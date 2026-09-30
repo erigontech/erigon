@@ -219,7 +219,7 @@ func assembleWithLogConfig(t *testing.T, cfg *logger.LogConfig, tracerName *stri
 func TestWriteTracerResultWritesNothingOnError(t *testing.T) {
 	var buf bytes.Buffer
 	s := jsonstream.New(&buf)
-	tracer := &tracers.Tracer{MarshalFastJSONTo: func(*jsonstream.StackStream) error { return errors.New("stopped") }}
+	tracer := &tracers.Tracer{MarshalFastJSONTo: func(*jsonstream.Stream) error { return errors.New("stopped") }}
 	require.EqualError(t, writeTracerResult(tracer, s), "stopped")
 	require.Empty(t, s.Buffer())
 }

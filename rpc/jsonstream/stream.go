@@ -42,8 +42,8 @@ const (
 	ItemField
 )
 
-// StackStream wraps jsoniter.Stream with a stack to track unclosed JSON elements
-type StackStream struct {
+// Stream wraps jsoniter.Stream with a stack to track unclosed JSON elements
+type Stream struct {
 	separatorPending bool
 	stream           *jsoniter.Stream
 	stack            []stackItem
@@ -52,11 +52,11 @@ type StackStream struct {
 	out io.Writer
 }
 
-// newStackStream creates a new StackStream writing to out. Building the
+// newStream creates a new Stream writing to out. Building the
 // jsoniter.Stream here rather than taking one is what pins jsoniter's
 // IndentionStep at zero.
-func newStackStream(out io.Writer, bufSize int) *StackStream {
-	return &StackStream{
+func newStream(out io.Writer, bufSize int) *Stream {
+	return &Stream{
 		stream: jsoniter.NewStream(jsoniter.ConfigDefault, out, bufSize),
 		stack:  make([]stackItem, 0, InitialStackSize),
 		out:    out,
@@ -64,12 +64,12 @@ func newStackStream(out io.Writer, bufSize int) *StackStream {
 }
 
 // Buffer returns the underlying jsoniter.Stream's buffer
-func (s *StackStream) Buffer() []byte {
+func (s *Stream) Buffer() []byte {
 	return s.stream.Buffer()
 }
 
 // Reset resets the underlying jsoniter.Stream and clears the stack
-func (s *StackStream) Reset(out io.Writer) {
+func (s *Stream) Reset(out io.Writer) {
 	s.stream.Reset(out)
 	s.out = out
 	// jsoniter latches the error on the stream, so a reused one would fail every
@@ -82,7 +82,7 @@ func (s *StackStream) Reset(out io.Writer) {
 // WriteRawBytes writes already-encoded JSON held as bytes. A payload at or above
 // FlushThreshold goes straight to the writer. Such a response commits the HTTP
 // status either way, since flushIfFull drains the buffer the moment this returns.
-func (s *StackStream) WriteRawBytes(content []byte) {
+func (s *Stream) WriteRawBytes(content []byte) {
 	s.beforeValue()
 	if s.out != nil && len(content) >= FlushThreshold {
 		s.writeThrough(content)
@@ -93,7 +93,7 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 	s.afterValue()
 }
 
-func (s *StackStream) WriteHex(b []byte) {
+func (s *Stream) WriteHex(b []byte) {
 	s.beforeValue()
 	buf := s.stream.Buffer()
 	start := len(buf)
@@ -104,7 +104,7 @@ func (s *StackStream) WriteHex(b []byte) {
 
 // HexesField writes fixed-size values as one array field: one buffer growth for the whole
 // array, where a value write per element grows once per element. A nil slice is null.
-func HexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items S) {
+func HexesField[S ~[]E, E ~[length.Hash]byte](s *Stream, name string, items S) {
 	s.Field(name)
 	if items == nil {
 		s.WriteNil()
@@ -125,7 +125,7 @@ func HexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items
 
 // WriteHexBytes is WriteHexes for elements that are already byte slices, whose lengths vary
 // and so are summed before the single growth.
-func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
+func WriteHexBytes[S ~[]E, E ~[]byte](s *Stream, items S) {
 	s.beforeValue()
 	size := 2 + len(items)
 	for i := range items {
@@ -145,7 +145,7 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
 
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
 // for hex quantities, which never need escaping.
-func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
+func (s *Stream) WriteQuotedText(v encoding.TextAppender) {
 	s.beforeValue()
 	start := len(s.stream.Buffer())
 	buf, err := v.AppendText(append(s.stream.Buffer(), '"'))
@@ -178,7 +178,7 @@ func assertNoEscapes(text []byte) {
 
 // commit takes the buffer a value was appended to, handing anything past FlushThreshold
 // straight to the writer rather than holding a whole large value in memory.
-func (s *StackStream) commit(buf []byte, start int) {
+func (s *Stream) commit(buf []byte, start int) {
 	if s.out != nil && len(buf)-start >= FlushThreshold {
 		s.stream.SetBuffer(buf[:start])
 		s.writeThrough(buf[start:])
@@ -190,7 +190,7 @@ func (s *StackStream) commit(buf []byte, start int) {
 // writeThrough drains what is buffered and hands content to the writer. The
 // empty-buffer check only skips a pointless zero-length Write; content is large
 // by the time we get here, so it is written either way.
-func (s *StackStream) writeThrough(content []byte) {
+func (s *Stream) writeThrough(content []byte) {
 	if len(s.stream.Buffer()) > 0 && s.stream.Flush() != nil {
 		// Same as flushIfFull: jsoniter latches the error, so these bytes can never
 		// reach the client and holding them only pins memory.
@@ -206,77 +206,77 @@ func (s *StackStream) writeThrough(content []byte) {
 }
 
 // WriteRaw writes raw content to the stream
-func (s *StackStream) WriteRaw(content string) {
+func (s *Stream) WriteRaw(content string) {
 	s.beforeValue()
 	s.stream.WriteRaw(content)
 	s.afterValue()
 }
 
 // WriteNil writes a null value to the stream
-func (s *StackStream) WriteNil() {
+func (s *Stream) WriteNil() {
 	s.beforeValue()
 	s.stream.WriteNil()
 	s.afterValue()
 }
 
 // WriteTrue writes a true value to the stream
-func (s *StackStream) WriteTrue() {
+func (s *Stream) WriteTrue() {
 	s.beforeValue()
 	s.stream.WriteTrue()
 	s.afterValue()
 }
 
 // WriteFalse writes a false value to the stream
-func (s *StackStream) WriteFalse() {
+func (s *Stream) WriteFalse() {
 	s.beforeValue()
 	s.stream.WriteFalse()
 	s.afterValue()
 }
 
 // WriteBool writes a boolean value to the stream
-func (s *StackStream) WriteBool(val bool) {
+func (s *Stream) WriteBool(val bool) {
 	s.beforeValue()
 	s.stream.WriteBool(val)
 	s.afterValue()
 }
 
 // Int writes a signed integer. Narrower signed types widen to it without changing the digits.
-func (s *StackStream) Int(val int64) {
+func (s *Stream) Int(val int64) {
 	s.beforeValue()
 	s.stream.WriteInt64(val)
 	s.afterValue()
 }
 
 // Uint writes an unsigned integer. Narrower unsigned types widen to it without changing the digits.
-func (s *StackStream) Uint(val uint64) {
+func (s *Stream) Uint(val uint64) {
 	s.beforeValue()
 	s.stream.WriteUint64(val)
 	s.afterValue()
 }
 
 // WriteFloat32 writes a float32 value to the stream
-func (s *StackStream) WriteFloat32(val float32) {
+func (s *Stream) WriteFloat32(val float32) {
 	s.beforeValue()
 	s.stream.WriteFloat32(val)
 	s.afterValue()
 }
 
 // WriteFloat64 writes a float64 value to the stream
-func (s *StackStream) WriteFloat64(val float64) {
+func (s *Stream) WriteFloat64(val float64) {
 	s.beforeValue()
 	s.stream.WriteFloat64(val)
 	s.afterValue()
 }
 
 // WriteString writes a string value to the stream
-func (s *StackStream) WriteString(val string) {
+func (s *Stream) WriteString(val string) {
 	s.beforeValue()
 	writeStringFast(s.stream, val)
 	s.afterValue()
 }
 
 // WriteObjectStart writes the start of an object and adds it to the stack
-func (s *StackStream) WriteObjectStart() {
+func (s *Stream) WriteObjectStart() {
 	s.beforeValue()
 	s.stream.WriteObjectStart()
 	s.consumeField()
@@ -284,7 +284,7 @@ func (s *StackStream) WriteObjectStart() {
 }
 
 // WriteObjectEnd writes the end of an object and removes it from the stack
-func (s *StackStream) WriteObjectEnd() {
+func (s *Stream) WriteObjectEnd() {
 	s.closeInside(ItemObject)
 	s.stream.WriteObjectEnd()
 	s.pop(ItemObject)
@@ -292,7 +292,7 @@ func (s *StackStream) WriteObjectEnd() {
 }
 
 // WriteArrayStart writes the start of an array and adds it to the stack
-func (s *StackStream) WriteArrayStart() {
+func (s *Stream) WriteArrayStart() {
 	s.beforeValue()
 	s.stream.WriteArrayStart()
 	s.consumeField()
@@ -300,7 +300,7 @@ func (s *StackStream) WriteArrayStart() {
 }
 
 // WriteArrayEnd writes the end of an array and removes it from the stack
-func (s *StackStream) WriteArrayEnd() {
+func (s *Stream) WriteArrayEnd() {
 	s.closeInside(ItemArray)
 	s.stream.WriteArrayEnd()
 	s.pop(ItemArray)
@@ -308,7 +308,7 @@ func (s *StackStream) WriteArrayEnd() {
 }
 
 // Field writes a field name for an object and adds it to the stack.
-func (s *StackStream) Field(fieldName string) *StackStream {
+func (s *Stream) Field(fieldName string) *Stream {
 	s.beforeValue()
 	writeObjectFieldFast(s.stream, fieldName)
 	s.push(ItemField)
@@ -318,7 +318,7 @@ func (s *StackStream) Field(fieldName string) *StackStream {
 // RewindField drops the field name written at buffer offset mark and stack depth, with the
 // separator before it, and reports whether it did. It does so only while no value has followed
 // the name and the name is still in the buffer, not flushed.
-func (s *StackStream) RewindField(mark, depth int) bool {
+func (s *Stream) RewindField(mark, depth int) bool {
 	b := s.stream.Buffer()
 	if len(s.stack) != depth+1 || s.stack[depth] != ItemField || len(b) <= mark {
 		return false
@@ -330,12 +330,12 @@ func (s *StackStream) RewindField(mark, depth int) bool {
 }
 
 // Flush flushes the underlying stream
-func (s *StackStream) Flush() error {
+func (s *Stream) Flush() error {
 	return s.stream.Flush()
 }
 
 // BufferAsString returns the content as a string after flushing any incomplete structures
-func (s *StackStream) BufferAsString() (string, error) {
+func (s *Stream) BufferAsString() (string, error) {
 	err := s.ClosePending(0)
 	if err != nil {
 		return "", err
@@ -344,26 +344,26 @@ func (s *StackStream) BufferAsString() (string, error) {
 }
 
 // WriteEmptyArray writes an empty array into the underlying stream
-func (s *StackStream) WriteEmptyArray() {
+func (s *Stream) WriteEmptyArray() {
 	s.beforeValue()
 	s.stream.WriteEmptyArray()
 	s.afterValue()
 }
 
 // WriteEmptyObject writes an empty object into the underlying stream
-func (s *StackStream) WriteEmptyObject() {
+func (s *Stream) WriteEmptyObject() {
 	s.beforeValue()
 	s.stream.WriteEmptyObject()
 	s.afterValue()
 }
 
 // IsComplete checks if the JSON structure is currently complete without open elements
-func (s *StackStream) IsComplete() bool {
+func (s *Stream) IsComplete() bool {
 	return len(s.stack) == 0
 }
 
 // StackSummary returns a summary of the current stack state for debugging
-func (s *StackStream) StackSummary() string {
+func (s *Stream) StackSummary() string {
 	if len(s.stack) == 0 {
 		return "Empty"
 	}
@@ -384,7 +384,7 @@ func (s *StackStream) StackSummary() string {
 
 // ClosePending closes all open JSON structures above targetDepth, leaving the first targetDepth
 // stack entries intact so subsequent writes continue inside that nesting level.
-func (s *StackStream) ClosePending(targetDepth uint) error {
+func (s *Stream) ClosePending(targetDepth uint) error {
 	stackLen := len(s.stack)
 	if stackLen == 0 {
 		return s.stream.Error
@@ -416,19 +416,19 @@ func (s *StackStream) ClosePending(targetDepth uint) error {
 
 // Err reports a write error the stream latched. Flush cannot stand in for it on a stream with no
 // writer: jsoniter returns nil for that case before it looks at the latched error.
-func (s *StackStream) Err() error { return s.stream.Error }
+func (s *Stream) Err() error { return s.stream.Error }
 
-func (s *StackStream) Depth() int { return len(s.stack) }
+func (s *Stream) Depth() int { return len(s.stack) }
 
 // push adds an item to the stack
-func (s *StackStream) push(item stackItem) {
+func (s *Stream) push(item stackItem) {
 	s.stack = append(s.stack, item)
 }
 
 // closeInside completes whatever the caller left open inside the innermost
 // container of this kind, so ending it yields valid JSON rather than a dangling
 // comma or field. It does nothing once that container is already the top.
-func (s *StackStream) closeInside(kind stackItem) {
+func (s *Stream) closeInside(kind stackItem) {
 	for i, item := range slices.Backward(s.stack) {
 		if item == kind {
 			_ = s.ClosePending(uint(i + 1))
@@ -439,14 +439,14 @@ func (s *StackStream) closeInside(kind stackItem) {
 
 // pop removes the specified item from the top of the stack, if present
 // @param item the item to pop from the stack
-func (s *StackStream) pop(item stackItem) {
+func (s *Stream) pop(item stackItem) {
 	if len(s.stack) > 0 && s.stack[len(s.stack)-1] == item {
 		s.stack = s.stack[:len(s.stack)-1]
 	}
 }
 
 // beforeValue writes the separator the next member needs.
-func (s *StackStream) beforeValue() {
+func (s *Stream) beforeValue() {
 	if s.separatorPending {
 		s.stream.WriteMore()
 		s.separatorPending = false
@@ -455,12 +455,12 @@ func (s *StackStream) beforeValue() {
 
 // markSeparatorPending states that a sibling value precedes what is written next. It is for
 // a fragment written into a container this stream did not open, where the stack cannot say.
-func (s *StackStream) markSeparatorPending() { s.separatorPending = true }
+func (s *Stream) markSeparatorPending() { s.separatorPending = true }
 
 // consumeField drops the pending field name once its value has been written. A container
 // consumes it when it opens, not when it closes: otherwise the field outlives its own
 // value and ClosePending fills it with a second null.
-func (s *StackStream) consumeField() {
+func (s *Stream) consumeField() {
 	if n := len(s.stack); n > 0 && s.stack[n-1] == ItemField {
 		s.stack = s.stack[:n-1]
 	}
@@ -468,7 +468,7 @@ func (s *StackStream) consumeField() {
 
 // afterValue separates the next member, but only inside a container: consecutive
 // top-level values in one stream get no comma between them.
-func (s *StackStream) afterValue() {
+func (s *Stream) afterValue() {
 	s.consumeField()
 	s.separatorPending = len(s.stack) > 0
 	flushIfFull(s.stream)

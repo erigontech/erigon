@@ -539,7 +539,7 @@ type ExecutionWitnessResult struct {
 }
 
 // MarshalFastJSONTo writes the result field by field, in the order and form encoding/json uses.
-func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if m == nil {
 		s.WriteNil()
 		return nil
@@ -561,7 +561,7 @@ func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) er
 	return nil
 }
 
-func writeHexElem(s *jsonstream.StackStream, b *hexutil.Bytes) { s.WriteHex(*b) }
+func writeHexElem(s *jsonstream.Stream, b *hexutil.Bytes) { s.WriteHex(*b) }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
 	if header, ok := m.headerByNumber[blockNum]; ok {

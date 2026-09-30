@@ -43,7 +43,7 @@ import (
 type JsonStreamLogger struct {
 	ctx    context.Context
 	cfg    LogConfig
-	stream *jsonstream.StackStream
+	stream *jsonstream.Stream
 	// Scratch for the hex helpers below. Every result aliases it, so only one is
 	// live at a time: hand it to the stream, which copies, before encoding the next.
 	hexEncodeBuf [128]byte
@@ -56,7 +56,7 @@ type JsonStreamLogger struct {
 }
 
 // NewStructLogger returns a new logger
-func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsonstream.StackStream) *JsonStreamLogger {
+func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsonstream.Stream) *JsonStreamLogger {
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,

@@ -217,9 +217,9 @@ func TestTracerStopRace(t *testing.T) {
 	}
 }
 
-type fastJSON func(*jsonstream.StackStream) error
+type fastJSON func(*jsonstream.Stream) error
 
-func (f fastJSON) MarshalFastJSONTo(s *jsonstream.StackStream) error { return f(s) }
+func (f fastJSON) MarshalFastJSONTo(s *jsonstream.Stream) error { return f(s) }
 
 func TestCallTracerFastJSONMatchesGetResult(t *testing.T) {
 	tracer, err := tracers.New("callTracer", &tracers.Context{}, json.RawMessage(`{"withLog":true}`))

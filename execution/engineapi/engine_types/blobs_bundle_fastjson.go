@@ -22,7 +22,7 @@ import (
 )
 
 // MarshalFastJSONTo writes the getPayload envelope, byte-identical to json.Marshal(r).
-func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if r == nil {
 		s.WriteNil()
 		return nil
@@ -43,7 +43,7 @@ func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.StackStream) error 
 }
 
 // writeTo writes the payload in its struct's field order and encoding/json's forms.
-func (p *ExecutionPayload) writeTo(s *jsonstream.StackStream) {
+func (p *ExecutionPayload) writeTo(s *jsonstream.Stream) {
 	if p == nil {
 		s.WriteNil()
 		return

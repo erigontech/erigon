@@ -35,12 +35,12 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
-func (s *StackStream) closeAllPendingElements() error {
+func (s *Stream) closeAllPendingElements() error {
 	return s.ClosePending(0)
 }
 
-func TestStackStream_BasicOperations(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+func TestStream_BasicOperations(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Write a simple object
 	ss.WriteObjectStart()
@@ -54,8 +54,8 @@ func TestStackStream_BasicOperations(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-func TestStackStream_NestedStructures(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+func TestStream_NestedStructures(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Write a nested structure
 	ss.WriteObjectStart()
@@ -79,8 +79,8 @@ func TestStackStream_NestedStructures(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-func TestStackStream_ArrayOperations(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+func TestStream_ArrayOperations(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Write an array
 	ss.WriteArrayStart()
@@ -93,8 +93,8 @@ func TestStackStream_ArrayOperations(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-func TestStackStream_MixedStructures(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+func TestStream_MixedStructures(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Write a complex structure
 	ss.WriteObjectStart()
@@ -117,8 +117,8 @@ func TestStackStream_MixedStructures(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-func TestStackStream_ClosePendingObjects_Object(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+func TestStream_ClosePendingObjects_Object(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Start an object but don't finish it
 	ss.WriteObjectStart()
@@ -140,8 +140,8 @@ func TestStackStream_ClosePendingObjects_Object(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+func TestStream_ClosePendingObjects_Array(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Start an array but don't finish it
 	ss.WriteArrayStart()
@@ -162,8 +162,8 @@ func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-func TestStackStream_ClosePendingObjects_ComplexNested(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+func TestStream_ClosePendingObjects_ComplexNested(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Create a deeply nested structure but don't complete it
 	ss.WriteObjectStart()
@@ -192,8 +192,8 @@ func TestStackStream_ClosePendingObjects_ComplexNested(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-func TestStackStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+func TestStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Create a deeply nested structure but don't complete it
 	ss.WriteArrayStart()
@@ -223,8 +223,8 @@ func TestStackStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-func TestStackStream_BufferAsString(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+func TestStream_BufferAsString(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Create incomplete JSON
 	ss.WriteObjectStart()
@@ -239,8 +239,8 @@ func TestStackStream_BufferAsString(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-func TestStackStream_Reset(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+func TestStream_Reset(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Write some data
 	ss.WriteObjectStart()
@@ -264,8 +264,8 @@ func TestStackStream_Reset(t *testing.T) {
 	assert.Equal(t, `[1,2]`, string(ss.Buffer()))
 }
 
-func TestStackStream_GetStackSummary(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+func TestStream_GetStackSummary(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Empty stack
 	assert.Equal(t, "Empty", ss.StackSummary())
@@ -286,9 +286,9 @@ func TestStackStream_GetStackSummary(t *testing.T) {
 	assert.Contains(t, summary, "Field")
 }
 
-// TestStackStream_SequentialOperations tests sequential operations without chaining
-func TestStackStream_SequentialOperations(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+// TestStream_SequentialOperations tests sequential operations without chaining
+func TestStream_SequentialOperations(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Perform operations without chaining
 	ss.WriteObjectStart()
@@ -303,9 +303,9 @@ func TestStackStream_SequentialOperations(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-// TestStackStream_RecoveryFromIncompleteState tests recovery from the incomplete state
-func TestStackStream_RecoveryFromIncompleteState(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+// TestStream_RecoveryFromIncompleteState tests recovery from the incomplete state
+func TestStream_RecoveryFromIncompleteState(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Create an incomplete structure
 	ss.WriteObjectStart()
@@ -327,16 +327,16 @@ func TestStackStream_RecoveryFromIncompleteState(t *testing.T) {
 	assert.Equal(t, `{"incomplete":"value"}`, string(ss.Buffer()))
 }
 
-// TestStackStream_NestedIncompleteStructures tests handling of nested incomplete structures
-func TestStackStream_NestedIncompleteStructures(t *testing.T) {
+// TestStream_NestedIncompleteStructures tests handling of nested incomplete structures
+func TestStream_NestedIncompleteStructures(t *testing.T) {
 	testCases := []struct {
 		name           string
-		buildStructure func(*StackStream)
+		buildStructure func(*Stream)
 		expected       string
 	}{
 		{
 			name: "incomplete nested arrays",
-			buildStructure: func(ss *StackStream) {
+			buildStructure: func(ss *Stream) {
 				ss.WriteArrayStart()
 				ss.WriteArrayStart()
 				ss.WriteArrayStart()
@@ -345,7 +345,7 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 		},
 		{
 			name: "incomplete nested objects",
-			buildStructure: func(ss *StackStream) {
+			buildStructure: func(ss *Stream) {
 				ss.WriteObjectStart()
 				ss.Field("a")
 				ss.WriteObjectStart()
@@ -356,7 +356,7 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 		},
 		{
 			name: "mixed incomplete structures",
-			buildStructure: func(ss *StackStream) {
+			buildStructure: func(ss *Stream) {
 				ss.WriteObjectStart()
 				ss.Field("array")
 				ss.WriteArrayStart()
@@ -369,7 +369,7 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ss := newStackStream(nil, InitialBufferSize)
+			ss := newStream(nil, InitialBufferSize)
 			tc.buildStructure(ss)
 
 			// Verify structure is incomplete
@@ -386,9 +386,9 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 	}
 }
 
-// TestStackStream_ClosePendingObjectsWithEmptyStack tests closePendingObjects with empty stack
-func TestStackStream_ClosePendingObjectsWithEmptyStack(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+// TestStream_ClosePendingObjectsWithEmptyStack tests closePendingObjects with empty stack
+func TestStream_ClosePendingObjectsWithEmptyStack(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Stack is already empty
 	assert.True(t, ss.IsComplete())
@@ -399,9 +399,9 @@ func TestStackStream_ClosePendingObjectsWithEmptyStack(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-// TestStackStream_MultipleFlushCalls tests multiple flush calls
-func TestStackStream_MultipleFlushCalls(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+// TestStream_MultipleFlushCalls tests multiple flush calls
+func TestStream_MultipleFlushCalls(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Create an incomplete structure
 	ss.WriteObjectStart()
@@ -420,9 +420,9 @@ func TestStackStream_MultipleFlushCalls(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-// TestStackStream_EmptyStructures tests handling of empty objects and arrays
-func TestStackStream_EmptyStructures(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+// TestStream_EmptyStructures tests handling of empty objects and arrays
+func TestStream_EmptyStructures(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Test empty object
 	ss.WriteObjectStart()
@@ -451,9 +451,9 @@ func TestStackStream_EmptyStructures(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-// TestStackStream_AllDataTypes tests all data types supported by StackStream
-func TestStackStream_AllDataTypes(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+// TestStream_AllDataTypes tests all data types supported by Stream
+func TestStream_AllDataTypes(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Test all primitive data types
 	ss.WriteObjectStart()
@@ -514,9 +514,9 @@ func TestStackStream_AllDataTypes(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-// TestStackStream_BoundaryValues tests boundary values for numeric types
-func TestStackStream_BoundaryValues(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+// TestStream_BoundaryValues tests boundary values for numeric types
+func TestStream_BoundaryValues(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Test boundary values
 	ss.WriteObjectStart()
@@ -565,9 +565,9 @@ func TestStackStream_BoundaryValues(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-// TestStackStream_ExtremeNesting tests deeply nested structures
-func TestStackStream_ExtremeNesting(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+// TestStream_ExtremeNesting tests deeply nested structures
+func TestStream_ExtremeNesting(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Create a deeply nested structure (50 levels deep)
 	const nestingDepth = 50
@@ -596,12 +596,12 @@ func TestStackStream_ExtremeNesting(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestStackStream_ErrorHandlingWithoutClosing tests error handling and propagation *without* closing pending elements
-func TestStackStream_ErrorHandlingWithoutClosing(t *testing.T) {
+// TestStream_ErrorHandlingWithoutClosing tests error handling and propagation *without* closing pending elements
+func TestStream_ErrorHandlingWithoutClosing(t *testing.T) {
 	// Test with a writer that will fail
 	failWriter := &failingWriter{failAfter: 10}
 
-	ss := newStackStream(failWriter, InitialBufferSize)
+	ss := newStream(failWriter, InitialBufferSize)
 
 	// Write enough data to trigger the error
 	ss.WriteObjectStart()
@@ -614,12 +614,12 @@ func TestStackStream_ErrorHandlingWithoutClosing(t *testing.T) {
 	assert.Equal(t, "write failed", err.Error())
 }
 
-// TestStackStream_ErrorHandlingWithClosing tests error handling and propagation *with* closing pending elements
-func TestStackStream_ErrorHandlingWithClosing(t *testing.T) {
+// TestStream_ErrorHandlingWithClosing tests error handling and propagation *with* closing pending elements
+func TestStream_ErrorHandlingWithClosing(t *testing.T) {
 	// Test with a writer that will fail
 	failWriter := &failingWriter{failAfter: 10}
 
-	ss := newStackStream(failWriter, InitialBufferSize)
+	ss := newStream(failWriter, InitialBufferSize)
 
 	// Write enough data to trigger the error
 	ss.WriteObjectStart()
@@ -634,9 +634,9 @@ func TestStackStream_ErrorHandlingWithClosing(t *testing.T) {
 	assert.Equal(t, "write failed", err.Error())
 }
 
-// TestStackStream_StackManipulationEdgeCases tests edge cases in stack manipulation
-func TestStackStream_StackManipulationEdgeCases(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+// TestStream_StackManipulationEdgeCases tests edge cases in stack manipulation
+func TestStream_StackManipulationEdgeCases(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Test 1: Popping from an empty stack should not panic
 	ss.pop(ItemObject)
@@ -665,9 +665,9 @@ func TestStackStream_StackManipulationEdgeCases(t *testing.T) {
 	assert.NotContains(t, summary, "Array")
 }
 
-// TestStackStream_MixedWriteOperations tests mixing different write operations
-func TestStackStream_MixedWriteOperations(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+// TestStream_MixedWriteOperations tests mixing different write operations
+func TestStream_MixedWriteOperations(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	// Test mixing WriteRaw with other operations
 	ss.WriteObjectStart()
@@ -714,16 +714,16 @@ func TestStackStream_MixedWriteOperations(t *testing.T) {
 	assert.True(t, ss.IsComplete())
 }
 
-// TestStackStream_IncompleteStructuresWithFlush tests flushing with various incomplete structures
-func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
+// TestStream_IncompleteStructuresWithFlush tests flushing with various incomplete structures
+func TestStream_IncompleteStructuresWithFlush(t *testing.T) {
 	testCases := []struct {
 		name           string
-		buildStructure func(*StackStream)
+		buildStructure func(*Stream)
 		expected       string
 	}{
 		{
 			name: "object with missing field value",
-			buildStructure: func(ss *StackStream) {
+			buildStructure: func(ss *Stream) {
 				ss.WriteObjectStart()
 				ss.Field("field") // Missing value
 			},
@@ -731,7 +731,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 		},
 		{
 			name: "nested object with missing field in inner object",
-			buildStructure: func(ss *StackStream) {
+			buildStructure: func(ss *Stream) {
 				ss.WriteObjectStart()
 				ss.Field("outer")
 				ss.WriteObjectStart()
@@ -741,7 +741,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 		},
 		{
 			name: "multiple nested incomplete structures",
-			buildStructure: func(ss *StackStream) {
+			buildStructure: func(ss *Stream) {
 				ss.WriteObjectStart()
 				ss.Field("a")
 				ss.WriteArrayStart()
@@ -754,7 +754,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ss := newStackStream(nil, InitialBufferSize)
+			ss := newStream(nil, InitialBufferSize)
 			tc.buildStructure(ss)
 
 			// Verify structure is incomplete
@@ -771,12 +771,12 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 	}
 }
 
-// TestStackStream_BufferAsStringWithErrors tests BufferAsString with error conditions
-func TestStackStream_BufferAsStringWithErrors(t *testing.T) {
+// TestStream_BufferAsStringWithErrors tests BufferAsString with error conditions
+func TestStream_BufferAsStringWithErrors(t *testing.T) {
 	// Test with a writer that will fail
 	failWriter := &failingWriter{failAfter: 10}
 
-	ss := newStackStream(failWriter, InitialBufferSize)
+	ss := newStream(failWriter, InitialBufferSize)
 
 	// Write enough data to trigger the error
 	ss.WriteObjectStart()
@@ -796,9 +796,9 @@ func TestStackStream_BufferAsStringWithErrors(t *testing.T) {
 	assert.Equal(t, "write failed", err.Error())
 }
 
-// TestStackStream_Depth verifies that Depth() tracks nesting level correctly.
-func TestStackStream_Depth(t *testing.T) {
-	ss := newStackStream(nil, InitialBufferSize)
+// TestStream_Depth verifies that Depth() tracks nesting level correctly.
+func TestStream_Depth(t *testing.T) {
+	ss := newStream(nil, InitialBufferSize)
 
 	assert.Equal(t, 0, ss.Depth())
 	ss.WriteArrayStart()
@@ -815,12 +815,12 @@ func TestStackStream_Depth(t *testing.T) {
 	assert.Equal(t, 0, ss.Depth())
 }
 
-// TestStackStream_ClosePendingPreservesStack verifies the fix: ClosePending(N) closes
+// TestStream_ClosePendingPreservesStack verifies the fix: ClosePending(N) closes
 // elements above depth N and leaves the first N entries on the stack intact so that
 // subsequent writes continue inside the preserved nesting level.
-func TestStackStream_ClosePendingPreservesStack(t *testing.T) {
-	newSS := func() *StackStream {
-		return newStackStream(nil, InitialBufferSize)
+func TestStream_ClosePendingPreservesStack(t *testing.T) {
+	newSS := func() *Stream {
+		return newStream(nil, InitialBufferSize)
 	}
 
 	t.Run("nothing_to_close_when_at_target_depth", func(t *testing.T) {
@@ -933,10 +933,10 @@ func (w *discardCounter) Write(p []byte) (int, error) { w.n += int64(len(p)); re
 // of already-encoded bytes has to stream just like a string-heavy one.
 func TestBufferBoundedForEveryWriter(t *testing.T) {
 	rawValue := []byte(`{"pc":1024,"op":"SSTORE","gas":"0x5208"}`)
-	for name, writeValue := range map[string]func(s *StackStream, i int){
-		"WriteInt":      func(s *StackStream, i int) { s.Int(int64(i)) },
-		"WriteUint64":   func(s *StackStream, i int) { s.Uint(uint64(i)) },
-		"WriteRawBytes": func(s *StackStream, i int) { s.WriteRawBytes(rawValue) },
+	for name, writeValue := range map[string]func(s *Stream, i int){
+		"WriteInt":      func(s *Stream, i int) { s.Int(int64(i)) },
+		"WriteUint64":   func(s *Stream, i int) { s.Uint(uint64(i)) },
+		"WriteRawBytes": func(s *Stream, i int) { s.WriteRawBytes(rawValue) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out discardCounter
@@ -959,28 +959,28 @@ func TestBufferBoundedForEveryWriter(t *testing.T) {
 	}
 }
 
-// TestStackStreamEndClosesWhatIsOpen pins the point of the stack tracking: a
+// TestStreamEndClosesWhatIsOpen pins the point of the stack tracking: a
 // container end repairs whatever the caller left open inside it, so a handler
 // that stops early still yields a parseable response.
-func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
+func TestStreamEndClosesWhatIsOpen(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		write func(s *StackStream)
+		write func(s *Stream)
 		want  string
 	}{
-		{"field with no value", func(s *StackStream) {
+		{"field with no value", func(s *Stream) {
 			s.WriteObjectStart()
 			s.Field("a")
 			s.WriteObjectEnd()
 		}, `{"a":null}`},
-		{"inner array left open", func(s *StackStream) {
+		{"inner array left open", func(s *Stream) {
 			s.WriteObjectStart()
 			s.Field("result")
 			s.WriteArrayStart()
 			s.Int(1)
 			s.WriteObjectEnd()
 		}, `{"result":[1]}`},
-		{"complete output is untouched", func(s *StackStream) {
+		{"complete output is untouched", func(s *Stream) {
 			s.WriteObjectStart()
 			s.Field("a")
 			s.WriteArrayStart()
@@ -990,7 +990,7 @@ func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
 		}, `{"a":[1]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := newStackStream(nil, 64)
+			s := newStream(nil, 64)
 			tc.write(s)
 
 			require.Equal(t, tc.want, string(s.Buffer()))
@@ -1000,10 +1000,10 @@ func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
 	}
 }
 
-// TestStackStreamResetClearsError pins that a reused stream works again. jsoniter
+// TestStreamResetClearsError pins that a reused stream works again. jsoniter
 // latches the error on the stream, so leaving it set makes every later Flush
 // fail without draining, and the buffer bound then discards the response.
-func TestStackStreamResetClearsError(t *testing.T) {
+func TestStreamResetClearsError(t *testing.T) {
 	s := New(goneWriter{})
 	s.WriteRaw(strings.Repeat("x", 2*FlushThreshold))
 	require.Error(t, s.Flush())
@@ -1021,7 +1021,7 @@ func TestStackStreamResetClearsError(t *testing.T) {
 func TestWriteQuotedTextRejectsEscapableText(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = true
-	s := newStackStream(nil, 64)
+	s := newStream(nil, 64)
 
 	require.PanicsWithValue(t, `jsonstream: quoted text holds '"', which JSON escapes`, func() {
 		s.WriteQuotedText(appenderFunc(`say "hi"`))
@@ -1198,22 +1198,22 @@ func TestWriteRawBytesWriteThroughError(t *testing.T) {
 	}
 }
 
-// TestStackStream_SeparatorsAreAutomatic pins the contract: the stream writes the comma a
+// TestStream_SeparatorsAreAutomatic pins the contract: the stream writes the comma a
 // value needs.
-func TestStackStream_SeparatorsAreAutomatic(t *testing.T) {
+func TestStream_SeparatorsAreAutomatic(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		write func(*StackStream)
+		write func(*Stream)
 		want  string
 	}{
-		{"array elements", func(s *StackStream) {
+		{"array elements", func(s *Stream) {
 			s.WriteArrayStart()
 			s.Int(1)
 			s.Int(2)
 			s.Int(3)
 			s.WriteArrayEnd()
 		}, `[1,2,3]`},
-		{"object fields", func(s *StackStream) {
+		{"object fields", func(s *Stream) {
 			s.WriteObjectStart()
 			s.Field("a")
 			s.Int(1)
@@ -1221,7 +1221,7 @@ func TestStackStream_SeparatorsAreAutomatic(t *testing.T) {
 			s.WriteString("x")
 			s.WriteObjectEnd()
 		}, `{"a":1,"b":"x"}`},
-		{"nested containers", func(s *StackStream) {
+		{"nested containers", func(s *Stream) {
 			s.WriteObjectStart()
 			s.Field("list")
 			s.WriteArrayStart()
@@ -1236,7 +1236,7 @@ func TestStackStream_SeparatorsAreAutomatic(t *testing.T) {
 			s.WriteBool(true)
 			s.WriteObjectEnd()
 		}, `{"list":[{"k":7},{}],"after":true}`},
-		{"empty containers", func(s *StackStream) {
+		{"empty containers", func(s *Stream) {
 			s.WriteObjectStart()
 			s.Field("o")
 			s.WriteObjectStart()
@@ -1248,7 +1248,7 @@ func TestStackStream_SeparatorsAreAutomatic(t *testing.T) {
 		}, `{"o":{},"a":[]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ss := newStackStream(nil, InitialBufferSize)
+			ss := newStream(nil, InitialBufferSize)
 			tc.write(ss)
 			require.Equal(t, tc.want, string(ss.Buffer()))
 			require.True(t, json.Valid(ss.Buffer()))
@@ -1278,7 +1278,7 @@ func TestWriteQuotedTextKeepsBufferOnError(t *testing.T) {
 
 // A latched write error must reach the caller. Flush cannot report it on a writerless stream,
 // so marshalFastJSONTo would otherwise clone a buffer holding the empty-string placeholder.
-func TestStackStreamErrSurvivesWriterlessFlush(t *testing.T) {
+func TestStreamErrSurvivesWriterlessFlush(t *testing.T) {
 	s := Get(nil)
 	defer Put(s)
 	s.WriteQuotedText(failingAppender{})
@@ -1290,7 +1290,7 @@ func TestStackStreamErrSurvivesWriterlessFlush(t *testing.T) {
 // Closing to the root ends the last value's container, so the next top-level value is not a
 // member of anything and takes no separator.
 func TestClosePendingToRootClearsSeparator(t *testing.T) {
-	s := newStackStream(nil, InitialBufferSize)
+	s := newStream(nil, InitialBufferSize)
 	s.WriteArrayStart()
 	s.Int(1)
 	require.NoError(t, s.ClosePending(0))
@@ -1324,18 +1324,18 @@ func TestWriteHexBytes(t *testing.T) {
 // in the buffer; anything else must stay, so the caller closes it instead.
 func TestRewindField(t *testing.T) {
 	for name, tc := range map[string]struct {
-		after  func(*StackStream)
+		after  func(*Stream)
 		rewind bool
 		want   string
 	}{
-		"nothing written":   {func(*StackStream) {}, true, `{"a":1,"b":2}`},
-		"scalar written":    {func(s *StackStream) { s.Int(5) }, false, `{"a":1,"x":5,"b":2}`},
-		"container opened":  {func(s *StackStream) { s.WriteArrayStart() }, false, `{"a":1,"x":[],"b":2}`},
-		"name flushed away": {func(s *StackStream) { _ = s.Flush() }, false, `{"a":1,"x":null,"b":2}`},
+		"nothing written":   {func(*Stream) {}, true, `{"a":1,"b":2}`},
+		"scalar written":    {func(s *Stream) { s.Int(5) }, false, `{"a":1,"x":5,"b":2}`},
+		"container opened":  {func(s *Stream) { s.WriteArrayStart() }, false, `{"a":1,"x":[],"b":2}`},
+		"name flushed away": {func(s *Stream) { _ = s.Flush() }, false, `{"a":1,"x":null,"b":2}`},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
-			s := newStackStream(&out, InitialBufferSize)
+			s := newStream(&out, InitialBufferSize)
 			s.WriteObjectStart()
 			s.Field("a").Int(1)
 			mark, depth := len(s.Buffer()), s.Depth()

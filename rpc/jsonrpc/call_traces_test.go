@@ -726,7 +726,7 @@ func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
 	stream.WriteString("2.0")
 	stream.Field("id")
 	stream.Int(1)
-	err := rpc.WriteFieldOrError(stream, "result", func(*jsonstream.StackStream) error {
+	err := rpc.WriteFieldOrError(stream, "result", func(*jsonstream.Stream) error {
 		return api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
 			BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 		}, stream)

@@ -41,7 +41,7 @@ type WitnessNotification struct {
 	Witness     *ExecutionWitnessResult `json:"witness"`
 }
 
-func (n WitnessNotification) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (n WitnessNotification) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	s.WriteObjectStart()
 	jsonstream.Text(s, "blockNumber", &n.BlockNumber)
 	s.Field("blockHash").WriteHex(n.BlockHash[:])
