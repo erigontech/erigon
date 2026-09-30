@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"runtime/debug"
 	"runtime/pprof"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -35,6 +37,7 @@ type commitmentResult struct {
 	txNum      uint64
 	rootHash   []byte
 	shadowRoot []byte
+	stopped    map[kv.Domain]bool
 	err        error
 }
 
@@ -1310,13 +1313,13 @@ func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t com
 		return
 	}
 	if !cc.hasActivationBlock {
-		cc.activationBlock = t.blockNum
-		if cc.blockReader != nil {
-			if activationBlock, found, err := binaryTrieActivationBlock(ctx, cc.roTx, cc.blockReader, cc.chainConfig, t.blockNum); err == nil && found {
-				cc.activationBlock = activationBlock
-			}
+		if cc.blockReader == nil {
+			cc.activationBlock = t.blockNum
+			cc.hasActivationBlock = true
+		} else if activationBlock, found, err := binaryTrieActivationBlockWithHead(ctx, cc.roTx, cc.blockReader, cc.chainConfig, t.blockNum, &types.Header{Time: t.blockTime}); err == nil && found {
+			cc.activationBlock = activationBlock
+			cc.hasActivationBlock = true
 		}
-		cc.hasActivationBlock = true
 	}
 	if shouldStopHexShadow(cc.activationBlock, cc.maxReorgDepth, t.blockNum) {
 		cc.stopShadowDomain(kv.CommitmentDomain)
@@ -1359,11 +1362,6 @@ func (cc *commitmentCalculator) stopShadowDomain(domain kv.Domain) {
 		cc.shadowStopped = make(map[kv.Domain]bool)
 	}
 	cc.shadowStopped[domain] = true
-	if cc.roTx != nil {
-		if p, ok := cc.roTx.AggTx().(interface{ StopCommitmentDomain(kv.Domain) }); ok {
-			p.StopCommitmentDomain(domain)
-		}
-	}
 	if cc.doms != nil {
 		if ctx := cc.doms.GetCommitmentCtxForDomain(domain); ctx != nil {
 			ctx.ResetPendingUpdates()
@@ -1372,21 +1370,27 @@ func (cc *commitmentCalculator) stopShadowDomain(domain kv.Domain) {
 }
 
 func (cc *commitmentCalculator) ShadowDomainStopped(domain kv.Domain) bool {
-	if cc.roTx != nil {
-		if p, ok := cc.roTx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool }); ok && p.CommitmentDomainStopped(domain) {
-			return true
-		}
+	if cc.shadowStopped[domain] {
+		return true
 	}
-	return cc.shadowStopped[domain]
+	if cc.roTx == nil {
+		return false
+	}
+	p, ok := cc.roTx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool })
+	return ok && p.CommitmentDomainStopped(domain)
 }
 
-func recordStoppedCommitmentDomains(tx kv.TemporalRwTx) error {
+func recordStoppedCommitmentDomains(tx kv.TemporalRwTx, local ...map[kv.Domain]bool) error {
 	stopped, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool })
-	if !ok {
+	if !ok && len(local) == 0 {
 		return nil
 	}
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-		if !stopped.CommitmentDomainStopped(domain) {
+		isStopped := len(local) != 0 && local[0][domain]
+		if !isStopped && ok {
+			isStopped = stopped.CommitmentDomainStopped(domain)
+		}
+		if !isStopped {
 			continue
 		}
 		if err := rawdb.WriteCommitmentDomainStopped(tx, domain); err != nil {
@@ -1508,6 +1512,9 @@ func (cc *commitmentCalculator) computeTransition(ctx context.Context, target co
 }
 
 func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult) {
+	if len(cc.shadowStopped) != 0 {
+		r.stopped = maps.Clone(cc.shadowStopped)
+	}
 	// Best-effort send; log only genuine errors as a breadcrumb (the apply loop
 	// surfaces the authoritative one). Wrong-root and shutdown cancels are expected.
 	if r.err != nil && cc.logger != nil &&

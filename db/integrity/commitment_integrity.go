@@ -136,7 +136,7 @@ func checkPBinCommitmentStateFiles(tx kv.TemporalTx) error {
 		return err
 	}
 	latest := files[len(files)-1]
-	latestValue, found, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, latest.EndRootNum())
+	latestValue, found, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, fileLookupMaxTxNum(latest.EndRootNum()))
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func checkPBinCommitmentStateFiles(tx kv.TemporalTx) error {
 		return fmt.Errorf("latest binary commitment state is missing from %s", filepath.Base(latest.Fullpath()))
 	}
 	for _, file := range files[:len(files)-1] {
-		_, found, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, file.EndRootNum())
+		_, found, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, fileLookupMaxTxNum(file.EndRootNum()))
 		if err != nil {
 			return err
 		}
@@ -289,6 +289,13 @@ func ExtractCommitmentStateRoot(stateKey, value []byte) ([]byte, uint64, uint64,
 	return commitment.HexTrieExtractStateRoot(value)
 }
 
+func fileLookupMaxTxNum(endTxNum uint64) uint64 {
+	if endTxNum == 0 {
+		return 0
+	}
+	return endTxNum - 1
+}
+
 func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
 	maxTxNum := f.EndRootNum()
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithHexCommitmentOnly())
@@ -300,7 +307,7 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	} else {
 		sd.GetCommitmentCtx().SetTraceWriter(nil)
 	}
-	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, maxTxNum))
+	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, fileLookupMaxTxNum(maxTxNum)))
 	latestTxNum, _, err := sd.SeekCommitment(ctx, tx) // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err

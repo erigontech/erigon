@@ -55,6 +55,17 @@ func TestCommitmentCalculatorStopsHexShadowAfterWindow(t *testing.T) {
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "hex shadow must stop on block 13")
 }
 
+func TestCommitmentCalculatorUsesCurrentBranchHeaderForActivation(t *testing.T) {
+	activationTime := uint64(10)
+	cc := &commitmentCalculator{
+		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
+		blockReader:   uncommittedActivationHeaderReader{},
+		maxReorgDepth: 1,
+	}
+	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 7, blockTime: activationTime})
+	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "hex shadow must stop at the first block after the activation window")
+}
+
 func TestCommitmentCalculatorStopsFoldingHexAtWindowEnd(t *testing.T) {
 	db, tx, doms := dualCalculatorTest(t)
 	roTx, err := db.BeginTemporalRo(t.Context())
@@ -108,7 +119,7 @@ func TestAutomaticHexStopRecordsMarkerInCommitmentTransaction(t *testing.T) {
 	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 4, blockTime: activationTime})
 	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 5, blockTime: activationTime})
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain))
-	require.NoError(t, recordStoppedCommitmentDomains(tx))
+	require.NoError(t, recordStoppedCommitmentDomains(tx, cc.shadowStopped))
 	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentDomain)
 	require.NoError(t, err)
 	require.True(t, stopped, "the automatic stop marker must share the commitment transaction")
@@ -134,4 +145,18 @@ func (hexStopHeaderReader) HeaderByNumber(_ context.Context, _ kv.Getter, number
 		timestamp = 10
 	}
 	return &types.Header{Time: timestamp}, nil
+}
+
+type uncommittedActivationHeaderReader struct {
+	dbservices.FullBlockReader
+}
+
+func (uncommittedActivationHeaderReader) HeaderByNumber(_ context.Context, _ kv.Getter, number uint64) (*types.Header, error) {
+	if number >= 7 {
+		return nil, nil
+	}
+	if number >= 5 {
+		return &types.Header{Time: 10}, nil
+	}
+	return &types.Header{}, nil
 }

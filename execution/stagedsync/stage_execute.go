@@ -193,6 +193,10 @@ func binaryTrieActivationBlock(ctx context.Context, tx kv.TemporalTx, br dbservi
 	if err != nil {
 		return 0, false, err
 	}
+	return binaryTrieActivationBlockWithHead(ctx, tx, br, config, currentBlock, head)
+}
+
+func binaryTrieActivationBlockWithHead(ctx context.Context, tx kv.TemporalTx, br dbservices.FullBlockReader, config *chain.Config, currentBlock uint64, head *types.Header) (uint64, bool, error) {
 	if head == nil || !config.IsBinaryTrie(head.Time) {
 		return 0, false, nil
 	}
