@@ -1981,7 +1981,12 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
-				if b := be.taskIndexOf(wv.TxIndex); b > blocker {
+				// A same-writer re-publication may still be forgiven by the value
+				// tiebreaker, so it names no blocker: parking on it would wait for a
+				// writer that did not invalidate this read. When it does invalidate
+				// (the value changed) the caller re-executes at once, which is right —
+				// the new value is already published.
+				if b := be.taskIndexOf(wv.TxIndex); rv.TxIndex != wv.TxIndex && b > blocker {
 					// Invariant: a read can only be invalidated by a PREDECESSOR write.
 					// A blocker >= this task is a forward dependency (a future write
 					// invalidating a past read) — impossible in Block-STM; fail loud.

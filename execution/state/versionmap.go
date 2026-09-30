@@ -1183,11 +1183,16 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
-			if valid != VersionValid && matchesLive != nil && matchesLive() {
-				// Value tiebreaker: the writer re-published under a different version but
-				// the value this read saw is still the live one, so the read is accurate.
-				// Without it one re-execution invalidates every reader of a hot cell (the
-				// block's shared gas payer) and serializes the block.
+			if valid != VersionValid && rr.Version().TxIndex == version.TxIndex &&
+				matchesLive != nil && matchesLive() {
+				// Value tiebreaker: the SAME writer re-published under a new incarnation
+				// but the value this read saw is still the live one, so the read is
+				// accurate. Without it one re-execution invalidates every reader of a hot
+				// cell (the block's shared gas payer) and serializes the block. Restricted
+				// to the same writer: a different, higher writer means the read bound to a
+				// version that is no longer the one in effect, and an equal value there can
+				// still hide a lifecycle change (a lower tx's SELFDESTRUCT) the version
+				// check is the only thing that catches.
 				valid = VersionValid
 			}
 			// An origin AddressPath read is the committed baseline; re-run the create/
@@ -1200,6 +1205,15 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 						valid = VersionInvalid
 					}
 				}
+			}
+		}
+		// An AddressPath read predating a later self-destruct that nothing revived is
+		// stale. checkVersion misses it — the destruct writes no AddressPath cell — and
+		// the value tiebreaker above can forgive the version churn that would catch it.
+		if valid == VersionValid && path == AddressPath {
+			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.resolved() && destructed &&
+				sdRR.DepIdx() > rr.Version().TxIndex && vm.IsNetAbsent(addr, txIndex) {
+				valid = VersionInvalid
 			}
 		}
 		// A later tx self-destructed the account (no revival), so a read predating the

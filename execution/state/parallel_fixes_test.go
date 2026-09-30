@@ -406,3 +406,49 @@ func TestValueTiebreaker_MapReadIncarnationBump(t *testing.T) {
 		*uint256.NewInt(999), liveBalance, eqUint256, checkVersion, false, "")
 	assert.Equal(t, VersionInvalid, valid, "a changed value must still invalidate")
 }
+
+// A different, higher writer publishing an equal value says nothing about the
+// account still existing, so the tiebreaker must not forgive a read that a later
+// SELFDESTRUCT made stale. Under Tangerine Whistle rules a forgiven read skips
+// CreateBySelfdestructGas and the tx validates with the wrong gas.
+func TestValueTiebreaker_DifferentWriterMustNotBypassLaterSD(t *testing.T) {
+	addr := getAddress(160)
+	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+
+	io := NewVersionedIO(6)
+	rs := ReadSet{}
+	rs.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}},
+		Val:        NewAccountView(alive),
+	})
+	io.RecordReads(Version{TxIndex: 5}, rs)
+
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 3}, alive, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
+
+	assert.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
+}
+
+// Same-writer variant: the tiebreaker legitimately forgives the incarnation bump,
+// so the AddressPath destruct check is the only thing left to catch the stale read.
+func TestValueTiebreaker_SameWriterMustNotBypassLaterSD(t *testing.T) {
+	addr := getAddress(162)
+	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+
+	io := NewVersionedIO(6)
+	rs := ReadSet{}
+	rs.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 3}},
+		Val:        NewAccountView(alive),
+	})
+	io.RecordReads(Version{TxIndex: 5}, rs)
+
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 3, Incarnation: 1}, alive, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
+
+	assert.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
+}
