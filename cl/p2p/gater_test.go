@@ -119,6 +119,57 @@ func TestInterceptSecuredRejectsRedundantInboundTCPWhenPeerAlreadyHasQUIC(t *tes
 	require.NoError(t, err, "the surviving connection must be the QUIC one")
 }
 
+// TestInterceptSecuredClosesStaleInboundTCPWhenQUICArrivesSecond covers the reverse
+// arrival order from TestInterceptSecuredRejectsRedundantInboundTCPWhenPeerAlreadyHasQUIC:
+// TCP connects first, then the same peer's QUIC connection arrives. The preferred
+// (QUIC) connection must still end up as the sole survivor, not just the non-preferred
+// one when it arrives second.
+func TestInterceptSecuredClosesStaleInboundTCPWhenQUICArrivesSecond(t *testing.T) {
+	serverKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
+	require.NoError(t, err)
+	gater, err := NewGater(&P2PConfig{IpAddr: "127.0.0.1"})
+	require.NoError(t, err)
+	serverOpts = append(serverOpts, libp2p.ConnectionGater(gater))
+	server, err := libp2p.New(serverOpts...)
+	require.NoError(t, err)
+	defer server.Close()
+	gater.SetHost(server)
+
+	peerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	serverQUICAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_QUIC_V1)
+	serverTCPAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_TCP)
+
+	tcpOnlyClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1", DisableQUIC: true}, peerKey)
+	require.NoError(t, err)
+	tcpOnlyClient, err := libp2p.New(tcpOnlyClientOpts...)
+	require.NoError(t, err)
+	defer tcpOnlyClient.Close()
+
+	require.NoError(t, tcpOnlyClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverTCPAddr}}))
+	require.Len(t, server.Network().ConnsToPeer(tcpOnlyClient.ID()), 1)
+
+	quicClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, peerKey)
+	require.NoError(t, err)
+	quicClient, err := libp2p.New(quicClientOpts...)
+	require.NoError(t, err)
+	defer quicClient.Close()
+
+	require.NoError(t, quicClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverQUICAddr}}))
+
+	require.Eventually(t, func() bool {
+		conns := server.Network().ConnsToPeer(quicClient.ID())
+		if len(conns) != 1 {
+			return false
+		}
+		_, err := conns[0].RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1)
+		return err == nil
+	}, time.Second, 10*time.Millisecond, "the stale TCP connection must be closed once the preferred QUIC connection is admitted")
+}
+
 func firstMultiaddrWithProtocol(t *testing.T, addrs []multiaddr.Multiaddr, protocol int) multiaddr.Multiaddr {
 	t.Helper()
 	for _, addr := range addrs {

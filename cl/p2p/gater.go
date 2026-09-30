@@ -78,11 +78,17 @@ func (g *Gater) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
 // other around the same time, one over TCP and one over QUIC: go-libp2p does not
 // deduplicate connections across transports (swarm.addConn appends unconditionally),
 // so both dials succeed and the peer ends up with two live connections that never
-// converge on their own. Rejecting here, before the connection is registered or the
-// muxer negotiated, is cheaper than closing it afterwards and — because "is this
-// address QUIC" is a fact both sides compute identically — always converges on
-// keeping the same connection (the QUIC one) rather than racing on timestamps that
-// the two peers could disagree on.
+// converge on their own. Rejecting the non-preferred transport here, before the
+// connection is registered or the muxer negotiated, is cheaper than closing it
+// afterwards and — because "is this address QUIC" is a fact both sides compute
+// identically — always converges on keeping the same connection (the QUIC one)
+// rather than racing on timestamps that the two peers could disagree on.
+//
+// Arrival order isn't fixed: TCP can just as easily reach here before QUIC does, in
+// which case the earlier TCP connection is already registered when this runs. Simply
+// allowing QUIC in that case would leave both connections live, so the QUIC arm also
+// closes any already-registered non-QUIC connection to the same peer, making the
+// outcome (QUIC survives, TCP doesn't) the same regardless of which one arrives first.
 func (g *Gater) InterceptSecured(dir network.Direction, p peer.ID, addrs network.ConnMultiaddrs) (allow bool) {
 	if dir != network.DirInbound {
 		return true
@@ -91,10 +97,16 @@ func (g *Gater) InterceptSecured(dir network.Direction, p peer.ID, addrs network
 	if hostPtr == nil {
 		return true
 	}
+	existing := (*hostPtr).Network().ConnsToPeer(p)
 	if _, err := addrs.RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
+		for _, conn := range existing {
+			if _, err := conn.RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1); err != nil {
+				_ = conn.Close()
+			}
+		}
 		return true
 	}
-	for _, conn := range (*hostPtr).Network().ConnsToPeer(p) {
+	for _, conn := range existing {
 		if _, err := conn.RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
 			return false
 		}
