@@ -284,7 +284,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			return nil
 		}
 		// Retain canceled imports too: gossip validation has already marked the block as seen.
-		if shouldBackOffBlockRetry(err) || (ctx.Err() != nil && errors.Is(err, ctx.Err())) {
+		if shouldBackOffBlockRetry(err) || isCallerCancellation(ctx, err) {
 			job, _ := b.scheduleBlockForLaterProcessing(msg, nil)
 			job.logStorageErrorOnce(err)
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
@@ -296,6 +296,10 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 
 func shouldBackOffBlockRetry(err error) bool {
 	return errors.Is(err, forkchoice.ErrNewPayloadNoStatus) || errors.Is(err, errBlockStorage)
+}
+
+func isCallerCancellation(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && errors.Is(err, ctx.Err())
 }
 
 func (b *blockService) ValidateGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock) error {
@@ -897,7 +901,7 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		persisted = slot != nil
 		return err
 	}); err != nil {
-		if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		if isCallerCancellation(ctx, err) {
 			return err
 		}
 		return fmt.Errorf("%w: read block index: %w", errBlockStorage, err)
@@ -906,7 +910,7 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 			return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
 		}); err != nil {
-			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			if isCallerCancellation(ctx, err) {
 				return err
 			}
 			return fmt.Errorf("%w: write block: %w", errBlockStorage, err)
@@ -921,7 +925,7 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	}
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
-	}); err != nil {
+	}); err != nil && !isCallerCancellation(ctx, err) {
 		// Import has succeeded; failure to update this local index is not a peer fault.
 		log.Warn("Failed to update highest finalized after block import", "slot", block.Block.Slot, "err", err)
 	}
