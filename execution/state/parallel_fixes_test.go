@@ -481,3 +481,28 @@ func TestValueTiebreaker_UnresolvedRevivalDoesNotHideDestruct(t *testing.T) {
 
 	assert.Equal(t, VersionInvalid, vm.ValidateVersion(6, io, validateEqualVersion, false, ""))
 }
+
+// A tentative balance credit above a completed destruct is not a revival: until
+// it validates it may be withdrawn, and the account is still absent. Counting it
+// would let the value tiebreaker keep an AddressPath read that predates the
+// destruct.
+func TestValueTiebreaker_UnresolvedBalanceRevivalDoesNotHideDestruct(t *testing.T) {
+	addr := getAddress(165)
+	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+
+	io := NewVersionedIO(7)
+	rs := ReadSet{}
+	rs.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 3}},
+		Val:        NewAccountView(alive),
+	})
+	io.RecordReads(Version{TxIndex: 6}, rs)
+
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 3, Incarnation: 1}, alive, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
+	vm.WriteBalance(addr, Version{TxIndex: 5}, *uint256.NewInt(1), false)
+
+	assert.Equal(t, VersionInvalid, vm.ValidateVersion(6, io, validateEqualVersion, false, ""))
+}

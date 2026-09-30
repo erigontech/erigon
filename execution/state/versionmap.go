@@ -628,6 +628,18 @@ const (
 
 // AccountLifecycleAt resolves an account's lifecycle in one pass: the state, the canonical version dependent reads must anchor on, and the destruct (wipe) TxIndex.
 func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
+	return vm.accountLifecycleAt(addr, txIdx, false)
+}
+
+// ResolvedAccountLifecycleAt ignores revival writes that have not resolved yet.
+// A tentative field write above a destruct may still be withdrawn, so validation
+// must not take it as proof the account came back; the read path wants the
+// opposite and uses AccountLifecycleAt.
+func (vm *VersionMap) ResolvedAccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
+	return vm.accountLifecycleAt(addr, txIdx, true)
+}
+
+func (vm *VersionMap) accountLifecycleAt(addr accounts.Address, txIdx int, resolvedRevivalsOnly bool) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
 	if vm == nil {
 		return LifecycleLive, Version{}, 0
 	}
@@ -670,16 +682,16 @@ func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (stat
 	}
 
 	revivalLimit := txIdx - 1
-	if hi, ok := highestBelow(e.Address, revivalLimit); ok && hi >= destroyedAt {
+	if hi, ok := highestBelow(e.Address, revivalLimit, resolvedRevivalsOnly); ok && hi >= destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt
 	}
-	if hi, ok := highestBelow(e.Balance, revivalLimit); ok && hi > destroyedAt {
+	if hi, ok := highestBelow(e.Balance, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt
 	}
-	if hi, ok := highestBelow(e.Nonce, revivalLimit); ok && hi > destroyedAt {
+	if hi, ok := highestBelow(e.Nonce, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt
 	}
-	if hi, ok := highestBelow(e.CodeHash, revivalLimit); ok && hi > destroyedAt {
+	if hi, ok := highestBelow(e.CodeHash, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt
 	}
 	return LifecycleAbsent, canonicalVer, destroyedAt
@@ -687,12 +699,15 @@ func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (stat
 
 // highestBelow returns the largest TxIndex ≤ limit present in cells, if any. The
 // caller must hold the owning AddressEntry's lock.
-func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int) (int, bool) {
+func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int, resolvedOnly bool) (int, bool) {
 	if cells == nil {
 		return 0, false
 	}
 	hi, ok := 0, false
-	cells.Descend(limit, func(k int, _ *WriteCell[T]) bool {
+	cells.Descend(limit, func(k int, v *WriteCell[T]) bool {
+		if resolvedOnly && v.flag != FlagDone && v.flag != FlagValidated {
+			return true
+		}
 		hi, ok = k, true
 		return false
 	})
@@ -1259,7 +1274,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		// stale. checkVersion misses it — the destruct writes no AddressPath cell — and
 		// the value tiebreaker above can forgive the version churn that would catch it.
 		if valid == VersionValid && path == AddressPath {
-			if st, _, destroyedAt := vm.AccountLifecycleAt(addr, txIndex); st == LifecycleAbsent &&
+			if st, _, destroyedAt := vm.ResolvedAccountLifecycleAt(addr, txIndex); st == LifecycleAbsent &&
 				destroyedAt > rr.Version().TxIndex {
 				valid = VersionInvalid
 			}
