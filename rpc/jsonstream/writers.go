@@ -18,6 +18,7 @@ package jsonstream
 
 import (
 	"encoding"
+	"slices"
 	"strconv"
 
 	"github.com/holiman/uint256"
@@ -64,6 +65,48 @@ func HexUint64(s *StackStream, v uint64) {
 	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
 	s.commit(append(buf, '"'), start)
 	s.afterValue()
+}
+
+// HexUint64Field writes a field name and its HexUint64 value in one step, so the name is never
+// left on the stack waiting for a value.
+func HexUint64Field(s *StackStream, name string, v uint64) {
+	s.beforeValue()
+	writeObjectFieldFast(s.stream, name)
+	buf := s.stream.Buffer()
+	start := len(buf)
+	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
+	s.commit(append(buf, '"'), start)
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
+// HexField writes a field name and the 0x-prefixed hex of b in one step, as HexUint64Field does.
+func HexField(s *StackStream, name string, b []byte) {
+	s.beforeValue()
+	writeObjectFieldFast(s.stream, name)
+	buf := s.stream.Buffer()
+	start := len(buf)
+	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
+	s.commit(buf, start)
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
+// HexUint256Field writes a field name and its HexUint256 value in one step, null for a nil one.
+func HexUint256Field(s *StackStream, name string, v *uint256.Int) {
+	s.beforeValue()
+	writeObjectFieldFast(s.stream, name)
+	buf := s.stream.Buffer()
+	start := len(buf)
+	if v == nil {
+		buf = append(buf, "null"...)
+	} else {
+		buf, _ = hexutil.U256(*v).AppendText(append(buf, '"'))
+		buf = append(buf, '"')
+	}
+	s.commit(buf, start)
+	s.separatorPending = true
+	flushIfFull(s.stream)
 }
 
 // HexUint256 does the same for a 256-bit value, null for a nil one.

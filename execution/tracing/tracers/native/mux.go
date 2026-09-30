@@ -89,13 +89,13 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 	}
 }
 
-func (t *muxTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (t *muxTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	for _, child := range t.tracers {
 		child.Hooks.EmitOpcode(pc, op, gas, cost, scope, rData, depth, err)
 	}
 }
 
-func (t *muxTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+func (t *muxTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
 	for _, child := range t.tracers {
 		child.Hooks.EmitFault(pc, op, gas, cost, scope, depth, err)
 	}

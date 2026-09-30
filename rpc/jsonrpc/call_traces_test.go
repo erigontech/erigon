@@ -451,6 +451,39 @@ func TestFilterModeValidation(t *testing.T) {
 	}
 }
 
+// TestFilterBoundPastHead checks that a bound past the executed head returns
+// -32602, as eth_getLogs does, instead of an empty result, and that the head
+// itself is still a valid bound.
+func TestFilterBoundPastHead(t *testing.T) {
+	m := execmoduletester.New(t)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	for name, req := range map[string]map[string]any{
+		"fromBlock next":          {"fromBlock": "0x1"},
+		"toBlock next":            {"fromBlock": "0x0", "toBlock": "0x1"},
+		"toBlock far":             {"fromBlock": "0x0", "toBlock": "0xfffffffff"},
+		"fromBlock far, reversed": {"fromBlock": "0xfffffffff", "toBlock": "0x0"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var result json.RawMessage
+			err := client.CallContext(t.Context(), &result, "trace_filter", req)
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			require.EqualError(t, err, ErrBlockRangeIntoFuture)
+		})
+	}
+
+	t.Run("head", func(t *testing.T) {
+		var result json.RawMessage
+		require.NoError(t, client.CallContext(t.Context(), &result, "trace_filter", map[string]any{"fromBlock": "0x0", "toBlock": "0x0"}))
+		require.JSONEq(t, "[]", string(result))
+	})
+}
+
 // An explicit null for an optional trace_filter member is the same as omitting it.
 func TestFilterNullMembers(t *testing.T) {
 	key, err := crypto.GenerateKey()

@@ -17,6 +17,7 @@
 package native_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -31,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/stretchr/testify/require"
 )
 
@@ -212,4 +215,53 @@ func TestTracerStopRace(t *testing.T) {
 			}
 		})
 	}
+}
+
+type fastJSON func(jsonstream.Stream) error
+
+func (f fastJSON) MarshalFastJSONTo(s *jsonstream.StackStream) error { return f(s) }
+
+func TestCallTracerFastJSONMatchesGetResult(t *testing.T) {
+	tracer, err := tracers.New("callTracer", &tracers.Context{}, json.RawMessage(`{"withLog":true}`))
+	require.NoError(t, err)
+	to := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	tracer.OnTxStart(&tracing.VMContext{Rules: &chain.Rules{IsAmsterdam: true}},
+		types.NewTransaction(0, to.Value(), uint256.NewInt(7), 100_000, nil, []byte{1, 2}), accounts.ZeroAddress)
+	tracer.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, to, false, []byte{1, 2},
+		mdgas.MdGas{Execution: 1000, State: 200}, *uint256.NewInt(7), nil)
+	tracer.OnLog(&types.Log{Address: to.Value(), Data: []byte{3}})
+	tracer.OnLog(&types.Log{Address: to.Value(), Topics: []common.Hash{{0x0b}}})
+	tracer.EmitEnter(1, byte(vm.CREATE2), to, to, false, nil, mdgas.MdGas{Execution: 800}, uint256.Int{}, nil)
+	tracer.EmitExit(1, nil, mdgas.MdGasUsage{Execution: 20, State: -30}, errors.New("a<b>&c\xff"), false)
+	tracer.EmitEnter(1, byte(vm.CALL), to, to, false, nil, mdgas.MdGas{Execution: 800}, uint256.Int{}, nil)
+	tracer.EmitExit(1, nil, mdgas.MdGasUsage{Execution: 20}, errors.New("a<b>&c"), false)
+	tracer.EmitExit(0, []byte{9}, mdgas.MdGasUsage{Execution: 100, State: 50}, nil, false)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: 37_000},
+		mdgas.TxnGasUsage{BlockExecutionGasUsed: 30_000, BlockStateGasUsed: 12_000, GasRefund: 5_000}, nil)
+
+	want, err := tracer.GetResult()
+	require.NoError(t, err)
+	got, err := jsonstream.Marshal(fastJSON(tracer.MarshalFastJSONTo))
+	require.NoError(t, err)
+	require.Equal(t, string(want), string(got))
+
+	tracer.Stop(errors.New("stopped"))
+	var buf bytes.Buffer
+	s := jsonstream.New(&buf)
+	require.EqualError(t, tracer.MarshalFastJSONTo(s), "stopped")
+	require.Empty(t, s.Buffer(), "a stopped tracer writes nothing")
+}
+
+func TestCallTracerFastJSONWritesNullForExcludedPrecompileRoot(t *testing.T) {
+	tracer, err := tracers.New("callTracer", &tracers.Context{}, json.RawMessage(`{"includePrecompiles":false}`))
+	require.NoError(t, err)
+	tracer.OnTxStart(&tracing.VMContext{Rules: &chain.Rules{}},
+		types.NewTransaction(0, accounts.ZeroAddress.Value(), nil, 100_000, nil, nil), accounts.ZeroAddress)
+	tracer.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, true, nil, mdgas.MdGas{Execution: 1000}, uint256.Int{}, nil)
+	tracer.EmitExit(0, nil, mdgas.MdGasUsage{Execution: 100}, nil, false)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: 100}, mdgas.TxnGasUsage{}, nil)
+
+	got, err := jsonstream.Marshal(fastJSON(tracer.MarshalFastJSONTo))
+	require.NoError(t, err)
+	require.Equal(t, "null", string(got))
 }

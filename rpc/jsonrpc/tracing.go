@@ -146,7 +146,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 	txns := block.Transactions()
 
-	var gasUsed uint64
+	var gasUsed protocol.GasUsed
 	for txnIndex, txn := range txns {
 		txnHash := txn.Hash()
 
@@ -172,8 +172,9 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				GasPrice:   *msg.GasPrice(),
 				BlobHashes: msg.BlobHashes(),
 			}
-			txGasUsed, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
-			gasUsed += txGasUsed
+			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+			gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
+			gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
 			if traceErr != nil {
 				return traceErr
 			}
@@ -193,8 +194,9 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			refunds = false
 		}
 
-		if refunds && block.GasUsed() != gasUsed {
-			panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), gasUsed, blockNumber))
+		blockGasUsed := gasUsed.BlockGasUsed()
+		if refunds && block.GasUsed() != blockGasUsed {
+			panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), blockGasUsed, blockNumber))
 		}
 	}
 
