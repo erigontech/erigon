@@ -454,7 +454,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 }
 
 func BenchmarkAggregator_BeginFilesRo_Latency(b *testing.B) {
-	//BenchmarkAggregator_BeginFilesRo/begin_files_ro-16  1737404  737.3 ns/op  3216 B/op  21 allocs/op
+	// BenchmarkAggregator_BeginFilesRo/begin_files_ro-16  1737404  737.3 ns/op  3216 B/op  21 allocs/op
 	aggStep := uint64(100_00)
 	_, agg := testDbAndAggregatorBench(b, aggStep)
 
@@ -465,9 +465,11 @@ func BenchmarkAggregator_BeginFilesRo_Latency(b *testing.B) {
 	})
 }
 
-var parallel = flag.Int("bench.parallel", 1, "parallelism value") // runs 1 *maxprocs
-var cpuIters = flag.Int("bench.cpu-iters", 1000, "CPU work iterations between BeginFilesRo and Close")
-var sleepMs = flag.Int("bench.sleep-ms", 5, "sleep duration in milliseconds between BeginRo and Rollback")
+var (
+	parallel = flag.Int("bench.parallel", 1, "parallelism value") // runs 1 *maxprocs
+	cpuIters = flag.Int("bench.cpu-iters", 1000, "CPU work iterations between BeginFilesRo and Close")
+	sleepMs  = flag.Int("bench.sleep-ms", 5, "sleep duration in milliseconds between BeginRo and Rollback")
+)
 
 func BenchmarkAggregator_BeginFilesRo_Throughput(b *testing.B) {
 	// RESULT: deteriorates after 2^21 goroutines

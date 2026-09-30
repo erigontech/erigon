@@ -755,11 +755,9 @@ func TestEIP155Transition(t *testing.T) {
 	// generate an invalid chain id transaction
 	config := &libchain.Config{ChainID: uint256.NewInt(2), TangerineWhistleBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(2), HomesteadBlock: common.NewUint64(0)}
 	chain, chainErr = m.GenerateChainWithConfig(config, chain.TopBlock, 4, func(i int, block *blockgen.BlockGen) {
-		var (
-			basicTx = func(signer types.Signer) (types.Transaction, error) {
-				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
-			}
-		)
+		basicTx := func(signer types.Signer) (types.Transaction, error) {
+			return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(uint256.Int), 21000, new(uint256.Int), nil), signer, key)
+		}
 		if i == 0 {
 			tx, txErr := basicTx(*types.LatestSigner(config))
 			if txErr != nil {
@@ -1487,7 +1485,8 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -1822,7 +1821,8 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -1864,13 +1864,13 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		exist    bool
 		blocknum int
 	}
-	var current = &expectation{
+	current := &expectation{
 		exist:    true, // exists in genesis
 		blocknum: 0,
 		values:   map[int]int{1: 1, 2: 2},
 	}
 	var expectations []*expectation
-	var newDestruct = func(e *expectation) types.Transaction {
+	newDestruct := func(e *expectation) types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, aa.Value(),
 			&u256.Num0, 50000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
@@ -1881,7 +1881,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		//t.Logf("block %d; adding destruct\n", e.blocknum)
 		return tx
 	}
-	var newResurrect = func(e *expectation) types.Transaction {
+	newResurrect := func(e *expectation) types.Transaction {
 		tx, _ := types.SignTx(types.NewTransaction(nonce, bb,
 			&u256.Num0, 100000, &u256.Num1, nil), *types.LatestSignerForChainID(nil), key)
 		nonce++
@@ -1894,7 +1894,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	}
 
 	chain, err := m.GenerateChain(150, func(i int, b *blockgen.BlockGen) {
-		var exp = new(expectation)
+		exp := new(expectation)
 		exp.blocknum = i + 1
 		exp.values = make(map[int]int)
 		maps.Copy(exp.values, current.values)
@@ -1920,7 +1920,7 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		t.Fatalf("generate blocks: %v", err)
 	}
 	// Import the canonical chain
-	var asHash = func(num int) common.Hash {
+	asHash := func(num int) common.Hash {
 		return common.BytesToHash([]byte{byte(num)})
 	}
 	for i := range chain.Blocks {
@@ -1929,7 +1929,6 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 			t.Fatalf("block %d: failed to insert into chain: %v", i, err)
 		}
 		err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-
 			statedb := state.New(m.NewStateReader(tx))
 			defer statedb.Close()
 			// If all is correct, then slot 1 and 2 are zero
@@ -2028,7 +2027,8 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}
 	bbCode := []byte{
 		// Push initcode onto stack
-		byte(vm.PUSH1) + byte(len(initCode)-1)}
+		byte(vm.PUSH1) + byte(len(initCode)-1),
+	}
 	bbCode = append(bbCode, initCode...)
 	bbCode = append(bbCode, []byte{
 		byte(vm.PUSH1), 0x0, // memory start on stack
@@ -2073,7 +2073,6 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	}
 
 	err = m.DB.ViewTemporal(m.Ctx, func(tx kv.TemporalTx) error {
-
 		// Import the canonical chain
 		statedb := state.New(m.NewHistoryStateReader(2, tx))
 		defer statedb.Close()
@@ -2197,7 +2196,6 @@ func TestEIP2718Transition(t *testing.T) {
 		vm.GasQuickStep*2 + params.WarmStorageReadCostEIP2929 + params.ColdSloadCostEIP2929
 	if block.GasUsed() != expected {
 		t.Fatalf("incorrect amount of gas spent: expected %d, got %d", expected, block.GasUsed())
-
 	}
 }
 

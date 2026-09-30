@@ -17,14 +17,16 @@ import (
 
 type statusFlag uint
 
-const FlagDone statusFlag = 0
-const FlagEstimate statusFlag = 1
+const (
+	FlagDone     statusFlag = 0
+	FlagEstimate statusFlag = 1
+	UnknownDep              = -3
+)
 
 // FlagValidated: a pre-seal write whose tx validated its read-set out-of-order. A
 // reader continues on it (early break) like Done rather than pausing like an Estimate,
 // but it stays revertible until the in-order seal promotes it to Done.
 const FlagValidated statusFlag = 2
-const UnknownDep = -3
 
 type AccountPath int8
 
@@ -1136,7 +1138,8 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	readLive func(*VersionMap, accounts.Address, accounts.StorageKey, int) (T, ReadResult, bool),
 	eq func(a, b T) bool,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
-	traceInvalid bool, tracePrefix string) VersionValidity {
+	traceInvalid bool, tracePrefix string,
+) VersionValidity {
 	// One typed read supplies both the status (version check) and the live value
 	// (tiebreaker) — no second lookup, no boxing.
 	live, rr, ok := readLive(vm, addr, key, txIndex)
@@ -1149,18 +1152,23 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 func liveBalance(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
 	return vm.ReadBalance(a, tx)
 }
+
 func liveNonce(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
 	return vm.ReadNonce(a, tx)
 }
+
 func liveIncarnation(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
 	return vm.ReadIncarnation(a, tx)
 }
+
 func liveCodeHash(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (accounts.CodeHash, ReadResult, bool) {
 	return vm.ReadCodeHash(a, tx)
 }
+
 func liveAddress(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (*accounts.Account, ReadResult, bool) {
 	return vm.ReadAddress(a, tx)
 }
+
 func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
 	// Wipe-aware: a slot of a destructed account reads zero unless a post-destruct write
 	// revived it, anchored on the destruct (canonicalVer) so it validates against the
@@ -1190,8 +1198,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	rr ReadResult,
 	matchesLive func() bool,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
-	traceInvalid bool, tracePrefix string, recursive bool) VersionValidity {
-
+	traceInvalid bool, tracePrefix string, recursive bool,
+) VersionValidity {
 	valid := VersionValid
 	switch rr.Status() {
 	case MVReadResultDone, MVReadResultValidated:
@@ -1455,7 +1463,9 @@ func getCellNonce() *WriteCell[uint64] { return cellPoolNonce.Get().(*WriteCell[
 func getCellIncarnation() *WriteCell[uint64] {
 	return cellPoolIncarnation.Get().(*WriteCell[uint64])
 }
+
 func getCellCode() *WriteCell[accounts.Code] { return cellPoolCode.Get().(*WriteCell[accounts.Code]) }
+
 func getCellCodeHash() *WriteCell[accounts.CodeHash] {
 	return cellPoolCodeHash.Get().(*WriteCell[accounts.CodeHash])
 }
@@ -1463,6 +1473,7 @@ func getCellCodeSize() *WriteCell[int] { return cellPoolCodeSize.Get().(*WriteCe
 func getCellCreateContract() *WriteCell[bool] {
 	return cellPoolCreateContract.Get().(*WriteCell[bool])
 }
+
 func getCellStorage() *WriteCell[uint256.Int] {
 	return cellPoolStorage.Get().(*WriteCell[uint256.Int])
 }
@@ -1536,12 +1547,12 @@ func (res *ReadResult) Version() Version {
 	}
 }
 
-func (mvr ReadResult) Status() int {
-	if mvr.depIdx != UnknownDep {
-		if mvr.validated {
+func (res ReadResult) Status() int {
+	if res.depIdx != UnknownDep {
+		if res.validated {
 			return MVReadResultValidated
 		}
-		if mvr.incarnation == -1 {
+		if res.incarnation == -1 {
 			return MVReadResultDependency
 		} else {
 			return MVReadResultDone

@@ -251,7 +251,8 @@ func (pe *parallelExecutor) bindBlockChangesetForFold(blockNum uint64, blockHash
 func (pe *parallelExecutor) exec(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker,
+) (*types.Header, kv.TemporalRwTx, error) {
 	var (
 		outHeader *types.Header
 		outTx     kv.TemporalRwTx
@@ -267,8 +268,8 @@ func (pe *parallelExecutor) exec(ctx context.Context,
 func (pe *parallelExecutor) execImpl(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
-
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker,
+) (*types.Header, kv.TemporalRwTx, error) {
 	// Deterministic bug-injection faults for this batch (chaos_monkey.WithFaults on the
 	// run context). Read once here; every injection site additionally gates on
 	// enableChaosMonkey, and incarnation-scoped faults fire only at the last valid
@@ -699,7 +700,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 
 					var blockValidatorWaiter *blockValidator
-					if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+					if applyResult.BlockNum > 0 && !applyResult.isPartial { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
 
@@ -1535,7 +1536,8 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.execWorkers, _, pe.stopWorkers, err = exec.NewWorkersPool(
 		workersCtx, nil, true, pe.cfg.db, nil, nil, nil,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
+		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
+	)
 
 	if err != nil {
 		return execLoopCtx, execLoopCtxCancel, err
@@ -2417,8 +2419,8 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) (result *exec.TxResult) {
-
+	calcFees bool,
+) (result *exec.TxResult) {
 	var start time.Time
 	if ev.profile || logNpPhases {
 		start = time.Now()
@@ -3462,7 +3464,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
 				_, finErr := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
-					tt.Withdrawals, chainReader, syscall, false, pe.logger)
+					tt.Withdrawals, chainReader, syscall, false, pe.logger,
+				)
 				// A system-contract read can fail during Finalize and be applied as a
 				// zero value without surfacing through finErr; treat it as an
 				// infrastructure failure, not an invalid block.

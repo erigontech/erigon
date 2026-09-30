@@ -40,8 +40,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const dumpSlotFrequency = 4
-const pruneBatchSize = 256
+const (
+	dumpSlotFrequency = 4
+	pruneBatchSize    = 256
+)
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee

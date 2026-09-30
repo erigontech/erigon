@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"encoding"
 	"io"
 )
 
@@ -27,6 +28,8 @@ type Stream interface {
 
 	Buffer() []byte
 	Reset(out io.Writer)
+	// markSeparatorPending states that a sibling value precedes what is written next.
+	markSeparatorPending()
 	// WriteRawBytes and WriteRaw write already-encoded JSON. Nothing is escaped
 	// or validated, so the caller owns that: a value that is not yet valid JSON
 	// — any unencoded string — must go through WriteString.
@@ -43,19 +46,11 @@ type Stream interface {
 	WriteTrue()
 	WriteFalse()
 	WriteBool(val bool)
-	WriteInt(val int)
-	WriteInt8(val int8)
-	WriteInt16(val int16)
-	WriteInt32(val int32)
-	WriteInt64(val int64)
-	WriteUint(val uint)
-	WriteUint8(val uint8)
-	WriteUint16(val uint16)
-	WriteUint32(val uint32)
-	WriteUint64(val uint64)
+	Int(val int64)
+	Uint(val uint64)
 	WriteFloat32(val float32)
 	WriteFloat64(val float64)
-	// WriteString and WriteObjectField must consume val before returning:
+	// WriteString and Field must consume val before returning:
 	// callers pass views over reusable buffers.
 	WriteString(val string)
 
@@ -65,22 +60,28 @@ type Stream interface {
 	WriteObjectEnd()
 	WriteArrayStart()
 	WriteArrayEnd()
-	WriteMore()
-	WriteObjectField(fieldName string)
+	Field(fieldName string) *StackStream
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)
+	// WriteQuotedText writes v.AppendText's output as a JSON string, with no escape scan.
+	WriteQuotedText(v encoding.TextAppender)
 
 	// Utility methods
 
 	WriteEmptyArray()
 	WriteEmptyObject()
+	// Open returns the stack stream the value goes to, opening a lazily written field first.
+	Open() *StackStream
 
 	// Extended functionality
 
 	ClosePending(targetDepth uint) error
 	// Depth counts the entries ClosePending would unwind, which is not the
-	// container nesting: a field name or a comma still waiting for its value
-	// counts too. Pass it back as targetDepth to return to this point.
+	// container nesting: a field name still waiting for its value counts too.
+	// Pass it back as targetDepth to return to this point.
 	Depth() int
+	// Err reports a write error the stream latched. Flush does not surface it on a writerless
+	// stream, so a caller that reads Buffer() instead of flushing must ask for it.
+	Err() error
 }

@@ -24,19 +24,19 @@ import (
 // with a missing cell and lifecycle checks treat it as an inert baseline.
 const originIndex = -2
 
-func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr accounts.Address) (int, error) {
+func codeSizeFromStateObject(ibs *IntraBlockState, so *stateObject, addr accounts.Address) (int, error) {
 	if so == nil || so.deleted {
 		return 0, nil
 	}
 	if so.code.Bytes != nil {
-		sdb.callCodeAccessHook(addr, so.code.Bytes)
+		ibs.callCodeAccessHook(addr, so.code.Bytes)
 		return so.code.Len(), nil
 	}
 	if so.data.CodeHash.IsEmpty() {
 		return 0, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
-		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
 	if dbg.KVReadLevelledMetrics {
@@ -44,37 +44,37 @@ func codeSizeFromStateObject(sdb *IntraBlockState, so *stateObject, addr account
 	}
 	// Size-only read for stateless-witness correctness: a witness node has the
 	// size but not the bytes, so ReadAccountCode would report EXTCODESIZE 0.
-	size, err := sdb.stateReader.ReadAccountCodeSize(addr)
+	size, err := ibs.stateReader.ReadAccountCodeSize(addr)
 	if dbg.KVReadLevelledMetrics {
-		sdb.codeReadDuration += time.Since(readStart)
-		sdb.codeReadCount++
+		ibs.codeReadDuration += time.Since(readStart)
+		ibs.codeReadCount++
 	}
-	sdb.stateReader.SetTrace(false, "")
-	sdb.recordStateReadError(err)
+	ibs.stateReader.SetTrace(false, "")
+	ibs.recordStateReadError(err)
 	return size, err
 }
 
 // committedStorageDirect reads a storage slot's committed value straight from the
 // state reader, no stateObject. A contract this tx created (own CreateContract cell)
 // has fresh storage, so a cold slot reads zero rather than a prior incarnation's value.
-func (sdb *IntraBlockState) committedStorageDirect(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
-	if cc, ok := sdb.versionedWriteCreateContract(addr); ok && cc {
+func (ibs *IntraBlockState) committedStorageDirect(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
+	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
 		return uint256.Int{}, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
-		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
 	if dbg.KVReadLevelledMetrics {
 		readStart = time.Now()
 	}
-	res, ok, err := sdb.stateReader.ReadAccountStorage(addr, key)
+	res, ok, err := ibs.stateReader.ReadAccountStorage(addr, key)
 	if dbg.KVReadLevelledMetrics {
-		sdb.storageReadDuration += time.Since(readStart)
+		ibs.storageReadDuration += time.Since(readStart)
 	}
-	sdb.storageReadCount++
-	sdb.stateReader.SetTrace(false, "")
-	sdb.recordStateReadError(err)
+	ibs.storageReadCount++
+	ibs.stateReader.SetTrace(false, "")
+	ibs.recordStateReadError(err)
 	if err != nil {
 		return uint256.Int{}, err
 	}
@@ -87,47 +87,47 @@ func (sdb *IntraBlockState) committedStorageDirect(addr accounts.Address, key ac
 // committedCodeDirect reads an account's committed code bytes straight from the
 // state reader, no stateObject. A contract this tx created has no code until SetCode
 // runs, so it reads empty rather than a prior incarnation's bytes.
-func (sdb *IntraBlockState) committedCodeDirect(addr accounts.Address) ([]byte, error) {
-	if cc, ok := sdb.versionedWriteCreateContract(addr); ok && cc {
+func (ibs *IntraBlockState) committedCodeDirect(addr accounts.Address) ([]byte, error) {
+	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
 		return nil, nil
 	}
-	codeHash, err := sdb.committedCodeHash(addr)
+	codeHash, err := ibs.committedCodeHash(addr)
 	if err != nil {
 		return nil, err
 	}
 	if codeHash.IsEmpty() {
 		return nil, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
-		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
 	if dbg.KVReadLevelledMetrics {
 		readStart = time.Now()
 	}
-	code, err := sdb.stateReader.ReadAccountCode(addr)
+	code, err := ibs.stateReader.ReadAccountCode(addr)
 	if dbg.KVReadLevelledMetrics {
-		sdb.codeReadDuration += time.Since(readStart)
-		sdb.codeReadCount++
+		ibs.codeReadDuration += time.Since(readStart)
+		ibs.codeReadCount++
 	}
-	sdb.stateReader.SetTrace(false, "")
-	sdb.recordStateReadError(err)
+	ibs.stateReader.SetTrace(false, "")
+	ibs.recordStateReadError(err)
 	return code, err
 }
 
 // codeSeed returns the code this tx currently sees at addr — its own Code write cell
 // if any, else the committed value — without recording an OCC read. Lets SetCode on the
 // rebuilt noMaterialize transient compare against current code, not the stale tx-start value.
-func (sdb *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts.CodeHash) (accounts.Code, error) {
-	if _, isDirty := sdb.journal.dirties[addr]; isDirty {
-		if vw, ok := sdb.versionedWrites.GetCode(addr); ok {
+func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts.CodeHash) (accounts.Code, error) {
+	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
+		if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
 			return vw.Val, nil
 		}
 	}
 	if currentHash == accounts.EmptyCodeHash {
 		return accounts.Code{Hash: accounts.EmptyCodeHash}, nil
 	}
-	bytes, err := sdb.committedCodeDirect(addr)
+	bytes, err := ibs.committedCodeDirect(addr)
 	if err != nil {
 		return accounts.Code{}, err
 	}
@@ -137,9 +137,9 @@ func (sdb *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 // committedCodeHash returns the tx-start code hash from the committed reader
 // (normalised to EmptyCodeHash for an absent or code-less account), without
 // recording an OCC read.
-func (sdb *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
-	acc, err := sdb.stateReader.ReadAccountData(addr)
-	sdb.recordStateReadError(err)
+func (ibs *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
+	acc, err := ibs.stateReader.ReadAccountData(addr)
+	ibs.recordStateReadError(err)
 	if err != nil {
 		return accounts.EmptyCodeHash, err
 	}
@@ -152,31 +152,31 @@ func (sdb *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.C
 // committedCodeSizeDirect reads an account's committed code size straight from the
 // state reader, no stateObject. Size-only for stateless-witness correctness (a witness
 // node carries the size but not the bytes).
-func (sdb *IntraBlockState) committedCodeSizeDirect(addr accounts.Address) (int, error) {
-	if cc, ok := sdb.versionedWriteCreateContract(addr); ok && cc {
+func (ibs *IntraBlockState) committedCodeSizeDirect(addr accounts.Address) (int, error) {
+	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
 		return 0, nil
 	}
-	codeHash, err := sdb.committedCodeHash(addr)
+	codeHash, err := ibs.committedCodeHash(addr)
 	if err != nil {
 		return 0, err
 	}
 	if codeHash.IsEmpty() {
 		return 0, nil
 	}
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
-		sdb.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", sdb.blockNum, sdb.txIndex, sdb.version))
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
 	}
 	var readStart time.Time
 	if dbg.KVReadLevelledMetrics {
 		readStart = time.Now()
 	}
-	size, err := sdb.stateReader.ReadAccountCodeSize(addr)
+	size, err := ibs.stateReader.ReadAccountCodeSize(addr)
 	if dbg.KVReadLevelledMetrics {
-		sdb.codeReadDuration += time.Since(readStart)
-		sdb.codeReadCount++
+		ibs.codeReadDuration += time.Since(readStart)
+		ibs.codeReadCount++
 	}
-	sdb.stateReader.SetTrace(false, "")
-	sdb.recordStateReadError(err)
+	ibs.stateReader.SetTrace(false, "")
+	ibs.recordStateReadError(err)
 	return size, err
 }
 
@@ -915,8 +915,8 @@ func warmSource(src ReadSource) bool { return src == MapRead || src == StorageRe
 // warmReadable reports whether addr has no own write this tx, so a recorded read
 // of it is a stable snapshot the read-once fast path can serve (own writes take
 // precedence and must go through the full path). Same gate as versionedWriteHit.
-func (s *IntraBlockState) warmReadable(addr accounts.Address) bool {
-	_, dirty := s.journal.dirties[addr]
+func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
+	_, dirty := ibs.journal.dirties[addr]
 	return !dirty
 }
 

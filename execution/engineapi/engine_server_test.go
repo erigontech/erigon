@@ -27,7 +27,6 @@ import (
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -52,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool"
@@ -100,14 +100,12 @@ func TestGetBlobsV1(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 
-	var chainConfig chain.Config
-	err := copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
-	require.NoError(t, err)
+	chainConfig := chain.AllProtocolChanges.Copy()
 	chainConfig.PragueTime = nil
 	chainConfig.OsakaTime = nil
 	chainConfig.AmsterdamTime = nil
 	gspec := &types.Genesis{
-		Config: &chainConfig,
+		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},
@@ -373,13 +371,7 @@ func getBlobsV4Fixture(t *testing.T, value byte) (common.Hash, txpool.PoolBlobBu
 
 func newGetBlobsV4Client(t *testing.T, getter txpool.BlobGetter) *rpc.Client {
 	t.Helper()
-	logger := log.New()
-	server := rpc.NewServer(1, false, false, false, logger, 0)
-	t.Cleanup(server.Stop)
-	require.NoError(t, server.RegisterName("engine", &EngineServer{logger: logger, blobGetter: getter}))
-	client := rpc.DialInProc(server, logger)
-	t.Cleanup(client.Close)
-	return client
+	return newEngineInProcClient(t, &EngineServer{logger: log.New(), blobGetter: getter})
 }
 
 func TestGetBlobsV4(t *testing.T) {
@@ -422,11 +414,13 @@ func TestGetBlobsV4FastJSON(t *testing.T) {
 	server := &EngineServer{logger: log.New(), blobGetter: blobGetterMap{hash: bundle}}
 	result, err := server.GetBlobsV4(t.Context(), []common.Hash{hash, {}}, hexutil.MustDecodeHex("0x01000000000000000100000000000080"))
 	require.NoError(t, err)
-	marshaler, ok := any(result).(interface{ MarshalFastJSON() ([]byte, error) })
+	marshaler, ok := any(result).(interface {
+		MarshalFastJSONTo(*jsonstream.StackStream) error
+	})
 	require.True(t, ok, "GetBlobsV4 must return a fast JSON result")
 	want, err := json.Marshal(result)
 	require.NoError(t, err)
-	got, err := marshaler.MarshalFastJSON()
+	got, err := jsonstream.Marshal(marshaler)
 	require.NoError(t, err)
 	require.Equal(t, string(want), string(got))
 }
