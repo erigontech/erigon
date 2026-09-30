@@ -103,10 +103,18 @@ func jumpdestBitmapSIMD(code []byte, bits bitvec) (entry int) {
 
 		x1 := xm.GetLo()
 		x6 := xm.GetHi()
-		x1.StoreArray((*[16]byte)(tab[jdTabBase:]))
 		x6.StoreArray((*[16]byte)(tab[jdTabBase+64:]))
 		idx := x1.Sub(c10)
 		x6.PermuteOrZero(idx.AsInt8x16()).Max(idx).StoreArray((*[16]byte)(tab[jdTabBase+48:]))
+		if jd == 0 { // no JUMPDEST: only the entry into the next block is needed
+			if b%2 == 1 {
+				bits[b/2] = acc
+			}
+			acc = 0
+			e = tab[int(e)+jdTabBase-80]
+			continue
+		}
+		x1.StoreArray((*[16]byte)(tab[jdTabBase:]))
 		nq, vq := n.AsUint64x4(), v.AsUint64x4()
 		binary.LittleEndian.PutUint64(tab[jdTabBase+96:], nq.GetLo().GetElem(0))
 		binary.LittleEndian.PutUint64(tab[jdTabBase+144:], nq.GetHi().GetElem(0))
