@@ -276,5 +276,7 @@ func TestEncodeHexMatchesStdlib(t *testing.T) {
 		encodeHex(dst, src)
 		require.Equal(t, want, string(dst), "len %d", n)
 		require.Equal(t, `x"0x`+want+`"`, string(AppendQuoted([]byte("x"), src)), "len %d", n)
+		text, _ := Bytes(src).AppendText([]byte("x"))
+		require.Equal(t, "x0x"+want, string(text), "len %d", n)
 	}
 }
