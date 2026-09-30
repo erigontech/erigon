@@ -74,11 +74,12 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.
 		}
 	}
 	logger.Info("[integrity] CommitmentRoot files discovered", "total", len(allFiles), "kvFiles", len(files), "onlyCheckLastFile", onlyCheckLastFile, "onlyRecomputeLastFile", onlyRecomputeLastFile)
-	if len(files) == 0 {
+	hasBinDomain := slices.Contains(aggTx.CommitmentDomains(), kv.CommitmentBinDomain)
+	if len(files) == 0 && !hasBinDomain {
 		logger.Warn("[integrity] CommitmentRoot: no commitment .kv files found, nothing to check")
 		return nil
 	}
-	if onlyCheckLastFile {
+	if onlyCheckLastFile && len(files) != 0 {
 		files = files[len(files)-1:]
 	}
 	var integrityErr error
@@ -95,6 +96,17 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.
 			logger.Warn(err.Error())
 			integrityErr = err
 			continue
+		}
+	}
+	if hasBinDomain {
+		err = state.VerifyPBinDomain(ctx, tx, aggTx.Agg(), kv.CommitmentBinDomain)
+		if err != nil {
+			err = fmt.Errorf("%w: binary commitment: %w", ErrIntegrity, err)
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
 		}
 	}
 	return integrityErr

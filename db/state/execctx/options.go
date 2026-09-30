@@ -35,6 +35,7 @@ type sharedDomainOptions struct {
 	hexCommitmentOnly    bool
 	commitmentDomain     *kv.Domain
 	skipCommitmentSeek   bool
+	pbinOnly             bool
 	localCacheUnwind     bool
 	mem                  kv.TemporalMemBatch
 	paraTrieDB           kv.TemporalRoDB
@@ -50,6 +51,10 @@ func WithTrieConfig(cfg commitment.TrieConfig) SharedDomainOption {
 
 func WithCommitmentDomain(domain kv.Domain) SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.commitmentDomain = &domain }
+}
+
+func WithPBinOnly() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.pbinOnly = true }
 }
 
 // WithoutCommitmentSeek skips restoring the persisted trie state. A rebuild that

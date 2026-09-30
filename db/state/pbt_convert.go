@@ -112,7 +112,7 @@ func VerifyPBinDomain(ctx context.Context, tx kv.TemporalTx, aggregator *Aggrega
 	}
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
-	if len(aggregator.CommitmentDomains()) > 1 {
+	if len(aggregator.CommitmentDomains()) > 1 && domain != kv.CommitmentBinDomain {
 		cfg.Variant = commitment.VariantCommitmentV3
 	}
 	cfg.EnableTrieWarmup = false
@@ -121,7 +121,7 @@ func VerifyPBinDomain(ctx context.Context, tx kv.TemporalTx, aggregator *Aggrega
 	if len(at.Files(domain)) == 0 {
 		return nil
 	}
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(domain))
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(domain), execctx.WithPBinOnly())
 	if err != nil {
 		return err
 	}

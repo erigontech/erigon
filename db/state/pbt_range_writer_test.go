@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -54,7 +55,6 @@ func TestNewPBinRangeWriter(t *testing.T) {
 	writePBinRangeWriterAccounts(t, db, 32)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
-
 	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 24)
 	require.NoError(t, err)
 	require.NotNil(t, writer)
@@ -171,6 +171,87 @@ func TestPBinRangeWriterWritesEmptyTargetRange(t *testing.T) {
 		}
 	}
 	require.Zero(t, emptyRows)
+}
+
+func TestPBinRangeWriterWritesEmptyStateAtNewestRange(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	db, agg := commitmenttemporal.Open(t, 8)
+	writePBinRangeWriterAccounts(t, db, 32)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	defer domains.Close()
+	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 24)
+	require.NoError(t, err)
+	root, err := writer.Write(t.Context(), tx, domains, func(func(state.PBinLeaf) error) error {
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, eip8297.EmptyTreeHash, root)
+	out := agg.BeginFilesRo()
+	defer out.Close()
+	stateValue, found, start, end, err := out.DebugGetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, math.MaxUint64)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(16), start)
+	require.Equal(t, uint64(24), end)
+	txNum, blockNum := commitmentdb.DecodeTxBlockNums(stateValue)
+	require.Equal(t, uint64(24), txNum)
+	require.Zero(t, blockNum)
+}
+
+func TestPBinRangeWriterReleasesFinishedRows(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	counts := make([]int, 0, 2)
+	for _, accountCount := range []byte{8, 80} {
+		func() {
+			db, agg := commitmenttemporal.Open(t, 8)
+			writePBinRangeWriterAccounts(t, db, 32)
+			require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
+			agg.WaitForFiles()
+			tx, err := db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			cfg := commitment.DefaultTrieConfig()
+			cfg.Variant = commitment.VariantCommitmentV3
+			cfg.EnableTrieWarmup = false
+			domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+			require.NoError(t, err)
+			writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 24)
+			require.NoError(t, err)
+			entries := make([]eip8297.Entry, 0, int(accountCount))
+			for i := byte(1); i <= accountCount; i++ {
+				entries = append(entries, eip8297.EmbedState([][]eip8297.State{{{
+					Address: bytes.Repeat([]byte{i}, length.Addr),
+					Nonce:   uint64(i),
+					Balance: *uint256.NewInt(uint64(i)),
+				}}})...)
+			}
+			sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
+			_, err = writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
+				for _, entry := range entries {
+					if emitErr := emit(state.PBinLeaf{Key: entry.Key, Value: entry.Value}); emitErr != nil {
+						return emitErr
+					}
+				}
+				return nil
+			})
+			require.NoError(t, err)
+			counts = append(counts, domains.GetMemBatch().(*state.TemporalMemBatch).DomainLen(kv.CommitmentBinDomain))
+			domains.Close()
+			tx.Rollback()
+			agg.Close()
+			db.Close()
+		}()
+	}
+	require.Equal(t, counts[0], counts[1])
 }
 
 func TestPBinRangeWriterStampsRowsByMaximumLeafAndKeepsEmptyRanges(t *testing.T) {

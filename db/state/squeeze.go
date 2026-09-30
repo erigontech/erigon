@@ -1902,6 +1902,9 @@ func (o *pbinRebuildOverlay) Flush() error {
 		if err := o.inner.PutBranch([]byte(key), write.data, write.prev); err != nil {
 			return err
 		}
+		if o.release != nil {
+			o.release([]byte(key))
+		}
 	}
 	if o.finished != nil {
 		if err := o.finished(); err != nil {

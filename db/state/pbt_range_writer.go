@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
@@ -75,7 +77,7 @@ func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 	}
 	at := aggregator.BeginFilesRo()
 	defer at.Close()
-	files := at.Files(kv.AccountsDomain)
+	files := pbinAccountFiles(at.Files(kv.AccountsDomain))
 	if len(files) == 0 {
 		if endTxNum == 0 {
 			return &PBinRangeWriter{aggregator: aggregator, domain: domain}, nil
@@ -124,6 +126,16 @@ func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 	return &PBinRangeWriter{aggregator: aggregator, domain: domain, endTxNum: endTxNum, ranges: ranges}, nil
 }
 
+func pbinAccountFiles(files kv.VisibleFiles) kv.VisibleFiles {
+	accountFiles := make(kv.VisibleFiles, 0, len(files))
+	for _, file := range files {
+		if strings.HasSuffix(file.Fullpath(), ".kv") {
+			accountFiles = append(accountFiles, file)
+		}
+	}
+	return accountFiles
+}
+
 func (w *PBinRangeWriter) Write(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, leaves func(func(PBinLeaf) error) error) (common.Hash, error) {
 	return w.WriteAtBlock(ctx, tx, domains, leaves, 0)
 }
@@ -159,13 +171,13 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			state = bytes.Clone(data)
 			return nil
 		}
-		stamp, err := tracker.stamp(key)
-		if err != nil {
-			return err
+		stamp, stampErr := tracker.stamp(key)
+		if stampErr != nil {
+			return stampErr
 		}
-		rangeIndex, err := w.rangeForStamp(stamp)
-		if err != nil {
-			return err
+		rangeIndex, rangeErr := w.rangeForStamp(stamp)
+		if rangeErr != nil {
+			return rangeErr
 		}
 		return w.ranges[rangeIndex].collector.Collect(key, data)
 	}
@@ -173,34 +185,36 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		seen = true
 		for _, op := range batch {
 			var stampBytes [8]byte
-			if _, err := io.ReadFull(stampFile, stampBytes[:]); err != nil {
-				return err
+			if _, readErr := io.ReadFull(stampFile, stampBytes[:]); readErr != nil {
+				return readErr
 			}
 			stamp := binary.BigEndian.Uint64(stampBytes[:])
-			if err := tracker.observe(op.Key, stamp); err != nil {
-				return err
+			if observeErr := tracker.observe(op.Key, stamp); observeErr != nil {
+				return observeErr
 			}
 		}
 		if final {
 			tracker.finish()
-		} else if err := tracker.advance(nextKey); err != nil {
-			return err
+		} else if advanceErr := tracker.advance(nextKey); advanceErr != nil {
+			return advanceErr
 		}
 		domains.GetCommitmentCtx().SetPBinOps(batch)
 		var current *pbinRebuildOverlay
-		var err error
-		root, err = domains.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, blockNum, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
+		var computeErr error
+		root, computeErr = domains.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, blockNum, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
 			if overlay == nil {
 				overlay = newPBinRebuildOverlay()
 			}
 			current = overlay.withInner(inner).withWrite(onRow).withFinished(func() error {
 				tracker.clearClosed()
 				return nil
+			}).withRelease(func(key []byte) {
+				domains.GetMemBatch().(*TemporalMemBatch).ForgetLatest(w.domain, key)
 			})
 			return current
 		})
-		if err != nil {
-			return err
+		if computeErr != nil {
+			return computeErr
 		}
 		if final {
 			return current.Flush()
@@ -208,34 +222,51 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return current.FlushFinished(nextKey)
 	}
 	stream := func(emit func(pbt.Op) error) error {
-		err := leaves(func(leaf PBinLeaf) error {
+		streamErr := leaves(func(leaf PBinLeaf) error {
 			if len(leaf.Value) != eip8297.ValueLength {
 				return fmt.Errorf("pbin range writer: leaf %x has value length %d", leaf.Key, len(leaf.Value))
 			}
 			var stampBytes [8]byte
 			binary.BigEndian.PutUint64(stampBytes[:], leaf.Stamp)
-			if _, err := stampFile.Write(stampBytes[:]); err != nil {
-				return err
+			if _, writeErr := stampFile.Write(stampBytes[:]); writeErr != nil {
+				return writeErr
 			}
 			var value [eip8297.ValueLength]byte
 			copy(value[:], leaf.Value)
 			return emit(pbt.Op{Key: bytes.Clone(leaf.Key), Value: value})
 		})
-		if err == nil {
-			if err = stampFile.Sync(); err == nil {
-				_, err = stampFile.Seek(0, io.SeekStart)
+		if streamErr == nil {
+			if streamErr = stampFile.Sync(); streamErr == nil {
+				_, streamErr = stampFile.Seek(0, io.SeekStart)
 			}
 		}
-		return err
+		return streamErr
 	}
-	if err := pbinForEachRebuildOpStreamLookaheadAfterWithSample(w.aggregator.Dirs().Tmp, pbinRebuildMaxOps, pbinRebuildMaxBytes, nil, visit, stream, nil); err != nil {
+	if streamErr := pbinForEachRebuildOpStreamLookaheadAfterWithSample(w.aggregator.Dirs().Tmp, pbinRebuildMaxOps, pbinRebuildMaxBytes, nil, visit, stream, nil); streamErr != nil {
 		w.closeRanges()
-		return common.Hash{}, err
+		return common.Hash{}, streamErr
 	}
 	if !seen {
 		root = append([]byte(nil), eip8297.EmptyTreeHash[:]...)
 	}
-	if len(state) == 0 && seen {
+	if len(state) == 0 {
+		trie, ok := domains.GetCommitmentCtx().Trie().(commitment.StatefulTrie)
+		if !ok {
+			w.closeRanges()
+			return common.Hash{}, fmt.Errorf("pbin range writer: trie does not support state encoding")
+		}
+		trieState, encodeErr := trie.EncodeCurrentState(nil)
+		if encodeErr != nil {
+			w.closeRanges()
+			return common.Hash{}, encodeErr
+		}
+		state, err = commitmentdb.NewCommitmentState(w.endTxNum, blockNum, trieState).Encode()
+		if err != nil {
+			w.closeRanges()
+			return common.Hash{}, err
+		}
+	}
+	if len(state) == 0 {
 		w.closeRanges()
 		return common.Hash{}, fmt.Errorf("pbin range writer: commitment state is missing")
 	}

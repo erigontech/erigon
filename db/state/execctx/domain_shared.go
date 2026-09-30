@@ -373,6 +373,13 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	} else if o.trieCfg.Variant == commitment.VariantBinPatriciaTrie {
 		commitmentDomains = []kv.Domain{kv.CommitmentBinDomain}
 	}
+	if o.pbinOnly {
+		if !slices.Contains(commitmentDomains, kv.CommitmentBinDomain) {
+			return nil, fmt.Errorf("commitment domain %s is not registered", kv.CommitmentBinDomain)
+		}
+		commitmentDomains = []kv.Domain{kv.CommitmentBinDomain}
+		o.trieCfg.Variant = commitment.VariantBinPatriciaTrie
+	}
 	if o.hexCommitmentOnly {
 		if len(commitmentDomains) == 1 && (statecfg.ExperimentalBinCommitment || o.trieCfg.Variant == commitment.VariantBinPatriciaTrie) {
 			return nil, ErrBinCommitmentUnsupported

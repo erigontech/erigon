@@ -420,15 +420,15 @@
 - Modify: `db/integrity/commitment_integrity.go`
 - Create: `db/integrity/commitment_integrity_bin_test.go`
 
-- [ ] write tests:
+- [x] write tests:
       - integrity passes on a converted hex+bin datadir;
       - a corrupted bin row or bin root there fails `CheckCommitmentRoot`;
       - the zero root is accepted.
 
       Confirm they fail at those assertions.
-- [ ] check the bin domain on hex+bin datadirs, accept converted ranges without per-file state records, accept the zero
+- [x] check the bin domain on hex+bin datadirs, accept converted ranges without per-file state records, accept the zero
       root
-- [ ] run tests - must pass before task 8
+- [x] run tests - must pass before task 8
 
 ### Task 8: Attach published files
 
