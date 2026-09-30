@@ -975,3 +975,10 @@ func isForked(s *uint64, head uint64) bool {
 func (c *Config) IsPreMerge(blockNumber uint64) bool {
 	return c.MergeHeight != nil && blockNumber < *c.MergeHeight
 }
+
+func (c *Config) IsPostMerge(number, time uint64) bool {
+	return (c.TerminalTotalDifficulty != nil && c.TerminalTotalDifficulty.IsZero()) ||
+		(c.MergeHeight != nil && number >= *c.MergeHeight) ||
+		(c.MergeNetsplitBlock != nil && number >= *c.MergeNetsplitBlock) ||
+		c.IsShanghai(time)
+}

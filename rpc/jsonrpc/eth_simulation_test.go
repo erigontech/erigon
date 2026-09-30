@@ -169,6 +169,23 @@ func TestMakeHeadersSlotNumber(t *testing.T) {
 	}
 }
 
+func TestMakeHeadersDifficultyAtMergeHeight(t *testing.T) {
+	config := chain.TestChainBerlinConfig.Copy()
+	config.TerminalTotalDifficulty = uint256.NewInt(1)
+	config.MergeHeight = common.NewUint64(12)
+	sim := &simulator{
+		base:        &types.Header{Number: *uint256.NewInt(10), Time: 50, Difficulty: *uint256.NewInt(5)},
+		chainConfig: config,
+	}
+	blocks, err := sim.sanitizeSimulatedBlocks([]SimulatedBlock{{}, {}})
+	require.NoError(t, err)
+	headers, err := sim.makeHeaders(blocks)
+	require.NoError(t, err)
+	require.Len(t, headers, 2)
+	assert.Equal(t, *uint256.NewInt(5), headers[0].Difficulty, "block before MergeHeight")
+	assert.Equal(t, uint256.Int{}, headers[1].Difficulty, "block at MergeHeight")
+}
+
 // TestSanitizeBlocksTooMany verifies the maxSimulateBlocks limit.
 func TestSanitizeBlocksTooMany(t *testing.T) {
 	sim := &simulator{base: &types.Header{Number: *uint256.NewInt(0), Time: 0}}
