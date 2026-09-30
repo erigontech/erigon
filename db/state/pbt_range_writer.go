@@ -306,6 +306,12 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 		}
 		collation := Collation{valuesComp: valuesComp, valuesPath: valuesPath}
 		writer := seg.NewWriter(valuesComp, seg.CompressNone)
+		if i == len(w.ranges)-1 && len(state) != 0 {
+			if collectErr := w.ranges[i].collector.Collect(commitment.KeyCommitmentState, state); collectErr != nil {
+				valuesComp.Close()
+				return collectErr
+			}
+		}
 		err = w.ranges[i].collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 			if _, writeErr := writer.Write(key); writeErr != nil {
 				return writeErr
@@ -316,16 +322,6 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 		if err != nil {
 			valuesComp.Close()
 			return err
-		}
-		if i == len(w.ranges)-1 && len(state) != 0 {
-			if _, stateKeyErr := writer.Write(commitment.KeyCommitmentState); stateKeyErr != nil {
-				valuesComp.Close()
-				return stateKeyErr
-			}
-			if _, stateValueErr := writer.Write(state); stateValueErr != nil {
-				valuesComp.Close()
-				return stateValueErr
-			}
 		}
 		collation.valuesCount = valuesComp.Count() / 2
 		static, err := domain.buildFileRange(ctx, stepFrom, stepTo, collation, background.NewProgressSet(), "")

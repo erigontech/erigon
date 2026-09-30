@@ -34,6 +34,7 @@ type sharedDomainOptions struct {
 	useSharedBranchCache bool
 	hexCommitmentOnly    bool
 	commitmentDomain     *kv.Domain
+	commitmentDomainOnly bool
 	skipCommitmentSeek   bool
 	pbinOnly             bool
 	localCacheUnwind     bool
@@ -51,6 +52,13 @@ func WithTrieConfig(cfg commitment.TrieConfig) SharedDomainOption {
 
 func WithCommitmentDomain(domain kv.Domain) SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.commitmentDomain = &domain }
+}
+
+func WithCommitmentDomainOnly(domain kv.Domain) SharedDomainOption {
+	return func(o *sharedDomainOptions) {
+		o.commitmentDomain = &domain
+		o.commitmentDomainOnly = true
+	}
 }
 
 func WithPBinOnly() SharedDomainOption {

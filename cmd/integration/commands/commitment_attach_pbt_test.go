@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -151,6 +152,16 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
 		require.ErrorContains(t, err, "extends past conversion txNum")
 	})
+	t.Run("published bin range", func(t *testing.T) {
+		node, published := newPBTAttachFileTrees(t, false)
+		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 8)
+		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 8)
+		oldPath := filepath.Join(published.SnapDomain, "v1.0-commitment-bin.0-1.kv")
+		newPath := filepath.Join(published.SnapDomain, "v1.0-commitment-bin.0-0.kv")
+		require.NoError(t, os.Rename(oldPath, newPath))
+		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
+		require.ErrorContains(t, err, "commitment-bin ranges do not match commitment ranges")
+	})
 	t.Run("missing bin", func(t *testing.T) {
 		node, published := newPBTAttachFileTrees(t, true)
 		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 8)
@@ -176,6 +187,84 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
 		require.ErrorContains(t, err, "behind conversion block")
 	})
+}
+
+func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	previousHook := attachPBTStepHook
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+		statecfg.BinCommitmentHash = previousHash
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+		attachPBTStepHook = previousHook
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = ""
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	for _, step := range []string{"marker", "swap", "reset", "settings"} {
+		t.Run(step, func(t *testing.T) {
+			source, _ := newPBTConversionSource(t)
+			published := filepath.Join(t.TempDir(), "published")
+			require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+			setExecutionProgress(t, source.Chaindata, 1)
+			attachPBTStepHook = func(current string) error {
+				if current == step {
+					return errors.New("interrupted attach")
+				}
+				return nil
+			}
+			require.ErrorContains(t, attachPBT(t.Context(), source.DataDir, published, "", log.New()), "interrupted attach")
+			marker, err := state.ReadPBTAttachMarker(datadir.Open(source.DataDir))
+			require.NoError(t, err)
+			require.NotNil(t, marker)
+			require.ErrorContains(t, state.RefusePBTAttachMarker(datadir.Open(source.DataDir)), "rerun attach-pbt")
+			attachPBTStepHook = nil
+			require.NoError(t, attachPBT(t.Context(), source.DataDir, published, "", log.New()))
+			marker, err = state.ReadPBTAttachMarker(datadir.Open(source.DataDir))
+			require.NoError(t, err)
+			require.Nil(t, marker)
+		})
+	}
+}
+
+func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+		statecfg.BinCommitmentHash = previousHash
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, _ := newPBTConversionSource(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	settings, err := state.ReadErigonDBSettings(datadir.Open(published))
+	require.NoError(t, err)
+	conversionTx := uint64(16)
+	settings.ConversionTxNum = &conversionTx
+	require.NoError(t, state.WriteErigonDBSettings(datadir.Open(published), settings))
+	setExecutionProgress(t, source.Chaindata, 2)
+	err = attachPBT(t.Context(), source.DataDir, published, "", log.New())
+	require.ErrorContains(t, err, "do not end at conversion txNum")
 }
 
 func TestAttachPBTAllowsMidBlockConversionPoint(t *testing.T) {

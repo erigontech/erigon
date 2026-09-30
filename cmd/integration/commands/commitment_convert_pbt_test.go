@@ -215,6 +215,60 @@ func TestConvertPBTPrunedSourceOpens(t *testing.T) {
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
 }
 
+func TestConvertPBTHexBinSourceConfiguresVariantBeforeOpening(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousHash := statecfg.BinCommitmentHash
+	previousSchema := statecfg.Schema
+	previousSuite := commitment.PBinHashSuiteName()
+	previousDatadir := datadirCli
+	previousChaindata := chaindata
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.BinCommitmentHash = previousHash
+		statecfg.Schema = previousSchema
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+		datadirCli = previousDatadir
+		chaindata = previousChaindata
+	})
+	statecfg.ExperimentalBinCommitment = false
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = ""
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, wantRoot := newPBTConversionSource(t)
+	dualPath := filepath.Join(t.TempDir(), "dual")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, dualPath, true, "", log.New()))
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(source.Chaindata).MustOpen()
+	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		forkTime := uint64(1)
+		if err := rawdb.WriteChainConfig(tx, genesisHash, &chainpkg.Config{BinaryTrieTime: &forkTime}); err != nil {
+			return err
+		}
+		header := &types.Header{Number: *uint256.NewInt(1), Time: 1, Root: wantRoot}
+		if err := rawdb.WriteHeader(tx, header); err != nil {
+			return err
+		}
+		return rawdb.WriteCanonicalHash(tx, header.Hash(), 1)
+	}))
+	rawDB.Close()
+	require.NoError(t, os.Symlink(source.Chaindata, filepath.Join(dualPath, "chaindata")))
+	dual := pbtConversionSource{Dirs: datadir.Open(dualPath)}
+	output := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), dual.DataDir, output, false, "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())
+}
+
 func TestConvertPBTFailureRemovesOutput(t *testing.T) {
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
@@ -233,6 +287,51 @@ func TestConvertPBTFailureRemovesOutput(t *testing.T) {
 	require.ErrorContains(t, err, "injected conversion failure")
 	_, statErr := os.Stat(output)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestConvertPBTStandaloneReopenRequiresBothDomains(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	previousHook := convertPBTStandaloneHook
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+		statecfg.BinCommitmentHash = previousHash
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+		convertPBTStandaloneHook = previousHook
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	for _, test := range []struct {
+		name   string
+		domain string
+	}{
+		{name: "hex", domain: kv.CommitmentDomain.String()},
+		{name: "bin", domain: kv.CommitmentBinDomain.String()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			source, _ := newPBTConversionSource(t)
+			output := filepath.Join(t.TempDir(), "output")
+			convertPBTStandaloneHook = func(dirs datadir.Dirs) error {
+				removePBTOutputDomainFiles(t, dirs.SnapDomain, test.domain)
+				return nil
+			}
+			err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
+			require.ErrorContains(t, err, "standalone output")
+			_, statErr := os.Stat(output)
+			require.ErrorIs(t, statErr, os.ErrNotExist)
+		})
+	}
 }
 
 func TestConvertPBTBinOnlyRefusesBeforeFork(t *testing.T) {
@@ -487,6 +586,22 @@ func removePBTConversionState(t *testing.T, source pbtConversionSource) {
 			require.NoError(t, dir.RemoveFile(filepath.Join(source.SnapDomain, entry.Name())))
 		}
 	}
+}
+
+func removePBTOutputDomainFiles(t *testing.T, snapDomain, domain string) {
+	t.Helper()
+	entries, err := os.ReadDir(snapDomain)
+	require.NoError(t, err)
+	removed := false
+	for _, entry := range entries {
+		parsed, _, ok := snaptype.ParseFileName(snapDomain, entry.Name())
+		if !ok || parsed.TypeString != domain {
+			continue
+		}
+		require.NoError(t, dir.RemoveFile(filepath.Join(snapDomain, entry.Name())))
+		removed = true
+	}
+	require.True(t, removed)
 }
 
 func readPBTBinRoot(t *testing.T, output, rawPath string) common.Hash {

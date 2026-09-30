@@ -48,9 +48,10 @@ import (
 )
 
 var (
-	convertPBTKeepHex       bool
-	convertPBTOutputDatadir string
-	convertPBTOutputHook    func() error
+	convertPBTKeepHex        bool
+	convertPBTOutputDatadir  string
+	convertPBTOutputHook     func() error
+	convertPBTStandaloneHook func(datadir.Dirs) error
 )
 
 func init() {
@@ -122,6 +123,7 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 	if err != nil {
 		return err
 	}
+	configurePBTSourceVariant(sourceSettings)
 	point, err := readPBinSourcePoint(ctx, sourceDirs, sourceSettings, keepHex, logger)
 	if err != nil {
 		return err
@@ -161,7 +163,6 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 	datadirCli = stagingDirs.DataDir
 	chaindata = sourceDirs.Chaindata
 	rebuildOutputDatadir = stagingDirs.DataDir
-	configurePBTSourceVariant(sourceSettings)
 	sourceDB, err := openDB(ctx, dbCfg(dbcfg.ChainDB, sourceDirs.Chaindata), false, chainName, logger)
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: open source: %w", err)
@@ -293,6 +294,11 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 		finalSettings.ReferencesInCommitmentBranches = new(bool)
 	}
 	targetAgg.Close()
+	if convertPBTStandaloneHook != nil {
+		if err := convertPBTStandaloneHook(outputDirs); err != nil {
+			return err
+		}
+	}
 	if err := verifyPBTOutputStandalone(ctx, outputDirs, finalSettings, point, logger); err != nil {
 		return err
 	}

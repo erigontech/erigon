@@ -415,6 +415,12 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		}
 		commitmentDomain = requestedDomain
 	}
+	if o.commitmentDomainOnly {
+		commitmentDomains = []kv.Domain{commitmentDomain}
+		if commitmentDomain == kv.CommitmentBinDomain {
+			o.trieCfg.Variant = commitment.VariantBinPatriciaTrie
+		}
+	}
 	if o.trieCfg.Variant == commitment.VariantCommitmentV3 {
 		o.useSharedBranchCache = false
 	}

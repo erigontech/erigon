@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -39,12 +40,16 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
 )
 
-var attachPBTFrom string
+var (
+	attachPBTFrom     string
+	attachPBTStepHook func(string) error
+)
 
 func init() {
 	withChain(cmdCommitmentAttachPBT)
@@ -89,6 +94,17 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	}
 	nodeDirs := datadir.Open(nodePath)
 	publishedDirs := datadir.Open(publishedPath)
+	marker, err := dbstate.ReadPBTAttachMarker(nodeDirs)
+	if err != nil {
+		return err
+	}
+	absolutePublishedPath, err := filepath.Abs(publishedDirs.DataDir)
+	if err != nil {
+		return err
+	}
+	if marker != nil && filepath.Clean(marker.PublishedPath) != filepath.Clean(absolutePublishedPath) {
+		return fmt.Errorf("commitment attach-pbt is incomplete for %s; rerun attach-pbt --from %s", marker.PublishedPath, marker.PublishedPath)
+	}
 	if nested, err := pathsOverlap(nodeDirs.DataDir, publishedDirs.DataDir); err != nil {
 		return err
 	} else if nested {
@@ -128,15 +144,14 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 		return err
 	}
 	rawDB := dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata).MustOpen()
-	if err := checkPBTNodePosition(ctx, rawDB, blockNum, txNum); err != nil {
-		rawDB.Close()
-		return err
+	if marker == nil {
+		if err := checkPBTNodePosition(ctx, rawDB, blockNum, txNum); err != nil {
+			rawDB.Close()
+			return err
+		}
 	}
 	rawDB.Close()
-	if err := adoptPBTFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
-		return err
-	}
-	if err := resetPBTExecution(ctx, nodeDirs, publishedSettings, logger); err != nil {
+	if err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
 		return err
 	}
 	refs := publishedSettings.RefsInCommitmentBranches()
@@ -152,7 +167,118 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 		ConversionBlockNum:             &blockNum,
 		ConversionTxNum:                &txNum,
 	}
-	return dbstate.WriteErigonDBSettings(nodeDirs, finalSettings)
+	if marker == nil {
+		if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, Settings: finalSettings}); err != nil {
+			return err
+		}
+	}
+	if err := runPBTAttachStepHook("marker"); err != nil {
+		return err
+	}
+	if err := adoptPBTFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
+		return err
+	}
+	if err := runPBTAttachStepHook("swap"); err != nil {
+		return err
+	}
+	if err := resetPBTExecution(ctx, nodeDirs, publishedSettings, logger); err != nil {
+		return err
+	}
+	if err := runPBTAttachStepHook("reset"); err != nil {
+		return err
+	}
+	if err := dbstate.WriteErigonDBSettings(nodeDirs, finalSettings); err != nil {
+		return err
+	}
+	if err := runPBTAttachStepHook("settings"); err != nil {
+		return err
+	}
+	return dbstate.RemovePBTAttachMarker(nodeDirs)
+}
+
+func runPBTAttachStepHook(step string) error {
+	if attachPBTStepHook == nil {
+		return nil
+	}
+	return attachPBTStepHook(step)
+}
+
+func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) error {
+	configurePBTSourceVariant(settings)
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(nil); err != nil {
+		return err
+	}
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	publishedFiles, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return err
+	}
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		maxTo, found := pbtAttachFileEnd(publishedFiles, domain)
+		if found && maxTo*settings.StepSize != txNum {
+			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
+		}
+	}
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		files := at.Files(domain)
+		if len(files) == 0 || files.EndRootNum() != txNum {
+			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
+		}
+	}
+	checks := []struct {
+		domain kv.Domain
+		key    []byte
+		name   string
+		decode func([]byte) (uint64, uint64, error)
+	}{
+		{domain: kv.CommitmentDomain, key: commitment.KeyCommitmentV3State, name: "commitment", decode: func(value []byte) (uint64, uint64, error) {
+			block, tx, _, err := commitment.DecodeCommitmentV3State(value)
+			return block, tx, err
+		}},
+		{domain: kv.CommitmentBinDomain, key: commitment.KeyCommitmentState, name: "commitment-bin", decode: func(value []byte) (uint64, uint64, error) {
+			if len(value) < 16 {
+				return 0, 0, errors.New("state record is too short")
+			}
+			tx, block := commitmentdb.DecodeTxBlockNums(value)
+			return block, tx, nil
+		}},
+	}
+	for _, check := range checks {
+		value, found, _, end, err := at.DebugGetLatestFromFiles(check.domain, check.key, math.MaxUint64)
+		if err != nil {
+			return err
+		}
+		if !found || end != txNum {
+			return fmt.Errorf("commitment attach-pbt: published %s state is not at conversion txNum %d", check.name, txNum)
+		}
+		gotBlock, gotTx, err := check.decode(value)
+		if err != nil {
+			return fmt.Errorf("commitment attach-pbt: decode published %s state: %w", check.name, err)
+		}
+		if gotBlock != blockNum || gotTx != txNum {
+			return fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
+		}
+	}
+	return nil
+}
+
+func pbtAttachFileEnd(files []pbtAttachFile, domain kv.Domain) (uint64, bool) {
+	var maxTo uint64
+	found := false
+	for _, file := range files {
+		if file.domain != domain || !file.data {
+			continue
+		}
+		maxTo = max(maxTo, file.to)
+		found = true
+	}
+	return maxTo, found
 }
 
 func configuredPBTNodeHash(settings *dbstate.ErigonDBSettings) string {
@@ -184,6 +310,9 @@ func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endT
 	}
 	nodeRanges := pbtAttachRanges(nodeFiles, stepSize, endTxNum)
 	publishedRanges := pbtAttachRanges(publishedFiles, stepSize, endTxNum)
+	if !slices.Equal(publishedRanges[kv.CommitmentDomain], publishedRanges[kv.CommitmentBinDomain]) {
+		return fmt.Errorf("commitment attach-pbt: published commitment-bin ranges do not match commitment ranges")
+	}
 	for _, domain := range pbtAttachDomains {
 		if (domain == kv.CommitmentDomain || domain == kv.CommitmentBinDomain) && len(publishedRanges[domain]) == 0 {
 			return fmt.Errorf("commitment attach-pbt: published files are missing domain %s", domain)

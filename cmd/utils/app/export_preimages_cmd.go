@@ -47,8 +47,6 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -133,22 +131,18 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 }
 
 func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir, tmpDir string, logger log.Logger) error {
-	root, err := pinnedStateRoot(ctx, tx, logger)
+	pin, err := sharedExportPin(ctx, tx, headerAt, logger)
 	if err != nil {
 		return err
 	}
-	block, err := stages.GetStageProgress(tx, stages.Execution)
+	header, err := headerAt(pin.Block)
 	if err != nil {
+		return fmt.Errorf("read canonical header for block %d: %w", pin.Block, err)
+	}
+	if err := checkRootPin(pin.Root, header, pin.Block); err != nil {
 		return err
 	}
-	header, err := headerAt(block)
-	if err != nil {
-		return fmt.Errorf("read canonical header for block %d: %w", block, err)
-	}
-	if err := checkRootPin(root, header, block); err != nil {
-		return err
-	}
-	logger.Info("[export-preimages] pin", "block", block, "stateRoot", root.Hex())
+	logger.Info("[export-preimages] pin", "block", pin.Block, "txNum", pin.TxNum, "stateRoot", pin.Root.Hex(), "domain", pin.Domain)
 
 	tmpDir, err = prepareScratchDir(tmpDir)
 	if err != nil {
@@ -175,7 +169,7 @@ func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*ty
 	}
 
 	metadata := preimagesMeta{
-		Block: block, StateRoot: root.Hex(), Order: preimagesOrderKeccak256,
+		Block: pin.Block, StateRoot: pin.Root.Hex(), Order: preimagesOrderKeccak256,
 		Accounts: stats.Accounts, Storage: stats.Slots,
 	}
 	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
@@ -187,21 +181,6 @@ func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*ty
 	}
 	logger.Info("[export-preimages] done", "accounts", stats.Accounts, "slots", stats.Slots, "file", framedPath, "bytes", stats.sizeBytes(), "took", time.Since(start).Round(time.Second))
 	return nil
-}
-
-func pinnedStateRoot(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (common.Hash, error) {
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
-	if domains != nil {
-		defer domains.Close()
-	}
-	if err != nil {
-		return common.Hash{}, err
-	}
-	rootBytes, err := domains.GetCommitmentCtx().Trie().RootHash()
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return common.BytesToHash(rootBytes), nil
 }
 
 // writePreimagesFile hashes both domain scans through an ETL sort and writes the

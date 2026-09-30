@@ -295,6 +295,9 @@ func New(
 	}
 
 	dirs := stack.Config().Dirs
+	if err := state.RefusePBTAttachMarker(dirs); err != nil {
+		return nil, err
+	}
 
 	tmpdir := dirs.Tmp
 	if err := RemoveContents(tmpdir); err != nil { // clean it on startup

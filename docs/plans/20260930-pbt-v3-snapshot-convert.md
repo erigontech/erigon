@@ -478,15 +478,15 @@
 - Create: `cmd/utils/app/export_pin_test.go`
 - Modify: `cmd/utils/app/export_preimages_cmd.go`
 
-- [ ] confirm `7853b9226e3` is an ancestor of HEAD
-- [ ] add the pin signature with a stub. Write the pin-matrix tests; confirm they fail at the pin assertions. Cases:
+- [x] confirm `7853b9226e3` is an ancestor of HEAD
+- [x] add the pin signature with a stub. Write the pin-matrix tests; confirm they fail at the pin assertions. Cases:
       - hex-only, hex+bin before and after the fork, bin-only;
       - a block end, a mid-block checkpoint, a missing B mapping;
       - a lagging or frozen shadow.
-- [ ] implement the pin; `export-preimages` switches to it, replacing `pinnedStateRoot` and its
+- [x] implement the pin; `export-preimages` switches to it, replacing `pinnedStateRoot` and its
       `WithSequentialCommitment`
-- [ ] write a test that `export-preimages` keeps the v3 hex variant when opening a hex+bin datadir
-- [ ] run tests - must pass before task 11
+- [x] write a test that `export-preimages` keeps the v3 hex variant when opening a hex+bin datadir
+- [x] run tests - must pass before task 11
 
 ### Task 11: PBT snapshot codec and preimage join
 
