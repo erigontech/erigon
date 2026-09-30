@@ -108,6 +108,8 @@ type calcState struct {
 
 	logger    log.Logger
 	logPrefix string
+
+	prefetch *branchPrefetcher
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -142,6 +144,7 @@ func (cs *calcState) ensureAccount(addr accounts.Address, writes *state.WriteSet
 		return acc
 	}
 
+	cs.prefetch.add(accountPrefetch(addr.Value()))
 	acc := &calcAccountState{
 		CodeHash: empty.CodeHash,
 	}
@@ -248,6 +251,9 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			cs.storageDirty[addr] = dirty
 		}
 		for key, vw := range inner {
+			if _, seen := slots[key]; !seen {
+				cs.prefetch.add(storagePrefetch(addr.Value(), key.Value()))
+			}
 			slots[key] = vw.Val
 			dirty[key] = true
 		}

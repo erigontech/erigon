@@ -158,6 +158,8 @@ var (
 	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
 	TrieBALWarmupers = EnvInt("TRIE_BAL_WARMUPERS", balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
 
+	CommitmentPrefetch = EnvBool("COMMITMENT_PREFETCH", true)
+
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
 
