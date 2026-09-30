@@ -74,6 +74,7 @@ func codeBitmapPortable(code []byte) bitvec {
 		i := w * 64
 		src := code[i-32 : i+64]
 		for j := 0; j < 96; j += n {
+			j = min(j, 96-n) // the last load may overlap the one before it
 			c := simd.LoadUint8s(src[j:]).BitsToInt8()
 			c.IfElse(simd.LoadInt8s(portableIota96[j:]).GreaterEqual(simd.BroadcastInt8s(int8(32+e))), z).Store(win[j:])
 		}
