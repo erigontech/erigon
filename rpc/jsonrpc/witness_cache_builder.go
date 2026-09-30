@@ -383,9 +383,9 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
-	start := time.Now()
-	result, err := api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
-	if err != nil {
+	if _, err = api.witnessCache.buildOnce(ctx, hash, func(ctx context.Context) (*ExecutionWitnessResult, error) {
+		return api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
+	}, api.storeBuiltWitness(num, hash)); err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()
 		} else {
@@ -394,8 +394,6 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
-	witnessCacheBuildDuration.ObserveDuration(start)
-	api.storeWitness(num, hash, result)
 	witnessCacheBuildOKCounter.Inc()
 	return true
 }
@@ -467,9 +465,9 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
-	start := time.Now()
-	result, err := api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy)
-	if err != nil {
+	if _, err = api.witnessCache.buildOnce(ctx, hash, func(ctx context.Context) (*ExecutionWitnessResult, error) {
+		return api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy)
+	}, api.storeBuiltWitness(num, hash)); err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()
 		} else {
@@ -478,10 +476,15 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
-	witnessCacheBuildDuration.ObserveDuration(start)
-	api.storeWitness(num, hash, result)
 	witnessCacheBuildOKCounter.Inc()
 	return true
+}
+
+func (api *DebugAPIImpl) storeBuiltWitness(num uint64, hash common.Hash) witnessStoreFunc {
+	return func(r *ExecutionWitnessResult, took time.Duration) {
+		witnessCacheBuildDuration.Observe(took.Seconds())
+		api.storeWitness(num, hash, r)
+	}
 }
 
 func (api *DebugAPIImpl) storeWitness(num uint64, hash common.Hash, result *ExecutionWitnessResult) {

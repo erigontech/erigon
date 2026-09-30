@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"runtime"
 	"slices"
@@ -334,29 +333,12 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 	fromBlock, toBlock := latest, latest
 	if req.FromBlock != nil {
-		fromBlock, err = api.resolveCommittedBlockNumber(ctx, dbtx, *req.FromBlock)
-		if err != nil {
-			if errors.As(err, &rpc.BlockNotFoundErr{}) {
-				stream.WriteEmptyArray()
-				return nil // waiting for spec: not error for historical reasons
-			}
+		if fromBlock, err = api.resolveFilterBound(ctx, dbtx, *req.FromBlock, latest); err != nil {
 			return err
 		}
 	}
 	if req.ToBlock != nil {
-		toBlock, err = api.resolveCommittedBlockNumber(ctx, dbtx, *req.ToBlock)
-		if err != nil {
-			if errors.As(err, &rpc.BlockNotFoundErr{}) {
-				stream.WriteEmptyArray()
-				return nil // waiting for spec: not error for historical reasons
-			}
-			return err
-		}
-	}
-	// The txnum index silently clamps a target past execution to the last
-	// available txnum, so either bound must be checked before comparing them.
-	if req.FromBlock != nil || req.ToBlock != nil {
-		if err := rpchelper.CheckBlockExecuted(dbtx, max(fromBlock, toBlock)); err != nil {
+		if toBlock, err = api.resolveFilterBound(ctx, dbtx, *req.ToBlock, latest); err != nil {
 			return err
 		}
 	}
@@ -377,6 +359,24 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 
 	return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream, *gasBailOut, traceConfig)
+}
+
+// resolveFilterBound resolves an explicit trace_filter bound. A bound past the
+// latest executed block is invalid params, as in eth_getLogs, rather than an
+// empty or clamped result: the txnum index silently clamps a target past
+// execution to the last available txnum.
+func (api *TraceAPIImpl) resolveFilterBound(ctx context.Context, tx kv.Tx, bound rpc.BlockNumberOrHash, latest uint64) (uint64, error) {
+	if number, ok := bound.Number(); ok && number >= 0 && uint64(number) > latest {
+		return 0, errBlockRangeIntoFuture
+	}
+	blockNum, err := api.resolveCommittedBlockNumber(ctx, tx, bound)
+	if err != nil {
+		return 0, err
+	}
+	if blockNum > latest {
+		return 0, errBlockRangeIntoFuture
+	}
+	return blockNum, nil
 }
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream jsonstream.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
@@ -1017,7 +1017,6 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, err
 	}
 	rules := blockCtx.Rules(cfg)
-	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
 	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
 	if err != nil {
 		return nil, err
@@ -1054,26 +1053,13 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	txnHash := txn.Hash()
-	if err := checkOverriddenSigner(traceConfig, signer, txn); err != nil {
-		return nil, fmt.Errorf("convert txn into msg: %w", err)
-	}
-	msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
-	if err != nil {
-		return nil, fmt.Errorf("convert txn into msg: %w", err)
-	}
-
 	callParam := TraceCallParam{
 		txHash:     &txnHash,
 		traceTypes: traceTypes,
 	}
 
-	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
+	return api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txn, callParam,
 		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
-
-	if cmErr != nil {
-		return nil, cmErr
-	}
-	return trace, nil
 }
 
 // TraceFilterRequest represents the arguments for trace_filter

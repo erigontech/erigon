@@ -628,7 +628,7 @@ func (t *dialTask) dial(d *dialScheduler, dest *enode.Node) error {
 		d.mutex.Unlock()
 		return &dialError{err}
 	}
-	mfd := newMeteredConn(fd, false, &net.TCPAddr{IP: dest.IP(), Port: dest.TCP()})
+	mfd := newMeteredConn(fd, false)
 	return d.setupFunc(mfd, t.flags, dest)
 }
 
