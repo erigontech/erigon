@@ -441,7 +441,8 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - [x] read rows through a `PatriciaContext` over bin commitment history as of the parent block
 - [x] write error tests: missing row, corrupt row, a group whose depth disagrees with its path
 - [x] run tests - must pass before task 8
-- [x] ➕ rework the resolver to read path-local rows, validate stored pointers, and cache each row once per build
+- [x] ➕ rework the resolver to read path-local rows, validate stored pointers, resolve bucket descriptors, reject
+      impossible group probes early, and cover systematic shapes, corruption, and root/bucket read bounds
 
 ### Task 8: PBT witness builder and dispatch
 
