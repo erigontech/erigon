@@ -23,8 +23,43 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+// TestSetCodeRevertRestoresCodeHash covers a state object whose account record is older than the
+// code a prior transaction published: the revert of SetCode must restore the published code
+// together with its hash.
+func TestSetCodeRevertRestoresCodeHash(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	oldCode := accounts.NewCode([]byte{0x60, 0x01})
+	publishedCode := accounts.NewCode([]byte{0x60, 0x02})
+
+	vmap := NewVersionMap(nil)
+	vmap.WriteCode(addr, Version{TxIndex: 0}, publishedCode, true)
+	ibs := NewWithVersionMap(NewNoopReader(), vmap)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 1)
+
+	acc := accounts.NewAccount()
+	acc.CodeHash = oldCode.Hash
+	so := newObject(ibs, addr, &acc, &acc)
+	ibs.setStateObject(addr, so)
+
+	snapshot := ibs.PushSnapshot()
+	_, err := so.SetCode(accounts.NewCode([]byte{0x60, 0x03}), false, tracing.CodeChangeUnspecified)
+	require.NoError(t, err)
+	ibs.RevertToSnapshot(snapshot, nil)
+
+	code, err := so.CodeTyped()
+	require.NoError(t, err)
+	require.Equal(t, publishedCode, code)
+	require.Equal(t, publishedCode.Hash, so.data.CodeHash)
+}
 
 func BenchmarkCutOriginal(b *testing.B) {
 	value := common.HexToHash("0x01")
