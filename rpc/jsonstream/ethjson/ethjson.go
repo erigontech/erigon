@@ -35,8 +35,7 @@ import (
 // type and hold that mapping in one place: an encoder cannot pass a byte slice where the
 // spec wants a quantity, and no encoder needs to name a hexutil type.
 func Quantity[T ~uint64 | ~uint](s *jsonstream.StackStream, name string, v T) {
-	s.Field(name)
-	jsonstream.HexUint64(s, uint64(v))
+	jsonstream.HexUint64Field(s, name, uint64(v))
 }
 
 // SignedQuantity writes a signed value as hexutil.Int64 does, with a minus before the 0x. The

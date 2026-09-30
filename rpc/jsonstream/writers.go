@@ -66,6 +66,19 @@ func HexUint64(s *StackStream, v uint64) {
 	s.afterValue()
 }
 
+// HexUint64Field writes a field name and its HexUint64 value in one step, so the name is never
+// left on the stack waiting for a value.
+func HexUint64Field(s *StackStream, name string, v uint64) {
+	s.beforeValue()
+	writeObjectFieldFast(s.stream, name)
+	buf := s.stream.Buffer()
+	start := len(buf)
+	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
+	s.commit(append(buf, '"'), start)
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
 // HexUint256 does the same for a 256-bit value, null for a nil one.
 func HexUint256(s *StackStream, v *uint256.Int) {
 	if v == nil {
