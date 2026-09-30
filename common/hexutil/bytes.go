@@ -52,11 +52,8 @@ func QuotedLen(n int) int { return len(`"0x"`) + 2*n }
 
 // AppendQuoted appends b as a 0x-prefixed hex JSON string.
 func AppendQuoted(dst, b []byte) []byte {
-	n, size := len(dst), QuotedLen(len(b))
-	dst = slices.Grow(dst, size)[:n+size]
-	dst[n], dst[n+1], dst[n+2], dst[n+size-1] = '"', '0', 'x', '"'
-	encodeHex(dst[n+3:n+size-1], b)
-	return dst
+	dst, _ = Bytes(b).AppendText(append(dst, '"'))
+	return append(dst, '"')
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
