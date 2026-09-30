@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"math/rand"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -837,6 +838,17 @@ func TestStepBoundaryRecordsIntoTheExecutorsChangeset(t *testing.T) {
 		})
 	}
 
-	require.Positive(t, ownCS.Diffs[kv.CommitmentDomain].Len(),
-		"the mid-block checkpoint must record its commitment writes into the changeset the executor opened for the block")
+	// Branch writes alone would satisfy a bare Len() check. KeyCommitmentState is the
+	// marker an unwind needs, so assert that exact key (diff keys carry an 8-byte step
+	// suffix) rather than "something was recorded".
+	stateKey := string(commitmentdb.KeyCommitmentState)
+	sawStateKey := false
+	for _, d := range ownCS.Diffs[kv.CommitmentDomain].GetDiffSet() {
+		if len(d.Key) == len(stateKey)+8 && strings.HasPrefix(d.Key, stateKey) {
+			sawStateKey = true
+			break
+		}
+	}
+	require.True(t, sawStateKey,
+		"the mid-block checkpoint must record KeyCommitmentState into the changeset the executor opened for the block, or a reorg cannot unwind it")
 }

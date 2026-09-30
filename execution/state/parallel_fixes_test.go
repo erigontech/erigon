@@ -456,3 +456,28 @@ func TestValueTiebreaker_SameWriterMustNotBypassLaterSD(t *testing.T) {
 
 	assert.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
 }
+
+// A tentative revival must not hide the destruct under it: the latest SelfDestruct
+// cell is an unresolved false, so only the resolved history says the account is gone.
+// If tx5 later drops the revival the read is already invalid, rather than surviving on
+// a write that never committed.
+func TestValueTiebreaker_UnresolvedRevivalDoesNotHideDestruct(t *testing.T) {
+	addr := getAddress(164)
+	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+
+	io := NewVersionedIO(7)
+	rs := ReadSet{}
+	rs.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 3}},
+		Val:        NewAccountView(alive),
+	})
+	io.RecordReads(Version{TxIndex: 6}, rs)
+
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 3, Incarnation: 1}, alive, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 5}, false, false)
+
+	assert.Equal(t, VersionInvalid, vm.ValidateVersion(6, io, validateEqualVersion, false, ""))
+}

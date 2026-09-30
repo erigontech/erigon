@@ -1253,9 +1253,12 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 		// An AddressPath read predating a later self-destruct that nothing revived is
 		// stale. checkVersion misses it — the destruct writes no AddressPath cell — and
 		// the value tiebreaker above can forgive the version churn that would catch it.
+		// AccountLifecycleAt is the authority rather than the latest SelfDestruct cell:
+		// the latest cell can be an unresolved SelfDestruct=false that hides a completed
+		// destruct below it.
 		if valid == VersionValid && path == AddressPath {
-			if destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex); ok && sdRR.resolved() && destructed &&
-				sdRR.DepIdx() > rr.Version().TxIndex && vm.IsNetAbsent(addr, txIndex) {
+			if st, _, destroyedAt := vm.AccountLifecycleAt(addr, txIndex); st == LifecycleAbsent &&
+				destroyedAt > rr.Version().TxIndex {
 				valid = VersionInvalid
 			}
 		}
