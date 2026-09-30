@@ -287,10 +287,12 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 	for i := range 64 {
 		addr := fmt.Sprintf("%040x", i+1)
 		ub.Balance(addr, uint64(i+1))
+		slots := 2
 		if i%8 == 0 {
-			for s := range 300 {
-				ub.Storage(addr, fmt.Sprintf("%064x", s+1), fmt.Sprintf("%02x", s%250+1))
-			}
+			slots = 300
+		}
+		for s := range slots {
+			ub.Storage(addr, fmt.Sprintf("%064x", i*1000+s+1), fmt.Sprintf("%02x", s%250+1))
 		}
 	}
 	plainKeys, updates := ub.Build()
@@ -301,7 +303,7 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 	require.NoError(t, err)
 
 	w := &Warmuper{maxDepth: WarmupMaxDepth}
-	storageBranches, extensionHops := 0, 0
+	storageBranches, extensionHops, storageRootExtensions := 0, 0, 0
 	for _, pk := range plainKeys {
 		hk := KeyToHexNibbleHash(pk)
 		want := map[string]bool{}
@@ -320,6 +322,9 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 			if depths[i] > depths[i-1]+1 && (depths[i-1] >= 64 || depths[i] < 64) {
 				extensionHops++
 			}
+			if depths[i-1] < 64 && depths[i] > 64 {
+				storageRootExtensions++
+			}
 		}
 		rec := &branchReadRecorder{MockState: ms, read: map[string]bool{}}
 		w.warmupKey(rec, hk, 0)
@@ -327,4 +332,5 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 	}
 	require.NotZero(t, storageBranches, "fixture must carry storage-plane branches")
 	require.NotZero(t, extensionHops, "fixture must carry extension nodes between branches")
+	require.NotZero(t, storageRootExtensions, "fixture must carry storage roots that are extension nodes")
 }
