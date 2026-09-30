@@ -322,7 +322,9 @@ func TestConvertPBTHexBinSourceWithOrdinaryHexFlags(t *testing.T) {
 	statecfg.ExperimentalCommitmentV3 = false
 	statecfg.BinCommitmentHash = ""
 	output := filepath.Join(t.TempDir(), "output")
-	require.NoError(t, convertPBT(t.Context(), dual.DataDir, output, false, "", log.New()))
+	require.NotPanics(t, func() {
+		require.NoError(t, convertPBT(t.Context(), dual.DataDir, output, false, "", log.New()))
+	})
 	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
 	require.NoError(t, err)
 	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())

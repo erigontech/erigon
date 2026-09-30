@@ -18,6 +18,7 @@ package artifact
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"math/rand"
@@ -317,6 +318,99 @@ func TestPreimageJoinRejectsMissingAndSurplusAddress(t *testing.T) {
 	records, err = ReadPreimages(bytes.NewReader(encoded.Bytes()))
 	require.NoError(t, err)
 	require.Error(t, Join(snapshot, records, eip8297.HashBytes), "a surplus address must be rejected")
+}
+
+func TestPreimageJoinMergesTreeKeysAcrossAddressOrders(t *testing.T) {
+	const accountCount = 1000
+	addresses := make([]common.Address, accountCount)
+	leaves := make([]testLeaf, 0, accountCount*3)
+	records := make([]Preimage, accountCount)
+	for i := range addresses {
+		binary.BigEndian.PutUint64(addresses[i][12:], uint64(i+1))
+		address32 := eip8297.RightAlign32(addresses[i][:])
+		position := eip8297.HashBytes(address32[:])
+		basic, err := eip8297.EncodeBasicData(uint64(i+1), newBalance(uint64(i+1)), 0)
+		require.NoError(t, err)
+		headerSlot := [32]byte{1}
+		overflowSlot := [32]byte{0x80}
+		leaves = append(leaves,
+			testLeaf{eip8297.TreeKey(eip8297.AccountZone, position[:], eip8297.BasicDataLeafKey), basic[:]},
+			testLeaf{eip8297.TreeKeyStorage(addresses[i][:], headerSlot[:]), paddedValue(1)},
+			testLeaf{eip8297.TreeKeyStorage(addresses[i][:], overflowSlot[:]), paddedValue(2)},
+		)
+		records[i] = Preimage{Address: addresses[i], Slots: [][32]byte{headerSlot, overflowSlot}}
+	}
+	sort.Slice(leaves, func(i, j int) bool { return bytes.Compare(leaves[i].Key, leaves[j].Key) < 0 })
+	sort.Slice(records, func(i, j int) bool {
+		left := keccak.Sum256(records[i].Address[:])
+		right := keccak.Sum256(records[j].Address[:])
+		return bytes.Compare(left[:], right[:]) < 0
+	})
+	for i := range records {
+		sort.Slice(records[i].Slots, func(left, right int) bool {
+			a := keccak.Sum256(records[i].Slots[left][:])
+			b := keccak.Sum256(records[i].Slots[right][:])
+			return bytes.Compare(a[:], b[:]) < 0
+		})
+	}
+	var snapshot, preimages bytes.Buffer
+	_, err := WriteSnapshot(&snapshot, common.Hash{}, func(emit func([]byte, []byte) error) error {
+		for _, leaf := range leaves {
+			if err := emit(leaf.Key, leaf.Value); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.NoError(t, WritePreimages(&preimages, records))
+	require.NoError(t, JoinAt(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), bytes.NewReader(preimages.Bytes()), int64(preimages.Len()), eip8297.HashBytes, nil))
+
+	testJoinError := func(name string, mutate func([]Preimage) []Preimage, want string) {
+		t.Run(name, func(t *testing.T) {
+			mutated := mutate(append([]Preimage(nil), records...))
+			var encoded bytes.Buffer
+			require.NoError(t, WritePreimages(&encoded, mutated))
+			err := JoinAt(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), eip8297.HashBytes, nil)
+			require.ErrorContains(t, err, want)
+		})
+	}
+	testJoinError("missing address", func(input []Preimage) []Preimage { return input[:len(input)-1] }, "missing key")
+	testJoinError("surplus address", func(input []Preimage) []Preimage {
+		input = append(input, Preimage{Address: common.Address{0xff}})
+		sort.Slice(input, func(i, j int) bool {
+			a := keccak.Sum256(input[i].Address[:])
+			b := keccak.Sum256(input[j].Address[:])
+			return bytes.Compare(a[:], b[:]) < 0
+		})
+		return input
+	}, "surplus key")
+	testJoinError("missing header slot", func(input []Preimage) []Preimage {
+		input[0].Slots = input[0].Slots[1:]
+		return input
+	}, "missing key")
+	testJoinError("surplus header slot", func(input []Preimage) []Preimage {
+		input[0].Slots = append(input[0].Slots, [32]byte{2})
+		sort.Slice(input[0].Slots, func(i, j int) bool {
+			a := keccak.Sum256(input[0].Slots[i][:])
+			b := keccak.Sum256(input[0].Slots[j][:])
+			return bytes.Compare(a[:], b[:]) < 0
+		})
+		return input
+	}, "surplus key")
+	testJoinError("missing overflow slot", func(input []Preimage) []Preimage {
+		input[0].Slots = input[0].Slots[:1]
+		return input
+	}, "missing key")
+	testJoinError("surplus overflow slot", func(input []Preimage) []Preimage {
+		input[0].Slots = append(input[0].Slots, [32]byte{0x81})
+		sort.Slice(input[0].Slots, func(i, j int) bool {
+			a := keccak.Sum256(input[0].Slots[i][:])
+			b := keccak.Sum256(input[0].Slots[j][:])
+			return bytes.Compare(a[:], b[:]) < 0
+		})
+		return input
+	}, "surplus key")
 }
 
 type testLeaf struct {

@@ -136,7 +136,11 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 	if err != nil {
 		return err
 	}
-	if binRoot, found, err := exportPBTBinRootAtPin(ctx, tx, pin, logger); err != nil {
+	if pin.Variant == commitment.VariantBinPatriciaTrie {
+		if root != pin.Root {
+			return fmt.Errorf("export-pbt: stream root %s differs from bin root %s", root.Hex(), pin.Root.Hex())
+		}
+	} else if binRoot, found, err := exportPBTBinRootAtPin(ctx, tx, pin, logger); err != nil {
 		return err
 	} else if found && root != binRoot {
 		return fmt.Errorf("export-pbt: stream root %s differs from bin root %s", root.Hex(), binRoot.Hex())
@@ -145,6 +149,18 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 		return err
 	}
 	snapshotPath := filepath.Join(outDir, pbtSnapshotFileName)
+	preimagePath := filepath.Join(outDir, pbtPreimagesFileName)
+	metaPath := filepath.Join(outDir, pbtMetaFileName)
+	_ = dir.RemoveFile(metaPath)
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		_ = dir.RemoveFile(snapshotPath)
+		_ = dir.RemoveFile(preimagePath)
+		_ = dir.RemoveFile(metaPath)
+	}()
 	snapshotFile, err := os.Create(snapshotPath)
 	if err != nil {
 		return err
@@ -161,7 +177,6 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 	if closeErr != nil {
 		return closeErr
 	}
-	preimagePath := filepath.Join(outDir, pbtPreimagesFileName)
 	preimageFile, err := os.Create(preimagePath)
 	if err != nil {
 		return err
@@ -250,7 +265,32 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(outDir, pbtMetaFileName), append(metaBytes, '\n'), 0o644)
+	metaTemp, err := os.CreateTemp(outDir, ".pbt-snapshot-meta-*.tmp")
+	if err != nil {
+		return err
+	}
+	metaTempName := metaTemp.Name()
+	defer func() {
+		_ = metaTemp.Close()
+		_ = dir.RemoveFile(metaTempName)
+	}()
+	if _, err := metaTemp.Write(append(metaBytes, '\n')); err != nil {
+		return err
+	}
+	if err := metaTemp.Sync(); err != nil {
+		return err
+	}
+	if err := metaTemp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(metaTempName, metaPath); err != nil {
+		return err
+	}
+	if err := dir.FsyncDir(outDir); err != nil {
+		return err
+	}
+	completed = true
+	return nil
 }
 
 func digestPBTFile(file *os.File) (common.Hash, error) {

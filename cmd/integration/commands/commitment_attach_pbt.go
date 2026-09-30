@@ -238,16 +238,41 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	if err != nil {
 		return err
 	}
+	opened := make(map[kv.Domain]map[string]struct{})
+	for _, domain := range pbtAttachDomains {
+		opened[domain] = make(map[string]struct{})
+		for _, file := range at.Files(domain) {
+			if filepath.Ext(file.Fullpath()) == ".kv" {
+				opened[domain][filepath.Clean(file.Fullpath())] = struct{}{}
+			}
+		}
+	}
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		maxTo, found := pbtAttachFileEnd(publishedFiles, domain)
-		if found && maxTo*settings.StepSize != txNum {
+		maxEnd := uint64(0)
+		for _, file := range publishedFiles {
+			if file.domain != domain || !file.data || file.to*settings.StepSize > txNum {
+				continue
+			}
+			if _, ok := opened[domain][filepath.Clean(file.path)]; !ok {
+				return fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
+			}
+			maxEnd = max(maxEnd, file.to*settings.StepSize)
+		}
+		if maxEnd != txNum {
 			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
 		}
 	}
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 		files := at.Files(domain)
-		if len(files) == 0 || files.EndRootNum() != txNum {
+		if len(opened[domain]) == 0 || files.EndRootNum() != txNum {
 			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
+		}
+		for _, file := range publishedFiles {
+			if file.domain == domain && file.data && file.to*settings.StepSize <= txNum {
+				if _, ok := opened[domain][filepath.Clean(file.path)]; !ok {
+					return fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
+				}
+			}
 		}
 	}
 	checks := []struct {
@@ -500,10 +525,17 @@ func linkOrCopyPBTFile(src, dst string) error {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+		_ = out.Close()
 		return err
 	}
-	return out.Close()
+	if err := out.Sync(); err != nil {
+		_ = out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return dir.FsyncDir(filepath.Dir(dst))
 }
 
 func resetPBTExecution(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger) error {

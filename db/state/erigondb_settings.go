@@ -218,7 +218,10 @@ func writeErigonDBSettings(path string, s *ErigonDBSettings) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	return dir.FsyncDir(filepath.Dir(path))
 }
 
 // ResolveErigonDBSettings determines the active ErigonDB settings:

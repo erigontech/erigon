@@ -64,14 +64,17 @@ func WritePBTAttachMarker(dirs datadir.Dirs, marker *PBTAttachMarker) error {
 	if err != nil {
 		return err
 	}
-	return dir.WriteFileWithFsync(PBTAttachMarkerPath(dirs), data, 0o644)
+	if err := dir.WriteFileWithFsync(PBTAttachMarkerPath(dirs), data, 0o644); err != nil {
+		return err
+	}
+	return dir.FsyncDir(dirs.Snap)
 }
 
 func RemovePBTAttachMarker(dirs datadir.Dirs) error {
 	if err := dir.RemoveFile(PBTAttachMarkerPath(dirs)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return nil
+	return dir.FsyncDir(dirs.Snap)
 }
 
 func RefusePBTAttachMarker(dirs datadir.Dirs) error {
