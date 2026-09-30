@@ -421,11 +421,11 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		// caller goroutine and will be used only for flush/unwind/stage-update.
 		tRoTx := time.Now()
 		applyRoTx, err := pe.cfg.db.BeginTemporalRo(ctx)
-		pe.applyRoTxNs.Add(int64(time.Since(tRoTx)))
 		if err != nil {
 			return fmt.Errorf("apply loop: open roTx: %w", err)
 		}
 		defer applyRoTx.Rollback()
+		pe.applyRoTxNs.Add(int64(time.Since(tRoTx)))
 
 		// pe.changesetWindowStart and pe.currentChangeSet were set up
 		// before pe.run/executeBlocks launched their goroutines (above the
