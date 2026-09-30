@@ -92,7 +92,7 @@ func TestCheckCommitmentRootAcceptsZeroBinRoot(t *testing.T) {
 	cfg.EnableTrieWarmup = false
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
-	writer, err := state.NewPBinRangeWriter(fixture.agg, kv.CommitmentBinDomain, 8)
+	writer, err := state.NewPBinRangeWriter(fixture.agg, kv.CommitmentBinDomain, 7)
 	require.NoError(t, err)
 	_, err = writer.WriteAtBlock(t.Context(), tx, domains, func(func(state.PBinLeaf) error) error { return nil }, 1)
 	require.NoError(t, err)
@@ -127,7 +127,7 @@ func newPBinIntegrityFixture(t *testing.T) pbinIntegrityFixture {
 	updates.TouchPlainKey(string(slot), nil, func(*commitment.KeyUpdate, []byte) {})
 	hexCtx := domains.GetCommitmentCtxForDomain(kv.CommitmentDomain)
 	hexCtx.SetUpdates(updates)
-	hexRoot, err := hexCtx.ComputeCommitment(t.Context(), probeTx, false, 1, 8, "integrity-bin-test", nil)
+	hexRoot, err := hexCtx.ComputeCommitment(t.Context(), probeTx, false, 1, 7, "integrity-bin-test", nil)
 	require.NoError(t, err)
 	domains.Close()
 	probeTx.Rollback()
@@ -138,7 +138,7 @@ func newPBinIntegrityFixture(t *testing.T) pbinIntegrityFixture {
 	require.NoError(t, err)
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address, accounts.SerialiseV3(&account), 1, nil))
 	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{1}, 1, nil))
-	hexState, err := commitment.EncodeCommitmentV3State(hexRoot, 1, 8, nil)
+	hexState, err := commitment.EncodeCommitmentV3State(hexRoot, 1, 7, nil)
 	require.NoError(t, err)
 	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, hexState, 7, nil))
 	updates = commitment.NewUpdates(commitment.ModeCollect, "", commitment.KeyToHexNibbleHash)
@@ -146,12 +146,12 @@ func newPBinIntegrityFixture(t *testing.T) pbinIntegrityFixture {
 	updates.TouchPlainKey(string(slot), nil, func(*commitment.KeyUpdate, []byte) {})
 	hexCtx = domains.GetCommitmentCtxForDomain(kv.CommitmentDomain)
 	hexCtx.SetUpdates(updates)
-	computedRoot, err := hexCtx.ComputeCommitment(t.Context(), tx, false, 1, 8, "integrity-bin-test", nil)
+	computedRoot, err := hexCtx.ComputeCommitment(t.Context(), tx, false, 1, 7, "integrity-bin-test", nil)
 	require.NoError(t, err)
 	require.Equal(t, hexRoot, computedRoot)
 	require.NoError(t, domains.Flush(t.Context(), tx))
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 0, 0))
-	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 8))
+	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 7))
 	require.NoError(t, tx.Commit())
 	domains.Close()
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
@@ -169,7 +169,7 @@ func newPBinIntegrityFixture(t *testing.T) pbinIntegrityFixture {
 		TargetTx:         targetTx,
 		TargetDomain:     kv.CommitmentBinDomain,
 		BlockNum:         1,
-		EndTxNum:         8,
+		EndTxNum:         7,
 		Hash:             eip8297.HashBytes,
 	})
 	require.NoError(t, err)

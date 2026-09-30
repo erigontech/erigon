@@ -64,7 +64,7 @@ func TestConvertPBinMatchesReferenceRootAndVerification(t *testing.T) {
 		TargetAggregator: agg,
 		TargetTx:         targetTx,
 		TargetDomain:     kv.CommitmentBinDomain,
-		EndTxNum:         8,
+		EndTxNum:         7,
 		Hash:             eip8297.HashBytes,
 	})
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestVerifyPBinDomainRejectsCorruptedRow(t *testing.T) {
 		TargetAggregator: agg,
 		TargetTx:         targetTx,
 		TargetDomain:     kv.CommitmentDomain,
-		EndTxNum:         8,
+		EndTxNum:         7,
 		Hash:             eip8297.HashBytes,
 	})
 	require.NoError(t, err)
@@ -179,7 +179,7 @@ func TestVerifyPBinDomainAcceptsBinOnlyConversion(t *testing.T) {
 		TargetAggregator: agg,
 		TargetTx:         targetTx,
 		TargetDomain:     kv.CommitmentDomain,
-		EndTxNum:         8,
+		EndTxNum:         7,
 		Hash:             eip8297.HashBytes,
 	})
 	require.NoError(t, err)

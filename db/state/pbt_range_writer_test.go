@@ -55,7 +55,7 @@ func TestNewPBinRangeWriter(t *testing.T) {
 	writePBinRangeWriterAccounts(t, db, 32)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
-	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 24)
+	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 23)
 	require.NoError(t, err)
 	require.NotNil(t, writer)
 }
@@ -78,7 +78,7 @@ func TestPBinRangeWriterStreamsLeavesIntoBinFiles(t *testing.T) {
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	defer domains.Close()
-	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 24)
+	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 23)
 	require.NoError(t, err)
 	var leaves []state.PBinLeaf
 	root, err := writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
@@ -137,7 +137,7 @@ func TestPBinRangeWriterWritesEmptyTargetRange(t *testing.T) {
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	defer domains.Close()
-	writer, err := state.NewPBinRangeWriter(targetAgg, kv.CommitmentBinDomain, 24)
+	writer, err := state.NewPBinRangeWriter(targetAgg, kv.CommitmentBinDomain, 23)
 	require.NoError(t, err)
 	entries := eip8297.EmbedState([][]eip8297.State{{
 		{Address: bytes.Repeat([]byte{0x11}, length.Addr), Nonce: 1, Balance: *uint256.NewInt(1), Code: []byte{0x60, 0x01, 0x60, 0x00, 0x52}, Slots: map[string][]byte{string(bytes.Repeat([]byte{0x22}, 32)): {1}}},
@@ -188,7 +188,7 @@ func TestPBinRangeWriterWritesEmptyStateAtNewestRange(t *testing.T) {
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	defer domains.Close()
-	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 24)
+	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 23)
 	require.NoError(t, err)
 	root, err := writer.Write(t.Context(), tx, domains, func(func(state.PBinLeaf) error) error {
 		return nil
@@ -203,7 +203,7 @@ func TestPBinRangeWriterWritesEmptyStateAtNewestRange(t *testing.T) {
 	require.Equal(t, uint64(16), start)
 	require.Equal(t, uint64(24), end)
 	txNum, blockNum := commitmentdb.DecodeTxBlockNums(stateValue)
-	require.Equal(t, uint64(24), txNum)
+	require.Equal(t, uint64(23), txNum)
 	require.Zero(t, blockNum)
 }
 
@@ -224,7 +224,7 @@ func TestPBinRangeWriterReleasesFinishedRows(t *testing.T) {
 			cfg.EnableTrieWarmup = false
 			domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
 			require.NoError(t, err)
-			writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 24)
+			writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 23)
 			require.NoError(t, err)
 			entries := make([]eip8297.Entry, 0, int(accountCount))
 			for i := byte(1); i <= accountCount; i++ {
@@ -271,7 +271,7 @@ func TestPBinRangeWriterStampsRowsByMaximumLeafAndKeepsEmptyRanges(t *testing.T)
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	defer domains.Close()
-	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 24)
+	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 23)
 	require.NoError(t, err)
 	entries := eip8297.EmbedState([][]eip8297.State{{
 		{Address: bytes.Repeat([]byte{0x11}, length.Addr), Nonce: 1, Balance: *uint256.NewInt(1), Code: []byte{0x60, 0x01, 0x60, 0x00, 0x52}, Slots: map[string][]byte{string(bytes.Repeat([]byte{0x22}, 32)): {1}, string(bytes.Repeat([]byte{0x23}, 32)): {2}}},

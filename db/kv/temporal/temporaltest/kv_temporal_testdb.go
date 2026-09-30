@@ -89,10 +89,13 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64, openExisting b
 
 	var rawDB kv.RwDB
 	ctx := context.Background()
-	if tb != nil && !openExisting {
+	switch {
+	case tb != nil && !openExisting:
 		ctx = tb.Context()
 		rawDB = mdbxtest.NewTestDB(tb, dbcfg.ChainDB)
-	} else {
+	case tb == nil && !openExisting:
+		rawDB = mdbxtest.New(nil, dirs.Chaindata, dbcfg.ChainDB)
+	default:
 		if tb != nil {
 			ctx = tb.Context()
 		}

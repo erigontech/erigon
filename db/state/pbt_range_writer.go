@@ -88,16 +88,16 @@ func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			endTxNum:   endTxNum,
 			ranges: []pbinRange{{
 				start:     0,
-				end:       endTxNum,
+				end:       endTxNum + 1,
 				collector: etl.NewCollector("pbin-range-writer", aggregator.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
 			}},
 		}, nil
 	}
 	if endTxNum == 0 {
-		endTxNum = files.EndRootNum()
+		endTxNum = files.EndRootNum() - 1
 	}
-	if endTxNum > files.EndRootNum() {
-		return nil, fmt.Errorf("pbin range writer: end txNum %d is past accounts files %d", endTxNum, files.EndRootNum())
+	if files.EndRootNum() != endTxNum+1 {
+		return nil, fmt.Errorf("pbin range writer: end txNum %d is not at accounts file end %d", endTxNum, files.EndRootNum())
 	}
 	ranges := make([]pbinRange, 0, len(files))
 	seenRanges := make(map[[2]uint64]struct{}, len(files))
@@ -117,7 +117,7 @@ func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			collector: etl.NewCollector("pbin-range-writer", aggregator.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
 		})
 	}
-	if len(ranges) == 0 || ranges[len(ranges)-1].end < endTxNum {
+	if len(ranges) == 0 || ranges[len(ranges)-1].end != endTxNum+1 {
 		for i := range ranges {
 			ranges[i].collector.Close()
 		}

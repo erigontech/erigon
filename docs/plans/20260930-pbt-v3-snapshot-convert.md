@@ -200,8 +200,8 @@
 - `integration commitment attach-pbt --from <published dir>` on a stopped node:
   1. check the published settings: same step size and ranges as the node's files up to S, hex and bin both present, and
      a `trie_hash` equal to the node's configured suite;
-  2. adopt the published state and commitment files up to S and remove the node's own state and commitment files past
-     S;
+  2. adopt the published state and commitment files up to S, copy the published state-index salts, and remove the
+     node’s own state, commitment, receipt, history, inverted-index and accessor files past S;
   3. run `ResetExec` (state, history, commitment tables and stop markers cleared; block data kept);
   4. write `trie_variant = hex+bin`, the published `trie_hash` and the conversion point.
 - on restart `SeekCommitments` restores the checkpoint at S; the node re-executes from there in dual mode.

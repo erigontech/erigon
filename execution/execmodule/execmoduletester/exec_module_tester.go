@@ -151,6 +151,7 @@ type ExecModuleTester struct {
 	posStagedSync  *stagedsync.Sync
 	bgComponentsEg errgroup.Group
 	closeOnce      sync.Once
+	ownsDataDir    bool
 }
 
 func (emt *ExecModuleTester) Close() {
@@ -174,7 +175,7 @@ func (emt *ExecModuleTester) Close() {
 		if emt.DB != nil {
 			emt.DB.Close()
 		}
-		if emt.tb == nil && emt.Dirs.DataDir != "" {
+		if emt.ownsDataDir && emt.Dirs.DataDir != "" {
 			_ = dir.RemoveAll(emt.Dirs.DataDir)
 		}
 	})
@@ -532,6 +533,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	var err error
 	var tmpdir string
 	var dirs datadir.Dirs
+	ownsDataDir := false
 	switch {
 	case opt.existingDirs != nil:
 		dirs = *opt.existingDirs
@@ -543,6 +545,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			panic(err)
 		}
 		dirs = datadir.New(tmpdir)
+		ownsDataDir = true
 	}
 	if tb != nil && opt.existingDirs == nil && opt.dataDirs == nil {
 		// we can't use tb.TempDir() here because some tests produce names long
@@ -627,6 +630,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	mock := &ExecModuleTester{
 		Ctx: ctx, cancel: ctxCancel, DB: db,
+		ownsDataDir:        ownsDataDir,
 		tb:                 tb,
 		Log:                logger,
 		Dirs:               dirs,

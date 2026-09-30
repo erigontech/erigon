@@ -18,6 +18,7 @@ package execmoduletester
 
 import (
 	"context"
+	"fmt"
 
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -50,6 +51,8 @@ func (emt *ExecModuleTester) ReExecuteTo(ctx context.Context, toBlock uint64) er
 			aggT.PresetOfflineExecution()
 		}
 	}
+	var previous uint64
+	havePrevious := false
 	for {
 		progress, err := emt.reExecuteBatch(ctx, toBlock, cfg)
 		if err != nil {
@@ -58,6 +61,11 @@ func (emt *ExecModuleTester) ReExecuteTo(ctx context.Context, toBlock uint64) er
 		if progress >= toBlock {
 			return nil
 		}
+		if havePrevious && progress <= previous {
+			return fmt.Errorf("re-execution made no progress at block %d", progress)
+		}
+		previous = progress
+		havePrevious = true
 	}
 }
 
@@ -89,6 +97,9 @@ func (emt *ExecModuleTester) reExecuteBatch(ctx context.Context, toBlock uint64,
 	doms.Close()
 	if progressErr != nil {
 		return 0, progressErr
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
 	}
 	return progress, nil
 }

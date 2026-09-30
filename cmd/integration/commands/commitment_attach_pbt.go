@@ -249,7 +249,7 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	}
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		files := at.Files(domain)
-		if len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() < txNum {
+		if len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() != txNum+1 {
 			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
 		}
 		for _, file := range publishedFiles {
@@ -263,7 +263,7 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	}
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 		files := at.Files(domain)
-		if len(opened[domain]) == 0 || len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() < txNum {
+		if len(opened[domain]) == 0 || len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() != txNum+1 {
 			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
 		}
 		for _, file := range publishedFiles {
@@ -388,7 +388,7 @@ func validatePBTAttachFrontier(files []pbtAttachFile, stepSize, endTxNum uint64)
 		}
 	}
 	for _, domain := range pbtAttachDomains {
-		if frontiers[domain] < endTxNum {
+		if frontiers[domain] != endTxNum+1 {
 			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, endTxNum)
 		}
 	}
@@ -483,6 +483,9 @@ func checkPBTNodePosition(ctx context.Context, db kv.RwDB, blockNum, txNum uint6
 }
 
 func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint64) error {
+	if err := removePBTFilesPastPoint(nodeDirs, stepSize, endTxNum); err != nil {
+		return err
+	}
 	nodeFiles, err := pbtAttachFiles(nodeDirs)
 	if err != nil {
 		return err
@@ -512,10 +515,57 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 			return err
 		}
 	}
+	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
+		src := filepath.Join(publishedDirs.Snap, name)
+		if _, err := os.Stat(src); errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if err := linkOrCopyPBTFile(src, filepath.Join(nodeDirs.Snap, name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func removePBTFilesPastPoint(dirs datadir.Dirs, stepSize, endTxNum uint64) error {
+	if stepSize == 0 {
+		return errors.New("commitment attach-pbt: step size is zero")
+	}
+	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				if errors.Is(walkErr, fs.ErrNotExist) {
+					return nil
+				}
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
+			if ok && parsed.From*stepSize > endTxNum {
+				return dir.RemoveFile(path)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func linkOrCopyPBTFile(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if dstInfo, statErr := os.Stat(dst); statErr == nil && os.SameFile(srcInfo, dstInfo) {
+		return nil
+	} else if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
+		return statErr
+	}
 	if err := os.Link(src, dst); err == nil {
 		return nil
 	}
@@ -524,11 +574,7 @@ func linkOrCopyPBTFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	info, err := in.Stat()
-	if err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode().Perm())
 	if err != nil {
 		return err
 	}

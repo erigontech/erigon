@@ -466,8 +466,8 @@ func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
 		return nil
 	}
 	last := files[len(files)-1]
-	if last.StartRootNum() > endTxNum || last.EndRootNum() < endTxNum {
-		return fmt.Errorf("commitment convert-pbt: source state txNum %d is outside the accounts file frontier [%d,%d)", endTxNum, last.StartRootNum(), last.EndRootNum())
+	if last.StartRootNum() > endTxNum || last.EndRootNum() != endTxNum+1 {
+		return fmt.Errorf("commitment convert-pbt: source state txNum %d is not at the accounts file end %d", endTxNum, last.EndRootNum())
 	}
 	return nil
 }

@@ -32,7 +32,9 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -146,22 +148,49 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
 	publishedSettings, err := dbstate.ReadErigonDBSettings(datadir.Open(published))
 	require.NoError(t, err)
-	conversionBlock, conversionTx, ok, err := publishedSettings.ConversionPoint()
+	conversionBlock, _, ok, err := publishedSettings.ConversionPoint()
 	require.NoError(t, err)
 	require.True(t, ok)
-	t.Logf("conversion point=(%d,%d)", conversionBlock, conversionTx)
-	publishedAgg := dbstate.New(datadir.Open(published)).WithErigonDBSettings(publishedSettings).Logger(log.New()).MustOpen(t.Context())
-	require.NoError(t, publishedAgg.OpenFolder(nil))
-	publishedAt := publishedAgg.BeginFilesRo()
-	stateValue, found, startTx, endTx, stateErr := publishedAt.DebugGetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, ^uint64(0))
-	require.NoError(t, stateErr)
-	t.Logf("published bin state found=%t bytes=%d range=[%d,%d)", found, len(stateValue), startTx, endTx)
-	publishedAt.Close()
-	publishedAgg.Close()
 	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
 	require.Zero(t, readExecutionStageProgress(t, node.Tester.Dirs.Chaindata))
 
 	require.Equal(t, readPBTFilesRoot(t, published, source.Tester.Dirs.Chaindata), readPBTFilesRoot(t, node.Tester.Dirs.DataDir, node.Tester.Dirs.Chaindata))
+	dual, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
+	require.NoError(t, err)
+	require.NoError(t, dual.Tester.InsertChain(dual.Chain))
+	selectPBTCommandSuite(t)
+	reopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
+		execmoduletester.WithGenesisSpec(node.Genesis),
+		execmoduletester.WithKey(node.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	progressTx, err := reopened.DB.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(progressTx.Rollback)
+	require.NoError(t, stages.SaveStageProgress(progressTx, stages.Execution, conversionBlock))
+	require.NoError(t, progressTx.Commit())
+	for block := conversionBlock + 1; block <= node.Chain.TopBlock.NumberU64(); block++ {
+		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
+		attachedRaw := reopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+		var attachedRoot []byte
+		require.NoError(t, attachedRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			attachedRoot, err = rawdb.ReadShadowStateRoot(tx, node.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		dualRaw := dual.Tester.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+		var dualRoot []byte
+		require.NoError(t, dualRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			dualRoot, err = rawdb.ReadShadowStateRoot(tx, dual.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		require.Equal(t, dualRoot, attachedRoot)
+	}
+	reopened.Close()
 }
 
 func TestPBTReplayMatchesConvertedState(t *testing.T) {
@@ -218,6 +247,100 @@ func TestPBTReplayMatchesConvertedState(t *testing.T) {
 	require.Equal(t, convertedMeta["snapshotDigest"], replayedMeta["snapshotDigest"])
 }
 
+func TestPBTAttachedReplayMatchesConvertedState(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	buildPBTAcceptanceFiles(t, node)
+	node.Tester.Close()
+
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 3)))
+	buildPBTAcceptanceFiles(t, source)
+	source.Tester.Close()
+	selectPBTCommandSuite(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(published))
+	require.NoError(t, err)
+	conversionBlock, _, ok, err := settings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
+
+	selectPBTCommandSuite(t)
+	reopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
+		execmoduletester.WithGenesisSpec(node.Genesis),
+		execmoduletester.WithKey(node.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	progressTx, err := reopened.DB.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(progressTx.Rollback)
+	require.NoError(t, stages.SaveStageProgress(progressTx, stages.Execution, conversionBlock))
+	require.NoError(t, progressTx.Commit())
+	for block := conversionBlock + 1; block <= node.Chain.TopBlock.NumberU64(); block++ {
+		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
+	}
+	attachedExport := filepath.Join(t.TempDir(), "attached-export")
+	attachedTx, err := reopened.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(attachedTx.Rollback)
+	require.NoError(t, app.RunExportPBT(t.Context(), attachedTx, func(block uint64) (*types.Header, error) {
+		return node.Chain.Headers[block-1], nil
+	}, attachedExport, log.New()))
+	attachedTx.Rollback()
+	reopened.Close()
+
+	selectPBTHexCommandSuite(t)
+	converted, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, converted.Tester.InsertChain(converted.Chain))
+	buildPBTAcceptanceFiles(t, converted)
+	converted.Tester.Close()
+	selectPBTCommandSuite(t)
+	convertedOutput := filepath.Join(t.TempDir(), "converted")
+	require.NoError(t, convertPBT(t.Context(), converted.Tester.Dirs.DataDir, convertedOutput, true, "", log.New()))
+	convertedDigest := exportConvertedPBTDigest(t, convertedOutput, converted.Tester.Dirs.Chaindata, converted)
+	attachedMetaBytes, err := os.ReadFile(filepath.Join(attachedExport, "pbt-snapshot.meta.json"))
+	require.NoError(t, err)
+	var attachedMeta map[string]any
+	require.NoError(t, json.Unmarshal(attachedMetaBytes, &attachedMeta))
+	require.Equal(t, convertedDigest, attachedMeta["snapshotDigest"])
+}
+
+func exportConvertedPBTDigest(t *testing.T, output, rawPath string, fixture *execmoduletester.PBTAcceptanceChain) any {
+	t.Helper()
+	convertedRaw := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()
+	convertedSettings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
+	require.NoError(t, err)
+	convertedAgg := dbstate.New(datadir.Open(output)).WithErigonDBSettings(convertedSettings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, convertedAgg.OpenFolder(convertedRaw))
+	convertedDB, err := dbtemporal.New(convertedRaw, convertedAgg, nil)
+	require.NoError(t, err)
+	convertedTx, err := convertedDB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer convertedTx.Rollback()
+	convertedExport := filepath.Join(t.TempDir(), "converted-export")
+	require.NoError(t, app.RunExportPBT(t.Context(), convertedTx, func(block uint64) (*types.Header, error) {
+		return fixture.Chain.Headers[block-1], nil
+	}, convertedExport, log.New()))
+	convertedTx.Rollback()
+	convertedDB.Close()
+	convertedAgg.Close()
+	convertedRaw.Close()
+	metaBytes, err := os.ReadFile(filepath.Join(convertedExport, "pbt-snapshot.meta.json"))
+	require.NoError(t, err)
+	var meta map[string]any
+	require.NoError(t, json.Unmarshal(metaBytes, &meta))
+	return meta["snapshotDigest"]
+}
+
 func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain) {
 	t.Helper()
 	dirs := fixture.Tester.Dirs
@@ -229,12 +352,31 @@ func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptan
 	require.NoError(t, agg.OpenFolder(rawDB))
 	db, err := dbtemporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
+	writeTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(writeTx.Rollback)
+	domains, err := execctx.NewSharedDomains(t.Context(), writeTx, log.New(), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
-	defer tx.Rollback()
+	t.Cleanup(tx.Rollback)
 	_, lastTxNum, err := rawdbv3.TxNums.Last(tx)
 	require.NoError(t, err)
 	tx.Rollback()
+	for _, domain := range domains.CommitmentDomains() {
+		key := commitment.KeyCommitmentV3State
+		if domain == kv.CommitmentBinDomain {
+			key = commitment.KeyCommitmentState
+		}
+		value, _, getErr := domains.GetLatest(domain, writeTx, key)
+		require.NoError(t, getErr)
+		if len(value) != 0 {
+			require.NoError(t, domains.DomainPut(domain, writeTx, key, value, lastTxNum, value))
+		}
+	}
+	require.NoError(t, domains.Flush(t.Context(), writeTx))
+	require.NoError(t, writeTx.Commit())
+	domains.Close()
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
 	agg.WaitForFiles()
 	db.Close()
