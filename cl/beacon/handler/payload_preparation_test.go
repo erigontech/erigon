@@ -1060,6 +1060,21 @@ func TestTargetGasLimitForFirstSepoliaGloasSlot(t *testing.T) {
 	}
 }
 
+func TestTargetGasLimitForLaterSepoliaGloasSlot(t *testing.T) {
+	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
+	targetSlot := (config.GloasForkEpoch + 1) * config.SlotsPerEpoch
+	baseState := state.New(config)
+	baseState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, baseState.SetSlot(targetSlot-1))
+	baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{GasLimit: 60_000_000})
+	handler := &ApiHandler{beaconChainCfg: config}
+
+	gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
+
+	require.NotNil(t, gasLimit)
+	require.Equal(t, hexutil.Uint64(200_000_000), *gasLimit)
+}
+
 func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceRemoval(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(

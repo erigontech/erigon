@@ -18,6 +18,8 @@ package handler
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,15 +30,30 @@ import (
 
 func TestGetSpecIncludesGasLimitSchedule(t *testing.T) {
 	for _, test := range []struct {
-		name     string
-		network  clparams.NetworkType
-		schedule string
+		name         string
+		network      clparams.NetworkType
+		customConfig string
+		schedule     string
 	}{
 		{name: "mainnet", network: chainspec.MainnetChainID, schedule: `[]`},
 		{name: "sepolia", network: chainspec.SepoliaChainID, schedule: `[{"EPOCH":"353024","GAS_LIMIT":"200000000"}]`},
+		{name: "custom omitted", customConfig: "GLOAS_FORK_EPOCH: 10\n", schedule: `[]`},
+		{name: "custom empty value", customConfig: "GLOAS_FORK_EPOCH: 10\nGAS_LIMIT_SCHEDULE:\n", schedule: `[]`},
+		{name: "custom null", customConfig: "GLOAS_FORK_EPOCH: 10\nGAS_LIMIT_SCHEDULE: null\n", schedule: `[]`},
+		{name: "custom empty array", customConfig: "GLOAS_FORK_EPOCH: 10\nGAS_LIMIT_SCHEDULE: []\n", schedule: `[]`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			network, config := clparams.GetConfigsByNetwork(test.network)
+			var network *clparams.NetworkConfig
+			var config *clparams.BeaconChainConfig
+			if test.customConfig == "" {
+				network, config = clparams.GetConfigsByNetwork(test.network)
+			} else {
+				configPath := filepath.Join(t.TempDir(), "config.yaml")
+				require.NoError(t, os.WriteFile(configPath, []byte(test.customConfig), 0o644))
+				beaconCfg, networkCfg, err := clparams.CustomConfig(configPath)
+				require.NoError(t, err)
+				network, config = &networkCfg, &beaconCfg
+			}
 			handler := &ApiHandler{beaconChainCfg: config, netConfig: network}
 			response, err := handler.getSpec(nil, nil)
 			require.NoError(t, err)

@@ -1225,6 +1225,9 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	if err := yaml.Unmarshal(b, &beaconCfg); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
+	if beaconCfg.GasLimitSchedule == nil {
+		beaconCfg.GasLimitSchedule = []GasLimitScheduleEntry{}
+	}
 
 	// Forks absent from a custom config are unscheduled (far-future), as in other
 	// clients, rather than inheriting the mainnet base config's finite epochs.
