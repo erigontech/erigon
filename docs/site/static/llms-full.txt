@@ -988,7 +988,7 @@ services:
       - "42069:42069/udp"
       - "4000:4000/udp"       # Caplin consensus-layer discovery
       - "4001:4001/tcp"       # Caplin consensus-layer p2p over TCP
-      - "4001:4001/udp"       # Caplin consensus-layer p2p over QUIC
+      - "4002:4002/udp"       # Caplin consensus-layer p2p over QUIC (see note below)
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
       # Replace the path below with an actual directory on your machine
@@ -1002,7 +1002,9 @@ Set `EXTERNAL_IP` before starting, either in a `.env` file next to `docker-compo
 echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 ```
 
-or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001` ports on your router as well, otherwise peers still cannot reach you.
+or by exporting it in your shell. Forward the `30303`, `42069`, `4000`, `4001` and `4002` ports on your router as well, otherwise peers still cannot reach you.
+
+If you can't publish an extra UDP port — for example a managed Kubernetes ingress that only forwards TCP — drop the `4002:4002/udp` line above and add `--caplin.quic.disable` to the `command` block instead. Caplin then falls back to TCP-only peering.
 
 :::warning
 ⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
@@ -1202,7 +1204,7 @@ services:
       - "42069:42069/udp"
       - "4000:4000/udp"       # Caplin consensus-layer discovery
       - "4001:4001/tcp"       # Caplin consensus-layer p2p over TCP
-      - "4001:4001/udp"       # Caplin consensus-layer p2p over QUIC
+      - "4002:4002/udp"       # Caplin consensus-layer p2p over QUIC (see note below)
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
       # Replace the path below with an actual directory on your machine
@@ -1216,7 +1218,9 @@ Set `EXTERNAL_IP` before starting, either in a `.env` file next to `docker-compo
 echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 ```
 
-or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001` ports on your router as well, otherwise peers still cannot reach you.
+or by exporting it in your shell. Forward the `30303`, `42069`, `4000`, `4001` and `4002` ports on your router as well, otherwise peers still cannot reach you.
+
+If you can't publish an extra UDP port — for example a managed Kubernetes ingress that only forwards TCP — drop the `4002:4002/udp` line above and add `--caplin.quic.disable` to the `command` block instead. Caplin then falls back to TCP-only peering.
 
 :::warning
 ⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
@@ -2852,7 +2856,10 @@ Flags for configuring the [Caplin](https://docs.erigon.tech/fundamentals/caplin)
   - Default: `4001`
 
 - `--caplin.discovery.quicport value`: The QUIC UDP port for Caplin libp2p.
-  - Default: `4001`
+  - Default: `4002`
+
+- `--caplin.quic.disable`: Disables the QUIC transport for Caplin libp2p, falling back to TCP only. Useful when the QUIC UDP port cannot be exposed, for example in some Docker or Kubernetes setups.
+  - Default: `false`
 
 - `--caplin.checkpoint-sync-url value`: The checkpoint sync endpoint.
 - `--caplin.subscribe-all-topics`: Subscribes to all gossip topics.
@@ -3228,7 +3235,8 @@ Here is a comprehensive list of port-related options:
 
 - `--caplin.discovery.port [value]`: Port for Caplin DISCV5 protocol (default: `4000`)
 - `--caplin.discovery.tcpport [value]`: TCP port for Caplin libp2p (default: `4001`)
-- `--caplin.discovery.quicport [value]`: QUIC UDP port for Caplin libp2p (default: `4001`)
+- `--caplin.discovery.quicport [value]`: QUIC UDP port for Caplin libp2p (default: `4002`)
+- `--caplin.quic.disable`: Disables the QUIC transport for Caplin libp2p, falling back to TCP only (default: `false`)
 - `--sentinel.port [value]`: Port the Caplin sentinel gRPC service listens on (default: `7777`)
 
 ### BeaconAPI
@@ -7871,7 +7879,7 @@ erigon \
   --caplin.discovery.addr=0.0.0.0 \
   --caplin.discovery.port=4000 \
   --caplin.discovery.tcpport=4001 \
-  --caplin.discovery.quicport=4001 \
+  --caplin.discovery.quicport=4002 \
   --beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse 
 ```
 
@@ -8371,11 +8379,14 @@ The ports to allow inbound:
 | P2P (execution layer) | 30303 | TCP+UDP |
 | Snapshot downloader (BitTorrent) | 42069 | TCP+UDP |
 | Caplin DISCV5 discovery | 4000 | UDP |
-| Caplin libp2p peering | 4001 | TCP+UDP |
+| Caplin libp2p peering (TCP) | 4001 | TCP |
+| Caplin libp2p peering (QUIC) | 4002 | UDP |
 
 This table is not exhaustive — it lists what a default node needs. See [Default ports](https://docs.erigon.tech/fundamentals/default-ports) for every port Erigon can open, including the opt-in Shutter port.
 
-The Caplin ports are its defaults (`--caplin.discovery.port`, `--caplin.discovery.tcpport`, and `--caplin.discovery.quicport`); change the rules to match if you override them. DISCV5 is UDP-only and runs on `4000`, while TCP and QUIC/UDP peering both default to the numeric port `4001`. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+The Caplin ports are its defaults (`--caplin.discovery.port`, `--caplin.discovery.tcpport`, and `--caplin.discovery.quicport`); change the rules to match if you override them. DISCV5 is UDP-only and runs on `4000`, TCP peering defaults to `4001`, and QUIC/UDP peering defaults to `4002`. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+
+If the QUIC UDP port cannot be opened — for example a Docker or Kubernetes setup where only the TCP port was published, or a network policy that blocks UDP — pass `--caplin.quic.disable` to fall back to TCP-only peering instead of leaving the QUIC port unreachable.
 
 Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure Cloud firewalls in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`; for dedicated servers the equivalent lives in the Robot panel under **Server → Firewall**.
 
