@@ -111,13 +111,17 @@ func TestGetTransactionByIndexMatchesBlock(t *testing.T) {
 			checked++
 		}
 
-		past := hexutil.Uint(len(b.Transactions()))
-		byNum, err := api.GetTransactionByBlockNumberAndIndex(ctx, rpc.BlockNumber(b.NumberU64()), past)
-		require.NoError(t, err)
-		require.Nil(t, byNum)
-		raw, err := api.GetRawTransactionByBlockNumberAndIndex(ctx, rpc.BlockNumber(b.NumberU64()), past)
-		require.NoError(t, err)
-		require.Nil(t, raw)
+		for _, past := range []hexutil.Uint{hexutil.Uint(len(b.Transactions())), ^hexutil.Uint(0)} {
+			byNum, err := api.GetTransactionByBlockNumberAndIndex(ctx, rpc.BlockNumber(b.NumberU64()), past)
+			require.NoError(t, err)
+			require.Nil(t, byNum)
+			raw, err := api.GetRawTransactionByBlockNumberAndIndex(ctx, rpc.BlockNumber(b.NumberU64()), past)
+			require.NoError(t, err)
+			require.Nil(t, raw)
+			byHash, err := api.GetTransactionByBlockHashAndIndex(ctx, b.Hash(), hexutil.Uint64(past))
+			require.NoError(t, err)
+			require.Nil(t, byHash)
+		}
 	}
 
 	t.Run("block not cached", func(t *testing.T) {
