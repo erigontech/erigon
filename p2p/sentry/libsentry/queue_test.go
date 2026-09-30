@@ -44,6 +44,7 @@ func TestSentryQueue_DropsQuarterFromOldest(t *testing.T) {
 	}
 	s.Close()
 	messages := drainMessages(t, c)
+	// One batch evicts 1024/4 = 256 oldest messages; 600 - 256 = 344 remain.
 	require.Len(t, messages, 344)
 	assert.Equal(t, sentryproto.MessageId(256), messages[0].Id)
 	assert.Equal(t, sentryproto.MessageId(599), messages[len(messages)-1].Id)

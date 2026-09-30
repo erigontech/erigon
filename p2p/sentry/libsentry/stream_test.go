@@ -34,6 +34,9 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
+// Flooding Send with no consumer must not block or grow the queue without bound.
+// Small payloads exercise repeated eviction by message count without reaching
+// the byte limit; the newest message must survive.
 func TestSentryStreamS_SendEvictsWhenConsumerSlow(t *testing.T) {
 	s, c := newTestSentryStream(t)
 
