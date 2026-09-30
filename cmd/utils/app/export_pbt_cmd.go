@@ -191,9 +191,9 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 			if statErr != nil {
 				writeErr = statErr
 			} else {
-				writeErr = artifact.WritePreimages(preimageFile, artifact.PreimageIterator(func(yield func(artifact.Preimage) error) error {
-					return artifact.ReadPreimagesAt(preimageTemp, info.Size(), yield)
-				}))
+				writeErr = artifact.WritePreimagesStream(preimageFile, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+					return artifact.ReadPreimagesStream(preimageTemp, info.Size(), yield)
+				})
 			}
 		}
 	}

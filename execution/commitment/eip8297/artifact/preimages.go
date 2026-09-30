@@ -37,6 +37,7 @@ import (
 var ErrPreimages = errors.New("pbt artifact: invalid preimages")
 
 type PreimageIterator func(func(Preimage) error) error
+type PreimageStreamIterator func(func(common.Address, func(func([32]byte) error) error) error) error
 
 func WritePreimages(dst io.Writer, records any) error {
 	var iterate PreimageIterator
@@ -60,38 +61,82 @@ func WritePreimages(dst io.Writer, records any) error {
 	if iterate == nil {
 		return ErrPreimages
 	}
+	return WritePreimagesStream(dst, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+		return iterate(func(record Preimage) error {
+			return yield(record.Address, func(slotYield func([32]byte) error) error {
+				for _, slot := range record.Slots {
+					if err := slotYield(slot); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		})
+	})
+}
+
+func WritePreimagesStream(dst io.Writer, iterate PreimageStreamIterator) error {
+	if iterate == nil {
+		return ErrPreimages
+	}
 	var previous common.Hash
 	index := 0
-	return iterate(func(record Preimage) error {
-		digest := common.Hash(keccak.Sum256(record.Address[:]))
+	return iterate(func(address common.Address, slots func(func([32]byte) error) error) error {
+		digest := common.Hash(keccak.Sum256(address[:]))
 		if index != 0 && bytes.Compare(digest[:], previous[:]) <= 0 {
 			return ErrUnsorted
 		}
 		previous = digest
 		index++
-		if len(record.Slots) > int(^uint32(0)) {
+		if slots == nil {
 			return ErrPreimages
 		}
-		if _, err := dst.Write(record.Address[:]); err != nil {
+		slotFile, err := os.CreateTemp("", "pbt-preimage-record-")
+		if err != nil {
 			return err
 		}
-		var count [4]byte
-		binary.BigEndian.PutUint32(count[:], uint32(len(record.Slots)))
-		if _, err := dst.Write(count[:]); err != nil {
-			return err
+		slotName := slotFile.Name()
+		cleanup := func() {
+			_ = slotFile.Close()
+			_ = dir.RemoveFile(slotName)
 		}
+		defer cleanup()
+		var count uint32
 		var previousSlot common.Hash
-		for j, slot := range record.Slots {
+		err = slots(func(slot [32]byte) error {
+			if count == ^uint32(0) {
+				return ErrPreimages
+			}
 			slotDigest := common.Hash(keccak.Sum256(slot[:]))
-			if j != 0 && bytes.Compare(slotDigest[:], previousSlot[:]) <= 0 {
+			if count != 0 && bytes.Compare(slotDigest[:], previousSlot[:]) <= 0 {
 				return ErrUnsorted
 			}
 			previousSlot = slotDigest
-			if _, err := dst.Write(slot[:]); err != nil {
+			if _, err := slotFile.Write(slot[:]); err != nil {
 				return err
 			}
+			count++
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		return nil
+		if err := slotFile.Sync(); err != nil {
+			return err
+		}
+		var encodedCount [4]byte
+		binary.BigEndian.PutUint32(encodedCount[:], count)
+		if _, err := dst.Write(address[:]); err != nil {
+			return err
+		}
+		if _, err := dst.Write(encodedCount[:]); err != nil {
+			return err
+		}
+		if _, err := slotFile.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		_, err = io.Copy(dst, slotFile)
+		return err
 	})
 }
 
@@ -175,13 +220,6 @@ func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, pre
 	if hashFn == nil {
 		hashFn = eip8297.HashBytes
 	}
-	if _, err := ReadSnapshotAt(snapshot, snapshotSize, SnapshotCallbacks{}); err != nil {
-		return err
-	}
-	headerCursor, storageCursor, headerCount, storageCount, err := snapshotCursors(snapshot, snapshotSize)
-	if err != nil {
-		return err
-	}
 	expected, err := os.CreateTemp("", "pbt-join-expected-")
 	if err != nil {
 		return err
@@ -190,33 +228,32 @@ func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, pre
 	defer func() { _ = expected.Close(); _ = dir.RemoveFile(expectedName) }()
 	expectedWriter := bufio.NewWriterSize(expected, 1<<20)
 	writeExpected := func(key []byte) error { return writeJoinItem(expectedWriter, joinItem{key: bytes.Clone(key)}) }
-	for range headerCount {
-		header, err := readHeaderAt(&headerCursor)
-		if err != nil {
-			return err
-		}
-		if err := writeExpected(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.BasicDataLeafKey)); err != nil {
-			return err
-		}
-		for _, slot := range header.Slots {
-			if err := writeExpected(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.HeaderStorageOffset+slot.Index)); err != nil {
+	_, err = ReadSnapshotStreamAt(snapshot, snapshotSize, SnapshotStreamCallbacks{
+		Header: func(header Header) error {
+			if err := writeExpected(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.BasicDataLeafKey)); err != nil {
 				return err
 			}
-		}
-	}
-	for range storageCount {
-		storage, err := readStorageAt(&storageCursor)
-		if err != nil {
-			return err
-		}
-		for _, group := range storage.Groups {
-			position := append(bytes.Clone(storage.AddressHash[:]), group.StemHash[:]...)
-			for _, entry := range group.Entries {
-				if err := writeExpected(eip8297.TreeKey(eip8297.StorageZone, position, entry.Index)); err != nil {
+			for _, slot := range header.Slots {
+				if err := writeExpected(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.HeaderStorageOffset+slot.Index)); err != nil {
 					return err
 				}
 			}
-		}
+			return nil
+		},
+		Storage: func(address common.Hash, groups func(func(Group) error) error) error {
+			return groups(func(group Group) error {
+				position := append(bytes.Clone(address[:]), group.StemHash[:]...)
+				for _, entry := range group.Entries {
+					if err := writeExpected(eip8297.TreeKey(eip8297.StorageZone, position, entry.Index)); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		},
+	})
+	if err != nil {
+		return err
 	}
 	if err := expectedWriter.Flush(); err != nil {
 		return err
@@ -544,38 +581,6 @@ func removeJoinRuns(paths []string) {
 	for _, path := range paths {
 		_ = dir.RemoveFile(path)
 	}
-}
-
-func snapshotCursors(src io.ReaderAt, size int64) (artifactCursor, artifactCursor, uint64, uint64, error) {
-	c := artifactCursor{src: src, limit: size}
-	if _, err := c.bytes(32); err != nil {
-		return artifactCursor{}, artifactCursor{}, 0, 0, err
-	}
-	headerCount, err := c.count()
-	if err != nil {
-		return artifactCursor{}, artifactCursor{}, 0, 0, err
-	}
-	headerStart := c.offset
-	for range headerCount {
-		if _, err := readHeaderAt(&c); err != nil {
-			return artifactCursor{}, artifactCursor{}, 0, 0, err
-		}
-	}
-	headerEnd := c.offset
-	codeCount, err := c.count()
-	if err != nil {
-		return artifactCursor{}, artifactCursor{}, 0, 0, err
-	}
-	for range codeCount {
-		if _, err := readGroupAt(&c); err != nil {
-			return artifactCursor{}, artifactCursor{}, 0, 0, err
-		}
-	}
-	storageCount, err := c.count()
-	if err != nil {
-		return artifactCursor{}, artifactCursor{}, 0, 0, err
-	}
-	return artifactCursor{src: src, offset: headerStart, limit: headerEnd}, c, headerCount, storageCount, nil
 }
 
 func treeKeyWithHash(hashFn eip8297.HashFn, address, slot []byte) []byte {

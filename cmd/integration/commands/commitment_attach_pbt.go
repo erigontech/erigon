@@ -248,7 +248,10 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 		}
 	}
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		maxEnd := uint64(0)
+		files := at.Files(domain)
+		if len(files) == 0 || files.EndRootNum() != txNum {
+			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
+		}
 		for _, file := range publishedFiles {
 			if file.domain != domain || !file.data || file.to*settings.StepSize > txNum {
 				continue
@@ -256,10 +259,6 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 			if _, ok := opened[domain][filepath.Clean(file.path)]; !ok {
 				return fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
 			}
-			maxEnd = max(maxEnd, file.to*settings.StepSize)
-		}
-		if maxEnd != txNum {
-			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
 		}
 	}
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {

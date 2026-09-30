@@ -324,6 +324,7 @@ func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) 
 	previousSchema := statecfg.Schema
 	previousHash := statecfg.BinCommitmentHash
 	previousSuite := commitment.PBinHashSuiteName()
+	previousHook := attachPBTStepHook
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = previousBin
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
@@ -331,6 +332,7 @@ func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) 
 		statecfg.Schema = previousSchema
 		statecfg.BinCommitmentHash = previousHash
 		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+		attachPBTStepHook = previousHook
 	})
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
@@ -346,6 +348,68 @@ func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) 
 	setExecutionProgress(t, source.Chaindata, 2)
 	err = attachPBT(t.Context(), source.DataDir, published, "", log.New())
 	require.ErrorContains(t, err, "do not end at conversion txNum")
+}
+
+func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+		statecfg.BinCommitmentHash = previousHash
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, _ := newPBTConversionSource(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	files, err := pbtAttachFiles(datadir.Open(published))
+	require.NoError(t, err)
+	for _, file := range files {
+		if file.domain == kv.AccountsDomain && file.data {
+			require.NoError(t, os.Truncate(file.path, 1))
+			break
+		}
+	}
+	settings, err := state.ReadErigonDBSettings(datadir.Open(published))
+	require.NoError(t, err)
+	blockNum, txNum, ok, err := settings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.ErrorContains(t, validatePBTAttachPublishedPoint(t.Context(), datadir.Open(published), settings, blockNum, txNum, log.New()), "was not opened")
+	setExecutionProgress(t, source.Chaindata, 1)
+	err = attachPBT(t.Context(), source.DataDir, published, "", log.New())
+	require.ErrorContains(t, err, "accounts")
+
+	recoverySource, _ := newPBTConversionSource(t)
+	recoveryPublished := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), recoverySource.DataDir, recoveryPublished, true, "", log.New()))
+	setExecutionProgress(t, recoverySource.Chaindata, 1)
+	attachPBTStepHook = func(step string) error {
+		if step == "marker" {
+			return errors.New("interrupted attach")
+		}
+		return nil
+	}
+	require.ErrorContains(t, attachPBT(t.Context(), recoverySource.DataDir, recoveryPublished, "", log.New()), "interrupted attach")
+	recoveryFiles, err := pbtAttachFiles(datadir.Open(recoveryPublished))
+	require.NoError(t, err)
+	for _, file := range recoveryFiles {
+		if file.domain == kv.AccountsDomain && file.data {
+			require.NoError(t, os.Truncate(file.path, 1))
+			break
+		}
+	}
+	attachPBTStepHook = nil
+	require.ErrorContains(t, attachPBT(t.Context(), recoverySource.DataDir, recoveryPublished, "", log.New()), "accounts")
 }
 
 func TestAttachPBTAllowsMidBlockConversionPoint(t *testing.T) {

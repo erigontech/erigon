@@ -45,7 +45,33 @@ type SnapshotCallbacks struct {
 	Storage func(Storage) error
 }
 
+type SnapshotStreamCallbacks struct {
+	Header  func(Header) error
+	Code    func(Group) error
+	Storage func(common.Hash, func(func(Group) error) error) error
+}
+
 func ReadSnapshotAt(src io.ReaderAt, size int64, callbacks SnapshotCallbacks) (SnapshotMeta, error) {
+	return ReadSnapshotStreamAt(src, size, SnapshotStreamCallbacks{
+		Header: callbacks.Header,
+		Code:   callbacks.Code,
+		Storage: func(address common.Hash, groups func(func(Group) error) error) error {
+			if callbacks.Storage == nil {
+				return groups(nil)
+			}
+			storage := Storage{AddressHash: address}
+			if err := groups(func(group Group) error {
+				storage.Groups = append(storage.Groups, group)
+				return nil
+			}); err != nil {
+				return err
+			}
+			return callbacks.Storage(storage)
+		},
+	})
+}
+
+func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamCallbacks) (SnapshotMeta, error) {
 	var meta SnapshotMeta
 	if src == nil || size < 56 {
 		return meta, ErrMalformed
@@ -53,22 +79,22 @@ func ReadSnapshotAt(src io.ReaderAt, size int64, callbacks SnapshotCallbacks) (S
 	c := artifactCursor{src: src, limit: size}
 	root, err := c.bytes(32)
 	if err != nil {
-		return meta, err
+		return meta, fmt.Errorf("%w: root: %w", ErrMalformed, err)
 	}
 	copy(meta.Root[:], root)
 	headerCount, err := c.count()
 	if err != nil {
-		return meta, err
+		return meta, fmt.Errorf("%w: header count: %w", ErrMalformed, err)
 	}
 	if err := countFits(headerCount, c.remaining(), 36); err != nil {
-		return meta, err
+		return meta, fmt.Errorf("%w: header count: %w", ErrMalformed, err)
 	}
 	headerStart := c.offset
 	var previousAddress common.Hash
 	for i := range headerCount {
 		header, err := readHeaderAt(&c)
 		if err != nil {
-			return meta, err
+			return meta, fmt.Errorf("%w: header %d: %w", ErrMalformed, i, err)
 		}
 		if i != 0 && bytes.Compare(header.AddressHash[:], previousAddress[:]) <= 0 {
 			return meta, ErrUnsorted
@@ -83,16 +109,16 @@ func ReadSnapshotAt(src io.ReaderAt, size int64, callbacks SnapshotCallbacks) (S
 	headerEnd := c.offset
 	codeCount, err := c.count()
 	if err != nil {
-		return meta, err
+		return meta, fmt.Errorf("%w: code count: %w", ErrMalformed, err)
 	}
 	if err := countFits(codeCount, c.remaining(), 35); err != nil {
-		return meta, err
+		return meta, fmt.Errorf("%w: code count: %w", ErrMalformed, err)
 	}
 	var previousStem common.Hash
 	for i := range codeCount {
 		group, err := readGroupAt(&c)
 		if err != nil {
-			return meta, err
+			return meta, fmt.Errorf("%w: code group %d: %w", ErrMalformed, i, err)
 		}
 		if i != 0 && bytes.Compare(group.StemHash[:], previousStem[:]) <= 0 {
 			return meta, ErrUnsorted
@@ -106,29 +132,60 @@ func ReadSnapshotAt(src io.ReaderAt, size int64, callbacks SnapshotCallbacks) (S
 	}
 	storageCount, err := c.count()
 	if err != nil {
-		return meta, err
+		return meta, fmt.Errorf("%w: storage count: %w", ErrMalformed, err)
 	}
 	if err := countFits(storageCount, c.remaining(), 68); err != nil {
-		return meta, err
+		return meta, fmt.Errorf("%w: storage count: %w", ErrMalformed, err)
 	}
 	headerCursor := artifactCursor{src: src, offset: headerStart, limit: headerEnd}
 	var previousStorage common.Hash
 	for i := range storageCount {
-		storage, err := readStorageAt(&c)
+		address, err := c.bytes(32)
 		if err != nil {
-			return meta, err
+			return meta, fmt.Errorf("%w: storage address: %w", ErrMalformed, err)
 		}
-		if i != 0 && bytes.Compare(storage.AddressHash[:], previousStorage[:]) <= 0 {
+		var addressHash common.Hash
+		copy(addressHash[:], address)
+		if i != 0 && bytes.Compare(addressHash[:], previousStorage[:]) <= 0 {
 			return meta, ErrUnsorted
 		}
-		previousStorage = storage.AddressHash
-		if err := matchStorageHeader(&headerCursor, storage.AddressHash); err != nil {
-			return meta, err
+		previousStorage = addressHash
+		if err := matchStorageHeader(&headerCursor, addressHash); err != nil {
+			return meta, fmt.Errorf("%w: storage header: %w", ErrMalformed, err)
+		}
+		countBytes, err := readIntegerAt(&c, 8)
+		if err != nil || len(countBytes) == 0 {
+			return meta, fmt.Errorf("%w: zero storage group count: %v", ErrMalformed, err)
+		}
+		count := integerValue(countBytes)
+		if count == 0 || count > uint64(c.remaining()/35) {
+			return meta, fmt.Errorf("%w: invalid storage group count %d", ErrMalformed, count)
+		}
+		groups := func(yield func(Group) error) error {
+			var previous common.Hash
+			for j := range count {
+				group, err := readGroupAt(&c)
+				if err != nil {
+					return fmt.Errorf("%w: storage group %d: %w", ErrMalformed, j, err)
+				}
+				if j != 0 && bytes.Compare(group.StemHash[:], previous[:]) <= 0 {
+					return ErrUnsorted
+				}
+				previous = group.StemHash
+				if yield != nil {
+					if err := yield(group); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
 		}
 		if callbacks.Storage != nil {
-			if err := callbacks.Storage(storage); err != nil {
+			if err := callbacks.Storage(addressHash, groups); err != nil {
 				return meta, err
 			}
+		} else if err := groups(nil); err != nil {
+			return meta, err
 		}
 	}
 	if c.offset != c.limit {

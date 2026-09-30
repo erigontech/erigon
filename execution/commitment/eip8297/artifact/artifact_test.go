@@ -32,6 +32,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -512,15 +514,98 @@ func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
 			return yield(key)
 		})
 	}, eip8297.HashBytes))
-	surplus := append([][32]byte{headerSlot, overflowSlot}, [32]byte{2})
-	sort.Slice(surplus, func(i, j int) bool {
-		a := keccak.Sum256(surplus[i][:])
-		b := keccak.Sum256(surplus[j][:])
-		return bytes.Compare(a[:], b[:]) < 0
+	require.Error(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), func(yield func([]byte) error) error {
+		if err := yield(headerKey); err != nil {
+			return err
+		}
+		return yield(headerSlotKey)
+	}, eip8297.HashBytes), "a missing overflow preimage must be rejected")
+	extraHeaderSlot := [32]byte{2}
+	extraSlots := [][32]byte{headerSlot, overflowSlot, extraHeaderSlot}
+	sort.Slice(extraSlots, func(i, j int) bool {
+		left := keccak.Sum256(extraSlots[i][:])
+		right := keccak.Sum256(extraSlots[j][:])
+		return bytes.Compare(left[:], right[:]) < 0
 	})
 	encoded.Reset()
-	require.NoError(t, WritePreimages(&encoded, []Preimage{{Address: address, Slots: surplus}}))
+	require.NoError(t, WritePreimages(&encoded, []Preimage{{Address: address, Slots: extraSlots}}))
 	require.ErrorContains(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), yieldExpected, eip8297.HashBytes), "surplus key")
+}
+
+func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
+	const slotCount = 1_000_000
+	address := common.Address{1}
+	basic, err := eip8297.EncodeBasicData(1, uint256.NewInt(1), 0)
+	require.NoError(t, err)
+	treeCollector := etl.NewCollector(t.Name()+"-tree", t.TempDir(), etl.NewSortableBuffer(1<<20), log.New())
+	defer treeCollector.Close()
+	preimageCollector := etl.NewCollector(t.Name()+"-preimages", t.TempDir(), etl.NewSortableBuffer(1<<20), log.New())
+	defer preimageCollector.Close()
+	address32 := eip8297.RightAlign32(address[:])
+	stem := eip8297.HashBytes(address32[:])
+	require.NoError(t, treeCollector.Collect(eip8297.TreeKey(eip8297.AccountZone, stem[:], eip8297.BasicDataLeafKey), basic[:]))
+	value := paddedValue(1)
+	for i := range slotCount {
+		var slot [32]byte
+		slot[0] = 1
+		binary.BigEndian.PutUint64(slot[1:9], uint64(i))
+		slot[31] = 0x80
+		slotDigest := keccak.Sum256(slot[:])
+		require.NoError(t, treeCollector.Collect(eip8297.TreeKeyStorage(address[:], slot[:]), value))
+		require.NoError(t, preimageCollector.Collect(slotDigest[:], slot[:]))
+	}
+	snapshotFile, err := os.CreateTemp(t.TempDir(), "large-snapshot-")
+	require.NoError(t, err)
+	_, err = WriteSnapshot(snapshotFile, common.Hash{}, func(emit func([]byte, []byte) error) error {
+		return treeCollector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			return emit(key, value)
+		}, etl.TransformArgs{})
+	})
+	require.NoError(t, err)
+	require.NoError(t, snapshotFile.Close())
+	defer os.Remove(snapshotFile.Name())
+	snapshot, err := os.Open(snapshotFile.Name())
+	require.NoError(t, err)
+	defer snapshot.Close()
+	snapshotInfo, err := snapshot.Stat()
+	require.NoError(t, err)
+	preimageFile, err := os.CreateTemp(t.TempDir(), "large-preimages-")
+	require.NoError(t, err)
+	err = WritePreimagesStream(preimageFile, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+		return yield(address, func(slotYield func([32]byte) error) error {
+			return preimageCollector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+				var slot [32]byte
+				copy(slot[:], value)
+				return slotYield(slot)
+			}, etl.TransformArgs{})
+		})
+	})
+	require.NoError(t, err)
+	require.NoError(t, preimageFile.Close())
+	defer os.Remove(preimageFile.Name())
+	preimages, err := os.Open(preimageFile.Name())
+	require.NoError(t, err)
+	defer preimages.Close()
+	preimageInfo, err := preimages.Stat()
+	require.NoError(t, err)
+	_, err = ReadSnapshotStreamAt(snapshot, snapshotInfo.Size(), SnapshotStreamCallbacks{})
+	require.NoError(t, err)
+	runtime.GC()
+	var peak uint64
+	seen := 0
+	err = JoinAt(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), eip8297.HashBytes, func(common.Address, [32]byte) error {
+		seen++
+		if seen%10_000 == 0 {
+			runtime.GC()
+			var memory runtime.MemStats
+			runtime.ReadMemStats(&memory)
+			peak = max(peak, memory.HeapAlloc)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, slotCount, seen)
+	require.Less(t, peak, uint64(32<<20))
 }
 
 type testLeaf struct {
