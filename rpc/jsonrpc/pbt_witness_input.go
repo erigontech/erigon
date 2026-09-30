@@ -36,17 +36,23 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 	result := pbinWitnessInput{}
 	readKeys := make(map[string][]byte)
 	for address, source := range rs.accountReadSources {
-		if source&recordingReadPreState != 0 {
+		if source&recordingReadPreState != 0 && source&recordingReadUser != 0 {
 			key := eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey)
 			readKeys[string(key)] = key
 		}
 	}
 	for address, keys := range rs.storageReadSources {
 		for slot, source := range keys {
-			if source&recordingReadPreState != 0 {
+			if source&recordingReadPreState != 0 && source&recordingReadUser != 0 {
 				key := eip8297.TreeKeyStorage(address[:], slot[:])
 				readKeys[string(key)] = key
 			}
+		}
+	}
+	for address := range rs.DeletedAccounts {
+		if rs.innerExists(address) {
+			key := eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey)
+			readKeys[string(key)] = key
 		}
 	}
 	for address, code := range rs.PreStateCode {
@@ -55,13 +61,8 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 			readKeys[string(key)] = key
 			continue
 		}
-		codeHash := rs.codeHash(code)
 		key := eip8297.TreeKeyAccount(address[:], eip8297.CodeHashLeafKey)
 		readKeys[string(key)] = key
-		for chunkID := range eip8297.ChunkifyCode(code) {
-			chunkKey := eip8297.TreeKeyCodeChunk(codeHash, chunkID)
-			readKeys[string(chunkKey)] = chunkKey
-		}
 	}
 	result.Reads = make([][]byte, 0, len(readKeys))
 	for _, key := range readKeys {

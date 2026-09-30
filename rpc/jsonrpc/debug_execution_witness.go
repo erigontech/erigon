@@ -46,6 +46,8 @@ type recordingReadSource uint8
 const (
 	recordingReadPreState recordingReadSource = 1 << iota
 	recordingReadOverlay
+	recordingReadSystemCall
+	recordingReadUser
 )
 
 // RecordingState combines a StateReader and StateWriter with an in-memory overlay.
@@ -97,6 +99,7 @@ type RecordingState struct {
 	// that alone is not a witness access. A real opcode access during a user tx
 	// (seen via the per-tx access set) sets this so it is kept (EIP-7928).
 	systemAddrTouchedInTx bool
+	systemCallScope       bool
 }
 
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
@@ -151,14 +154,30 @@ func (s *RecordingState) tracing(addr common.Address) bool {
 }
 
 func (s *RecordingState) recordAccountRead(addr common.Address, source recordingReadSource) {
+	if s.systemCallScope {
+		source |= recordingReadSystemCall
+	} else {
+		source |= recordingReadUser
+	}
 	s.accountReadSources[addr] |= source
 }
 
 func (s *RecordingState) recordStorageRead(addr common.Address, key common.Hash, source recordingReadSource) {
+	if s.systemCallScope {
+		source |= recordingReadSystemCall
+	} else {
+		source |= recordingReadUser
+	}
 	if s.storageReadSources[addr] == nil {
 		s.storageReadSources[addr] = make(map[common.Hash]recordingReadSource)
 	}
 	s.storageReadSources[addr][key] |= source
+}
+
+func withRecordingSystemCallScope(recordingState *RecordingState, call func() error) error {
+	recordingState.systemCallScope = true
+	defer func() { recordingState.systemCallScope = false }()
+	return call()
 }
 
 func (s *RecordingState) recordPBTCode(code []byte) {
@@ -761,12 +780,14 @@ func (api *BaseAPI) buildAccessedState(
 	}
 	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
+		recordingState.systemCallScope = true
+		defer func() { recordingState.systemCallScope = false }()
 		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
 	}
 	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize block: %w", err)
 	}
-	if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
+	if err = withRecordingSystemCallScope(recordingState, func() error { return ibs.FinalizeTx(blockRules, recordingState) }); err != nil {
 		return nil, nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
 	}
 
@@ -799,6 +820,8 @@ func (api *BaseAPI) buildAccessedState(
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+		recordingState.systemCallScope = true
+		defer func() { recordingState.systemCallScope = false }()
 		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
 	}
 
@@ -813,7 +836,7 @@ func (api *BaseAPI) buildAccessedState(
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
-	if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
+	if err = withRecordingSystemCallScope(recordingState, func() error { return ibs.CommitBlock(blockRules, recordingState) }); err != nil {
 		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
@@ -2445,6 +2468,16 @@ func withPBinSystemCallScope(stateless statelessWitnessState, call func() ([]byt
 	return call()
 }
 
+func withPBinSystemCallError(stateless statelessWitnessState, call func() error) error {
+	scoped, ok := stateless.(pbinSystemCallScoped)
+	if !ok {
+		return call()
+	}
+	scoped.setPBinSystemCallScope(true)
+	defer scoped.setPBinSystemCallScope(false)
+	return call()
+}
+
 // replayBlockOverWitness drives the block through the EVM against a witness-backed
 // reader/writer. It stops short of the post-state root, which each variant computes
 // its own way.
@@ -2516,7 +2549,7 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 		return fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	if err := ibs.CommitBlock(blockRules, stateless); err != nil {
+	if err := withPBinSystemCallError(stateless, func() error { return ibs.CommitBlock(blockRules, stateless) }); err != nil {
 		return fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
 	}
 

@@ -53,9 +53,15 @@ func pbinExecBlockStatelessly(ctx context.Context, result *ExecutionWitnessResul
 	if err := replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
 		return common.Hash{}, stateless, err
 	}
+	if stateless.resolveError != nil {
+		return common.Hash{}, stateless, stateless.resolveError
+	}
 	root, err := stateless.Finalize(ctx)
 	if err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("pbin post-state root: %w", err)
+	}
+	if err := stateless.checkAllNodesConsumed(); err != nil {
+		return common.Hash{}, stateless, err
 	}
 	return root, stateless, nil
 }
@@ -82,6 +88,8 @@ type pbinWitnessStateless struct {
 	preStateAccounts map[common.Address]bool
 	storageWrites    map[common.Address]map[common.Hash]uint256.Int
 	deleted          map[common.Address]struct{}
+	paths            [][]byte
+	resolveError     error
 
 	trace       bool
 	tracePrefix string
@@ -101,8 +109,10 @@ func newPBinWitnessStateless(result *ExecutionWitnessResult, parentRoot common.H
 		return nil, fmt.Errorf("pbin witness: keys and state lengths differ: %d and %d", len(result.Keys), len(result.State))
 	}
 	blobs := make(map[string][]byte, len(result.State))
+	paths := make([][]byte, len(result.Keys))
 	for index, key := range result.Keys {
 		path := bytes.Clone(key)
+		paths[index] = path
 		if len(result.State[index]) == 0 {
 			return nil, fmt.Errorf("pbin witness: empty node at path %x", path)
 		}
@@ -111,10 +121,15 @@ func newPBinWitnessStateless(result *ExecutionWitnessResult, parentRoot common.H
 		}
 		blobs[string(path)] = bytes.Clone(result.State[index])
 	}
+	var stateless *pbinWitnessStateless
 	resolve := func(path []byte) ([]byte, error) {
 		blob, ok := blobs[string(path)]
 		if !ok {
-			return nil, fmt.Errorf("%w: missing node at path %x", commitment.ErrPBinWitnessBlinded, path)
+			err := fmt.Errorf("%w: missing node at path %x", commitment.ErrPBinWitnessBlinded, path)
+			if stateless != nil && !stateless.systemCallScope {
+				stateless.resolveError = err
+			}
+			return nil, err
 		}
 		return bytes.Clone(blob), nil
 	}
@@ -130,7 +145,7 @@ func newPBinWitnessStateless(result *ExecutionWitnessResult, parentRoot common.H
 		}
 		codes[hash] = bytes.Clone(code)
 	}
-	return &pbinWitnessStateless{
+	stateless = &pbinWitnessStateless{
 		tree:             tree,
 		codes:            codes,
 		codeUpdates:      make(map[common.Address][]byte),
@@ -138,7 +153,22 @@ func newPBinWitnessStateless(result *ExecutionWitnessResult, parentRoot common.H
 		preStateAccounts: make(map[common.Address]bool),
 		storageWrites:    make(map[common.Address]map[common.Hash]uint256.Int),
 		deleted:          make(map[common.Address]struct{}),
-	}, nil
+		paths:            paths,
+	}
+	return stateless, nil
+}
+
+func (s *pbinWitnessStateless) checkAllNodesConsumed() error {
+	consumed := make(map[string]struct{}, len(s.tree.Resolved()))
+	for _, node := range s.tree.Resolved() {
+		consumed[string(node.Path)] = struct{}{}
+	}
+	for _, path := range s.paths {
+		if _, ok := consumed[string(path)]; !ok {
+			return fmt.Errorf("pbin witness: unconsumed node at path %x", path)
+		}
+	}
+	return nil
 }
 
 func (s *pbinWitnessStateless) SetTrace(trace bool, tracePrefix string) {

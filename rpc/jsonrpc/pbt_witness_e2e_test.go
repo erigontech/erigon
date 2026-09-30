@@ -158,14 +158,28 @@ func pbtCorpusAnchor(t *testing.T, m *execmoduletester.ExecModuleTester, number 
 	return root
 }
 
-func pbtCorpusCloneWithout(result *ExecutionWitnessResult, index int) *ExecutionWitnessResult {
-	clone := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(result.Keys)), State: make([]hexutil.Bytes, len(result.State)), Codes: make([]hexutil.Bytes, len(result.Codes)), Headers: append([]hexutil.Bytes(nil), result.Headers...)}
-	clone.Codes = append(clone.Codes, result.Codes...)
+func pbtCorpusClone(result *ExecutionWitnessResult) *ExecutionWitnessResult {
+	clone := &ExecutionWitnessResult{
+		Keys:           make([]hexutil.Bytes, len(result.Keys)),
+		State:          make([]hexutil.Bytes, len(result.State)),
+		Codes:          make([]hexutil.Bytes, len(result.Codes)),
+		Headers:        append([]hexutil.Bytes(nil), result.Headers...),
+		headerByNumber: result.headerByNumber,
+	}
 	for i := range result.Keys {
 		clone.Keys[i] = append(hexutil.Bytes(nil), result.Keys[i]...)
 		clone.State[i] = append(hexutil.Bytes(nil), result.State[i]...)
 	}
-	clone.State[index] = nil
+	for i := range result.Codes {
+		clone.Codes[i] = append(hexutil.Bytes(nil), result.Codes[i]...)
+	}
+	return clone
+}
+
+func pbtCorpusCloneWithout(result *ExecutionWitnessResult, index int) *ExecutionWitnessResult {
+	clone := pbtCorpusClone(result)
+	clone.Keys = append(clone.Keys[:index], clone.Keys[index+1:]...)
+	clone.State = append(clone.State[:index], clone.State[index+1:]...)
 	return clone
 }
 
@@ -189,11 +203,64 @@ func TestPBinExecutionWitnessCorpus(t *testing.T) {
 			postRoot := pbtCorpusAnchor(t, m, number)
 			require.NoError(t, verifyPBinWitnessAgainstBlock(t.Context(), result, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 			require.NotEmpty(t, result.State)
-			for index := range result.State {
+			for index := range result.Keys {
 				trimmed := pbtCorpusCloneWithout(result, index)
-				require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine), "dropping blob %d must fail", index)
+				require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine), "dropping blob %d path %x must fail", index, []byte(result.Keys[index]))
+
+				corrupted := pbtCorpusClone(result)
+				corrupted.State[index][len(corrupted.State[index])-1] ^= 1
+				require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), corrupted, block, parentRoot, postRoot, m.ChainConfig, m.Engine), "corrupting blob %d path %x must fail", index, []byte(result.Keys[index]))
+
+				corrupted = pbtCorpusClone(result)
+				if len(corrupted.Keys[index]) == 0 {
+					corrupted.Keys[index] = hexutil.Bytes{0xff}
+				} else {
+					corrupted.Keys[index][len(corrupted.Keys[index])-1] ^= 1
+				}
+				require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), corrupted, block, parentRoot, postRoot, m.ChainConfig, m.Engine), "corrupting path %d must fail", index)
 			}
 		})
+	}
+}
+
+func TestPBinExecutionWitnessDeletesPersistedEmptyStorageAccount(t *testing.T) {
+	victim := common.HexToAddress("0x7600000000000000000000000000000000000000")
+	toucher := common.HexToAddress("0x7700000000000000000000000000000000000000")
+	touchCode := []byte{0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x60, 0, 0x73}
+	touchCode = append(touchCode, victim[:]...)
+	touchCode = append(touchCode, 0x5a, 0xf1, 0x00)
+	alloc := types.GenesisAlloc{victim: {
+		Storage: map[common.Hash]common.Hash{
+			pbtCorpusSlot(0):   pbtCorpusSlot(1),
+			pbtCorpusSlot(256): pbtCorpusSlot(1),
+			pbtCorpusSlot(257): pbtCorpusSlot(2),
+		},
+	}, toucher: {Code: touchCode}}
+	api, m := pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 1, nil, func(i int, _ *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), _ func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
+		if i == 0 {
+			addTransaction(toucher, uint256.NewInt(0), nil)
+		}
+	}, alloc)
+	repairPBinPreForkShadows(t, m, 1000)
+	pbt := "pbt"
+	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
+	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(1), nil, &pbt)
+	require.NoError(t, err)
+	block := pbtPortBlock(t, m, 1)
+	require.NoError(t, verifyPBinWitnessAgainstBlock(t.Context(), result, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
+
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+	encoded, _, err := tx.GetLatest(kv.AccountsDomain, victim[:], kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, encoded, "the persisted empty account must be deleted by the touch")
+	for _, slot := range []uint64{0, 256, 257} {
+		slotKey := pbtCorpusSlot(slot)
+		key := append(append([]byte(nil), victim[:]...), slotKey[:]...)
+		storage, _, err := tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Empty(t, storage, "storage slot %d must be deleted with the account", slot)
 	}
 }
 

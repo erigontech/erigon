@@ -561,6 +561,7 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - [x] dual matrix: bin-only; hex+bin before, at and after activation; canonical and shadow anchors; retained and pruned
       history; head capture; blocks that touch no state
 - [x] run tests - must pass before task 13
+- [x] ➕ enforce exact node-set consumption in the verifier, remove builder-only pre-state code-chunk proofs, and cover persisted empty accounts with header and overflow storage
 
 ### Task 13: Witness documentation
 

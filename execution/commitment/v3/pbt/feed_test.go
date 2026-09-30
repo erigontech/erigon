@@ -435,6 +435,23 @@ func TestProcessFeedEmptyCodeWriteLeavesCodeHash(t *testing.T) {
 	assertFeedState(t, []commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{account}}}, [][]eip8297.State{{feedState(account)}})
 }
 
+func TestProcessFeedKeepsZeroBasicDataForStorageAccount(t *testing.T) {
+	address := common.Hex2Bytes("000000000000000000000000000000000000000e")
+	account := feedAccount(address)
+	account.CodeWritten = true
+	account.Code = []byte{}
+	account.CodeHash = empty.CodeHash
+	account.Slots = []commitment.PBinFeedSlot{{Key: []byte{0x01, 0x00}, Value: []byte{0x02}}}
+	ctx := newTrieTestContext()
+	trie := NewTrie(ctx)
+	_, err := trie.ProcessFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{account}})
+	require.NoError(t, err)
+	cell, present, err := trie.lookupLeaf(eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey))
+	require.NoError(t, err)
+	require.True(t, present, "storage-bearing account must keep its zero BASIC_DATA leaf")
+	require.Equal(t, [eip8297.ValueLength]byte{}, cell.Value)
+}
+
 func TestTranslateFeedRejectsCodeHashMismatch(t *testing.T) {
 	address := common.Hex2Bytes("000000000000000000000000000000000000000b")
 	account := feedAccount(address)

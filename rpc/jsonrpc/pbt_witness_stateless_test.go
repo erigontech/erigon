@@ -114,6 +114,18 @@ func (f *pbinStatelessFixture) stateless(t *testing.T) *pbinWitnessStateless {
 	return stateless
 }
 
+func pbinStatelessWitnessForReads(t *testing.T, f *pbinStatelessFixture, reads ...[]byte) *ExecutionWitnessResult {
+	t.Helper()
+	paths, blobs, _, err := pbtengine.NewTrie(f.context).Witness(context.Background(), f.root, eipWitness.PBinDriverInput{Reads: reads})
+	require.NoError(t, err)
+	result := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(paths)), State: make([]hexutil.Bytes, len(blobs))}
+	for index := range paths {
+		result.Keys[index] = paths[index]
+		result.State[index] = blobs[index]
+	}
+	return result
+}
+
 func TestPBinWitnessStatelessReplaysWrites(t *testing.T) {
 	f := newPBinStatelessFixture(t)
 	stateless := f.stateless(t)
@@ -142,6 +154,10 @@ func TestPBinWitnessStatelessReplaysWrites(t *testing.T) {
 
 func TestPBinWitnessStatelessReplaysWithdrawal(t *testing.T) {
 	f := newPBinStatelessFixture(t)
+	result := pbinStatelessWitnessForReads(t, f,
+		eip8297.TreeKeyAccount(f.address[:], eip8297.BasicDataLeafKey),
+		eip8297.TreeKeyAccount(f.address[:], eip8297.CodeHashLeafKey),
+	)
 	post := newPBinWitnessInputContext()
 	post.records = clonePBinWitnessInputRecords(f.context.records)
 	balance := uint256.NewInt(7 + 3*common.GWei)
@@ -152,8 +168,28 @@ func TestPBinWitnessStatelessReplaysWithdrawal(t *testing.T) {
 	block := types.NewBlock(&types.Header{Root: postRoot, Number: *uint256.NewInt(1), Difficulty: uint256.Int{}, GasLimit: 30_000_000, Time: 1, BaseFee: uint256.NewInt(7)}, nil, nil, nil, []*types.Withdrawal{{Index: 0, Validator: 0, Address: f.address, Amount: 3}}, nil)
 	engine := merge.New(ethash.NewFaker())
 	chainConfig := pbinStatelessChainConfig()
-	require.NoError(t, verifyPBinWitnessAgainstBlock(context.Background(), f.result, block, f.root, postRoot, chainConfig, engine))
-	require.ErrorContains(t, verifyPBinWitnessAgainstBlock(context.Background(), f.result, block, f.root, common.HexToHash("0x01"), chainConfig, engine), "state root mismatch")
+	require.NoError(t, verifyPBinWitnessAgainstBlock(context.Background(), result, block, f.root, postRoot, chainConfig, engine))
+	require.ErrorContains(t, verifyPBinWitnessAgainstBlock(context.Background(), result, block, f.root, common.HexToHash("0x01"), chainConfig, engine), "state root mismatch")
+}
+
+func TestPBinWitnessStatelessRejectsUnconsumedNode(t *testing.T) {
+	f := newPBinStatelessFixture(t)
+	result := pbinStatelessWitnessForReads(t, f,
+		eip8297.TreeKeyAccount(f.address[:], eip8297.BasicDataLeafKey),
+		eip8297.TreeKeyAccount(f.address[:], eip8297.CodeHashLeafKey),
+	)
+	result.Keys = append(result.Keys, hexutil.Bytes{0xff})
+	result.State = append(result.State, hexutil.Bytes{0x01})
+	post := newPBinWitnessInputContext()
+	post.records = clonePBinWitnessInputRecords(f.context.records)
+	balance := uint256.NewInt(7 + 3*common.GWei)
+	basic, err := eip8297.EncodeBasicData(1, balance, 0)
+	require.NoError(t, err)
+	postRoot, err := pbtengine.NewTrie(post).Process([]pbtengine.Op{{Key: eip8297.TreeKeyAccount(f.address[:], eip8297.BasicDataLeafKey), Value: basic}})
+	require.NoError(t, err)
+	block := types.NewBlock(&types.Header{Root: postRoot, Number: *uint256.NewInt(1), Difficulty: uint256.Int{}, GasLimit: 30_000_000, Time: 1, BaseFee: uint256.NewInt(7)}, nil, nil, nil, []*types.Withdrawal{{Index: 0, Validator: 0, Address: f.address, Amount: 3}}, nil)
+	engine := merge.New(ethash.NewFaker())
+	require.ErrorContains(t, verifyPBinWitnessAgainstBlock(context.Background(), result, block, f.root, postRoot, pbinStatelessChainConfig(), engine), "unconsumed node at path ff")
 }
 
 func TestPBinWitnessStatelessWithdrawalUsesBasicCodeSize(t *testing.T) {

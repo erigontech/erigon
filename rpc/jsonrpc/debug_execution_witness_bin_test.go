@@ -88,6 +88,10 @@ func pbinWitnessFixtureWithGenerator(t *testing.T, activation uint64, beforeInse
 }
 
 func pbinWitnessFixtureWithGeneratorN(t *testing.T, activation uint64, blockCount int, beforeInsert func(*execmoduletester.ExecModuleTester, *blockgen.ChainPack) error, generator pbinWitnessBlockGenerator, dualOption ...bool) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
+	return pbinWitnessFixtureWithGeneratorNAlloc(t, activation, blockCount, beforeInsert, generator, nil, dualOption...)
+}
+
+func pbinWitnessFixtureWithGeneratorNAlloc(t *testing.T, activation uint64, blockCount int, beforeInsert func(*execmoduletester.ExecModuleTester, *blockgen.ChainPack) error, generator pbinWitnessBlockGenerator, extraAlloc types.GenesisAlloc, dualOption ...bool) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
 	t.Helper()
 	withCommitmentHistory(t)
 	dual := activation > 0
@@ -133,6 +137,7 @@ func pbinWitnessFixtureWithGeneratorN(t *testing.T, activation uint64, blockCoun
 	}
 	balance := new(big.Int).Mul(big.NewInt(10), new(big.Int).SetUint64(common.Ether))
 	genesis := &types.Genesis{Config: config, Difficulty: uint256.NewInt(0), Alloc: types.GenesisAlloc{from: {Balance: new(big.Int).Set(balance)}, to: {Balance: big.NewInt(0), Nonce: 1, Code: common.FromHex("0x60003560005500")}}, GasLimit: 30_000_000, BaseFee: uint256.NewInt(0)}
+	maps.Copy(genesis.Alloc, extraAlloc)
 	for i := range 256 {
 		genesis.Alloc[common.BytesToAddress([]byte{0x02, byte(i)})] = types.GenesisAccount{Balance: big.NewInt(1)}
 	}

@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	pbtengine "github.com/erigontech/erigon/execution/commitment/v3/pbt"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -59,6 +60,26 @@ func TestPBinWitnessInputExcludesOverlayReads(t *testing.T) {
 	got, err = buildPBinWitnessInput(overlayOnly)
 	require.NoError(t, err)
 	require.NotContains(t, got.Reads, wantKey, "overlay read must not become a pre-state load")
+}
+
+func TestPBinWitnessInputExcludesSyntheticSystemReads(t *testing.T) {
+	address := common.HexToAddress("0x4600000000000000000000000000000000000000")
+	slot := common.HexToHash("0x80")
+	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Nonce: 1}}}
+	rs := NewRecordingState(inner)
+	rs.systemCallScope = true
+	_, err := rs.ReadAccountData(accounts.InternAddress(address))
+	require.NoError(t, err)
+	_, _, err = rs.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(slot))
+	require.NoError(t, err)
+	rs.systemCallScope = false
+	_, err = rs.ReadAccountData(params.SystemAddress)
+	require.NoError(t, err)
+
+	got, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	systemAddress := params.SystemAddress.Value()
+	require.Equal(t, [][]byte{eip8297.TreeKeyAccount(systemAddress[:], eip8297.BasicDataLeafKey)}, got.Reads, "synthetic system reads must not enter the pbt input")
 }
 
 func TestPBinWitnessInputKeepsRevertedCallReads(t *testing.T) {
@@ -97,6 +118,7 @@ func TestPBinWitnessInputCodesAreContentKeyed(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, got.Codes, first, "the first code version must remain in the pbt code set")
 	require.Contains(t, got.Codes, second, "the second code version must remain in the pbt code set")
+	require.NotContains(t, got.Reads, eip8297.TreeKeyCodeChunk(rs.codeHash(first), 0), "pre-state code reads do not need code chunk proofs")
 	mpt := collectAccessedState(rs, witnessModeLegacy)
 	require.Contains(t, mpt.SortedCodes, hexutil.Bytes(first), "the MPT code set must retain the first code version")
 	require.Contains(t, mpt.SortedCodes, hexutil.Bytes(second), "the MPT code set must retain the second code version")
