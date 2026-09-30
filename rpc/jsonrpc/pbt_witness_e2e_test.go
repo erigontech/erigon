@@ -354,6 +354,30 @@ func TestPBinExecutionWitnessUserSystemAddressCodeSizeProof(t *testing.T) {
 	require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 }
 
+func TestPBinExecutionWitnessDelegationToSystemAddressProof(t *testing.T) {
+	system := params.SystemAddress.Value()
+	delegated := common.HexToAddress("0x7700000000000000000000000000000000000077")
+	designator := append([]byte{0xef, 0x01, 0x00}, system[:]...)
+	alloc := types.GenesisAlloc{
+		system:    {Balance: big.NewInt(5), Code: []byte{0x00}},
+		delegated: {Balance: big.NewInt(1), Code: designator},
+	}
+	api, m := pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 2, nil, func(i int, _ *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), _ func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
+		if i == 1 {
+			addTransaction(delegated, uint256.NewInt(0), nil)
+		}
+	}, alloc)
+	repairPBinPreForkShadows(t, m, 1000)
+	result := pbtPortWitness(t, api, m, 2)
+	block := pbtPortBlock(t, m, 2)
+	parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
+	target := []byte{0x00, 0x10, 0x00, 0x4b}
+	index := slices.IndexFunc(result.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, target) })
+	require.NotEqual(t, -1, index, "the system-address header group must be in the witness")
+	trimmed := pbtCorpusCloneWithout(result, index)
+	require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
+}
+
 func TestPBinExecutionWitnessProvesOverflowOnlyAccountCodeHashRead(t *testing.T) {
 	victim := common.HexToAddress("0x000000000000000000000000000000000000abcde")
 	caller := common.HexToAddress("0x000000000000000000000000000000000000abcdf")
