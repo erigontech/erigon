@@ -18,6 +18,7 @@ package jsonstream
 
 import (
 	"encoding"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"slices"
@@ -94,13 +95,57 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 	s.afterValue()
 }
 
+// hexChunk is how much input one chunk of a large hex value encodes: its hex stays well under
+// FlushThreshold, so the value streams through a buffer of about that size.
+const hexChunk = FlushThreshold / 4
+
 func (s *StackStream) WriteHex(b []byte) {
+	if s.out != nil && len(b) > hexChunk {
+		s.writeHexChunked(b)
+		return
+	}
 	s.beforeValue()
 	buf := s.stream.Buffer()
 	start := len(buf)
 	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
 	s.commit(buf, start)
 	s.afterValue()
+}
+
+func (s *StackStream) writeHexChunked(b []byte) {
+	s.beforeValue()
+	s.appendHex(b)
+	s.afterValue()
+}
+
+// appendHex appends b as a quoted hex string. A value above one chunk is appended chunk by
+// chunk, handing the buffer to the writer whenever it passes FlushThreshold, so the value never
+// needs a buffer of its own size.
+func (s *StackStream) appendHex(b []byte) {
+	if len(b) <= hexChunk {
+		s.stream.SetBuffer(hexutil.AppendQuoted(s.stream.Buffer(), b))
+		return
+	}
+	s.stream.SetBuffer(append(s.stream.Buffer(), `"0x`...))
+	for i := 0; i < len(b); i += hexChunk {
+		s.stream.SetBuffer(hex.AppendEncode(s.stream.Buffer(), b[i:min(i+hexChunk, len(b))]))
+		flushIfFull(s.stream)
+	}
+	s.stream.SetBuffer(append(s.stream.Buffer(), '"'))
+}
+
+// appendArrayChunked appends an array of n elements, handing the buffer to the writer whenever
+// it passes FlushThreshold. elem appends element i; a large one may flush on its own.
+func (s *StackStream) appendArrayChunked(n int, elem func(i int)) {
+	s.stream.SetBuffer(append(s.stream.Buffer(), '['))
+	for i := range n {
+		if i > 0 {
+			s.stream.SetBuffer(append(s.stream.Buffer(), ','))
+		}
+		elem(i)
+		flushIfFull(s.stream)
+	}
+	s.stream.SetBuffer(append(s.stream.Buffer(), ']'))
 }
 
 // HexesField writes fixed-size values as one array field: one buffer growth for the whole
@@ -112,7 +157,13 @@ func HexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items
 		return
 	}
 	s.beforeValue()
-	buf := slices.Grow(s.stream.Buffer(), 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
+	size := 2 + len(items)*(hexutil.QuotedLen(length.Hash)+1)
+	if s.out != nil && size > FlushThreshold {
+		s.appendArrayChunked(len(items), func(i int) { s.appendHex(items[i][:]) })
+		s.afterValue()
+		return
+	}
+	buf := slices.Grow(s.stream.Buffer(), size)
 	buf = append(buf, '[')
 	for i := range items {
 		if i > 0 {
@@ -131,6 +182,11 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
 	size := 2 + len(items)
 	for i := range items {
 		size += hexutil.QuotedLen(len(items[i]))
+	}
+	if s.out != nil && size > FlushThreshold {
+		s.appendArrayChunked(len(items), func(i int) { s.appendHex(items[i]) })
+		s.afterValue()
+		return
 	}
 	buf := slices.Grow(s.stream.Buffer(), size)
 	buf = append(buf, '[')
