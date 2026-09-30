@@ -67,7 +67,7 @@ func DoCall(
 	var ibs *state.IntraBlockState
 	if dbg.CallVersionedIBS {
 		ibs = state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
-		ibs.SetNoMaterialize(true)
+		ibs.SetNoMaterialize(dbg.CallNoMaterialize)
 		ibs.SetTxContext(0, 0)
 	} else {
 		ibs = state.New(stateReader)

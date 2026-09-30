@@ -49,6 +49,8 @@ var (
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 	// CallVersionedIBS routes eth_call through the parallel-exec state path.
 	CallVersionedIBS = EnvBool("CALL_VERSIONED_IBS", false)
+	// CallNoMaterialize: with CALL_VERSIONED_IBS, also suppress the stateObject cache.
+	CallNoMaterialize = EnvBool("CALL_NOMAT", true)
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
