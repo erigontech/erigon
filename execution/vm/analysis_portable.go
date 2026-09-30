@@ -25,12 +25,23 @@ import (
 	"unsafe"
 )
 
-var portableIota = func() (t [64]int8) {
-	for i := range t {
-		t[i] = int8(i)
+var portableIota, portableIota96 = func() (t [64]int8, t96 [96]int8) {
+	for i := range t96 {
+		t96[i] = int8(i)
 	}
-	return t
+	copy(t[:], t96[:])
+	return t, t96
 }()
+
+// anyByte reports whether any of the 64 bytes is non-zero.
+func anyByte(b *[64]int8) bool {
+	raw := (*[64]byte)(unsafe.Pointer(b))
+	var v uint64
+	for i := 0; i < 64; i += 8 {
+		v |= binary.LittleEndian.Uint64(raw[i:])
+	}
+	return v != 0
+}
 
 // packBytes turns 64 bytes of 0x00/0xff into 64 bits.
 func packBytes(b *[64]int8) uint64 {
@@ -42,43 +53,51 @@ func packBytes(b *[64]int8) uint64 {
 	return v
 }
 
-// codeBitmapPortable uses only the portable simd package: lane-wise compares on loads of the
-// code at shifted offsets, no shuffles. A byte y is inside the data of a PUSH d bytes before it
-// when int8(code[y-d]) >= 0x5f+d. Taking every PUSH at or past the entry as real gives the covered
-// bytes in 32 compares; when no such PUSH is itself covered the guess is exact, otherwise a scalar
-// walk takes the chunk. The first chunk is walked too, so the 32-byte lookback stays in bounds.
+// codeBitmapPortable uses only the portable simd package: lane-wise arithmetic on loads at shifted
+// offsets, no shuffles. A byte y is inside the data of a PUSH d bytes before it when
+// int8(code[y-d]) >= 0x5f+d, so y is covered when the maximum over d of code[y-d]-d, saturated,
+// reaches 0x5f. Taking every PUSH at or past the entry as real gives the covered bytes; when no
+// such PUSH is itself covered the guess is exact, otherwise a scalar walk takes the chunk. The
+// first chunk is walked too, so the 32-byte lookback stays in bounds.
 func codeBitmapPortable(code []byte) bitvec {
 	out := make(bitvec, (len(code)+63)/64)
 	var z simd.Int8s
 	n := z.Len()
+	one := simd.BroadcastInt8s(1)
 	c5f := simd.BroadcastInt8s(0x5f)
 	c5b := simd.BroadcastInt8s(0x5b)
-	var cov, cand, jdb [64]int8
+	var win [96]int8 // lookback and chunk, with the bytes before the entry cleared
+	var res, conflict, cand [64]int8
 	e := walkChunk(code, 0, 0, out)
 	w := 1
 	for ; (w+1)*64 <= len(code); w++ {
 		i := w * 64
-		for j := 0; j < 64; j += n {
-			pos := simd.LoadInt8s(portableIota[j:])
-			c := simd.LoadUint8s(code[i+j:]).BitsToInt8()
-			covered := c.Less(c) // all false
-			for d := 1; d <= 32; d++ {
-				pushed := simd.LoadUint8s(code[i+j-d:]).BitsToInt8().GreaterEqual(simd.BroadcastInt8s(int8(0x5f + d)))
-				covered = covered.Or(pushed.And(pos.GreaterEqual(simd.BroadcastInt8s(int8(e + d)))))
-			}
-			covered.ToInt8s().Store(cov[j:])
-			c.Greater(c5f).ToInt8s().Store(cand[j:])
-			c.Equal(c5b).ToInt8s().Store(jdb[j:])
+		src := code[i-32 : i+64]
+		for j := 0; j < 96; j += n {
+			c := simd.LoadUint8s(src[j:]).BitsToInt8()
+			c.IfElse(simd.LoadInt8s(portableIota96[j:]).GreaterEqual(simd.BroadcastInt8s(int8(32+e))), z).Store(win[j:])
 		}
-		covBits, jdBits := packBytes(&cov), packBytes(&jdb)
-		candBits := packBytes(&cand) &^ (uint64(1)<<e - 1)
-		if covBits&candBits != 0 {
+		entry := simd.BroadcastInt8s(int8(e))
+		for j := 0; j < 64; j += n {
+			d, reach := one, simd.BroadcastInt8s(-128)
+			for back := 1; back <= 32; back++ {
+				reach = reach.Max(simd.LoadInt8s(win[32+j-back:]).SubSaturated(d))
+				d = d.Add(one)
+			}
+			covered := reach.GreaterEqual(c5f).Or(simd.LoadInt8s(portableIota[j:]).Less(entry))
+			isPush := simd.LoadInt8s(win[32+j:]).Greater(c5f)
+			isPush.And(covered).ToInt8s().Store(conflict[j:])
+			isPush.ToInt8s().Store(cand[j:])
+			jd := simd.LoadUint8s(code[i+j:]).BitsToInt8().Equal(c5b).ToInt8s()
+			jd.AndNot(covered.ToInt8s()).Store(res[j:])
+		}
+		if anyByte(&conflict) {
 			e = walkChunk(code, i, e, out)
 			continue
 		}
-		out[w] = jdBits &^ (covBits | uint64(1)<<e - 1)
+		out[w] = packBytes(&res)
 		next := e
-		if candBits != 0 {
+		if candBits := packBytes(&cand); candBits != 0 {
 			p := 63 - bits.LeadingZeros64(candBits)
 			next = max(next, p+1+int(pushLenOf(code[i+p])))
 		}
