@@ -157,3 +157,20 @@ func osCreateBlankAssign(m dsl.Matcher) {
 		Report(`os.Create/OpenFile result assigned to _ leaks a file descriptor. Assign to a variable and close it.
 			Rules are in ./rules.go file.`)
 }
+
+func headerPointerFieldAliasesAnotherObject(m dsl.Matcher) {
+	// &other.field keeps the whole owner alive as long as the header lives, and a pointer to a
+	// package-level var lets a write through the header reach every other holder of it. Copy first.
+	m.Match(
+		`$h.BaseFee = &$x.$f`,
+		`$h.BlobGasUsed = &$x.$f`,
+		`$h.ExcessBlobGas = &$x.$f`,
+		`$h.WithdrawalsHash = &$x.$f`,
+		`$h.RequestsHash = &$x.$f`,
+		`$h.BlockAccessListHash = &$x.$f`,
+		`$h.ParentBeaconBlockRoot = &$x.$f`,
+		`$h.SlotNumber = &$x.$f`,
+	).
+		Report(`Assign the address of a copy, not of another object's field: "v := $x.$f" then "&v".
+			Rules are in ./rules.go file.`)
+}

@@ -607,7 +607,8 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		if g.RequestsHash != nil {
 			head.RequestsHash = g.RequestsHash
 		} else {
-			head.RequestsHash = &empty.RequestsHash
+			emptyRequestsHash := empty.RequestsHash
+			head.RequestsHash = &emptyRequestsHash
 		}
 	}
 
@@ -616,7 +617,8 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 			if g.BlockAccessListHash != nil {
 				head.BlockAccessListHash = g.BlockAccessListHash
 			} else {
-				head.BlockAccessListHash = &empty.BlockAccessListHash
+				emptyBalHash := empty.BlockAccessListHash
+				head.BlockAccessListHash = &emptyBalHash
 			}
 		}
 		if g.SlotNumber != nil {
