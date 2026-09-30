@@ -36,12 +36,12 @@ func (x *Sample) writeJSONFields(s *jsonstream.StackStream) error {
 		ethjson.Data(s, "optBytes", x.OptBytes[:])
 	}
 	if x.PtrBytes == nil {
-		s.Field("ptrBytes").WriteNil()
+		jsonstream.NullField(s, "ptrBytes")
 	} else {
 		ethjson.Data(s, "ptrBytes", (*x.PtrBytes)[:])
 	}
 	if x.PtrHash == nil {
-		s.Field("ptrHash").WriteNil()
+		jsonstream.NullField(s, "ptrHash")
 	} else {
 		ethjson.Data(s, "ptrHash", x.PtrHash[:])
 	}
@@ -58,7 +58,7 @@ func (x *Sample) writeJSONFields(s *jsonstream.StackStream) error {
 		ethjson.Quantity(s, "optNum", x.OptNum)
 	}
 	if x.PtrNum == nil {
-		s.Field("ptrNum").WriteNil()
+		jsonstream.NullField(s, "ptrNum")
 	} else {
 		ethjson.Quantity(s, "ptrNum", *x.PtrNum)
 	}
@@ -68,7 +68,7 @@ func (x *Sample) writeJSONFields(s *jsonstream.StackStream) error {
 	ethjson.Quantity256(s, "big", (*uint256.Int)(&x.Big))
 	ethjson.Quantity256(s, "optBig", (*uint256.Int)(&x.OptBig))
 	if x.PtrBig == nil {
-		s.Field("ptrBig").WriteNil()
+		jsonstream.NullField(s, "ptrBig")
 	} else {
 		ethjson.Quantity256(s, "ptrBig", (*uint256.Int)(x.PtrBig))
 	}
@@ -80,12 +80,12 @@ func (x *Sample) writeJSONFields(s *jsonstream.StackStream) error {
 	if x.OptStr != "" {
 		ethjson.String(s, "optStr", x.OptStr)
 	}
-	s.Field("flag").WriteBool(x.Flag)
+	jsonstream.BoolField(s, "flag", x.Flag)
 	if x.OptFlag {
-		s.Field("optFlag").WriteBool(x.OptFlag)
+		jsonstream.BoolField(s, "optFlag", x.OptFlag)
 	}
 	if x.Logs == nil {
-		s.Field("logs").WriteNil()
+		jsonstream.NullField(s, "logs")
 	} else {
 		s.Field("logs")
 		if err := x.Logs.MarshalFastJSONTo(s); err != nil {
@@ -99,7 +99,7 @@ func (x *Sample) writeJSONFields(s *jsonstream.StackStream) error {
 		}
 	}
 	if x.Nested == nil {
-		s.Field("nested").WriteNil()
+		jsonstream.NullField(s, "nested")
 	} else {
 		s.Field("nested")
 		if err := x.Nested.MarshalFastJSONTo(s); err != nil {

@@ -27,36 +27,36 @@ func (x *RPCHeader) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
 func (x *RPCHeader) writeJSONFields(s *jsonstream.StackStream) error {
 	if x.Number == nil {
-		s.Field("number").WriteNil()
+		jsonstream.NullField(s, "number")
 	} else {
 		ethjson.Quantity256(s, "number", (*uint256.Int)(x.Number))
 	}
 	if x.Hash == nil {
-		s.Field("hash").WriteNil()
+		jsonstream.NullField(s, "hash")
 	} else {
 		ethjson.Data(s, "hash", x.Hash[:])
 	}
 	ethjson.Data(s, "parentHash", x.ParentHash[:])
 	if x.Nonce == nil {
-		s.Field("nonce").WriteNil()
+		jsonstream.NullField(s, "nonce")
 	} else {
 		ethjson.Data(s, "nonce", x.Nonce[:])
 	}
 	ethjson.Data(s, "mixHash", x.MixHash[:])
 	ethjson.Data(s, "sha3Uncles", x.Sha3Uncles[:])
 	if x.LogsBloom == nil {
-		s.Field("logsBloom").WriteNil()
+		jsonstream.NullField(s, "logsBloom")
 	} else {
 		ethjson.Data(s, "logsBloom", x.LogsBloom[:])
 	}
 	ethjson.Data(s, "stateRoot", x.StateRoot[:])
 	if x.Miner == nil {
-		s.Field("miner").WriteNil()
+		jsonstream.NullField(s, "miner")
 	} else {
 		ethjson.Data(s, "miner", x.Miner[:])
 	}
 	if x.Difficulty == nil {
-		s.Field("difficulty").WriteNil()
+		jsonstream.NullField(s, "difficulty")
 	} else {
 		ethjson.Quantity256(s, "difficulty", (*uint256.Int)(x.Difficulty))
 	}

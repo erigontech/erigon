@@ -80,6 +80,24 @@ func HexUint64Field(s *StackStream, name string, v uint64) {
 	flushIfFull(s.stream)
 }
 
+// BoolField writes a field name and a boolean in one step, as HexUint64Field does.
+func BoolField(s *StackStream, name string, v bool) {
+	s.beforeValue()
+	writeObjectFieldFast(s.stream, name)
+	s.stream.WriteBool(v)
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
+// NullField writes a field name and null in one step.
+func NullField(s *StackStream, name string) {
+	s.beforeValue()
+	writeObjectFieldFast(s.stream, name)
+	s.stream.WriteNil()
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
 // HexField writes a field name and the 0x-prefixed hex of b in one step, as HexUint64Field does.
 func HexField(s *StackStream, name string, b []byte) {
 	s.beforeValue()
