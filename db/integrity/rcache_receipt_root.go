@@ -18,6 +18,7 @@ package integrity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -77,10 +78,8 @@ func CheckRCacheRootAtBlk(ctx context.Context, db kv.TemporalRoDB, blockReader d
 		return nil
 	}
 	var probs problems
-	if err := checkRCacheRootAtBlkChunk(ctx, blockNum, blockNum, db, blockReader, failFast, &probs); err != nil {
-		return err
-	}
-	return probs.verdict(string(ReceiptRootIntegrity))
+	err := checkRCacheRootAtBlkChunk(ctx, blockNum, blockNum, db, blockReader, failFast, &probs)
+	return errors.Join(err, probs.verdict(string(ReceiptRootIntegrity)))
 }
 
 // CheckRCacheRootAtBlkRange verifies receipt roots over [from, to) using

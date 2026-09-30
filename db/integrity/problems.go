@@ -42,7 +42,7 @@ func (p *problems) report(failFast bool, err error) error {
 // verdict is what a check returns once it has walked everything it was given.
 func (p *problems) verdict(check string) error {
 	if n := p.n.Load(); n > 0 {
-		return fmt.Errorf("%s: found %d problem(s), listed above", check, n)
+		return fmt.Errorf("%w: %s: found %d problem(s), listed above", ErrIntegrity, check, n)
 	}
 	return nil
 }

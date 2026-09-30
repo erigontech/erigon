@@ -3,6 +3,7 @@ package integrity
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -207,10 +208,8 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 // receiptsNoDupsRange instead, so that one tally covers every chunk.
 func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) error {
 	var probs problems
-	if err := receiptsNoDupsRange(ctx, fromBlock, toBlock, db, blockReader, failFast, &probs); err != nil {
-		return err
-	}
-	return probs.verdict(string(ReceiptsNoDups))
+	err := receiptsNoDupsRange(ctx, fromBlock, toBlock, db, blockReader, failFast, &probs)
+	return errors.Join(err, probs.verdict(string(ReceiptsNoDups)))
 }
 
 func receiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, probs *problems) (err error) {

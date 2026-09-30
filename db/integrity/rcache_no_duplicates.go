@@ -2,6 +2,7 @@ package integrity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -182,8 +183,7 @@ func parallelChunkCheck(ctx context.Context, sampler *Sampler, fromBlock, toBloc
 		})
 	}
 
-	if err := g.Wait(); err != nil {
-		return err
-	}
-	return probs.verdict(prefix)
+	// A chunk that failed operationally must not erase the problems already reported: the count
+	// is what --failFast=false is run for.
+	return errors.Join(g.Wait(), probs.verdict(prefix))
 }

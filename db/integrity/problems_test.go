@@ -96,3 +96,35 @@ func TestParallelChunkCheckFailsOnAReportedProblem(t *testing.T) {
 		require.NoError(t, parallelChunkCheck(context.Background(), sc.NewSampler(), 1, 500, nil, nil, false, "TestCheck", clean))
 	})
 }
+
+// Checks classify their failures with ErrIntegrity so callers can tell a bad datadir from a broken
+// run. The verdict has to carry it too, or the same defect is classifiable under --failFast and
+// plain without it.
+func TestProblemsVerdictIsAnIntegrityError(t *testing.T) {
+	var p problems
+	require.NoError(t, p.report(false, errChunk))
+	require.ErrorIs(t, p.verdict("SomeCheck"), ErrIntegrity)
+}
+
+// An operational failure part-way through — a read error, or the group context the first one
+// cancels siblings with — must not erase the problems already found. That count is the whole
+// reason to run with --failFast=false.
+func TestParallelChunkCheckKeepsTheTallyWhenAChunkErrors(t *testing.T) {
+	sc, err := NewSamplerCfg(1, 1.0)
+	require.NoError(t, err)
+	opErr := errors.New("stream blew up")
+
+	reportThenFail := func(_ context.Context, from, _ uint64, _ kv.TemporalRoDB, _ dbservices.FullBlockReader, failFast bool, p *problems) error {
+		if reportErr := p.report(failFast, errChunk); reportErr != nil {
+			return reportErr
+		}
+		if from == 1 {
+			return opErr
+		}
+		return nil
+	}
+
+	err = parallelChunkCheck(context.Background(), sc.NewSampler(), 1, 500, nil, nil, false, "TestCheck", reportThenFail)
+	require.ErrorIs(t, err, opErr, "the operational failure must still surface")
+	require.Contains(t, err.Error(), "TestCheck", "and the problems already found must not be lost")
+}
