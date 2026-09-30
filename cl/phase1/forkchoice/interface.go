@@ -175,9 +175,9 @@ type ForkChoiceStorageWriter interface {
 	// self-build envelope, skipping BLS signature verification. EL validation still runs.
 	// MUST only be called from the local block production path.
 	ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
-	// [New in Gloas:EIP7732] OnPayloadAttestationMessage processes a PTC attestation message from gossip.
-	// Returns error if validation fails (REJECT), nil if accepted or ignored.
-	OnPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error
+	// [New in Gloas:EIP7732] OnGossipPayloadAttestationMessage processes a PTC attestation message from gossip.
+	// Returns ErrIgnore for IGNORE conditions, other errors for REJECT conditions.
+	OnGossipPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage) error
 	// [New in Gloas:EIP7732] StoreAnchorEnvelope persists an envelope to disk and updates
 	// eth2Roots without running state transition. Used during checkpoint sync where the
 	// finalized state already incorporates the envelope's effects but subsequent blocks

@@ -37,6 +37,8 @@ const (
 	maxPendingValidationContextBuilds            = int(clparams.PtcSize)
 )
 
+var errPayloadAttestationSlotMismatch = errors.New("payload attestation slot does not match block slot")
+
 type payloadAttestationValidationContext struct {
 	slot       uint64
 	domain     common.Hash
@@ -182,7 +184,7 @@ func (f *ForkChoiceStore) payloadAttestationValidationContext(
 			return nil, fmt.Errorf("%w: block state not found for root %v", ErrIgnore, blockRoot)
 		}
 		if slot != blockState.Slot() {
-			return nil, fmt.Errorf("%w: attestation slot %d does not match block slot %d", ErrIgnore, slot, blockState.Slot())
+			return nil, fmt.Errorf("%w: %w: attestation slot %d, block slot %d", ErrIgnore, errPayloadAttestationSlotMismatch, slot, blockState.Slot())
 		}
 
 		ptc, err := blockState.GetPTC(slot)
@@ -231,7 +233,7 @@ func (f *ForkChoiceStore) payloadAttestationValidationContext(
 
 func (c *payloadAttestationValidationContext) ptcPositions(msg *cltypes.PayloadAttestationMessage) ([]int, error) {
 	if msg.Data.Slot != c.slot {
-		return nil, fmt.Errorf("%w: attestation slot %d does not match block slot %d", ErrIgnore, msg.Data.Slot, c.slot)
+		return nil, fmt.Errorf("%w: %w: attestation slot %d, block slot %d", ErrIgnore, errPayloadAttestationSlotMismatch, msg.Data.Slot, c.slot)
 	}
 	positions, ok := c.positions[msg.ValidatorIndex]
 	if !ok {

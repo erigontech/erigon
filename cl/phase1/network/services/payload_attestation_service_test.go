@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -51,11 +52,11 @@ type panickingPayloadAttestationForkchoice struct {
 	forkchoice.ForkChoiceStorage
 }
 
-func (*panickingPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (*panickingPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
 	panic("validation panic")
 }
 
-func (f *blockingPayloadAttestationForkchoice) OnPayloadAttestationMessage(ctx context.Context, _ *cltypes.PayloadAttestationMessage, _ bool) error {
+func (f *blockingPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(ctx context.Context, _ *cltypes.PayloadAttestationMessage) error {
 	active := f.active.Add(1)
 	defer f.active.Add(-1)
 	for {
@@ -86,7 +87,7 @@ type retryablePayloadAttestationForkchoice struct {
 	calls atomic.Int32
 }
 
-func (f *retryablePayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *retryablePayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
 	if f.calls.Add(1) == 1 {
 		return f.first
 	}
@@ -99,7 +100,7 @@ type candidatePayloadAttestationForkchoice struct {
 	release chan struct{}
 }
 
-func (f *candidatePayloadAttestationForkchoice) OnPayloadAttestationMessage(_ context.Context, msg *cltypes.PayloadAttestationMessage, _ bool) error {
+func (f *candidatePayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(_ context.Context, msg *cltypes.PayloadAttestationMessage) error {
 	candidate := msg.Signature[0]
 	f.started <- candidate
 	<-f.release
@@ -109,7 +110,7 @@ func (f *candidatePayloadAttestationForkchoice) OnPayloadAttestationMessage(_ co
 	return nil
 }
 
-func (f *retryPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *retryPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
 	if f.calls.Add(1) == 1 {
 		close(f.firstStarted)
 		<-f.releaseFirst
@@ -749,7 +750,7 @@ type coordinatedPayloadAttestationForkchoice struct {
 	firstErr     error
 }
 
-func (f *coordinatedPayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *coordinatedPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
 	if f.calls.Add(1) == 1 {
 		close(f.firstStarted)
 		<-f.releaseFirst
@@ -758,7 +759,7 @@ func (f *coordinatedPayloadAttestationForkchoice) OnPayloadAttestationMessage(co
 	return nil
 }
 
-func (f *consumeOncePayloadAttestationForkchoice) OnPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage, bool) error {
+func (f *consumeOncePayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
 	if f.calls.Add(1) == 1 {
 		return nil
 	}
@@ -1087,6 +1088,28 @@ func TestPayloadAttestationServiceRetainsPendingRetryableValidation(t *testing.T
 			require.Zero(t, service.pending.count.Load())
 		})
 	}
+}
+
+type notCurrentSlotPayloadAttestationForkchoice struct {
+	forkchoice.ForkChoiceStorage
+}
+
+func (notCurrentSlotPayloadAttestationForkchoice) OnGossipPayloadAttestationMessage(context.Context, *cltypes.PayloadAttestationMessage) error {
+	return fmt.Errorf("%w: %w", forkchoice.ErrIgnore, forkchoice.ErrPayloadAttestationNotCurrentSlot)
+}
+
+func TestPayloadAttestationServiceAcceptsGossipNotCountedByForkChoice(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	root := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 42, root)
+	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.forkchoiceStore = notCurrentSlotPayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, msg))
+	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 42}))
+	_, pooled := service.epbsPool.PayloadAttestations.Get(pool.PayloadAttestationKey{Slot: 100, ValidatorIndex: 42})
+	require.True(t, pooled)
 }
 
 func TestPayloadAttestationServicePendingQueueCap(t *testing.T) {

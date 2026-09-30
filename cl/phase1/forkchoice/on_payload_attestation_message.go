@@ -26,16 +26,36 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// OnPayloadAttestationMessage processes a payload attestation message and updates
-// the PTC vote tracking in the store.
-// Run upon receiving a new ptc_message from either within a block or directly on the wire.
+// ErrPayloadAttestationNotCurrentSlot marks a validly signed wire message that fork
+// choice does not count because its slot is not the store's current slot.
+var ErrPayloadAttestationNotCurrentSlot = errors.New("payload attestation is not for the current slot")
+
+// OnPayloadAttestationMessage implements on_payload_attestation_message: it updates
+// the PTC votes for a message from a block or from the wire.
 // Returns ErrIgnore for IGNORE conditions, other errors for REJECT conditions.
-// Caller should handle errors appropriately based on isFromBlock context.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	ctx context.Context,
 	msg *cltypes.PayloadAttestationMessage,
 	isFromBlock bool,
+) error {
+	return f.onPayloadAttestationMessage(ctx, msg, isFromBlock, false)
+}
+
+// OnGossipPayloadAttestationMessage is OnPayloadAttestationMessage for a gossip message,
+// which must also be the first valid message from its validator in the slot.
+func (f *ForkChoiceStore) OnGossipPayloadAttestationMessage(
+	ctx context.Context,
+	msg *cltypes.PayloadAttestationMessage,
+) error {
+	return f.onPayloadAttestationMessage(ctx, msg, false, true)
+}
+
+func (f *ForkChoiceStore) onPayloadAttestationMessage(
+	ctx context.Context,
+	msg *cltypes.PayloadAttestationMessage,
+	isFromBlock bool,
+	firstValidOnly bool,
 ) error {
 	if msg == nil || msg.Data == nil {
 		return errors.New("nil payload attestation data")
@@ -45,22 +65,27 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 	blockRoot := data.BeaconBlockRoot
 
 	validationContext, err := f.payloadAttestationValidationContext(ctx, blockRoot, data.Slot)
-	if err != nil {
-		return err
+	var ptcIndices []int
+	if err == nil {
+		ptcIndices, err = validationContext.ptcPositions(msg)
 	}
-	ptcIndices, err := validationContext.ptcPositions(msg)
+	if !firstValidOnly && errors.Is(err, errPayloadAttestationSlotMismatch) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
 
-	// Verify the signature if coming from wire.
 	if !isFromBlock {
 		if err := validationContext.validateSignature(msg); err != nil {
 			return err
 		}
+		if currentSlot := f.Slot(); data.Slot != currentSlot {
+			return fmt.Errorf("%w: %w: slot %d, current slot %d", ErrIgnore, ErrPayloadAttestationNotCurrentSlot, data.Slot, currentSlot)
+		}
 	}
 
-	return f.applyValidatedPayloadAttestation(msg.ValidatorIndex, ptcIndices, data, blockRoot, isFromBlock)
+	return f.applyValidatedPayloadAttestation(msg.ValidatorIndex, ptcIndices, data, blockRoot, firstValidOnly)
 }
 
 func (f *ForkChoiceStore) applyValidatedPayloadAttestation(
@@ -68,14 +93,14 @@ func (f *ForkChoiceStore) applyValidatedPayloadAttestation(
 	ptcIndices []int,
 	data *cltypes.PayloadAttestationData,
 	blockRoot common.Hash,
-	isFromBlock bool,
+	firstValidOnly bool,
 ) error {
 	// Keep the votes and cached head decision consistent for head readers.
 	// The lock order is f.mu before ptcVoteMu.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if err := f.recordPayloadAttestationVotes(validatorIndex, ptcIndices, data, blockRoot, isFromBlock); err != nil {
+	if err := f.recordPayloadAttestationVotes(validatorIndex, ptcIndices, data, blockRoot, firstValidOnly); err != nil {
 		return err
 	}
 
@@ -93,7 +118,7 @@ func (f *ForkChoiceStore) recordPayloadAttestationVotes(
 	ptcIndices []int,
 	data *cltypes.PayloadAttestationData,
 	blockRoot common.Hash,
-	isFromBlock bool,
+	firstValidOnly bool,
 ) error {
 	f.ptcVoteMu.Lock()
 	defer f.ptcVoteMu.Unlock()
@@ -106,7 +131,9 @@ func (f *ForkChoiceStore) recordPayloadAttestationVotes(
 	if existing, ok := f.payloadDataAvailabilityVote.Load(blockRoot); ok {
 		dataAvailabilityVotes = existing.([clparams.PtcSize]int8)
 	}
-	if !isFromBlock {
+	// The first-valid check runs under ptcVoteMu so that concurrent gossip candidates
+	// from one validator have exactly one winner.
+	if firstValidOnly {
 		if f.payloadAttestationSeen != nil && data.Slot < f.payloadAttestationSeenSlot {
 			return fmt.Errorf("%w: payload attestation validation completed after a newer slot", ErrIgnore)
 		}
