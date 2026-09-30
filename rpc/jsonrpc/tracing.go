@@ -319,6 +319,9 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	if err != nil {
 		return fmt.Errorf("read chain config: %w", err)
 	}
+	if err := ethapi.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
+		return err
+	}
 	engine := api.engine()
 
 	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader)
@@ -424,7 +427,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	if err != nil {
 		return err
 	}
-	if err := validateBundles(bundles); err != nil {
+	if err := validateBundles(bundles, chainConfig.ChainID); err != nil {
 		return err
 	}
 

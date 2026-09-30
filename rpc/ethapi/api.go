@@ -80,6 +80,15 @@ func CheckCallData(data, input *hexutil.Bytes) error {
 	return nil
 }
 
+// CheckChainID rejects a call object whose chainId names another chain. Such a call is invalid
+// whatever the state, so it is invalid params rather than an execution error.
+func CheckChainID(have *hexutil.U256, want *uint256.Int) error {
+	if have != nil && !(*uint256.Int)(have).Eq(want) {
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("chainId does not match node's (have=%v, want=%v)", (*uint256.Int)(have), want)}
+	}
+	return nil
+}
+
 func (args *CallArgs) FromOrEmpty() accounts.Address {
 	return args.from()
 }
