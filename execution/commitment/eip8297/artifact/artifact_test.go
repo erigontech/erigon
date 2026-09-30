@@ -40,6 +40,41 @@ type goldenArtifact struct {
 	SnapshotDigest string `json:"snapshotDigest"`
 }
 
+func readSnapshot(t *testing.T, data []byte) (Snapshot, error) {
+	t.Helper()
+	var snapshot Snapshot
+	meta, err := ReadSnapshotAt(bytes.NewReader(data), int64(len(data)), SnapshotCallbacks{
+		Header: func(header Header) error {
+			snapshot.Headers = append(snapshot.Headers, header)
+			return nil
+		},
+		Code: func(group Group) error {
+			snapshot.CodeGroups = append(snapshot.CodeGroups, group)
+			return nil
+		},
+		Storage: func(storage Storage) error {
+			snapshot.StorageGroups = append(snapshot.StorageGroups, storage)
+			return nil
+		},
+	})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snapshot.Root = meta.Root
+	snapshot.SnapshotDigest = meta.SnapshotDigest
+	return snapshot, nil
+}
+
+func readPreimages(t *testing.T, data []byte) ([]Preimage, error) {
+	t.Helper()
+	var records []Preimage
+	err := ReadPreimagesAt(bytes.NewReader(data), int64(len(data)), func(record Preimage) error {
+		records = append(records, record)
+		return nil
+	})
+	return records, err
+}
+
 func TestWriterReproducesHandWrittenGolden(t *testing.T) {
 	golden := readGolden(t)
 	want, err := hex.DecodeString(golden.Bytes)
@@ -64,7 +99,7 @@ func TestReaderAcceptsHandWrittenGolden(t *testing.T) {
 	golden := readGolden(t)
 	want, err := hex.DecodeString(golden.Bytes)
 	require.NoError(t, err)
-	snapshot, err := ReadSnapshot(bytes.NewReader(want))
+	snapshot, err := readSnapshot(t, want)
 	require.NoError(t, err)
 	require.Len(t, snapshot.Headers, 3)
 	require.Len(t, snapshot.CodeGroups, 1)
@@ -120,7 +155,7 @@ func TestArtifactReaderRejectsMaximumCountsWithoutAllocating(t *testing.T) {
 		for i := range 8 {
 			broken[offset+i] = 0xff
 		}
-		_, err := ReadSnapshot(bytes.NewReader(broken))
+		_, err := readSnapshot(t, broken)
 		require.Error(t, err, "count at offset %d must be bounded by the remaining bytes", offset)
 	}
 }
@@ -139,7 +174,7 @@ func TestArtifactReaderRejectsStorageWithoutHeader(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	_, err = ReadSnapshot(bytes.NewReader(encoded.Bytes()))
+	_, err = readSnapshot(t, encoded.Bytes())
 	require.Error(t, err, "a storage record without a header must be rejected")
 }
 
@@ -150,7 +185,7 @@ func TestArtifactReaderRejectsZeroGroupValue(t *testing.T) {
 	index := bytes.Index(data, []byte{1, 0, 1, 0x55})
 	require.NotEqual(t, -1, index)
 	data[index+2] = 0
-	_, err = ReadSnapshot(bytes.NewReader(data))
+	_, err = readSnapshot(t, data)
 	require.ErrorContains(t, err, "invalid group value", "a code group with a zero value must be rejected")
 }
 
@@ -182,7 +217,7 @@ func TestArtifactReaderRejectsMalformedInputs(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := ReadSnapshot(bytes.NewReader(test.data()))
+			_, err := readSnapshot(t, test.data())
 			if test.name == "header slot is not below 64" {
 				require.ErrorContains(t, err, "header slot")
 				return
@@ -207,14 +242,14 @@ func TestArtifactRoundTripAndEmptySnapshot(t *testing.T) {
 		})
 		if n == 0 {
 			require.NoError(t, err)
-			snapshot, readErr := ReadSnapshot(bytes.NewReader(encoded.Bytes()))
+			snapshot, readErr := readSnapshot(t, encoded.Bytes())
 			require.NoError(t, readErr)
 			require.Empty(t, snapshot.Headers)
 			require.Equal(t, root, snapshot.Root)
 			continue
 		}
 		require.NoError(t, err)
-		_, err = ReadSnapshot(bytes.NewReader(encoded.Bytes()))
+		_, err = readSnapshot(t, encoded.Bytes())
 		require.NoError(t, err)
 	}
 	for seed := range 5 {
@@ -225,7 +260,7 @@ func TestArtifactRoundTripAndEmptySnapshot(t *testing.T) {
 		var encoded bytes.Buffer
 		_, err = WriteSnapshot(&encoded, root, func(emit func([]byte, []byte) error) error { return emit(key, basic[:]) })
 		require.NoError(t, err)
-		_, err = ReadSnapshot(bytes.NewReader(encoded.Bytes()))
+		_, err = readSnapshot(t, encoded.Bytes())
 		require.NoError(t, err)
 	}
 }
@@ -312,10 +347,10 @@ func TestPreimageReaderRejectsUnsortedDuplicateAndTruncatedRecords(t *testing.T)
 	records := []Preimage{{Address: addressA}}
 	var encoded bytes.Buffer
 	require.NoError(t, WritePreimages(&encoded, records))
-	_, err := ReadPreimages(bytes.NewReader(append(encoded.Bytes(), 1)))
+	_, err := readPreimages(t, append(encoded.Bytes(), 1))
 	require.Error(t, err, "a trailing byte must not be accepted as a preimage record")
 	duplicate := append(bytes.Clone(encoded.Bytes()), encoded.Bytes()...)
-	_, err = ReadPreimages(bytes.NewReader(duplicate))
+	_, err = readPreimages(t, duplicate)
 	require.Error(t, err, "duplicate addresses must be rejected")
 	addressRecords := []Preimage{{Address: common.Address{1}}, {Address: common.Address{2}}}
 	sort.Slice(addressRecords, func(i, j int) bool {
@@ -329,7 +364,7 @@ func TestPreimageReaderRejectsUnsortedDuplicateAndTruncatedRecords(t *testing.T)
 	firstAddress := bytes.Clone(unsortedAddresses[:20])
 	copy(unsortedAddresses[:20], unsortedAddresses[24:44])
 	copy(unsortedAddresses[24:44], firstAddress)
-	_, err = ReadPreimages(bytes.NewReader(unsortedAddresses))
+	_, err = readPreimages(t, unsortedAddresses)
 	require.Error(t, err, "unsorted addresses must be rejected")
 	slots := [][32]byte{{1}, {2}}
 	sort.Slice(slots, func(i, j int) bool {
@@ -344,33 +379,12 @@ func TestPreimageReaderRejectsUnsortedDuplicateAndTruncatedRecords(t *testing.T)
 	firstSlot := bytes.Clone(unsortedSlots[24:56])
 	copy(unsortedSlots[24:56], unsortedSlots[56:88])
 	copy(unsortedSlots[56:88], firstSlot)
-	_, err = ReadPreimages(bytes.NewReader(unsortedSlots))
+	_, err = readPreimages(t, unsortedSlots)
 	require.Error(t, err, "unsorted slots must be rejected")
 	duplicateSlot := bytes.Clone(encoded.Bytes())
 	copy(duplicateSlot[56:88], duplicateSlot[24:56])
-	_, err = ReadPreimages(bytes.NewReader(duplicateSlot))
+	_, err = readPreimages(t, duplicateSlot)
 	require.Error(t, err, "duplicate slots must be rejected")
-}
-
-func TestPreimageJoinRejectsMissingAndSurplusAddress(t *testing.T) {
-	address := common.Address{1}
-	snapshot := Snapshot{Headers: []Header{{AddressHash: common.BytesToHash(eip8297.TreeKeyAccount(address[:], 0)[1:33])}}}
-	var encoded bytes.Buffer
-	require.NoError(t, WritePreimages(&encoded, []Preimage{{Address: common.Address{2}}}))
-	records, err := ReadPreimages(bytes.NewReader(encoded.Bytes()))
-	require.NoError(t, err)
-	require.Error(t, Join(snapshot, records, eip8297.HashBytes), "a missing address must be rejected")
-	encoded.Reset()
-	records = []Preimage{{Address: common.Address{1}}, {Address: common.Address{2}}}
-	sort.Slice(records, func(i, j int) bool {
-		left := keccak.Sum256(records[i].Address[:])
-		right := keccak.Sum256(records[j].Address[:])
-		return bytes.Compare(left[:], right[:]) < 0
-	})
-	require.NoError(t, WritePreimages(&encoded, records))
-	records, err = ReadPreimages(bytes.NewReader(encoded.Bytes()))
-	require.NoError(t, err)
-	require.Error(t, Join(snapshot, records, eip8297.HashBytes), "a surplus address must be rejected")
 }
 
 func TestPreimageJoinMergesTreeKeysAcrossAddressOrders(t *testing.T) {

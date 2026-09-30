@@ -312,19 +312,6 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	return nil
 }
 
-func pbtAttachFileEnd(files []pbtAttachFile, domain kv.Domain) (uint64, bool) {
-	var maxTo uint64
-	found := false
-	for _, file := range files {
-		if file.domain != domain || !file.data {
-			continue
-		}
-		maxTo = max(maxTo, file.to)
-		found = true
-	}
-	return maxTo, found
-}
-
 func configuredPBTNodeHash(settings *dbstate.ErigonDBSettings) string {
 	if settings != nil && (settings.TrieVariantName() == dbstate.TrieVariantBin || settings.TrieVariantName() == dbstate.TrieVariantHexBin) {
 		return settings.TrieHashName()

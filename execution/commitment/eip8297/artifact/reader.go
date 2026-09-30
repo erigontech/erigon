@@ -22,12 +22,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -146,41 +144,6 @@ func ReadSnapshotAt(src io.ReaderAt, size int64, callbacks SnapshotCallbacks) (S
 	meta.SnapshotDigest = common.BytesToHash(hash.Sum(nil))
 	return meta, nil
 }
-
-func ReadSnapshot(src io.Reader) (Snapshot, error) {
-	file, cleanup, err := spoolReader(src, "pbt-artifact-read-")
-	if err != nil {
-		return Snapshot{}, err
-	}
-	defer cleanup()
-	info, err := file.Stat()
-	if err != nil {
-		return Snapshot{}, err
-	}
-	var snapshot Snapshot
-	meta, err := ReadSnapshotAt(file, info.Size(), SnapshotCallbacks{
-		Header: func(header Header) error {
-			snapshot.Headers = append(snapshot.Headers, header)
-			return nil
-		},
-		Code: func(group Group) error {
-			snapshot.CodeGroups = append(snapshot.CodeGroups, group)
-			return nil
-		},
-		Storage: func(storage Storage) error {
-			snapshot.StorageGroups = append(snapshot.StorageGroups, storage)
-			return nil
-		},
-	})
-	if err != nil {
-		return Snapshot{}, err
-	}
-	snapshot.Root = meta.Root
-	snapshot.SnapshotDigest = meta.SnapshotDigest
-	return snapshot, nil
-}
-
-func Read(src io.Reader) (Snapshot, error) { return ReadSnapshot(src) }
 
 type artifactCursor struct {
 	src    io.ReaderAt
@@ -413,25 +376,4 @@ func matchStorageHeader(headers *artifactCursor, address common.Hash) error {
 		}
 	}
 	return fmt.Errorf("%w: storage has no header", ErrMalformed)
-}
-
-func spoolReader(src io.Reader, pattern string) (*os.File, func(), error) {
-	file, err := os.CreateTemp("", pattern)
-	if err != nil {
-		return nil, nil, err
-	}
-	cleanup := func() {
-		name := file.Name()
-		_ = file.Close()
-		_ = dir.RemoveFile(name)
-	}
-	if _, err := io.Copy(file, src); err != nil {
-		cleanup()
-		return nil, nil, err
-	}
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		cleanup()
-		return nil, nil, err
-	}
-	return file, cleanup, nil
 }

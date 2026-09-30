@@ -30,6 +30,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -92,27 +93,6 @@ func WritePreimages(dst io.Writer, records any) error {
 		}
 		return nil
 	})
-}
-
-func ReadPreimages(src io.Reader) ([]Preimage, error) {
-	file, cleanup, err := spoolReader(src, "pbt-preimages-read-")
-	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	result := make([]Preimage, 0)
-	err = ReadPreimagesAt(file, info.Size(), func(record Preimage) error {
-		result = append(result, record)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
 }
 
 func ReadPreimagesAt(src io.ReaderAt, size int64, yield func(Preimage) error) error {
@@ -207,7 +187,7 @@ func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, pre
 		return err
 	}
 	expectedName := expected.Name()
-	defer func() { _ = expected.Close(); _ = os.Remove(expectedName) }()
+	defer func() { _ = expected.Close(); _ = dir.RemoveFile(expectedName) }()
 	expectedWriter := bufio.NewWriterSize(expected, 1<<20)
 	writeExpected := func(key []byte) error { return writeJoinItem(expectedWriter, joinItem{key: bytes.Clone(key)}) }
 	for range headerCount {
@@ -302,7 +282,7 @@ func CheckPreimageSetAt(preimages io.ReaderAt, preimageSize int64, expected func
 		return err
 	}
 	expectedName := expectedFile.Name()
-	defer func() { _ = expectedFile.Close(); _ = os.Remove(expectedName) }()
+	defer func() { _ = expectedFile.Close(); _ = dir.RemoveFile(expectedName) }()
 	expectedWriter := bufio.NewWriterSize(expectedFile, 64<<10)
 	var previous []byte
 	if err := expected(func(key []byte) error {
@@ -508,17 +488,17 @@ func makeJoinRuns(src io.ReaderAt, size int64, hashFn eip8297.HashFn) ([]string,
 		for _, item := range items {
 			if err := writeJoinItem(writer, item); err != nil {
 				_ = file.Close()
-				_ = os.Remove(file.Name())
+				_ = dir.RemoveFile(file.Name())
 				return err
 			}
 		}
 		if err := writer.Flush(); err != nil {
 			_ = file.Close()
-			_ = os.Remove(file.Name())
+			_ = dir.RemoveFile(file.Name())
 			return err
 		}
 		if err := file.Close(); err != nil {
-			_ = os.Remove(file.Name())
+			_ = dir.RemoveFile(file.Name())
 			return err
 		}
 		paths = append(paths, file.Name())
@@ -562,124 +542,8 @@ func makeJoinRuns(src io.ReaderAt, size int64, hashFn eip8297.HashFn) ([]string,
 
 func removeJoinRuns(paths []string) {
 	for _, path := range paths {
-		_ = os.Remove(path)
+		_ = dir.RemoveFile(path)
 	}
-}
-
-type preimageCursor struct {
-	offset      int64
-	previous    common.Hash
-	hasPrevious bool
-}
-
-func nextPreimage(src io.ReaderAt, size int64, cursor *preimageCursor) (Preimage, bool, error) {
-	var record Preimage
-	if cursor.offset == size {
-		return record, false, nil
-	}
-	c := artifactCursor{src: src, offset: cursor.offset, limit: size}
-	address, err := c.bytes(20)
-	if err != nil {
-		return record, false, ErrPreimages
-	}
-	countBytes, err := c.bytes(4)
-	if err != nil {
-		return record, false, ErrPreimages
-	}
-	count := binary.BigEndian.Uint32(countBytes)
-	if uint64(count) > uint64(c.remaining()/32) {
-		return record, false, ErrPreimages
-	}
-	copy(record.Address[:], address)
-	record.Slots = make([][32]byte, 0)
-	digest := common.Hash(keccak.Sum256(record.Address[:]))
-	if cursor.hasPrevious && bytes.Compare(digest[:], cursor.previous[:]) <= 0 {
-		return Preimage{}, false, ErrUnsorted
-	}
-	cursor.previous = digest
-	cursor.hasPrevious = true
-	var previousSlot common.Hash
-	for i := range count {
-		value, err := c.bytes(32)
-		if err != nil {
-			return Preimage{}, false, ErrPreimages
-		}
-		var slot [32]byte
-		copy(slot[:], value)
-		slotDigest := common.Hash(keccak.Sum256(slot[:]))
-		if i != 0 && bytes.Compare(slotDigest[:], previousSlot[:]) <= 0 {
-			return Preimage{}, false, ErrUnsorted
-		}
-		previousSlot = slotDigest
-		record.Slots = append(record.Slots, slot)
-	}
-	cursor.offset = c.offset
-	return record, true, nil
-}
-
-func matchHeaderPreimage(record Preimage, header Header, hashFn eip8297.HashFn, yield func(common.Address, [32]byte) error) (bool, error) {
-	matched := [eip8297.HeaderStorageSlots]bool{}
-	hasStorage := false
-	for _, slot := range record.Slots {
-		treeKey := treeKeyWithHash(hashFn, record.Address[:], slot[:])
-		if treeKey[0] != eip8297.AccountZone {
-			hasStorage = true
-			continue
-		}
-		index := treeKey[len(treeKey)-1] - eip8297.HeaderStorageOffset
-		if !containsSlot(header.Slots, index) || matched[index] {
-			return false, fmt.Errorf("%w: surplus slot", ErrPreimages)
-		}
-		matched[index] = true
-		if yield != nil {
-			if err := yield(record.Address, slot); err != nil {
-				return false, err
-			}
-		}
-	}
-	for _, slot := range header.Slots {
-		if !matched[slot.Index] {
-			return false, fmt.Errorf("%w: missing slot", ErrPreimages)
-		}
-	}
-	return hasStorage, nil
-}
-
-func hasStorageSlots(record Preimage, hashFn eip8297.HashFn) bool {
-	for _, slot := range record.Slots {
-		if treeKeyWithHash(hashFn, record.Address[:], slot[:])[0] == eip8297.StorageZone {
-			return true
-		}
-	}
-	return false
-}
-
-func matchStoragePreimage(record Preimage, storage Storage, hashFn eip8297.HashFn, yield func(common.Address, [32]byte) error) error {
-	matched := make(map[string]bool)
-	for _, slot := range record.Slots {
-		treeKey := treeKeyWithHash(hashFn, record.Address[:], slot[:])
-		if treeKey[0] != eip8297.StorageZone {
-			continue
-		}
-		key := string(treeKey[33:])
-		if matched[key] || !containsGroupEntry(storage.Groups, treeKey[33:65], treeKey[65]) {
-			return fmt.Errorf("%w: surplus slot", ErrPreimages)
-		}
-		matched[key] = true
-		if yield != nil {
-			if err := yield(record.Address, slot); err != nil {
-				return err
-			}
-		}
-	}
-	for _, group := range storage.Groups {
-		for _, entry := range group.Entries {
-			if !matched[string(append(bytes.Clone(group.StemHash[:]), entry.Index))] {
-				return fmt.Errorf("%w: missing slot", ErrPreimages)
-			}
-		}
-	}
-	return nil
 }
 
 func snapshotCursors(src io.ReaderAt, size int64) (artifactCursor, artifactCursor, uint64, uint64, error) {
@@ -714,73 +578,6 @@ func snapshotCursors(src io.ReaderAt, size int64) (artifactCursor, artifactCurso
 	return artifactCursor{src: src, offset: headerStart, limit: headerEnd}, c, headerCount, storageCount, nil
 }
 
-func Join(snapshot Snapshot, records []Preimage, hashFn eip8297.HashFn) error {
-	if hashFn == nil {
-		hashFn = eip8297.HashBytes
-	}
-	headerByHash := make(map[common.Hash]*Header, len(snapshot.Headers))
-	for i := range snapshot.Headers {
-		headerByHash[snapshot.Headers[i].AddressHash] = &snapshot.Headers[i]
-	}
-	storageByHash := make(map[common.Hash]*Storage, len(snapshot.StorageGroups))
-	for i := range snapshot.StorageGroups {
-		storageByHash[snapshot.StorageGroups[i].AddressHash] = &snapshot.StorageGroups[i]
-	}
-	seen := make(map[common.Hash]bool, len(records))
-	for _, record := range records {
-		address32 := eip8297.RightAlign32(record.Address[:])
-		addressHash := hashFn(address32[:])
-		if seen[addressHash] {
-			return fmt.Errorf("%w: duplicate address", ErrPreimages)
-		}
-		seen[addressHash] = true
-		header, ok := headerByHash[addressHash]
-		if !ok {
-			return fmt.Errorf("%w: surplus address", ErrPreimages)
-		}
-		storage := storageByHash[addressHash]
-		matchedHeaders := make(map[byte]bool, len(header.Slots))
-		matchedStorage := make(map[string]bool)
-		for _, slot := range record.Slots {
-			treeKey := treeKeyWithHash(hashFn, record.Address[:], slot[:])
-			if treeKey[0] == eip8297.AccountZone {
-				index := treeKey[len(treeKey)-1] - eip8297.HeaderStorageOffset
-				if !containsSlot(header.Slots, index) {
-					return fmt.Errorf("%w: surplus slot", ErrPreimages)
-				}
-				if matchedHeaders[index] {
-					return fmt.Errorf("%w: duplicate slot", ErrPreimages)
-				}
-				matchedHeaders[index] = true
-				continue
-			}
-			storageKey := string(treeKey[33:])
-			if storage == nil || !containsGroupEntry(storage.Groups, treeKey[33:65], treeKey[65]) || matchedStorage[storageKey] {
-				return fmt.Errorf("%w: surplus slot", ErrPreimages)
-			}
-			matchedStorage[storageKey] = true
-		}
-		for _, slot := range header.Slots {
-			if !matchedHeaders[slot.Index] {
-				return fmt.Errorf("%w: missing slot", ErrPreimages)
-			}
-		}
-		if storage != nil {
-			for _, group := range storage.Groups {
-				for _, entry := range group.Entries {
-					if !matchedStorage[string(append(bytes.Clone(group.StemHash[:]), entry.Index))] {
-						return fmt.Errorf("%w: missing slot", ErrPreimages)
-					}
-				}
-			}
-		}
-	}
-	if len(seen) != len(headerByHash) {
-		return fmt.Errorf("%w: missing address", ErrPreimages)
-	}
-	return nil
-}
-
 func treeKeyWithHash(hashFn eip8297.HashFn, address, slot []byte) []byte {
 	address32 := eip8297.RightAlign32(address)
 	slot32 := eip8297.RightAlign32(slot)
@@ -797,27 +594,4 @@ func treeKeyWithHash(hashFn eip8297.HashFn, address, slot []byte) []byte {
 	position = append(position, stem[:]...)
 	position = append(position, group[:]...)
 	return eip8297.TreeKey(eip8297.StorageZone, position, slot32[31])
-}
-
-func containsSlot(slots []Slot, index byte) bool {
-	for _, slot := range slots {
-		if slot.Index == index {
-			return true
-		}
-	}
-	return false
-}
-
-func containsGroupEntry(groups []Group, stem []byte, index byte) bool {
-	for _, group := range groups {
-		if !bytes.Equal(group.StemHash[:], stem) {
-			continue
-		}
-		for _, entry := range group.Entries {
-			if entry.Index == index {
-				return true
-			}
-		}
-	}
-	return false
 }
