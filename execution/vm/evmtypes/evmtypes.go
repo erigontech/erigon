@@ -70,11 +70,13 @@ type TxContext struct {
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
 	mdgas.TxnGasUsage
-	ReceiptGasUsed       uint64 // Gas paid after refunds and the calldata floor
-	MaxGasUsed           uint64 // Gas used by the transaction before refunds
-	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	Reverted             bool   // Whether the execution was aborted by `REVERT`
-	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)
+	ReceiptGasUsed uint64 // Gas paid after refunds and the calldata floor
+	MaxGasUsed     uint64 // Gas used by the transaction before refunds
+	Err            error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	Reverted       bool   // Whether the execution was aborted by `REVERT`
+	// Returned data from evm(function result or data supplied with revert opcode).
+	// Return and Revert hand this slice out without copying, so no caller may mutate it.
+	ReturnData           []byte
 	SenderInitBalance    uint256.Int
 	CoinbaseInitBalance  uint256.Int
 	FeeTipped            uint256.Int
