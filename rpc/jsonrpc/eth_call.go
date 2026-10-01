@@ -116,6 +116,9 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	if err != nil {
 		return nil, err
 	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
+		return nil, err
+	}
 	engine := api.engine()
 
 	if args.Gas == nil || uint64(*args.Gas) == 0 {
@@ -187,6 +190,9 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
+		return 0, err
+	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
 		return 0, err
 	}
 	engine := api.engine()
@@ -954,6 +960,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
+		return nil, err
+	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
 		return nil, err
 	}
 	engine := api.engine()
