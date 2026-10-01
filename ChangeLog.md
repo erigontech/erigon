@@ -35,7 +35,7 @@ v3.7.1 makes **Caplin ready for Glamsterdam on Sepolia**. Upgrade Sepolia nodes 
 
 ---
 
-# Erigon v3.7.0 — Velvet Vibrissae — TBD
+# Erigon v3.7.0 — Velvet Vibrissae — 2026-09-25
 
 Erigon 3.7.0 is headlined by **parallel commitment enabled by default**, **broad RPC performance improvements**,
 **persisted receipts by default**, and **Glamsterdam on Sepolia**. It also improves Caplin validator reliability,
