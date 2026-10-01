@@ -1,10 +1,11 @@
 # Erigon v3.7.1 — Velvet Vibrissae — TBD
 
-v3.7.1 makes **Caplin ready for Glamsterdam on Sepolia**. Upgrade Sepolia nodes before **6 October 2026, 13:53:36 UTC** (epoch `353024`). This bugfix release is recommended for all users; no re-sync is required from 3.7.0. Operators using custom graffiti should review the change below.
+v3.7.1 makes **Caplin ready for Glamsterdam on Sepolia**. Upgrade Sepolia nodes before **6 October 2026, 13:53:36 UTC** (epoch `353024`). This bugfix release is recommended for all users; no re-sync is required from 3.7.0. Operators using custom graffiti or non-default Caplin ports should review the breaking changes below.
 
 **Breaking Changes**
 
-- cl/beacon: prefix custom graffiti with EL+CL client identification by default (#24394) by @lystopad — custom text is truncated to fit the 32-byte field. Set `--beacon.api.preserve-graffiti` to disable the prefix. Short hex values are now right-padded on both paths.
+- cl/beacon: prefix custom graffiti with EL+CL client identification by default (#24394) by @lystopad — leaves 19 bytes for custom text, or 25 while the EL version is unavailable; longer text is truncated. Set `--beacon.api.preserve-graffiti` to keep the full 32 bytes for custom graffiti. Short hex values are right-padded with and without `--beacon.api.preserve-graffiti`.
+- cl/p2p: add QUIC v1 with TCP fallback (#24413) by @domiwei — QUIC defaults to UDP `4001`; allow this port through your firewall, or the port configured by `--caplin.discovery.quicport` (`--sentinel.quic.port` for standalone Sentinel). Discovery still defaults to UDP `4000`. If you use `--caplin.discovery.port=4001`, set a different QUIC port before upgrading: conflicting discovery and QUIC UDP binds now prevent Caplin from starting. Fixes #23398.
 
 **Bugfixes**
 
@@ -12,14 +13,14 @@ v3.7.1 makes **Caplin ready for Glamsterdam on Sepolia**. Upgrade Sepolia nodes 
 - execution: release block-builder state after a payload is built (#24478) by @taratorio — cached results kept transaction read sets and contract bytecode alive, causing out-of-memory failures under heavy code-access workloads.
 - cl/beacon: publish request blobs on nodes that did not produce the block (#24471) by @lystopad — fixes `500 missing blob bundle` when validators publish pre-Gloas blocks to multiple beacon nodes. Fixes #23112.
 - execution/engineapi: wait longer for a busy execution module before dropping a payload build (#24396) by @lystopad — external consensus clients now get up to 6 seconds, or one slot on chains with shorter slots, instead of 500 ms. This avoids missed proposals during background flush and commit. Fixes #24371.
+- db/datadir/reset: reject `erigon snapshots reset --local=false` when it would mix referenced commitment and state files from different builds (#24401) by @lystopad — checks run before any deletion; `--allow-mixed-state` overrides the guard.
 
 **Security**
 
-- cl/phase1/network/services: check the block root and signature on sync-committee cache hits (#24384) by @lystopad — prevents unverified replacement content from reaching gossip and suppresses already-published retries. Fixes #24305.
+- cl/beacon, cl/phase1/network/services: prevent unvalidated sync-committee messages from reaching gossip (#24368, #24384) by @lystopad — messages outside the allowed slot window are no longer published, cache hits check the block root and signature, and already-published retries are suppressed. Together these changes fix #24305.
 
 **Improvements**
 
-- cl/p2p: add QUIC v1 with TCP fallback (#24413) by @domiwei — QUIC uses UDP `4001`, configured with `--caplin.discovery.quicport` or standalone Sentinel's `--sentinel.quic.port`; discovery remains on UDP `4000`. Fixes #23398.
 - cl/beacon: publish sync-committee messages in the background (#24368) by @lystopad — removes gossip latency from Beacon API responses and reports queue-admission failures to callers.
 - cl/antiquary: compress blob snapshot backlogs with multiple workers (#24338) by @lystopad — speeds up archive-node catch-up while keeping one worker at the tip.
 
