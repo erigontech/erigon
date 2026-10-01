@@ -26,10 +26,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -575,4 +578,42 @@ func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 	length, encoding, _ = post(`{"jsonrpc":"2.0","id":2,"method":"big_largeResp"}`)
 	require.Equal(t, int64(-1), length)
 	require.Equal(t, []string{"chunked"}, encoding)
+}
+
+type setHeadService struct{ calls atomic.Int32 }
+
+func (s *setHeadService) SetHead(uint64) error { s.calls.Add(1); return nil }
+
+func TestGetCallFromOtherSiteIsRefused(t *testing.T) {
+	srv := NewServer(50, false, false, false, log.Root(), 100)
+	defer srv.Stop()
+	svc := new(setHeadService)
+	require.NoError(t, srv.RegisterName("debug", svc))
+
+	call := func(header http.Header) int {
+		q := url.Values{"method": {"debug_setHead"}, "params": {`[1]`}}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://localhost:8545/?"+q.Encode(), nil)
+		maps.Copy(req.Header, header)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	for _, header := range []http.Header{
+		{"Sec-Fetch-Site": {"cross-site"}},
+		{"Sec-Fetch-Site": {"same-site"}},
+		{"Origin": {"https://evil.example"}},
+	} {
+		require.Equal(t, http.StatusForbidden, call(header), "%v", header)
+	}
+	require.Zero(t, svc.calls.Load())
+
+	for _, header := range []http.Header{
+		{},
+		{"Sec-Fetch-Site": {"none"}},
+		{"Sec-Fetch-Site": {"same-origin"}, "Origin": {"http://localhost:8545"}},
+	} {
+		require.Equal(t, http.StatusOK, call(header), "%v", header)
+	}
+	require.EqualValues(t, 3, svc.calls.Load())
 }
