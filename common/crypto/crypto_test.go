@@ -415,3 +415,23 @@ var (
 	sinkHash  common.Hash
 	sinkBytes []byte
 )
+
+func TestCachedKeccak256MatchesDirect(t *testing.T) {
+	keccakCacheOn = true
+	defer func() { keccakCacheOn = false }()
+	for n := 0; n <= 100; n++ {
+		in := bytes.Repeat([]byte{byte(n)}, n)
+		for range 2 {
+			if got, want := Keccak256Hash(in), common.Hash(sha3Keccak(in)); got != want {
+				t.Fatalf("len %d: got %x want %x", n, got, want)
+			}
+		}
+	}
+}
+
+func sha3Keccak(in []byte) (h common.Hash) {
+	d := sha3.NewLegacyKeccak256()
+	d.Write(in)
+	d.Sum(h[:0])
+	return h
+}
