@@ -34,10 +34,10 @@ func TestInterceptSecuredAllowsBeforeHostIsSet(t *testing.T) {
 	require.True(t, g.InterceptSecured(network.DirInbound, peer.ID("peer"), nil), "must fail open before SetHost is called")
 }
 
-// TestInterceptSecuredAllowsFirstConnectionRegardlessOfDirection covers a peer with no
-// existing connections: direction alone must never cause a rejection, for either
-// transport, since there is nothing yet to converge with.
-func TestInterceptSecuredAllowsFirstConnectionRegardlessOfDirection(t *testing.T) {
+// TestInterceptSecuredAllowsFirstConnectionToAPeer covers a peer with no existing
+// connections: neither direction nor transport should ever cause a rejection, since
+// there is nothing yet to collide with.
+func TestInterceptSecuredAllowsFirstConnectionToAPeer(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	opts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, key)
@@ -48,39 +48,92 @@ func TestInterceptSecuredAllowsFirstConnectionRegardlessOfDirection(t *testing.T
 
 	g := &Gater{}
 	g.SetHost(host)
-	tcpAddr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
-	require.NoError(t, err)
 	for _, dir := range []network.Direction{network.DirInbound, network.DirOutbound} {
-		require.True(t, g.InterceptSecured(dir, peer.ID("peer"), stubConnMultiaddrs{remote: tcpAddr}))
+		require.True(t, g.InterceptSecured(dir, peer.ID("peer"), nil))
 	}
 }
 
-// TestInterceptSecuredAllowsQUICRegardlessOfDirection covers the same "nothing to
-// converge with yet" case as above, specifically for the preferred transport.
-func TestInterceptSecuredAllowsQUICRegardlessOfDirection(t *testing.T) {
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	opts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, key)
-	require.NoError(t, err)
-	host, err := libp2p.New(opts...)
-	require.NoError(t, err)
-	defer host.Close()
+// TestInterceptSecuredRejectsSecondConnectionRegardlessOfTransport reproduces the
+// dual-transport connection race (two nodes discover each other via discv5 and dial one
+// another around the same time) across every transport combination, and pins the
+// safety requirement from review: whichever connection registers first survives, and it
+// is never closed to make room for a later one of a different transport.
+func TestInterceptSecuredRejectsSecondConnectionRegardlessOfTransport(t *testing.T) {
+	tests := []struct {
+		name       string
+		firstQUIC  bool
+		secondQUIC bool
+	}{
+		{"TCP first, QUIC second", false, true},
+		{"QUIC first, TCP second", true, false},
+		{"TCP first, TCP second", false, false},
+		{"QUIC first, QUIC second", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serverKey, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
+			require.NoError(t, err)
+			gater, err := NewGater(&P2PConfig{IpAddr: "127.0.0.1"})
+			require.NoError(t, err)
+			serverOpts = append(serverOpts, libp2p.ConnectionGater(gater))
+			server, err := libp2p.New(serverOpts...)
+			require.NoError(t, err)
+			defer server.Close()
+			gater.SetHost(server)
 
-	g := &Gater{}
-	g.SetHost(host)
-	quicAddr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/udp/4001/quic-v1")
-	require.NoError(t, err)
-	for _, dir := range []network.Direction{network.DirInbound, network.DirOutbound} {
-		require.True(t, g.InterceptSecured(dir, peer.ID("peer"), stubConnMultiaddrs{remote: quicAddr}))
+			peerKey, err := crypto.GenerateKey()
+			require.NoError(t, err)
+
+			protocolFor := func(wantQUIC bool) int {
+				if wantQUIC {
+					return multiaddr.P_QUIC_V1
+				}
+				return multiaddr.P_TCP
+			}
+
+			firstOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1", DisableQUIC: !tt.firstQUIC}, peerKey)
+			require.NoError(t, err)
+			firstClient, err := libp2p.New(firstOpts...)
+			require.NoError(t, err)
+			defer firstClient.Close()
+
+			firstAddr := firstMultiaddrWithProtocol(t, server.Addrs(), protocolFor(tt.firstQUIC))
+			require.NoError(t, firstClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{firstAddr}}))
+			require.Len(t, server.Network().ConnsToPeer(firstClient.ID()), 1)
+
+			// A second dial from the same client would be a silent no-op once
+			// go-libp2p already reports it Connected to the peer, so the second leg
+			// uses a separate client host sharing the same peer identity.
+			secondOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1", DisableQUIC: !tt.secondQUIC}, peerKey)
+			require.NoError(t, err)
+			secondClient, err := libp2p.New(secondOpts...)
+			require.NoError(t, err)
+			defer secondClient.Close()
+
+			secondAddr := firstMultiaddrWithProtocol(t, server.Addrs(), protocolFor(tt.secondQUIC))
+			_ = secondClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{secondAddr}})
+
+			require.Eventually(t, func() bool {
+				return len(secondClient.Network().ConnsToPeer(server.ID())) == 0
+			}, time.Second, 10*time.Millisecond, "the second connection must be rejected")
+
+			conns := server.Network().ConnsToPeer(firstClient.ID())
+			require.Len(t, conns, 1, "the first connection must never be closed to make room for a later one")
+			_, err = conns[0].RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1)
+			if tt.firstQUIC {
+				require.NoError(t, err, "the surviving connection must be the one that registered first")
+			} else {
+				require.Error(t, err, "the surviving connection must be the one that registered first")
+			}
+		})
 	}
 }
 
-// TestInterceptSecuredRejectsRedundantInboundTCPWhenPeerAlreadyHasQUIC reproduces the
-// dual-transport connection race: two independent nodes discover each other and dial one
-// another over different transports around the same time. Without this gate, both
-// connections succeed and never converge; the gate makes the server reject the second
-// (non-preferred) transport for a peer it is already connected to over QUIC.
-func TestInterceptSecuredRejectsRedundantInboundTCPWhenPeerAlreadyHasQUIC(t *testing.T) {
+// TestInterceptSecuredRejectsRegardlessOfDirection pins that the rejection is based
+// purely on whether a connection already exists for the peer, not on which side dialed.
+func TestInterceptSecuredRejectsRegardlessOfDirection(t *testing.T) {
 	serverKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
@@ -92,319 +145,6 @@ func TestInterceptSecuredRejectsRedundantInboundTCPWhenPeerAlreadyHasQUIC(t *tes
 	require.NoError(t, err)
 	defer server.Close()
 	gater.SetHost(server)
-
-	peerKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-
-	serverQUICAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_QUIC_V1)
-	serverTCPAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_TCP)
-
-	quicClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, peerKey)
-	require.NoError(t, err)
-	quicClient, err := libp2p.New(quicClientOpts...)
-	require.NoError(t, err)
-	defer quicClient.Close()
-
-	require.NoError(t, quicClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverQUICAddr}}))
-	require.Len(t, server.Network().ConnsToPeer(quicClient.ID()), 1)
-
-	tcpOnlyClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1", DisableQUIC: true}, peerKey)
-	require.NoError(t, err)
-	tcpOnlyClient, err := libp2p.New(tcpOnlyClientOpts...)
-	require.NoError(t, err)
-	defer tcpOnlyClient.Close()
-
-	// The reject closes the connection on the accepting (server) side; the dialer's
-	// Connect() call itself does not reliably surface that as an error (the security
-	// handshake completes locally before the remote's gater verdict tears it down), so
-	// the invariant to assert is connection state, not Connect()'s return value.
-	_ = tcpOnlyClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverTCPAddr}})
-
-	require.Eventually(t, func() bool {
-		return len(tcpOnlyClient.Network().ConnsToPeer(server.ID())) == 0
-	}, time.Second, 10*time.Millisecond, "the redundant TCP connection must not remain established on the dialer side")
-
-	conns := server.Network().ConnsToPeer(quicClient.ID())
-	require.Len(t, conns, 1, "the server must not have accepted a second connection for the same peer")
-	_, err = conns[0].RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1)
-	require.NoError(t, err, "the surviving connection must be the QUIC one")
-}
-
-// TestInterceptSecuredClosesStaleInboundTCPWhenQUICArrivesSecond covers the reverse
-// arrival order from TestInterceptSecuredRejectsRedundantInboundTCPWhenPeerAlreadyHasQUIC:
-// TCP connects first, then the same peer's QUIC connection arrives. The preferred
-// (QUIC) connection must still end up as the sole survivor, not just the non-preferred
-// one when it arrives second.
-func TestInterceptSecuredClosesStaleInboundTCPWhenQUICArrivesSecond(t *testing.T) {
-	serverKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
-	require.NoError(t, err)
-	gater, err := NewGater(&P2PConfig{IpAddr: "127.0.0.1"})
-	require.NoError(t, err)
-	serverOpts = append(serverOpts, libp2p.ConnectionGater(gater))
-	server, err := libp2p.New(serverOpts...)
-	require.NoError(t, err)
-	defer server.Close()
-	gater.SetHost(server)
-
-	peerKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-
-	serverQUICAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_QUIC_V1)
-	serverTCPAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_TCP)
-
-	tcpOnlyClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1", DisableQUIC: true}, peerKey)
-	require.NoError(t, err)
-	tcpOnlyClient, err := libp2p.New(tcpOnlyClientOpts...)
-	require.NoError(t, err)
-	defer tcpOnlyClient.Close()
-
-	require.NoError(t, tcpOnlyClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverTCPAddr}}))
-	require.Len(t, server.Network().ConnsToPeer(tcpOnlyClient.ID()), 1)
-
-	quicClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, peerKey)
-	require.NoError(t, err)
-	quicClient, err := libp2p.New(quicClientOpts...)
-	require.NoError(t, err)
-	defer quicClient.Close()
-
-	require.NoError(t, quicClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverQUICAddr}}))
-
-	require.Eventually(t, func() bool {
-		conns := server.Network().ConnsToPeer(quicClient.ID())
-		if len(conns) != 1 {
-			return false
-		}
-		_, err := conns[0].RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1)
-		return err == nil
-	}, time.Second, 10*time.Millisecond, "the stale TCP connection must be closed once the preferred QUIC connection is admitted")
-}
-
-// TestInterceptSecuredClosesStaleInboundTCPWhenOurOwnOutboundQUICArrivesSecond covers
-// the arrival-order combination the prior fix missed: it only applied the dedup logic
-// to inbound connections, so a peer's connections were still deduplicated against each
-// other, but our own outbound dials were exempt entirely (InterceptSecured returned
-// true unconditionally for any non-inbound direction). A peer dialing us over TCP,
-// followed by us independently dialing that same peer over QUIC, left both live.
-//
-// This can't be driven through host.Connect()/Network().DialPeer(), even with
-// network.WithForceDirectDial: go-libp2p reuses any existing live connection to a peer
-// rather than dialing a second one once Connectedness already reports Connected, so a
-// second high-level dial call is a silent no-op here. In production the only way an
-// outbound QUIC attempt reaches this gate at all is when it was already in flight
-// before the inbound TCP connection registered - an unreproducible timing race, not a
-// sequencing a test can drive. Calling the gate directly with a real pre-existing
-// connection reproduces that arrival deterministically instead.
-func TestInterceptSecuredAdmitsOurOwnOutboundQUICEvenWithStaleInboundTCPExisting(t *testing.T) {
-	serverKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
-	require.NoError(t, err)
-	gater, err := NewGater(&P2PConfig{IpAddr: "127.0.0.1"})
-	require.NoError(t, err)
-	serverOpts = append(serverOpts, libp2p.ConnectionGater(gater))
-	server, err := libp2p.New(serverOpts...)
-	require.NoError(t, err)
-	defer server.Close()
-	gater.SetHost(server)
-
-	peerKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	peerOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, peerKey)
-	require.NoError(t, err)
-	peerHost, err := libp2p.New(peerOpts...)
-	require.NoError(t, err)
-	defer peerHost.Close()
-
-	serverTCPAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_TCP)
-
-	// The peer dials the server over TCP: inbound at the server, a real, fully
-	// registered connection.
-	require.NoError(t, peerHost.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverTCPAddr}}))
-	require.Len(t, server.Network().ConnsToPeer(peerHost.ID()), 1)
-
-	quicAddr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/udp/4001/quic-v1")
-	require.NoError(t, err)
-	require.True(t, gater.InterceptSecured(network.DirOutbound, peerHost.ID(), stubConnMultiaddrs{remote: quicAddr}),
-		"the outbound QUIC leg itself must still be admitted")
-
-	// InterceptSecured runs before muxer negotiation, so the QUIC connection it
-	// just admitted could still fail to fully upgrade afterward. It must not close
-	// the existing, healthy TCP connection itself - only onConnected (which only
-	// fires once a connection is fully registered) may do that. See
-	// TestOnConnectedClosesRedundantNonQUICConnection for that side of the
-	// contract, and TestInterceptSecuredClosesStaleInboundTCPWhenQUICArrivesSecond
-	// for the end-to-end behavior once QUIC does fully register.
-	require.Len(t, server.Network().ConnsToPeer(peerHost.ID()), 1,
-		"InterceptSecured must not itself close the existing TCP connection")
-}
-
-// TestSetHostReconcilesConnectionsEstablishedBeforeRegistration covers the startup
-// window between libp2p.New returning the host and NewP2Pmanager calling SetHost: a
-// connection can complete and register during that gap too, since InterceptSecured
-// fails open (g.host is nil) the whole time. Without reconciling already-connected
-// peers once the host is finally wired in, a redundant pair that both slipped through
-// during that window would never get cleaned up by anything - the Connected notifee
-// only fires for connections that register *after* it is registered.
-func TestSetHostReconcilesConnectionsEstablishedBeforeRegistration(t *testing.T) {
-	serverKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
-	require.NoError(t, err)
-	gater, err := NewGater(&P2PConfig{IpAddr: "127.0.0.1"})
-	require.NoError(t, err)
-	serverOpts = append(serverOpts, libp2p.ConnectionGater(gater))
-	server, err := libp2p.New(serverOpts...)
-	require.NoError(t, err)
-	defer server.Close()
-	// gater.SetHost is deliberately not called yet.
-
-	peerKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-
-	quicClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, peerKey)
-	require.NoError(t, err)
-	quicClient, err := libp2p.New(quicClientOpts...)
-	require.NoError(t, err)
-	defer quicClient.Close()
-
-	tcpOnlyClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1", DisableQUIC: true}, peerKey)
-	require.NoError(t, err)
-	tcpOnlyClient, err := libp2p.New(tcpOnlyClientOpts...)
-	require.NoError(t, err)
-	defer tcpOnlyClient.Close()
-
-	serverQUICAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_QUIC_V1)
-	serverTCPAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_TCP)
-
-	require.NoError(t, quicClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverQUICAddr}}))
-	require.NoError(t, tcpOnlyClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverTCPAddr}}))
-	require.Len(t, server.Network().ConnsToPeer(quicClient.ID()), 2,
-		"both connections register: the gater's host isn't wired in yet, so InterceptSecured fails open")
-
-	// This is the call under test: it happens right after libp2p.New() in
-	// production, here deliberately delayed until after both connections above.
-	gater.SetHost(server)
-
-	require.Eventually(t, func() bool {
-		conns := server.Network().ConnsToPeer(quicClient.ID())
-		if len(conns) != 1 {
-			return false
-		}
-		_, err := conns[0].RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1)
-		return err == nil
-	}, time.Second, 10*time.Millisecond, "SetHost must reconcile connections that registered before it was called, not just ones that register afterward")
-}
-
-// TestInterceptSecuredRejectsInboundTCPWhenOurOwnOutboundQUICAlreadyExists is the
-// mirror arrival order: we dial out over QUIC first, then the same peer separately
-// dials us over TCP. The inbound TCP must be rejected, not just tolerated alongside it.
-// As above, the second leg is simulated directly rather than dialed, since a real
-// second dial from the peer's side would race the same Connectedness short-circuit.
-func TestInterceptSecuredRejectsInboundTCPWhenOurOwnOutboundQUICAlreadyExists(t *testing.T) {
-	serverKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
-	require.NoError(t, err)
-	gater, err := NewGater(&P2PConfig{IpAddr: "127.0.0.1"})
-	require.NoError(t, err)
-	serverOpts = append(serverOpts, libp2p.ConnectionGater(gater))
-	server, err := libp2p.New(serverOpts...)
-	require.NoError(t, err)
-	defer server.Close()
-	gater.SetHost(server)
-
-	peerKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	peerOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, peerKey)
-	require.NoError(t, err)
-	peerHost, err := libp2p.New(peerOpts...)
-	require.NoError(t, err)
-	defer peerHost.Close()
-
-	peerQUICAddr := firstMultiaddrWithProtocol(t, peerHost.Addrs(), multiaddr.P_QUIC_V1)
-
-	// The server dials the peer over QUIC: outbound from the server's own gater, a
-	// real, fully registered connection.
-	require.NoError(t, server.Connect(t.Context(), peer.AddrInfo{ID: peerHost.ID(), Addrs: []multiaddr.Multiaddr{peerQUICAddr}}))
-	require.Len(t, server.Network().ConnsToPeer(peerHost.ID()), 1)
-
-	tcpAddr, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/tcp/4001")
-	require.NoError(t, err)
-	require.False(t, gater.InterceptSecured(network.DirInbound, peerHost.ID(), stubConnMultiaddrs{remote: tcpAddr}),
-		"the redundant inbound TCP leg must be rejected")
-
-	conns := server.Network().ConnsToPeer(peerHost.ID())
-	require.Len(t, conns, 1, "the pre-existing outbound QUIC connection must be untouched")
-	_, err = conns[0].RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1)
-	require.NoError(t, err)
-}
-
-// TestOnConnectedClosesRedundantNonQUICConnection covers the residual race
-// InterceptSecured cannot close on its own: ConnsToPeer is a snapshot taken before the
-// connection under evaluation is registered, so two connections for the same peer that
-// reach InterceptSecured concurrently can each see an empty snapshot and both admit
-// themselves. Connected fires strictly after its own connection is added to the
-// swarm's connection map, so whichever of two racing connections registers second is
-// guaranteed to observe both - closing the non-QUIC one here, independent of
-// InterceptSecured, closes that window regardless of timing.
-//
-// Two connections are established with no gater attached (so nothing at the
-// InterceptSecured layer interferes) to reach the "both got through" state directly,
-// then onConnected is invoked as the Connected notifee would.
-func TestOnConnectedClosesRedundantNonQUICConnection(t *testing.T) {
-	serverKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
-	require.NoError(t, err)
-	server, err := libp2p.New(serverOpts...)
-	require.NoError(t, err)
-	defer server.Close()
-
-	peerKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-
-	quicClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, peerKey)
-	require.NoError(t, err)
-	quicClient, err := libp2p.New(quicClientOpts...)
-	require.NoError(t, err)
-	defer quicClient.Close()
-
-	tcpOnlyClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1", DisableQUIC: true}, peerKey)
-	require.NoError(t, err)
-	tcpOnlyClient, err := libp2p.New(tcpOnlyClientOpts...)
-	require.NoError(t, err)
-	defer tcpOnlyClient.Close()
-
-	serverQUICAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_QUIC_V1)
-	serverTCPAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_TCP)
-
-	require.NoError(t, quicClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverQUICAddr}}))
-	require.NoError(t, tcpOnlyClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverTCPAddr}}))
-	conns := server.Network().ConnsToPeer(quicClient.ID())
-	require.Len(t, conns, 2, "both connections register since no gater is attached to reject either")
-
-	g := &Gater{}
-	g.onConnected(server.Network(), conns[0])
-
-	remaining := server.Network().ConnsToPeer(quicClient.ID())
-	require.Len(t, remaining, 1, "the redundant non-QUIC connection must be closed")
-	_, err = remaining[0].RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1)
-	require.NoError(t, err, "the surviving connection must be the QUIC one")
-}
-
-func TestSetHostRegistersConnectedNotifeeThatDoesNotPanicOnASingleConnection(t *testing.T) {
-	serverKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
-	require.NoError(t, err)
-	server, err := libp2p.New(serverOpts...)
-	require.NoError(t, err)
-	defer server.Close()
-
-	g := &Gater{}
-	g.SetHost(server)
 
 	peerKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -416,10 +156,12 @@ func TestSetHostRegistersConnectedNotifeeThatDoesNotPanicOnASingleConnection(t *
 
 	serverQUICAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_QUIC_V1)
 	require.NoError(t, peerHost.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverQUICAddr}}))
+	require.Len(t, server.Network().ConnsToPeer(peerHost.ID()), 1)
 
-	require.Eventually(t, func() bool {
-		return len(server.Network().ConnsToPeer(peerHost.ID())) == 1
-	}, time.Second, 10*time.Millisecond, "a single connection must be unaffected by the notifee")
+	for _, dir := range []network.Direction{network.DirInbound, network.DirOutbound} {
+		require.False(t, gater.InterceptSecured(dir, peerHost.ID(), nil))
+	}
+	require.Len(t, server.Network().ConnsToPeer(peerHost.ID()), 1, "the existing connection must be untouched")
 }
 
 func firstMultiaddrWithProtocol(t *testing.T, addrs []multiaddr.Multiaddr, protocol int) multiaddr.Multiaddr {
@@ -432,10 +174,3 @@ func firstMultiaddrWithProtocol(t *testing.T, addrs []multiaddr.Multiaddr, proto
 	t.Fatalf("no address with protocol %d found among %v", protocol, addrs)
 	return nil
 }
-
-type stubConnMultiaddrs struct {
-	local, remote multiaddr.Multiaddr
-}
-
-func (c stubConnMultiaddrs) LocalMultiaddr() multiaddr.Multiaddr  { return c.local }
-func (c stubConnMultiaddrs) RemoteMultiaddr() multiaddr.Multiaddr { return c.remote }
