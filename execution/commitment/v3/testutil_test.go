@@ -56,7 +56,9 @@ func openTestTrie(ctx context.Context, spec runner.RunSpec) (commitment.Trie, er
 	tr := &Trie{scheduleWorkers: spec.Workers}
 	reader, _ := spec.Memory.Open(ctx)
 	tr.ResetContext(reader)
-	tr.SetTrieContextFactory(spec.Memory.Open)
+	if !spec.NoContextFactory {
+		tr.SetTrieContextFactory(spec.Memory.Open)
+	}
 	return tr, nil
 }
 

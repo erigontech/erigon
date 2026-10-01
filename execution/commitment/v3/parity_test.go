@@ -143,6 +143,26 @@ func TestDifferential(t *testing.T) {
 	parity := func(i int) commitmenttest.Op {
 		return accountOp(parityAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i})
 	}
+	t.Run("wide_round_without_factory", func(t *testing.T) {
+		var initial, ops []commitmenttest.Op
+		for i := range 4096 {
+			initial = append(initial, accountOp(incrAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i}))
+			switch {
+			case i%7 == 0:
+				ops = append(ops, commitmenttest.Op{Key: incrAddress(i), Delete: true})
+			case i%3 == 0:
+				ops = append(ops, slotOp(incrSlot(incrAddress(i), i), i+1))
+			default:
+				ops = append(ops, accountOp(incrAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i + 8192}))
+			}
+		}
+		for i := 4096; i < 4096+512; i++ {
+			ops = append(ops, accountOp(incrAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i}))
+		}
+		engines := []runner.RunSpec{{Name: "v3", Mode: commitment.ModeCollect, Workers: 4, NoContextFactory: true}, {Name: "hph", Mode: commitment.ModeUpdate}}
+		differential(t, commitmenttest.Case{ID: "wide_round_without_factory", Rounds: [][]commitmenttest.Op{initial, ops}}, engines)
+	})
+
 	t.Run("bulk", func(t *testing.T) {
 		for _, kind := range []string{"accounts", "storage", "mixed"} {
 			for _, count := range []int{1, 2, 16, 1000, 100000} {

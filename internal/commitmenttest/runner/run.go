@@ -31,13 +31,16 @@ import (
 type openFunc func(context.Context, RunSpec) (commitment.Trie, error)
 
 type RunSpec struct {
-	Name     string
-	Mode     commitment.Mode
-	Workers  int
-	Reload   bool
-	Fresh    bool
-	Context  ContextSpec
-	Memory   *Memory
+	Name    string
+	Mode    commitment.Mode
+	Workers int
+
+	NoContextFactory bool
+	Reload           bool
+	Fresh            bool
+	Context          ContextSpec
+	Memory           *Memory
+
 	expected []roundResult
 }
 

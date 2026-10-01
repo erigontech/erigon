@@ -109,7 +109,8 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	storageParts := make([]deltaParts, len(storage))
 	accountFold := foldPlan{ctx: ctx, factory: factory, workers: accountWorkers}
 	storageDone := make(chan error, 1)
-	if factory != nil && storageWorkers > 1 {
+	storageAsync := factory != nil && storageWorkers > 1
+	if storageAsync {
 		go func() {
 			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin)
 		}()
@@ -129,7 +130,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	storageReady := make(chan struct{})
 	var storageErr error
 	var results map[[32]byte][32]byte
-	go func() {
+	collectStorage := func() {
 		defer close(storageReady)
 		if storageErr = <-storageDone; storageErr != nil {
 			return
@@ -138,7 +139,12 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		for i, task := range storage {
 			results[task.addrHash] = storageRoots[i]
 		}
-	}()
+	}
+	if storageAsync {
+		go collectStorage()
+	} else {
+		collectStorage()
+	}
 	encode := func(i int) {
 		plan := &plans[i]
 		if plan.skip || plan.delete {
@@ -254,7 +260,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		rest = append(rest, i)
 	}
 	var groupErrs [16]error
-	parallelFor(16, workers, 1, func(nib int) {
+	parallelFor(16, min(workers, (len(remaining)+1023)/1024), 1, func(nib int) {
 		for _, i := range groups[nib] {
 			if err := insert(root, plans[i].entry.hashedKey, accountResults[i].value); err != nil {
 				groupErrs[nib] = err
@@ -315,9 +321,16 @@ func (g graph) planAccounts(ctx commitment.PatriciaContext, root *node, accounts
 }
 
 func parallelFor(n, workers, chunk int, fn func(i int)) {
+	w := min(workers, (n+chunk-1)/chunk)
+	if w <= 1 {
+		for i := range n {
+			fn(i)
+		}
+		return
+	}
 	var next atomic.Int64
 	var wg sync.WaitGroup
-	for range min(workers, (n+chunk-1)/chunk) {
+	for range w {
 		wg.Go(func() {
 			for {
 				lo := int(next.Add(int64(chunk))) - chunk
