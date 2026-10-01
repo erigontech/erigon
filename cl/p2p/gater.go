@@ -39,16 +39,21 @@ func NewGater(cfg *P2PConfig) (g *Gater, err error) {
 
 // SetHost lets the gater see live connections once the host exists. buildOptions
 // registers the gater before libp2p.New returns the host it gates, so InterceptSecured
-// fails open (allow) until this is called.
+// fails open (allow) until this is called - and libp2p.New can itself start accepting
+// connections before it returns, so one or more can complete and register during that
+// same window, before this method has even run.
 //
-// It also registers a Connected notifee: InterceptSecured's ConnsToPeer check runs
-// before the connection it is deciding on is registered, so two connections for the
-// same peer that reach it concurrently can each observe an empty snapshot and both
-// admit themselves. onConnected is the backstop for that residual race - see its
-// doc comment.
+// It registers a Connected notifee for connections that complete afterward, and
+// reconciles every peer already present in the host's connection list for ones that
+// slipped through during the startup window - otherwise a redundant pair that both
+// registered before this point would never be observed by anything and would never
+// converge.
 func (g *Gater) SetHost(h host.Host) {
 	g.host.Store(&h)
 	h.Network().Notify(&network.NotifyBundle{ConnectedF: g.onConnected})
+	for _, p := range h.Network().Peers() {
+		g.reconcilePeer(h.Network(), p)
+	}
 }
 
 // onConnected closes a peer's redundant non-QUIC connection once QUIC is known to also
@@ -58,7 +63,11 @@ func (g *Gater) SetHost(h host.Host) {
 // guaranteed to see both in ConnsToPeer here - the swarm's connection map serializes
 // the two registrations even when the admission checks raced.
 func (g *Gater) onConnected(net network.Network, conn network.Conn) {
-	conns := net.ConnsToPeer(conn.RemotePeer())
+	g.reconcilePeer(net, conn.RemotePeer())
+}
+
+func (g *Gater) reconcilePeer(net network.Network, p peer.ID) {
+	conns := net.ConnsToPeer(p)
 	if len(conns) < 2 {
 		return
 	}
@@ -113,37 +122,34 @@ func (g *Gater) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
 // other around the same time, one over TCP and one over QUIC: go-libp2p does not
 // deduplicate connections across transports (swarm.addConn appends unconditionally),
 // so both dials succeed and the peer ends up with two live connections that never
-// converge on their own. Rejecting the non-preferred transport here, before the
-// connection is registered or the muxer negotiated, is cheaper than closing it
-// afterwards and — because "is this address QUIC" is a fact both sides compute
-// identically — always converges on keeping the same connection (the QUIC one)
+// converge on their own. Rejecting a new non-preferred (TCP) connection here, when a
+// QUIC connection to the same peer is already registered, is cheaper than admitting it
+// and closing it afterwards and — because "is this address QUIC" is a fact both sides
+// compute identically — always converges on keeping the same connection (the QUIC one)
 // rather than racing on timestamps that the two peers could disagree on.
 //
-// Arrival order isn't fixed: TCP can just as easily reach here before QUIC does, in
-// which case the earlier TCP connection is already registered when this runs. Simply
-// allowing QUIC in that case would leave both connections live, so the QUIC arm also
-// closes any already-registered non-QUIC connection to the same peer, making the
-// outcome (QUIC survives, TCP doesn't) the same regardless of which one arrives first.
-//
-// This applies regardless of direction: the redundant leg of the pair is just as
-// likely to be one we dialed ourselves (e.g. a peer reaches us over TCP, and we
-// separately dial that same peer over QUIC) as one the peer dialed. Direction says
-// nothing about which transport should survive, only "is this QUIC or not" does.
+// This runs before the muxer negotiates (see the doc comment above), so a QUIC
+// connection admitted here can still fail to fully upgrade afterward. Closing an
+// existing, healthy TCP connection on its behalf at this point would risk leaving the
+// peer with no connection at all if that happens. So this only ever rejects a new,
+// redundant TCP attempt against an already-registered QUIC connection; it never closes
+// anything itself. A QUIC connection that arrives while a TCP one is already registered
+// is simply admitted here, and reconcilePeer - invoked from the Connected notifee,
+// which only fires once a connection is fully registered - closes the stale TCP
+// connection once QUIC has actually, successfully gone live. This also means arrival
+// order and direction don't matter: whichever order the two legs reach this point in,
+// and regardless of who dialed whom, the same two rules (reject redundant TCP, let
+// reconcilePeer clean up after a successful QUIC registration) converge on the same
+// outcome.
 func (g *Gater) InterceptSecured(_ network.Direction, p peer.ID, addrs network.ConnMultiaddrs) (allow bool) {
 	hostPtr := g.host.Load()
 	if hostPtr == nil {
 		return true
 	}
-	existing := (*hostPtr).Network().ConnsToPeer(p)
 	if _, err := addrs.RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
-		for _, conn := range existing {
-			if _, err := conn.RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1); err != nil {
-				_ = conn.Close()
-			}
-		}
 		return true
 	}
-	for _, conn := range existing {
+	for _, conn := range (*hostPtr).Network().ConnsToPeer(p) {
 		if _, err := conn.RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
 			return false
 		}
