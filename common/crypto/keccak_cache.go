@@ -24,6 +24,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/erigontech/erigon/common/dbg"
 
@@ -52,8 +55,39 @@ type keccakBucket struct {
 
 var (
 	keccakCacheSeed    = maphash.MakeSeed()
-	keccakCacheBuckets [1 << 17]keccakBucket
+	keccakCacheBuckets = allocBuckets()
+	kcAdmit            = dbg.EnvBool("KECCAK_CACHE_ADMIT", false)
+	kcSeen             [1 << 14]atomic.Uint64 // 2^20 bits, 128 KB
+	kcSeenAdds         atomic.Uint64
 )
+
+func allocBuckets() []keccakBucket {
+	n := 1 << dbg.EnvInt("KECCAK_CACHE_BITS", 17)
+	size := n * int(unsafe.Sizeof(keccakBucket{}))
+	if dbg.EnvBool("KECCAK_CACHE_HUGE", false) {
+		mem, err := unix.Mmap(-1, 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_PRIVATE|unix.MAP_ANON)
+		if err == nil {
+			_ = unix.Madvise(mem, 14) // MADV_HUGEPAGE on linux
+			return unsafe.Slice((*keccakBucket)(unsafe.Pointer(&mem[0])), n)
+		}
+	}
+	return make([]keccakBucket, n)
+}
+
+// admitted reports whether key was seen before; the first sighting only marks it.
+func admitted(key uint64) bool {
+	w, bit := &kcSeen[(key>>20)&(uint64(len(kcSeen))-1)], uint64(1)<<(key>>40&63)
+	if w.Load()&bit != 0 {
+		return true
+	}
+	w.Or(bit)
+	if kcSeenAdds.Add(1)&(1<<18-1) == 0 {
+		for i := range kcSeen {
+			kcSeen[i].Store(0)
+		}
+	}
+	return false
+}
 
 // Keccak256Hash calc Keccak256. Short inputs are memoized in a direct-mapped table; a bucket
 // another goroutine holds is treated as a miss, so a lookup never waits.
@@ -80,7 +114,7 @@ func Keccak256Hash(data []byte) common.Hash {
 		}
 	}
 	h := keccak.Sum256(data)
-	if kcVariant == "lookup" {
+	if kcVariant == "lookup" || (kcAdmit && !admitted(key)) {
 		return h
 	}
 	if st := b.tag.Load(); st&keccakBucketLocked == 0 && b.tag.CompareAndSwap(st, st|keccakBucketLocked) {
