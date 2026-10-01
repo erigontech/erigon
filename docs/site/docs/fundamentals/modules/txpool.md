@@ -65,7 +65,7 @@ On each of the other hosts, point the same flag at Erigon rather than at themsel
 
 ## Delegated (EIP-7702) senders
 
-An account with code — in practice one with an active EIP-7702 delegation — may have only one transaction in the pool, and it must use the account's current nonce. A further transaction, or one with a nonce gap, is rejected with `in-flight transaction limit reached for delegated account` or `gapped-nonce transaction from delegated account`. Replacing the pooled transaction at the same nonce with a higher fee is still allowed. When an account becomes delegated, its pooled transactions are cut back to one on the next block. No flag changes this.
+An account with code — in practice one with an active EIP-7702 delegation — may have only one transaction in the pool, and it must use the account's current nonce. A further transaction, or one with a nonce gap, is rejected with `in-flight transaction limit reached for delegated account` or `gapped-nonce transaction from delegated account`. Replacing the pooled transaction at the same nonce is still allowed, subject to the usual price bump (`--txpool.pricebump`, and `--txpool.blobpricebump` for blob transactions). When an account becomes delegated, its pooled transactions are cut back to at most one on the next block. No flag changes the one-transaction limit.
 
 ## Flags explanation
 

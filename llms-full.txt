@@ -2431,7 +2431,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   - Default: `8551`
 
 - `--authrpc.jwtsecret value`: The path to the [JWT secret](https://docs.erigon.tech/fundamentals/jwt) file for the consensus layer.
-- `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more: with Zstandard when the client sends `Accept-Encoding: zstd`, otherwise with gzip.
+- `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more with the encoding the client's `Accept-Encoding` allows: Zstandard (preferred) or gzip. A client that accepts neither gets an uncompressed response.
   - Default: `true`
 
 - `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
@@ -3027,7 +3027,7 @@ Erigon's own variables — everything below except the [Docker](https://docs.eri
 - `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--exec.no-prune`)
 - `NO_MERGE` - Disables merging operations (flag equivalent: `--exec.no-merge`)
 - `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
-- `MAX_REORG_DEPTH` - Sets how many blocks behind the head Erigon keeps reorg data while no finalized block is known (default: `96`). Once the consensus layer reports a finalized block, Erigon keeps changesets and holds snapshot retirement back to that block instead, so during non-finality it can reorg deeper than this value — down to, but not below, the finalized block.
+- `MAX_REORG_DEPTH` - Sets how many blocks behind the head Erigon keeps reorg data while no finalized block is known, and during the initial sync cycle (default: `96`). After that, once the consensus layer reports a finalized block, Erigon keeps changesets and holds snapshot retirement back to that block instead: during non-finality it can reorg deeper than this value — down to, but not below, the finalized block — and with normal finality it may keep fewer than 96 blocks. The value still caps how far a new payload's missing ancestors are downloaded and how far from the head a side fork is validated.
 - `CAPLIN_STATE_PRUNE_DISABLE` - Disables pruning of Caplin's state indexing DB after ranges are frozen into snapshots (default: `false`)
 - `CAPLIN_STATE_PRUNE_TIMEOUT` - Overrides the per-pass time budget for Caplin state pruning (a duration, e.g. `500ms`; default derived from the chain's slot time)
 
@@ -4806,7 +4806,7 @@ On each of the other hosts, point the same flag at Erigon rather than at themsel
 
 ## Delegated (EIP-7702) senders
 
-An account with code — in practice one with an active EIP-7702 delegation — may have only one transaction in the pool, and it must use the account's current nonce. A further transaction, or one with a nonce gap, is rejected with `in-flight transaction limit reached for delegated account` or `gapped-nonce transaction from delegated account`. Replacing the pooled transaction at the same nonce with a higher fee is still allowed. When an account becomes delegated, its pooled transactions are cut back to one on the next block. No flag changes this.
+An account with code — in practice one with an active EIP-7702 delegation — may have only one transaction in the pool, and it must use the account's current nonce. A further transaction, or one with a nonce gap, is rejected with `in-flight transaction limit reached for delegated account` or `gapped-nonce transaction from delegated account`. Replacing the pooled transaction at the same nonce is still allowed, subject to the usual price bump (`--txpool.pricebump`, and `--txpool.blobpricebump` for blob transactions). When an account becomes delegated, its pooled transactions are cut back to at most one on the next block. No flag changes the one-transaction limit.
 
 ## Flags explanation
 
@@ -5360,22 +5360,23 @@ Erigon does not support the `pending` block tag for `eth_call`, `eth_createAcces
 
 ### Fork-gated call fields
 
-`eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_simulateV1` and `trace_call` validate a call against the fork active at the requested block, as a transaction would be:
+Methods that execute a call object — among them `eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_simulateV1`, `eth_callMany`, `debug_traceCall` and the `trace_call` family — validate it against the fork active at the requested block, as a transaction would be:
 
 | Call carries | Rejected when | Error |
 | --- | --- | --- |
 | `accessList` | the block is before Berlin | `eip-2930 transactions require Berlin` |
 | `blobVersionedHashes` | the block is before Cancun | `BlobTx transactions require Cancun` |
-| `blobVersionedHashes` and no `to` | always | `txn: field 'To' can not be 'nil'` |
-| an empty `blobVersionedHashes` list | always | `blob txn must contain at least one blob versioned hash` |
+| `blobVersionedHashes` and no `to` | from Cancun on | `txn: field 'To' can not be 'nil'` |
+| an empty `blobVersionedHashes` list | from Cancun on | `blob txn must contain at least one blob versioned hash` |
+| a blob versioned hash with the wrong version byte | from Cancun on | `blob txn versioned hash has invalid version byte` |
 
 `eth_createAccessList` therefore rejects every request on a block before Berlin, including a plain transfer.
 
 ### eth_syncing and eth_subscribe("syncing")
 
-`eth_syncing` returns `false` once the node is within 8 blocks of the highest block it has seen; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty. On 3.7 `eth_syncing` reports `startingBlock` as `0x0`; the subscription reports the block where the current sync began.
+`eth_syncing` returns `false` once the node is fewer than 8 blocks behind the highest block it has seen; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). On 3.7 `eth_syncing` reports `startingBlock` as `0x0`; the subscription reports the block it was at when it first saw the node syncing.
 
-`eth_subscribe("syncing")` (WebSocket or IPC) sends the current state when you subscribe, then one message per change: the same object with `syncing: true` while syncing, or `false` once synced.
+`eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then one message per change: the same object with `syncing: true` while syncing, or `false` once synced.
 
 ### eth_getProof
 
@@ -6265,9 +6266,9 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCallMany","params":[[{"tra
 | --- | --- |
 | Array | Array of trace results for each bundle |
 
-### callTracer output
-
+:::note callTracer output
 With `{"tracer": "callTracer", "tracerConfig": {"withLog": true}}`, each entry in `logs` has an `index` that is the log's index **within the block**, matching `eth_getLogs` and the receipts, for `debug_traceTransaction` and `debug_traceBlockByNumber`/`ByHash`. `debug_traceCall` counts from `0x0`, and `debug_traceCallMany` counts within each bundle. A failed `CREATE` or `CREATE2` frame, including one that reverts, has no `to` field.
+:::
 
 ### debug_setMemoryLimit
 
