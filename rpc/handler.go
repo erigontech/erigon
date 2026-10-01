@@ -301,6 +301,9 @@ func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
 	defer jsonstream.Put(stream)
 
 	h.answerInto(cp, msg, stream)
+	if msg.isNotification() {
+		return
+	}
 	if err := h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer())); err != nil {
 		h.logger.Debug("Failed to write RPC response", "err", err)
 	}
@@ -343,7 +346,9 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream) {
 			h.answerBuffered(cp, msg)
 		} else {
 			h.answerInto(cp, msg, stream)
-			stream.WriteRaw("\n")
+			if !msg.isNotification() {
+				stream.WriteRaw("\n")
+			}
 		}
 		for _, n := range cp.notifiers {
 			if err := n.activate(); err != nil {
@@ -555,7 +560,9 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *jsonstream.Stream) *jsonrpcMessage {
 	switch {
 	case msg.isNotification():
-		_, _ = h.handleCall(ctx, msg, stream)
+		discard := jsonstream.Get(nil)
+		defer jsonstream.Put(discard)
+		_, _ = h.handleCall(ctx, msg, discard)
 		if h.traceRequests {
 			h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
 		}
