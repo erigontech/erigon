@@ -110,12 +110,12 @@ func NewTemporalMemBatch(tx kv.TemporalTx, db kv.RoDB, ioMetrics any) *TemporalM
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(aggTx.iis))
 
 	for id, ii := range aggTx.iis {
-		sd.iiWriters[id] = ii.newWriter(db, ii.ii.dirs.Tmp, !ii.ii.Enabled)
+		sd.iiWriters[id] = ii.NewWriter(db)
 	}
 
 	for id, d := range aggTx.d {
 		sd.domains[id] = map[string][]dataWithTxNum{}
-		sd.domainWriters[id] = d.newWriter(db, d.d.dirs.Tmp, !d.d.Enabled)
+		sd.domainWriters[id] = d.NewWriter(db)
 	}
 
 	return sd

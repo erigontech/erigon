@@ -331,8 +331,8 @@ func (iit *InvertedIndexRoTx) Files() (res VisibleFiles) {
 	return res
 }
 
-func (iit *InvertedIndexRoTx) NewWriter() *InvertedIndexBufferedWriter {
-	return iit.newWriter(nil, iit.ii.dirs.Tmp, !iit.ii.Enabled)
+func (iit *InvertedIndexRoTx) NewWriter(db kv.RoDB) *InvertedIndexBufferedWriter {
+	return iit.newWriter(db, iit.ii.dirs.Tmp, !iit.ii.Enabled)
 }
 
 type InvertedIndexBufferedWriter struct {

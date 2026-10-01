@@ -449,7 +449,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	defer tx.Rollback()
 	ic := ii.beginForTests()
 	defer ic.Close()
-	writer := ic.NewWriter()
+	writer := ic.NewWriter(db)
 	defer writer.close()
 
 	err = writer.Add([]byte("key1"), 2)
@@ -527,7 +527,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	}()
 	ic := ii.beginForTests()
 	defer ic.Close()
-	writer := ic.NewWriter()
+	writer := ic.NewWriter(db)
 	defer writer.close()
 
 	err = writer.Add([]byte("key1"), 2)
@@ -616,7 +616,7 @@ func TestInvIndex_PruneRollingCursorProgress(t *testing.T) {
 		t.Helper()
 		ic := ii.beginForTests()
 		defer ic.Close()
-		w := ic.NewWriter()
+		w := ic.NewWriter(db)
 		defer w.close()
 		for k := range uint64(keyCount) {
 			var key [8]byte
@@ -714,7 +714,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		ic := ii.beginForTests()
 		defer ic.Close()
-		writer := ic.NewWriter()
+		writer := ic.NewWriter(db)
 		defer writer.close()
 
 		var flusher flusher
@@ -735,7 +735,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 			}
 			if txNum%10 == 0 {
 				flusher = writer
-				writer = ic.NewWriter()
+				writer = ic.NewWriter(db)
 			}
 		}
 		if flusher != nil {
@@ -1118,7 +1118,7 @@ func TestInvertedIndex_IdxRange_SkipsFileRange(t *testing.T) {
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		ic := ii.beginForTests()
 		defer ic.Close()
-		writer := ic.NewWriter()
+		writer := ic.NewWriter(db)
 		defer writer.close()
 		for _, txNum := range txNums {
 			if err := writer.Add(key[:], txNum); err != nil {
@@ -1204,7 +1204,7 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		ic := ii.beginForTests()
 		defer ic.Close()
-		writer := ic.NewWriter()
+		writer := ic.NewWriter(db)
 		defer writer.close()
 		for _, txNum := range txNums {
 			if err := writer.Add(key[:], txNum); err != nil {
@@ -1283,7 +1283,7 @@ func TestInvertedIndexDisabledDiscardsWrites(t *testing.T) {
 
 	ic := ii.beginForTests()
 	defer ic.Close()
-	w := ic.NewWriter()
+	w := ic.NewWriter(db)
 	defer w.close()
 
 	require.NoError(t, w.Add([]byte("key1"), 2))
@@ -1445,7 +1445,7 @@ func TestInvertedIndexPrefetch(t *testing.T) {
 				require.NoError(t, err)
 				defer c.Close()
 				cursor := &prefetchIndexCursor{RwCursorDupSort: c, t: t}
-				w := iit.newWriter(&prefetchIndexDB{RoDB: db, cursor: cursor}, ii.dirs.Tmp, false)
+				w := iit.NewWriter(&prefetchIndexDB{RoDB: db, cursor: cursor})
 				defer w.close()
 				for i, e := range entries {
 					require.NoError(t, w.Add([]byte(e.key), e.txNum))
@@ -1497,7 +1497,7 @@ func TestInvertedIndexPrefetchError(t *testing.T) {
 	defer c.Close()
 	wantErr := errors.New("read failed")
 	cursor := &prefetchIndexCursor{RwCursorDupSort: c, t: t, prefetchErr: wantErr}
-	w := iit.newWriter(&prefetchIndexDB{RoDB: db, cursor: cursor}, ii.dirs.Tmp, false)
+	w := iit.NewWriter(&prefetchIndexDB{RoDB: db, cursor: cursor})
 	defer w.close()
 	require.NoError(t, w.Add([]byte("key"), 1))
 	err = w.Flush(t.Context(), &prefetchIndexTx{RwTx: tx, table: ii.ValuesTable, cursor: cursor})
@@ -1521,7 +1521,7 @@ func TestInvertedIndexPrefetchReuse(t *testing.T) {
 			db, ii := testDbAndInvertedIndex(t, 16, log.New())
 			iit := ii.beginForTests()
 			defer iit.Close()
-			w := iit.newWriter(db, ii.dirs.Tmp, false)
+			w := iit.NewWriter(db)
 			defer w.close()
 			p := w.prefetcher
 			if invIdxPrefetchWorkers > 0 {

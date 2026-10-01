@@ -459,8 +459,8 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	return nil
 }
 
-func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
-	return ht.newWriter(nil, ht.h.dirs.Tmp, !ht.h.Enabled)
+func (ht *HistoryRoTx) NewWriter(db kv.RoDB) *historyBufferedWriter {
+	return ht.newWriter(db, ht.h.dirs.Tmp, !ht.h.Enabled)
 }
 
 type historyBufferedWriter struct {

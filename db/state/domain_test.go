@@ -178,7 +178,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	defer tx.Rollback()
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	var (
@@ -305,10 +305,10 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 
 func TestDumpStepRangeToPathWithoutWrites(t *testing.T) {
 	t.Parallel()
-	_, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, 16, log.New())
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	batch := &TemporalMemBatch{}
@@ -335,7 +335,7 @@ func TestDumpStepRangeToPath(t *testing.T) {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	require.NoError(t, writer.PutWithPrev([]byte("k1"), []byte("v1"), 2, nil))
@@ -399,7 +399,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	defer tx.Rollback()
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	var (
@@ -480,7 +480,7 @@ func fillDomain(t *testing.T, d *Domain, db kv.RwDB, logger log.Logger) uint64 {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	var prev [32][]byte
@@ -934,7 +934,7 @@ func TestDomainRoTx_CursorParentCheck(t *testing.T) {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	val := []byte("value1")
@@ -996,7 +996,7 @@ func TestDomain_CollationSelectsExactStep(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback() //nolint:gocritic
 	dt := d.beginForTests()
-	w := dt.NewWriter()
+	w := dt.NewWriter(db)
 
 	// Step 0 writes (txNums 0-15)
 	require.NoError(t, w.PutWithPrev(k1, v1s0, 5, nil))
@@ -1058,7 +1058,7 @@ func TestDomain_GetLatestMaxStepBoundsFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	domainTx := d.beginForTests()
-	writer := domainTx.NewWriter()
+	writer := domainTx.NewWriter(db)
 	key := []byte("key")
 	v0, v1, v2 := []byte("step-0"), []byte("step-1"), []byte("step-2")
 	require.NoError(t, writer.PutWithPrev(key, v0, 5, nil))
@@ -1090,7 +1090,7 @@ func TestDomain_GetLatestMaxStepSelectsNewestDBValue(t *testing.T) {
 	defer tx.Rollback()
 	domainTx := d.beginForTests()
 	defer domainTx.Close()
-	writer := domainTx.NewWriter()
+	writer := domainTx.NewWriter(db)
 	defer writer.Close()
 	key := []byte("key")
 	v1, v2 := []byte("step-1"), []byte("step-2")
@@ -1111,7 +1111,7 @@ func TestDomain_GetLatestMaxStepZeroWithUnitSteps(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	domainTx := d.beginForTests()
-	writer := domainTx.NewWriter()
+	writer := domainTx.NewWriter(db)
 	key := []byte("key")
 	v0, v1 := []byte("step-0"), []byte("step-1")
 	require.NoError(t, writer.PutWithPrev(key, v0, 0, nil))
@@ -1136,7 +1136,7 @@ func TestDomain_GetLatestMaxStepRejectsMergedFileSplit(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	domainTx := d.beginForTests()
-	writer := domainTx.NewWriter()
+	writer := domainTx.NewWriter(db)
 	key := []byte("key")
 	v0, v1 := []byte("step-0"), []byte("step-1")
 	require.NoError(t, writer.PutWithPrev(key, v0, 5, nil))
@@ -1177,7 +1177,7 @@ func TestDomain_Delete(t *testing.T) {
 	defer tx.Rollback()
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	// Put on even txNum, delete on odd txNum
@@ -1352,7 +1352,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	defer tx.Rollback()
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	// keys are encodings of numbers 1..31
@@ -1612,7 +1612,7 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
 
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	var preval1, preval2, preval3 []byte
@@ -1709,7 +1709,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1217: %s\n", time.Since(t)) }(time.Now())
@@ -1803,7 +1803,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	defer tx.Rollback()
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	// keys are encodings of numbers 1..31
@@ -1943,7 +1943,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
@@ -2018,7 +2018,7 @@ func TestDomainRange(t *testing.T) {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	keySize1 := uint64(2)
@@ -2136,7 +2136,7 @@ func TestDomain_CanScanPruneAfterAggregation(t *testing.T) {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
@@ -2233,7 +2233,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
@@ -2323,7 +2323,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	// Write keyCount keys at txNum=1 (step 0).
@@ -2443,7 +2443,7 @@ func TestDomain_PruneRollingCursorProgress(t *testing.T) {
 
 	writeStep := func(step kv.Step) {
 		t.Helper()
-		w := domRoTx.NewWriter()
+		w := domRoTx.NewWriter(db)
 		defer w.Close()
 		txNum := uint64(step)*stepSize + 1 // first txNum of the step
 		var k, v [8]byte
@@ -2548,7 +2548,7 @@ func TestDomain_Unwind(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
-		writer := domainRoTx.NewWriter()
+		writer := domainRoTx.NewWriter(db)
 		defer writer.Close()
 		var preval1, preval2, preval3, preval4 []byte
 
@@ -2598,7 +2598,7 @@ func TestDomain_Unwind(t *testing.T) {
 
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
-		writer := domainRoTx.NewWriter()
+		writer := domainRoTx.NewWriter(db)
 		defer writer.Close()
 
 		totalDiff := []kv.DomainEntryDiff{}
@@ -2786,7 +2786,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
-		writer := domainRoTx.NewWriter()
+		writer := domainRoTx.NewWriter(db)
 		defer writer.Close()
 
 		for i := 0; uint64(i) < maxTx; i++ {
@@ -2955,7 +2955,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	d.HistoryLargeValues = true
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	keySize1 := uint64(length.Addr)
@@ -3040,7 +3040,7 @@ func TestCanBuild(t *testing.T) {
 
 	domainRoTx.files = append(domainRoTx.files, visibleFile{startTxNum: 0, endTxNum: d.stepSize})
 
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	k, v := []byte{1}, []byte{1}
@@ -3167,7 +3167,7 @@ func TestCommitmentDomain_DebugRangeLatest(t *testing.T) {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	// Insert test data: keys 1..31, with updates at different txNums
@@ -3278,7 +3278,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	// Phase 1: Write keys 1-10 to be stored in files
@@ -3318,7 +3318,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 	domainRoTx.Close()
 	domainRoTx = d.beginForTests()
 	defer domainRoTx.Close()
-	writer = domainRoTx.NewWriter()
+	writer = domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	dbOnlyKeyNums := make(map[uint64]bool) // keys only in MDBX
@@ -3433,7 +3433,7 @@ func TestDomain_IntegrateDirtyFilesNilGuard(t *testing.T) {
 
 	domainRoTx := d.beginForTests()
 	defer domainRoTx.Close()
-	writer := domainRoTx.NewWriter()
+	writer := domainRoTx.NewWriter(db)
 	defer writer.Close()
 
 	var (
@@ -3662,7 +3662,7 @@ func TestDomain_DeletedKeyNotResurrectedByFiles(t *testing.T) {
 
 			domainRoTx := d.beginForTests()
 			defer domainRoTx.Close()
-			writer := domainRoTx.NewWriter()
+			writer := domainRoTx.NewWriter(db)
 			defer writer.Close()
 
 			key := []byte("key1")
@@ -3744,7 +3744,7 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 
 			domainRoTx := d.beginForTests()
 			defer domainRoTx.Close()
-			writer := domainRoTx.NewWriter()
+			writer := domainRoTx.NewWriter(db)
 			defer writer.Close()
 
 			key := []byte("key1")
@@ -3887,7 +3887,7 @@ func TestDomainDisabledDiscardsWrites(t *testing.T) {
 
 	dc := d.beginForTests()
 	defer dc.Close()
-	w := dc.NewWriter()
+	w := dc.NewWriter(db)
 	defer w.Close()
 
 	require.NoError(t, w.PutWithPrev([]byte("key"), []byte("value"), 0, nil))
