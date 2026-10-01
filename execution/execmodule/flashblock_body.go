@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -453,57 +454,60 @@ func (e *ExecModule) filterStreamLocked(ctx context.Context, newTxRLPs [][]byte)
 		return 0
 	}
 
-	var nStale, nFuture, nSeen, nBad int
-	survivors := make([][]byte, 0, len(newTxRLPs))
-	for _, rlp := range newTxRLPs {
-		tx, derr := types.DecodeTransaction(rlp)
-		if derr != nil {
-			nBad++
-			continue // undecodable — drop
-		}
-		s, ok := tx.GetSender()
-		if !ok {
-			if rec, serr := signer.Sender(tx); serr == nil {
-				s, ok = rec, true
-			}
-		}
-		if !ok {
-			nBad++
-			continue // unrecoverable sender — drop
-		}
-		k := snKeyExec{addr: s, nonce: tx.GetNonce()}
+	var nStale, nFuture, nSeen int
+	cands, nBad := orderBySenderNonce(newTxRLPs, signer)
+	survivors := make([][]byte, 0, len(cands))
+	for _, c := range cands {
+		rlp, s := c.rlp, c.sender
+		k := snKeyExec{addr: s, nonce: c.nonce}
 		if e.flash.seen[k] {
 			nSeen++
 			continue // already decided (kept or dropped) — never reconsider
 		}
-		e.flash.seen[k] = true
 		exp := nextNonce(s)
-		if tx.GetNonce() < exp {
+		if c.nonce < exp {
+			e.flash.seen[k] = true
 			nStale++
 			srcKind, srcBlock := "canonical", uint64(0)
 			if _, n, sd := e.preExec.Active(); sd != nil {
 				srcKind, srcBlock = "preexec", n
 			}
 			e.logger.Warn("[TRACE-filter] STALE drop", "block", e.flash.num, "sender", s,
-				"nonce", tx.GetNonce(), "exp", exp, "src", srcKind, "srcBlock", srcBlock)
+				"nonce", c.nonce, "exp", exp, "src", srcKind, "srcBlock", srcBlock)
 			continue // stale: already sealed on the frontier — dropped (and now remembered)
 		}
-		if tx.GetNonce() > exp {
-			// Future/gap: leave it for a later drain (do NOT mark advanced). Remembered as seen so the exact
-			// (sender,nonce) is not re-decided this block; a genuine gap-fill arrives under a different nonce.
+		if c.nonce > exp {
+			// ⚠ FUTURE IS DEFERRED, NOT DECIDED — so it is NOT marked seen.
+			//
+			// It used to be, on the reasoning that the exact (sender,nonce) should not be re-judged
+			// within a block. But a future nonce has not been judged: it has been told to wait for
+			// its predecessor, and that predecessor may well land in a LATER ROUND OF THIS SAME
+			// BLOCK — the drain feeds one transaction at a time and goes back for more for the whole
+			// fill window. Marking it seen made the wait last until the next block regardless, so a
+			// sender's second transaction cost a full DAG cycle:
+			//
+			//	[intra-block] block sealed num=197 sealedTxs=1 fed=3 backlog=0
+			//	[DAG-DIAG] feedPendingToDAG poolPending=2 added=2 inFlight=0
+			//
+			// Three fed, one sealed, nothing requeued — the other two went back round through the
+			// pool and arrived a block later.
+			//
+			// Not marking it costs one map lookup and a nonce comparison per re-offer, and `seen`
+			// still stops anything DECIDED from being reconsidered.
 			nFuture++
 			continue
 		}
+		e.flash.seen[k] = true
 		// The tx passes against STATE (nonce == the frontier SD's next). Check it also continues the BODY it
 		// is being appended to: if the body already holds a lower, non-adjacent nonce for this sender, state
 		// and body have diverged — the SD applied transactions this body does not record — and appending here
 		// is what mints a body that cannot be re-executed. Log where it happens; do not silently paper over it.
-		if prev, have := e.flash.bodyNonce[s]; have && tx.GetNonce() != prev+1 {
+		if prev, have := e.flash.bodyNonce[s]; have && c.nonce != prev+1 {
 			e.logger.Error("[BODY-AUDIT] filter kept a tx that does not continue the body",
-				"block", e.flash.num, "sender", s, "lastInBody", prev, "keeping", tx.GetNonce(),
+				"block", e.flash.num, "sender", s, "lastInBody", prev, "keeping", c.nonce,
 				"stateNext", exp, "bodyLen", len(e.flash.body))
 		}
-		e.flash.bodyNonce[s] = tx.GetNonce()
+		e.flash.bodyNonce[s] = c.nonce
 		survivors = append(survivors, rlp)
 		next[s] = exp + 1
 	}
@@ -611,4 +615,67 @@ func (e *ExecModule) frontierStateReader(ctx context.Context) (state.StateReader
 		return state.NewReaderV3(sd.AsGetter(ov)), func() { roTx.Rollback() }, nil
 	}
 	return state.NewReaderV3(sd.AsGetter(roTx)), func() { roTx.Rollback() }, nil
+}
+
+// txCandidate is one decoded transaction awaiting a nonce verdict, with its sender resolved once.
+type txCandidate struct {
+	rlp    []byte
+	sender accounts.Address
+	nonce  uint64
+	rank   int // the sender's first appearance, so senders keep the order they arrived in
+}
+
+// orderBySenderNonce decodes a round's candidates and puts EACH SENDER'S OWN transactions back into
+// nonce order, returning them and the count that could not be decoded or attributed.
+//
+// ⚠ THIS IS WHY A BURST USED TO ENTER ONE PER BLOCK.
+//
+// The batch arrives in DAG COMMIT order, which says nothing about nonces. A sender that submits N
+// and N+1 together can be offered N+1 first — and N+1 judged against a state that still expects N is
+// `future`, so it is refused, goes back round through the pool and the DAG, and lands a block later.
+// Measured on live225, one round of a four-order burst:
+//
+//	[TRACE-filter] round  block=262  in=2  kept=1  future=1
+//
+// Two consecutive nonces from one sender, one kept and one refused — which can only happen that way
+// round. Placement costs 40ms when nothing is queued behind it; those orders cost a block each.
+//
+// Senders keep their arrival order relative to each other, so this does not reorder the block between
+// parties. Only a sender's own sequence is restored, and for that the order is not a choice: a nonce
+// sequence has exactly one valid order, and presenting it in another throws away what the sender
+// already told us.
+func orderBySenderNonce(newTxRLPs [][]byte, signer *types.Signer) ([]txCandidate, int) {
+	cands := make([]txCandidate, 0, len(newTxRLPs))
+	rankOf := make(map[accounts.Address]int, len(newTxRLPs))
+	bad := 0
+	for _, rlp := range newTxRLPs {
+		tx, derr := types.DecodeTransaction(rlp)
+		if derr != nil {
+			bad++
+			continue // undecodable — drop
+		}
+		s, ok := tx.GetSender()
+		if !ok {
+			if rec, serr := signer.Sender(tx); serr == nil {
+				s, ok = rec, true
+			}
+		}
+		if !ok {
+			bad++
+			continue // unrecoverable sender — drop
+		}
+		r, known := rankOf[s]
+		if !known {
+			r = len(rankOf)
+			rankOf[s] = r
+		}
+		cands = append(cands, txCandidate{rlp: rlp, sender: s, nonce: tx.GetNonce(), rank: r})
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		if cands[i].rank != cands[j].rank {
+			return cands[i].rank < cands[j].rank
+		}
+		return cands[i].nonce < cands[j].nonce
+	})
+	return cands, bad
 }
