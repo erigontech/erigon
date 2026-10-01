@@ -73,7 +73,6 @@ var traceGetLatest, _ = kv.String2Domain(dbg.EnvString("AGG_TRACE_GET_LATEST", "
 type Domain struct {
 	statecfg.DomainCfg // keep it above *History to avoid unexpected shadowing
 	*History
-	allowStateFilesAheadOfHistory bool
 
 	// Schema:
 	//  - .kv - key -> value

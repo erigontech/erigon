@@ -26,7 +26,6 @@ import (
 
 	app "github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -149,7 +148,6 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
 	buildPBTAcceptanceFilesAt(t, node, 7)
-	removePBTStateHistoryFrom(t, node.Tester.Dirs, 1, 7)
 	node.Tester.Close()
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
@@ -163,7 +161,7 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
 	publishedSettings, err := dbstate.ReadErigonDBSettings(datadir.Open(published))
 	require.NoError(t, err)
-	conversionBlock, _, ok, err := publishedSettings.ConversionPoint()
+	conversionBlock, conversionTx, ok, err := publishedSettings.ConversionPoint()
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
@@ -195,6 +193,7 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 		return err
 	}))
 	require.Equal(t, dualAtConversion, attachedAtConversion)
+	assertPBTAttachHistory(t, node.Sender, node.Contract, reopened, dual.Tester, conversionTx)
 	for block := conversionBlock + 1; block <= node.Chain.TopBlock.NumberU64(); block++ {
 		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
 		var attachedRoot []byte
@@ -211,7 +210,20 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 		}))
 		require.Equal(t, dualRoot, attachedRoot)
 	}
+	assertPBTAttachHistory(t, node.Sender, node.Contract, reopened, dual.Tester, conversionTx)
 	reopened.Close()
+	buildPBTAcceptanceFilesAtWithMerge(t, node, pbtAcceptanceLastTxNum(t, dual.Tester), true)
+	selectPBTCommandSuite(t)
+	merged := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
+		execmoduletester.WithGenesisSpec(node.Genesis),
+		execmoduletester.WithKey(node.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	assertPBTAttachHistory(t, node.Sender, node.Contract, merged, dual.Tester, conversionTx)
+	merged.Close()
 }
 
 func TestPBTAttachPostForkBlockEndShadowRoot(t *testing.T) {
@@ -220,7 +232,6 @@ func TestPBTAttachPostForkBlockEndShadowRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
 	buildPBTAcceptanceFilesAt(t, node, 7)
-	removePBTStateHistoryFrom(t, node.Tester.Dirs, 1, 7)
 	node.Tester.Close()
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
@@ -268,7 +279,6 @@ func TestPBTAttachAcceptanceAtMidBlockConversionPoint(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
 	buildPBTAcceptanceFilesAt(t, node, 9)
-	removePBTStateHistoryFrom(t, node.Tester.Dirs, 1, 9)
 	node.Tester.Close()
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
@@ -400,10 +410,9 @@ func TestPBTAttachedReplayMatchesConvertedState(t *testing.T) {
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
 	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(published))
 	require.NoError(t, err)
-	conversionBlock, conversionTx, ok, err := settings.ConversionPoint()
+	conversionBlock, _, ok, err := settings.ConversionPoint()
 	require.NoError(t, err)
 	require.True(t, ok)
-	removePBTStateHistoryFrom(t, node.Tester.Dirs, 1, conversionTx)
 	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
 
 	selectPBTCommandSuite(t)
@@ -479,17 +488,6 @@ func copyPBTStateSalt(t *testing.T, node, source *execmoduletester.PBTAcceptance
 	require.NoError(t, os.WriteFile(filepath.Join(source.Tester.Dirs.Snap, "salt-state.txt"), value, 0o644))
 }
 
-func removePBTStateHistoryFrom(t *testing.T, dirs datadir.Dirs, stepSize, txNum uint64) {
-	t.Helper()
-	files, err := pbtAttachFiles(dirs)
-	require.NoError(t, err)
-	for _, file := range files {
-		if pbtAttachStateDomain(file.domain) && !pbtAttachAdoptsFile(file) && (file.from*stepSize >= txNum || file.to*stepSize > txNum) {
-			require.NoError(t, dir.RemoveFile(file.path))
-		}
-	}
-}
-
 func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain) {
 	t.Helper()
 	fixture.Tester.Close()
@@ -505,6 +503,10 @@ func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptan
 }
 
 func buildPBTAcceptanceFilesAt(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain, lastTxNum uint64) {
+	buildPBTAcceptanceFilesAtWithMerge(t, fixture, lastTxNum, false)
+}
+
+func buildPBTAcceptanceFilesAtWithMerge(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain, lastTxNum uint64, doMerge bool) {
 	t.Helper()
 	fixture.Tester.Close()
 	dirs := fixture.Tester.Dirs
@@ -518,12 +520,55 @@ func buildPBTAcceptanceFilesAt(t *testing.T, fixture *execmoduletester.PBTAccept
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), doMerge))
 	agg.WaitForFiles()
 	tx.Rollback()
 	db.Close()
 	agg.Close()
 	rawDB.Close()
+}
+
+func assertPBTAttachHistory(t *testing.T, sender, contract common.Address, attached, dual *execmoduletester.ExecModuleTester, maxTxNum uint64) {
+	t.Helper()
+	attachedTx, err := attached.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer attachedTx.Rollback()
+	dualTx, err := dual.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer dualTx.Rollback()
+	var zeroSlot common.Hash
+	storageKey := append(append([]byte(nil), contract[:]...), zeroSlot[:]...)
+	keys := []struct {
+		domain kv.Domain
+		key    []byte
+	}{
+		{domain: kv.AccountsDomain, key: sender[:]},
+		{domain: kv.AccountsDomain, key: contract[:]},
+		{domain: kv.StorageDomain, key: storageKey},
+		{domain: kv.CodeDomain, key: contract[:]},
+	}
+	for txNum := uint64(0); txNum <= maxTxNum; txNum++ {
+		for _, item := range keys {
+			attachedValue, attachedOK, err := attachedTx.GetAsOf(item.domain, item.key, txNum)
+			require.NoError(t, err)
+			dualValue, dualOK, err := dualTx.GetAsOf(item.domain, item.key, txNum)
+			require.NoError(t, err)
+			require.Equalf(t, dualOK, attachedOK, "%s presence at txNum %d", item.domain, txNum)
+			require.Equalf(t, dualValue, attachedValue, "%s value at txNum %d", item.domain, txNum)
+		}
+	}
+}
+
+func pbtAcceptanceLastTxNum(t *testing.T, fixture *execmoduletester.ExecModuleTester) uint64 {
+	t.Helper()
+	rawDB := fixture.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	var lastTxNum uint64
+	require.NoError(t, rawDB.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		_, lastTxNum, err = rawdbv3.TxNums.Last(tx)
+		return err
+	}))
+	return lastTxNum
 }
 
 func readCurrentPBTStateRoot(t *testing.T, fixture *execmoduletester.ExecModuleTester) common.Hash {

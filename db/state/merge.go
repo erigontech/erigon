@@ -47,9 +47,6 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 	if d == nil {
 		return 0
 	}
-	if d.allowStateFilesAheadOfHistory {
-		return d.dirtyFiles.EndTxNumMax()
-	}
 	return d.dirtyFiles.endTxNumMinimax(d.History.dirtyFilesEndTxNumMinimax())
 }
 

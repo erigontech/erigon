@@ -87,7 +87,7 @@ func TestConfigureImportVariantBinDoesNotEnableV3Hex(t *testing.T) {
 	statecfg.ExperimentalBinCommitment = false
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ExperimentalCommitmentV3 = true
-	configureImportVariant(dirs)
+	require.NoError(t, configureImportVariant(dirs))
 	require.True(t, statecfg.ExperimentalBinCommitment)
 	require.False(t, statecfg.ExperimentalHexBinCommitment)
 	require.False(t, statecfg.ExperimentalCommitmentV3, "bin-only import must not enable v3-hex")

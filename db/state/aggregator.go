@@ -80,15 +80,14 @@ type Aggregator struct {
 	dirtyFilesLock sync.Mutex
 	// commitmentRefsMu guards the runtime-mutable commitment ReferencesInCommitmentBranches
 	// flag: ReloadErigonDBSettings writes it while background merges read it.
-	commitmentRefsMu              sync.RWMutex
-	canonicalCommitment           atomic.Uint32
-	stoppedCommitment             [kv.DomainLen]atomic.Bool
-	commitmentLifecycleRestored   atomic.Bool
-	trieVariant                   string
-	allowStateFilesAheadOfHistory bool
-	frozenMu                      sync.RWMutex
-	frozenAtTxNum                 [kv.DomainLen]uint64
-	frozen                        [kv.DomainLen]bool
+	commitmentRefsMu            sync.RWMutex
+	canonicalCommitment         atomic.Uint32
+	stoppedCommitment           [kv.DomainLen]atomic.Bool
+	commitmentLifecycleRestored atomic.Bool
+	trieVariant                 string
+	frozenMu                    sync.RWMutex
+	frozenAtTxNum               [kv.DomainLen]uint64
+	frozen                      [kv.DomainLen]bool
 	// visible is CoW field updated only by `recalcVisibleFiles`.
 	visible atomic.Pointer[aggregatorVisible]
 	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
@@ -178,7 +177,6 @@ func newAggregator(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (*
 	if settings, settingsErr := readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)); settingsErr == nil {
 		a.trieVariant = settings.TrieVariantName()
 		a.setFrozenAtTxNums(settings.FrozenAtTxNum)
-		_, _, a.allowStateFilesAheadOfHistory, _ = settings.ConversionPoint()
 	}
 	a.canonicalCommitment.Store(uint32(kv.CommitmentDomain))
 	empty := &aggregatorVisible{}

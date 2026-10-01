@@ -542,30 +542,6 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 	return db
 }
 
-func OpenExisting(ctx context.Context, opts MdbxOpts, readonly bool) (kv.RwDB, error) {
-	opts = opts.WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{} }).Accede(true).Readonly(readonly)
-	db, err := opts.Open(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := db.View(ctx, func(tx kv.Tx) error {
-		names, err := tx.ListTables()
-		if err != nil {
-			return err
-		}
-		for _, name := range names {
-			if err := tx.(kv.BucketMigrator).CreateTable(name); err != nil {
-				return err
-			}
-		}
-		return tx.(*MdbxTx).Commit()
-	}); err != nil {
-		db.Close()
-		return nil, err
-	}
-	return db, nil
-}
-
 // roTxPoolSize bounds the pooled read txns; ERIGON_MDBX_RO_TX_POOL=0 disables pooling.
 // Growing it is not free: a pooled txn holds its reader slot, and libmdbx never shrinks
 // the reader-table length, so every later slot scan and oldest-reader walk stays longer.

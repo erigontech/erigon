@@ -35,8 +35,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -173,7 +173,7 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	} else if err := validatePBTAttachPublishedFiles(publishedDirs, publishedSettings.StepSize, txNum); err != nil {
 		return err
 	}
-	rawDB, err := mdbx.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata), true)
+	rawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata), true)
 	if err != nil {
 		return err
 	}
@@ -306,7 +306,7 @@ func pbtAttachPublishedRoot(ctx context.Context, dirs datadir.Dirs, settings *db
 }
 
 func pbtAttachBlockEnd(ctx context.Context, dirs datadir.Dirs, blockNum, txNum uint64) (common.Hash, bool, bool, error) {
-	db, err := mdbx.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
 		return common.Hash{}, false, false, err
 	}
@@ -348,7 +348,7 @@ func pbtAttachBlockEnd(ctx context.Context, dirs datadir.Dirs, blockNum, txNum u
 }
 
 func writePBTAttachShadowRoot(ctx context.Context, dirs datadir.Dirs, blockHash common.Hash, blockNum uint64, root common.Hash) error {
-	db, err := mdbx.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), false)
+	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), false)
 	if err != nil {
 		return err
 	}
@@ -603,7 +603,7 @@ func validatePBTAttachUncutFiles(nodeFiles []pbtAttachFile, stepSize, endTxNum u
 		if !pbtAttachStateDomain(file.domain) || pbtAttachAdoptsFile(file) {
 			continue
 		}
-		if file.from*stepSize <= endTxNum && file.to*stepSize > endTxNum {
+		if file.from*stepSize <= endTxNum && file.to*stepSize > endTxNum+1 {
 			return fmt.Errorf("commitment attach-pbt: node file %s spans conversion txNum %d and cannot be cut", file.path, endTxNum)
 		}
 	}

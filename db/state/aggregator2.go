@@ -14,7 +14,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -93,13 +92,6 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
-	}
-	if a.allowStateFilesAheadOfHistory {
-		for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-			if a.d[domain] != nil {
-				a.d[domain].allowStateFilesAheadOfHistory = true
-			}
-		}
 	}
 	// After ConfigureDomains, which is what registers the dependencies, and before
 	// OpenFolder, which is what first reads them.

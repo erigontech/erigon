@@ -278,7 +278,6 @@ func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
 		}
 	}
 	require.True(t, hasCommitmentHistory)
-	removePBTStateHistoryFrom(t, source.Dirs, 8, 7)
 	setExecutionProgress(t, source.Chaindata, 1)
 	require.NoError(t, attachPBT(t.Context(), source.DataDir, output, "", log.New()))
 }

@@ -34,8 +34,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -91,7 +91,7 @@ func doExportPBT(ctx context.Context, cliCtx *cli.Command) error {
 	if _, err := state.EnableCommitmentV3FromFiles(dirs); err != nil {
 		return err
 	}
-	chainDB, err := mdbx.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	chainDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
 		return err
 	}

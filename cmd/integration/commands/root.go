@@ -139,7 +139,7 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 }
 
 func openDBReadOnly(ctx context.Context, opts kv2.MdbxOpts, logger log.Logger) (kv.TemporalRwDB, error) {
-	rawDB, err := kv2.OpenExisting(ctx, opts, true)
+	rawDB, err := backup.OpenExisting(ctx, opts, true)
 	if err != nil {
 		return nil, err
 	}

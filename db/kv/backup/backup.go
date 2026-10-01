@@ -59,6 +59,29 @@ func OpenPair(from, to string, label kv.Label, targetPageSize datasize.ByteSize,
 	return src, dst
 }
 
+func OpenExisting(ctx context.Context, opts mdbx2.MdbxOpts, readonly bool) (kv.RwDB, error) {
+	probeOpts := opts.WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{} }).Accede(true).Readonly(true)
+	probe, err := probeOpts.Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	onDisk, err := tablesOnDisk(ctx, probe)
+	probe.Close()
+	if err != nil {
+		return nil, err
+	}
+	tables := maps.Clone(kv.TablesCfgByLabel(opts.GetLabel()))
+	for name, cfg := range tables {
+		cfg.IsDeprecated = true
+		tables[name] = cfg
+	}
+	for name, cfg := range onDisk {
+		cfg.IsDeprecated = true
+		tables[name] = cfg
+	}
+	return opts.WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return tables }).Accede(true).Readonly(readonly).Open(ctx)
+}
+
 // growthStepFor scales the growth step with the db. A bulk copy wants few file
 // extensions, but mdbx rounds the file up to a whole step, so one step sized for
 // chaindata would pad every small db in a datadir to that size.

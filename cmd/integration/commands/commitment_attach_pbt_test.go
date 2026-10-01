@@ -87,7 +87,7 @@ func TestAttachPBTUsesLegacyStepSizeWithoutNodeSettings(t *testing.T) {
 func TestValidatePBTAttachFilesRejectsUncutStateHistory(t *testing.T) {
 	node, published := newPBTAttachFileTrees(t, true)
 	require.NoError(t, os.MkdirAll(node.SnapHistory, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(node.SnapHistory, "v1.0-accounts.0-1.v"), []byte("history"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(node.SnapHistory, "v1.0-accounts.0-2.v"), []byte("history"), 0o644))
 	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 7), "spans conversion txNum 7")
 }
 
@@ -178,7 +178,6 @@ func TestAttachPBTResetsAndReopensAtPublishedRoot(t *testing.T) {
 	source, wantRoot := newPBTConversionSource(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
-	removePBTStateHistoryFrom(t, source.Dirs, 8, 7)
 	setExecutionProgress(t, source.Chaindata, 1)
 	corruptPBTBinTable(t, source.Chaindata)
 	require.NoError(t, attachPBT(t.Context(), source.DataDir, published, "", log.New()))
@@ -253,7 +252,7 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 7)
 		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 7)
 		require.NoError(t, os.MkdirAll(node.SnapHistory, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(node.SnapHistory, "v1.0-accounts.0-1.v"), []byte("history"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(node.SnapHistory, "v1.0-accounts.0-2.v"), []byte("history"), 0o644))
 		before := snapshotTree(t, node.DataDir)
 		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
 		require.ErrorContains(t, err, "spans conversion txNum 7")
@@ -321,9 +320,8 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 7)
 		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 7)
 		rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(node.Chaindata).MustOpen()
+		require.ErrorContains(t, checkPBTNodePosition(t.Context(), rawDB, 1, 7), "behind conversion block")
 		rawDB.Close()
-		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
-		require.ErrorContains(t, err, "behind conversion block")
 	})
 }
 
@@ -353,7 +351,6 @@ func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
 			source, _ := newPBTConversionSource(t)
 			published := filepath.Join(t.TempDir(), "published")
 			require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
-			removePBTStateHistoryFrom(t, source.Dirs, 8, 7)
 			setExecutionProgress(t, source.Chaindata, 1)
 			attachPBTStepHook = func(current string) error {
 				if current == step {
@@ -399,7 +396,6 @@ func TestAttachPBTRetryAfterPartialSwap(t *testing.T) {
 	source, _ := newPBTConversionSource(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
-	removePBTStateHistoryFrom(t, source.Dirs, 8, 7)
 	setExecutionProgress(t, source.Chaindata, 1)
 	attachPBTStepHook = func(step string) error {
 		if step == "marker" {
@@ -444,7 +440,6 @@ func TestAttachPBTRetryAfterPartialSettingsWrite(t *testing.T) {
 	source, _ := newPBTConversionSource(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
-	removePBTStateHistoryFrom(t, source.Dirs, 8, 7)
 	setExecutionProgress(t, source.Chaindata, 1)
 	attachPBTStepHook = func(step string) error {
 		if step == "reset" {
@@ -512,7 +507,6 @@ func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
 	source, _ := newPBTConversionSource(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
-	removePBTStateHistoryFrom(t, source.Dirs, 8, 7)
 	files, err := pbtAttachFiles(datadir.Open(published))
 	require.NoError(t, err)
 	for _, file := range files {
@@ -534,7 +528,6 @@ func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
 	recoverySource, _ := newPBTConversionSource(t)
 	recoveryPublished := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), recoverySource.DataDir, recoveryPublished, true, "", log.New()))
-	removePBTStateHistoryFrom(t, recoverySource.Dirs, 8, 7)
 	setExecutionProgress(t, recoverySource.Chaindata, 1)
 	attachPBTStepHook = func(step string) error {
 		if step == "marker" {
@@ -579,7 +572,6 @@ func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
 	source, _ := newPBTConversionSource(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
-	removePBTStateHistoryFrom(t, source.Dirs, 8, 7)
 	setExecutionProgress(t, source.Chaindata, 1)
 	validatePBTAttachLeafStampsFn = func(_ uint64, _ func(func(state.PBinLeaf) error) error) error {
 		return errors.New("commitment attach-pbt: published leaf stamp 8 is after conversion txNum 7")

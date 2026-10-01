@@ -200,8 +200,7 @@ func commitmentV3FilesIn(root string) (bool, error) {
 		}
 		return nil
 	})
-	var found errCommitmentV3FilesFound
-	if errors.As(err, &found) {
+	if _, ok := errors.AsType[errCommitmentV3FilesFound](err); ok {
 		return true, nil
 	}
 	return false, err

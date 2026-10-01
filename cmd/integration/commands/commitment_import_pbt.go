@@ -29,8 +29,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -285,7 +285,7 @@ func validatePBTImportPointWithReader(ctx context.Context, db kv.TemporalRwDB, t
 }
 
 func validatePBTImportPointReadOnly(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockHash common.Hash, logger log.Logger) (uint64, uint64, error) {
-	rawDB, err := mdbx.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	rawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
 		return 0, 0, err
 	}

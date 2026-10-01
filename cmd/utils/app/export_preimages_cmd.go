@@ -41,8 +41,8 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal"
@@ -112,7 +112,7 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 		tmpDir = dirs.Tmp
 	}
 
-	chainDB, err := mdbx.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	chainDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
 		return err
 	}
