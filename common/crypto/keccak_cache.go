@@ -51,7 +51,6 @@ var (
 
 // Keccak256Hash calc Keccak256. Short inputs are memoized in a direct-mapped table; a bucket
 // another goroutine holds is treated as a miss, so a lookup never waits.
-// Single-argument by design: a variadic signature exceeds the inlining budget.
 func Keccak256Hash(data []byte) common.Hash {
 	if len(data) == 0 || len(data) > keccakCacheMaxInput {
 		return keccak.Sum256(data)
