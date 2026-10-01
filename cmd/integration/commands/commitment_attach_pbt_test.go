@@ -42,9 +42,26 @@ import (
 func TestValidatePBTAttachFilesRequiresBothCommitmentDomains(t *testing.T) {
 	node, published := newPBTAttachFileTrees(t, true)
 	require.NoError(t, validatePBTAttachFiles(node, published, 8, 7))
-	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 8), "do not end at conversion txNum")
+	require.NoError(t, validatePBTAttachFiles(node, published, 8, 6))
+	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 8), "do not cover conversion txNum")
 	require.NoError(t, dir.RemoveFile(filepath.Join(published.SnapDomain, "v1.0-commitment-bin.0-1.kv")))
 	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 7), "commitment-bin")
+}
+
+func TestValidatePBTAttachSaltsIgnoresBlockSalt(t *testing.T) {
+	node, published := newPBTAttachFileTrees(t, true)
+	require.NoError(t, os.WriteFile(filepath.Join(node.Snap, "salt-state.txt"), []byte{1}, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(published.Snap, "salt-state.txt"), []byte{1}, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(node.Snap, "salt-blocks.txt"), []byte{2}, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(published.Snap, "salt-blocks.txt"), []byte{3}, 0o644))
+	require.NoError(t, validatePBTAttachSalts(node, published))
+}
+
+func TestValidatePBTAttachFilesRequiresPublishedCompanionFiles(t *testing.T) {
+	node, published := newPBTAttachFileTrees(t, true)
+	require.NoError(t, os.MkdirAll(node.SnapHistory, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(node.SnapHistory, "v1.0-accounts.0-1.v"), []byte("history"), 0o644))
+	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 7), "missing .v for accounts")
 }
 
 func TestAdoptPBTFilesReplacesStateAndCommitmentFiles(t *testing.T) {
@@ -159,6 +176,26 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
 		require.ErrorContains(t, err, "no erigondb.toml")
 	})
+	t.Run("missing node settings leaves datadir unchanged", func(t *testing.T) {
+		previousHash := statecfg.BinCommitmentHash
+		t.Cleanup(func() { statecfg.BinCommitmentHash = previousHash })
+		statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+		node, published := newPBTAttachFileTrees(t, true)
+		writePBTAttachSettings(t, published, commitment.PBinHashKeccak, 1, 7)
+		before := snapshotTree(t, node.DataDir)
+		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
+		require.ErrorContains(t, err, "trie_hash")
+		require.Equal(t, before, snapshotTree(t, node.DataDir))
+	})
+	t.Run("missing published companion", func(t *testing.T) {
+		node, published := newPBTAttachFileTrees(t, true)
+		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 7)
+		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 7)
+		require.NoError(t, os.MkdirAll(node.SnapHistory, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(node.SnapHistory, "v1.0-accounts.0-1.v"), []byte("history"), 0o644))
+		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
+		require.ErrorContains(t, err, "missing .v for accounts")
+	})
 	t.Run("hash", func(t *testing.T) {
 		node, published := newPBTAttachFileTrees(t, true)
 		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 7)
@@ -188,7 +225,7 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 7)
 		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 9)
 		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
-		require.ErrorContains(t, err, "do not end at conversion txNum")
+		require.ErrorContains(t, err, "do not cover conversion txNum")
 	})
 	t.Run("published bin range", func(t *testing.T) {
 		node, published := newPBTAttachFileTrees(t, false)
@@ -385,7 +422,7 @@ func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) 
 	require.NoError(t, state.WriteErigonDBSettings(datadir.Open(published), settings))
 	setExecutionProgress(t, source.Chaindata, 2)
 	err = attachPBT(t.Context(), source.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "do not end at conversion txNum")
+	require.ErrorContains(t, err, "do not cover conversion txNum")
 }
 
 func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {

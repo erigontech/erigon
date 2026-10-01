@@ -28,12 +28,14 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	chainpkg "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -87,6 +89,27 @@ func TestConfigureImportVariantBinDoesNotEnableV3Hex(t *testing.T) {
 	require.False(t, statecfg.ExperimentalHexBinCommitment)
 	require.False(t, statecfg.ExperimentalCommitmentV3, "bin-only import must not enable v3-hex")
 }
+
+func TestPBTImportRefusesFrozenTarget(t *testing.T) {
+	settings := &dbstate.ErigonDBSettings{FrozenAtTxNum: map[string]uint64{kv.CommitmentDomain.String(): 13}}
+	err := validatePBTImportTargetSettings(settings)
+	require.ErrorContains(t, err, "commitment is frozen at txNum 13")
+}
+
+func TestPBTImportRefusesTargetFilesPastCheckpoint(t *testing.T) {
+	files := kv.VisibleFiles{pbtImportVisibleFile{end: 8}}
+	err := validatePBTImportFilesFrontier(kv.AccountsDomain, files, 1)
+	require.ErrorContains(t, err, "accounts files extend past txNum 1")
+}
+
+type pbtImportVisibleFile struct {
+	end uint64
+}
+
+func (f pbtImportVisibleFile) Fullpath() string         { return "accounts.0-1.kv" }
+func (f pbtImportVisibleFile) StartRootNum() uint64     { return 0 }
+func (f pbtImportVisibleFile) EndRootNum() uint64       { return f.end }
+func (f pbtImportVisibleFile) Version() version.Version { return version.V2_0 }
 
 func TestImportPBTValidatesArtifactsBeforeReset(t *testing.T) {
 	previousDatadir := datadirCli

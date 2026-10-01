@@ -124,7 +124,8 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	} else {
 		nodeSettings, err = dbstate.ReadErigonDBSettings(nodeDirs)
 		if errors.Is(err, fs.ErrNotExist) {
-			nodeSettings, err = dbstate.ResolveErigonDBSettings(nodeDirs, logger, false)
+			nodeSettings = &dbstate.ErigonDBSettings{StepSize: publishedSettings.StepSize}
+			err = nil
 		}
 		if err != nil {
 			return err
@@ -253,8 +254,8 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	}
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		files := at.Files(domain)
-		if len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() != txNum+1 {
-			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
+		if len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() <= txNum {
+			return fmt.Errorf("commitment attach-pbt: published %s files do not cover conversion txNum %d", domain, txNum)
 		}
 		for _, file := range publishedFiles {
 			if file.domain != domain || !file.data || file.from*settings.StepSize > txNum {
@@ -267,8 +268,8 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	}
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 		files := at.Files(domain)
-		if len(opened[domain]) == 0 || len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() != txNum+1 {
-			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
+		if len(opened[domain]) == 0 || len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() <= txNum {
+			return fmt.Errorf("commitment attach-pbt: published %s files do not cover conversion txNum %d", domain, txNum)
 		}
 		for _, file := range publishedFiles {
 			if file.domain == domain && file.data && file.from*settings.StepSize <= txNum {
@@ -301,7 +302,7 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 		if err != nil {
 			return err
 		}
-		if !found || start > txNum || end != txNum+1 {
+		if !found || start > txNum || end <= txNum {
 			return fmt.Errorf("commitment attach-pbt: published %s state is not at conversion txNum %d", check.name, txNum)
 		}
 		gotBlock, gotTx, err := check.decode(value)
@@ -311,6 +312,14 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 		if gotBlock != blockNum || gotTx != txNum {
 			return fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
 		}
+	}
+	if err := dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
+		if leaf.Stamp > txNum {
+			return fmt.Errorf("commitment attach-pbt: published leaf stamp %d is after conversion txNum %d", leaf.Stamp, txNum)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }
@@ -348,6 +357,9 @@ func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endT
 		return err
 	}
 	if err := validatePBTAttachFrontier(publishedFiles, stepSize, endTxNum); err != nil {
+		return err
+	}
+	if err := validatePBTAttachFileKinds(nodeFiles, publishedFiles, stepSize, endTxNum); err != nil {
 		return err
 	}
 	for _, domain := range pbtAttachDomains {
@@ -392,11 +404,33 @@ func validatePBTAttachFrontier(files []pbtAttachFile, stepSize, endTxNum uint64)
 		}
 	}
 	for _, domain := range pbtAttachDomains {
-		if frontiers[domain] != endTxNum+1 {
-			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, endTxNum)
+		if frontiers[domain] <= endTxNum {
+			return fmt.Errorf("commitment attach-pbt: published %s files do not cover conversion txNum %d", domain, endTxNum)
 		}
 	}
 	return nil
+}
+
+func validatePBTAttachFileKinds(nodeFiles, publishedFiles []pbtAttachFile, stepSize, endTxNum uint64) error {
+	published := make(map[string]struct{}, len(publishedFiles))
+	for _, file := range publishedFiles {
+		if file.from*stepSize <= endTxNum {
+			published[pbtAttachFileKind(file)] = struct{}{}
+		}
+	}
+	for _, file := range nodeFiles {
+		if file.from*stepSize > endTxNum {
+			continue
+		}
+		if _, ok := published[pbtAttachFileKind(file)]; !ok {
+			return fmt.Errorf("commitment attach-pbt: published set is missing %s for %s", filepath.Ext(file.path), file.domain)
+		}
+	}
+	return nil
+}
+
+func pbtAttachFileKind(file pbtAttachFile) string {
+	return fmt.Sprintf("%s:%d:%d:%s", file.domain, file.from, file.to, filepath.Ext(file.path))
 }
 
 func validatePBTAttachPublishedRanges(ranges map[kv.Domain][]string, endTxNum uint64) error {
@@ -523,21 +557,20 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 }
 
 func validatePBTAttachSalts(nodeDirs, publishedDirs datadir.Dirs) error {
-	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
-		nodeSalt, nodeFound, err := readPBTAttachSalt(nodeDirs, name)
-		if err != nil {
-			return err
-		}
-		publishedSalt, publishedFound, err := readPBTAttachSalt(publishedDirs, name)
-		if err != nil {
-			return err
-		}
-		if nodeFound != publishedFound {
-			return fmt.Errorf("commitment attach-pbt: %s presence differs: node=%t published=%t", name, nodeFound, publishedFound)
-		}
-		if nodeFound && !bytes.Equal(nodeSalt, publishedSalt) {
-			return fmt.Errorf("commitment attach-pbt: %s differs: node=%x published=%x", name, nodeSalt, publishedSalt)
-		}
+	name := "salt-state.txt"
+	nodeSalt, nodeFound, err := readPBTAttachSalt(nodeDirs, name)
+	if err != nil {
+		return err
+	}
+	publishedSalt, publishedFound, err := readPBTAttachSalt(publishedDirs, name)
+	if err != nil {
+		return err
+	}
+	if nodeFound != publishedFound {
+		return fmt.Errorf("commitment attach-pbt: %s presence differs: node=%t published=%t", name, nodeFound, publishedFound)
+	}
+	if nodeFound && !bytes.Equal(nodeSalt, publishedSalt) {
+		return fmt.Errorf("commitment attach-pbt: %s differs: node=%x published=%x", name, nodeSalt, publishedSalt)
 	}
 	return nil
 }

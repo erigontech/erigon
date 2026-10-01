@@ -184,8 +184,9 @@
   `isCommitmentFileName` learns `commitmentbin`; today a dual source's bin files would be linked.
 - outputs:
   - `--keep-hex`: hex commitment files hardlinked, rows in `CommitmentBinDomain`, `trie_variant = hex+bin`. The source's
-    hex must be v3 (state key `0x42`, marker `0x04`) and its state record must sit at S; otherwise refuse and say to run
-    `commitment convert --v3` or to collate first.
+    hex must be v3 (state key `0x42`, marker `0x04`). The source is read from files only; every leaf provenance stamp
+    must be at or before S. A file range may extend beyond S when it contains no leaf stamped after S. Otherwise refuse
+    and say to run `commitment convert --v3` or to collate first.
   - without `--keep-hex`: rows in `CommitmentDomain`, `trie_variant = bin`, refused unless S is post-fork (a pre-fork
     bin-only output cannot boot: execution checks its bin root against an MPT header).
 - the output records `trie_hash` and the conversion point at S.
@@ -199,8 +200,9 @@
 
 - `integration commitment attach-pbt --from <published dir>` on a stopped node:
   1. check the published settings: same step size and ranges as the node's files up to S, hex and bin both present, and
-     a `trie_hash` equal to the node's configured suite;
-  2. require the published state-index salts to equal the node's salts, adopt the published state and commitment files
+     a `trie_hash` equal to the node's configured suite. The state salt must match the node's state salt; block salts
+     remain node-owned. Published state, history, inverted-index and accessor companions must cover every file replaced.
+  2. require every published leaf provenance stamp to be at or before S, adopt the published state and commitment files
      up to S, and remove the node's own state, commitment, receipt, history, inverted-index and accessor files past S;
   3. run `ResetExec` (state, history, commitment tables and stop markers cleared; block data kept);
   4. write `trie_variant = hex+bin`, the published `trie_hash` and the conversion point.
@@ -272,9 +274,10 @@
 - `--block` is checked against the local canonical header. N must be a block where bin is canonical (PBT from genesis,
   or after the fork); the output is bin-only.
 - steps:
-  1. strict readers, the exact-set join, code verification and both reference-root checks;
-  2. `ResetExec`;
-  3. write accounts (incarnation 1 for accounts with code, 0 otherwise), storage and address-keyed code through
+  1. strict readers, the exact-set join, code verification and both reference-root checks, before changing execution;
+  2. refuse a frozen target and a target whose state files extend beyond T;
+  3. `ResetExec`;
+  4. write accounts (incarnation 1 for accounts with code, 0 otherwise), storage and address-keyed code through
      `SharedDomains` at N's last txNum T; the ordinary bin commitment fold then writes the rows and the commitment-state
      record at (N, T), as the genesis path does.
 - checks:
@@ -586,6 +589,8 @@
 - [x] write tests for each failing check (wrong chunk, `codeSize` disagreement, designator under kind 1, missing and
       surplus preimage) and for the empty state
 - [x] run tests - must pass before task 15
+
+NOTES: import-pbt refuses frozen commitment targets before ResetExec; it does not clear a frozen record during import.
 
 ### Task 15: Remove rebuild's bin target
 

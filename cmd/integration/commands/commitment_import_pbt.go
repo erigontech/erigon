@@ -116,6 +116,12 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
 		return settingsErr
 	}
+	if err := validatePBTImportTargetSettings(settings); err != nil {
+		return err
+	}
+	if err := validatePBTImportTargetFrontier(db, txNum); err != nil {
+		return err
+	}
 	var originalSettings dbstate.ErigonDBSettings
 	settingsChanged := false
 	if settings != nil {
@@ -183,6 +189,18 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	return nil
 }
 
+func validatePBTImportTargetSettings(settings *dbstate.ErigonDBSettings) error {
+	if settings == nil {
+		return nil
+	}
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		if frozenAt, frozen := settings.FrozenAt(domain); frozen {
+			return fmt.Errorf("commitment import-pbt: target domain %s is frozen at txNum %d", domain, frozenAt)
+		}
+	}
+	return nil
+}
+
 func validatePBTImportPoint(ctx context.Context, db kv.TemporalRwDB, blockHash common.Hash) (uint64, uint64, error) {
 	var blockNum, txNum uint64
 	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
@@ -231,6 +249,40 @@ func validatePBTImportPoint(ctx context.Context, db kv.TemporalRwDB, blockHash c
 		return nil
 	})
 	return blockNum, txNum, err
+}
+
+func validatePBTImportTargetFrontier(db kv.TemporalRwDB, txNum uint64) error {
+	hasAgg, ok := db.(dbstate.HasAgg)
+	if !ok {
+		return errors.New("commitment import-pbt: target database has no state aggregator")
+	}
+	agg, ok := hasAgg.Agg().(*dbstate.Aggregator)
+	if !ok || agg == nil {
+		return errors.New("commitment import-pbt: target database has no state aggregator")
+	}
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		domainAt := at.DbgDomain(domain)
+		if domainAt == nil {
+			continue
+		}
+		if err := validatePBTImportFilesFrontier(domain, domainAt.Files(), txNum); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePBTImportFilesFrontier(domain kv.Domain, files kv.VisibleFiles, txNum uint64) error {
+	if len(files) == 0 || txNum == ^uint64(0) {
+		return nil
+	}
+	end := files[len(files)-1].EndRootNum()
+	if end > txNum+1 {
+		return fmt.Errorf("commitment import-pbt: target %s files extend past txNum %d", domain, txNum)
+	}
+	return nil
 }
 
 func configureImportVariant(dirs datadir.Dirs) {

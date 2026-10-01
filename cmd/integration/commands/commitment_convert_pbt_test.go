@@ -110,7 +110,7 @@ func TestPBTRealChainTxNumConvention(t *testing.T) {
 	})
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
 	agg.WaitForFiles()
-	require.ErrorContains(t, requirePBinSourceEnd(agg, lastTxNum-1), "not at the accounts file end")
+	require.ErrorContains(t, requirePBinSourceEnd(agg, lastTxNum-1), "source leaf stamp")
 	seekTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer seekTx.Rollback()
@@ -663,7 +663,7 @@ func TestConvertPBTBinOnlyRefusesBeforeFork(t *testing.T) {
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
-func TestConvertPBTHexStateInsideSourceFile(t *testing.T) {
+func TestConvertPBTRefusesSourceLeafAfterPoint(t *testing.T) {
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
 	t.Cleanup(func() {
@@ -675,9 +675,23 @@ func TestConvertPBTHexStateInsideSourceFile(t *testing.T) {
 	source, _ := newPBTConversionSourceAt(t, 6)
 	output := filepath.Join(t.TempDir(), "output")
 	err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
-	require.ErrorContains(t, err, "source state txNum 6 is not at the accounts file end 8")
+	require.ErrorContains(t, err, "source leaf stamp 7 is after conversion txNum 6")
 	_, statErr := os.Stat(output)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestConvertPBTIgnoresDatabaseRowsPastFiles(t *testing.T) {
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	source, _ := newPBTConversionSourceAtWithFutureLeaf(t, 7, 8)
+	output := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
 }
 
 func TestConvertPBTLegacyHexSourceIsRefusedAndRemoved(t *testing.T) {
@@ -721,6 +735,10 @@ func newPBTConversionSource(t *testing.T) (pbtConversionSource, common.Hash) {
 }
 
 func newPBTConversionSourceAt(t *testing.T, stateTx uint64) (pbtConversionSource, common.Hash) {
+	return newPBTConversionSourceAtWithFutureLeaf(t, stateTx, 0)
+}
+
+func newPBTConversionSourceAtWithFutureLeaf(t *testing.T, stateTx, futureLeafStamp uint64) (pbtConversionSource, common.Hash) {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
 	refs := false
@@ -841,6 +859,11 @@ func newPBTConversionSourceAt(t *testing.T, stateTx uint64) (pbtConversionSource
 		previousState, _, getErr := domains.GetLatest(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State)
 		require.NoError(t, getErr)
 		require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, hexState, stateTx, previousState))
+	}
+	if futureLeafStamp != 0 {
+		futureAddress := bytes.Repeat([]byte{0x55}, length.Addr)
+		futureAccount := accounts.Account{Nonce: 3, Balance: *uint256.NewInt(3), CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, futureAddress, accounts.SerialiseV3(&futureAccount), futureLeafStamp, nil))
 	}
 	require.NoError(t, domains.Flush(t.Context(), tx))
 	require.NoError(t, tx.Commit())

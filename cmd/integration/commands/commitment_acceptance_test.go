@@ -34,7 +34,6 @@ import (
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -153,7 +152,7 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
-	copyPBTAcceptanceSalts(t, node, source)
+	copyPBTStateSalt(t, node, source)
 	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 3)))
 	buildPBTAcceptanceFiles(t, source)
 	source.Tester.Close()
@@ -181,11 +180,6 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 		execmoduletester.WithoutGenesisCommit(),
 		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
 	)
-	progressTx, err := reopened.DB.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(progressTx.Rollback)
-	require.NoError(t, stages.SaveStageProgress(progressTx, stages.Execution, conversionBlock))
-	require.NoError(t, progressTx.Commit())
 	for block := conversionBlock + 1; block <= node.Chain.TopBlock.NumberU64(); block++ {
 		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
 		attachedRaw := reopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
@@ -271,7 +265,7 @@ func TestPBTAttachedReplayMatchesConvertedState(t *testing.T) {
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
-	copyPBTAcceptanceSalts(t, node, source)
+	copyPBTStateSalt(t, node, source)
 	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 3)))
 	buildPBTAcceptanceFiles(t, source)
 	source.Tester.Close()
@@ -294,11 +288,6 @@ func TestPBTAttachedReplayMatchesConvertedState(t *testing.T) {
 		execmoduletester.WithoutGenesisCommit(),
 		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
 	)
-	progressTx, err := reopened.DB.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(progressTx.Rollback)
-	require.NoError(t, stages.SaveStageProgress(progressTx, stages.Execution, conversionBlock))
-	require.NoError(t, progressTx.Commit())
 	for block := conversionBlock + 1; block <= node.Chain.TopBlock.NumberU64(); block++ {
 		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
 	}
@@ -356,13 +345,11 @@ func exportConvertedPBTDigest(t *testing.T, output, rawPath string, fixture *exe
 	return meta["snapshotDigest"]
 }
 
-func copyPBTAcceptanceSalts(t *testing.T, source, target *execmoduletester.PBTAcceptanceChain) {
+func copyPBTStateSalt(t *testing.T, node, source *execmoduletester.PBTAcceptanceChain) {
 	t.Helper()
-	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
-		value, err := os.ReadFile(filepath.Join(source.Tester.Dirs.Snap, name))
-		require.NoError(t, err)
-		require.NoError(t, os.WriteFile(filepath.Join(target.Tester.Dirs.Snap, name), value, 0o644))
-	}
+	value, err := os.ReadFile(filepath.Join(node.Tester.Dirs.Snap, "salt-state.txt"))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(source.Tester.Dirs.Snap, "salt-state.txt"), value, 0o644))
 }
 
 func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain) {
@@ -376,31 +363,12 @@ func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptan
 	require.NoError(t, agg.OpenFolder(rawDB))
 	db, err := dbtemporal.New(rawDB, agg, nil)
 	require.NoError(t, err)
-	writeTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(writeTx.Rollback)
-	domains, err := execctx.NewSharedDomains(t.Context(), writeTx, log.New(), execctx.WithoutCommitmentSeek())
-	require.NoError(t, err)
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 	_, lastTxNum, err := rawdbv3.TxNums.Last(tx)
 	require.NoError(t, err)
 	tx.Rollback()
-	for _, domain := range domains.CommitmentDomains() {
-		key := commitment.KeyCommitmentV3State
-		if domain == kv.CommitmentBinDomain {
-			key = commitment.KeyCommitmentState
-		}
-		value, _, getErr := domains.GetLatest(domain, writeTx, key)
-		require.NoError(t, getErr)
-		if len(value) != 0 {
-			require.NoError(t, domains.DomainPut(domain, writeTx, key, value, lastTxNum, value))
-		}
-	}
-	require.NoError(t, domains.Flush(t.Context(), writeTx))
-	require.NoError(t, writeTx.Commit())
-	domains.Close()
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
 	agg.WaitForFiles()
 	db.Close()

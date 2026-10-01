@@ -465,15 +465,12 @@ func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings 
 func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	files := at.Files(kv.AccountsDomain)
-	if len(files) == 0 {
+	return dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
+		if leaf.Stamp > endTxNum {
+			return fmt.Errorf("commitment convert-pbt: source leaf stamp %d is after conversion txNum %d", leaf.Stamp, endTxNum)
+		}
 		return nil
-	}
-	last := files[len(files)-1]
-	if last.StartRootNum() > endTxNum || last.EndRootNum() != endTxNum+1 {
-		return fmt.Errorf("commitment convert-pbt: source state txNum %d is not at the accounts file end %d", endTxNum, last.EndRootNum())
-	}
-	return nil
+	})
 }
 
 func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, point pbinConversionPoint) (header *types.Header, blockEnd, afterFork bool, err error) {

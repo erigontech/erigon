@@ -422,6 +422,7 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 	file, err := os.CreateTemp(t.TempDir(), "artifact-memory-")
 	require.NoError(t, err)
 	value := bytes.Repeat([]byte{1}, eip8297.ValueLength)
+	runtime.GC()
 	writerSampler := startHeapSampler()
 	digest, err := WriteSnapshot(file, common.Hash{}, func(emit func([]byte, []byte) error) error {
 		for group := range groupCount {

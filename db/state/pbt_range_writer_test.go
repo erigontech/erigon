@@ -55,7 +55,7 @@ func TestNewPBinRangeWriter(t *testing.T) {
 	writePBinRangeWriterAccounts(t, db, 32)
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
-	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 23)
+	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 22)
 	require.NoError(t, err)
 	require.NotNil(t, writer)
 }
