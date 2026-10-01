@@ -20,6 +20,8 @@
 package crypto
 
 import (
+	"encoding/binary"
+	keccak "github.com/erigontech/fastkeccak"
 	"testing"
 )
 
@@ -87,3 +89,30 @@ func BenchmarkKeccak256(b *testing.B) {
 var benchPayload = make([]byte, 500)
 
 var benchPayload1 = make([]byte, 1)
+
+// BenchmarkKeccak256HashCache: 64-byte inputs, hit = 1024 recurring inputs, miss = every input new.
+func BenchmarkKeccak256HashCache(b *testing.B) {
+	inputs := make([][]byte, 1<<20)
+	for i := range inputs {
+		inputs[i] = binary.BigEndian.AppendUint64(make([]byte, 56, 64), uint64(i))
+	}
+	for _, sc := range []struct {
+		name string
+		span int
+	}{{"hit", 1024}, {"miss", len(inputs)}} {
+		b.Run("direct/"+sc.name, func(b *testing.B) {
+			i := 0
+			for b.Loop() {
+				keccak.Sum256(inputs[i%sc.span])
+				i++
+			}
+		})
+		b.Run("cached/"+sc.name, func(b *testing.B) {
+			i := 0
+			for b.Loop() {
+				Keccak256Hash(inputs[i%sc.span])
+				i++
+			}
+		})
+	}
+}
