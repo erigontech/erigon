@@ -217,32 +217,46 @@ func TestParseMessage(t *testing.T) {
 		want  []*jsonrpcMessage
 	}{
 		{"empty object", `{}`, false, []*jsonrpcMessage{zero()}},
-		{"call", `{"jsonrpc":"2.0","id":1,"method":"m","params":[1,2]}`, false,
-			[]*jsonrpcMessage{testMessage("2.0", "m", "1", "[1,2]")}},
+		{
+			"call", `{"jsonrpc":"2.0","id":1,"method":"m","params":[1,2]}`, false,
+			[]*jsonrpcMessage{testMessage("2.0", "m", "1", "[1,2]")},
+		},
 		{"null message", `null`, false, []*jsonrpcMessage{nil}},
 		{"not an object", `1`, false, []*jsonrpcMessage{zero()}},
 		{"string", `"str"`, false, []*jsonrpcMessage{zero()}},
 		{"empty batch", `[]`, true, nil},
-		{"batch", `[{"method":"a","id":1},{"method":"b","id":2}]`, true,
-			[]*jsonrpcMessage{testMessage("", "a", "1", ""), testMessage("", "b", "2", "")}},
-		{"batch with null", `[{"method":"a","id":1},null]`, true,
-			[]*jsonrpcMessage{testMessage("", "a", "1", ""), nil}},
-		{"duplicate key, last wins", `{"method":"first","method":"second","id":1}`, false,
-			[]*jsonrpcMessage{testMessage("", "second", "1", "")}},
+		{
+			"batch", `[{"method":"a","id":1},{"method":"b","id":2}]`, true,
+			[]*jsonrpcMessage{testMessage("", "a", "1", ""), testMessage("", "b", "2", "")},
+		},
+		{
+			"batch with null", `[{"method":"a","id":1},null]`, true,
+			[]*jsonrpcMessage{testMessage("", "a", "1", ""), nil},
+		},
+		{
+			"duplicate key, last wins", `{"method":"first","method":"second","id":1}`, false,
+			[]*jsonrpcMessage{testMessage("", "second", "1", "")},
+		},
 
 		// field names have one spelling in the spec; any other spelling is an
 		// unknown key, but unicode escapes are unescaped first so they match the
 		// same way encoding/json map keys do
 		{"cased keys ignored", `{"Method":"m","ID":1,"Params":[1]}`, false, []*jsonrpcMessage{zero()}},
-		{"unicode-escaped method key", "{\"metho\\u0064\":\"m\",\"i\\u0064\":7}", false,
-			[]*jsonrpcMessage{testMessage("", "m", "7", "")}},
+		{
+			"unicode-escaped method key", "{\"metho\\u0064\":\"m\",\"i\\u0064\":7}", false,
+			[]*jsonrpcMessage{testMessage("", "m", "7", "")},
+		},
 		{"double-escaped key is not method", `{"metho\\u0064":"x"}`, false, []*jsonrpcMessage{zero()}},
 
 		// a string holding structural bytes must not end the value early
-		{"structural bytes in a string", `{"method":"m","params":["a\"},{\"b"],"id":1}`, false,
-			[]*jsonrpcMessage{testMessage("", "m", "1", `["a\"},{\"b"]`)}},
-		{"batch element with a brace in a string", `[{"method":"m","params":["},{"]}]`, true,
-			[]*jsonrpcMessage{testMessage("", "m", "", `["},{"]`)}},
+		{
+			"structural bytes in a string", `{"method":"m","params":["a\"},{\"b"],"id":1}`, false,
+			[]*jsonrpcMessage{testMessage("", "m", "1", `["a\"},{\"b"]`)},
+		},
+		{
+			"batch element with a brace in a string", `[{"method":"m","params":["},{"]}]`, true,
+			[]*jsonrpcMessage{testMessage("", "m", "", `["},{"]`)},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -494,7 +508,7 @@ func FuzzFillMessage(f *testing.F) {
 	})
 }
 
-func respond(s jsonstream.Stream, id json.RawMessage, result any) {
+func respond(s *jsonstream.Stream, id json.RawMessage, result any) {
 	_ = (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
 }
 
@@ -590,12 +604,12 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 
 type failingFastJSON struct{}
 
-func (failingFastJSON) MarshalFastJSONTo(*jsonstream.StackStream) error {
+func (failingFastJSON) MarshalFastJSONTo(*jsonstream.Stream) error {
 	return errors.New("encode failed")
 }
 
 func testResponseEncodeFailure(t *testing.T, result any) {
-	bad := func(s jsonstream.Stream) {
+	bad := func(s *jsonstream.Stream) {
 		respond(s, json.RawMessage(`7`), result)
 	}
 	assertErrorResponse := func(t *testing.T, raw []byte) {
@@ -696,7 +710,6 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 		require.Contains(t, back, "error")
 		require.NotContains(t, back, "result")
 	}
-
 }
 
 type failingAppender struct{}
@@ -705,7 +718,7 @@ func (failingAppender) AppendText([]byte) ([]byte, error) { return nil, errors.N
 
 type failingMidWrite struct{}
 
-func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	w.WriteObjectStart()
 	w.Field("balance")
 	w.WriteQuotedText(failingAppender{})

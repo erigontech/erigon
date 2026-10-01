@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -43,6 +44,8 @@ func TestJumpDestAnalysis(t *testing.T) {
 		{append([]byte{P32}, append(make([]byte, 31), J, J)...), 0b1 << 33, 0},
 		{append(make([]byte, 62), P2, J, J, J), 0b10, 1},
 		{append(make([]byte, 64), J), 0b1, 1},
+		{append(bytes.Repeat([]byte{J}, 61), P2, J, J), 1<<61 - 1, 0},
+		{append(append(bytes.Repeat([]byte{J}, 20), P32), bytes.Repeat([]byte{J}, 44)...), 0xffe0_0000_000f_ffff, 0},
 	}
 	for _, test := range tests {
 		ret := codeBitmap(test.code)

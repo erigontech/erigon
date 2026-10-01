@@ -7854,10 +7854,6 @@ func (ec *executionContext) marshalNAccessTuple2ᚖgithubᚗcomᚋerigontechᚋe
 	return ec._AccessTuple(ctx, sel, v)
 }
 
-func (ec *executionContext) marshalNAccount2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v model.Account) graphql.Marshaler {
-	return ec._Account(ctx, sel, &v)
-}
-
 func (ec *executionContext) marshalNAccount2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐAccount(ctx context.Context, sel ast.SelectionSet, v *model.Account) graphql.Marshaler {
 	if v == nil {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
@@ -8074,10 +8070,6 @@ func (ec *executionContext) marshalNLong2uint64(ctx context.Context, sel ast.Sel
 		}
 	}
 	return res
-}
-
-func (ec *executionContext) marshalNPending2githubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐPending(ctx context.Context, sel ast.SelectionSet, v model.Pending) graphql.Marshaler {
-	return ec._Pending(ctx, sel, &v)
 }
 
 func (ec *executionContext) marshalNPending2ᚖgithubᚗcomᚋerigontechᚋerigonᚋcmdᚋrpcdaemonᚋgraphqlᚋgraphᚋmodelᚐPending(ctx context.Context, sel ast.SelectionSet, v *model.Pending) graphql.Marshaler {

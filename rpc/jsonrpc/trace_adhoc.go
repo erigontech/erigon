@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -30,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -73,10 +71,27 @@ type TraceCallParam struct {
 	MaxFeePerGas         *hexutil.U256     `json:"maxFeePerGas"`
 	MaxFeePerBlobGas     *hexutil.U256     `json:"maxFeePerBlobGas"`
 	Value                *hexutil.U256     `json:"value"`
-	Data                 hexutil.Bytes     `json:"data"`
+	Data                 *hexutil.Bytes    `json:"data"`
+	Input                *hexutil.Bytes    `json:"input"`
 	AccessList           *types.AccessList `json:"accessList"`
 	txHash               *common.Hash
 	traceTypes           []string
+
+	// Converted as ethapi.CallArgs converts them for eth_call.
+	Nonce               *hexutil.Uint64           `json:"nonce"`
+	ChainID             *hexutil.U256             `json:"chainId"`
+	BlobVersionedHashes []common.Hash             `json:"blobVersionedHashes"`
+	AuthorizationList   []types.JsonAuthorization `json:"authorizationList"`
+}
+
+// UnmarshalJSON decodes a call object and rejects one whose data and input disagree, as
+// ethapi.CallArgs does.
+func (args *TraceCallParam) UnmarshalJSON(raw []byte) error {
+	type traceCallParam TraceCallParam
+	if err := json.Unmarshal(raw, (*traceCallParam)(args)); err != nil {
+		return err
+	}
+	return ethapi.CheckCallData(args.Data, args.Input)
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -124,19 +139,21 @@ type VmTrace struct {
 
 // VmTraceOp is one element of the vmTrace ops trace
 type VmTraceOp struct {
-	Cost int        `json:"cost"`
-	Ex   *VmTraceEx `json:"ex"`
-	Pc   int        `json:"pc"`
-	Sub  *VmTrace   `json:"sub"`
-	Op   string     `json:"op,omitempty"`
-	Idx  string     `json:"idx,omitempty"`
+	Cost         int        `json:"cost"`
+	StateGasCost int64      `json:"stateGasCost,omitempty"`
+	Ex           *VmTraceEx `json:"ex"`
+	Pc           int        `json:"pc"`
+	Sub          *VmTrace   `json:"sub"`
+	Op           string     `json:"op,omitempty"`
+	Idx          string     `json:"idx,omitempty"`
 }
 
 type VmTraceEx struct {
-	Mem   *VmTraceMem   `json:"mem"`
-	Push  []string      `json:"push"`
-	Store *VmTraceStore `json:"store"`
-	Used  int           `json:"used"`
+	Mem               *VmTraceMem   `json:"mem"`
+	Push              []string      `json:"push"`
+	Store             *VmTraceStore `json:"store"`
+	GasRemaining      int           `json:"used"`                // legacy "used" means remaining execution gas.
+	StateGasRemaining uint64        `json:"stateUsed,omitempty"` // mirrors legacy "used" naming for remaining state gas.
 }
 
 type VmTraceMem struct {
@@ -149,88 +166,52 @@ type VmTraceStore struct {
 	Val string `json:"val"`
 }
 
-// ToMessage converts CallArgs to the Message type used by the core evm
+// toCallArgs returns args as the eth_call arguments they describe.
+func (args *TraceCallParam) toCallArgs() ethapi.CallArgs {
+	return ethapi.CallArgs{
+		From:                 args.From,
+		To:                   args.To,
+		Gas:                  args.Gas,
+		GasPrice:             args.GasPrice,
+		MaxPriorityFeePerGas: args.MaxPriorityFeePerGas,
+		MaxFeePerGas:         args.MaxFeePerGas,
+		MaxFeePerBlobGas:     args.MaxFeePerBlobGas,
+		Value:                args.Value,
+		Data:                 args.Data,
+		Input:                args.Input,
+		Nonce:                args.Nonce,
+		AccessList:           args.AccessList,
+		ChainID:              args.ChainID,
+		BlobVersionedHashes:  args.BlobVersionedHashes,
+		AuthorizationList:    args.AuthorizationList,
+	}
+}
+
+// ToMessage converts args to the Message eth_call would run for them: omitted fees are zero,
+// and a call with no gas price is not repriced to the base fee.
 func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*types.Message, error) {
-	// Set sender address or use zero address if none specified.
-	var addr accounts.Address
-	if args.From != nil {
-		addr = accounts.InternAddress(*args.From)
-	}
+	callArgs := args.toCallArgs()
+	return callArgs.ToMessage(globalGasCap, baseFee)
+}
 
-	// Set default gas & gas price if none were set
-	gas := globalGasCap
-	if gas == 0 {
-		gas = uint64(math.MaxUint64 / 2)
-	}
-	if args.Gas != nil {
-		gas = uint64(*args.Gas)
-	}
-	if globalGasCap != 0 && globalGasCap < gas {
-		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)
-		gas = globalGasCap
-	}
-	var (
-		gasPrice         *uint256.Int
-		gasFeeCap        *uint256.Int
-		gasTipCap        *uint256.Int
-		maxFeePerBlobGas *uint256.Int
-	)
-	if baseFee == nil {
-		// If there's no basefee, then it must be a non-1559 execution
-		gasPrice = new(uint256.Int)
-		if args.GasPrice != nil {
-			gasPrice.Set((*uint256.Int)(args.GasPrice))
-		}
-		gasFeeCap, gasTipCap = gasPrice, gasPrice
-	} else {
-		// A basefee is provided, necessitating 1559-type execution
-		if args.GasPrice != nil {
-			// User specified the legacy gas field, convert to 1559 gas typing
-			gasPrice = new(uint256.Int).Set((*uint256.Int)(args.GasPrice))
-			gasFeeCap, gasTipCap = gasPrice, gasPrice
-		} else {
-			// User specified 1559 gas fields (or none), use those
-			gasFeeCap = new(uint256.Int)
-			if args.MaxFeePerGas != nil {
-				gasFeeCap.Set((*uint256.Int)(args.MaxFeePerGas))
-			}
-			gasTipCap = new(uint256.Int)
-			if args.MaxPriorityFeePerGas != nil {
-				gasTipCap.Set((*uint256.Int)(args.MaxPriorityFeePerGas))
-			}
-			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
-			gasPrice = new(uint256.Int)
-			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
-				*gasPrice = u256.Min(u256.Add(*gasTipCap, *baseFee), *gasFeeCap)
-			} else {
-				// This means gasFeeCap == 0, gasTipCap == 0
-				gasPrice.Set(baseFee)
-				gasFeeCap, gasTipCap = gasPrice, gasPrice
-			}
-		}
-		if args.MaxFeePerBlobGas != nil {
-			maxFeePerBlobGas = new(uint256.Int).Set((*uint256.Int)(args.MaxFeePerBlobGas))
-		}
-	}
-	value := new(uint256.Int)
-	if args.Value != nil {
-		value.Set((*uint256.Int)(args.Value))
-	}
-	var data []byte
-	if args.Data != nil {
-		data = args.Data
-	}
-	var accessList types.AccessList
-	if args.AccessList != nil {
-		accessList = *args.AccessList
-	}
+// callValidationError is a call rejected before execution, with the code eth_simulateV1 gives it.
+type callValidationError struct {
+	err  error
+	code int
+}
 
-	var to accounts.Address
-	if args.To != nil {
-		to = accounts.InternAddress(*args.To)
+func (e *callValidationError) Error() string  { return e.err.Error() }
+func (e *callValidationError) ErrorCode() int { return e.code }
+func (e *callValidationError) Unwrap() error  { return e.err }
+
+// callError gives a call that fails validation the error code eth_simulateV1 gives it, and
+// returns any other error unchanged.
+func callError(err error) error {
+	var coded *rpc.CustomError
+	if errors.As(txValidationError(err), &coded) && coded.Code != rpc.ErrCodeInternalError {
+		return &callValidationError{err: err, code: coded.Code}
 	}
-	msg := types.NewMessage(addr, to, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
-	return msg, nil
+	return err
 }
 
 // overrideBaseFee is a nil-safe wrapper around (*ethapi.BlockOverrides).OverrideBaseFee.
@@ -239,6 +220,14 @@ func overrideBaseFee(traceConfig *config.TraceConfig, baseFee *uint256.Int) *uin
 		return baseFee
 	}
 	return traceConfig.BlockOverrides.OverrideBaseFee(baseFee)
+}
+
+// overrideHeader is a nil-safe wrapper around (*ethapi.BlockOverrides).OverrideHeader.
+func overrideHeader(traceConfig *config.TraceConfig, header *types.Header) *types.Header {
+	if traceConfig == nil {
+		return header
+	}
+	return traceConfig.BlockOverrides.OverrideHeader(header)
 }
 
 // overrideBlockContext applies traceConfig's BlockOverrides (if any) to blockCtx.
@@ -287,11 +276,15 @@ type OeTracer struct {
 	traceAddr    []int
 	traceStack   []*ParityTrace
 	precompile   bool // Whether the last CaptureStart was called with `precompile = true`
+	builtin      bool // Whether the last frame entered is a precompile; it has no subframes, so its exit comes next
 	compat       bool // Bug for bug compatibility mode
+	isAmsterdam  bool
 	lastVmOp     *VmTraceOp
 	lastOp       vm.OpCode
 	lastMemOff   uint64
 	lastMemLen   uint64
+	callMemOff   uint64 // Output window of the last operation, pushed onto memOffStack/memLenStack if it enters a frame
+	callMemLen   uint64
 	memOffStack  []uint64
 	memLenStack  []uint64
 	lastOffStack *VmTraceOp
@@ -300,8 +293,18 @@ type OeTracer struct {
 	config       OeTracerConfig
 }
 
+func (args *TraceCallParam) zeroUnpricedBlobBaseFee(blockCtx *evmtypes.BlockContext) {
+	callArgs := ethapi.CallArgs{MaxFeePerBlobGas: args.MaxFeePerBlobGas, BlobVersionedHashes: args.BlobVersionedHashes}
+	callArgs.ZeroUnpricedBlobBaseFee(blockCtx)
+}
+
 // ToTransaction converts CallArgs to the Transaction type used by the core evm
 func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
+	var chainID uint256.Int
+	if args.ChainID != nil {
+		chainID = uint256.Int(*args.ChainID)
+	}
+
 	msg, err := args.ToMessage(globalGasCap, baseFee)
 	if err != nil {
 		return nil, err
@@ -309,6 +312,53 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 
 	var tx types.Transaction
 	switch {
+	case args.AuthorizationList != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		tx = &types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    msg.Nonce(),
+					GasLimit: msg.Gas(),
+					To:       args.To,
+					Value:    *msg.Value(),
+					Data:     msg.Data(),
+				},
+				ChainID:    chainID,
+				FeeCap:     *msg.FeeCap(),
+				TipCap:     *msg.TipCap(),
+				AccessList: al,
+			},
+			Authorizations: msg.Authorizations(),
+		}
+	case args.BlobVersionedHashes != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		var maxFeePerBlobGas uint256.Int
+		if args.MaxFeePerBlobGas != nil {
+			maxFeePerBlobGas = uint256.Int(*args.MaxFeePerBlobGas)
+		}
+		tx = &types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    msg.Nonce(),
+					GasLimit: msg.Gas(),
+					To:       args.To,
+					Value:    *msg.Value(),
+					Data:     msg.Data(),
+				},
+				ChainID:    chainID,
+				FeeCap:     *msg.FeeCap(),
+				TipCap:     *msg.TipCap(),
+				AccessList: al,
+			},
+			MaxFeePerBlobGas:    maxFeePerBlobGas,
+			BlobVersionedHashes: args.BlobVersionedHashes,
+		}
 	case args.MaxFeePerGas != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {
@@ -322,6 +372,7 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 				Value:    *msg.Value(),
 				Data:     msg.Data(),
 			},
+			ChainID:    chainID,
 			FeeCap:     *msg.FeeCap(),
 			TipCap:     *msg.TipCap(),
 			AccessList: al,
@@ -338,6 +389,7 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 				},
 				GasPrice: *msg.GasPrice(),
 			},
+			ChainID:    chainID,
 			AccessList: *args.AccessList,
 		}
 	default:
@@ -355,19 +407,37 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 	return tx, nil
 }
 
+// checkChainID rejects a call object whose chainId names another chain. Such a call is invalid
+// whatever the state, so it is invalid params rather than an execution error.
+func (args *TraceCallParam) checkChainID(chainID *uint256.Int) error {
+	if args.ChainID == nil {
+		return nil
+	}
+	if have := (*uint256.Int)(args.ChainID); !have.Eq(chainID) {
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("chainId does not match node's (have=%v, want=%v)", have, chainID)}
+	}
+	return nil
+}
+
 func (ot *OeTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnEnter:  ot.OnEnter,
-			OnExit:   ot.OnExit,
-			OnOpcode: ot.OnOpcode,
+			OnTxStart:  ot.OnTxStart,
+			OnEnterV2:  ot.OnEnterV2,
+			OnExitV2:   ot.OnExitV2,
+			OnOpcodeV2: ot.OnOpcodeV2,
+			OnFaultV2:  ot.OnFaultV2,
 		},
 		GetResult: ot.GetResult,
 		Stop:      ot.Stop,
 	}
 }
 
-func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) OnTxStart(env *tracing.VMContext, _ types.Transaction, _ accounts.Address) {
+	ot.isAmsterdam = env.Rules.IsAmsterdam
+}
+
+func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas mdgas.MdGas, value *uint256.Int, code []byte) {
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
 		if deep {
@@ -380,10 +450,15 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 			if !ot.compat {
 				ot.idx = append(ot.idx, fmt.Sprintf("%d-", len(vmT.Ops)-1))
 			}
+			ot.memOffStack = append(ot.memOffStack, ot.callMemOff)
+			ot.memLenStack = append(ot.memLenStack, ot.callMemLen)
 		}
 		if ot.lastVmOp != nil {
 			vmTrace = &VmTrace{Ops: []*VmTraceOp{}}
-			ot.lastVmOp.Sub = vmTrace
+			// SELFDESTRUCT enters a frame that runs no code, so it gets no sub.
+			if typ != vm.SELFDESTRUCT {
+				ot.lastVmOp.Sub = vmTrace
+			}
 			ot.vmOpStack = append(ot.vmOpStack, ot.lastVmOp)
 		} else {
 			vmTrace = ot.r.VmTrace
@@ -391,20 +466,21 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		if create {
 			vmTrace.Code = bytes.Clone(input)
 			if ot.lastVmOp != nil {
-				ot.lastVmOp.Cost += int(gas)
+				ot.lastVmOp.Cost += int(gas.Execution)
 			}
 		} else {
 			vmTrace.Code = code
 		}
 	}
+	ot.builtin = precompile
 	if precompile && deep && (value == nil || value.IsZero()) {
 		ot.precompile = true
 		if !ot.config.IncludePrecompiles {
 			return
 		}
 	}
-	if gas > 500000000 {
-		gas = 500000001 - (0x8000000000000000 - gas)
+	if gas.Execution > 500000000 {
+		gas.Execution = 500000001 - (0x8000000000000000 - gas.Execution)
 	}
 	trace := &ParityTrace{}
 	if create {
@@ -444,7 +520,10 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action := CreateTraceAction{}
 		action.From = from.Value()
 		action.CreationMethod = strings.ToLower(typ.String())
-		action.Gas = hexutil.U256(*uint256.NewInt(gas))
+		action.Gas = hexutil.U256(*uint256.NewInt(gas.Execution))
+		if ot.isAmsterdam {
+			action.StateGas = (*hexutil.Uint64)(&gas.State)
+		}
 		action.Init = bytes.Clone(input)
 		action.Value = hexutil.U256(*value)
 		trace.Action = &action
@@ -470,7 +549,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		}
 		action.From = from.Value()
 		action.To = to.Value()
-		action.Gas = hexutil.U256(*uint256.NewInt(gas))
+		action.Gas = hexutil.U256(*uint256.NewInt(gas.Execution))
 		action.Input = bytes.Clone(input)
 		action.Value = hexutil.U256(*value)
 		trace.Action = &action
@@ -479,16 +558,20 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 	ot.traceStack = append(ot.traceStack, trace)
 }
 
-func (ot *OeTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (ot *OeTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	isCreate := vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2
 	ot.captureStartOrEnter(depth != 0 /* deep */, vm.OpCode(typ), from, to, precompile, isCreate, input, gas, &value, code)
 }
 
-func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, err error) {
+func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdGasUsage, err error) {
 	if ot.r.VmTrace != nil {
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
 			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
+			// A call or create that fails its depth, balance or nonce check runs no code, so it gets no sub.
+			if errors.Is(err, vm.ErrDepth) || errors.Is(err, vm.ErrInsufficientBalance) || errors.Is(err, vm.ErrNonceUintOverflow) {
+				ot.lastOffStack.Sub = nil
+			}
 		}
 		if !ot.compat && deep {
 			ot.idx = ot.idx[:len(ot.idx)-1]
@@ -500,6 +583,8 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 			ot.memLenStack = ot.memLenStack[:len(ot.memLenStack)-1]
 		}
 	}
+	builtin := ot.builtin
+	ot.builtin = false
 	if ot.precompile {
 		ot.precompile = false
 		if !ot.config.IncludePrecompiles {
@@ -515,19 +600,13 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 		ignoreError = !deep && topTrace.Type == CREATE
 	}
 	if err != nil && !ignoreError {
+		topTrace.Error = parityTraceError(err, builtin)
 		if errors.Is(err, vm.ErrExecutionReverted) {
-			topTrace.Error = "Reverted"
-			switch topTrace.Type {
-			case CALL:
-				topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
-				topTrace.Result.(*TraceResult).Output = bytes.Clone(output)
-			case CREATE:
-				topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
-				topTrace.Result.(*CreateTraceResult).Code = bytes.Clone(output)
-			}
+			// A reverted CREATE deploys nothing, so it reports its revert data as a call does,
+			// without the address it would have occupied.
+			topTrace.Result = &TraceResult{GasUsed: (*hexutil.U256)(uint256.NewInt(gasUsed.Execution)), Output: bytes.Clone(output)}
 		} else {
 			topTrace.Result = nil
-			topTrace.Error = err.Error()
 		}
 	} else {
 		if len(output) > 0 {
@@ -540,9 +619,17 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 		}
 		switch topTrace.Type {
 		case CALL:
-			topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
+			topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed.Execution))
 		case CREATE:
-			topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
+			topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed.Execution))
+		}
+	}
+	if ot.isAmsterdam {
+		switch result := topTrace.Result.(type) {
+		case *TraceResult:
+			result.StateGasUsed = (*hexutil.Int64)(&gasUsed.State)
+		case *CreateTraceResult:
+			result.StateGasUsed = (*hexutil.Int64)(&gasUsed.State)
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
@@ -551,11 +638,56 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 	}
 }
 
-func (ot *OeTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+// parityTraceError returns the Parity trace label for a frame's error. An error without a label
+// keeps its own text.
+func parityTraceError(err error, builtin bool) string {
+	var (
+		stackUnderflow *vm.ErrStackUnderflow
+		stackOverflow  *vm.ErrStackOverflow
+		invalidOpCode  *vm.ErrInvalidOpCode
+	)
+	switch {
+	case errors.Is(err, vm.ErrExecutionReverted):
+		return "Reverted"
+	// Before out of gas: the interpreter wraps a dynamic gas error in vm.ErrOutOfGas.
+	case errors.Is(err, vm.ErrWriteProtection):
+		return "Mutable Call In Static Context"
+	// EIP-170 names a code deposit failure, the code size limit included, as out of gas.
+	case errors.Is(err, vm.ErrOutOfGas), errors.Is(err, vm.ErrCodeStoreOutOfGas), errors.Is(err, vm.ErrMaxCodeSizeExceeded),
+		errors.Is(err, vm.ErrMaxInitCodeSizeExceeded), errors.Is(err, vm.ErrGasUintOverflow):
+		return "Out of gas"
+	case errors.Is(err, vm.ErrInvalidJump):
+		return "Bad jump destination"
+	case errors.As(err, &invalidOpCode):
+		return "Bad instruction"
+	case errors.As(err, &stackUnderflow):
+		return "Stack underflow"
+	case errors.As(err, &stackOverflow):
+		return "Out of stack"
+	case errors.Is(err, vm.ErrReturnDataOutOfBounds):
+		return "Out of bounds"
+	case errors.Is(err, vm.ErrInvalidCode):
+		return "Invalid code"
+	case errors.Is(err, vm.ErrContractAddressCollision):
+		return "Contract address collision"
+	case errors.Is(err, vm.ErrNonceUintOverflow):
+		return "Nonce overflow"
+	case errors.Is(err, vm.ErrInsufficientBalance):
+		return "Insufficient balance for transfer"
+	case errors.Is(err, vm.ErrDepth):
+		return "Max call depth exceeded"
+	case builtin:
+		return "Built-in failed"
+	default:
+		return err.Error()
+	}
+}
+
+func (ot *OeTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	ot.captureEndOrExit(depth != 0 /* deep */, output, gasUsed, err)
 }
 
-func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	memory := scope.MemoryData()
 	st := scope.StackData()
 
@@ -613,7 +745,8 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			}
 		}
 		if ot.lastOffStack != nil {
-			ot.lastOffStack.Ex.Used = int(gas)
+			ot.lastOffStack.Ex.GasRemaining = int(gas.Execution)
+			ot.lastOffStack.Ex.StateGasRemaining = gas.State
 			if len(st) > 0 {
 				ot.lastOffStack.Ex.Push = []string{tracers.StackBack(st, 0).Hex()}
 			} else {
@@ -628,8 +761,10 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			}
 			ot.lastOffStack = nil
 		}
-		if ot.lastOp == vm.STOP && vm.OpCode(op) == vm.STOP && len(ot.vmOpStack) == 0 {
-			// Looks like OE is "optimising away" the second STOP
+		// The interpreter reports running off the end of the code as a STOP at or beyond len(code),
+		// and reports an operation it rejects before execution with that error. Neither executed.
+		if pc >= uint64(len(scope.Code())) || rejectedBeforeExecution(err) {
+			ot.lastVmOp = nil
 			return
 		}
 		ot.lastVmOp = &VmTraceOp{Ex: &VmTraceEx{}}
@@ -643,13 +778,22 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			ot.lastVmOp.Idx = fmt.Sprintf("%s%d", sb.String(), len(vmTrace.Ops)-1)
 		}
 		ot.lastOp = vm.OpCode(op)
-		ot.lastVmOp.Cost = int(cost)
+		ot.lastVmOp.Cost = int(cost.Execution)
+		ot.lastVmOp.StateGasCost = cost.State
 		ot.lastVmOp.Pc = int(pc)
-		ot.lastVmOp.Ex.Push = []string{}
-		ot.lastVmOp.Ex.Used = int(gas) - int(cost)
 		if !ot.compat {
 			ot.lastVmOp.Op = vm.OpCode(op).String()
 		}
+		if err != nil {
+			// The operation began executing and halted exceptionally, so it has no effects.
+			ot.lastVmOp.Ex = nil
+			return
+		}
+		ot.lastVmOp.Ex.Push = []string{}
+		gasRemaining := scope.Gas()
+		ot.lastVmOp.Ex.StateGasRemaining = gasRemaining.State
+		ot.lastVmOp.Ex.GasRemaining = int(gasRemaining.Execution)
+		ot.callMemOff, ot.callMemLen = 0, 0
 		switch vm.OpCode(op) {
 		case vm.MSTORE, vm.MLOAD:
 			if len(st) > 0 {
@@ -673,27 +817,46 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			}
 		case vm.STATICCALL, vm.DELEGATECALL:
 			if len(st) > 5 {
-				ot.memOffStack = append(ot.memOffStack, tracers.StackBack(st, 4).Uint64())
-				ot.memLenStack = append(ot.memLenStack, tracers.StackBack(st, 5).Uint64())
+				ot.callMemOff = tracers.StackBack(st, 4).Uint64()
+				ot.callMemLen = tracers.StackBack(st, 5).Uint64()
 			}
 		case vm.CALL, vm.CALLCODE:
 			if len(st) > 6 {
-				ot.memOffStack = append(ot.memOffStack, tracers.StackBack(st, 5).Uint64())
-				ot.memLenStack = append(ot.memLenStack, tracers.StackBack(st, 6).Uint64())
+				ot.callMemOff = tracers.StackBack(st, 5).Uint64()
+				ot.callMemLen = tracers.StackBack(st, 6).Uint64()
 			}
-		case vm.CREATE, vm.CREATE2, vm.SELFDESTRUCT:
-			// Effectively disable memory output
-			ot.memOffStack = append(ot.memOffStack, 0)
-			ot.memLenStack = append(ot.memLenStack, 0)
 		case vm.SSTORE:
 			if len(st) > 1 {
 				ot.lastVmOp.Ex.Store = &VmTraceStore{Key: tracers.StackBack(st, 0).Hex(), Val: tracers.StackBack(st, 1).Hex()}
 			}
 		}
-		if ot.lastVmOp.Ex.Used < 0 {
-			ot.lastVmOp.Ex = nil
-		}
 	}
+}
+
+// OnFaultV2 is called when an operation reported by OnOpcodeV2 fails during execution.
+func (ot *OeTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
+	if ot.r.VmTrace == nil || ot.lastVmOp == nil || errors.Is(err, vm.ErrExecutionReverted) {
+		return
+	}
+	if rejectedBeforeExecution(err) {
+		vmTrace := ot.r.VmTrace
+		if len(ot.vmOpStack) > 0 {
+			vmTrace = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
+		}
+		vmTrace.Ops = vmTrace.Ops[:len(vmTrace.Ops)-1]
+		ot.lastVmOp = nil
+		return
+	}
+	ot.lastVmOp.Ex = nil
+}
+
+// rejectedBeforeExecution reports whether err rejects an operation before it executes:
+// an undefined opcode (including the designated INVALID, 0xFE) or a stack underflow or overflow.
+func rejectedBeforeExecution(err error) bool {
+	var underflow *vm.ErrStackUnderflow
+	var overflow *vm.ErrStackOverflow
+	var invalid *vm.ErrInvalidOpCode
+	return errors.As(err, &underflow) || errors.As(err, &overflow) || errors.As(err, &invalid)
 }
 
 func (ot *OeTracer) GetResult() (json.RawMessage, error) {
@@ -765,7 +928,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 		switch {
 		case initialExist:
 			if exist {
-				var allEqual = len(accountDiff.Storage) == 0
+				allEqual := len(accountDiff.Storage) == 0
 				ifromBalance, err := initialIbs.GetBalance(addr)
 				if err != nil {
 					return err
@@ -1077,10 +1240,13 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
+	if err := args.checkChainID(chainConfig.ChainID); err != nil {
+		return nil, err
+	}
 	engine := api.engine()
 
 	if blockNrOrHash == nil {
-		var num = rpc.LatestBlockNumber
+		num := rpc.LatestBlockNumber
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 	if err := rejectPending(*blockNrOrHash); err != nil {
@@ -1144,7 +1310,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	ot.compat = api.compatibility
-	vmConfig := vm.Config{}
+	vmConfig := vm.Config{NoBaseFee: true}
 	if traceTypeTrace || traceTypeVmTrace {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
@@ -1156,14 +1322,13 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if traceConfig != nil {
 		blockOverrides = traceConfig.BlockOverrides
 	}
-	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
-	blockCtx.GasLimit = math.MaxUint64
-	blockCtx.MaxGasLimit = true
+	effectiveHeader := blockOverrides.OverrideHeader(header)
+	blockCtx := transactions.NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	if err := blockOverrides.Override(&blockCtx); err != nil {
 		return nil, err
 	}
 
-	baseFee := &blockCtx.BaseFee
+	baseFee := effectiveHeader.BaseFee
 	msg, err := args.ToMessage(api.gasCap, baseFee)
 	if err != nil {
 		return nil, err
@@ -1182,7 +1347,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 	}
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+	args.zeroUnpricedBlobBaseFee(&blockCtx)
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
 	if precompiles != nil {
 		evm.SetPrecompiles(precompiles)
 	}
@@ -1196,10 +1362,10 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
-	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
+	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
-		return nil, err
+		return nil, callError(err)
 	}
 	if vmConfig.Tracer.HasTxEndHook() {
 		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
@@ -1294,9 +1460,18 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if tok != json.Delim(']') {
 		return nil, errors.New("expected end of array of [callparam, tracetypes]")
 	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range callParams {
+		if err := callParams[i].checkChainID(chainConfig.ChainID); err != nil {
+			return nil, fmt.Errorf("call %d: %w", i, err)
+		}
+	}
 	var baseFee *uint256.Int
 	if parentNrOrHash == nil {
-		var num = rpc.LatestBlockNumber
+		num := rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 	if err := rejectPending(*parentNrOrHash); err != nil {
@@ -1343,12 +1518,13 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api._txNumReader)
+	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
 	stateCache := shards.NewStateCache(
-		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+		32, 0, /* no limit */
+	) // this cache living only during current RPC call, but required to store state writes
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
@@ -1356,9 +1532,11 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, true /* gasBailout */, false /* advanceTxNum */, traceConfig)
-
-	return trace, err
+		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig)
+	if err != nil {
+		return nil, callError(err)
+	}
+	return trace, nil
 }
 
 // advanceTxNum moves the history reader with the transaction index. Block
@@ -1367,7 +1545,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
-	header *types.Header, requireCanonical, gasBailout, advanceTxNum bool,
+	header *types.Header, requireCanonical, gasBailout, advanceTxNum, noBaseFee bool,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1427,7 +1605,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: args.txHash}
-		vmConfig := vm.Config{}
+		vmConfig := vm.Config{NoBaseFee: noBaseFee}
 		if traceTypeTrace || traceTypeVmTrace {
 			var ot OeTracer
 			ot.config, err = parseOeTracerConfig(traceConfig)
@@ -1467,7 +1645,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			ibs.SetHooks(tracer.Hooks)
 		}
 		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+		txBlockCtx := blockCtx
+		if noBaseFee {
+			args.zeroUnpricedBlobBaseFee(&txBlockCtx)
+		}
+		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(txBlockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
 		if tracer != nil && tracer.Hooks.OnTxStart != nil {
@@ -1527,7 +1709,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 
 func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
-	msg *types.Message, callParam TraceCallParam,
+	txn types.Transaction, callParam TraceCallParam,
 	header *types.Header, requireCanonical, gasBailout bool, txIndex int,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
@@ -1560,6 +1742,15 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	blockCtx := transactions.NewEVMBlockContext(engine, header, requireCanonical, dbtx, api._blockReader, chainConfig)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 		return nil, err
+	}
+	chainRules := blockCtx.Rules(chainConfig)
+	signer := types.MakeSigner(chainConfig, blockCtx.BlockNumber, blockCtx.Time)
+	if err := checkOverriddenSigner(traceConfig, signer, txn); err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
+	}
+	msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, chainRules)
+	if err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
 	}
 
 	if isHistoricalStateReader {
@@ -1625,12 +1816,14 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
+		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
+	}
 	execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	if err != nil {
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
 
-	chainRules := blockCtx.Rules(chainConfig)
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)
@@ -1682,7 +1875,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 	engine := api.engine()
 
-	var num = rpc.LatestBlockNumber
+	num := rpc.LatestBlockNumber
 	blockNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &num}
 
 	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader)
@@ -1754,18 +1947,15 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	rules := blockCtx.Rules(chainConfig)
 
+	// Keep the nonce, EIP-3607 sender-code and EIP-7825 gas-limit checks that
+	// AsMessage enables: a signed transaction is traced only if it is valid at
+	// the latest state.
 	msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 	if err != nil {
 		return nil, err
 	}
-	msg.SetCheckNonce(false)
-	msg.SetCheckTransaction(false)
-	msg.SetCheckGas(false)
 
 	txCtx := protocol.NewEVMTxContext(msg)
-
-	blockCtx.GasLimit = math.MaxUint64
-	blockCtx.MaxGasLimit = true
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	storeEVM(evm)
@@ -1778,7 +1968,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
-	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
+	// A signed transaction pays for its own gas, so no gas bailout: the sender
+	// is charged for value and gas as it would be in a block.
+	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err

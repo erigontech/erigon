@@ -69,11 +69,11 @@ type MemoryMutation struct {
 //
 // Common pattern:
 //
-//	batch := NewMemoryBatch(db, tmpDir)
+//	batch := NewMemoryBatch(db)
 //	defer batch.Close()
 //	... some calculations on `batch`
 //	batch.Commit()
-func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*MemoryMutation, error) {
+func NewMemoryBatch(tx kv.TemporalTx) (*MemoryMutation, error) {
 	mem := newMemStore()
 	memDB := &memStoreDB{store: mem}
 
@@ -302,10 +302,6 @@ func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 	return m.readTx.GetOne(table, key)
 }
 
-func (m *MemoryMutation) Last(table string) ([]byte, []byte, error) {
-	panic("not implemented. (MemoryMutation.Last)")
-}
-
 // Has returns whether a key is present in the mutation overlay or underlying DB.
 // Thread-safe: acquires RLock.
 func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
@@ -380,22 +376,8 @@ func (m *MemoryMutation) Prefix(table string, prefix []byte) (stream.KV, error) 
 	return m.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
 }
 
-func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
-	panic("please implement me")
-}
-
-func (m *MemoryMutation) StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	panic("please implement me")
-}
-
-func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	panic("please implement me")
-}
-
-// Range merges the db side and the overlay by key, so on a DupSort table a db
-// value is dropped when the overlay holds another value under the same key.
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
+	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit), dupSort: isTablePurelyDupsort(table)}
 	var err error
 	m.mu.RLock()
 	cleared := m.isTableCleared(table)
@@ -436,7 +418,19 @@ type rangeIter struct {
 	hasNextDb, hasNextMem                bool
 	nextKdb, nextVdb, nextKmem, nextVmem []byte
 	orderAscend                          bool
+	dupSort                              bool
 	limit                                int64
+}
+
+// Both sides are ordered by key and, on a DupSort table, by value within a
+// key: there the overlay value adds a dup instead of replacing the db one, so
+// only an identical (key, value) pair collapses into a single row.
+func (s *rangeIter) compare() int {
+	c := bytes.Compare(s.nextKdb, s.nextKmem)
+	if c != 0 || !s.dupSort {
+		return c
+	}
+	return bytes.Compare(s.nextVdb, s.nextVmem)
 }
 
 func (s *rangeIter) Close() {
@@ -477,7 +471,7 @@ func (s *rangeIter) HasNext() bool {
 func (s *rangeIter) Next() (k, v []byte, err error) {
 	s.limit--
 	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
-	c := bytes.Compare(s.nextKdb, s.nextKmem)
+	c := s.compare()
 	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
 		k = s.nextKdb
 		v = s.nextVdb

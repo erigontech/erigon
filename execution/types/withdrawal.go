@@ -31,27 +31,15 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type Withdrawal
+
 // Withdrawal represents a validator withdrawal from the consensus layer.
 // See EIP-4895: Beacon chain push withdrawals as operations.
 type Withdrawal struct {
-	Index     hexutil.Uint64 `json:"index"`          // monotonically increasing identifier issued by consensus layer
-	Validator hexutil.Uint64 `json:"validatorIndex"` // index of validator associated with withdrawal
-	Address   common.Address `json:"address"`        // target address for withdrawn ether
-	Amount    hexutil.Uint64 `json:"amount"`         // value of withdrawal in GWei
-}
-
-func (obj *Withdrawal) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	if obj == nil {
-		s.WriteNil()
-		return nil
-	}
-	s.WriteObjectStart()
-	jsonstream.Text(s, "index", &obj.Index)
-	jsonstream.Text(s, "validatorIndex", &obj.Validator)
-	s.Field("address").WriteHex(obj.Address[:])
-	jsonstream.Text(s, "amount", &obj.Amount)
-	s.WriteObjectEnd()
-	return nil
+	Index     hexutil.Uint64 `json:"index" ethjson:"quantity"`          // monotonically increasing identifier issued by consensus layer
+	Validator hexutil.Uint64 `json:"validatorIndex" ethjson:"quantity"` // index of validator associated with withdrawal
+	Address   common.Address `json:"address" ethjson:"data"`            // target address for withdrawn ether
+	Amount    hexutil.Uint64 `json:"amount" ethjson:"quantity"`         // value of withdrawal in GWei
 }
 
 func (obj *Withdrawal) EncodingSize() int {
@@ -123,11 +111,20 @@ func (*Withdrawal) Clone() clonable.Clonable {
 // Withdrawals implements DerivableList for withdrawals.
 type Withdrawals []*Withdrawal
 
-func (s Withdrawals) Len() int { return len(s) }
+// MarshalFastJSONTo writes the withdrawals as a bare array. The receiver must stay a value, so
+// the type itself satisfies the fast-JSON interface.
+func (ws Withdrawals) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	jsonstream.ArrayValue(s, ws, writeWithdrawalElem)
+	return nil
+}
+
+func writeWithdrawalElem(s *jsonstream.Stream, w **Withdrawal) { _ = (*w).MarshalFastJSONTo(s) }
+
+func (ws Withdrawals) Len() int { return len(ws) }
 
 // EncodeIndex encodes the i'th withdrawal to w. Note that this does not check for errors
 // because we assume that *Withdrawal will only ever contain valid withdrawals that were either
 // constructed by decoding or via public API in this package.
-func (s Withdrawals) EncodeIndex(i int, w *bytes.Buffer) {
-	_ = rlp.Encode(w, s[i])
+func (ws Withdrawals) EncodeIndex(i int, w *bytes.Buffer) {
+	_ = rlp.Encode(w, ws[i])
 }

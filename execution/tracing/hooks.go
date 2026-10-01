@@ -34,6 +34,7 @@ import (
 type OpContext interface {
 	MemoryData() []byte
 	StackData() []uint256.Int
+	Gas() mdgas.MdGas
 	Caller() accounts.Address
 	Address() accounts.Address
 	CallValue() uint256.Int
@@ -119,13 +120,13 @@ type (
 	OpcodeHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, rData []byte, depth int, err error)
 
 	// OpcodeHookV2 reports execution and state gas and takes precedence over OpcodeHook.
-	OpcodeHookV2 = func(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, rData []byte, depth int, err error)
+	OpcodeHookV2 = func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, rData []byte, depth int, err error)
 
 	// FaultHook is invoked when an error occurs during the execution of an opcode.
 	FaultHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, depth int, err error)
 
 	// FaultHookV2 reports execution and state gas and takes precedence over FaultHook.
-	FaultHookV2 = func(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, depth int, err error)
+	FaultHookV2 = func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, depth int, err error)
 
 	// GasChangeHook reports changes to the execution gas balance.
 	GasChangeHook = func(old, new uint64, reason GasChangeReason)
@@ -150,9 +151,7 @@ type (
 	// GenesisBlockHook is called when the genesis block is being processed.
 	GenesisBlockHook = func(genesis *types.Block, alloc types.GenesisAlloc)
 
-	// OnSystemCallStartHook is called when a system call is about to be executed. Today,
-	// this hook is invoked when the EIP-4788 system call is about to be executed to set the
-	// beacon block root.
+	// OnSystemCallStartHook is called before a system call.
 	//
 	// After this hook, the EVM call tracing will happened as usual so you will receive a `OnEnter/OnExit`
 	// as well as state hooks between this hook and the `OnSystemCallEndHook`.
@@ -165,9 +164,7 @@ type (
 	// to `OnSystemCallStartHook` for more information.
 	OnSystemCallStartHookV2 = func(vm *VMContext)
 
-	// OnSystemCallEndHook is called when a system call has finished executing. Today,
-	// this hook is invoked when the EIP-4788 system call is about to be executed to set the
-	// beacon block root.
+	// OnSystemCallEndHook is called after a system call finishes.
 	OnSystemCallEndHook = func()
 
 	/*
@@ -276,7 +273,7 @@ func (h *Hooks) HasOpcodeHook() bool {
 	return h != nil && (h.OnOpcodeV2 != nil || h.OnOpcode != nil)
 }
 
-func (h *Hooks) EmitOpcode(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, rData []byte, depth int, err error) {
+func (h *Hooks) EmitOpcode(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, rData []byte, depth int, err error) {
 	if h == nil {
 		return
 	}
@@ -291,7 +288,7 @@ func (h *Hooks) HasFaultHook() bool {
 	return h != nil && (h.OnFaultV2 != nil || h.OnFault != nil)
 }
 
-func (h *Hooks) EmitFault(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, depth int, err error) {
+func (h *Hooks) EmitFault(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, depth int, err error) {
 	if h == nil {
 		return
 	}
@@ -315,6 +312,17 @@ func (h *Hooks) EmitGasChange(old, new mdgas.MdGas, reason GasChangeReason) {
 		h.OnGasChangeV2(old, new, reason)
 	} else if h.OnGasChange != nil {
 		h.OnGasChange(old.Execution, new.Execution, reason)
+	}
+}
+
+func (h *Hooks) EmitSystemCallStart(vmctx *VMContext) {
+	if h == nil {
+		return
+	}
+	if h.OnSystemCallStartV2 != nil && vmctx != nil {
+		h.OnSystemCallStartV2(vmctx)
+	} else if h.OnSystemCallStart != nil {
+		h.OnSystemCallStart()
 	}
 }
 
@@ -438,12 +446,14 @@ const (
 	GasChangeRefundRevertedState GasChangeReason = 17
 	// GasChangeCallGasForwarded is gas forwarded to a child call.
 	GasChangeCallGasForwarded GasChangeReason = 18
-	// GasChangeCallNewAccount is state gas charged for creating an account.
-	GasChangeCallNewAccount GasChangeReason = 19
+	// state gas charged for account creation before the transaction's first frame.
+	GasChangeRuntimeNewAccount GasChangeReason = 19
 	// GasChangeTxAuthorization is gas charged for processing an EIP-7702 authorization.
 	GasChangeTxAuthorization GasChangeReason = 20
 	// GasChangeRefundAccountCreation is state gas refunded for cancelled account creation.
 	GasChangeRefundAccountCreation GasChangeReason = 21
+	// gas charged to reach the transaction calldata floor.
+	GasChangeTxDataFloor GasChangeReason = 22
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.

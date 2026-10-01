@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"bytes"
 	"math/rand"
 	"testing"
 )
@@ -64,7 +65,7 @@ func TestCodeBitmapEquivalence(t *testing.T) {
 		c := make([]byte, n)
 		for i := range c {
 			switch mode {
-			case 0: // jumpdest-heavy (the unique-code adversarial shape)
+			case 0: // jumpdest-heavy
 				if r.Intn(20) == 0 {
 					c[i] = byte(0x60 + r.Intn(32))
 				} else {
@@ -94,9 +95,9 @@ func TestCodeBitmapEquivalence(t *testing.T) {
 	for n := range 48 {
 		edges = append(
 			edges,
-			append([]byte{0x7f}, make([]byte, n)...), // PUSH32 + n bytes
-			append([]byte{0x5b, 0x7f}, make([]byte, n)...), // JUMPDEST, PUSH32, ...
-			append(make([]byte, n), 0x7f),                  // trailing PUSH32
+			append([]byte{0x7f}, bytes.Repeat([]byte{0x5b}, n)...),       // PUSH32 + n bytes
+			append([]byte{0x5b, 0x7f}, bytes.Repeat([]byte{0x5b}, n)...), // JUMPDEST, PUSH32, ...
+			append(bytes.Repeat([]byte{0x5b}, n), 0x7f),                  // trailing PUSH32
 		)
 	}
 	for _, code := range edges {

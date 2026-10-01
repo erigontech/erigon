@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
-	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -60,7 +60,22 @@ func (mb *AssembledBlock) AddTxn(txn types.Transaction) {
 
 func (mb *AssembledBlock) AvailableRlpSpace(chainConfig *chain.Config, withAdditional ...types.Transaction) int {
 	if mb.headerRlpSize == nil {
-		s := mb.Header.EncodingSize()
+		h := types.CopyHeader(mb.Header)
+		h.GasUsed = h.GasLimit
+		if h.BlobGasUsed != nil {
+			maxBlobGas := chainConfig.GetMaxBlobGasPerBlock(h.Time)
+			h.BlobGasUsed = &maxBlobGas
+		}
+		if h.WithdrawalsHash == nil && mb.Withdrawals != nil {
+			h.WithdrawalsHash = &common.Hash{}
+		}
+		if h.RequestsHash == nil && chainConfig.IsPrague(h.Time) {
+			h.RequestsHash = &common.Hash{}
+		}
+		if h.BlockAccessListHash == nil && chainConfig.IsEIPEnabled(7928, h.Time) {
+			h.BlockAccessListHash = &common.Hash{}
+		}
+		s := h.EncodingSize()
 		s += rlp.ListPrefixLen(s)
 		mb.headerRlpSize = &s
 	}
@@ -298,6 +313,8 @@ func (ba *BlockAssembler) AddTransactions(
 		}
 	}()
 
+	minTxGas := mdgas.MinTxGas(ba.cfg.ChainConfig.IsAmsterdam(header.Time))
+
 	done := false
 
 LOOP:
@@ -322,8 +339,10 @@ LOOP:
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done.
-		if gasPool.Gas() < params.TxGas {
-			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
+		// Only the execution dimension bounds this exit: AA txns draw solely on the
+		// execution pool, so a state-gas exit would drop ones that still fit.
+		if gasPool.Gas() < minTxGas {
+			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
 			break
 		}

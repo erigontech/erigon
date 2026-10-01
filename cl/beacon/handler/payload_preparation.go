@@ -916,7 +916,7 @@ func (a *ApiHandler) gloasPayloadPathForHead(head forkchoice.ForkChoiceNode, tar
 	}
 }
 
-// targetGasLimitForProposal uses the matching proposer's preference or the parent's gas limit.
+// targetGasLimitForProposal uses proposer preferences, then the schedule, then the parent limit.
 // stateVersion is the target fork; the head state may still be from before Gloas.
 func (a *ApiHandler) targetGasLimitForProposal(
 	baseState *state.CachingBeaconState,
@@ -926,8 +926,12 @@ func (a *ApiHandler) targetGasLimitForProposal(
 	if stateVersion.Before(clparams.GloasVersion) {
 		return nil
 	}
+	proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
 	var targetGasLimit *hexutil.Uint64
-	if baseState.Version().Before(clparams.GloasVersion) {
+	if scheduledGasLimit, ok := a.beaconChainCfg.GetScheduledGasLimit(proposalEpoch); ok {
+		gasLimit := hexutil.Uint64(scheduledGasLimit)
+		targetGasLimit = &gasLimit
+	} else if baseState.Version().Before(clparams.GloasVersion) {
 		// The Gloas upgrade carries this limit into the parent bid.
 		gasLimit := hexutil.Uint64(baseState.LatestExecutionPayloadHeader().GasLimit)
 		targetGasLimit = &gasLimit
@@ -938,7 +942,6 @@ func (a *ApiHandler) targetGasLimitForProposal(
 	if a.epbsPool == nil {
 		return targetGasLimit
 	}
-	proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
 	dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
 	if err != nil {
 		log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)

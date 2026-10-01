@@ -148,7 +148,7 @@ func TestAddAfterUnsubscribeDoesNotOrphanStore(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, f.UnsubscribeLogs(id))
 		require.False(t, f.hasTrackedSub(SubscriptionID(id)))
-		f.AddLogs(id, &types.RPCLog{})
+		f.AddLogs(id, &types.Log{})
 		_, ok := f.logsStores.Get(id)
 		require.False(t, ok)
 	})
