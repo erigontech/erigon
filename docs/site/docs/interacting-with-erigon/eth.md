@@ -34,7 +34,26 @@ these gaps, so this page will change as the two converge.
 
 ### Pending state
 
-Erigon does not support the `pending` block tag for `eth_call`, `eth_createAccessList`, `eth_getProof`, `eth_getWitness`, `eth_getTxWitness`, or `eth_simulateV1`. These methods need a block header and state from the same view, and Erigon cannot currently acquire a matching pending-state view. They return `pending state is not supported` instead of executing against a different block. Other `eth` methods keep their existing pending behavior.
+Erigon does not support the `pending` block tag for `eth_call`, `eth_callMany`, `eth_createAccessList`, `eth_getProof`, `eth_getWitness`, `eth_getTxWitness`, or `eth_simulateV1`. These methods need a block header and state from the same view, and Erigon cannot currently acquire a matching pending-state view. They return `pending state is not supported` instead of executing against a different block. Other `eth` methods keep their existing pending behavior.
+
+### Fork-gated call fields
+
+`eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_simulateV1` and `trace_call` validate a call against the fork active at the requested block, as a transaction would be:
+
+| Call carries | Rejected when | Error |
+|---|---|---|
+| `accessList` | the block is before Berlin | `eip-2930 transactions require Berlin` |
+| `blobVersionedHashes` | the block is before Cancun | `BlobTx transactions require Cancun` |
+| `blobVersionedHashes` and no `to` | always | `txn: field 'To' can not be 'nil'` |
+| an empty `blobVersionedHashes` list | always | `blob txn must contain at least one blob versioned hash` |
+
+`eth_createAccessList` therefore rejects every request on a block before Berlin, including a plain transfer.
+
+### eth\_syncing and eth\_subscribe("syncing")
+
+`eth_syncing` returns `false` once the node is within 8 blocks of the highest block it has seen; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty. Both report `startingBlock` as the block where the current sync session began.
+
+`eth_subscribe("syncing")` (WebSocket or IPC) sends the current state when you subscribe, then one message per change: the same object with `syncing: true` while syncing, or `false` once synced.
 
 ### eth\_getProof
 
@@ -349,6 +368,9 @@ on a quiet chain as long as the client keeps calling it. `eth_getFilterLogs` doe
 without touching the deadline — so a client that only ever calls `eth_getFilterLogs`
 loses its filter after five idle minutes. A call against an evicted filter returns
 `filter not found`.
+
+Logs returned by `eth_getFilterChanges` for a log filter, and logs pushed by
+`eth_subscribe("logs")`, carry the block time as `blockTimestamp`, as `eth_getLogs` does.
 
 Change the window, or turn eviction off entirely, with:
 
