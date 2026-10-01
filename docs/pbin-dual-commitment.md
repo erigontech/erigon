@@ -52,7 +52,9 @@ removed `0x10` format are refused at datadir open with an instruction to run `co
 The converter validates only its output files through the files-only aggregator.
 
 The binary trie stores rows and fixed bucket-root records. `docs/pbin-encoding.md` describes the
-key derivation, record bytes, root forms and fold. The hex rebuild keeps its existing path.
+key derivation, record bytes, root forms and fold. `integration commitment rebuild` remains the
+hex rebuild and has no binary target. Binary migration uses `integration commitment convert-pbt`
+and `integration commitment attach-pbt`; the operator procedure is in `docs/pbt-migration.md`.
 `commitment convert-pbt` reads the files-only leaf stream from `db/state/pbt_leaf_stream.go`,
 feeds the bounded range writer in `db/state/pbt_range_writer.go`, and writes a fresh binary target.
 A hex datadir is converted with `commitment convert-pbt` into a fresh output datadir.

@@ -644,7 +644,7 @@ recursive verification remains in the converter command after the written files 
 - Modify: `cmd/integration/Readme.md`
 - Modify: `docs/pbin-dual-commitment.md`
 
-- [ ] document these in `docs/pbt-migration.md`:
+- [x] document these in `docs/pbt-migration.md`:
       - producer conversion and publication;
       - attach;
       - the dual window and the automatic hex stop;
@@ -652,9 +652,9 @@ recursive verification remains in the converter command after the written files 
       - import (test-only);
       - the conversion point;
       - the command entry points.
-- [ ] replace the bin rebuild instructions in `cmd/integration/Readme.md` and `docs/pbin-dual-commitment.md`
-- [ ] cite code by name, never by line number
-- [ ] run `make lint` - must pass before task 17
+- [x] replace the bin rebuild instructions in `cmd/integration/Readme.md` and `docs/pbin-dual-commitment.md`
+- [x] cite code by name, never by line number
+- [x] run `make lint` - must pass before task 17
 
 ### Task 17: Verify acceptance criteria
 

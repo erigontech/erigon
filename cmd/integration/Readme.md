@@ -119,19 +119,22 @@ integration stage_exec
 # Option 2 is good 
 ```
 
-## How to re-gen CommitmentDomain
+## Commitment migration
 
 ```sh
 # hex, in place
 integration commitment rebuild --datadir=<datadir>
 
-# EIP-8297 binary trie, derived from a hex datadir (offline migration).
+# Convert v3 hex files into a fresh PBT output datadir.
 integration commitment convert-pbt --datadir=<src> --output.datadir=<out> --keep-hex
+
+# Attach the published output to a stopped node.
+integration commitment attach-pbt --datadir=<node> --from=<out>
 ```
 
-The converter writes a separate output datadir and records its trie variant, hash suite and
-conversion point in `erigondb.toml`. Use `--keep-hex` to publish both commitment domains; omit it
-for a post-fork bin-only output.
+`integration commitment rebuild` remains the hex rebuild and has no binary target. Use
+`convert-pbt` to produce the binary files, then publish and attach the output. See
+`docs/pbt-migration.md` for the operator checks and recovery rules.
 
 ## Convert legacy binary-trie record files
 
