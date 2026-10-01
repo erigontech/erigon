@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// ExecutionPayloadFromBlock converts a built block and its committed BAL sidecar to an Engine API payload.
 func ExecutionPayloadFromBlock(block *types.Block) (*ExecutionPayload, error) {
 	header := block.Header()
 
@@ -71,6 +72,7 @@ func ExecutionPayloadFromBlock(block *types.Block) (*ExecutionPayload, error) {
 	return ep, nil
 }
 
+// ToEth1Block converts a payload to CL form without filling missing extra data or withdrawals.
 func (p *ExecutionPayload) ToEth1Block(version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) (*cltypes.Eth1Block, error) {
 	block := cltypes.NewEth1Block(version, beaconCfg)
 	block.ParentHash = p.ParentHash
