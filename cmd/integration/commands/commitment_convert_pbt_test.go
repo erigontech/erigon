@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -213,6 +214,33 @@ func TestConvertPBTHexSourceKeepHex(t *testing.T) {
 	secondOutput := filepath.Join(t.TempDir(), "output")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, secondOutput, true, "", log.New()))
 	require.Equal(t, snapshotTree(t, output), snapshotTree(t, secondOutput))
+}
+
+func TestConvertPBTSourceWithoutBinaryTables(t *testing.T) {
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	previousTables := kv.ChaindataTablesCfg
+	tables := maps.Clone(previousTables)
+	for _, table := range []string{kv.TblCommitmentBinVals, kv.TblCommitmentBinHistoryKeys, kv.TblCommitmentBinHistoryVals, kv.TblCommitmentBinIdx} {
+		delete(tables, table)
+	}
+	kv.ChaindataTablesCfg = tables
+	t.Cleanup(func() { kv.ChaindataTablesCfg = previousTables })
+	source, _ := newPBTConversionSource(t)
+	kv.ChaindataTablesCfg = previousTables
+	before := snapshotTree(t, source.DataDir)
+	output := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
+	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 
 func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte) (map[string][]byte, common.Hash, common.Hash, string, map[string][]byte, map[string][]byte, string) {

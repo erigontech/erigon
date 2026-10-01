@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -103,7 +104,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	if err := validatePBTImportTargetFrontierFiles(ctx, dirs, settings, txNum, logger); err != nil {
 		return err
 	}
-	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), false, chainName, logger)
+	db, err := openDBReadOnly(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), logger)
 	if err != nil {
 		return err
 	}
@@ -260,7 +261,7 @@ func validatePBTImportPoint(ctx context.Context, db kv.TemporalRwDB, blockHash c
 }
 
 func validatePBTImportPointReadOnly(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockHash common.Hash, logger log.Logger) (uint64, uint64, error) {
-	rawDB, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Readonly(true).Open(ctx)
+	rawDB, err := mdbx.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
 		return 0, 0, err
 	}

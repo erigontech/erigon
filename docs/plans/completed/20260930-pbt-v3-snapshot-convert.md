@@ -180,8 +180,9 @@
 ### Converter
 
 - `integration commitment convert-pbt [--keep-hex] --output.datadir <dir>`.
-- the source opens through rebuild's opening path with both commitment domains' files excluded.
-  `isCommitmentFileName` learns `commitmentbin`; today a dual source's bin files would be linked.
+- the source opens through rebuild's opening path with both commitment domains' files excluded. The read-only source
+  open accepts existing tables without creating the branch's optional binary tables; it reads only headers and `TxNums`
+  from chaindata. `isCommitmentFileName` learns `commitmentbin`; today a dual source's bin files would be linked.
 - outputs:
   - `--keep-hex`: hex commitment files hardlinked, rows in `CommitmentBinDomain`, `trie_variant = hex+bin`. The source's
     hex must be v3 (state key `0x42`, marker `0x04`). The source is read from files only; every leaf provenance stamp
@@ -202,13 +203,19 @@
 - `integration commitment attach-pbt --from <published dir>` on a stopped node:
   1. check the published settings: same step size and ranges as the node's files up to S, hex and bin both present, and
      a `trie_hash` equal to the node's configured suite. The state salt must match the node's state salt; block salts
-     remain node-owned. Published state, history, inverted-index and accessor companions must cover every file replaced.
+     remain node-owned. For accounts, storage and code, the published set must carry the `.kv`, `.bt`, `.kvi` and
+     `.kvei` files that attach replaces. Their history and inverted-index files are not published or adopted.
   2. require every published leaf provenance stamp to be at or before S, adopt the published state and commitment files
-     up to S, and remove the node's own state, commitment, receipt, history, inverted-index and accessor files past S;
+     up to S, keep the node's own history and inverted-index files through S, and remove node files starting after S;
+     a state-domain history or index file spanning S is refused because it cannot be cut safely;
   3. run `ResetExec` (state, history, commitment tables and stop markers cleared; block data kept);
   4. write `trie_variant = hex+bin`, the published `trie_hash` and the conversion point.
 - on restart `SeekCommitments` restores the checkpoint at S; the node re-executes from there in dual mode. Published
-  state ranges start at or before S; a file-granular stamp after S is refused before adoption.
+  state ranges start at or before S; a file-granular stamp after S is refused before adoption. A conversion-point
+  datadir keeps state files visible when retained history ends at S, so mixed state and history ranges can reopen,
+  collate and merge.
+- at a block-end S before the fork, attach writes the published PBT root as the shadow root. After the fork it writes
+  the adopted hex root; if that root is unavailable, it writes no shadow record.
 - a mid-block S is covered: executors skip transactions through the restored checkpoint, and the rest of the block
   executes once.
 - the command never wipes chaindata or block files.

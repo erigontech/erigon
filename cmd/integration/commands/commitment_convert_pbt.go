@@ -167,7 +167,7 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	datadirCli = stagingDirs.DataDir
 	chaindata = sourceDirs.Chaindata
 	rebuildOutputDatadir = stagingDirs.DataDir
-	sourceDB, err := openDB(ctx, dbCfg(dbcfg.ChainDB, sourceDirs.Chaindata), false, chainName, logger)
+	sourceDB, err := openDBReadOnly(ctx, dbCfg(dbcfg.ChainDB, sourceDirs.Chaindata), logger)
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: open source: %w", err)
 	}
@@ -216,10 +216,6 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	}
 
-	internal, ok := sourceDB.(interface{ InternalDB() kv.RwDB })
-	if !ok {
-		return errors.New("commitment convert-pbt: source database has no raw database")
-	}
 	targetSettings := &dbstate.ErigonDBSettings{
 		StepSize:                       sourceAgg.StepSize(),
 		StepsInFrozenFile:              sourceAgg.StepsInFrozenFile(),
@@ -241,16 +237,24 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 			targetAgg.Close()
 		}
 	}()
-	if err := targetAgg.OpenFolder(internal.InternalDB()); err != nil {
-		return err
-	}
-	if err := requirePBinSourceEnd(targetAgg, point.TxNum); err != nil {
-		return err
-	}
-	targetDB, err := dbtemporal.New(internal.InternalDB(), targetAgg, nil)
+	targetChaindata, err := os.MkdirTemp("", "convert-pbt-target-chaindata-")
 	if err != nil {
 		return err
 	}
+	defer func() { _ = dir.RemoveAll(targetChaindata) }()
+	targetRaw, err := mdbx.New(dbcfg.ChainDB, logger).Path(targetChaindata).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer targetRaw.Close()
+	if err := targetAgg.OpenFolder(targetRaw); err != nil {
+		return err
+	}
+	targetDB, err := dbtemporal.New(targetRaw, targetAgg, nil)
+	if err != nil {
+		return err
+	}
+	defer targetDB.Close()
 	targetTx, err := targetDB.BeginTemporalRw(ctx)
 	if err != nil {
 		return err
@@ -284,6 +288,9 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		if err := linkPBinHexFiles(sourceDirs.SnapDomain, outputDirs.SnapDomain); err != nil {
 			return err
 		}
+	}
+	if err := removePBTStateHistoryIndexFiles(outputDirs); err != nil {
+		return err
 	}
 	if err := removePBTFilesPastPoint(outputDirs, targetSettings.StepSize, point.TxNum); err != nil {
 		return err

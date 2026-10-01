@@ -26,6 +26,7 @@ import (
 
 	app "github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -147,13 +148,14 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
-	buildPBTAcceptanceFiles(t, node)
+	buildPBTAcceptanceFilesAt(t, node, 7)
+	removePBTStateHistoryFrom(t, node.Tester.Dirs, 1, 7)
 	node.Tester.Close()
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	copyPBTStateSalt(t, node, source)
-	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 3)))
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
 	buildPBTAcceptanceFiles(t, source)
 	source.Tester.Close()
 	selectPBTCommandSuite(t)
@@ -166,8 +168,7 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	require.True(t, ok)
 	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
 	require.Zero(t, readExecutionStageProgress(t, node.Tester.Dirs.Chaindata))
-
-	require.Equal(t, readPBTFilesRoot(t, published, source.Tester.Dirs.Chaindata), readPBTFilesRoot(t, node.Tester.Dirs.DataDir, node.Tester.Dirs.Chaindata))
+	require.Equal(t, readPBTFilesRoot(t, published), readPBTFilesRoot(t, node.Tester.Dirs.DataDir))
 	dual, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
 	require.NoError(t, err)
 	require.NoError(t, dual.Tester.InsertChain(dual.Chain))
@@ -213,12 +214,61 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	reopened.Close()
 }
 
+func TestPBTAttachPostForkBlockEndShadowRoot(t *testing.T) {
+	selectPBTCommandSuite(t)
+	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	buildPBTAcceptanceFilesAt(t, node, 7)
+	removePBTStateHistoryFrom(t, node.Tester.Dirs, 1, 7)
+	node.Tester.Close()
+
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	copyPBTStateSalt(t, node, source)
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
+	buildPBTAcceptanceFiles(t, source)
+	source.Tester.Close()
+
+	selectPBTCommandSuite(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(published))
+	require.NoError(t, err)
+	blockNum, txNum, ok, err := settings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
+
+	dual, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	require.NoError(t, dual.Tester.InsertChain(dual.Chain))
+	attached := dbCfg(dbcfg.ChainDB, node.Tester.Dirs.Chaindata).MustOpen()
+	defer attached.Close()
+	dualRaw := dual.Tester.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	var attachedRoot, dualRoot []byte
+	require.NoError(t, attached.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		attachedRoot, err = rawdb.ReadShadowStateRoot(tx, node.Chain.Blocks[blockNum-1].Hash(), blockNum)
+		return err
+	}))
+	require.NoError(t, dualRaw.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		dualRoot, err = rawdb.ReadShadowStateRoot(tx, dual.Chain.Blocks[blockNum-1].Hash(), blockNum)
+		return err
+	}))
+	require.NotEmpty(t, attachedRoot)
+	require.Equal(t, dualRoot, attachedRoot)
+	require.Equal(t, uint64(7), txNum)
+}
+
 func TestPBTAttachAcceptanceAtMidBlockConversionPoint(t *testing.T) {
 	selectPBTHexCommandSuite(t)
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
-	buildPBTAcceptanceFiles(t, node)
+	buildPBTAcceptanceFilesAt(t, node, 9)
+	removePBTStateHistoryFrom(t, node.Tester.Dirs, 1, 9)
 	node.Tester.Close()
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
@@ -350,9 +400,10 @@ func TestPBTAttachedReplayMatchesConvertedState(t *testing.T) {
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
 	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(published))
 	require.NoError(t, err)
-	conversionBlock, _, ok, err := settings.ConversionPoint()
+	conversionBlock, conversionTx, ok, err := settings.ConversionPoint()
 	require.NoError(t, err)
 	require.True(t, ok)
+	removePBTStateHistoryFrom(t, node.Tester.Dirs, 1, conversionTx)
 	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
 
 	selectPBTCommandSuite(t)
@@ -428,6 +479,17 @@ func copyPBTStateSalt(t *testing.T, node, source *execmoduletester.PBTAcceptance
 	require.NoError(t, os.WriteFile(filepath.Join(source.Tester.Dirs.Snap, "salt-state.txt"), value, 0o644))
 }
 
+func removePBTStateHistoryFrom(t *testing.T, dirs datadir.Dirs, stepSize, txNum uint64) {
+	t.Helper()
+	files, err := pbtAttachFiles(dirs)
+	require.NoError(t, err)
+	for _, file := range files {
+		if pbtAttachStateDomain(file.domain) && !pbtAttachAdoptsFile(file) && (file.from*stepSize >= txNum || file.to*stepSize > txNum) {
+			require.NoError(t, dir.RemoveFile(file.path))
+		}
+	}
+}
+
 func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain) {
 	t.Helper()
 	fixture.Tester.Close()
@@ -482,15 +544,13 @@ func readCurrentPBTStateRoot(t *testing.T, fixture *execmoduletester.ExecModuleT
 	return root
 }
 
-func readPBTFilesRoot(t *testing.T, output, rawPath string) common.Hash {
+func readPBTFilesRoot(t *testing.T, output string) common.Hash {
 	t.Helper()
 	dirs := datadir.Open(output)
 	settings, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
-	rawDB := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()
-	defer rawDB.Close()
 	agg := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
-	require.NoError(t, agg.OpenFolder(rawDB))
+	require.NoError(t, agg.OpenFolder(nil))
 	defer agg.Close()
 	at := agg.BeginFilesRo()
 	defer at.Close()

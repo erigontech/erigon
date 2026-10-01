@@ -50,13 +50,18 @@ integration commitment attach-pbt \
 ```
 
 `attachPBT` checks the step size, ranges, hash suite, conversion point, state
-salt, both commitment domains, and every file type that it replaces. The
-published set must contain the `.kv`, `.v`, `.ef`, and accessor files for the
-affected ranges. It adopts the files through `S`, removes the node's domain,
-history, index and accessor files past `S`, including receipts and logs, runs
+salt, both commitment domains, and every file type that it replaces. For
+accounts, storage and code, the published set must contain the `.kv`, `.bt`,
+`.kvi` and `.kvei` files for the affected ranges. It does not publish or adopt
+history and inverted-index files. Attach keeps the node's own `.v`, `.ef`,
+`.vi` and `.efi` files through `S`, removes files starting after `S`, and
+refuses a state-domain history or index file that spans `S`, because it cannot
+be cut safely. It adopts the state and commitment files through `S`, runs
 `ResetExec`, and writes the conversion point and hex+bin settings. It does not
-remove chaindata or block files. At a post-fork block-end conversion point,
-attach writes the published PBT root as that block's shadow root.
+remove chaindata or block files. At a block-end conversion point before the
+fork, attach writes the PBT root as the shadow root; after the fork it writes
+the adopted hex root. If the post-fork hex root is unavailable, it writes no
+shadow record.
 
 A refused attach leaves the node unchanged. An interrupted attach leaves an
 in-progress marker and the node refuses to start until the same

@@ -137,3 +137,27 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 	logSnapshotStats(ctx, db, blockSnaps, logger)
 	return db, nil
 }
+
+func openDBReadOnly(ctx context.Context, opts kv2.MdbxOpts, logger log.Logger) (kv.TemporalRwDB, error) {
+	rawDB, err := kv2.OpenExisting(ctx, opts, true)
+	if err != nil {
+		return nil, err
+	}
+	dirs := datadir.New(datadirCli)
+	if err := CheckSaltFilesExist(dirs); err != nil {
+		rawDB.Close()
+		return nil, err
+	}
+	db, err := newTemporalDB(ctx, rawDB, logger)
+	if err != nil {
+		rawDB.Close()
+		return nil, err
+	}
+	blockSnaps, _, err := allSnapshots(ctx, db, logger)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	logSnapshotStats(ctx, db, blockSnaps, logger)
+	return db, nil
+}
