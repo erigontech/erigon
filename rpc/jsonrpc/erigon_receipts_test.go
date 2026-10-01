@@ -196,6 +196,71 @@ func TestGetLatestLogsStopsBeforePrunedBlocks(t *testing.T) {
 	}
 }
 
+func TestGetLatestLogsAtHistoryBoundary(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	topics := []common.Hash{{0x11}, {0x22}, {0x33}}
+	signer := types.LatestSignerForChainID(nil)
+	m := mockWithGenerator(t, 2, func(i int, block *blockgen.BlockGen) {
+		if i != 0 {
+			return
+		}
+		for _, topic := range topics {
+			logOnCreate := append(append([]byte{0x7f}, topic[:]...), 0x60, 0x00, 0x60, 0x00, 0xa1, 0x00) // PUSH32 topic PUSH1 0 PUSH1 0 LOG1 STOP
+			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	want, err := api.GetLatestLogs(ctx, blockFilter(1), filters.LogFilterOptions{LogCount: 3})
+	require.NoError(t, err)
+	require.Len(t, want, 3)
+	require.Equal(t, hexutil.Uint(2), want[0].TxIndex)
+	require.Equal(t, hexutil.Uint(1), want[1].TxIndex)
+
+	tx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	start, err := api._txNumReader.Min(ctx, tx, 1)
+	require.NoError(t, err)
+	// Report history from the second user transaction, leaving the reader's data
+	// intact so a missing gate would serve the pruned first transaction too.
+	api.db = historyFloorDB{TemporalRoDB: m.DB, startTxNum: start + 2}
+
+	t.Run("retained_logs", func(t *testing.T) {
+		logs, err := api.GetLatestLogs(ctx, blockFilter(1), filters.LogFilterOptions{LogCount: 2})
+		require.NoError(t, err)
+		require.Equal(t, want[:2], logs)
+	})
+	t.Run("retained_topic", func(t *testing.T) {
+		criteria := blockFilter(1)
+		criteria.Topics = [][]common.Hash{{topics[2]}}
+		logs, err := api.GetLatestLogs(ctx, criteria, filters.LogFilterOptions{LogCount: 1})
+		require.NoError(t, err)
+		require.Equal(t, want[:1], logs)
+	})
+	t.Run("pruned_transaction", func(t *testing.T) {
+		logs, err := api.GetLatestLogs(ctx, blockFilter(1), filters.LogFilterOptions{LogCount: 3})
+		require.ErrorIs(t, err, state.ErrPruned)
+		require.Nil(t, logs)
+	})
+	t.Run("exhausted_topic_index", func(t *testing.T) {
+		criteria := blockFilter(1)
+		criteria.Topics = [][]common.Hash{{topics[2]}}
+		logs, err := api.GetLatestLogs(ctx, criteria, filters.LogFilterOptions{LogCount: 2})
+		require.ErrorIs(t, err, state.ErrPruned)
+		require.Nil(t, logs)
+	})
+	t.Run("incomplete_block", func(t *testing.T) {
+		criteria := blockFilter(1)
+		criteria.Topics = [][]common.Hash{{topics[2]}}
+		logs, err := api.GetLatestLogs(ctx, criteria, filters.LogFilterOptions{BlockCount: 1})
+		require.ErrorIs(t, err, state.ErrPruned)
+		require.Nil(t, logs)
+	})
+}
+
 func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
