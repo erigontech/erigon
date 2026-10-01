@@ -21,15 +21,19 @@ package tracetest
 
 import (
 	"encoding/json"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -191,4 +195,79 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			}
 		})
 	}
+}
+
+func tracePrestateDiff(t *testing.T, alloc types.GenesisAlloc, to common.Address) map[common.Address]json.RawMessage {
+	t.Helper()
+	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
+	require.NoError(t, err)
+	signer := types.LatestSigner(chainspec.Mainnet.Config)
+	tx, err := types.SignNewTx(privkey, *signer, &types.LegacyTx{
+		GasPrice: *uint256.NewInt(0),
+		CommonTx: types.CommonTx{GasLimit: 200000, To: &to},
+	})
+	require.NoError(t, err)
+	origin, _ := signer.Sender(tx)
+	alloc[origin.Value()] = types.GenesisAccount{Balance: big.NewInt(500000000000000)}
+	context := evmtypes.BlockContext{
+		CanTransfer: protocol.CanTransfer,
+		Transfer:    misc.Transfer,
+		Coinbase:    accounts.ZeroAddress,
+		BlockNumber: 8000000,
+		Time:        5,
+		Difficulty:  *uint256.NewInt(0x30000),
+		GasLimit:    uint64(6000000),
+	}
+	rules := context.Rules(chainspec.Mainnet.Config)
+	m := execmoduletester.New(t)
+	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
+	require.NoError(t, err)
+	defer dbTx.Rollback()
+	statedb, err := testutil.MakePreState(rules, m.DB, dbTx, alloc, context.BlockNumber)
+	require.NoError(t, err)
+	tracer, err := tracers.New("prestateTracer", nil, json.RawMessage(`{"diffMode":true}`))
+	require.NoError(t, err)
+	statedb.SetHooks(tracer.Hooks)
+	txContext := evmtypes.TxContext{Origin: origin, GasPrice: *uint256.NewInt(0)}
+	evm := vm.NewEVM(context, txContext, statedb, chainspec.Mainnet.Config, vm.Config{Tracer: tracer.Hooks})
+	msg, err := tx.AsMessage(*signer, nil, rules)
+	require.NoError(t, err)
+	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
+	st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()))
+	vmRet, err := st.Execute(true, false)
+	require.NoError(t, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, nil)
+	res, err := tracer.GetResult()
+	require.NoError(t, err)
+	var out struct {
+		Post map[common.Address]json.RawMessage `json:"post"`
+	}
+	require.NoError(t, json.Unmarshal(res, &out))
+	return out.Post
+}
+
+func TestPrestateDiffModeSelfdestructSurvivesUnrelatedRevert(t *testing.T) {
+	var (
+		driver    = common.HexToAddress("0x00000000000000000000000000000000000000aa")
+		reverter  = common.HexToAddress("0x00000000000000000000000000000000000000bb")
+		destroyed = common.HexToAddress("0x00000000000000000000000000000000000000dd")
+	)
+	selfdestruct := []byte{byte(vm.PUSH1), 0xee, byte(vm.SELFDESTRUCT)}
+
+	run := func(callReverter bool) json.RawMessage {
+		code := evmCallTo(0xdd)
+		if callReverter {
+			code = append(code, evmCallTo(0xbb)...)
+		}
+		code = append(code, byte(vm.STOP))
+		alloc := types.GenesisAlloc{
+			driver:    {Nonce: 1, Code: code},
+			reverter:  {Nonce: 1, Code: evmRevert},
+			destroyed: {Nonce: 1, Code: selfdestruct, Balance: big.NewInt(7)},
+		}
+		return tracePrestateDiff(t, alloc, driver)[destroyed]
+	}
+
+	require.Nil(t, run(false), "self-destructed account must not appear in post")
+	require.Nil(t, run(true), "a later, unrelated reverted call must not resurrect the self-destructed account in post")
 }

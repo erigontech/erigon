@@ -74,6 +74,14 @@ type prestateTracer struct {
 	reason    atomic.Pointer[error] // Reason for the interruption, populated by Stop
 	created   map[accounts.Address]bool
 	deleted   map[accounts.Address]bool
+	marks     []markEntry
+	frames    []int
+}
+
+type markEntry struct {
+	addr    accounts.Address
+	deleted bool
+	had     bool
 }
 
 type prestateTracerConfig struct {
@@ -110,6 +118,7 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 			OnSystemCallStartV2: t.OnSystemCallStartV2,
 			OnTxEndV2:           t.OnTxEndV2,
 			OnOpcodeV2:          t.OnOpcodeV2,
+			OnEnterV2:           t.OnEnterV2,
 			OnExitV2:            t.OnExitV2,
 		},
 		GetResult: t.GetResult,
@@ -117,18 +126,41 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	}, nil
 }
 
-// ExitHook is invoked when the processing of a message ends.
-func (t *prestateTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
-	if reverted {
-		// clear the created or deleted address beacuse the tx is reverted; and so avoid to notify wrong state change
-		for addr := range t.created {
-			delete(t.created, addr)
-		}
+func (t *prestateTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+	t.frames = append(t.frames, len(t.marks))
+}
 
-		for addr := range t.deleted {
-			delete(t.deleted, addr)
+// OnExitV2 undoes the created and deleted marks recorded inside a reverted frame.
+func (t *prestateTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
+	start := 0
+	if n := len(t.frames); n > 0 {
+		start = t.frames[n-1]
+		t.frames = t.frames[:n-1]
+	}
+	if !reverted {
+		return
+	}
+	for i := len(t.marks) - 1; i >= start; i-- {
+		m := t.marks[i]
+		set := t.created
+		if m.deleted {
+			set = t.deleted
+		}
+		if !m.had {
+			delete(set, m.addr)
 		}
 	}
+	t.marks = t.marks[:start]
+}
+
+func (t *prestateTracer) markCreated(addr accounts.Address) {
+	t.marks = append(t.marks, markEntry{addr: addr, had: t.created[addr]})
+	t.created[addr] = true
+}
+
+func (t *prestateTracer) markDeleted(addr accounts.Address) {
+	t.marks = append(t.marks, markEntry{addr: addr, deleted: true, had: t.deleted[addr]})
+	t.deleted[addr] = true
 }
 
 // OnOpcodeV2 implements the EVMLogger interface to trace a single step of VM execution.
@@ -158,11 +190,11 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 			if t.env.ChainConfig.IsCancun(t.env.Time) {
 				// EIP-6780: Post Dancum/Cancun only delete if created in same transaction
 				if t.created[caller] {
-					t.deleted[caller] = true
+					t.markDeleted(caller)
 				}
 			} else {
 				// EIP-6780: Pre Dancum/Cancun only delete if created in same transaction
-				t.deleted[caller] = true
+				t.markDeleted(caller)
 			}
 		}
 
@@ -181,7 +213,7 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 		nonce, _ := t.env.IntraBlockState.GetNonce(caller)
 		addr := accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 		t.lookupAccount(addr)
-		t.created[addr] = true
+		t.markCreated(addr)
 	case stackLen >= 4 && op == vm.CREATE2:
 		offset := stackData[stackLen-2]
 		size := stackData[stackLen-3]
@@ -193,7 +225,7 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 		salt := stackData[stackLen-4]
 		addr := accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), inithash))
 		t.lookupAccount(addr)
-		t.created[addr] = true
+		t.markCreated(addr)
 	}
 }
 
