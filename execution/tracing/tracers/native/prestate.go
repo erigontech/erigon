@@ -128,6 +128,9 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 
 func (t *prestateTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	t.frames = append(t.frames, len(t.marks))
+	if depth > 0 && (vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2) {
+		t.markCreated(to)
+	}
 }
 
 // OnExitV2 undoes the created and deleted marks recorded inside a reverted frame.
@@ -213,7 +216,6 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 		nonce, _ := t.env.IntraBlockState.GetNonce(caller)
 		addr := accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
 		t.lookupAccount(addr)
-		t.markCreated(addr)
 	case stackLen >= 4 && op == vm.CREATE2:
 		offset := stackData[stackLen-2]
 		size := stackData[stackLen-3]
@@ -225,7 +227,6 @@ func (t *prestateTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cos
 		salt := stackData[stackLen-4]
 		addr := accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), inithash))
 		t.lookupAccount(addr)
-		t.markCreated(addr)
 	}
 }
 

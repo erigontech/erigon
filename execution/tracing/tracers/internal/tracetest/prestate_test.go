@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -197,14 +198,14 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 	}
 }
 
-func tracePrestateDiff(t *testing.T, alloc types.GenesisAlloc, to common.Address) map[common.Address]json.RawMessage {
+func tracePrestateDiff(t *testing.T, config *chain.Config, alloc types.GenesisAlloc, to common.Address) map[common.Address]json.RawMessage {
 	t.Helper()
 	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
 	require.NoError(t, err)
-	signer := types.LatestSigner(chainspec.Mainnet.Config)
+	signer := types.LatestSigner(config)
 	tx, err := types.SignNewTx(privkey, *signer, &types.LegacyTx{
 		GasPrice: *uint256.NewInt(0),
-		CommonTx: types.CommonTx{GasLimit: 200000, To: &to},
+		CommonTx: types.CommonTx{GasLimit: 5000000, To: &to},
 	})
 	require.NoError(t, err)
 	origin, _ := signer.Sender(tx)
@@ -218,7 +219,7 @@ func tracePrestateDiff(t *testing.T, alloc types.GenesisAlloc, to common.Address
 		Difficulty:  *uint256.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
 	}
-	rules := context.Rules(chainspec.Mainnet.Config)
+	rules := context.Rules(config)
 	m := execmoduletester.New(t)
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
@@ -229,7 +230,7 @@ func tracePrestateDiff(t *testing.T, alloc types.GenesisAlloc, to common.Address
 	require.NoError(t, err)
 	statedb.SetHooks(tracer.Hooks)
 	txContext := evmtypes.TxContext{Origin: origin, GasPrice: *uint256.NewInt(0)}
-	evm := vm.NewEVM(context, txContext, statedb, chainspec.Mainnet.Config, vm.Config{Tracer: tracer.Hooks})
+	evm := vm.NewEVM(context, txContext, statedb, config, vm.Config{Tracer: tracer.Hooks})
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	require.NoError(t, err)
 	tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
@@ -265,9 +266,31 @@ func TestPrestateDiffModeSelfdestructSurvivesUnrelatedRevert(t *testing.T) {
 			reverter:  {Nonce: 1, Code: evmRevert},
 			destroyed: {Nonce: 1, Code: selfdestruct, Balance: big.NewInt(7)},
 		}
-		return tracePrestateDiff(t, alloc, driver)[destroyed]
+		return tracePrestateDiff(t, chainspec.Mainnet.Config, alloc, driver)[destroyed]
 	}
 
 	require.Nil(t, run(false), "self-destructed account must not appear in post")
 	require.Nil(t, run(true), "a later, unrelated reverted call must not resurrect the self-destructed account in post")
+}
+
+func TestPrestateDiffModeFailedCreateDoesNotMarkCollidedAccountCreated(t *testing.T) {
+	cancun := *chain.AllProtocolChanges
+	cancun.PragueTime, cancun.OsakaTime, cancun.AmsterdamTime = nil, nil, nil
+
+	driver := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	victim := types.CreateAddress(driver, 1)
+	code := []byte{
+		byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.CREATE), byte(vm.POP),
+		byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00,
+		byte(vm.PUSH20),
+	}
+	code = append(code, victim[:]...)
+	code = append(code, byte(vm.GAS), byte(vm.CALL), byte(vm.POP), byte(vm.STOP))
+	alloc := types.GenesisAlloc{
+		driver: {Nonce: 1, Code: code},
+		victim: {Nonce: 1, Code: []byte{byte(vm.PUSH1), 0xee, byte(vm.SELFDESTRUCT)}, Balance: big.NewInt(7)},
+	}
+
+	post := tracePrestateDiff(t, &cancun, alloc, driver)
+	require.NotNil(t, post[victim], "a CREATE that collided with the account must not let its SELFDESTRUCT delete it under EIP-6780")
 }
