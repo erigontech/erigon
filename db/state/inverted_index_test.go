@@ -1541,10 +1541,6 @@ func TestInvertedIndexPrefetchReuse(t *testing.T) {
 				}
 				return nil
 			}))
-			w.close()
-			if p != nil {
-				require.ErrorIs(t, p.Prefetch(t.Context(), nil).Wait(), context.Canceled)
-			}
 		})
 	}
 }
@@ -1575,9 +1571,8 @@ func TestInvertedIndexPrefetchCursor(t *testing.T) {
 		{[]byte("missing"), []byte("value")},
 		{[]byte("uncommitted"), []byte("value")},
 	}
-	p := kv.NewPrefetcher(db, ii.ValuesTable, 3)
-	defer p.Close()
-	require.NoError(t, p.Prefetch(t.Context(), pairs).Wait())
+	p := kv.NewInvertedIndexPrefetcher(db, ii.ValuesTable, 3)
+	require.NoError(t, p.Prefetch(t.Context(), pairs))
 	k, v, err = c.Current()
 	require.NoError(t, err)
 	require.Equal(t, wantKey, string(k))
@@ -1585,10 +1580,10 @@ func TestInvertedIndexPrefetchCursor(t *testing.T) {
 	v, err = tx.GetOne(ii.ValuesTable, []byte("uncommitted"))
 	require.NoError(t, err)
 	require.Equal(t, "value", string(v))
-	require.NoError(t, p.Prefetch(t.Context(), nil).Wait())
+	require.NoError(t, p.Prefetch(t.Context(), nil))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	require.ErrorIs(t, p.Prefetch(ctx, pairs).Wait(), context.Canceled)
+	require.ErrorIs(t, p.Prefetch(ctx, pairs), context.Canceled)
 }
 
 func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
@@ -1600,9 +1595,8 @@ func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
 	defer tx.Rollback()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	p := kv.NewPrefetcher(db, kv.TblTracesToIdx, 1)
-	defer p.Close()
+	p := kv.NewInvertedIndexPrefetcher(db, kv.TblTracesToIdx, 1)
 	pairs := [][2][]byte{{[]byte("key"), make([]byte, 8)}}
-	require.NoError(t, p.Prefetch(ctx, pairs).Wait())
+	require.NoError(t, p.Prefetch(ctx, pairs))
 	require.NoError(t, tx.Put(kv.TblTracesToIdx, pairs[0][0], pairs[0][1]))
 }

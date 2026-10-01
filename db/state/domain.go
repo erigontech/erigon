@@ -511,14 +511,6 @@ func (w *DomainBufferedWriter) Close() {
 		return
 	}
 	w.h.close()
-	w.reset()
-}
-
-func (w *DomainBufferedWriter) reset() {
-	if w == nil { // allow dobule-close
-		return
-	}
-	w.h.reset()
 	if w.values != nil {
 		w.values.Close()
 	}
@@ -532,7 +524,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	if w.values == nil {
-		w.reset()
+		w.Close()
 		return nil
 	}
 
@@ -540,7 +532,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
-		w.reset()
+		w.Close()
 		return nil
 	}
 
@@ -561,7 +553,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
-	w.reset()
+	w.Close()
 
 	return nil
 }

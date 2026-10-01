@@ -337,7 +337,7 @@ func (iit *InvertedIndexRoTx) NewWriter() *InvertedIndexBufferedWriter {
 type InvertedIndexBufferedWriter struct {
 	index, indexKeys *etl.Collector
 	indexCount       uint64
-	prefetcher       *kv.Prefetcher
+	prefetcher       *kv.InvertedIndexPrefetcher
 
 	discard      bool
 	filenameBase string
@@ -395,7 +395,7 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 			return err
 		}
 	}
-	w.reset()
+	w.close()
 	return nil
 }
 
@@ -406,7 +406,7 @@ func (w *InvertedIndexBufferedWriter) flushIndex(ctx context.Context, tx kv.RwTx
 	pairs := make([][2][]byte, 0, 1024)
 	var buffer []byte
 	flush := func(next etl.LoadNextFunc) error {
-		if err := w.prefetcher.Prefetch(ctx, pairs).Wait(); err != nil {
+		if err := w.prefetcher.Prefetch(ctx, pairs); err != nil {
 			return err
 		}
 		for _, pair := range pairs {
@@ -452,16 +452,6 @@ func (w *InvertedIndexBufferedWriter) close() {
 	if w == nil {
 		return
 	}
-	if w.prefetcher != nil {
-		w.prefetcher.Close()
-	}
-	w.reset()
-}
-
-func (w *InvertedIndexBufferedWriter) reset() {
-	if w == nil {
-		return
-	}
 	if w.index != nil {
 		w.index.Close()
 	}
@@ -487,7 +477,7 @@ func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool)
 		indexTable:     iit.ii.ValuesTable,
 	}
 	if invIdxPrefetchWorkers > 0 && !discard && db != nil {
-		w.prefetcher = kv.NewPrefetcher(db, w.indexTable, invIdxPrefetchWorkers)
+		w.prefetcher = kv.NewInvertedIndexPrefetcher(db, w.indexTable, invIdxPrefetchWorkers)
 	}
 	return w
 }

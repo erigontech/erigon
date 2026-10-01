@@ -485,14 +485,6 @@ func (w *historyBufferedWriter) close() {
 		return
 	}
 	w.ii.close()
-	w.reset()
-}
-
-func (w *historyBufferedWriter) reset() {
-	if w == nil { // allow dobule-close
-		return
-	}
-	w.ii.reset()
 	if w.historyVals != nil {
 		w.historyVals.Close()
 	}
@@ -525,7 +517,7 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	w.reset()
+	w.close()
 	return nil
 }
 

@@ -856,7 +856,7 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 			return err
 		}
 		aggTx.d[di].closeValsCursor() // TODO: why?
-		w.reset()
+		w.Close()
 	}
 	for _, writer := range slices.Backward(sd.pastIIWriters) {
 		if err := writer.Flush(ctx, tx); err != nil {
@@ -871,7 +871,7 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
-		w.reset()
+		w.close()
 	}
 	return nil
 }
