@@ -19,8 +19,8 @@
 
 package vm
 
-// codeBitmap collects valid jump destinations in code: JUMPDEST opcodes outside of push data.
-func codeBitmap(code []byte) bitvec {
+// codeBitmapGeneric collects valid jump destinations in code: JUMPDEST opcodes outside of push data.
+func codeBitmapGeneric(code []byte) bitvec {
 	bits := make(bitvec, (len(code)+63)/64)
 	for pc := 0; pc < len(code); {
 		// Collect the bits of a 64-byte chunk in a register: updating the bitmap in memory
