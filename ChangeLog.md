@@ -1,35 +1,29 @@
 # Erigon v3.7.1 — Velvet Vibrissae — TBD
 
-v3.7.1 makes **Caplin ready for Glamsterdam on Sepolia**. Upgrade Sepolia nodes before **6 October 2026, 13:53:36 UTC** (epoch `353024`). This bugfix release is recommended for all users, especially Caplin operators and block proposers. No re-sync is required when upgrading from 3.7.0; operators using custom graffiti should review the breaking change below.
+v3.7.1 makes **Caplin ready for Glamsterdam on Sepolia**. Upgrade Sepolia nodes before **6 October 2026, 13:53:36 UTC** (epoch `353024`). This bugfix release is recommended for all users; no re-sync is required from 3.7.0. Operators using custom graffiti should review the change below.
 
 **Breaking Changes**
 
-- cl/beacon: prefix custom graffiti with EL+CL client identification by default (#24394) by @lystopad — block-production requests that supply graffiti now retain the client-identification segment, truncating the supplied text to fit the 32-byte field. Set `--beacon.api.preserve-graffiti` to disable the prefix and keep the full custom graffiti. Short hex values are now right-padded on both paths.
+- cl/beacon: prefix custom graffiti with EL+CL client identification by default (#24394) by @lystopad — custom text is truncated to fit the 32-byte field. Set `--beacon.api.preserve-graffiti` to disable the prefix. Short hex values are now right-padded on both paths.
 
 **Bugfixes**
 
-- cl: align Gloas consensus and Beacon/Builder APIs with `consensus-specs` v1.7.0-beta.2 (#24386) by @domiwei — corrects payload settlement and attestation processing, builder validation, and fork-boundary checks. Execution-payload-envelope range requests serve canonical FULL payloads and report unavailable history explicitly.
-- cl/clparams: use the Gloas payload deadline at 50% of the slot (#24421) by @domiwei — `PAYLOAD_DUE_BPS` changes from `7500` to `5000`, moving the deadline from 9 seconds to 6 seconds on Sepolia. Payload attestations and builder handoff now use the deadline expected by other clients.
-- execution/execmodule/chainreader: preserve the slot number and block access list in payloads built by embedded Caplin (#24474) by @Bruce039 — both fields were lost when converting an assembled block to a Gloas payload, causing its reconstructed block hash to differ from the block that was built.
-- cl/beacon: correct and deduplicate Payload Timeliness Committee (PTC) duties (#24386, #24399) by @domiwei — repeated committee seats no longer produce duplicate duties for a validator and slot. The dependent root now matches `head_v2`; requests for the first Gloas epoch return `503` until a Gloas head is available, preventing validator clients from caching incorrect duties across the fork. Fixes #24115 and #24116.
-- cl/phase1/stages, cl/phase1/forkchoice: replay stored Gloas parent payloads that still lack an execution-layer verdict (#24484) by @domiwei — after an earlier EL call fails or times out, chain-tip sync retries retained parent payloads with a bounded budget so their FULL children can progress. EMPTY children remain independent of those retries. This recovers within a running process; it does not add recovery across process restarts.
-- cl/utils/eth_clock: encode the next fork epoch in ENR records as little-endian (#24458) by @MysticRyuujin — Caplin now advertises Sepolia's scheduled Gloas epoch correctly to other clients; the old byte order advertised an incorrect epoch when a fork was scheduled.
-- execution: release block-builder state after a payload is built (#24478) by @taratorio — a pointer from the cached result kept the assembler and its transaction read sets alive, retaining large amounts of contract bytecode and causing out-of-memory failures under heavy code-access workloads.
-- cl/beacon: publish blobs supplied in block requests on nodes that did not produce the block (#24471) by @lystopad — validators publishing to multiple beacon nodes no longer receive `500 missing blob bundle` from every node except the producer. Request blobs and proofs are checked before publishing blob or data-column sidecars. This affects pre-Gloas blocks; Gloas carries blobs in payload envelopes. Fixes #23112.
-- execution/engineapi: wait for a busy execution module before dropping a payload build (#24396) by @lystopad — with an external consensus client, a fork-choice update requesting a payload now waits up to 6 seconds, or one slot on chains with shorter slots, instead of returning `SYNCING` after 500 ms during background flush and commit. This avoids losing proposals while the module is briefly busy. Fixes #24371.
-- db/datadir/reset: refuse snapshot resets that would mix referenced commitment files with state files from a different build (#24401) by @lystopad — with `--local=false`, the reset now checks for incompatible retained files before removing anything, avoiding invalid commitment offsets after the next download. `--allow-mixed-state` overrides the check.
-- db/integrity: detect missing receipt-cache entries in empty blocks (#24422) by @awskii — receipt-cache integrity checks now count all required entries, including system-transaction entries, so an empty receipt root no longer hides missing history. Fixes #23916.
+- cl, execution: prepare Caplin for Glamsterdam on Sepolia (#24386, #24399, #24421, #24441, #24458, #24474, #24484) by @domiwei, @yperbasis, @MysticRyuujin, @Bruce039 — aligns Gloas consensus and APIs with `consensus-specs` v1.7.0-beta.2, corrects Payload Timeliness Committee (PTC) duties and fork-epoch advertising, and preserves slot numbers and block access lists in locally built payloads. Sets the payload deadline to 50% of the slot (6 seconds on Sepolia) and schedules Sepolia's default 200M gas-limit target. Retries retained parent payloads without an EL verdict during sync within the running process.
+- execution: release block-builder state after a payload is built (#24478) by @taratorio — cached results kept transaction read sets and contract bytecode alive, causing out-of-memory failures under heavy code-access workloads.
+- cl/beacon: publish request blobs on nodes that did not produce the block (#24471) by @lystopad — fixes `500 missing blob bundle` when validators publish pre-Gloas blocks to multiple beacon nodes. Fixes #23112.
+- execution/engineapi: wait longer for a busy execution module before dropping a payload build (#24396) by @lystopad — external consensus clients now get up to 6 seconds, or one slot on chains with shorter slots, instead of 500 ms. This avoids missed proposals during background flush and commit. Fixes #24371.
+- db/datadir/reset: reject `--local=false` resets that would mix referenced commitment and state files from different builds (#24401) by @lystopad — checks run before any deletion; `--allow-mixed-state` overrides the guard.
+- db/integrity: detect receipt-cache holes in empty blocks by counting required entries, including system transactions (#24422) by @awskii. Fixes #23916.
 
 **Security**
 
-- cl/phase1/network/services: authenticate sync-committee messages that reuse a previously seen key (#24384) by @lystopad — the cache now checks the block root and signature against the verified message before accepting a retry. A replacement with different content can no longer bypass validation and reach gossip forwarding; already-published retries are ignored. Fixes #24305.
+- cl/phase1/network/services: check the block root and signature on sync-committee cache hits (#24384) by @lystopad — prevents unverified replacement content from reaching gossip and suppresses already-published retries. Fixes #24305.
 
 **Improvements**
 
-- cl: schedule Sepolia's default gas-limit target at 200 million from Glamsterdam epoch `353024` (#24441) by @yperbasis — local payload construction, builder selection, and payload-attributes events use the scheduled target. Signed proposer preferences take precedence, and the actual block gas limit follows the existing gradual adjustment rule.
-- cl/p2p: add QUIC v1 alongside TCP (#24413) by @domiwei — Caplin prefers QUIC when a peer advertises it and keeps TCP as a fallback. Allow UDP port `4001` for QUIC; discovery remains on UDP `4000`. Configure the QUIC port with `--caplin.discovery.quicport` or `--sentinel.quic.port` for standalone Sentinel. Fixes #23398.
-- cl/beacon: publish sync-committee messages in the background (#24368) by @lystopad — Beacon API responses no longer wait for gossip publication. Queue-admission failures are reported to the caller instead of silently returning success, and publication outcomes are logged and counted.
-- cl/antiquary: compress blob snapshot backlogs with multiple workers (#24338) by @lystopad — archive nodes can catch up on blob retirement faster, while retirement at the chain tip continues to use one worker.
+- cl/p2p: add QUIC v1 with TCP fallback (#24413) by @domiwei — QUIC uses UDP `4001`, configured with `--caplin.discovery.quicport` or standalone Sentinel's `--sentinel.quic.port`; discovery remains on UDP `4000`. Fixes #23398.
+- cl/beacon: publish sync-committee messages in the background (#24368) by @lystopad — removes gossip latency from Beacon API responses and reports queue-admission failures to callers.
+- cl/antiquary: compress blob snapshot backlogs with multiple workers (#24338) by @lystopad — speeds up archive-node catch-up while keeping one worker at the tip.
 
 **Full Changelog**: https://github.com/erigontech/erigon/compare/v3.7.0...v3.7.1
 
