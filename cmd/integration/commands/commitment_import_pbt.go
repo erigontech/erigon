@@ -176,7 +176,12 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	if err != nil {
 		return fmt.Errorf("commitment import-pbt: open target read-only: %w", err)
 	}
-	defer rawDB.Close()
+	rawDBOpen := true
+	defer func() {
+		if rawDBOpen {
+			rawDB.Close()
+		}
+	}()
 	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, dirs, rawDB, logger)
 	if err != nil {
 		return err
@@ -256,7 +261,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	}
 	if lastTx != meta.TxNum {
 		readTx.Rollback()
-		return fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run stage_exec --block=%d --chain=%s --experimental.commitment-v3 --experimental.bin-commitment.hash=%s, then export-pbt", meta.Block, meta.TxNum, meta.Block, lastTx, meta.Block, chainConfig.ChainName, meta.HashSuite)
+		return fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run integration stage_exec --block=%d --chain=%s, then export-pbt", meta.Block, meta.TxNum, meta.Block, lastTx, meta.Block, chainConfig.ChainName)
 	}
 	if common.HexToHash(meta.StateRoot) != header.Root {
 		readTx.Rollback()
@@ -268,10 +273,12 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		return err
 	}
 	if hexBlock != meta.Block || hexTx != meta.TxNum {
-		return fmt.Errorf("commitment import-pbt: hex commitment checkpoint is (%d, %d), want (%d, %d)", hexBlock, hexTx, meta.Block, meta.TxNum)
+		return fmt.Errorf("commitment import-pbt: hex commitment checkpoint is (%d, %d), want (%d, %d) at block %d; run integration stage_exec --block=%d --chain=%s, then export-pbt", hexBlock, hexTx, meta.Block, meta.TxNum, meta.Block, meta.Block, chainConfig.ChainName)
 	}
 	closeBlockReader()
 	closeBlockReader = nil
+	rawDB.Close()
+	rawDBOpen = false
 
 	stageRoot, err := os.MkdirTemp(filepath.Dir(dirs.DataDir), ".import-pbt-")
 	if err != nil {
@@ -344,7 +351,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	if err != nil {
 		return err
 	}
-	writer, err := dbstate.NewPBinRangeWriter(targetAgg, kv.CommitmentBinDomain, meta.TxNum)
+	writer, err := dbstate.NewPBinRangeWriterWithinFiles(targetAgg, kv.CommitmentBinDomain, meta.TxNum)
 	if err != nil {
 		domains.Close()
 		return err
@@ -358,6 +365,18 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		})
 		return streamErr
 	}, meta.Block)
+	checkpointState := writer.PBinCommitmentState()
+	checkpointInFiles := writer.PBinCommitmentStateInFiles()
+	if !checkpointInFiles {
+		if err := domains.DomainPut(kv.CommitmentBinDomain, targetTx, commitment.KeyCommitmentState, checkpointState, meta.TxNum, nil); err != nil {
+			domains.Close()
+			return err
+		}
+		if err := domains.Flush(ctx, targetTx); err != nil {
+			domains.Close()
+			return err
+		}
+	}
 	domains.Close()
 	if err != nil {
 		return err
@@ -367,11 +386,15 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		return fmt.Errorf("commitment import-pbt: written root %s differs from artifact root %s", root, wantRoot)
 	}
 	domains.Close()
-	targetTx.Rollback()
+	if checkpointInFiles {
+		targetTx.Rollback()
+	} else if err := targetTx.Commit(); err != nil {
+		return err
+	}
 	targetDB.Close()
 	targetAgg.Close()
 	stageRaw.Close()
-	if err := verifyPBTImportRows(ctx, stageDirs, finalSettings, logger, meta); err != nil {
+	if err := verifyPBTImportRows(ctx, stageDirs, finalSettings, logger, meta, checkpointState, !checkpointInFiles); err != nil {
 		return err
 	}
 	if importPBTSwapHook != nil {
@@ -409,6 +432,9 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 			return err
 		}
 	}
+	if err := writePBTImportCheckpoint(ctx, dirs, finalSettings, checkpointState, !checkpointInFiles, meta.TxNum, common.HexToHash(meta.BlockHash), meta.Block, root, logger); err != nil {
+		return err
+	}
 	if err := dbstate.WriteErigonDBSettings(dirs, finalSettings); err != nil {
 		return err
 	}
@@ -425,7 +451,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	return nil
 }
 
-func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger, point pbtImportMeta) error {
+func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger, point pbtImportMeta, state []byte, writeState bool) error {
 	rawPath, err := os.MkdirTemp("", "import-pbt-verify-")
 	if err != nil {
 		return err
@@ -463,6 +489,35 @@ func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		return err
 	}
 	defer db.Close()
+	if writeState {
+		tx, err := db.BeginTemporalRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		cfg := commitment.DefaultTrieConfig()
+		cfg.Variant = commitment.VariantBinPatriciaTrie
+		cfg.EnableTrieWarmup = false
+		domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+		if err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := domains.DomainPut(kv.CommitmentBinDomain, tx, commitment.KeyCommitmentState, state, point.TxNum, nil); err != nil {
+			domains.Close()
+			tx.Rollback()
+			return err
+		}
+		if err := domains.Flush(ctx, tx); err != nil {
+			domains.Close()
+			tx.Rollback()
+			return err
+		}
+		domains.Close()
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -472,6 +527,52 @@ func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		return fmt.Errorf("commitment import-pbt: verify written rows: %w", err)
 	}
 	return nil
+}
+
+func writePBTImportCheckpoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, state []byte, writeState bool, txNum uint64, blockHash common.Hash, blockNum uint64, root common.Hash, logger log.Logger) error {
+	rawDB, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
+	if err != nil {
+		return fmt.Errorf("commitment import-pbt: open target for checkpoint: %w", err)
+	}
+	defer rawDB.Close()
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(rawDB); err != nil {
+		return err
+	}
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantBinPatriciaTrie
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+	if err != nil {
+		return err
+	}
+	defer domains.Close()
+	if writeState {
+		if err := domains.DomainPut(kv.CommitmentBinDomain, tx, commitment.KeyCommitmentState, state, txNum, nil); err != nil {
+			return err
+		}
+		if err := domains.Flush(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if err := rawdb.WriteShadowStateRoot(tx, blockHash, blockNum, root[:]); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func readPBTImportMeta(snapshotPath string) (pbtImportMeta, error) {
@@ -547,7 +648,7 @@ func readPBTImportHexCheckpoint(ctx context.Context, dirs datadir.Dirs, rawDB kv
 }
 
 func pbtImportProgressError(progress uint64, meta pbtImportMeta, chainName string) error {
-	return fmt.Errorf("commitment import-pbt: target is at block %d, snapshot is at block %d; run integration stage_exec --block=%d --chain=%s --experimental.commitment-v3 --experimental.bin-commitment.hash=%s, then export-pbt", progress, meta.Block, progress, chainName, meta.HashSuite)
+	return fmt.Errorf("commitment import-pbt: target is at block %d, snapshot is at block %d; run integration stage_exec --block=%d --chain=%s, then export-pbt", progress, meta.Block, progress, chainName)
 }
 
 func movePBTImportBinFiles(stageDirs, targetDirs datadir.Dirs) ([]string, error) {

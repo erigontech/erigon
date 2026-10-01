@@ -271,14 +271,17 @@ func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
 	historyFiles, err := pbtAttachFiles(datadir.Open(output))
 	require.NoError(t, err)
-	var hasCommitmentHistory bool
+	var hasCommitmentHistory, hasCommitmentAccessor bool
 	for _, file := range historyFiles {
 		if file.domain == kv.CommitmentDomain && !file.data && (strings.HasSuffix(file.path, ".v") || strings.HasSuffix(file.path, ".ef")) {
 			hasCommitmentHistory = true
-			break
+		}
+		if file.domain == kv.CommitmentDomain && !file.data && (strings.HasSuffix(file.path, ".vi") || strings.HasSuffix(file.path, ".efi")) {
+			hasCommitmentAccessor = true
 		}
 	}
 	require.True(t, hasCommitmentHistory)
+	require.True(t, hasCommitmentAccessor, "commitment history and index accessors must be published")
 	setExecutionProgress(t, source.Chaindata, 1)
 	require.NoError(t, attachPBT(t.Context(), source.DataDir, output, "", log.New()))
 

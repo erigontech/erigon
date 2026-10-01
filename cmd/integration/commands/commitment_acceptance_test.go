@@ -471,7 +471,8 @@ func buildPBTAcceptanceFilesAtWithMerge(t *testing.T, fixture *execmoduletester.
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), doMerge))
+	toStep := kv.Step(lastTxNum/settings.StepSize + 1)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, toStep, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), doMerge))
 	agg.WaitForFiles()
 	tx.Rollback()
 	db.Close()
@@ -524,24 +525,6 @@ func pbtAcceptanceLastTxNum(t *testing.T, fixture *execmoduletester.ExecModuleTe
 		return err
 	}))
 	return lastTxNum
-}
-
-func readCurrentPBTStateRoot(t *testing.T, fixture *execmoduletester.ExecModuleTester) common.Hash {
-	t.Helper()
-	tx, err := fixture.DB.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	agg := fixture.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
-	require.NoError(t, err)
-	require.NoError(t, dbstate.ForEachPBinLeaf(at, tx, false, func(leaf dbstate.PBinLeaf) error {
-		return builder.Add(leaf.Key, leaf.Value)
-	}))
-	root, err := builder.RootHash()
-	require.NoError(t, err)
-	return root
 }
 
 func readPBTFilesRoot(t *testing.T, output string) common.Hash {
@@ -614,16 +597,6 @@ func selectPBTBinaryCommandSuite(t *testing.T) {
 	statecfg.ExperimentalParallelCommitment = false
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
-}
-
-func resetPBTImportProcessGlobals(t *testing.T) {
-	t.Helper()
-	statecfg.ExperimentalBinCommitment = false
-	statecfg.ExperimentalHexBinCommitment = false
-	statecfg.ExperimentalCommitmentV3 = false
-	statecfg.ExperimentalParallelCommitment = true
-	statecfg.BinCommitmentHash = ""
-	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
 }
 
 func selectPBTHexCommandSuite(t *testing.T) {

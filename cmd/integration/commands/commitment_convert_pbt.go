@@ -686,7 +686,7 @@ func removePBTInvisibleFiles(visibleRanges map[string]struct{}, sourceDirs, outp
 			if err != nil || !os.SameFile(sourceInfo, outputInfo) {
 				return nil
 			}
-			key := pbtSnapshotFileKey(filepath.Dir(rel), parsed.TypeString, parsed.From, parsed.To)
+			key := pbtSnapshotFileKey(pbtSnapshotFileFamily(rel), parsed.TypeString, parsed.From, parsed.To)
 			if _, ok := visibleRanges[key]; ok {
 				return nil
 			}
@@ -712,7 +712,7 @@ func pbtVisibleSnapshotFiles(sourceAgg *dbstate.Aggregator, sourceDirs datadir.D
 		if !ok {
 			continue
 		}
-		visibleRanges[pbtSnapshotFileKey(filepath.Dir(rel), parsed.TypeString, parsed.From, parsed.To)] = struct{}{}
+		visibleRanges[pbtSnapshotFileKey(pbtSnapshotFileFamily(rel), parsed.TypeString, parsed.From, parsed.To)] = struct{}{}
 	}
 	addPBTCommitmentVisibleFiles(visibleRanges, sourceDirs)
 	return visibleRanges
@@ -724,7 +724,7 @@ func addPBTCommitmentVisibleFiles(visibleRanges map[string]struct{}, dirs datadi
 		from, to          uint64
 	}
 	var files []commitmentFile
-	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx} {
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			continue
@@ -742,7 +742,7 @@ func addPBTCommitmentVisibleFiles(visibleRanges map[string]struct{}, dirs datadi
 				continue
 			}
 			files = append(files, commitmentFile{
-				family: filepath.Dir(rel), kind: parsed.TypeString, ext: filepath.Ext(entry.Name()), from: parsed.From, to: parsed.To,
+				family: pbtSnapshotFileFamily(rel), kind: parsed.TypeString, ext: filepath.Ext(entry.Name()), from: parsed.From, to: parsed.To,
 			})
 		}
 	}
@@ -758,6 +758,21 @@ func addPBTCommitmentVisibleFiles(visibleRanges map[string]struct{}, dirs datadi
 		if !covered {
 			visibleRanges[pbtSnapshotFileKey(file.family, file.kind, file.from, file.to)] = struct{}{}
 		}
+	}
+}
+
+func pbtSnapshotFileFamily(rel string) string {
+	family := filepath.Dir(rel)
+	if family != "accessor" {
+		return family
+	}
+	switch filepath.Ext(rel) {
+	case ".vi":
+		return "history"
+	case ".efi":
+		return "idx"
+	default:
+		return "domain"
 	}
 }
 

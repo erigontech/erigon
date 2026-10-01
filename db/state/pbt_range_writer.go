@@ -41,18 +41,21 @@ import (
 )
 
 type PBinRangeWriter struct {
-	aggregator *Aggregator
-	domain     kv.Domain
-	endTxNum   uint64
-	leafStamp  uint64
-	ranges     []pbinRange
-	maxOps     int
-	maxBytes   int
+	aggregator   *Aggregator
+	domain       kv.Domain
+	endTxNum     uint64
+	leafStamp    uint64
+	ranges       []pbinRange
+	maxOps       int
+	maxBytes     int
+	state        []byte
+	stateInFiles bool
 }
 
 type PBinRangeWriterLimits struct {
-	MaxOps   int
-	MaxBytes int
+	MaxOps              int
+	MaxBytes            int
+	NoRangePastFrontier bool
 }
 
 const (
@@ -217,6 +220,10 @@ func NewPBinRangeWriterWithLimits(aggregator *Aggregator, domain kv.Domain, endT
 	return newPBinRangeWriter(aggregator, domain, endTxNum, limits)
 }
 
+func NewPBinRangeWriterWithinFiles(aggregator *Aggregator, domain kv.Domain, endTxNum uint64) (*PBinRangeWriter, error) {
+	return newPBinRangeWriter(aggregator, domain, endTxNum, PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes, NoRangePastFrontier: true})
+}
+
 func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64, limits PBinRangeWriterLimits) (*PBinRangeWriter, error) {
 	if aggregator == nil {
 		return nil, fmt.Errorf("pbin range writer: nil aggregator")
@@ -235,12 +242,13 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			return &PBinRangeWriter{aggregator: aggregator, domain: domain, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes}, nil
 		}
 		return &PBinRangeWriter{
-			aggregator: aggregator,
-			domain:     domain,
-			endTxNum:   endTxNum,
-			leafStamp:  endTxNum,
-			maxOps:     limits.MaxOps,
-			maxBytes:   limits.MaxBytes,
+			aggregator:   aggregator,
+			domain:       domain,
+			endTxNum:     endTxNum,
+			leafStamp:    endTxNum,
+			maxOps:       limits.MaxOps,
+			maxBytes:     limits.MaxBytes,
+			stateInFiles: !limits.NoRangePastFrontier,
 			ranges: []pbinRange{{
 				start:     0,
 				end:       endTxNum + 1,
@@ -277,7 +285,8 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 	}
 	leafStamp := ranges[len(ranges)-1].end - 1
 	leafStamp = min(leafStamp, endTxNum)
-	if ranges[len(ranges)-1].end <= endTxNum {
+	stateInFiles := !limits.NoRangePastFrontier || endTxNum < ranges[len(ranges)-1].end
+	if ranges[len(ranges)-1].end <= endTxNum && !limits.NoRangePastFrontier {
 		if endTxNum == ^uint64(0) {
 			for i := range ranges {
 				ranges[i].collector.Close()
@@ -290,7 +299,7 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			collector: etl.NewCollector("pbin-range-writer", aggregator.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
 		})
 	}
-	return &PBinRangeWriter{aggregator: aggregator, domain: domain, endTxNum: endTxNum, leafStamp: leafStamp, ranges: ranges, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes}, nil
+	return &PBinRangeWriter{aggregator: aggregator, domain: domain, endTxNum: endTxNum, leafStamp: leafStamp, ranges: ranges, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes, stateInFiles: stateInFiles}, nil
 }
 
 func (w *PBinRangeWriter) PBinLeafStamp() uint64 {
@@ -298,6 +307,17 @@ func (w *PBinRangeWriter) PBinLeafStamp() uint64 {
 		return 0
 	}
 	return w.leafStamp
+}
+
+func (w *PBinRangeWriter) PBinCommitmentState() []byte {
+	if w == nil {
+		return nil
+	}
+	return bytes.Clone(w.state)
+}
+
+func (w *PBinRangeWriter) PBinCommitmentStateInFiles() bool {
+	return w != nil && w.stateInFiles
 }
 
 func pbinAccountFiles(files kv.VisibleFiles) kv.VisibleFiles {
@@ -440,6 +460,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			return common.Hash{}, err
 		}
 	}
+	w.state = bytes.Clone(state)
 	if len(state) == 0 {
 		w.closeRanges()
 		return common.Hash{}, fmt.Errorf("pbin range writer: commitment state is missing")
@@ -480,7 +501,7 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 		}
 		collation := Collation{valuesComp: valuesComp, valuesPath: valuesPath}
 		writer := seg.NewWriter(valuesComp, seg.CompressNone)
-		if i == len(w.ranges)-1 && len(state) != 0 {
+		if w.stateInFiles && i == len(w.ranges)-1 && len(state) != 0 {
 			if collectErr := w.ranges[i].collector.Collect(commitment.KeyCommitmentState, state); collectErr != nil {
 				valuesComp.Close()
 				return collectErr

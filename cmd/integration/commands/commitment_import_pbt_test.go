@@ -70,12 +70,12 @@ func TestImportPBTReadsHexCheckpointFromDatabaseWhenFilesLag(t *testing.T) {
 	require.Equal(t, uint64(7), txNum)
 }
 
-func TestImportPBTReplacesConvertAndAttach(t *testing.T) {
+func TestImportPBTReplacesConvertAndAttachWithFilesBeforeCheckpoint(t *testing.T) {
 	selectPBTHexCommandSuite(t)
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
-	buildPBTAcceptanceFiles(t, source)
+	buildPBTAcceptanceFilesAt(t, source, 6)
 	sourceDB := execmoduletester.New(t,
 		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
 		execmoduletester.WithGenesisSpec(source.Genesis),
@@ -96,15 +96,20 @@ func TestImportPBTReplacesConvertAndAttach(t *testing.T) {
 	sourceDB.Close()
 	converted := filepath.Join(t.TempDir(), "converted")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, converted, true, "", log.New()))
+	convertedSettings, err := dbstate.ReadErigonDBSettings(datadir.Open(converted))
+	require.NoError(t, err)
+	_, convertedTx, convertedPoint, err := convertedSettings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, convertedPoint)
+	require.Less(t, convertedTx, uint64(7), "convert-pbt must use the file frontier below the export checkpoint")
 	statecfg.BinCommitmentHash = ""
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
-
 	target, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	require.NoError(t, target.Tester.InsertChain(target.Chain))
 	require.NoError(t, rawdbreset.ResetExec(t.Context(), target.Tester.DB))
 	require.NoError(t, target.Tester.ReExecuteTo(t.Context(), 2))
-	buildPBTAcceptanceFilesAt(t, target, 7)
+	buildPBTAcceptanceFilesAt(t, target, 6)
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	before := snapshotTree(t, target.Tester.Dirs.DataDir)
@@ -172,6 +177,18 @@ func TestImportPBTReplacesConvertAndAttach(t *testing.T) {
 	)
 	importedRaw := reopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
 	dualRaw := dual.Tester.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	var importedAtExport, dualAtExport []byte
+	require.NoError(t, importedRaw.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		importedAtExport, err = rawdb.ReadShadowStateRoot(tx, target.Chain.Blocks[1].Hash(), 2)
+		return err
+	}))
+	require.NoError(t, dualRaw.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		dualAtExport, err = rawdb.ReadShadowStateRoot(tx, dual.Chain.Blocks[1].Hash(), 2)
+		return err
+	}))
+	require.Equal(t, dualAtExport, importedAtExport, "imported bin shadow at the export block")
 	for block := uint64(3); block <= target.Chain.TopBlock.NumberU64(); block++ {
 		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
 		var importedRoot, dualRoot []byte
@@ -427,13 +444,18 @@ func readPBTImportCheckpoint(t *testing.T, dataDir string) (uint64, uint64) {
 	resolved, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
 	agg := dbstate.New(dirs).WithErigonDBSettings(resolved).Logger(log.New()).MustOpen(t.Context())
-	require.NoError(t, agg.OpenFolder(nil))
+	rawDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer rawDB.Close()
+	require.NoError(t, agg.OpenFolder(rawDB))
 	defer agg.Close()
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	value, found, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, ^uint64(0))
+	readTx, err := rawDB.BeginRo(t.Context())
 	require.NoError(t, err)
-	require.True(t, found)
+	defer readTx.Rollback()
+	value, _, _, err := at.GetLatest(kv.CommitmentBinDomain, commitment.KeyCommitmentState, readTx, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, value, "import must write the bin checkpoint")
 	tx, block := commitmentdb.DecodeTxBlockNums(value)
 	return block, tx
 }

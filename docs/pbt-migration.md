@@ -168,6 +168,11 @@ last. It changes no state-domain files and has no preimage or block-hash flag.
 Any refusal leaves the datadir unchanged. A frozen block is read from block
 snapshots through the block reader.
 
+Import is a test substitute for conversion and attach. It checks the artifact
+against its metadata and the rows it writes, but it does not compare every
+artifact leaf with the node's prior state. An internally consistent artifact
+whose leaves were changed is therefore outside its guarantees.
+
 An unwind cannot cross the conversion point. `checkUnwindConversionPoint`
 refuses a block or transaction target below the published point.
 
