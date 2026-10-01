@@ -369,7 +369,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	}()
 
 	p, isPrecompile := evm.precompile(addr)
-	var code []byte
+	var code accounts.Code
 	if !isPrecompile {
 		code, err = evm.intraBlockState.ResolveCode(addr)
 		if err != nil {
@@ -380,7 +380,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	// Invoke tracer hooks that signal entering/exiting a call frame
 	if gasTracing {
-		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code)
+		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code.Bytes)
 	}
 
 	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
@@ -466,44 +466,19 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	switch {
 	case isPrecompile:
 		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, evm.Config().Tracer)
-	case len(code) == 0:
+	case code.Len() == 0:
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
 		ret, err = nil, nil // gas is unchanged
 	default:
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
-		var codeHash accounts.CodeHash
-		codeHash, err = evm.intraBlockState.ResolveCodeHash(addr)
-		if err != nil {
-			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-		}
-		var contract Contract
+		contract := Contract{caller: caller, addr: addr, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		switch typ {
 		case CALLCODE:
-			contract = Contract{
-				caller:   caller,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
+			contract.addr = caller
 		case DELEGATECALL:
-			contract = Contract{
-				caller:   callerAddress,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
-		default:
-			contract = Contract{
-				caller:   caller,
-				addr:     addr,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
+			contract.caller, contract.addr = callerAddress, caller
 		}
 		readOnly := false
 		if typ == STATICCALL {

@@ -341,7 +341,7 @@ func StateStep(ctx context.Context, chainReader rules.ChainReader, engine rules.
 		}
 	}
 	lastNum := headersChain[len(headersChain)-1].Number.Uint64()
-	if err := rawdb.TruncateCanonicalChain(ctx, tx, lastNum+1); err != nil {
+	if err := rawdb.TruncateCanonicalChain(tx, lastNum+1); err != nil {
 		return err
 	}
 	// Once we unwound we can start constructing the chain (assumption: len(headersChain) == len(bodiesChain))
