@@ -2894,3 +2894,68 @@ func TestBaseFeeRoundTripAnnouncesOnce(t *testing.T) {
 	drain()
 	require.Equal(t, 1, announced, "a return to pending is not a new pending txn")
 }
+
+func TestFromDBBlobsOutliveReadTx(t *testing.T) {
+	require := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	chainConfig := testforks.Forks["Osaka"]
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	poolDB := mdbxtest.NewTestPoolDB(t)
+	pool, err := New(ctx, make(chan Announcements, 5), poolDB, coreDB, txpoolcfg.DefaultConfig,
+		kvcache.New(kvcache.DefaultCoherentConfig), chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(err)
+
+	sender := common.Address{1}
+	acc := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
+	require.NoError(pool.OnNewBlock(ctx, &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee:  1,
+		BlockGasLimit:        30_000_000,
+		PendingBlobFeePerGas: 1,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(sender),
+				Data:    accounts.SerialiseV3(&acc),
+			}},
+		}},
+	}, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	txnRlp := makeWrappedBlobTxnRlpWithCellProofs(t, chainConfig.ChainID, 2)
+	parseCtx := NewTxnParseContext(*chainConfig.ChainID)
+	parseCtx.WithSender(false)
+	var slot TxnSlot
+	_, err = parseCtx.ParseTransaction(txnRlp, 0, &slot, nil, false, true, nil)
+	require.NoError(err)
+	blobHashes := slot.GetBlobHashes()
+
+	require.NoError(poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(kv.PoolTransaction, slot.IDHash[:], append(sender[:], txnRlp...))
+	}))
+	require.NoError(poolDB.View(ctx, func(poolTx kv.Tx) error {
+		return coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
+			return pool.fromDB(ctx, poolTx, coreTx)
+		})
+	}))
+
+	bundles := pool.GetBlobs(blobHashes)
+	require.Len(bundles, len(blobHashes))
+	require.NotEmpty(bundles[0].Blob)
+	want := bytes.Clone(bundles[0].Blob)
+
+	require.NoError(poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Delete(kv.PoolTransaction, slot.IDHash[:])
+	}))
+	filler := bytes.Repeat([]byte{0xaa}, len(txnRlp)+20)
+	for i := range 16 {
+		require.NoError(poolDB.Update(ctx, func(tx kv.RwTx) error {
+			return tx.Put(kv.PoolTransaction, []byte{byte(i)}, filler)
+		}))
+	}
+
+	bundles = pool.GetBlobs(blobHashes)
+	require.Len(bundles, len(blobHashes))
+	require.Equal(want, bundles[0].Blob, "blob loaded from the pool DB must not change after its read tx ends")
+}
