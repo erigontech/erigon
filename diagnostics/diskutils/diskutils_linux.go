@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -85,6 +86,10 @@ func SmlinkForDirPath(dirPath string) string {
 			log.Debug("[diskutils] Error getting target path for symlink:", dirPath, "Error:", err)
 			return dirPath
 		} else {
+			if !filepath.IsAbs(targetPath) {
+				// Keep components intact so the OS resolves symlinks before "..".
+				targetPath = filepath.Dir(dirPath) + string(filepath.Separator) + targetPath
+			}
 			return targetPath
 		}
 	} else {
