@@ -295,7 +295,7 @@ func writePreimagesFile(
 	if err != nil {
 		return collected, err
 	}
-	stats, err = writeHashedPreimages(ctx, collector, countedWriter, reportWriting)
+	stats, err = writeHashedPreimages(ctx, collector, countedWriter, reportWriting, tmpDir)
 	if err != nil {
 		return stats, err
 	}
@@ -489,6 +489,7 @@ func writeHashedPreimages(
 	collector *etl.Collector,
 	writer io.Writer,
 	onProgress func(exportPreimagesStats),
+	tmpDir string,
 ) (exportPreimagesStats, error) {
 	var stats exportPreimagesStats
 	var recordHeader [preimageAddrLen + preimageCountLen]byte
@@ -517,7 +518,7 @@ func writeHashedPreimages(
 		}
 		if slotSpill == nil {
 			var err error
-			slotSpill, err = os.CreateTemp("", "pbt-preimage-slots-")
+			slotSpill, err = os.CreateTemp(tmpDir, "pbt-preimage-slots-")
 			if err != nil {
 				return err
 			}

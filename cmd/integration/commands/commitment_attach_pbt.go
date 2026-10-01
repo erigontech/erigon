@@ -51,8 +51,9 @@ import (
 )
 
 var (
-	attachPBTFrom     string
-	attachPBTStepHook func(string) error
+	attachPBTFrom                 string
+	attachPBTStepHook             func(string) error
+	validatePBTAttachLeafStampsFn = validatePBTAttachLeafStamps
 )
 
 func init() {
@@ -387,7 +388,7 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 			return fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
 		}
 	}
-	if err := validatePBTAttachLeafStamps(txNum, func(emit func(dbstate.PBinLeaf) error) error {
+	if err := validatePBTAttachLeafStampsFn(txNum, func(emit func(dbstate.PBinLeaf) error) error {
 		return dbstate.ForEachPBinLeaf(at, nil, true, emit)
 	}); err != nil {
 		return err

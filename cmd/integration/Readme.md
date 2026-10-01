@@ -126,11 +126,18 @@ integration stage_exec
 integration commitment rebuild --datadir=<datadir>
 
 # Convert v3 hex files into a fresh PBT output datadir.
-integration commitment convert-pbt --datadir=<src> --output.datadir=<out> --keep-hex
+integration commitment convert-pbt --datadir=<src> --output.datadir=<out> --keep-hex \
+  --experimental.bin-commitment.hash=<suite>
 
 # Attach the published output to a stopped node.
-integration commitment attach-pbt --datadir=<node> --from=<out>
+integration commitment attach-pbt --datadir=<node> --from=<out> \
+  --experimental.bin-commitment.hash=<suite>
 ```
+
+Pass `--experimental.bin-commitment.hash=<suite>` to both commands. The
+producer and node must use the network's hash suite; attach refuses a suite
+mismatch. The EIP-8297 reference implementation uses BLAKE3, but the suite is
+a network choice.
 
 `integration commitment rebuild` remains the hex rebuild and has no binary target. Use
 `convert-pbt` to produce the binary files, then publish and attach the output. See

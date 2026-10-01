@@ -12,7 +12,8 @@ Run conversion against a source that is not being written:
 integration commitment convert-pbt \
   --datadir=<source-datadir> \
   --output.datadir=<published-datadir> \
-  --keep-hex
+  --keep-hex \
+  --experimental.bin-commitment.hash=<suite>
 ```
 
 `--keep-hex` writes the binary files and retains the v3 hex files, producing a
@@ -20,15 +21,18 @@ hex+bin datadir. Without it, conversion writes a post-fork bin-only datadir.
 The output contains files and settings, not the source chaindata. Publish the
 completed output together with its `erigondb.toml`.
 
-The conversion point is `(B, S)`. `S` is the block's last transaction number,
-as returned by `SeekCommitment`. The converter reads the source files only;
+The conversion point is `(B, S)`. `S` is the latest commitment transaction
+number in the source files, as read by `readPBinConversionPointFromFiles`; it
+can be in the middle of a block. The converter reads the source files only;
 database rows newer than the files are not part of the conversion. It refuses
 a source whose latest file contains writes after `S`. Provenance stamps are
 file-granular, so wait for the next step when the last file extends past `S`.
 
-The producer must use the network's `salt-state.txt`. A different state salt
-invalidates the accessors, so attach refuses it. Attach never writes the
-node's salts. `salt-blocks.txt` does not affect this check.
+The producer and node must use the network's state salt and hash suite. Pass
+`--experimental.bin-commitment.hash=<suite>` to both `convert-pbt` and
+`attach-pbt`. The suite is a network choice; EIP-8297 does not make it final,
+and its reference implementation uses BLAKE3. Attach refuses a suite mismatch
+and a state-salt mismatch. Attach never writes the node's salts.
 
 The converter verifies the written rows, the reference root, and the
 checkpoint before it writes the output settings. If any check fails, remove
@@ -41,15 +45,18 @@ Stop the node, then attach the published files:
 ```sh
 integration commitment attach-pbt \
   --datadir=<node-datadir> \
-  --from=<published-datadir>
+  --from=<published-datadir> \
+  --experimental.bin-commitment.hash=<suite>
 ```
 
 `attachPBT` checks the step size, ranges, hash suite, conversion point, state
 salt, both commitment domains, and every file type that it replaces. The
 published set must contain the `.kv`, `.v`, `.ef`, and accessor files for the
-affected ranges. It adopts the files through `S`, removes the node's state and
-commitment files past `S`, runs `ResetExec`, and writes the conversion point
-and hex+bin settings. It does not remove chaindata or block files.
+affected ranges. It adopts the files through `S`, removes the node's domain,
+history, index and accessor files past `S`, including receipts and logs, runs
+`ResetExec`, and writes the conversion point and hex+bin settings. It does not
+remove chaindata or block files. At a post-fork block-end conversion point,
+attach writes the published PBT root as that block's shadow root.
 
 A refused attach leaves the node unchanged. An interrupted attach leaves an
 in-progress marker and the node refuses to start until the same
@@ -72,7 +79,8 @@ unwind below the activation window is refused.
 ## Export
 
 Export uses the block and transaction pin of the domain canonical at that
-block:
+block. To export at a selected block, stop execution with the integration
+stage command, then run export:
 
 ```sh
 erigon snapshots export-pbt \
@@ -87,9 +95,11 @@ finalized flag. The artifact and preimage files are read back with the strict
 readers and exact-set join before the meta is published. The streamed root
 must match the bin root when the pinned datadir has one.
 
-`export-preimages` uses the same pin and is the operator path when only the
-preimage file is required. Export does not require restoring every shadow
-domain; a lagging or frozen shadow is not the pin.
+`integration stage_exec --block=<B>` stops before committing block `B`, so use
+the corresponding completed execution point when selecting the export. Export
+has no block flag. `export-preimages` uses the same pin for a preimage-only
+operation. Export does not require restoring every shadow domain; a lagging or
+frozen shadow is not the pin.
 
 ## Import (test-only)
 
@@ -109,6 +119,9 @@ roots before `ResetExec`. It refuses a frozen target and a target whose files
 run past the artifact transaction number before changing the datadir. After
 validation it writes the state and bin commitment at the pinned transaction,
 then flushes and checks the folded root.
+
+An unwind cannot cross the conversion point. `checkUnwindConversionPoint`
+refuses a block or transaction target below the published point.
 
 ## Code entry points
 

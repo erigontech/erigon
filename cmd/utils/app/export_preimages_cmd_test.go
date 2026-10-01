@@ -378,7 +378,7 @@ func exportPreimages(t *testing.T, ctx context.Context, accounts, storage stream
 	if err != nil {
 		return collected, err
 	}
-	written, err := writeHashedPreimages(ctx, collector, writer, opts.onWrite)
+	written, err := writeHashedPreimages(ctx, collector, writer, opts.onWrite, t.TempDir())
 	if err != nil {
 		return written, err
 	}
@@ -737,7 +737,7 @@ func TestWriteHashedPreimages_RejectsShortValues(t *testing.T) {
 		defer collector.Close()
 		require.NoError(t, collector.Collect(accountHash[:], address[:preimageAddrLen-1]))
 
-		_, err := writeHashedPreimages(context.Background(), collector, io.Discard, nil)
+		_, err := writeHashedPreimages(context.Background(), collector, io.Discard, nil, t.TempDir())
 		require.ErrorContains(t, err, "20-byte address")
 	})
 
@@ -748,7 +748,7 @@ func TestWriteHashedPreimages_RejectsShortValues(t *testing.T) {
 		slotHash := crypto.Keccak256Hash(slot(0x01))
 		require.NoError(t, collector.Collect(append(bytes.Clone(accountHash[:]), slotHash[:]...), slot(0x01)[:preimageSlotLen-1]))
 
-		_, err := writeHashedPreimages(context.Background(), collector, io.Discard, nil)
+		_, err := writeHashedPreimages(context.Background(), collector, io.Discard, nil, t.TempDir())
 		require.ErrorContains(t, err, "32-byte key")
 	})
 }
@@ -808,7 +808,7 @@ func TestWriteHashedPreimages_CancellationKeepsContextErrorIdentity(t *testing.T
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := writeHashedPreimages(ctx, collector, io.Discard, nil)
+	_, err := writeHashedPreimages(ctx, collector, io.Discard, nil, t.TempDir())
 	require.ErrorIs(t, err, context.Canceled)
 }
 

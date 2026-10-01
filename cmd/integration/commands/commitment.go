@@ -769,62 +769,47 @@ var cmdCommitmentRebuild = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-
-		sourceDirs := datadir.Open(datadirCli)
-		target, err := resolveCommitmentRebuildTarget()
-		if err != nil {
+		if err := runCommitmentRebuild(cmd, args, logger, ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error(err.Error())
-			return
-		}
-		target.MaxShardSteps = rebuildMaxShardSteps
-		if err := checkRebuildFlags(rebuildOutputDatadir != ""); err != nil {
-			logger.Error(err.Error())
-			return
-		}
-		if reset {
-			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-			if err != nil {
-				logger.Error("Opening DB", "error", err)
-				return
-			}
-			defer db.Close()
-			if err := rawdbreset.Reset(ctx, db, stages.Execution); err != nil {
-				logger.Error(err.Error())
-			}
-			return
-		}
-		if err := refuseRebuildFromSource(target, sourceDirs); err != nil {
-			logger.Error(err.Error())
-			return
-		}
-		var out *rebuildOutput
-		if rebuildOutputDatadir != "" {
-			if out, err = stageRebuildOutput(datadir.Open(datadirCli), rebuildOutputDatadir, target, resume, logger); err != nil {
-				logger.Error(err.Error())
-				return
-			}
-			// openDB and allSnapshots take their dirs from datadirCli, so pointing it at
-			// the staged datadir is what makes the rebuild write there. chaindata was
-			// resolved from the source before this and stays the source's.
-			datadirCli = out.dirs.DataDir
-		}
-
-		// Migrations write to the source chaindata, which an output run treats as a
-		// read-only input.
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), out == nil, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := commitmentRebuild(db, cmd.Context(), logger, target, out); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
 		}
 	},
+}
+
+func runCommitmentRebuild(cmd *cobra.Command, args []string, logger log.Logger, ctx context.Context) error {
+	_ = args
+	sourceDirs := datadir.Open(datadirCli)
+	target, err := resolveCommitmentRebuildTarget()
+	if err != nil {
+		return err
+	}
+	target.MaxShardSteps = rebuildMaxShardSteps
+	if err := checkRebuildFlags(rebuildOutputDatadir != ""); err != nil {
+		return err
+	}
+	if reset {
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			return fmt.Errorf("opening DB: %w", err)
+		}
+		defer db.Close()
+		return rawdbreset.Reset(ctx, db, stages.Execution)
+	}
+	if err := refuseRebuildFromSource(target, sourceDirs); err != nil {
+		return err
+	}
+	var out *rebuildOutput
+	if rebuildOutputDatadir != "" {
+		if out, err = stageRebuildOutput(datadir.Open(datadirCli), rebuildOutputDatadir, target, resume, logger); err != nil {
+			return err
+		}
+		datadirCli = out.dirs.DataDir
+	}
+	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), out == nil, chain, logger)
+	if err != nil {
+		return fmt.Errorf("opening DB: %w", err)
+	}
+	defer db.Close()
+	return commitmentRebuild(db, cmd.Context(), logger, target, out)
 }
 
 func resolveCommitmentRebuildTarget() (dbstate.RebuildTarget, error) {

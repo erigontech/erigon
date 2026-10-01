@@ -67,6 +67,7 @@ func TestCommitmentRebuildRunRefusesHexBinSource(t *testing.T) {
 		t.Run(fmt.Sprintf("output=%t", output), func(t *testing.T) {
 			withRebuildFlags(t, func() {
 				datadirCli = src.DataDir
+				chaindata = src.Chaindata
 				if output {
 					noHistory = true
 					rebuildOutputDatadir = filepath.Join(t.TempDir(), "output")
@@ -74,11 +75,15 @@ func TestCommitmentRebuildRunRefusesHexBinSource(t *testing.T) {
 			})
 			before := snapshotTree(t, src.DataDir)
 			outputPath := rebuildOutputDatadir
-			cmd := &cobra.Command{Use: "rebuild", Run: cmdCommitmentRebuild.Run}
+			cmd := &cobra.Command{Use: "rebuild"}
 			utils.CobraFlags(cmd, debug.Flags, utils.MetricFlags, logging.Flags)
 			cmd.Flags().AddFlagSet(cmd.PersistentFlags())
 			cmd.SetContext(t.Context())
-			cmdCommitmentRebuild.Run(cmd, nil)
+			var err error
+			require.NotPanics(t, func() {
+				err = runCommitmentRebuild(cmd, nil, log.New(), cmd.Context())
+			})
+			require.ErrorContains(t, err, "use commitment convert-pbt")
 			require.Equal(t, before, snapshotTree(t, src.DataDir))
 			if output {
 				_, err := os.Stat(outputPath)

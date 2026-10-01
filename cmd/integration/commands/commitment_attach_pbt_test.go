@@ -521,13 +521,37 @@ func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
 }
 
 func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
-	node := datadir.New(t.TempDir())
-	before := snapshotTree(t, node.DataDir)
-	err := validatePBTAttachLeafStamps(7, func(emit func(state.PBinLeaf) error) error {
-		return emit(state.PBinLeaf{Stamp: 8})
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	previousValidator := validatePBTAttachLeafStampsFn
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+		statecfg.BinCommitmentHash = previousHash
+		validatePBTAttachLeafStampsFn = previousValidator
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
 	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, _ := newPBTConversionSource(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	setExecutionProgress(t, source.Chaindata, 1)
+	validatePBTAttachLeafStampsFn = func(_ uint64, _ func(func(state.PBinLeaf) error) error) error {
+		return errors.New("commitment attach-pbt: published leaf stamp 8 is after conversion txNum 7")
+	}
+	before := snapshotTree(t, source.DataDir)
+	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
 	require.ErrorContains(t, err, "published leaf stamp 8")
-	require.Equal(t, before, snapshotTree(t, node.DataDir))
+	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 
 func TestAttachPBTAllowsMidBlockConversionPoint(t *testing.T) {

@@ -375,7 +375,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	// forcePerBlockCompute=true routes the first partial block to computeWithoutCheck.
+	// forcePerBlockCompute=true routes the first partial block through the checked per-block path.
 	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out)
 	require.NoError(t, err)
 	defer cc.Stop()
@@ -730,7 +730,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
-	// First partial block => computeWithoutCheck, a per-block compute with no
+	// First partial block uses the regular per-block checked path with no
 	// root check; pre-window, so it must isolate its commitment writes.
 	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, 5, true))
 

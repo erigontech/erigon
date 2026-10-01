@@ -51,7 +51,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	if opts.Hash == nil {
 		return common.Hash{}, fmt.Errorf("pbin conversion: nil hash function")
 	}
-	cfg := pbinConversionTrieConfig(opts.TargetDomain, opts.TargetAggregator.CommitmentDomains())
+	cfg := pbinConversionTrieConfig()
 	cfg.EnableTrieWarmup = false
 	domains, err := execctx.NewSharedDomains(ctx, opts.TargetTx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(opts.TargetDomain), execctx.WithoutCommitmentSeek())
 	if err != nil {
@@ -100,7 +100,7 @@ func VerifyPBinDomain(ctx context.Context, tx kv.TemporalTx, aggregator *Aggrega
 	if tx == nil || aggregator == nil {
 		return fmt.Errorf("pbin verification: missing database input")
 	}
-	cfg := pbinConversionTrieConfig(domain, aggregator.CommitmentDomains())
+	cfg := pbinConversionTrieConfig()
 	cfg.EnableTrieWarmup = false
 	at := aggregator.BeginFilesRo()
 	defer at.Close()
@@ -120,11 +120,8 @@ func VerifyPBinDomain(ctx context.Context, tx kv.TemporalTx, aggregator *Aggrega
 	return verifier.Verify()
 }
 
-func pbinConversionTrieConfig(domain kv.Domain, commitmentDomains []kv.Domain) commitment.TrieConfig {
+func pbinConversionTrieConfig() commitment.TrieConfig {
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
-	if len(commitmentDomains) > 1 && domain != kv.CommitmentBinDomain {
-		cfg.Variant = commitment.VariantCommitmentV3
-	}
 	return cfg
 }
