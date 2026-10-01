@@ -872,6 +872,7 @@ Updating to the latest version of Erigon gives you access to the latest features
 
 A 3.6.x node upgrades to 3.7 in place: there is no database migration and no re-sync. Before restarting on the new version, check the following:
 
+- **Sepolia: Glamsterdam**: Glamsterdam activates on Sepolia at epoch `353024`, 6 October 2026 13:53:36 UTC (Amsterdam in the execution layer, Gloas in Caplin). Upgrade Sepolia nodes to the latest 3.7 release before then; 3.6 does not follow the chain past the fork. With an external consensus client, upgrade it too.
 - **CPU baseline**: amd64 binaries and Docker images now require the `x86-64-v2` baseline (SSE4.2, POPCNT). The separate `amd64v2` tarball and `linux/amd64/v2` Docker platform are gone; use the standard amd64 artifacts. Building from source requires Go 1.26 or newer. See [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements).
 - **Removed flags**: `--fcu.background.commit` and `--experimental.streaming-commitment` now prevent startup. Remove them from your startup arguments.
 - **Caplin with checkpoint sync disabled**: nodes running `--caplin.checkpoint-sync.disable` re-sync Caplin from genesis on upgrade unless a finalized state is saved locally. Allow checkpoint sync during the upgrade to avoid the replay.
@@ -1854,7 +1855,9 @@ MDBX reuses free pages instead of returning them to the filesystem, so `mdbx.dat
 
 Erigon must be stopped. The command takes the datadir lock and opens each database exclusively, so it fails instead of touching a database still in use. The copy is written inside the database's own directory, so each database needs free space for a second copy of itself on the volume it already lives on, and a big `chaindata/` can take hours.
 
-This is a manual defragmentation pass, not the background compaction of an LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
+Erigon also compacts at startup, before the node opens its databases: any database whose free pages are at least 10 GB **and** more than four times its live data is rewritten the same way (`[compact] auto-compact` in the log). It needs the same free space for a second copy, delays startup while it runs, and cannot be turned off. A database that fails to compact is left as it was, and startup continues. It skips the step if another process holds the datadir lock.
+
+`erigon db compact` is a manual defragmentation pass, not the background compaction of an LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
 ## Where to go next
 
@@ -3024,7 +3027,7 @@ Erigon's own variables — everything below except the [Docker](https://docs.eri
 - `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--exec.no-prune`)
 - `NO_MERGE` - Disables merging operations (flag equivalent: `--exec.no-merge`)
 - `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
-- `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `96`)
+- `MAX_REORG_DEPTH` - Sets how many blocks behind the head Erigon keeps reorg data while no finalized block is known (default: `96`). Once the consensus layer reports a finalized block, Erigon keeps changesets and holds snapshot retirement back to that block instead, so during non-finality it can reorg deeper than this value — down to, but not below, the finalized block.
 - `CAPLIN_STATE_PRUNE_DISABLE` - Disables pruning of Caplin's state indexing DB after ranges are frozen into snapshots (default: `false`)
 - `CAPLIN_STATE_PRUNE_TIMEOUT` - Overrides the per-pass time budget for Caplin state pruning (a duration, e.g. `500ms`; default derived from the chain's slot time)
 
@@ -4801,6 +4804,10 @@ On each of the other hosts, point the same flag at Erigon rather than at themsel
 ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --datadir=<your datadir> --txpool.api.addr=localhost:9094
 ```
 
+## Delegated (EIP-7702) senders
+
+An account with code — in practice one with an active EIP-7702 delegation — may have only one transaction in the pool, and it must use the account's current nonce. A further transaction, or one with a nonce gap, is rejected with `in-flight transaction limit reached for delegated account` or `gapped-nonce transaction from delegated account`. Replacing the pooled transaction at the same nonce with a higher fee is still allowed. When an account becomes delegated, its pooled transactions are cut back to one on the next block. No flag changes this.
+
 ## Flags explanation
 
 - `--txpool.disable`: This flag disables the internal transaction pool (TxPool) and block producer (default: `false`). When running the TxPool as a separate process, this flag is used to prevent the internal TxPool from interfering with the external one.
@@ -5351,6 +5358,25 @@ The sections below cover only the places where Erigon adds a method that is not 
 
 Erigon does not support the `pending` block tag for `eth_call`, `eth_createAccessList`, `eth_getProof`, `eth_getWitness`, `eth_getTxWitness`, or `eth_simulateV1`. These methods need a block header and state from the same view, and Erigon cannot currently acquire a matching pending-state view. They return `pending state is not supported` instead of executing against a different block. Other `eth` methods keep their existing pending behavior.
 
+### Fork-gated call fields
+
+`eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_simulateV1` and `trace_call` validate a call against the fork active at the requested block, as a transaction would be:
+
+| Call carries | Rejected when | Error |
+| --- | --- | --- |
+| `accessList` | the block is before Berlin | `eip-2930 transactions require Berlin` |
+| `blobVersionedHashes` | the block is before Cancun | `BlobTx transactions require Cancun` |
+| `blobVersionedHashes` and no `to` | always | `txn: field 'To' can not be 'nil'` |
+| an empty `blobVersionedHashes` list | always | `blob txn must contain at least one blob versioned hash` |
+
+`eth_createAccessList` therefore rejects every request on a block before Berlin, including a plain transfer.
+
+### eth_syncing and eth_subscribe("syncing")
+
+`eth_syncing` returns `false` once the node is within 8 blocks of the highest block it has seen; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty. On 3.7 `eth_syncing` reports `startingBlock` as `0x0`; the subscription reports the block where the current sync began.
+
+`eth_subscribe("syncing")` (WebSocket or IPC) sends the current state when you subscribe, then one message per change: the same object with `syncing: true` while syncing, or `false` once synced.
+
 ### eth_getProof
 
 `eth_getProof` returns Merkle proofs for account state and storage slots, as defined in [EIP-1186](https://eips.ethereum.org/EIPS/eip-1186). It is stable and production-ready as of Erigon v3.4.
@@ -5538,6 +5564,8 @@ So `{"blockNumber": "null"}` is the only way to reach `latest` by that spelling 
 ### Filter lifetime
 
 The standard spec does not say how long a filter lives. In Erigon, a filter created by `eth_newFilter`, `eth_newBlockFilter`, or `eth_newPendingTransactionFilter` is evicted once it has gone **5 minutes** without being polled. Only `eth_getFilterChanges` counts as a poll: it calls `TouchSubscription`, which resets the clock, so a filter stays alive on a quiet chain as long as the client keeps calling it. `eth_getFilterLogs` does **not** — it reads the stored criteria and serves them through the same path as `eth_getLogs`, without touching the deadline — so a client that only ever calls `eth_getFilterLogs` loses its filter after five idle minutes. A call against an evicted filter returns `filter not found`.
+
+Logs returned by `eth_getFilterChanges` for a log filter, and logs pushed by `eth_subscribe("logs")`, carry the block time as `blockTimestamp`, as `eth_getLogs` does.
 
 Change the window, or turn eviction off entirely, with:
 
@@ -6236,6 +6264,10 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCallMany","params":[[{"tra
 | Type | Description |
 | --- | --- |
 | Array | Array of trace results for each bundle |
+
+### callTracer output
+
+With `{"tracer": "callTracer", "tracerConfig": {"withLog": true}}`, each entry in `logs` has an `index` that is the log's index **within the block**, matching `eth_getLogs` and the receipts, for `debug_traceTransaction` and `debug_traceBlockByNumber`/`ByHash`. `debug_traceCall` counts from `0x0`, and `debug_traceCallMany` counts within each bundle. A failed `CREATE` or `CREATE2` frame, including one that reverts, has no `to` field.
 
 ### debug_setMemoryLimit
 
