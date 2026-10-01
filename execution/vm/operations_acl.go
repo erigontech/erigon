@@ -264,7 +264,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		}
 		// Per EIP-7928, SELFDESTRUCT is a state access on the beneficiary
 		// independently of any value transfer, so record it unconditionally.
-		evm.IntraBlockState().MarkOpcodeAddressAccess(address)
+		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if empty && !balance.IsZero() {
 			if evm.chainRules.IsAmsterdam {
 				gas.Execution += accountWriteCost(evm.chainRules)

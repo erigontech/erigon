@@ -86,7 +86,6 @@ type pbinWitnessStateless struct {
 
 	systemCallScope             bool
 	syntheticSystemRead         bool
-	systemAddressOpcodeRead     bool
 	systemAddressReadSuppressed bool
 	systemAddressReadError      error
 
@@ -103,18 +102,7 @@ type pbinWitnessStateless struct {
 }
 
 func (s *pbinWitnessStateless) setPBinSystemCallScope(active bool) {
-	if active {
-		s.systemAddressOpcodeRead = false
-	} else if s.systemAddressOpcodeRead {
-		s.latchPBinSystemAddressRead()
-	}
 	s.systemCallScope = active
-}
-
-func (s *pbinWitnessStateless) OnOpcodeAddressAccess(address accounts.Address) {
-	if s.systemCallScope && isPBinSystemAddress(address.Value()) {
-		s.systemAddressOpcodeRead = true
-	}
 }
 
 func (s *pbinWitnessStateless) latchPBinResolveError(err error) {
@@ -228,7 +216,7 @@ func (s *pbinWitnessStateless) ReadAccountDataForDebug(address accounts.Address)
 func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addr := address.Value()
 	previousSynthetic := s.syntheticSystemRead
-	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr) && !s.systemAddressOpcodeRead)
+	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr))
 	defer func() { s.syntheticSystemRead = previousSynthetic }()
 	if account, ok := s.accountUpdates[addr]; ok {
 		return account, nil
@@ -238,7 +226,7 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 	}
 	value, present, err := s.tree.Read(eip8297.TreeKeyAccount(addr[:], eip8297.BasicDataLeafKey))
 	if err != nil {
-		if s.syntheticSystemRead && errors.Is(err, commitment.ErrPBinWitnessBlinded) {
+		if s.systemCallScope && isPBinSystemAddress(addr) && errors.Is(err, commitment.ErrPBinWitnessBlinded) {
 			s.systemAddressReadSuppressed = true
 			s.systemAddressReadError = err
 			return nil, nil
@@ -329,7 +317,7 @@ func (s *pbinWitnessStateless) readDelegation(addr common.Address) ([]byte, bool
 func (s *pbinWitnessStateless) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addr, slot := address.Value(), key.Value()
 	previousSynthetic := s.syntheticSystemRead
-	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr) && !s.systemAddressOpcodeRead)
+	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr))
 	defer func() { s.syntheticSystemRead = previousSynthetic }()
 	if writes, ok := s.storageWrites[addr]; ok {
 		if value, ok := writes[slot]; ok {
@@ -362,7 +350,7 @@ func (s *pbinWitnessStateless) ReadAccountStorage(address accounts.Address, key 
 func (s *pbinWitnessStateless) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addr := address.Value()
 	previousSynthetic := s.syntheticSystemRead
-	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr) && !s.systemAddressOpcodeRead)
+	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr))
 	defer func() { s.syntheticSystemRead = previousSynthetic }()
 	if code, ok := s.codeUpdates[addr]; ok {
 		return bytes.Clone(code), nil

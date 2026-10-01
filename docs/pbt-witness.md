@@ -76,8 +76,10 @@ driver and compares the resulting root with the post-state anchor.
 
 The verifier suppresses the missing-node error only for the synthetic system-call touch of `SYSTEM_ADDRESS`. The scope
 covers system calls from `Initialize`, its `FinalizeTx`, `Finalize`, and `CommitBlock`, but resolver errors are latched
-throughout those scopes except for that synthetic touch. An EVM opcode target access to `SYSTEM_ADDRESS` during those
-scopes is genuine and must be proved. A user transaction access to `SYSTEM_ADDRESS` is retained when
+throughout those scopes except for that synthetic touch. A system contract whose own code reads state from
+`SYSTEM_ADDRESS` is not supported: the read counts as the synthetic touch, so its proof is neither required nor
+supplied. The canonical EIP-4788, EIP-2935, EIP-7002, and EIP-7251 contracts never read it. A user transaction access
+to `SYSTEM_ADDRESS` is retained when
 the per-transaction access set records it, or when `ResolveCode` or `ResolveCodeHash` follows a delegation designator
 to it. Loading a designator with `EXTCODE*` does not follow it, and an access-list entry alone is not enough.
 Both cases need the basic-data proof when the system call has already warmed the account. Genuine reads of system

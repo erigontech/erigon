@@ -384,7 +384,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	}
 
 	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
-	evm.intraBlockState.MarkOpcodeAddressAccess(addr)
+	evm.intraBlockState.MarkAddressAccess(addr, false)
 
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, gasRemaining, mdgas.MdGasUsage{}, nil
@@ -608,7 +608,7 @@ func (evm *EVM) prepareCreate(caller accounts.Address, address accounts.Address,
 	if evm.chainRules.IsBerlin {
 		evm.intraBlockState.AddAddressToAccessList(address)
 	}
-	evm.intraBlockState.MarkOpcodeAddressAccess(address)
+	evm.intraBlockState.MarkAddressAccess(address, false)
 	if evm.chainRules.IsAmsterdam && nested {
 		preparation.chargeNewAccount, err = evm.intraBlockState.Empty(address)
 		if err != nil {
