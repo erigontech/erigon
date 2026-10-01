@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"slices"
 	"strconv"
@@ -560,7 +561,7 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *jsonstream.Stream) *jsonrpcMessage {
 	switch {
 	case msg.isNotification():
-		discard := jsonstream.Get(nil)
+		discard := jsonstream.Get(io.Discard)
 		defer jsonstream.Put(discard)
 		_, _ = h.handleCall(ctx, msg, discard)
 		if h.traceRequests {
