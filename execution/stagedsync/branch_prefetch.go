@@ -137,8 +137,8 @@ func (p *branchPrefetcher) freeze() {
 	}
 	p.mu.Lock()
 	p.frozen, p.records = p.records, nil
-	p.mu.Unlock()
 	p.bytes.Store(0)
+	p.mu.Unlock()
 }
 
 func (p *branchPrefetcher) release() {
@@ -160,16 +160,16 @@ func (p *branchPrefetcher) cached(key []byte) ([]byte, bool) {
 }
 
 func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
+	data = bytes.Clone(data)
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.bytes.Load() >= branchPrefetchMaxBytes {
 		return data
 	}
-	data = bytes.Clone(data)
-	p.mu.Lock()
 	if p.records == nil {
 		p.records = make(map[string]prefetchedRecord)
 	}
 	p.records[string(key)] = prefetchedRecord{data: data, step: step}
-	p.mu.Unlock()
 	p.bytes.Add(int64(len(key) + len(data)))
 	return data
 }
