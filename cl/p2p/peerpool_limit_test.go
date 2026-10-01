@@ -291,6 +291,32 @@ func TestPeerPoolLimiterBoundsTotalReservations(t *testing.T) {
 	require.LessOrEqual(t, len(l.reservations), 3)
 }
 
+// TestPeerPoolLimiterBoundsIPLiveBaselines reproduces review finding "IP baselines
+// accumulate indefinitely after connections close": an IP whose connection later
+// closes and that never attempts to connect again is never reconciled again, so
+// nothing ever deletes its baseline entry. Over a long-running node's lifetime,
+// ordinary peer churn - not even an attacker - would accumulate one entry per
+// source IP ever seen, unbounded.
+func TestPeerPoolLimiterBoundsIPLiveBaselines(t *testing.T) {
+	l := &peerPoolLimiter{
+		maxPerIP: 1000, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+		reservationTTL: time.Minute, now: time.Now, maxIPBaselines: 3,
+	}
+	fixture := &connsFixtureHost{}
+	l.setHost(fixture)
+
+	// 4 distinct IPs each connect once - triggering a reconciled baseline entry -
+	// and then stop attempting, simulating ordinary churn with no attacker involved.
+	for _, ip := range []string{"203.0.113.1", "203.0.113.2", "203.0.113.3", "203.0.113.4"} {
+		fixture.conns = append(fixture.conns, ip)
+		require.True(t, l.allow(net.ParseIP(ip)))
+	}
+
+	require.LessOrEqual(t, len(l.ipLiveBaseline), 3,
+		"baseline tracking must stay bounded even though every IP disconnected without ever being revisited")
+}
+
 // connsFixtureHost is a minimal liveConnsSource stand-in: real libp2p hosts are
 // exercised in gater_test.go's integration tests, but the occupancy math itself
 // (per-IP / per-block counting and RFC 6177 aggregation) doesn't need a live

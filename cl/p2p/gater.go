@@ -54,10 +54,19 @@ type hostConns struct {
 	host host.Host
 }
 
+// remoteIPs reports only inbound connections. peerPoolLimiter.allow is only ever
+// invoked for inbound attempts (via InterceptAccept) and only ever creates
+// reservations for them; if this also counted outbound connections - ones we dialed
+// ourselves, which never went through the limiter at all - an outbound connection to
+// some IP could be misread by reconciliation as "one of this IP's pending inbound
+// reservations just matured" and retire a still-genuinely-pending one.
 func (h hostConns) remoteIPs() []net.IP {
 	conns := h.host.Network().Conns()
 	ips := make([]net.IP, 0, len(conns))
 	for _, conn := range conns {
+		if conn.Stat().Direction != network.DirInbound {
+			continue
+		}
 		if ip, err := manet.ToIP(conn.RemoteMultiaddr()); err == nil {
 			ips = append(ips, ip)
 		}

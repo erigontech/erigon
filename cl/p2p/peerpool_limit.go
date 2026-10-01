@@ -17,6 +17,7 @@
 package p2p
 
 import (
+	"container/list"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -64,6 +65,13 @@ const (
 	// spread across many distinct keys, each individually within its own cap,
 	// must not be able to grow the reservation pool without bound.
 	defaultPeerPoolMaxReservations = 8192
+
+	// defaultPeerPoolMaxIPBaselines bounds ipLiveBaseline. An IP's baseline entry
+	// is only ever revisited (and so only ever cleaned up) by a later admission
+	// attempt from the same IP; one that connects once and never attempts again
+	// (ordinary peer churn, not an attacker) would otherwise sit in the map
+	// forever. Least-recently-reconciled entries are evicted first.
+	defaultPeerPoolMaxIPBaselines = 8192
 )
 
 // liveConnsSource gives the occupancy count a live view of currently connected
@@ -112,11 +120,12 @@ type peerPoolLimiter struct {
 	reservationTTL  time.Duration
 	maxReservations int
 	now             func() time.Time
-	// ipLiveBaseline is the live-connection count per IP as of the last
-	// reconciliation; only entries for IPs with at least one live or reserved
-	// connection are kept, so it stays bounded by currently-active sources rather
-	// than every IP ever seen.
-	ipLiveBaseline map[string]int
+	// ipLiveBaseline is the live-connection count per IP as of its last
+	// reconciliation, LRU-bounded by maxIPBaselines (see its doc comment).
+	ipLiveBaseline      map[string]int
+	ipLiveBaselineLRU   *list.List
+	ipLiveBaselineElems map[string]*list.Element
+	maxIPBaselines      int
 
 	maxPerIP              int
 	maxPerSubscriberBlock int
@@ -146,6 +155,9 @@ func newPeerPoolLimiter(maxPeerCount uint64) *peerPoolLimiter {
 		maxReservations:       defaultPeerPoolMaxReservations,
 		now:                   time.Now,
 		ipLiveBaseline:        make(map[string]int),
+		ipLiveBaselineLRU:     list.New(),
+		ipLiveBaselineElems:   make(map[string]*list.Element),
+		maxIPBaselines:        defaultPeerPoolMaxIPBaselines,
 		maxPerIP:              max(peerPoolLimiterMinPerIP, int(maxPeerCount)/peerPoolLimiterPerIPDivisor),
 		maxPerSubscriberBlock: maxPerSubscriberBlock,
 		maxPerASBlock:         maxPerASBlock,
@@ -175,10 +187,13 @@ func (l *peerPoolLimiter) allow(ip net.IP) bool {
 	subscriberKey := l.subnetKey(ip, l.v4SubscriberBlockBits, l.v6SubscriberBlockBits)
 	asKey := l.subnetKey(ip, l.v4ASBlockBits, l.v6ASBlockBits)
 
-	liveIP, liveSubscriberBlock, liveASBlock := l.liveCounts(*hostPtr, ip, subscriberKey, asKey)
-
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	// Sampled under the lock, not before it: a connection that registers in the
+	// host between an earlier sample and this decision must not be missed, or the
+	// decision could use a stale, too-low count and admit past the cap.
+	liveIP, liveSubscriberBlock, liveASBlock := l.liveCounts(*hostPtr, ip, subscriberKey, asKey)
 
 	now := l.clock()
 	l.pruneExpiredLocked(now)
@@ -244,13 +259,11 @@ func (l *peerPoolLimiter) maxReservationsOrDefault() int {
 // least as many of its connections as were pending, rather than waiting out their full
 // TTL. It must be called with l.mu held, after pruneExpiredLocked.
 func (l *peerPoolLimiter) reconcileLocked(ipKey string, liveIP int) {
-	if l.ipLiveBaseline == nil {
-		l.ipLiveBaseline = make(map[string]int)
-	}
+	l.ensureIPLiveBaselineLocked()
 	delta := liveIP - l.ipLiveBaseline[ipKey]
 	if delta <= 0 {
 		if liveIP == 0 {
-			delete(l.ipLiveBaseline, ipKey)
+			l.deleteIPBaselineLocked(ipKey)
 		}
 		return
 	}
@@ -264,7 +277,54 @@ func (l *peerPoolLimiter) reconcileLocked(ipKey string, liveIP int) {
 		remaining = append(remaining, r)
 	}
 	l.reservations = remaining
+	l.setIPBaselineLocked(ipKey, liveIP)
+}
+
+func (l *peerPoolLimiter) ensureIPLiveBaselineLocked() {
+	if l.ipLiveBaseline == nil {
+		l.ipLiveBaseline = make(map[string]int)
+	}
+	if l.ipLiveBaselineLRU == nil {
+		l.ipLiveBaselineLRU = list.New()
+	}
+	if l.ipLiveBaselineElems == nil {
+		l.ipLiveBaselineElems = make(map[string]*list.Element)
+	}
+}
+
+func (l *peerPoolLimiter) maxIPBaselinesOrDefault() int {
+	if l.maxIPBaselines > 0 {
+		return l.maxIPBaselines
+	}
+	return defaultPeerPoolMaxIPBaselines
+}
+
+// setIPBaselineLocked records ipKey's reconciled live count and marks it
+// most-recently-used, evicting the least-recently-reconciled entry if the bound is
+// exceeded. Must be called with l.mu held.
+func (l *peerPoolLimiter) setIPBaselineLocked(ipKey string, liveIP int) {
 	l.ipLiveBaseline[ipKey] = liveIP
+	if elem, ok := l.ipLiveBaselineElems[ipKey]; ok {
+		l.ipLiveBaselineLRU.MoveToFront(elem)
+		return
+	}
+	l.ipLiveBaselineElems[ipKey] = l.ipLiveBaselineLRU.PushFront(ipKey)
+	if l.ipLiveBaselineLRU.Len() <= l.maxIPBaselinesOrDefault() {
+		return
+	}
+	oldest := l.ipLiveBaselineLRU.Back()
+	if oldest == nil {
+		return
+	}
+	l.deleteIPBaselineLocked(oldest.Value.(string))
+}
+
+func (l *peerPoolLimiter) deleteIPBaselineLocked(ipKey string) {
+	delete(l.ipLiveBaseline, ipKey)
+	if elem, ok := l.ipLiveBaselineElems[ipKey]; ok {
+		l.ipLiveBaselineLRU.Remove(elem)
+		delete(l.ipLiveBaselineElems, ipKey)
+	}
 }
 
 func (l *peerPoolLimiter) liveCounts(src liveConnsSource, ip net.IP, subscriberKey, asKey string) (sameIP, sameSubscriberBlock, sameASBlock int) {
