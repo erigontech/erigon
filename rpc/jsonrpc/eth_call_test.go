@@ -303,6 +303,36 @@ func TestEstimateGasStateOverrideClearedCodeKeepsTransferShortcut(t *testing.T) 
 // trial starts from the same overridden state: writing a fresh slot costs 20000
 // only on clean state, so a write leaking from an earlier trial would let the
 // search settle below the true minimum.
+func TestEstimateGasTransferWithRefundedAuthorization(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime = nil
+	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, cfg)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	receiverKey, err := crypto.HexToECDSA("a71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f292")
+	require.NoError(t, err)
+	require.Equal(t, receiverAddress, crypto.PubkeyToAddress(receiverKey.PublicKey))
+	auth, err := types.SignAuthorization(receiverKey, *uint256.MustFromBig(cfg.ChainID.ToBig()), common.HexToAddress("0x1234"), 0)
+	require.NoError(t, err)
+
+	recipient := common.HexToAddress("0x5678")
+	args := ethapi.CallArgs{
+		From:              &bankAddress,
+		To:                &recipient,
+		AuthorizationList: []types.JsonAuthorization{types.JsonAuthorization{}.FromAuthorization(auth)},
+	}
+	estimate, err := api.EstimateGas(context.Background(), &args, nil, nil, nil)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, uint64(estimate), params.TxGas+params.PerEmptyAccountCost)
+
+	args.Gas = &estimate
+	_, err = api.Call(context.Background(), args, nil, nil, nil)
+	require.NoError(t, err, "a call with the estimated gas must pass the intrinsic gas check")
+}
+
 func TestEstimateGasStateOverrideAppliedToEveryTrial(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -2294,34 +2324,4 @@ func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
 	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, written))
 	require.True(t, (*uint256.Int)(notYetWritten.Value).IsZero(), "slot %d at block %d holds %x, which only block %d writes", bn, bn, (*uint256.Int)(notYetWritten.Value).Bytes32(), bn+1)
 	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, notYetWritten))
-}
-
-func TestEstimateGasTransferWithRefundedAuthorization(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
-	cfg := chain.AllProtocolChanges.Copy()
-	cfg.AmsterdamTime = nil
-	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, cfg)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
-
-	receiverKey, err := crypto.HexToECDSA("a71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f292")
-	require.NoError(t, err)
-	require.Equal(t, receiverAddress, crypto.PubkeyToAddress(receiverKey.PublicKey))
-	auth, err := types.SignAuthorization(receiverKey, *uint256.MustFromBig(cfg.ChainID.ToBig()), common.HexToAddress("0x1234"), 0)
-	require.NoError(t, err)
-
-	recipient := common.HexToAddress("0x5678")
-	args := ethapi.CallArgs{
-		From:              &bankAddress,
-		To:                &recipient,
-		AuthorizationList: []types.JsonAuthorization{types.JsonAuthorization{}.FromAuthorization(auth)},
-	}
-	estimate, err := api.EstimateGas(context.Background(), &args, nil, nil, nil)
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, uint64(estimate), params.TxGas+params.PerEmptyAccountCost)
-
-	args.Gas = &estimate
-	_, err = api.Call(context.Background(), args, nil, nil, nil)
-	require.NoError(t, err, "a call with the estimated gas must pass the intrinsic gas check")
 }
