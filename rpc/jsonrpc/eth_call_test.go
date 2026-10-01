@@ -66,6 +66,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -2324,4 +2325,60 @@ func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
 	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, written))
 	require.True(t, (*uint256.Int)(notYetWritten.Value).IsZero(), "slot %d at block %d holds %x, which only block %d writes", bn, bn, (*uint256.Int)(notYetWritten.Value).Bytes32(), bn+1)
 	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, notYetWritten))
+}
+
+// A chainId for another chain makes a call object invalid whatever the state, so every
+// endpoint that takes ethapi.CallArgs rejects it as invalid params instead of running the call.
+func TestCallArgsRejectOtherChainID(t *testing.T) {
+	m, _, bank := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api, debugApi := newCallManyApisForTest(m)
+	ctx := context.Background()
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: latest, TransactionIndex: &txIndex}
+
+	own := ethapi.CallArgs{From: &bank, To: &bank, ChainID: (*hexutil.U256)(uint256.NewInt(1337))}
+	other := own
+	other.ChainID = (*hexutil.U256)(uint256.NewInt(1))
+	bundles := []Bundle{{Transactions: []ethapi.CallArgs{own, other}}}
+
+	_, err := api.Call(ctx, own, &latest, nil, nil)
+	require.NoError(t, err)
+
+	mismatch := "chainId does not match node's (have=1, want=1337)"
+	for name, tc := range map[string]struct {
+		call func() error
+		want string
+	}{
+		"eth_call": {func() error {
+			_, err := api.Call(ctx, other, &latest, nil, nil)
+			return err
+		}, mismatch},
+		"eth_estimateGas": {func() error {
+			_, err := api.EstimateGas(ctx, &other, &latest, nil, nil)
+			return err
+		}, mismatch},
+		"eth_createAccessList": {func() error {
+			_, err := api.CreateAccessList(ctx, other, &latest, nil, nil)
+			return err
+		}, mismatch},
+		"eth_callMany": {func() error {
+			_, err := api.CallMany(ctx, bundles, stateCtx, nil, nil)
+			return err
+		}, "bundle 0, transaction 1: " + mismatch},
+		"debug_traceCall": {func() error {
+			return debugApi.TraceCall(ctx, other, &latest, nil, jsonstream.New(io.Discard))
+		}, mismatch},
+		"debug_traceCallMany": {func() error {
+			return debugApi.TraceCallMany(ctx, bundles, stateCtx, nil, jsonstream.New(io.Discard))
+		}, "bundle 0, transaction 1: " + mismatch},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := tc.call()
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			require.EqualError(t, err, tc.want)
+		})
+	}
 }

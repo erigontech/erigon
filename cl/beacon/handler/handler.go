@@ -58,16 +58,27 @@ import (
 )
 
 const (
-	maxBlobBundleCacheSize             = 48 // 8 blocks worth of blobs
+	minBlobBundleCacheSize             = 48
 	maxPendingBuilderPayloads          = 4
 	maxExecutionPayloadEnvelopeRetries = 1024
 )
 
-// Pre-fulu blob bundle structure to hold the commitment, blob, and KZG proof. (TODO: remove after electra fork)
+// BlobBundle holds a blob with its commitment and KZG proofs: one blob proof before Fulu, one proof
+// per cell from Fulu on.
 type BlobBundle struct {
 	Commitment common.Bytes48
 	Blob       *cltypes.Blob
 	KzgProofs  []common.Bytes48
+	Cells      []cltypes.Cell // the blob's cells, from Fulu on, when already computed
+}
+
+// blobBundleCacheSize fits two full blocks at the highest blob limit in the schedule, so the bundles
+// of one block are not evicted before that block is published.
+func blobBundleCacheSize(cfg *clparams.BeaconChainConfig) int {
+	if cfg == nil {
+		return minBlobBundleCacheSize
+	}
+	return max(minBlobBundleCacheSize, 2*int(cfg.MaxBlobsPerBlockUpperBound()))
 }
 
 type selfBuildPayload struct {
@@ -315,7 +326,7 @@ func NewApiHandler(
 	payloadAttestationService services.PayloadAttestationService,
 	proposerPreferencesService services.ProposerPreferencesService,
 ) *ApiHandler {
-	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
+	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", blobBundleCacheSize(beaconChainConfig))
 	if err != nil {
 		panic(err)
 	}
