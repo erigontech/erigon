@@ -213,6 +213,7 @@ type IntraBlockState struct {
 	// SelfDestruct cells. Left false for genesis/RPC/serial, which still commit
 	// via FinalizeTx→so.data.
 	noMaterialize bool
+	discardLogs   bool
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -423,6 +424,14 @@ func (ibs *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize in
 	return ibs.logs.alloc(ibs.journal, addr, ibs.txIndex, numTopics, dataSize)
 }
 
+// SetDiscardLogs makes LOG opcodes store nothing, for a caller that never reads logs.
+func (ibs *IntraBlockState) SetDiscardLogs(v bool) { ibs.discardLogs = v }
+
+// DiscardsLogs reports whether a log would be dropped: discarding is on and no tracer wants it.
+func (ibs *IntraBlockState) DiscardsLogs() bool {
+	return ibs.discardLogs && (ibs.tracingHooks == nil || ibs.tracingHooks.OnLog == nil)
+}
+
 // NotifyLog runs the OnLog hook after a log's fields are populated.
 func (ibs *IntraBlockState) NotifyLog(lp *types.Log) {
 	if dbg.TraceLogs && (ibs.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
@@ -444,6 +453,9 @@ func (ibs *IntraBlockState) NotifyLog(lp *types.Log) {
 // AddLog copies log into the next slot. TxIndex and Index are assigned by the
 // state; every other field comes from the caller.
 func (ibs *IntraBlockState) AddLog(log *types.Log) {
+	if ibs.DiscardsLogs() {
+		return
+	}
 	lp := ibs.AllocLog(log.Address, len(log.Topics), len(log.Data))
 	copy(lp.Topics, log.Topics)
 	copy(lp.Data, log.Data)

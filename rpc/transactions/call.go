@@ -65,6 +65,7 @@ func DoCall(
 
 	state := state.New(stateReader)
 	defer state.Close()
+	state.SetDiscardLogs(true)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -211,6 +212,7 @@ func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledC
 	} else {
 		ibs.Reset()
 	}
+	ibs.SetDiscardLogs(true)
 	if r.stateOverrides == nil {
 		return ibs, nil, nil
 	}

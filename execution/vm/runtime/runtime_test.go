@@ -107,6 +107,34 @@ func TestExecute(t *testing.T) {
 	}
 }
 
+func TestLogDiscardedWhenStateDiscardsLogs(t *testing.T) {
+	t.Parallel()
+	code := []byte{
+		byte(vm.PUSH1), 0x77, // stays below the LOG1 operands
+		byte(vm.PUSH1), 0xff,
+		byte(vm.PUSH1), 32,
+		byte(vm.PUSH1), 0,
+		byte(vm.LOG1),
+		byte(vm.PUSH1), 0,
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 32,
+		byte(vm.PUSH1), 0,
+		byte(vm.RETURN),
+	}
+	for _, discard := range []bool{false, true} {
+		statedb := state.New(state.NewNoopReader())
+		statedb.SetDiscardLogs(discard)
+		ret, _, err := Execute(code, nil, &Config{State: statedb}, t.TempDir())
+		require.NoError(t, err)
+		require.Equal(t, uint64(0x77), new(uint256.Int).SetBytes(ret).Uint64(), "discard=%v", discard)
+		wantLogs := 1
+		if discard {
+			wantLogs = 0
+		}
+		require.Len(t, statedb.GetRawLogs(0), wantLogs, "discard=%v", discard)
+	}
+}
+
 func TestCall(t *testing.T) {
 	t.Parallel()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
