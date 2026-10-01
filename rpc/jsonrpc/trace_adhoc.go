@@ -1258,7 +1258,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1482,7 +1482,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1883,7 +1883,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNumber)
+	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, dbtx, blockNumber)
 	if err != nil {
 		return nil, err
 	}

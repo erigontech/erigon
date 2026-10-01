@@ -125,7 +125,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, errors.New("contract construction txn not found")
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneTransactionHistory(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +288,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 	}
 
 	// Re-executes with overridden code, so stored receipts cannot answer for it.
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, begin)
+	err = api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, tx, begin, end)
 	if err != nil {
 		return nil, err
 	}

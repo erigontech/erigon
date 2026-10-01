@@ -210,7 +210,11 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots) error 
 			fmt.Fprintf(w, "%s \t\t - \t\t - \t\t %d\n", d.String(), step)
 			continue
 		}
-		fmt.Fprintf(w, "%s \t\t %d \t\t %d \t\t %d\n", d.String(), dbg.HistoryStartFrom(d), txNum, step)
+		historyStart, err := dbg.HistoryStartFrom(d)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "%s \t\t %d \t\t %d \t\t %d\n", d.String(), historyStart, txNum, step)
 	}
 	fmt.Fprintf(w, " \t\t  \t\t  \t\t  \n") // newline acts as a table separator, this is a hack to maintain same tabwriter group
 	for _, ii := range []kv.InvertedIdx{kv.LogTopicIdx, kv.LogAddrIdx, kv.TracesFromIdx, kv.TracesToIdx} {

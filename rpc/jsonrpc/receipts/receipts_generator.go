@@ -477,9 +477,9 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 // PostStateCalculated reports whether the receipts of this block carry a post state
 // that has to be computed. The persistent cache does not store that field, so those
-// receipts are re-executed and reach only as far as state history — which is what the
-// RPC availability gates must answer for. The fork check comes first: FrozenBlocks is a
-// backend call on a remote rpcdaemon, and every receipt request reaches this.
+// receipts need state history and, when enabled, commitment history to be re-executed.
+// The fork check comes first: FrozenBlocks is a backend call on a remote rpcdaemon,
+// and every receipt request reaches this.
 func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEnabled bool, blockReader dbservices.FullBlockReader) bool {
 	if cfg.IsByzantium(blockNum) {
 		return false
