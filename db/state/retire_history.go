@@ -17,8 +17,6 @@
 package state
 
 import (
-	"context"
-
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
@@ -78,7 +76,7 @@ func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) (deleted []string, aged [
 // Retire drops old visible History+InvertedIndex files below their per-domain cutoff.
 // Reads visible only — invisible garbage is the merge clean-up's job (cleanAfterMerge /
 // RemoveOverlaps). Physical deletion is deferred until no reader pins the retired generation.
-func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
+func (at *AggregatorRoTx) Retire(cutoffs kv.RetireCutoffs) (retiredCount int, err error) {
 	if dbg.NoRetire() || cutoffs.IsNoop() {
 		return 0, nil
 	}

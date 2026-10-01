@@ -60,7 +60,22 @@ func (mb *AssembledBlock) AddTxn(txn types.Transaction) {
 
 func (mb *AssembledBlock) AvailableRlpSpace(chainConfig *chain.Config, withAdditional ...types.Transaction) int {
 	if mb.headerRlpSize == nil {
-		s := mb.Header.EncodingSize()
+		h := types.CopyHeader(mb.Header)
+		h.GasUsed = h.GasLimit
+		if h.BlobGasUsed != nil {
+			maxBlobGas := chainConfig.GetMaxBlobGasPerBlock(h.Time)
+			h.BlobGasUsed = &maxBlobGas
+		}
+		if h.WithdrawalsHash == nil && mb.Withdrawals != nil {
+			h.WithdrawalsHash = &common.Hash{}
+		}
+		if h.RequestsHash == nil && chainConfig.IsPrague(h.Time) {
+			h.RequestsHash = &common.Hash{}
+		}
+		if h.BlockAccessListHash == nil && chainConfig.IsEIPEnabled(7928, h.Time) {
+			h.BlockAccessListHash = &common.Hash{}
+		}
+		s := h.EncodingSize()
 		s += rlp.ListPrefixLen(s)
 		mb.headerRlpSize = &s
 	}
