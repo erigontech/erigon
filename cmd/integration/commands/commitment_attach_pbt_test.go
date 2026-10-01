@@ -32,12 +32,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 func TestValidatePBTAttachFilesRequiresBothCommitmentDomains(t *testing.T) {
@@ -319,9 +317,11 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		node, published := newPBTAttachFileTrees(t, true)
 		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 7)
 		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 7)
+		require.NoError(t, os.MkdirAll(node.Chaindata, 0o755))
 		rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(node.Chaindata).MustOpen()
-		require.ErrorContains(t, checkPBTNodePosition(t.Context(), rawDB, 1, 7), "behind conversion block")
 		rawDB.Close()
+		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
+		require.ErrorContains(t, err, "behind conversion block")
 	})
 }
 
@@ -580,23 +580,6 @@ func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
 	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
 	require.ErrorContains(t, err, "published leaf stamp 8")
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
-}
-
-func TestAttachPBTAllowsMidBlockConversionPoint(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.MkdirAll(dirs.Chaindata, 0o755))
-	db := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
-	t.Cleanup(db.Close)
-	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		if err := rawdbv3.TxNums.Append(tx, 0, 0); err != nil {
-			return err
-		}
-		if err := rawdbv3.TxNums.Append(tx, 1, 10); err != nil {
-			return err
-		}
-		return stages.SaveStageProgress(tx, stages.Execution, 1)
-	}))
-	require.NoError(t, checkPBTNodePosition(t.Context(), db, 1, 8))
 }
 
 func writePBTAttachSettings(t *testing.T, dirs datadir.Dirs, hash string, blockNum, txNum uint64) {

@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -202,7 +201,7 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	if err := requirePBinSourceEnd(sourceAgg, point.TxNum); err != nil {
 		return err
 	}
-	header, blockEnd, afterFork, err := readPBinForkPoint(ctx, sourceTx, blockReader, blockView, point)
+	header, blockEnd, afterFork, err := readPBinForkPoint(ctx, pbtTemporalBlockFilesTx{TemporalTx: sourceTx, view: blockView}, blockReader, point)
 	if err != nil {
 		return err
 	}
@@ -549,7 +548,7 @@ func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
 	})
 }
 
-func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, blockReader *freezeblocks.BlockReader, blockView *blocksnapshots.View, point pbinConversionPoint) (header *types.Header, blockEnd, afterFork bool, err error) {
+func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, blockReader *freezeblocks.BlockReader, point pbinConversionPoint) (header *types.Header, blockEnd, afterFork bool, err error) {
 	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
 		return nil, false, false, err
@@ -558,7 +557,7 @@ func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, blockReader *freez
 	if err != nil {
 		return nil, false, false, err
 	}
-	header, err = pbtHeaderByNumber(tx, blockReader, blockView, point.BlockNum)
+	header, err = blockReader.HeaderByNumber(ctx, tx, point.BlockNum)
 	if err != nil {
 		return nil, false, false, err
 	}
@@ -566,7 +565,7 @@ func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, blockReader *freez
 		return header, false, false, nil
 	}
 	afterFork = chainConfig.IsBinaryTrie(header.Time)
-	maxTxNum, found, txErr := pbtMaxTxNum(ctx, tx, blockView, point.BlockNum)
+	maxTxNum, found, txErr := blockReader.TxnumReader().MaxExact(ctx, tx, point.BlockNum)
 	if txErr != nil {
 		return nil, false, false, txErr
 	}

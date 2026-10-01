@@ -32,13 +32,46 @@ import (
 )
 
 type trieTestContext struct {
-	mu             sync.Mutex
-	records        map[string][]byte
-	reads          [][]byte
-	writes         []trieTestWrite
-	rejectNilPrev  bool
-	keepTombstones bool
-	readHook       func([]byte)
+	mu                 sync.Mutex
+	records            map[string][]byte
+	reads              [][]byte
+	writes             []trieTestWrite
+	rejectNilPrev      bool
+	keepTombstones     bool
+	readHook           func([]byte)
+	expectedBucketKeys map[string]struct{}
+	releasedParent     bool
+}
+
+func (c *trieTestContext) PBinResetBucketKeys() {
+	c.expectedBucketKeys = make(map[string]struct{})
+}
+
+func (c *trieTestContext) PBinMarkBucketKey(key []byte) {
+	if c.expectedBucketKeys == nil {
+		c.expectedBucketKeys = make(map[string]struct{})
+	}
+	c.expectedBucketKeys[string(key)] = struct{}{}
+}
+
+func (c *trieTestContext) PBinCheckBucketRecords() error {
+	for key, data := range c.records {
+		if len(data) == 0 {
+			continue
+		}
+		if _, err := bucketPathForKey([]byte(key)); err == nil {
+			if _, ok := c.expectedBucketKeys[key]; !ok {
+				return fmt.Errorf("orphan bucket record %x", []byte(key))
+			}
+		}
+	}
+	return nil
+}
+
+func (c *trieTestContext) PBinObserveReleasedChild(child *rowNode) {
+	if child.parent != nil {
+		c.releasedParent = true
+	}
 }
 
 type trieTestWrite struct {

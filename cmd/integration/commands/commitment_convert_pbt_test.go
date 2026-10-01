@@ -272,7 +272,7 @@ func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
 	require.NoError(t, err)
 	var hasCommitmentHistory bool
 	for _, file := range historyFiles {
-		if file.domain == kv.CommitmentDomain && !file.data {
+		if file.domain == kv.CommitmentDomain && !file.data && (strings.HasSuffix(file.path, ".v") || strings.HasSuffix(file.path, ".ef")) {
 			hasCommitmentHistory = true
 			break
 		}
@@ -280,6 +280,22 @@ func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
 	require.True(t, hasCommitmentHistory)
 	setExecutionProgress(t, source.Chaindata, 1)
 	require.NoError(t, attachPBT(t.Context(), source.DataDir, output, "", log.New()))
+
+	t.Run("published set without commitment history", func(t *testing.T) {
+		source, _ := newPBTConversionSource(t)
+		output := filepath.Join(t.TempDir(), "output")
+		require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
+		publishedDirs := datadir.Open(output)
+		files, err := pbtAttachFiles(publishedDirs)
+		require.NoError(t, err)
+		for _, file := range files {
+			if file.domain == kv.CommitmentDomain && (strings.HasSuffix(file.path, ".v") || strings.HasSuffix(file.path, ".ef") || strings.HasSuffix(file.path, ".vi") || strings.HasSuffix(file.path, ".efi")) {
+				require.NoError(t, dir.RemoveFile(file.path))
+			}
+		}
+		setExecutionProgress(t, source.Chaindata, 1)
+		require.NoError(t, attachPBT(t.Context(), source.DataDir, output, "", log.New()))
+	})
 }
 
 func TestConvertPBTSourceWithoutBinaryTables(t *testing.T) {

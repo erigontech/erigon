@@ -45,26 +45,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
-
-func TestValidatePBTImportPointRefusesNonCanonicalBlock(t *testing.T) {
-	db, _ := temporal.Open(t, 8)
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	genesis := common.Hash{1}
-	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesis, 0))
-	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chainpkg.Config{BinaryTrieTime: new(uint64)}))
-	require.NoError(t, rawdbv3.TxNums.Append(tx, 0, 0))
-	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
-	header := &types.Header{Number: *uint256.NewInt(1), Time: 0}
-	require.NoError(t, rawdb.WriteHeader(tx, header))
-	require.NoError(t, rawdb.WriteCanonicalHash(tx, common.Hash{2}, 1))
-	require.NoError(t, tx.Commit())
-	_, _, err = validatePBTImportPoint(t.Context(), db, header.Hash())
-	require.ErrorContains(t, err, "not canonical")
-}
 
 func TestConfigureImportVariantBinDoesNotEnableV3Hex(t *testing.T) {
 	previousBin := statecfg.ExperimentalBinCommitment

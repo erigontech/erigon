@@ -220,19 +220,19 @@ func validatePBTImportTargetSettings(settings *dbstate.ErigonDBSettings) error {
 	return nil
 }
 
-func validatePBTImportPoint(ctx context.Context, db kv.TemporalRwDB, blockHash common.Hash) (uint64, uint64, error) {
-	return validatePBTImportPointWithReader(ctx, db, rawdbv3.TxNums, nil, nil, blockHash)
-}
-
 func validatePBTImportPointWithReader(ctx context.Context, db kv.TemporalRwDB, txNums rawdbv3.TxNumsReader, blockReader *freezeblocks.BlockReader, blockView *blocksnapshots.View, blockHash common.Hash) (uint64, uint64, error) {
 	var blockNum, txNum uint64
 	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		readerTx := tx
+		if blockReader != nil {
+			readerTx = pbtTemporalBlockFilesTx{TemporalTx: tx, view: blockView}
+		}
 		var header *types.Header
 		var err error
 		if blockReader != nil {
-			header, err = pbtHeaderByHash(tx, blockReader, blockView, blockHash)
+			header, err = blockReader.HeaderByHash(ctx, readerTx, blockHash)
 		} else {
-			header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+			header, err = rawdb.ReadHeaderByHash(readerTx, blockHash)
 		}
 		if err != nil {
 			return err
@@ -241,22 +241,29 @@ func validatePBTImportPointWithReader(ctx context.Context, db kv.TemporalRwDB, t
 			return fmt.Errorf("commitment import-pbt: block %s is not in local chaindata", blockHash.Hex())
 		}
 		blockNum = header.Number.Uint64()
-		canonical, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		var canonical common.Hash
+		var canonicalFound bool
+		if blockReader != nil {
+			canonical, canonicalFound, err = blockReader.CanonicalHash(ctx, readerTx, blockNum)
+		} else {
+			canonical, err = rawdb.ReadCanonicalHash(readerTx, blockNum)
+			canonicalFound = canonical != (common.Hash{})
+		}
 		if err != nil {
 			return err
 		}
-		if canonical != blockHash {
+		if !canonicalFound || canonical != blockHash {
 			return fmt.Errorf("commitment import-pbt: block %s is not canonical", blockHash.Hex())
 		}
-		settings, settingsErr := dbstate.ReadErigonDBSettings(tx.Debug().Dirs())
+		settings, settingsErr := dbstate.ReadErigonDBSettings(readerTx.Debug().Dirs())
 		if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
 			return settingsErr
 		}
-		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		genesisHash, err := rawdb.ReadCanonicalHash(readerTx, 0)
 		if err != nil {
 			return err
 		}
-		chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
+		chainConfig, err := rawdb.ReadChainConfig(readerTx, genesisHash)
 		if err != nil {
 			return err
 		}
@@ -269,9 +276,9 @@ func validatePBTImportPointWithReader(ctx context.Context, db kv.TemporalRwDB, t
 		}
 		var found bool
 		if blockReader != nil {
-			txNum, found, err = pbtMaxTxNum(ctx, tx, blockView, blockNum)
+			txNum, found, err = blockReader.TxnumReader().MaxExact(ctx, readerTx, blockNum)
 		} else {
-			txNum, found, err = txNums.MaxExact(ctx, tx, blockNum)
+			txNum, found, err = txNums.MaxExact(ctx, readerTx, blockNum)
 		}
 		if err != nil {
 			return err
@@ -312,7 +319,7 @@ func validatePBTImportPointReadOnly(ctx context.Context, dirs datadir.Dirs, sett
 		return 0, 0, err
 	}
 	defer db.Close()
-	return validatePBTImportPointWithReader(ctx, db, rawdbv3.TxNums, blockReader, blockView, blockHash)
+	return validatePBTImportPointWithReader(ctx, db, blockReader.TxnumReader(), blockReader, blockView, blockHash)
 }
 
 func validatePBTImportTargetFrontierFiles(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, logger log.Logger) error {

@@ -20,16 +20,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	"github.com/erigontech/erigon/db/snaptype2"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -64,54 +60,16 @@ func openPBTBlockReader(ctx context.Context, dirs datadir.Dirs, db kv.RoDB, logg
 	return reader, view, func() { view.Close(); snapshots.Close() }, nil
 }
 
-func pbtHeaderByNumber(tx kv.Getter, reader *freezeblocks.BlockReader, view *blocksnapshots.View, blockNum uint64) (*types.Header, error) {
-	header, err := reader.HeaderFromView(view, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if header != nil {
-		return header, nil
-	}
-	return rawdb.ReadHeaderByNumber(tx, blockNum), nil
+type pbtBlockFilesTx struct {
+	kv.Tx
+	view *blocksnapshots.View
 }
 
-func pbtHeaderByHash(tx kv.Getter, reader *freezeblocks.BlockReader, view *blocksnapshots.View, hash common.Hash) (*types.Header, error) {
-	header, err := rawdb.ReadHeaderByHash(tx, hash)
-	if err != nil {
-		return nil, err
-	}
-	if header != nil {
-		return header, nil
-	}
-	for _, segment := range view.Headers() {
-		for blockNum := segment.From(); blockNum < segment.To(); blockNum++ {
-			header, err := reader.HeaderFromView(view, blockNum)
-			if err != nil {
-				return nil, err
-			}
-			if header != nil && header.Hash() == hash {
-				return header, nil
-			}
-		}
-	}
-	return nil, nil
+func (tx pbtBlockFilesTx) BlockFilesRoTx() *blocksnapshots.View { return tx.view }
+
+type pbtTemporalBlockFilesTx struct {
+	kv.TemporalTx
+	view *blocksnapshots.View
 }
 
-func pbtMaxTxNum(ctx context.Context, tx kv.Tx, view *blocksnapshots.View, blockNum uint64) (uint64, bool, error) {
-	maxTxNum, found, err := rawdbv3.TxNums.MaxExact(ctx, tx, blockNum)
-	if err != nil || found {
-		return maxTxNum, found, err
-	}
-	segment, ok := view.Segment(snaptype2.Bodies, blockNum)
-	if !ok {
-		return 0, false, nil
-	}
-	body, _, err := freezeblocks.BodyForTxnFromSnapshot(blockNum, segment, nil)
-	if err != nil {
-		return 0, false, err
-	}
-	if body == nil || body.TxCount == 0 {
-		return 0, false, nil
-	}
-	return body.BaseTxnID.U64() + uint64(body.TxCount) - 1, true, nil
-}
+func (tx pbtTemporalBlockFilesTx) BlockFilesRoTx() *blocksnapshots.View { return tx.view }

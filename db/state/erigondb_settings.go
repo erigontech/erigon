@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 
@@ -168,6 +169,13 @@ func ReadErigonDBSettings(dirs datadir.Dirs) (*ErigonDBSettings, error) {
 }
 
 func EnableCommitmentV3FromFiles(dirs datadir.Dirs) (bool, error) {
+	settings, err := ReadErigonDBSettings(dirs)
+	if err == nil && settings.TrieVariantName() == TrieVariantBin {
+		return false, nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
 	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
 		detected, err := commitmentV3FilesIn(root)
 		if err != nil {
@@ -195,7 +203,8 @@ func commitmentV3FilesIn(root string) (bool, error) {
 			return nil
 		}
 		parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
-		if ok && parsed.TypeString == kv.CommitmentDomain.String() && !parsed.Version.Less(version.V3_0) {
+		if ok && parsed.TypeString == kv.CommitmentDomain.String() && !parsed.Version.Less(version.V3_0) &&
+			(strings.HasSuffix(entry.Name(), ".kv") || strings.HasSuffix(entry.Name(), ".v")) {
 			return errCommitmentV3FilesFound{}
 		}
 		return nil

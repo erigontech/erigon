@@ -37,10 +37,10 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -101,14 +101,16 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	}
 	nodeDirs := datadir.Open(nodePath)
 	publishedDirs := datadir.Open(publishedPath)
-	if _, err := dbstate.EnableCommitmentV3FromFiles(nodeDirs); err != nil {
-		return err
-	}
-	if _, err := dbstate.EnableCommitmentV3FromFiles(publishedDirs); err != nil {
-		return err
-	}
 	marker, err := dbstate.ReadPBTAttachMarker(nodeDirs)
 	if err != nil {
+		return err
+	}
+	if marker == nil {
+		if _, err := dbstate.EnableCommitmentV3FromFiles(nodeDirs); err != nil {
+			return err
+		}
+	}
+	if _, err := dbstate.EnableCommitmentV3FromFiles(publishedDirs); err != nil {
 		return err
 	}
 	absolutePublishedPath, err := filepath.Abs(publishedDirs.DataDir)
@@ -177,13 +179,19 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if err != nil {
 		return err
 	}
-	_, blockView, closeBlockReader, err := openPBTBlockReader(ctx, nodeDirs, rawDB, logger)
+	if marker == nil {
+		if err := checkPBTNodeProgress(ctx, rawDB, blockNum); err != nil {
+			rawDB.Close()
+			return err
+		}
+	}
+	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, nodeDirs, rawDB, logger)
 	if err != nil {
 		rawDB.Close()
 		return err
 	}
 	if marker == nil {
-		if err := checkPBTNodePositionWithFiles(ctx, rawDB, blockView, blockNum, txNum); err != nil {
+		if err := checkPBTNodePositionWithFiles(ctx, rawDB, blockReader, blockView, blockNum, txNum); err != nil {
 			closeBlockReader()
 			rawDB.Close()
 			return err
@@ -321,14 +329,15 @@ func pbtAttachBlockEnd(ctx context.Context, dirs datadir.Dirs, blockNum, txNum u
 		return common.Hash{}, false, false, err
 	}
 	defer tx.Rollback()
-	maxTxNum, found, err := pbtMaxTxNum(ctx, tx, blockView, blockNum)
+	blockTx := pbtBlockFilesTx{Tx: tx, view: blockView}
+	maxTxNum, found, err := blockReader.TxnumReader().MaxExact(ctx, blockTx, blockNum)
 	if err != nil {
 		return common.Hash{}, false, false, err
 	}
 	if !found {
 		return common.Hash{}, false, false, fmt.Errorf("commitment attach-pbt: block %d has no txNum mapping", blockNum)
 	}
-	header, err := pbtHeaderByNumber(tx, blockReader, blockView, blockNum)
+	header, err := blockReader.HeaderByNumber(ctx, blockTx, blockNum)
 	if err != nil {
 		return common.Hash{}, false, false, err
 	}
@@ -695,11 +704,7 @@ func pbtAttachDomain(domain kv.Domain) bool {
 	return slices.Contains(pbtAttachDomains, domain)
 }
 
-func checkPBTNodePosition(ctx context.Context, db kv.RwDB, blockNum, txNum uint64) error {
-	return checkPBTNodePositionWithReader(ctx, db, rawdbv3.TxNums, blockNum, txNum)
-}
-
-func checkPBTNodePositionWithFiles(ctx context.Context, db kv.RwDB, view *blocksnapshots.View, blockNum, txNum uint64) error {
+func checkPBTNodeProgress(ctx context.Context, db kv.RoDB, blockNum uint64) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -711,23 +716,11 @@ func checkPBTNodePositionWithFiles(ctx context.Context, db kv.RwDB, view *blocks
 	}
 	if progress < blockNum {
 		return fmt.Errorf("commitment attach-pbt: node is behind conversion block %d", blockNum)
-	}
-	if progress == blockNum {
-		maxTxNum, found, err := pbtMaxTxNum(ctx, tx, view, blockNum)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fmt.Errorf("commitment attach-pbt: block %d has no txNum mapping", blockNum)
-		}
-		if maxTxNum < txNum {
-			return fmt.Errorf("commitment attach-pbt: node is behind conversion txNum %d", txNum)
-		}
 	}
 	return nil
 }
 
-func checkPBTNodePositionWithReader(ctx context.Context, db kv.RwDB, txNums rawdbv3.TxNumsReader, blockNum, txNum uint64) error {
+func checkPBTNodePositionWithFiles(ctx context.Context, db kv.RoDB, reader *freezeblocks.BlockReader, view *blocksnapshots.View, blockNum, txNum uint64) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -737,11 +730,9 @@ func checkPBTNodePositionWithReader(ctx context.Context, db kv.RwDB, txNums rawd
 	if err != nil {
 		return err
 	}
-	if progress < blockNum {
-		return fmt.Errorf("commitment attach-pbt: node is behind conversion block %d", blockNum)
-	}
 	if progress == blockNum {
-		maxTxNum, found, err := txNums.MaxExact(ctx, tx, blockNum)
+		blockTx := pbtBlockFilesTx{Tx: tx, view: view}
+		maxTxNum, found, err := reader.TxnumReader().MaxExact(ctx, blockTx, blockNum)
 		if err != nil {
 			return err
 		}

@@ -163,49 +163,57 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 		if cell.Prefix != wantPrefix || cell.Left != childResult.Left || cell.Right != childResult.Right {
 			return FoldResult{}, fmt.Errorf("row %x cell %d does not match its child", row.key, slot)
 		}
-		cell.child = nil
-		child.parent = nil
+		t.releaseVerifiedChild(cell, child)
 	}
 	return rowFoldResult(row)
 }
 
 func (t *Trie) verifyBuckets() error {
-	want, err := t.expectedBucketRecords()
+	if _, err := t.expectedBucketRecords(); err != nil {
+		return err
+	}
+	if verifier, ok := t.ctx.(pbinBucketVerifier); ok {
+		return verifier.PBinCheckBucketRecords()
+	}
+	return nil
+}
+
+type pbinBucketVerifier interface {
+	PBinResetBucketKeys()
+	PBinMarkBucketKey([]byte)
+	PBinCheckBucketRecords() error
+}
+
+type pbinVerifierReleaseObserver interface {
+	PBinObserveReleasedChild(*rowNode)
+}
+
+func (t *Trie) releaseVerifiedChild(cell *rowCell, child *rowNode) {
+	cell.child = nil
+	child.parent = nil
+	if observer, ok := t.ctx.(pbinVerifierReleaseObserver); ok {
+		observer.PBinObserveReleasedChild(child)
+	}
+}
+
+func (t *Trie) verifyBucketRecord(key []byte, descriptor bucketDescriptor) error {
+	data, _, err := t.ctx.Branch(key)
 	if err != nil {
 		return err
 	}
-	for key := range want {
-		descriptor := want[key]
-		data, _, err := t.ctx.Branch([]byte(key))
-		if err != nil {
-			return err
-		}
-		if len(data) == 0 {
-			return fmt.Errorf("bucket record %x is missing", []byte(key))
-		}
-		record := descriptor.record()
-		wantData, err := EncodeRecord([]byte(key), &record)
-		if err != nil {
-			return err
-		}
-		if !bytes.Equal(data, wantData) {
-			return fmt.Errorf("bucket record %x does not match its upper cell", []byte(key))
-		}
-		if _, err := DecodeRecord([]byte(key), data); err != nil {
-			return err
-		}
+	if len(data) == 0 {
+		return fmt.Errorf("bucket record %x is missing", key)
 	}
-	if lister, ok := t.ctx.(interface{ Records() map[string][]byte }); ok {
-		for key, data := range lister.Records() {
-			if len(data) == 0 {
-				continue
-			}
-			if _, err := bucketPathForKey([]byte(key)); err == nil {
-				if _, ok := want[key]; !ok {
-					return fmt.Errorf("orphan bucket record %x", []byte(key))
-				}
-			}
-		}
+	record := descriptor.record()
+	wantData, err := EncodeRecord(key, &record)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(data, wantData) {
+		return fmt.Errorf("bucket record %x does not match its upper cell", key)
+	}
+	if _, err := DecodeRecord(key, data); err != nil {
+		return err
 	}
 	return nil
 }

@@ -340,13 +340,20 @@ func (t *Trie) rowKeys(row *rowNode) ([][]byte, error) {
 }
 
 func (t *Trie) expectedBucketRecords() (map[string]bucketDescriptor, error) {
-	records := make(map[string]bucketDescriptor)
+	if verifier, ok := t.ctx.(pbinBucketVerifier); ok {
+		verifier.PBinResetBucketKeys()
+	}
 	add := func(path *eip8297.Bitpath, descriptor bucketDescriptor) error {
 		key, err := EncodeRowKey(path)
 		if err != nil {
 			return err
 		}
-		records[string(key)] = descriptor
+		if err := t.verifyBucketRecord(key, descriptor); err != nil {
+			return err
+		}
+		if verifier, ok := t.ctx.(pbinBucketVerifier); ok {
+			verifier.PBinMarkBucketKey(key)
+		}
 		return nil
 	}
 	var visit func(*rowNode) error
@@ -376,8 +383,10 @@ func (t *Trie) expectedBucketRecords() (map[string]bucketDescriptor, error) {
 							return err
 						}
 						if err := add(&bucketPath, bucketDescriptor{form: RowRoot, row: child}); err != nil {
+							t.releaseVerifiedChild(cell, child)
 							return err
 						}
+						t.releaseVerifiedChild(cell, child)
 					} else if err := add(&bucketPath, bucketDescriptor{form: ExtRoot, self: full.Slice(264, full.BitLen), left: cell.Left, right: cell.Right}); err != nil {
 						return err
 					}
@@ -389,8 +398,10 @@ func (t *Trie) expectedBucketRecords() (map[string]bucketDescriptor, error) {
 						return err
 					}
 					if err := visit(child); err != nil {
+						t.releaseVerifiedChild(cell, child)
 						return err
 					}
+					t.releaseVerifiedChild(cell, child)
 				}
 			}
 		}
@@ -421,8 +432,10 @@ func (t *Trie) expectedBucketRecords() (map[string]bucketDescriptor, error) {
 					return nil, err
 				}
 				if err := add(&bucketPath, bucketDescriptor{form: RowRoot, row: row}); err != nil {
+					root.topRow = nil
 					return nil, err
 				}
+				root.topRow = nil
 			} else if err := add(&bucketPath, bucketDescriptor{form: ExtRoot, self: root.self.Slice(264, root.self.BitLen), left: root.left, right: root.right}); err != nil {
 				return nil, err
 			}
@@ -442,5 +455,5 @@ func (t *Trie) expectedBucketRecords() (map[string]bucketDescriptor, error) {
 			}
 		}
 	}
-	return records, nil
+	return nil, nil
 }

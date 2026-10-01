@@ -61,6 +61,42 @@ func TestTrieVerifyReleasesVerifiedRows(t *testing.T) {
 	require.LessOrEqual(t, len(verifier.rows), 2)
 }
 
+func TestTrieVerifyUnlinksVerifiedChildren(t *testing.T) {
+	ctx := newTrieTestContext()
+	entries := make([]Op, 128)
+	for i := range entries {
+		entries[i] = Op{Key: trieCodeKey(byte(i>>8), byte(i), byte(i+1)), Value: testTrieValue(byte(i + 1))}
+	}
+	_, err := NewTrie(ctx).Process(entries)
+	require.NoError(t, err)
+
+	verifier := NewTrie(ctx).newVerifier()
+	root, err := verifier.loadRoot()
+	require.NoError(t, err)
+	row := root.row
+	if row == nil {
+		row, err = verifier.extTopRow(root)
+		require.NoError(t, err)
+	}
+	_, err = verifier.verifyRow(row)
+	require.NoError(t, err)
+	require.False(t, ctx.releasedParent)
+	var check func(*rowNode)
+	check = func(row *rowNode) {
+		branches := 0
+		for slot := range row.cells {
+			if row.cell(slot).Kind == BranchCell {
+				branches++
+				require.Nil(t, row.cell(slot).child)
+			}
+		}
+		require.Positive(t, branches)
+	}
+	if verifier.root != nil {
+		check(row)
+	}
+}
+
 func TestTrieVerifyRejectsWrongRootSelfExtensionBits(t *testing.T) {
 	ctx := newTrieTestContext()
 	a := trieCodeKey(0, 0, 1)
