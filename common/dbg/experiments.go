@@ -158,8 +158,6 @@ var (
 	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
 	TrieBALWarmupers = EnvInt("TRIE_BAL_WARMUPERS", balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
 
-	CommitmentPrefetch = EnvBool("COMMITMENT_PREFETCH", true)
-
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
 
@@ -168,14 +166,10 @@ func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {
 }
 
 func BALCommitmentWarmupReaders() int {
-	readers := 0
-	if ReadAhead {
-		readers += max(TrieBALWarmupers, 0)
+	if !ReadAhead {
+		return 0
 	}
-	if CommitmentPrefetch {
-		readers += max(TrieBALWarmupers, 0)
-	}
-	return readers
+	return max(TrieBALWarmupers, 0)
 }
 
 func ReadAheadWorkerReaders() int {

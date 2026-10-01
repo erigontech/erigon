@@ -97,9 +97,14 @@ func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
 		require.NoError(t, tx.Commit())
 	}()
 
-	root := func(prefetch bool) []byte {
-		defer func(prev bool) { dbg.CommitmentPrefetch = prev }(dbg.CommitmentPrefetch)
-		dbg.CommitmentPrefetch = prefetch
+	root := func(prefetch, amsterdam bool) []byte {
+		defer func(readAhead bool, workers int) {
+			dbg.ReadAhead, dbg.TrieBALWarmupers = readAhead, workers
+		}(dbg.ReadAhead, dbg.TrieBALWarmupers)
+		dbg.ReadAhead, dbg.TrieBALWarmupers = true, 0
+		if prefetch {
+			dbg.TrieBALWarmupers = 2
+		}
 
 		tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
 		require.NoError(t, err)
@@ -121,7 +126,7 @@ func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
 			cc.handleMessage(ctx, &txResult{
 				blockNum: 2,
 				txNum:    txNum,
-				rules:    &chain.Rules{},
+				rules:    &chain.Rules{IsAmsterdam: amsterdam},
 				writes:   nonceBalanceWrites(accounts.InternAddress(addr), 2, *uint256.NewInt(20)),
 			})
 		}
@@ -129,12 +134,13 @@ func TestCalculatorRootUnchangedByBranchPrefetch(t *testing.T) {
 		cc.handleMessage(ctx, newTestBlockResult(2, common.Hash{0x02}, lastTxNum, false))
 		finished := cc.prefetch == nil
 		cc.Stop()
-		require.Equal(t, prefetch, started, "the first touched key starts the block's prefetch")
+		require.Equal(t, prefetch && !amsterdam, started, "the first touched key starts the prefetch, except on BAL blocks the read-ahead covers")
 		require.True(t, finished, "the prefetch finishes before the round computes")
 		return (<-out).rootHash
 	}
 
-	want := root(false)
+	want := root(false, false)
 	require.NotEmpty(t, want, "computeAndCheck publishes the root with the header mismatch")
-	require.Equal(t, want, root(true), "prefetched branches must yield the same root as direct reads")
+	require.Equal(t, want, root(true, false), "prefetched branches must yield the same root as direct reads")
+	root(true, true)
 }

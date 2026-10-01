@@ -92,6 +92,7 @@ type commitmentCalculator struct {
 	spare *commitment.Updates
 
 	prefetch *commitment.Warmuper
+	balBlock bool
 
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
 	// instead of reallocated — reuse keeps the arena's grown slabs and ext chunks.
@@ -342,8 +343,12 @@ func newCommitmentCalculator(
 		done:                 make(chan struct{}),
 		processedWake:        make(chan struct{}),
 	}
-	if dbg.CommitmentPrefetch && dbg.TrieBALWarmupers > 0 {
-		cc.state.prefetch = func(plainKey []byte) { cc.prefetchKey(workCtx, plainKey) }
+	if dbg.BALCommitmentWarmupReaders() > 0 {
+		cc.state.prefetch = func(plainKey []byte) {
+			if !cc.balBlock {
+				cc.prefetchKey(workCtx, plainKey)
+			}
+		}
 	}
 	return cc, nil
 }
@@ -484,6 +489,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// the lazy-load path and never leaks into the trie fold path.
 		if !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
+			cc.balBlock = r.rules.IsAmsterdam
 			cc.state.ApplyWrites(r.writes, r.rules.IsAmsterdam)
 		}
 

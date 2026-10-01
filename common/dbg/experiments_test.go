@@ -30,13 +30,12 @@ func TestBALCommitmentWarmupWorkersDefault(t *testing.T) {
 }
 
 func TestBALCommitmentWarmupReaders(t *testing.T) {
-	previousEnabled, previousWorkers, previousPrefetch := ReadAhead, TrieBALWarmupers, CommitmentPrefetch
+	previousEnabled, previousWorkers := ReadAhead, TrieBALWarmupers
 	t.Cleanup(func() {
 		ReadAhead = previousEnabled
 		TrieBALWarmupers = previousWorkers
-		CommitmentPrefetch = previousPrefetch
 	})
-	ReadAhead, CommitmentPrefetch = true, false
+	ReadAhead = true
 
 	for _, test := range []struct {
 		workers int
@@ -52,11 +51,6 @@ func TestBALCommitmentWarmupReaders(t *testing.T) {
 	ReadAhead = false
 	TrieBALWarmupers = 6
 	require.Zero(t, BALCommitmentWarmupReaders())
-
-	CommitmentPrefetch = true
-	require.Equal(t, 6, BALCommitmentWarmupReaders(), "the calculator's touched-key prefetch holds its own readers")
-	ReadAhead = true
-	require.Equal(t, 12, BALCommitmentWarmupReaders(), "read-ahead and calculator prefetch can run at once")
 }
 
 func TestReadAheadWorkerReaders(t *testing.T) {
