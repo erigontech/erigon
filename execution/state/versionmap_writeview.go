@@ -181,17 +181,16 @@ func (v *versionMapWriteView) StoragesChanged() iter.Seq2[accounts.Address, map[
 		out := map[accounts.StorageKey]*VersionedWrite[uint256.Int]{}
 		var scratch []VersionedWrite[uint256.Int]
 		for addr, inner := range v.keys.Storages() {
-			if _, skip := reset[addr]; skip {
-				if !yield(addr, inner) {
-					return
-				}
-				continue
-			}
+			_, keepAll := reset[addr]
 			// A destruct wiped the account's storage, so a slot's baseline is zero
 			// rather than the cell predating the destruct, and a write-back of the
 			// pre-destruct value is a real change.
-			lifecycle, _, destroyedAt := v.vm.AccountLifecycleAt(addr, v.txIdx)
-			destructed := lifecycle != LifecycleLive
+			var destructed bool
+			var destroyedAt int
+			if !keepAll {
+				lifecycle, _, da := v.vm.AccountLifecycleAt(addr, v.txIdx)
+				destructed, destroyedAt = lifecycle != LifecycleLive, da
+			}
 			clear(out)
 			if cap(scratch) < len(inner) {
 				scratch = make([]VersionedWrite[uint256.Int], len(inner))
@@ -203,11 +202,13 @@ func (v *versionMapWriteView) StoragesChanged() iter.Seq2[accounts.Address, map[
 				if !ok {
 					val = kw.Val
 				}
-				originVal, origin, originOK := v.vm.ReadStorage(addr, key, v.txIdx)
-				if originOK && origin.Status() == MVReadResultDone &&
-					!(destructed && destroyedAt > origin.Version().TxIndex) &&
-					val.Eq(&originVal) {
-					continue
+				if !keepAll {
+					originVal, origin, originOK := v.vm.ReadStorage(addr, key, v.txIdx)
+					if originOK && origin.Status() == MVReadResultDone &&
+						!(destructed && destroyedAt > origin.Version().TxIndex) &&
+						val.Eq(&originVal) {
+						continue
+					}
 				}
 				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
 				out[key] = &scratch[i]
