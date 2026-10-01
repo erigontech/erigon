@@ -182,7 +182,7 @@ func (v *versionMapWriteView) StoragesChanged() iter.Seq2[accounts.Address, map[
 				for key, w := range inner {
 					originVal, origin, originOK := v.vm.ReadStorage(addr, key, v.txIdx)
 					if originOK && origin.Status() == MVReadResultDone &&
-						!(destructed && destroyedAt > origin.Version().TxIndex) &&
+						!(destructed && destroyedAt >= origin.Version().TxIndex) &&
 						w.Val.Eq(&originVal) {
 						delete(inner, key)
 					}

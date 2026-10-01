@@ -176,6 +176,35 @@ func TestVersionMapWriteView_StoragesChanged(t *testing.T) {
 		"after a destruct, writing the pre-destruct value back is a real change")
 }
 
+// A destruct at the same tx index as the origin wipes that origin too: the read
+// paths only let a cell survive a destruct when it sits strictly above it, so
+// the filter must not treat an equal-index origin as the baseline.
+func TestVersionMapWriteView_DestructAtOriginIndexWipesIt(t *testing.T) {
+	t.Parallel()
+
+	const originTx, myTx = 2, 5
+	addr := getAddress(1)
+	key := accounts.InternKey(uint256.NewInt(0x11).Bytes32())
+	val100 := *uint256.NewInt(100)
+
+	keys := &WriteSet{}
+	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val100})
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: originTx}, val100, true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: originTx}, true, true)
+	writeFor(vm, addr, StoragePath, key, Version{TxIndex: myTx}, val100, true)
+
+	got := map[accounts.StorageKey]uint256.Int{}
+	for _, inner := range NewVersionMapWriteView(keys, vm, myTx).StoragesChanged() {
+		for k, vw := range inner {
+			got[k] = vw.Val
+		}
+	}
+	require.Equal(t, map[accounts.StorageKey]uint256.Int{key: val100}, got,
+		"the origin shares the destruct's tx index, so it was wiped and the write-back is real")
+}
+
 // An account created in this tx has its storage wiped, so its origin is the
 // pre-creation snapshot: a write that happens to equal it is still a real
 // change and must survive the filter.
