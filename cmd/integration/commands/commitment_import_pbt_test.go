@@ -110,6 +110,27 @@ func TestImportPBTReplacesConvertAndAttachWithFilesBeforeCheckpoint(t *testing.T
 	require.NoError(t, rawdbreset.ResetExec(t.Context(), target.Tester.DB))
 	require.NoError(t, target.Tester.ReExecuteTo(t.Context(), 2))
 	buildPBTAcceptanceFilesAt(t, target, 6)
+	convertedTarget, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, convertedTarget.Tester.InsertChain(convertedTarget.Chain))
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), convertedTarget.Tester.DB))
+	require.NoError(t, convertedTarget.Tester.ReExecuteTo(t.Context(), 2))
+	copyPBTStateSalt(t, source, convertedTarget)
+	buildPBTAcceptanceFilesAt(t, convertedTarget, 6)
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	require.NoError(t, attachPBT(t.Context(), convertedTarget.Tester.Dirs.DataDir, converted, "", log.New()))
+	selectPBTCommandSuite(t)
+	convertedReopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(convertedTarget.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(convertedTarget.Genesis),
+		execmoduletester.WithKey(convertedTarget.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	require.NoError(t, convertedReopened.ReExecuteTo(t.Context(), convertedTarget.Chain.TopBlock.NumberU64()))
+	convertedRaw := convertedReopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	t.Cleanup(convertedReopened.Close)
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	before := snapshotTree(t, target.Tester.Dirs.DataDir)
@@ -203,6 +224,13 @@ func TestImportPBTReplacesConvertAndAttachWithFilesBeforeCheckpoint(t *testing.T
 			return err
 		}))
 		require.Equal(t, dualRoot, importedRoot, "imported bin shadow at block %d", block)
+		var convertedRoot []byte
+		require.NoError(t, convertedRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			convertedRoot, err = rawdb.ReadShadowStateRoot(tx, convertedTarget.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		require.Equal(t, dualRoot, convertedRoot, "converted and attached bin shadow at block %d", block)
 	}
 	reopened.Close()
 }
