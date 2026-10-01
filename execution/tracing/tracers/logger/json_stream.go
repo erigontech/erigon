@@ -43,7 +43,7 @@ import (
 type JsonStreamLogger struct {
 	ctx    context.Context
 	cfg    LogConfig
-	stream jsonstream.Stream
+	stream *jsonstream.Stream
 	// Scratch for the hex helpers below. Every result aliases it, so only one is
 	// live at a time: hand it to the stream, which copies, before encoding the next.
 	hexEncodeBuf [128]byte
@@ -56,7 +56,7 @@ type JsonStreamLogger struct {
 }
 
 // NewStructLogger returns a new logger
-func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream jsonstream.Stream) *JsonStreamLogger {
+func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsonstream.Stream) *JsonStreamLogger {
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,
@@ -104,8 +104,7 @@ func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
 	return common.ToStringZeroCopy(append(b, '"'))
 }
 
-// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes. It goes through
-// hexEncodeBuf so a caller's local array does not escape through the Stream interface.
+// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes.
 func (l *JsonStreamLogger) writeWord(word []byte) {
 	padded := l.hexEncodeBuf[:32]
 	clear(padded[copy(padded, word):])

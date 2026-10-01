@@ -108,8 +108,8 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 
 // writeResponse streams result into stream as the response; a result that fails to encode becomes the error.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
-func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) error {
-	return writeResultResponse(stream, msg.ID, func(s *jsonstream.StackStream) error {
+func (msg *jsonrpcMessage) writeResponse(stream *jsonstream.Stream, result any) error {
+	return writeResultResponse(stream, msg.ID, func(s *jsonstream.Stream) error {
 		if isNilPointer(result) {
 			return json.NewEncoder(encoderWriter{s}).Encode(result)
 		}
@@ -131,8 +131,7 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 
 // writeResultResponse writes the response envelope with write filling "result". An error from write
 // is returned for the caller's metrics and logs.
-func writeResultResponse(stream jsonstream.Stream, id json.RawMessage, write func(*jsonstream.StackStream) error) error {
-	s := stream.Open()
+func writeResultResponse(s *jsonstream.Stream, id json.RawMessage, write func(*jsonstream.Stream) error) error {
 	s.WriteObjectStart()
 	s.Field("jsonrpc")
 	s.WriteString(vsn)
@@ -147,8 +146,7 @@ func writeResultResponse(stream jsonstream.Stream, id json.RawMessage, write fun
 
 // WriteFieldOrError writes field with the value write streams. When write fails, a field that got no
 // value is taken back so the object carries only "error"; a partial value is closed and "error" follows.
-func WriteFieldOrError(stream jsonstream.Stream, field string, write func(*jsonstream.StackStream) error) error {
-	s := stream.Open()
+func WriteFieldOrError(s *jsonstream.Stream, field string, write func(*jsonstream.Stream) error) error {
 	mark, depth := len(s.Buffer()), s.Depth()
 	s.Field(field)
 	err := write(s)
@@ -161,7 +159,7 @@ func WriteFieldOrError(stream jsonstream.Stream, field string, write func(*jsons
 
 // encoderWriter hands the stream json.Encoder output without its trailing newline. Encode writes once, after
 // the whole value has encoded.
-type encoderWriter struct{ stream jsonstream.Stream }
+type encoderWriter struct{ stream *jsonstream.Stream }
 
 func (w encoderWriter) Write(b []byte) (int, error) {
 	w.stream.WriteRawBytes(bytes.TrimSuffix(b, []byte{'\n'}))
@@ -285,7 +283,7 @@ type rawResponse []byte
 // transport can stream them instead of first joining them into one buffer.
 type rawBatch [][]byte
 
-func (b rawBatch) writeTo(s jsonstream.Stream) {
+func (b rawBatch) writeTo(s *jsonstream.Stream) {
 	s.WriteArrayStart()
 	for _, answer := range b {
 		s.WriteRawBytes(answer)

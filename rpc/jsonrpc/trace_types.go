@@ -45,7 +45,7 @@ type ParityTraces []ParityTrace
 
 // MarshalFastJSONTo streams trace_block and trace_transaction results in encoding/json's field
 // order and forms. An action or result of a type it does not know fails before the first write.
-func (ts ParityTraces) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (ts ParityTraces) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if ts == nil {
 		s.WriteNil()
 		return nil
@@ -63,7 +63,7 @@ func (ts ParityTraces) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	return nil
 }
 
-func (t *ParityTrace) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (t *ParityTrace) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if err := t.checkKinds(); err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (t *ParityTrace) checkKinds() error {
 	return nil
 }
 
-func (t *ParityTrace) marshalFastJSONTo(s *jsonstream.StackStream) {
+func (t *ParityTrace) marshalFastJSONTo(s *jsonstream.Stream) {
 	s.WriteObjectStart()
 	s.Field("action")
 	switch a := t.Action.(type) {
@@ -131,7 +131,7 @@ func (t *ParityTrace) marshalFastJSONTo(s *jsonstream.StackStream) {
 	s.WriteObjectEnd()
 }
 
-func writeIntElem(s *jsonstream.StackStream, v *int) { s.Int(int64(*v)) }
+func writeIntElem(s *jsonstream.Stream, v *int) { s.Int(int64(*v)) }
 
 type CallTraceAction struct {
 	From     common.Address `json:"from"`
@@ -142,7 +142,7 @@ type CallTraceAction struct {
 	Value    hexutil.U256   `json:"value"`
 }
 
-func (a *CallTraceAction) marshalFastJSONTo(s *jsonstream.StackStream) {
+func (a *CallTraceAction) marshalFastJSONTo(s *jsonstream.Stream) {
 	if a == nil {
 		s.WriteNil()
 		return
@@ -166,7 +166,7 @@ type CreateTraceAction struct {
 	Value          hexutil.U256    `json:"value"`
 }
 
-func (a *CreateTraceAction) marshalFastJSONTo(s *jsonstream.StackStream) {
+func (a *CreateTraceAction) marshalFastJSONTo(s *jsonstream.Stream) {
 	if a == nil {
 		s.WriteNil()
 		return
@@ -189,7 +189,7 @@ type SuicideTraceAction struct {
 	Balance       hexutil.U256   `json:"balance"`
 }
 
-func (a *SuicideTraceAction) marshalFastJSONTo(s *jsonstream.StackStream) {
+func (a *SuicideTraceAction) marshalFastJSONTo(s *jsonstream.Stream) {
 	if a == nil {
 		s.WriteNil()
 		return
@@ -207,7 +207,7 @@ type RewardTraceAction struct {
 	Value      hexutil.U256   `json:"value"`
 }
 
-func (a *RewardTraceAction) marshalFastJSONTo(s *jsonstream.StackStream) {
+func (a *RewardTraceAction) marshalFastJSONTo(s *jsonstream.Stream) {
 	if a == nil {
 		s.WriteNil()
 		return
@@ -227,7 +227,7 @@ type CreateTraceResult struct {
 	StateGasUsed *hexutil.Int64  `json:"stateGasUsed,omitempty"` // amsterdam: signed net state usage for the root frame and each child frame.
 }
 
-func (r *CreateTraceResult) marshalFastJSONTo(s *jsonstream.StackStream) {
+func (r *CreateTraceResult) marshalFastJSONTo(s *jsonstream.Stream) {
 	if r == nil {
 		s.WriteNil()
 		return
@@ -252,7 +252,7 @@ type TraceResult struct {
 	StateGasUsed *hexutil.Int64 `json:"stateGasUsed,omitempty"` // amsterdam: signed net state usage for the root frame and each child frame.
 }
 
-func (r *TraceResult) marshalFastJSONTo(s *jsonstream.StackStream) {
+func (r *TraceResult) marshalFastJSONTo(s *jsonstream.Stream) {
 	if r == nil {
 		s.WriteNil()
 		return

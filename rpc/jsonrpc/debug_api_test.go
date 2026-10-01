@@ -289,7 +289,7 @@ func gasTracingTestChain(t *testing.T) (*execmoduletester.ExecModuleTester, *blo
 	return m, generated, calls
 }
 
-func readGasTrace(t *testing.T, result any, trace func(jsonstream.Stream) error) {
+func readGasTrace(t *testing.T, result any, trace func(*jsonstream.Stream) error) {
 	t.Helper()
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
@@ -307,7 +307,7 @@ func TestTraceGasUsageAcrossRPCPaths(t *testing.T) {
 	var blockTraces []struct {
 		Result traceGasUsage `json:"result"`
 	}
-	readGasTrace(t, &blockTraces, func(stream jsonstream.Stream) error {
+	readGasTrace(t, &blockTraces, func(stream *jsonstream.Stream) error {
 		return api.TraceBlockByNumber(m.Ctx, 1, config, stream)
 	})
 	require.Len(t, blockTraces, len(calls))
@@ -325,14 +325,14 @@ func TestTraceGasUsageAcrossRPCPaths(t *testing.T) {
 	require.Positive(t, *blockTraces[1].Result.GasRefund)
 
 	var manyTraces [][]traceGasUsage
-	readGasTrace(t, &manyTraces, func(stream jsonstream.Stream) error {
+	readGasTrace(t, &manyTraces, func(stream *jsonstream.Stream) error {
 		return api.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, StateContext{BlockNumber: block, TransactionIndex: new(0)}, config, stream)
 	})
 	require.Len(t, manyTraces, 1)
 	require.Len(t, manyTraces[0], len(calls))
 	for i, call := range calls {
 		var txnTrace traceGasUsage
-		readGasTrace(t, &txnTrace, func(stream jsonstream.Stream) error {
+		readGasTrace(t, &txnTrace, func(stream *jsonstream.Stream) error {
 			return api.TraceTransaction(m.Ctx, generated.Blocks[0].Transactions()[i].Hash(), config, stream)
 		})
 		require.Equal(t, blockTraces[i].Result, txnTrace, "transaction %d", i)
@@ -340,7 +340,7 @@ func TestTraceGasUsageAcrossRPCPaths(t *testing.T) {
 		callConfig := *config
 		callConfig.TxIndex = new(hexutil.Uint(i))
 		var callTrace traceGasUsage
-		readGasTrace(t, &callTrace, func(stream jsonstream.Stream) error {
+		readGasTrace(t, &callTrace, func(stream *jsonstream.Stream) error {
 			return api.TraceCall(m.Ctx, call, &block, &callConfig, stream)
 		})
 		require.Equal(t, txnTrace, callTrace, "call %d", i)
@@ -373,7 +373,7 @@ func TestTraceBlockGasExcludesSystemChanges(t *testing.T) {
 				StateGasUsed   uint64 `json:"stateGasUsed"`
 			} `json:"result"`
 		}
-		readGasTrace(t, &traces, func(stream jsonstream.Stream) error {
+		readGasTrace(t, &traces, func(stream *jsonstream.Stream) error {
 			return api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(block.NumberU64()), nil, stream)
 		})
 		require.Len(t, traces, len(block.Transactions()))
@@ -557,7 +557,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)
 
-	newStream := func() (*bytes.Buffer, jsonstream.Stream) {
+	newStream := func() (*bytes.Buffer, *jsonstream.Stream) {
 		var buf bytes.Buffer
 		return &buf, jsonstream.New(&buf)
 	}
@@ -814,7 +814,7 @@ func TestTraceBlockErrorAfterWrite(t *testing.T) {
 	s.WriteObjectStart()
 	s.Field("txHash")
 	s.WriteString("0xdeadbeef")
-	err := rpc.WriteFieldOrError(s, "result", func(*jsonstream.StackStream) error {
+	err := rpc.WriteFieldOrError(s, "result", func(*jsonstream.Stream) error {
 		s.WriteObjectStart()
 		s.Field("from")
 		s.WriteString("0xabcd")
