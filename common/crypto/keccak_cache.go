@@ -66,9 +66,9 @@ func init() {
 		return
 	}
 	go func() {
-		for range time.Tick(10 * time.Second) {
+		for now := range time.Tick(time.Second) {
 			h, m, b := keccakHits.Load(), keccakMisses.Load(), keccakBypass.Load()
-			fmt.Fprintf(os.Stderr, "[keccak-cache] on=%v hits=%d misses=%d bypass(>87B)=%d hit-rate=%.1f%%\n", keccakCacheOn, h, m, b, 100*float64(h)/float64(max(h+m, 1)))
+			fmt.Fprintf(os.Stderr, "[keccak-cache] ts=%d on=%v hits=%d misses=%d bypass(>87B)=%d hit-rate=%.1f%%\n", now.UnixMilli(), keccakCacheOn || keccakInlineOn, h, m, b, 100*float64(h)/float64(max(h+m, 1)))
 		}
 	}()
 }
