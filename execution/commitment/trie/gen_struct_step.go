@@ -82,7 +82,6 @@ func (GenStructStepHashData) GenStructStepData() {}
 // makes decisions about the local structure, i.e. the presence of the prefix groups.
 // `e` parameter is the trie builder, which uses the structure information to assemble trie on the stack and compute its hash.
 // `h` parameter is the hash collector, which is notified whenever branch node is constructed.
-// `data` parameter specified if a hash or a binary string or an account should be emitted.
 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack. Meaning - which children of given prefix have dbutils.HashedAccount records
 // `hasTree` same as `groups`, but meaning - which children of given prefix have dbutils.TrieOfAccountsBucket record
 // `hasHash` same as `groups`, but meaning - which children of given prefix are branch nodes and their hashes can be saved and used on next trie resolution.
