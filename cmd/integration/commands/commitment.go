@@ -321,7 +321,7 @@ var cmdCommitmentRebuild = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		skipFilesDBGapCheck = true
+		skipFilesDBGapCheck = statecfg.ExperimentalCommitmentV3
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
