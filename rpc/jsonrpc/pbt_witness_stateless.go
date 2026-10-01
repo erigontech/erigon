@@ -51,6 +51,9 @@ func pbinExecBlockStatelessly(ctx context.Context, result *ExecutionWitnessResul
 		return common.Hash{}, nil, err
 	}
 	if err := replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
+		if stateless.resolveError != nil {
+			return common.Hash{}, stateless, stateless.resolveError
+		}
 		return common.Hash{}, stateless, err
 	}
 	if stateless.resolveError != nil {
@@ -104,6 +107,12 @@ func (s *pbinWitnessStateless) setPBinSystemCallScope(active bool) {
 
 func (s *pbinWitnessStateless) latchPBinResolveError(err error) {
 	if err != nil && !s.syntheticSystemRead && s.resolveError == nil {
+		s.resolveError = err
+	}
+}
+
+func (s *pbinWitnessStateless) latchPBinCodeError(err error) {
+	if err != nil && s.resolveError == nil {
 		s.resolveError = err
 	}
 }
@@ -365,7 +374,7 @@ func (s *pbinWitnessStateless) ReadAccountCode(address accounts.Address) ([]byte
 	code, ok := s.codes[codeHash]
 	if !ok {
 		err := fmt.Errorf("pbin witness: missing code for account %x with code hash %x", addr, codeHash)
-		s.latchPBinResolveError(err)
+		s.latchPBinCodeError(err)
 		return nil, err
 	}
 	return bytes.Clone(code), nil
@@ -399,6 +408,9 @@ func (s *pbinWitnessStateless) DeleteAccount(address accounts.Address, _ *accoun
 		}
 	}
 	if !s.preStateAccounts[addr] {
+		delete(s.accountUpdates, addr)
+		delete(s.codeUpdates, addr)
+		delete(s.storageWrites, addr)
 		return nil
 	}
 	if err := s.tree.DeleteAccount(addr[:]); err != nil {

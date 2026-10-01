@@ -354,6 +354,30 @@ func TestPBinExecutionWitnessUserSystemAddressCodeSizeProof(t *testing.T) {
 	require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 }
 
+func TestPBinExecutionWitnessRejectsMissingSystemCodeDuringSystemCall(t *testing.T) {
+	system := params.SystemAddress.Value()
+	systemCode := []byte{0x5b, 0x00}
+	beaconCode := append([]byte{0x73}, system[:]...)
+	beaconCode = append(beaconCode, 0x3b, 0x50, 0x00)
+	alloc := types.GenesisAlloc{
+		system:                            {Balance: big.NewInt(5), Code: systemCode},
+		params.BeaconRootsAddress.Value(): {Nonce: 1, Code: beaconCode},
+	}
+	api, m := pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 1, nil, func(int, *blockgen.BlockGen, func(common.Address, *uint256.Int, []byte), func(*uint256.Int, []byte), func(types.Transaction), func(common.Address, *uint256.Int, []byte)) {
+	}, alloc)
+	repairPBinPreForkShadows(t, m, 1000)
+	result := pbtPortWitness(t, api, m, 1)
+	block := pbtPortBlock(t, m, 1)
+	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
+	index := slices.IndexFunc(result.Codes, func(code hexutil.Bytes) bool { return bytes.Equal(code, systemCode) })
+	require.NotEqual(t, -1, index)
+	trimmed := pbtCorpusClone(result)
+	trimmed.Codes = append(trimmed.Codes[:index], trimmed.Codes[index+1:]...)
+	err := verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine)
+	require.ErrorContains(t, err, "missing code")
+	require.NotContains(t, err.Error(), "receipts root mismatch")
+}
+
 func TestPBinExecutionWitnessDelegationToSystemAddressProof(t *testing.T) {
 	system := params.SystemAddress.Value()
 	delegated := common.HexToAddress("0x7700000000000000000000000000000000000077")
@@ -534,7 +558,58 @@ func TestPBinExecutionWitnessRejectsMissingCodeForOutOfGasCall(t *testing.T) {
 	require.NotEqual(t, -1, index)
 	trimmed := pbtCorpusClone(result)
 	trimmed.Codes = append(trimmed.Codes[:index], trimmed.Codes[index+1:]...)
-	require.ErrorContains(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine), "missing code")
+	header := types.CopyHeader(block.HeaderNoCopy())
+	header.ReceiptHash[0] ^= 1
+	tampered := block.WithSeal(header)
+	err := verifyPBinWitnessAgainstBlock(t.Context(), trimmed, tampered, parentRoot, postRoot, m.ChainConfig, m.Engine)
+	require.ErrorContains(t, err, "missing code")
+	require.NotContains(t, err.Error(), "receipts root mismatch")
+}
+
+func TestPBinExecutionWitnessCreate2SelfDestructRecreate(t *testing.T) {
+	factory := common.HexToAddress("0x8c0000000000000000000000000000000000008c")
+	reader := common.HexToAddress("0x8d0000000000000000000000000000000000008d")
+	runtime := []byte{0x33, 0xff}
+	init := pbtCreate2Init(runtime)
+	child := types.CreateAddress2(factory, [32]byte{}, accounts.InternCodeHash(crypto.Keccak256Hash(init)))
+	readerCode := append([]byte{0x73}, child[:]...)
+	readerCode = append(readerCode, 0x3b, 0x50, 0x00)
+	alloc := types.GenesisAlloc{factory: {Code: pbtCreate2Factory(init)}, reader: {Code: readerCode}}
+	generator := func(i int, _ *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), _ func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
+		if i == 0 {
+			addTransaction(factory, uint256.NewInt(0), nil)
+			addTransaction(child, uint256.NewInt(0), nil)
+			addTransaction(factory, uint256.NewInt(0), nil)
+			addTransaction(reader, uint256.NewInt(0), nil)
+			addTransaction(child, uint256.NewInt(0), nil)
+			addTransaction(reader, uint256.NewInt(0), nil)
+		}
+	}
+	api, m := pbinWitnessFixtureWithGeneratorNAllocNoSystemCalls(t, 1000, 1, generator, alloc)
+	repairPBinPreForkShadows(t, m, 1000)
+	result := pbtPortWitness(t, api, m, 1)
+	block := pbtPortBlock(t, m, 1)
+	require.Len(t, block.Transactions(), 6)
+	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
+	for index := range result.Keys {
+		trimmed := pbtCorpusCloneWithout(result, index)
+		require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine), "dropping node %d must fail", index)
+	}
+}
+
+func pbtCreate2Init(runtime []byte) []byte {
+	n := byte(len(runtime))
+	code := []byte{0x5f + n}
+	code = append(code, runtime...)
+	return append(code, 0x60, 0x00, 0x52, 0x60, n, 0x60, 32-n, 0xf3)
+}
+
+func pbtCreate2Factory(init []byte) []byte {
+	n := byte(len(init))
+	code := []byte{0x5f + n}
+	code = append(code, init...)
+	code = append(code, 0x60, 0x00, 0x52, 0x60, 0x00, 0x60, n, 0x60, 32-n, 0x60, 0x00, 0xf5)
+	return append(code, 0x00)
 }
 
 func TestPBinWitnessPreByzantiumGates(t *testing.T) {
