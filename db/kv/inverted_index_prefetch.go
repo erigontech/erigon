@@ -32,6 +32,23 @@ func NewInvertedIndexPrefetcher(db RoDB, table string, workers uint64) *Inverted
 	return &InvertedIndexPrefetcher{db: db, table: table, workers: workers}
 }
 
+func (p *InvertedIndexPrefetcher) Prefetch(ctx context.Context, pairs [][2][]byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	parts := int(min(p.workers, uint64(len(pairs))))
+	var g errgroup.Group
+	for part := range parts {
+		g.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return p.fetch(ctx, pairs[len(pairs)*part/parts:len(pairs)*(part+1)/parts])
+		})
+	}
+	return g.Wait()
+}
+
 func (p *InvertedIndexPrefetcher) fetch(ctx context.Context, pairs [][2][]byte) error {
 	tx, err := p.db.BeginRo(WithNonBlockingAcquire(ctx))
 	if err != nil {
@@ -55,21 +72,4 @@ func (p *InvertedIndexPrefetcher) fetch(ctx context.Context, pairs [][2][]byte) 
 		}
 	}
 	return nil
-}
-
-func (p *InvertedIndexPrefetcher) Prefetch(ctx context.Context, pairs [][2][]byte) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	parts := int(min(p.workers, uint64(len(pairs))))
-	var g errgroup.Group
-	for part := range parts {
-		g.Go(func() error {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			return p.fetch(ctx, pairs[len(pairs)*part/parts:len(pairs)*(part+1)/parts])
-		})
-	}
-	return g.Wait()
 }
