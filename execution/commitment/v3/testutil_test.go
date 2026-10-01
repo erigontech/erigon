@@ -255,6 +255,17 @@ func liveStorageRecords(records map[string][]byte) map[string][]byte {
 	return records
 }
 
+func requireLiveRecords(t *testing.T, want, got map[string][]byte, label string) {
+	t.Helper()
+	want, got = liveStorageRecords(want), liveStorageRecords(got)
+	for key, value := range got {
+		wantValue, ok := want[key]
+		require.True(t, ok, "%s: record %x is not in a trie rebuilt from the same state (%d records, rebuilt %d)", label, key, len(got), len(want))
+		require.Equal(t, wantValue, value, "%s: record %x differs from the rebuilt trie's", label, key)
+	}
+	require.Len(t, got, len(want), "%s: record count", label)
+}
+
 func testUpdates(t *testing.T, mode commitment.Mode, ops []commitmenttest.Op) *commitment.Updates {
 	t.Helper()
 	updates := commitment.NewUpdates(mode, t.TempDir(), commitment.KeyToHexNibbleHash)

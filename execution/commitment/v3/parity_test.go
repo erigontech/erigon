@@ -111,7 +111,9 @@ var (
 func differential(t *testing.T, c commitmenttest.Case, specs []runner.RunSpec) ([][]byte, map[string][]byte, []int) {
 	t.Helper()
 	c.Assertions = commitmenttest.Assertions{TolerateHPHDrift: c.Assertions.TolerateHPHDrift, ProcessNoError: true, ZeroAccountReads: true, ZeroStorageReads: true, StateReadEngines: []string{"v3", "v3-reload", "fresh-v3"}}
-	modes := []runner.RunSpec{specs[0], {Name: "fresh-v3", Mode: commitment.ModeCollect, Workers: 1, Fresh: true}, {Name: "fresh-hph", Mode: commitment.ModeUpdate, Fresh: true}}
+	v3 := specs[0]
+	v3.Context.CheckPrevious = true
+	modes := []runner.RunSpec{v3, {Name: "fresh-v3", Mode: commitment.ModeCollect, Workers: 1, Fresh: true, Context: runner.ContextSpec{CheckPrevious: true}}, {Name: "fresh-hph", Mode: commitment.ModeUpdate, Fresh: true}}
 	got := runner.Compare(t, c, append(modes, specs[1:]...), openTestTrie)
 	roots := make([][]byte, len(c.Rounds))
 	state := make(commitmenttest.State)
@@ -119,7 +121,9 @@ func differential(t *testing.T, c commitmenttest.Case, specs []runner.RunSpec) (
 		round := &got[0].Rounds[i]
 		roots[i] = round.Root
 		state.Apply(c.Rounds[i])
-		checkDifferentialRecords(t, state, round.Records, fmt.Sprintf("case=%s seed=%+v round=%d", c.ID, c.Seed, i))
+		label := fmt.Sprintf("case=%s seed=%+v round=%d", c.ID, c.Seed, i)
+		checkDifferentialRecords(t, state, round.Records, label)
+		requireLiveRecords(t, got[1].Rounds[i].Records, round.Records, label)
 	}
 	var hphDrift []int
 	for _, run := range got {
@@ -299,6 +303,31 @@ func TestDifferential(t *testing.T) {
 			{Kind: "stress", Rounds: 60, Accounts: 200, Slots: 40, OpsPerRound: 8},
 		} {
 			runWorlds(t, spec, 4)
+		}
+	})
+
+	t.Run("pending_collapse", func(t *testing.T) {
+		hashedPrefix := func(prefix ...byte) []byte {
+			for i := 0; ; i++ {
+				addr := commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-address", Size: length.Addr}, i)
+				if bytes.HasPrefix(commitment.KeyToHexNibbleHash(addr), prefix) {
+					return addr
+				}
+			}
+		}
+		account := func(key []byte, number int) commitmenttest.Op {
+			return accountOp(key, commitmenttest.AccountSpec{Kind: "parity", Number: number})
+		}
+		a, b, c, d, e := hashedPrefix(3, 1), hashedPrefix(3, 2), hashedPrefix(3, 5), hashedPrefix(9, 0), hashedPrefix(9, 1)
+		seed := []commitmenttest.Op{account(a, 1), account(b, 2), account(d, 3), account(e, 4)}
+		for _, tc := range []struct {
+			name string
+			next []commitmenttest.Op
+		}{
+			{"delete", []commitmenttest.Op{{Key: a, Delete: true}, account(d, 5)}},
+			{"delete_and_recreate", []commitmenttest.Op{{Key: a, Delete: true}, account(c, 6), account(d, 5)}},
+		} {
+			differential(t, commitmenttest.Case{ID: "pending_collapse/" + tc.name, Rounds: [][]commitmenttest.Op{seed, tc.next}}, []runner.RunSpec{{Name: "v3", Mode: commitment.ModeCollect, Workers: 4}})
 		}
 	})
 

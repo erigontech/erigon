@@ -173,6 +173,8 @@ func applyDeltas(parts deltaParts, putBranch func(key, data, prev []byte) error)
 }
 
 func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *deltaParts) ([32]byte, error) {
+	g.dropDead(n, n.dead, acc)
+	n.dead = nil
 	for nib := range 16 {
 		bit := uint16(1) << nib
 		if n.childMask&bit == 0 || n.leafMask&bit != 0 {
@@ -214,6 +216,27 @@ func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *d
 	}
 	acc.add(recordDelta{Key: key, Data: data, Prev: prev})
 	return hash, nil
+}
+
+func (g graph) dropDead(holder *node, dead []*node, acc *deltaParts) {
+	for _, d := range dead {
+		if len(d.raw) != 0 && !hasNodeAt(holder, d.path) {
+			acc.add(recordDelta{Key: nodeKey(g.plane, g.addrHash, d.path, nil), Data: []byte{}, Prev: d.raw})
+		}
+		g.dropDead(holder, d.dead, acc)
+	}
+}
+
+func hasNodeAt(n *node, path []byte) bool {
+	if child := rootExtensionChild(n); child != nil {
+		n = child
+	}
+	for len(n.path) < len(path) && bytes.HasPrefix(path, n.path) {
+		if n = n.child(int(path[len(n.path)])); n == nil {
+			return false
+		}
+	}
+	return bytes.Equal(n.path, path)
 }
 
 func (g graph) childExt(n, child, root *node) []byte {
@@ -276,6 +299,9 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan fol
 	if err := promoteRootExtension(root); err != nil {
 		return nil, err
 	}
+	var acc deltaParts
+	g.dropDead(root, root.dead, &acc)
+	root.dead = nil
 	var accs []deltaParts
 	if plan.parallel() && len(root.path) == 0 {
 		var err error
@@ -283,7 +309,6 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan fol
 			return nil, err
 		}
 	}
-	var acc deltaParts
 	if _, err := g.materialize(ctx, root, root, &acc); err != nil {
 		return nil, err
 	}
