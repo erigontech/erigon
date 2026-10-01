@@ -31,6 +31,20 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func TestExecutionPayloadToEth1BlockRejectsNilConfig(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.GloasVersion} {
+		t.Run(version.String(), func(t *testing.T) {
+			payload := &ExecutionPayload{}
+			block, err := payload.ToEth1Block(version, nil)
+
+			require.ErrorContains(t, err, "beacon config is required")
+			require.Nil(t, block)
+		})
+	}
+}
+
 func TestExecutionPayloadBlockRoundTrip(t *testing.T) {
 	t.Parallel()
 

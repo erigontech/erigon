@@ -4,6 +4,7 @@
 package engine_types
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -73,7 +74,11 @@ func ExecutionPayloadFromBlock(block *types.Block) (*ExecutionPayload, error) {
 }
 
 // ToEth1Block converts a payload to CL form without filling missing extra data or withdrawals.
+// A non-nil beacon configuration is required.
 func (p *ExecutionPayload) ToEth1Block(version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) (*cltypes.Eth1Block, error) {
+	if beaconCfg == nil {
+		return nil, errors.New("beacon config is required")
+	}
 	block := cltypes.NewEth1Block(version, beaconCfg)
 	block.ParentHash = p.ParentHash
 	block.FeeRecipient = p.FeeRecipient
@@ -113,11 +118,7 @@ func (p *ExecutionPayload) ToEth1Block(version clparams.StateVersion, beaconCfg 
 	block.Transactions = solid.NewTransactionsSSZFromTransactions(txBytes)
 
 	if p.Withdrawals != nil {
-		maxWithdrawals := 16
-		if beaconCfg != nil {
-			maxWithdrawals = int(beaconCfg.MaxWithdrawalsPerPayload)
-		}
-		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](maxWithdrawals, 44)
+		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(beaconCfg.MaxWithdrawalsPerPayload), 44)
 		for _, w := range p.Withdrawals {
 			block.Withdrawals.Append(&cltypes.Withdrawal{
 				Index:     uint64(w.Index),
@@ -132,11 +133,7 @@ func (p *ExecutionPayload) ToEth1Block(version clparams.StateVersion, beaconCfg 
 		block.SlotNumber = uint64(*p.SlotNumber)
 	}
 	if p.BlockAccessList != nil && len(*p.BlockAccessList) > 0 {
-		maxBytes := uint64(1073741824) // MAX_BYTES_PER_TRANSACTION default
-		if beaconCfg != nil {
-			maxBytes = beaconCfg.MaxBytesPerTransaction
-		}
-		block.BlockAccessList = solid.NewByteListSSZ(maxBytes)
+		block.BlockAccessList = solid.NewByteListSSZ(beaconCfg.MaxBytesPerTransaction)
 		if err := block.BlockAccessList.SetBytes(*p.BlockAccessList); err != nil {
 			return nil, err
 		}
