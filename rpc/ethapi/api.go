@@ -358,14 +358,14 @@ type Account struct {
 }
 
 func NewRevertError(result *evmtypes.ExecutionResult) *RevertError {
-	reason, errUnpack := abi.UnpackRevert(result.Revert())
+	reason, errUnpack := abi.UnpackRevert(result.RevertNoCopy())
 	err := errors.New("execution reverted")
 	if errUnpack == nil {
 		err = fmt.Errorf("execution reverted: %v", reason)
 	}
 	return &RevertError{
 		error:  err,
-		reason: hexutil.Encode(result.Revert()),
+		reason: hexutil.Encode(result.RevertNoCopy()),
 	}
 }
 

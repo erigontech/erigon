@@ -96,19 +96,31 @@ func (result *ExecutionResult) Failed() bool { return result.Err != nil }
 // Return is a helper function to help caller distinguish between revert reason
 // and function return. Return returns the data after execution if no error occurs.
 func (result *ExecutionResult) Return() []byte {
+	return bytes.Clone(result.ReturnNoCopy())
+}
+
+// ReturnNoCopy is Return without the defensive copy. The caller must not retain
+// or mutate the result beyond the lifetime of the ExecutionResult.
+func (result *ExecutionResult) ReturnNoCopy() []byte {
 	if result.Err != nil {
 		return nil
 	}
-	return bytes.Clone(result.ReturnData)
+	return result.ReturnData
 }
 
 // Revert returns the concrete revert reason if the execution is aborted by `REVERT`
 // opcode. Note the reason can be nil if no data supplied with revert opcode.
 func (result *ExecutionResult) Revert() []byte {
+	return bytes.Clone(result.RevertNoCopy())
+}
+
+// RevertNoCopy is Revert without the defensive copy, under the same caller rules
+// as ReturnNoCopy.
+func (result *ExecutionResult) RevertNoCopy() []byte {
 	if !result.Reverted {
 		return nil
 	}
-	return bytes.Clone(result.ReturnData)
+	return result.ReturnData
 }
 
 type (

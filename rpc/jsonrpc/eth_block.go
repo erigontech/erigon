@@ -197,7 +197,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if result.Err != nil {
 			jsonResult["error"] = result.Err.Error()
 		} else {
-			jsonResult["value"] = common.BytesToHash(result.Return())
+			jsonResult["value"] = common.BytesToHash(result.ReturnNoCopy())
 		}
 
 		results = append(results, jsonResult)

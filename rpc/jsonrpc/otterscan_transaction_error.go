@@ -35,5 +35,5 @@ func (api *OtterscanAPIImpl) GetTransactionError(ctx context.Context, hash commo
 		return nil, err
 	}
 
-	return result.Revert(), nil
+	return result.RevertNoCopy(), nil
 }

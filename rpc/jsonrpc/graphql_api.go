@@ -479,10 +479,10 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 	}
 
 	if errors.Is(result.Err, vm.ErrExecutionReverted) {
-		return &GraphQLCallResult{Data: result.Revert(), GasUsed: result.ReceiptGasUsed, Status: 0}, nil
+		return &GraphQLCallResult{Data: result.RevertNoCopy(), GasUsed: result.ReceiptGasUsed, Status: 0}, nil
 	}
 
-	return &GraphQLCallResult{Data: result.Return(), GasUsed: result.ReceiptGasUsed, Status: 1}, nil
+	return &GraphQLCallResult{Data: result.ReturnNoCopy(), GasUsed: result.ReceiptGasUsed, Status: 1}, nil
 }
 
 func (api *GraphQLAPIImpl) EstimateGas(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error) {
