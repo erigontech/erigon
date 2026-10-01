@@ -506,9 +506,9 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 	if b.syncedData.Syncing() {
 		return fmt.Errorf("%w: syncing", ErrIgnore)
 	}
-	currentSlot := b.syncedData.HeadSlot()
+	currentSlot := b.ethClock.GetCurrentSlot()
 	if currentSlot < msg.Block.Slot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Block.Slot) {
-		return fmt.Errorf("%w: block is not from a future slot: %d > %d", ErrIgnore, currentSlot, msg.Block.Slot)
+		return fmt.Errorf("%w: block is from a future slot: %d > %d", ErrIgnore, msg.Block.Slot, currentSlot)
 	}
 	if b.beaconCfg.SlotsPerEpoch == 0 {
 		return errors.New("slots per epoch is zero")

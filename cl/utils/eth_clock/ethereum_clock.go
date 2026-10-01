@@ -78,6 +78,7 @@ type ethereumClockImpl struct {
 	genesisValidatorsRoot common.Hash
 	beaconCfg             *clparams.BeaconChainConfig
 	forkDigestToVersion   map[common.Bytes4]clparams.StateVersion
+	now                   func() time.Time
 }
 
 func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, beaconCfg *clparams.BeaconChainConfig) EthereumClock {
@@ -86,6 +87,7 @@ func NewEthereumClock(genesisTime uint64, genesisValidatorsRoot common.Hash, bea
 		beaconCfg:             beaconCfg,
 		genesisValidatorsRoot: genesisValidatorsRoot,
 		forkDigestToVersion:   make(map[common.Bytes4]clparams.StateVersion),
+		now:                   time.Now,
 	}
 
 	for _, fork := range forkList(beaconCfg.ForkVersionSchedule) {
@@ -122,24 +124,33 @@ func (t *ethereumClockImpl) GetSlotTime(slot uint64) time.Time {
 }
 
 func (t *ethereumClockImpl) GetCurrentSlot() uint64 {
-	now := uint64(time.Now().Unix())
-	if now < t.genesisTime {
+	return t.slotAt(t.now())
+}
+
+func (t *ethereumClockImpl) slotAt(now time.Time) uint64 {
+	seconds := uint64(now.Unix())
+	if seconds < t.genesisTime {
 		return 0
 	}
-
-	return (now - t.genesisTime) / t.beaconCfg.SecondsPerSlot
+	return (seconds - t.genesisTime) / t.beaconCfg.SecondsPerSlot
 }
 
 func (t *ethereumClockImpl) GetEpochAtSlot(slot uint64) uint64 {
 	return slot / t.beaconCfg.SlotsPerEpoch
 }
 
+// IsSlotCurrentSlotWithMaximumClockDisparity implements the spec's is_current_slot: the current time
+// is within the slot, widened by maximumClockDisparity on both ends.
 func (t *ethereumClockImpl) IsSlotCurrentSlotWithMaximumClockDisparity(slot uint64) bool {
-	slotTime := t.GetSlotTime(slot)
-	currSlot := t.GetCurrentSlot()
-	minSlot := t.GetSlotByTime(slotTime.Add(-maximumClockDisparity))
-	maxSlot := t.GetSlotByTime(slotTime.Add(maximumClockDisparity))
-	return minSlot == currSlot || maxSlot == currSlot
+	// The disparity is shorter than a slot, so only neighbours of the current slot can qualify.
+	// Checking that first also keeps the time arithmetic below from overflowing.
+	now := t.now()
+	currentSlot := t.slotAt(now)
+	if slot > currentSlot+1 || slot+1 < currentSlot {
+		return false
+	}
+	return !now.Add(maximumClockDisparity).Before(t.GetSlotTime(slot)) &&
+		!t.GetSlotTime(slot+1).Add(maximumClockDisparity).Before(now)
 }
 
 func (t *ethereumClockImpl) GetSlotByTime(time time.Time) uint64 {

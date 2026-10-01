@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -56,6 +57,33 @@ func getObjectsForSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controlle
 		ImmediateVerification: true,
 	}
 	return state, msg
+}
+
+// TestSyncCommitteesIgnoresForgedSlotThatAliasesToNow uses the real clock: a slot 2^62 ahead
+// of the current one maps to the same start time under 64-bit arithmetic, but must still be ignored,
+// and before any signature work, since the message signature does not cover the slot.
+func TestSyncCommitteesIgnoresForgedSlotThatAliasesToNow(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockFuncs := &mockFuncs{ctrl: ctrl}
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures // no expectation: any call fails the test
+
+	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	cfg := &clparams.MainnetBeaconConfig
+	midSlotGenesis := uint64(time.Now().Unix()) - state.Slot()*cfg.SecondsPerSlot - cfg.SecondsPerSlot/2
+	ethClock := eth_clock.NewEthereumClock(midSlotGenesis, common.Hash{}, cfg)
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
+	require.NoError(t, syncedDataManager.OnHeadState(state))
+	syncContributionPool := syncpoolmock.NewMockSyncContributionPool(ctrl)
+	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
+	go batchSignatureVerifier.Start()
+	s := NewSyncCommitteeMessagesService(cfg, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, true)
+	require.Equal(t, state.Slot(), ethClock.GetCurrentSlot())
+
+	msg.SyncCommitteeMessage.Slot = state.Slot() + 1<<62
+	require.ErrorIs(t, s.ProcessMessage(context.Background(), new(uint64), msg), ErrIgnore)
 }
 
 func TestSyncCommitteesServiceUnsynced(t *testing.T) {
