@@ -283,12 +283,11 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
 	)
-	vmConfig := vm.Config{}
 	// Create a new context to be used in the EVM environment
 	author := contract
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
+	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vm.Config{})
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
 		State:     0, // state gas reservoir will consume from execution gas for sys calls
