@@ -139,6 +139,11 @@ producer and node must use the network's hash suite; attach refuses a suite
 mismatch. The EIP-8297 reference implementation uses BLAKE3, but the suite is
 a network choice.
 
+For a v3 source without a recorded schema setting, prefix these commands with
+`COMMITMENT_V3=true`. Current commands detect v3 commitment files before they
+open the source. The same environment setting can be used with
+`erigon snapshots export-pbt` and `integration commitment import-pbt`.
+
 `integration commitment rebuild` remains the hex rebuild and has no binary target. Use
 `convert-pbt` to produce the binary files, then publish and attach the output. See
 `docs/pbt-migration.md` for the operator checks and recovery rules.

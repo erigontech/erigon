@@ -2,7 +2,9 @@
 
 This procedure moves a stopped Erigon datadir from a v3 hex commitment to the
 EIP-8297 binary commitment trie (PBT). The producer and the node must use the
-same network state salt.
+same network state salt and hash suite. Commands detect v3 commitment files;
+`COMMITMENT_V3=true` may be set when a wrapper does not perform that detection
+before opening the datadir.
 
 ## Conversion and publication
 
@@ -34,6 +36,29 @@ The producer and node must use the network's state salt and hash suite. Pass
 and its reference implementation uses BLAKE3. Attach refuses a suite mismatch
 and a state-salt mismatch. Attach never writes the node's salts.
 
+For a v3 hex datadir created without the current settings record, the complete
+operator commands are:
+
+```sh
+COMMITMENT_V3=true integration commitment convert-pbt \
+  --datadir=<source-datadir> --output.datadir=<published-datadir> --keep-hex \
+  --experimental.bin-commitment.hash=<suite>
+
+COMMITMENT_V3=true integration commitment attach-pbt \
+  --datadir=<node-datadir> --from=<published-datadir> \
+  --experimental.bin-commitment.hash=<suite>
+
+COMMITMENT_V3=true erigon snapshots export-pbt \
+  --datadir=<datadir> --out=<export-dir>
+
+COMMITMENT_V3=true integration commitment import-pbt \
+  --datadir=<datadir> --snapshot=<pbt-snapshot.bin> \
+  --preimages=<framed.bin> --block=<canonical-block-hash>
+```
+
+The current commands detect v3 files themselves, so the environment variable
+is an explicit setting rather than a requirement for this build.
+
 The converter verifies the written rows, the reference root, and the
 checkpoint before it writes the output settings. If any check fails, remove
 the incomplete output and publish only a successful conversion.
@@ -52,11 +77,13 @@ integration commitment attach-pbt \
 `attachPBT` checks the step size, ranges, hash suite, conversion point, state
 salt, both commitment domains, and every file type that it replaces. For
 accounts, storage and code, the published set must contain the `.kv`, `.bt`,
-`.kvi` and `.kvei` files for the affected ranges. It does not publish or adopt
-history and inverted-index files. Attach keeps the node's own `.v`, `.ef`,
-`.vi` and `.efi` files through `S`, removes files starting after `S`, and
-refuses a state-domain history or index file that spans `S`, because it cannot
-be cut safely. It adopts the state and commitment files through `S`, runs
+`.kvi` and `.kvei` files for the affected ranges. The converter publishes
+commitment history and index files when the source has them; attach accepts
+either set and adopts the published commitment files. It keeps the node's own
+accounts, storage and code `.v`, `.ef`, `.vi` and `.efi` files through `S`,
+removes files starting after `S`, and refuses a state-domain history or index
+file that spans `S`, because it cannot be cut safely. It adopts the state and
+commitment files through `S`, runs
 `ResetExec`, and writes the conversion point and hex+bin settings. It does not
 remove chaindata or block files. At a block-end conversion point before the
 fork, attach writes the PBT root as the shadow root; after the fork it writes

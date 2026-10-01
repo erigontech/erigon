@@ -68,6 +68,7 @@ type Trie struct {
 	upperStops             []eip8297.Bitpath
 	root                   *treeRoot
 	rootLoaded             bool
+	verifyOnly             bool
 	roundPending           bool
 	rootDirty              bool
 	foldedRoot             common.Hash

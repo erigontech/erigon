@@ -91,3 +91,22 @@ func TestMaxTxNumNilCursor(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestMaxExactDoesNotUseTheLatestRowForMissingBlock(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), dirs.Chaindata).MustOpen()
+	t.Cleanup(db.Close)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return TxNums.Append(tx, 10, 99)
+	}))
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		maxTxNum, found, err := TxNums.MaxExact(t.Context(), tx, 9)
+		require.NoError(t, err)
+		require.False(t, found)
+		require.Zero(t, maxTxNum)
+		maxTxNum, err = TxNums.Max(t.Context(), tx, 9)
+		require.NoError(t, err)
+		require.Equal(t, uint64(99), maxTxNum)
+		return nil
+	}))
+}

@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -13,7 +14,9 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -163,6 +166,50 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 func ReadErigonDBSettings(dirs datadir.Dirs) (*ErigonDBSettings, error) {
 	return readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
 }
+
+func EnableCommitmentV3FromFiles(dirs datadir.Dirs) (bool, error) {
+	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		detected, err := commitmentV3FilesIn(root)
+		if err != nil {
+			return false, err
+		}
+		if detected {
+			statecfg.ExperimentalCommitmentV3 = true
+			statecfg.InitSchemas()
+			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func commitmentV3FilesIn(root string) (bool, error) {
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return filepath.SkipDir
+			}
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
+		if ok && parsed.TypeString == kv.CommitmentDomain.String() && !parsed.Version.Less(version.V3_0) {
+			return errCommitmentV3FilesFound{}
+		}
+		return nil
+	})
+	var found errCommitmentV3FilesFound
+	if errors.As(err, &found) {
+		return true, nil
+	}
+	return false, err
+}
+
+type errCommitmentV3FilesFound struct{}
+
+func (errCommitmentV3FilesFound) Error() string { return "commitment v3 files found" }
 
 func ReadErigonDBConversionPoint(dirs datadir.Dirs) (blockNum, txNum uint64, ok bool, err error) {
 	settings, err := ReadErigonDBSettings(dirs)

@@ -114,6 +114,20 @@ func TestResolveErigonDBStepSizeReadsExistingSettings(t *testing.T) {
 	require.Equal(t, uint64(123), got)
 }
 
+func TestEnableCommitmentV3FromFiles(t *testing.T) {
+	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+	})
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+	detected, err := EnableCommitmentV3FromFiles(dirs)
+	require.NoError(t, err)
+	require.True(t, detected)
+	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
+}
+
 func TestErigonDBSettingsTrieVariantRoundTrip(t *testing.T) {
 	t.Parallel()
 	for _, variant := range []string{TrieVariantHex, TrieVariantBin, TrieVariantHexBin} {

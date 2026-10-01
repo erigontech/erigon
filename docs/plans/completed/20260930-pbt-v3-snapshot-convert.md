@@ -126,8 +126,8 @@
    zone `0x00`, code zone `0x01`, storage zone `0xff`, grouped by stem. So the same stream feeds the converter, the
    artifact writer and a new streaming reference root.
 2. The converter feeds the stream through the pbt engine in sorted batches. A range writer places each finished row in
-   the published state-file range of the newest write under it. There is no history and no intermediate state record;
-   every range up to S gets a file.
+   the published state-file range of the newest write under it. Accounts, storage and code history and inverted-index
+   files are omitted; source commitment history and indexes are retained when present. Every range up to S gets a file.
 3. Attach adopts published files, resets the node's execution state with `ResetExec` and re-executes from S. The
    automatic hex stop ends dual mode after the fork window.
 4. Export writes the artifact and the preimage file from one shared pin at a block end. Import rebuilds a test node's
@@ -180,15 +180,18 @@
 ### Converter
 
 - `integration commitment convert-pbt [--keep-hex] --output.datadir <dir>`.
-- the source opens through rebuild's opening path with both commitment domains' files excluded. The read-only source
-  open accepts existing tables without creating the branch's optional binary tables; it reads only headers and `TxNums`
-  from chaindata. `isCommitmentFileName` learns `commitmentbin`; today a dual source's bin files would be linked.
+  - the source opens through rebuild's opening path with both commitment domains' files excluded. The read-only source
+    open accepts existing tables without creating the branch's optional binary tables; it reads only headers and
+    snapshot-aware `TxNums` from chaindata and block snapshots. v3 commitment files are detected before opening, even
+    when the settings file does not record v3. `isCommitmentFileName` learns `commitmentbin`; today a dual source's bin
+    files would be linked.
 - outputs:
   - `--keep-hex`: hex commitment files hardlinked, rows in `CommitmentBinDomain`, `trie_variant = hex+bin`. The source's
     hex must be v3 (state key `0x42`, marker `0x04`). The source is read from files only; every leaf provenance stamp
     must be at or before S. Stamps are file-granular, so a last file whose writes reach F−1 after S is refused with the
-    option to wait for the next step. Ranges starting after S are not published. Otherwise refuse
+    message to wait for the next step. Ranges starting after S are not published. Otherwise refuse
     and say to run `commitment convert --v3` or to collate first.
+    Commitment history and its index/accessors are copied through S when present in the source.
   - without `--keep-hex`: rows in `CommitmentDomain`, `trie_variant = bin`, refused unless S is post-fork (a pre-fork
     bin-only output cannot boot: execution checks its bin root against an MPT header).
 - the output records `trie_hash` and the conversion point at S.
@@ -204,10 +207,13 @@
   1. check the published settings: same step size and ranges as the node's files up to S, hex and bin both present, and
      a `trie_hash` equal to the node's configured suite. The state salt must match the node's state salt; block salts
      remain node-owned. For accounts, storage and code, the published set must carry the `.kv`, `.bt`, `.kvi` and
-     `.kvei` files that attach replaces. Their history and inverted-index files are not published or adopted.
+     `.kvei` files that attach replaces. Commitment history and inverted-index files are published and adopted when
+     present in the source; their absence is accepted. State history and inverted-index files are not published or
+     adopted.
   2. require every published leaf provenance stamp to be at or before S, adopt the published state and commitment files
-     up to S, keep the node's own history and inverted-index files through S, and remove node files starting after S;
-     a state-domain history or index file spanning S is refused because it cannot be cut safely;
+     up to S, keep the node's own accounts, storage and code history and inverted-index files through S, and remove node
+     files starting after S; commitment history and indexes are adopted only when published, and a state-domain history
+     or index file spanning S is refused because it cannot be cut safely;
   3. run `ResetExec` (state, history, commitment tables and stop markers cleared; block data kept);
   4. write `trie_variant = hex+bin`, the published `trie_hash` and the conversion point.
 - on restart `SeekCommitments` restores the checkpoint at S; the node re-executes from there in dual mode. Published
@@ -230,7 +236,8 @@
 
 - one pin serves `export-pbt` and `export-preimages`:
   - the live commitment checkpoint (B, T) of the domain canonical at B;
-  - a real mapping from B to T, with T equal to B's last txNum (`Max(B)` falls back silently when B is absent);
+  - a real mapping from B to T, with T equal to B's last txNum, resolved from the database or block snapshots; a
+    missing mapping is an error rather than a fallback to the latest database row;
   - pre-fork bin-only and post-fork hex-only datadirs refused;
   - before the fork the hex root must equal `header(B).Root`, after it the bin root;
   - no restore of every active domain just to accept a lagging shadow.

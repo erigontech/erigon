@@ -47,6 +47,10 @@ type exportPin struct {
 }
 
 func sharedExportPin(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), logger log.Logger) (exportPin, error) {
+	return sharedExportPinWithTxNumReader(ctx, tx, headerAt, rawdbv3.TxNums, logger)
+}
+
+func sharedExportPinWithTxNumReader(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), txNums rawdbv3.TxNumsReader, logger log.Logger) (exportPin, error) {
 	head, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return exportPin{}, err
@@ -83,7 +87,7 @@ func sharedExportPin(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64
 		return exportPin{}, err
 	}
 	if checkpointFound {
-		if err := checkExportPinTxNum(ctx, tx, checkpointBlock, checkpointTx); err != nil {
+		if err := checkExportPinTxNum(ctx, tx, txNums, checkpointBlock, checkpointTx); err != nil {
 			return exportPin{}, err
 		}
 	}
@@ -103,7 +107,7 @@ func sharedExportPin(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64
 	if checkpointFound && (blockNum != checkpointBlock || txNum != checkpointTx) {
 		return exportPin{}, fmt.Errorf("export pin checkpoint (%d, %d) differs from state record (%d, %d)", blockNum, txNum, checkpointBlock, checkpointTx)
 	}
-	if err := checkExportPinTxNum(ctx, tx, blockNum, txNum); err != nil {
+	if err := checkExportPinTxNum(ctx, tx, txNums, blockNum, txNum); err != nil {
 		return exportPin{}, err
 	}
 	header, err := headerAt(blockNum)
@@ -150,8 +154,8 @@ func exportCheckpoint(tx kv.TemporalTx, domain kv.Domain) (blockNum, txNum uint6
 	return 0, 0, false, nil
 }
 
-func checkExportPinTxNum(ctx context.Context, tx kv.TemporalTx, blockNum, txNum uint64) error {
-	maxTxNum, found, err := rawdbv3.DefaultTxBlockIndexInstance.MaxTxNum(ctx, tx, nil, blockNum)
+func checkExportPinTxNum(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, blockNum, txNum uint64) error {
+	maxTxNum, found, err := txNums.MaxExact(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}

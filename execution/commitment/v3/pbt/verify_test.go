@@ -47,6 +47,20 @@ func TestTrieVerifyRejectsStaleBranchHash(t *testing.T) {
 	require.Error(t, NewTrie(ctx).Verify())
 }
 
+func TestTrieVerifyReleasesVerifiedRows(t *testing.T) {
+	ctx := newTrieTestContext()
+	entries := make([]Op, 512)
+	for i := range entries {
+		entries[i] = Op{Key: trieCodeKey(byte(i>>8), byte(i), byte(i+1)), Value: testTrieValue(byte(i + 1))}
+	}
+	_, err := NewTrie(ctx).Process(entries)
+	require.NoError(t, err)
+
+	verifier := NewTrie(ctx).newVerifier()
+	require.NoError(t, verifier.verify())
+	require.LessOrEqual(t, len(verifier.rows), 2)
+}
+
 func TestTrieVerifyRejectsWrongRootSelfExtensionBits(t *testing.T) {
 	ctx := newTrieTestContext()
 	a := trieCodeKey(0, 0, 1)

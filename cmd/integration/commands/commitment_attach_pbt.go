@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -100,6 +101,12 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	}
 	nodeDirs := datadir.Open(nodePath)
 	publishedDirs := datadir.Open(publishedPath)
+	if _, err := dbstate.EnableCommitmentV3FromFiles(nodeDirs); err != nil {
+		return err
+	}
+	if _, err := dbstate.EnableCommitmentV3FromFiles(publishedDirs); err != nil {
+		return err
+	}
 	marker, err := dbstate.ReadPBTAttachMarker(nodeDirs)
 	if err != nil {
 		return err
@@ -170,12 +177,19 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if err != nil {
 		return err
 	}
+	_, blockView, closeBlockReader, err := openPBTBlockReader(ctx, nodeDirs, rawDB, logger)
+	if err != nil {
+		rawDB.Close()
+		return err
+	}
 	if marker == nil {
-		if err := checkPBTNodePosition(ctx, rawDB, blockNum, txNum); err != nil {
+		if err := checkPBTNodePositionWithFiles(ctx, rawDB, blockView, blockNum, txNum); err != nil {
+			closeBlockReader()
 			rawDB.Close()
 			return err
 		}
 	}
+	closeBlockReader()
 	rawDB.Close()
 	if err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
 		return err
@@ -297,16 +311,27 @@ func pbtAttachBlockEnd(ctx context.Context, dirs datadir.Dirs, blockNum, txNum u
 		return common.Hash{}, false, false, err
 	}
 	defer db.Close()
+	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, dirs, db, log.Root())
+	if err != nil {
+		return common.Hash{}, false, false, err
+	}
+	defer closeBlockReader()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return common.Hash{}, false, false, err
 	}
 	defer tx.Rollback()
-	maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, blockNum)
+	maxTxNum, found, err := pbtMaxTxNum(ctx, tx, blockView, blockNum)
 	if err != nil {
 		return common.Hash{}, false, false, err
 	}
-	header := rawdb.ReadHeaderByNumber(tx, blockNum)
+	if !found {
+		return common.Hash{}, false, false, fmt.Errorf("commitment attach-pbt: block %d has no txNum mapping", blockNum)
+	}
+	header, err := pbtHeaderByNumber(tx, blockReader, blockView, blockNum)
+	if err != nil {
+		return common.Hash{}, false, false, err
+	}
 	if header == nil {
 		return common.Hash{}, false, false, nil
 	}
@@ -563,6 +588,9 @@ func validatePBTAttachFileKinds(nodeFiles, publishedFiles []pbtAttachFile, stepS
 		if file.from*stepSize > endTxNum || !pbtAttachAdoptsFile(file) {
 			continue
 		}
+		if file.domain == kv.CommitmentDomain || file.domain == kv.CommitmentBinDomain {
+			continue
+		}
 		if _, ok := published[pbtAttachFileKind(file)]; !ok {
 			return fmt.Errorf("commitment attach-pbt: published set is missing %s for %s", filepath.Ext(file.path), file.domain)
 		}
@@ -668,6 +696,10 @@ func pbtAttachDomain(domain kv.Domain) bool {
 }
 
 func checkPBTNodePosition(ctx context.Context, db kv.RwDB, blockNum, txNum uint64) error {
+	return checkPBTNodePositionWithReader(ctx, db, rawdbv3.TxNums, blockNum, txNum)
+}
+
+func checkPBTNodePositionWithFiles(ctx context.Context, db kv.RwDB, view *blocksnapshots.View, blockNum, txNum uint64) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -681,9 +713,40 @@ func checkPBTNodePosition(ctx context.Context, db kv.RwDB, blockNum, txNum uint6
 		return fmt.Errorf("commitment attach-pbt: node is behind conversion block %d", blockNum)
 	}
 	if progress == blockNum {
-		maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, blockNum)
+		maxTxNum, found, err := pbtMaxTxNum(ctx, tx, view, blockNum)
 		if err != nil {
 			return err
+		}
+		if !found {
+			return fmt.Errorf("commitment attach-pbt: block %d has no txNum mapping", blockNum)
+		}
+		if maxTxNum < txNum {
+			return fmt.Errorf("commitment attach-pbt: node is behind conversion txNum %d", txNum)
+		}
+	}
+	return nil
+}
+
+func checkPBTNodePositionWithReader(ctx context.Context, db kv.RwDB, txNums rawdbv3.TxNumsReader, blockNum, txNum uint64) error {
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	progress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return err
+	}
+	if progress < blockNum {
+		return fmt.Errorf("commitment attach-pbt: node is behind conversion block %d", blockNum)
+	}
+	if progress == blockNum {
+		maxTxNum, found, err := txNums.MaxExact(ctx, tx, blockNum)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("commitment attach-pbt: block %d has no txNum mapping", blockNum)
 		}
 		if maxTxNum < txNum {
 			return fmt.Errorf("commitment attach-pbt: node is behind conversion txNum %d", txNum)

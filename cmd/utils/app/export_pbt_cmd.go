@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -87,6 +88,9 @@ func doExportPBT(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	if _, err := state.EnableCommitmentV3FromFiles(dirs); err != nil {
+		return err
+	}
 	chainDB, err := mdbx.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
 		return err
@@ -112,13 +116,13 @@ func doExportPBT(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer tx.Rollback()
 	br := freezeblocks.NewBlockReader(blockSnaps)
-	return runExportPBT(ctx, tx, func(blockNum uint64) (*types.Header, error) {
+	return runExportPBTWithTxNumReader(ctx, tx, br.TxnumReader(), func(blockNum uint64) (*types.Header, error) {
 		return br.HeaderByNumber(ctx, tx, blockNum)
 	}, cliCtx.String("out"), logger)
 }
 
 func runExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger) error {
-	return runExportPBTWithReadbackHook(ctx, tx, headerAt, outDir, logger, nil)
+	return runExportPBTWithReadbackHookAndTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, nil)
 }
 
 func RunExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger) error {
@@ -126,10 +130,18 @@ func RunExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (
 }
 
 func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
+	return runExportPBTWithReadbackHookAndTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, beforeReadback)
+}
+
+func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger) error {
+	return runExportPBTWithReadbackHookAndTxNumReader(ctx, tx, txNums, headerAt, outDir, logger, nil)
+}
+
+func runExportPBTWithReadbackHookAndTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
 	if tx == nil || headerAt == nil {
 		return fmt.Errorf("export-pbt: missing input")
 	}
-	pin, err := sharedExportPin(ctx, tx, headerAt, logger)
+	pin, err := sharedExportPinWithTxNumReader(ctx, tx, headerAt, txNums, logger)
 	if err != nil {
 		return err
 	}

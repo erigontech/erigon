@@ -24,10 +24,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
-func (t *Trie) Verify() error {
-	if t.ctx == nil {
-		return fmt.Errorf("nil Patricia context")
-	}
+func (t *Trie) newVerifier() *Trie {
 	verifier := &Trie{
 		ctx:                   t.ctx,
 		rootKey:               bytes.Clone(t.rootKey),
@@ -40,6 +37,7 @@ func (t *Trie) Verify() error {
 		dirtyRows:             make(map[string]*rowNode),
 		bucketDirty:           make(map[string][]byte),
 		mergeCreatedStems:     make(map[string]struct{}),
+		verifyOnly:            true,
 	}
 	if t.ownedPrefix != nil {
 		prefix := *t.ownedPrefix
@@ -48,7 +46,14 @@ func (t *Trie) Verify() error {
 	if len(t.upperStops) != 0 {
 		verifier.upperStops = append([]eip8297.Bitpath(nil), t.upperStops...)
 	}
-	return verifier.verify()
+	return verifier
+}
+
+func (t *Trie) Verify() error {
+	if t.ctx == nil {
+		return fmt.Errorf("nil Patricia context")
+	}
+	return t.newVerifier().verify()
 }
 
 func (t *Trie) verify() error {
@@ -158,6 +163,8 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 		if cell.Prefix != wantPrefix || cell.Left != childResult.Left || cell.Right != childResult.Right {
 			return FoldResult{}, fmt.Errorf("row %x cell %d does not match its child", row.key, slot)
 		}
+		cell.child = nil
+		child.parent = nil
 	}
 	return rowFoldResult(row)
 }

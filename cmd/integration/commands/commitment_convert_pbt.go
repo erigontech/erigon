@@ -36,6 +36,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -127,6 +129,10 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	if err != nil {
 		return err
 	}
+	requestedHash := statecfg.BinCommitmentHash
+	if _, err := dbstate.EnableCommitmentV3FromFiles(sourceDirs); err != nil {
+		return err
+	}
 	configurePBTSourceVariant(sourceSettings)
 	point, err := readPBinSourcePoint(ctx, sourceDirs, sourceSettings, keepHex, logger)
 	if err != nil {
@@ -172,6 +178,11 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		return fmt.Errorf("commitment convert-pbt: open source: %w", err)
 	}
 	defer sourceDB.Close()
+	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, sourceDirs, sourceDB, logger)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: open block snapshots: %w", err)
+	}
+	defer closeBlockReader()
 	sourceAgg := sourceDB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if err := sourceAgg.ReloadFiles(); err != nil {
 		return fmt.Errorf("commitment convert-pbt: reload source files: %w", err)
@@ -191,7 +202,7 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	if err := requirePBinSourceEnd(sourceAgg, point.TxNum); err != nil {
 		return err
 	}
-	header, blockEnd, afterFork, err := readPBinForkPoint(ctx, sourceTx, point)
+	header, blockEnd, afterFork, err := readPBinForkPoint(ctx, sourceTx, blockReader, blockView, point)
 	if err != nil {
 		return err
 	}
@@ -199,7 +210,7 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		return fmt.Errorf("commitment convert-pbt: bin-only output requires a conversion point after the binary trie fork")
 	}
 
-	hashName := statecfg.BinCommitmentHash
+	hashName := requestedHash
 	if hashName == "" && sourceSettings != nil && (variant == dbstate.TrieVariantBin || variant == dbstate.TrieVariantHexBin) {
 		hashName = sourceSettings.TrieHashName()
 	}
@@ -286,6 +297,9 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	}
 	if keepHex {
 		if err := linkPBinHexFiles(sourceDirs.SnapDomain, outputDirs.SnapDomain); err != nil {
+			return err
+		}
+		if err := linkPBinCommitmentFiles(sourceDirs, outputDirs, targetSettings.StepSize, point.TxNum); err != nil {
 			return err
 		}
 	}
@@ -535,7 +549,7 @@ func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
 	})
 }
 
-func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, point pbinConversionPoint) (header *types.Header, blockEnd, afterFork bool, err error) {
+func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, blockReader *freezeblocks.BlockReader, blockView *blocksnapshots.View, point pbinConversionPoint) (header *types.Header, blockEnd, afterFork bool, err error) {
 	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
 		return nil, false, false, err
@@ -544,15 +558,22 @@ func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, point pbinConversi
 	if err != nil {
 		return nil, false, false, err
 	}
-	header = rawdb.ReadHeaderByNumber(tx, point.BlockNum)
+	header, err = pbtHeaderByNumber(tx, blockReader, blockView, point.BlockNum)
+	if err != nil {
+		return nil, false, false, err
+	}
 	if chainConfig == nil || header == nil {
 		return header, false, false, nil
 	}
 	afterFork = chainConfig.IsBinaryTrie(header.Time)
-	maxTxNum, txErr := rawdbv3.TxNums.Max(ctx, tx, point.BlockNum)
-	if txErr == nil {
-		blockEnd = maxTxNum == point.TxNum
+	maxTxNum, found, txErr := pbtMaxTxNum(ctx, tx, blockView, point.BlockNum)
+	if txErr != nil {
+		return nil, false, false, txErr
 	}
+	if !found {
+		return nil, false, false, fmt.Errorf("commitment convert-pbt: block %d has no txNum mapping", point.BlockNum)
+	}
+	blockEnd = maxTxNum == point.TxNum
 	return header, blockEnd, afterFork, nil
 }
 
@@ -577,6 +598,38 @@ func linkPBinHexFiles(sourceDir, outputDir string) error {
 		}
 		if err := os.Link(filepath.Join(sourceDir, entry.Name()), filepath.Join(outputDir, entry.Name())); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func linkPBinCommitmentFiles(sourceDirs, outputDirs datadir.Dirs, stepSize, endTxNum uint64) error {
+	for _, roots := range [][2]string{
+		{sourceDirs.SnapHistory, outputDirs.SnapHistory},
+		{sourceDirs.SnapIdx, outputDirs.SnapIdx},
+		{sourceDirs.SnapAccessors, outputDirs.SnapAccessors},
+	} {
+		entries, err := os.ReadDir(roots[0])
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			parsed, _, ok := snaptype.ParseFileName(roots[0], entry.Name())
+			if !ok || parsed.TypeString != kv.CommitmentDomain.String() || parsed.From*stepSize > endTxNum {
+				continue
+			}
+			if err := os.MkdirAll(roots[1], 0o755); err != nil {
+				return err
+			}
+			if err := os.Link(filepath.Join(roots[0], entry.Name()), filepath.Join(roots[1], entry.Name())); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

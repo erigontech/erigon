@@ -216,6 +216,73 @@ func TestConvertPBTHexSourceKeepHex(t *testing.T) {
 	require.Equal(t, snapshotTree(t, output), snapshotTree(t, secondOutput))
 }
 
+func TestConvertPBTUsesRequestedKeccakSuite(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousHash := statecfg.BinCommitmentHash
+	previousSchema := statecfg.Schema
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.BinCommitmentHash = previousHash
+		statecfg.Schema = previousSchema
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.InitSchemas()
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = commitment.PBinHashKeccak
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
+	source, _ := newPBTConversionSource(t)
+	output := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
+	require.NoError(t, err)
+	require.Equal(t, commitment.PBinHashKeccak, settings.TrieHashName())
+}
+
+func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousHash := statecfg.BinCommitmentHash
+	previousSchema := statecfg.Schema
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.BinCommitmentHash = previousHash
+		statecfg.Schema = previousSchema
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.InitSchemas()
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.EnableHistoricalCommitment()
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, _ := newPBTConversionSource(t)
+	output := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
+	historyFiles, err := pbtAttachFiles(datadir.Open(output))
+	require.NoError(t, err)
+	var hasCommitmentHistory bool
+	for _, file := range historyFiles {
+		if file.domain == kv.CommitmentDomain && !file.data {
+			hasCommitmentHistory = true
+			break
+		}
+	}
+	require.True(t, hasCommitmentHistory)
+	removePBTStateHistoryFrom(t, source.Dirs, 8, 7)
+	setExecutionProgress(t, source.Chaindata, 1)
+	require.NoError(t, attachPBT(t.Context(), source.DataDir, output, "", log.New()))
+}
+
 func TestConvertPBTSourceWithoutBinaryTables(t *testing.T) {
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema

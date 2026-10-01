@@ -34,12 +34,15 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/debug"
 )
 
@@ -82,6 +85,9 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 		return errors.New("commitment import-pbt: block must be a 32-byte hex hash")
 	}
 	dirs := datadir.Open(dataDir)
+	if _, err := dbstate.EnableCommitmentV3FromFiles(dirs); err != nil {
+		return err
+	}
 	settings, settingsErr := dbstate.ReadErigonDBSettings(dirs)
 	if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
 		return settingsErr
@@ -96,7 +102,9 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	if err := validatePBTImportTargetSettings(settings); err != nil {
 		return err
 	}
-	configureImportVariant(dirs)
+	if err := configureImportVariant(dirs); err != nil {
+		return err
+	}
 	blockNum, txNum, err := validatePBTImportPointReadOnly(ctx, dirs, settings, blockHash, logger)
 	if err != nil {
 		return err
@@ -171,7 +179,9 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 		}
 		settingsChanged = true
 	}
-	configureImportVariant(dirs)
+	if err := configureImportVariant(dirs); err != nil {
+		return err
+	}
 	db, err = openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chainName, logger)
 	if err != nil {
 		return err
@@ -211,9 +221,19 @@ func validatePBTImportTargetSettings(settings *dbstate.ErigonDBSettings) error {
 }
 
 func validatePBTImportPoint(ctx context.Context, db kv.TemporalRwDB, blockHash common.Hash) (uint64, uint64, error) {
+	return validatePBTImportPointWithReader(ctx, db, rawdbv3.TxNums, nil, nil, blockHash)
+}
+
+func validatePBTImportPointWithReader(ctx context.Context, db kv.TemporalRwDB, txNums rawdbv3.TxNumsReader, blockReader *freezeblocks.BlockReader, blockView *blocksnapshots.View, blockHash common.Hash) (uint64, uint64, error) {
 	var blockNum, txNum uint64
 	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		header, err := rawdb.ReadHeaderByHash(tx, blockHash)
+		var header *types.Header
+		var err error
+		if blockReader != nil {
+			header, err = pbtHeaderByHash(tx, blockReader, blockView, blockHash)
+		} else {
+			header, err = rawdb.ReadHeaderByHash(tx, blockHash)
+		}
 		if err != nil {
 			return err
 		}
@@ -248,7 +268,11 @@ func validatePBTImportPoint(ctx context.Context, db kv.TemporalRwDB, blockHash c
 			return fmt.Errorf("commitment import-pbt: block %d is before the binary trie fork", blockNum)
 		}
 		var found bool
-		txNum, found, err = rawdbv3.DefaultTxBlockIndexInstance.MaxTxNum(ctx, tx, nil, blockNum)
+		if blockReader != nil {
+			txNum, found, err = pbtMaxTxNum(ctx, tx, blockView, blockNum)
+		} else {
+			txNum, found, err = txNums.MaxExact(ctx, tx, blockNum)
+		}
 		if err != nil {
 			return err
 		}
@@ -265,6 +289,12 @@ func validatePBTImportPointReadOnly(ctx context.Context, dirs datadir.Dirs, sett
 	if err != nil {
 		return 0, 0, err
 	}
+	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, dirs, rawDB, logger)
+	if err != nil {
+		rawDB.Close()
+		return 0, 0, err
+	}
+	defer closeBlockReader()
 	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
 	if err != nil {
 		rawDB.Close()
@@ -282,7 +312,7 @@ func validatePBTImportPointReadOnly(ctx context.Context, dirs datadir.Dirs, sett
 		return 0, 0, err
 	}
 	defer db.Close()
-	return validatePBTImportPoint(ctx, db, blockHash)
+	return validatePBTImportPointWithReader(ctx, db, rawdbv3.TxNums, blockReader, blockView, blockHash)
 }
 
 func validatePBTImportTargetFrontierFiles(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, logger log.Logger) error {
@@ -321,10 +351,10 @@ func validatePBTImportFilesFrontier(domain kv.Domain, files kv.VisibleFiles, txN
 	return nil
 }
 
-func configureImportVariant(dirs datadir.Dirs) {
+func configureImportVariant(dirs datadir.Dirs) error {
 	settings, err := dbstate.ReadErigonDBSettings(dirs)
 	if err != nil || settings == nil {
-		return
+		return nil
 	}
 	statecfg.ExperimentalBinCommitment = settings.TrieVariantName() == dbstate.TrieVariantBin
 	statecfg.ExperimentalHexBinCommitment = settings.TrieVariantName() == dbstate.TrieVariantHexBin
@@ -333,9 +363,14 @@ func configureImportVariant(dirs datadir.Dirs) {
 		statecfg.ExperimentalParallelCommitment = false
 	}
 	statecfg.BinCommitmentHash = settings.TrieHashName()
-	if statecfg.ExperimentalCommitmentV3 {
+	detected, err := dbstate.EnableCommitmentV3FromFiles(dirs)
+	if err != nil {
+		return err
+	}
+	if statecfg.ExperimentalCommitmentV3 || detected {
 		statecfg.InitSchemas()
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	}
 	_ = commitment.SetPBinHashSuite(settings.TrieHashName())
+	return nil
 }

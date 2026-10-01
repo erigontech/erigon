@@ -42,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -101,13 +103,19 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	if _, err := state.EnableCommitmentV3FromFiles(dirs); err != nil {
+		return err
+	}
 	outDir := cliCtx.String("out")
 	tmpDir := cliCtx.String("tmpdir")
 	if tmpDir == "" {
 		tmpDir = dirs.Tmp
 	}
 
-	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	chainDB, err := mdbx.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	if err != nil {
+		return err
+	}
 	defer chainDB.Close()
 	chainConfig := fromdb.ChainConfig(chainDB)
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
@@ -132,11 +140,15 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	headerAt := func(blockNum uint64) (*types.Header, error) {
 		return br.HeaderByNumber(ctx, tx, blockNum)
 	}
-	return runExport(ctx, tx, headerAt, outDir, tmpDir, logger)
+	return runExportWithTxNumReader(ctx, tx, br.TxnumReader(), headerAt, outDir, tmpDir, logger)
 }
 
 func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir, tmpDir string, logger log.Logger) error {
-	pin, err := sharedExportPin(ctx, tx, headerAt, logger)
+	return runExportWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, tmpDir, logger)
+}
+
+func runExportWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, headerAt func(uint64) (*types.Header, error), outDir, tmpDir string, logger log.Logger) error {
+	pin, err := sharedExportPinWithTxNumReader(ctx, tx, headerAt, txNums, logger)
 	if err != nil {
 		return err
 	}
