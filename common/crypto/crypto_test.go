@@ -28,6 +28,7 @@ import (
 	"hash"
 	"os"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -417,8 +418,8 @@ var (
 )
 
 func TestCachedKeccak256MatchesDirect(t *testing.T) {
-	keccakCacheOn = true
-	defer func() { keccakCacheOn = false }()
+	keccakCacheOn, keccakInlineOn = true, true
+	defer func() { keccakCacheOn, keccakInlineOn = false, false }()
 	for n := 0; n <= 100; n++ {
 		in := bytes.Repeat([]byte{byte(n)}, n)
 		for range 2 {
@@ -427,6 +428,19 @@ func TestCachedKeccak256MatchesDirect(t *testing.T) {
 			}
 		}
 	}
+	var wg sync.WaitGroup
+	for g := range 8 {
+		wg.Go(func() {
+			for i := range 20000 {
+				in := []byte{byte(i), byte(i >> 8), byte(g % 2)}
+				if Keccak256Hash(in) != sha3Keccak(in) {
+					t.Errorf("concurrent mismatch %x", in)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
 }
 
 func sha3Keccak(in []byte) (h common.Hash) {

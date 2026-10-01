@@ -81,6 +81,9 @@ func cachedKeccak256(data []byte) common.Hash {
 		return keccak.Sum256(data)
 	}
 	key := maphash.Hash(data)
+	if keccakInlineOn {
+		return inlineKeccak256(key, data)
+	}
 	if keccakLRU != nil {
 		return lruKeccak256(key, data)
 	}
@@ -116,4 +119,49 @@ func lruKeccak256(key uint64, data []byte) common.Hash {
 	copy(e.in[:], data)
 	keccakLRU.Add(key, e)
 	return e.hash
+}
+
+// KECCAK_CACHE_MODE=inline: flat buckets that hold the entry in place; the tag word doubles as the lock.
+const (
+	keccakBucketLocked = 1 << 0
+	keccakBucketAlive  = 1 << 1
+)
+
+type keccakBucket struct {
+	tag  atomic.Uint64
+	n    uint8
+	in   [keccakCacheMaxInput]byte
+	hash common.Hash
+}
+
+var (
+	keccakInlineOn = dbg.EnvString("KECCAK_CACHE_MODE", "") == "inline"
+	keccakBuckets  [1 << 17]keccakBucket
+)
+
+func inlineKeccak256(key uint64, data []byte) common.Hash {
+	b := &keccakBuckets[key&(uint64(len(keccakBuckets))-1)]
+	tag := (key | keccakBucketAlive) &^ keccakBucketLocked
+	if st := b.tag.Load(); st == tag && b.tag.CompareAndSwap(st, st|keccakBucketLocked) {
+		hit := int(b.n) == len(data) && bytes.Equal(b.in[:b.n], data)
+		h := b.hash
+		b.tag.Store(st)
+		if hit {
+			if keccakCacheStats {
+				keccakHits.Add(1)
+			}
+			return h
+		}
+	}
+	if keccakCacheStats {
+		keccakMisses.Add(1)
+	}
+	h := keccak.Sum256(data)
+	if st := b.tag.Load(); st&keccakBucketLocked == 0 && b.tag.CompareAndSwap(st, st|keccakBucketLocked) {
+		b.n = uint8(len(data))
+		copy(b.in[:], data)
+		b.hash = h
+		b.tag.Store(tag)
+	}
+	return h
 }
