@@ -107,12 +107,16 @@ func VerifyPBinDomain(ctx context.Context, tx kv.TemporalTx, aggregator *Aggrega
 	if len(at.Files(domain)) == 0 {
 		return nil
 	}
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(domain))
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(domain))
 	if err != nil {
 		return err
 	}
 	defer domains.Close()
-	trie := domains.GetCommitmentCtx().Trie()
+	commitmentCtx := domains.GetCommitmentCtxForDomain(domain)
+	if commitmentCtx == nil {
+		return fmt.Errorf("pbin verification: commitment domain %s is unavailable", domain)
+	}
+	trie := commitmentCtx.Trie()
 	verifier, ok := trie.(interface{ Verify() error })
 	if !ok {
 		return fmt.Errorf("pbin verification: trie does not support verification")

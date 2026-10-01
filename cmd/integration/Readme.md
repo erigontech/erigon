@@ -132,6 +132,14 @@ integration commitment convert-pbt --datadir=<src> --chain=<chain> --output.data
 # Attach the published output to a stopped node.
 integration commitment attach-pbt --datadir=<node> --chain=<chain> --from=<out> \
   --experimental.bin-commitment.hash=<suite>
+
+# Test-only substitute for conversion and attach.
+integration stage_exec --datadir=<node> --chain=<chain> --block=<X> --experimental.commitment-v3
+erigon snapshots export-pbt --datadir=<node> --chain=<chain> --out=<export>
+integration commitment import-pbt --datadir=<node> --chain=<chain> \
+  --snapshot=<export>/pbt-snapshot.bin --experimental.bin-commitment.hash=<suite>
+integration stage_exec --datadir=<node> --chain=<chain> --experimental.commitment-v3 \
+  --experimental.bin-commitment --experimental.bin-commitment.hash=<suite>
 ```
 
 Pass `--experimental.bin-commitment.hash=<suite>` to both commands. The

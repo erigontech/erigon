@@ -21,136 +21,38 @@ import (
 	"sort"
 	"testing"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/rawdb"
-	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/eip8297/artifact"
-	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
 
-func TestImportPBTSnapshotWritesProgressStateAndRoot(t *testing.T) {
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() { require.NoError(t, commitment.SetPBinHashSuite(previousSuite)) })
-	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
-	db, _ := temporal.Open(t, 8)
-	address := common.Address{1}
-	slot := [32]byte{1}
-	basic, err := eip8297.EncodeBasicData(1, uint256.NewInt(2), 0)
-	require.NoError(t, err)
-	storageValue := eip8297.EncodeStorageValue([]byte{3})
-	codeHashValue := eip8297.CodeHashValue(empty.CodeHash)
-	leaves := []eip8297.Entry{
-		{Key: eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), Value: basic[:]},
-		{Key: eip8297.TreeKeyAccount(address[:], eip8297.CodeHashLeafKey), Value: codeHashValue[:]},
-		{Key: eip8297.TreeKeyStorage(address[:], slot[:]), Value: storageValue[:]},
-	}
-	root := eip8297.StateRootWithHash(leaves, eip8297.HashBytes)
+func TestForEachPBinArtifactLeafStreamsEmptyArtifact(t *testing.T) {
 	var snapshot bytes.Buffer
-	_, err = artifact.WriteSnapshot(&snapshot, root, func(emit func([]byte, []byte) error) error {
-		for _, leaf := range leaves {
-			if emitErr := emit(leaf.Key, leaf.Value); emitErr != nil {
-				return emitErr
-			}
-		}
+	_, err := artifact.WriteSnapshot(&snapshot, eip8297.EmptyTreeHash, func(func([]byte, []byte) error) error { return nil })
+	require.NoError(t, err)
+	count := 0
+	root, err := state.ForEachPBinArtifactLeaf(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), eip8297.HashBytes, func(state.PBinLeaf) error {
+		count++
 		return nil
 	})
 	require.NoError(t, err)
-	var preimages bytes.Buffer
-	require.NoError(t, artifact.WritePreimages(&preimages, []artifact.Preimage{{Address: address, Slots: [][32]byte{slot}}}))
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	genesis := common.Hash{9}
-	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesis, 0))
-	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chain.Config{BinaryTrieTime: new(uint64)}))
-	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
-	header := &types.Header{Number: *uint256.NewInt(1), Root: root, Time: 0}
-	require.NoError(t, rawdb.WriteHeader(tx, header))
-	blockHash := header.Hash()
-	require.NoError(t, rawdb.WriteCanonicalHash(tx, blockHash, 1))
-	var wrongSnapshot bytes.Buffer
-	_, err = artifact.WriteSnapshot(&wrongSnapshot, common.Hash{8}, func(emit func([]byte, []byte) error) error {
-		for _, leaf := range leaves {
-			if emitErr := emit(leaf.Key, leaf.Value); emitErr != nil {
-				return emitErr
-			}
-		}
-		return nil
-	})
-	require.NoError(t, err)
-	got, err := dbstate.ImportPBTSnapshot(t.Context(), tx, dbstate.PBTImportOptions{
-		Snapshot: bytes.NewReader(snapshot.Bytes()), SnapshotSize: int64(snapshot.Len()),
-		Preimages: bytes.NewReader(preimages.Bytes()), PreimageSize: int64(preimages.Len()),
-		BlockHash: blockHash, BlockNum: 1, TxNum: 1, HeaderRoot: &root, Hash: eip8297.HashBytes, Logger: log.New(),
-	})
-	require.NoError(t, err)
-	require.Equal(t, root, got)
-	require.NoError(t, tx.Commit())
-	roTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	func() {
-		defer roTx.Rollback()
-		cfg := commitment.DefaultTrieConfig()
-		cfg.Variant = commitment.VariantBinPatriciaTrie
-		cfg.EnableTrieWarmup = false
-		domains, domainErr := execctx.NewSharedDomains(t.Context(), roTx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentDomain), execctx.WithoutCommitmentSeek())
-		require.NoError(t, domainErr)
-		defer domains.Close()
-		value, _, domainErr := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
-		require.NoError(t, domainErr)
-		require.NotEmpty(t, value)
-		_, blockNum, domainErr := domains.SeekCommitment(t.Context(), roTx)
-		require.NoError(t, domainErr)
-		require.Equal(t, uint64(1), blockNum, "the commitment point must survive commit and reopen")
-	}()
-	wtx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer wtx.Rollback()
-	_, err = dbstate.ImportPBTSnapshot(t.Context(), wtx, dbstate.PBTImportOptions{
-		Snapshot: bytes.NewReader(wrongSnapshot.Bytes()), SnapshotSize: int64(wrongSnapshot.Len()),
-		Preimages: bytes.NewReader(preimages.Bytes()), PreimageSize: int64(preimages.Len()),
-		BlockHash: blockHash, BlockNum: 1, TxNum: 1, HeaderRoot: &root, Hash: eip8297.HashBytes, Logger: log.New(),
-	})
-	require.ErrorContains(t, err, "differs from artifact root", "a changed artifact root must be rejected")
+	require.Equal(t, eip8297.EmptyTreeHash, root)
+	require.Zero(t, count)
 }
 
-func TestImportPBTSnapshotAcceptsAllAccountKindsAndSharedCode(t *testing.T) {
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() { require.NoError(t, commitment.SetPBinHashSuite(previousSuite)) })
-	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
-	sharedCode := bytes.Repeat([]byte{1}, eip8297.ChunkDataLen+1)
-	zeroCode := make([]byte, eip8297.ChunkDataLen)
-	delegation := append(append([]byte(nil), eip8297.DelegationMarker[:]...), bytes.Repeat([]byte{7}, 20)...)
-	address1 := common.Address{1}
-	address2 := common.Address{2}
-	address3 := common.Address{3}
-	address4 := common.Address{4}
-	address5 := common.Address{5}
-	states := []eip8297.State{
-		{Address: address1[:], Nonce: 1, Balance: *uint256.NewInt(2), Slots: map[string][]byte{string([]byte{1}): {3}, string([]byte{0x80}): {4}}},
-		{Address: address2[:], Code: sharedCode},
-		{Address: address3[:], Code: sharedCode},
-		{Address: address4[:], Code: zeroCode},
-		{Address: address5[:], Code: delegation},
-	}
-	entries := eip8297.EmbedState([][]eip8297.State{states})
+func TestForEachPBinArtifactLeafKeepsCodeZoneLeaves(t *testing.T) {
+	var balance uint256.Int
+	balance.SetUint64(1)
+	entries := eip8297.EmbedState([][]eip8297.State{{
+		{Address: []byte{1}, Balance: balance, Code: []byte{1, 2, 3}},
+	}})
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
-	root := eip8297.StateRootWithHash(entries, eip8297.HashBytes)
+	wantRoot := eip8297.StateRootWithHash(entries, eip8297.HashBytes)
 	var snapshot bytes.Buffer
-	_, err := artifact.WriteSnapshot(&snapshot, root, func(emit func([]byte, []byte) error) error {
+	_, err := artifact.WriteSnapshot(&snapshot, wantRoot, func(emit func([]byte, []byte) error) error {
 		for _, entry := range entries {
 			if err := emit(entry.Key, entry.Value); err != nil {
 				return err
@@ -159,44 +61,19 @@ func TestImportPBTSnapshotAcceptsAllAccountKindsAndSharedCode(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	records := make([]artifact.Preimage, 0, len(states))
-	for _, item := range states {
-		record := artifact.Preimage{Address: common.BytesToAddress(item.Address)}
-		for slot := range item.Slots {
-			slotBytes := eip8297.RightAlign32([]byte(slot))
-			record.Slots = append(record.Slots, slotBytes)
+	var got []state.PBinLeaf
+	root, err := state.ForEachPBinArtifactLeaf(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), eip8297.HashBytes, func(leaf state.PBinLeaf) error {
+		got = append(got, leaf)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, wantRoot, root)
+	require.Equal(t, len(entries), len(got))
+	codeLeaves := 0
+	for _, leaf := range got {
+		if leaf.Key[0] == eip8297.CodeZone {
+			codeLeaves++
 		}
-		sort.Slice(record.Slots, func(i, j int) bool {
-			a := keccak.Sum256(record.Slots[i][:])
-			b := keccak.Sum256(record.Slots[j][:])
-			return bytes.Compare(a[:], b[:]) < 0
-		})
-		records = append(records, record)
 	}
-	sort.Slice(records, func(i, j int) bool {
-		a := keccak.Sum256(records[i].Address[:])
-		b := keccak.Sum256(records[j].Address[:])
-		return bytes.Compare(a[:], b[:]) < 0
-	})
-	var preimages bytes.Buffer
-	require.NoError(t, artifact.WritePreimages(&preimages, records))
-	db, _ := temporal.Open(t, 8)
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	genesis := common.Hash{9}
-	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesis, 0))
-	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chain.Config{BinaryTrieTime: new(uint64)}))
-	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
-	header := &types.Header{Number: *uint256.NewInt(1), Root: root, Time: 0}
-	require.NoError(t, rawdb.WriteHeader(tx, header))
-	blockHash := header.Hash()
-	require.NoError(t, rawdb.WriteCanonicalHash(tx, blockHash, 1))
-	got, err := dbstate.ImportPBTSnapshot(t.Context(), tx, dbstate.PBTImportOptions{
-		Snapshot: bytes.NewReader(snapshot.Bytes()), SnapshotSize: int64(snapshot.Len()),
-		Preimages: bytes.NewReader(preimages.Bytes()), PreimageSize: int64(preimages.Len()),
-		BlockHash: blockHash, BlockNum: 1, TxNum: 1, HeaderRoot: &root, Hash: eip8297.HashBytes, Logger: log.New(),
-	})
-	require.NoError(t, err)
-	require.Equal(t, root, got)
+	require.NotZero(t, codeLeaves, "the imported artifact must retain code-zone leaves")
 }

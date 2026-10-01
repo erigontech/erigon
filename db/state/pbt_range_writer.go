@@ -44,6 +44,7 @@ type PBinRangeWriter struct {
 	aggregator *Aggregator
 	domain     kv.Domain
 	endTxNum   uint64
+	leafStamp  uint64
 	ranges     []pbinRange
 	maxOps     int
 	maxBytes   int
@@ -237,6 +238,7 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			aggregator: aggregator,
 			domain:     domain,
 			endTxNum:   endTxNum,
+			leafStamp:  endTxNum,
 			maxOps:     limits.MaxOps,
 			maxBytes:   limits.MaxBytes,
 			ranges: []pbinRange{{
@@ -248,9 +250,6 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 	}
 	if endTxNum == 0 {
 		endTxNum = files.EndRootNum() - 1
-	}
-	if files.EndRootNum() <= endTxNum {
-		return nil, fmt.Errorf("pbin range writer: accounts files do not cover txNum %d", endTxNum)
 	}
 	ranges := make([]pbinRange, 0, len(files))
 	seenRanges := make(map[[2]uint64]struct{}, len(files))
@@ -270,13 +269,35 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 			collector: etl.NewCollector("pbin-range-writer", aggregator.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
 		})
 	}
-	if len(ranges) == 0 || ranges[len(ranges)-1].end <= endTxNum {
+	if len(ranges) == 0 {
 		for i := range ranges {
 			ranges[i].collector.Close()
 		}
 		return nil, fmt.Errorf("pbin range writer: no account range contains %d", endTxNum)
 	}
-	return &PBinRangeWriter{aggregator: aggregator, domain: domain, endTxNum: endTxNum, ranges: ranges, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes}, nil
+	leafStamp := ranges[len(ranges)-1].end - 1
+	leafStamp = min(leafStamp, endTxNum)
+	if ranges[len(ranges)-1].end <= endTxNum {
+		if endTxNum == ^uint64(0) {
+			for i := range ranges {
+				ranges[i].collector.Close()
+			}
+			return nil, fmt.Errorf("pbin range writer: end txNum is too large")
+		}
+		ranges = append(ranges, pbinRange{
+			start:     ranges[len(ranges)-1].end,
+			end:       endTxNum + 1,
+			collector: etl.NewCollector("pbin-range-writer", aggregator.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
+		})
+	}
+	return &PBinRangeWriter{aggregator: aggregator, domain: domain, endTxNum: endTxNum, leafStamp: leafStamp, ranges: ranges, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes}, nil
+}
+
+func (w *PBinRangeWriter) PBinLeafStamp() uint64 {
+	if w == nil {
+		return 0
+	}
+	return w.leafStamp
 }
 
 func pbinAccountFiles(files kv.VisibleFiles) kv.VisibleFiles {

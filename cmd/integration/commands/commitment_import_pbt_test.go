@@ -17,17 +17,18 @@
 package commands
 
 import (
-	"bytes"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/holiman/uint256"
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
 	app "github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -35,238 +36,378 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/db/version"
-	chainpkg "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/eip8297"
-	"github.com/erigontech/erigon/execution/commitment/eip8297/artifact"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
 
-func TestConfigureImportVariantBinDoesNotEnableV3Hex(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
-	dirs := datadir.New(t.TempDir())
-	variant, hash := dbstate.TrieVariantBin, commitment.PBinHashBlake3
-	require.NoError(t, dbstate.WriteErigonDBSettings(dirs, &dbstate.ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash}))
-	statecfg.ExperimentalBinCommitment = false
-	statecfg.ExperimentalHexBinCommitment = false
-	statecfg.ExperimentalCommitmentV3 = true
-	require.NoError(t, configureImportVariant(dirs))
-	require.True(t, statecfg.ExperimentalBinCommitment)
-	require.False(t, statecfg.ExperimentalHexBinCommitment)
-	require.False(t, statecfg.ExperimentalCommitmentV3, "bin-only import must not enable v3-hex")
+func TestImportPBTUsesOnlySnapshotInput(t *testing.T) {
+	require.NotNil(t, cmdCommitmentImportPBT.Flags().Lookup("snapshot"))
+	require.Nil(t, cmdCommitmentImportPBT.Flags().Lookup("preimages"), "import-pbt must not require preimages")
+	require.Nil(t, cmdCommitmentImportPBT.Flags().Lookup("block"), "import-pbt must not require a block hash")
 }
 
-func TestPBTImportRefusesFrozenTarget(t *testing.T) {
-	settings := &dbstate.ErigonDBSettings{FrozenAtTxNum: map[string]uint64{kv.CommitmentDomain.String(): 13}}
-	err := validatePBTImportTargetSettings(settings)
-	require.ErrorContains(t, err, "commitment is frozen at txNum 13")
-}
-
-func TestPBTImportRefusesTargetFilesPastCheckpoint(t *testing.T) {
-	files := kv.VisibleFiles{pbtImportVisibleFile{end: 8}}
-	err := validatePBTImportFilesFrontier(kv.AccountsDomain, files, 1)
-	require.ErrorContains(t, err, "accounts files extend past txNum 1")
-}
-
-type pbtImportVisibleFile struct {
-	end uint64
-}
-
-func (f pbtImportVisibleFile) Fullpath() string         { return "accounts.0-1.kv" }
-func (f pbtImportVisibleFile) StartRootNum() uint64     { return 0 }
-func (f pbtImportVisibleFile) EndRootNum() uint64       { return f.end }
-func (f pbtImportVisibleFile) Version() version.Version { return version.V2_0 }
-
-func TestImportPBTValidatesArtifactsBeforeReset(t *testing.T) {
-	previousDatadir := datadirCli
-	previousChaindata := chaindata
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		datadirCli = previousDatadir
-		chaindata = previousChaindata
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
-	statecfg.ExperimentalBinCommitment = false
-	statecfg.ExperimentalHexBinCommitment = false
-	statecfg.ExperimentalCommitmentV3 = true
-	statecfg.BinCommitmentHash = ""
-	statecfg.InitSchemas()
-	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
-	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-state.txt"), []byte{1, 2, 3, 4}, 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-blocks.txt"), []byte("blocks"), 0o644))
-	datadirCli = dirs.DataDir
-	chaindata = dirs.Chaindata
-	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
-	tx, err := rawDB.BeginRw(t.Context())
-	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-	genesis := common.Hash{9}
-	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesis, 0))
-	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chainpkg.Config{BinaryTrieTime: new(uint64)}))
-	require.NoError(t, rawdbv3.TxNums.Append(tx, 0, 0))
-	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
-	header := &types.Header{Number: *uint256.NewInt(1), Root: eip8297.EmptyTreeHash}
-	require.NoError(t, rawdb.WriteHeader(tx, header))
-	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), 1))
-	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
-	require.NoError(t, tx.Commit())
-	rawDB.Close()
-
-	var snapshot bytes.Buffer
-	_, err = artifact.WriteSnapshot(&snapshot, eip8297.EmptyTreeHash, func(func([]byte, []byte) error) error { return nil })
-	require.NoError(t, err)
-	var preimages bytes.Buffer
-	require.NoError(t, artifact.WritePreimages(&preimages, []artifact.Preimage{{Address: common.Address{1}}}))
-	snapshotPath := filepath.Join(t.TempDir(), "snapshot")
-	preimagesPath := filepath.Join(t.TempDir(), "preimages")
-	require.NoError(t, os.WriteFile(snapshotPath, snapshot.Bytes(), 0o644))
-	require.NoError(t, os.WriteFile(preimagesPath, preimages.Bytes(), 0o644))
-	err = importPBT(t.Context(), dirs.DataDir, snapshotPath, preimagesPath, header.Hash().Hex(), "", log.New())
-	require.ErrorContains(t, err, "surplus key")
-	require.Equal(t, uint64(1), readExecutionStageProgress(t, dirs.Chaindata), "invalid artifacts must not reset execution")
-}
-
-func TestImportPBTRefusalsLeaveDatadirUnchanged(t *testing.T) {
-	selectPBTBinaryCommandSuite(t)
-	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, false)
+func TestImportPBTReplacesConvertAndAttach(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
+	buildPBTAcceptanceFiles(t, source)
+	sourceDB := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(source.Genesis),
+		execmoduletester.WithKey(source.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	output := filepath.Join(t.TempDir(), "export")
-	tx, err := source.Tester.DB.BeginTemporalRo(t.Context())
+	tx, err := sourceDB.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 	require.NoError(t, app.RunExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
 		return source.Chain.Headers[block-1], nil
 	}, output, log.New()))
 	tx.Rollback()
-	source.Tester.Close()
-	previousDatadir, previousChaindata := datadirCli, chaindata
-	t.Cleanup(func() { datadirCli, chaindata = previousDatadir, previousChaindata })
-	for _, test := range []struct {
-		name   string
-		frozen bool
-	}{
-		{name: "frozen", frozen: true},
-		{name: "frontier"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			target, targetErr := execmoduletester.NewPBTAcceptanceChain(t, true, false)
-			require.NoError(t, targetErr)
-			require.NoError(t, target.Tester.InsertChain(target.Chain))
-			buildPBTAcceptanceFiles(t, target)
-			settings, settingsErr := dbstate.ReadErigonDBSettings(target.Tester.Dirs)
-			require.NoError(t, settingsErr)
-			if test.frozen {
-				settings.FrozenAtTxNum = map[string]uint64{kv.CommitmentDomain.String(): 13}
-				require.NoError(t, dbstate.WriteErigonDBSettings(target.Tester.Dirs, settings))
-			}
-			target.Tester.Close()
-			before := snapshotTree(t, target.Tester.Dirs.DataDir)
-			datadirCli, chaindata = target.Tester.Dirs.DataDir, target.Tester.Dirs.Chaindata
-			err := importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), filepath.Join(output, "framed.bin"), source.Chain.Blocks[1].Hash().Hex(), "", log.New())
-			if test.frozen {
-				require.ErrorContains(t, err, "commitment is frozen")
+	sourceDB.Close()
+	converted := filepath.Join(t.TempDir(), "converted")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, converted, true, "", log.New()))
+	statecfg.BinCommitmentHash = ""
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
+
+	target, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, target.Tester.InsertChain(target.Chain))
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), target.Tester.DB))
+	require.NoError(t, target.Tester.ReExecuteTo(t.Context(), 2))
+	buildPBTAcceptanceFilesAt(t, target, 7)
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	before := snapshotTree(t, target.Tester.Dirs.DataDir)
+	target.Tester.Close()
+	t.Cleanup(func() { importPBTSwapHook = nil })
+	importPBTSwapHook = func(step string) error {
+		if step == "staging-built" {
+			return errors.New("test staging failure")
+		}
+		return nil
+	}
+	require.ErrorContains(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()), "test staging failure")
+	require.Equal(t, before, snapshotTree(t, target.Tester.Dirs.DataDir), "staging failure must not change the target")
+	importPBTSwapHook = func(step string) error {
+		if step == "files-moved" {
+			return errors.New("test move failure")
+		}
+		return nil
+	}
+	settingsBeforeMoveFailure := snapshotTree(t, target.Tester.Dirs.DataDir)
+	require.ErrorContains(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()), "test move failure")
+	require.Equal(t, settingsBeforeMoveFailure, snapshotTree(t, target.Tester.Dirs.DataDir), "move failure must not change the target")
+	importPBTSwapHook = nil
+	require.NoError(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()))
+	after := snapshotTree(t, target.Tester.Dirs.DataDir)
+	require.NotEqual(t, before, after)
+	for path, value := range before {
+		if strings.Contains(path, "accounts") || strings.Contains(path, "storage") || strings.Contains(path, "code") {
+			require.Equal(t, value, after[path], "import must not rewrite state-domain file %s", path)
+		}
+	}
+	settings, err := dbstate.ReadErigonDBSettings(target.Tester.Dirs)
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
+	require.Equal(t, commitment.PBinHashBlake3, settings.TrieHashName())
+	gotBlock, gotTx := readPBTImportCheckpoint(t, target.Tester.Dirs.DataDir)
+	require.Equal(t, uint64(2), gotBlock, "import must write the bin checkpoint block")
+	require.Equal(t, uint64(7), gotTx, "import must write the bin checkpoint txNum")
+	binFiles, err := filepath.Glob(filepath.Join(target.Tester.Dirs.SnapDomain, "*-commitment-bin.*.kv"))
+	require.NoError(t, err)
+	require.NotEmpty(t, binFiles, "import must write commitment-bin files")
+	require.Equal(t, readPBTFilesRoot(t, converted), readPBTFilesRoot(t, target.Tester.Dirs.DataDir), "import rows must equal convert-pbt rows")
+
+	selectPBTCommandSuite(t)
+	dual, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
+	require.NoError(t, err)
+	require.NoError(t, dual.Tester.InsertChain(dual.Chain))
+	reopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(target.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(target.Genesis),
+		execmoduletester.WithKey(target.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	importedRaw := reopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	dualRaw := dual.Tester.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	for block := uint64(3); block <= target.Chain.TopBlock.NumberU64(); block++ {
+		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
+		var importedRoot, dualRoot []byte
+		require.NoError(t, importedRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			importedRoot, err = rawdb.ReadShadowStateRoot(tx, target.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		require.NoError(t, dualRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			dualRoot, err = rawdb.ReadShadowStateRoot(tx, dual.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		require.Equal(t, dualRoot, importedRoot, "imported bin shadow at block %d", block)
+	}
+	reopened.Close()
+}
+
+func TestImportPBTRefusalsLeaveDatadirUnchanged(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	fixture := newPBTImportFixture(t)
+	originalMeta, err := os.ReadFile(fixture.metaPath)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, os.WriteFile(fixture.metaPath, originalMeta, 0o644)) }()
+
+	attempt := func(name string, mutate func(*pbtImportMeta), want string) {
+		t.Run(name, func(t *testing.T) {
+			var meta pbtImportMeta
+			require.NoError(t, json.Unmarshal(originalMeta, &meta))
+			mutate(&meta)
+			data, marshalErr := json.Marshal(meta)
+			require.NoError(t, marshalErr)
+			require.NoError(t, os.WriteFile(fixture.metaPath, data, 0o644))
+			before := snapshotTree(t, fixture.dataDir)
+			err := importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New())
+			if want == "" {
+				require.Error(t, err)
 			} else {
-				require.ErrorContains(t, err, "files extend past")
+				require.ErrorContains(t, err, want)
 			}
-			require.Equal(t, before, snapshotTree(t, target.Tester.Dirs.DataDir))
+			require.Equal(t, before, snapshotTree(t, fixture.dataDir), "refusal must leave the datadir unchanged")
+			require.NoError(t, os.WriteFile(fixture.metaPath, originalMeta, 0o644))
 		})
 	}
-	for _, test := range []struct {
-		name string
-		hash common.Hash
-		want string
-	}{
-		{name: "no-settings-unknown-block", hash: common.Hash{0xff}, want: "not in local chaindata"},
-		{name: "no-settings-frontier", hash: source.Chain.Blocks[1].Hash(), want: "files extend past"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			target, targetErr := execmoduletester.NewPBTAcceptanceChain(t, true, false)
-			require.NoError(t, targetErr)
-			require.NoError(t, target.Tester.InsertChain(target.Chain))
-			buildPBTAcceptanceFiles(t, target)
-			settingsPath := filepath.Join(target.Tester.Dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
-			require.NoError(t, dir.RemoveFile(settingsPath))
-			target.Tester.Close()
-			before := snapshotTree(t, target.Tester.Dirs.DataDir)
-			datadirCli, chaindata = target.Tester.Dirs.DataDir, target.Tester.Dirs.Chaindata
-			err := importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), filepath.Join(output, "framed.bin"), test.hash.Hex(), "", log.New())
-			require.ErrorContains(t, err, test.want)
-			require.Equal(t, before, snapshotTree(t, target.Tester.Dirs.DataDir))
-			_, statErr := os.Stat(settingsPath)
-			require.ErrorIs(t, statErr, os.ErrNotExist)
-		})
-	}
-	t.Run("no-settings-artifact-refusal", func(t *testing.T) {
-		target, targetErr := execmoduletester.NewPBTAcceptanceChain(t, true, false)
-		require.NoError(t, targetErr)
-		require.NoError(t, target.Tester.InsertChain(target.Chain))
-		settingsPath := filepath.Join(target.Tester.Dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
-		require.NoError(t, dir.RemoveFile(settingsPath))
-		target.Tester.Close()
-		var badPreimages bytes.Buffer
-		require.NoError(t, artifact.WritePreimages(&badPreimages, []artifact.Preimage{{Address: common.Address{1}}}))
-		badPath := filepath.Join(t.TempDir(), "preimages")
-		require.NoError(t, os.WriteFile(badPath, badPreimages.Bytes(), 0o644))
-		before := snapshotTree(t, target.Tester.Dirs.DataDir)
-		datadirCli, chaindata = target.Tester.Dirs.DataDir, target.Tester.Dirs.Chaindata
-		err := importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), badPath, source.Chain.Blocks[1].Hash().Hex(), "", log.New())
-		require.ErrorContains(t, err, "missing key")
-		assertSnapshotTreeUnchanged(t, before, snapshotTree(t, target.Tester.Dirs.DataDir))
-		_, statErr := os.Stat(settingsPath)
-		require.ErrorIs(t, statErr, os.ErrNotExist)
+
+	attempt("moved past block", func(meta *pbtImportMeta) {
+		setImportExecutionProgress(t, fixture.dataDir, meta.Block+1)
+	}, "target is at block")
+	setImportExecutionProgress(t, fixture.dataDir, 2)
+	attempt("mid-block checkpoint", func(meta *pbtImportMeta) { meta.TxNum-- }, "not the block end")
+	attempt("wrong block hash", func(meta *pbtImportMeta) { meta.BlockHash = common.Hash{0xaa}.Hex() }, "")
+	attempt("wrong txNum", func(meta *pbtImportMeta) { meta.TxNum++ }, "not the block end")
+	attempt("wrong chain id", func(meta *pbtImportMeta) { meta.ChainID = "999999" }, "chain id")
+	attempt("digest mismatch", func(meta *pbtImportMeta) { meta.SnapshotDigest = common.Hash{0xbb}.Hex() }, "snapshot digest")
+
+	t.Run("leaf root mismatch", func(t *testing.T) {
+		originalSnapshot, readErr := os.ReadFile(fixture.snapshot)
+		require.NoError(t, readErr)
+		data := append([]byte(nil), originalSnapshot...)
+		data[len(data)-34] ^= 1
+		require.NoError(t, os.WriteFile(fixture.snapshot, data, 0o644))
+		hash := keccak.NewFastKeccak()
+		_, requireErr := hash.Write(data)
+		require.NoError(t, requireErr)
+		var meta pbtImportMeta
+		require.NoError(t, json.Unmarshal(originalMeta, &meta))
+		meta.SnapshotDigest = common.BytesToHash(hash.Sum(nil)).Hex()
+		metaData, marshalErr := json.Marshal(meta)
+		require.NoError(t, marshalErr)
+		require.NoError(t, os.WriteFile(fixture.metaPath, metaData, 0o644))
+		before := snapshotTree(t, fixture.dataDir)
+		require.ErrorContains(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New()), "root")
+		require.Equal(t, before, snapshotTree(t, fixture.dataDir))
+		require.NoError(t, os.WriteFile(fixture.snapshot, originalSnapshot, 0o644))
+		require.NoError(t, os.WriteFile(fixture.metaPath, originalMeta, 0o644))
+	})
+
+	t.Run("target already hex and bin", func(t *testing.T) {
+		dirs := datadir.Open(fixture.dataDir)
+		settings, settingsErr := dbstate.ReadErigonDBSettings(dirs)
+		require.NoError(t, settingsErr)
+		originalSettings, readErr := os.ReadFile(filepath.Join(dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE))
+		require.NoError(t, readErr)
+		variant := dbstate.TrieVariantHexBin
+		settings.TrieVariant = &variant
+		require.NoError(t, dbstate.WriteErigonDBSettings(dirs, settings))
+		before := snapshotTree(t, fixture.dataDir)
+		require.ErrorContains(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New()), "hex-only")
+		require.Equal(t, before, snapshotTree(t, fixture.dataDir))
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE), originalSettings, 0o644))
+	})
+
+	t.Run("hash suite mismatch", func(t *testing.T) {
+		statecfg.BinCommitmentHash = commitment.PBinHashKeccak
+		before := snapshotTree(t, fixture.dataDir)
+		require.ErrorContains(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New()), "hash suite")
+		require.Equal(t, before, snapshotTree(t, fixture.dataDir))
+		statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	})
+
+	t.Run("frozen target", func(t *testing.T) {
+		dirs := datadir.Open(fixture.dataDir)
+		settings, settingsErr := dbstate.ReadErigonDBSettings(dirs)
+		require.NoError(t, settingsErr)
+		originalSettings, readErr := os.ReadFile(filepath.Join(dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE))
+		require.NoError(t, readErr)
+		settings.FrozenAtTxNum = map[string]uint64{kv.CommitmentDomain.String(): 7}
+		require.NoError(t, dbstate.WriteErigonDBSettings(dirs, settings))
+		before := snapshotTree(t, fixture.dataDir)
+		require.ErrorContains(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New()), "frozen")
+		require.Equal(t, before, snapshotTree(t, fixture.dataDir))
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE), originalSettings, 0o644))
 	})
 }
 
-func assertSnapshotTreeUnchanged(t *testing.T, before, after map[string]string) {
+func TestImportPBTUsesFrozenBlockFiles(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	chain, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, chain.Tester.InsertChain(chain.Chain.Slice(0, 2)))
+	buildPBTAcceptanceFiles(t, chain)
+	sourceDB := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(chain.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(chain.Genesis),
+		execmoduletester.WithKey(chain.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	output := filepath.Join(t.TempDir(), "export")
+	tx, err := sourceDB.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, app.RunExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
+		return chain.Chain.Headers[block-1], nil
+	}, output, log.New()))
+	tx.Rollback()
+
+	config := snapcfg.KnownCfgOrDevnet(chain.Tester.ChainConfig.ChainName)
+	sourceDB.Close()
+	statecfg.BinCommitmentHash = ""
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
+	archive, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, archive.Tester.InsertChain(archive.Chain))
+	require.NoError(t, freezeblocks.DumpBlocks(t.Context(), 0, 3, archive.Tester.ChainConfig, archive.Tester.Dirs.Tmp, archive.Tester.Dirs.Snap, archive.Tester.DB, 1, log.LvlInfo, log.New(), archive.Tester.BlockReader, config, nil))
+	archive.Tester.Close()
+	copyPBTBlockSnapshotFiles(t, archive.Tester.Dirs, chain.Tester.Dirs)
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	block := chain.Chain.Blocks[1]
+	rawDB := dbCfg(dbcfg.ChainDB, chain.Tester.Dirs.Chaindata).MustOpen()
+	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+		rawdb.DeleteHeader(tx, block.Hash(), block.NumberU64())
+		rawdb.DeleteBody(tx, block.Hash(), block.NumberU64())
+		if err := rawdb.TruncateCanonicalHash(tx, block.NumberU64(), false); err != nil {
+			return err
+		}
+		return rawdbv3.TxNums.Truncate(tx, block.NumberU64())
+	}))
+	rawDB.Close()
+	setImportExecutionProgress(t, chain.Tester.Dirs.DataDir, block.NumberU64())
+	require.NoError(t, importPBT(t.Context(), chain.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(chain.Tester.Dirs)
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
+}
+
+func copyPBTBlockSnapshotFiles(t *testing.T, source, target datadir.Dirs) {
 	t.Helper()
-	if len(before) != len(after) {
-		for path := range after {
-			if _, ok := before[path]; !ok {
-				t.Logf("created path %s", path)
-			}
+	require.NoError(t, filepath.WalkDir(source.Snap, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		for path := range before {
-			if _, ok := after[path]; !ok {
-				t.Logf("removed path %s", path)
-			}
+		if entry.IsDir() {
+			return nil
 		}
+		rel, err := filepath.Rel(source.Snap, path)
+		if err != nil {
+			return err
+		}
+		if filepath.Dir(rel) != "." || entry.Name() == dbstate.ERIGONDB_SETTINGS_FILE || strings.HasPrefix(entry.Name(), "salt-") {
+			return nil
+		}
+		return os.Link(path, filepath.Join(target.Snap, entry.Name()))
+	}))
+}
+
+type pbtImportFixture struct {
+	dataDir  string
+	snapshot string
+	metaPath string
+}
+
+func newPBTImportFixture(t *testing.T) pbtImportFixture {
+	t.Helper()
+	selectPBTHexCommandSuite(t)
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
+	buildPBTAcceptanceFiles(t, source)
+	sourceDB := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(source.Genesis),
+		execmoduletester.WithKey(source.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	output := filepath.Join(t.TempDir(), "export")
+	tx, err := sourceDB.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, app.RunExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
+		return source.Chain.Headers[block-1], nil
+	}, output, log.New()))
+	tx.Rollback()
+	sourceDB.Close()
+	statecfg.BinCommitmentHash = ""
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
+
+	target, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, target.Tester.InsertChain(target.Chain))
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), target.Tester.DB))
+	require.NoError(t, target.Tester.ReExecuteTo(t.Context(), 2))
+	buildPBTAcceptanceFilesAt(t, target, 7)
+	target.Tester.Close()
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	return pbtImportFixture{
+		dataDir:  target.Tester.Dirs.DataDir,
+		snapshot: filepath.Join(output, "pbt-snapshot.bin"),
+		metaPath: filepath.Join(output, "pbt-snapshot.meta.json"),
 	}
-	require.Equal(t, len(before), len(after))
-	for path, beforeValue := range before {
-		afterValue, ok := after[path]
-		require.Truef(t, ok, "missing path %s", path)
-		require.Lenf(t, afterValue, len(beforeValue), "changed path %s", path)
-		require.Truef(t, bytes.Equal([]byte(beforeValue), []byte(afterValue)), "changed path %s", path)
-	}
+}
+
+func setImportExecutionProgress(t *testing.T, dataDir string, progress uint64) {
+	t.Helper()
+	dirs := datadir.Open(dataDir)
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, progress)
+	}))
+	rawDB.Close()
+}
+
+func readPBTImportCheckpoint(t *testing.T, dataDir string) (uint64, uint64) {
+	t.Helper()
+	dirs := datadir.Open(dataDir)
+	resolved, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+	agg := dbstate.New(dirs).WithErigonDBSettings(resolved).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(nil))
+	defer agg.Close()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	value, found, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, ^uint64(0))
+	require.NoError(t, err)
+	require.True(t, found)
+	tx, block := commitmentdb.DecodeTxBlockNums(value)
+	return block, tx
 }

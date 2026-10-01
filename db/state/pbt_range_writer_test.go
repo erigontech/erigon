@@ -60,6 +60,19 @@ func TestNewPBinRangeWriter(t *testing.T) {
 	require.NotNil(t, writer)
 }
 
+func TestNewPBinRangeWriterExtendsPastStateFrontier(t *testing.T) {
+	previous := statecfg.ExperimentalHexBinCommitment
+	t.Cleanup(func() { statecfg.ExperimentalHexBinCommitment = previous })
+	statecfg.ExperimentalHexBinCommitment = true
+	db, agg := commitmenttemporal.Open(t, 8)
+	writePBinRangeWriterAccounts(t, db, 32)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 39)
+	require.NoError(t, err, "import must create an empty range after the state-file frontier")
+	require.NotNil(t, writer)
+}
+
 func TestPBinRangeWriterStreamsLeavesIntoBinFiles(t *testing.T) {
 	selectPBinRangeWriterHash(t)
 	statecfg.ExperimentalHexBinCommitment = true

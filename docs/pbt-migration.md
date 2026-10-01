@@ -53,7 +53,7 @@ COMMITMENT_V3=true erigon snapshots export-pbt \
 
 COMMITMENT_V3=true integration commitment import-pbt \
   --datadir=<datadir> --chain=<chain> --snapshot=<pbt-snapshot.bin> \
-  --preimages=<framed.bin> --block=<canonical-block-hash>
+  --experimental.bin-commitment.hash=<suite>
 ```
 
 The current commands detect v3 files themselves, so the environment variable
@@ -138,22 +138,35 @@ a lagging or frozen shadow is not the pin.
 
 ## Import (test-only)
 
-The import command is for test and bootstrap use, not a live-node migration:
+Import substitutes for conversion and attach in tests. Stop a v3 hex node at a
+block end, export its snapshot, import that snapshot into the stopped node, and
+continue in dual mode:
 
 ```sh
-integration commitment import-pbt \
-  --datadir=<datadir> \
-  --snapshot=<pbt-snapshot.bin> \
-  --preimages=<framed.bin> \
-  --block=<canonical-block-hash>
+COMMITMENT_V3=true integration stage_exec \
+  --datadir=<datadir> --chain=<chain> --block=<X> \
+  --experimental.commitment-v3
+
+COMMITMENT_V3=true erigon snapshots export-pbt \
+  --datadir=<datadir> --chain=<chain> --out=<export-dir>
+
+COMMITMENT_V3=true integration commitment import-pbt \
+  --datadir=<datadir> --chain=<chain> --snapshot=<export-dir>/pbt-snapshot.bin \
+  --experimental.bin-commitment.hash=<suite>
+
+COMMITMENT_V3=true integration stage_exec \
+  --datadir=<datadir> --chain=<chain> \
+  --experimental.commitment-v3 --experimental.bin-commitment \
+  --experimental.bin-commitment.hash=<suite>
 ```
 
-The block must be canonical locally and at or after the binary fork. Import
-validates the artifact, the exact preimage set, code reconstruction, and both
-roots before `ResetExec`. It refuses a frozen target and a target whose files
-run past the artifact transaction number before changing the datadir. After
-validation it writes the state and bin commitment at the pinned transaction,
-then flushes and checks the folded root.
+The target must be a stopped, hex-only v3 datadir at `X`. The metadata must
+match its chain, canonical block, last transaction, hex checkpoint, state root,
+hash suite and snapshot digest. Import streams the artifact into staged
+`commitment-bin` files, verifies the root and rows, then writes hex+bin settings
+last. It changes no state-domain files and has no preimage or block-hash flag.
+Any refusal leaves the datadir unchanged. A frozen block is read from block
+snapshots through the block reader.
 
 An unwind cannot cross the conversion point. `checkUnwindConversionPoint`
 refuses a block or transaction target below the published point.

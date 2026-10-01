@@ -18,37 +18,51 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"strings"
+	"path/filepath"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/spf13/cobra"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
-	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
 )
 
 var (
-	importPBTSnapshot  string
-	importPBTPreimages string
-	importPBTBlock     string
+	importPBTSnapshot string
+	importPBTSwapHook func(string) error
 )
+
+type pbtImportMeta struct {
+	ChainID        string `json:"chainId"`
+	Block          uint64 `json:"block"`
+	BlockHash      string `json:"blockHash"`
+	TxNum          uint64 `json:"txNum"`
+	HashSuite      string `json:"hashSuite"`
+	StateRoot      string `json:"stateRoot"`
+	PBTRoot        string `json:"pbtRoot"`
+	SnapshotDigest string `json:"snapshotDigest"`
+}
 
 func init() {
 	withChain(cmdCommitmentImportPBT)
@@ -56,58 +70,27 @@ func init() {
 	withConfig(cmdCommitmentImportPBT)
 	withExperimentalCommitment(cmdCommitmentImportPBT)
 	cmdCommitmentImportPBT.Flags().StringVar(&importPBTSnapshot, "snapshot", "", "PBT snapshot artifact")
-	cmdCommitmentImportPBT.Flags().StringVar(&importPBTPreimages, "preimages", "", "PBT preimage artifact")
-	cmdCommitmentImportPBT.Flags().StringVar(&importPBTBlock, "block", "", "canonical block hash")
 	must(cmdCommitmentImportPBT.MarkFlagRequired("snapshot"))
-	must(cmdCommitmentImportPBT.MarkFlagRequired("preimages"))
-	must(cmdCommitmentImportPBT.MarkFlagRequired("block"))
 	commitmentCmd.AddCommand(cmdCommitmentImportPBT)
 }
 
 var cmdCommitmentImportPBT = &cobra.Command{
 	Use:          "import-pbt",
-	Short:        "bootstrap execution from a PBT snapshot artifact",
+	Short:        "import a PBT snapshot into a stopped hex node for tests",
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		return importPBT(ctx, datadirCli, importPBTSnapshot, importPBTPreimages, importPBTBlock, chain, logger)
+		return importPBT(ctx, datadirCli, importPBTSnapshot, chain, logger)
 	},
 }
 
-func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockText, chainName string, logger log.Logger) (retErr error) {
-	if dataDir == "" || snapshotPath == "" || preimagesPath == "" || blockText == "" {
-		return errors.New("commitment import-pbt: datadir, snapshot, preimages and block are required")
-	}
-	blockHash := common.HexToHash(blockText)
-	if !strings.HasPrefix(strings.ToLower(blockText), "0x") {
-		return errors.New("commitment import-pbt: block must be a 32-byte hex hash")
+func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, logger log.Logger) error {
+	if dataDir == "" || snapshotPath == "" {
+		return errors.New("commitment import-pbt: datadir and snapshot are required")
 	}
 	dirs := datadir.Open(dataDir)
-	if _, err := dbstate.EnableCommitmentV3FromFiles(dirs); err != nil {
-		return err
-	}
-	settings, settingsErr := dbstate.ReadErigonDBSettings(dirs)
-	if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
-		return settingsErr
-	}
-	if errors.Is(settingsErr, os.ErrNotExist) {
-		stepSize, err := dbstate.ResolveErigonDBStepSize(dirs)
-		if err != nil {
-			return err
-		}
-		settings = &dbstate.ErigonDBSettings{StepSize: stepSize}
-	}
-	if err := validatePBTImportTargetSettings(settings); err != nil {
-		return err
-	}
-	if err := configureImportVariant(dirs); err != nil {
-		return err
-	}
-	blockNum, txNum, err := validatePBTImportPointReadOnly(ctx, dirs, settings, blockHash, logger)
+	meta, err := readPBTImportMeta(snapshotPath)
 	if err != nil {
-		return err
-	}
-	if err := validatePBTImportTargetFrontierFiles(ctx, dirs, settings, txNum, logger); err != nil {
 		return err
 	}
 	snapshot, err := os.Open(snapshotPath)
@@ -115,264 +98,445 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 		return err
 	}
 	defer snapshot.Close()
-	preimages, err := os.Open(preimagesPath)
-	if err != nil {
-		return err
-	}
-	defer preimages.Close()
 	snapshotInfo, err := snapshot.Stat()
 	if err != nil {
 		return err
 	}
-	preimagesInfo, err := preimages.Stat()
-	if err != nil {
+	if err := validatePBTImportDigest(snapshot, snapshotInfo.Size(), meta.SnapshotDigest); err != nil {
 		return err
 	}
-	var originalSettings dbstate.ErigonDBSettings
-	var db kv.TemporalRwDB
-	settingsChanged := false
-	if settings != nil {
-		originalSettings = *settings
-	}
+
+	oldBin, oldHexBin, oldV3, oldParallel, oldHash, oldSchema := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash, statecfg.Schema
+	oldSuite := commitment.PBinHashSuiteName()
 	defer func() {
-		if db != nil {
-			db.Close()
-			db = nil
-		}
-		if settingsChanged && retErr != nil {
-			_ = dbstate.WriteErigonDBSettings(dirs, &originalSettings)
-		}
+		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash, statecfg.Schema = oldBin, oldHexBin, oldV3, oldParallel, oldHash, oldSchema
+		_ = commitment.SetPBinHashSuite(oldSuite)
 	}()
-	targetDomain := kv.CommitmentDomain
-	headerRoot, err := readPBTImportHeaderRoot(ctx, dirs, blockHash, logger)
-	if err != nil {
-		return err
-	}
-	importOptions := dbstate.PBTImportOptions{
-		Snapshot: snapshot, SnapshotSize: snapshotInfo.Size(), Preimages: preimages, PreimageSize: preimagesInfo.Size(),
-		BlockHash: blockHash, BlockNum: blockNum, TxNum: txNum, HeaderRoot: &headerRoot, TargetDomain: targetDomain, Hash: eip8297.HashBytes, Logger: logger,
-	}
-	if err := dbstate.ValidatePBTSnapshot(ctx, importOptions); err != nil {
-		return err
-	}
-	if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
-		variant := dbstate.TrieVariantBin
-		settings.TrieVariant = &variant
-		settings.ReferencesInCommitmentBranches = new(bool)
-		if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
-			return err
-		}
-		settingsChanged = true
-	}
-	if err := configureImportVariant(dirs); err != nil {
-		return err
-	}
-	db, err = openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chainName, logger)
-	if err != nil {
-		return err
-	}
-	if err := rawdbreset.ResetExec(ctx, db); err != nil {
-		return err
-	}
-	tx, err := db.BeginTemporalRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	root, err := dbstate.ImportPBTSnapshot(ctx, tx, importOptions)
-	if err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.Execution, blockNum); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	logger.Info("imported PBT snapshot", "block", blockNum, "txNum", txNum, "root", root.Hex())
-	return nil
-}
 
-func validatePBTImportTargetSettings(settings *dbstate.ErigonDBSettings) error {
-	if settings == nil {
-		return nil
-	}
-	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-		if frozenAt, frozen := settings.FrozenAt(domain); frozen {
-			return fmt.Errorf("commitment import-pbt: target domain %s is frozen at txNum %d", domain, frozenAt)
-		}
-	}
-	return nil
-}
-
-func validatePBTImportPointWithReader(ctx context.Context, db kv.TemporalRwDB, blockReader *freezeblocks.BlockReader, blockView *blocksnapshots.View, blockHash common.Hash) (uint64, uint64, error) {
-	var blockNum, txNum uint64
-	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		readerTx := pbtTemporalBlockFilesTx{TemporalTx: tx, view: blockView}
-		header, err := blockReader.HeaderByHash(ctx, readerTx, blockHash)
-		if err != nil {
-			return err
-		}
-		if header == nil {
-			return fmt.Errorf("commitment import-pbt: block %s is not in local chaindata", blockHash.Hex())
-		}
-		blockNum = header.Number.Uint64()
-		var canonical common.Hash
-		var canonicalFound bool
-		canonical, canonicalFound, err = blockReader.CanonicalHash(ctx, readerTx, blockNum)
-		if err != nil {
-			return err
-		}
-		if !canonicalFound || canonical != blockHash {
-			return fmt.Errorf("commitment import-pbt: block %s is not canonical", blockHash.Hex())
-		}
-		settings, settingsErr := dbstate.ReadErigonDBSettings(readerTx.Debug().Dirs())
-		if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
-			return settingsErr
-		}
-		genesisHash, err := rawdb.ReadCanonicalHash(readerTx, 0)
-		if err != nil {
-			return err
-		}
-		chainConfig, err := rawdb.ReadChainConfig(readerTx, genesisHash)
-		if err != nil {
-			return err
-		}
-		binCanonical := chainConfig != nil && chainConfig.IsBinaryTrie(header.Time)
-		if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantBin {
-			binCanonical = true
-		}
-		if !binCanonical {
-			return fmt.Errorf("commitment import-pbt: block %d is before the binary trie fork", blockNum)
-		}
-		var found bool
-		txNum, found, err = blockReader.TxnumReader().MaxExact(ctx, readerTx, blockNum)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fmt.Errorf("commitment import-pbt: block %d has no txNum mapping", blockNum)
-		}
-		return nil
-	})
-	return blockNum, txNum, err
-}
-
-func validatePBTImportPointReadOnly(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockHash common.Hash, logger log.Logger) (uint64, uint64, error) {
-	rawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
-	if err != nil {
-		return 0, 0, err
-	}
-	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, dirs, rawDB, logger)
-	if err != nil {
-		rawDB.Close()
-		return 0, 0, err
-	}
-	defer closeBlockReader()
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
-	if err != nil {
-		rawDB.Close()
-		return 0, 0, err
-	}
-	if err := agg.OpenFolder(rawDB); err != nil {
-		agg.Close()
-		rawDB.Close()
-		return 0, 0, err
-	}
-	db, err := dbtemporal.New(rawDB, agg, nil)
-	if err != nil {
-		agg.Close()
-		rawDB.Close()
-		return 0, 0, err
-	}
-	defer db.Close()
-	return validatePBTImportPointWithReader(ctx, db, blockReader, blockView, blockHash)
-}
-
-func readPBTImportHeaderRoot(ctx context.Context, dirs datadir.Dirs, blockHash common.Hash, logger log.Logger) (common.Hash, error) {
-	rawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	defer rawDB.Close()
-	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, dirs, rawDB, logger)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	defer closeBlockReader()
-	tx, err := rawDB.BeginRo(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	defer tx.Rollback()
-	header, err := blockReader.HeaderByHash(ctx, pbtBlockFilesTx{Tx: tx, view: blockView}, blockHash)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	if header == nil {
-		return common.Hash{}, fmt.Errorf("commitment import-pbt: block %s is not in local chaindata", blockHash.Hex())
-	}
-	return header.Root, nil
-}
-
-func validatePBTImportTargetFrontierFiles(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, logger log.Logger) error {
-	aggOpts := dbstate.New(dirs).Logger(logger).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps()
-	aggOpts = aggOpts.WithErigonDBSettings(settings)
-	agg, err := aggOpts.Open(ctx)
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
-	if err := agg.OpenFolder(nil); err != nil {
-		return err
-	}
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.CommitmentBinDomain} {
-		domainAt := at.DbgDomain(domain)
-		if domainAt == nil {
-			continue
-		}
-		if err := validatePBTImportFilesFrontier(domain, domainAt.Files(), txNum); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validatePBTImportFilesFrontier(domain kv.Domain, files kv.VisibleFiles, txNum uint64) error {
-	if len(files) == 0 || txNum == ^uint64(0) {
-		return nil
-	}
-	end := files[len(files)-1].EndRootNum()
-	if end > txNum+1 {
-		return fmt.Errorf("commitment import-pbt: target %s files extend past txNum %d", domain, txNum)
-	}
-	return nil
-}
-
-func configureImportVariant(dirs datadir.Dirs) error {
 	settings, err := dbstate.ReadErigonDBSettings(dirs)
-	if err != nil || settings == nil {
-		return nil
+	if errors.Is(err, os.ErrNotExist) {
+		return errors.New("commitment import-pbt: target settings are missing")
 	}
-	statecfg.ExperimentalBinCommitment = settings.TrieVariantName() == dbstate.TrieVariantBin
-	statecfg.ExperimentalHexBinCommitment = settings.TrieVariantName() == dbstate.TrieVariantHexBin
-	statecfg.ExperimentalCommitmentV3 = false
-	if statecfg.ExperimentalBinCommitment {
-		statecfg.ExperimentalParallelCommitment = false
+	if err != nil {
+		return err
 	}
-	statecfg.BinCommitmentHash = settings.TrieHashName()
+	if settings.TrieVariantName() != dbstate.TrieVariantHex {
+		return fmt.Errorf("commitment import-pbt: target must be hex-only, got %s", settings.TrieVariantName())
+	}
+	if frozenAt, frozen := settings.FrozenAt(kv.CommitmentDomain); frozen {
+		return fmt.Errorf("commitment import-pbt: target domain %s is frozen at txNum %d", kv.CommitmentDomain, frozenAt)
+	}
+	if err := validatePBTImportNoBinFiles(dirs); err != nil {
+		return err
+	}
 	detected, err := dbstate.EnableCommitmentV3FromFiles(dirs)
 	if err != nil {
 		return err
 	}
-	if statecfg.ExperimentalCommitmentV3 || detected {
-		statecfg.InitSchemas()
-		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	} else if statecfg.ExperimentalBinCommitment {
-		statecfg.InitSchemas()
+	if !detected {
+		return errors.New("commitment import-pbt: target is not a v3 hex datadir")
 	}
-	_ = commitment.SetPBinHashSuite(settings.TrieHashName())
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.InitSchemas()
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	requestedHash := statecfg.BinCommitmentHash
+	if requestedHash == "" {
+		requestedHash = commitment.PBinHashSuiteName()
+	}
+	if requestedHash != meta.HashSuite {
+		return fmt.Errorf("commitment import-pbt: hash suite %q does not match snapshot suite %q", requestedHash, meta.HashSuite)
+	}
+	if err := commitment.SetPBinHashSuite(meta.HashSuite); err != nil {
+		return err
+	}
+
+	rawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	if err != nil {
+		return fmt.Errorf("commitment import-pbt: open target read-only: %w", err)
+	}
+	defer rawDB.Close()
+	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, dirs, rawDB, logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeBlockReader != nil {
+			closeBlockReader()
+		}
+	}()
+	readTx, err := rawDB.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer readTx.Rollback()
+	readerTx := pbtBlockFilesTx{Tx: readTx, view: blockView}
+	header, err := blockReader.HeaderByHash(ctx, readerTx, common.HexToHash(meta.BlockHash))
+	if err != nil {
+		readTx.Rollback()
+		return err
+	}
+	if header == nil {
+		readTx.Rollback()
+		return fmt.Errorf("commitment import-pbt: block %s is not local or canonical", meta.BlockHash)
+	}
+	if header.Number.Uint64() != meta.Block {
+		readTx.Rollback()
+		return fmt.Errorf("commitment import-pbt: snapshot block %d has header number %d", meta.Block, header.Number.Uint64())
+	}
+	canonical, found, err := blockReader.CanonicalHash(ctx, readerTx, meta.Block)
+	if err != nil {
+		readTx.Rollback()
+		return err
+	}
+	if !found || canonical != header.Hash() {
+		readTx.Rollback()
+		return fmt.Errorf("commitment import-pbt: block %d is not canonical with hash %s", meta.Block, meta.BlockHash)
+	}
+	genesisHash, err := rawdb.ReadCanonicalHash(readTx, 0)
+	if err != nil {
+		readTx.Rollback()
+		return err
+	}
+	chainConfig, err := rawdb.ReadChainConfig(readTx, genesisHash)
+	if err != nil {
+		readTx.Rollback()
+		return err
+	}
+	if chainConfig == nil {
+		readTx.Rollback()
+		return errors.New("commitment import-pbt: chain config is missing")
+	}
+	if chainName != "" && chainConfig.ChainName != chainName {
+		readTx.Rollback()
+		return fmt.Errorf("commitment import-pbt: chain %q does not match target chain %q", chainName, chainConfig.ChainName)
+	}
+	if chainConfig.ChainID == nil || chainConfig.ChainID.String() != meta.ChainID {
+		readTx.Rollback()
+		return fmt.Errorf("commitment import-pbt: chain id %q does not match target", meta.ChainID)
+	}
+	progress, err := stages.GetStageProgress(readTx, stages.Execution)
+	if err != nil {
+		readTx.Rollback()
+		return err
+	}
+	if progress != meta.Block {
+		readTx.Rollback()
+		return pbtImportProgressError(progress, meta, chainConfig.ChainName)
+	}
+	lastTx, found, err := blockReader.TxnumReader().MaxExact(ctx, readerTx, meta.Block)
+	if err != nil {
+		readTx.Rollback()
+		return err
+	}
+	if !found {
+		readTx.Rollback()
+		return fmt.Errorf("commitment import-pbt: block %d has no txNum mapping", meta.Block)
+	}
+	if lastTx != meta.TxNum {
+		readTx.Rollback()
+		return fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run stage_exec --block=%d --chain=%s --experimental.commitment-v3 --experimental.bin-commitment.hash=%s, then export-pbt", meta.Block, meta.TxNum, meta.Block, lastTx, meta.Block, chainConfig.ChainName, meta.HashSuite)
+	}
+	if common.HexToHash(meta.StateRoot) != header.Root {
+		readTx.Rollback()
+		return fmt.Errorf("commitment import-pbt: snapshot stateRoot %s differs from header root %s", meta.StateRoot, header.Root)
+	}
+	readTx.Rollback()
+	hexBlock, hexTx, err := readPBTImportHexCheckpoint(ctx, dirs, settings, logger)
+	if err != nil {
+		return err
+	}
+	if hexBlock != meta.Block || hexTx != meta.TxNum {
+		return fmt.Errorf("commitment import-pbt: hex commitment checkpoint is (%d, %d), want (%d, %d)", hexBlock, hexTx, meta.Block, meta.TxNum)
+	}
+	closeBlockReader()
+	closeBlockReader = nil
+
+	stageRoot, err := os.MkdirTemp(filepath.Dir(dirs.DataDir), ".import-pbt-")
+	if err != nil {
+		return err
+	}
+	stageDirs := datadir.Open(stageRoot)
+	defer func() { _ = dir.RemoveAll(stageRoot) }()
+	if _, err := linkSnapshotsExceptCommitment(dirs.Snap, stageDirs.Snap); err != nil {
+		return err
+	}
+	if err := linkPBinHexFiles(dirs.SnapDomain, stageDirs.SnapDomain); err != nil {
+		return err
+	}
+	if err := linkPBinCommitmentFiles(dirs, stageDirs, settings.StepSize, meta.TxNum); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(stageDirs.Tmp, 0o755); err != nil {
+		return err
+	}
+	variant := dbstate.TrieVariantHexBin
+	hashName := meta.HashSuite
+	conversionBlock, conversionTx := meta.Block, meta.TxNum
+	finalSettings := &dbstate.ErigonDBSettings{
+		StepSize: settings.StepSize, StepsInFrozenFile: settings.StepsInFrozenFile,
+		ReferencesInCommitmentBranches: settings.ReferencesInCommitmentBranches,
+		TrieVariant:                    &variant, TrieHash: &hashName,
+		ConversionBlockNum: &conversionBlock, ConversionTxNum: &conversionTx,
+	}
+	if err := dbstate.WriteErigonDBSettings(stageDirs, finalSettings); err != nil {
+		return err
+	}
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.BinCommitmentHash = meta.HashSuite
+	statecfg.InitSchemas()
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	targetAgg, err := dbstate.New(stageDirs).Logger(logger).WithErigonDBSettings(finalSettings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer targetAgg.Close()
+	stageRawPath, err := os.MkdirTemp("", "import-pbt-chaindata-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.RemoveAll(stageRawPath) }()
+	stageRaw, err := mdbx.New(dbcfg.ChainDB, logger).Path(stageRawPath).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer stageRaw.Close()
+	if err := targetAgg.OpenFolder(stageRaw); err != nil {
+		return err
+	}
+	targetDB, err := dbtemporal.New(stageRaw, targetAgg, nil)
+	if err != nil {
+		return err
+	}
+	defer targetDB.Close()
+	targetTx, err := targetDB.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer targetTx.Rollback()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantBinPatriciaTrie
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(ctx, targetTx, logger, execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+	if err != nil {
+		return err
+	}
+	writer, err := dbstate.NewPBinRangeWriter(targetAgg, kv.CommitmentBinDomain, meta.TxNum)
+	if err != nil {
+		domains.Close()
+		return err
+	}
+	var artifactRoot common.Hash
+	root, err := writer.WriteAtBlock(ctx, targetTx, domains, func(emit func(dbstate.PBinLeaf) error) error {
+		var streamErr error
+		artifactRoot, streamErr = dbstate.ForEachPBinArtifactLeaf(snapshot, snapshotInfo.Size(), eip8297.HashBytes, func(leaf dbstate.PBinLeaf) error {
+			leaf.Stamp = writer.PBinLeafStamp()
+			return emit(leaf)
+		})
+		return streamErr
+	}, meta.Block)
+	domains.Close()
+	if err != nil {
+		return err
+	}
+	wantRoot := common.HexToHash(meta.PBTRoot)
+	if root != artifactRoot || root != wantRoot {
+		return fmt.Errorf("commitment import-pbt: written root %s differs from artifact root %s", root, wantRoot)
+	}
+	domains.Close()
+	targetTx.Rollback()
+	targetDB.Close()
+	targetAgg.Close()
+	stageRaw.Close()
+	if err := verifyPBTImportRows(ctx, stageDirs, finalSettings, logger, meta); err != nil {
+		return err
+	}
+	if importPBTSwapHook != nil {
+		if err := importPBTSwapHook("staging-built"); err != nil {
+			return err
+		}
+	}
+	moved, err := movePBTImportBinFiles(stageDirs, dirs)
+	if err != nil {
+		removePBTImportFiles(moved)
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			removePBTImportFiles(moved)
+		}
+	}()
+	if importPBTSwapHook != nil {
+		if err := importPBTSwapHook("files-moved"); err != nil {
+			return err
+		}
+	}
+	if err := dbstate.WriteErigonDBSettings(dirs, finalSettings); err != nil {
+		return err
+	}
+	if importPBTSwapHook != nil {
+		if err := importPBTSwapHook("settings-written"); err != nil {
+			return err
+		}
+	}
+	committed = true
+	logger.Info("imported PBT snapshot", "block", meta.Block, "txNum", meta.TxNum, "root", root.Hex())
 	return nil
+}
+
+func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger, point pbtImportMeta) error {
+	rawPath, err := os.MkdirTemp("", "import-pbt-verify-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.RemoveAll(rawPath) }()
+	rawDB, err := mdbx.New(dbcfg.ChainDB, logger).Path(rawPath).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer rawDB.Close()
+	if err := rawDB.Update(ctx, func(tx kv.RwTx) error {
+		for blockNum := uint64(0); blockNum <= point.Block; blockNum++ {
+			maxTxNum := point.TxNum
+			if blockNum == 0 && point.Block != 0 {
+				maxTxNum = 0
+			}
+			if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(rawDB); err != nil {
+		return err
+	}
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := dbstate.VerifyPBinDomain(ctx, tx, agg, kv.CommitmentBinDomain); err != nil {
+		return fmt.Errorf("commitment import-pbt: verify written rows: %w", err)
+	}
+	return nil
+}
+
+func readPBTImportMeta(snapshotPath string) (pbtImportMeta, error) {
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(snapshotPath), "pbt-snapshot.meta.json"))
+	if err != nil {
+		return pbtImportMeta{}, fmt.Errorf("commitment import-pbt: read metadata: %w", err)
+	}
+	var meta pbtImportMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return pbtImportMeta{}, fmt.Errorf("commitment import-pbt: decode metadata: %w", err)
+	}
+	for name, value := range map[string]string{"blockHash": meta.BlockHash, "hashSuite": meta.HashSuite, "stateRoot": meta.StateRoot, "pbtRoot": meta.PBTRoot, "snapshotDigest": meta.SnapshotDigest} {
+		if value == "" {
+			return pbtImportMeta{}, fmt.Errorf("commitment import-pbt: metadata field %s is empty", name)
+		}
+	}
+	return meta, nil
+}
+
+func validatePBTImportDigest(file *os.File, size int64, expected string) error {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	hash := keccak.NewFastKeccak()
+	if _, err := io.Copy(hash, io.LimitReader(file, size)); err != nil {
+		return err
+	}
+	sum := hash.Sum(nil)
+	if common.BytesToHash(sum) != common.HexToHash(expected) {
+		return fmt.Errorf("commitment import-pbt: snapshot digest %s differs from metadata %s", common.BytesToHash(sum), expected)
+	}
+	return nil
+}
+
+func validatePBTImportNoBinFiles(dirs datadir.Dirs) error {
+	files, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		if file.domain == kv.CommitmentBinDomain {
+			return errors.New("commitment import-pbt: target already has a binary commitment domain")
+		}
+	}
+	return nil
+}
+
+func readPBTImportHexCheckpoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger) (uint64, uint64, error) {
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(nil); err != nil {
+		return 0, 0, err
+	}
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	value, found, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentV3State, ^uint64(0))
+	if err != nil {
+		return 0, 0, err
+	}
+	if !found {
+		return 0, 0, errors.New("commitment import-pbt: hex commitment checkpoint is missing from files")
+	}
+	block, tx, _, err := commitment.DecodeCommitmentV3State(value)
+	return block, tx, err
+}
+
+func pbtImportProgressError(progress uint64, meta pbtImportMeta, chainName string) error {
+	return fmt.Errorf("commitment import-pbt: target is at block %d, snapshot is at block %d; run integration stage_exec --block=%d --chain=%s --experimental.commitment-v3 --experimental.bin-commitment.hash=%s, then export-pbt", progress, meta.Block, progress, chainName, meta.HashSuite)
+}
+
+func movePBTImportBinFiles(stageDirs, targetDirs datadir.Dirs) ([]string, error) {
+	files, err := pbtAttachFiles(stageDirs)
+	if err != nil {
+		return nil, err
+	}
+	moved := make([]string, 0)
+	for _, file := range files {
+		if file.domain != kv.CommitmentBinDomain {
+			continue
+		}
+		rel, err := filepath.Rel(stageDirs.Snap, file.path)
+		if err != nil {
+			return moved, err
+		}
+		destination := filepath.Join(targetDirs.Snap, rel)
+		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+			return moved, err
+		}
+		if err := os.Rename(file.path, destination); err != nil {
+			return moved, err
+		}
+		moved = append(moved, destination)
+	}
+	if len(moved) == 0 {
+		return moved, errors.New("commitment import-pbt: staged binary commitment files are missing")
+	}
+	return moved, nil
+}
+
+func removePBTImportFiles(files []string) {
+	for _, file := range files {
+		_ = dir.RemoveFile(file)
+	}
 }

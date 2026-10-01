@@ -130,8 +130,9 @@
    files are omitted; source commitment history and indexes are retained when present. Every range up to S gets a file.
 3. Attach adopts published files, resets the node's execution state with `ResetExec` and re-executes from S. The
    automatic hex stop ends dual mode after the fork window.
-4. Export writes the artifact and the preimage file from one shared pin at a block end. Import rebuilds a test node's
-   state from them through the ordinary commitment fold and runs it forward.
+4. Export writes the artifact and the preimage file from one shared pin at a block end. Test-only import replaces
+   conversion and attach by reading the artifact, staging commitment-bin files, switching settings last, and running
+   the node forward in dual mode.
 
 ## Technical Details
 
@@ -285,23 +286,22 @@
 
 ### Import (test-only)
 
-- `integration commitment import-pbt --snapshot <file> --preimages <file> --block <hash> --datadir <dir>`, run on a
-  copy of a node's datadir.
-- `--block` is checked against the local canonical header. N must be a block where bin is canonical (PBT from genesis,
-  or after the fork); the output is bin-only.
+- `integration commitment import-pbt --snapshot <file> --datadir <dir>`, run on a stopped v3 hex-only node at the
+  block in the snapshot metadata. The command takes `--chain` and
+  `--experimental.bin-commitment.hash=<suite>`.
+- The metadata chain id, block number and hash, exact block-end txNum, hash suite, state root and snapshot digest are
+  checked against the node. The header, canonical hash, and txNum come from the block reader, so frozen blocks work.
 - steps:
-  1. strict readers, the exact-set join, code verification and both reference-root checks, before changing execution;
-  2. refuse a frozen target and a target whose state files extend beyond T;
-  3. `ResetExec`;
-  4. write accounts (incarnation 1 for accounts with code, 0 otherwise), storage and address-keyed code through
-     `SharedDomains` at N's last txNum T; the ordinary bin commitment fold then writes the rows and the commitment-state
-     record at (N, T), as the genesis path does.
+  1. validate metadata and the digest without opening a writable database;
+  2. stream artifact leaves into `PBinRangeWriter` in a staging directory, with all rows stamped at the import point;
+  3. compare the written root with the artifact root and verify the written rows;
+  4. move only the commitment-bin files into the node and write hex+bin settings, the hash suite, and the conversion
+     point last.
 - checks:
-  - the bin root equals `pbtRoot`, which equals `header(N).stateRoot`;
-  - code: missing chunks read as 31 zero bytes, truncated to `codeSize`, the keccak equals the code hash, re-chunking
-    gives the artifact's chunks, one `codeSize` per code hash, no surplus code groups.
-- shared bytecode expands into address-keyed code rows; delegated accounts store their 23-byte designator; codeless
-  accounts have no code row.
+  - the written bin root equals the artifact `pbtRoot` and the metadata root;
+  - the target's state and hex files remain unchanged; no bin history is created;
+  - a failed staging move leaves files and settings unchanged. Import has no preimage or block-hash flag and does not
+    reset execution or rewrite the state database.
 
 ## What Goes Where
 
@@ -578,35 +578,9 @@
 
 ### Task 14: import-pbt test bootstrap
 
-**Files:**
-- Create: `db/state/pbt_import.go`
-- Create: `db/state/pbt_import_test.go`
-- Create: `cmd/integration/commands/commitment_import_pbt.go`
-- Create: `cmd/integration/commands/commitment_import_pbt_test.go`
-
-- [x] add the command with a stub. Write the acceptance test in `commitment_import_pbt_test.go` on a chain with PBT
-      from genesis. The chain covers kinds 0, 1 and 2, shared code, code with an all-zero 31-byte chunk, and header and
-      overflow slots. The test:
-      1. exports at N from node A;
-      2. copies A's datadir;
-      3. imports with `--block` set to N's hash;
-      4. asserts Execution progress is N;
-      5. executes to the tip, where every root must equal A's.
-
-      Confirm it fails at the progress or root assertion.
-- [x] implement:
-      - the `--block` check against the local canonical header, refusing N where bin is not canonical;
-      - `ResetExec`;
-      - the readers and the join;
-      - writes through `SharedDomains` at T with incarnation normalized and address-keyed code;
-      - the ordinary bin fold producing the rows and the commitment-state record.
-- [x] implement the checks (roots against `pbtRoot` and `header(N).stateRoot`, code rules, kind 2 code hash
-      `keccak256(ef0100 ‖ target)`)
-- [x] write tests for each failing check (wrong chunk, `codeSize` disagreement, designator under kind 1, missing and
-      surplus preimage) and for the empty state
-- [x] run tests - must pass before task 15
-
-NOTES: import-pbt refuses frozen commitment targets before ResetExec; it does not clear a frozen record during import.
+The original bootstrap design was replaced by Task 19. The artifact reader and
+streaming leaf adapter remain covered there; the database reset, preimage join,
+code reconstruction and bin-only bootstrap path were removed.
 
 ### Task 15: Remove rebuild's bin target
 
@@ -696,6 +670,17 @@ recursive verification remains in the converter command after the written files 
 
 - [x] mark the rows plan's rebuild tasks as superseded by `convert-pbt`
 - [x] move this plan to `docs/plans/completed/`
+
+### Task 19: ➕ import as a test-only substitute for convert and attach
+
+- [x] replace the old bootstrap path with snapshot-only import, read-only validation, staged commitment-bin files,
+      row verification, and a last-step hex+bin settings switch
+- [x] cover acceptance parity with conversion, unchanged state-domain files, checkpoint and settings guards, and
+      post-import dual re-execution
+- [x] cover metadata, digest, canonical block, txNum, target variant, hash-suite, and frozen-block refusals without
+      changing the datadir
+- [x] leave a failed staging move or settings write without adopted files or settings
+- [x] update the operator documentation and remove the obsolete preimage and block flags
 
 ## Post-Completion
 
