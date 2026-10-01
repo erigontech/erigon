@@ -253,15 +253,15 @@ func ReadPreimagesStream(src io.ReaderAt, size int64, yield func(common.Address,
 	return nil
 }
 
-func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64, hashFn eip8297.HashFn, yield func(common.Address, [32]byte) error) error {
-	return joinAtWithBuffer(snapshot, snapshotSize, preimages, preimageSize, hashFn, yield, etl.BufferOptimalSize, os.TempDir())
+func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64, hashFn eip8297.HashFn, yield func(common.Address, [32]byte) error, scratchDir string) error {
+	return joinAtWithBuffer(snapshot, snapshotSize, preimages, preimageSize, hashFn, yield, etl.BufferOptimalSize, scratchDir)
 }
 
 func joinAtWithBuffer(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64, hashFn eip8297.HashFn, yield func(common.Address, [32]byte) error, bufferSize datasize.ByteSize, tmpDir string) error {
 	if hashFn == nil {
 		hashFn = eip8297.HashBytes
 	}
-	expected, err := os.CreateTemp("", "pbt-join-expected-")
+	expected, err := os.CreateTemp(tmpDir, "pbt-join-expected-")
 	if err != nil {
 		return err
 	}
@@ -354,8 +354,8 @@ func joinItemLabel(item joinItem) string {
 	return fmt.Sprintf("tree key %x", item.key)
 }
 
-func CheckPreimageSetAt(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn) error {
-	return checkPreimageSetAtWithBuffer(preimages, preimageSize, expected, hashFn, etl.BufferOptimalSize, os.TempDir())
+func CheckPreimageSetAt(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn, scratchDir string) error {
+	return checkPreimageSetAtWithBuffer(preimages, preimageSize, expected, hashFn, etl.BufferOptimalSize, scratchDir)
 }
 
 func checkPreimageSetAtWithBuffer(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn, bufferSize datasize.ByteSize, tmpDir string) error {
@@ -365,7 +365,7 @@ func checkPreimageSetAtWithBuffer(preimages io.ReaderAt, preimageSize int64, exp
 	if hashFn == nil {
 		hashFn = eip8297.HashBytes
 	}
-	expectedFile, err := os.CreateTemp("", "pbt-preimage-expected-")
+	expectedFile, err := os.CreateTemp(tmpDir, "pbt-preimage-expected-")
 	if err != nil {
 		return err
 	}

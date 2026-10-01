@@ -84,6 +84,7 @@ var exportPreimagesCommand = cli.Command{
 		&utils.DataDirFlag,
 		&cli.StringFlag{Name: "out", Value: ".", Usage: "output directory for the framed file and preimages.meta.json"},
 		&cli.StringFlag{Name: "tmpdir", Usage: "scratch directory for the external sort, sized for the whole key set (default: <datadir>/temp)"},
+		&utils.ExperimentalBinCommitmentHashFlag,
 	}),
 }
 
@@ -106,6 +107,11 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	if _, err := state.EnableCommitmentV3FromFiles(dirs); err != nil {
 		return err
 	}
+	restoreHash, err := configurePBTExportHash(dirs, cliCtx)
+	if err != nil {
+		return err
+	}
+	defer restoreHash()
 	outDir := cliCtx.String("out")
 	tmpDir := cliCtx.String("tmpdir")
 	if tmpDir == "" {
@@ -212,7 +218,7 @@ func runExportWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawd
 			}
 			return yield(leaf.Key)
 		})
-	}, eip8297.HashBytes); err != nil {
+	}, eip8297.HashBytes, tmpDir); err != nil {
 		return fmt.Errorf("export aborted (preimage set): %w", err)
 	}
 	preimageDigest, err := digestPBTFile(outputFile)

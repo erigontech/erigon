@@ -181,7 +181,7 @@ func TestStreamingReadersUseCallbacks(t *testing.T) {
 	var empty bytes.Buffer
 	_, err = WriteSnapshot(&empty, common.Hash{}, func(func([]byte, []byte) error) error { return nil })
 	require.NoError(t, err)
-	require.NoError(t, JoinAt(bytes.NewReader(empty.Bytes()), int64(empty.Len()), bytes.NewReader(nil), 0, eip8297.HashBytes, nil))
+	require.NoError(t, JoinAt(bytes.NewReader(empty.Bytes()), int64(empty.Len()), bytes.NewReader(nil), 0, eip8297.HashBytes, nil, t.TempDir()))
 
 	var preimages bytes.Buffer
 	require.NoError(t, WritePreimages(&preimages, PreimageIterator(func(yield func(Preimage) error) error {
@@ -575,14 +575,14 @@ func TestPreimageJoinMergesTreeKeysAcrossAddressOrders(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, WritePreimages(&preimages, records))
-	require.NoError(t, JoinAt(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), bytes.NewReader(preimages.Bytes()), int64(preimages.Len()), eip8297.HashBytes, nil))
+	require.NoError(t, JoinAt(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), bytes.NewReader(preimages.Bytes()), int64(preimages.Len()), eip8297.HashBytes, nil, t.TempDir()))
 
 	testJoinError := func(name string, mutate func([]Preimage) []Preimage, want string) {
 		t.Run(name, func(t *testing.T) {
 			mutated := mutate(append([]Preimage(nil), records...))
 			var encoded bytes.Buffer
 			require.NoError(t, WritePreimages(&encoded, mutated))
-			err := JoinAt(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), eip8297.HashBytes, nil)
+			err := JoinAt(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), eip8297.HashBytes, nil, t.TempDir())
 			require.ErrorContains(t, err, want)
 		})
 	}
@@ -646,7 +646,7 @@ func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
 		}
 		return nil
 	}
-	require.NoError(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), yieldExpected, eip8297.HashBytes))
+	require.NoError(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), yieldExpected, eip8297.HashBytes, t.TempDir()))
 	require.Error(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), func(yield func([]byte) error) error {
 		return yieldExpected(func(key []byte) error {
 			if bytes.Equal(key, headerSlotKey) {
@@ -654,13 +654,13 @@ func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
 			}
 			return yield(key)
 		})
-	}, eip8297.HashBytes))
+	}, eip8297.HashBytes, t.TempDir()))
 	require.Error(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), func(yield func([]byte) error) error {
 		if err := yield(headerKey); err != nil {
 			return err
 		}
 		return yield(headerSlotKey)
-	}, eip8297.HashBytes), "a missing overflow preimage must be rejected")
+	}, eip8297.HashBytes, t.TempDir()), "a missing overflow preimage must be rejected")
 	extraHeaderSlot := [32]byte{2}
 	extraSlots := [][32]byte{headerSlot, overflowSlot, extraHeaderSlot}
 	sort.Slice(extraSlots, func(i, j int) bool {
@@ -670,7 +670,7 @@ func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
 	})
 	encoded.Reset()
 	require.NoError(t, WritePreimages(&encoded, []Preimage{{Address: address, Slots: extraSlots}}))
-	require.ErrorContains(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), yieldExpected, eip8297.HashBytes), "surplus key")
+	require.ErrorContains(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), yieldExpected, eip8297.HashBytes, t.TempDir()), "surplus key")
 }
 
 func TestJoinAtLargeStorageStaysBounded(t *testing.T) {

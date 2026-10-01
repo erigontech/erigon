@@ -63,6 +63,7 @@ var exportPBTCommand = cli.Command{
 	Flags: joinFlags([]cli.Flag{
 		&utils.DataDirFlag,
 		&cli.StringFlag{Name: "out", Value: ".", Usage: "output directory for the PBT snapshot and preimages"},
+		&utils.ExperimentalBinCommitmentHashFlag,
 	}),
 }
 
@@ -91,6 +92,11 @@ func doExportPBT(ctx context.Context, cliCtx *cli.Command) error {
 	if _, err := state.EnableCommitmentV3FromFiles(dirs); err != nil {
 		return err
 	}
+	restoreHash, err := configurePBTExportHash(dirs, cliCtx)
+	if err != nil {
+		return err
+	}
+	defer restoreHash()
 	chainDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
 		return err
@@ -262,7 +268,7 @@ func runExportPBTWithReadbackHookAndTxNumReader(ctx context.Context, tx kv.Tempo
 	if err != nil {
 		return err
 	}
-	if err := artifact.JoinAt(snapshotRead, snapshotInfo.Size(), preimageRead, preimageInfo.Size(), eip8297.HashBytes, nil); err != nil {
+	if err := artifact.JoinAt(snapshotRead, snapshotInfo.Size(), preimageRead, preimageInfo.Size(), eip8297.HashBytes, nil, scratchDir); err != nil {
 		return fmt.Errorf("export-pbt: join preimages: %w", err)
 	}
 	if snapshotMeta.SnapshotDigest != snapshotDigest {

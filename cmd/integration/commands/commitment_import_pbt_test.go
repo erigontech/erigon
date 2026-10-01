@@ -54,6 +54,22 @@ func TestImportPBTUsesOnlySnapshotInput(t *testing.T) {
 	require.Nil(t, cmdCommitmentImportPBT.Flags().Lookup("block"), "import-pbt must not require a block hash")
 }
 
+func TestImportPBTReadsHexCheckpointFromDatabaseWhenFilesLag(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	fixture, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, fixture.Tester.InsertChain(fixture.Chain.Slice(0, 2)))
+	buildPBTAcceptanceFilesAt(t, fixture, 6)
+	settings, err := dbstate.ReadErigonDBSettings(fixture.Tester.Dirs)
+	require.NoError(t, err)
+	rawDB := dbCfg(dbcfg.ChainDB, fixture.Tester.Dirs.Chaindata).MustOpen()
+	defer rawDB.Close()
+	block, txNum, err := readPBTImportHexCheckpoint(t.Context(), fixture.Tester.Dirs, rawDB, settings, log.New())
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), block)
+	require.Equal(t, uint64(7), txNum)
+}
+
 func TestImportPBTReplacesConvertAndAttach(t *testing.T) {
 	selectPBTHexCommandSuite(t)
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
@@ -111,6 +127,16 @@ func TestImportPBTReplacesConvertAndAttach(t *testing.T) {
 	settingsBeforeMoveFailure := snapshotTree(t, target.Tester.Dirs.DataDir)
 	require.ErrorContains(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()), "test move failure")
 	require.Equal(t, settingsBeforeMoveFailure, snapshotTree(t, target.Tester.Dirs.DataDir), "move failure must not change the target")
+	importPBTSwapHook = func(step string) error {
+		if step == "files-moved" {
+			panic("test interrupted after move")
+		}
+		return nil
+	}
+	require.Panics(t, func() {
+		_ = importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New())
+	})
+	require.FileExists(t, dbstate.PBTImportMarkerPath(datadir.Open(target.Tester.Dirs.DataDir)))
 	importPBTSwapHook = nil
 	require.NoError(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()))
 	after := snapshotTree(t, target.Tester.Dirs.DataDir)

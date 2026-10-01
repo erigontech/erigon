@@ -105,6 +105,20 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	if err := validatePBTImportDigest(snapshot, snapshotInfo.Size(), meta.SnapshotDigest); err != nil {
 		return err
 	}
+	marker, err := dbstate.ReadPBTImportMarker(dirs)
+	if err != nil {
+		return err
+	}
+	absSnapshotPath, err := filepath.Abs(snapshotPath)
+	if err != nil {
+		return err
+	}
+	if marker != nil && filepath.Clean(marker.SnapshotPath) != filepath.Clean(absSnapshotPath) {
+		return fmt.Errorf("commitment import-pbt is incomplete for %s; rerun import-pbt --snapshot %s", marker.SnapshotPath, marker.SnapshotPath)
+	}
+	if marker != nil && marker.SnapshotHash != meta.SnapshotDigest {
+		return fmt.Errorf("commitment import-pbt: incomplete marker does not match snapshot digest")
+	}
 
 	oldBin, oldHexBin, oldV3, oldParallel, oldHash, oldSchema := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash, statecfg.Schema
 	oldSuite := commitment.PBinHashSuiteName()
@@ -120,14 +134,22 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	if err != nil {
 		return err
 	}
+	if marker != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
+		if marker.Settings.TrieHashName() == settings.TrieHashName() && marker.Settings.ConversionTxNum != nil && *marker.Settings.ConversionTxNum == meta.TxNum && marker.Settings.ConversionBlockNum != nil && *marker.Settings.ConversionBlockNum == meta.Block {
+			return dbstate.RemovePBTImportMarker(dirs)
+		}
+		return fmt.Errorf("commitment import-pbt: incomplete marker does not match target settings")
+	}
 	if settings.TrieVariantName() != dbstate.TrieVariantHex {
 		return fmt.Errorf("commitment import-pbt: target must be hex-only, got %s", settings.TrieVariantName())
 	}
 	if frozenAt, frozen := settings.FrozenAt(kv.CommitmentDomain); frozen {
 		return fmt.Errorf("commitment import-pbt: target domain %s is frozen at txNum %d", kv.CommitmentDomain, frozenAt)
 	}
-	if err := validatePBTImportNoBinFiles(dirs); err != nil {
-		return err
+	if marker == nil {
+		if err := validatePBTImportNoBinFiles(dirs); err != nil {
+			return err
+		}
 	}
 	detected, err := dbstate.EnableCommitmentV3FromFiles(dirs)
 	if err != nil {
@@ -241,7 +263,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		return fmt.Errorf("commitment import-pbt: snapshot stateRoot %s differs from header root %s", meta.StateRoot, header.Root)
 	}
 	readTx.Rollback()
-	hexBlock, hexTx, err := readPBTImportHexCheckpoint(ctx, dirs, settings, logger)
+	hexBlock, hexTx, err := readPBTImportHexCheckpoint(ctx, dirs, rawDB, settings, logger)
 	if err != nil {
 		return err
 	}
@@ -357,14 +379,28 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 			return err
 		}
 	}
+	if err := dbstate.WritePBTImportMarker(dirs, &dbstate.PBTImportMarker{SnapshotPath: absSnapshotPath, SnapshotHash: meta.SnapshotDigest, Settings: finalSettings}); err != nil {
+		return err
+	}
+	if marker != nil {
+		if err := removePBTImportFilesForRecovery(dirs); err != nil {
+			_ = dbstate.RemovePBTImportMarker(dirs)
+			return err
+		}
+	}
 	moved, err := movePBTImportBinFiles(stageDirs, dirs)
 	if err != nil {
+		_ = dbstate.RemovePBTImportMarker(dirs)
 		removePBTImportFiles(moved)
 		return err
 	}
-	committed := false
+	settingsWritten := false
 	defer func() {
-		if !committed {
+		if recovered := recover(); recovered != nil {
+			panic(recovered)
+		}
+		if !settingsWritten {
+			_ = dbstate.RemovePBTImportMarker(dirs)
 			removePBTImportFiles(moved)
 		}
 	}()
@@ -376,12 +412,15 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	if err := dbstate.WriteErigonDBSettings(dirs, finalSettings); err != nil {
 		return err
 	}
+	settingsWritten = true
 	if importPBTSwapHook != nil {
 		if err := importPBTSwapHook("settings-written"); err != nil {
 			return err
 		}
 	}
-	committed = true
+	if err := dbstate.RemovePBTImportMarker(dirs); err != nil {
+		return err
+	}
 	logger.Info("imported PBT snapshot", "block", meta.Block, "txNum", meta.TxNum, "root", root.Hex())
 	return nil
 }
@@ -480,18 +519,23 @@ func validatePBTImportNoBinFiles(dirs datadir.Dirs) error {
 	return nil
 }
 
-func readPBTImportHexCheckpoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger) (uint64, uint64, error) {
+func readPBTImportHexCheckpoint(ctx context.Context, dirs datadir.Dirs, rawDB kv.RwDB, settings *dbstate.ErigonDBSettings, logger log.Logger) (uint64, uint64, error) {
 	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer agg.Close()
-	if err := agg.OpenFolder(nil); err != nil {
+	if err := agg.OpenFolder(rawDB); err != nil {
 		return 0, 0, err
 	}
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	value, found, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentV3State, ^uint64(0))
+	readTx, err := rawDB.BeginRo(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer readTx.Rollback()
+	value, _, found, err := at.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, readTx, kv.GetLatestOptions{})
 	if err != nil {
 		return 0, 0, err
 	}
@@ -539,4 +583,19 @@ func removePBTImportFiles(files []string) {
 	for _, file := range files {
 		_ = dir.RemoveFile(file)
 	}
+}
+
+func removePBTImportFilesForRecovery(dirs datadir.Dirs) error {
+	files, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		if file.domain == kv.CommitmentBinDomain {
+			if err := dir.RemoveFile(file.path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

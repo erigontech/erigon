@@ -203,6 +203,135 @@ func testPBTDualCommitmentFlipAndReorg(t *testing.T, parallel bool) {
 	assertBlockCommitments(t, m, alternateChain.TopBlock, alternateRoots[len(alternateRoots)-1])
 }
 
+func TestPBTCommittedHexStopContinuesInSameProcess(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	previousExec3Parallel := dbg.Exec3Parallel
+	previousBatchCommitments := dbg.BatchCommitments
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalParallelCommitment = previousParallel
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+		statecfg.BinCommitmentHash = previousHash
+		dbg.Exec3Parallel = previousExec3Parallel
+		dbg.BatchCommitments = previousBatchCommitments
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalParallelCommitment = false
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = ""
+	dbg.Exec3Parallel = false
+	dbg.BatchCommitments = false
+
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	from := crypto.PubkeyToAddress(key.PublicKey)
+	amsterdamTime := uint64(0)
+	activationTime := uint64(30)
+	config := chain.AllProtocolChanges.Copy()
+	config.AmsterdamTime = &amsterdamTime
+	config.BinaryTrieTime = &activationTime
+	contract := common.HexToAddress("0x1000000000000000000000000000000000000001")
+	code := common.FromHex("0x60003560005500")
+	initialBalance := new(big.Int).Mul(big.NewInt(10), new(big.Int).SetUint64(common.Ether))
+	genesis := &types.Genesis{
+		Config: config,
+		Alloc: types.GenesisAlloc{
+			from:     {Balance: new(big.Int).Set(initialBalance)},
+			contract: {Balance: big.NewInt(0), Nonce: 1, Code: code},
+		},
+		GasLimit: 30_000_000,
+		BaseFee:  uint256.NewInt(0),
+	}
+	dirs := datadir.New(t.TempDir())
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithDataDir(dirs),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+		execmoduletester.WithoutExperimentalBAL(),
+		execmoduletester.WithMaxReorgDepth(1),
+	)
+	seedDualGenesis(t, m, genesis)
+	require.NoError(t, m.ExecModule.ResetCurrentContext(t.Context()))
+
+	signer := types.LatestSignerForChainID(config.ChainID)
+	generate := func(i int, b *blockgen.BlockGen) {
+		value := uint64(i + 1)
+		data := common.BigToHash(new(big.Int).SetUint64(value))
+		txn, signErr := types.SignTx(types.NewTransaction(b.TxNonce(from), contract, uint256.NewInt(value), 2_000_000, uint256.NewInt(0), data[:]), *signer, key)
+		require.NoError(t, signErr)
+		b.AddTx(txn)
+	}
+	pack, err := m.GenerateChain(7, generate)
+	require.NoError(t, err)
+	roots := make([]pbtBlockRoots, len(pack.Blocks))
+	total := uint64(0)
+	for i, block := range pack.Blocks {
+		total += uint64(i + 1)
+		alloc := types.GenesisAlloc{
+			from: {Balance: new(big.Int).Sub(initialBalance, new(big.Int).SetUint64(total)), Nonce: uint64(i + 1)},
+			contract: {
+				Balance: new(big.Int).SetUint64(total), Nonce: 1, Code: code,
+				Storage: map[common.Hash]common.Hash{{}: common.BigToHash(new(big.Int).SetUint64(uint64(i + 1)))},
+			},
+		}
+		for address, account := range genesis.Alloc {
+			if address != from && address != contract {
+				alloc[address] = account
+			}
+		}
+		builderExit := config.GetBuilderExitContract().Value()
+		builderAccount := alloc[builderExit]
+		builderAccount.Storage = nil
+		alloc[builderExit] = builderAccount
+		roots[i] = pbtRootsFromAllocation(t, config, alloc, activationTime)
+		require.Equal(t, roots[i].hex, block.Root())
+	}
+	setPBTRoots(pack, roots, config)
+	debugAPI := jsonrpc.NewPrivateDebugAPI(
+		jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
+		m.DB, nil, &rpccfg.DebugApiConfig{},
+	)
+	for i, block := range pack.Blocks {
+		require.NoError(t, m.InsertChain(pack.Slice(i, i+1)))
+		if i >= 4 {
+			assertPBTBinRoot(t, m, block, roots[i])
+		}
+	}
+	progress, err := debugAPI.MigrationProgress(t.Context())
+	require.NoError(t, err)
+	require.True(t, progress.ShadowStopped)
+	m.Close()
+
+	reopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(m.Dirs),
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	reopenedAPI := jsonrpc.NewPrivateDebugAPI(
+		jsonrpc.NewBaseApi(nil, reopened.StateCache, reopened.BlockReader, reopened.Engine, &rpccfg.BaseApiConfig{Dirs: reopened.Dirs}),
+		reopened.DB, nil, &rpccfg.DebugApiConfig{},
+	)
+	progress, err = reopenedAPI.MigrationProgress(t.Context())
+	require.NoError(t, err)
+	require.True(t, progress.ShadowStopped)
+	assertPBTBinRoot(t, reopened, pack.TopBlock, roots[len(roots)-1])
+}
+
 func seedDualGenesis(t *testing.T, m *execmoduletester.ExecModuleTester, genesis *types.Genesis) {
 	t.Helper()
 	tx, err := m.DB.BeginTemporalRw(context.Background())
@@ -275,6 +404,22 @@ func assertBlockCommitments(t *testing.T, m *execmoduletester.ExecModuleTester, 
 	} else {
 		require.Equal(t, blockRoot[:], hexRoot)
 		require.NotEqual(t, blockRoot[:], binRoot)
+	}
+}
+
+func assertPBTBinRoot(t *testing.T, m *execmoduletester.ExecModuleTester, block *types.Block, want pbtBlockRoots) {
+	t.Helper()
+	tx, err := m.DB.BeginTemporalRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	binRoot, err := domains.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
+	require.NoError(t, err)
+	require.Equal(t, want.bin, common.BytesToHash(binRoot))
+	if m.ChainConfig.IsBinaryTrie(block.Time()) {
+		require.Equal(t, block.Root(), common.BytesToHash(binRoot))
 	}
 }
 

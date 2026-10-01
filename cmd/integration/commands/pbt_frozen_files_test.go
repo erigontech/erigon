@@ -130,7 +130,7 @@ func TestPBTCommandsUseFrozenBlockFiles(t *testing.T) {
 	tx.Rollback()
 	closeReader()
 	rawDB.Close()
-	blockHash, blockEnd, _, err := pbtAttachBlockEnd(t.Context(), chain.Tester.Dirs, blockNum, wantMaxTx)
+	blockHash, _, blockEnd, _, err := pbtAttachBlockEnd(t.Context(), chain.Tester.Dirs, blockNum, wantMaxTx)
 	require.NoError(t, err)
 	require.Equal(t, wantHeader.Hash(), blockHash)
 	require.True(t, blockEnd)

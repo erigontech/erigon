@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -184,6 +185,17 @@ func TestAutomaticHexStopRecordsMarkerInCommitmentTransaction(t *testing.T) {
 	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentDomain)
 	require.NoError(t, err)
 	require.True(t, stopped, "the automatic stop marker must share the commitment transaction")
+}
+
+func TestCommittedHexStopUpdatesLiveAggregator(t *testing.T) {
+	_, tx, doms := dualCalculatorTest(t)
+	agg, ok := tx.AggTx().(interface{ Agg() *dbstate.Aggregator })
+	require.True(t, ok)
+	live := agg.Agg()
+	require.NoError(t, rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentDomain))
+	require.False(t, live.CommitmentDomainStopped(kv.CommitmentDomain))
+	require.NoError(t, doms.Commit(t.Context(), tx))
+	require.True(t, live.CommitmentDomainStopped(kv.CommitmentDomain), "a committed stop must update the live aggregator")
 }
 
 func TestStoppedHexShadowUnwindRefusesAcrossActivation(t *testing.T) {

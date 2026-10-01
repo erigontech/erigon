@@ -92,7 +92,7 @@ func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
 	require.NoError(t, err)
 	snapshotMeta, err := artifact.ReadSnapshotAt(bytes.NewReader(snapshotBytes), int64(len(snapshotBytes)), artifact.SnapshotCallbacks{})
 	require.NoError(t, err)
-	require.NoError(t, artifact.JoinAt(bytes.NewReader(snapshotBytes), int64(len(snapshotBytes)), bytes.NewReader(preimages), int64(len(preimages)), eip8297.HashBytes, nil))
+	require.NoError(t, artifact.JoinAt(bytes.NewReader(snapshotBytes), int64(len(snapshotBytes)), bytes.NewReader(preimages), int64(len(preimages)), eip8297.HashBytes, nil, t.TempDir()))
 	require.Equal(t, root, snapshotMeta.Root)
 	metaBytes, err := os.ReadFile(filepath.Join(outDir, pbtMetaFileName))
 	require.NoError(t, err)
@@ -281,6 +281,9 @@ func TestRunExportPBTUsesStoppedExecutionStage(t *testing.T) {
 func TestDoExportPBTUsesFrozenBlockFiles(t *testing.T) {
 	selectPBTFrozenExportSuite(t)
 	dirs := buildFrozenPBTExportDatadir(t)
+	tmpFile := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(tmpFile, nil, 0o644))
+	t.Setenv("TMPDIR", tmpFile)
 	outDir := filepath.Join(t.TempDir(), "export")
 	cmd := &cli.Command{Flags: []cli.Flag{
 		&cli.StringFlag{Name: utils.DataDirFlag.Name},
@@ -295,6 +298,9 @@ func TestDoExportPBTUsesFrozenBlockFiles(t *testing.T) {
 func TestDoExportPreimagesUsesFrozenBlockFiles(t *testing.T) {
 	selectPBTFrozenExportSuite(t)
 	dirs := buildFrozenPBTExportDatadir(t)
+	tmpFile := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(tmpFile, nil, 0o644))
+	t.Setenv("TMPDIR", tmpFile)
 	outDir := filepath.Join(t.TempDir(), "export")
 	cmd := &cli.Command{Flags: []cli.Flag{
 		&cli.StringFlag{Name: utils.DataDirFlag.Name},
@@ -306,6 +312,64 @@ func TestDoExportPreimagesUsesFrozenBlockFiles(t *testing.T) {
 	require.NoError(t, cmd.Set("tmpdir", filepath.Join(t.TempDir(), "tmp")))
 	require.NoError(t, doExportPreimages(t.Context(), cmd))
 	require.FileExists(t, filepath.Join(outDir, preimagesFileName))
+}
+
+func TestDoExportPBTHexOnlyDefaultsToBlake3(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	previousHash := statecfg.BinCommitmentHash
+	previousSchema := statecfg.Schema
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.ExperimentalParallelCommitment = previousParallel
+		statecfg.BinCommitmentHash = previousHash
+		statecfg.Schema = previousSchema
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.ExperimentalBinCommitment = false
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.ExperimentalParallelCommitment = false
+	statecfg.BinCommitmentHash = ""
+	statecfg.InitSchemas()
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
+	fixture, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, fixture.Tester.InsertChain(fixture.Chain))
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	tx, err := fixture.Tester.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	builder, err := eip8297.NewStreamRootBuilder(eip8297.HashBytes)
+	require.NoError(t, err)
+	require.NoError(t, state.ForEachPBinLeaf(state.AggTx(tx), tx, false, func(leaf state.PBinLeaf) error {
+		return builder.Add(leaf.Key, leaf.Value)
+	}))
+	want, err := builder.RootHash()
+	require.NoError(t, err)
+	tx.Rollback()
+	fixture.Tester.Close()
+	outDir := filepath.Join(t.TempDir(), "export")
+	cmd := &cli.Command{Flags: []cli.Flag{
+		&cli.StringFlag{Name: utils.DataDirFlag.Name},
+		&cli.StringFlag{Name: "out"},
+		&utils.ExperimentalBinCommitmentHashFlag,
+	}}
+	require.NoError(t, cmd.Set(utils.DataDirFlag.Name, fixture.Tester.Dirs.DataDir))
+	require.NoError(t, cmd.Set("out", outDir))
+	require.NoError(t, doExportPBT(t.Context(), cmd))
+	metaBytes, err := os.ReadFile(filepath.Join(outDir, pbtMetaFileName))
+	require.NoError(t, err)
+	var meta pbtExportMeta
+	require.NoError(t, json.Unmarshal(metaBytes, &meta))
+	require.Equal(t, commitment.PBinHashBlake3, meta.HashSuite)
+	require.Equal(t, want.Hex(), meta.PBTRoot)
 }
 
 func buildFrozenPBTExportDatadir(t *testing.T) datadir.Dirs {

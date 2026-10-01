@@ -1349,6 +1349,33 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		}
 		return nil
 	}
+	var stopCommitted func(kv.Domain)
+	if temporalTx, ok := tx.(kv.TemporalTx); ok {
+		if scheduler, ok := temporalTx.AggTx().(interface{ CommitmentStopper() func(kv.Domain) }); ok {
+			stopCommitted = scheduler.CommitmentStopper()
+		}
+	}
+	stopped := make([]kv.Domain, 0, 2)
+	readStopped := func() error {
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			isStopped, err := rawdb.ReadCommitmentDomainStopped(tx, domain)
+			if err != nil {
+				return err
+			}
+			if isStopped {
+				stopped = append(stopped, domain)
+			}
+		}
+		return nil
+	}
+	applyStopped := func() {
+		if stopCommitted == nil {
+			return
+		}
+		for _, domain := range stopped {
+			stopCommitted(domain)
+		}
+	}
 
 	if sd.branchCache == nil && sd.stateCache == nil {
 		if err := sd.flushMem(ctx, tx); err != nil {
@@ -1360,7 +1387,14 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		if err := requireStateVersion(tx, committedStateVersion); err != nil {
 			return err
 		}
-		return tx.Commit()
+		if err := readStopped(); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		applyStopped()
+		return nil
 	}
 
 	// Stash every cache-bound domain tuple during the flush and publish it only
@@ -1450,9 +1484,13 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if err := requireStateVersion(tx, committedStateVersion); err != nil {
 		return err
 	}
+	if err := readStopped(); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	applyStopped()
 	if sd.hasLocalCacheUnwind() && sd.branchCache != nil {
 		sd.branchCache.Unwind(sd.cacheUnwind.toTxNum)
 	}

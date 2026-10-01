@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var (
@@ -203,9 +204,40 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
 		return err
 	}
-	blockHash, blockEnd, afterFork, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
+	blockHash, headerRoot, blockEnd, afterFork, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
 	if err != nil {
 		return err
+	}
+	if marker == nil {
+		publishedHexRoot, found, err := pbtAttachHexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("commitment attach-pbt: published hex root is missing at (%d, %d)", blockNum, txNum)
+		}
+		nodeHexRoot, err := pbtAttachNodeHexRoot(ctx, nodeDirs, nodeSettings, blockNum, txNum, logger)
+		if err != nil {
+			return err
+		}
+		if nodeHexRoot != publishedHexRoot {
+			return fmt.Errorf("commitment attach-pbt: node hex root %s differs from published root %s at (%d, %d)", nodeHexRoot, publishedHexRoot, blockNum, txNum)
+		}
+		if blockEnd {
+			wantHeaderRoot := publishedHexRoot
+			if afterFork {
+				wantHeaderRoot, err = pbtAttachPublishedRootFn(ctx, publishedDirs, publishedSettings, logger)
+				if err != nil {
+					return err
+				}
+			}
+			if headerRoot != wantHeaderRoot {
+				return fmt.Errorf("commitment attach-pbt: published root %s differs from header root %s at block %d", wantHeaderRoot, headerRoot, blockNum)
+			}
+		}
+		if err := validatePBTAttachGenesis(ctx, nodeDirs, publishedDirs, logger); err != nil {
+			return err
+		}
 	}
 	refs := publishedSettings.RefsInCommitmentBranches()
 	variant := dbstate.TrieVariantHexBin
@@ -315,47 +347,47 @@ func pbtAttachPublishedRoot(ctx context.Context, dirs datadir.Dirs, settings *db
 	return builder.RootHash()
 }
 
-func pbtAttachBlockEnd(ctx context.Context, dirs datadir.Dirs, blockNum, txNum uint64) (common.Hash, bool, bool, error) {
+func pbtAttachBlockEnd(ctx context.Context, dirs datadir.Dirs, blockNum, txNum uint64) (common.Hash, common.Hash, bool, bool, error) {
 	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
-		return common.Hash{}, false, false, err
+		return common.Hash{}, common.Hash{}, false, false, err
 	}
 	defer db.Close()
 	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, dirs, db, log.Root())
 	if err != nil {
-		return common.Hash{}, false, false, err
+		return common.Hash{}, common.Hash{}, false, false, err
 	}
 	defer closeBlockReader()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
-		return common.Hash{}, false, false, err
+		return common.Hash{}, common.Hash{}, false, false, err
 	}
 	defer tx.Rollback()
 	blockTx := pbtBlockFilesTx{Tx: tx, view: blockView}
 	maxTxNum, found, err := blockReader.TxnumReader().MaxExact(ctx, blockTx, blockNum)
 	if err != nil {
-		return common.Hash{}, false, false, err
+		return common.Hash{}, common.Hash{}, false, false, err
 	}
 	if !found {
-		return common.Hash{}, false, false, fmt.Errorf("commitment attach-pbt: block %d has no txNum mapping", blockNum)
+		return common.Hash{}, common.Hash{}, false, false, fmt.Errorf("commitment attach-pbt: block %d has no txNum mapping", blockNum)
 	}
 	header, err := blockReader.HeaderByNumber(ctx, blockTx, blockNum)
 	if err != nil {
-		return common.Hash{}, false, false, err
+		return common.Hash{}, common.Hash{}, false, false, err
 	}
 	if header == nil {
-		return common.Hash{}, false, false, nil
+		return common.Hash{}, common.Hash{}, false, false, nil
 	}
 	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
-		return common.Hash{}, false, false, err
+		return common.Hash{}, common.Hash{}, false, false, err
 	}
 	chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
 	if err != nil {
-		return common.Hash{}, false, false, err
+		return common.Hash{}, common.Hash{}, false, false, err
 	}
 	afterFork := chainConfig != nil && chainConfig.IsBinaryTrie(header.Time)
-	return header.Hash(), maxTxNum == txNum, afterFork, nil
+	return header.Hash(), header.Root, maxTxNum == txNum, afterFork, nil
 }
 
 func writePBTAttachShadowRoot(ctx context.Context, dirs datadir.Dirs, blockHash common.Hash, blockNum uint64, root common.Hash) error {
@@ -393,6 +425,101 @@ func pbtAttachHexRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.
 		return common.Hash{}, false, fmt.Errorf("commitment attach-pbt: published hex state is (%d, %d), want (%d, %d)", gotBlock, gotTx, blockNum, txNum)
 	}
 	return common.BytesToHash(root), true, nil
+}
+
+func pbtAttachNodeHexRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) (common.Hash, error) {
+	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer db.Close()
+	configurePBTSourceVariant(settings)
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(db); err != nil {
+		return common.Hash{}, err
+	}
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer roTx.Rollback()
+	value, found, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentV3State, txNum)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if !found {
+		value, _, found, err = at.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, roTx, kv.GetLatestOptions{}.WithMaxStep(kv.Step(txNum/settings.StepSize)))
+	}
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if !found {
+		return common.Hash{}, fmt.Errorf("commitment attach-pbt: node hex state is missing at (%d, %d)", blockNum, txNum)
+	}
+	gotBlock, gotTx, root, err := commitment.DecodeCommitmentV3State(value)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if gotBlock != blockNum || gotTx != txNum {
+		return common.Hash{}, fmt.Errorf("commitment attach-pbt: node hex state is (%d, %d), want (%d, %d)", gotBlock, gotTx, blockNum, txNum)
+	}
+	return common.BytesToHash(root), nil
+}
+
+func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datadir.Dirs, logger log.Logger) error {
+	nodeDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata), true)
+	if err != nil {
+		return err
+	}
+	defer nodeDB.Close()
+	var nodeGenesis common.Hash
+	if err := nodeDB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		nodeGenesis, err = rawdb.ReadCanonicalHash(tx, 0)
+		return err
+	}); err != nil {
+		return err
+	}
+	var chainName string
+	if err := nodeDB.View(ctx, func(tx kv.Tx) error {
+		config, err := rawdb.ReadChainConfig(tx, nodeGenesis)
+		if err != nil {
+			return err
+		}
+		if config == nil {
+			return errors.New("commitment attach-pbt: chain config is missing")
+		}
+		chainName = config.ChainName
+		return nil
+	}); err != nil {
+		return err
+	}
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainName)
+	snapshots := blocksnapshots.NewRoSnapshots(cfg, publishedDirs.Snap, logger)
+	if err := snapshots.OpenFolder(); err != nil {
+		return err
+	}
+	defer snapshots.Close()
+	view := snapshots.View()
+	defer view.Close()
+	reader := freezeblocks.NewBlockReader(snapshots)
+	genesis, err := reader.HeaderFromView(view, 0)
+	if err != nil {
+		return err
+	}
+	if genesis == nil {
+		return nil
+	}
+	if genesis.Hash() != nodeGenesis {
+		return fmt.Errorf("commitment attach-pbt: genesis hash %s differs from node genesis %s", genesis.Hash(), nodeGenesis)
+	}
+	return nil
 }
 
 func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) error {

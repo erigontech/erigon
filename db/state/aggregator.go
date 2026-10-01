@@ -2000,6 +2000,13 @@ func (at *AggregatorRoTx) StopCommitmentDomain(domain kv.Domain) {
 	at.a.StopCommitmentDomain(domain)
 }
 
+func (at *AggregatorRoTx) CommitmentStopper() func(kv.Domain) {
+	a := at.a
+	return func(domain kv.Domain) {
+		a.StopCommitmentDomain(domain)
+	}
+}
+
 func (at *AggregatorRoTx) CommitmentDomainStopped(domain kv.Domain) bool {
 	return at.a.CommitmentDomainStopped(domain)
 }

@@ -191,6 +191,33 @@ func TestPBTAttachPostForkBlockEndShadowRoot(t *testing.T) {
 	require.Equal(t, uint64(7), txNum)
 }
 
+func TestPBTAttachRejectsPublishedRootMismatchWithoutMutation(t *testing.T) {
+	selectPBTCommandSuite(t)
+	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	buildPBTAcceptanceFilesAt(t, node, 7)
+	node.Tester.Close()
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	copyPBTStateSalt(t, node, source)
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
+	buildPBTAcceptanceFiles(t, source)
+	source.Tester.Close()
+	selectPBTCommandSuite(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
+	previousRoot := pbtAttachPublishedRootFn
+	pbtAttachPublishedRootFn = func(context.Context, datadir.Dirs, *dbstate.ErigonDBSettings, log.Logger) (common.Hash, error) {
+		return common.Hash{0xaa}, nil
+	}
+	t.Cleanup(func() { pbtAttachPublishedRootFn = previousRoot })
+	before := snapshotTree(t, node.Tester.Dirs.DataDir)
+	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
+	require.ErrorContains(t, err, "differs from header root")
+	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+}
+
 func TestPBTAttachAcceptanceAtMidBlockConversionPoint(t *testing.T) {
 	selectPBTHexCommandSuite(t)
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
