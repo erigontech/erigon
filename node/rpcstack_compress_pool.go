@@ -62,6 +62,7 @@ func (w *pooledGzipWriter) Close() error {
 		return nil
 	}
 	err := w.Writer.Close()
+	w.Writer.Reset(nil)
 	gzipWriters.put(w.Writer)
 	w.Writer = nil
 	return err

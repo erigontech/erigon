@@ -22,9 +22,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+	"weak"
 
 	"github.com/klauspost/compress/gzhttp"
 	"github.com/klauspost/compress/zstd"
@@ -495,6 +497,30 @@ func TestCompressionWritersInUse(t *testing.T) {
 
 			assert.Equal(t, before+1, during, "an active response must hold one writer")
 			assert.Equal(t, before, tc.inUse.GetValue(), "a closed response must release its writer")
+		})
+	}
+}
+
+// TestPooledWritersDetachDestination pins that an idle pooled writer does not
+// keep the response writer of its last response alive.
+func TestPooledWritersDetachDestination(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		new  func(io.Writer) io.WriteCloser
+	}{
+		{"gzip", func(w io.Writer) io.WriteCloser { return gzipWriterFactory.New(w, gzipLevel) }},
+		{"zstd", func(w io.Writer) io.WriteCloser { return zstdWriterFactory.New(w, int(zstdLevel)) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := new(bytes.Buffer)
+			ref := weak.Make(dst)
+			w := tc.new(dst)
+			_, err := w.Write(bytes.Repeat([]byte("x"), minGzipBodySize))
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+
+			runtime.GC()
+			assert.Nil(t, ref.Value(), "a pooled writer must not retain its destination")
 		})
 	}
 }
