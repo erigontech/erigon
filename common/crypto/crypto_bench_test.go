@@ -99,7 +99,7 @@ func BenchmarkKeccak256HashCache(b *testing.B) {
 	b.Run("direct", func(b *testing.B) {
 		i := 0
 		for b.Loop() {
-			keccak.Sum256(inputs[i%len(inputs)])
+			sinkHash = keccak.Sum256(inputs[i%len(inputs)])
 			i++
 		}
 	})
@@ -110,7 +110,7 @@ func BenchmarkKeccak256HashCache(b *testing.B) {
 		b.Run("cached/"+sc.name, func(b *testing.B) {
 			i := 0
 			for b.Loop() {
-				Keccak256Hash(inputs[i%sc.span])
+				sinkHash = Keccak256Hash(inputs[i%sc.span])
 				i++
 			}
 		})

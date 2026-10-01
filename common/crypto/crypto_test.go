@@ -426,7 +426,7 @@ func TestKeccak256HashMatchesReference(t *testing.T) {
 	}
 	for n := 0; n <= 100; n++ {
 		in := bytes.Repeat([]byte{byte(n)}, n)
-		for range 2 { // the second call is served from the cache when n <= keccakCacheMaxInput
+		for range 2 { // the second call is served from the cache when 0 < n <= keccakCacheMaxInput
 			if got, want := Keccak256Hash(in), ref(in); got != want {
 				t.Fatalf("len %d: got %x, want %x", n, got, want)
 			}
