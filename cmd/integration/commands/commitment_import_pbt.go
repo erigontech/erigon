@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -244,7 +245,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	}
 	if progress != meta.Block {
 		readTx.Rollback()
-		return pbtImportProgressError(progress, meta, chainConfig.ChainName)
+		return pbtImportProgressError(progress, meta, dataDir, chainConfig.ChainName)
 	}
 	lastTx, found, err := blockReader.TxnumReader().MaxExact(ctx, readerTx, meta.Block)
 	if err != nil {
@@ -257,7 +258,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	}
 	if lastTx != meta.TxNum {
 		readTx.Rollback()
-		return fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run integration stage_exec --block=%d --chain=%s, then export-pbt", meta.Block, meta.TxNum, meta.Block, lastTx, meta.Block, chainConfig.ChainName)
+		return fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.commitment-v3", meta.Block, meta.TxNum, meta.Block, lastTx, dataDir, meta.Block, chainConfig.ChainName, dataDir, chainConfig.ChainName)
 	}
 	if common.HexToHash(meta.StateRoot) != header.Root {
 		readTx.Rollback()
@@ -269,7 +270,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		return err
 	}
 	if hexBlock != meta.Block || hexTx != meta.TxNum {
-		return fmt.Errorf("commitment import-pbt: hex commitment checkpoint is (%d, %d), want (%d, %d) at block %d; run integration stage_exec --block=%d --chain=%s, then export-pbt", hexBlock, hexTx, meta.Block, meta.TxNum, meta.Block, meta.Block, chainConfig.ChainName)
+		return fmt.Errorf("commitment import-pbt: hex commitment checkpoint is (%d, %d), want (%d, %d) at block %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.commitment-v3", hexBlock, hexTx, meta.Block, meta.TxNum, meta.Block, dataDir, meta.Block, chainConfig.ChainName, dataDir, chainConfig.ChainName)
 	}
 	closeBlockReader()
 	closeBlockReader = nil
@@ -416,12 +417,16 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		return err
 	}
 	settingsWritten := false
+	checkpointWritten := false
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			panic(recovered)
 		}
 		if !settingsWritten {
 			removePBTImportFiles(moved)
+			if checkpointWritten {
+				_ = removePBTImportCheckpoint(ctx, dirs, finalSettings, meta.TxNum, common.HexToHash(meta.BlockHash), meta.Block, logger)
+			}
 			_ = dbstate.RemovePBTImportMarker(dirs)
 		}
 	}()
@@ -432,6 +437,12 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	}
 	if err := writePBTImportCheckpoint(ctx, dirs, finalSettings, checkpointState, !checkpointInFiles, meta.TxNum, common.HexToHash(meta.BlockHash), meta.Block, root, logger); err != nil {
 		return err
+	}
+	checkpointWritten = true
+	if importPBTSwapHook != nil {
+		if err := importPBTSwapHook("before-settings"); err != nil {
+			return err
+		}
 	}
 	if err := dbstate.WriteErigonDBSettings(dirs, finalSettings); err != nil {
 		return err
@@ -480,6 +491,57 @@ func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		return fmt.Errorf("commitment import-pbt: verify written rows: %w", err)
 	}
 	return nil
+}
+
+func removePBTImportCheckpoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, blockHash common.Hash, blockNum uint64, logger log.Logger) error {
+	rawDB, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer rawDB.Close()
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(rawDB); err != nil {
+		return err
+	}
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantBinPatriciaTrie
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+	if err != nil {
+		return err
+	}
+	value, _, err := domains.GetLatest(kv.CommitmentBinDomain, tx, commitment.KeyCommitmentState)
+	if err != nil {
+		domains.Close()
+		return err
+	}
+	if err := domains.DomainDel(kv.CommitmentBinDomain, tx, commitment.KeyCommitmentState, txNum, value); err != nil {
+		domains.Close()
+		return err
+	}
+	if err := domains.Flush(ctx, tx); err != nil {
+		domains.Close()
+		return err
+	}
+	domains.Close()
+	if err := tx.Delete(kv.ShadowStateRoot, dbutils.BlockBodyKey(blockNum, blockHash)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func writePBTImportCheckpoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, state []byte, writeState bool, txNum uint64, blockHash common.Hash, blockNum uint64, root common.Hash, logger log.Logger) error {
@@ -600,8 +662,8 @@ func readPBTImportHexCheckpoint(ctx context.Context, dirs datadir.Dirs, rawDB kv
 	return block, tx, err
 }
 
-func pbtImportProgressError(progress uint64, meta pbtImportMeta, chainName string) error {
-	return fmt.Errorf("commitment import-pbt: target is at block %d, snapshot is at block %d; run integration stage_exec --block=%d --chain=%s, then export-pbt", progress, meta.Block, progress, chainName)
+func pbtImportProgressError(progress uint64, meta pbtImportMeta, dataDir, chainName string) error {
+	return fmt.Errorf("commitment import-pbt: target is at block %d, snapshot is at block %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.commitment-v3", progress, meta.Block, dataDir, progress, chainName, dataDir, chainName)
 }
 
 func movePBTImportBinFiles(stageDirs, targetDirs datadir.Dirs) ([]string, error) {

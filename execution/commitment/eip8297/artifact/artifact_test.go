@@ -17,6 +17,7 @@
 package artifact
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
@@ -796,12 +797,21 @@ func TestPreimageReaderAllocationsStayBounded(t *testing.T) {
 
 func TestWritePreimagesStreamWithScratchReusesScratchAcrossAccounts(t *testing.T) {
 	previousCreate := preimageScratchFileCreate
+	previousFlush := preimageScratchFileFlush
 	createCount := 0
+	flushCount := 0
 	preimageScratchFileCreate = func(dir, pattern string) (*os.File, error) {
 		createCount++
 		return previousCreate(dir, pattern)
 	}
-	t.Cleanup(func() { preimageScratchFileCreate = previousCreate })
+	preimageScratchFileFlush = func(writer *bufio.Writer) error {
+		flushCount++
+		return previousFlush(writer)
+	}
+	t.Cleanup(func() {
+		preimageScratchFileCreate = previousCreate
+		preimageScratchFileFlush = previousFlush
+	})
 	records := make([]common.Address, 10_000)
 	for i := range records {
 		binary.BigEndian.PutUint64(records[i][12:], uint64(i))
@@ -811,19 +821,44 @@ func TestWritePreimagesStreamWithScratchReusesScratchAcrossAccounts(t *testing.T
 		right := keccak.Sum256(records[j][:])
 		return bytes.Compare(left[:], right[:]) < 0
 	})
+	largeSlots := make([][32]byte, 32_769)
+	for i := range largeSlots {
+		binary.BigEndian.PutUint64(largeSlots[i][24:], uint64(i))
+	}
+	sort.Slice(largeSlots, func(i, j int) bool {
+		left := keccak.Sum256(largeSlots[i][:])
+		right := keccak.Sum256(largeSlots[j][:])
+		return bytes.Compare(left[:], right[:]) < 0
+	})
 	scratchDir := t.TempDir()
 	var output bytes.Buffer
+	largeYieldCount := 0
 	err := WritePreimagesStreamWithScratch(&output, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
-		for _, address := range records {
-			if err := yield(address, func(func([32]byte) error) error { return nil }); err != nil {
+		for index, address := range records {
+			if err := yield(address, func(slotYield func([32]byte) error) error {
+				if index == 0 {
+					for _, slot := range largeSlots {
+						largeYieldCount++
+						if err := slotYield(slot); err != nil {
+							return err
+						}
+					}
+					return nil
+				}
+				var slot [32]byte
+				binary.BigEndian.PutUint64(slot[24:], uint64(index))
+				return slotYield(slot)
+			}); err != nil {
 				return err
 			}
 		}
 		return nil
 	}, scratchDir)
 	require.NoError(t, err)
-	require.Len(t, output.Bytes(), len(records)*24)
-	require.LessOrEqual(t, createCount, 1)
+	require.Greater(t, len(output.Bytes()), len(records)*24)
+	require.Equal(t, 1, createCount)
+	require.Equal(t, len(largeSlots), largeYieldCount)
+	require.Equal(t, 2, flushCount)
 	entries, err := os.ReadDir(scratchDir)
 	require.NoError(t, err)
 	require.Empty(t, entries)

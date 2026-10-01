@@ -51,10 +51,34 @@ type PBTAcceptanceChain struct {
 }
 
 func NewPBTAcceptanceChain(tb testing.TB, binary bool, dual bool) (*PBTAcceptanceChain, error) {
-	return NewPBTAcceptanceChainWithSharedCode(tb, binary, dual, bytes.Repeat([]byte{1}, 32))
+	return NewPBTAcceptanceChainWithStepSize(tb, binary, dual, 1)
 }
 
 func NewPBTAcceptanceChainWithSharedCode(tb testing.TB, binary bool, dual bool, sharedCode []byte) (*PBTAcceptanceChain, error) {
+	return NewPBTAcceptanceChainWithSharedCodeAndStepSize(tb, binary, dual, sharedCode, 1)
+}
+
+func NewPBTAcceptanceChainWithStepSize(tb testing.TB, binary bool, dual bool, stepSize uint64) (*PBTAcceptanceChain, error) {
+	return NewPBTAcceptanceChainWithStepSizeAndBlocks(tb, binary, dual, stepSize, 4)
+}
+
+func NewPBTAcceptanceChainWithSharedCodeAndStepSize(tb testing.TB, binary bool, dual bool, sharedCode []byte, stepSize uint64) (*PBTAcceptanceChain, error) {
+	return newPBTAcceptanceChain(tb, binary, dual, sharedCode, stepSize, 1, 4, nil)
+}
+
+func NewPBTAcceptanceChainWithStepSizeAndBlocks(tb testing.TB, binary bool, dual bool, stepSize uint64, blocks int) (*PBTAcceptanceChain, error) {
+	return NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(tb, binary, dual, stepSize, 1, blocks)
+}
+
+func NewPBTAcceptanceChainWithStepSizeAndFrozenBlocks(tb testing.TB, binary bool, dual bool, stepSize, stepsInFrozenFile uint64, blocks int) (*PBTAcceptanceChain, error) {
+	return newPBTAcceptanceChain(tb, binary, dual, bytes.Repeat([]byte{1}, 32), stepSize, stepsInFrozenFile, blocks, nil)
+}
+
+func NewPBTAcceptanceChainWithTxCounts(tb testing.TB, binary bool, dual bool, stepSize, stepsInFrozenFile uint64, txCounts []int) (*PBTAcceptanceChain, error) {
+	return newPBTAcceptanceChain(tb, binary, dual, bytes.Repeat([]byte{1}, 32), stepSize, stepsInFrozenFile, len(txCounts), txCounts)
+}
+
+func newPBTAcceptanceChain(tb testing.TB, binary bool, dual bool, sharedCode []byte, stepSize, stepsInFrozenFile uint64, blocks int, txCounts []int) (*PBTAcceptanceChain, error) {
 	tb.Helper()
 	config := chain.TestChainBerlinConfig.Copy()
 	if binary {
@@ -84,7 +108,7 @@ func NewPBTAcceptanceChainWithSharedCode(tb testing.TB, binary bool, dual bool, 
 	dirs := datadir.New(tb.TempDir())
 	refs := false
 	variant := dbstate.TrieVariantHex
-	settings := &dbstate.ErigonDBSettings{StepSize: 1, StepsInFrozenFile: 1, ReferencesInCommitmentBranches: &refs, TrieVariant: &variant}
+	settings := &dbstate.ErigonDBSettings{StepSize: stepSize, StepsInFrozenFile: stepsInFrozenFile, ReferencesInCommitmentBranches: &refs, TrieVariant: &variant}
 	if binary {
 		variant = dbstate.TrieVariantBin
 	}
@@ -104,7 +128,7 @@ func NewPBTAcceptanceChainWithSharedCode(tb testing.TB, binary bool, dual bool, 
 	if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
 		return nil, err
 	}
-	options := []Option{WithGenesisSpec(genesis), WithKey(key), WithStepSize(1), WithDataDir(dirs)}
+	options := []Option{WithGenesisSpec(genesis), WithKey(key), WithStepSize(stepSize), WithDataDir(dirs)}
 	if dual {
 		previousBin := statecfg.ExperimentalBinCommitment
 		previousHexBin := statecfg.ExperimentalHexBinCommitment
@@ -129,8 +153,8 @@ func NewPBTAcceptanceChainWithSharedCode(tb testing.TB, binary bool, dual bool, 
 		tester.Close()
 		return nil, settingsErr
 	}
-	settings.StepSize = 1
-	settings.StepsInFrozenFile = 1
+	settings.StepSize = stepSize
+	settings.StepsInFrozenFile = stepsInFrozenFile
 	if writeErr := dbstate.WriteErigonDBSettings(dirs, settings); writeErr != nil {
 		tester.Close()
 		return nil, writeErr
@@ -176,13 +200,21 @@ func NewPBTAcceptanceChainWithSharedCode(tb testing.TB, binary bool, dual bool, 
 		}
 	}
 	baseAlloc := copyGenesisAlloc(genesis.Alloc)
-	pack, err := tester.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
-		data := common.BigToHash(big.NewInt(int64(i + 1)))
-		tx, txErr := types.SignTx(types.NewTransaction(uint64(i), contract, uint256.NewInt(0), 2_000_000, uint256.NewInt(0), data[:]), *types.LatestSignerForChainID(config.ChainID), key)
-		if txErr != nil {
-			tb.Fatal(txErr)
+	nonce := uint64(0)
+	pack, err := tester.GenerateChain(blocks, func(i int, b *blockgen.BlockGen) {
+		count := 1
+		if txCounts != nil {
+			count = txCounts[i]
 		}
-		b.AddTx(tx)
+		for j := 0; j < count; j++ {
+			data := common.BigToHash(big.NewInt(int64(i + j + 1)))
+			tx, txErr := types.SignTx(types.NewTransaction(nonce, contract, uint256.NewInt(0), 2_000_000, uint256.NewInt(0), data[:]), *types.LatestSignerForChainID(config.ChainID), key)
+			if txErr != nil {
+				tb.Fatal(txErr)
+			}
+			b.AddTx(tx)
+			nonce++
+		}
 	})
 	if err != nil {
 		tester.Close()

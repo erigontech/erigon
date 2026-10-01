@@ -17,6 +17,7 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -178,12 +179,13 @@ func runExportPBTWithReadbackHookAndTxNumReader(ctx context.Context, tx kv.Tempo
 	if err != nil {
 		return err
 	}
+	snapshotWriter := bufio.NewWriterSize(snapshotFile, 1<<20)
 	builder, err := eip8297.NewStreamRootBuilder(eip8297.HashBytes)
 	if err != nil {
 		_ = snapshotFile.Close()
 		return err
 	}
-	snapshotDigest, writeErr := artifact.WriteSnapshotStream(snapshotFile, func(emit func([]byte, []byte) error) error {
+	snapshotDigest, writeErr := artifact.WriteSnapshotStream(snapshotWriter, func(emit func([]byte, []byte) error) error {
 		return state.ForEachPBinLeaf(state.AggTx(tx), tx, false, func(leaf state.PBinLeaf) error {
 			if err := builder.Add(leaf.Key, leaf.Value); err != nil {
 				return err
@@ -191,6 +193,9 @@ func runExportPBTWithReadbackHookAndTxNumReader(ctx context.Context, tx kv.Tempo
 			return emit(leaf.Key, leaf.Value)
 		})
 	}, builder.RootHash)
+	if writeErr == nil {
+		writeErr = snapshotWriter.Flush()
+	}
 	closeErr := snapshotFile.Close()
 	if writeErr != nil {
 		return writeErr

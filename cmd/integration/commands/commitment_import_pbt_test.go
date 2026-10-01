@@ -21,6 +21,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -169,6 +170,15 @@ func TestImportPBTReplacesConvertAndAttachWithFilesBeforeCheckpoint(t *testing.T
 	require.ErrorContains(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()), "test move failure")
 	require.Equal(t, settingsBeforeMoveFailure, snapshotTree(t, target.Tester.Dirs.DataDir), "move failure must not change the target")
 	importPBTSwapHook = func(step string) error {
+		if step == "before-settings" {
+			return errors.New("test settings failure")
+		}
+		return nil
+	}
+	settingsBeforeWriteFailure := snapshotTree(t, target.Tester.Dirs.Snap)
+	require.ErrorContains(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()), "test settings failure")
+	require.True(t, reflect.DeepEqual(settingsBeforeWriteFailure, snapshotTree(t, target.Tester.Dirs.Snap)), "settings failure must not change snapshot files")
+	importPBTSwapHook = func(step string) error {
 		if step == "files-moved" {
 			panic("test interrupted after move")
 		}
@@ -248,6 +258,121 @@ func TestImportPBTReplacesConvertAndAttachWithFilesBeforeCheckpoint(t *testing.T
 		require.Equal(t, dualRoot, convertedRoot, "converted and attached bin shadow at block %d", block)
 	}
 	reopened.Close()
+}
+
+func TestImportPBTMatchesConvertAndAttachWithStepSizedFiles(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	txCounts := []int{1, 1, 1, 1, 1, 1, 2, 0, 1, 1, 1, 1, 1, 1}
+	source, err := execmoduletester.NewPBTAcceptanceChainWithTxCounts(t, false, false, 8, 4, txCounts)
+	require.NoError(t, err)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), source.Tester.DB))
+	require.NoError(t, source.Tester.ReExecuteTo(t.Context(), 7))
+	buildPBTAcceptanceFilesAt(t, source, 23)
+	sourceDB := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(source.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(source.Genesis),
+		execmoduletester.WithKey(source.Key),
+		execmoduletester.WithStepSize(8),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	require.NoError(t, sourceDB.ReExecuteTo(t.Context(), 9))
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	exportDir := filepath.Join(t.TempDir(), "export")
+	tx, err := sourceDB.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, app.RunExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
+		return source.Chain.Headers[block-1], nil
+	}, exportDir, log.New()))
+	tx.Rollback()
+	sourceDB.Close()
+	convertedDir := filepath.Join(t.TempDir(), "converted")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, convertedDir, true, "", log.New()))
+	convertedSettings, err := dbstate.ReadErigonDBSettings(datadir.Open(convertedDir))
+	require.NoError(t, err)
+	conversionBlock, conversionTx, ok, err := convertedSettings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(8), convertedSettings.StepSize)
+	require.Equal(t, uint64(7), conversionBlock)
+	require.Equal(t, uint64(23), conversionTx)
+
+	selectPBTHexCommandSuite(t)
+	convertedTarget, err := execmoduletester.NewPBTAcceptanceChainWithTxCounts(t, false, false, 8, 4, txCounts)
+	require.NoError(t, err)
+	require.NoError(t, convertedTarget.Tester.InsertChain(convertedTarget.Chain))
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), convertedTarget.Tester.DB))
+	require.NoError(t, convertedTarget.Tester.ReExecuteTo(t.Context(), 7))
+	copyPBTStateSalt(t, source, convertedTarget)
+	buildPBTAcceptanceFilesAt(t, convertedTarget, 23)
+	convertedTarget.Tester.Close()
+	selectPBTCommandSuite(t)
+	require.NoError(t, attachPBT(t.Context(), convertedTarget.Tester.Dirs.DataDir, convertedDir, "", log.New()))
+	attachedSettings, attachedErr := dbstate.ReadErigonDBSettings(convertedTarget.Tester.Dirs)
+	require.NoError(t, attachedErr)
+	require.Equal(t, dbstate.TrieVariantHexBin, attachedSettings.TrieVariantName())
+	convertedReopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(convertedTarget.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(convertedTarget.Genesis),
+		execmoduletester.WithKey(convertedTarget.Key),
+		execmoduletester.WithStepSize(8),
+		execmoduletester.WithoutGenesisCommit(),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	require.NoError(t, convertedReopened.ReExecuteTo(t.Context(), 14))
+	defer convertedReopened.Close()
+
+	selectPBTHexCommandSuite(t)
+	imported, err := execmoduletester.NewPBTAcceptanceChainWithTxCounts(t, false, false, 8, 4, txCounts)
+	require.NoError(t, err)
+	require.NoError(t, imported.Tester.InsertChain(imported.Chain))
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), imported.Tester.DB))
+	require.NoError(t, imported.Tester.ReExecuteTo(t.Context(), 7))
+	buildPBTAcceptanceFilesAt(t, imported, 23)
+	importedAtX := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(imported.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(imported.Genesis),
+		execmoduletester.WithKey(imported.Key),
+		execmoduletester.WithStepSize(8),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	require.NoError(t, importedAtX.ReExecuteTo(t.Context(), 9))
+	importedAtX.Close()
+	imported.Tester.Close()
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	require.NoError(t, importPBT(t.Context(), imported.Tester.Dirs.DataDir, filepath.Join(exportDir, "pbt-snapshot.bin"), "", log.New()))
+	selectPBTCommandSuite(t)
+	importedReopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(imported.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(imported.Genesis),
+		execmoduletester.WithKey(imported.Key),
+		execmoduletester.WithStepSize(8),
+		execmoduletester.WithoutGenesisCommit(),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	defer importedReopened.Close()
+	convertedRaw := convertedReopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	importedRaw := importedReopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	for block := uint64(9); block <= 14; block++ {
+		if block > 9 {
+			require.NoError(t, importedReopened.ReExecuteTo(t.Context(), block))
+		}
+		var convertedRoot, importedRoot []byte
+		require.NoError(t, convertedRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			convertedRoot, err = rawdb.ReadShadowStateRoot(tx, convertedTarget.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		require.NoError(t, importedRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			importedRoot, err = rawdb.ReadShadowStateRoot(tx, imported.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		require.Equal(t, convertedRoot, importedRoot, "step-sized import shadow at block %d", block)
+	}
 }
 
 func TestImportPBTRefusalsLeaveDatadirUnchanged(t *testing.T) {

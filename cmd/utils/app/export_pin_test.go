@@ -88,6 +88,20 @@ func TestSharedExportPinRejectsMissingBlockMapping(t *testing.T) {
 	require.ErrorContains(t, err, "has no txNum mapping")
 }
 
+func TestExportPinNamesNextBlockInMidBlockRemedy(t *testing.T) {
+	db := newExportPinTestDB(t)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, rawdbv3.TxNums.Append(tx, 4, 7))
+	require.NoError(t, tx.Commit())
+	readTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer readTx.Rollback()
+	err = checkExportPinTxNum(t.Context(), readTx, rawdbv3.TxNums, 4, 6)
+	require.ErrorContains(t, err, "--block=5")
+}
+
 func TestSharedExportPinUsesTheMappedCheckpoint(t *testing.T) {
 	db := newExportPinTestDB(t)
 	root := seedState(t, db, 7, [][]byte{addr(0xaa)}, nil)

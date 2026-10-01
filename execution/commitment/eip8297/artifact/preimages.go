@@ -39,7 +39,12 @@ var ErrPreimages = errors.New("pbt artifact: invalid preimages")
 
 const preimageSlotSpillThreshold = 1 << 20
 
-var preimageScratchFileCreate = os.CreateTemp
+var (
+	preimageScratchFileCreate = os.CreateTemp
+	preimageScratchFileFlush  = func(writer *bufio.Writer) error {
+		return writer.Flush()
+	}
+)
 
 type PreimageIterator func(func(Preimage) error) error
 
@@ -93,16 +98,21 @@ func WritePreimagesStreamWithScratch(dst io.Writer, iterate PreimageStreamIterat
 		scratchDir = os.TempDir()
 	}
 	var slotFile *os.File
+	var slotWriter *bufio.Writer
 	var slotName string
 	defer func() {
 		if slotFile != nil {
+			if slotWriter != nil {
+				_ = preimageScratchFileFlush(slotWriter)
+			}
 			_ = slotFile.Close()
 			_ = dir.RemoveFile(slotName)
 		}
 	}()
 	var previous common.Hash
 	index := 0
-	return iterate(func(address common.Address, slots func(func([32]byte) error) error) error {
+	destination := bufio.NewWriterSize(dst, 1<<20)
+	writeErr := iterate(func(address common.Address, slots func(func([32]byte) error) error) error {
 		digest := common.Hash(keccak.Sum256(address[:]))
 		if index != 0 && bytes.Compare(digest[:], previous[:]) <= 0 {
 			return ErrUnsorted
@@ -115,6 +125,7 @@ func WritePreimagesStreamWithScratch(dst io.Writer, iterate PreimageStreamIterat
 		var slotBytes bytes.Buffer
 		var count uint32
 		var previousSlot common.Hash
+		spilled := false
 		err := slots(func(slot [32]byte) error {
 			if count == ^uint32(0) {
 				return ErrPreimages
@@ -124,20 +135,24 @@ func WritePreimagesStreamWithScratch(dst io.Writer, iterate PreimageStreamIterat
 				return ErrUnsorted
 			}
 			previousSlot = slotDigest
-			if slotFile == nil && slotBytes.Len()+len(slot) > preimageSlotSpillThreshold {
+			if !spilled && slotBytes.Len()+len(slot) > preimageSlotSpillThreshold {
 				var createErr error
-				slotFile, createErr = preimageScratchFileCreate(scratchDir, "pbt-preimage-record-")
-				if createErr != nil {
-					return createErr
+				if slotFile == nil {
+					slotFile, createErr = preimageScratchFileCreate(scratchDir, "pbt-preimage-record-")
+					if createErr != nil {
+						return createErr
+					}
+					slotName = slotFile.Name()
+					slotWriter = bufio.NewWriterSize(slotFile, 1<<20)
 				}
-				slotName = slotFile.Name()
-				if _, createErr = slotFile.Write(slotBytes.Bytes()); createErr != nil {
+				if _, createErr = slotWriter.Write(slotBytes.Bytes()); createErr != nil {
 					return createErr
 				}
 				slotBytes.Reset()
+				spilled = true
 			}
-			if slotFile != nil {
-				_, err := slotFile.Write(slot[:])
+			if spilled {
+				_, err := slotWriter.Write(slot[:])
 				count++
 				return err
 			}
@@ -150,31 +165,35 @@ func WritePreimagesStreamWithScratch(dst io.Writer, iterate PreimageStreamIterat
 		}
 		var encodedCount [4]byte
 		binary.BigEndian.PutUint32(encodedCount[:], count)
-		if _, err := dst.Write(address[:]); err != nil {
+		if _, err := destination.Write(address[:]); err != nil {
 			return err
 		}
-		if _, err := dst.Write(encodedCount[:]); err != nil {
+		if _, err := destination.Write(encodedCount[:]); err != nil {
 			return err
 		}
-		if slotFile == nil {
-			_, err = dst.Write(slotBytes.Bytes())
+		if !spilled {
+			_, err = destination.Write(slotBytes.Bytes())
+			return err
+		}
+		if err := preimageScratchFileFlush(slotWriter); err != nil {
 			return err
 		}
 		if _, err := slotFile.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
-		_, err = io.Copy(dst, slotFile)
-		if truncateErr := slotFile.Truncate(0); err == nil {
-			err = truncateErr
+		if _, err := io.Copy(destination, slotFile); err != nil {
+			return err
 		}
-		if seekErr := func() error {
-			_, seekErr := slotFile.Seek(0, io.SeekStart)
-			return seekErr
-		}(); err == nil {
-			err = seekErr
+		if err := slotFile.Truncate(0); err != nil {
+			return err
 		}
+		_, err = slotFile.Seek(0, io.SeekStart)
 		return err
 	})
+	if writeErr != nil {
+		return writeErr
+	}
+	return destination.Flush()
 }
 
 func ReadPreimagesAt(src io.ReaderAt, size int64, yield func(Preimage) error) error {

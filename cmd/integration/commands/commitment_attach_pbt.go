@@ -59,7 +59,6 @@ var (
 	validatePBTAttachLeafStampsFn = validatePBTAttachLeafStamps
 	validatePBTAttachGenesisFn    = validatePBTAttachGenesis
 	pbtAttachHexRootFn            = pbtAttachHexRoot
-	pbtAttachPublishedRootFn      = pbtAttachPublishedRoot
 	pbtAttachNodePbtRootFn        = pbtAttachNodePbtRoot
 )
 
@@ -204,7 +203,8 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	}
 	closeBlockReader()
 	rawDB.Close()
-	if err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
+	publishedPbtRoot, err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
+	if err != nil {
 		return err
 	}
 	blockHash, headerRoot, blockEnd, afterFork, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
@@ -229,20 +229,13 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 		if blockEnd {
 			wantHeaderRoot := publishedHexRoot
 			if afterFork {
-				wantHeaderRoot, err = pbtAttachPublishedRootFn(ctx, publishedDirs, publishedSettings, logger)
-				if err != nil {
-					return err
-				}
+				wantHeaderRoot = publishedPbtRoot
 			}
 			if headerRoot != wantHeaderRoot {
 				return fmt.Errorf("commitment attach-pbt: published root %s differs from header root %s at block %d", wantHeaderRoot, headerRoot, blockNum)
 			}
 		}
 		if err := validatePBTAttachGenesisFn(ctx, nodeDirs, publishedDirs, logger); err != nil {
-			return err
-		}
-		publishedPbtRoot, err := pbtAttachPublishedRootFn(ctx, publishedDirs, publishedSettings, logger)
-		if err != nil {
 			return err
 		}
 		nodePbtRoot, err := pbtAttachNodePbtRootFn(ctx, nodeDirs, nodeSettings, txNum, publishedSettings.TrieHashName(), logger)
@@ -307,10 +300,7 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 				blockEnd = false
 			}
 		} else {
-			shadowRoot, err = pbtAttachPublishedRootFn(ctx, publishedDirs, publishedSettings, logger)
-			if err != nil {
-				return err
-			}
+			shadowRoot = publishedPbtRoot
 		}
 		if blockEnd {
 			if err := writePBTAttachShadowRoot(ctx, nodeDirs, blockHash, blockNum, shadowRoot); err != nil {
@@ -332,33 +322,6 @@ func runPBTAttachStepHook(step string) error {
 		return nil
 	}
 	return attachPBTStepHook(step)
-}
-
-func pbtAttachPublishedRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger) (common.Hash, error) {
-	configurePBTSourceVariant(settings)
-	if err := eip8297.SetHashSuite(settings.TrieHashName()); err != nil {
-		return common.Hash{}, err
-	}
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	defer agg.Close()
-	if err := agg.OpenFolder(nil); err != nil {
-		return common.Hash{}, err
-	}
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
-	if err != nil {
-		return common.Hash{}, err
-	}
-	if err := dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
-		return builder.Add(leaf.Key, leaf.Value)
-	}); err != nil {
-		return common.Hash{}, err
-	}
-	return builder.RootHash()
 }
 
 func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, hashName string, logger log.Logger) (common.Hash, error) {
@@ -582,21 +545,24 @@ func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datad
 	return nil
 }
 
-func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) error {
+func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) (common.Hash, error) {
 	configurePBTSourceVariant(settings)
+	if err := eip8297.SetHashSuite(settings.TrieHashName()); err != nil {
+		return common.Hash{}, err
+	}
 	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	defer agg.Close()
 	if err := agg.OpenFolder(nil); err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	at := agg.BeginFilesRo()
 	defer at.Close()
 	publishedFiles, err := pbtAttachFiles(dirs)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	publishedFiles = pbtAttachVisibleFiles(publishedFiles)
 	opened := make(map[kv.Domain]map[string]struct{})
@@ -611,26 +577,26 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		files := at.Files(domain)
 		if len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() <= txNum {
-			return fmt.Errorf("commitment attach-pbt: published %s files do not cover conversion txNum %d", domain, txNum)
+			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s files do not cover conversion txNum %d", domain, txNum)
 		}
 		for _, file := range publishedFiles {
 			if file.domain != domain || !file.data || file.from*settings.StepSize > txNum {
 				continue
 			}
 			if _, ok := opened[domain][filepath.Clean(file.path)]; !ok {
-				return fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
+				return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
 			}
 		}
 	}
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 		files := at.Files(domain)
 		if len(opened[domain]) == 0 || len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() <= txNum {
-			return fmt.Errorf("commitment attach-pbt: published %s files do not cover conversion txNum %d", domain, txNum)
+			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s files do not cover conversion txNum %d", domain, txNum)
 		}
 		for _, file := range publishedFiles {
 			if file.domain == domain && file.data && file.from*settings.StepSize <= txNum {
 				if _, ok := opened[domain][filepath.Clean(file.path)]; !ok {
-					return fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
+					return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
 				}
 			}
 		}
@@ -656,34 +622,39 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	for _, check := range checks {
 		value, found, start, end, err := at.DebugGetLatestFromFiles(check.domain, check.key, math.MaxUint64)
 		if err != nil {
-			return err
+			return common.Hash{}, err
 		}
 		if !found || start > txNum || end <= txNum {
-			return fmt.Errorf("commitment attach-pbt: published %s state is not at conversion txNum %d", check.name, txNum)
+			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s state is not at conversion txNum %d", check.name, txNum)
 		}
 		gotBlock, gotTx, err := check.decode(value)
 		if err != nil {
-			return fmt.Errorf("commitment attach-pbt: decode published %s state: %w", check.name, err)
+			return common.Hash{}, fmt.Errorf("commitment attach-pbt: decode published %s state: %w", check.name, err)
 		}
 		if gotBlock != blockNum || gotTx != txNum {
-			return fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
+			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
 		}
 	}
-	if err := validatePBTAttachLeafStampsFn(txNum, func(emit func(dbstate.PBinLeaf) error) error {
+	return validatePBTAttachLeafStampsFn(txNum, func(emit func(dbstate.PBinLeaf) error) error {
 		return dbstate.ForEachPBinLeaf(at, nil, true, emit)
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
 }
 
-func validatePBTAttachLeafStamps(txNum uint64, forEach func(func(dbstate.PBinLeaf) error) error) error {
-	return forEach(func(leaf dbstate.PBinLeaf) error {
+func validatePBTAttachLeafStamps(txNum uint64, forEach func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) {
+	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
+	if err != nil {
+		return common.Hash{}, err
+	}
+	err = forEach(func(leaf dbstate.PBinLeaf) error {
 		if leaf.Stamp > txNum {
 			return fmt.Errorf("commitment attach-pbt: published leaf stamp %d is after conversion txNum %d", leaf.Stamp, txNum)
 		}
-		return nil
+		return builder.Add(leaf.Key, leaf.Value)
 	})
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return builder.RootHash()
 }
 
 func configuredPBTNodeHash(settings *dbstate.ErigonDBSettings) string {
@@ -817,18 +788,21 @@ func validatePBTAttachUncutFiles(nodeFiles []pbtAttachFile, stepSize, endTxNum u
 
 func validatePBTAttachHistoryFrontier(nodeFiles []pbtAttachFile, stepSize, endTxNum uint64) error {
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		var latestHistory *pbtAttachFile
+		latestHistory := make(map[string]*pbtAttachFile)
 		for i := range nodeFiles {
 			file := &nodeFiles[i]
 			if file.domain != domain || file.from*stepSize > endTxNum || pbtAttachAdoptsFile(*file) {
 				continue
 			}
-			if latestHistory == nil || file.to > latestHistory.to {
-				latestHistory = file
+			ext := filepath.Ext(file.path)
+			if latestHistory[ext] == nil || file.to > latestHistory[ext].to {
+				latestHistory[ext] = file
 			}
 		}
-		if latestHistory != nil && latestHistory.to*stepSize <= endTxNum {
-			return fmt.Errorf("commitment attach-pbt: node history file %s ends at txNum %d before conversion txNum %d", latestHistory.path, latestHistory.to*stepSize, endTxNum)
+		for _, file := range latestHistory {
+			if file.to*stepSize <= endTxNum {
+				return fmt.Errorf("commitment attach-pbt: node history file %s ends at txNum %d before conversion txNum %d", file.path, file.to*stepSize, endTxNum)
+			}
 		}
 	}
 	return nil

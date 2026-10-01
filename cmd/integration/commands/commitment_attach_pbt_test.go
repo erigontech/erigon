@@ -122,6 +122,16 @@ func TestValidatePBTAttachFilesRejectsHistoryBelowStateFrontier(t *testing.T) {
 	require.ErrorContains(t, err, "ends at txNum 8")
 }
 
+func TestValidatePBTAttachHistoryFrontierChecksEachFileExtension(t *testing.T) {
+	files := []pbtAttachFile{
+		{path: "accounts.0-2.kv", domain: kv.AccountsDomain, from: 0, to: 2, data: true},
+		{path: "accounts.0-2.v", domain: kv.AccountsDomain, from: 0, to: 2},
+		{path: "accounts.0-1.efi", domain: kv.AccountsDomain, from: 0, to: 1},
+	}
+	err := validatePBTAttachHistoryFrontier(files, 8, 10)
+	require.ErrorContains(t, err, "accounts.0-1.efi")
+}
+
 func TestAttachPBTRejectsHistorySpanningPointWithoutMutation(t *testing.T) {
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
@@ -553,7 +563,8 @@ func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
 	blockNum, txNum, ok, err := settings.ConversionPoint()
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.ErrorContains(t, validatePBTAttachPublishedPoint(t.Context(), datadir.Open(published), settings, blockNum, txNum, log.New()), "accounts")
+	_, err = validatePBTAttachPublishedPoint(t.Context(), datadir.Open(published), settings, blockNum, txNum, log.New())
+	require.ErrorContains(t, err, "accounts")
 	setExecutionProgress(t, source.Chaindata, 1)
 	err = attachPBT(t.Context(), source.DataDir, published, "", log.New())
 	require.ErrorContains(t, err, "accounts")

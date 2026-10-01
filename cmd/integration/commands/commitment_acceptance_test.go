@@ -119,8 +119,8 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 		}))
 		require.Equal(t, dualRoot, attachedRoot)
 	}
-	assertPBTAttachHistory(t, reopened, dual.Tester, conversionTx)
 	lastTxNum := pbtAcceptanceLastTxNum(t, reopened)
+	assertPBTAttachHistory(t, reopened, dual.Tester, lastTxNum)
 	attachedAgg := reopened.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	require.NoError(t, attachedAgg.BuildFiles2(t.Context(), reopened.DB, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), true))
 	attachedAgg.WaitForFiles()
@@ -144,7 +144,7 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 		execmoduletester.WithoutGenesisCommit(),
 		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
 	)
-	assertPBTAttachHistory(t, merged, dual.Tester, conversionTx)
+	assertPBTAttachHistory(t, merged, dual.Tester, lastTxNum)
 	merged.Close()
 }
 
@@ -211,11 +211,11 @@ func TestPBTAttachRejectsPublishedRootMismatchWithoutMutation(t *testing.T) {
 	selectPBTCommandSuite(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
-	previousRoot := pbtAttachPublishedRootFn
-	pbtAttachPublishedRootFn = func(context.Context, datadir.Dirs, *dbstate.ErigonDBSettings, log.Logger) (common.Hash, error) {
+	previousRoot := validatePBTAttachLeafStampsFn
+	validatePBTAttachLeafStampsFn = func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) {
 		return common.Hash{0xaa}, nil
 	}
-	t.Cleanup(func() { pbtAttachPublishedRootFn = previousRoot })
+	t.Cleanup(func() { validatePBTAttachLeafStampsFn = previousRoot })
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
 	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
 	require.ErrorContains(t, err, "differs from header root")
@@ -408,6 +408,7 @@ func TestPBTAttachAcceptanceAtMidBlockConversionPoint(t *testing.T) {
 		}))
 		require.Equal(t, dualRoot, attachedRoot)
 	}
+	assertPBTAttachHistory(t, reopened, dual.Tester, pbtAcceptanceLastTxNum(t, reopened))
 	reopened.Close()
 }
 

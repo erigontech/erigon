@@ -129,7 +129,7 @@ must match the bin root when the pinned datadir has one.
 
 `integration stage_exec --block=<B>` executes and commits block `B`. To recover
 from a mid-block pin, run
-`COMMITMENT_V3=true integration stage_exec --datadir=<datadir> --chain=<chain> --block=<next block end> --experimental.commitment-v3`,
+`COMMITMENT_V3=true integration stage_exec --datadir=<datadir> --chain=<chain> --block=<next block number> --experimental.commitment-v3`,
 then run
 `COMMITMENT_V3=true erigon snapshots export-pbt --datadir=<datadir> --chain=<chain> --out=<export-dir>`.
 Export has no block flag. `export-preimages` uses the same pin for a
