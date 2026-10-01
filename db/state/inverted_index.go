@@ -160,6 +160,7 @@ func (ii *InvertedIndex) efAccessorFileNameMask(fromStep, toStep kv.Step) string
 var (
 	invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
 	invIdxPrefetchWorkers     = dbg.EnvUint("INV_IDX_PREFETCH_WORKERS", uint64(runtime.GOMAXPROCS(0)))
+	invIdxPrefetchBatchSize   = dbg.EnvUint("INV_IDX_PREFETCH_BATCH_SIZE", 1024)
 )
 
 func (ii *InvertedIndex) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
@@ -403,7 +404,7 @@ func (w *InvertedIndexBufferedWriter) flushIndex(ctx context.Context, tx kv.RwTx
 	if w.prefetcher == nil {
 		return w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()})
 	}
-	pairs := make([][2][]byte, 0, 1024)
+	pairs := make([][2][]byte, 0, invIdxPrefetchBatchSize)
 	var buffer []byte
 	flush := func(next etl.LoadNextFunc) error {
 		if err := w.prefetcher.Prefetch(ctx, pairs); err != nil {
@@ -465,7 +466,12 @@ func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool)
 	if iit.ii.stepSize != iit.stepSize {
 		panic(fmt.Sprintf("assert: %d %d", iit.ii.stepSize, iit.stepSize))
 	}
+	var prefetcher *kv.InvertedIndexPrefetcher
+	if invIdxPrefetchWorkers > 0 && !discard && db != nil {
+		prefetcher = kv.NewInvertedIndexPrefetcher(db, iit.ii.ValuesTable, invIdxPrefetchWorkers)
+	}
 	w := &InvertedIndexBufferedWriter{
+		prefetcher:   prefetcher,
 		name:         iit.name,
 		discard:      discard,
 		filenameBase: iit.ii.FilenameBase,
@@ -475,9 +481,6 @@ func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool)
 
 		indexKeysTable: iit.ii.KeysTable,
 		indexTable:     iit.ii.ValuesTable,
-	}
-	if invIdxPrefetchWorkers > 0 && !discard && db != nil {
-		w.prefetcher = kv.NewInvertedIndexPrefetcher(db, w.indexTable, invIdxPrefetchWorkers)
 	}
 	return w
 }

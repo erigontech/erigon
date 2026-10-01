@@ -1459,7 +1459,11 @@ func TestInvertedIndexPrefetch(t *testing.T) {
 				if invIdxPrefetchWorkers > 0 {
 					workers := invIdxPrefetchWorkers
 					entryCount := uint64(len(entries))
-					expectedCalls := entryCount/1024*min(workers, 1024) + min(workers, entryCount%1024)
+					batchSize := invIdxPrefetchBatchSize
+					expectedCalls := entryCount
+					if batchSize > 0 {
+						expectedCalls = entryCount/batchSize*min(workers, batchSize) + min(workers, entryCount%batchSize)
+					}
 					require.EqualValues(t, expectedCalls, cursor.prefetchCalls.Load())
 				} else {
 					require.Zero(t, cursor.prefetchCalls.Load())
