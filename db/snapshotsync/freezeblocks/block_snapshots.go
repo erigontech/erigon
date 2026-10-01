@@ -284,7 +284,7 @@ func (br *BlockRetire) MergeBlocks(
 	snapshots := br.snapshots()
 
 	merger := snapshotsync.NewMerger(tmpDir, int(workers), lvl, db, br.chainConfig, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(true), snapshots.BlocksAvailable())
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(true))
 	if len(rangesToMerge) == 0 {
 		//TODO: enable, but optimize to reduce chain-tip impact
 		//if err := snapshots.RemoveOverlaps(); err != nil {
@@ -327,7 +327,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 	// PruneBlocks deletes the whole [from, to) range capped at limit in a
 	// single cursor pass; the sync loop re-enters each cycle, so no inner loop is needed.
 	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
-		if deleted, err = br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
+		if deleted, err = br.blockWriter.PruneBlocks(tx, canDeleteTo, limit); err != nil {
 			return deleted, err
 		}
 	}
@@ -800,11 +800,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 }
 
 func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-	return DumpHeadersRaw(ctx, db, nil, blockFrom, blockTo, nil, collect, workers, lvl, logger, false)
+	return DumpHeadersRaw(ctx, db, blockFrom, blockTo, collect, lvl, logger, false)
 }
 
 // DumpHeadersRaw - [from, to)
-func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger, test bool) (uint64, error) {
+func DumpHeadersRaw(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, collect func([]byte) error, lvl log.Lvl, logger log.Logger, test bool) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -970,7 +970,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 	return lastTxNum, nil
 }
 
-func ForEachHeader(ctx context.Context, s *blocksnapshots.RoSnapshots, walker func(header *types.Header) error) error {
+func ForEachHeader(s *blocksnapshots.RoSnapshots, walker func(header *types.Header) error) error {
 	word := make([]byte, 0, 2*4096)
 
 	view := s.View()

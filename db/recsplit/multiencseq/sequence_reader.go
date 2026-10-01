@@ -42,7 +42,7 @@ func ReadMultiEncSeq(baseNum uint64, raw []byte) *SequenceReader {
 
 // This is a specialized "fast" Count method that shouldn't allocate new objects, but read the count directly
 // from raw data
-func Count(baseNum uint64, data []byte) uint64 {
+func Count(data []byte) uint64 {
 	// plain elias fano (legacy)
 	if data[0]&PlainEliasFanoMask == 0 {
 		return eliasfano32.Count(data)
