@@ -210,21 +210,24 @@ func (i *FilesItem) IsRawTxN(stepSize uint64) bool {
 	return i.startTxNum%stepSize != 0 || i.endTxNum%stepSize != 0
 }
 
-// V4OneEndTxNForStep returns the endTxN of the v4 #1 file for this
-// step, or (0, false) when no v4 #1 exists. Used by retire's dest-path
-// helpers to construct the complementary v4 #2 path — the v4 #2 tail
-// starts at the v4 #1's non-aligned endTxN and reaches to stepEnd.
+// V4FrontierEndTxNForStep returns the txNum at which this step's v4
+// files stop covering it, or (0, false) when the step holds none.
+// Retire's dest-path helpers anchor the next tail there.
 //
-// v4 #1: startTxNum == step*stepSize AND endTxNum % stepSize != 0
-func (df *DirtyFiles) V4OneEndTxNForStep(stepSize uint64, step kv.Step) (uint64, bool) {
-	targetStart := uint64(step) * stepSize
+// A mode-B unwind adds its own v4 file above v4 #1, so the frontier is
+// not always v4 #1's end. It must be the highest end, because prune
+// drops MDBX history as soon as a file covers it: a tail reaching
+// below the frontier would declare a range it can no longer fill, and
+// would supersede the file that holds it.
+func (df *DirtyFiles) V4FrontierEndTxNForStep(stepSize uint64, step kv.Step) (uint64, bool) {
+	stepStart := uint64(step) * stepSize
+	stepEnd := stepStart + stepSize
 	var endTxN uint64
 	var found bool
 	df.Scan(func(item *FilesItem) bool {
-		if item.startTxNum == targetStart && item.endTxNum%stepSize != 0 {
+		if item.startTxNum >= stepStart && item.endTxNum < stepEnd && item.endTxNum > endTxN {
 			endTxN = item.endTxNum
 			found = true
-			return false
 		}
 		return true
 	})

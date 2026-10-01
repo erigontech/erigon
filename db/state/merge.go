@@ -163,14 +163,13 @@ func calculateMergeStartTxNum(endTxNum, stepSize, maxSpan uint64) uint64 {
 // but resets needMerge to false, letting later smaller-but-still-mergeable files
 // take over.
 func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan uint64, superSetCheck bool) MergeRange {
-	// v4-pair positive detection first. When both v4 #1 [step*ss, cut)
-	// and v4 #2 [cut, (step+1)*ss) exist, that step is a mergeable
-	// single-step range whose union is the standard step-aligned output.
-	// Fire it before the wider-merge algorithm so the aggregator
-	// consolidates the pair; subsequent scheduling cycles pick up the
-	// freshly-consolidated file for any wider merge.
-	if pair, ok := v4PairMergeRange(files, stepSize, maxEndTxNum); ok {
-		return pair
+	// Positive v4 detection first. A step whose v4 files tile it end to
+	// end is a mergeable single-step range whose union is the standard
+	// step-aligned output. Fire it before the wider-merge algorithm so
+	// the aggregator consolidates it; subsequent scheduling cycles pick
+	// up the freshly-consolidated file for any wider merge.
+	if tiled, ok := v4TiledStepMergeRange(files, stepSize, maxEndTxNum); ok {
+		return tiled
 	}
 
 	var r MergeRange
@@ -212,20 +211,19 @@ func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan ui
 	return r
 }
 
-// v4PairMergeRange scans files for the first step where both v4 #1
-// (aligned start, mid-step end) and v4 #2 (mid-step start, aligned
-// end) exist and together tile [step*stepSize, (step+1)*stepSize).
-// Returns that step's aligned range as a MergeRange so the merge
-// scheduler consolidates the pair into a standard step-aligned file.
-// Bounded by maxEndTxNum — a pair whose stepEnd exceeds the frontier
-// isn't yet a candidate.
+// v4TiledStepMergeRange scans files for the first step whose v4 files
+// tile it end to end, and returns that step's aligned range so the merge
+// scheduler consolidates them into a standard step-aligned file.
+// Bounded by maxEndTxNum — a step whose end exceeds the frontier isn't
+// yet a candidate.
 //
-// Returns (MergeRange{}, false) when no complete pair exists — either
-// only v4 #1 has landed (retire hasn't emitted the tail yet) or the
-// files are all step-aligned.
-func v4PairMergeRange(files visibleFiles, stepSize, maxEndTxNum uint64) (MergeRange, bool) {
+// A step usually holds two tiles, but a mode-B unwind landing inside one
+// adds another, so the walk follows the chain rather than expecting a
+// pair. Returns (MergeRange{}, false) when the tiles leave a hole —
+// typically because retire hasn't written the closing tail yet.
+func v4TiledStepMergeRange(files visibleFiles, stepSize, maxEndTxNum uint64) (MergeRange, bool) {
 	for i, f := range files {
-		// v4 #1: aligned start, mid-step end.
+		// Opening tile: aligned start, mid-step end.
 		if f.startTxNum%stepSize != 0 || f.endTxNum%stepSize == 0 {
 			continue
 		}
@@ -234,17 +232,16 @@ func v4PairMergeRange(files visibleFiles, stepSize, maxEndTxNum uint64) (MergeRa
 		if stepEnd > maxEndTxNum {
 			continue
 		}
-		// Search forward for the complementary v4 #2 in the same step.
-		// Since files are sorted by endTxNum ascending, v4 #2 (endTxN
-		// == stepEnd) sorts after v4 #1 (endTxN < stepEnd).
-		for j := i + 1; j < len(files); j++ {
+		// Files are sorted by endTxNum ascending, so each successive
+		// tile sorts after the one it extends.
+		covered := f.endTxNum
+		for j := i + 1; j < len(files) && covered < stepEnd; j++ {
 			g := files[j]
-			if g.startTxNum != f.endTxNum {
-				continue
+			if g.startTxNum == covered && g.endTxNum <= stepEnd {
+				covered = g.endTxNum
 			}
-			if g.endTxNum != stepEnd {
-				break
-			}
+		}
+		if covered == stepEnd {
 			return MergeRange{needMerge: true, from: stepStart, to: stepEnd}, true
 		}
 	}

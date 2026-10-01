@@ -340,12 +340,12 @@ func (d *Domain) v4FilesForStep(step kv.Step) []string {
 // domainRetireDestPaths returns the .kv path retire's collate should
 // write for this step, plus isV4Tail indicating whether the path is
 // v4 #2 form (raw-txN, non-aligned start) or standard step-aligned.
-// Mirrors History.historyRetireDestPaths on the .kv side. When v4 #1
-// exists for the step, returns the v4 #2 tail path
-// [v4#1.endTxN, stepEnd) so the background merge scheduler can later
-// compose the pair into the aligned .kv.
+// Mirrors History.historyRetireDestPaths on the .kv side. When v4 files
+// already cover part of the step, returns the tail path
+// [frontier, stepEnd) so the background merge scheduler can later
+// compose the step's tiles into the aligned .kv.
 func (d *Domain) domainRetireDestPaths(step kv.Step) (kvPath string, fromTxN uint64, isV4Tail bool) {
-	if endTxN, ok := d.dirtyFiles.V4OneEndTxNForStep(d.stepSize, step); ok {
+	if endTxN, ok := d.dirtyFiles.V4FrontierEndTxNForStep(d.stepSize, step); ok {
 		stepEnd := (uint64(step) + 1) * d.stepSize
 		return d.kvNewFilePathV4(endTxN, stepEnd), endTxN, true
 	}

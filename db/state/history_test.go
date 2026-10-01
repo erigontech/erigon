@@ -2631,3 +2631,29 @@ func TestHistoryCollate_V4TailSkipsTxNumsBelowBase(t *testing.T) {
 	require.Equal(t, int(txTo-cut), c.historyComp.Count(),
 		"v4 tail must collate exactly [base, txTo) — txNums below the base are v4 #1's")
 }
+
+// TestHistoryRetireDestPaths_TailStartsAtV4CoverageFrontier pins how
+// far a retire tail may claim to reach back. A mode-B unwind leaves its
+// own v4 file above v4 #1, and prune then drops that range from MDBX
+// because a file covers it. A tail anchored at v4 #1's end would
+// re-declare the unwind file's range and fill it from an MDBX that no
+// longer holds it, yielding a file staler than its own name and
+// superseding the file that did hold the data.
+func TestHistoryRetireDestPaths_TailStartsAtV4CoverageFrontier(t *testing.T) {
+	t.Parallel()
+	_, h := testDbAndHistory(t, false, log.New())
+
+	stepStart := uint64(3) * h.stepSize
+	stepEnd := uint64(4) * h.stepSize
+	cut := stepStart + 3
+	unwindEnd := stepStart + 5
+	h.dirtyFiles.Set(&FilesItem{startTxNum: stepStart, endTxNum: cut})
+	h.dirtyFiles.Set(&FilesItem{startTxNum: cut, endTxNum: unwindEnd})
+
+	vPath, efPath, fromTxN, isV4Tail := h.historyRetireDestPaths(kv.Step(3))
+	require.True(t, isV4Tail, "v4 files cover part of step 3 — must stay in v4 tail form")
+	require.Equal(t, unwindEnd, fromTxN,
+		"tail must start where the step's v4 files stop covering, not at v4 #1's end")
+	require.Contains(t, vPath, fmt.Sprintf(".%d-%d.v", unwindEnd, stepEnd))
+	require.Contains(t, efPath, fmt.Sprintf(".%d-%d.ef", unwindEnd, stepEnd))
+}

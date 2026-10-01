@@ -134,9 +134,9 @@ func (h *History) retireSubsumedV4ItemsInRange(rangeStart, rangeEnd uint64) []*F
 // should write for this step, plus isV4Tail indicating whether the
 // paths are v4 #2 form (raw-txN, non-aligned start) or standard
 // step-aligned. Under the universal two-v4-then-merge lifecycle,
-// retire produces the v4 #2 tail file [v4#1.endTxN, stepEnd) when a
-// v4 #1 already occupies [step*ss, v4#1.endTxN); background merge
-// composes the pair into a standard step-aligned file later.
+// retire produces the tail file [frontier, stepEnd) when v4 files
+// already cover [step*ss, frontier); background merge composes the
+// step's tiles into a standard step-aligned file later.
 // historyRetireDestPaths returns the .v and .ef paths retire's collate
 // should write, plus the raw fromTxN that goes into the file name AND
 // the multiencseq encoding base. isV4Tail reports whether v4 #2 tail
@@ -146,7 +146,7 @@ func (h *History) retireSubsumedV4ItemsInRange(rangeStart, rangeEnd uint64) []*F
 // at Reset time — mismatch produces Seek values shifted by
 // (step_start - tail_start).
 func (h *History) historyRetireDestPaths(step kv.Step) (vPath, efPath string, fromTxN uint64, isV4Tail bool) {
-	if endTxN, ok := h.dirtyFiles.V4OneEndTxNForStep(h.stepSize, step); ok {
+	if endTxN, ok := h.dirtyFiles.V4FrontierEndTxNForStep(h.stepSize, step); ok {
 		stepEnd := (uint64(step) + 1) * h.stepSize
 		return h.vNewFilePathV4(endTxN, stepEnd), h.efNewFilePathV4(endTxN, stepEnd), endTxN, true
 	}

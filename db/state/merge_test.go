@@ -1749,3 +1749,41 @@ func TestFindMergeRangeInFiles_V4PairPrecedesWiderAligned(t *testing.T) {
 	require.Equal(t, uint64(3000), got.from, "v4-pair merge starts at step 3's start")
 	require.Equal(t, uint64(4000), got.to, "v4-pair merge ends at step 3's end")
 }
+
+// TestFindMergeRangeInFiles_V4ChainOfThreeTilesFires pins the merge
+// for a step a mode-B unwind has split a third time: v4 #1, the unwind's
+// own tail, and the tail retire writes once forward exec reaches the
+// step end. Three tiles still tile the step, so the step must still
+// consolidate — a pair-only rule leaves it in v4 form forever, and every
+// read of it keeps paying the v4 lookup.
+func TestFindMergeRangeInFiles_V4ChainOfThreeTilesFires(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+
+	files := visibleFiles{
+		makeVisibleFile(3000, 3512), // v4 #1
+		makeVisibleFile(3512, 3620), // unwind tail
+		makeVisibleFile(3620, 4000), // retire tail
+	}
+
+	got := findMergeRangeInFiles(files, stepSize, 4000, 32*stepSize, false)
+	require.True(t, got.needMerge, "three v4 tiles tiling step 3 must fire a merge")
+	require.Equal(t, uint64(3000), got.from, "aligned merge starts at step*stepSize")
+	require.Equal(t, uint64(4000), got.to, "aligned merge ends at (step+1)*stepSize")
+}
+
+// TestFindMergeRangeInFiles_V4ChainWithGapStaysSkipped pins the negative
+// half: tiles that leave a hole in the step must not fire, or the merged
+// file would advertise a range wider than its content.
+func TestFindMergeRangeInFiles_V4ChainWithGapStaysSkipped(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+
+	files := visibleFiles{
+		makeVisibleFile(3000, 3512),
+		makeVisibleFile(3620, 4000), // [3512, 3620) uncovered
+	}
+
+	got := findMergeRangeInFiles(files, stepSize, 4000, 32*stepSize, false)
+	require.False(t, got.needMerge, "a hole between v4 tiles must not fire a merge")
+}

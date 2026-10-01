@@ -3980,3 +3980,23 @@ func TestDomainDisabledDiscardsWrites(t *testing.T) {
 		require.Zerof(t, n, "table %s must stay empty", table)
 	}
 }
+
+// TestDomainRetireDestPaths_TailStartsAtV4CoverageFrontier is the .kv
+// side of TestHistoryRetireDestPaths_TailStartsAtV4CoverageFrontier.
+func TestDomainRetireDestPaths_TailStartsAtV4CoverageFrontier(t *testing.T) {
+	t.Parallel()
+	_, d := testDbAndDomain(t, log.New())
+
+	stepStart := uint64(3) * d.stepSize
+	stepEnd := uint64(4) * d.stepSize
+	cut := stepStart + 3
+	unwindEnd := stepStart + 5
+	d.dirtyFiles.Set(&FilesItem{startTxNum: stepStart, endTxNum: cut})
+	d.dirtyFiles.Set(&FilesItem{startTxNum: cut, endTxNum: unwindEnd})
+
+	kvPath, fromTxN, isV4Tail := d.domainRetireDestPaths(kv.Step(3))
+	require.True(t, isV4Tail, "v4 files cover part of step 3 — must stay in v4 tail form")
+	require.Equal(t, unwindEnd, fromTxN,
+		"tail must start where the step's v4 files stop covering, not at v4 #1's end")
+	require.Contains(t, kvPath, fmt.Sprintf(".%d-%d.kv", unwindEnd, stepEnd))
+}
