@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -35,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	ethapi "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -47,9 +49,54 @@ type GraphQLCallResult struct {
 	Status  uint64
 }
 
+// GraphQLReceipt is a receipt with the transaction fields the GraphQL resolver reads.
+// Its Logs replaces the RPC logs with the receipt's own.
+type GraphQLReceipt struct {
+	*ethutils.RPCReceipt
+	Nonce                uint64           `json:"nonce"`
+	Value                *uint256.Int     `json:"value"`
+	Data                 []byte           `json:"data"`
+	Logs                 types.Logs       `json:"logs"`
+	Gas                  uint64           `json:"gas"`
+	MaxFeePerGas         *uint256.Int     `json:"maxFeePerGas,omitempty"`
+	MaxPriorityFeePerGas *uint256.Int     `json:"maxPriorityFeePerGas,omitempty"`
+	MaxFeePerBlobGas     *hexutil.U256    `json:"maxFeePerBlobGas,omitempty"`
+	AccessList           types.AccessList `json:"accessList"`
+}
+
+// MarshalFastJSONTo shadows the promoted RPCReceipt method, which would drop the transaction fields.
+func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	return writeReflected(s, r)
+}
+
+func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *GraphQLReceipt {
+	transaction := &GraphQLReceipt{
+		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true, false),
+		Nonce:      txn.GetNonce(),
+		Value:      txn.GetValue(),
+		Data:       txn.GetData(),
+		Logs:       receipt.Logs,
+		Gas:        txn.GetGasLimit(),
+		AccessList: txn.GetAccessList(),
+	}
+	// Exclusion, as in ethapi.NewRPCTransaction: a type registered outside this
+	// package is fee-capped too.
+	if txType := txn.Type(); txType != types.LegacyTxType && txType != types.AccessListTxType {
+		transaction.MaxFeePerGas = txn.GetFeeCap()
+		transaction.MaxPriorityFeePerGas = txn.GetTipCap()
+	}
+	if wrapper, ok := txn.(*types.BlobTxWrapper); ok {
+		txn = &wrapper.Tx
+	}
+	if blobTx, ok := txn.(*types.BlobTx); ok {
+		transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
+	}
+	return transaction
+}
+
 type GraphQLAPI interface {
-	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
-	GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error)
+	GetBlockDetails(ctx context.Context, number rpc.BlockNumber, withTxs *bool) (map[string]any, error)
+	GetBlockDetailsByHash(ctx context.Context, hash common.Hash, withTxs *bool) (map[string]any, error)
 	GetLatestBlockNumber(ctx context.Context) (uint64, error)
 	GetChainID(ctx context.Context) (*uint256.Int, error)
 	GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error)
@@ -59,7 +106,8 @@ type GraphQLAPI interface {
 	Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error)
 	EstimateGas(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error)
 	GasPrice(ctx context.Context) (string, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
+	MaxPriorityFeePerGas(ctx context.Context) (string, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error)
 	GetPendingTransactions(ctx context.Context) ([]types.Transaction, error)
 }
 
@@ -93,17 +141,20 @@ func (api *GraphQLAPIImpl) GetLatestBlockNumber(ctx context.Context) (uint64, er
 }
 
 func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.Hash) (uint64, bool, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, false, err
 	}
 	defer tx.Rollback()
 
-	blockNum, _, ok, err := api.txnLookup(ctx, api.filters.WithOverlay(tx), hash)
+	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
 	return blockNum, ok, err
 }
 
 func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*uint256.Int, error) {
+	if cc, ok := api.tryChainConfig(); ok {
+		return cc.ChainID, nil
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -118,15 +169,16 @@ func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*uint256.Int, error)
 	return response.ChainID, nil
 }
 
-func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+// GetBlockDetails answers with the transactions unless withTxs says otherwise, which the
+// GraphQL resolver sets from the query's selection.
+func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber, withTxs *bool) (map[string]any, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	overlayTx := api.filters.WithTemporalOverlay(tx)
-	block, _, err := api.getBlockWithSenders(ctx, blockNumber, overlayTx)
+	block, _, err := api.getBlockWithSenders(ctx, blockNumber, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -134,36 +186,32 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, nil
 	}
 
-	getBlockRes, err := api.delegateGetBlockByNumber(overlayTx, block, blockNumber, false)
+	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, blockNumber, false)
 	if err != nil {
 		return nil, err
 	}
 
-	return api.buildBlockDetailsResponse(ctx, overlayTx, block, getBlockRes)
+	return api.buildBlockDetailsResponse(ctx, tx, block, getBlockRes, withTxs == nil || *withTxs)
 }
 
-func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash, withTxs *bool) (map[string]any, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	// One selected view for resolution, gate and reads: a background commit can publish
-	// or drop the overlay between two selections, leaving the gate on one generation and
-	// the block or its receipts on another.
-	overlayTx := api.filters.WithTemporalOverlay(tx)
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(hash, false)
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := api.checkBlockReceiptsAvailable(ctx, overlayTx, blockHeight); err != nil {
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, blockHeight); err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, overlayTx, blockHash, blockHeight)
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -171,47 +219,31 @@ func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash commo
 		return nil, nil
 	}
 
-	getBlockRes, err := api.delegateGetBlockByNumber(overlayTx, block, rpc.BlockNumber(blockHeight), false)
+	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, rpc.BlockNumber(blockHeight), false)
 	if err != nil {
 		return nil, err
 	}
 
-	return api.buildBlockDetailsResponse(ctx, overlayTx, block, getBlockRes)
+	return api.buildBlockDetailsResponse(ctx, tx, block, getBlockRes, withTxs == nil || *withTxs)
 }
 
-func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.TemporalTx, block *types.Block, getBlockRes map[string]any) (map[string]any, error) {
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	receipts, err := api.getReceipts(ctx, tx, block)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]map[string]any, 0, len(receipts))
-	for _, receipt := range receipts {
-		txn := block.Transactions()[receipt.TransactionIndex]
-
-		transaction := ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false)
-		transaction["nonce"] = txn.GetNonce()
-		transaction["value"] = txn.GetValue()
-		transaction["data"] = txn.GetData()
-		transaction["logs"] = receipt.Logs
-		transaction["gas"] = txn.GetGasLimit()
-		txType := txn.Type()
-		if txType == types.DynamicFeeTxType || txType == types.SetCodeTxType || txType == types.BlobTxType {
-			transaction["maxFeePerGas"] = txn.GetFeeCap()
-			transaction["maxPriorityFeePerGas"] = txn.GetTipCap()
+func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.TemporalTx, block *types.Block, getBlockRes *ethapi.RPCBlock, withTxs bool) (map[string]any, error) {
+	response := map[string]any{}
+	if withTxs {
+		chainConfig, err := api.chainConfig(ctx, tx)
+		if err != nil {
+			return nil, err
 		}
-		if txType == types.BlobTxType {
-			if blobTx, ok := txn.(*types.BlobTx); ok {
-				transaction["maxFeePerBlobGas"] = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
-			}
+		receipts, err := api.getReceipts(ctx, tx, block)
+		if err != nil {
+			return nil, err
 		}
-		transaction["accessList"] = txn.GetAccessList()
-		result = append(result, transaction)
+		result := make([]*GraphQLReceipt, 0, len(receipts))
+		for _, receipt := range receipts {
+			txn := block.Transactions()[receipt.TransactionIndex]
+			result = append(result, NewGraphQLReceipt(receipt, txn, chainConfig, block.HeaderNoCopy()))
+		}
+		response["receipts"] = result
 	}
 
 	td, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())
@@ -219,29 +251,34 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		return nil, err
 	}
 	if td != nil {
-		getBlockRes["totalDifficulty"] = (*hexutil.U256)(td)
+		getBlockRes.TotalDifficulty = (*hexutil.U256)(td)
 	} else {
-		getBlockRes["totalDifficulty"] = new(hexutil.U256)
+		getBlockRes.TotalDifficulty = new(hexutil.U256)
 	}
 
-	response := map[string]any{}
 	response["block"] = getBlockRes
-	response["receipts"] = result
 
-	wresult := make([]map[string]any, 0, len(block.Withdrawals()))
-	for _, withdrawal := range block.Withdrawals() {
-		wmap := make(map[string]any)
-		wmap["index"] = hexutil.Uint64(withdrawal.Index)
-		wmap["validator"] = hexutil.Uint64(withdrawal.Validator)
-		wmap["address"] = withdrawal.Address
-		wmap["amount"] = withdrawal.Amount
-
-		wresult = append(wresult, wmap)
-	}
-
-	response["withdrawals"] = wresult
+	response["withdrawals"] = marshalWithdrawals(block.Withdrawals())
 
 	return response, nil
+}
+
+// GraphQLWithdrawal is a withdrawal as the graphql_ block responses render it.
+// Its validator index keeps the `validator` key the GraphQL schema asks for,
+// not the `validatorIndex` of eth_getBlockByNumber.
+type GraphQLWithdrawal struct {
+	Index     hexutil.Uint64 `json:"index"`
+	Validator hexutil.Uint64 `json:"validator"`
+	Address   common.Address `json:"address"`
+	Amount    hexutil.Uint64 `json:"amount"`
+}
+
+func marshalWithdrawals(withdrawals types.Withdrawals) []GraphQLWithdrawal {
+	out := make([]GraphQLWithdrawal, 0, len(withdrawals))
+	for _, withdrawal := range withdrawals {
+		out = append(out, GraphQLWithdrawal(*withdrawal))
+	}
+	return out
 }
 
 // getBlockWithSenders resolves and reads on the view tx exposes; the caller selects it
@@ -251,7 +288,7 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 		return api.pendingBlock(), nil, nil
 	}
 
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -277,14 +314,14 @@ const zeroStorageHash = "0x00000000000000000000000000000000000000000000000000000
 
 // GetAccountInfo returns the balance (hex), nonce, and bytecode for an account at the given block.
 func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return "", 0, "", err
 	}
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return "", 0, "", err
 	}
@@ -293,12 +330,11 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 		return "", 0, "", err
 	}
 
-	stateTx := api.filters.WithTemporalOverlay(tx)
-	if err := rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
 		return "", 0, "", err
 	}
@@ -333,14 +369,14 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
 	}
 
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return zeroStorageHash, err
 	}
@@ -349,12 +385,11 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, err
 	}
 
-	stateTx := api.filters.WithTemporalOverlay(tx)
-	if err := rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
 		return zeroStorageHash, err
 	}
@@ -373,22 +408,19 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 	return hexutil.Encode(res.PaddedBytes(32)), nil
 }
 
-func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
-	additionalFields := make(map[string]any)
-	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
+func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
+	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx)
 	if !inclTx {
-		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
+		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
-	response["transactionCount"] = hexutil.Uint64(b.Transactions().Len())
+	txCount := uint64(b.Transactions().Len())
+	response.TransactionCount = &txCount
 
-	if err == nil && number == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	if number == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
-	return response, err
+	return response, nil
 }
 
 func (api *GraphQLAPIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
@@ -401,20 +433,11 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, err
 	}
 
-	roTx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
-	defer roTx.Rollback()
-
-	var tx kv.TemporalTx = roTx
-	if api.filters != nil {
-		if sd := api.filters.LatestSD(); sd != nil {
-			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
-				tx = overlayTx
-			}
-		}
-	}
+	defer tx.Rollback()
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -437,11 +460,11 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, err
 	}
 
-	if err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
+	if err := rpchelper.CheckBlockExecuted(tx, header.Number.Uint64()); err != nil {
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -482,7 +505,15 @@ func (api *GraphQLAPIImpl) GasPrice(ctx context.Context) (string, error) {
 	return price.String(), nil
 }
 
-func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
+func (api *GraphQLAPIImpl) MaxPriorityFeePerGas(ctx context.Context) (string, error) {
+	tip, err := api.eth.MaxPriorityFeePerGas(ctx)
+	if err != nil {
+		return "", err
+	}
+	return tip.String(), nil
+}
+
+func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
 	return api.eth.GetLogs(ctx, crit)
 }
 

@@ -120,9 +120,9 @@ func (me *downloadBatch) doMetainfoTask(task func() func()) {
 
 var errBatchEnded = errors.New("download batch ended")
 
-// end joins the batch and returns the cause it ended with. Queued seeding is dropped only when ctx
-// goes away, including a cancel arriving during the join, which is why the cause is read after it.
-// A batch that failed for its own reasons still seeds what it holds.
+// end joins the batch and returns the cause it ended with. Queued seeding is dropped only by a
+// cancel from outside the batch, including one arriving during the join, which is why the cause is
+// read after it. A batch that failed for its own reasons still seeds what it holds.
 func (me *downloadBatch) end(ctx context.Context, cause error) error {
 	me.ended.Do(func() {
 		ended := cmp.Or(cause, errBatchEnded)
@@ -137,6 +137,11 @@ func (me *downloadBatch) end(ctx context.Context, cause error) error {
 		}
 		me.d.decDownloadRequests()
 	})
+	if me.seedDropped.Load() > 0 {
+		// seedCtx hangs off d.ctx, so a shutdown drops seeding without the caller's ctx ever
+		// showing it, and the caller is told a batch that seeded nothing succeeded.
+		return cmp.Or(cause, context.Cause(ctx), context.Cause(me.seedCtx))
+	}
 	return cmp.Or(cause, context.Cause(ctx))
 }
 

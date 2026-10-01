@@ -28,9 +28,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	kv2 "github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/logging"
@@ -69,7 +69,7 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	return opts
 }
 
-func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
+func openRawDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
 	migrationDBs := map[kv.Label]bool{
 		dbcfg.ChainDB:     true,
 		dbcfg.ConsensusDB: true,
@@ -77,7 +77,6 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 	if _, ok := migrationDBs[opts.GetLabel()]; !ok {
 		panic(opts.GetLabel())
 	}
-
 	// Apply migrations BEFORE the accede-mode open. In accede mode MDBX cannot
 	// create new tables, so if a table was added to the schema after the DB was
 	// originally created (e.g. BlockAccessList) the open would panic. The
@@ -90,7 +89,6 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 			return nil, fmt.Errorf("open migrations db: %w", err)
 		}
 		defer migrationsDB.Close()
-
 		migrator := migrations.NewMigrator(opts.GetLabel())
 		has, err := migrator.HasPendingMigrations(migrationsDB)
 		if err != nil {
@@ -106,20 +104,33 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 			rawDBExcl.Close()
 		}
 	}
+	return opts.MustOpen(), nil
+}
 
-	rawDB := opts.MustOpen()
+// isDefaultChaindata compares the flags as given: dirs.Chaindata is absolute and never matches a relative --datadir.
+func isDefaultChaindata(chaindata, datadir string) bool {
+	return chaindata == filepath.Join(datadir, "chaindata")
+}
 
+func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	dirs := datadir.New(datadirCli)
-	if err := CheckSaltFilesExist(dirs); err != nil {
-		return nil, err
+	if applyMigrations && isDefaultChaindata(chaindata, datadirCli) {
+		if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
+			return nil, err
+		}
 	}
-
-	blockSnaps, agg, _, err := allSnapshots(ctx, rawDB, logger)
+	rawDB, err := openRawDB(opts, applyMigrations, logger)
 	if err != nil {
 		return nil, err
 	}
-
-	db, err := temporal.New(rawDB, agg, blockSnaps)
+	if err := CheckSaltFilesExist(dirs); err != nil {
+		return nil, err
+	}
+	db, err := newTemporalDB(ctx, rawDB, logger)
+	if err != nil {
+		return nil, err
+	}
+	blockSnaps, _, err := allSnapshots(ctx, db, logger)
 	if err != nil {
 		return nil, err
 	}

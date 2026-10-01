@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -37,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -46,9 +49,30 @@ const API_LEVEL = 8
 
 type TransactionsWithReceipts struct {
 	Txs       []*ethapi.RPCTransaction `json:"txs"`
-	Receipts  []map[string]any         `json:"receipts"`
+	Receipts  []ReceiptWithTimestamp   `json:"receipts"`
 	FirstPage bool                     `json:"firstPage"`
 	LastPage  bool                     `json:"lastPage"`
+}
+
+// ReceiptWithTimestamp is a receipt with the timestamp of its block.
+type ReceiptWithTimestamp struct {
+	*ethutils.RPCReceipt
+	Timestamp uint64 `json:"timestamp"`
+}
+
+// MarshalFastJSONTo shadows the promoted RPCReceipt method, which would drop Timestamp.
+func (r ReceiptWithTimestamp) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	return writeReflected(s, r)
+}
+
+// writeReflected writes v with encoding/json.
+func writeReflected(s *jsonstream.Stream, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	s.WriteRawBytes(b)
+	return nil
 }
 
 type OtterscanAPI interface {
@@ -173,14 +197,14 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 	result, err := protocol.ApplyMessage(vmenv, msg, new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */, engine)
 	if err != nil {
-		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-			tracer.Hooks.OnTxEnd(nil, err)
+		if tracer != nil {
+			tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		}
 		return nil, fmt.Errorf("tracing failed: %w", err)
 	}
 
-	if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-		tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
+	if tracer != nil && tracer.Hooks.HasTxEndHook() {
+		tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
 	}
 	return result, nil
 }
@@ -219,9 +243,13 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	}
 	defer dbtx.Rollback()
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum)
-	if err != nil {
-		return nil, err
+	// blockNum 0 is the sentinel for the newest page, not a request to read genesis;
+	// the blocks the scan lands on are gated as it reaches them.
+	if blockNum != 0 {
+		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return api.searchTransactionsBeforeV3(dbtx, ctx, addr, blockNum, pageSize)
@@ -246,30 +274,31 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	}
 	defer dbtx.Rollback()
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum)
-	if err != nil {
-		return nil, err
+	// blockNum 0 is the oldest-page sentinel; see SearchTransactionsBefore.
+	if blockNum != 0 {
+		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return api.searchTransactionsAfterV3(dbtx, ctx, addr, blockNum, pageSize)
 }
 
-func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
-	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, nil)
+func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
+	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx)
 	if !inclTx {
-		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
+		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
-	response["transactionCount"] = b.Transactions().Len()
+	txCount := uint64(b.Transactions().Len())
+	response.TransactionCount = &txCount
 
-	if err == nil && number == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	if number == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
 	// Explicitly drop unwanted fields
-	response["logsBloom"] = nil
-	return response, err
+	response.LogsBloom = nil
+	return response, nil
 }
 
 // TODO: temporary workaround due to API breakage from watch_the_burn
@@ -300,15 +329,15 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config, e
 	}
 
 	var ret internalIssuance
-	ret.BlockReward = hexutil.EncodeBig(blockReward.ToBig())
-	ret.UncleReward = hexutil.EncodeBig(uncleReward.ToBig())
+	ret.BlockReward = blockReward.Hex()
+	ret.UncleReward = uncleReward.Hex()
 
 	blockReward.Add(blockReward, uncleReward)
-	ret.Issuance = hexutil.EncodeBig(blockReward.ToBig())
+	ret.Issuance = blockReward.Hex()
 	return ret, nil
 }
 
-func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config, receipts types.Receipts) (uint256.Int, error) {
+func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, chainConfig *chain.Config, receipts types.Receipts) (uint256.Int, error) {
 	var fee, gasUsed, totalFees uint256.Int
 	isLondon := chainConfig.IsLondon(block.NumberU64())
 	baseFee := block.BaseFee()
@@ -331,101 +360,54 @@ func delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, sender
 	return totalFees, nil
 }
 
-// getBlockWithSenders resolves and reads on the view tx exposes; the caller selects it
+// getBlock resolves and reads on the view tx exposes; the caller selects it
 // once and uses the same one for everything it derives from the block.
-func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.TemporalTx) (*types.Block, []common.Address, error) {
+func (api *OtterscanAPIImpl) getBlock(ctx context.Context, number rpc.BlockNumber, tx kv.TemporalTx) (*types.Block, error) {
 	if number == rpc.PendingBlockNumber {
-		return api.pendingBlock(), nil, nil
+		return api.pendingBlock(), nil
 	}
 
-	n, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
+	n, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
-			return nil, nil, nil // not error, see also other cases https://github.com/erigontech/erigon/issues/1645
+			return nil, nil // not error, see also other cases https://github.com/erigontech/erigon/issues/1645
 		}
-		return nil, nil, err
+		return nil, err
 	}
-
-	block, err := api.blockWithSenders(ctx, tx, hash, n)
-	if err != nil {
-		return nil, nil, err
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, n); err != nil {
+		return nil, err
 	}
-	if block == nil {
-		return nil, nil, nil
-	}
-	return block, block.Body().SendersFromTxs(), nil
+	return api.blockWithSenders(ctx, tx, hash, n)
 }
 
 func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	// One selected view for resolution, gate and reads: a background commit can publish
-	// or drop the overlay between two selections, leaving the gate on one generation and
-	// the block or its receipts on another.
-	overlayTx := api.filters.WithTemporalOverlay(tx)
-
-	var b *types.Block
-	if number == rpc.PendingBlockNumber {
-		b, _, err = api.getBlockWithSenders(ctx, number, overlayTx)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), overlayTx, api._blockReader, nil)
-		if err != nil {
-			if errors.As(err, &rpc.BlockNotFoundErr{}) {
-				return nil, nil
-			}
-			return nil, err
-		}
-		if err := api.BaseAPI.checkBlockReceiptsAvailable(ctx, overlayTx, blockNum); err != nil {
-			return nil, err
-		}
-		b, _, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), overlayTx)
-		if err != nil {
-			return nil, err
-		}
+	b, err := api.getBlock(ctx, number, tx)
+	if err != nil {
+		return nil, err
 	}
 	if b == nil {
 		return nil, nil
 	}
 
-	chainConfig, err := api.chainConfig(ctx, overlayTx)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
 
-	getBlockRes, err := delegateGetBlockByNumber(overlayTx, b, number, true)
+	getBlockRes, err := delegateGetBlockByNumber(tx, b, number, false)
 	if err != nil {
 		return nil, err
 	}
 
-	// Receipts
-	receipts, err := api.getReceipts(ctx, overlayTx, b)
+	receipts, err := api.getReceipts(ctx, tx, b)
 	if err != nil {
 		return nil, err
-	}
-
-	result := make([]map[string]any, 0, len(receipts))
-	for _, receipt := range receipts {
-		txn := b.Transactions()[receipt.TransactionIndex]
-		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true, false)
-		marshalledRcpt["logs"] = nil
-		marshalledRcpt["logsBloom"] = nil
-		result = append(result, marshalledRcpt)
-	}
-
-	// Crop txn input to 4bytes
-	var txs = getBlockRes["transactions"].([]any)
-	for _, rawTx := range txs {
-		rpcTx := rawTx.(*ethapi.RPCTransaction)
-		if len(rpcTx.Input) >= 4 {
-			rpcTx.Input = rpcTx.Input[:4]
-		}
 	}
 
 	// Crop page
@@ -438,12 +420,31 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		pageStart = 0
 	}
 
-	if pageEnd > len(result) {
-		return nil, fmt.Errorf("receipts count mismatch: got %d, need %d", len(result), pageEnd)
+	if pageEnd > len(receipts) {
+		return nil, fmt.Errorf("receipts count mismatch: got %d, need %d", len(receipts), pageEnd)
 	}
+
+	blockHash, baseFee := b.Hash(), b.BaseFee()
+	txs := make([]*ethapi.RPCTransaction, 0, pageEnd-pageStart)
+	result := make([]*ethutils.RPCReceipt, 0, pageEnd-pageStart)
+	for _, receipt := range receipts[pageStart:pageEnd] {
+		txn := b.Transactions()[receipt.TransactionIndex]
+
+		rpcTx := ethapi.NewRPCTransaction(txn, blockHash, b.Time(), b.NumberU64(), uint64(receipt.TransactionIndex), baseFee)
+		if len(rpcTx.Input) >= 4 {
+			rpcTx.Input = rpcTx.Input[:4]
+		}
+		txs = append(txs, rpcTx)
+
+		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), true, false)
+		marshalledRcpt.Logs = nil
+		marshalledRcpt.LogsBloom = nil
+		result = append(result, marshalledRcpt)
+	}
+
 	response := map[string]any{}
-	getBlockRes["transactions"] = getBlockRes["transactions"].([]any)[pageStart:pageEnd]
+	getBlockRes.Transactions = txs
 	response["fullblock"] = getBlockRes
-	response["receipts"] = result[pageStart:pageEnd]
+	response["receipts"] = result
 	return response, nil
 }

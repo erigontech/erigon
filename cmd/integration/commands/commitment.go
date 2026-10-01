@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -236,7 +237,8 @@ Examples:
 
 func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize uint64, logger interface {
 	Info(msg string, ctx ...any)
-}) error {
+},
+) error {
 	compactKey := nibbles.HexToCompact(prefix)
 	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
 	if err != nil {
@@ -307,7 +309,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 
 	if !clearCommitment {
 		domainProgress := rwTx.Debug().DomainProgress(kv.CommitmentDomain)
-		ok, err := br.TxnumReader().IsMaxTxNumPopulated(ctx, rwTx, domainProgress)
+		ok, err := br.TxnumReader().IsMaxTxNumPopulated(rwTx, domainProgress)
 		if err != nil {
 			return err
 		}
@@ -386,8 +388,9 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		return nil
 	}
 
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	if err = agg.OpenFolder(db); err != nil { // reopen after snapshot file deletions
+	temporalDB := db.(*temporal.DB)
+	agg := temporalDB.Agg().(*dbstate.Aggregator)
+	if err = temporalDB.OpenStateSnapshots(ctx); err != nil { // reopen after snapshot file deletions
 		return fmt.Errorf("failed to re-open aggregator: %w", err)
 	}
 
