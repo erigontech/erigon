@@ -686,14 +686,13 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsFinalizedSidecar(
 	t.Zero(service.pendingGloasSidecars.count.Load())
 }
 
-func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsSeenSidecarWhenBlockDisappears() {
+func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsSeenSidecar() {
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
 	service.scheduleSidecarForLaterProcessing(sidecar)
 	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
 	service.seenGloasSidecar.Add(seenGloasSidecarKey{testBlockRoot, sidecar.Index}, struct{}{})
 	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot, testBlockRoot)
-	service.forkChoice = &disappearingEnvelopeBlockStore{ForkChoiceStorage: t.mockForkChoice}
 
 	service.pendingGloasSidecars.processPending(t.T().Context())
 

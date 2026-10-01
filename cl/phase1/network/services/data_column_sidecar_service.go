@@ -399,7 +399,7 @@ func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cl
 	// Bound hashing and retained data before the block's commitments are available.
 	// Failed admission keeps the missing-block IGNORE verdict from gossip validation.
 	blobParameters := s.cfg.GetBlobParameters(sidecar.Slot / s.cfg.SlotsPerEpoch)
-	if !das.VerifyDataColumnSidecar(sidecar) || sidecar.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
+	if !verifyDataColumnSidecar(sidecar) || sidecar.Column.Len() > int(blobParameters.MaxBlobsPerBlock) {
 		return
 	}
 	err := s.pendingGloasSidecars.enqueueLazy(sidecar, func() (common.Hash, error) { return sidecar.HashSSZ() })
