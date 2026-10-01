@@ -629,6 +629,14 @@ func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx
 	return api.historyStartBlocksFromTxNum(ctx, tx, head, startTxNum)
 }
 
+func (api *BaseAPI) readCommitmentHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx, head uint64) (historyPruneFloors, error) {
+	startTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if err != nil {
+		return historyPruneFloors{}, err
+	}
+	return api.historyStartBlocksFromTxNum(ctx, tx, head, startTxNum)
+}
+
 func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, head, startTxNum uint64) (historyPruneFloors, error) {
 	if startTxNum == 0 {
 		return historyPruneFloors{}, nil
@@ -966,21 +974,33 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 	return nil
 }
 
-// Pre-Byzantium post-state roots are not cached. Rebuilding them needs history
-// from the initial system transaction, not just the first user transaction.
+// Pre-Byzantium post-state roots are not stored in the receipt domain. Rebuilding
+// them needs state history and, when enabled, commitment history from the initial
+// system transaction, not just the first user transaction.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	return api.checkReceiptAvailableAtIndex(ctx, tx, block, 0)
 }
 
 func (api *BaseAPI) checkReceiptAvailableAtIndex(ctx context.Context, tx kv.Tx, block, txIndex uint64) error {
-	computed, err := api.postStateCalculated(ctx, tx, block)
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if computed {
-		return api.checkPruneHistory(ctx, tx, block)
+	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
+	if err != nil {
+		return err
 	}
-	return api.checkReceiptSourceAvailable(ctx, tx, block, txIndex)
+	if !receipts.PostStateCalculated(chainConfig, block, commitmentHistory, api._blockReader) {
+		return api.checkReceiptSourceAvailable(ctx, tx, block, txIndex)
+	}
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
+		floors, err := api.historyStartBlocks(ctx, tx, head)
+		if err != nil || !commitmentHistory {
+			return floors.wholeBlock, err
+		}
+		commitmentFloors, err := api.readCommitmentHistoryStartBlocks(ctx, tx.(kv.TemporalTx), head)
+		return max(floors.wholeBlock, commitmentFloors.wholeBlock), err
+	})
 }
 
 // checkReceiptSourceAvailable gates on where the receipts come from, whatever fields
@@ -1013,22 +1033,6 @@ func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, b
 		}
 		return api.checkPruneTransactionHistoryAtIndex(ctx, tx, block, txIndex)
 	}
-}
-
-// postStateCalculated reports whether the receipts of this block carry a post state
-// that has to be computed, which is the case below Byzantium. The persistent cache
-// does not store that field, so those receipts are always re-executed and reach only
-// as far back as state history.
-func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return false, err
-	}
-	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
-	if err != nil {
-		return false, err
-	}
-	return receipts.PostStateCalculated(chainConfig, block, commitmentHistory, api._blockReader), nil
 }
 
 // checkBlockReceiptsAvailable gates endpoints serving the receipts of one block.

@@ -543,6 +543,81 @@ func TestComputedReceiptsNeedWholeBlockHistory(t *testing.T) {
 	require.Equal(t, blockNumber+1, uint64(*caps.Receipts.OldestBlock))
 }
 
+func TestComputedReceiptsNeedCommitmentHistory(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name              string
+		startBlock        uint64
+		txOffset          uint64
+		commitmentHistory bool
+		oldest            uint64
+	}{
+		{"block_start", 8, 0, true, 8},
+		{"inside_block", 8, 1, true, 9},
+		{"beyond_byzantium", pruneGatingByzantiumHeight + 1, 0, true, pruneGatingByzantiumHeight},
+		{"not_retired", 0, 0, true, 0},
+		{"disabled", 8, 1, false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			mode := prune.ArchiveMode
+			mode.CommitmentHistory = prune.Distance(5)
+			apis, _ := setupPruneGating(t, pruneGatingConfig{
+				mode:        mode,
+				chainConfig: byzantiumChainConfig(pruneGatingByzantiumHeight),
+			})
+			ctx := t.Context()
+			rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(rwTx, tc.commitmentHistory))
+			require.NoError(t, rwTx.Commit())
+
+			tx, err := apis.eth.db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			start, err := apis.eth._txNumReader.Min(ctx, tx, tc.startBlock)
+			require.NoError(t, err)
+			starts := map[kv.Domain]uint64{kv.CommitmentDomain: start + tc.txOffset}
+			view := domainHistoryFloorTx{TemporalTx: tx, starts: starts}
+			apis.eth.db = domainHistoryFloorDB{TemporalRoDB: apis.eth.db, starts: starts}
+
+			t.Run("gate", func(t *testing.T) {
+				if tc.oldest > 0 {
+					require.NoError(t, apis.eth.checkPruneHistory(ctx, view, tc.oldest-1), "ordinary history is retained")
+					require.ErrorIs(t, apis.eth.checkReceiptAvailableAtIndex(ctx, view, tc.oldest-1, 0), state.ErrPruned,
+						"receipt roots need commitment history from the initial system transaction")
+				}
+				require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, view, tc.oldest))
+				require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, view, pruneGatingByzantiumHeight))
+			})
+			t.Run("capabilities", func(t *testing.T) {
+				caps, err := apis.eth.Capabilities(ctx)
+				require.NoError(t, err)
+				require.Equal(t, tc.oldest, uint64(*caps.Receipts.OldestBlock))
+				require.Zero(t, uint64(*caps.Logs.OldestBlock), "logs do not need receipt post-state roots")
+				if tc.commitmentHistory && tc.oldest < pruneGatingByzantiumHeight {
+					require.NotNil(t, caps.Receipts.DeleteStrategy)
+					require.EqualValues(t, 5, caps.Receipts.DeleteStrategy.RetentionBlocks)
+				} else {
+					require.Nil(t, caps.Receipts.DeleteStrategy)
+				}
+			})
+			for _, crit := range []filters.FilterCriteria{{}, addressFilter(tc.startBlock)} {
+				require.NoError(t, apis.eth.checkLogsAvailable(ctx, view, 0, pruneGatingByzantiumHeight, crit))
+			}
+			view.errs = map[kv.Domain]error{kv.CommitmentDomain: errors.New("commitment floor unavailable")}
+			if tc.commitmentHistory {
+				require.ErrorIs(t, apis.eth.checkReceiptsAvailable(ctx, view, 8), view.errs[kv.CommitmentDomain])
+			} else {
+				require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, view, 8))
+			}
+			require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, view, pruneGatingByzantiumHeight))
+		})
+	}
+}
+
 func TestLogsGateSkipsInitialSystemHistory(t *testing.T) {
 	t.Parallel()
 	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
@@ -2756,6 +2831,19 @@ func (tx countingHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) (uint64
 
 func (tx countingHistoryFloorDebugTx) HistoryFilesGeneration() uint64 {
 	return tx.TemporalDebugTx.(interface{ HistoryFilesGeneration() uint64 }).HistoryFilesGeneration()
+}
+
+type domainHistoryFloorDB struct {
+	kv.TemporalRoDB
+	starts map[kv.Domain]uint64
+}
+
+func (db domainHistoryFloorDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // Ownership passes to the caller.
+	if err != nil {
+		return nil, err
+	}
+	return domainHistoryFloorTx{TemporalTx: tx, starts: db.starts}, nil
 }
 
 type domainHistoryFloorTx struct {

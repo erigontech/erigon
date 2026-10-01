@@ -179,16 +179,13 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		return nil, err
 	}
 	stateOldest = max(stateOldest, onDiskFloors.postState)
-	historyOldest := max(pruneMode.History.PruneTo(headBlock), onDiskFloors.wholeBlock)
+	receiptHistoryOldest := max(pruneMode.History.PruneTo(headBlock), onDiskFloors.wholeBlock)
+	receiptHistoryAmount := pruneMode.History
 	replayOldest := max(pruneMode.History.PruneTo(headBlock), onDiskFloors.replay)
 
 	var stateproofs CapabilityField
 	if keepExecutionProofs {
-		commitmentStart, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-		if err != nil {
-			return nil, err
-		}
-		commitmentFloors, err := api.historyStartBlocksFromTxNum(ctx, tx, headBlock, commitmentStart)
+		commitmentFloors, err := api.readCommitmentHistoryStartBlocks(ctx, tx, headBlock)
 		if err != nil {
 			return nil, err
 		}
@@ -199,6 +196,8 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 			proofAmount = pruneMode.History
 		}
 		stateproofs = avail(max(stateOldest, commitmentFloors.postState), proofAmount)
+		receiptHistoryOldest = max(receiptHistoryOldest, commitmentFloors.wholeBlock)
+		receiptHistoryAmount = proofAmount
 	} else {
 		stateproofs = CapabilityField{Disabled: true}
 	}
@@ -226,17 +225,16 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 			receiptsOldest, receiptsAmount = widerRetention(amount.PruneTo(headBlock), amount, replayOldest, pruneMode.History)
 		}
 	}
-	// Below Byzantium the receipt carries a post state the cache does not store, so
-	// those blocks are re-executed and reach only as far as history. This mirrors
-	// postStateCalculated, down to the shape that computes the post state at all and
-	// to a chain that never reaches the fork.
+	// Pre-Byzantium receipt roots need state history and, when enabled, commitment
+	// history from the block's initial system transaction. The persistent receipt
+	// cache does not store these roots.
 	byzantium := uint64(math.MaxUint64)
 	if chainConfig.ByzantiumBlock != nil {
 		byzantium = *chainConfig.ByzantiumBlock
 	}
 	if receipts.PostStateCalculated(chainConfig, receiptsOldest, keepExecutionProofs, api._blockReader) {
-		if historyOldest < byzantium {
-			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, historyOldest, pruneMode.History)
+		if receiptHistoryOldest < byzantium {
+			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, receiptHistoryOldest, receiptHistoryAmount)
 		} else {
 			// The fork sets a fixed availability boundary, not a rolling deletion
 			// window, so it has no retention distance of its own to report.
@@ -250,9 +248,9 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 	// A log query filtered by address or topic searches LogAddrIdx and LogTopicIdx,
 	// standalone indices retired at the history cutoff whatever the receipt retention is.
-	// The field takes that stricter form: an unfiltered query reads straight from the
-	// receipts and reaches further back than advertised.
-	logsOldest, logsAmount := stricterRetention(receiptsOldest, receiptsAmount, replayOldest, pruneMode.History)
+	// Logs do not need receipt post-state roots or commitment history. Unfiltered
+	// queries can reach further back when the receipt cache outlives state history.
+	logsOldest, logsAmount := stricterRetention(blocksOldest, pruneMode.Blocks, replayOldest, pruneMode.History)
 	logsField := avail(logsOldest, logsAmount)
 
 	return &CapabilitiesResult{
