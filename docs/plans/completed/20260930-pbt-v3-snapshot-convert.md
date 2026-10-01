@@ -680,8 +680,8 @@ recursive verification remains in the converter command after the written files 
 - Modify: `docs/plans/completed/20260925-pbt-v3-rows.md`
 - Move: this plan to `docs/plans/completed/`
 
-- [ ] mark the rows plan's rebuild tasks as superseded by `convert-pbt`
-- [ ] move this plan to `docs/plans/completed/`
+- [x] mark the rows plan's rebuild tasks as superseded by `convert-pbt`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
