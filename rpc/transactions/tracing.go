@@ -251,9 +251,9 @@ func ExecuteTraceTx(
 		stream.Field("failed")
 		stream.WriteBool(result.Failed())
 		// If the result contains a revert reason, return it.
-		ret := result.ReturnNoCopy()
-		if revert := result.RevertNoCopy(); len(revert) > 0 {
-			ret = revert
+		ret := result.Return()
+		if len(result.Revert()) > 0 {
+			ret = result.Revert()
 		}
 		ethjson.Data(stream, "returnValue", ret)
 		stream.WriteObjectEnd()

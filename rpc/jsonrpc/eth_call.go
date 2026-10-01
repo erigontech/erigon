@@ -158,7 +158,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, ethapi2.NewRevertError(result)
 	}
 
-	return result.ReturnNoCopy(), result.Err
+	return result.Return(), result.Err
 }
 
 // EstimateGas implements eth_estimateGas. Returns an estimate of how much gas is necessary to allow the transaction to complete. The transaction will not be added to the blockchain.

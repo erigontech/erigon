@@ -260,7 +260,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			}
 			jsonResult := make(map[string]any)
 			if result.Err != nil {
-				if len(result.RevertNoCopy()) > 0 {
+				if len(result.Revert()) > 0 {
 					revertErr := ethapi.NewRevertError(result)
 					jsonResult["error"] = map[string]any{
 						"message": revertErr.Error(),
@@ -270,7 +270,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 					jsonResult["error"] = result.Err.Error()
 				}
 			} else {
-				jsonResult["value"] = hex.EncodeToString(result.ReturnNoCopy())
+				jsonResult["value"] = hex.EncodeToString(result.Return())
 			}
 
 			results = append(results, jsonResult)
