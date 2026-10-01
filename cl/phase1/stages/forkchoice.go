@@ -316,6 +316,9 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		sn := hexutil.Uint64(nextSlot)
 		payloadAttributes.SlotNumber = &sn
 		tgl := hexutil.Uint64(cfg.beaconCfg.DefaultBuilderGasLimit)
+		if gasLimit, ok := cfg.beaconCfg.GetScheduledGasLimit(epoch); ok {
+			tgl = hexutil.Uint64(gasLimit)
+		}
 		payloadAttributes.TargetGasLimit = &tgl
 	}
 	e := &beaconevents.PayloadAttributesData{

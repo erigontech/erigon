@@ -93,7 +93,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		e.lock.Unlock()
 	}
 	if sd.BlockOverlay() == nil {
-		if err := sd.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+		if err := sd.InitBlockOverlay(roTx); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: %w", err)
 		}
 	} else {

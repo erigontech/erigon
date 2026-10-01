@@ -394,7 +394,7 @@ func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath stri
 
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
 // Mostly useful for testing
-func OpenBtreeIndexAndDataFile(indexPath, dataPath string, compressed seg.FileCompression, trace bool) (_ *seg.Decompressor, _ *BtIndex, err error) {
+func OpenBtreeIndexAndDataFile(indexPath, dataPath string, compressed seg.FileCompression) (_ *seg.Decompressor, _ *BtIndex, err error) {
 	d, err := seg.NewDecompressor(dataPath)
 	if err != nil {
 		return nil, nil, err

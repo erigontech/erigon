@@ -579,7 +579,7 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 
 // opExtCodeHash returns the code hash of a specified account.
 // There are several cases when the function is called, while we can relay everything
-// to `state.ResolveCodeHash` function to ensure the correctness.
+// to `IntraBlockState.GetCodeHash` to ensure the correctness.
 //
 //	(1) Caller tries to get the code hash of a normal contract account, state
 //
@@ -794,19 +794,10 @@ func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	pos := scope.Stack.pop()
 	if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
 		if usedBitmap {
-			if evm.config.TraceJumpDest {
-				log.Debug(
-					"Code Bitmap used for detecting invalid jump",
-					"tx", fmt.Sprintf("0x%x", evm.TxHash),
-					"block_num", evm.Context.BlockNumber,
-				)
-			} else {
-				// This is "cheaper" version because it does not require calculation of txHash for each transaction
-				log.Debug(
-					"Code Bitmap used for detecting invalid jump",
-					"block_num", evm.Context.BlockNumber,
-				)
-			}
+			log.Debug(
+				"Code Bitmap used for detecting invalid jump",
+				"block_num", evm.Context.BlockNumber,
+			)
 		}
 		return pc, nil, ErrInvalidJump
 	}
@@ -827,19 +818,10 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if !cond.IsZero() {
 		if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
 			if usedBitmap {
-				if evm.config.TraceJumpDest {
-					log.Warn(
-						"Code Bitmap used for detecting invalid jump",
-						"tx", fmt.Sprintf("0x%x", evm.TxHash),
-						"block_num", evm.Context.BlockNumber,
-					)
-				} else {
-					// This is "cheaper" version because it does not require calculation of txHash for each transaction
-					log.Warn(
-						"Code Bitmap used for detecting invalid jump",
-						"block_num", evm.Context.BlockNumber,
-					)
-				}
+				log.Warn(
+					"Code Bitmap used for detecting invalid jump",
+					"block_num", evm.Context.BlockNumber,
+				)
 			}
 			return pc, nil, ErrInvalidJump
 		}
