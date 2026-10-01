@@ -548,7 +548,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	domains.DiscardWrites(kv.StorageDomain)
 	domains.DiscardWrites(kv.CodeDomain)
 	domains.SetInMemHistoryReads(false)
-	domains.EnableParaTrieDB(rwDb)
+	if rebuildCfg.Variant != commitment.VariantCommitmentV3 {
+		domains.EnableParaTrieDB(rwDb)
+	}
 
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, rwTx)
 	if err != nil {
@@ -683,7 +685,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		domains.DiscardWrites(kv.StorageDomain)
 		domains.DiscardWrites(kv.CodeDomain)
 		domains.SetInMemHistoryReads(false)
-		domains.EnableParaTrieDB(rwDb)
+		if flushCfg.Variant != commitment.VariantCommitmentV3 {
+			domains.EnableParaTrieDB(rwDb)
+		}
 		return nil
 	}
 
