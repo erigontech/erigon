@@ -24,7 +24,6 @@ package trie
 import (
 	"encoding/hex"
 	"fmt"
-	"io"
 	"strings"
 )
 
@@ -41,17 +40,6 @@ func (n *FullNode) fstring(ind string) string {
 	return resp.String() + "\n" + ind + "]"
 }
 
-func (n *FullNode) print(w io.Writer) {
-	fmt.Fprintf(w, "f(")
-	for i, node := range &n.Children {
-		if node != nil {
-			fmt.Fprintf(w, "%d:", i)
-			node.print(w)
-		}
-	}
-	fmt.Fprintf(w, ")")
-}
-
 func (n *DuoNode) fstring(ind string) string {
 	var resp strings.Builder
 	resp.WriteString(fmt.Sprintf("duo[\n%s  ", ind))
@@ -62,48 +50,20 @@ func (n *DuoNode) fstring(ind string) string {
 	return resp.String()
 }
 
-func (n *DuoNode) print(w io.Writer) {
-	fmt.Fprintf(w, "d(")
-	i1, i2 := n.childrenIdx()
-	fmt.Fprintf(w, "%d:", i1)
-	n.child1.print(w)
-	fmt.Fprintf(w, "%d:", i2)
-	n.child2.print(w)
-	fmt.Fprintf(w, ")")
-}
-
 func (n *ShortNode) fstring(ind string) string {
 	return fmt.Sprintf("{%x: %v} ", n.Key, n.Val.fstring(ind+"  "))
-}
-
-func (n *ShortNode) print(w io.Writer) {
-	fmt.Fprintf(w, "s(%x:", n.Key)
-	n.Val.print(w)
-	fmt.Fprintf(w, ")")
 }
 
 func (n HashNode) fstring(ind string) string {
 	return fmt.Sprintf("<%x> ", n.hash)
 }
 
-func (n HashNode) print(w io.Writer) {
-	fmt.Fprintf(w, "h(%x)", n.hash)
-}
-
 func (n ValueNode) fstring(ind string) string {
 	return fmt.Sprintf("%x ", []byte(n))
 }
 
-func (n ValueNode) print(w io.Writer) {
-	fmt.Fprintf(w, "v(%x)", []byte(n))
-}
-
 func (n CodeNode) fstring(ind string) string {
 	return fmt.Sprintf("code: %x ", []byte(n))
-}
-
-func (n CodeNode) print(w io.Writer) {
-	fmt.Fprintf(w, "code(%x)", []byte(n))
 }
 
 func (an AccountNode) fstring(ind string) string {
@@ -113,11 +73,4 @@ func (an AccountNode) fstring(ind string) string {
 		return hex.EncodeToString(encodedAccount)
 	}
 	return hex.EncodeToString(encodedAccount) + " " + an.Storage.fstring(ind+" ")
-}
-
-func (an AccountNode) print(w io.Writer) {
-	encodedAccount := make([]byte, an.EncodingLengthForHashing())
-	an.EncodeForHashing(encodedAccount)
-
-	fmt.Fprintf(w, "v(%x)", encodedAccount)
 }

@@ -27,14 +27,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-// EmptyRoot is the known root hash of an empty trie.
-// DESCRIBED: docs/programmers_guide/guide.md#root
-var EmptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 // Trie is a Merkle Patricia Trie.
 // The zero value is an empty trie with no database.
@@ -51,18 +48,13 @@ type Trie struct {
 }
 
 // New creates a trie with an existing root node from db.
-//
-// If root is the zero hash or the sha3 hash of an empty string, the
-// trie is initially empty and does not require a database. Otherwise,
-// New will panic if db is nil and returns a MissingNodeError if root does
-// not exist in the database. Accessing the trie loads nodes from db on demand.
 // Deprecated
 // use package turbo/trie
 func New(root common.Hash) *Trie {
 	trie := &Trie{
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
 	}
-	if (root != common.Hash{}) && root != EmptyRoot {
+	if (root != common.Hash{}) && root != empty.RootHash {
 		trie.RootNode = &HashNode{hash: root[:]}
 	}
 	return trie
@@ -92,7 +84,7 @@ func NewTestRLPTrie(root common.Hash) *Trie {
 		valueNodesRLPEncoded: true,
 		newHasherFunc:        func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
 	}
-	if (root != common.Hash{}) && root != EmptyRoot {
+	if (root != common.Hash{}) && root != empty.RootHash {
 		trie.RootNode = &HashNode{hash: root[:]}
 	}
 	return trie
@@ -279,7 +271,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	hex := nibbles.KeybytesToHex(key)
 
 	var newnode *AccountNode
-	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
+	if value.Root == empty.RootHash || value.Root == (common.Hash{}) {
 		newnode = &AccountNode{*value, nil, true, nil, codeSizeUncached}
 	} else {
 		newnode = &AccountNode{*value, &HashNode{hash: value.Root[:]}, true, nil, codeSizeUncached}
@@ -778,7 +770,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 			if preserveAccountNode {
 				n.Storage = nil
 				n.Code = nil
-				n.Root = EmptyRoot
+				n.Root = empty.RootHash
 				n.RootCorrect = true
 				return true, n
 			}
@@ -832,7 +824,7 @@ func (t *Trie) Root() []byte {
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Hash() common.Hash {
 	if t == nil || t.RootNode == nil {
-		return EmptyRoot
+		return empty.RootHash
 	}
 
 	h := t.getHasher()
@@ -867,7 +859,7 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash, error) {
 		return true, accNode.Root, nil
 	}
 	if accNode.Storage == nil {
-		accNode.Root = EmptyRoot
+		accNode.Root = empty.RootHash
 		accNode.RootCorrect = true
 	} else {
 		h := t.getHasher()
@@ -1145,7 +1137,7 @@ func decodeAccountNode(val ValueNode, nodeMap map[common.Hash]Node) (*AccountNod
 	}
 
 	// If account has non-empty storage root, try to find it in nodeMap
-	if acc.Root != EmptyRoot && acc.Root != (common.Hash{}) {
+	if acc.Root != empty.RootHash && acc.Root != (common.Hash{}) {
 		if storageNode, ok := nodeMap[acc.Root]; ok {
 			an.Storage = storageNode
 		} else {

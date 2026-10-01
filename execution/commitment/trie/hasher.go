@@ -26,6 +26,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -43,8 +44,6 @@ type hasher struct {
 
 const rlpPrefixLength = 4
 
-var emptyHash [32]byte
-
 var hashersPool = sync.Pool{
 	New: func() any {
 		return &hasher{
@@ -52,17 +51,6 @@ var hashersPool = sync.Pool{
 			bw:  &ByteArrayWriter{},
 		}
 	},
-}
-
-// hash or if RLP < 32 bytes --> RLP
-func CalcNodeHash(n Node) ([]byte, error) {
-	h := newHasher(false)
-	var hn common.Hash
-	_, err := h.hash(n, false, hn[:])
-	if err != nil {
-		return nil, err
-	}
-	return hn[:], nil
 }
 
 func newHasher(valueNodesRlpEncoded bool) *hasher {
@@ -187,7 +175,7 @@ func (h *hasher) hashChildren(original Node, bufOffset int) ([]byte, error) {
 		} else if ac, ok := n.Val.(*AccountNode); ok {
 			// Hashing the storage trie if necessary
 			if ac.Storage == nil {
-				ac.Root = EmptyRoot
+				ac.Root = empty.RootHash
 			} else {
 				_, err := h.hashInternal(ac.Storage, true, ac.Root[:], bufOffset+pos)
 				if err != nil {
@@ -332,7 +320,7 @@ func (h *hasher) accountNodeToBuffer(ac *AccountNode, buffer []byte, pos int) (i
 // force enforces the hashing even for short RLPs.
 func (h *hasher) nodeRef(nodeRlp []byte, force bool, storeTo []byte) (int, error) {
 	if nodeRlp == nil {
-		copy(storeTo, emptyHash[:])
+		clear(storeTo[:32])
 		return 32, nil
 	}
 	if len(nodeRlp) < 32 && !force {

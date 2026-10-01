@@ -29,11 +29,6 @@ func (rlb *RetainListBuilder) AddTouch(touch []byte) {
 	rlb.touches = append(rlb.touches, bytes.Clone(touch))
 }
 
-// AddStorageTouch adds a key (in KEY encoding) into the read/change set of storage keys
-func (rlb *RetainListBuilder) AddStorageTouch(touch []byte) {
-	rlb.storageTouches = append(rlb.storageTouches, bytes.Clone(touch))
-}
-
 // ExtractTouches returns accumulated read/change sets and clears them for the next block's execution
 func (rlb *RetainListBuilder) ExtractTouches() ([][]byte, [][]byte) {
 	touches := rlb.touches
@@ -50,20 +45,6 @@ func (rlb *RetainListBuilder) extractCodeTouches() map[accounts.CodeHash][]byte 
 	rlb.proofCodes = make(map[accounts.CodeHash][]byte)
 	rlb.createdCodes = make(map[accounts.CodeHash]struct{})
 	return proofCodes
-}
-
-// ReadCode registers that given contract code has been accessed during current block's execution
-func (rlb *RetainListBuilder) ReadCode(codeHash accounts.CodeHash, code []byte) {
-	if _, ok := rlb.proofCodes[codeHash]; !ok {
-		rlb.proofCodes[codeHash] = code
-	}
-}
-
-// CreateCode registers that given contract code has been created (deployed) during current block's execution
-func (rlb *RetainListBuilder) CreateCode(codeHash accounts.CodeHash) {
-	if _, ok := rlb.proofCodes[codeHash]; !ok {
-		rlb.createdCodes[codeHash] = struct{}{}
-	}
 }
 
 func (rlb *RetainListBuilder) Build(isBinary bool) *RetainList {
@@ -83,21 +64,4 @@ func (rlb *RetainListBuilder) Build(isBinary bool) *RetainList {
 	}
 
 	return rl
-}
-
-func (rlb *RetainListBuilder) Copy() *RetainListBuilder {
-	rlbCopy := NewRetainListBuilder()
-	for _, touch := range rlb.touches {
-		rlbCopy.AddTouch(touch)
-	}
-	for _, touch := range rlb.storageTouches {
-		rlbCopy.AddStorageTouch(touch)
-	}
-	for codeHash, code := range rlb.proofCodes {
-		rlbCopy.ReadCode(codeHash, code)
-	}
-	for codeHash := range rlb.createdCodes {
-		rlbCopy.CreateCode(codeHash)
-	}
-	return rlbCopy
 }
