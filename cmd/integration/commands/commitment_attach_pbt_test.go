@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -181,7 +182,13 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		t.Cleanup(func() { statecfg.BinCommitmentHash = previousHash })
 		statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 		node, published := newPBTAttachFileTrees(t, true)
-		writePBTAttachSettings(t, published, commitment.PBinHashKeccak, 1, 7)
+		refs := false
+		variant := state.TrieVariantHexBin
+		hash := commitment.PBinHashKeccak
+		require.NoError(t, state.WriteErigonDBSettings(published, &state.ErigonDBSettings{
+			StepSize: config3.DefaultStepSize, StepsInFrozenFile: 1, ReferencesInCommitmentBranches: &refs,
+			TrieVariant: &variant, TrieHash: &hash, ConversionBlockNum: uint64Ptr(1), ConversionTxNum: uint64Ptr(7),
+		}))
 		before := snapshotTree(t, node.DataDir)
 		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
 		require.ErrorContains(t, err, "trie_hash")

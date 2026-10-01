@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -124,7 +125,11 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	} else {
 		nodeSettings, err = dbstate.ReadErigonDBSettings(nodeDirs)
 		if errors.Is(err, fs.ErrNotExist) {
-			nodeSettings = &dbstate.ErigonDBSettings{StepSize: publishedSettings.StepSize}
+			stepSize, stepErr := pbtAttachNodeStepSize(nodeDirs)
+			if stepErr != nil {
+				return stepErr
+			}
+			nodeSettings = &dbstate.ErigonDBSettings{StepSize: stepSize}
 			err = nil
 		}
 		if err != nil {
@@ -218,6 +223,15 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 		return err
 	}
 	return dbstate.RemovePBTAttachMarker(nodeDirs)
+}
+
+func pbtAttachNodeStepSize(dirs datadir.Dirs) (uint64, error) {
+	if _, err := os.Stat(filepath.Join(dirs.Snap, datadir.PreverifiedFileName)); err == nil {
+		return config3.LegacyStepSize, nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return 0, err
+	}
+	return config3.DefaultStepSize, nil
 }
 
 func runPBTAttachStepHook(step string) error {

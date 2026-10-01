@@ -185,7 +185,8 @@
 - outputs:
   - `--keep-hex`: hex commitment files hardlinked, rows in `CommitmentBinDomain`, `trie_variant = hex+bin`. The source's
     hex must be v3 (state key `0x42`, marker `0x04`). The source is read from files only; every leaf provenance stamp
-    must be at or before S. A file range may extend beyond S when it contains no leaf stamped after S. Otherwise refuse
+    must be at or before S. Stamps are file-granular, so a last file whose writes reach F−1 after S is refused with the
+    option to wait for the next step or convert at F−1. Ranges starting after S are not published. Otherwise refuse
     and say to run `commitment convert --v3` or to collate first.
   - without `--keep-hex`: rows in `CommitmentDomain`, `trie_variant = bin`, refused unless S is post-fork (a pre-fork
     bin-only output cannot boot: execution checks its bin root against an MPT header).
@@ -206,7 +207,8 @@
      up to S, and remove the node's own state, commitment, receipt, history, inverted-index and accessor files past S;
   3. run `ResetExec` (state, history, commitment tables and stop markers cleared; block data kept);
   4. write `trie_variant = hex+bin`, the published `trie_hash` and the conversion point.
-- on restart `SeekCommitments` restores the checkpoint at S; the node re-executes from there in dual mode.
+- on restart `SeekCommitments` restores the checkpoint at S; the node re-executes from there in dual mode. Published
+  state ranges start at or before S; a file-granular stamp after S is refused before adoption.
 - a mid-block S is covered: executors skip transactions through the restored checkpoint, and the rest of the block
   executes once.
 - the command never wipes chaindata or block files.

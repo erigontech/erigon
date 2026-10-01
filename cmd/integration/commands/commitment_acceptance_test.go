@@ -201,6 +201,70 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	reopened.Close()
 }
 
+func TestPBTAttachAcceptanceAtMidBlockConversionPoint(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	buildPBTAcceptanceFiles(t, node)
+	node.Tester.Close()
+
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	copyPBTStateSalt(t, node, source)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	buildPBTAcceptanceFilesAt(t, source, 9)
+	source.Tester.Close()
+	selectPBTCommandSuite(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
+	publishedSettings, err := dbstate.ReadErigonDBSettings(datadir.Open(published))
+	require.NoError(t, err)
+	conversionBlock, conversionTx, ok, err := publishedSettings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(3), conversionBlock)
+	require.Equal(t, uint64(9), conversionTx)
+	publishedFiles, err := pbtAttachFiles(datadir.Open(published))
+	require.NoError(t, err)
+	for _, file := range publishedFiles {
+		require.LessOrEqual(t, file.from*publishedSettings.StepSize, conversionTx)
+	}
+	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
+
+	dual, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
+	require.NoError(t, err)
+	require.NoError(t, dual.Tester.InsertChain(dual.Chain))
+	selectPBTCommandSuite(t)
+	reopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
+		execmoduletester.WithGenesisSpec(node.Genesis),
+		execmoduletester.WithKey(node.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	for block := conversionBlock; block <= node.Chain.TopBlock.NumberU64(); block++ {
+		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
+		attachedRaw := reopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+		var attachedRoot []byte
+		require.NoError(t, attachedRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			attachedRoot, err = rawdb.ReadShadowStateRoot(tx, node.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		dualRaw := dual.Tester.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+		var dualRoot []byte
+		require.NoError(t, dualRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			dualRoot, err = rawdb.ReadShadowStateRoot(tx, dual.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		require.Equal(t, dualRoot, attachedRoot)
+	}
+	reopened.Close()
+}
+
 func TestPBTReplayMatchesConvertedState(t *testing.T) {
 	selectPBTHexCommandSuite(t)
 	converted, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
@@ -354,8 +418,22 @@ func copyPBTStateSalt(t *testing.T, node, source *execmoduletester.PBTAcceptance
 
 func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain) {
 	t.Helper()
-	dirs := fixture.Tester.Dirs
 	fixture.Tester.Close()
+	rawDB := dbCfg(dbcfg.ChainDB, fixture.Tester.Dirs.Chaindata).MustOpen()
+	tx, err := rawDB.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	_, lastTxNum, err := rawdbv3.TxNums.Last(tx)
+	require.NoError(t, err)
+	tx.Rollback()
+	rawDB.Close()
+	buildPBTAcceptanceFilesAt(t, fixture, lastTxNum)
+}
+
+func buildPBTAcceptanceFilesAt(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain, lastTxNum uint64) {
+	t.Helper()
+	fixture.Tester.Close()
+	dirs := fixture.Tester.Dirs
 	settings, err := dbstate.ReadErigonDBSettings(dirs)
 	require.NoError(t, err)
 	rawDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
@@ -365,12 +443,10 @@ func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptan
 	require.NoError(t, err)
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
-	t.Cleanup(tx.Rollback)
-	_, lastTxNum, err := rawdbv3.TxNums.Last(tx)
-	require.NoError(t, err)
-	tx.Rollback()
+	defer tx.Rollback()
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
 	agg.WaitForFiles()
+	tx.Rollback()
 	db.Close()
 	agg.Close()
 	rawDB.Close()

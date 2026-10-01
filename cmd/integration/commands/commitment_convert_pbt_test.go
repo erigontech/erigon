@@ -112,7 +112,7 @@ func TestPBTRealChainTxNumConvention(t *testing.T) {
 	})
 	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
 	agg.WaitForFiles()
-	require.ErrorContains(t, requirePBinSourceEnd(agg, lastTxNum-1), "source leaf stamp")
+	require.ErrorContains(t, requirePBinSourceEnd(agg, lastTxNum-1), "the last file holds writes up to txNum")
 	seekTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer seekTx.Rollback()
@@ -680,7 +680,7 @@ func TestConvertPBTStandaloneReopenRequiresBothDomains(t *testing.T) {
 				return nil
 			}
 			err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
-			require.ErrorContains(t, err, "standalone output")
+			require.ErrorContains(t, err, "commitment state is missing for one or more domains")
 			_, statErr := os.Stat(output)
 			require.ErrorIs(t, statErr, os.ErrNotExist)
 		})
@@ -708,7 +708,7 @@ func TestConvertPBTRefusesSourceLeafAfterPoint(t *testing.T) {
 	source, _ := newPBTConversionSourceAt(t, 6)
 	output := filepath.Join(t.TempDir(), "output")
 	err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
-	require.ErrorContains(t, err, "source leaf stamp 7 is after conversion txNum 6")
+	require.ErrorContains(t, err, "the last file holds writes up to txNum 7, after conversion txNum 6")
 	_, statErr := os.Stat(output)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
@@ -723,8 +723,38 @@ func TestConvertPBTIgnoresDatabaseRowsPastFiles(t *testing.T) {
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, _ := newPBTConversionSourceAtWithFutureLeaf(t, 7, 8)
+	addPBTCommitmentStateAfterFiles(t, source, 8)
 	output := filepath.Join(t.TempDir(), "output")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
+}
+
+func addPBTCommitmentStateAfterFiles(t *testing.T, source pbtConversionSource, txNum uint64) {
+	t.Helper()
+	settings, err := dbstate.ReadErigonDBSettings(source.Dirs)
+	require.NoError(t, err)
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(source.Chaindata).MustOpen()
+	defer rawDB.Close()
+	agg := dbstate.New(source.Dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	defer agg.Close()
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	defer db.Close()
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	defer domains.Close()
+	state, _, err := domains.GetLatest(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State)
+	require.NoError(t, err)
+	block, _, root, err := commitment.DecodeCommitmentV3State(state)
+	require.NoError(t, err)
+	futureState, err := commitment.EncodeCommitmentV3State(root, block, txNum, nil)
+	require.NoError(t, err)
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, futureState, txNum, state))
+	require.NoError(t, domains.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
 }
 
 func TestConvertPBTLegacyHexSourceIsRefusedAndRemoved(t *testing.T) {

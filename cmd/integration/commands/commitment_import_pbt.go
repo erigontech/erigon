@@ -80,8 +80,15 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 		return errors.New("commitment import-pbt: block must be a 32-byte hex hash")
 	}
 	dirs := datadir.Open(dataDir)
+	settings, settingsErr := dbstate.ReadErigonDBSettings(dirs)
+	if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
+		return settingsErr
+	}
+	if err := validatePBTImportTargetSettings(settings); err != nil {
+		return err
+	}
 	configureImportVariant(dirs)
-	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chainName, logger)
+	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), false, chainName, logger)
 	if err != nil {
 		return err
 	}
@@ -92,6 +99,9 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	}()
 	blockNum, txNum, err := validatePBTImportPoint(ctx, db, blockHash)
 	if err != nil {
+		return err
+	}
+	if err := validatePBTImportTargetFrontierFiles(ctx, dirs, settings, txNum, logger); err != nil {
 		return err
 	}
 	snapshot, err := os.Open(snapshotPath)
@@ -110,16 +120,6 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	}
 	preimagesInfo, err := preimages.Stat()
 	if err != nil {
-		return err
-	}
-	settings, settingsErr := dbstate.ReadErigonDBSettings(dirs)
-	if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
-		return settingsErr
-	}
-	if err := validatePBTImportTargetSettings(settings); err != nil {
-		return err
-	}
-	if err := validatePBTImportTargetFrontier(db, txNum); err != nil {
 		return err
 	}
 	var originalSettings dbstate.ErigonDBSettings
@@ -151,21 +151,21 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	if validationErr != nil {
 		return validationErr
 	}
+	db.Close()
+	db = nil
 	if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
 		variant := dbstate.TrieVariantBin
 		settings.TrieVariant = &variant
 		settings.ReferencesInCommitmentBranches = new(bool)
-		db.Close()
-		db = nil
 		if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
 			return err
 		}
 		settingsChanged = true
-		configureImportVariant(dirs)
-		db, err = openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chainName, logger)
-		if err != nil {
-			return err
-		}
+	}
+	configureImportVariant(dirs)
+	db, err = openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chainName, logger)
+	if err != nil {
+		return err
 	}
 	if err := rawdbreset.ResetExec(ctx, db); err != nil {
 		return err
@@ -251,14 +251,19 @@ func validatePBTImportPoint(ctx context.Context, db kv.TemporalRwDB, blockHash c
 	return blockNum, txNum, err
 }
 
-func validatePBTImportTargetFrontier(db kv.TemporalRwDB, txNum uint64) error {
-	hasAgg, ok := db.(dbstate.HasAgg)
-	if !ok {
-		return errors.New("commitment import-pbt: target database has no state aggregator")
+func validatePBTImportTargetFrontierFiles(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, logger log.Logger) error {
+	if settings == nil {
+		return nil
 	}
-	agg, ok := hasAgg.Agg().(*dbstate.Aggregator)
-	if !ok || agg == nil {
-		return errors.New("commitment import-pbt: target database has no state aggregator")
+	aggOpts := dbstate.New(dirs).Logger(logger).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps()
+	aggOpts = aggOpts.WithErigonDBSettings(settings)
+	agg, err := aggOpts.Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(nil); err != nil {
+		return err
 	}
 	at := agg.BeginFilesRo()
 	defer at.Close()

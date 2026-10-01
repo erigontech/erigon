@@ -235,7 +235,12 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	if err != nil {
 		return err
 	}
-	defer targetAgg.Close()
+	targetAggClosed := false
+	defer func() {
+		if !targetAggClosed {
+			targetAgg.Close()
+		}
+	}()
 	if err := targetAgg.OpenFolder(internal.InternalDB()); err != nil {
 		return err
 	}
@@ -270,16 +275,8 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	if err != nil {
 		return err
 	}
-	verifyTx, err := targetDB.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer verifyTx.Rollback()
-	err = dbstate.VerifyPBinDomain(ctx, verifyTx, targetAgg, targetDomain)
-	verifyTx.Rollback()
-	if err != nil {
-		return fmt.Errorf("commitment convert-pbt: verify written rows: %w", err)
-	}
+	targetAgg.Close()
+	targetAggClosed = true
 	if blockEnd && afterFork && !bytes.Equal(root[:], header.Root[:]) {
 		return fmt.Errorf("commitment convert-pbt: root %x differs from header root %x", root, header.Root)
 	}
@@ -287,6 +284,9 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		if err := linkPBinHexFiles(sourceDirs.SnapDomain, outputDirs.SnapDomain); err != nil {
 			return err
 		}
+	}
+	if err := removePBTFilesAfterTx(outputDirs.Snap, targetSettings.StepSize, point.TxNum); err != nil {
+		return err
 	}
 	conversionBlock, conversionTx := point.BlockNum, point.TxNum
 	finalSettings := &dbstate.ErigonDBSettings{
@@ -306,6 +306,9 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		if err := convertPBTStandaloneHook(outputDirs); err != nil {
 			return err
 		}
+	}
+	if err := verifyPBTOutputRows(ctx, outputDirs, finalSettings, targetDomain, point, logger); err != nil {
+		return err
 	}
 	if err := verifyPBTOutputStandalone(ctx, outputDirs, finalSettings, point, logger); err != nil {
 		return err
@@ -467,15 +470,93 @@ func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings 
 	return nil
 }
 
+func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint, logger log.Logger) error {
+	configurePBTSourceVariant(settings)
+	if err := os.MkdirAll("/tmp/tandem-pbt-snapshot", 0o755); err != nil {
+		return err
+	}
+	chaindataDir, err := os.MkdirTemp("/tmp/tandem-pbt-snapshot", "convert-pbt-chaindata-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.RemoveAll(chaindataDir) }()
+	rawDB := mdbx.New(dbcfg.ChainDB, logger).Path(chaindataDir).MustOpen()
+	defer rawDB.Close()
+	if err := rawDB.Update(ctx, func(tx kv.RwTx) error {
+		for blockNum := uint64(0); blockNum <= point.BlockNum; blockNum++ {
+			maxTxNum := point.TxNum
+			if blockNum == 0 && point.BlockNum != 0 {
+				maxTxNum = 0
+			}
+			if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(nil); err != nil {
+		return err
+	}
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := dbstate.VerifyPBinDomain(ctx, tx, agg, domain); err != nil {
+		return fmt.Errorf("commitment convert-pbt: verify written rows: %w", err)
+	}
+	return nil
+}
+
 func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
 	at := agg.BeginFilesRo()
 	defer at.Close()
 	return dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
 		if leaf.Stamp > endTxNum {
-			return fmt.Errorf("commitment convert-pbt: source leaf stamp %d is after conversion txNum %d", leaf.Stamp, endTxNum)
+			return fmt.Errorf("commitment convert-pbt: the last file holds writes up to txNum %d, after conversion txNum %d; wait for the next step, or convert at %d", leaf.Stamp, endTxNum, leaf.Stamp)
 		}
 		return nil
 	})
+}
+
+func removePBTFilesAfterTx(root string, stepSize, endTxNum uint64) error {
+	if stepSize == 0 {
+		return errors.New("commitment convert-pbt: step size is zero")
+	}
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		parsed, _, ok := snaptype.ParseFileName(filepath.Dir(path), entry.Name())
+		if !ok || !pbtConversionFileDomain(parsed.TypeString) || parsed.From*stepSize <= endTxNum {
+			return nil
+		}
+		return dir.RemoveFile(path)
+	})
+}
+
+func pbtConversionFileDomain(typeName string) bool {
+	switch typeName {
+	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.CommitmentBinDomain.String():
+		return true
+	default:
+		return false
+	}
 }
 
 func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, point pbinConversionPoint) (header *types.Header, blockEnd, afterFork bool, err error) {

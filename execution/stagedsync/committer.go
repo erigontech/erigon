@@ -566,7 +566,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				cc.state.ResetBlockFlags()
 			}
 		case cc.perBlockCompute(blockNum):
-			if cc.lastComputedBlock == 0 && r.isPartial {
+			if cc.lastComputedBlock == 0 && r.isPartial && r.Block.Root() == (common.Hash{}) {
 				// First block is partial (resumed mid-block).
 				// Compute it (like serial does) to save trie state, then
 				// restore that state so the next full block starts from
