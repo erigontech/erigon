@@ -35,8 +35,7 @@ import (
 // type and hold that mapping in one place: an encoder cannot pass a byte slice where the
 // spec wants a quantity, and no encoder needs to name a hexutil type.
 func Quantity[T ~uint64 | ~uint](s *jsonstream.StackStream, name string, v T) {
-	s.Field(name)
-	jsonstream.HexUint64(s, uint64(v))
+	jsonstream.HexUint64Field(s, name, uint64(v))
 }
 
 // SignedQuantity writes a signed value as hexutil.Int64 does, with a minus before the 0x. The
@@ -62,14 +61,12 @@ func String(s *jsonstream.StackStream, name string, v string) {
 
 // Quantity256 writes a 256-bit quantity, null when the field is absent.
 func Quantity256(s *jsonstream.StackStream, name string, v *uint256.Int) {
-	s.Field(name)
-	jsonstream.HexUint256(s, v)
+	jsonstream.HexUint256Field(s, name, v)
 }
 
 // Data writes a byte string whose length is its own, such as extraData or a log's data.
 func Data(s *jsonstream.StackStream, name string, b []byte) {
-	s.Field(name)
-	s.WriteHex(b)
+	jsonstream.HexField(s, name, b)
 }
 
 // DataList writes fixed-size values as one array field, growing the buffer once for the whole
