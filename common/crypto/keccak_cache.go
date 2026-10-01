@@ -68,8 +68,10 @@ func allocBuckets() []keccakBucket {
 	size := n * int(unsafe.Sizeof(keccakBucket{}))
 	if dbg.EnvBool("KECCAK_CACHE_HUGE", false) {
 		mem, err := unix.Mmap(-1, 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_PRIVATE|unix.MAP_ANON)
+		fmt.Fprintf(os.Stderr, "[kcvar] pid=%d huge mmap size=%d err=%v\n", os.Getpid(), size, err)
 		if err == nil {
-			_ = unix.Madvise(mem, 14) // MADV_HUGEPAGE on linux
+			merr := unix.Madvise(mem, 14) // MADV_HUGEPAGE on linux
+			fmt.Fprintf(os.Stderr, "[kcvar] pid=%d madvise err=%v addr=%p\n", os.Getpid(), merr, &mem[0])
 			return unsafe.Slice((*keccakBucket)(unsafe.Pointer(&mem[0])), n)
 		}
 	}
@@ -153,7 +155,20 @@ func init() {
 					fmt.Fprintf(&sb, " %d:%d", i, n)
 				}
 			}
-			fmt.Fprintf(os.Stderr, "[kcvar] pid=%d ts=%d variant=%s calls=%d hits=%d len:count%s\n", os.Getpid(), now.UnixMilli(), kcVariant, total, kcHits.Load(), sb.String())
+			fmt.Fprintf(os.Stderr, "[kcvar] pid=%d ts=%d variant=%s calls=%d hits=%d hugeKB=%s len:count%s\n", os.Getpid(), now.UnixMilli(), kcVariant, total, kcHits.Load(), anonHugeKB(), sb.String())
 		}
 	}()
+}
+
+func anonHugeKB() string {
+	b, err := os.ReadFile("/proc/self/smaps_rollup")
+	if err != nil {
+		return "?"
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(l, "AnonHugePages:") {
+			return strings.Fields(l)[1]
+		}
+	}
+	return "?"
 }
