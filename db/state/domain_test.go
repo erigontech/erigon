@@ -468,7 +468,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.Equal(t, p2, v)
 }
 
-func fillDomain(t *testing.T, d *Domain, db kv.RwDB, logger log.Logger) uint64 {
+func fillDomain(t *testing.T, d *Domain, db kv.RwDB) uint64 {
 	t.Helper()
 	require := require.New(t)
 	ctx := t.Context()
@@ -515,7 +515,7 @@ func fillDomain(t *testing.T, d *Domain, db kv.RwDB, logger log.Logger) uint64 {
 func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	t.Helper()
 	db, d := testDbAndDomain(t, logger)
-	txs := fillDomain(t, d, db, logger)
+	txs := fillDomain(t, d, db)
 	return db, d, txs
 }
 
@@ -2776,7 +2776,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Parallel()
 
 	pruningKey := common.FromHex("701b39aee8d1ee500442d2874a6e6d0cc9dad8d9")
-	writeOneKey := func(t *testing.T, d *Domain, db kv.RwDB, maxTx, stepSize uint64) {
+	writeOneKey := func(t *testing.T, d *Domain, db kv.RwDB, maxTx uint64) {
 		t.Helper()
 
 		ctx := t.Context()
@@ -2865,7 +2865,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple history inside 1step", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(13), uint64(17)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 3*stepSize, stepSize)
+		writeOneKey(t, d, db, 3*stepSize)
 
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
@@ -2877,7 +2877,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple history between 2 steps", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(8), uint64(17)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 3*stepSize, stepSize)
+		writeOneKey(t, d, db, 3*stepSize)
 
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
@@ -2889,7 +2889,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple prune whole step", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(10)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 3*stepSize, stepSize)
+		writeOneKey(t, d, db, 3*stepSize)
 
 		ctx := t.Context()
 		rotx, err := db.BeginRo(ctx)
@@ -2932,7 +2932,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple history discard", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(20)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 2*stepSize, stepSize)
+		writeOneKey(t, d, db, 2*stepSize)
 
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
@@ -3091,7 +3091,7 @@ func testTraceKey(t *testing.T, largeVals bool) {
 	db, d := testDbAndDomain(t, logger)
 	d.HistoryLargeValues = largeVals
 
-	txs := fillDomain(t, d, db, logger)
+	txs := fillDomain(t, d, db)
 	err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, d, txs)
 		return nil
@@ -3546,7 +3546,7 @@ func filledDomainWithHashMapAccessor(t *testing.T, logger log.Logger) (kv.RwDB, 
 	d.DisableFsync()
 	t.Cleanup(d.Close)
 
-	txs := fillDomain(t, d, db, logger)
+	txs := fillDomain(t, d, db)
 	return db, d, txs
 }
 

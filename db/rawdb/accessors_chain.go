@@ -991,7 +991,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 	return deleted, nil
 }
 
-func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error {
+func TruncateCanonicalChain(db kv.RwTx, from uint64) error {
 	return db.ForEach(kv.HeaderCanonical, hexutil.EncodeTs(from), func(k, _ []byte) error {
 		return db.Delete(kv.HeaderCanonical, k)
 	})
