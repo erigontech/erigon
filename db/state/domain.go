@@ -745,6 +745,20 @@ func (c Collation) Close() {
 	c.HistoryCollation.Close()
 }
 
+func (d *Domain) dumpStepWithHistory(ctx context.Context, step kv.Step, batch *TemporalMemBatch) (StaticFiles, error) {
+	wal := batch.domainWriters[d.Name]
+	defer wal.Close()
+	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), nil, "")
+	if err != nil {
+		return StaticFiles{}, err
+	}
+	if coll.HistoryCollation, err = d.History.collateETL(ctx, step, wal.h.valsCollector()); err != nil {
+		coll.Close()
+		return StaticFiles{}, err
+	}
+	return d.buildFiles(ctx, step, coll, background.NewProgressSet())
+}
+
 func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer) error {
 	return d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, vt, "", true)
 }
@@ -825,7 +839,9 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		fromTxNum = uint64(stepFrom-1) * d.stepSize
 	}
 
-	err = wal.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	var lastK, lastV []byte
+	var hasLast bool
+	write := func(k, v []byte) error {
 		if d.LargeValues {
 			bareKey := k[:len(k)-8]
 			val := v
@@ -858,7 +874,22 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 			}
 		}
 		return nil
+	}
+	err = wal.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if hasLast && !bytes.Equal(k, lastK) {
+			if err := write(lastK, lastV); err != nil {
+				return err
+			}
+		}
+		lastK, lastV, hasLast = append(lastK[:0], k...), append(lastV[:0], v...), true
+		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
+	if err == nil && hasLast {
+		err = write(lastK, lastV)
+	}
+	if err != nil {
+		return Collation{}, err
+	}
 
 	closeCollation = false
 	coll.valuesCount = coll.valuesComp.Count() / 2

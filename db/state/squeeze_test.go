@@ -10,6 +10,8 @@ import (
 	randOld "math/rand"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -37,6 +40,8 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
@@ -424,6 +429,218 @@ func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 		require.NoError(t, err)
 		require.Zero(t, check.Orphans)
 		require.Equal(t, finalRoot, check.Root)
+	}
+}
+
+type rebuildHeaders map[uint64]common.Hash
+
+func (rebuildHeaders) TxnumReader() rawdbv3.TxNumsReader { return rawdbv3.TxNums }
+
+func (h rebuildHeaders) HeaderByNumber(_ context.Context, _ kv.Getter, blockNum uint64) (*types.Header, error) {
+	root, ok := h[blockNum]
+	if !ok {
+		return nil, nil
+	}
+	return &types.Header{Root: root}, nil
+}
+
+type flushRecorder struct{ direct []bool }
+
+func (h *flushRecorder) Enabled(context.Context, log.Lvl) bool { return true }
+
+func (h *flushRecorder) Log(r *log.Record) error {
+	if r.Msg != "[rebuild_commitment_history] flushing" {
+		return nil
+	}
+	for i := 0; i+1 < len(r.Ctx); i += 2 {
+		if r.Ctx[i] == "direct" {
+			h.direct = append(h.direct, r.Ctx[i+1].(bool))
+		}
+	}
+	return nil
+}
+
+func TestAggregator_RebuildCommitmentWithHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	for _, v3 := range []bool{false, true} {
+		for _, c := range []struct {
+			filedSteps uint64
+			resume     bool
+		}{{5, false}, {4, false}, {5, true}} {
+			t.Run(fmt.Sprintf("v3=%t/filedSteps=%d/resume=%t", v3, c.filedSteps, c.resume), func(t *testing.T) {
+				testRebuildCommitmentWithHistory(t, v3, c.filedSteps, c.resume)
+			})
+		}
+	}
+}
+
+func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, resume bool) {
+	schema, enabled := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = schema, enabled })
+	statecfg.EnableHistoricalCommitment()
+	if v3 {
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		statecfg.ExperimentalCommitmentV3 = true
+	}
+	const stepSize = 16
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer func() { rwTx.Rollback() }()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
+	require.NoError(t, err)
+	defer func() { domains.Close() }()
+
+	rnd := newRnd(11)
+	addrs, _ := generateInputData(t, length.Addr, 1, 40)
+	slots := storageSlotsSharingFirstNibble(t)
+	storageKey := func(a, j int) []byte { return append(bytes.Clone(addrs[a]), slots[j]...) }
+	put := func(d kv.Domain, k, v []byte, txNum uint64) {
+		prev, _, err := domains.GetLatest(d, rwTx, k)
+		require.NoError(t, err)
+		require.NoError(t, domains.DomainPut(d, rwTx, k, v, txNum, prev))
+	}
+	del := func(d kv.Domain, k []byte, txNum uint64) {
+		prev, _, err := domains.GetLatest(d, rwTx, k)
+		require.NoError(t, err)
+		if len(prev) != 0 {
+			require.NoError(t, domains.DomainDel(d, rwTx, k, txNum, prev))
+		}
+	}
+
+	roots := rebuildHeaders{}
+	var lastTxNums []uint64
+	var txNum uint64
+	filesBoundary := (filedSteps + 1) * stepSize
+	for blockNum := uint64(0); txNum < 5*stepSize+7; blockNum++ {
+		txs := uint64(1 + rnd.IntN(7))
+		if txNum < filesBoundary {
+			txs = min(txs, filesBoundary-txNum)
+		}
+		for range txs {
+			for range 2 {
+				a := rnd.IntN(len(addrs))
+				acc := accounts.Account{Nonce: txNum, Balance: *uint256.NewInt(rnd.Uint64()), CodeHash: accounts.EmptyCodeHash}
+				put(kv.AccountsDomain, addrs[a], accounts.SerialiseV3(&acc), txNum)
+				if j := rnd.IntN(len(slots)); rnd.IntN(4) == 0 {
+					del(kv.StorageDomain, storageKey(a, j), txNum)
+				} else {
+					put(kv.StorageDomain, storageKey(a, j), []byte{byte(rnd.IntN(255) + 1)}, txNum)
+				}
+			}
+			if rnd.IntN(8) == 0 {
+				a := rnd.IntN(len(addrs))
+				for j := range slots {
+					del(kv.StorageDomain, storageKey(a, j), txNum)
+				}
+				del(kv.AccountsDomain, addrs[a], txNum)
+			}
+			txNum++
+		}
+		root, err := domains.ComputeCommitment(ctx, rwTx, true, blockNum, txNum-1, "", nil)
+		require.NoError(t, err)
+		roots[blockNum] = common.Hash(root)
+		require.NoError(t, rawdbv3.TxNums.Append(rwTx, blockNum, txNum-1))
+		lastTxNums = append(lastTxNums, txNum-1)
+		if txNum == filesBoundary {
+			require.NoError(t, domains.Flush(ctx, rwTx))
+			domains.Close()
+			require.NoError(t, rwTx.Commit())
+			require.NoError(t, agg.BuildFiles(db, txNum, unboundedFinalityCtx))
+			rwTx, err = db.BeginTemporalRw(ctx) //nolint:gocritic
+			require.NoError(t, err)
+			domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
+			require.NoError(t, err)
+		}
+	}
+	lastBlock := uint64(len(lastTxNums) - 1)
+	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Execution, lastBlock))
+	require.NoError(t, domains.Flush(ctx, rwTx))
+	require.NoError(t, rwTx.Commit())
+	if txNum < filesBoundary {
+		require.NoError(t, agg.BuildFiles(db, txNum, unboundedFinalityCtx))
+	}
+
+	dirs := agg.Dirs()
+	agg.Close()
+	agg = testAgg(t, dirs, stepSize, log.New())
+	tdb, err := temporal.New(db, agg, nil)
+	require.NoError(t, err)
+	defer tdb.Close()
+
+	clearTx, err := tdb.BeginRw(ctx)
+	require.NoError(t, err)
+	defer clearTx.Rollback()
+	for _, table := range statecfg.Schema.CommitmentDomain.Tables() {
+		require.NoError(t, clearTx.ClearTable(table))
+	}
+	require.NoError(t, clearTx.Commit())
+	for _, d := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		files, err := filepath.Glob(filepath.Join(d, "*"+kv.CommitmentDomain.String()+"*"))
+		require.NoError(t, err)
+		for _, f := range files {
+			require.NoError(t, dir.RemoveFile(f))
+		}
+	}
+	require.NoError(t, agg.OpenFolder(tdb))
+
+	rebuild := func(toBlock uint64) []bool {
+		progressTx, err := tdb.BeginRw(ctx)
+		require.NoError(t, err)
+		defer progressTx.Rollback()
+		require.NoError(t, stages.SaveStageProgress(progressTx, stages.Execution, toBlock))
+		require.NoError(t, progressTx.Commit())
+
+		logger, flushes := log.New(), &flushRecorder{}
+		logger.SetHandler(flushes)
+		root, err := state.RebuildCommitmentFilesWithHistory(ctx, tdb, roots, unboundedFinalityCtx, logger, false)
+		require.NoError(t, err)
+		require.Equal(t, roots[toBlock], common.Hash(root))
+		return flushes.direct
+	}
+	direct := make([]bool, txNum/stepSize+1)
+	for i := range filedSteps {
+		direct[i] = true
+	}
+	if resume {
+		commitsIn := func(step uint64) (n int) {
+			for _, last := range lastTxNums {
+				if last/stepSize == step {
+					n++
+				}
+			}
+			return n
+		}
+		resumeStep := uint64(1)
+		for commitsIn(resumeStep) < 2 || slices.Contains(lastTxNums, (resumeStep+1)*stepSize-1) {
+			resumeStep++
+		}
+		require.Less(t, resumeStep, filedSteps-1, "no step with two blocks and none ending on its boundary")
+		resumeBlock := slices.IndexFunc(lastTxNums, func(last uint64) bool { return last >= resumeStep*stepSize })
+		firstRun := append(slices.Repeat([]bool{true}, int(resumeStep)), false)
+		require.Equal(t, firstRun, rebuild(uint64(resumeBlock)), "the run stops inside step %d", resumeStep)
+		direct = direct[resumeStep:]
+		direct[0] = false
+	}
+	require.Equal(t, direct, rebuild(lastBlock), "steps with state files go straight to files, the rest and a resumed step through the DB")
+	if !v3 {
+		return
+	}
+	filesEnd := txNum / stepSize * stepSize
+	for b, last := range lastTxNums {
+		if last >= filesEnd {
+			break
+		}
+		check, err := state.FoldCommitmentV3(ctx, agg, last+1)
+		require.NoError(t, err, "block %d", b)
+		require.Zero(t, check.Orphans, "block %d", b)
+		require.Equal(t, uint64(b), check.BlockNum)
+		require.Equal(t, roots[uint64(b)], common.Hash(check.Root), "block %d", b)
 	}
 }
 
