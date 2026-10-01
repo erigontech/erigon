@@ -245,7 +245,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--authrpc.port value`: The HTTP-RPC server listening port for the Engine API.
   * Default: `8551`
 * `--authrpc.jwtsecret value`: The path to the [JWT secret](/fundamentals/jwt) file for the consensus layer.
-* `--http.compression`: Enables compression over HTTP-RPC.
+* `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more: with Zstandard when the client sends `Accept-Encoding: zstd`, otherwise with gzip.
   * Default: `true`
 * `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
 * `--http.vhosts value`: A comma-separated list of virtual hostnames.
@@ -584,6 +584,8 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.snapgen`: Enables snapshot generation.
   * Default: `false`
 * `--caplin.mev-relay-url value`: The MEV relay endpoint.
+* `--caplin.builder.allow-private-urls`: Lets the builder URLs that validators submit as builder preferences resolve to private or loopback addresses, for a builder on the same host or LAN. Other non-public ranges stay blocked. Does not apply to `--caplin.mev-relay-url`.
+  * Default: `false`
 * `--caplin.validator-monitor`: Enables Caplin validator monitoring metrics.
   * Default: `false`
 * `--caplin.custom-config value`: Sets a custom config for Caplin.
