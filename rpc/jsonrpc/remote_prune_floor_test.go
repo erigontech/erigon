@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/remotedb"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -126,15 +127,25 @@ func TestRemoteHistoryFloorCacheSeparatesPinnedFiles(t *testing.T) {
 	require.Equal(t, int64(6), calls.Load(), "each pinned view is loaded once")
 }
 
-func TestRemoteHistoryFloorCacheFollowsRenewal(t *testing.T) {
-	for _, duringLookup := range []bool{false, true} {
-		name := "before_lookup"
-		if duringLookup {
-			name = "during_lookup"
-		}
-		t.Run(name, func(t *testing.T) {
+func TestRemoteHistoryFloorFollowsRenewal(t *testing.T) {
+	commitmentCfg := statecfg.Schema.CommitmentDomain
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema.CommitmentDomain = commitmentCfg })
+
+	for _, tc := range []struct {
+		name         string
+		domain       kv.Domain
+		duringLookup bool
+	}{
+		{"state/before_lookup", kv.AccountsDomain, false},
+		{"state/during_lookup", kv.AccountsDomain, true},
+		{"commitment/before_lookup", kv.CommitmentDomain, false},
+		{"commitment/during_lookup", kv.CommitmentDomain, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			apis, chainInfo := setupPhysicallyPrunedHistory(t, prunedHistoryConfig{mode: prune.Mode{
 				Initialised: true, History: prunedHistoryDistance, Blocks: prune.KeepAllBlocksPruneMode,
+				CommitmentHistory: prunedHistoryDistance,
 			}})
 			apis.eth._txNumReader = rawdbv3.TxNums
 			apis.eth._historyPruneFloor.ttl = time.Hour
@@ -144,18 +155,29 @@ func TestRemoteHistoryFloorCacheFollowsRenewal(t *testing.T) {
 				tx, err := db.BeginTemporalRo(ctx)
 				require.NoError(t, err)
 				defer tx.Rollback()
+				readUncached := apis.eth.readHistoryStartBlocks
+				if tc.domain == kv.CommitmentDomain {
+					readUncached = apis.eth.readCommitmentHistoryStartBlocks
+				}
+				read := func() (historyPruneFloors, error) {
+					if tc.domain == kv.CommitmentDomain {
+						return readUncached(ctx, tx, chainInfo.head)
+					}
+					return apis.eth.historyStartBlocks(ctx, tx, chainInfo.head)
+				}
 				oldViewID := tx.ViewID()
-				old, err := apis.eth.readHistoryStartBlocks(ctx, tx, chainInfo.head)
+				old, err := readUncached(ctx, tx, chainInfo.head)
 				require.NoError(t, err)
-				if !duringLookup {
-					_, err = apis.eth.historyStartBlocks(ctx, tx, chainInfo.head)
+				require.Positive(t, old.startTxNum, "a nonzero floor must reach the txNum-to-block lookup")
+				if !tc.duringLookup {
+					_, err = read()
 					require.NoError(t, err)
 				}
 
 				local, err := apis.eth.db.BeginTemporalRo(ctx)
 				require.NoError(t, err)
 				defer local.Rollback()
-				end := local.Debug().TxNumsInFiles(kv.AccountsDomain)
+				end := local.Debug().TxNumsInFiles(tc.domain)
 				retired, err := local.Debug().Retire(ctx, kv.RetireCutoffs{Default: end - prunedHistoryStepSize})
 				require.NoError(t, err)
 				require.Positive(t, retired)
@@ -163,19 +185,19 @@ func TestRemoteHistoryFloorCacheFollowsRenewal(t *testing.T) {
 					return tx.Put(kv.DatabaseInfo, []byte("history-cache-test"), []byte{1})
 				}))
 				time.Sleep(remotedbserver.MaxTxTTL + time.Nanosecond)
-				if !duringLookup {
+				if !tc.duringLookup {
 					cursor, err := tx.Cursor(kv.MaxTxNum)
 					require.NoError(t, err)
 					defer cursor.Close()
 				}
 
-				got, err := apis.eth.historyStartBlocks(ctx, tx, chainInfo.head)
+				got, err := read()
 				require.NoError(t, err)
 				require.NotEqual(t, oldViewID, tx.ViewID(), "renewal refreshes the MDBX snapshot ID too")
-				want, err := apis.eth.readHistoryStartBlocks(ctx, tx, chainInfo.head)
+				want, err := readUncached(ctx, tx, chainInfo.head)
 				require.NoError(t, err)
 				require.Greater(t, want.startTxNum, old.startTxNum)
-				require.Equal(t, want, got, "renewal must not reuse or populate an entry for the previous view")
+				require.Equal(t, want, got, "the floor must match the renewed view")
 			})
 		})
 	}

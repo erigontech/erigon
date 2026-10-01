@@ -630,11 +630,22 @@ func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx
 }
 
 func (api *BaseAPI) readCommitmentHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx, head uint64) (historyPruneFloors, error) {
-	startTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if err != nil {
-		return historyPruneFloors{}, err
+	for {
+		key, hasKey := historyFloorCacheKey(tx, head)
+		startTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return historyPruneFloors{}, err
+		}
+		floors, err := api.historyStartBlocksFromTxNum(ctx, tx, head, startTxNum)
+		if err != nil || !hasKey {
+			return floors, err
+		}
+		// Cursor reads in the conversion can renew a remote transaction.
+		// Retry the whole lookup if it spans different views.
+		if current, ok := historyFloorCacheKey(tx, head); ok && current == key {
+			return floors, nil
+		}
 	}
-	return api.historyStartBlocksFromTxNum(ctx, tx, head, startTxNum)
 }
 
 func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, head, startTxNum uint64) (historyPruneFloors, error) {
