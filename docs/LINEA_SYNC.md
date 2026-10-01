@@ -26,6 +26,10 @@ initialized the datadir may already have discarded the `clique` configuration.
 Do not change terminal total difficulty or force `terminalTotalDifficultyPassed`
 to bypass historical validation.
 
+EIP-7002 and EIP-7251 dequeue calls return no requests when their configured
+contract address has no code. This behavior applies to all chains using these
+functions; state-read and system-call errors still propagate.
+
 ## Validation
 
 The patch includes regressions for Clique JSON persistence, engine selection,
