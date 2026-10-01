@@ -100,6 +100,7 @@ type RecordingState struct {
 	// (seen via the per-tx access set) sets this so it is kept (EIP-7928).
 	systemAddrTouchedInTx    bool
 	pbtSystemAddrTouchedInTx bool
+	pbtSystemAddrOpcodeRead  bool
 	systemCallScope          bool
 }
 
@@ -136,6 +137,12 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 func (s *RecordingState) MarkSystemAddrTouchedInTx() { s.systemAddrTouchedInTx = true }
 
 func (s *RecordingState) markPBinSystemAddrTouchedInTx() { s.pbtSystemAddrTouchedInTx = true }
+
+func (s *RecordingState) OnOpcodeAddressAccess(address accounts.Address) {
+	if s.systemCallScope && isPBinSystemAddress(address.Value()) {
+		s.pbtSystemAddrOpcodeRead = true
+	}
+}
 
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
 	if len(addrs) == 0 {
@@ -443,6 +450,7 @@ func (s *RecordingState) DeleteAccount(address accounts.Address, original *accou
 	// Clear storage overlay for this account
 	delete(s.storageOverlay, addr)
 	delete(s.codeOverlay, addr)
+	delete(s.ModifiedCode, addr)
 	if s.tracing(addr) {
 		fmt.Printf("[TRACE] DeleteAccount %s\n", addr.Hex())
 	}

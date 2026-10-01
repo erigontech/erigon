@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
@@ -141,6 +143,24 @@ func TestRecordingState_accountExists(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecordingStateDeleteAccountClearsModifiedCode(t *testing.T) {
+	address := common.HexToAddress("0x5600000000000000000000000000000000000000")
+	code := []byte{0x60, 0x01, 0x00}
+	rs := NewRecordingState(&fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Nonce: 1}}})
+	require.NoError(t, rs.UpdateAccountCode(accounts.InternAddress(address), 0, accounts.InternCodeHash(crypto.Keccak256Hash(code)), code))
+	require.NoError(t, rs.DeleteAccount(accounts.InternAddress(address), nil))
+	funded := &accounts.Account{Balance: *uint256.NewInt(1)}
+	require.NoError(t, rs.UpdateAccountData(accounts.InternAddress(address), nil, funded))
+
+	input, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	require.Len(t, input.Accounts, 1)
+	require.Nil(t, input.Accounts[0].Code)
+	basic, err := eip8297.EncodeBasicData(0, &funded.Balance, 0)
+	require.NoError(t, err)
+	require.Equal(t, basic[:], input.Accounts[0].Values[eip8297.BasicDataLeafKey])
 }
 
 // hasEmptyCode reports whether the legacy code set carries the single empty `0x`

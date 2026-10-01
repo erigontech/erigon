@@ -2954,6 +2954,17 @@ func (sdb *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	}
 }
 
+type opcodeAddressAccessTracker interface {
+	OnOpcodeAddressAccess(accounts.Address)
+}
+
+func (sdb *IntraBlockState) MarkOpcodeAddressAccess(addr accounts.Address) {
+	sdb.MarkAddressAccess(addr, false)
+	if hook, ok := sdb.stateReader.(opcodeAddressAccessTracker); ok {
+		hook.OnOpcodeAddressAccess(addr)
+	}
+}
+
 // StartAccessRecording enables versioned access tracking until ResetVersionedIO.
 // Block finalization re-enables it (Prepare only runs for user txs) so that an
 // address touched but left absent — e.g. a zero-amount withdrawal recipient —

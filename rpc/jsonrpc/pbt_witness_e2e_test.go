@@ -369,13 +369,40 @@ func TestPBinExecutionWitnessRejectsMissingSystemCodeDuringSystemCall(t *testing
 	result := pbtPortWitness(t, api, m, 1)
 	block := pbtPortBlock(t, m, 1)
 	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
-	index := slices.IndexFunc(result.Codes, func(code hexutil.Bytes) bool { return bytes.Equal(code, systemCode) })
+	headerPath := []byte{0x00, 0x10, 0x00, 0x4b}
+	index := slices.IndexFunc(result.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, headerPath) })
 	require.NotEqual(t, -1, index)
-	trimmed := pbtCorpusClone(result)
+	trimmed := pbtCorpusCloneWithout(result, index)
+	require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
+	index = slices.IndexFunc(result.Codes, func(code hexutil.Bytes) bool { return bytes.Equal(code, systemCode) })
+	require.NotEqual(t, -1, index)
+	trimmed = pbtCorpusClone(result)
 	trimmed.Codes = append(trimmed.Codes[:index], trimmed.Codes[index+1:]...)
 	err := verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine)
 	require.ErrorContains(t, err, "missing code")
 	require.NotContains(t, err.Error(), "receipts root mismatch")
+}
+
+func TestPBinExecutionWitnessSystemCallSystemAddressReadProof(t *testing.T) {
+	system := params.SystemAddress.Value()
+	beaconCode := append([]byte{0x73}, system[:]...)
+	beaconCode = append(beaconCode, 0x31, 0x60, 0x00, 0x55, 0x00)
+	alloc := types.GenesisAlloc{
+		system:                            {Balance: big.NewInt(5)},
+		params.BeaconRootsAddress.Value(): {Nonce: 1, Code: beaconCode},
+	}
+	api, m := pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 1, nil, func(int, *blockgen.BlockGen, func(common.Address, *uint256.Int, []byte), func(*uint256.Int, []byte), func(types.Transaction), func(common.Address, *uint256.Int, []byte)) {
+	}, alloc)
+	repairPBinPreForkShadows(t, m, 1000)
+	result := pbtPortWitness(t, api, m, 1)
+	block := pbtPortBlock(t, m, 1)
+	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
+	headerPath := []byte{0x00, 0x10, 0x00, 0x4b}
+	index := slices.IndexFunc(result.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, headerPath) })
+	require.NotEqual(t, -1, index, "the system-address header group must be in the witness")
+	require.NoError(t, verifyPBinWitnessAgainstBlock(t.Context(), result, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
+	trimmed := pbtCorpusCloneWithout(result, index)
+	require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 }
 
 func TestPBinExecutionWitnessDelegationToSystemAddressProof(t *testing.T) {

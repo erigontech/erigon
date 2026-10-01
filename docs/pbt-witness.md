@@ -76,7 +76,8 @@ driver and compares the resulting root with the post-state anchor.
 
 The verifier suppresses the missing-node error only for the synthetic system-call touch of `SYSTEM_ADDRESS`. The scope
 covers system calls from `Initialize`, its `FinalizeTx`, `Finalize`, and `CommitBlock`, but resolver errors are latched
-throughout those scopes except for that synthetic touch. A user transaction access to `SYSTEM_ADDRESS` is retained when
+throughout those scopes except for that synthetic touch. An EVM opcode target access to `SYSTEM_ADDRESS` during those
+scopes is genuine and must be proved. A user transaction access to `SYSTEM_ADDRESS` is retained when
 the per-transaction access set records it, or when `ResolveCode` or `ResolveCodeHash` follows a delegation designator
 to it. Loading a designator with `EXTCODE*` does not follow it, and an access-list entry alone is not enough.
 Both cases need the basic-data proof when the system call has already warmed the account. Genuine reads of system
@@ -85,6 +86,10 @@ Byzantium, gas used, and blob gas used with the block header. Contract creation 
 existing account with storage wipes that storage; creation of a previously absent account does not walk an unproved
 storage subtree. An account without `BASIC_DATA` is considered present only after its code-hash or delegation leaf is
 resolved. All supplied PBT entries must be consumed before verification succeeds.
+
+Before Cancun, a block that destroys a contract in one transaction and funds or recreates the address in a later
+transaction cannot be witnessed. The PBT engine retains code chunks after their last holder is destroyed, so its
+historical anchor does not match the EIP-8297 state required by stateless replay.
 
 ## Witness cache
 
