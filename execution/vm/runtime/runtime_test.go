@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -949,4 +950,54 @@ func TestOpcodeMaskStillReportsFaults(t *testing.T) {
 			require.NotEmpty(t, faults, "an excluded opcode that faults must still reach OnFault")
 		})
 	}
+}
+
+// TestCallDepthDoesNotGrowGoStack pins the property that makes CPU profiles
+// readable: a contract calling itself 100+ frames deep must cost no extra Go
+// stack frames, because Run keeps its own frame stack.
+func TestCallDepthDoesNotGrowGoStack(t *testing.T) {
+	t.Parallel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	// CALL self with all remaining gas; the 63/64 rule ends the recursion.
+	require.NoError(t, statedb.SetCode(address, []byte{
+		byte(vm.PUSH1), 0, // retLength
+		byte(vm.PUSH1), 0, // retOffset
+		byte(vm.PUSH1), 0, // argsLength
+		byte(vm.PUSH1), 0, // argsOffset
+		byte(vm.PUSH1), 0, // value
+		byte(vm.ADDRESS),
+		byte(vm.GAS),
+		byte(vm.CALL),
+		byte(vm.STOP),
+	}, tracing.CodeChangeUnspecified))
+
+	goFrames := map[int]int{}
+	hooks := &tracing.Hooks{
+		OnOpcode: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ []byte, depth int, _ error) {
+			if _, seen := goFrames[depth]; seen {
+				return
+			}
+			var pcs [256]uintptr
+			goFrames[depth] = runtime.Callers(0, pcs[:])
+		},
+	}
+	_, _, err := Call(address, nil, &Config{
+		State:     statedb,
+		GasLimit:  10_000_000,
+		EVMConfig: vm.Config{Tracer: hooks},
+	})
+	require.NoError(t, err)
+
+	maxDepth := 0
+	for depth := range goFrames {
+		maxDepth = max(maxDepth, depth)
+	}
+	require.Greater(t, maxDepth, 100, "test needs deep EVM recursion to be meaningful")
+	require.Equal(t, goFrames[1], goFrames[maxDepth],
+		"EVM depth %d uses a different Go stack depth than EVM depth 1", maxDepth)
 }

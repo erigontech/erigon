@@ -81,7 +81,23 @@ type CallContext struct {
 	// Stack.data is 32 KB it can skip entirely.
 	Contract Contract
 	create   createGasPreparation
-	Stack    Stack
+
+	// pending is the child call a call opcode staged for Run's frame loop,
+	// standing in for the recursive evm.Call it used to make.
+	pending pendingCall
+
+	Stack Stack
+}
+
+type pendingCall struct {
+	input              []byte
+	caller             accounts.Address
+	callerAddr         accounts.Address
+	addr               accounts.Address
+	value              uint256.Int
+	gas                mdgas.MdGas
+	retOffset, retSize uint64
+	typ                OpCode
 }
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
@@ -159,6 +175,7 @@ func (ctx *CallContext) put() {
 	ctx.cachedAddr = accounts.NilAddress
 	ctx.input = nil
 	ctx.Contract = Contract{}
+	ctx.pending = pendingCall{}
 	contextPool.Put(ctx)
 }
 
@@ -388,8 +405,64 @@ func traceGas(op OpCode, callGas mdgas.MdGasCost, cost mdgas.MdGasCost) mdgas.Md
 	return cost
 }
 
+// flatFrame is one EVM call frame on evm.frames. pc and res are the inner
+// loop's state, saved whenever the frame yields to a child.
+type flatFrame struct {
+	ctx             *CallContext
+	res             []byte
+	pc              uint64
+	gasIn           mdgas.MdGas
+	info            callFrame
+	restoreReadonly bool
+	spawned         bool // pushed by a call opcode rather than by Run itself
+}
+
+func (evm *EVM) pushFrame(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool, info callFrame, spawned bool) {
+	// Reset the previous call's return data. It's unimportant to preserve the old buffer
+	// as every returning call will return new data anyway.
+	evm.returnData = nil
+	// Make sure the readOnly is only set if we aren't in readOnly yet.
+	// This makes also sure that the readOnly flag isn't removed for child calls.
+	restoreReadonly := readOnly && !evm.readOnly
+	if restoreReadonly {
+		evm.readOnly = true
+	}
+	// Increment the call depth which is restricted to 1024
+	evm.depth++
+	evm.frames = append(evm.frames, flatFrame{
+		ctx:             getCallContext(contract, input, gas),
+		gasIn:           gas,
+		info:            info,
+		restoreReadonly: restoreReadonly,
+		spawned:         spawned,
+	})
+}
+
+// popFrame releases the top frame and derives its net state-gas usage.
+//
+// EIP-8037: a state charge lowers stateGas (or raises stateGasSpill on spill)
+// and a refill reverses it, so the net used (signed) is
+// (initialReservoir - stateGas) + stateGasSpill. gasUsed.Execution is derived
+// later by callEpilogue, which also covers the precompile and no-code paths.
+func (evm *EVM) popFrame() (gasUsed mdgas.MdGasUsage, info callFrame, spawned bool) {
+	f := &evm.frames[len(evm.frames)-1]
+	gasUsed.StateSpill = f.ctx.stateGasSpill
+	gasUsed.State = int64(f.gasIn.State) - int64(f.ctx.stateGas) + int64(f.ctx.stateGasSpill)
+	info, spawned = f.info, f.spawned
+	f.ctx.put()
+	if f.restoreReadonly {
+		evm.readOnly = false
+	}
+	evm.depth--
+	evm.frames = evm.frames[:len(evm.frames)-1]
+	return gasUsed, info, spawned
+}
+
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
+//
+// Child calls do not recurse: a call opcode pushes a frame onto evm.frames and
+// this loop picks it up, so one Go stack frame serves every EVM call depth.
 //
 // It's important to note that any errors returned by the interpreter should be
 // considered a revert-and-consume-all-gas operation except for
@@ -400,69 +473,68 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		return nil, gas, mdgas.MdGasUsage{}, nil
 	}
 
-	// Reset the previous call's return data. It's unimportant to preserve the old buffer
-	// as every returning call will return new data anyway.
-	evm.returnData = nil
+	base := len(evm.frames)
+	evm.pushFrame(contract, gas, input, readOnly, callFrame{}, false)
+	defer func() {
+		// A panic escaping the loop must not leave frames, depth or readOnly
+		// behind for the next Run on this EVM.
+		for len(evm.frames) > base {
+			evm.popFrame()
+		}
+	}()
 
+	for {
+		ret, gasRemaining, err = evm.runFrame(len(evm.frames) - 1)
+		if err == errCallFrame { //nolint:errorlint // intentional bare sentinel check
+			continue // a child frame was pushed; run it
+		}
+		gasUsed, info, spawned := evm.popFrame()
+		if !spawned {
+			return ret, gasRemaining, gasUsed, err
+		}
+		ret, gasRemaining, gasUsed, err = evm.callEpilogue(&info, ret, gasRemaining, gasUsed, err)
+		parent := len(evm.frames) - 1
+		evm.frames[parent].res = finishCall(evm, evm.frames[parent].ctx, ret, gasRemaining, gasUsed, err)
+	}
+}
+
+// beginPendingCall resolves the call a call opcode staged. It either pushes a
+// child frame (spawned) or returns the already-finished result.
+func (evm *EVM) beginPendingCall(scope *CallContext) (spawned bool, ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+	p := &scope.pending
+	if evm.abort.Load() {
+		return false, nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, nil
+	}
+	f, ret, gasRemaining, run, err := evm.callPrologue(p.typ, p.caller, p.callerAddr, p.addr, p.input, p.gas, p.value, false)
+	if !run {
+		ret, gasRemaining, gasUsed, err = evm.callEpilogue(&f, ret, gasRemaining, mdgas.MdGasUsage{}, err)
+		return false, ret, gasRemaining, gasUsed, err
+	}
+	evm.pushFrame(f.contract, gasRemaining, p.input, f.readOnly, f, true)
+	return true, nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, nil
+}
+
+// runFrame executes opcodes of frame fi until it halts, faults, or yields to a
+// child frame — in which case it returns errCallFrame.
+func (evm *EVM) runFrame(fi int) (ret []byte, gasRemaining mdgas.MdGas, err error) {
 	var (
 		op          OpCode // current opcode
-		callContext = getCallContext(contract, input, gas)
+		callContext = evm.frames[fi].ctx
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc   = uint64(0) // program counter
+		pc   = evm.frames[fi].pc // program counter
 		cost mdgas.MdGasCost
 		// copies used by tracer
 		pcCopy  uint64 // needed for the deferred Tracer
 		oldGas  mdgas.MdGas
 		callGas mdgas.MdGasCost
-		logged  bool   // deferred Tracer should ignore already logged steps
-		res     []byte // result of the opcode execution function
+		logged  bool                 // deferred Tracer should ignore already logged steps
+		res     = evm.frames[fi].res // result of the opcode execution function
 		tracer  = evm.config.Tracer
 		debug   = tracer != nil && (tracer.HasOpcodeHook() || tracer.HasGasChangeHook() || tracer.HasFaultHook())
 		trace   = dbg.TraceInstructions && evm.intraBlockState.Trace()
 	)
-
-	// Make sure the readOnly is only set if we aren't in readOnly yet.
-	// This makes also sure that the readOnly flag isn't removed for child calls.
-	restoreReadonly := readOnly && !evm.readOnly
-	if restoreReadonly {
-		evm.readOnly = true
-	}
-	// Increment the call depth which is restricted to 1024
-	evm.depth++
-	defer func() {
-		// EIP-8037: snapshot the spilled portion and derive the frame's net
-		// state-gas usage from the reservoir delta before callContext.put()
-		// clears them. A state charge lowers stateGas (or raises stateGasSpill
-		// on spill) and a refill reverses it, so the net used (signed) is
-		// (initialReservoir - stateGas) + stateGasSpill. gasUsed.Execution is
-		// derived uniformly by evm.call/evm.create's defer from the final
-		// gasRemaining (covers precompile/no-code paths and the revert burn).
-		gasUsed.StateSpill = callContext.stateGasSpill
-		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
-		callContext.put()
-		if restoreReadonly {
-			evm.readOnly = false
-		}
-		evm.depth--
-	}()
-
-	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
-	// the stacks before callContext.put() returns them to the pool.
-	if debug {
-		defer func() {
-			if err == nil {
-				return
-			}
-			switch {
-			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
-				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
-				tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
-			}
-		}()
-	}
 
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
@@ -471,6 +543,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	anyTrace := dbg.TraceDynamicGas || debug || trace
+	contract := &callContext.Contract
 	stack := &callContext.Stack
 	jt := evm.jt
 
@@ -490,11 +563,13 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
 		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
+			res, err = nil, stackBoundsErr(sLen, operation)
+			break
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
 		if callContext.gas < cost.Execution {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+			res, err = nil, ErrOutOfGas
+			break
 		} else {
 			callContext.gas -= cost.Execution
 		}
@@ -509,12 +584,14 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if operation.memorySize != nil {
 				memSize, overflow := operation.memorySize(callContext)
 				if overflow {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
+					res, err = nil, ErrGasUintOverflow
+					break
 				}
 				// memory is expanded in words of 32 bytes. Gas
 				// is also calculated in words.
 				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
+					res, err = nil, ErrGasUintOverflow
+					break
 				}
 			}
 			// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
@@ -527,7 +604,8 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				if !errors.Is(err, ErrOutOfGas) {
 					err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
 				}
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
+				res = nil
+				break
 			}
 			if anyTrace {
 				cost = cost.Plus(dynamicCost)
@@ -539,13 +617,15 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				}
 			}
 			if callContext.gas < dynamicCost.Execution {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+				res, err = nil, ErrOutOfGas
+				break
 			}
 			callContext.gas -= dynamicCost.Execution
 			if dynamicCost.State > 0 {
 				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
 				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+					res, err = nil, ErrOutOfGas
+					break
 				}
 			} else if dynamicCost.State < 0 {
 				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
@@ -583,6 +663,18 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 		// execute the operation
 		pc, res, err = operation.execute(pc, evm, callContext)
+		if err == errCallFrame { //nolint:errorlint // intentional bare sentinel check
+			// The opcode staged a child call in callContext.pending instead of
+			// recursing. Resume at the next instruction once it returns.
+			evm.frames[fi].pc, evm.frames[fi].res = pc+1, res
+			spawned, cret, cgas, cusage, cerr := evm.beginPendingCall(callContext)
+			if spawned {
+				return nil, mdgas.MdGas{}, errCallFrame
+			}
+			res = finishCall(evm, callContext, cret, cgas, cusage, cerr)
+			pc, err = evm.frames[fi].pc, nil
+			continue
+		}
 		if err != nil {
 			break
 		}
@@ -593,5 +685,14 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		err = nil // clear stop token error
 	}
 
-	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
+	if debug && err != nil {
+		switch {
+		case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
+			tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+		case tracer.HasOpcodeHook() && tracer.HasFaultHook():
+			tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
+		}
+	}
+
+	return res, callContext.Gas(), err
 }

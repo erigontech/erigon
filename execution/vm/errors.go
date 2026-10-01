@@ -51,6 +51,10 @@ var (
 	// errStopToken is an internal token indicating interpreter loop termination,
 	// never returned to outside callers.
 	errStopToken = errors.New("stop token")
+
+	// errCallFrame is an internal token: the opcode staged a child call in
+	// CallContext.pending for Run's frame loop instead of recursing.
+	errCallFrame = errors.New("call frame")
 	//
 	// ErrIntraBlockStateFailed indicates a fatal error when processing IBS
 	// requests

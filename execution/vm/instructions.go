@@ -1092,55 +1092,96 @@ func stCreate2(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.gas)
 }
 
-func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	stack := &scope.Stack
-	// Pop gas. The actual gas in evm.callGasTemp.
-	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
-	// Pop other call parameters.
-	addr, value := stack.pop2()
-	inOffset, inSize := stack.pop2Uint64()
-	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
-	// Get the arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset, inSize)
-
-	if !value.IsZero() {
-		if evm.readOnly {
-			// The gas function already called Empty() on the target for
-			// gas calculation, which recorded versioned reads.  Mark them
-			// as internal so they are kept for conflict detection but
-			// excluded from the block access list — the CALL never
-			// actually executes.
-			evm.intraBlockState.MarkReadsInternal(toAddr)
-			return pc, nil, ErrWriteProtection
-		}
-		gas.Execution += params.CallStipend
-	}
-
-	scope.forwardStateGas(evm.config.Tracer)
-	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, *value, false /* bailout */)
-	res := stack.pushRef()
+// finishCall applies a finished child frame's result to its parent, the second
+// half of every call opcode.
+func finishCall(evm *EVM, scope *CallContext, ret []byte, returnGas mdgas.MdGas, usage mdgas.MdGasUsage, err error) []byte {
+	p := &scope.pending
+	res := scope.Stack.pushRef()
 	if err != nil {
 		res.Clear()
 	} else {
 		res.SetOne()
 	}
 	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-		scope.Memory.Set(retOffset, retSize, ret)
+		scope.Memory.Set(p.retOffset, p.retSize, ret)
 	}
 
 	scope.restoreChildGas(returnGas, evm.config.Tracer)
 	if evm.chainRules.IsAmsterdam {
 		if err == nil {
-			scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
-		} else if scope.newAccountCharged {
+			scope.mergeChildStateGas(usage.StateSpill, evm.config.Tracer)
+		} else if p.typ == CALL && scope.newAccountCharged {
 			scope.refillStateGas(params.StateGasNewAccount, evm.config.Tracer, tracing.GasChangeRefundAccountCreation)
 		}
 	}
-	scope.Contract.selfBalanceCached = false
+	if p.typ != STATICCALL {
+		scope.Contract.selfBalanceCached = false
+	}
 	evm.returnData = ret
-	return pc, ret, nil
+	return ret
+}
+
+// stageCall pops the CALL-family operands and stages the child call in
+// scope.pending for Run's frame loop, so no recursion happens here.
+func stageCall(pc uint64, evm *EVM, scope *CallContext, typ OpCode) (uint64, []byte, error) {
+	stack := &scope.Stack
+	// Pop gas. The actual gas is in evm.callGasTemp.
+	stack.drop() // gas operand, already consumed by the gas phase
+	gas := scope.callGas(evm)
+	// Pop other call parameters.
+	addr := stack.pop()
+	var value uint256.Int
+	if typ == CALL || typ == CALLCODE {
+		value = stack.popCopy()
+	}
+	inOffset, inSize := stack.pop2Uint64()
+	retOffset, retSize := stack.pop2Uint64()
+	toAddr := evm.internAddress(addr)
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(inOffset, inSize)
+
+	caller, callerAddr := scope.Contract.Address(), scope.Contract.Address()
+	switch typ {
+	case CALL, CALLCODE:
+		if !value.IsZero() {
+			if typ == CALL && evm.readOnly {
+				// The gas function already called Empty() on the target for
+				// gas calculation, which recorded versioned reads.  Mark them
+				// as internal so they are kept for conflict detection but
+				// excluded from the block access list — the CALL never
+				// actually executes.
+				evm.intraBlockState.MarkReadsInternal(toAddr)
+				return pc, nil, ErrWriteProtection
+			}
+			gas.Execution += params.CallStipend
+		}
+	case DELEGATECALL:
+		caller, callerAddr, value = scope.Contract.addr, scope.Contract.caller, scope.Contract.value
+	}
+
+	scope.forwardStateGas(evm.config.Tracer)
+	scope.pending = pendingCall{
+		typ: typ, caller: caller, callerAddr: callerAddr, addr: toAddr,
+		input: args, gas: gas, value: value,
+		retOffset: retOffset, retSize: retSize,
+	}
+	return pc, nil, errCallFrame
+}
+
+func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	return stageCall(pc, evm, scope, CALL)
+}
+
+func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	return stageCall(pc, evm, scope, CALLCODE)
+}
+
+func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	return stageCall(pc, evm, scope, DELEGATECALL)
+}
+
+func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	return stageCall(pc, evm, scope, STATICCALL)
 }
 
 func stCall(_ uint64, scope *CallContext) string {
@@ -1153,80 +1194,6 @@ func stCall(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %x %x", CALL.String(), toAddr, args)
 }
 
-func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	// Pop gas. The actual gas is in evm.callGasTemp.
-	stack := &scope.Stack
-	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
-	// Pop other call parameters.
-	addr, value := stack.pop2()
-	inOffset, inSize := stack.pop2Uint64()
-	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
-	// Get arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset, inSize)
-
-	if !value.IsZero() {
-		gas.Execution += params.CallStipend
-	}
-
-	scope.forwardStateGas(evm.config.Tracer)
-
-	ret, returnGas, childGasUsage, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, *value)
-	res := stack.pushRef()
-	if err != nil {
-		res.Clear()
-	} else {
-		res.SetOne()
-	}
-	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-		scope.Memory.Set(retOffset, retSize, ret)
-	}
-
-	scope.restoreChildGas(returnGas, evm.config.Tracer)
-	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
-	}
-	scope.Contract.selfBalanceCached = false
-	evm.returnData = ret
-	return pc, ret, nil
-}
-
-func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	stack := &scope.Stack
-	// Pop gas. The actual gas is in evm.callGasTemp.
-	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
-	// Pop other call parameters.
-	addr := stack.pop()
-	inOffset, inSize := stack.pop2Uint64()
-	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
-	// Get arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset, inSize)
-
-	scope.forwardStateGas(evm.config.Tracer)
-
-	ret, returnGas, childGasUsage, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
-	res := stack.pushRef()
-	if err != nil {
-		res.Clear()
-	} else {
-		res.SetOne()
-	}
-	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-		scope.Memory.Set(retOffset, retSize, ret)
-	}
-
-	scope.restoreChildGas(returnGas, evm.config.Tracer)
-	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
-	}
-	scope.Contract.selfBalanceCached = false
-	evm.returnData = ret
-	return pc, ret, nil
-}
-
 func stDelegateCall(_ uint64, scope *CallContext) string {
 	stack := &scope.Stack
 	addr, inOffset, inSize := stack.data[stack.top-2], stack.data[stack.top-3], stack.data[stack.top-4]
@@ -1235,40 +1202,6 @@ func stDelegateCall(_ uint64, scope *CallContext) string {
 	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
 
 	return fmt.Sprintf("%s %x %x", DELEGATECALL.String(), toAddr, args)
-}
-
-func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	// Pop gas. The actual gas is in evm.callGasTemp.
-	stack := &scope.Stack
-	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
-	// Pop other call parameters.
-	addr := stack.pop()
-	inOffset, inSize := stack.pop2Uint64()
-	retOffset, retSize := stack.pop2Uint64()
-	toAddr := evm.internAddress(addr)
-	// Get arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset, inSize)
-
-	scope.forwardStateGas(evm.config.Tracer)
-
-	ret, returnGas, childGasUsage, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
-	res := stack.pushRef()
-	if err != nil {
-		res.Clear()
-	} else {
-		res.SetOne()
-	}
-	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-		scope.Memory.Set(retOffset, retSize, ret)
-	}
-
-	scope.restoreChildGas(returnGas, evm.config.Tracer)
-	if evm.chainRules.IsAmsterdam && err == nil {
-		scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
-	}
-	evm.returnData = ret
-	return pc, ret, nil
 }
 
 func stStaticCall(_ uint64, scope *CallContext) string {
