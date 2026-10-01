@@ -63,7 +63,8 @@ const (
 	maxExecutionPayloadEnvelopeRetries = 1024
 )
 
-// Pre-fulu blob bundle structure to hold the commitment, blob, and KZG proof. (TODO: remove after electra fork)
+// BlobBundle holds a blob with its commitment and KZG proofs: one blob proof before Fulu, one proof
+// per cell from Fulu on.
 type BlobBundle struct {
 	Commitment common.Bytes48
 	Blob       *cltypes.Blob

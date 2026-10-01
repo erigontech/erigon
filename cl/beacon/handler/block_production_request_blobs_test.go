@@ -189,6 +189,60 @@ func TestRequestBlobBundlesRejectsForkThatDoesNotMatchSlot(t *testing.T) {
 	require.ErrorContains(t, err, "is labelled electra but its slot is in fulu")
 }
 
+// TestRequestBlobBundlesChecksAtForkAndBlobScheduleBoundaries pins the fork-label check and the
+// blob limit at the slots where they change: the last Electra slot and the first Fulu slot, and the
+// last slot before and the first slot of a blob schedule entry.
+func TestRequestBlobBundlesChecksAtForkAndBlobScheduleBoundaries(t *testing.T) {
+	const fuluEpoch, bpoEpoch = 2, 3
+	h := newRequestBlobsHandler(t, clparams.ElectraVersion)
+	h.beaconChainCfg.FuluForkEpoch = fuluEpoch
+	h.beaconChainCfg.BlobSchedule = []clparams.BlobParameters{{Epoch: bpoEpoch, MaxBlobsPerBlock: 6}}
+	slotsPerEpoch := h.beaconChainCfg.SlotsPerEpoch
+	fuluBlobs := func(n int) []testBlob {
+		blobs := make([]testBlob, n)
+		for i := range blobs {
+			blobs[i] = newTestBlob(t, byte(i+1), clparams.FuluVersion)
+		}
+		return blobs
+	}
+	electraBlob, fuluBlob := newTestBlob(t, 1, clparams.ElectraVersion), newTestBlob(t, 1, clparams.FuluVersion)
+
+	for _, tc := range []struct {
+		name    string
+		version clparams.StateVersion
+		slot    uint64
+		blobs   []testBlob
+		wantErr string
+	}{
+		{"last electra slot labelled electra", clparams.ElectraVersion, fuluEpoch*slotsPerEpoch - 1, []testBlob{electraBlob}, ""},
+		{"first fulu slot labelled electra", clparams.ElectraVersion, fuluEpoch * slotsPerEpoch, []testBlob{electraBlob}, "is labelled electra but its slot is in fulu"},
+		{"last electra slot labelled fulu", clparams.FuluVersion, fuluEpoch*slotsPerEpoch - 1, []testBlob{fuluBlob}, "is labelled fulu but its slot is in electra"},
+		{"7 blobs right before the schedule entry", clparams.FuluVersion, bpoEpoch*slotsPerEpoch - 1, fuluBlobs(7), ""},
+		{"6 blobs at the schedule entry", clparams.FuluVersion, bpoEpoch * slotsPerEpoch, fuluBlobs(6), ""},
+		{"7 blobs at the schedule entry", clparams.FuluVersion, bpoEpoch * slotsPerEpoch, fuluBlobs(7), "more than 6 blob commitments"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bundles, err := h.requestBlobBundles(newRequestBlock(h.beaconChainCfg, tc.version, tc.slot, tc.blobs...))
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, bundles, len(tc.blobs))
+		})
+	}
+}
+
+func TestRequestBlobBundlesRejectsBlobsWithoutCommitmentList(t *testing.T) {
+	h := newRequestBlobsHandler(t, clparams.ElectraVersion)
+	block := newRequestBlock(h.beaconChainCfg, clparams.ElectraVersion, 0, newTestBlob(t, 1, clparams.ElectraVersion))
+	block.SignedBlock.Block.Body.BlobKzgCommitments = nil
+
+	_, err := h.requestBlobBundles(block)
+
+	require.ErrorContains(t, err, "request has blobs but the block has no blob_kzg_commitments")
+}
+
 // TestRequestBlobBundlesRejectsTooManyBlobsBeforeVerifying proves the gossip blob limit is checked
 // before any KZG work: the proofs here are invalid, yet the limit is what the request fails on.
 func TestRequestBlobBundlesRejectsTooManyBlobsBeforeVerifying(t *testing.T) {

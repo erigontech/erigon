@@ -2225,7 +2225,10 @@ func (a *ApiHandler) requestBlobBundles(block *cltypes.DenebSignedBeaconBlock) (
 		proofsPerBlob = goethkzg.CellsPerExtBlob
 	}
 	commitments := block.SignedBlock.Block.Body.GetBlobKzgCommitments()
-	if commitments == nil || commitments.Len() > int(maxBlobs) {
+	if commitments == nil {
+		return nil, errors.New("request has blobs but the block has no blob_kzg_commitments")
+	}
+	if commitments.Len() > int(maxBlobs) {
 		return nil, fmt.Errorf("block has more than %d blob commitments", maxBlobs)
 	}
 	if commitments.Len() != block.Blobs.Len() || block.KZGProofs == nil || block.KZGProofs.Len() != block.Blobs.Len()*proofsPerBlob {
