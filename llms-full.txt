@@ -872,7 +872,7 @@ Updating to the latest version of Erigon gives you access to the latest features
 
 A 3.6.x node upgrades to 3.7 in place: there is no database migration and no re-sync. Before restarting on the new version, check the following:
 
-- **Sepolia: Glamsterdam**: Glamsterdam activates on Sepolia at epoch `353024`, 6 October 2026 13:53:36 UTC (Amsterdam in the execution layer, Gloas in Caplin). Upgrade Sepolia nodes to the latest 3.7 release before then; 3.6 does not follow the chain past the fork. With an external consensus client, upgrade it too.
+- **Sepolia: Glamsterdam**: Glamsterdam activates on Sepolia at epoch `353024`, 6 October 2026 13:53:36 UTC (Amsterdam in the execution layer, Gloas in Caplin). Upgrade Sepolia nodes to v3.7.1 or later before then: v3.7.0 predates Glamsterdam fixes the fork needs, and 3.6 does not follow the chain past it. With an external consensus client, upgrade it too.
 - **CPU baseline**: amd64 binaries and Docker images now require the `x86-64-v2` baseline (SSE4.2, POPCNT). The separate `amd64v2` tarball and `linux/amd64/v2` Docker platform are gone; use the standard amd64 artifacts. Building from source requires Go 1.26 or newer. See [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements).
 - **Removed flags**: `--fcu.background.commit` and `--experimental.streaming-commitment` now prevent startup. Remove them from your startup arguments.
 - **Caplin with checkpoint sync disabled**: nodes running `--caplin.checkpoint-sync.disable` re-sync Caplin from genesis on upgrade unless a finalized state is saved locally. Allow checkpoint sync during the upgrade to avoid the replay.
