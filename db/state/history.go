@@ -460,7 +460,7 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 }
 
 func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
-	return ht.newWriter(ht.h.dirs.Tmp, !ht.h.Enabled)
+	return ht.newWriter(nil, ht.h.dirs.Tmp, !ht.h.Enabled)
 }
 
 type historyBufferedWriter struct {
@@ -481,23 +481,31 @@ type historyBufferedWriter struct {
 }
 
 func (w *historyBufferedWriter) close() {
-	if w == nil { // allow dobule-close
+	if w == nil {
 		return
 	}
 	w.ii.close()
+	w.reset()
+}
+
+func (w *historyBufferedWriter) reset() {
+	if w == nil { // allow dobule-close
+		return
+	}
+	w.ii.reset()
 	if w.historyVals != nil {
 		w.historyVals.Close()
 	}
 }
 
-func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWriter {
+func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *historyBufferedWriter {
 	w := &historyBufferedWriter{
 		discard: discard,
 
 		largeValues:      ht.h.HistoryLargeValues,
 		historyValsTable: ht.h.ValuesTable,
 
-		ii: ht.iit.newWriter(tmpdir, discard),
+		ii: ht.iit.newWriter(db, tmpdir, discard),
 	}
 	return w
 }
@@ -517,7 +525,7 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 	}
-	w.close()
+	w.reset()
 	return nil
 }
 

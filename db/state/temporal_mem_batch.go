@@ -98,7 +98,7 @@ type TemporalMemBatch struct {
 	metrics *kvmetrics.DomainMetrics
 }
 
-func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
+func NewTemporalMemBatch(tx kv.TemporalTx, db kv.RoDB, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage:           btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:           ioMetrics.(*kvmetrics.DomainMetrics),
@@ -110,12 +110,12 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(aggTx.iis))
 
 	for id, ii := range aggTx.iis {
-		sd.iiWriters[id] = ii.NewWriter()
+		sd.iiWriters[id] = ii.newWriter(db, ii.ii.dirs.Tmp, !ii.ii.Enabled)
 	}
 
 	for id, d := range aggTx.d {
 		sd.domains[id] = map[string][]dataWithTxNum{}
-		sd.domainWriters[id] = d.NewWriter()
+		sd.domainWriters[id] = d.newWriter(db, d.d.dirs.Tmp, !d.d.Enabled)
 	}
 
 	return sd
@@ -856,7 +856,7 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 			return err
 		}
 		aggTx.d[di].closeValsCursor() // TODO: why?
-		w.Close()
+		w.reset()
 	}
 	for _, writer := range slices.Backward(sd.pastIIWriters) {
 		if err := writer.Flush(ctx, tx); err != nil {
@@ -871,7 +871,7 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
-		w.close()
+		w.reset()
 	}
 	return nil
 }

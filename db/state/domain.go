@@ -330,7 +330,7 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 }
 
 func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter {
-	return dt.newWriter(dt.d.dirs.Tmp, !dt.d.Enabled)
+	return dt.newWriter(nil, dt.d.dirs.Tmp, !dt.d.Enabled)
 }
 
 // openList - main method to open list of files.
@@ -476,7 +476,7 @@ func (w *DomainBufferedWriter) DeleteWithPrevDiff(k []byte, txNum uint64, prev [
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
 func (w *DomainBufferedWriter) Diff() *kv.DomainDiff        { return w.diff }
 
-func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
+func (dt *DomainRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.HistoryDisabled
 
 	w := &DomainBufferedWriter{
@@ -484,7 +484,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
 		name:      dt.d.Name,
-		h:         dt.ht.newWriter(tmpdir, discardHistory),
+		h:         dt.ht.newWriter(db, tmpdir, discardHistory),
 	}
 	return w
 }
@@ -507,10 +507,18 @@ type DomainBufferedWriter struct {
 }
 
 func (w *DomainBufferedWriter) Close() {
-	if w == nil { // allow dobule-close
+	if w == nil {
 		return
 	}
 	w.h.close()
+	w.reset()
+}
+
+func (w *DomainBufferedWriter) reset() {
+	if w == nil { // allow dobule-close
+		return
+	}
+	w.h.reset()
 	if w.values != nil {
 		w.values.Close()
 	}
@@ -524,7 +532,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 	if w.values == nil {
-		w.Close()
+		w.reset()
 		return nil
 	}
 
@@ -532,7 +540,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 			return err
 		}
-		w.Close()
+		w.reset()
 		return nil
 	}
 
@@ -553,7 +561,7 @@ func (w *DomainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	}, etl.TransformArgs{Quit: ctx.Done(), EmptyVals: true}); err != nil {
 		return err
 	}
-	w.Close()
+	w.reset()
 
 	return nil
 }

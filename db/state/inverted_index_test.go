@@ -20,14 +20,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -1291,4 +1294,315 @@ func TestInvertedIndexDisabledDiscardsWrites(t *testing.T) {
 		require.NoError(t, err)
 		require.Zerof(t, n, "table %s must stay empty", table)
 	}
+}
+
+type prefetchIndexTx struct {
+	kv.RwTx
+	table  string
+	cursor *prefetchIndexCursor
+}
+
+func (tx *prefetchIndexTx) RwCursor(table string) (kv.RwCursor, error) {
+	if table != tx.table {
+		return tx.RwTx.RwCursor(table)
+	}
+	return tx.cursor, nil
+}
+
+type prefetchIndexCursor struct {
+	kv.RwCursorDupSort
+	t             *testing.T
+	prefetchErr   error
+	prefetched    atomic.Int32
+	prefetchCalls atomic.Int32
+}
+
+func (c *prefetchIndexCursor) Put(k, v []byte) error {
+	if invIdxPrefetchWorkers > 0 {
+		require.GreaterOrEqual(c.t, c.prefetched.Add(-1), int32(0), "prefetch must precede every write")
+	} else {
+		require.Zero(c.t, c.prefetched.Load(), "prefetch must not run when disabled")
+	}
+	return c.RwCursorDupSort.Put(k, v)
+}
+
+type prefetchIndexDB struct {
+	kv.RoDB
+	cursor *prefetchIndexCursor
+}
+
+func (db *prefetchIndexDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	db.cursor.prefetchCalls.Add(1)
+	if db.cursor.prefetchErr != nil {
+		return nil, db.cursor.prefetchErr
+	}
+	tx, err := db.RoDB.BeginRo(ctx) //nolint:gocritic // The caller owns the returned transaction.
+	if err != nil {
+		return nil, err
+	}
+	return &prefetchIndexReadTx{Tx: tx, cursor: db.cursor}, nil
+}
+
+type prefetchIndexReadTx struct {
+	kv.Tx
+	cursor *prefetchIndexCursor
+}
+
+func (tx *prefetchIndexReadTx) CursorDupSort(table string) (kv.CursorDupSort, error) {
+	c, err := tx.Tx.CursorDupSort(table) //nolint:gocritic // The caller owns the returned cursor.
+	if err != nil {
+		return nil, err
+	}
+	return &prefetchIndexReadCursor{CursorDupSort: c, cursor: tx.cursor}, nil
+}
+
+type prefetchIndexReadCursor struct {
+	kv.CursorDupSort
+	cursor *prefetchIndexCursor
+}
+
+func (c *prefetchIndexReadCursor) SeekBothRange(k, v []byte) ([]byte, error) {
+	value, err := c.CursorDupSort.SeekBothRange(k, v)
+	if err == nil {
+		c.cursor.prefetched.Add(1)
+	}
+	return value, err
+}
+
+func TestInvertedIndexPrefetch(t *testing.T) {
+	type entry struct {
+		txNum uint64
+		key   string
+	}
+	entries := []entry{
+		{6, "c"},
+		{5, "b"},
+		{6, "a"},
+		{5, "b"},
+		{6, "c"},
+		{8, "z"},
+		{6, "d"},
+		{5, "a"},
+		{6, "a\x00"},
+		{8, "c"},
+		{7, "c"},
+		{9, "c"},
+		{9, "c"},
+		{0, "m"},
+		{0, ""},
+		{3, ""},
+		{2, ""},
+		{3, ""},
+	}
+	for i := range 3073 {
+		key := "boundary"
+		if i >= 1025 {
+			key = "boundary-next"
+		}
+		entries = append(entries, entry{uint64(16 + i%31), key})
+	}
+	for _, seed := range []struct {
+		name    string
+		entries []entry
+	}{
+		{"empty", nil},
+		{"append", []entry{{1, "z"}}},
+		{"overlap", []entry{{5, "b"}, {6, "b"}, {9, "z"}}},
+		{"same_last_key", []entry{{5, "b"}}},
+		{"empty_key", []entry{{2, ""}, {5, ""}}},
+	} {
+		for _, spill := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/spill=%t", seed.name, spill), func(t *testing.T) {
+				db, ii := testDbAndInvertedIndex(t, 16, log.New())
+				require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+					for _, e := range seed.entries {
+						var txNum [8]byte
+						binary.BigEndian.PutUint64(txNum[:], e.txNum)
+						if err := tx.Put(ii.KeysTable, txNum[:], []byte(e.key)); err != nil {
+							return err
+						}
+						if err := tx.Put(ii.ValuesTable, []byte(e.key), txNum[:]); err != nil {
+							return err
+						}
+					}
+					return nil
+				}))
+				tx, err := db.BeginRw(t.Context())
+				require.NoError(t, err)
+				defer tx.Rollback()
+				expected := map[string]map[string]struct{}{ii.KeysTable: {}, ii.ValuesTable: {}}
+				for _, group := range [][]entry{seed.entries, entries} {
+					for _, e := range group {
+						var txNum [8]byte
+						binary.BigEndian.PutUint64(txNum[:], e.txNum)
+						expected[ii.KeysTable][fmt.Sprintf("%x:%x", txNum, e.key)] = struct{}{}
+						expected[ii.ValuesTable][fmt.Sprintf("%x:%x", e.key, txNum)] = struct{}{}
+					}
+				}
+				iit := ii.beginForTests()
+				defer iit.Close()
+				c, err := tx.RwCursorDupSort(ii.ValuesTable)
+				require.NoError(t, err)
+				defer c.Close()
+				cursor := &prefetchIndexCursor{RwCursorDupSort: c, t: t}
+				w := iit.newWriter(&prefetchIndexDB{RoDB: db, cursor: cursor}, ii.dirs.Tmp, false)
+				defer w.close()
+				for i, e := range entries {
+					require.NoError(t, w.Add([]byte(e.key), e.txNum))
+					if spill && i%2 == 1 {
+						require.NoError(t, w.indexKeys.Flush())
+						require.NoError(t, w.index.Flush())
+					}
+				}
+				require.NoError(t, w.Flush(t.Context(), &prefetchIndexTx{RwTx: tx, table: ii.ValuesTable, cursor: cursor}))
+				require.Zero(t, cursor.prefetched.Load())
+				if invIdxPrefetchWorkers > 0 {
+					workers := invIdxPrefetchWorkers
+					entryCount := uint64(len(entries))
+					expectedCalls := entryCount/1024*min(workers, 1024) + min(workers, entryCount%1024)
+					require.EqualValues(t, expectedCalls, cursor.prefetchCalls.Load())
+				} else {
+					require.Zero(t, cursor.prefetchCalls.Load())
+				}
+				for table, values := range expected {
+					want := make([]string, 0, len(values))
+					for value := range values {
+						want = append(want, value)
+					}
+					var got []string
+					require.NoError(t, tx.ForEach(table, nil, func(k, v []byte) error {
+						got = append(got, fmt.Sprintf("%x:%x", k, v))
+						return nil
+					}))
+					require.ElementsMatch(t, want, got, table)
+				}
+			})
+		}
+	}
+}
+
+func TestInvertedIndexPrefetchError(t *testing.T) {
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	iit := ii.beginForTests()
+	defer iit.Close()
+	c, err := tx.RwCursorDupSort(ii.ValuesTable)
+	require.NoError(t, err)
+	defer c.Close()
+	wantErr := errors.New("read failed")
+	cursor := &prefetchIndexCursor{RwCursorDupSort: c, t: t, prefetchErr: wantErr}
+	w := iit.newWriter(&prefetchIndexDB{RoDB: db, cursor: cursor}, ii.dirs.Tmp, false)
+	defer w.close()
+	require.NoError(t, w.Add([]byte("key"), 1))
+	err = w.Flush(t.Context(), &prefetchIndexTx{RwTx: tx, table: ii.ValuesTable, cursor: cursor})
+	if invIdxPrefetchWorkers > 0 {
+		require.ErrorIs(t, err, wantErr)
+		value, getErr := tx.GetOne(ii.ValuesTable, []byte("key"))
+		require.NoError(t, getErr)
+		require.Empty(t, value, "failed prefetch must not write a partial batch")
+	} else {
+		require.NoError(t, err)
+		require.Zero(t, cursor.prefetchCalls.Load())
+	}
+}
+
+func TestInvertedIndexPrefetchReuse(t *testing.T) {
+	for _, workers := range []uint64{0, 3} {
+		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
+			previous := invIdxPrefetchWorkers
+			invIdxPrefetchWorkers = workers
+			t.Cleanup(func() { invIdxPrefetchWorkers = previous })
+			db, ii := testDbAndInvertedIndex(t, 16, log.New())
+			iit := ii.beginForTests()
+			defer iit.Close()
+			w := iit.newWriter(db, ii.dirs.Tmp, false)
+			defer w.close()
+			p := w.prefetcher
+			if invIdxPrefetchWorkers > 0 {
+				require.NotNil(t, p, "create the prefetcher with the writer")
+			} else {
+				require.Nil(t, p)
+			}
+			for txNum := uint64(1); txNum <= 2; txNum++ {
+				ctx, cancel := context.WithCancel(t.Context())
+				require.NoError(t, w.Add([]byte("key"), txNum))
+				err := db.Update(ctx, func(tx kv.RwTx) error { return w.Flush(ctx, tx) })
+				cancel()
+				require.NoError(t, err)
+				require.Same(t, p, w.prefetcher)
+			}
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
+					n, err := tx.Count(table)
+					require.NoError(t, err)
+					require.EqualValues(t, 2, n)
+				}
+				return nil
+			}))
+			w.close()
+			if p != nil {
+				require.ErrorIs(t, p.Prefetch(t.Context(), nil).Wait(), context.Canceled)
+			}
+		})
+	}
+}
+
+func TestInvertedIndexPrefetchCursor(t *testing.T) {
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, value := range []string{"one", "three"} {
+			if err := tx.Put(ii.ValuesTable, []byte("key"), []byte(value)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	c, err := tx.RwCursorDupSort(ii.ValuesTable)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.Put([]byte("uncommitted"), []byte("value")))
+	k, v, err := c.SeekBothExact([]byte("key"), []byte("three"))
+	require.NoError(t, err)
+	wantKey, wantValue := string(k), string(v)
+	pairs := [][2][]byte{
+		{[]byte("key"), []byte("one")},
+		{[]byte("key"), []byte("two")},
+		{[]byte("missing"), []byte("value")},
+		{[]byte("uncommitted"), []byte("value")},
+	}
+	p := kv.NewPrefetcher(db, ii.ValuesTable, 3)
+	defer p.Close()
+	require.NoError(t, p.Prefetch(t.Context(), pairs).Wait())
+	k, v, err = c.Current()
+	require.NoError(t, err)
+	require.Equal(t, wantKey, string(k))
+	require.Equal(t, wantValue, string(v))
+	v, err = tx.GetOne(ii.ValuesTable, []byte("uncommitted"))
+	require.NoError(t, err)
+	require.Equal(t, "value", string(v))
+	require.NoError(t, p.Prefetch(t.Context(), nil).Wait())
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, p.Prefetch(ctx, pairs).Wait(), context.Canceled)
+}
+
+func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).
+		RoTxsLimiter(semaphore.NewWeighted(0)).MustOpen()
+	t.Cleanup(db.Close)
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	p := kv.NewPrefetcher(db, kv.TblTracesToIdx, 1)
+	defer p.Close()
+	pairs := [][2][]byte{{[]byte("key"), make([]byte, 8)}}
+	require.NoError(t, p.Prefetch(ctx, pairs).Wait())
+	require.NoError(t, tx.Put(kv.TblTracesToIdx, pairs[0][0], pairs[0][1]))
 }

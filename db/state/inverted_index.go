@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -156,7 +157,10 @@ func (ii *InvertedIndex) efAccessorFileNameMask(fromStep, toStep kv.Step) string
 	return fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep)
 }
 
-var invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
+var (
+	invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
+	invIdxPrefetchWorkers     = dbg.EnvUint("INV_IDX_PREFETCH_WORKERS", uint64(runtime.GOMAXPROCS(0)))
+)
 
 func (ii *InvertedIndex) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	accessor, err := recsplit.OpenIndex(fPath)
@@ -327,11 +331,13 @@ func (iit *InvertedIndexRoTx) Files() (res VisibleFiles) {
 }
 
 func (iit *InvertedIndexRoTx) NewWriter() *InvertedIndexBufferedWriter {
-	return iit.newWriter(iit.ii.dirs.Tmp, !iit.ii.Enabled)
+	return iit.newWriter(nil, iit.ii.dirs.Tmp, !iit.ii.Enabled)
 }
 
 type InvertedIndexBufferedWriter struct {
 	index, indexKeys *etl.Collector
+	indexCount       uint64
+	prefetcher       *kv.Prefetcher
 
 	discard      bool
 	filenameBase string
@@ -371,6 +377,7 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
 		return err
 	}
+	w.indexCount++
 	return nil
 }
 
@@ -379,7 +386,7 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 		return nil
 	}
 	if w.index != nil {
-		if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		if err := w.flushIndex(ctx, tx); err != nil {
 			return err
 		}
 	}
@@ -388,8 +395,43 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 			return err
 		}
 	}
-	w.close()
+	w.reset()
 	return nil
+}
+
+func (w *InvertedIndexBufferedWriter) flushIndex(ctx context.Context, tx kv.RwTx) error {
+	if w.prefetcher == nil {
+		return w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()})
+	}
+	pairs := make([][2][]byte, 0, 1024)
+	var buffer []byte
+	flush := func(next etl.LoadNextFunc) error {
+		if err := w.prefetcher.Prefetch(ctx, pairs).Wait(); err != nil {
+			return err
+		}
+		for _, pair := range pairs {
+			if err := next(pair[0], pair[0], pair[1]); err != nil {
+				return err
+			}
+		}
+		pairs = pairs[:0]
+		buffer = buffer[:0]
+		return nil
+	}
+	remaining := w.indexCount
+	return w.index.Load(tx, w.indexTable, func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		start := len(buffer)
+		buffer = append(buffer, k...)
+		key := buffer[start:]
+		start = len(buffer)
+		buffer = append(buffer, v...)
+		pairs = append(pairs, [2][]byte{key, buffer[start:]})
+		remaining--
+		if len(pairs) == cap(pairs) || remaining == 0 {
+			return flush(next)
+		}
+		return nil
+	}, etl.TransformArgs{Quit: ctx.Done()})
 }
 
 func (w *InvertedIndexBufferedWriter) keysCollector() *etl.Collector {
@@ -410,15 +452,26 @@ func (w *InvertedIndexBufferedWriter) close() {
 	if w == nil {
 		return
 	}
+	if w.prefetcher != nil {
+		w.prefetcher.Close()
+	}
+	w.reset()
+}
+
+func (w *InvertedIndexBufferedWriter) reset() {
+	if w == nil {
+		return
+	}
 	if w.index != nil {
 		w.index.Close()
 	}
 	if w.indexKeys != nil {
 		w.indexKeys.Close()
 	}
+	w.indexCount = 0
 }
 
-func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIndexBufferedWriter {
+func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *InvertedIndexBufferedWriter {
 	if iit.ii.stepSize != iit.stepSize {
 		panic(fmt.Sprintf("assert: %d %d", iit.ii.stepSize, iit.stepSize))
 	}
@@ -432,6 +485,9 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 
 		indexKeysTable: iit.ii.KeysTable,
 		indexTable:     iit.ii.ValuesTable,
+	}
+	if invIdxPrefetchWorkers > 0 && !discard && db != nil {
+		w.prefetcher = kv.NewPrefetcher(db, w.indexTable, invIdxPrefetchWorkers)
 	}
 	return w
 }

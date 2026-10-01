@@ -485,11 +485,11 @@ func (tx *Tx) Debug() kv.TemporalDebugTx {
 }
 
 func (tx *RwTx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
-	return state.NewTemporalMemBatch(tx, ioMetrics)
+	return state.NewTemporalMemBatch(tx, tx.db.RwDB, ioMetrics)
 }
 
 func (tx *Tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
-	return state.NewTemporalMemBatch(tx, ioMetrics)
+	return state.NewTemporalMemBatch(tx, tx.db.RwDB, ioMetrics)
 }
 
 // ST1016 is reported here, not on AsyncClone: staticcheck aggregates the
