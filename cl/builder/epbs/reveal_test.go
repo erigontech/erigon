@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type revealRunnerSigner struct{}
@@ -39,11 +41,28 @@ func (revealRunnerSigner) SignEnvelope(context.Context, common.Hash) (common.Byt
 	return common.Bytes96{0: 3}, nil
 }
 
+type countingEnvelopeSigner struct {
+	revealRunnerSigner
+	calls atomic.Int32
+}
+
+func (s *countingEnvelopeSigner) SignEnvelope(context.Context, common.Hash) (common.Bytes96, error) {
+	s.calls.Add(1)
+	return common.Bytes96{0: 3}, nil
+}
+
 type revealBlockStore struct {
 	mu            sync.Mutex
 	blocks        map[common.Hash]*cltypes.SignedBeaconBlock
 	envelopes     map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	getBlockCalls atomic.Int32
+}
+
+func newRevealBlockStore() *revealBlockStore {
+	return &revealBlockStore{
+		blocks:    make(map[common.Hash]*cltypes.SignedBeaconBlock),
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+	}
 }
 
 func (s *revealBlockStore) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -102,14 +121,19 @@ func (p *recordingRevealPublisher) Publish(context.Context, string, []byte) erro
 type blockingRevealProcessor struct {
 	contextErr chan error
 	started    chan struct{}
+	blockedFor chan time.Duration
 	startOnce  sync.Once
 }
 
 func (p *blockingRevealProcessor) ProcessMessage(ctx context.Context, _ *uint64, _ *cltypes.SignedExecutionPayloadEnvelope) error {
+	startedAt := time.Now()
 	if p.started != nil {
 		p.startOnce.Do(func() { close(p.started) })
 	}
 	<-ctx.Done()
+	if p.blockedFor != nil {
+		p.blockedFor <- time.Since(startedAt)
+	}
 	p.contextErr <- ctx.Err()
 	return ctx.Err()
 }
@@ -132,6 +156,15 @@ type failingRevealProcessor struct {
 func (p *failingRevealProcessor) ProcessMessage(context.Context, *uint64, *cltypes.SignedExecutionPayloadEnvelope) error {
 	p.calls.Add(1)
 	return errors.New("local processing failed")
+}
+
+type canceledRevealProcessor struct {
+	calls atomic.Int32
+}
+
+func (p *canceledRevealProcessor) ProcessMessage(context.Context, *uint64, *cltypes.SignedExecutionPayloadEnvelope) error {
+	p.calls.Add(1)
+	return context.Canceled
 }
 
 type successfulRevealProcessor struct {
@@ -196,6 +229,42 @@ type firstBlockingRevealProcessor struct {
 	release   chan struct{}
 	processed chan common.Hash
 }
+
+type releaseBlockedRevealProcessor struct {
+	calls       atomic.Int32
+	started     chan struct{}
+	release     chan struct{}
+	releaseOnce sync.Once
+}
+
+func (p *releaseBlockedRevealProcessor) ProcessMessage(context.Context, *uint64, *cltypes.SignedExecutionPayloadEnvelope) error {
+	if p.calls.Add(1) == 1 {
+		close(p.started)
+		<-p.release
+	}
+	return nil
+}
+
+func (p *releaseBlockedRevealProcessor) unblock() {
+	p.releaseOnce.Do(func() { close(p.release) })
+}
+
+type revealLogCaptureHandler struct {
+	records chan<- *log.Record
+}
+
+func (h revealLogCaptureHandler) Log(record *log.Record) error {
+	if !strings.HasPrefix(record.Msg, "Embedded builder payload") {
+		return nil
+	}
+	select {
+	case h.records <- record:
+	default:
+	}
+	return nil
+}
+
+func (revealLogCaptureHandler) Enabled(context.Context, log.Lvl) bool { return true }
 
 func (p *firstBlockingRevealProcessor) ProcessMessage(
 	ctx context.Context,
@@ -861,6 +930,635 @@ type fixedRevealDeadlineClock struct {
 
 func (c fixedRevealDeadlineClock) GetSlotTime(uint64) time.Time {
 	return c.slotTime
+}
+
+func setRevealDeadlinePassed(t *testing.T, runner *revealRunner, slot uint64) (time.Time, time.Time) {
+	t.Helper()
+	slotStart := time.Now()
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: slot}, slotTime: slotStart}
+	deadline, ok := payloadRevealDeadline(runner.clock, runner.beaconCfg, slot)
+	require.True(t, ok)
+	slotStart = time.Now().Add(-deadline.Sub(slotStart) - 10*time.Millisecond)
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: slot}, slotTime: slotStart}
+	deadline, ok = payloadRevealDeadline(runner.clock, runner.beaconCfg, slot)
+	require.True(t, ok)
+	return slotStart, deadline
+}
+
+func activateRevealRequest(runner *revealRunner, request revealRequest, requestedAt time.Time, trigger revealTrigger) revealRequest {
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	request.requestedAt = requestedAt
+	request.trigger = trigger
+	request.generation = runner.newGenerationLocked()
+	runner.tracked[request.key] = revealTracking{
+		slot: request.slot, requestedAt: requestedAt, trigger: trigger, generation: request.generation, active: true,
+	}
+	runner.activeCount++
+	return request
+}
+
+func observeRevealOutcomes(runner *revealRunner) chan revealOutcome {
+	outcomes := make(chan revealOutcome, 4)
+	runner.observeOutcome = func(outcome revealOutcome) { outcomes <- outcome }
+	return outcomes
+}
+
+func captureRevealLogs(t *testing.T) <-chan *log.Record {
+	t.Helper()
+	records := make(chan *log.Record, 8)
+	previous := log.Root().GetHandler()
+	log.Root().SetHandler(revealLogCaptureHandler{records: records})
+	t.Cleanup(func() { log.Root().SetHandler(previous) })
+	return records
+}
+
+func requireSingleRevealOutcome(t *testing.T, outcomes chan revealOutcome) revealOutcome {
+	t.Helper()
+	outcome := receiveRevealTestValue(t, outcomes, "reveal outcome was not reported")
+	select {
+	case extra := <-outcomes:
+		t.Fatalf("unexpected extra reveal outcome: %+v", extra)
+	default:
+	}
+	return outcome
+}
+
+func receiveRevealTestValue[T any](t *testing.T, values <-chan T, failure string) T {
+	t.Helper()
+	select {
+	case value := <-values:
+		return value
+	case <-time.After(time.Second):
+		t.Fatal(failure)
+		var zero T
+		return zero
+	}
+}
+
+func requireRevealCapacityReleased(t *testing.T, runner *revealRunner) {
+	t.Helper()
+	runner.mu.Lock()
+	defer runner.mu.Unlock()
+	require.Zero(t, runner.activeCount)
+	require.Zero(t, runner.reservedActive)
+}
+
+func TestRevealRunnerReportsOutcomes(t *testing.T) {
+	tests := []struct {
+		name               string
+		trigger            revealTrigger
+		requestTime        func(time.Time, time.Time) time.Time
+		deadlineExpired    bool
+		dropPayload        bool
+		mutateRequest      func(*revealRequest)
+		wantKind           revealOutcomeKind
+		wantErr            error
+		wantErrText        string
+		wantSignerCalls    int32
+		wantProcessorCalls int32
+		wantPublisherCalls int32
+	}{
+		{
+			name: "revealed", trigger: revealTriggerGossip,
+			requestTime: func(slotStart, _ time.Time) time.Time { return slotStart.Add(40 * time.Millisecond) },
+			wantKind:    revealOutcomeRevealed, wantSignerCalls: 1, wantProcessorCalls: 1, wantPublisherCalls: 1,
+		},
+		{
+			name: "revealed for a request created before slot start", trigger: revealTriggerGossip,
+			requestTime: func(slotStart, _ time.Time) time.Time { return slotStart.Add(-500 * time.Millisecond) },
+			wantKind:    revealOutcomeRevealed, wantSignerCalls: 1, wantProcessorCalls: 1, wantPublisherCalls: 1,
+		},
+		{
+			name: "revealed despite a late request time", trigger: revealTriggerImported,
+			requestTime: func(_ time.Time, deadline time.Time) time.Time { return deadline.Add(time.Millisecond) },
+			wantKind:    revealOutcomeRevealed, wantSignerCalls: 1, wantProcessorCalls: 1, wantPublisherCalls: 1,
+		},
+		{
+			name: "withheld", trigger: revealTriggerImported, deadlineExpired: true,
+			requestTime: func(_ time.Time, deadline time.Time) time.Time { return deadline.Add(time.Millisecond) },
+			wantKind:    revealOutcomeWithheld, wantErr: ErrRevealExpired,
+		},
+		{
+			name: "withheld at the deadline", trigger: revealTriggerImported, deadlineExpired: true,
+			requestTime: func(_ time.Time, deadline time.Time) time.Time { return deadline },
+			wantKind:    revealOutcomeWithheld, wantErr: ErrRevealExpired,
+		},
+		{
+			name: "failed because the payload is missing", trigger: revealTriggerImported, dropPayload: true,
+			requestTime: func(slotStart, _ time.Time) time.Time { return slotStart },
+			wantKind:    revealOutcomeFailed, wantErr: errRetainedPayloadMissing,
+		},
+		{
+			name: "failed because the payload is missing at the deadline", trigger: revealTriggerCanonicalHead, dropPayload: true,
+			requestTime: func(_ time.Time, deadline time.Time) time.Time { return deadline },
+			wantKind:    revealOutcomeFailed, wantErr: errRetainedPayloadMissing,
+		},
+		{
+			name: "failed because the bid root mismatches at the deadline", trigger: revealTriggerCanonicalHead,
+			requestTime: func(_ time.Time, deadline time.Time) time.Time { return deadline },
+			mutateRequest: func(request *revealRequest) {
+				request.key.signedBidRoot[0] ^= 0xff
+			},
+			wantKind: revealOutcomeFailed, wantErrText: "epbs/reveal: retained bid root mismatch",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := newRevealBlockStore()
+			processor := new(successfulRevealProcessor)
+			publisher := new(recordingRevealPublisher)
+			runner, request := retainedRevealFixture(
+				t, revealTestClock{slot: 64}, processor, publisher, store, 1, time.Millisecond,
+			)
+			signer := new(countingEnvelopeSigner)
+			runner.signer = signer
+			slotStart := time.Now()
+			runner.clock = fixedRevealDeadlineClock{
+				revealTestClock: revealTestClock{slot: request.slot}, slotTime: slotStart,
+			}
+			deadline, ok := payloadRevealDeadline(runner.clock, runner.beaconCfg, request.slot)
+			require.True(t, ok)
+			if test.deadlineExpired {
+				slotStart, deadline = setRevealDeadlinePassed(t, runner, request.slot)
+			}
+			if test.dropPayload {
+				require.True(t, runner.coordinator.DropPayload(request.identity))
+			}
+			if test.mutateRequest != nil {
+				test.mutateRequest(&request)
+			}
+			requestedAt := test.requestTime(slotStart, deadline)
+			request = activateRevealRequest(runner, request, requestedAt, test.trigger)
+			outcomes := observeRevealOutcomes(runner)
+
+			before := time.Now()
+			runner.runRequest(t.Context(), request)
+			after := time.Now()
+
+			outcome := requireSingleRevealOutcome(t, outcomes)
+			require.Equal(t, test.wantKind, outcome.kind)
+			require.Equal(t, request.slot, outcome.request.slot)
+			require.Equal(t, request.key.beaconBlockRoot, outcome.request.key.beaconBlockRoot)
+			require.Equal(t, request.identity.BlockHash, outcome.request.identity.BlockHash)
+			require.Equal(t, test.trigger, outcome.request.trigger)
+			require.Equal(t, requestedAt.Sub(slotStart), outcome.requestedAfterSlotStart)
+			if test.wantErr == nil {
+				if test.wantErrText == "" {
+					require.NoError(t, outcome.err)
+				} else {
+					require.EqualError(t, outcome.err, test.wantErrText)
+				}
+			} else {
+				require.ErrorIs(t, outcome.err, test.wantErr)
+			}
+			if test.wantKind == revealOutcomeRevealed {
+				require.LessOrEqual(t, outcome.revealElapsed, after.Sub(before))
+			}
+			require.Equal(t, test.wantSignerCalls, signer.calls.Load())
+			require.Equal(t, test.wantProcessorCalls, processor.calls.Load())
+			require.Equal(t, test.wantPublisherCalls, publisher.calls.Load())
+			requireRevealCapacityReleased(t, runner)
+		})
+	}
+}
+
+func TestLogRevealOutcomeContract(t *testing.T) {
+	records := captureRevealLogs(t)
+	outcome := revealOutcome{
+		request: revealRequest{
+			key:      revealKey{beaconBlockRoot: common.Hash{0: 1}},
+			identity: PayloadIdentity{BlockHash: common.Hash{0: 2}},
+			slot:     64,
+			trigger:  revealTriggerGossip,
+		},
+		requestedAfterSlotStart: 20 * time.Millisecond,
+		revealElapsed:           30 * time.Millisecond,
+		err:                     errors.New("reveal failed"),
+	}
+	tests := []struct {
+		name    string
+		kind    revealOutcomeKind
+		level   log.Lvl
+		message string
+		keys    []string
+	}{
+		{
+			name: "revealed", kind: revealOutcomeRevealed, level: log.LvlInfo,
+			message: "Embedded builder payload revealed",
+			keys:    []string{"slot", "blockRoot", "blockHash", "trigger", "requestedAfterSlotStart", "revealElapsed"},
+		},
+		{
+			name: "withheld", kind: revealOutcomeWithheld, level: log.LvlInfo,
+			message: "Embedded builder payload withheld",
+			keys:    []string{"slot", "blockRoot", "blockHash", "trigger", "requestedAfterSlotStart"},
+		},
+		{
+			name: "failed", kind: revealOutcomeFailed, level: log.LvlWarn,
+			message: "Embedded builder payload reveal failed",
+			keys:    []string{"slot", "blockRoot", "blockHash", "trigger", "requestedAfterSlotStart", "revealElapsed", "err"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			outcome.kind = test.kind
+			logRevealOutcome(outcome)
+			record := receiveRevealTestValue(t, records, "reveal outcome was not logged")
+			require.Equal(t, test.level, record.Lvl)
+			require.Equal(t, test.message, record.Msg)
+			require.Len(t, record.Ctx, len(test.keys)*2)
+			fields := make(map[string]any, len(record.Ctx)/2)
+			keys := make([]string, 0, len(record.Ctx)/2)
+			for i := 0; i < len(record.Ctx); i += 2 {
+				key, ok := record.Ctx[i].(string)
+				require.True(t, ok)
+				keys = append(keys, key)
+				fields[key] = record.Ctx[i+1]
+			}
+			require.ElementsMatch(t, test.keys, keys)
+			require.Equal(t, uint64(64), fields["slot"])
+			require.Equal(t, common.Hash{0: 1}, fields["blockRoot"])
+			require.Equal(t, common.Hash{0: 2}, fields["blockHash"])
+			require.Equal(t, revealTriggerGossip, fields["trigger"])
+			require.Equal(t, 20*time.Millisecond, fields["requestedAfterSlotStart"])
+			if test.kind != revealOutcomeWithheld {
+				require.Equal(t, 30*time.Millisecond, fields["revealElapsed"])
+			}
+			if test.kind == revealOutcomeFailed {
+				require.Equal(t, outcome.err, fields["err"])
+			}
+			select {
+			case extra := <-records:
+				t.Fatalf("unexpected extra log record: %+v", extra)
+			default:
+			}
+		})
+	}
+}
+
+func TestRevealRunnerDefaultObserverLogsRevealedOutcome(t *testing.T) {
+	store := newRevealBlockStore()
+	runner, request := retainedRevealFixture(
+		t,
+		revealTestClock{slot: 64},
+		new(successfulRevealProcessor),
+		new(recordingRevealPublisher),
+		store,
+		1,
+		time.Millisecond,
+	)
+	slotStart := time.Now()
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: slotStart}
+	request = activateRevealRequest(runner, request, slotStart, revealTriggerGossip)
+	records := captureRevealLogs(t)
+
+	runner.runRequest(t.Context(), request)
+
+	record := receiveRevealTestValue(t, records, "default reveal observer did not log the outcome")
+	require.Equal(t, log.LvlInfo, record.Lvl)
+	require.Equal(t, "Embedded builder payload revealed", record.Msg)
+	requireRevealCapacityReleased(t, runner)
+}
+
+func TestRevealRunnerReportsFailedWhenDeadlinePassesDuringReveal(t *testing.T) {
+	store := newRevealBlockStore()
+	processor := &blockingRevealProcessor{
+		contextErr: make(chan error, 1), started: make(chan struct{}), blockedFor: make(chan time.Duration, 1),
+	}
+	runner, request := retainedRevealFixture(
+		t, revealTestClock{slot: 64}, processor, new(recordingRevealPublisher), store, 1, time.Second,
+	)
+	runner.beaconCfg.SecondsPerSlot = 1
+	runner.beaconCfg.PayloadDueBps = 2000
+	slotStart := time.Now()
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: slotStart}
+	request = activateRevealRequest(runner, request, slotStart, revealTriggerGossip)
+	outcomes := observeRevealOutcomes(runner)
+
+	done := make(chan struct{})
+	go func() {
+		runner.runRequest(t.Context(), request)
+		close(done)
+	}()
+	receiveRevealTestValue(t, done, "reveal did not finish after the payload deadline")
+
+	select {
+	case <-processor.started:
+	default:
+		t.Fatal("reveal processor did not start before the payload deadline")
+	}
+	select {
+	case err := <-processor.contextErr:
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	default:
+		t.Fatal("payload deadline did not cancel the reveal processor")
+	}
+	var blockedFor time.Duration
+	select {
+	case blockedFor = <-processor.blockedFor:
+	default:
+		t.Fatal("reveal processor did not record its blocked interval")
+	}
+	require.Positive(t, blockedFor)
+
+	outcome := requireSingleRevealOutcome(t, outcomes)
+	require.Equal(t, revealOutcomeFailed, outcome.kind)
+	require.Equal(t, time.Duration(0), outcome.requestedAfterSlotStart)
+	require.GreaterOrEqual(t, outcome.revealElapsed, blockedFor)
+	require.ErrorIs(t, outcome.err, ErrRevealExpired)
+	requireRevealCapacityReleased(t, runner)
+}
+
+func TestRevealRunnerDoesNotReportCanceledReveal(t *testing.T) {
+	store := newRevealBlockStore()
+	processor := &blockingRevealProcessor{contextErr: make(chan error, 1), started: make(chan struct{})}
+	runner, request := retainedRevealFixture(
+		t, revealTestClock{slot: 64}, processor, new(recordingRevealPublisher), store, 1, time.Millisecond,
+	)
+	slotStart := time.Now()
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: slotStart}
+	request = activateRevealRequest(runner, request, slotStart, revealTriggerImported)
+	outcomes := observeRevealOutcomes(runner)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		runner.runRequest(ctx, request)
+		close(done)
+	}()
+	receiveRevealTestValue(t, processor.started, "reveal processor did not start")
+	cancel()
+	receiveRevealTestValue(t, done, "canceled reveal did not stop")
+	err := receiveRevealTestValue(t, processor.contextErr, "canceled reveal did not cancel the processor")
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, outcomes)
+	requireRevealCapacityReleased(t, runner)
+}
+
+func TestRevealRunnerReportsProcessorCancellationWithHealthyContext(t *testing.T) {
+	store := newRevealBlockStore()
+	processor := new(canceledRevealProcessor)
+	runner, request := retainedRevealFixture(
+		t, revealTestClock{slot: 64}, processor, new(recordingRevealPublisher), store, 1, time.Millisecond,
+	)
+	runner.beaconCfg.SecondsPerSlot = 1
+	runner.beaconCfg.PayloadDueBps = 2000
+	slotStart := time.Now()
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: slotStart}
+	request = activateRevealRequest(runner, request, slotStart, revealTriggerImported)
+	outcomes := observeRevealOutcomes(runner)
+
+	runner.runRequest(t.Context(), request)
+
+	outcome := requireSingleRevealOutcome(t, outcomes)
+	require.Equal(t, revealOutcomeFailed, outcome.kind)
+	require.ErrorIs(t, outcome.err, context.Canceled)
+	require.Positive(t, processor.calls.Load())
+	requireRevealCapacityReleased(t, runner)
+}
+
+func TestRevealRunnerRecordsSubmissionTrigger(t *testing.T) {
+	tests := []struct {
+		name    string
+		trigger revealTrigger
+		submit  func(*testing.T, *revealRunner, *revealBlockStore, revealRequest) revealRequest
+	}{
+		{
+			name:    "gossip",
+			trigger: revealTriggerGossip,
+			submit: func(t *testing.T, runner *revealRunner, store *revealBlockStore, request revealRequest) revealRequest {
+				block := store.blocks[request.key.beaconBlockRoot]
+				require.True(t, runner.SubmitGossipValidatedBlock(request.key.beaconBlockRoot, block))
+				return receiveRevealTestValue(t, runner.requests, "gossip reveal request was not queued")
+			},
+		},
+		{
+			name:    "imported",
+			trigger: revealTriggerImported,
+			submit: func(t *testing.T, runner *revealRunner, _ *revealBlockStore, request revealRequest) revealRequest {
+				require.True(t, runner.SubmitAcceptedBlock(request.key.beaconBlockRoot))
+				return receiveRevealTestValue(t, runner.requests, "imported reveal request was not queued")
+			},
+		},
+		{
+			name:    "canonical head",
+			trigger: revealTriggerCanonicalHead,
+			submit: func(t *testing.T, runner *revealRunner, _ *revealBlockStore, request revealRequest) revealRequest {
+				head := new(revealHeadReader)
+				head.setRoot(request.key.beaconBlockRoot)
+				runner.head = head
+				runner.reconcileCanonicalHead(t.Context())
+				canonicalRequest, ok := runner.nextCanonicalRequest()
+				require.True(t, ok)
+				return canonicalRequest
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := newRevealBlockStore()
+			runner, request := retainedRevealFixture(
+				t, revealTestClock{slot: 64}, new(successfulRevealProcessor), new(recordingRevealPublisher), store, 1, time.Millisecond,
+			)
+			runner.clock = fixedRevealDeadlineClock{
+				revealTestClock: revealTestClock{slot: request.slot}, slotTime: time.Now().Add(-time.Second),
+			}
+
+			before := time.Now()
+			queued := test.submit(t, runner, store, request)
+			after := time.Now()
+			require.Equal(t, test.trigger, queued.trigger)
+			require.False(t, queued.requestedAt.Before(before))
+			require.False(t, queued.requestedAt.After(after))
+		})
+	}
+}
+
+func TestRevealRunnerReportsWithheldForLateGossipSubmission(t *testing.T) {
+	store := newRevealBlockStore()
+	processor := new(successfulRevealProcessor)
+	publisher := new(recordingRevealPublisher)
+	runner, fixtureRequest := retainedRevealFixture(
+		t, revealTestClock{slot: 64}, processor, publisher, store, 1, time.Millisecond,
+	)
+	signer := new(countingEnvelopeSigner)
+	runner.signer = signer
+	_, deadline := setRevealDeadlinePassed(t, runner, fixtureRequest.slot)
+	block := store.blocks[fixtureRequest.key.beaconBlockRoot]
+	require.True(t, runner.SubmitGossipValidatedBlock(fixtureRequest.key.beaconBlockRoot, block))
+	request := receiveRevealTestValue(t, runner.requests, "late gossip reveal request was not queued")
+	require.False(t, request.requestedAt.Before(deadline))
+	outcomes := observeRevealOutcomes(runner)
+
+	runner.runRequest(t.Context(), request)
+
+	outcome := requireSingleRevealOutcome(t, outcomes)
+	require.Equal(t, revealOutcomeWithheld, outcome.kind)
+	require.Equal(t, revealTriggerGossip, outcome.request.trigger)
+	require.ErrorIs(t, outcome.err, ErrRevealExpired)
+	require.Zero(t, signer.calls.Load())
+	require.Zero(t, processor.calls.Load())
+	require.Zero(t, publisher.calls.Load())
+	requireRevealCapacityReleased(t, runner)
+}
+
+func TestRevealRunnerCanonicalReplacementKeepsFirstRequestTime(t *testing.T) {
+	store := newRevealBlockStore()
+	processor := &firstBlockingRevealProcessor{
+		started: make(chan struct{}), release: make(chan struct{}), processed: make(chan common.Hash, 2),
+	}
+	runner, fixtureRequest := retainedRevealFixture(
+		t, revealTestClock{slot: 64}, processor, new(recordingRevealPublisher), store, 1, time.Millisecond,
+	)
+	slotStart := time.Now()
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: fixtureRequest.slot}, slotTime: slotStart}
+	outcomes := observeRevealOutcomes(runner)
+	block := store.blocks[fixtureRequest.key.beaconBlockRoot]
+	require.True(t, runner.SubmitGossipValidatedBlock(fixtureRequest.key.beaconBlockRoot, block))
+	request := receiveRevealTestValue(t, runner.requests, "gossip reveal request was not queued")
+	firstRequestedAt := request.requestedAt
+	firstDone := make(chan struct{})
+	go func() {
+		runner.runRequest(t.Context(), request)
+		close(firstDone)
+	}()
+	receiveRevealTestValue(t, processor.started, "gossip reveal processor did not start")
+
+	require.True(t, runner.submitAcceptedBlock(request.key.beaconBlockRoot, true))
+	receiveRevealTestValue(t, firstDone, "superseded reveal did not stop")
+	require.Empty(t, outcomes)
+	requireRevealCapacityReleased(t, runner)
+	canonicalRequest, ok := runner.nextCanonicalRequest()
+	require.True(t, ok)
+	require.False(t, firstRequestedAt.IsZero())
+	require.Equal(t, firstRequestedAt, canonicalRequest.requestedAt)
+	require.Equal(t, revealTriggerGossip, canonicalRequest.trigger)
+
+	runner.runRequest(t.Context(), canonicalRequest)
+	outcome := requireSingleRevealOutcome(t, outcomes)
+	require.Equal(t, revealOutcomeRevealed, outcome.kind)
+	require.Equal(t, revealTriggerGossip, outcome.request.trigger)
+	require.Equal(t, firstRequestedAt.Sub(slotStart), outcome.requestedAfterSlotStart)
+	requireRevealCapacityReleased(t, runner)
+}
+
+func TestRevealRunnerSupersededGenerationCannotFinishCanonicalReplacement(t *testing.T) {
+	store := newRevealBlockStore()
+	processor := &releaseBlockedRevealProcessor{started: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(processor.unblock)
+	runner, fixtureRequest := retainedRevealFixture(
+		t, revealTestClock{slot: 64}, processor, new(recordingRevealPublisher), store, 1, time.Millisecond,
+	)
+	runner.clock = fixedRevealDeadlineClock{
+		revealTestClock: revealTestClock{slot: fixtureRequest.slot}, slotTime: time.Now(),
+	}
+	outcomes := observeRevealOutcomes(runner)
+	block := store.blocks[fixtureRequest.key.beaconBlockRoot]
+	require.True(t, runner.SubmitGossipValidatedBlock(fixtureRequest.key.beaconBlockRoot, block))
+	gossipRequest := receiveRevealTestValue(t, runner.requests, "gossip reveal request was not queued")
+	firstDone := make(chan struct{})
+	go func() {
+		runner.runRequest(t.Context(), gossipRequest)
+		close(firstDone)
+	}()
+	receiveRevealTestValue(t, processor.started, "gossip reveal processor did not start")
+
+	require.True(t, runner.submitAcceptedBlock(gossipRequest.key.beaconBlockRoot, true))
+	canonicalRequest, ok := runner.nextCanonicalRequest()
+	require.True(t, ok)
+	processor.unblock()
+	receiveRevealTestValue(t, firstDone, "superseded gossip reveal did not finish")
+	require.Empty(t, outcomes)
+
+	runner.mu.Lock()
+	tracking, tracked := runner.tracked[canonicalRequest.key]
+	activeCount := runner.activeCount
+	reservedActive := runner.reservedActive
+	runner.mu.Unlock()
+	require.True(t, tracked)
+	require.True(t, tracking.active)
+	require.Equal(t, canonicalRequest.generation, tracking.generation)
+	require.Equal(t, 1, activeCount)
+	require.Equal(t, 1, reservedActive)
+
+	runner.runRequest(t.Context(), canonicalRequest)
+	outcome := requireSingleRevealOutcome(t, outcomes)
+	require.Equal(t, revealOutcomeRevealed, outcome.kind)
+	requireRevealCapacityReleased(t, runner)
+}
+
+func TestRevealRunnerDoesNotReportWhenCompletionClaimIsLost(t *testing.T) {
+	store := newRevealBlockStore()
+	processor := &firstBlockingRevealProcessor{
+		started: make(chan struct{}), release: make(chan struct{}), processed: make(chan common.Hash, 1),
+	}
+	runner, request := retainedRevealFixture(
+		t, revealTestClock{slot: 64}, processor, new(recordingRevealPublisher), store, 1, time.Millisecond,
+	)
+	slotStart := time.Now()
+	runner.clock = fixedRevealDeadlineClock{revealTestClock: revealTestClock{slot: request.slot}, slotTime: slotStart}
+	request = activateRevealRequest(runner, request, slotStart, revealTriggerGossip)
+	outcomes := observeRevealOutcomes(runner)
+	done := make(chan struct{})
+	go func() {
+		runner.runRequest(t.Context(), request)
+		close(done)
+	}()
+	receiveRevealTestValue(t, processor.started, "reveal processor did not start")
+
+	runner.mu.Lock()
+	tracking := runner.tracked[request.key]
+	stop := runner.retireTrackingLocked(request.key, tracking)
+	runner.mu.Unlock()
+	require.NotNil(t, stop)
+	close(processor.release)
+	receiveRevealTestValue(t, done, "reveal did not finish after losing its completion claim")
+
+	require.Empty(t, outcomes)
+	requireRevealCapacityReleased(t, runner)
+}
+
+func TestRevealRunnerCompletionClaimsRequestBeforeReporting(t *testing.T) {
+	store := newRevealBlockStore()
+	processor := new(successfulRevealProcessor)
+	publisher := new(recordingRevealPublisher)
+	runner, fixtureRequest := retainedRevealFixture(
+		t, revealTestClock{slot: 64}, processor, publisher, store, 1, time.Millisecond,
+	)
+	runner.clock = fixedRevealDeadlineClock{
+		revealTestClock: revealTestClock{slot: fixtureRequest.slot}, slotTime: time.Now(),
+	}
+	observerStarted := make(chan revealOutcome, 1)
+	releaseObserver := make(chan struct{})
+	runner.observeOutcome = func(outcome revealOutcome) {
+		observerStarted <- outcome
+		select {
+		case <-releaseObserver:
+		case <-time.After(time.Second):
+			t.Error("outcome observer was not released")
+		}
+	}
+	block := store.blocks[fixtureRequest.key.beaconBlockRoot]
+	require.True(t, runner.SubmitGossipValidatedBlock(fixtureRequest.key.beaconBlockRoot, block))
+	request := receiveRevealTestValue(t, runner.requests, "gossip reveal request was not queued")
+	done := make(chan struct{})
+	go func() {
+		runner.runRequest(t.Context(), request)
+		close(done)
+	}()
+	outcome := receiveRevealTestValue(t, observerStarted, "outcome observer did not start")
+
+	replacementAccepted := runner.submitAcceptedBlock(request.key.beaconBlockRoot, true)
+	close(releaseObserver)
+	receiveRevealTestValue(t, done, "reveal did not finish after outcome reporting")
+
+	require.False(t, replacementAccepted)
+	require.Equal(t, revealOutcomeRevealed, outcome.kind)
+	require.Equal(t, int32(1), processor.calls.Load())
+	require.Equal(t, int32(1), publisher.calls.Load())
+	requireRevealCapacityReleased(t, runner)
 }
 
 type mutableRevealClock struct {

@@ -28,7 +28,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-var ErrRevealExpired = errors.New("epbs/reveal: payload reveal deadline expired")
+var (
+	ErrRevealExpired          = errors.New("epbs/reveal: payload reveal deadline expired")
+	errRetainedPayloadMissing = errors.New("epbs/reveal: retained payload is missing")
+)
 
 const maxConcurrentReveals = 4
 
@@ -66,35 +69,64 @@ type revealKey struct {
 	signedBidRoot   common.Hash
 }
 
+type revealTrigger string
+
+const (
+	revealTriggerGossip        revealTrigger = "gossip"
+	revealTriggerImported      revealTrigger = "imported"
+	revealTriggerCanonicalHead revealTrigger = "canonical_head"
+)
+
+type revealOutcomeKind uint8
+
+const (
+	revealOutcomeRevealed revealOutcomeKind = iota
+	revealOutcomeWithheld
+	revealOutcomeFailed
+)
+
+type revealOutcome struct {
+	kind                    revealOutcomeKind
+	request                 revealRequest
+	requestedAfterSlotStart time.Duration
+	revealElapsed           time.Duration
+	err                     error
+}
+
 type revealRequest struct {
-	key        revealKey
-	identity   PayloadIdentity
-	slot       uint64
-	generation uint64
+	key         revealKey
+	identity    PayloadIdentity
+	slot        uint64
+	requestedAt time.Time
+	trigger     revealTrigger
+	generation  uint64
 }
 
 type revealTracking struct {
-	slot       uint64
-	generation uint64
-	active     bool
-	reserved   bool
-	stop       context.CancelFunc
+	slot        uint64
+	requestedAt time.Time
+	trigger     revealTrigger
+	generation  uint64
+	active      bool
+	reserved    bool
+	stop        context.CancelFunc
 }
 
 type revealRunner struct {
-	beaconCfg     *clparams.BeaconChainConfig
-	clock         LiveSlotClock
-	signer        Signer
-	coordinator   *Coordinator
-	blocks        AcceptedBlockReader
-	persisted     PersistedEnvelopeReader
-	head          CanonicalHeadReader
-	processor     PayloadProcessor
-	blobData      BlobDataPreparer
-	publisher     GossipPublisher
-	retryInterval time.Duration
-	requests      chan revealRequest
-	canonical     chan struct{}
+	beaconCfg      *clparams.BeaconChainConfig
+	clock          LiveSlotClock
+	signer         Signer
+	coordinator    *Coordinator
+	blocks         AcceptedBlockReader
+	persisted      PersistedEnvelopeReader
+	head           CanonicalHeadReader
+	processor      PayloadProcessor
+	blobData       BlobDataPreparer
+	publisher      GossipPublisher
+	retryInterval  time.Duration
+	observeOutcome func(revealOutcome)
+	requests       chan revealRequest
+	canonical      chan struct{}
 
 	mu               sync.Mutex
 	tracked          map[revealKey]revealTracking
@@ -124,8 +156,32 @@ func newRevealRunner(
 	return &revealRunner{
 		beaconCfg: beaconCfg, clock: clock, signer: signer, coordinator: coordinator, blocks: blocks,
 		processor: processor, publisher: publisher, persisted: persisted, head: head, retryInterval: retryInterval,
-		requests: make(chan revealRequest, maxQueued), canonical: make(chan struct{}, 1),
+		observeOutcome: logRevealOutcome,
+		requests:       make(chan revealRequest, maxQueued), canonical: make(chan struct{}, 1),
 		tracked: make(map[revealKey]revealTracking),
+	}
+}
+
+func logRevealOutcome(outcome revealOutcome) {
+	fields := []any{
+		"slot", outcome.request.slot,
+		"blockRoot", outcome.request.key.beaconBlockRoot,
+		"blockHash", outcome.request.identity.BlockHash,
+		"trigger", outcome.request.trigger,
+		"requestedAfterSlotStart", outcome.requestedAfterSlotStart,
+	}
+	switch outcome.kind {
+	case revealOutcomeRevealed:
+		log.Info("Embedded builder payload revealed", append(fields,
+			"revealElapsed", outcome.revealElapsed,
+		)...)
+	case revealOutcomeWithheld:
+		log.Info("Embedded builder payload withheld", fields...)
+	case revealOutcomeFailed:
+		log.Warn("Embedded builder payload reveal failed", append(fields,
+			"revealElapsed", outcome.revealElapsed,
+			"err", outcome.err,
+		)...)
 	}
 }
 
@@ -199,7 +255,8 @@ func (r *revealRunner) nextCanonicalRequest() (revealRequest, bool) {
 		}
 	}
 	r.tracked[request.key] = revealTracking{
-		slot: request.slot, generation: request.generation, active: true, reserved: true,
+		slot: request.slot, requestedAt: request.requestedAt, trigger: request.trigger,
+		generation: request.generation, active: true, reserved: true,
 	}
 	r.activeCount++
 	r.reservedActive++
@@ -216,10 +273,29 @@ func (r *revealRunner) runRequest(ctx context.Context, request revealRequest) {
 		return
 	}
 	defer stop()
-	defer r.finishRequest(request.key, request.generation)
-	if err := r.reveal(requestCtx, request); err != nil && !errors.Is(err, context.Canceled) {
-		log.Warn("Embedded builder payload reveal failed", "slot", request.slot, "blockRoot", request.key.beaconBlockRoot, "err", err)
+	revealStartedAt := time.Now()
+	err := r.reveal(requestCtx, request)
+	revealElapsed := time.Since(revealStartedAt)
+	if !r.finishRequest(request.key, request.generation) || err != nil && requestCtx.Err() != nil {
+		return
 	}
+	slotStart := r.clock.GetSlotTime(request.slot)
+	outcome := revealOutcome{
+		request:                 request,
+		requestedAfterSlotStart: request.requestedAt.Sub(slotStart),
+		revealElapsed:           revealElapsed,
+		err:                     err,
+	}
+	deadline, hasDeadline := payloadRevealDeadline(r.clock, r.beaconCfg, request.slot)
+	switch {
+	case err == nil:
+		outcome.kind = revealOutcomeRevealed
+	case hasDeadline && !request.requestedAt.Before(deadline) && errors.Is(err, ErrRevealExpired):
+		outcome.kind = revealOutcomeWithheld
+	default:
+		outcome.kind = revealOutcomeFailed
+	}
+	r.observeOutcome(outcome)
 }
 
 func (r *revealRunner) startRequest(ctx context.Context, request revealRequest) (context.Context, context.CancelFunc, bool) {
@@ -243,7 +319,7 @@ func (r *revealRunner) SubmitGossipValidatedBlock(blockRoot common.Hash, block *
 	if block == nil {
 		return false
 	}
-	return r.submitBlock(blockRoot, block, false)
+	return r.submitBlock(blockRoot, block, revealTriggerGossip)
 }
 
 func (r *revealRunner) reconcileCanonicalHead(ctx context.Context) {
@@ -258,10 +334,19 @@ func (r *revealRunner) reconcileCanonicalHead(ctx context.Context) {
 }
 
 func (r *revealRunner) submitAcceptedBlock(blockRoot common.Hash, replaceInactive bool) bool {
-	return r.submitBlock(blockRoot, nil, replaceInactive)
+	trigger := revealTriggerImported
+	if replaceInactive {
+		trigger = revealTriggerCanonicalHead
+	}
+	return r.submitBlock(blockRoot, nil, trigger)
 }
 
-func (r *revealRunner) submitBlock(blockRoot common.Hash, block *cltypes.SignedBeaconBlock, replaceInactive bool) bool {
+func (r *revealRunner) submitBlock(
+	blockRoot common.Hash,
+	block *cltypes.SignedBeaconBlock,
+	trigger revealTrigger,
+) bool {
+	replaceInactive := trigger == revealTriggerCanonicalHead
 	if replaceInactive {
 		if !r.canonicalNeedsValidation(blockRoot) {
 			return false
@@ -300,7 +385,9 @@ func (r *revealRunner) submitBlock(blockRoot common.Hash, block *cltypes.SignedB
 		return false
 	}
 	key := revealKey{beaconBlockRoot: blockRoot, signedBidRoot: common.Hash(signedBidRoot)}
-	request := revealRequest{key: key, identity: identity, slot: signedBid.Message.Slot}
+	request := revealRequest{
+		key: key, identity: identity, slot: signedBid.Message.Slot, requestedAt: time.Now(), trigger: trigger,
+	}
 	if replaceInactive {
 		return r.submitCanonicalRequest(request)
 	}
@@ -313,7 +400,10 @@ func (r *revealRunner) submitBlock(blockRoot common.Hash, block *cltypes.SignedB
 		return false
 	}
 	request.generation = r.newGenerationLocked()
-	r.tracked[key] = revealTracking{slot: request.slot, generation: request.generation, active: true}
+	r.tracked[key] = revealTracking{
+		slot: request.slot, requestedAt: request.requestedAt, trigger: request.trigger,
+		generation: request.generation, active: true,
+	}
 	r.activeCount++
 	select {
 	case r.requests <- request:
@@ -364,6 +454,8 @@ func (r *revealRunner) submitCanonicalRequest(request revealRequest) bool {
 				satisfied = true
 				continue
 			}
+			request.requestedAt = tracking.requestedAt
+			request.trigger = tracking.trigger
 			if stop := r.retireTrackingLocked(key, tracking); stop != nil {
 				stops = append(stops, stop)
 			}
@@ -457,12 +549,12 @@ func (r *revealRunner) pruneTracked(currentSlot uint64) {
 	}
 }
 
-func (r *revealRunner) finishRequest(key revealKey, generation uint64) {
+func (r *revealRunner) finishRequest(key revealKey, generation uint64) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tracking, ok := r.tracked[key]
 	if !ok || !tracking.active || tracking.generation != generation {
-		return
+		return false
 	}
 	r.activeCount--
 	if tracking.reserved {
@@ -471,6 +563,7 @@ func (r *revealRunner) finishRequest(key revealKey, generation uint64) {
 	tracking.active = false
 	tracking.stop = nil
 	r.tracked[key] = tracking
+	return true
 }
 
 func (r *revealRunner) releaseActiveTracking() {
@@ -488,8 +581,11 @@ func (r *revealRunner) releaseActiveTracking() {
 
 func (r *revealRunner) reveal(ctx context.Context, request revealRequest) error {
 	retained, ok, err := r.coordinator.Payload(request.identity)
-	if err != nil || !ok {
+	if err != nil {
 		return err
+	}
+	if !ok {
+		return errRetainedPayloadMissing
 	}
 	if retained.SignedBidRoot != request.key.signedBidRoot {
 		return errors.New("epbs/reveal: retained bid root mismatch")
