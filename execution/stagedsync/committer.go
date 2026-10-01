@@ -566,15 +566,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				cc.state.ResetBlockFlags()
 			}
 		case cc.perBlockCompute(blockNum):
-			if cc.lastComputedBlock == 0 && r.isPartial && r.Block.Root() == (common.Hash{}) {
-				// First block is partial (resumed mid-block).
-				// Compute it (like serial does) to save trie state, then
-				// restore that state so the next full block starts from
-				// the same trie state as serial's batch 2 start.
-				cc.computeWithoutCheck(ctx, target)
-			} else {
-				cc.computeAndCheck(ctx, target)
-			}
+			cc.computeAndCheck(ctx, target)
 			if blockNum+1 == cc.perBlockFrom {
 				// Pre-window per-block computes (BatchCommitments off) defer
 				// branch writes too — flush the boundary block's pending update
@@ -1488,12 +1480,6 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 
 func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, target commitTarget) {
 	cc.compute(ctx, target, computeMode{checkRoot: true, publishRoot: true})
-}
-
-// computeWithoutCheck computes the first partial block's commitment without
-// verifying the root (its trie state doesn't match the header).
-func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, target commitTarget) {
-	cc.compute(ctx, target, computeMode{label: "partial-block "})
 }
 
 func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, target commitTarget) {

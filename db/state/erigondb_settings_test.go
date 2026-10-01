@@ -84,6 +84,36 @@ func TestErigonDBSettingsConversionPointRoundTrip(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestResolveErigonDBStepSizeUsesFirstStartChoice(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		preverified bool
+		want        uint64
+	}{
+		{name: "fresh", want: config3.DefaultStepSize},
+		{name: "legacy", preverified: true, want: config3.LegacyStepSize},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			if tc.preverified {
+				require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), nil, 0o644))
+			}
+			got, err := ResolveErigonDBStepSize(dirs)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestResolveErigonDBStepSizeReadsExistingSettings(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	refs := false
+	require.NoError(t, WriteErigonDBSettings(dirs, &ErigonDBSettings{StepSize: 123, ReferencesInCommitmentBranches: &refs}))
+	got, err := ResolveErigonDBStepSize(dirs)
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), got)
+}
+
 func TestErigonDBSettingsTrieVariantRoundTrip(t *testing.T) {
 	t.Parallel()
 	for _, variant := range []string{TrieVariantHex, TrieVariantBin, TrieVariantHexBin} {

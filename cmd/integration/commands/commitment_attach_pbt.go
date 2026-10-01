@@ -30,19 +30,21 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
@@ -125,7 +127,7 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	} else {
 		nodeSettings, err = dbstate.ReadErigonDBSettings(nodeDirs)
 		if errors.Is(err, fs.ErrNotExist) {
-			stepSize, stepErr := pbtAttachNodeStepSize(nodeDirs)
+			stepSize, stepErr := dbstate.ResolveErigonDBStepSize(nodeDirs)
 			if stepErr != nil {
 				return stepErr
 			}
@@ -173,6 +175,14 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
 		return err
 	}
+	publishedRoot, err := pbtAttachPublishedRoot(ctx, publishedDirs, publishedSettings, logger)
+	if err != nil {
+		return err
+	}
+	blockHash, blockEnd, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
+	if err != nil {
+		return err
+	}
 	refs := publishedSettings.RefsInCommitmentBranches()
 	variant := dbstate.TrieVariantHexBin
 	hash := publishedSettings.TrieHashName()
@@ -216,6 +226,11 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if err := runPBTAttachStepHook("reset"); err != nil {
 		return err
 	}
+	if blockEnd {
+		if err := writePBTAttachShadowRoot(ctx, nodeDirs, blockHash, blockNum, publishedRoot); err != nil {
+			return err
+		}
+	}
 	if err := dbstate.WriteErigonDBSettings(nodeDirs, finalSettings); err != nil {
 		return err
 	}
@@ -225,20 +240,65 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	return dbstate.RemovePBTAttachMarker(nodeDirs)
 }
 
-func pbtAttachNodeStepSize(dirs datadir.Dirs) (uint64, error) {
-	if _, err := os.Stat(filepath.Join(dirs.Snap, datadir.PreverifiedFileName)); err == nil {
-		return config3.LegacyStepSize, nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return 0, err
-	}
-	return config3.DefaultStepSize, nil
-}
-
 func runPBTAttachStepHook(step string) error {
 	if attachPBTStepHook == nil {
 		return nil
 	}
 	return attachPBTStepHook(step)
+}
+
+func pbtAttachPublishedRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger) (common.Hash, error) {
+	configurePBTSourceVariant(settings)
+	if err := eip8297.SetHashSuite(settings.TrieHashName()); err != nil {
+		return common.Hash{}, err
+	}
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(nil); err != nil {
+		return common.Hash{}, err
+	}
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if err := dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
+		return builder.Add(leaf.Key, leaf.Value)
+	}); err != nil {
+		return common.Hash{}, err
+	}
+	return builder.RootHash()
+}
+
+func pbtAttachBlockEnd(ctx context.Context, dirs datadir.Dirs, blockNum, txNum uint64) (common.Hash, bool, error) {
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer db.Close()
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return common.Hash{}, false, err
+	}
+	defer tx.Rollback()
+	maxTxNum, err := rawdbv3.TxNums.Max(ctx, tx, blockNum)
+	if err != nil {
+		return common.Hash{}, false, err
+	}
+	header := rawdb.ReadHeaderByNumber(tx, blockNum)
+	if header == nil {
+		return common.Hash{}, false, nil
+	}
+	return header.Hash(), maxTxNum == txNum, nil
+}
+
+func writePBTAttachShadowRoot(ctx context.Context, dirs datadir.Dirs, blockHash common.Hash, blockNum uint64, root common.Hash) error {
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer db.Close()
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteShadowStateRoot(tx, blockHash, blockNum, root[:])
+	})
 }
 
 func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) error {

@@ -175,6 +175,24 @@ func ReadErigonDBConversionPoint(dirs datadir.Dirs) (blockNum, txNum uint64, ok 
 	return settings.ConversionPoint()
 }
 
+func ResolveErigonDBStepSize(dirs datadir.Dirs) (uint64, error) {
+	settings, err := ReadErigonDBSettings(dirs)
+	if err == nil {
+		return settings.StepSize, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return 0, err
+	}
+	preverifiedExists, err := dir.FileExist(filepath.Join(dirs.Snap, datadir.PreverifiedFileName))
+	if err != nil {
+		return 0, err
+	}
+	if preverifiedExists {
+		return config3.LegacyStepSize, nil
+	}
+	return config3.DefaultStepSize, nil
+}
+
 // WriteErigonDBSettings writes a datadir's erigondb.toml.
 func WriteErigonDBSettings(dirs datadir.Dirs, s *ErigonDBSettings) error {
 	return writeErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), s)
@@ -297,13 +315,13 @@ func resolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 		trieHash = &h
 	}
 
-	preverifiedExists, err := dir.FileExist(filepath.Join(dirs.Snap, datadir.PreverifiedFileName))
+	stepSize, err := ResolveErigonDBStepSize(dirs)
 	if err != nil {
 		return nil, err
 	}
 
 	// Legacy datadir (Erigon <= 3.3): write legacy settings so erigondb.toml exists on disk.
-	if preverifiedExists {
+	if stepSize == config3.LegacyStepSize {
 		if statecfg.ExperimentalBinCommitment {
 			return nil, errors.New("--experimental.bin-commitment: this datadir already has hex commitment state; the bin trie needs a fresh datadir")
 		}
@@ -311,7 +329,7 @@ func resolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 			return nil, errors.New("genesis schedules EIP-8297 but this datadir already has hex commitment state; the bin trie needs a fresh datadir")
 		}
 		settings := &ErigonDBSettings{
-			StepSize:                       config3.LegacyStepSize,
+			StepSize:                       stepSize,
 			StepsInFrozenFile:              config3.LegacyStepsInFrozenFile,
 			ReferencesInCommitmentBranches: &refs,
 		}
@@ -326,7 +344,7 @@ func resolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 
 	// Fresh datadir, no preverified.toml: use default settings.
 	settings := &ErigonDBSettings{
-		StepSize:                       config3.DefaultStepSize,
+		StepSize:                       stepSize,
 		StepsInFrozenFile:              config3.DefaultStepsInFrozenFile,
 		ReferencesInCommitmentBranches: &refs,
 		TrieVariant:                    trieVariant,

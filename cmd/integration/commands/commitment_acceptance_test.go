@@ -180,16 +180,28 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 		execmoduletester.WithoutGenesisCommit(),
 		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
 	)
+	attachedRaw := reopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	dualRaw := dual.Tester.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	var attachedAtConversion, dualAtConversion []byte
+	require.NoError(t, attachedRaw.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		attachedAtConversion, err = rawdb.ReadShadowStateRoot(tx, node.Chain.Blocks[conversionBlock-1].Hash(), conversionBlock)
+		return err
+	}))
+	require.NoError(t, dualRaw.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		dualAtConversion, err = rawdb.ReadShadowStateRoot(tx, dual.Chain.Blocks[conversionBlock-1].Hash(), conversionBlock)
+		return err
+	}))
+	require.Equal(t, dualAtConversion, attachedAtConversion)
 	for block := conversionBlock + 1; block <= node.Chain.TopBlock.NumberU64(); block++ {
 		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
-		attachedRaw := reopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
 		var attachedRoot []byte
 		require.NoError(t, attachedRaw.View(t.Context(), func(tx kv.Tx) error {
 			var err error
 			attachedRoot, err = rawdb.ReadShadowStateRoot(tx, node.Chain.Blocks[block-1].Hash(), block)
 			return err
 		}))
-		dualRaw := dual.Tester.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
 		var dualRoot []byte
 		require.NoError(t, dualRaw.View(t.Context(), func(tx kv.Tx) error {
 			var err error

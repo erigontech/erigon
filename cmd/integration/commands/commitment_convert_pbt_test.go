@@ -698,7 +698,7 @@ func TestConvertPBTBinOnlyRefusesBeforeFork(t *testing.T) {
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
-func TestConvertPBTRefusesSourceLeafAfterPoint(t *testing.T) {
+func TestConvertPBTRefusesSourceFileEndAfterPoint(t *testing.T) {
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
 	t.Cleanup(func() {
@@ -710,9 +710,37 @@ func TestConvertPBTRefusesSourceLeafAfterPoint(t *testing.T) {
 	source, _ := newPBTConversionSourceAt(t, 6)
 	output := filepath.Join(t.TempDir(), "output")
 	err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
-	require.ErrorContains(t, err, "the last file holds writes up to txNum 7, after conversion txNum 6")
+	require.ErrorContains(t, err, "the last file holds writes up to txNum 7, after conversion txNum 6; wait for the next step")
 	_, statErr := os.Stat(output)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestRemovePBTFilesPastPointKeepsOnlyPublishedRanges(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	files := []struct {
+		root string
+		name string
+	}{
+		{dirs.SnapDomain, "v1.0-accounts.0-1.kv"},
+		{dirs.SnapDomain, "v1.0-accounts.1-2.kv"},
+		{dirs.SnapHistory, "v1.0-accounts.1-2.v"},
+		{dirs.SnapIdx, "v1.0-accounts.1-2.ef"},
+		{dirs.SnapAccessors, "v1.0-accounts.1-2.vi"},
+	}
+	for _, file := range files {
+		require.NoError(t, os.MkdirAll(file.root, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(file.root, file.name), []byte(file.name), 0o644))
+	}
+	require.NoError(t, os.MkdirAll(dirs.Snap, 0o755))
+	blockFile := filepath.Join(dirs.Snap, "v1.0-blocks.1-2.seg")
+	require.NoError(t, os.WriteFile(blockFile, []byte("block"), 0o644))
+	require.NoError(t, removePBTFilesPastPoint(dirs, 8, 7))
+	require.FileExists(t, filepath.Join(dirs.SnapDomain, "v1.0-accounts.0-1.kv"))
+	for _, file := range files[1:] {
+		_, err := os.Stat(filepath.Join(file.root, file.name))
+		require.ErrorIs(t, err, os.ErrNotExist, file.name)
+	}
+	require.FileExists(t, blockFile)
 }
 
 func TestConvertPBTIgnoresDatabaseRowsPastFiles(t *testing.T) {

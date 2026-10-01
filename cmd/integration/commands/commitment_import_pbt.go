@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -84,10 +85,24 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
 		return settingsErr
 	}
+	if errors.Is(settingsErr, os.ErrNotExist) {
+		stepSize, err := dbstate.ResolveErigonDBStepSize(dirs)
+		if err != nil {
+			return err
+		}
+		settings = &dbstate.ErigonDBSettings{StepSize: stepSize}
+	}
 	if err := validatePBTImportTargetSettings(settings); err != nil {
 		return err
 	}
 	configureImportVariant(dirs)
+	blockNum, txNum, err := validatePBTImportPointReadOnly(ctx, dirs, settings, blockHash, logger)
+	if err != nil {
+		return err
+	}
+	if err := validatePBTImportTargetFrontierFiles(ctx, dirs, settings, txNum, logger); err != nil {
+		return err
+	}
 	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), false, chainName, logger)
 	if err != nil {
 		return err
@@ -97,13 +112,6 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 			db.Close()
 		}
 	}()
-	blockNum, txNum, err := validatePBTImportPoint(ctx, db, blockHash)
-	if err != nil {
-		return err
-	}
-	if err := validatePBTImportTargetFrontierFiles(ctx, dirs, settings, txNum, logger); err != nil {
-		return err
-	}
 	snapshot, err := os.Open(snapshotPath)
 	if err != nil {
 		return err
@@ -251,10 +259,32 @@ func validatePBTImportPoint(ctx context.Context, db kv.TemporalRwDB, blockHash c
 	return blockNum, txNum, err
 }
 
-func validatePBTImportTargetFrontierFiles(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, logger log.Logger) error {
-	if settings == nil {
-		return nil
+func validatePBTImportPointReadOnly(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockHash common.Hash, logger log.Logger) (uint64, uint64, error) {
+	rawDB, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Readonly(true).Open(ctx)
+	if err != nil {
+		return 0, 0, err
 	}
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		rawDB.Close()
+		return 0, 0, err
+	}
+	if err := agg.OpenFolder(rawDB); err != nil {
+		agg.Close()
+		rawDB.Close()
+		return 0, 0, err
+	}
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	if err != nil {
+		agg.Close()
+		rawDB.Close()
+		return 0, 0, err
+	}
+	defer db.Close()
+	return validatePBTImportPoint(ctx, db, blockHash)
+}
+
+func validatePBTImportTargetFrontierFiles(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, logger log.Logger) error {
 	aggOpts := dbstate.New(dirs).Logger(logger).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps()
 	aggOpts = aggOpts.WithErigonDBSettings(settings)
 	agg, err := aggOpts.Open(ctx)

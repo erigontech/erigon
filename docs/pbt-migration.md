@@ -24,8 +24,7 @@ The conversion point is `(B, S)`. `S` is the block's last transaction number,
 as returned by `SeekCommitment`. The converter reads the source files only;
 database rows newer than the files are not part of the conversion. It refuses
 a source whose latest file contains writes after `S`. Provenance stamps are
-file-granular, so wait for the next step or convert at the file end when the
-last file extends past `S`.
+file-granular, so wait for the next step when the last file extends past `S`.
 
 The producer must use the network's `salt-state.txt`. A different state salt
 invalidates the accessors, so attach refuses it. Attach never writes the

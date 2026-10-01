@@ -58,6 +58,32 @@ func TestValidatePBTAttachSaltsIgnoresBlockSalt(t *testing.T) {
 	require.NoError(t, validatePBTAttachSalts(node, published))
 }
 
+func TestAttachPBTUsesLegacyStepSizeWithoutNodeSettings(t *testing.T) {
+	node, published := newPBTAttachFileTrees(t, true)
+	hash := commitment.PBinHashBlake3
+	variant := state.TrieVariantHexBin
+	refs := false
+	blockNum, txNum := uint64(2), uint64(7)
+	require.NoError(t, state.WriteErigonDBSettings(published, &state.ErigonDBSettings{
+		StepSize:                       config3.LegacyStepSize,
+		StepsInFrozenFile:              config3.LegacyStepsInFrozenFile,
+		ReferencesInCommitmentBranches: &refs,
+		TrieVariant:                    &variant,
+		TrieHash:                       &hash,
+		ConversionBlockNum:             &blockNum,
+		ConversionTxNum:                &txNum,
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(node.Snap, "salt-state.txt"), []byte{1}, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(published.Snap, "salt-state.txt"), []byte{1}, 0o644))
+	previousHash := statecfg.BinCommitmentHash
+	statecfg.BinCommitmentHash = hash
+	t.Cleanup(func() { statecfg.BinCommitmentHash = previousHash })
+	before := snapshotTree(t, node.DataDir)
+	err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
+	require.ErrorContains(t, err, "step size")
+	require.Equal(t, before, snapshotTree(t, node.DataDir))
+}
+
 func TestValidatePBTAttachFilesRequiresPublishedCompanionFiles(t *testing.T) {
 	node, published := newPBTAttachFileTrees(t, true)
 	require.NoError(t, os.MkdirAll(node.SnapHistory, 0o755))

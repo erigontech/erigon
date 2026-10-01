@@ -285,7 +285,7 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 			return err
 		}
 	}
-	if err := removePBTFilesAfterTx(outputDirs.Snap, targetSettings.StepSize, point.TxNum); err != nil {
+	if err := removePBTFilesPastPoint(outputDirs, targetSettings.StepSize, point.TxNum); err != nil {
 		return err
 	}
 	conversionBlock, conversionTx := point.BlockNum, point.TxNum
@@ -522,38 +522,10 @@ func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
 	defer at.Close()
 	return dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
 		if leaf.Stamp > endTxNum {
-			return fmt.Errorf("commitment convert-pbt: the last file holds writes up to txNum %d, after conversion txNum %d; wait for the next step, or convert at %d", leaf.Stamp, endTxNum, leaf.Stamp)
+			return fmt.Errorf("commitment convert-pbt: the last file holds writes up to txNum %d, after conversion txNum %d; wait for the next step", leaf.Stamp, endTxNum)
 		}
 		return nil
 	})
-}
-
-func removePBTFilesAfterTx(root string, stepSize, endTxNum uint64) error {
-	if stepSize == 0 {
-		return errors.New("commitment convert-pbt: step size is zero")
-	}
-	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		parsed, _, ok := snaptype.ParseFileName(filepath.Dir(path), entry.Name())
-		if !ok || !pbtConversionFileDomain(parsed.TypeString) || parsed.From*stepSize <= endTxNum {
-			return nil
-		}
-		return dir.RemoveFile(path)
-	})
-}
-
-func pbtConversionFileDomain(typeName string) bool {
-	switch typeName {
-	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.CommitmentBinDomain.String():
-		return true
-	default:
-		return false
-	}
 }
 
 func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, point pbinConversionPoint) (header *types.Header, blockEnd, afterFork bool, err error) {

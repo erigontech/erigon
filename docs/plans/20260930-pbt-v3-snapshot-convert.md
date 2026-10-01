@@ -186,7 +186,7 @@
   - `--keep-hex`: hex commitment files hardlinked, rows in `CommitmentBinDomain`, `trie_variant = hex+bin`. The source's
     hex must be v3 (state key `0x42`, marker `0x04`). The source is read from files only; every leaf provenance stamp
     must be at or before S. Stamps are file-granular, so a last file whose writes reach F−1 after S is refused with the
-    option to wait for the next step or convert at F−1. Ranges starting after S are not published. Otherwise refuse
+    option to wait for the next step. Ranges starting after S are not published. Otherwise refuse
     and say to run `commitment convert --v3` or to collate first.
   - without `--keep-hex`: rows in `CommitmentDomain`, `trie_variant = bin`, refused unless S is post-fork (a pre-fork
     bin-only output cannot boot: execution checks its bin root against an MPT header).

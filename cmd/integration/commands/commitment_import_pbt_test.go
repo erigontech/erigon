@@ -220,4 +220,29 @@ func TestImportPBTRefusalsLeaveDatadirUnchanged(t *testing.T) {
 			require.Equal(t, before, snapshotTree(t, target.Tester.Dirs.DataDir))
 		})
 	}
+	for _, test := range []struct {
+		name string
+		hash common.Hash
+		want string
+	}{
+		{name: "no-settings-unknown-block", hash: common.Hash{0xff}, want: "not in local chaindata"},
+		{name: "no-settings-frontier", hash: source.Chain.Blocks[1].Hash(), want: "files extend past"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			target, targetErr := execmoduletester.NewPBTAcceptanceChain(t, true, false)
+			require.NoError(t, targetErr)
+			require.NoError(t, target.Tester.InsertChain(target.Chain))
+			buildPBTAcceptanceFiles(t, target)
+			settingsPath := filepath.Join(target.Tester.Dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
+			require.NoError(t, os.Remove(settingsPath))
+			target.Tester.Close()
+			before := snapshotTree(t, target.Tester.Dirs.DataDir)
+			datadirCli, chaindata = target.Tester.Dirs.DataDir, target.Tester.Dirs.Chaindata
+			err := importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), filepath.Join(output, "framed.bin"), test.hash.Hex(), "", log.New())
+			require.ErrorContains(t, err, test.want)
+			require.Equal(t, before, snapshotTree(t, target.Tester.Dirs.DataDir))
+			_, statErr := os.Stat(settingsPath)
+			require.ErrorIs(t, statErr, os.ErrNotExist)
+		})
+	}
 }
