@@ -272,6 +272,10 @@ func (vm *VersionMap) WriteChanges(changes types.BlockAccessList) {
 	for i := range changes {
 		accountChanges := &changes[i]
 		addr := accounts.InternAddress(accountChanges.Address)
+		// Create the entry here, single-threaded, even when the BAL lists only reads
+		// for this account: otherwise the first worker to read it pays a sync.Map
+		// miss, and the workers' lookups are meant to be the lock-free path.
+		vm.entryOrCreate(addr)
 		if dbg.TraceBALFeed {
 			fmt.Printf(
 				"BAL-ACCT %x storage=%d balance=%d nonce=%d code=%d reads=%d\n",
