@@ -22,10 +22,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+	"weak"
 
+	"github.com/klauspost/compress/gzhttp"
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -444,6 +447,80 @@ func TestCompressionMetricsAttributed(t *testing.T) {
 			require.Greater(t, tc.in.GetValueUint64(), beforeIn, "raw bytes were not counted")
 			require.Greater(t, tc.out.GetValueUint64(), beforeOut, "wire bytes were not counted")
 			require.Less(t, tc.out.GetValueUint64()-beforeOut, tc.in.GetValueUint64()-beforeIn, "ratio must be under 1")
+		})
+	}
+}
+
+// TestCompressorFactoriesRejectOtherLevels pins that a wrapper cannot be built
+// with a level the level-blind pools would silently ignore.
+func TestCompressorFactoriesRejectOtherLevels(t *testing.T) {
+	t.Run("gzip", func(t *testing.T) {
+		_, err := gzhttp.NewWrapper(
+			gzhttp.CompressionLevel(gzip.BestCompression),
+			gzhttp.Implementation(gzipWriterFactory),
+		)
+		require.Error(t, err)
+	})
+	t.Run("zstd", func(t *testing.T) {
+		_, err := gzhttp.NewWrapper(
+			gzhttp.EnableZstd(true),
+			gzhttp.ZstdCompressionLevel(int(zstd.SpeedBestCompression)),
+			gzhttp.ZstdImplementation(zstdWriterFactory),
+		)
+		require.Error(t, err)
+	})
+}
+
+// TestCompressionWritersInUse pins that a writer counts as in use from the
+// moment compression starts until the response is closed.
+func TestCompressionWritersInUse(t *testing.T) {
+	for _, tc := range []struct {
+		accept string
+		inUse  metrics.Gauge
+	}{
+		{"gzip", gzipWritersInUse},
+		{"zstd", zstdWritersInUse},
+	} {
+		t.Run(tc.accept, func(t *testing.T) {
+			before := tc.inUse.GetValue()
+			var during float64
+			handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(bytes.Repeat([]byte("x"), 4*minGzipBodySize))
+				during = tc.inUse.GetValue()
+			}))
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+			req.Header.Set("Accept-Encoding", tc.accept)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			require.Equal(t, tc.accept, rec.Header().Get("Content-Encoding"))
+
+			assert.Equal(t, before+1, during, "an active response must hold one writer")
+			assert.Equal(t, before, tc.inUse.GetValue(), "a closed response must release its writer")
+		})
+	}
+}
+
+// TestPooledWritersDetachDestination pins that an idle pooled writer does not
+// keep the response writer of its last response alive.
+func TestPooledWritersDetachDestination(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		new  func(io.Writer) io.WriteCloser
+	}{
+		{"gzip", func(w io.Writer) io.WriteCloser { return gzipWriterFactory.New(w, gzipLevel) }},
+		{"zstd", func(w io.Writer) io.WriteCloser { return zstdWriterFactory.New(w, int(zstdLevel)) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := new(bytes.Buffer)
+			ref := weak.Make(dst)
+			w := tc.new(dst)
+			_, err := w.Write(bytes.Repeat([]byte("x"), minGzipBodySize))
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
+
+			runtime.GC()
+			assert.Nil(t, ref.Value(), "a pooled writer must not retain its destination")
 		})
 	}
 }
