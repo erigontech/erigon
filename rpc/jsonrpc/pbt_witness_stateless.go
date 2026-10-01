@@ -102,6 +102,12 @@ func (s *pbinWitnessStateless) setPBinSystemCallScope(active bool) {
 	s.systemCallScope = active
 }
 
+func (s *pbinWitnessStateless) latchPBinResolveError(err error) {
+	if err != nil && !s.syntheticSystemRead && s.resolveError == nil {
+		s.resolveError = err
+	}
+}
+
 func (s *pbinWitnessStateless) latchPBinSystemAddressRead() {
 	if s.systemAddressReadSuppressed && s.resolveError == nil {
 		s.resolveError = s.systemAddressReadError
@@ -141,8 +147,8 @@ func newPBinWitnessStateless(result *ExecutionWitnessResult, parentRoot common.H
 		blob, ok := blobs[string(path)]
 		if !ok {
 			err := fmt.Errorf("%w: missing node at path %x", commitment.ErrPBinWitnessBlinded, path)
-			if stateless != nil && !stateless.syntheticSystemRead {
-				stateless.resolveError = err
+			if stateless != nil {
+				stateless.latchPBinResolveError(err)
 			}
 			return nil, err
 		}
@@ -358,7 +364,9 @@ func (s *pbinWitnessStateless) ReadAccountCode(address accounts.Address) ([]byte
 	}
 	code, ok := s.codes[codeHash]
 	if !ok {
-		return nil, fmt.Errorf("pbin witness: missing code for account %x with code hash %x", addr, codeHash)
+		err := fmt.Errorf("pbin witness: missing code for account %x with code hash %x", addr, codeHash)
+		s.latchPBinResolveError(err)
+		return nil, err
 	}
 	return bytes.Clone(code), nil
 }

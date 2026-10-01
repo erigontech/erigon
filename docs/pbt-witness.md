@@ -78,7 +78,7 @@ The verifier suppresses the missing-node error only for the synthetic system-cal
 covers system calls from `Initialize`, its `FinalizeTx`, `Finalize`, and `CommitBlock`, but resolver errors are latched
 throughout those scopes except for that synthetic touch. A user transaction access to `SYSTEM_ADDRESS` is retained when
 the per-transaction access set records it, or when `ResolveCode` or `ResolveCodeHash` follows a delegation designator
-to it. Loading a designator with `EXTCODE*` does not follow it, and an access-list entry alone is not enough. The
+to it. Loading a designator with `EXTCODE*` does not follow it, and an access-list entry alone is not enough.
 Both cases need the basic-data proof when the system call has already warmed the account. Genuine reads of system
 contracts need their proofs. PBT replay also compares the receipt root after
 Byzantium, gas used, and blob gas used with the block header. Contract creation over an

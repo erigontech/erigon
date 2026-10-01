@@ -510,6 +510,33 @@ func TestPBinExecutionWitnessDesignatorLoadDoesNotRequireDelegationTargetProof(t
 	}
 }
 
+func TestPBinExecutionWitnessRejectsMissingCodeForOutOfGasCall(t *testing.T) {
+	callee := common.HexToAddress("0x7700000000000000000000000000000000000077")
+	caller := common.HexToAddress("0x7800000000000000000000000000000000000078")
+	calleeCode := []byte{0x5b, 0x60, 0x00, 0x56}
+	callerCode := append([]byte{0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x73}, callee[:]...)
+	callerCode = append(callerCode, 0x5a, 0xf1, 0x50, 0x00)
+	alloc := types.GenesisAlloc{
+		callee: {Code: calleeCode},
+		caller: {Code: callerCode},
+	}
+	generator := func(i int, _ *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), _ func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
+		if i == 0 {
+			addTransaction(caller, uint256.NewInt(0), nil)
+		}
+	}
+	api, m := pbinWitnessFixtureWithGeneratorNAllocNoSystemCalls(t, 1000, 1, generator, alloc)
+	repairPBinPreForkShadows(t, m, 1000)
+	result := pbtPortWitness(t, api, m, 1)
+	block := pbtPortBlock(t, m, 1)
+	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
+	index := slices.IndexFunc(result.Codes, func(code hexutil.Bytes) bool { return bytes.Equal(code, calleeCode) })
+	require.NotEqual(t, -1, index)
+	trimmed := pbtCorpusClone(result)
+	trimmed.Codes = append(trimmed.Codes[:index], trimmed.Codes[index+1:]...)
+	require.ErrorContains(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine), "missing code")
+}
+
 func TestPBinWitnessPreByzantiumGates(t *testing.T) {
 	system := params.SystemAddress.Value()
 	runtime := append([]byte{0x73}, system[:]...)
