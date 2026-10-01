@@ -22,12 +22,77 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestExecutionPayloadBlockRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	to := common.Address{1}
+	txs := []types.Transaction{
+		types.NewTransaction(1, to, uint256.NewInt(2), 30_000, uint256.NewInt(3), []byte{4}),
+		&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 5, GasLimit: 50_000, To: &to, Value: *uint256.NewInt(6), Data: []byte{7}},
+			ChainID:  *uint256.NewInt(1),
+			TipCap:   *uint256.NewInt(8),
+			FeeCap:   *uint256.NewInt(9),
+		},
+	}
+	receipts := []*types.Receipt{
+		{
+			Status:            types.ReceiptStatusSuccessful,
+			CumulativeGasUsed: 21_000,
+			Logs:              types.Logs{{Address: common.Address{2}, Topics: []common.Hash{{3}}, Data: []byte{4}}},
+		},
+		{Type: types.DynamicFeeTxType, Status: types.ReceiptStatusSuccessful, CumulativeGasUsed: 42_000},
+	}
+	withdrawals := types.Withdrawals{
+		{Index: 10, Validator: 11, Address: common.Address{12}, Amount: 13},
+		{Index: 14, Validator: 15, Address: common.Address{16}, Amount: 17},
+	}
+	sidecar := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{18}}})
+	balHash, err := sidecar.Hash()
+	require.NoError(t, err)
+	beaconRoot := common.Hash{19}
+	requestsHash := types.FlatRequests{}.Hash()
+	header := &types.Header{
+		ParentHash:            common.Hash{20},
+		Coinbase:              common.Address{21},
+		Root:                  common.Hash{22},
+		Number:                *uint256.NewInt(123),
+		Difficulty:            *merge.ProofOfStakeDifficulty,
+		Nonce:                 merge.ProofOfStakeNonce,
+		GasLimit:              30_000_000,
+		GasUsed:               42_000,
+		Time:                  1_000,
+		Extra:                 []byte{23, 24},
+		MixDigest:             common.Hash{25},
+		BaseFee:               uint256.MustFromHex("0x10000000000000001"),
+		BlobGasUsed:           common.NewUint64(131_072),
+		ExcessBlobGas:         common.NewUint64(262_144),
+		ParentBeaconBlockRoot: &beaconRoot,
+		RequestsHash:          requestsHash,
+		BlockAccessListHash:   &balHash,
+		SlotNumber:            common.NewUint64(4242),
+	}
+	block := types.NewBlock(header, txs, nil, receipts, withdrawals, sidecar)
+
+	payload, err := ExecutionPayloadFromBlock(block)
+	require.NoError(t, err)
+	eth1Block, err := payload.ToEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	require.NoError(t, err)
+
+	derived, err := eth1Block.ComputeBlockHash(&beaconRoot, *requestsHash, nil)
+	require.NoError(t, err)
+	require.Equal(t, block.Hash(), derived)
+	require.Equal(t, block.Hash(), eth1Block.BlockHash)
+}
 
 func TestExecutionPayloadFromBlockIncludesCanonicalEmptyBAL(t *testing.T) {
 	t.Parallel()
