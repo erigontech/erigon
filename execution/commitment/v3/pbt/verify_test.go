@@ -81,8 +81,7 @@ func TestTrieVerifyUnlinksVerifiedChildren(t *testing.T) {
 	_, err = verifier.verifyRow(row)
 	require.NoError(t, err)
 	require.False(t, ctx.releasedParent)
-	var check func(*rowNode)
-	check = func(row *rowNode) {
+	check := func(row *rowNode) {
 		branches := 0
 		for slot := range row.cells {
 			if row.cell(slot).Kind == BranchCell {

@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -166,16 +165,11 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 	if root != state.meta.Root {
 		return common.Hash{}, fmt.Errorf("pbt import: computed root %s differs from artifact root %s", root.Hex(), state.meta.Root.Hex())
 	}
-	headerRoot := opts.HeaderRoot
-	if headerRoot == nil {
-		header := rawdb.ReadHeader(tx, opts.BlockHash, opts.BlockNum)
-		if header == nil {
-			return common.Hash{}, fmt.Errorf("pbt import: local header %s is missing", opts.BlockHash.Hex())
-		}
-		headerRoot = &header.Root
+	if opts.HeaderRoot == nil {
+		return common.Hash{}, fmt.Errorf("pbt import: header root is required")
 	}
-	if root != *headerRoot {
-		return common.Hash{}, fmt.Errorf("pbt import: computed root %s differs from header root %s", root.Hex(), headerRoot.Hex())
+	if root != *opts.HeaderRoot {
+		return common.Hash{}, fmt.Errorf("pbt import: computed root %s differs from header root %s", root.Hex(), opts.HeaderRoot.Hex())
 	}
 	if err := domains.Flush(ctx, tx); err != nil {
 		return common.Hash{}, err
@@ -183,8 +177,8 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 	return root, nil
 }
 
-func ValidatePBTSnapshot(ctx context.Context, tx kv.Getter, opts PBTImportOptions) error {
-	if tx == nil || opts.Snapshot == nil || opts.Preimages == nil {
+func ValidatePBTSnapshot(ctx context.Context, opts PBTImportOptions) error {
+	if opts.Snapshot == nil || opts.Preimages == nil {
 		return fmt.Errorf("pbt import: missing input")
 	}
 	if opts.Hash == nil {
@@ -204,16 +198,11 @@ func ValidatePBTSnapshot(ctx context.Context, tx kv.Getter, opts PBTImportOption
 	if root != state.meta.Root {
 		return fmt.Errorf("pbt import: reference root %s differs from artifact root %s", root.Hex(), state.meta.Root.Hex())
 	}
-	headerRoot := opts.HeaderRoot
-	if headerRoot == nil {
-		header := rawdb.ReadHeader(tx, opts.BlockHash, opts.BlockNum)
-		if header == nil {
-			return fmt.Errorf("pbt import: local header %s is missing", opts.BlockHash.Hex())
-		}
-		headerRoot = &header.Root
+	if opts.HeaderRoot == nil {
+		return fmt.Errorf("pbt import: header root is required")
 	}
-	if root != *headerRoot {
-		return fmt.Errorf("pbt import: reference root %s differs from header root %s", root.Hex(), headerRoot.Hex())
+	if root != *opts.HeaderRoot {
+		return fmt.Errorf("pbt import: reference root %s differs from header root %s", root.Hex(), opts.HeaderRoot.Hex())
 	}
 	return nil
 }

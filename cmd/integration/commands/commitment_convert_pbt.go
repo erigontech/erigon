@@ -129,10 +129,16 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		return err
 	}
 	requestedHash := statecfg.BinCommitmentHash
-	if _, err := dbstate.EnableCommitmentV3FromFiles(sourceDirs); err != nil {
+	detectedV3, err := dbstate.EnableCommitmentV3FromFiles(sourceDirs)
+	if err != nil {
 		return err
 	}
 	configurePBTSourceVariant(sourceSettings)
+	if detectedV3 && (sourceSettings == nil || sourceSettings.TrieVariantName() == dbstate.TrieVariantHex) {
+		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.InitSchemas()
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	}
 	point, err := readPBinSourcePoint(ctx, sourceDirs, sourceSettings, keepHex, logger)
 	if err != nil {
 		return err
@@ -224,6 +230,8 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	statecfg.ExperimentalCommitmentV3 = keepHex
 	if keepHex {
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	} else {
+		statecfg.InitSchemas()
 	}
 
 	targetSettings := &dbstate.ErigonDBSettings{
@@ -306,6 +314,9 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		return err
 	}
 	if err := removePBTFilesPastPoint(outputDirs, targetSettings.StepSize, point.TxNum); err != nil {
+		return err
+	}
+	if err := removePBTInvisibleFiles(ctx, sourceDirs, outputDirs, sourceSettings, keepHex, logger); err != nil {
 		return err
 	}
 	conversionBlock, conversionTx := point.BlockNum, point.TxNum
@@ -632,4 +643,88 @@ func linkPBinCommitmentFiles(sourceDirs, outputDirs datadir.Dirs, stepSize, endT
 		}
 	}
 	return nil
+}
+
+func removePBTInvisibleFiles(ctx context.Context, sourceDirs, outputDirs datadir.Dirs, settings *dbstate.ErigonDBSettings, keepHex bool, logger log.Logger) error {
+	visibleRanges, err := pbtVisibleSnapshotFiles(ctx, sourceDirs, settings, keepHex, logger)
+	if err != nil {
+		return err
+	}
+	for _, root := range []string{outputDirs.SnapDomain, outputDirs.SnapHistory, outputDirs.SnapIdx, outputDirs.SnapAccessors} {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				if errors.Is(walkErr, fs.ErrNotExist) {
+					return nil
+				}
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
+			if !ok {
+				return nil
+			}
+			rel, err := filepath.Rel(outputDirs.Snap, path)
+			if err != nil {
+				return err
+			}
+			sourcePath := filepath.Join(sourceDirs.Snap, rel)
+			sourceInfo, err := os.Stat(sourcePath)
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			outputInfo, err := os.Stat(path)
+			if err != nil || !os.SameFile(sourceInfo, outputInfo) {
+				return nil
+			}
+			key := pbtSnapshotRangeKey(parsed.TypeString, parsed.From, parsed.To)
+			if _, ok := visibleRanges[key]; ok {
+				return nil
+			}
+			return dir.RemoveFile(path)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func pbtVisibleSnapshotFiles(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, keepHex bool, logger log.Logger) (map[string]struct{}, error) {
+	if (settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin) || (keepHex && (settings == nil || settings.TrieVariantName() == dbstate.TrieVariantHex)) {
+		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.InitSchemas()
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	}
+	opener := dbstate.New(dirs).Logger(logger).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps()
+	if settings != nil {
+		opener = opener.WithErigonDBSettings(settings)
+	}
+	agg, err := opener.Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(nil); err != nil {
+		return nil, err
+	}
+	visibleRanges := make(map[string]struct{})
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	for _, file := range at.AllFiles() {
+		parsed, _, ok := snaptype.ParseFileName(filepath.Dir(file.Fullpath()), filepath.Base(file.Fullpath()))
+		if !ok {
+			continue
+		}
+		visibleRanges[pbtSnapshotRangeKey(parsed.TypeString, parsed.From, parsed.To)] = struct{}{}
+	}
+	return visibleRanges, nil
+}
+
+func pbtSnapshotRangeKey(kind string, from, to uint64) string {
+	return fmt.Sprintf("%s:%d:%d", kind, from, to)
 }

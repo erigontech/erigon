@@ -88,6 +88,7 @@ type Trie struct {
 	originalLeaves         map[string]*Cell
 	droppedLeafKeys        map[string]struct{}
 	mergeCreatedStems      map[string]struct{}
+	verifiedBucketKeys     map[string]struct{}
 }
 
 func NewTrie(ctx commitment.PatriciaContext) *Trie {

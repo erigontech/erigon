@@ -94,7 +94,7 @@ func TestImportPBTSnapshotWritesProgressStateAndRoot(t *testing.T) {
 	got, err := dbstate.ImportPBTSnapshot(t.Context(), tx, dbstate.PBTImportOptions{
 		Snapshot: bytes.NewReader(snapshot.Bytes()), SnapshotSize: int64(snapshot.Len()),
 		Preimages: bytes.NewReader(preimages.Bytes()), PreimageSize: int64(preimages.Len()),
-		BlockHash: blockHash, BlockNum: 1, TxNum: 1, Hash: eip8297.HashBytes, Logger: log.New(),
+		BlockHash: blockHash, BlockNum: 1, TxNum: 1, HeaderRoot: &root, Hash: eip8297.HashBytes, Logger: log.New(),
 	})
 	require.NoError(t, err)
 	require.Equal(t, root, got)
@@ -122,7 +122,7 @@ func TestImportPBTSnapshotWritesProgressStateAndRoot(t *testing.T) {
 	_, err = dbstate.ImportPBTSnapshot(t.Context(), wtx, dbstate.PBTImportOptions{
 		Snapshot: bytes.NewReader(wrongSnapshot.Bytes()), SnapshotSize: int64(wrongSnapshot.Len()),
 		Preimages: bytes.NewReader(preimages.Bytes()), PreimageSize: int64(preimages.Len()),
-		BlockHash: blockHash, BlockNum: 1, TxNum: 1, Hash: eip8297.HashBytes, Logger: log.New(),
+		BlockHash: blockHash, BlockNum: 1, TxNum: 1, HeaderRoot: &root, Hash: eip8297.HashBytes, Logger: log.New(),
 	})
 	require.ErrorContains(t, err, "differs from artifact root", "a changed artifact root must be rejected")
 }
@@ -195,7 +195,7 @@ func TestImportPBTSnapshotAcceptsAllAccountKindsAndSharedCode(t *testing.T) {
 	got, err := dbstate.ImportPBTSnapshot(t.Context(), tx, dbstate.PBTImportOptions{
 		Snapshot: bytes.NewReader(snapshot.Bytes()), SnapshotSize: int64(snapshot.Len()),
 		Preimages: bytes.NewReader(preimages.Bytes()), PreimageSize: int64(preimages.Len()),
-		BlockHash: blockHash, BlockNum: 1, TxNum: 1, Hash: eip8297.HashBytes, Logger: log.New(),
+		BlockHash: blockHash, BlockNum: 1, TxNum: 1, HeaderRoot: &root, Hash: eip8297.HashBytes, Logger: log.New(),
 	})
 	require.NoError(t, err)
 	require.Equal(t, root, got)

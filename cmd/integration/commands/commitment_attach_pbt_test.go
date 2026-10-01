@@ -48,6 +48,28 @@ func TestValidatePBTAttachFilesRequiresBothCommitmentDomains(t *testing.T) {
 	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 7), "commitment-bin")
 }
 
+func TestPBTAttachVisibleFilesPrefersMergedRanges(t *testing.T) {
+	files := []pbtAttachFile{
+		{domain: kv.AccountsDomain, from: 0, to: 1, path: "v2.0-accounts.0-1.kv", data: true},
+		{domain: kv.AccountsDomain, from: 1, to: 2, path: "v2.0-accounts.1-2.kv", data: true},
+		{domain: kv.AccountsDomain, from: 0, to: 2, path: "v2.0-accounts.0-2.kv", data: true},
+		{domain: kv.AccountsDomain, from: 0, to: 1, path: "v2.0-accounts.0-1.bt"},
+		{domain: kv.AccountsDomain, from: 1, to: 2, path: "v2.0-accounts.1-2.bt"},
+		{domain: kv.AccountsDomain, from: 0, to: 2, path: "v2.0-accounts.0-2.bt"},
+	}
+	visible := pbtAttachVisibleFiles(files)
+	require.Len(t, visible, 2)
+	require.ElementsMatch(t, []string{"v2.0-accounts.0-2.kv", "v2.0-accounts.0-2.bt"}, pbtAttachFilePaths(visible))
+}
+
+func pbtAttachFilePaths(files []pbtAttachFile) []string {
+	paths := make([]string, 0, len(files))
+	for _, file := range files {
+		paths = append(paths, file.path)
+	}
+	return paths
+}
+
 func TestValidatePBTAttachSaltsIgnoresBlockSalt(t *testing.T) {
 	node, published := newPBTAttachFileTrees(t, true)
 	require.NoError(t, os.WriteFile(filepath.Join(node.Snap, "salt-state.txt"), []byte{1}, 0o644))

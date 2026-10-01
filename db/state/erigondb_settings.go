@@ -176,48 +176,59 @@ func EnableCommitmentV3FromFiles(dirs datadir.Dirs) (bool, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
-		detected, err := commitmentV3FilesIn(root)
-		if err != nil {
-			return false, err
-		}
-		if detected {
-			statecfg.ExperimentalCommitmentV3 = true
-			statecfg.InitSchemas()
-			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-			return true, nil
-		}
+	hasLegacy, detected, err := commitmentFileVersions(dirs)
+	if err != nil {
+		return false, err
+	}
+	if hasLegacy && detected {
+		return false, errors.New("commitment files straddle v3.0")
+	}
+	if detected {
+		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.InitSchemas()
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		return true, nil
 	}
 	return false, nil
 }
 
-func commitmentV3FilesIn(root string) (bool, error) {
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			if errors.Is(walkErr, fs.ErrNotExist) {
-				return filepath.SkipDir
+func commitmentFileVersions(dirs datadir.Dirs) (bool, bool, error) {
+	var hasLegacy, hasV3 bool
+	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				if errors.Is(walkErr, fs.ErrNotExist) {
+					return filepath.SkipDir
+				}
+				return walkErr
 			}
-			return walkErr
-		}
-		if entry.IsDir() {
+			if entry.IsDir() {
+				return nil
+			}
+			parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
+			if !ok || parsed.TypeString != kv.CommitmentDomain.String() {
+				return nil
+			}
+			isData := strings.HasSuffix(entry.Name(), ".kv")
+			isV3Data := isData || strings.HasSuffix(entry.Name(), ".v")
+			if !isV3Data {
+				return nil
+			}
+			if parsed.Version.Less(version.V3_0) {
+				if isData {
+					hasLegacy = true
+				}
+				return nil
+			}
+			hasV3 = true
 			return nil
+		})
+		if err != nil {
+			return false, false, err
 		}
-		parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
-		if ok && parsed.TypeString == kv.CommitmentDomain.String() && !parsed.Version.Less(version.V3_0) &&
-			(strings.HasSuffix(entry.Name(), ".kv") || strings.HasSuffix(entry.Name(), ".v")) {
-			return errCommitmentV3FilesFound{}
-		}
-		return nil
-	})
-	if _, ok := errors.AsType[errCommitmentV3FilesFound](err); ok {
-		return true, nil
 	}
-	return false, err
+	return hasLegacy, hasV3, nil
 }
-
-type errCommitmentV3FilesFound struct{}
-
-func (errCommitmentV3FilesFound) Error() string { return "commitment v3 files found" }
 
 func ReadErigonDBConversionPoint(dirs datadir.Dirs) (blockNum, txNum uint64, ok bool, err error) {
 	settings, err := ReadErigonDBSettings(dirs)

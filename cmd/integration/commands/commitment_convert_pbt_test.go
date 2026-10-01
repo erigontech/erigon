@@ -617,6 +617,7 @@ func TestConvertPBTHexBinSourceConfiguresVariantBeforeOpening(t *testing.T) {
 	statecfg.ExperimentalBinCommitment = false
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.InitSchemas()
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.BinCommitmentHash = ""
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
@@ -797,7 +798,7 @@ func corruptPBTOutputRow(ctx context.Context, dirs datadir.Dirs) error {
 	if err != nil {
 		return err
 	}
-	defer dir.RemoveAll(rawPath)
+	defer func() { _ = dir.RemoveAll(rawPath) }()
 	rawDB, err := mdbx.New(dbcfg.ChainDB, log.New()).Path(rawPath).Open(ctx)
 	if err != nil {
 		return err

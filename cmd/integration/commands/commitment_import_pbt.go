@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -42,7 +41,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/debug"
 )
 
@@ -154,20 +152,8 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 		Snapshot: snapshot, SnapshotSize: snapshotInfo.Size(), Preimages: preimages, PreimageSize: preimagesInfo.Size(),
 		BlockHash: blockHash, BlockNum: blockNum, TxNum: txNum, HeaderRoot: &headerRoot, TargetDomain: targetDomain, Hash: eip8297.HashBytes, Logger: logger,
 	}
-	readDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
-	if err != nil {
+	if err := dbstate.ValidatePBTSnapshot(ctx, importOptions); err != nil {
 		return err
-	}
-	validationTx, err := readDB.BeginRo(ctx)
-	if err != nil {
-		readDB.Close()
-		return err
-	}
-	validationErr := dbstate.ValidatePBTSnapshot(ctx, validationTx, importOptions)
-	validationTx.Rollback()
-	readDB.Close()
-	if validationErr != nil {
-		return validationErr
 	}
 	if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
 		variant := dbstate.TrieVariantBin
@@ -219,20 +205,11 @@ func validatePBTImportTargetSettings(settings *dbstate.ErigonDBSettings) error {
 	return nil
 }
 
-func validatePBTImportPointWithReader(ctx context.Context, db kv.TemporalRwDB, txNums rawdbv3.TxNumsReader, blockReader *freezeblocks.BlockReader, blockView *blocksnapshots.View, blockHash common.Hash) (uint64, uint64, error) {
+func validatePBTImportPointWithReader(ctx context.Context, db kv.TemporalRwDB, blockReader *freezeblocks.BlockReader, blockView *blocksnapshots.View, blockHash common.Hash) (uint64, uint64, error) {
 	var blockNum, txNum uint64
 	err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		readerTx := tx
-		if blockReader != nil {
-			readerTx = pbtTemporalBlockFilesTx{TemporalTx: tx, view: blockView}
-		}
-		var header *types.Header
-		var err error
-		if blockReader != nil {
-			header, err = blockReader.HeaderByHash(ctx, readerTx, blockHash)
-		} else {
-			header, err = rawdb.ReadHeaderByHash(readerTx, blockHash)
-		}
+		readerTx := pbtTemporalBlockFilesTx{TemporalTx: tx, view: blockView}
+		header, err := blockReader.HeaderByHash(ctx, readerTx, blockHash)
 		if err != nil {
 			return err
 		}
@@ -242,12 +219,7 @@ func validatePBTImportPointWithReader(ctx context.Context, db kv.TemporalRwDB, t
 		blockNum = header.Number.Uint64()
 		var canonical common.Hash
 		var canonicalFound bool
-		if blockReader != nil {
-			canonical, canonicalFound, err = blockReader.CanonicalHash(ctx, readerTx, blockNum)
-		} else {
-			canonical, err = rawdb.ReadCanonicalHash(readerTx, blockNum)
-			canonicalFound = canonical != (common.Hash{})
-		}
+		canonical, canonicalFound, err = blockReader.CanonicalHash(ctx, readerTx, blockNum)
 		if err != nil {
 			return err
 		}
@@ -274,11 +246,7 @@ func validatePBTImportPointWithReader(ctx context.Context, db kv.TemporalRwDB, t
 			return fmt.Errorf("commitment import-pbt: block %d is before the binary trie fork", blockNum)
 		}
 		var found bool
-		if blockReader != nil {
-			txNum, found, err = blockReader.TxnumReader().MaxExact(ctx, readerTx, blockNum)
-		} else {
-			txNum, found, err = txNums.MaxExact(ctx, readerTx, blockNum)
-		}
+		txNum, found, err = blockReader.TxnumReader().MaxExact(ctx, readerTx, blockNum)
 		if err != nil {
 			return err
 		}
@@ -318,7 +286,7 @@ func validatePBTImportPointReadOnly(ctx context.Context, dirs datadir.Dirs, sett
 		return 0, 0, err
 	}
 	defer db.Close()
-	return validatePBTImportPointWithReader(ctx, db, blockReader.TxnumReader(), blockReader, blockView, blockHash)
+	return validatePBTImportPointWithReader(ctx, db, blockReader, blockView, blockHash)
 }
 
 func readPBTImportHeaderRoot(ctx context.Context, dirs datadir.Dirs, blockHash common.Hash, logger log.Logger) (common.Hash, error) {
@@ -402,6 +370,8 @@ func configureImportVariant(dirs datadir.Dirs) error {
 	if statecfg.ExperimentalCommitmentV3 || detected {
 		statecfg.InitSchemas()
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	} else if statecfg.ExperimentalBinCommitment {
+		statecfg.InitSchemas()
 	}
 	_ = commitment.SetPBinHashSuite(settings.TrieHashName())
 	return nil

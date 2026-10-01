@@ -37,6 +37,7 @@ func (t *Trie) newVerifier() *Trie {
 		dirtyRows:             make(map[string]*rowNode),
 		bucketDirty:           make(map[string][]byte),
 		mergeCreatedStems:     make(map[string]struct{}),
+		verifiedBucketKeys:    make(map[string]struct{}),
 		verifyOnly:            true,
 	}
 	if t.ownedPrefix != nil {
@@ -61,6 +62,7 @@ func (t *Trie) verify() error {
 	if err != nil {
 		return err
 	}
+	t.verifiedBucketKeys = make(map[string]struct{})
 	if root.row == nil && root.form == RowRoot {
 		return t.verifyBuckets()
 	}
@@ -68,6 +70,15 @@ func (t *Trie) verify() error {
 	switch root.form {
 	case LeafRoot:
 		verifyErr = t.verifyRootRecord()
+		if verifyErr == nil && root.leaf.Key[0] == eip8297.StorageZone {
+			path, err := keyPath(root.leaf.Key)
+			if err != nil {
+				verifyErr = err
+			} else {
+				bucketPath := path.Slice(0, 264)
+				verifyErr = t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: LeafRoot, leaf: root.leaf})
+			}
+		}
 	case ExtRoot:
 		if err := t.verifyRootRecord(); err != nil {
 			verifyErr = err
@@ -94,6 +105,14 @@ func (t *Trie) verify() error {
 		}
 		if root.self != wantSelf {
 			verifyErr = fmt.Errorf("root extension prefix does not match its top row")
+		}
+		if verifyErr == nil && root.self.BitLen >= 264 && pathByte(&root.self, 0) == eip8297.StorageZone {
+			bucketPath := root.self.Slice(0, 264)
+			if root.self.BitLen < 268 {
+				verifyErr = t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: RowRoot, row: row})
+			} else {
+				verifyErr = t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: ExtRoot, self: root.self.Slice(264, root.self.BitLen), left: root.left, right: root.right})
+			}
 		}
 	case RowRoot:
 		_, verifyErr = t.verifyRow(root.row)
@@ -144,6 +163,19 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 	}
 	for slot := range row.cells {
 		cell := row.cell(slot)
+		if cell.Kind == LeafCell {
+			if row.path.BitLen < 264 && cell.Key[0] == eip8297.StorageZone {
+				path, err := keyPath(cell.Key)
+				if err != nil {
+					return FoldResult{}, err
+				}
+				bucketPath := path.Slice(0, 264)
+				if err := t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: LeafRoot, leaf: *cell.Cell}); err != nil {
+					return FoldResult{}, err
+				}
+			}
+			continue
+		}
 		if cell.Kind != BranchCell {
 			continue
 		}
@@ -155,13 +187,24 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 		if err != nil {
 			return FoldResult{}, err
 		}
-		full, err := rowTopPrefix(child, childResult.Split)
+		top, err := rowTopPrefix(child, childResult.Split)
 		if err != nil {
 			return FoldResult{}, err
 		}
-		wantPrefix := full.Slice(row.path.BitLen+4, childResult.Split)
+		wantPrefix := top.Slice(row.path.BitLen+4, childResult.Split)
 		if cell.Prefix != wantPrefix || cell.Left != childResult.Left || cell.Right != childResult.Right {
 			return FoldResult{}, fmt.Errorf("row %x cell %d does not match its child", row.key, slot)
+		}
+		full := branchPath(row, slot, cell)
+		if row.path.BitLen < 264 && full.BitLen >= 264 && pathByte(&full, 0) == eip8297.StorageZone {
+			bucketPath := full.Slice(0, 264)
+			if full.BitLen < 268 {
+				if err := t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: RowRoot, row: child}); err != nil {
+					return FoldResult{}, err
+				}
+			} else if err := t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: ExtRoot, self: full.Slice(264, full.BitLen), left: cell.Left, right: cell.Right}); err != nil {
+				return FoldResult{}, err
+			}
 		}
 		t.releaseVerifiedChild(cell, child)
 	}
@@ -169,19 +212,21 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 }
 
 func (t *Trie) verifyBuckets() error {
-	if _, err := t.expectedBucketRecords(); err != nil {
-		return err
+	records, ok := t.ctx.(interface{ Records() map[string][]byte })
+	if !ok {
+		return nil
 	}
-	if verifier, ok := t.ctx.(pbinBucketVerifier); ok {
-		return verifier.PBinCheckBucketRecords()
+	for key, data := range records.Records() {
+		if len(data) == 0 {
+			continue
+		}
+		if _, err := bucketPathForKey([]byte(key)); err == nil {
+			if _, found := t.verifiedBucketKeys[key]; !found {
+				return fmt.Errorf("orphan bucket record %x", []byte(key))
+			}
+		}
 	}
 	return nil
-}
-
-type pbinBucketVerifier interface {
-	PBinResetBucketKeys()
-	PBinMarkBucketKey([]byte)
-	PBinCheckBucketRecords() error
 }
 
 type pbinVerifierReleaseObserver interface {
@@ -194,6 +239,21 @@ func (t *Trie) releaseVerifiedChild(cell *rowCell, child *rowNode) {
 	if observer, ok := t.ctx.(pbinVerifierReleaseObserver); ok {
 		observer.PBinObserveReleasedChild(child)
 	}
+}
+
+func (t *Trie) verifyBucketRecordPath(path *eip8297.Bitpath, descriptor bucketDescriptor) error {
+	key, err := EncodeRowKey(path)
+	if err != nil {
+		return err
+	}
+	if _, found := t.verifiedBucketKeys[string(key)]; found {
+		return nil
+	}
+	if err := t.verifyBucketRecord(key, descriptor); err != nil {
+		return err
+	}
+	t.verifiedBucketKeys[string(key)] = struct{}{}
+	return nil
 }
 
 func (t *Trie) verifyBucketRecord(key []byte, descriptor bucketDescriptor) error {

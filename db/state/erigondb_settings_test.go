@@ -150,6 +150,15 @@ func TestEnableCommitmentV3FromFilesIgnoresV3HistoryIndex(t *testing.T) {
 	require.Len(t, entries, len(files))
 }
 
+func TestEnableCommitmentV3FromFilesRefusesStraddledCommitmentData(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	for _, name := range []string{"v2.0-commitment.0-1.kv", "v3.0-commitment.1-2.kv"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), nil, 0o644))
+	}
+	_, err := EnableCommitmentV3FromFiles(dirs)
+	require.ErrorContains(t, err, "straddle v3.0")
+}
+
 func TestEnableCommitmentV3FromFilesIgnoresBinDatadir(t *testing.T) {
 	previousBin, previousHexBin, previousV3, previousSchema := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.Schema
 	t.Cleanup(func() {

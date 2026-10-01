@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -61,6 +62,8 @@ func TestPBTCommandsUseFrozenBlockFiles(t *testing.T) {
 	err = freezeblocks.DumpBlocks(t.Context(), 0, 3, chain.Tester.ChainConfig, chain.Tester.Dirs.Tmp, chain.Tester.Dirs.Snap, chain.Tester.DB, 1, log.LvlInfo, log.New(), chain.Tester.BlockReader, config, nil)
 	require.NoError(t, err)
 	buildPBTAcceptanceFilesAt(t, chain, 7)
+	block := chain.Chain.Blocks[1]
+	blockNum := block.NumberU64()
 	settings, err := dbstate.ReadErigonDBSettings(chain.Tester.Dirs)
 	require.NoError(t, err)
 	point, err := readPBinSourcePoint(t.Context(), chain.Tester.Dirs, settings, false, log.New())
@@ -70,7 +73,7 @@ func TestPBTCommandsUseFrozenBlockFiles(t *testing.T) {
 	var wantHeader *types.Header
 	var wantMaxTx uint64
 	require.NoError(t, rawDB.View(t.Context(), func(tx kv.Tx) error {
-		wantHeader = rawdb.ReadHeaderByNumber(tx, 2)
+		wantHeader = rawdb.ReadHeaderByNumber(tx, blockNum)
 		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 		require.NoError(t, err)
 		chainConfig, err := rawdb.ReadChainConfig(tx, genesisHash)
@@ -78,37 +81,49 @@ func TestPBTCommandsUseFrozenBlockFiles(t *testing.T) {
 		require.True(t, chainConfig.IsBinaryTrie(wantHeader.Time))
 		var found bool
 		var maxErr error
-		wantMaxTx, found, maxErr = rawdbv3.TxNums.MaxExact(t.Context(), tx, 2)
+		wantMaxTx, found, maxErr = rawdbv3.TxNums.MaxExact(t.Context(), tx, blockNum)
 		require.True(t, found)
 		return maxErr
 	}))
 	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
-		block := chain.Chain.Blocks[2]
-		rawdb.DeleteHeader(tx, block.Hash(), 2)
-		rawdb.DeleteBody(tx, block.Hash(), 2)
-		if err := rawdb.TruncateCanonicalHash(tx, 2, false); err != nil {
+		rawdb.DeleteHeader(tx, block.Hash(), blockNum)
+		rawdb.DeleteBody(tx, block.Hash(), blockNum)
+		if err := rawdb.TruncateCanonicalHash(tx, blockNum, false); err != nil {
 			return err
 		}
-		return rawdbv3.TxNums.Truncate(tx, 2)
+		return rawdbv3.TxNums.Truncate(tx, blockNum)
 	}))
 	rawDB.Close()
+	setExecutionProgress(t, chain.Tester.Dirs.Chaindata, blockNum)
 	rawDB = dbCfg(dbcfg.ChainDB, chain.Tester.Dirs.Chaindata).MustOpen()
+	require.NoError(t, rawDB.View(t.Context(), func(tx kv.Tx) error {
+		require.Nil(t, rawdb.ReadHeaderByNumber(tx, blockNum))
+		canonical, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		require.NoError(t, err)
+		require.Equal(t, common.Hash{}, canonical)
+		_, found, err := rawdbv3.TxNums.MaxExact(t.Context(), tx, blockNum)
+		require.NoError(t, err)
+		require.False(t, found)
+		return nil
+	}))
 	reader, view, closeReader, err := openPBTBlockReader(t.Context(), chain.Tester.Dirs, rawDB, log.New())
 	require.NoError(t, err)
 	tx, err := rawDB.BeginRo(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	readerTx := pbtBlockFilesTx{Tx: tx, view: view}
-	header, err := reader.HeaderByNumber(t.Context(), readerTx, 2)
+	header, err := reader.HeaderByNumber(t.Context(), readerTx, blockNum)
 	require.NoError(t, err)
 	require.Equal(t, wantHeader.Hash(), header.Hash())
-	maxTx, found, err := reader.TxnumReader().MaxExact(t.Context(), readerTx, 2)
+	maxTx, found, err := reader.TxnumReader().MaxExact(t.Context(), readerTx, blockNum)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, wantMaxTx, maxTx)
-	canonical, found, err := reader.CanonicalHash(t.Context(), readerTx, 2)
+	canonical, found, err := reader.CanonicalHash(t.Context(), readerTx, blockNum)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, wantHeader.Hash(), canonical)
+	require.NoError(t, checkPBTNodePositionWithFiles(t.Context(), rawDB, reader, view, blockNum, wantMaxTx))
 	byHash, err := reader.HeaderByHash(t.Context(), readerTx, wantHeader.Hash())
 	require.NoError(t, err)
 	require.Equal(t, wantHeader.Hash(), byHash.Hash())
@@ -119,7 +134,7 @@ func TestPBTCommandsUseFrozenBlockFiles(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = validatePBTImportPointReadOnly(t.Context(), chain.Tester.Dirs, settings, wantHeader.Hash(), log.New())
 	require.NoError(t, err)
-	blockHash, blockEnd, _, err := pbtAttachBlockEnd(t.Context(), chain.Tester.Dirs, 2, wantMaxTx)
+	blockHash, blockEnd, _, err := pbtAttachBlockEnd(t.Context(), chain.Tester.Dirs, blockNum, wantMaxTx)
 	require.NoError(t, err)
 	require.Equal(t, wantHeader.Hash(), blockHash)
 	require.True(t, blockEnd)

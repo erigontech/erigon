@@ -411,6 +411,7 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	if err != nil {
 		return err
 	}
+	publishedFiles = pbtAttachVisibleFiles(publishedFiles)
 	opened := make(map[kv.Domain]map[string]struct{})
 	for _, domain := range pbtAttachDomains {
 		opened[domain] = make(map[string]struct{})
@@ -520,6 +521,8 @@ func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endT
 	if err != nil {
 		return err
 	}
+	nodeFiles = pbtAttachVisibleFiles(nodeFiles)
+	publishedFiles = pbtAttachVisibleFiles(publishedFiles)
 	if err := validatePBTAttachUncutFiles(nodeFiles, stepSize, endTxNum); err != nil {
 		return err
 	}
@@ -564,6 +567,7 @@ func validatePBTAttachPublishedFiles(publishedDirs datadir.Dirs, stepSize, endTx
 	if err != nil {
 		return err
 	}
+	publishedFiles = pbtAttachVisibleFiles(publishedFiles)
 	for _, file := range publishedFiles {
 		if file.from*stepSize > endTxNum {
 			return fmt.Errorf("commitment attach-pbt: published file %s extends past conversion txNum %d", file.path, endTxNum)
@@ -724,6 +728,26 @@ func pbtAttachFiles(dirs datadir.Dirs) ([]pbtAttachFile, error) {
 	return files, nil
 }
 
+func pbtAttachVisibleFiles(files []pbtAttachFile) []pbtAttachFile {
+	visible := make([]pbtAttachFile, 0, len(files))
+	for i, file := range files {
+		hidden := false
+		for j, other := range files {
+			if i == j || file.domain != other.domain || filepath.Ext(file.path) != filepath.Ext(other.path) {
+				continue
+			}
+			if other.from <= file.from && other.to >= file.to && (other.from < file.from || other.to > file.to) {
+				hidden = true
+				break
+			}
+		}
+		if !hidden {
+			visible = append(visible, file)
+		}
+	}
+	return visible
+}
+
 func pbtAttachDomain(domain kv.Domain) bool {
 	return slices.Contains(pbtAttachDomains, domain)
 }
@@ -778,6 +802,7 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 	if err != nil {
 		return err
 	}
+	nodeFiles = pbtAttachVisibleFiles(nodeFiles)
 	for _, file := range nodeFiles {
 		if !pbtAttachAdoptsFile(file) {
 			continue
@@ -790,6 +815,7 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 	if err != nil {
 		return err
 	}
+	publishedFiles = pbtAttachVisibleFiles(publishedFiles)
 	for _, file := range publishedFiles {
 		if file.from*stepSize > endTxNum || !pbtAttachAdoptsFile(file) {
 			continue
