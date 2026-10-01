@@ -32,11 +32,25 @@ import (
 
 const keccakCacheMaxInput = 87
 
-type keccakCacheEntry struct {
+type keccakCacheEntry = KeccakCacheEntry
+
+// KeccakCacheEntry is one memoized hash: the input it was computed from and its digest.
+type KeccakCacheEntry struct {
 	hash common.Hash
 	n    uint8
 	in   [keccakCacheMaxInput]byte
 }
+
+// KeccakLRU is an alternative store for the memo, keyed by the input's maphash.
+type KeccakLRU interface {
+	Get(key uint64) (*KeccakCacheEntry, bool)
+	Add(key uint64, e *KeccakCacheEntry) bool
+}
+
+var keccakLRU KeccakLRU
+
+// SetKeccakLRU replaces the fixed table with l; it must be called before any hashing.
+func SetKeccakLRU(l KeccakLRU) { keccakLRU, keccakCacheOn = l, l != nil }
 
 var (
 	keccakCacheOn    = dbg.EnvBool("KECCAK_CACHE", false)
@@ -66,7 +80,11 @@ func cachedKeccak256(data []byte) common.Hash {
 		}
 		return keccak.Sum256(data)
 	}
-	slot := &keccakCacheSlots[maphash.Hash(data)&(uint64(len(keccakCacheSlots))-1)]
+	key := maphash.Hash(data)
+	if keccakLRU != nil {
+		return lruKeccak256(key, data)
+	}
+	slot := &keccakCacheSlots[key&(uint64(len(keccakCacheSlots))-1)]
 	if e := slot.Load(); e != nil && int(e.n) == len(data) && bytes.Equal(e.in[:e.n], data) {
 		if keccakCacheStats {
 			keccakHits.Add(1)
@@ -81,5 +99,21 @@ func cachedKeccak256(data []byte) common.Hash {
 	if keccakCacheOn {
 		slot.Store(e)
 	}
+	return e.hash
+}
+
+func lruKeccak256(key uint64, data []byte) common.Hash {
+	if e, ok := keccakLRU.Get(key); ok && int(e.n) == len(data) && bytes.Equal(e.in[:e.n], data) {
+		if keccakCacheStats {
+			keccakHits.Add(1)
+		}
+		return e.hash
+	}
+	if keccakCacheStats {
+		keccakMisses.Add(1)
+	}
+	e := &keccakCacheEntry{hash: keccak.Sum256(data), n: uint8(len(data))}
+	copy(e.in[:], data)
+	keccakLRU.Add(key, e)
 	return e.hash
 }
