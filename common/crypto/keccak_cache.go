@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"hash/maphash"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -57,6 +58,7 @@ var (
 	keccakCacheSeed    = maphash.MakeSeed()
 	keccakCacheBuckets = allocBuckets()
 	kcAdmit            = dbg.EnvBool("KECCAK_CACHE_ADMIT", false)
+	kcInsertMask       = uint32(1)<<dbg.EnvInt("KECCAK_CACHE_INSERT_SHIFT", 0) - 1
 	kcSeen             [1 << 14]atomic.Uint64 // 2^20 bits, 128 KB
 	kcSeenAdds         atomic.Uint64
 )
@@ -110,11 +112,14 @@ func Keccak256Hash(data []byte) common.Hash {
 		h := b.hash
 		b.tag.Store(st)
 		if hit {
+			if kcStats {
+				kcHits.Add(1)
+			}
 			return h
 		}
 	}
 	h := keccak.Sum256(data)
-	if kcVariant == "lookup" || (kcAdmit && !admitted(key)) {
+	if kcVariant == "lookup" || (kcAdmit && !admitted(key)) || (kcInsertMask != 0 && rand.Uint32()&kcInsertMask != 0) {
 		return h
 	}
 	if st := b.tag.Load(); st&keccakBucketLocked == 0 && b.tag.CompareAndSwap(st, st|keccakBucketLocked) {
@@ -131,6 +136,7 @@ var (
 	kcStats   = dbg.EnvBool("KECCAK_CACHE_STATS", false)
 	kcHist    [137]atomic.Uint64
 	kcSink    atomic.Uint64
+	kcHits    atomic.Uint64
 )
 
 func init() {
@@ -147,7 +153,7 @@ func init() {
 					fmt.Fprintf(&sb, " %d:%d", i, n)
 				}
 			}
-			fmt.Fprintf(os.Stderr, "[kcvar] pid=%d ts=%d variant=%s calls=%d len:count%s\n", os.Getpid(), now.UnixMilli(), kcVariant, total, sb.String())
+			fmt.Fprintf(os.Stderr, "[kcvar] pid=%d ts=%d variant=%s calls=%d hits=%d len:count%s\n", os.Getpid(), now.UnixMilli(), kcVariant, total, kcHits.Load(), sb.String())
 		}
 	}()
 }
