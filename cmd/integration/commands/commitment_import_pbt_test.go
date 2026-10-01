@@ -27,6 +27,7 @@ import (
 
 	app "github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -234,7 +235,7 @@ func TestImportPBTRefusalsLeaveDatadirUnchanged(t *testing.T) {
 			require.NoError(t, target.Tester.InsertChain(target.Chain))
 			buildPBTAcceptanceFiles(t, target)
 			settingsPath := filepath.Join(target.Tester.Dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
-			require.NoError(t, os.Remove(settingsPath))
+			require.NoError(t, dir.RemoveFile(settingsPath))
 			target.Tester.Close()
 			before := snapshotTree(t, target.Tester.Dirs.DataDir)
 			datadirCli, chaindata = target.Tester.Dirs.DataDir, target.Tester.Dirs.Chaindata
