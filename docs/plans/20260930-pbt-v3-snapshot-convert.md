@@ -661,12 +661,12 @@ recursive verification remains in the converter command after the written files 
 **Files:**
 - none (verification only)
 
-- [ ] every requirement in the Overview is implemented
-- [ ] the pin matrix, the reject tables and the refusal cases are covered by tests
-- [ ] run the full suites: `go test ./db/state/... ./db/integrity/... ./db/rawdb/... ./execution/commitment/...
+- [x] every requirement in the Overview is implemented
+- [x] the pin matrix, the reject tables and the refusal cases are covered by tests
+- [x] run the full suites: `go test ./db/state/... ./db/integrity/... ./db/rawdb/... ./execution/commitment/...
       ./execution/stagedsync/... ./cmd/integration/... ./cmd/utils/app/...`
-- [ ] run `make lint` until clean and `make erigon integration`
-- [ ] mutation-check the key guards; each must turn a named test red when reverted:
+- [x] run `make lint` until clean and `make erigon integration`
+- [x] mutation-check the key guards; each must turn a named test red when reverted:
       - row stamping from the leaf stream;
       - the unwind floor at each site;
       - the recursive `Verify` completion check;
