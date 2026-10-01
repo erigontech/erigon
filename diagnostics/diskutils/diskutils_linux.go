@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -85,7 +86,12 @@ func SmlinkForDirPath(dirPath string) string {
 			log.Debug("[diskutils] Error getting target path for symlink:", dirPath, "Error:", err)
 			return dirPath
 		} else {
-			return targetPath
+			// os.Readlink returns the raw link content, which is relative to the
+			// directory holding the symlink, not to the process working directory.
+			if !filepath.IsAbs(targetPath) {
+				targetPath = filepath.Join(filepath.Dir(dirPath), targetPath)
+			}
+			return filepath.Clean(targetPath)
 		}
 	} else {
 		return dirPath
