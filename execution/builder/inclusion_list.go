@@ -8,11 +8,16 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 func (b *Builder) BuildInclusionList(ctx context.Context) (types.Transactions, error) {
+	if b.txnProvider == nil {
+		return nil, txpool.ErrPoolDisabled
+	}
+
 	provideOpts := []txnprovider.ProvideOption{
-		txnprovider.WithAvailableRlpSpace(int(params.MaxBytesPerInclusionListEIP7805)),
+		txnprovider.WithAvailableRlpSpace(int(params.MaxTransactionsBytesPerInclusionListEIP7805)),
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(math.MaxUint64, math.MaxUint64, 0)),
 	}
 

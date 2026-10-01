@@ -49,7 +49,7 @@ func TestBuildInclusionListRequestsSpecLimits(t *testing.T) {
 	got, err := b.BuildInclusionList(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, types.Transactions(txns), got)
-	require.Equal(t, int(params.MaxBytesPerInclusionListEIP7805), provider.opts.AvailableRlpSpace)
+	require.Equal(t, int(params.MaxTransactionsBytesPerInclusionListEIP7805), provider.opts.AvailableRlpSpace)
 	require.Zero(t, provider.opts.GasTarget.Blob, "blob transactions must not be selected")
 	require.Equal(t, uint64(math.MaxUint64), provider.opts.GasTarget.Execution)
 	require.Equal(t, uint64(math.MaxUint64), provider.opts.GasTarget.State)

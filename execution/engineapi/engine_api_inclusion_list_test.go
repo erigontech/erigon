@@ -319,7 +319,7 @@ func TestGetInclusionListV1(t *testing.T) {
 	txnWithData := func(nonce uint64, dataLen int) types.Transaction {
 		return types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), make([]byte, dataLen))
 	}
-	half := int(params.MaxBytesPerInclusionListEIP7805) / 2
+	half := int(params.MaxTransactionsBytesPerInclusionListEIP7805) / 2
 	a, b, c := txnWithData(0, 100), txnWithData(1, half), txnWithData(2, half)
 
 	for _, tc := range []struct {
@@ -351,7 +351,7 @@ func TestGetInclusionListV1(t *testing.T) {
 				require.Equal(t, hexutil.Bytes(want[i]), result[i])
 				total += len(result[i])
 			}
-			require.LessOrEqual(t, total, int(params.MaxBytesPerInclusionListEIP7805))
+			require.LessOrEqual(t, total, int(params.MaxTransactionsBytesPerInclusionListEIP7805))
 		})
 	}
 }
