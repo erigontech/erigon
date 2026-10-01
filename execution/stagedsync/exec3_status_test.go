@@ -120,6 +120,28 @@ func TestExecStatusList_RevalidationRange(t *testing.T) {
 
 // --- New non-contiguous selection API driving dependency-ordered validation ---
 
+func TestExecStatusList_TakeReady_OnlyNotedPending(t *testing.T) {
+	t.Parallel()
+
+	var m execStatusList
+	for _, tx := range []int{0, 1, 2, 3} {
+		m.pushPending(tx)
+	}
+	m.noteReady(2)
+	m.noteReady(0)
+	require.Equal(t, []int{0, 2}, m.takeReady(), "noted pending txs come back in ascending order")
+	require.Nil(t, m.takeReady(), "a taken tx is not returned twice")
+	require.Equal(t, []int{1, 3}, m.pending, "unnoted txs stay pending")
+
+	// clearComplete drops completion without re-queueing, so such a tx must not
+	// become ready: the old scan walked the pending slice and skipped it.
+	m.setInProgress(1)
+	m.markComplete(1)
+	m.clearComplete(1)
+	m.noteReady(1)
+	require.Nil(t, m.takeReady(), "a tx absent from pending is never ready")
+}
+
 func TestExecStatusList_TakePendingWhere_SelectsNonContiguously(t *testing.T) {
 	var m execStatusList
 	for i := range 6 {

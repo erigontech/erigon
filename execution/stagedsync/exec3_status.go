@@ -19,6 +19,9 @@ type execStatusList struct {
 	pending       []int
 	inProgress    []bool
 	complete      []bool
+	ready         []int // pending txs an external condition marked ready; sorted
+	isReady       []bool
+	inPending     []bool
 	dependency    map[int]map[int]bool
 	blocker       map[int]map[int]bool
 	inProgressCnt int
@@ -33,6 +36,50 @@ func (m *execStatusList) ensureLen(tx int) {
 	}
 	m.complete = slices.Grow(m.complete, n-len(m.complete))[:n]
 	m.inProgress = slices.Grow(m.inProgress, n-len(m.inProgress))[:n]
+	m.isReady = slices.Grow(m.isReady, n-len(m.isReady))[:n]
+	m.inPending = slices.Grow(m.inPending, n-len(m.inPending))[:n]
+}
+
+// isPending mirrors the pending slice. It is tracked rather than derived from
+// inProgress/complete: clearComplete drops a tx's completion without putting it
+// back in pending, and such a tx must stay out of the ready set.
+func (m *execStatusList) isPending(tx int) bool {
+	return tx >= 0 && tx < len(m.inPending) && m.inPending[tx]
+}
+
+// noteReady records that tx now satisfies the caller's readiness condition, so
+// takeReady can return it without scanning every pending tx.
+func (m *execStatusList) noteReady(tx int) {
+	m.ensureLen(tx)
+	if m.isReady[tx] || !m.isPending(tx) {
+		return
+	}
+	m.isReady[tx] = true
+	m.ready = insertInList(m.ready, tx)
+}
+
+// takeReady removes and returns the noteReady-marked pending txs in ascending
+// order, marking each in-progress. It is takePendingWhere without the scan.
+func (m *execStatusList) takeReady() []int {
+	if len(m.ready) == 0 {
+		return nil
+	}
+	marked := m.ready
+	m.ready = nil
+	taken := marked[:0]
+	for _, tx := range marked {
+		m.isReady[tx] = false
+		if !m.isPending(tx) {
+			continue
+		}
+		m.clearPending(tx)
+		m.setInProgress(tx)
+		taken = append(taken, tx)
+	}
+	if len(taken) == 0 {
+		return nil
+	}
+	return taken
 }
 
 func insertInList(l []int, v int) []int {
@@ -55,6 +102,8 @@ func (m *execStatusList) takeNextPending() int {
 
 	x := m.pending[0]
 	m.pending = m.pending[1:]
+	m.ensureLen(x)
+	m.inPending[x] = false
 	m.setInProgress(x)
 
 	return x
@@ -73,6 +122,7 @@ func (m *execStatusList) takePendingWhere(pred func(tx int) bool) []int {
 	for _, tx := range m.pending {
 		if pred(tx) {
 			taken = append(taken, tx)
+			m.inPending[tx] = false
 			m.setInProgress(tx)
 		} else {
 			kept = append(kept, tx)
@@ -89,6 +139,7 @@ func (m execStatusList) maxComplete() int {
 func (m *execStatusList) pushPending(tx int) {
 	m.ensureLen(tx)
 	m.pending = insertInList(m.pending, tx)
+	m.inPending[tx] = true
 }
 
 func (m *execStatusList) setInProgress(tx int) {
@@ -101,6 +152,7 @@ func (m *execStatusList) setInProgress(tx int) {
 
 func (m *execStatusList) setComplete(tx int) {
 	m.ensureLen(tx)
+	m.inPending[tx] = false
 	if !m.complete[tx] {
 		m.complete[tx] = true
 		m.completeCnt++
@@ -136,6 +188,7 @@ func removeFromList(l []int, v int, expect bool) []int {
 
 func (m *execStatusList) markComplete(tx int) {
 	m.ensureLen(tx)
+	m.inPending[tx] = false
 	if !m.inProgress[tx] {
 		panic(errors.New("should not happen - element expected in list"))
 	}
@@ -286,6 +339,9 @@ func (m *execStatusList) clearComplete(tx int) {
 
 func (m *execStatusList) clearPending(tx int) {
 	m.pending = removeFromList(m.pending, tx, false)
+	if tx >= 0 && tx < len(m.inPending) {
+		m.inPending[tx] = false
+	}
 }
 
 func (m *execStatusList) completeList() []int {

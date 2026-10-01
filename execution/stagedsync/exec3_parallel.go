@@ -2644,6 +2644,24 @@ type blockExecutor struct {
 // readyForDepOrderValidation decides whether tx may be validated out of contiguous
 // order: exec-complete and not already validated. The self-loop worker only sends a
 // result once its read-set re-validates, so no dependency/coinbase gate is needed.
+// noteValidationReady re-arms the ready set after a validation was cleared: the
+// tx is pending again and its execution may already be complete.
+func (be *blockExecutor) noteValidationReady(tx int) {
+	if be.execTasks.checkComplete(tx) {
+		be.validateTasks.noteReady(tx)
+	}
+}
+
+// assertReadySetComplete fails when the incrementally maintained ready set
+// disagrees with scanning every pending tx, which would silently stall a tx.
+func (be *blockExecutor) assertReadySetComplete(taken []int) {
+	for _, tx := range be.validateTasks.pending {
+		if be.readyForDepOrderValidation(tx) {
+			panic(fmt.Sprintf("ready set missed tx %d (took %v)", tx, taken))
+		}
+	}
+}
+
 func (be *blockExecutor) readyForDepOrderValidation(tx int) bool {
 	if !be.execTasks.checkComplete(tx) || be.validateTasks.checkComplete(tx) {
 		return false
@@ -2929,6 +2947,7 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 						panic(fmt.Sprintf("revalidate oracle: clean tx %d failed finalize re-validation", tx))
 					}
 					be.validateTasks.clearComplete(tx)
+					be.noteValidationReady(tx)
 					be.signalSelfLoopReexec(tx)
 					break
 				}
@@ -3108,6 +3127,7 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 		be.cntValidationFail++
 		be.execFailed[tx]++
 		be.validateTasks.clearComplete(tx)
+		be.noteValidationReady(tx)
 		// Signal the parked worker to re-execute in place; leave execTasks complete so
 		// the re-sent result re-validates without going through the dispatch path.
 		be.signalSelfLoopReexec(tx)
@@ -3153,9 +3173,10 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			return r, ferr
 		}
 
-		toValidate := be.validateTasks.takePendingWhere(func(t int) bool {
-			return be.readyForDepOrderValidation(t)
-		})
+		toValidate := be.validateTasks.takeReady()
+		if dbg.AssertEnabled {
+			be.assertReadySetComplete(toValidate)
+		}
 
 		for _, tx := range toValidate {
 			txResult := be.results[tx]
@@ -3296,6 +3317,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.execTasks.markComplete(tx)
 		be.execTasks.removeDependency(tx)
 	}
+	be.validateTasks.noteReady(tx)
 
 	// do validations ...
 	var stateReader state.StateReader
