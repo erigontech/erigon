@@ -279,7 +279,7 @@ func TestRunExportPBTUsesStoppedExecutionStage(t *testing.T) {
 }
 
 func TestDoExportPBTUsesFrozenBlockFiles(t *testing.T) {
-	selectPBTFrozenExportSuite(t)
+	selectPBTExportSuite(t)
 	dirs := buildFrozenPBTExportDatadir(t)
 	tmpFile := filepath.Join(t.TempDir(), "not-a-directory")
 	require.NoError(t, os.WriteFile(tmpFile, nil, 0o644))
@@ -296,7 +296,7 @@ func TestDoExportPBTUsesFrozenBlockFiles(t *testing.T) {
 }
 
 func TestDoExportPreimagesUsesFrozenBlockFiles(t *testing.T) {
-	selectPBTFrozenExportSuite(t)
+	selectPBTExportSuite(t)
 	dirs := buildFrozenPBTExportDatadir(t)
 	tmpFile := filepath.Join(t.TempDir(), "not-a-directory")
 	require.NoError(t, os.WriteFile(tmpFile, nil, 0o644))
@@ -441,10 +441,6 @@ func selectPBTExportSuite(t *testing.T) {
 	statecfg.ExperimentalParallelCommitment = false
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
-}
-
-func selectPBTFrozenExportSuite(t *testing.T) {
-	selectPBTExportSuite(t)
 }
 
 func newPBTExportDB(t *testing.T) (kv.TemporalRwDB, common.Hash) {

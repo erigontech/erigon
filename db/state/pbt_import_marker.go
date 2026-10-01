@@ -65,7 +65,29 @@ func WritePBTImportMarker(dirs datadir.Dirs, marker *PBTImportMarker) error {
 	if err != nil {
 		return err
 	}
-	if err := dir.WriteFileWithFsync(PBTImportMarkerPath(dirs), data, 0o644); err != nil {
+	path := PBTImportMarkerPath(dirs)
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = dir.RemoveFile(tmpPath)
+	}()
+	if err := tmp.Chmod(0o644); err != nil {
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
 		return err
 	}
 	return dir.FsyncDir(dirs.Snap)
@@ -76,4 +98,15 @@ func RemovePBTImportMarker(dirs datadir.Dirs) error {
 		return err
 	}
 	return dir.FsyncDir(dirs.Snap)
+}
+
+func RefusePBTImportMarker(dirs datadir.Dirs) error {
+	marker, err := ReadPBTImportMarker(dirs)
+	if err != nil {
+		return fmt.Errorf("commitment import-pbt marker is invalid; rerun import-pbt --snapshot <snapshot>: %w", err)
+	}
+	if marker == nil {
+		return nil
+	}
+	return fmt.Errorf("commitment import-pbt is incomplete for %s; rerun import-pbt --snapshot %s", marker.SnapshotPath, marker.SnapshotPath)
 }

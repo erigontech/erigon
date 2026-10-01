@@ -18,6 +18,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -56,6 +57,9 @@ func configurePBTExportHash(dirs datadir.Dirs, cliCtx *cli.Command) (func(), err
 		}
 	}
 	if requested != "" {
+		if variant != state.TrieVariantHex && settings != nil && requested != settings.TrieHashName() {
+			return nil, fmt.Errorf("--experimental.bin-commitment.hash=%s differs from datadir trie_hash %s", requested, settings.TrieHashName())
+		}
 		if err := commitment.SetPBinHashSuite(requested); err != nil {
 			restore()
 			return nil, err

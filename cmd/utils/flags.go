@@ -1162,7 +1162,7 @@ var (
 	// adopted like the variant itself: roots do not survive a change.
 	ExperimentalBinCommitmentHashFlag = cli.StringFlag{
 		Name:  "experimental.bin-commitment.hash",
-		Usage: "EXPERIMENTAL: hash for the EIP-8297 binary commitment trie: \"keccak\" (default) or \"blake3\". blake3 matches the execution-specs reference and the other clients on the binary-trie testnets. Takes effect on a fresh datadir only and is persisted there.",
+		Usage: "EXPERIMENTAL: hash for the EIP-8297 binary commitment trie: \"blake3\" (default) or \"keccak\". blake3 matches the execution-specs reference and the other clients on the binary-trie testnets. Takes effect on a fresh datadir only and is persisted there.",
 		// Empty, not "keccak": an unset flag must stay distinguishable from an
 		// explicit one, which a hex datadir refuses.
 		Value: "",

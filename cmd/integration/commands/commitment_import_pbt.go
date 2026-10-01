@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -107,7 +106,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	}
 	marker, err := dbstate.ReadPBTImportMarker(dirs)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w; rerun import-pbt --snapshot %s", err, snapshotPath)
 	}
 	absSnapshotPath, err := filepath.Abs(snapshotPath)
 	if err != nil {
@@ -162,10 +161,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	statecfg.InitSchemas()
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	requestedHash := statecfg.BinCommitmentHash
-	if requestedHash == "" {
-		requestedHash = commitment.PBinHashSuiteName()
-	}
-	if requestedHash != meta.HashSuite {
+	if requestedHash != "" && requestedHash != meta.HashSuite {
 		return fmt.Errorf("commitment import-pbt: hash suite %q does not match snapshot suite %q", requestedHash, meta.HashSuite)
 	}
 	if err := commitment.SetPBinHashSuite(meta.HashSuite); err != nil {
@@ -321,7 +317,10 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		return err
 	}
 	defer targetAgg.Close()
-	stageRawPath, err := os.MkdirTemp("", "import-pbt-chaindata-")
+	if err := os.MkdirAll(dirs.Tmp, 0o755); err != nil {
+		return err
+	}
+	stageRawPath, err := os.MkdirTemp(dirs.Tmp, "import-pbt-chaindata-")
 	if err != nil {
 		return err
 	}
@@ -394,7 +393,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	targetDB.Close()
 	targetAgg.Close()
 	stageRaw.Close()
-	if err := verifyPBTImportRows(ctx, stageDirs, finalSettings, logger, meta, checkpointState, !checkpointInFiles); err != nil {
+	if err := verifyPBTImportRows(ctx, stageDirs, finalSettings, logger, dirs.Chaindata); err != nil {
 		return err
 	}
 	if importPBTSwapHook != nil {
@@ -407,14 +406,13 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	}
 	if marker != nil {
 		if err := removePBTImportFilesForRecovery(dirs); err != nil {
-			_ = dbstate.RemovePBTImportMarker(dirs)
 			return err
 		}
 	}
 	moved, err := movePBTImportBinFiles(stageDirs, dirs)
 	if err != nil {
-		_ = dbstate.RemovePBTImportMarker(dirs)
 		removePBTImportFiles(moved)
+		_ = dbstate.RemovePBTImportMarker(dirs)
 		return err
 	}
 	settingsWritten := false
@@ -423,8 +421,8 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 			panic(recovered)
 		}
 		if !settingsWritten {
-			_ = dbstate.RemovePBTImportMarker(dirs)
 			removePBTImportFiles(moved)
+			_ = dbstate.RemovePBTImportMarker(dirs)
 		}
 	}()
 	if importPBTSwapHook != nil {
@@ -451,31 +449,15 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	return nil
 }
 
-func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger, point pbtImportMeta, state []byte, writeState bool) error {
-	rawPath, err := os.MkdirTemp("", "import-pbt-verify-")
-	if err != nil {
+func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger, chaindataPath string) error {
+	if err := os.MkdirAll(dirs.Tmp, 0o755); err != nil {
 		return err
 	}
-	defer func() { _ = dir.RemoveAll(rawPath) }()
-	rawDB, err := mdbx.New(dbcfg.ChainDB, logger).Path(rawPath).Open(ctx)
+	rawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, chaindataPath), true)
 	if err != nil {
 		return err
 	}
 	defer rawDB.Close()
-	if err := rawDB.Update(ctx, func(tx kv.RwTx) error {
-		for blockNum := uint64(0); blockNum <= point.Block; blockNum++ {
-			maxTxNum := point.TxNum
-			if blockNum == 0 && point.Block != 0 {
-				maxTxNum = 0
-			}
-			if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
 	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
 	if err != nil {
 		return err
@@ -489,35 +471,6 @@ func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		return err
 	}
 	defer db.Close()
-	if writeState {
-		tx, err := db.BeginTemporalRw(ctx)
-		if err != nil {
-			return err
-		}
-		defer tx.Rollback()
-		cfg := commitment.DefaultTrieConfig()
-		cfg.Variant = commitment.VariantBinPatriciaTrie
-		cfg.EnableTrieWarmup = false
-		domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-		if err := domains.DomainPut(kv.CommitmentBinDomain, tx, commitment.KeyCommitmentState, state, point.TxNum, nil); err != nil {
-			domains.Close()
-			tx.Rollback()
-			return err
-		}
-		if err := domains.Flush(ctx, tx); err != nil {
-			domains.Close()
-			tx.Rollback()
-			return err
-		}
-		domains.Close()
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err

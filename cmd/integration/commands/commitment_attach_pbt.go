@@ -57,7 +57,10 @@ var (
 	attachPBTFrom                 string
 	attachPBTStepHook             func(string) error
 	validatePBTAttachLeafStampsFn = validatePBTAttachLeafStamps
+	validatePBTAttachGenesisFn    = validatePBTAttachGenesis
+	pbtAttachHexRootFn            = pbtAttachHexRoot
 	pbtAttachPublishedRootFn      = pbtAttachPublishedRoot
+	pbtAttachNodePbtRootFn        = pbtAttachNodePbtRoot
 )
 
 func init() {
@@ -209,7 +212,7 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 		return err
 	}
 	if marker == nil {
-		publishedHexRoot, found, err := pbtAttachHexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
+		publishedHexRoot, found, err := pbtAttachHexRootFn(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
 		if err != nil {
 			return err
 		}
@@ -235,8 +238,19 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 				return fmt.Errorf("commitment attach-pbt: published root %s differs from header root %s at block %d", wantHeaderRoot, headerRoot, blockNum)
 			}
 		}
-		if err := validatePBTAttachGenesis(ctx, nodeDirs, publishedDirs, logger); err != nil {
+		if err := validatePBTAttachGenesisFn(ctx, nodeDirs, publishedDirs, logger); err != nil {
 			return err
+		}
+		publishedPbtRoot, err := pbtAttachPublishedRootFn(ctx, publishedDirs, publishedSettings, logger)
+		if err != nil {
+			return err
+		}
+		nodePbtRoot, err := pbtAttachNodePbtRootFn(ctx, nodeDirs, nodeSettings, txNum, publishedSettings.TrieHashName(), logger)
+		if err != nil {
+			return err
+		}
+		if nodePbtRoot != publishedPbtRoot {
+			return fmt.Errorf("commitment attach-pbt: node PBT root %s differs from published root %s at (%d, %d)", nodePbtRoot, publishedPbtRoot, blockNum, txNum)
 		}
 	}
 	refs := publishedSettings.RefsInCommitmentBranches()
@@ -285,7 +299,7 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if blockEnd {
 		var shadowRoot common.Hash
 		if afterFork {
-			if hexRoot, found, err := pbtAttachHexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
+			if hexRoot, found, err := pbtAttachHexRootFn(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
 				return err
 			} else if found {
 				shadowRoot = hexRoot
@@ -340,6 +354,43 @@ func pbtAttachPublishedRoot(ctx context.Context, dirs datadir.Dirs, settings *db
 		return common.Hash{}, err
 	}
 	if err := dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
+		return builder.Add(leaf.Key, leaf.Value)
+	}); err != nil {
+		return common.Hash{}, err
+	}
+	return builder.RootHash()
+}
+
+func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, hashName string, logger log.Logger) (common.Hash, error) {
+	configurePBTSourceVariant(settings)
+	if err := eip8297.SetHashSuite(hashName); err != nil {
+		return common.Hash{}, err
+	}
+	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer db.Close()
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(db); err != nil {
+		return common.Hash{}, err
+	}
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	roTx, err := db.BeginRo(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer roTx.Rollback()
+	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if err := dbstate.ForEachPBinLeafAt(ctx, at, roTx, txNum+1, func(leaf dbstate.PBinLeaf) error {
 		return builder.Add(leaf.Key, leaf.Value)
 	}); err != nil {
 		return common.Hash{}, err
@@ -514,6 +565,15 @@ func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datad
 		return err
 	}
 	if genesis == nil {
+		for _, pattern := range []string{"*headers.seg", "*bodies.seg", "*transactions.seg"} {
+			files, globErr := filepath.Glob(filepath.Join(publishedDirs.Snap, pattern))
+			if globErr != nil {
+				return globErr
+			}
+			if len(files) != 0 {
+				return errors.New("commitment attach-pbt: published genesis is missing")
+			}
+		}
 		return nil
 	}
 	if genesis.Hash() != nodeGenesis {

@@ -18,12 +18,14 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
@@ -37,11 +39,18 @@ type PBinLeaf struct {
 }
 
 type pbinLatestCursor struct {
-	iter  *DomainLatestIterFile
-	key   []byte
-	value []byte
-	stamp uint64
-	ok    bool
+	iter        pbinLeafIterator
+	key         []byte
+	value       []byte
+	stamp       uint64
+	stampReader func() uint64
+	ok          bool
+}
+
+type pbinLeafIterator interface {
+	HasNext() bool
+	Next() ([]byte, []byte, error)
+	Close()
 }
 
 func ForEachPBinLeaf(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(PBinLeaf) error) error {
@@ -78,7 +87,47 @@ func ForEachPBinLeaf(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(P
 	if err := storageCursor.advance(); err != nil {
 		return err
 	}
+	return pbinForEachLeaf(at, accountsCursor, codeCursor, storageCursor, emit)
+}
 
+func ForEachPBinLeafAt(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, txNum uint64, emit func(PBinLeaf) error) error {
+	if at == nil {
+		return fmt.Errorf("pbin leaf stream: nil aggregator transaction")
+	}
+	if roTx == nil {
+		return fmt.Errorf("pbin leaf stream: nil database transaction")
+	}
+	if emit == nil {
+		return fmt.Errorf("pbin leaf stream: nil emitter")
+	}
+	accountsCursor, err := pbinOpenAsOfCursor(ctx, at, roTx, kv.AccountsDomain, txNum)
+	if err != nil {
+		return err
+	}
+	defer accountsCursor.close()
+	codeCursor, err := pbinOpenAsOfCursor(ctx, at, roTx, kv.CodeDomain, txNum)
+	if err != nil {
+		return err
+	}
+	defer codeCursor.close()
+	storageCursor, err := pbinOpenAsOfCursor(ctx, at, roTx, kv.StorageDomain, txNum)
+	if err != nil {
+		return err
+	}
+	defer storageCursor.close()
+	if err := accountsCursor.advance(); err != nil {
+		return err
+	}
+	if err := codeCursor.advance(); err != nil {
+		return err
+	}
+	if err := storageCursor.advance(); err != nil {
+		return err
+	}
+	return pbinForEachLeaf(at, accountsCursor, codeCursor, storageCursor, emit)
+}
+
+func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCursor pbinLatestCursor, emit func(PBinLeaf) error) error {
 	collector := etl.NewCollector("pbin-leaf-stream", at.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
 	defer collector.Close()
 	emitter := pbt.NewRebuildFeedOpEmitter()
@@ -157,13 +206,34 @@ func pbinOpenLatestCursor(at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, file
 	if domainRoTx == nil {
 		return pbinLatestCursor{}, fmt.Errorf("pbin leaf stream: domain %s is unavailable", domain)
 	}
-	var iter *DomainLatestIterFile
+	var iter pbinLeafIterator
+	var stampReader func() uint64
 	var err error
 	if filesOnly {
-		iter, err = domainRoTx.DebugRangeLatestFromFiles(nil, nil, kv.Unlim)
+		fileIter, fileErr := domainRoTx.DebugRangeLatestFromFiles(nil, nil, kv.Unlim)
+		iter, err = fileIter, fileErr
+		if fileIter != nil {
+			stampReader = fileIter.Stamp
+		}
 	} else {
-		iter, err = domainRoTx.DebugRangeLatest(roTx, nil, nil, kv.Unlim)
+		dbIter, dbErr := domainRoTx.DebugRangeLatest(roTx, nil, nil, kv.Unlim)
+		iter, err = dbIter, dbErr
+		if dbIter != nil {
+			stampReader = dbIter.Stamp
+		}
 	}
+	if err != nil {
+		return pbinLatestCursor{}, err
+	}
+	return pbinLatestCursor{iter: iter, stampReader: stampReader}, nil
+}
+
+func pbinOpenAsOfCursor(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, txNum uint64) (pbinLatestCursor, error) {
+	domainRoTx := at.DbgDomain(domain)
+	if domainRoTx == nil {
+		return pbinLatestCursor{}, fmt.Errorf("pbin leaf stream: domain %s is unavailable", domain)
+	}
+	iter, err := domainRoTx.RangeAsOf(ctx, roTx, nil, nil, txNum, order.Asc, kv.Unlim)
 	if err != nil {
 		return pbinLatestCursor{}, err
 	}
@@ -189,7 +259,11 @@ func (c *pbinLatestCursor) advance() error {
 	}
 	c.key = bytes.Clone(key)
 	c.value = bytes.Clone(value)
-	c.stamp = c.iter.Stamp()
+	if c.stampReader != nil {
+		c.stamp = c.stampReader()
+	} else {
+		c.stamp = 0
+	}
 	c.ok = true
 	return nil
 }

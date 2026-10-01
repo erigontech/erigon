@@ -70,6 +70,21 @@ func TestImportPBTReadsHexCheckpointFromDatabaseWhenFilesLag(t *testing.T) {
 	require.Equal(t, uint64(7), txNum)
 }
 
+func TestImportPBTEndToEndWhenFilesReachCheckpoint(t *testing.T) {
+	fixture := newPBTImportFixture(t)
+	before := snapshotTree(t, fixture.dataDir)
+	require.NoError(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New()))
+	block, txNum := readPBTImportCheckpoint(t, fixture.dataDir)
+	require.Equal(t, uint64(2), block)
+	require.Equal(t, uint64(7), txNum)
+	after := snapshotTree(t, fixture.dataDir)
+	for path, value := range before {
+		if strings.Contains(path, "accounts") || strings.Contains(path, "storage") || strings.Contains(path, "code") {
+			require.Equal(t, value, after[path], "import must not rewrite state-domain file %s", path)
+		}
+	}
+}
+
 func TestImportPBTReplacesConvertAndAttachWithFilesBeforeCheckpoint(t *testing.T) {
 	selectPBTHexCommandSuite(t)
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)

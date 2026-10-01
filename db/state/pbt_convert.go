@@ -107,7 +107,7 @@ func VerifyPBinDomain(ctx context.Context, tx kv.TemporalTx, aggregator *Aggrega
 	if len(at.Files(domain)) == 0 {
 		return nil
 	}
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(domain))
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(domain), execctx.WithoutCommitmentSeek())
 	if err != nil {
 		return err
 	}
@@ -116,6 +116,7 @@ func VerifyPBinDomain(ctx context.Context, tx kv.TemporalTx, aggregator *Aggrega
 	if commitmentCtx == nil {
 		return fmt.Errorf("pbin verification: commitment domain %s is unavailable", domain)
 	}
+	commitmentCtx.PrepareForVerification(tx)
 	trie := commitmentCtx.Trie()
 	verifier, ok := trie.(interface{ Verify() error })
 	if !ok {

@@ -49,11 +49,10 @@ import (
 )
 
 var (
-	convertPBTKeepHex          bool
-	convertPBTOutputDatadir    string
-	convertPBTOutputHook       func() error
-	convertPBTTargetSchemaHook func() error
-	convertPBTStandaloneHook   func(datadir.Dirs) error
+	convertPBTKeepHex        bool
+	convertPBTOutputDatadir  string
+	convertPBTOutputHook     func() error
+	convertPBTStandaloneHook func(datadir.Dirs) error
 )
 
 func init() {
@@ -236,12 +235,6 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		statecfg.InitSchemas()
 		statecfg.DisableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	}
-	if convertPBTTargetSchemaHook != nil {
-		if err := convertPBTTargetSchemaHook(); err != nil {
-			return err
-		}
-	}
-
 	targetSettings := &dbstate.ErigonDBSettings{
 		StepSize:                       sourceAgg.StepSize(),
 		StepsInFrozenFile:              sourceAgg.StepsInFrozenFile(),

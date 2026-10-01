@@ -298,6 +298,9 @@ func New(
 	if err := state.RefusePBTAttachMarker(dirs); err != nil {
 		return nil, err
 	}
+	if err := state.RefusePBTImportMarker(dirs); err != nil {
+		return nil, err
+	}
 
 	tmpdir := dirs.Tmp
 	if err := RemoveContents(tmpdir); err != nil { // clean it on startup

@@ -599,80 +599,37 @@ func TestConvertPBTPrunedSourceOpens(t *testing.T) {
 }
 
 func TestConvertPBTHexBinSourceConfiguresVariantBeforeOpening(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	previousDatadir := datadirCli
-	previousChaindata := chaindata
-	previousTargetSchemaHook := convertPBTTargetSchemaHook
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-		datadirCli = previousDatadir
-		chaindata = previousChaindata
-		convertPBTTargetSchemaHook = previousTargetSchemaHook
-	})
-	statecfg.ExperimentalBinCommitment = false
-	statecfg.ExperimentalHexBinCommitment = false
-	statecfg.ExperimentalCommitmentV3 = true
-	statecfg.InitSchemas()
-	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	statecfg.BinCommitmentHash = ""
-	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
-	source, wantRoot := newPBTConversionSource(t)
-	dualPath := filepath.Join(t.TempDir(), "dual")
-	require.NoError(t, convertPBT(t.Context(), source.DataDir, dualPath, true, "", log.New()))
-	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(source.Chaindata).MustOpen()
-	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
-		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			return err
-		}
-		forkTime := uint64(1)
-		if err := rawdb.WriteChainConfig(tx, genesisHash, &chainpkg.Config{BinaryTrieTime: &forkTime}); err != nil {
-			return err
-		}
-		header := &types.Header{Number: *uint256.NewInt(1), Time: 1, Root: wantRoot}
-		if err := rawdb.WriteHeader(tx, header); err != nil {
-			return err
-		}
-		return rawdb.WriteCanonicalHash(tx, header.Hash(), 1)
-	}))
-	rawDB.Close()
-	require.NoError(t, os.Symlink(source.Chaindata, filepath.Join(dualPath, "chaindata")))
-	dual := pbtConversionSource{Dirs: datadir.Open(dualPath)}
-	convertPBTTargetSchemaHook = func() error {
-		if statecfg.Schema.CommitmentDomain.CommitmentV3Records {
-			return errors.New("bin-only target uses the v3 hex schema")
-		}
-		return nil
-	}
+	selectPBTCommandSuite(t)
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	buildPBTAcceptanceFiles(t, source)
+	wantRoot := readPBTFilesRoot(t, source.Tester.Dirs.DataDir)
+	source.Tester.Close()
+	selectPBTHexCommandSuite(t)
 	output := filepath.Join(t.TempDir(), "output")
-	require.NoError(t, convertPBT(t.Context(), dual.DataDir, output, false, "", log.New()))
-	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, output, false, "", log.New()))
+	selectPBTBinaryCommandSuite(t)
+	settings, err := dbstate.ResolveErigonDBSettings(datadir.Open(output), log.New(), true)
 	require.NoError(t, err)
 	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())
 	legacyFiles, err := filepath.Glob(filepath.Join(datadir.Open(output).SnapDomain, "v3.0-commitment.*.kv"))
 	require.NoError(t, err)
 	require.Empty(t, legacyFiles, "bin-only output must not use the v3 hex schema")
+	binFiles, err := filepath.Glob(filepath.Join(datadir.Open(output).SnapDomain, "v2.2-commitment.*.kv"))
+	require.NoError(t, err)
+	require.NotEmpty(t, binFiles, "bin-only output must publish commitment files")
 	statecfg.InitSchemas()
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.ExperimentalHexBinCommitment = false
-	statecfg.ExperimentalCommitmentV3 = false
-	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
-	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	statecfg.DisableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	require.NotPanics(t, func() {
-		agg := dbstate.New(datadir.Open(output)).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+		agg := dbstate.New(datadir.Open(output)).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Logger(log.New()).MustOpen(t.Context())
 		require.NoError(t, agg.OpenFolder(nil))
+		at := agg.BeginFilesRo()
+		require.NotEmpty(t, at.AllFiles())
+		at.Close()
 		agg.Close()
 	})
+	require.Equal(t, wantRoot, readPBTBinRoot(t, output, source.Tester.Dirs.Chaindata))
 }
 
 func TestConvertPBTHexBinSourceWithOrdinaryHexFlags(t *testing.T) {
@@ -1454,6 +1411,10 @@ func readPBTBinRoot(t *testing.T, output, rawPath string) common.Hash {
 	dirs := datadir.Open(output)
 	settings, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
+	domain := kv.CommitmentBinDomain
+	if settings.TrieVariantName() == dbstate.TrieVariantBin {
+		domain = kv.CommitmentDomain
+	}
 	rawDB := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()
 	agg := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
 	require.NoError(t, agg.OpenFolder(rawDB))
@@ -1463,7 +1424,7 @@ func readPBTBinRoot(t *testing.T, output, rawPath string) common.Hash {
 		agg.Close()
 		rawDB.Close()
 	}()
-	iter, err := at.DebugRangeLatestFromFiles(kv.CommitmentBinDomain, nil, nil, kv.Unlim)
+	iter, err := at.DebugRangeLatestFromFiles(domain, nil, nil, kv.Unlim)
 	require.NoError(t, err)
 	hasRows := false
 	for iter.HasNext() {
@@ -1483,9 +1444,9 @@ func readPBTBinRoot(t *testing.T, output, rawPath string) common.Hash {
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithCommitmentDomainOnly(domain))
 	require.NoError(t, err)
-	root, err := domains.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
+	root, err := domains.GetCommitmentCtxForDomain(domain).Trie().RootHash()
 	require.NoError(t, err)
 	domains.Close()
 	tx.Rollback()
