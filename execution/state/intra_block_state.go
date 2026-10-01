@@ -667,33 +667,34 @@ func (sdb *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
-	return sdb.getCode(addr, false)
+	code, err := sdb.getCode(addr, false)
+	return code.Bytes, err
 }
 
-func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byte, error) {
+func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) (accounts.Code, error) {
 	if sdb.versionMap == nil {
 		stateObject, err := sdb.getStateObject(addr, true)
 		if err != nil {
-			return nil, err
+			return accounts.Code{}, err
 		}
 		if stateObject != nil && !stateObject.deleted {
-			code, err := stateObject.Code()
+			code, err := stateObject.CodeTyped()
 			if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 				if err != nil {
 					fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, err)
 				} else {
-					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, len(code))
+					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, code.Len())
 				}
 			}
 			if err == nil {
-				sdb.callCodeAccessHook(addr, code)
+				sdb.callCodeAccessHook(addr, code.Bytes)
 			}
 			return code, err
 		}
 		if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, StorageRead, addr, 0)
 		}
-		return nil, nil
+		return accounts.Code{}, nil
 	}
 	// When commited=true (used by ResolveCode for EIP-7702 delegation),
 	// versionedReadCore skips local versionedWrites and may return a stale
@@ -704,7 +705,7 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 	if commited {
 		if so, ok := sdb.stateObjects[addr]; ok && so.dirtyCode && sdb.hasWrite(addr, CodePath, accounts.NilKey) {
 			sdb.callCodeAccessHook(addr, so.code.Bytes)
-			return so.code.Bytes, nil
+			return so.code, nil
 		}
 	}
 	code, source, _, err := readCode(sdb, addr, commited)
@@ -713,11 +714,11 @@ func (sdb *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 		if err != nil {
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, err)
 		} else {
-			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, len(code))
+			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, code.Len())
 		}
 	}
 	if err == nil {
-		sdb.callCodeAccessHook(addr, code)
+		sdb.callCodeAccessHook(addr, code.Bytes)
 	}
 
 	return code, err
@@ -817,33 +818,20 @@ func (sdb *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 	return hash, err
 }
 
-func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
-	// eip-7702
-	dd, ok, err := sdb.GetDelegatedDesignation(addr)
-
-	if ok {
-		return sdb.GetCodeHash(dd)
-	}
-
-	if err != nil {
-		return accounts.NilCodeHash, err
-	}
-
-	return sdb.GetCodeHash(addr)
-}
-
-func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {
+// ResolveCode returns the code a call to addr executes, following an EIP-7702 delegation. The
+// code hash comes from the same read as the code.
+func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, error) {
 	// committed=false so the tx's own writes (e.g. from EIP-7702 authorization
 	// list) are visible. With committed=true the parallel executor reads stale
 	// delegation code from the version map instead of the current tx's SetCode.
 	// CodePath exemptions in versionedReadCore already handle SelfDestruct cases.
 	code, err := sdb.getCode(addr, false)
 	// eip-7702
-	if delegation, ok := types.ParseDelegation(code); ok {
+	if delegation, ok := types.ParseDelegation(code.Bytes); ok {
 		return sdb.getCode(delegation, false)
 	}
 	if err != nil {
-		return nil, err
+		return accounts.Code{}, err
 	}
 	return code, nil
 }
@@ -862,8 +850,8 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 		if err != nil {
 			return accounts.ZeroAddress, false, err
 		}
-		if delegation, ok := types.ParseDelegation(code); ok {
-			sdb.callCodeAccessHook(addr, code)
+		if delegation, ok := types.ParseDelegation(code.Bytes); ok {
+			sdb.callCodeAccessHook(addr, code.Bytes)
 			return delegation, true, nil
 		}
 		return accounts.ZeroAddress, false, nil
