@@ -66,7 +66,7 @@ func (rlb *RetainListBuilder) CreateCode(codeHash accounts.CodeHash) {
 	}
 }
 
-func (rlb *RetainListBuilder) Build(isBinary bool) *RetainList {
+func (rlb *RetainListBuilder) Build() *RetainList {
 	var rl *RetainList = NewRetainList(0)
 
 	touches, storageTouches := rlb.ExtractTouches()

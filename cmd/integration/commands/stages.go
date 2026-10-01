@@ -606,7 +606,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(chainConfig, sync.Cfg(), false /* badBlockHalt */, tmpdir, pm, br, exec.NewBlockReadAheader())
+	cfg := stagedsync.StageSendersCfg(chainConfig, false /* badBlockHalt */, tmpdir, pm, br, exec.NewBlockReadAheader())
 	switch {
 	case unwind > 0:
 		if unwind > s.BlockNumber {

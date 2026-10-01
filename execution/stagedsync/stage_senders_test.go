@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestSenders(t *testing.T) {
@@ -146,7 +145,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, ethconfig.Defaults.Sync, false, "", prune.Mode{}, br, exec.NewBlockReadAheader())
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, "", prune.Mode{}, br, exec.NewBlockReadAheader())
 	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
 

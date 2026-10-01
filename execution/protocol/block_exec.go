@@ -177,7 +177,7 @@ func ExecuteBlockEphemerally(
 	var err error
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		newBlock, _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, vmConfig.Tracer)
+		newBlock, _, err = FinalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -305,14 +305,13 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 }
 
 func FinalizeBlockExecution(
-	engine rules.Engine, stateReader state.StateReader,
+	engine rules.Engine,
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
 	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, chainReader rules.ChainReader,
 	isMining bool,
 	logger log.Logger,
-	tracer *tracing.Hooks,
 ) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{})

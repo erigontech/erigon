@@ -172,7 +172,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, mdgas.MdGas, error) {
+func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}

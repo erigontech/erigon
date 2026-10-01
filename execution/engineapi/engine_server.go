@@ -519,7 +519,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
-	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
+	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -998,7 +998,6 @@ func (e *EngineServer) HandleNewPayload(
 	ctx context.Context,
 	logPrefix string,
 	block *types.Block,
-	versionedHashes []common.Hash,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 

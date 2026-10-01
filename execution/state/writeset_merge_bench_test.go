@@ -80,7 +80,7 @@ func benchVersionedFeeMerge(b *testing.B, addrs, slots int, merge func(prev, nex
 		io.RecordWrites(version, txOut)
 		merged := merge(txOut, tip)
 		io.RecordWrites(version, merged)
-		vm.FlushVersionedWrites(merged, true, "")
+		vm.FlushVersionedWrites(merged, true)
 		sinkWS = merged
 	}
 }

@@ -44,7 +44,7 @@ func TestExtractWitness_RetainedAccountBlindedStorage(t *testing.T) {
 
 	rlb := NewRetainListBuilder()
 	rlb.AddTouch(addrHash)
-	rl := rlb.Build(false)
+	rl := rlb.Build()
 
 	w, err := tr.ExtractWitness(false, rl)
 	require.NoError(t, err)
