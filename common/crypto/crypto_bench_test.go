@@ -96,17 +96,17 @@ func BenchmarkKeccak256HashCache(b *testing.B) {
 	for i := range inputs {
 		inputs[i] = binary.BigEndian.AppendUint64(make([]byte, 56, 64), uint64(i))
 	}
+	b.Run("direct", func(b *testing.B) {
+		i := 0
+		for b.Loop() {
+			keccak.Sum256(inputs[i%len(inputs)])
+			i++
+		}
+	})
 	for _, sc := range []struct {
 		name string
 		span int
 	}{{"hit", 1024}, {"miss", len(inputs)}} {
-		b.Run("direct/"+sc.name, func(b *testing.B) {
-			i := 0
-			for b.Loop() {
-				keccak.Sum256(inputs[i%sc.span])
-				i++
-			}
-		})
 		b.Run("cached/"+sc.name, func(b *testing.B) {
 			i := 0
 			for b.Loop() {

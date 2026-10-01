@@ -49,9 +49,10 @@ var (
 	keccakCacheBuckets [1 << 17]keccakBucket
 )
 
-// cachedKeccak256 memoizes short inputs in a direct-mapped table. A bucket another goroutine
-// holds is treated as a miss, so a lookup never waits.
-func cachedKeccak256(data []byte) common.Hash {
+// Keccak256Hash calc Keccak256. Short inputs are memoized in a direct-mapped table; a bucket
+// another goroutine holds is treated as a miss, so a lookup never waits.
+// Single-argument by design: a variadic signature exceeds the inlining budget.
+func Keccak256Hash(data []byte) common.Hash {
 	if len(data) == 0 || len(data) > keccakCacheMaxInput {
 		return keccak.Sum256(data)
 	}
@@ -59,7 +60,7 @@ func cachedKeccak256(data []byte) common.Hash {
 	b := &keccakCacheBuckets[key&(uint64(len(keccakCacheBuckets))-1)]
 	tag := (key | keccakBucketAlive) &^ keccakBucketLocked
 	if st := b.tag.Load(); st == tag && b.tag.CompareAndSwap(st, st|keccakBucketLocked) {
-		hit := int(b.n) == len(data) && bytes.Equal(b.in[:b.n], data)
+		hit := bytes.Equal(b.in[:b.n], data)
 		h := b.hash
 		b.tag.Store(st)
 		if hit {
