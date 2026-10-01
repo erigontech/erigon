@@ -58,4 +58,4 @@ type OmitemptyObjects struct {
 
 type selfWriter struct{}
 
-func (selfWriter) MarshalFastJSONTo(*jsonstream.StackStream) error { return nil }
+func (selfWriter) MarshalFastJSONTo(*jsonstream.Stream) error { return nil }

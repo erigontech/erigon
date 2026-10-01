@@ -113,18 +113,18 @@ type Withdrawals []*Withdrawal
 
 // MarshalFastJSONTo writes the withdrawals as a bare array. The receiver must stay a value, so
 // the type itself satisfies the fast-JSON interface.
-func (ws Withdrawals) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (ws Withdrawals) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	jsonstream.ArrayValue(s, ws, writeWithdrawalElem)
 	return nil
 }
 
-func writeWithdrawalElem(s *jsonstream.StackStream, w **Withdrawal) { _ = (*w).MarshalFastJSONTo(s) }
+func writeWithdrawalElem(s *jsonstream.Stream, w **Withdrawal) { _ = (*w).MarshalFastJSONTo(s) }
 
-func (s Withdrawals) Len() int { return len(s) }
+func (ws Withdrawals) Len() int { return len(ws) }
 
 // EncodeIndex encodes the i'th withdrawal to w. Note that this does not check for errors
 // because we assume that *Withdrawal will only ever contain valid withdrawals that were either
 // constructed by decoding or via public API in this package.
-func (s Withdrawals) EncodeIndex(i int, w *bytes.Buffer) {
-	_ = rlp.Encode(w, s[i])
+func (ws Withdrawals) EncodeIndex(i int, w *bytes.Buffer) {
+	_ = rlp.Encode(w, ws[i])
 }

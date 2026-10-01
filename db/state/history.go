@@ -256,7 +256,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	for i := 0; iiReader.HasNext(); i++ {
 		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
 		valBuf, _ = iiReader.Next(valBuf[:0])
-		cnt += multiencseq.Count(efBaseTxNum, valBuf)
+		cnt += multiencseq.Count(valBuf)
 		if i%1024 == 0 {
 			select {
 			case <-ctx.Done():

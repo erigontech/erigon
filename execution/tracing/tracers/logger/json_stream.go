@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // JsonStreamLogger is an EVM state logger and implements Tracer.
@@ -43,7 +44,7 @@ import (
 type JsonStreamLogger struct {
 	ctx    context.Context
 	cfg    LogConfig
-	stream jsonstream.Stream
+	stream *jsonstream.Stream
 	// Scratch for the hex helpers below. Every result aliases it, so only one is
 	// live at a time: hand it to the stream, which copies, before encoding the next.
 	hexEncodeBuf [128]byte
@@ -56,7 +57,7 @@ type JsonStreamLogger struct {
 }
 
 // NewStructLogger returns a new logger
-func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream jsonstream.Stream) *JsonStreamLogger {
+func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsonstream.Stream) *JsonStreamLogger {
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,
@@ -104,8 +105,7 @@ func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
 	return common.ToStringZeroCopy(append(b, '"'))
 }
 
-// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes. It goes through
-// hexEncodeBuf so a caller's local array does not escape through the Stream interface.
+// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes.
 func (l *JsonStreamLogger) writeWord(word []byte) {
 	padded := l.hexEncodeBuf[:32]
 	clear(padded[copy(padded, word):])
@@ -130,7 +130,7 @@ func (l *JsonStreamLogger) writePrologueOnce() {
 }
 
 // OnOpcodeV2 also tracks SLOAD/SSTORE ops to track storage change.
-func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	contractAddr := scope.Address()
 	memory := scope.MemoryData()
 	stack := scope.StackData()
@@ -188,7 +188,7 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas
 	l.stream.Uint(cost.Execution)
 	if cost.State != 0 {
 		l.stream.Field("stateGasCost")
-		l.stream.Uint(cost.State)
+		l.stream.Int(cost.State)
 	}
 	if gas.State != 0 {
 		l.stream.Field("stateGasReservoir")
@@ -224,8 +224,7 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableReturnData && len(rData) > 0 {
-		l.stream.Field("returnData")
-		l.stream.WriteHex(rData)
+		ethjson.Data(l.stream, "returnData", rData)
 	}
 	if outputStorage {
 		l.stream.Field("storage")

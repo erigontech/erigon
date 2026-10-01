@@ -309,7 +309,7 @@ func (t *jsTracer) onStart(from accounts.Address, to accounts.Address, create bo
 }
 
 // OnOpcodeV2 implements the Tracer interface to trace a single step of VM execution
-func (t *jsTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (t *jsTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	if !t.traceStep {
 		return
 	}
@@ -334,7 +334,7 @@ func (t *jsTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope t
 }
 
 // OnFaultV2 implements the Tracer interface to trace an execution fault
-func (t *jsTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+func (t *jsTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
 	if t.err != nil {
 		return
 	}
@@ -669,11 +669,11 @@ func (mo *memoryObj) Length() int {
 	return len(mo.memory)
 }
 
-func (m *memoryObj) setupObject() *goja.Object {
-	o := m.vm.NewObject()
-	_ = o.Set("slice", m.vm.ToValue(m.Slice))
-	_ = o.Set("getUint", m.vm.ToValue(m.GetUint))
-	_ = o.Set("length", m.vm.ToValue(m.Length))
+func (mo *memoryObj) setupObject() *goja.Object {
+	o := mo.vm.NewObject()
+	_ = o.Set("slice", mo.vm.ToValue(mo.Slice))
+	_ = o.Set("getUint", mo.vm.ToValue(mo.GetUint))
+	_ = o.Set("length", mo.vm.ToValue(mo.Length))
 	return o
 }
 
@@ -873,12 +873,12 @@ func (co *contractObj) GetInput() goja.Value {
 	return res
 }
 
-func (c *contractObj) setupObject() *goja.Object {
-	o := c.vm.NewObject()
-	_ = o.Set("getCaller", c.vm.ToValue(c.GetCaller))
-	_ = o.Set("getAddress", c.vm.ToValue(c.GetAddress))
-	_ = o.Set("getValue", c.vm.ToValue(c.GetValue))
-	_ = o.Set("getInput", c.vm.ToValue(c.GetInput))
+func (co *contractObj) setupObject() *goja.Object {
+	o := co.vm.NewObject()
+	_ = o.Set("getCaller", co.vm.ToValue(co.GetCaller))
+	_ = o.Set("getAddress", co.vm.ToValue(co.GetAddress))
+	_ = o.Set("getValue", co.vm.ToValue(co.GetValue))
+	_ = o.Set("getInput", co.vm.ToValue(co.GetInput))
 	return o
 }
 
@@ -1013,19 +1013,19 @@ type steplog struct {
 
 	pc     uint64
 	gas    mdgas.MdGas
-	cost   mdgas.MdGas
+	cost   mdgas.MdGasCost
 	depth  int
 	refund uint64
 	err    error
 }
 
-func (l *steplog) GetPC() uint64           { return l.pc }
-func (l *steplog) GetGas() uint64          { return l.gas.Execution }
-func (l *steplog) GetStateGas() uint64     { return l.gas.State }
-func (l *steplog) GetCost() uint64         { return l.cost.Execution }
-func (l *steplog) GetStateGasCost() uint64 { return l.cost.State }
-func (l *steplog) GetDepth() int           { return l.depth }
-func (l *steplog) GetRefund() uint64       { return l.refund }
+func (l *steplog) GetPC() uint64          { return l.pc }
+func (l *steplog) GetGas() uint64         { return l.gas.Execution }
+func (l *steplog) GetStateGas() uint64    { return l.gas.State }
+func (l *steplog) GetCost() uint64        { return l.cost.Execution }
+func (l *steplog) GetStateGasCost() int64 { return l.cost.State }
+func (l *steplog) GetDepth() int          { return l.depth }
+func (l *steplog) GetRefund() uint64      { return l.refund }
 
 func (l *steplog) GetError() goja.Value {
 	if l.err != nil {

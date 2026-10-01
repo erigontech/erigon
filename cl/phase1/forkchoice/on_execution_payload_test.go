@@ -860,6 +860,9 @@ func TestOnExecutionPayloadWithoutEngineMarksPayloadOptimistic(t *testing.T) {
 	status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
 	require.True(t, ok)
 	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
+	exits, ok := f.GetCachedParentBuilderExitRequests(root)
+	require.True(t, ok)
+	require.Empty(t, exits)
 }
 
 func TestRetryPendingExecutionPayloadEnvelopesDropsStaleStorageFailure(t *testing.T) {
@@ -3557,6 +3560,28 @@ func TestLocalSelfBuildValidatesPayloadHashWhenEngineUnavailable(t *testing.T) {
 		t.Run(fmt.Sprintf("valid=%t", valid), func(t *testing.T) {
 			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 			require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
+			exit := solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x1234")}
+			envelope.Message.ExecutionRequests.BuilderExits.Append(&exit)
+			requestsRoot, err := envelope.Message.ExecutionRequests.HashSSZ()
+			require.NoError(t, err)
+			bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+			bid.ExecutionRequestsRoot = requestsRoot
+			requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
+			blockHash, err := envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+			require.NoError(t, err)
+			envelope.Message.Payload.BlockHash = blockHash
+			bid.BlockHash = blockHash
+			bodyRoot, err := block.Block.Body.HashSSZ()
+			require.NoError(t, err)
+			blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
+				Slot:          block.Block.Slot,
+				ProposerIndex: block.Block.ProposerIndex,
+				ParentRoot:    block.Block.ParentRoot,
+				BodyRoot:      bodyRoot,
+			})
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			envelope.Message.BeaconBlockRoot = blockRoot
 			if !valid {
 				envelope.Message.Payload.GasUsed++
 			}
@@ -3591,6 +3616,9 @@ func TestLocalSelfBuildValidatesPayloadHashWhenEngineUnavailable(t *testing.T) {
 			if valid {
 				require.NoError(t, err)
 				require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+				exits, ok := f.GetCachedParentBuilderExitRequests(envelope.Message.BeaconBlockRoot)
+				require.True(t, ok)
+				require.Equal(t, []solid.BuilderExitRequest{exit}, exits)
 				require.Len(t, f.pendingELPayloads, 1)
 			} else {
 				require.ErrorContains(t, err, "mismatching hash")

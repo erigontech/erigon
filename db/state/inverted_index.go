@@ -949,7 +949,7 @@ func (iit *InvertedIndexRoTx) tableScanningPrune(ctx context.Context, rwTx kv.Rw
 	prs.TxTo = txTo
 
 	pruneStat, err := prune.TableScanningPrune(ctx, name, iit.ii.FilenameBase, txFrom, txTo, iit.stepSize,
-		logEvery, iit.ii.logger, keysCursor, valDelCursor, asserts, prs, mode)
+		logEvery, iit.ii.logger, keysCursor, valDelCursor, prs, mode)
 	if err != nil {
 		iit.ii.logger.Error("prune table", iit.ii.FilenameBase, "err", err)
 		return nil, err

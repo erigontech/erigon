@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -635,12 +636,13 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (
 	defer b.mu.Unlock()
 
 	// Determine the lowest and highest possible gas limits to binary search in between
+	minTxGas := mdgas.MinTxGas(b.m.ChainConfig.IsAmsterdam(b.pendingBlock.Time()))
 	var (
-		lo     = params.TxGas - 1
+		lo     = minTxGas - 1
 		hi     uint64
 		gasCap uint64
 	)
-	if call.Gas >= params.TxGas {
+	if call.Gas >= minTxGas {
 		hi = call.Gas
 	} else {
 		hi = b.pendingBlock.GasLimit()

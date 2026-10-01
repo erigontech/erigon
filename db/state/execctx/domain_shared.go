@@ -512,16 +512,16 @@ func (sd *SharedDomains) ResetPendingUpdates() {
 // The inner swap mutates the commitment writer's diff, which the exec loop
 // also rewrites via SetChangesetAccumulator — hence changesetMu, taken here
 // unless lockHeld says the caller already holds it.
-func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.TemporalTx) error {
-	return sd.flushPendingUpdates(ctx, tx, false)
+func (sd *SharedDomains) FlushPendingUpdates(tx kv.TemporalTx) error {
+	return sd.flushPendingUpdates(tx, false)
 }
 
 // FlushPendingUpdatesLocked is the variant for callers that already hold
 // changesetMu via LockChangesetAccumulator (the parallel calculator's
 // per-block compute window). The public FlushPendingUpdates above
 // acquires the lock itself.
-func (sd *SharedDomains) FlushPendingUpdatesLocked(ctx context.Context, tx kv.TemporalTx) error {
-	return sd.flushPendingUpdates(ctx, tx, true)
+func (sd *SharedDomains) FlushPendingUpdatesLocked(tx kv.TemporalTx) error {
+	return sd.flushPendingUpdates(tx, true)
 }
 
 // FlushPendingUpdatesWithoutChangeset flushes the pending deferred commitment
@@ -569,7 +569,7 @@ func commitmentDeltasResolved(parts [][]commitment.BranchDelta) bool {
 	return true
 }
 
-func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.TemporalTx, lockHeld bool) error {
+func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) error {
 	upd := sd.sdCtx.TakePendingUpdate()
 	if upd == nil {
 		return nil
@@ -964,11 +964,11 @@ func (sd *SharedDomains) BlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalT
 // InitBlockOverlay creates (or replaces) the block-level metadata overlay backed by
 // the given base transaction. Writes to the overlay are visible to subsequent reads
 // and are flushed atomically alongside domain state via Flush().
-func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx, tmpDir string) error {
+func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx) error {
 	if old := sd.blockOverlay.Load(); old != nil {
 		old.Close()
 	}
-	overlay, err := membatchwithdb.NewMemoryBatch(tx, tmpDir, sd.logger)
+	overlay, err := membatchwithdb.NewMemoryBatch(tx)
 	if err != nil {
 		return fmt.Errorf("init block overlay: %w", err)
 	}
@@ -1142,7 +1142,7 @@ func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 	defer sd.visibleEnds.reset()
 	if sd.sdCtx.HasPendingUpdate() {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
-			if err := sd.FlushPendingUpdates(ctx, ttx); err != nil {
+			if err := sd.FlushPendingUpdates(ttx); err != nil {
 				return err
 			}
 		}
@@ -2018,7 +2018,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 	// into the CORRECT block's changeset (via the hash-aware lookup in
 	// FlushPendingUpdates). This ensures the branch writes are recorded in
 	// the original block's diffset so they can be properly reverted on unwind.
-	if err := sd.FlushPendingUpdates(ctx, tx); err != nil {
+	if err := sd.FlushPendingUpdates(tx); err != nil {
 		return nil, err
 	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)

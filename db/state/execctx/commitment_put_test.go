@@ -149,7 +149,7 @@ func TestFlushPendingDeltasLandInTheBlockChangeset(t *testing.T) {
 			sd.GetCommitmentContext().SetPendingUpdate(&commitment.PendingCommitmentUpdate{
 				BlockNum: 5, BlockHash: blockHash, TxNum: 2, Deltas: slices.Collect(slices.Chunk(runner.CloneDeltas(next), 5)),
 			})
-			require.NoError(t, sd.FlushPendingUpdates(t.Context(), tx))
+			require.NoError(t, sd.FlushPendingUpdates(tx))
 		} else {
 			restore := sd.SwapCommitmentDiffLocked(block)
 			for _, d := range runner.CloneDeltas(next) {

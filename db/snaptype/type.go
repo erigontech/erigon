@@ -436,16 +436,16 @@ var CaplinEnums = struct {
 	BlobSidecars: MinCaplinEnum + 1,
 }
 
-func (ft Enum) String() string {
-	if t, ok := registeredTypes[ft]; ok {
+func (e Enum) String() string {
+	if t, ok := registeredTypes[e]; ok {
 		return t.Name()
 	}
 
-	panic(fmt.Sprintf("unknown file type: %d", ft))
+	panic(fmt.Sprintf("unknown file type: %d", e))
 }
 
-func (ft Enum) Type() Type {
-	return registeredTypes[ft]
+func (e Enum) Type() Type {
+	return registeredTypes[e]
 }
 
 func (e Enum) FileName(from uint64, to uint64) string {

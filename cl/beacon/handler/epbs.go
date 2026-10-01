@@ -125,12 +125,17 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 	}
 
 	// PTC duties available for current and next epoch (beacon-APIs PR #592)
+	var dependentRoot common.Hash
 	duties := make([]ptcDutyResponse, 0)
-	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+	if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
 		currentEpoch := state.Epoch(s)
 		if epoch < currentEpoch || epoch > currentEpoch+1 {
 			return beaconhttp.NewEndpointError(http.StatusBadRequest,
 				fmt.Errorf("PTC duties only available for current epoch %d and next epoch %d, requested %d", currentEpoch, currentEpoch+1, epoch))
+		}
+		if s.Version() < clparams.GloasVersion {
+			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable,
+				fmt.Errorf("PTC duties for fork epoch %d are not available until the head reaches the Gloas fork", epoch))
 		}
 
 		// Build a lookup set for requested validators
@@ -168,14 +173,19 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 				})
 			}
 		}
+
+		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, true)
+		if dependentRootSlot == headSlot {
+			dependentRoot = headRoot
+			return nil
+		}
+		root, err := s.GetBlockRootAtSlot(dependentRootSlot)
+		if err != nil {
+			return beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("dependent root for epoch %d: %w", epoch, err))
+		}
+		dependentRoot = root
 		return nil
 	}); err != nil {
-		return nil, err
-	}
-
-	// PTC duties use the same dependent_root as proposer duties (start of epoch shuffling)
-	dependentRoot, err := a.getDependentRoot(epoch, false)
-	if err != nil {
 		return nil, err
 	}
 
@@ -482,7 +492,7 @@ func payloadAttestationPTCPositions(ptc []uint64) map[uint64][]int {
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1BeaconPoolPayloadAttestations(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("the Gloas Eth-Consensus-Version header is required")).WriteTo(w)
 		return
 	}
 	var req []*cltypes.PayloadAttestationMessage
@@ -649,7 +659,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolProposerPreferences(w http.ResponseWrite
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1ValidatorProposerPreferences(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("the Gloas Eth-Consensus-Version header is required")).WriteTo(w)
 		return
 	}
 	reqs, ok := decodeProposerPreferencesRequest(w, r, true)
@@ -857,7 +867,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	validation := BlockPublishingValidationGossip
 	if canonical {
 		if r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("the Gloas Eth-Consensus-Version header is required")).WriteTo(w)
 			return
 		}
 		value := r.Header.Get("Eth-Blob-Data-Included")
@@ -1382,7 +1392,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadBidLegacy(w http.ResponseWri
 
 func (a *ApiHandler) postEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r *http.Request, canonical bool) {
 	if canonical && r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("the Gloas Eth-Consensus-Version header is required")).WriteTo(w)
 		return
 	}
 	req := new(cltypes.SignedExecutionPayloadBid)
