@@ -78,6 +78,10 @@ service ETHBACKEND {
   rpc FrozenBlocks(google.protobuf.Empty) returns (FrozenBlocksReply);
 
   rpc SetHead(SetHeadRequest) returns (SetHeadReply);
+
+  // Returns body metadata and the user transaction count without reading transactions.
+  // Both the block hash and height are required.
+  rpc BlockBody(BlockRequest) returns (BlockBodyReply);
 }
 
 enum Event {
@@ -304,4 +308,9 @@ message SetHeadRequest {
 
 message SetHeadReply {
   bool success = 1;
+}
+
+message BlockBodyReply {
+  bytes body_rlp = 1;
+  uint32 tx_count = 2;
 }

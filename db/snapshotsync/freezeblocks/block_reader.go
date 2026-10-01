@@ -332,15 +332,19 @@ func (r *RemoteBlockReader) Header(ctx context.Context, tx kv.Getter, hash commo
 	return block.Header(), nil
 }
 
-func (r *RemoteBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txCount uint32, err error) {
-	block, _, err := r.BlockWithSenders(ctx, tx, hash, blockHeight)
+func (r *RemoteBlockReader) Body(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txCount uint32, err error) {
+	reply, err := r.client.BlockBody(ctx, &remoteproto.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
 	if err != nil {
 		return nil, 0, err
 	}
-	if block == nil {
+	if len(reply.BodyRlp) == 0 {
 		return nil, 0, nil
 	}
-	return block.Body(), uint32(len(block.Body().Transactions)), nil
+	body = new(types.Body)
+	if err := rlp.DecodeBytes(reply.BodyRlp, body); err != nil {
+		return nil, 0, err
+	}
+	return body, reply.TxCount, nil
 }
 
 func (r *RemoteBlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
