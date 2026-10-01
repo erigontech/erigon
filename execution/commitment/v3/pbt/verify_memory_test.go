@@ -151,6 +151,6 @@ func TestPBinVerifyHeapDoesNotScaleWithLeaves(t *testing.T) {
 		require.NoError(t, err)
 		*test.delta = peak - base
 	}
-	require.Less(t, smallDelta, uint64(32<<20))
-	require.Less(t, largeDelta, uint64(32<<20))
+	require.Less(t, smallDelta, uint64(16<<20))
+	require.Less(t, largeDelta, uint64(16<<20))
 }

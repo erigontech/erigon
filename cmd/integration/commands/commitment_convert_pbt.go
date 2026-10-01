@@ -49,10 +49,11 @@ import (
 )
 
 var (
-	convertPBTKeepHex        bool
-	convertPBTOutputDatadir  string
-	convertPBTOutputHook     func() error
-	convertPBTStandaloneHook func(datadir.Dirs) error
+	convertPBTKeepHex          bool
+	convertPBTOutputDatadir    string
+	convertPBTOutputHook       func() error
+	convertPBTTargetSchemaHook func() error
+	convertPBTStandaloneHook   func(datadir.Dirs) error
 )
 
 func init() {
@@ -231,7 +232,14 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	if keepHex {
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	} else {
+		statecfg.ExperimentalCommitmentV3 = false
 		statecfg.InitSchemas()
+		statecfg.DisableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	}
+	if convertPBTTargetSchemaHook != nil {
+		if err := convertPBTTargetSchemaHook(); err != nil {
+			return err
+		}
 	}
 
 	targetSettings := &dbstate.ErigonDBSettings{
@@ -302,6 +310,7 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	if blockEnd && afterFork && !bytes.Equal(root[:], header.Root[:]) {
 		return fmt.Errorf("commitment convert-pbt: root %x differs from header root %x", root, header.Root)
 	}
+	visibleRanges := pbtVisibleSnapshotFiles(sourceAgg, sourceDirs)
 	if keepHex {
 		if err := linkPBinHexFiles(sourceDirs.SnapDomain, outputDirs.SnapDomain); err != nil {
 			return err
@@ -316,7 +325,7 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	if err := removePBTFilesPastPoint(outputDirs, targetSettings.StepSize, point.TxNum); err != nil {
 		return err
 	}
-	if err := removePBTInvisibleFiles(ctx, sourceDirs, outputDirs, sourceSettings, keepHex, logger); err != nil {
+	if err := removePBTInvisibleFiles(visibleRanges, sourceDirs, outputDirs); err != nil {
 		return err
 	}
 	conversionBlock, conversionTx := point.BlockNum, point.TxNum
@@ -645,11 +654,7 @@ func linkPBinCommitmentFiles(sourceDirs, outputDirs datadir.Dirs, stepSize, endT
 	return nil
 }
 
-func removePBTInvisibleFiles(ctx context.Context, sourceDirs, outputDirs datadir.Dirs, settings *dbstate.ErigonDBSettings, keepHex bool, logger log.Logger) error {
-	visibleRanges, err := pbtVisibleSnapshotFiles(ctx, sourceDirs, settings, keepHex, logger)
-	if err != nil {
-		return err
-	}
+func removePBTInvisibleFiles(visibleRanges map[string]struct{}, sourceDirs, outputDirs datadir.Dirs) error {
 	for _, root := range []string{outputDirs.SnapDomain, outputDirs.SnapHistory, outputDirs.SnapIdx, outputDirs.SnapAccessors} {
 		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -681,7 +686,7 @@ func removePBTInvisibleFiles(ctx context.Context, sourceDirs, outputDirs datadir
 			if err != nil || !os.SameFile(sourceInfo, outputInfo) {
 				return nil
 			}
-			key := pbtSnapshotRangeKey(parsed.TypeString, parsed.From, parsed.To)
+			key := pbtSnapshotFileKey(filepath.Dir(rel), parsed.TypeString, parsed.From, parsed.To)
 			if _, ok := visibleRanges[key]; ok {
 				return nil
 			}
@@ -694,37 +699,68 @@ func removePBTInvisibleFiles(ctx context.Context, sourceDirs, outputDirs datadir
 	return nil
 }
 
-func pbtVisibleSnapshotFiles(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, keepHex bool, logger log.Logger) (map[string]struct{}, error) {
-	if (settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin) || (keepHex && (settings == nil || settings.TrieVariantName() == dbstate.TrieVariantHex)) {
-		statecfg.ExperimentalCommitmentV3 = true
-		statecfg.InitSchemas()
-		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	}
-	opener := dbstate.New(dirs).Logger(logger).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps()
-	if settings != nil {
-		opener = opener.WithErigonDBSettings(settings)
-	}
-	agg, err := opener.Open(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer agg.Close()
-	if err := agg.OpenFolder(nil); err != nil {
-		return nil, err
-	}
+func pbtVisibleSnapshotFiles(sourceAgg *dbstate.Aggregator, sourceDirs datadir.Dirs) map[string]struct{} {
 	visibleRanges := make(map[string]struct{})
-	at := agg.BeginFilesRo()
+	at := sourceAgg.BeginFilesRo()
 	defer at.Close()
 	for _, file := range at.AllFiles() {
+		rel, err := filepath.Rel(sourceAgg.Dirs().Snap, file.Fullpath())
+		if err != nil {
+			continue
+		}
 		parsed, _, ok := snaptype.ParseFileName(filepath.Dir(file.Fullpath()), filepath.Base(file.Fullpath()))
 		if !ok {
 			continue
 		}
-		visibleRanges[pbtSnapshotRangeKey(parsed.TypeString, parsed.From, parsed.To)] = struct{}{}
+		visibleRanges[pbtSnapshotFileKey(filepath.Dir(rel), parsed.TypeString, parsed.From, parsed.To)] = struct{}{}
 	}
-	return visibleRanges, nil
+	addPBTCommitmentVisibleFiles(visibleRanges, sourceDirs)
+	return visibleRanges
 }
 
-func pbtSnapshotRangeKey(kind string, from, to uint64) string {
-	return fmt.Sprintf("%s:%d:%d", kind, from, to)
+func addPBTCommitmentVisibleFiles(visibleRanges map[string]struct{}, dirs datadir.Dirs) {
+	type commitmentFile struct {
+		family, kind, ext string
+		from, to          uint64
+	}
+	var files []commitmentFile
+	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
+			if !ok || parsed.TypeString != kv.CommitmentDomain.String() {
+				continue
+			}
+			rel, err := filepath.Rel(dirs.Snap, filepath.Join(root, entry.Name()))
+			if err != nil {
+				continue
+			}
+			files = append(files, commitmentFile{
+				family: filepath.Dir(rel), kind: parsed.TypeString, ext: filepath.Ext(entry.Name()), from: parsed.From, to: parsed.To,
+			})
+		}
+	}
+	for i, file := range files {
+		covered := false
+		for j, other := range files {
+			if i != j && file.family == other.family && file.kind == other.kind && file.ext == other.ext &&
+				other.from <= file.from && other.to >= file.to && (other.from < file.from || other.to > file.to) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			visibleRanges[pbtSnapshotFileKey(file.family, file.kind, file.from, file.to)] = struct{}{}
+		}
+	}
+}
+
+func pbtSnapshotFileKey(family, kind string, from, to uint64) string {
+	return fmt.Sprintf("%s:%s:%d:%d", family, kind, from, to)
 }

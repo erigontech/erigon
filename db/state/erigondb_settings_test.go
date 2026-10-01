@@ -159,6 +159,21 @@ func TestEnableCommitmentV3FromFilesRefusesStraddledCommitmentData(t *testing.T)
 	require.ErrorContains(t, err, "straddle v3.0")
 }
 
+func TestEnableCommitmentV3FromFilesIgnoresSupersededLegacyCommitmentData(t *testing.T) {
+	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+	})
+	dirs := datadir.New(t.TempDir())
+	for _, name := range []string{"v2.0-commitment.0-1.kv", "v2.0-commitment.1-2.kv", "v3.0-commitment.0-2.kv"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), nil, 0o644))
+	}
+	detected, err := EnableCommitmentV3FromFiles(dirs)
+	require.NoError(t, err)
+	require.True(t, detected)
+}
+
 func TestEnableCommitmentV3FromFilesIgnoresBinDatadir(t *testing.T) {
 	previousBin, previousHexBin, previousV3, previousSchema := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.Schema
 	t.Cleanup(func() {

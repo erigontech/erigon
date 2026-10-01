@@ -37,8 +37,10 @@ func (t *Trie) newVerifier() *Trie {
 		dirtyRows:             make(map[string]*rowNode),
 		bucketDirty:           make(map[string][]byte),
 		mergeCreatedStems:     make(map[string]struct{}),
-		verifiedBucketKeys:    make(map[string]struct{}),
 		verifyOnly:            true,
+	}
+	if _, ok := t.ctx.(interface{ Records() map[string][]byte }); ok {
+		verifier.verifiedBucketKeys = make(map[string]struct{})
 	}
 	if t.ownedPrefix != nil {
 		prefix := *t.ownedPrefix
@@ -62,7 +64,11 @@ func (t *Trie) verify() error {
 	if err != nil {
 		return err
 	}
-	t.verifiedBucketKeys = make(map[string]struct{})
+	if _, ok := t.ctx.(interface{ Records() map[string][]byte }); ok {
+		t.verifiedBucketKeys = make(map[string]struct{})
+	} else {
+		t.verifiedBucketKeys = nil
+	}
 	if root.row == nil && root.form == RowRoot {
 		return t.verifyBuckets()
 	}
@@ -246,13 +252,17 @@ func (t *Trie) verifyBucketRecordPath(path *eip8297.Bitpath, descriptor bucketDe
 	if err != nil {
 		return err
 	}
-	if _, found := t.verifiedBucketKeys[string(key)]; found {
-		return nil
+	if t.verifiedBucketKeys != nil {
+		if _, found := t.verifiedBucketKeys[string(key)]; found {
+			return nil
+		}
 	}
 	if err := t.verifyBucketRecord(key, descriptor); err != nil {
 		return err
 	}
-	t.verifiedBucketKeys[string(key)] = struct{}{}
+	if t.verifiedBucketKeys != nil {
+		t.verifiedBucketKeys[string(key)] = struct{}{}
+	}
 	return nil
 }
 

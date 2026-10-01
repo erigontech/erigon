@@ -450,6 +450,11 @@ func EnableCommitmentV3Records(c *DomainCfg) {
 	c.Hist.FileVersion.DataV.Current = version.V3_0
 }
 
+func DisableCommitmentV3Records(c *DomainCfg) {
+	c.CommitmentV3Records = false
+	c.Accessors = AccessorHashMap
+}
+
 func EnableHistoricalCommitment() {
 	for _, cfg := range []*DomainCfg{&Schema.CommitmentDomain, &Schema.CommitmentBinDomain} {
 		cfg.Hist.HistoryDisabled = false

@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 
@@ -193,38 +192,46 @@ func EnableCommitmentV3FromFiles(dirs datadir.Dirs) (bool, error) {
 }
 
 func commitmentFileVersions(dirs datadir.Dirs) (bool, bool, error) {
-	var hasLegacy, hasV3 bool
-	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
-		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				if errors.Is(walkErr, fs.ErrNotExist) {
-					return filepath.SkipDir
-				}
-				return walkErr
+	type commitmentDataFile struct {
+		from, to uint64
+		version  version.Version
+	}
+	var files []commitmentDataFile
+	err := filepath.WalkDir(dirs.SnapDomain, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return filepath.SkipDir
 			}
-			if entry.IsDir() {
-				return nil
-			}
-			parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
-			if !ok || parsed.TypeString != kv.CommitmentDomain.String() {
-				return nil
-			}
-			isData := strings.HasSuffix(entry.Name(), ".kv")
-			isV3Data := isData || strings.HasSuffix(entry.Name(), ".v")
-			if !isV3Data {
-				return nil
-			}
-			if parsed.Version.Less(version.V3_0) {
-				if isData {
-					hasLegacy = true
-				}
-				return nil
-			}
-			hasV3 = true
+			return walkErr
+		}
+		if entry.IsDir() {
 			return nil
-		})
-		if err != nil {
-			return false, false, err
+		}
+		parsed, _, ok := snaptype.ParseFileName(dirs.SnapDomain, entry.Name())
+		if ok && parsed.TypeString == kv.CommitmentDomain.String() && filepath.Ext(entry.Name()) == ".kv" {
+			files = append(files, commitmentDataFile{from: parsed.From, to: parsed.To, version: parsed.Version})
+		}
+		return nil
+	})
+	if err != nil {
+		return false, false, err
+	}
+	var hasLegacy, hasV3 bool
+	for i, file := range files {
+		covered := false
+		for j, other := range files {
+			if i != j && other.from <= file.from && other.to >= file.to && (other.from < file.from || other.to > file.to) {
+				covered = true
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+		if file.version.Less(version.V3_0) {
+			hasLegacy = true
+		} else {
+			hasV3 = true
 		}
 	}
 	return hasLegacy, hasV3, nil

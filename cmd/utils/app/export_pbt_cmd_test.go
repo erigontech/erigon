@@ -25,15 +25,22 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapcfg"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -42,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/eip8297/artifact"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -270,6 +278,84 @@ func TestRunExportPBTUsesStoppedExecutionStage(t *testing.T) {
 	require.Equal(t, partialResult.SnapshotDigest, fullResult.SnapshotDigest)
 }
 
+func TestDoExportPBTUsesFrozenBlockFiles(t *testing.T) {
+	selectPBTFrozenExportSuite(t)
+	dirs := buildFrozenPBTExportDatadir(t)
+	outDir := filepath.Join(t.TempDir(), "export")
+	cmd := &cli.Command{Flags: []cli.Flag{
+		&cli.StringFlag{Name: utils.DataDirFlag.Name},
+		&cli.StringFlag{Name: "out"},
+	}}
+	require.NoError(t, cmd.Set(utils.DataDirFlag.Name, dirs.DataDir))
+	require.NoError(t, cmd.Set("out", outDir))
+	require.NoError(t, doExportPBT(t.Context(), cmd))
+	require.FileExists(t, filepath.Join(outDir, pbtSnapshotFileName))
+}
+
+func TestDoExportPreimagesUsesFrozenBlockFiles(t *testing.T) {
+	selectPBTFrozenExportSuite(t)
+	dirs := buildFrozenPBTExportDatadir(t)
+	outDir := filepath.Join(t.TempDir(), "export")
+	cmd := &cli.Command{Flags: []cli.Flag{
+		&cli.StringFlag{Name: utils.DataDirFlag.Name},
+		&cli.StringFlag{Name: "out"},
+		&cli.StringFlag{Name: "tmpdir"},
+	}}
+	require.NoError(t, cmd.Set(utils.DataDirFlag.Name, dirs.DataDir))
+	require.NoError(t, cmd.Set("out", outDir))
+	require.NoError(t, cmd.Set("tmpdir", filepath.Join(t.TempDir(), "tmp")))
+	require.NoError(t, doExportPreimages(t.Context(), cmd))
+	require.FileExists(t, filepath.Join(outDir, preimagesFileName))
+}
+
+func buildFrozenPBTExportDatadir(t *testing.T) datadir.Dirs {
+	t.Helper()
+	fixture, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
+	require.NoError(t, err)
+	require.NoError(t, fixture.Tester.InsertChain(fixture.Chain))
+	block := fixture.Chain.Blocks[1]
+	blockNum := block.NumberU64()
+	config := snapcfg.KnownCfgOrDevnet(fixture.Tester.ChainConfig.ChainName)
+	require.NoError(t, freezeblocks.DumpBlocks(t.Context(), 0, 3, fixture.Tester.ChainConfig, fixture.Tester.Dirs.Tmp, fixture.Tester.Dirs.Snap, fixture.Tester.DB, 1, log.LvlInfo, log.New(), fixture.Tester.BlockReader, config, nil))
+	fixture.Tester.Close()
+	dirs := fixture.Tester.Dirs
+	settings, err := state.ReadErigonDBSettings(dirs)
+	require.NoError(t, err)
+	rawDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	agg := state.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	var lastTxNum uint64
+	require.NoError(t, rawDB.View(t.Context(), func(rawTx kv.Tx) error {
+		var found bool
+		lastTxNum, found, err = rawdbv3.TxNums.MaxExact(t.Context(), rawTx, blockNum)
+		require.True(t, found)
+		return err
+	}))
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
+	agg.WaitForFiles()
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), db))
+	db.Close()
+	agg.Close()
+	rawDB.Close()
+
+	rawDB = dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	require.NoError(t, rawDB.Update(t.Context(), func(rawTx kv.RwTx) error {
+		rawdb.DeleteHeader(rawTx, block.Hash(), blockNum)
+		rawdb.DeleteBody(rawTx, block.Hash(), blockNum)
+		if err := rawTx.Delete(kv.HeaderCanonical, hexutil.EncodeTs(blockNum)); err != nil {
+			return err
+		}
+		if err := rawTx.Delete(kv.MaxTxNum, hexutil.EncodeTs(blockNum)); err != nil {
+			return err
+		}
+		return stages.SaveStageProgress(rawTx, stages.Execution, blockNum)
+	}))
+	rawDB.Close()
+	return dirs
+}
+
 func selectPBTExportSuite(t *testing.T) {
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
@@ -291,6 +377,10 @@ func selectPBTExportSuite(t *testing.T) {
 	statecfg.ExperimentalParallelCommitment = false
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+}
+
+func selectPBTFrozenExportSuite(t *testing.T) {
+	selectPBTExportSuite(t)
 }
 
 func newPBTExportDB(t *testing.T) (kv.TemporalRwDB, common.Hash) {

@@ -604,6 +604,7 @@ func TestConvertPBTHexBinSourceConfiguresVariantBeforeOpening(t *testing.T) {
 	previousSuite := commitment.PBinHashSuiteName()
 	previousDatadir := datadirCli
 	previousChaindata := chaindata
+	previousTargetSchemaHook := convertPBTTargetSchemaHook
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = previousBin
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
@@ -613,6 +614,7 @@ func TestConvertPBTHexBinSourceConfiguresVariantBeforeOpening(t *testing.T) {
 		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
 		datadirCli = previousDatadir
 		chaindata = previousChaindata
+		convertPBTTargetSchemaHook = previousTargetSchemaHook
 	})
 	statecfg.ExperimentalBinCommitment = false
 	statecfg.ExperimentalHexBinCommitment = false
@@ -643,11 +645,31 @@ func TestConvertPBTHexBinSourceConfiguresVariantBeforeOpening(t *testing.T) {
 	rawDB.Close()
 	require.NoError(t, os.Symlink(source.Chaindata, filepath.Join(dualPath, "chaindata")))
 	dual := pbtConversionSource{Dirs: datadir.Open(dualPath)}
+	convertPBTTargetSchemaHook = func() error {
+		if statecfg.Schema.CommitmentDomain.CommitmentV3Records {
+			return errors.New("bin-only target uses the v3 hex schema")
+		}
+		return nil
+	}
 	output := filepath.Join(t.TempDir(), "output")
 	require.NoError(t, convertPBT(t.Context(), dual.DataDir, output, false, "", log.New()))
 	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
 	require.NoError(t, err)
 	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())
+	legacyFiles, err := filepath.Glob(filepath.Join(datadir.Open(output).SnapDomain, "v3.0-commitment.*.kv"))
+	require.NoError(t, err)
+	require.Empty(t, legacyFiles, "bin-only output must not use the v3 hex schema")
+	statecfg.InitSchemas()
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.ExperimentalCommitmentV3 = false
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	require.NotPanics(t, func() {
+		agg := dbstate.New(datadir.Open(output)).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+		require.NoError(t, agg.OpenFolder(nil))
+		agg.Close()
+	})
 }
 
 func TestConvertPBTHexBinSourceWithOrdinaryHexFlags(t *testing.T) {
