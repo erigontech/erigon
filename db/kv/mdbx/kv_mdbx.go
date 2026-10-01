@@ -815,6 +815,8 @@ func (db *MdbxKV) Close() {
 	}
 }
 
+var noRoTxsLimiter = dbg.EnvBool("MDBX_NO_RO_LIMITER", false)
+
 func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	// don't try to acquire if the context is already done
 	select {
@@ -828,7 +830,8 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, errors.New("db closed")
 	}
 
-	if kv.IsNonBlockingAcquire(ctx) {
+	if noRoTxsLimiter {
+	} else if kv.IsNonBlockingAcquire(ctx) {
 		if !db.roTxsLimiter.TryAcquire(1) {
 			db.trackTxEnd()
 			dbRoTxOverloaded.Inc()
@@ -843,7 +846,9 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		if txn == nil {
 			// on error, or if there is whatever reason that we don't return a tx,
 			// we need to free up the limiter slot, otherwise it could lead to deadlocks
-			db.roTxsLimiter.Release(1)
+			if !noRoTxsLimiter {
+				db.roTxsLimiter.Release(1)
+			}
 			db.trackTxEnd()
 		}
 	}()
@@ -1432,7 +1437,9 @@ func (tx *MdbxTx) Commit() error {
 		tx.tx = nil
 		tx.db.trackTxEnd()
 		if tx.readOnly {
-			tx.db.roTxsLimiter.Release(1)
+			if !noRoTxsLimiter {
+				tx.db.roTxsLimiter.Release(1)
+			}
 		} else {
 			runtime.UnlockOSThread()
 		}
@@ -1507,7 +1514,9 @@ func (tx *MdbxTx) Rollback() {
 	tx.db.unregisterLiveTx(tx, "ROLLBACK")
 	tx.db.trackTxEnd()
 	if tx.readOnly {
-		tx.db.roTxsLimiter.Release(1)
+		if !noRoTxsLimiter {
+			tx.db.roTxsLimiter.Release(1)
+		}
 	} else {
 		runtime.UnlockOSThread()
 	}
