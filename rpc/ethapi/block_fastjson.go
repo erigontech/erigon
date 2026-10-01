@@ -19,8 +19,11 @@ package ethapi
 import (
 	"encoding/json"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // MarshalFastJSONTo writes the whole block. It must exist: RPCBlock embeds RPCHeader, so
@@ -54,7 +57,7 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.Stream) error {
 		return err
 	}
 
-	jsonstream.Text(s, "size", &b.Size)
+	ethjson.Quantity(s, "size", b.Size)
 
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
@@ -79,7 +82,7 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.Stream) error {
 		s.Field("transactionCount").Uint(*b.TransactionCount)
 	}
 	if b.TotalDifficulty != nil {
-		jsonstream.Text(s, "totalDifficulty", b.TotalDifficulty)
+		ethjson.Quantity256(s, "totalDifficulty", (*uint256.Int)(b.TotalDifficulty))
 	}
 	if b.Calls != nil {
 		s.Field("calls").WriteArrayStart()
@@ -113,9 +116,9 @@ func (r *CallResult) writeTo(s *jsonstream.Stream, callErr []byte) {
 	s.Field("returnData").WriteString(r.ReturnData)
 	s.Field("logs")
 	_ = r.Logs.MarshalFastJSONTo(s)
-	jsonstream.Text(s, "gasUsed", &r.GasUsed)
-	jsonstream.Text(s, "maxUsedGas", &r.MaxUsedGas)
-	jsonstream.Text(s, "status", &r.Status)
+	ethjson.Quantity(s, "gasUsed", r.GasUsed)
+	ethjson.Quantity(s, "maxUsedGas", r.MaxUsedGas)
+	ethjson.Quantity(s, "status", r.Status)
 	if callErr != nil {
 		s.Field("error").WriteRawBytes(callErr)
 	}

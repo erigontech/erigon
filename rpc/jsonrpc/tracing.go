@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -151,8 +152,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		txnHash := txn.Hash()
 
 		stream.WriteObjectStart()
-		stream.Field("txHash")
-		stream.WriteHex(txnHash[:])
+		ethjson.Data(stream, "txHash", txnHash[:])
 		select {
 		default:
 		case <-ctx.Done():
