@@ -70,6 +70,7 @@ import (
 var (
 	branchPrefixFlag string
 	txnumFlag        uint64
+	verifyAsOf       []uint
 )
 
 // visualize command flags
@@ -134,6 +135,11 @@ func init() {
 	withConfig(cmdCommitmentConvert)
 	withConvertFlags(cmdCommitmentConvert)
 	commitmentCmd.AddCommand(cmdCommitmentConvert)
+
+	withChain(cmdCommitmentVerify)
+	withDataDir(cmdCommitmentVerify)
+	cmdCommitmentVerify.Flags().UintSliceVar(&verifyAsOf, "asof", nil, "also fold the records as of these txNums")
+	commitmentCmd.AddCommand(cmdCommitmentVerify)
 
 	// commitment visualize
 	cmdCommitmentVisualize.Flags().StringVar(&visualizeOutputDir, "output", "", "existing directory to store output HTML. By default, same as commitment files")
@@ -264,6 +270,52 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 }
 
 // integration commitment rebuild
+var cmdCommitmentVerify = &cobra.Command{
+	Use:   "verify",
+	Short: "Fold the v3 commitment records to the stored state root, at the latest state and at --asof txNums; fails on orphan records",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		if err := commitmentVerify(ctx, logger); err != nil {
+			logger.Error("[commitment verify]", "err", err)
+			os.Exit(1)
+		}
+	},
+}
+
+func commitmentVerify(ctx context.Context, logger log.Logger) error {
+	if !statecfg.ExperimentalCommitmentV3 {
+		return errors.New("verify reads v3 commitment records; run with COMMITMENT_V3=true")
+	}
+	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.DisableAllDependencies()
+	points := []uint64{math.MaxUint64}
+	for _, txNum := range verifyAsOf {
+		points = append(points, uint64(txNum))
+	}
+	for _, asOf := range points {
+		label := "latest"
+		if asOf != math.MaxUint64 {
+			label = strconv.FormatUint(asOf, 10)
+		}
+		started := time.Now()
+		c, err := dbstate.FoldCommitmentV3(ctx, agg, asOf)
+		if err != nil {
+			return fmt.Errorf("as of %s: %w", label, err)
+		}
+		if c.Orphans != 0 {
+			return fmt.Errorf("as of %s: %d orphan records (block %d, %d records)", label, c.Orphans, c.BlockNum, c.Records)
+		}
+		logger.Info("[commitment verify] ok", "asOf", label, "block", c.BlockNum, "txNum", c.TxNum, "root", hex.EncodeToString(c.Root),
+			"records", common.PrettyCounter(c.Records), "took", time.Since(started).Round(time.Millisecond))
+	}
+	return nil
+}
+
 var cmdCommitmentRebuild = &cobra.Command{
 	Use:   "rebuild",
 	Short: "",

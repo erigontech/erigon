@@ -419,6 +419,12 @@ func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 	require.NotEqual(t, empty.RootHash[:], finalRoot)
 
 	require.Equal(t, rootInFiles, finalRoot)
+	if v3 {
+		check, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+		require.NoError(t, err)
+		require.Zero(t, check.Orphans)
+		require.Equal(t, finalRoot, check.Root)
+	}
 }
 
 func composite(k, k2 []byte) []byte {

@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"runtime"
 	"sync"
@@ -453,51 +454,54 @@ func (b *hashedBatch) expect(key, hash []byte) error {
 var hashedBatchPool = sync.Pool{New: func() any { return &hashedBatch{} }}
 
 func verifyCommitmentV3Files(ctx context.Context, a *Aggregator, logger log.Logger) error {
-	at := a.BeginFilesRo()
-	defer at.Close()
 	started := time.Now()
-	it, err := at.d[kv.CommitmentDomain].DebugRangeLatestFromFiles(nil, nil, -1)
+	c, err := FoldCommitmentV3(ctx, a, math.MaxUint64)
 	if err != nil {
 		return err
 	}
-	defer it.Close()
-	f, err := foldCommitmentV3Records(ctx, it)
-	if err != nil {
-		return err
-	}
-	blockNum, txNum, err := f.checkState()
-	if err != nil {
-		return err
-	}
-	logger.Info("[commitment_convert] v3 records verified", "root", fmt.Sprintf("%x", f.root), "block", blockNum, "txNum", txNum,
-		"records", common.PrettyCounter(f.records), "orphans", common.PrettyCounter(f.orphans), "took", time.Since(started).Round(time.Millisecond))
+	logger.Info("[commitment_convert] v3 records verified", "root", fmt.Sprintf("%x", c.Root), "block", c.BlockNum, "txNum", c.TxNum,
+		"records", common.PrettyCounter(c.Records), "orphans", common.PrettyCounter(c.Orphans), "took", time.Since(started).Round(time.Millisecond))
 	return nil
 }
 
 func DebugCommitmentV3RootAsOf(ctx context.Context, a *Aggregator, txNum uint64) ([]byte, error) {
+	c, err := FoldCommitmentV3(ctx, a, txNum)
+	return c.Root, err
+}
+
+type CommitmentV3Check struct {
+	Root                              []byte
+	BlockNum, TxNum, Records, Orphans uint64
+}
+
+func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (CommitmentV3Check, error) {
 	at := a.BeginFilesRo()
 	defer at.Close()
 	dt := at.d[kv.CommitmentDomain]
-	hist := &HistoryRangeAsOfFiles{hc: dt.ht, startTxNum: txNum, limit: kv.Unlim, orderAscend: order.Asc, ctx: ctx, logger: dt.ht.h.logger}
-	if err := hist.init(dt.ht.iit.files); err != nil {
-		hist.Close()
-		return nil, err
-	}
 	latest, err := dt.DebugRangeLatestFromFiles(nil, nil, -1)
 	if err != nil {
-		hist.Close()
-		return nil, err
+		return CommitmentV3Check{}, err
 	}
-	it := stream.UnionKV(hist, latest, -1)
+	var it stream.KV = latest
+	if asOfTxNum != math.MaxUint64 {
+		hist := &HistoryRangeAsOfFiles{hc: dt.ht, startTxNum: asOfTxNum, limit: kv.Unlim, orderAscend: order.Asc, ctx: ctx, logger: dt.ht.h.logger}
+		if err = hist.init(dt.ht.iit.files); err != nil {
+			hist.Close()
+			latest.Close()
+			return CommitmentV3Check{}, err
+		}
+		it = stream.UnionKV(hist, latest, -1)
+	}
 	defer it.Close()
 	f, err := foldCommitmentV3Records(ctx, it)
 	if err != nil {
-		return nil, err
+		return CommitmentV3Check{}, err
 	}
-	if _, _, err := f.checkState(); err != nil {
-		return nil, err
+	blockNum, txNum, err := f.checkState()
+	if err != nil {
+		return CommitmentV3Check{}, err
 	}
-	return f.root[:], nil
+	return CommitmentV3Check{Root: f.root[:], BlockNum: blockNum, TxNum: txNum, Records: f.records, Orphans: f.orphans}, nil
 }
 
 type commitmentV3Fold struct {
