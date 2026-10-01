@@ -430,7 +430,7 @@ func TestCachedKeccak256MatchesDirect(t *testing.T) {
 }
 
 func sha3Keccak(in []byte) (h common.Hash) {
-	d := sha3.NewLegacyKeccak256()
+	d := xsha3.NewLegacyKeccak256()
 	d.Write(in)
 	d.Sum(h[:0])
 	return h
