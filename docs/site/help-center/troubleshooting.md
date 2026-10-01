@@ -82,7 +82,7 @@ This table is not exhaustive — it lists what a default node needs. See [Defaul
 
 The Caplin ports are its defaults (`--caplin.discovery.port`, `--caplin.discovery.tcpport`, and `--caplin.discovery.quicport`); change the rules to match if you override them. DISCV5 is UDP-only and runs on `4000`, TCP peering defaults to `4001`, and QUIC/UDP peering defaults to `4002`. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
 
-If the QUIC UDP port cannot be opened — for example a Docker or Kubernetes setup where only the TCP port was published, or a network policy that blocks UDP — pass `--caplin.quic.disable` to fall back to TCP-only peering instead of leaving the QUIC port unreachable.
+If specifically the QUIC port (`4002`) cannot be opened — for example a Docker or Kubernetes setup where only the TCP peering port was published — pass `--caplin.quic.disable` to fall back to TCP-only peering instead of leaving it unreachable. This does not help if DISCV5 discovery's UDP port (`4000`) is also blocked: Caplin needs that port regardless of whether QUIC is enabled.
 
 Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure Cloud firewalls in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`; for dedicated servers the equivalent lives in the Robot panel under **Server → Firewall**.
 
