@@ -18,8 +18,14 @@ package crypto
 
 import (
 	"bytes"
+	"fmt"
 	"hash/maphash"
+	"os"
+	"strings"
 	"sync/atomic"
+	"time"
+
+	"github.com/erigontech/erigon/common/dbg"
 
 	keccak "github.com/erigontech/fastkeccak"
 
@@ -52,10 +58,17 @@ var (
 // Keccak256Hash calc Keccak256. Short inputs are memoized in a direct-mapped table; a bucket
 // another goroutine holds is treated as a miss, so a lookup never waits.
 func Keccak256Hash(data []byte) common.Hash {
-	if len(data) == 0 || len(data) > keccakCacheMaxInput {
+	if kcStats {
+		kcHist[min(len(data), len(kcHist)-1)].Add(1)
+	}
+	if kcVariant == "off" || len(data) == 0 || len(data) > keccakCacheMaxInput {
 		return keccak.Sum256(data)
 	}
 	key := maphash.Bytes(keccakCacheSeed, data)
+	if kcVariant == "hashonly" {
+		kcSink.Store(key)
+		return keccak.Sum256(data)
+	}
 	b := &keccakCacheBuckets[key&(uint64(len(keccakCacheBuckets))-1)]
 	tag := (key | keccakBucketAlive) &^ keccakBucketLocked
 	if st := b.tag.Load(); st == tag && b.tag.CompareAndSwap(st, st|keccakBucketLocked) {
@@ -67,6 +80,9 @@ func Keccak256Hash(data []byte) common.Hash {
 		}
 	}
 	h := keccak.Sum256(data)
+	if kcVariant == "lookup" {
+		return h
+	}
 	if st := b.tag.Load(); st&keccakBucketLocked == 0 && b.tag.CompareAndSwap(st, st|keccakBucketLocked) {
 		b.n = uint8(len(data))
 		copy(b.in[:], data)
@@ -74,4 +90,30 @@ func Keccak256Hash(data []byte) common.Hash {
 		b.tag.Store(tag)
 	}
 	return h
+}
+
+var (
+	kcVariant = dbg.EnvString("KECCAK_CACHE_VARIANT", "full")
+	kcStats   = dbg.EnvBool("KECCAK_CACHE_STATS", false)
+	kcHist    [137]atomic.Uint64
+	kcSink    atomic.Uint64
+)
+
+func init() {
+	if !kcStats {
+		return
+	}
+	go func() {
+		for now := range time.Tick(200 * time.Millisecond) {
+			var sb strings.Builder
+			var total uint64
+			for i := range kcHist {
+				if n := kcHist[i].Load(); n > 0 {
+					total += n
+					fmt.Fprintf(&sb, " %d:%d", i, n)
+				}
+			}
+			fmt.Fprintf(os.Stderr, "[kcvar] pid=%d ts=%d variant=%s calls=%d len:count%s\n", os.Getpid(), now.UnixMilli(), kcVariant, total, sb.String())
+		}
+	}()
 }
