@@ -20,6 +20,8 @@
 package crypto
 
 import (
+	"encoding/binary"
+	"sync/atomic"
 	"testing"
 )
 
@@ -87,3 +89,40 @@ func BenchmarkKeccak256(b *testing.B) {
 var benchPayload = make([]byte, 500)
 
 var benchPayload1 = make([]byte, 1)
+
+// BenchmarkKeccakCache compares direct hashing with the inline memo on 64-byte inputs:
+// hit = 1024 recurring keys, miss = every key new, parallel = the same across GOMAXPROCS goroutines.
+func BenchmarkKeccakCache(b *testing.B) {
+	keys := make([][]byte, 1<<20)
+	for i := range keys {
+		keys[i] = make([]byte, 64)
+		binary.BigEndian.PutUint64(keys[i][24:], uint64(i))
+		binary.BigEndian.PutUint64(keys[i][56:], uint64(i)*7919)
+	}
+	for _, mode := range []string{"off", "inline"} {
+		keccakInlineOn = mode == "inline"
+		for _, sc := range []struct {
+			name string
+			span int
+		}{{"hit", 1024}, {"miss", len(keys)}} {
+			b.Run(mode+"/"+sc.name, func(b *testing.B) {
+				i := 0
+				for b.Loop() {
+					Keccak256Hash(keys[i%sc.span])
+					i++
+				}
+			})
+			b.Run(mode+"/"+sc.name+"/parallel", func(b *testing.B) {
+				var seed atomic.Uint64
+				b.RunParallel(func(pb *testing.PB) {
+					i := int(seed.Add(7777))
+					for pb.Next() {
+						Keccak256Hash(keys[i%sc.span])
+						i++
+					}
+				})
+			})
+		}
+	}
+	keccakInlineOn = false
+}
