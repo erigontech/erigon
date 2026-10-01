@@ -112,15 +112,6 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	if err := validatePBTImportTargetFrontierFiles(ctx, dirs, settings, txNum, logger); err != nil {
 		return err
 	}
-	db, err := openDBReadOnly(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), logger)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if db != nil {
-			db.Close()
-		}
-	}()
 	snapshot, err := os.Open(snapshotPath)
 	if err != nil {
 		return err
@@ -140,36 +131,44 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 		return err
 	}
 	var originalSettings dbstate.ErigonDBSettings
+	var db kv.TemporalRwDB
 	settingsChanged := false
 	if settings != nil {
 		originalSettings = *settings
 	}
 	defer func() {
+		if db != nil {
+			db.Close()
+			db = nil
+		}
 		if settingsChanged && retErr != nil {
-			if db != nil {
-				db.Close()
-				db = nil
-			}
 			_ = dbstate.WriteErigonDBSettings(dirs, &originalSettings)
 		}
 	}()
 	targetDomain := kv.CommitmentDomain
-	importOptions := dbstate.PBTImportOptions{
-		Snapshot: snapshot, SnapshotSize: snapshotInfo.Size(), Preimages: preimages, PreimageSize: preimagesInfo.Size(),
-		BlockHash: blockHash, BlockNum: blockNum, TxNum: txNum, TargetDomain: targetDomain, Hash: eip8297.HashBytes, Logger: logger,
-	}
-	validationTx, err := db.BeginTemporalRo(ctx)
+	headerRoot, err := readPBTImportHeaderRoot(ctx, dirs, blockHash, logger)
 	if err != nil {
 		return err
 	}
-	defer validationTx.Rollback()
+	importOptions := dbstate.PBTImportOptions{
+		Snapshot: snapshot, SnapshotSize: snapshotInfo.Size(), Preimages: preimages, PreimageSize: preimagesInfo.Size(),
+		BlockHash: blockHash, BlockNum: blockNum, TxNum: txNum, HeaderRoot: &headerRoot, TargetDomain: targetDomain, Hash: eip8297.HashBytes, Logger: logger,
+	}
+	readDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	if err != nil {
+		return err
+	}
+	validationTx, err := readDB.BeginRo(ctx)
+	if err != nil {
+		readDB.Close()
+		return err
+	}
 	validationErr := dbstate.ValidatePBTSnapshot(ctx, validationTx, importOptions)
 	validationTx.Rollback()
+	readDB.Close()
 	if validationErr != nil {
 		return validationErr
 	}
-	db.Close()
-	db = nil
 	if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
 		variant := dbstate.TrieVariantBin
 		settings.TrieVariant = &variant
@@ -320,6 +319,32 @@ func validatePBTImportPointReadOnly(ctx context.Context, dirs datadir.Dirs, sett
 	}
 	defer db.Close()
 	return validatePBTImportPointWithReader(ctx, db, blockReader.TxnumReader(), blockReader, blockView, blockHash)
+}
+
+func readPBTImportHeaderRoot(ctx context.Context, dirs datadir.Dirs, blockHash common.Hash, logger log.Logger) (common.Hash, error) {
+	rawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer rawDB.Close()
+	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, dirs, rawDB, logger)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer closeBlockReader()
+	tx, err := rawDB.BeginRo(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer tx.Rollback()
+	header, err := blockReader.HeaderByHash(ctx, pbtBlockFilesTx{Tx: tx, view: blockView}, blockHash)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if header == nil {
+		return common.Hash{}, fmt.Errorf("commitment import-pbt: block %s is not in local chaindata", blockHash.Hex())
+	}
+	return header.Root, nil
 }
 
 func validatePBTImportTargetFrontierFiles(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, logger log.Logger) error {

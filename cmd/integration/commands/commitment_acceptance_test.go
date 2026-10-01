@@ -17,7 +17,10 @@
 package commands
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -193,7 +197,7 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 		return err
 	}))
 	require.Equal(t, dualAtConversion, attachedAtConversion)
-	assertPBTAttachHistory(t, node.Sender, node.Contract, reopened, dual.Tester, conversionTx)
+	assertPBTAttachHistory(t, reopened, dual.Tester, conversionTx)
 	for block := conversionBlock + 1; block <= node.Chain.TopBlock.NumberU64(); block++ {
 		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
 		var attachedRoot []byte
@@ -210,9 +214,22 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 		}))
 		require.Equal(t, dualRoot, attachedRoot)
 	}
-	assertPBTAttachHistory(t, node.Sender, node.Contract, reopened, dual.Tester, conversionTx)
+	assertPBTAttachHistory(t, reopened, dual.Tester, conversionTx)
+	lastTxNum := pbtAcceptanceLastTxNum(t, reopened)
+	attachedAgg := reopened.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	require.NoError(t, attachedAgg.BuildFiles2(t.Context(), reopened.DB, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), true))
+	attachedAgg.WaitForFiles()
+	at := attachedAgg.BeginFilesRo()
+	wideRange := false
+	for _, file := range at.Files(kv.AccountsDomain) {
+		if file.EndRootNum()-file.StartRootNum() > 1 {
+			wideRange = true
+			break
+		}
+	}
+	at.Close()
+	require.True(t, wideRange, "the reopened aggregator must merge a range wider than one step")
 	reopened.Close()
-	buildPBTAcceptanceFilesAtWithMerge(t, node, pbtAcceptanceLastTxNum(t, dual.Tester), true)
 	selectPBTCommandSuite(t)
 	merged := execmoduletester.New(t,
 		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
@@ -222,7 +239,7 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 		execmoduletester.WithoutGenesisCommit(),
 		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
 	)
-	assertPBTAttachHistory(t, node.Sender, node.Contract, merged, dual.Tester, conversionTx)
+	assertPBTAttachHistory(t, merged, dual.Tester, conversionTx)
 	merged.Close()
 }
 
@@ -290,6 +307,11 @@ func TestPBTAttachAcceptanceAtMidBlockConversionPoint(t *testing.T) {
 	selectPBTCommandSuite(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
+	previousPublishedRoot := pbtAttachPublishedRootFn
+	pbtAttachPublishedRootFn = func(context.Context, datadir.Dirs, *dbstate.ErigonDBSettings, log.Logger) (common.Hash, error) {
+		return common.Hash{}, errors.New("the mid-block attach must not build the published root")
+	}
+	t.Cleanup(func() { pbtAttachPublishedRootFn = previousPublishedRoot })
 	publishedSettings, err := dbstate.ReadErigonDBSettings(datadir.Open(published))
 	require.NoError(t, err)
 	conversionBlock, conversionTx, ok, err := publishedSettings.ConversionPoint()
@@ -316,6 +338,7 @@ func TestPBTAttachAcceptanceAtMidBlockConversionPoint(t *testing.T) {
 		execmoduletester.WithoutGenesisCommit(),
 		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
 	)
+	assertPBTAttachHistory(t, reopened, dual.Tester, conversionTx)
 	for block := conversionBlock; block <= node.Chain.TopBlock.NumberU64(); block++ {
 		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
 		attachedRaw := reopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
@@ -528,7 +551,7 @@ func buildPBTAcceptanceFilesAtWithMerge(t *testing.T, fixture *execmoduletester.
 	rawDB.Close()
 }
 
-func assertPBTAttachHistory(t *testing.T, sender, contract common.Address, attached, dual *execmoduletester.ExecModuleTester, maxTxNum uint64) {
+func assertPBTAttachHistory(t *testing.T, attached, dual *execmoduletester.ExecModuleTester, maxTxNum uint64) {
 	t.Helper()
 	attachedTx, err := attached.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
@@ -536,27 +559,31 @@ func assertPBTAttachHistory(t *testing.T, sender, contract common.Address, attac
 	dualTx, err := dual.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer dualTx.Rollback()
-	var zeroSlot common.Hash
-	storageKey := append(append([]byte(nil), contract[:]...), zeroSlot[:]...)
-	keys := []struct {
-		domain kv.Domain
-		key    []byte
-	}{
-		{domain: kv.AccountsDomain, key: sender[:]},
-		{domain: kv.AccountsDomain, key: contract[:]},
-		{domain: kv.StorageDomain, key: storageKey},
-		{domain: kv.CodeDomain, key: contract[:]},
-	}
 	for txNum := uint64(0); txNum <= maxTxNum; txNum++ {
-		for _, item := range keys {
-			attachedValue, attachedOK, err := attachedTx.GetAsOf(item.domain, item.key, txNum)
-			require.NoError(t, err)
-			dualValue, dualOK, err := dualTx.GetAsOf(item.domain, item.key, txNum)
-			require.NoError(t, err)
-			require.Equalf(t, dualOK, attachedOK, "%s presence at txNum %d", item.domain, txNum)
-			require.Equalf(t, dualValue, attachedValue, "%s value at txNum %d", item.domain, txNum)
-		}
+		attachedValues := collectPBTStateAt(t, attachedTx, txNum)
+		dualValues := collectPBTStateAt(t, dualTx, txNum)
+		require.Equalf(t, dualValues, attachedValues, "state at txNum %d", txNum)
 	}
+}
+
+func collectPBTStateAt(t *testing.T, tx kv.TemporalTx, txNum uint64) map[string][]byte {
+	t.Helper()
+	values := make(map[string][]byte)
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		it, err := tx.RangeAsOf(domain, nil, nil, txNum+1, order.Asc, kv.Unlim)
+		require.NoError(t, err)
+		for it.HasNext() {
+			key, value, err := it.Next()
+			require.NoError(t, err)
+			if len(value) == 0 {
+				values[domain.String()+"\x00"+string(key)] = []byte{}
+			} else {
+				values[domain.String()+"\x00"+string(key)] = bytes.Clone(value)
+			}
+		}
+		it.Close()
+	}
+	return values
 }
 
 func pbtAcceptanceLastTxNum(t *testing.T, fixture *execmoduletester.ExecModuleTester) uint64 {

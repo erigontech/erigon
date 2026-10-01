@@ -12,7 +12,7 @@ Run conversion against a source that is not being written:
 
 ```sh
 integration commitment convert-pbt \
-  --datadir=<source-datadir> \
+  --datadir=<source-datadir> --chain=<chain> \
   --output.datadir=<published-datadir> \
   --keep-hex \
   --experimental.bin-commitment.hash=<suite>
@@ -41,18 +41,18 @@ operator commands are:
 
 ```sh
 COMMITMENT_V3=true integration commitment convert-pbt \
-  --datadir=<source-datadir> --output.datadir=<published-datadir> --keep-hex \
+  --datadir=<source-datadir> --chain=<chain> --output.datadir=<published-datadir> --keep-hex \
   --experimental.bin-commitment.hash=<suite>
 
 COMMITMENT_V3=true integration commitment attach-pbt \
-  --datadir=<node-datadir> --from=<published-datadir> \
+  --datadir=<node-datadir> --chain=<chain> --from=<published-datadir> \
   --experimental.bin-commitment.hash=<suite>
 
 COMMITMENT_V3=true erigon snapshots export-pbt \
-  --datadir=<datadir> --out=<export-dir>
+  --datadir=<datadir> --chain=<chain> --out=<export-dir>
 
 COMMITMENT_V3=true integration commitment import-pbt \
-  --datadir=<datadir> --snapshot=<pbt-snapshot.bin> \
+  --datadir=<datadir> --chain=<chain> --snapshot=<pbt-snapshot.bin> \
   --preimages=<framed.bin> --block=<canonical-block-hash>
 ```
 
@@ -69,7 +69,7 @@ Stop the node, then attach the published files:
 
 ```sh
 integration commitment attach-pbt \
-  --datadir=<node-datadir> \
+  --datadir=<node-datadir> --chain=<chain> \
   --from=<published-datadir> \
   --experimental.bin-commitment.hash=<suite>
 ```
@@ -127,11 +127,14 @@ finalized flag. The artifact and preimage files are read back with the strict
 readers and exact-set join before the meta is published. The streamed root
 must match the bin root when the pinned datadir has one.
 
-`integration stage_exec --block=<B>` stops before committing block `B`, so use
-the corresponding completed execution point when selecting the export. Export
-has no block flag. `export-preimages` uses the same pin for a preimage-only
-operation. Export does not require restoring every shadow domain; a lagging or
-frozen shadow is not the pin.
+`integration stage_exec --block=<B>` executes and commits block `B`. To recover
+from a mid-block pin, run
+`COMMITMENT_V3=true integration stage_exec --datadir=<datadir> --chain=<chain> --block=<next block end> --experimental.commitment-v3`,
+then run
+`COMMITMENT_V3=true erigon snapshots export-pbt --datadir=<datadir> --chain=<chain> --out=<export-dir>`.
+Export has no block flag. `export-preimages` uses the same pin for a
+preimage-only operation. Export does not require restoring every shadow domain;
+a lagging or frozen shadow is not the pin.
 
 ## Import (test-only)
 

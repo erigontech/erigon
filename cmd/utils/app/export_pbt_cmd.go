@@ -207,21 +207,26 @@ func runExportPBTWithReadbackHookAndTxNumReader(ctx context.Context, tx kv.Tempo
 	if err != nil {
 		return err
 	}
-	preimageTemp, err := os.CreateTemp(tx.Debug().Dirs().Tmp, "pbt-preimages-")
+	scratchDir, err := prepareScratchDir(tx.Debug().Dirs().Tmp)
 	if err != nil {
 		_ = preimageFile.Close()
 		return err
 	}
-	_, writeErr = writePreimagesFile(ctx, preimageTemp, tx.Debug().Dirs().Tmp, state.AggTx(tx), tx, logger)
+	preimageTemp, err := os.CreateTemp(scratchDir, "pbt-preimages-")
+	if err != nil {
+		_ = preimageFile.Close()
+		return err
+	}
+	_, writeErr = writePreimagesFile(ctx, preimageTemp, scratchDir, state.AggTx(tx), tx, logger)
 	if writeErr == nil {
 		if _, writeErr = preimageTemp.Seek(0, io.SeekStart); writeErr == nil {
 			info, statErr := preimageTemp.Stat()
 			if statErr != nil {
 				writeErr = statErr
 			} else {
-				writeErr = artifact.WritePreimagesStream(preimageFile, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+				writeErr = artifact.WritePreimagesStreamWithScratch(preimageFile, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
 					return artifact.ReadPreimagesStream(preimageTemp, info.Size(), yield)
-				})
+				}, scratchDir)
 			}
 		}
 	}

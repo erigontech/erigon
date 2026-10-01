@@ -48,6 +48,7 @@ type PBTImportOptions struct {
 	BlockHash    common.Hash
 	BlockNum     uint64
 	TxNum        uint64
+	HeaderRoot   *common.Hash
 	TargetDomain kv.Domain
 	Hash         eip8297.HashFn
 	Logger       log.Logger
@@ -165,12 +166,16 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 	if root != state.meta.Root {
 		return common.Hash{}, fmt.Errorf("pbt import: computed root %s differs from artifact root %s", root.Hex(), state.meta.Root.Hex())
 	}
-	header := rawdb.ReadHeader(tx, opts.BlockHash, opts.BlockNum)
-	if header == nil {
-		return common.Hash{}, fmt.Errorf("pbt import: local header %s is missing", opts.BlockHash.Hex())
+	headerRoot := opts.HeaderRoot
+	if headerRoot == nil {
+		header := rawdb.ReadHeader(tx, opts.BlockHash, opts.BlockNum)
+		if header == nil {
+			return common.Hash{}, fmt.Errorf("pbt import: local header %s is missing", opts.BlockHash.Hex())
+		}
+		headerRoot = &header.Root
 	}
-	if root != header.Root {
-		return common.Hash{}, fmt.Errorf("pbt import: computed root %s differs from header root %s", root.Hex(), header.Root.Hex())
+	if root != *headerRoot {
+		return common.Hash{}, fmt.Errorf("pbt import: computed root %s differs from header root %s", root.Hex(), headerRoot.Hex())
 	}
 	if err := domains.Flush(ctx, tx); err != nil {
 		return common.Hash{}, err
@@ -178,7 +183,7 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 	return root, nil
 }
 
-func ValidatePBTSnapshot(ctx context.Context, tx kv.TemporalTx, opts PBTImportOptions) error {
+func ValidatePBTSnapshot(ctx context.Context, tx kv.Getter, opts PBTImportOptions) error {
 	if tx == nil || opts.Snapshot == nil || opts.Preimages == nil {
 		return fmt.Errorf("pbt import: missing input")
 	}
@@ -199,12 +204,16 @@ func ValidatePBTSnapshot(ctx context.Context, tx kv.TemporalTx, opts PBTImportOp
 	if root != state.meta.Root {
 		return fmt.Errorf("pbt import: reference root %s differs from artifact root %s", root.Hex(), state.meta.Root.Hex())
 	}
-	header := rawdb.ReadHeader(tx, opts.BlockHash, opts.BlockNum)
-	if header == nil {
-		return fmt.Errorf("pbt import: local header %s is missing", opts.BlockHash.Hex())
+	headerRoot := opts.HeaderRoot
+	if headerRoot == nil {
+		header := rawdb.ReadHeader(tx, opts.BlockHash, opts.BlockNum)
+		if header == nil {
+			return fmt.Errorf("pbt import: local header %s is missing", opts.BlockHash.Hex())
+		}
+		headerRoot = &header.Root
 	}
-	if root != header.Root {
-		return fmt.Errorf("pbt import: reference root %s differs from header root %s", root.Hex(), header.Root.Hex())
+	if root != *headerRoot {
+		return fmt.Errorf("pbt import: reference root %s differs from header root %s", root.Hex(), headerRoot.Hex())
 	}
 	return nil
 }

@@ -56,6 +56,7 @@ var (
 	attachPBTFrom                 string
 	attachPBTStepHook             func(string) error
 	validatePBTAttachLeafStampsFn = validatePBTAttachLeafStamps
+	pbtAttachPublishedRootFn      = pbtAttachPublishedRoot
 )
 
 func init() {
@@ -202,10 +203,6 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
 		return err
 	}
-	publishedRoot, err := pbtAttachPublishedRoot(ctx, publishedDirs, publishedSettings, logger)
-	if err != nil {
-		return err
-	}
 	blockHash, blockEnd, afterFork, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
 	if err != nil {
 		return err
@@ -254,7 +251,7 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 		return err
 	}
 	if blockEnd {
-		shadowRoot := publishedRoot
+		var shadowRoot common.Hash
 		if afterFork {
 			if hexRoot, found, err := pbtAttachHexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
 				return err
@@ -262,6 +259,11 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 				shadowRoot = hexRoot
 			} else {
 				blockEnd = false
+			}
+		} else {
+			shadowRoot, err = pbtAttachPublishedRootFn(ctx, publishedDirs, publishedSettings, logger)
+			if err != nil {
+				return err
 			}
 		}
 		if blockEnd {
@@ -521,6 +523,9 @@ func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endT
 	if err := validatePBTAttachUncutFiles(nodeFiles, stepSize, endTxNum); err != nil {
 		return err
 	}
+	if err := validatePBTAttachHistoryFrontier(nodeFiles, stepSize, endTxNum); err != nil {
+		return err
+	}
 	for _, file := range publishedFiles {
 		if file.from*stepSize > endTxNum {
 			return fmt.Errorf("commitment attach-pbt: published file %s extends past conversion txNum %d", file.path, endTxNum)
@@ -614,6 +619,25 @@ func validatePBTAttachUncutFiles(nodeFiles []pbtAttachFile, stepSize, endTxNum u
 		}
 		if file.from*stepSize <= endTxNum && file.to*stepSize > endTxNum+1 {
 			return fmt.Errorf("commitment attach-pbt: node file %s spans conversion txNum %d and cannot be cut", file.path, endTxNum)
+		}
+	}
+	return nil
+}
+
+func validatePBTAttachHistoryFrontier(nodeFiles []pbtAttachFile, stepSize, endTxNum uint64) error {
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		var latestHistory *pbtAttachFile
+		for i := range nodeFiles {
+			file := &nodeFiles[i]
+			if file.domain != domain || file.from*stepSize > endTxNum || pbtAttachAdoptsFile(*file) {
+				continue
+			}
+			if latestHistory == nil || file.to > latestHistory.to {
+				latestHistory = file
+			}
+		}
+		if latestHistory != nil && latestHistory.to*stepSize <= endTxNum {
+			return fmt.Errorf("commitment attach-pbt: node history file %s ends at txNum %d before conversion txNum %d", latestHistory.path, latestHistory.to*stepSize, endTxNum)
 		}
 	}
 	return nil

@@ -37,6 +37,10 @@ import (
 
 var ErrPreimages = errors.New("pbt artifact: invalid preimages")
 
+const preimageSlotSpillThreshold = 1 << 20
+
+var preimageScratchFileCreate = os.CreateTemp
+
 type PreimageIterator func(func(Preimage) error) error
 
 type PreimageStreamIterator func(func(common.Address, func(func([32]byte) error) error) error) error
@@ -78,9 +82,24 @@ func WritePreimages(dst io.Writer, records any) error {
 }
 
 func WritePreimagesStream(dst io.Writer, iterate PreimageStreamIterator) error {
-	if iterate == nil {
+	return WritePreimagesStreamWithScratch(dst, iterate, os.TempDir())
+}
+
+func WritePreimagesStreamWithScratch(dst io.Writer, iterate PreimageStreamIterator, scratchDir string) error {
+	if iterate == nil || dst == nil {
 		return ErrPreimages
 	}
+	if scratchDir == "" {
+		scratchDir = os.TempDir()
+	}
+	var slotFile *os.File
+	var slotName string
+	defer func() {
+		if slotFile != nil {
+			_ = slotFile.Close()
+			_ = dir.RemoveFile(slotName)
+		}
+	}()
 	var previous common.Hash
 	index := 0
 	return iterate(func(address common.Address, slots func(func([32]byte) error) error) error {
@@ -93,19 +112,10 @@ func WritePreimagesStream(dst io.Writer, iterate PreimageStreamIterator) error {
 		if slots == nil {
 			return ErrPreimages
 		}
-		slotFile, err := os.CreateTemp("", "pbt-preimage-record-")
-		if err != nil {
-			return err
-		}
-		slotName := slotFile.Name()
-		cleanup := func() {
-			_ = slotFile.Close()
-			_ = dir.RemoveFile(slotName)
-		}
-		defer cleanup()
+		var slotBytes bytes.Buffer
 		var count uint32
 		var previousSlot common.Hash
-		err = slots(func(slot [32]byte) error {
+		err := slots(func(slot [32]byte) error {
 			if count == ^uint32(0) {
 				return ErrPreimages
 			}
@@ -114,16 +124,28 @@ func WritePreimagesStream(dst io.Writer, iterate PreimageStreamIterator) error {
 				return ErrUnsorted
 			}
 			previousSlot = slotDigest
-			if _, err := slotFile.Write(slot[:]); err != nil {
+			if slotFile == nil && slotBytes.Len()+len(slot) > preimageSlotSpillThreshold {
+				var createErr error
+				slotFile, createErr = preimageScratchFileCreate(scratchDir, "pbt-preimage-record-")
+				if createErr != nil {
+					return createErr
+				}
+				slotName = slotFile.Name()
+				if _, createErr = slotFile.Write(slotBytes.Bytes()); createErr != nil {
+					return createErr
+				}
+				slotBytes.Reset()
+			}
+			if slotFile != nil {
+				_, err := slotFile.Write(slot[:])
+				count++
 				return err
 			}
+			_, err := slotBytes.Write(slot[:])
 			count++
-			return nil
+			return err
 		})
 		if err != nil {
-			return err
-		}
-		if err := slotFile.Sync(); err != nil {
 			return err
 		}
 		var encodedCount [4]byte
@@ -134,10 +156,23 @@ func WritePreimagesStream(dst io.Writer, iterate PreimageStreamIterator) error {
 		if _, err := dst.Write(encodedCount[:]); err != nil {
 			return err
 		}
+		if slotFile == nil {
+			_, err = dst.Write(slotBytes.Bytes())
+			return err
+		}
 		if _, err := slotFile.Seek(0, io.SeekStart); err != nil {
 			return err
 		}
 		_, err = io.Copy(dst, slotFile)
+		if truncateErr := slotFile.Truncate(0); err == nil {
+			err = truncateErr
+		}
+		if seekErr := func() error {
+			_, seekErr := slotFile.Seek(0, io.SeekStart)
+			return seekErr
+		}(); err == nil {
+			err = seekErr
+		}
 		return err
 	})
 }

@@ -1319,7 +1319,7 @@ func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {
 	root := isolatedCommitmentRoot(t)
 	accepted, published, pending := isolatedCommitmentBranchKeys(t, root)
 	require.NotEmpty(t, accepted, "an unchecked isolated round must write its branch records, or the rejection arm proves nothing")
-	require.Empty(t, published, "an unchecked round publishes nothing")
+	require.Empty(t, published, "an empty round publishes nothing")
 	require.False(t, pending, "an accepted round must leave nothing pending")
 
 	rejected, published, pending := isolatedCommitmentBranchKeys(t, common.Hash{})

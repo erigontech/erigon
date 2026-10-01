@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io/fs"
 	"maps"
 	"math/big"
 	"os"
@@ -762,6 +763,204 @@ func TestConvertPBTFailureRemovesOutput(t *testing.T) {
 	require.ErrorContains(t, err, "injected conversion failure")
 	_, statErr := os.Stat(output)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestConvertPBTVerifiesCorruptedWrittenRows(t *testing.T) {
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	previousHook := convertPBTStandaloneHook
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+		convertPBTStandaloneHook = previousHook
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	source, _ := newPBTConversionSource(t)
+	convertPBTStandaloneHook = func(dirs datadir.Dirs) error {
+		return corruptPBTOutputRow(t.Context(), dirs)
+	}
+	output := filepath.Join(t.TempDir(), "output")
+	err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
+	require.ErrorContains(t, err, "verify written rows")
+}
+
+func corruptPBTOutputRow(ctx context.Context, dirs datadir.Dirs) error {
+	refs := false
+	variant := dbstate.TrieVariantHexBin
+	hash := commitment.PBinHashBlake3
+	settings := &dbstate.ErigonDBSettings{StepSize: 8, StepsInFrozenFile: 1, ReferencesInCommitmentBranches: &refs, TrieVariant: &variant, TrieHash: &hash}
+	if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
+		return err
+	}
+	rawPath, err := os.MkdirTemp("", "convert-pbt-corrupt-chaindata-")
+	if err != nil {
+		return err
+	}
+	defer dir.RemoveAll(rawPath)
+	rawDB, err := mdbx.New(dbcfg.ChainDB, log.New()).Path(rawPath).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer rawDB.Close()
+	if err := rawDB.Update(ctx, func(tx kv.RwTx) error {
+		if err := rawdbv3.TxNums.Append(tx, 0, 0); err != nil {
+			return err
+		}
+		return rawdbv3.TxNums.Append(tx, 1, 7)
+	}); err != nil {
+		return err
+	}
+	agg, err := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).Open(ctx)
+	if err != nil {
+		return err
+	}
+	if err := agg.OpenFolder(rawDB); err != nil {
+		agg.Close()
+		return err
+	}
+	at := agg.BeginFilesRo()
+	it, err := at.DebugRangeLatestFromFiles(kv.CommitmentBinDomain, nil, nil, kv.Unlim)
+	if err != nil {
+		at.Close()
+		agg.Close()
+		return err
+	}
+	rows := make([]struct{ key, value []byte }, 0)
+	for it.HasNext() {
+		candidateKey, candidateValue, nextErr := it.Next()
+		if nextErr != nil {
+			it.Close()
+			at.Close()
+			return nextErr
+		}
+		rows = append(rows, struct{ key, value []byte }{bytes.Clone(candidateKey), bytes.Clone(candidateValue)})
+	}
+	it.Close()
+	at.Close()
+	agg.Close()
+	rawDB.Close()
+	if len(rows) == 0 {
+		return errors.New("no binary row to corrupt")
+	}
+	corrupted := false
+	for i := range rows {
+		if !commitment.IsCommitmentStateKey(rows[i].key) {
+			rows[i].value[0] ^= 1
+			corrupted = true
+			break
+		}
+	}
+	if !corrupted {
+		return errors.New("no binary row to corrupt")
+	}
+	if err := removePBTOutputDomainFilesForHook(dirs, kv.CommitmentBinDomain.String()); err != nil {
+		return err
+	}
+	rawDB, err = mdbx.New(dbcfg.ChainDB, log.New()).Path(rawPath).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer rawDB.Close()
+	agg, err = dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(rawDB); err != nil {
+		return err
+	}
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantBinPatriciaTrie
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+	if err != nil {
+		return err
+	}
+	defer domains.Close()
+	for _, row := range rows {
+		if err := domains.DomainPut(kv.CommitmentBinDomain, tx, row.key, row.value, 7, nil); err != nil {
+			return err
+		}
+	}
+	if err := domains.Flush(ctx, tx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return agg.BuildFiles2(ctx, db, 0, 1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false)
+}
+
+func removePBTOutputDomainFilesForHook(dirs datadir.Dirs, domain string) error {
+	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
+		if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				if errors.Is(walkErr, os.ErrNotExist) {
+					return nil
+				}
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
+			if ok && parsed.TypeString == domain {
+				return dir.RemoveFile(path)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func TestConvertPBTRemovesFilesStartingAfterConversionPoint(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	buildPBTAcceptanceFiles(t, node)
+	node.Tester.Close()
+
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	copyPBTStateSalt(t, node, source)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	buildPBTAcceptanceFilesAt(t, source, 8)
+	source.Tester.Close()
+	selectPBTCommandSuite(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(published))
+	require.NoError(t, err)
+	_, conversionTx, ok, err := settings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	var past []string
+	require.NoError(t, filepath.WalkDir(published, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
+			return walkErr
+		}
+		parsed, _, parsedOK := snaptype.ParseFileName(filepath.Dir(path), entry.Name())
+		if parsedOK && parsed.From*settings.StepSize > conversionTx {
+			past = append(past, path)
+		}
+		return nil
+	}))
+	require.Empty(t, past)
+	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
 }
 
 func TestConvertPBTStandaloneReopenRequiresBothDomains(t *testing.T) {

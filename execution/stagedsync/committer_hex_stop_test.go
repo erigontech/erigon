@@ -25,11 +25,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -194,8 +196,29 @@ func TestStoppedHexShadowUnwindRefusesAcrossActivation(t *testing.T) {
 	require.NoError(t, checkStoppedHexShadowUnwind(t.Context(), tx, hexStopHeaderReader{}, &chain.Config{BinaryTrieTime: &activationTime}, 13, 5))
 }
 
+func TestUnwindExecutionStageRejectsStoppedHexShadowAcrossActivation(t *testing.T) {
+	_, tx, doms := dualCalculatorTest(t)
+	defer doms.Close()
+	activationTime := uint64(10)
+	require.NoError(t, rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentDomain))
+	err := UnwindExecutionStage(
+		&UnwindState{ID: stages.Execution, UnwindPoint: 4, CurrentBlockNumber: 13},
+		&StageState{ID: stages.Execution, BlockNumber: 13},
+		doms,
+		tx,
+		context.Background(),
+		ExecuteBlockCfg{blockReader: hexStopHeaderReader{}, chainConfig: &chain.Config{BinaryTrieTime: &activationTime}},
+		log.New(),
+	)
+	require.ErrorIs(t, err, ErrTooDeepUnwind)
+}
+
 type hexStopHeaderReader struct {
 	dbservices.FullBlockReader
+}
+
+func (hexStopHeaderReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
+	return common.Hash{}, false, nil
 }
 
 func (hexStopHeaderReader) HeaderByNumber(_ context.Context, _ kv.Getter, number uint64) (*types.Header, error) {

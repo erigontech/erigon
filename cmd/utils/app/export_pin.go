@@ -163,7 +163,7 @@ func checkExportPinTxNum(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.T
 		return fmt.Errorf("export pin block %d has no txNum mapping", blockNum)
 	}
 	if maxTxNum != txNum {
-		return fmt.Errorf("export pin checkpoint (%d, %d) does not match block %d last txNum %d", blockNum, txNum, blockNum, maxTxNum)
+		return fmt.Errorf("export pin checkpoint (%d, %d) does not match block %d last txNum %d; run `COMMITMENT_V3=true integration stage_exec --datadir=<datadir> --chain=<chain> --block=<next block end> --experimental.commitment-v3`, then `COMMITMENT_V3=true erigon snapshots export-pbt --datadir=<datadir> --chain=<chain> --out=<export-dir>`", blockNum, txNum, blockNum, maxTxNum)
 	}
 	return nil
 }

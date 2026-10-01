@@ -227,4 +227,46 @@ func TestImportPBTRefusalsLeaveDatadirUnchanged(t *testing.T) {
 			require.ErrorIs(t, statErr, os.ErrNotExist)
 		})
 	}
+	t.Run("no-settings-artifact-refusal", func(t *testing.T) {
+		target, targetErr := execmoduletester.NewPBTAcceptanceChain(t, true, false)
+		require.NoError(t, targetErr)
+		require.NoError(t, target.Tester.InsertChain(target.Chain))
+		settingsPath := filepath.Join(target.Tester.Dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
+		require.NoError(t, dir.RemoveFile(settingsPath))
+		target.Tester.Close()
+		var badPreimages bytes.Buffer
+		require.NoError(t, artifact.WritePreimages(&badPreimages, []artifact.Preimage{{Address: common.Address{1}}}))
+		badPath := filepath.Join(t.TempDir(), "preimages")
+		require.NoError(t, os.WriteFile(badPath, badPreimages.Bytes(), 0o644))
+		before := snapshotTree(t, target.Tester.Dirs.DataDir)
+		datadirCli, chaindata = target.Tester.Dirs.DataDir, target.Tester.Dirs.Chaindata
+		err := importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), badPath, source.Chain.Blocks[1].Hash().Hex(), "", log.New())
+		require.ErrorContains(t, err, "missing key")
+		assertSnapshotTreeUnchanged(t, before, snapshotTree(t, target.Tester.Dirs.DataDir))
+		_, statErr := os.Stat(settingsPath)
+		require.ErrorIs(t, statErr, os.ErrNotExist)
+	})
+}
+
+func assertSnapshotTreeUnchanged(t *testing.T, before, after map[string]string) {
+	t.Helper()
+	if len(before) != len(after) {
+		for path := range after {
+			if _, ok := before[path]; !ok {
+				t.Logf("created path %s", path)
+			}
+		}
+		for path := range before {
+			if _, ok := after[path]; !ok {
+				t.Logf("removed path %s", path)
+			}
+		}
+	}
+	require.Equal(t, len(before), len(after))
+	for path, beforeValue := range before {
+		afterValue, ok := after[path]
+		require.Truef(t, ok, "missing path %s", path)
+		require.Lenf(t, afterValue, len(beforeValue), "changed path %s", path)
+		require.Truef(t, bytes.Equal([]byte(beforeValue), []byte(afterValue)), "changed path %s", path)
+	}
 }

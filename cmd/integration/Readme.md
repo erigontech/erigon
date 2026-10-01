@@ -126,11 +126,11 @@ integration stage_exec
 integration commitment rebuild --datadir=<datadir>
 
 # Convert v3 hex files into a fresh PBT output datadir.
-integration commitment convert-pbt --datadir=<src> --output.datadir=<out> --keep-hex \
+integration commitment convert-pbt --datadir=<src> --chain=<chain> --output.datadir=<out> --keep-hex \
   --experimental.bin-commitment.hash=<suite>
 
 # Attach the published output to a stopped node.
-integration commitment attach-pbt --datadir=<node> --from=<out> \
+integration commitment attach-pbt --datadir=<node> --chain=<chain> --from=<out> \
   --experimental.bin-commitment.hash=<suite>
 ```
 

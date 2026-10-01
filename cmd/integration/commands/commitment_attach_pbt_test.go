@@ -20,6 +20,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -87,6 +88,16 @@ func TestValidatePBTAttachFilesRejectsUncutStateHistory(t *testing.T) {
 	require.NoError(t, os.MkdirAll(node.SnapHistory, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(node.SnapHistory, "v1.0-accounts.0-2.v"), []byte("history"), 0o644))
 	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 7), "spans conversion txNum 7")
+}
+
+func TestValidatePBTAttachFilesRejectsHistoryBelowStateFrontier(t *testing.T) {
+	files := []pbtAttachFile{
+		{path: "accounts.0-2.kv", domain: kv.AccountsDomain, from: 0, to: 2, data: true},
+		{path: "accounts.0-1.v", domain: kv.AccountsDomain, from: 0, to: 1},
+	}
+	err := validatePBTAttachHistoryFrontier(files, 8, 10)
+	require.ErrorContains(t, err, "accounts.0-1.v")
+	require.ErrorContains(t, err, "ends at txNum 8")
 }
 
 func TestAttachPBTRejectsHistorySpanningPointWithoutMutation(t *testing.T) {
@@ -483,7 +494,7 @@ func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) 
 	require.NoError(t, state.WriteErigonDBSettings(datadir.Open(published), settings))
 	setExecutionProgress(t, source.Chaindata, 2)
 	err = attachPBT(t.Context(), source.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "do not cover conversion txNum")
+	require.ErrorContains(t, err, "ends at txNum 8 before conversion txNum 16")
 }
 
 func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
@@ -555,14 +566,12 @@ func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
 	previousSchema := statecfg.Schema
 	previousHash := statecfg.BinCommitmentHash
 	previousSuite := commitment.PBinHashSuiteName()
-	previousValidator := validatePBTAttachLeafStampsFn
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = previousBin
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
 		statecfg.ExperimentalCommitmentV3 = previousV3
 		statecfg.Schema = previousSchema
 		statecfg.BinCommitmentHash = previousHash
-		validatePBTAttachLeafStampsFn = previousValidator
 		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
 	})
 	statecfg.ExperimentalCommitmentV3 = true
@@ -572,14 +581,42 @@ func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
 	source, _ := newPBTConversionSource(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	renamePBTFilesRange(t, source.Snap, "0-1", "0-2")
+	renamePBTAllFilesRange(t, published, "0-1", "0-2")
 	setExecutionProgress(t, source.Chaindata, 1)
-	validatePBTAttachLeafStampsFn = func(_ uint64, _ func(func(state.PBinLeaf) error) error) error {
-		return errors.New("commitment attach-pbt: published leaf stamp 8 is after conversion txNum 7")
-	}
+	validatePBTAttachLeafStampsFn = validatePBTAttachLeafStamps
 	before := snapshotTree(t, source.DataDir)
 	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "published leaf stamp 8")
+	require.ErrorContains(t, err, "published leaf stamp 15")
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
+}
+
+func renamePBTFilesRange(t *testing.T, root, from, to string) {
+	renamePBTFilesRangeWithFilter(t, root, from, to, true)
+}
+
+func renamePBTAllFilesRange(t *testing.T, root, from, to string) {
+	renamePBTFilesRangeWithFilter(t, root, from, to, false)
+}
+
+func renamePBTFilesRangeWithFilter(t *testing.T, root, from, to string, adoptedOnly bool) {
+	t.Helper()
+	var paths []string
+	require.NoError(t, filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.Contains(entry.Name(), "."+from+".") {
+			return err
+		}
+		ext := filepath.Ext(entry.Name())
+		if adoptedOnly && ext != ".kv" && ext != ".bt" && ext != ".kvi" && ext != ".kvei" {
+			return err
+		}
+		paths = append(paths, path)
+		return nil
+	}))
+	for _, path := range paths {
+		name := strings.Replace(filepath.Base(path), "."+from+".", "."+to+".", 1)
+		require.NoError(t, os.Rename(path, filepath.Join(filepath.Dir(path), name)))
+	}
 }
 
 func writePBTAttachSettings(t *testing.T, dirs datadir.Dirs, hash string, blockNum, txNum uint64) {

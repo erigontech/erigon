@@ -794,6 +794,41 @@ func TestPreimageReaderAllocationsStayBounded(t *testing.T) {
 	require.Less(t, allocations, float64(recordCount)*2, "the reader must reuse its cursor buffer")
 }
 
+func TestWritePreimagesStreamWithScratchReusesScratchAcrossAccounts(t *testing.T) {
+	previousCreate := preimageScratchFileCreate
+	createCount := 0
+	preimageScratchFileCreate = func(dir, pattern string) (*os.File, error) {
+		createCount++
+		return previousCreate(dir, pattern)
+	}
+	t.Cleanup(func() { preimageScratchFileCreate = previousCreate })
+	records := make([]common.Address, 10_000)
+	for i := range records {
+		binary.BigEndian.PutUint64(records[i][12:], uint64(i))
+	}
+	sort.Slice(records, func(i, j int) bool {
+		left := keccak.Sum256(records[i][:])
+		right := keccak.Sum256(records[j][:])
+		return bytes.Compare(left[:], right[:]) < 0
+	})
+	scratchDir := t.TempDir()
+	var output bytes.Buffer
+	err := WritePreimagesStreamWithScratch(&output, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+		for _, address := range records {
+			if err := yield(address, func(func([32]byte) error) error { return nil }); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, scratchDir)
+	require.NoError(t, err)
+	require.Len(t, output.Bytes(), len(records)*24)
+	require.LessOrEqual(t, createCount, 1)
+	entries, err := os.ReadDir(scratchDir)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+}
+
 type testLeaf struct {
 	Key   []byte
 	Value []byte
