@@ -327,15 +327,21 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 			return fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
 		}
 	}
-	if err := dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
-		if leaf.Stamp > txNum {
-			return fmt.Errorf("commitment attach-pbt: published leaf stamp %d is after conversion txNum %d", leaf.Stamp, txNum)
-		}
-		return nil
+	if err := validatePBTAttachLeafStamps(txNum, func(emit func(dbstate.PBinLeaf) error) error {
+		return dbstate.ForEachPBinLeaf(at, nil, true, emit)
 	}); err != nil {
 		return err
 	}
 	return nil
+}
+
+func validatePBTAttachLeafStamps(txNum uint64, forEach func(func(dbstate.PBinLeaf) error) error) error {
+	return forEach(func(leaf dbstate.PBinLeaf) error {
+		if leaf.Stamp > txNum {
+			return fmt.Errorf("commitment attach-pbt: published leaf stamp %d is after conversion txNum %d", leaf.Stamp, txNum)
+		}
+		return nil
+	})
 }
 
 func configuredPBTNodeHash(settings *dbstate.ErigonDBSettings) string {

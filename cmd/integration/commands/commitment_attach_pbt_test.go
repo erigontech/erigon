@@ -494,6 +494,16 @@ func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
 	require.ErrorContains(t, attachPBT(t.Context(), recoverySource.DataDir, recoveryPublished, "", log.New()), "accounts")
 }
 
+func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
+	node := datadir.New(t.TempDir())
+	before := snapshotTree(t, node.DataDir)
+	err := validatePBTAttachLeafStamps(7, func(emit func(state.PBinLeaf) error) error {
+		return emit(state.PBinLeaf{Stamp: 8})
+	})
+	require.ErrorContains(t, err, "published leaf stamp 8")
+	require.Equal(t, before, snapshotTree(t, node.DataDir))
+}
+
 func TestAttachPBTAllowsMidBlockConversionPoint(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.MkdirAll(dirs.Chaindata, 0o755))

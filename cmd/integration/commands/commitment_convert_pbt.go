@@ -472,10 +472,7 @@ func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings 
 
 func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, point pbinConversionPoint, logger log.Logger) error {
 	configurePBTSourceVariant(settings)
-	if err := os.MkdirAll("/tmp/tandem-pbt-snapshot", 0o755); err != nil {
-		return err
-	}
-	chaindataDir, err := os.MkdirTemp("/tmp/tandem-pbt-snapshot", "convert-pbt-chaindata-")
+	chaindataDir, err := os.MkdirTemp("", "convert-pbt-chaindata-")
 	if err != nil {
 		return err
 	}

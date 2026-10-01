@@ -372,14 +372,14 @@ type rebuildOutput struct {
 	source *dbstate.ErigonDBSettings
 }
 
-func refuseRebuildFromSettings(_ dbstate.RebuildTarget, source *dbstate.ErigonDBSettings, sourcePath string, _ bool) error {
+func refuseRebuildFromSettings(_ dbstate.RebuildTarget, source *dbstate.ErigonDBSettings, sourcePath string) error {
 	if source.TrieVariantName() == dbstate.TrieVariantBin || source.TrieVariantName() == dbstate.TrieVariantHexBin {
 		return fmt.Errorf("commitment rebuild: source datadir %s uses the bin commitment trie; use commitment convert-pbt", sourcePath)
 	}
 	return nil
 }
 
-func refuseRebuildFromSource(target dbstate.RebuildTarget, src datadir.Dirs, hasOutput bool) error {
+func refuseRebuildFromSource(target dbstate.RebuildTarget, src datadir.Dirs) error {
 	source, err := dbstate.ReadErigonDBSettings(src)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -387,7 +387,7 @@ func refuseRebuildFromSource(target dbstate.RebuildTarget, src datadir.Dirs, has
 	if err != nil {
 		return fmt.Errorf("commitment rebuild: read source erigondb.toml: %w", err)
 	}
-	return refuseRebuildFromSettings(target, source, src.DataDir, hasOutput)
+	return refuseRebuildFromSettings(target, source, src.DataDir)
 }
 
 func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.RebuildTarget, resume bool, logger log.Logger) (*rebuildOutput, error) {
@@ -793,7 +793,7 @@ var cmdCommitmentRebuild = &cobra.Command{
 			}
 			return
 		}
-		if err := refuseRebuildFromSource(target, sourceDirs, rebuildOutputDatadir != ""); err != nil {
+		if err := refuseRebuildFromSource(target, sourceDirs); err != nil {
 			logger.Error(err.Error())
 			return
 		}
@@ -878,7 +878,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		}
 	}
 	if source != nil {
-		if err := refuseRebuildFromSettings(rebuildTarget, source, dirs.DataDir, out != nil); err != nil {
+		if err := refuseRebuildFromSettings(rebuildTarget, source, dirs.DataDir); err != nil {
 			return err
 		}
 	}

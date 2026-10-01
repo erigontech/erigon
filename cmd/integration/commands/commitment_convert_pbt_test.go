@@ -214,7 +214,11 @@ func TestConvertPBTHexSourceKeepHex(t *testing.T) {
 	require.Equal(t, snapshotTree(t, output), snapshotTree(t, secondOutput))
 }
 
-func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte) (map[string][]byte, common.Hash, common.Hash, int, string, map[string][]byte) {
+func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte) (map[string][]byte, common.Hash, common.Hash, string, map[string][]byte, map[string][]byte) {
+	return convertedPBTAcceptanceRowsWithLimits(t, sharedCode, &dbstate.PBinRangeWriterLimits{MaxOps: 2, MaxBytes: 1 << 20})
+}
+
+func convertedPBTAcceptanceRowsWithLimits(t *testing.T, sharedCode []byte, limits *dbstate.PBinRangeWriterLimits) (map[string][]byte, common.Hash, common.Hash, string, map[string][]byte, map[string][]byte) {
 	t.Helper()
 	selectPBTHexCommandSuite(t)
 	source, err := execmoduletester.NewPBTAcceptanceChainWithSharedCode(t, false, false, sharedCode)
@@ -224,7 +228,6 @@ func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte) (map[string][]b
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	entries := pbtAcceptanceReferenceEntries(source)
 	wantRoot := eip8297.StateRootWithHash(entries, eip8297.SelectedHash())
-	sourceCodeChunks := countPBTCodeChunks(t, source.Tester.Dirs.DataDir, source.Tester.Dirs.Chaindata, sharedCode)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
@@ -234,13 +237,21 @@ func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte) (map[string][]b
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	output := filepath.Join(t.TempDir(), "output")
-	require.NoError(t, convertPBTWithLimits(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), &dbstate.PBinRangeWriterLimits{MaxOps: 2, MaxBytes: 1 << 20}))
+	if limits == nil {
+		require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New()))
+	} else {
+		require.NoError(t, convertPBTWithLimits(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), limits))
+	}
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.InitSchemas()
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	binRoot := readPBTBinRoot(t, output, source.Tester.Dirs.Chaindata)
-	return readPBTBinRows(t, output, source.Tester.Dirs.Chaindata), binRoot, wantRoot, sourceCodeChunks, string(entries[len(entries)-1].Key), readPBTBinLeaves(t, output, source.Tester.Dirs.Chaindata)
+	referenceRows := make(map[string][]byte, len(entries))
+	for _, entry := range entries {
+		referenceRows[string(entry.Key)] = bytes.Clone(entry.Value)
+	}
+	return readPBTBinRows(t, output, source.Tester.Dirs.Chaindata), binRoot, wantRoot, string(entries[len(entries)-1].Key), readPBTBinLeaves(t, output, source.Tester.Dirs.Chaindata), referenceRows
 }
 
 func pbtAcceptanceReferenceEntries(source *execmoduletester.PBTAcceptanceChain) []eip8297.Entry {
@@ -274,63 +285,55 @@ func pbtAcceptanceReferenceEntries(source *execmoduletester.PBTAcceptanceChain) 
 	return entries
 }
 
-func countPBTCodeChunks(t *testing.T, output, rawPath string, code []byte) int {
-	t.Helper()
-	dirs := datadir.Open(output)
-	settings, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
-	require.NoError(t, err)
-	rawDB := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()
-	defer rawDB.Close()
-	agg := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
-	require.NoError(t, agg.OpenFolder(rawDB))
-	defer agg.Close()
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	codeHash := crypto.Keccak256Hash(code)
-	expected := make(map[string]struct{}, len(eip8297.ChunkifyCode(code)))
-	for index := range eip8297.ChunkifyCode(code) {
-		expected[string(eip8297.TreeKeyCodeChunk(codeHash, index))] = struct{}{}
-	}
-	found := make(map[string]struct{}, len(expected))
-	require.NoError(t, dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
-		if _, ok := expected[string(leaf.Key)]; ok {
-			found[string(leaf.Key)] = struct{}{}
-		}
-		return nil
-	}))
-	return len(found)
-}
-
 func TestConvertPBTCases(t *testing.T) {
 	code := bytes.Repeat([]byte{1}, eip8297.StemSubtreeWidth*eip8297.ChunkDataLen+1)
 	t.Run("code spanning groups", func(t *testing.T) {
-		rows, _, _, sourceCodeChunks, _, _ := convertedPBTAcceptanceRows(t, code)
-		require.NotEmpty(t, rows, "converter must write code-bearing rows")
-		require.Equal(t, len(eip8297.ChunkifyCode(code)), sourceCodeChunks, "code must span every expected group")
-	})
-	t.Run("shared code chunked once", func(t *testing.T) {
-		_, root, referenceRoot, sourceCodeChunks, _, _ := convertedPBTAcceptanceRows(t, code)
-		require.Equal(t, len(eip8297.ChunkifyCode(code)), sourceCodeChunks, "shared code chunks must be unique in the output")
-		require.Equal(t, referenceRoot, root, "shared code must be chunked once")
-	})
-	t.Run("zero chunks absent", func(t *testing.T) {
-		_, root, referenceRoot, _, _, _ := convertedPBTAcceptanceRows(t, code)
-		require.Equal(t, referenceRoot, root, "zero chunks must not change the root")
-	})
-	t.Run("delegation without code leaves", func(t *testing.T) {
-		_, root, referenceRoot, _, _, _ := convertedPBTAcceptanceRows(t, code)
-		require.Equal(t, referenceRoot, root, "delegation accounts must not add code leaves")
-	})
-	t.Run("root and record parity", func(t *testing.T) {
-		rows, root, referenceRoot, _, _, _ := convertedPBTAcceptanceRows(t, code)
-		require.Equal(t, referenceRoot, root, "the converted records must match the reference root")
-		for key, value := range rows {
-			require.NotEmpty(t, value, "converted record %x must have a value", key)
+		_, _, _, _, leaves, _ := convertedPBTAcceptanceRows(t, code)
+		codeHash := crypto.Keccak256Hash(code)
+		for index, chunk := range eip8297.ChunkifyCode(code) {
+			key := string(eip8297.TreeKeyCodeChunk(codeHash, index))
+			require.Equal(t, chunk[:], leaves[key], "code chunk %d must be present in its stem", index)
 		}
 	})
+	t.Run("shared code chunked once", func(t *testing.T) {
+		_, _, _, _, leaves, referenceRows := convertedPBTAcceptanceRows(t, code)
+		wantCode := make(map[string][]byte)
+		gotCode := make(map[string][]byte)
+		for key, value := range referenceRows {
+			if len(key) > 0 && key[0] == eip8297.CodeZone {
+				wantCode[key] = value
+			}
+		}
+		for key, value := range leaves {
+			if len(key) > 0 && key[0] == eip8297.CodeZone {
+				gotCode[key] = value
+			}
+		}
+		require.Equal(t, wantCode, gotCode, "shared code chunks must match a single-holder run")
+	})
+	t.Run("zero chunks absent", func(t *testing.T) {
+		_, _, _, _, leaves, _ := convertedPBTAcceptanceRows(t, code)
+		zeroCodeHash := crypto.Keccak256Hash(make([]byte, 31))
+		for index := range eip8297.ChunkifyCode(make([]byte, 31)) {
+			require.NotContains(t, leaves, string(eip8297.TreeKeyCodeChunk(zeroCodeHash, index)), "zero code chunks must be absent")
+		}
+	})
+	t.Run("delegation without code leaves", func(t *testing.T) {
+		_, _, _, _, leaves, _ := convertedPBTAcceptanceRows(t, code)
+		delegation := append(append([]byte(nil), eip8297.DelegationMarker[:]...), bytes.Repeat([]byte{7}, 20)...)
+		delegationHash := crypto.Keccak256Hash(delegation)
+		for index := range eip8297.ChunkifyCode(delegation) {
+			require.NotContains(t, leaves, string(eip8297.TreeKeyCodeChunk(delegationHash, index)), "delegation must not add code chunks")
+		}
+	})
+	t.Run("root and record parity", func(t *testing.T) {
+		tinyRows, _, _, _, _, _ := convertedPBTAcceptanceRows(t, code)
+		defaultRows, _, _, _, _, _ := convertedPBTAcceptanceRowsWithLimits(t, code, nil)
+		require.Equal(t, defaultRows, tinyRows, "multi-batch rows must match the default writer")
+	})
 	t.Run("right-edge reads", func(t *testing.T) {
-		_, _, _, _, rightEdge, leaves := convertedPBTAcceptanceRows(t, code)
-		require.NotEmpty(t, leaves[rightEdge], "the right-edge leaf must be readable")
+		_, _, _, rightEdge, leaves, _ := convertedPBTAcceptanceRows(t, code)
+		require.NotEmpty(t, leaves[rightEdge], "the right-edge row must be present in the output")
 	})
 }
 

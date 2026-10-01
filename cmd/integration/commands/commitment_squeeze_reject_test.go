@@ -19,25 +19,32 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/logging"
 )
 
 func withRebuildFlags(t *testing.T, set func()) {
 	t.Helper()
 	previous := struct {
 		squeeze, clear, resume, noHistory, reset bool
-		datadir                                  string
-	}{squeeze, clearCommitment, resume, noHistory, reset, datadirCli}
+		datadir, output                          string
+	}{squeeze, clearCommitment, resume, noHistory, reset, datadirCli, rebuildOutputDatadir}
 	t.Cleanup(func() {
-		squeeze, clearCommitment, resume, noHistory, reset, datadirCli = previous.squeeze, previous.clear, previous.resume, previous.noHistory, previous.reset, previous.datadir
+		squeeze, clearCommitment, resume, noHistory, reset, datadirCli, rebuildOutputDatadir = previous.squeeze, previous.clear, previous.resume, previous.noHistory, previous.reset, previous.datadir, previous.output
 	})
 	squeeze, clearCommitment, resume, noHistory, reset = false, false, false, false, false
+	rebuildOutputDatadir = ""
 	datadirCli = t.TempDir()
 	if set != nil {
 		set()
@@ -54,12 +61,29 @@ func TestCommitmentRebuildRefusesHexBinSourceBeforeAnyWork(t *testing.T) {
 	require.Equal(t, before, snapshotTree(t, src.Snap))
 }
 
-func TestCommitmentRebuildRefusesHexBinSourceInBothModes(t *testing.T) {
+func TestCommitmentRebuildRunRefusesHexBinSource(t *testing.T) {
 	src := hexBinSourceDatadirFixture(t)
-	for _, hasOutput := range []bool{false, true} {
-		t.Run(fmt.Sprintf("output=%t", hasOutput), func(t *testing.T) {
-			err := refuseRebuildFromSource(hexTarget(t), src, hasOutput)
-			require.ErrorContains(t, err, "convert-pbt")
+	for _, output := range []bool{false, true} {
+		t.Run(fmt.Sprintf("output=%t", output), func(t *testing.T) {
+			withRebuildFlags(t, func() {
+				datadirCli = src.DataDir
+				if output {
+					noHistory = true
+					rebuildOutputDatadir = filepath.Join(t.TempDir(), "output")
+				}
+			})
+			before := snapshotTree(t, src.DataDir)
+			outputPath := rebuildOutputDatadir
+			cmd := &cobra.Command{Use: "rebuild", Run: cmdCommitmentRebuild.Run}
+			utils.CobraFlags(cmd, debug.Flags, utils.MetricFlags, logging.Flags)
+			cmd.Flags().AddFlagSet(cmd.PersistentFlags())
+			cmd.SetContext(t.Context())
+			cmdCommitmentRebuild.Run(cmd, nil)
+			require.Equal(t, before, snapshotTree(t, src.DataDir))
+			if output {
+				_, err := os.Stat(outputPath)
+				require.ErrorIs(t, err, os.ErrNotExist)
+			}
 		})
 	}
 }
