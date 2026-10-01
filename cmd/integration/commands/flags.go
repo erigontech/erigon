@@ -46,6 +46,7 @@ var (
 	batchSizeStr                 string
 	domain                       string
 	reset, squeeze, yes          bool
+	skipFilesDBGapCheck          bool
 	bucket                       string
 	datadirCli, toChaindata      string
 	migration                    string

@@ -1179,7 +1179,7 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 		return nil, err
 	}
 	aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
-	if reset {
+	if reset || skipFilesDBGapCheck {
 		aggOpts = aggOpts.SkipFilesDBGapCheck()
 	}
 	agg := aggOpts.MustOpen(ctx)

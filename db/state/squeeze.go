@@ -123,7 +123,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	dirs := at.Dirs()
 
 	commitmentUseReferencedBranches := at.a.referencesInCommitmentBranches()
-	if !commitmentUseReferencedBranches {
+	if !commitmentUseReferencedBranches || at.a.d[kv.CommitmentDomain].CommitmentV3Records {
 		return nil
 	}
 
@@ -760,17 +760,9 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 				domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewRebuildStateReader(rwTx, domains, toTxNum+1))
 				curBlock = blockNum
 			}
-			var domain kv.Domain
-			switch len(rawKey) {
-			case 20:
-				domain = kv.AccountsDomain
-			case 52:
-				domain = kv.StorageDomain
-			default:
-				return fmt.Errorf("[rebuild_commitment_history] block %d: unexpected rawKey length %d (hex %s)",
-					blockNum, len(rawKey), hex.EncodeToString(rawKey))
+			if err := domains.GetCommitmentCtx().TouchKeyFromState(rwTx, rawKey); err != nil {
+				return fmt.Errorf("[rebuild_commitment_history] block %d: %w", blockNum, err)
 			}
-			domains.GetCommitmentCtx().TouchKey(domain, string(rawKey), nil)
 			totalKeysProcessed++
 			return nil
 		}); err != nil {
@@ -1173,8 +1165,12 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	sf := time.Now()
 	var processed uint64
 	for ok, key := next(); ; ok, key = next() {
-		sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
-		processed++
+		if len(key) != 0 {
+			if err := sd.GetCommitmentCtx().TouchKeyFromState(tx, key); err != nil {
+				return nil, err
+			}
+			processed++
+		}
 		if !ok {
 			break
 		}

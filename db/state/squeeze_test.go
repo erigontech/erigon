@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -338,6 +339,12 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) { testRebuildCommitmentBasedOnFiles(t, v3) })
+	}
+}
+
+func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{
 		stepSize:                         10,
 		disableCommitmentBranchTransform: false,
@@ -366,6 +373,12 @@ func TestAggregator_RebuildCommitmentBasedOnFiles(t *testing.T) {
 		//db.Close()
 	}
 
+	if v3 {
+		schema, enabled := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+		t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = schema, enabled })
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		statecfg.ExperimentalCommitmentV3 = true
+	}
 	agg = testAgg(t, agg.Dirs(), agg.StepSize(), log.New())
 	db, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)

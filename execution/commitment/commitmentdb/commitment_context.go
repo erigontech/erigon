@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -332,6 +333,31 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	default:
 		//panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
+}
+
+func (sdc *SharedDomainsCommitmentContext) TouchKeyFromState(tx kv.TemporalTx, plainKey []byte) error {
+	d := kv.AccountsDomain
+	switch len(plainKey) {
+	case length.Addr:
+	case length.Addr + length.Hash:
+		d = kv.StorageDomain
+	default:
+		return fmt.Errorf("touch key from state: unexpected key length %d (%x)", len(plainKey), plainKey)
+	}
+	if sdc.updates.Mode() != commitment.ModeCollect {
+		sdc.TouchKey(d, string(plainKey), nil)
+		return nil
+	}
+	reader := sdc.stateReader
+	if reader == nil {
+		reader = NewLatestStateReader(tx, sdc.sharedDomains, LatestStateReaderOptions{})
+	}
+	val, _, err := reader.Read(d, plainKey, sdc.sharedDomains.StepSize())
+	if err != nil {
+		return err
+	}
+	sdc.TouchKey(d, string(plainKey), val)
+	return nil
 }
 
 // TouchHashedKey touches a hashed key which can be anywhere from 1 to 128 nibbles
