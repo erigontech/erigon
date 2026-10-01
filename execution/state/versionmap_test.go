@@ -1930,7 +1930,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 		}
 		return vm
 	}
-	newIBS := func(addr accounts.Address, vm *VersionMap) *IntraBlockState {
+	newIBS := func(vm *VersionMap) *IntraBlockState {
 		ibs := NewWithVersionMap(&emptyReader{}, vm)
 		t.Cleanup(func() { ibs.Release(false) })
 		ibs.SetTxContext(0, 5)
@@ -1945,7 +1945,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 	t.Run("code read is witnessed and a redeploy flush invalidates it", func(t *testing.T) {
 		addr := getAddress(220)
 		vm := newVM(addr, true)
-		ibs := newIBS(addr, vm)
+		ibs := newIBS(vm)
 		got, err := ibs.GetCode(addr)
 		require.NoError(t, err)
 		require.Empty(t, got)
@@ -1958,7 +1958,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 	t.Run("nonce read serves the wipe and validates", func(t *testing.T) {
 		addr := getAddress(221)
 		vm := newVM(addr, true)
-		ibs := newIBS(addr, vm)
+		ibs := newIBS(vm)
 		nonce, err := ibs.GetNonce(addr)
 		require.NoError(t, err)
 		require.Equal(t, uint64(0), nonce)
@@ -1967,7 +1967,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 	t.Run("code size read serves the wipe and validates", func(t *testing.T) {
 		addr := getAddress(222)
 		vm := newVM(addr, true)
-		ibs := newIBS(addr, vm)
+		ibs := newIBS(vm)
 		size, err := ibs.GetCodeSize(addr)
 		require.NoError(t, err)
 		require.Equal(t, 0, size)
@@ -1976,7 +1976,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 	t.Run("code hash read serves the wipe and validates", func(t *testing.T) {
 		addr := getAddress(223)
 		vm := newVM(addr, true)
-		ibs := newIBS(addr, vm)
+		ibs := newIBS(vm)
 		ch, err := ibs.GetCodeHash(addr)
 		require.NoError(t, err)
 		require.True(t, ch.IsEmpty() || ch.IsZero())
@@ -1986,7 +1986,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 		addr := getAddress(224)
 		key := accounts.InternKey(common.BigToHash(big.NewInt(1)))
 		vm := newVM(addr, true)
-		ibs := newIBS(addr, vm)
+		ibs := newIBS(vm)
 		v, err := ibs.GetState(addr, key)
 		require.NoError(t, err)
 		require.True(t, v.IsZero())

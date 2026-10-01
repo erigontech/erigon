@@ -601,12 +601,11 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	s := stage(sync, tx, stages.Senders)
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	pm, err := prune.Get(tx)
-	if err != nil {
+	if _, err := prune.Get(tx); err != nil {
 		return err
 	}
 
-	cfg := stagedsync.StageSendersCfg(chainConfig, false /* badBlockHalt */, tmpdir, pm, br, exec.NewBlockReadAheader())
+	cfg := stagedsync.StageSendersCfg(chainConfig, false /* badBlockHalt */, tmpdir, br, exec.NewBlockReadAheader())
 	switch {
 	case unwind > 0:
 		if unwind > s.BlockNumber {

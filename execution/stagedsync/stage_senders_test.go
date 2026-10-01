@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -145,7 +144,7 @@ func TestSenders(t *testing.T) {
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
-	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, "", prune.Mode{}, br, exec.NewBlockReadAheader())
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, false, "", br, exec.NewBlockReadAheader())
 	err = stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 3, m.Ctx, log.New())
 	require.NoError(err)
 
