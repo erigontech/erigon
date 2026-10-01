@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -148,7 +147,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	txns := block.Transactions()
 
 	var gasUsed protocol.GasUsed
-	inner := jsonstream.NewLazyFieldStream(stream, "result", true)
 	for txnIndex, txn := range txns {
 		txnHash := txn.Hash()
 
@@ -162,34 +160,26 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		}
 		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
 
-		inner.ResetField()
-
-		{
+		// A transaction's error is answered inside its own object; the block trace goes on.
+		_ = rpc.WriteFieldOrError(stream, "result", func(s *jsonstream.StackStream) error {
 			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
 			if asMessageErr != nil {
-				err = fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
-			} else {
-				txCtx := evmtypes.TxContext{
-					TxHash:     txnHash,
-					Origin:     msg.From(),
-					GasPrice:   *msg.GasPrice(),
-					BlobHashes: msg.BlobHashes(),
-				}
-
-				var txnGasUsage mdgas.TxnGasUsage
-				txnGasUsage, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, inner, api.evmCallTimeout, precompiles)
-				gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
-				gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
+				return fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
 			}
-		}
-		if err == nil {
-			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
-		}
-
-		if err != nil {
-			inner.CloseIfOpen()
-			rpc.HandleError(err, stream)
-		}
+			txCtx := evmtypes.TxContext{
+				TxHash:     txnHash,
+				Origin:     msg.From(),
+				GasPrice:   *msg.GasPrice(),
+				BlobHashes: msg.BlobHashes(),
+			}
+			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, s, api.evmCallTimeout, precompiles)
+			gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
+			gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
+			if traceErr != nil {
+				return traceErr
+			}
+			return ibs.FinalizeTx(rules, state.NewNoopWriter())
+		})
 
 		stream.WriteObjectEnd()
 

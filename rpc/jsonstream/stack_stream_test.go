@@ -1016,75 +1016,6 @@ func TestStackStreamResetClearsError(t *testing.T) {
 	require.Equal(t, `"ok"`, out.String())
 }
 
-// TestLazyFieldStreamWritesFieldFirst pins the wrapper's one invariant: whatever
-// value a caller writes first, the field name lands before it and the object
-// still parses. A method that slips through unensured puts the value's bytes at
-// the enclosing object's level.
-func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
-	for name, first := range map[string]func(s Stream){
-		"WriteInt":         func(s Stream) { s.Int(1) },
-		"WriteString":      func(s Stream) { s.WriteString("a") },
-		"WriteNil":         func(s Stream) { s.WriteNil() },
-		"WriteRaw":         func(s Stream) { s.WriteRaw("1") },
-		"WriteRawBytes":    func(s Stream) { s.WriteRawBytes([]byte("1")) },
-		"WriteArrayStart":  func(s Stream) { s.WriteArrayStart() },
-		"WriteObjectStart": func(s Stream) { s.WriteObjectStart() },
-		"WriteEmptyArray":  func(s Stream) { s.WriteEmptyArray() },
-	} {
-		t.Run(name, func(t *testing.T) {
-			inner := newStackStream(nil, 64)
-			inner.WriteObjectStart()
-			lazy := NewLazyFieldStream(inner, "result", false)
-
-			first(lazy)
-
-			require.True(t, lazy.Written(), "the field was never opened")
-			require.True(t, strings.HasPrefix(string(inner.Buffer()), `{"result":`),
-				"buffer starts with %q", string(inner.Buffer()))
-			require.NoError(t, inner.ClosePending(0))
-			require.NoError(t, json.Unmarshal(inner.Buffer(), new(any)), "produced %q", string(inner.Buffer()))
-		})
-	}
-}
-
-// A field name carries no value, so the wrapper leaves it alone: opening the field
-// for one emits `"result":` with nothing able to follow it.
-func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
-	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
-	dbg.AssertEnabled = false
-	for name, write := range map[string]func(s Stream){
-		"Field": func(s Stream) { s.Field("a") },
-	} {
-		t.Run(name, func(t *testing.T) {
-			inner := newStackStream(nil, 64)
-			inner.WriteObjectStart()
-			lazy := NewLazyFieldStream(inner, "result", false)
-
-			write(lazy)
-
-			require.False(t, lazy.Written(), "the field was opened for a write with no value")
-			require.NotContains(t, string(inner.Buffer()), `"result":`)
-		})
-	}
-}
-
-// Nested wrappers must hand the chained value to the stream that took the field name, not to a
-// wrapper still holding a pending field of its own.
-func TestLazyFieldStreamNestedChainsValueOntoExplicitField(t *testing.T) {
-	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
-	dbg.AssertEnabled = false
-	inner := newStackStream(nil, 64)
-	inner.WriteObjectStart()
-	outer := NewLazyFieldStream(inner, "outer", false)
-	nested := NewLazyFieldStream(outer, "inner", false)
-
-	nested.Field("error").WriteString("boom")
-
-	require.False(t, nested.Written(), "a chained value must not open the nested pending field")
-	require.False(t, outer.Written(), "a chained value must not open the outer pending field")
-	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
-}
-
 // WriteQuotedText writes its text unscanned, so a byte JSON would escape has to be caught
 // where it is produced rather than reaching a client as malformed JSON.
 func TestWriteQuotedTextRejectsEscapableText(t *testing.T) {
@@ -1101,20 +1032,6 @@ func TestWriteQuotedTextRejectsEscapableText(t *testing.T) {
 type appenderFunc string
 
 func (a appenderFunc) AppendText(dst []byte) ([]byte, error) { return append(dst, a...), nil }
-
-// Open must reach the stream that owns the buffer, however many wrappers sit above it.
-func TestLazyFieldStreamNestedOpenReturnsTheOwner(t *testing.T) {
-	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
-	dbg.AssertEnabled = false
-	inner := newStackStream(nil, 64)
-	inner.WriteObjectStart()
-	outer := NewLazyFieldStream(inner, "outer", false)
-	nested := NewLazyFieldStream(outer, "inner", false)
-
-	require.Same(t, inner, nested.Open())
-	nested.Open().WriteString("v")
-	require.Equal(t, `{"inner":"v"`, string(inner.Buffer()))
-}
 
 // Put clears the writer as well as the bytes. A pooled stream that kept one
 // would pin the connection it came from until the next Get.
@@ -1382,28 +1299,6 @@ func TestClosePendingToRootClearsSeparator(t *testing.T) {
 	require.Equal(t, `[1]2`, string(s.Buffer()))
 }
 
-// A field name or separator written before the lazy field opened would put its value in the
-// enclosing object, silently dropping the field. Asserts catch a marshaller that starts with
-// Stream.Field instead of a value write.
-func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
-	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
-	dbg.AssertEnabled = true
-	for name, write := range map[string]func(s Stream){
-		"Field": func(s Stream) { s.Field("a") },
-	} {
-		t.Run(name, func(t *testing.T) {
-			inner := newStackStream(nil, 64)
-			inner.WriteObjectStart()
-			lazy := NewLazyFieldStream(inner, "result", false)
-
-			require.Panics(t, func() { write(lazy) })
-
-			lazy.WriteObjectStart()
-			require.NotPanics(t, func() { write(lazy) })
-		})
-	}
-}
-
 // A nil slice is the caller's to write as null: WriteHexBytes always writes an array.
 func TestWriteHexBytes(t *testing.T) {
 	for name, tc := range map[string]struct {
@@ -1421,6 +1316,39 @@ func TestWriteHexBytes(t *testing.T) {
 			WriteHexBytes(s, tc.items)
 			require.NoError(t, s.Err())
 			require.Equal(t, tc.want, string(s.Buffer()))
+		})
+	}
+}
+
+// RewindField takes back a field name only while no value has followed it and the name is still
+// in the buffer; anything else must stay, so the caller closes it instead.
+func TestRewindField(t *testing.T) {
+	for name, tc := range map[string]struct {
+		after  func(*StackStream)
+		rewind bool
+		want   string
+	}{
+		"nothing written":   {func(*StackStream) {}, true, `{"a":1,"b":2}`},
+		"scalar written":    {func(s *StackStream) { s.Int(5) }, false, `{"a":1,"x":5,"b":2}`},
+		"container opened":  {func(s *StackStream) { s.WriteArrayStart() }, false, `{"a":1,"x":[],"b":2}`},
+		"name flushed away": {func(s *StackStream) { _ = s.Flush() }, false, `{"a":1,"x":null,"b":2}`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			s := newStackStream(&out, InitialBufferSize)
+			s.WriteObjectStart()
+			s.Field("a").Int(1)
+			mark, depth := len(s.Buffer()), s.Depth()
+			s.Field("x")
+			tc.after(s)
+			require.Equal(t, tc.rewind, s.RewindField(mark, depth))
+			if !tc.rewind {
+				require.NoError(t, s.ClosePending(uint(depth)))
+			}
+			s.Field("b").Int(2)
+			s.WriteObjectEnd()
+			require.NoError(t, s.Flush())
+			require.Equal(t, tc.want, out.String())
 		})
 	}
 }

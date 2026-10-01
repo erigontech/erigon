@@ -319,14 +319,18 @@ func (s *StackStream) Field(fieldName string) *StackStream {
 	return s
 }
 
-// rewindField drops a field name whose value never arrived, with the separator written before
-// it. Only bytes still in the buffer can go back, so the caller checks that nothing was written
-// after the field name.
-func (s *StackStream) rewindField(buf, depth int) {
+// RewindField drops the field name written at buffer offset mark and stack depth, with the
+// separator before it, and reports whether it did. It does so only while no value has followed
+// the name and the name is still in the buffer, not flushed.
+func (s *StackStream) RewindField(mark, depth int) bool {
 	b := s.stream.Buffer()
-	s.separatorPending = b[buf] == ','
-	s.stream.SetBuffer(b[:buf])
+	if len(s.stack) != depth+1 || s.stack[depth] != ItemField || len(b) <= mark {
+		return false
+	}
+	s.separatorPending = b[mark] == ','
+	s.stream.SetBuffer(b[:mark])
 	s.stack = s.stack[:depth]
+	return true
 }
 
 // Flush flushes the underlying stream

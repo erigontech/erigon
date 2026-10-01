@@ -247,9 +247,9 @@ func TestCallTracerFastJSONMatchesGetResult(t *testing.T) {
 
 	tracer.Stop(errors.New("stopped"))
 	var buf bytes.Buffer
-	result := jsonstream.NewLazyFieldStream(jsonstream.New(&buf), "result", false)
-	require.EqualError(t, tracer.MarshalFastJSONTo(result), "stopped")
-	require.False(t, result.Written(), "a stopped tracer leaves the result field unwritten")
+	s := jsonstream.New(&buf)
+	require.EqualError(t, tracer.MarshalFastJSONTo(s), "stopped")
+	require.Empty(t, s.Buffer(), "a stopped tracer writes nothing")
 }
 
 func TestCallTracerFastJSONWritesNullForExcludedPrecompileRoot(t *testing.T) {
