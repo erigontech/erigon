@@ -502,11 +502,16 @@ func (api *BaseAPI) checkPruneTransactionHistoryAtIndex(ctx context.Context, tx 
 		}
 		// The block-level replay floor may reject an indexed read whose pre-state
 		// survives. Check its exact txNum only when that floor would reject it.
-		minTxNum, err := api._txNumReader.Min(ctx, tx, block)
+		c, err := tx.Cursor(kv.MaxTxNum)
 		if err != nil {
 			return 0, err
 		}
-		maxTxNum, err := api._txNumReader.Max(ctx, tx, block)
+		defer c.Close()
+		minTxNum, err := api._txNumReader.MinWithCursor(ctx, tx, c, block)
+		if err != nil {
+			return 0, err
+		}
+		maxTxNum, err := api._txNumReader.MaxWithCursor(ctx, tx, c, block)
 		if err != nil {
 			return 0, err
 		}
@@ -1025,25 +1030,23 @@ func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, b
 	if err != nil {
 		return err
 	}
-	if !persisted || !receipts.PersistedReceiptsServed() {
-		return api.checkPruneTransactionHistoryAtIndex(ctx, tx, block, txIndex)
-	}
-	p, err := api.pruneMode(tx)
-	if err != nil || p == nil {
-		return err
-	}
-	switch amount := p.ReceiptsAmount(); {
-	case amount == prune.KeepAllReceiptsPruneMode:
-		return nil
-	case !amount.Enabled():
-		return api.checkPruneTransactionHistoryAtIndex(ctx, tx, block, txIndex)
-	default:
-		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available", nil)
-		if err == nil || !errors.Is(err, state.ErrPruned) {
+	if persisted && receipts.PersistedReceiptsServed() {
+		p, err := api.pruneMode(tx)
+		if err != nil || p == nil {
 			return err
 		}
-		return api.checkPruneTransactionHistoryAtIndex(ctx, tx, block, txIndex)
+		amount := p.ReceiptsAmount()
+		if amount == prune.KeepAllReceiptsPruneMode {
+			return nil
+		}
+		if amount.Enabled() {
+			err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available", nil)
+			if !errors.Is(err, state.ErrPruned) {
+				return err
+			}
+		}
 	}
+	return api.checkPruneTransactionHistoryAtIndex(ctx, tx, block, txIndex)
 }
 
 // checkBlockReceiptsAvailable gates endpoints serving the receipts of one block.
