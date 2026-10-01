@@ -168,10 +168,14 @@ func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {
 }
 
 func BALCommitmentWarmupReaders() int {
-	if !ReadAhead {
-		return 0
+	readers := 0
+	if ReadAhead {
+		readers += max(TrieBALWarmupers, 0)
 	}
-	return max(TrieBALWarmupers, 0)
+	if CommitmentPrefetch {
+		readers += max(TrieBALWarmupers, 0)
+	}
+	return readers
 }
 
 func ReadAheadWorkerReaders() int {
