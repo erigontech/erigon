@@ -51,8 +51,19 @@ const (
 
 	// defaultPeerPoolReservationTTL bounds how long an admission reservation
 	// counts toward the cap before it is assumed to have either registered in the
-	// live host (where it then counts from there instead) or failed outright.
-	defaultPeerPoolReservationTTL = 5 * time.Second
+	// live host (where it then counts from there instead) or failed outright. It
+	// must outlive the slowest legitimate handshake go-libp2p itself still permits:
+	// the shared upgrader's own defaults allow up to 15s to accept a connection
+	// plus 60s to negotiate it. A shorter TTL would let a reservation expire while
+	// the connection is still pending (not yet live, no longer reserved), letting
+	// a source accumulate more admissions than the cap once the slow handshakes
+	// eventually land.
+	defaultPeerPoolReservationTTL = 90 * time.Second
+
+	// defaultPeerPoolMaxReservations bounds the limiter's own memory: a flood
+	// spread across many distinct keys, each individually within its own cap,
+	// must not be able to grow the reservation pool without bound.
+	defaultPeerPoolMaxReservations = 8192
 )
 
 // liveConnsSource gives the occupancy count a live view of currently connected
@@ -78,17 +89,34 @@ type liveConnsSource interface {
 // host's live connection list, so counting only live connections is a TOCTOU race: a
 // burst of concurrent accepts from the same source would all observe the same
 // pre-admission snapshot and could all pass. allow tracks its own short-lived
-// admission reservations (released by TTL rather than an explicit close signal, since
-// a connection rejected by a later gater hook never fires a close notification) and
-// counts max(live, reserved) per key so a reservation stops contributing once the
-// live host confirms the same connection instead of stacking on top of it.
+// admission reservations, counted *additively* alongside live connections (live +
+// reserved, not max(live, reserved): the max form undercounts whenever a reservation
+// represents a genuinely new connection rather than one already reflected live -
+// e.g. two pre-existing live connections plus two brand new concurrent reservations
+// is 4 pending connections, not max(2,2)=2).
+//
+// Reservations are released two ways: by TTL (since a connection rejected by a later
+// gater hook never fires a close notification, so a notifee-based release would leak),
+// and by reconciliation - once the live host confirms at least one more connection
+// from a given IP than last observed, that many of the IP's oldest reservations are
+// retired immediately rather than waiting out the rest of their TTL. Reconciling at
+// the IP tier is sufficient for the coarser tiers too: a reservation tagged with a
+// subscriber-block or AS-block key is also tagged with the IP key, so retiring it once
+// its own IP's live count catches up removes its contribution from every tier it was
+// counted in.
 type peerPoolLimiter struct {
 	host atomic.Pointer[liveConnsSource]
 
-	mu             sync.Mutex
-	reservations   []peerPoolReservation
-	reservationTTL time.Duration
-	now            func() time.Time
+	mu              sync.Mutex
+	reservations    []peerPoolReservation
+	reservationTTL  time.Duration
+	maxReservations int
+	now             func() time.Time
+	// ipLiveBaseline is the live-connection count per IP as of the last
+	// reconciliation; only entries for IPs with at least one live or reserved
+	// connection are kept, so it stays bounded by currently-active sources rather
+	// than every IP ever seen.
+	ipLiveBaseline map[string]int
 
 	maxPerIP              int
 	maxPerSubscriberBlock int
@@ -115,7 +143,9 @@ func newPeerPoolLimiter(maxPeerCount uint64) *peerPoolLimiter {
 	maxPerASBlock := max(maxPerSubscriberBlock, int(float64(maxPeerCount)*peerPoolLimiterASBlockPoolFraction))
 	return &peerPoolLimiter{
 		reservationTTL:        defaultPeerPoolReservationTTL,
+		maxReservations:       defaultPeerPoolMaxReservations,
 		now:                   time.Now,
+		ipLiveBaseline:        make(map[string]int),
 		maxPerIP:              max(peerPoolLimiterMinPerIP, int(maxPeerCount)/peerPoolLimiterPerIPDivisor),
 		maxPerSubscriberBlock: maxPerSubscriberBlock,
 		maxPerASBlock:         maxPerASBlock,
@@ -152,6 +182,7 @@ func (l *peerPoolLimiter) allow(ip net.IP) bool {
 
 	now := l.clock()
 	l.pruneExpiredLocked(now)
+	l.reconcileLocked(ipKey, liveIP)
 
 	var reservedIP, reservedSubscriberBlock, reservedASBlock int
 	for _, r := range l.reservations {
@@ -166,14 +197,23 @@ func (l *peerPoolLimiter) allow(ip net.IP) bool {
 		}
 	}
 
-	// max, not sum: once a reservation's connection is confirmed live, the live
-	// count already reflects it, so adding the reservation on top would
-	// double-count that single connection until the reservation expires.
-	sameIP := max(liveIP, reservedIP)
-	sameSubscriberBlock := max(liveSubscriberBlock, reservedSubscriberBlock)
-	sameASBlock := max(liveASBlock, reservedASBlock)
+	// Additive, not max: a reservation represents a connection attempt in flight
+	// on top of whatever is already live, not an alternate accounting of the same
+	// connections - reconcileLocked above is what retires a reservation once the
+	// live host actually confirms it, so by this point every remaining reservation
+	// is still genuinely pending.
+	sameIP := liveIP + reservedIP
+	sameSubscriberBlock := liveSubscriberBlock + reservedSubscriberBlock
+	sameASBlock := liveASBlock + reservedASBlock
 
 	if sameIP >= l.maxPerIP || sameSubscriberBlock >= l.maxPerSubscriberBlock || sameASBlock >= l.maxPerASBlock {
+		return false
+	}
+
+	if len(l.reservations) >= l.maxReservationsOrDefault() {
+		// Global memory bound reached. Reject rather than evict: evicting an
+		// unrelated key's reservation here would silently weaken that source's
+		// cap to make room for this one.
 		return false
 	}
 
@@ -191,6 +231,40 @@ func (l *peerPoolLimiter) ttl() time.Duration {
 		return l.reservationTTL
 	}
 	return defaultPeerPoolReservationTTL
+}
+
+func (l *peerPoolLimiter) maxReservationsOrDefault() int {
+	if l.maxReservations > 0 {
+		return l.maxReservations
+	}
+	return defaultPeerPoolMaxReservations
+}
+
+// reconcileLocked retires ipKey's oldest reservations once the live host confirms at
+// least as many of its connections as were pending, rather than waiting out their full
+// TTL. It must be called with l.mu held, after pruneExpiredLocked.
+func (l *peerPoolLimiter) reconcileLocked(ipKey string, liveIP int) {
+	if l.ipLiveBaseline == nil {
+		l.ipLiveBaseline = make(map[string]int)
+	}
+	delta := liveIP - l.ipLiveBaseline[ipKey]
+	if delta <= 0 {
+		if liveIP == 0 {
+			delete(l.ipLiveBaseline, ipKey)
+		}
+		return
+	}
+	retired := 0
+	remaining := l.reservations[:0]
+	for _, r := range l.reservations {
+		if retired < delta && r.ipKey == ipKey {
+			retired++
+			continue
+		}
+		remaining = append(remaining, r)
+	}
+	l.reservations = remaining
+	l.ipLiveBaseline[ipKey] = liveIP
 }
 
 func (l *peerPoolLimiter) liveCounts(src liveConnsSource, ip net.IP, subscriberKey, asKey string) (sameIP, sameSubscriberBlock, sameASBlock int) {

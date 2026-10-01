@@ -241,6 +241,56 @@ func TestPeerPoolLimiterReservationDoesNotDoubleCountOnceLive(t *testing.T) {
 	require.False(t, l.allow(net.ParseIP(ip)), "two live connections already occupy the cap of 2")
 }
 
+// TestDefaultPeerPoolReservationTTLCoversLibp2pHandshakeTimeouts guards against
+// review finding "Short reservation expiry allows slow-handshake admission bypass":
+// go-libp2p's shared upgrader allows up to 15s to accept a connection plus 60s to
+// negotiate it, so a reservation shorter than that could expire - and stop counting
+// toward the cap - while a legitimate, still-pending handshake is neither live nor
+// reserved, letting a source accumulate more admissions than the configured cap once
+// enough slow handshakes land.
+func TestDefaultPeerPoolReservationTTLCoversLibp2pHandshakeTimeouts(t *testing.T) {
+	require.GreaterOrEqual(t, defaultPeerPoolReservationTTL, 75*time.Second)
+}
+
+// TestPeerPoolLimiterReservationCountingNeverExceedsCapWithPreExistingLive reproduces
+// review finding "Reservation counting can exceed the configured connection cap":
+// with a cap of 3 and two already-live connections, max(live, reserved) let two
+// concurrent new reservations both pass (max(2,2)==2), which would put the source at
+// 4 connections once both materialized.
+func TestPeerPoolLimiterReservationCountingNeverExceedsCapWithPreExistingLive(t *testing.T) {
+	l := &peerPoolLimiter{
+		maxPerIP: 3, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+		reservationTTL: time.Minute, now: time.Now,
+	}
+	ip := "203.0.113.5"
+	fixture := &connsFixtureHost{conns: []string{ip, ip}} // 2 pre-existing live connections
+	l.setHost(fixture)
+
+	require.True(t, l.allow(net.ParseIP(ip)), "1st new admission: 2 live + 0 reserved is under the cap of 3")
+	require.False(t, l.allow(net.ParseIP(ip)), "2nd new admission must be rejected: 2 live + 1 pending reservation already equals the cap")
+}
+
+// TestPeerPoolLimiterBoundsTotalReservations reproduces review finding "Unbounded
+// reservations enable attacker-controlled memory growth": many distinct sources, each
+// individually within its own per-key cap, must not be able to grow the reservation
+// pool without bound.
+func TestPeerPoolLimiterBoundsTotalReservations(t *testing.T) {
+	l := &peerPoolLimiter{
+		maxPerIP: 1000, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+		reservationTTL: time.Minute, now: time.Now, maxReservations: 3,
+	}
+	l.setHost(&connsFixtureHost{})
+
+	for i, ipStr := range []string{"203.0.113.1", "203.0.113.2", "203.0.113.3"} {
+		require.True(t, l.allow(net.ParseIP(ipStr)), "attempt %d should fit within the reservation bound", i)
+	}
+	require.False(t, l.allow(net.ParseIP("203.0.113.4")),
+		"a 4th distinct source must be rejected once the global reservation bound is reached, not silently grow past it")
+	require.LessOrEqual(t, len(l.reservations), 3)
+}
+
 // connsFixtureHost is a minimal liveConnsSource stand-in: real libp2p hosts are
 // exercised in gater_test.go's integration tests, but the occupancy math itself
 // (per-IP / per-block counting and RFC 6177 aggregation) doesn't need a live
