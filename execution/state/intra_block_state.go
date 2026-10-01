@@ -27,6 +27,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -213,6 +214,7 @@ type IntraBlockState struct {
 	// SelfDestruct cells. Left false for genesis/RPC/serial, which still commit
 	// via FinalizeTx→so.data.
 	noMaterialize bool
+	discardLogs   bool
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -393,6 +395,33 @@ func (ibs *IntraBlockState) Close() {
 	releaseResources(stateObjects, journal)
 }
 
+var ibsPool sync.Pool
+
+// GetPooled returns an IntraBlockState bound to r, reusing a pooled one when there is one.
+// PutPooled returns it. A caller that keeps nothing from the state after the call — one
+// eth_call, not a block — saves the maps and journal New allocates every time.
+func GetPooled(r StateReader) *IntraBlockState {
+	v := ibsPool.Get()
+	if v == nil {
+		return New(r)
+	}
+	sdb := v.(*IntraBlockState)
+	sdb.Reset()
+	sdb.stateReader = r
+	return sdb
+}
+
+// PutPooled returns sdb for reuse. Anything the caller still holds from it — a log, a
+// state object — belongs to the next user after this.
+func PutPooled(sdb *IntraBlockState) {
+	if sdb == nil || sdb.stateObjects == nil {
+		return
+	}
+	sdb.Reset()
+	sdb.stateReader = nil
+	ibsPool.Put(sdb)
+}
+
 // The noMaterialize path never releases what it takes, so a pool draw there
 // would be a one-way drain on the materializing paths.
 func (ibs *IntraBlockState) allocStateObject() *stateObject {
@@ -423,6 +452,14 @@ func (ibs *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize in
 	return ibs.logs.alloc(ibs.journal, addr, ibs.txIndex, numTopics, dataSize)
 }
 
+// SetDiscardLogs makes LOG opcodes store nothing; only for callers that never read logs and run no tracer.
+func (ibs *IntraBlockState) SetDiscardLogs(v bool) { ibs.discardLogs = v }
+
+// DiscardsLogs reports whether logs are dropped instead of stored.
+func (ibs *IntraBlockState) DiscardsLogs() bool {
+	return ibs.discardLogs && (ibs.tracingHooks == nil || ibs.tracingHooks.OnLog == nil)
+}
+
 // NotifyLog runs the OnLog hook after a log's fields are populated.
 func (ibs *IntraBlockState) NotifyLog(lp *types.Log) {
 	if dbg.TraceLogs && (ibs.trace || dbg.TraceAccount(accounts.InternAddress(lp.Address).Handle())) {
@@ -444,6 +481,9 @@ func (ibs *IntraBlockState) NotifyLog(lp *types.Log) {
 // AddLog copies log into the next slot. TxIndex and Index are assigned by the
 // state; every other field comes from the caller.
 func (ibs *IntraBlockState) AddLog(log *types.Log) {
+	if ibs.DiscardsLogs() {
+		return
+	}
 	lp := ibs.AllocLog(log.Address, len(log.Topics), len(log.Data))
 	copy(lp.Topics, log.Topics)
 	copy(lp.Data, log.Data)

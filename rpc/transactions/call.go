@@ -19,6 +19,7 @@ package transactions
 import (
 	"context"
 	"fmt"
+	"github.com/erigontech/erigon/common/dbg"
 	"sync/atomic"
 	"time"
 
@@ -38,6 +39,11 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
+)
+
+var (
+	callIBSPool = dbg.EnvBool("RPC_CALL_IBS_POOL", false)
+	callNoLogs  = dbg.EnvBool("RPC_CALL_NO_LOGS", false)
 )
 
 func DoCall(
@@ -63,8 +69,15 @@ func DoCall(
 		}
 	*/
 
-	state := state.New(stateReader)
-	defer state.Close()
+	var ibs *state.IntraBlockState
+	if callIBSPool {
+		ibs = state.GetPooled(stateReader)
+		defer state.PutPooled(ibs)
+	} else {
+		ibs = state.New(stateReader)
+		defer ibs.Close()
+	}
+	ibs.SetDiscardLogs(callNoLogs)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -95,7 +108,7 @@ func DoCall(
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
 	vmConfig := vm.Config{NoBaseFee: true}
-	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state, chainConfig, vmConfig)
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
 	// stop() runs before cancel() (LIFO), so the callback cannot fire for a later call, and
 	// this EVM is not reused, so a callback already running needs no join.
 	var timedOut atomic.Bool
@@ -109,7 +122,7 @@ func DoCall(
 	if stateOverrides != nil {
 		rules := blockCtx.Rules(chainConfig)
 		precompiles := vm.ActivePrecompiledContracts(rules)
-		if err := stateOverrides.Override(state, precompiles, rules); err != nil {
+		if err := stateOverrides.Override(ibs, precompiles, rules); err != nil {
 			return nil, err
 		}
 		evm.SetPrecompiles(precompiles)

@@ -1498,6 +1498,12 @@ func makeLog(size int) executionFunc {
 		stack, ibs := &scope.Stack, evm.IntraBlockState()
 		mStart, mSize := stack.pop2Uint64()
 		mem := scope.Memory.GetPtr(mStart, mSize)
+		if ibs.DiscardsLogs() {
+			for range size {
+				stack.pop()
+			}
+			return pc, nil, nil
+		}
 		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
 		// This is a non-consensus field, but assigned here because
 		// execution/state doesn't know the current block number.
