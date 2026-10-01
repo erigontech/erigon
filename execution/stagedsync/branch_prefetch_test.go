@@ -46,31 +46,42 @@ func drainPrefetchQueue(p *branchPrefetcher) []prefetchItem {
 	return got
 }
 
-func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
+func TestPrefetchedBranchesServeOneRound(t *testing.T) {
 	_, tx, doms := setupStepTest(t)
 	p := &branchPrefetcher{}
 	r := &asOfStateReader{sd: doms, roTx: tx, prefetched: p}
+	read := func(key []byte) ([]byte, kv.Step) {
+		got, step, err := r.Read(kv.CommitmentDomain, key, 16)
+		require.NoError(t, err)
+		return got, step
+	}
 
-	flushed, untouched, absent := []byte{0x40, 0x12, 0x02}, []byte{0x40, 0x34, 0x02}, []byte{0x40, 0x56, 0x02}
+	flushed, untouched, late := []byte{0x40, 0x12, 0x02}, []byte{0x40, 0x34, 0x02}, []byte{0x40, 0x56, 0x02}
 	p.put(flushed, []byte("prefetched-flushed"), 3)
 	p.put(untouched, []byte("prefetched-untouched"), 3)
 	require.NoError(t, doms.DomainPut(kv.CommitmentDomain, tx, flushed, []byte("mem-flushed"), 5, nil))
+	p.freeze()
+	p.put(late, []byte("prefetched-late"), 3)
 
-	got, _, err := r.Read(kv.CommitmentDomain, flushed, 16)
-	require.NoError(t, err)
-	require.Equal(t, []byte("mem-flushed"), got)
-
-	got, step, err := r.Read(kv.CommitmentDomain, untouched, 16)
-	require.NoError(t, err)
+	got, _ := read(flushed)
+	require.Equal(t, []byte("mem-flushed"), got, "sd.mem wins over a prefetched record")
+	got, step := read(untouched)
 	require.Equal(t, []byte("prefetched-untouched"), got)
 	require.Equal(t, kv.Step(3), step)
+	got, _ = read(late)
+	require.Empty(t, got, "a record fetched after the round froze its set waits for the next round")
 
-	got, _, err = r.Read(kv.CommitmentDomain, absent, 16)
-	require.NoError(t, err)
-	require.Empty(t, got)
+	p.release()
+	got, _ = read(untouched)
+	require.Empty(t, got, "records do not outlive their round")
+}
 
-	require.Equal(t, uint64(1), p.hits.Load(), "only the untouched key is served from the map")
-	require.Equal(t, uint64(1), p.misses.Load(), "only the absent key falls through the map")
+func TestReaderClonesCarryPrefetcher(t *testing.T) {
+	_, tx, doms := setupStepTest(t)
+	p := &branchPrefetcher{}
+	r := &asOfStateReader{sd: doms, roTx: tx, prefetched: p}
+	require.Same(t, p, r.Clone(tx).(*asOfStateReader).prefetched)
+	require.Same(t, p, r.CloneForWorker(context.Background(), tx).(*asOfStateReader).prefetched)
 }
 
 func TestBranchPrefetcherCountsDroppedAndDrained(t *testing.T) {
@@ -114,7 +125,7 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 	require.ElementsMatch(t, want, drainPrefetchQueue(p), "BAL writes queue their account and slot walks; read-only accounts get nothing")
 }
 
-func TestApplyWritesQueuesFirstTouchOnly(t *testing.T) {
+func TestApplyWritesQueuesFirstWritePerBlock(t *testing.T) {
 	p := &branchPrefetcher{work: make(chan prefetchItem, 16)}
 	cs := &calcState{
 		accounts:     map[accounts.Address]*calcAccountState{},
@@ -132,13 +143,15 @@ func TestApplyWritesQueuesFirstTouchOnly(t *testing.T) {
 		})
 		return ws
 	}
+	want := []prefetchItem{accountPrefetch(payer), storagePrefetch(contract, slot.Value())}
 
 	cs.ApplyWrites(writes(1), false)
-	cs.ResetBlockFlags()
 	cs.ApplyWrites(writes(2), false)
+	require.ElementsMatch(t, want, drainPrefetchQueue(p), "a key written twice in one block is queued once")
 
-	want := []prefetchItem{accountPrefetch(payer), storagePrefetch(contract, slot.Value())}
-	require.ElementsMatch(t, want, drainPrefetchQueue(p), "each plain key is queued the first time calcState sees it, not on every write")
+	cs.ResetBlockFlags()
+	cs.ApplyWrites(writes(3), false)
+	require.ElementsMatch(t, want, drainPrefetchQueue(p), "the next block queues the key again: records last one round")
 }
 
 func TestCalculatorServesPrefetchedBranches(t *testing.T) {
@@ -172,7 +185,7 @@ func TestCalculatorServesPrefetchedBranches(t *testing.T) {
 		require.NoError(t, tx.Commit())
 	}()
 
-	root := func(prefetch bool) ([]byte, *branchPrefetcher) {
+	root := func(prefetch, poisonRoot bool) commitmentResult {
 		defer func(prev bool) { dbg.CommitmentPrefetch = prev }(dbg.CommitmentPrefetch)
 		dbg.CommitmentPrefetch = prefetch
 
@@ -190,6 +203,9 @@ func TestCalculatorServesPrefetchedBranches(t *testing.T) {
 		require.NoError(t, err)
 		p := cc.prefetch
 		require.Equal(t, prefetch, p != nil)
+		if poisonRoot {
+			p.put([]byte{0x00}, nil, 0)
+		}
 
 		const lastTxNum = 1 + 64
 		for i, addr := range addrs[:64] {
@@ -202,17 +218,15 @@ func TestCalculatorServesPrefetchedBranches(t *testing.T) {
 				writes:   nonceBalanceWrites(accounts.InternAddress(addr), 2, *uint256.NewInt(20)),
 			})
 		}
-		stored := p == nil || assert.Eventually(t, func() bool { return p.bytes.Load() > 0 }, 10*time.Second, time.Millisecond)
+		stored := p == nil || poisonRoot || assert.Eventually(t, func() bool { return p.bytes.Load() > 0 }, 10*time.Second, time.Millisecond)
 		cc.handleMessage(ctx, newTestBlockResult(2, common.Hash{0x02}, lastTxNum, false))
 		cc.Stop()
 		require.True(t, stored, "prefetch workers never stored a record")
-		res := <-out
-		require.NotEmpty(t, res.rootHash, "computeAndCheck publishes the root with the header mismatch")
-		return res.rootHash, p
+		return <-out
 	}
 
-	want, _ := root(false)
-	got, p := root(true)
-	require.Equal(t, want, got, "the prefetched records must yield the same root as direct reads")
-	require.NotZero(t, p.hits.Load(), "the trie must read committed branches through the prefetch map")
+	want := root(false, false).rootHash
+	require.NotEmpty(t, want, "computeAndCheck publishes the root with the header mismatch")
+	require.Equal(t, want, root(true, false).rootHash, "the prefetched records must yield the same root as direct reads")
+	require.NotEqual(t, want, root(true, true).rootHash, "Process must read the frozen records: an absent root record has to change the result")
 }

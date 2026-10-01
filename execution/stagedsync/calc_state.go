@@ -144,7 +144,6 @@ func (cs *calcState) ensureAccount(addr accounts.Address, writes *state.WriteSet
 		return acc
 	}
 
-	cs.prefetch.add(accountPrefetch(addr.Value()))
 	acc := &calcAccountState{
 		CodeHash: empty.CodeHash,
 	}
@@ -175,6 +174,7 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	}
 	acc.dirty = true
 	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+	cs.prefetch.add(accountPrefetch(addr.Value()))
 }
 
 // ApplyWrites folds a tx's typed write collections into the local state.
@@ -251,7 +251,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			cs.storageDirty[addr] = dirty
 		}
 		for key, vw := range inner {
-			if _, seen := slots[key]; !seen {
+			if !dirty[key] {
 				cs.prefetch.add(storagePrefetch(addr.Value(), key.Value()))
 			}
 			slots[key] = vw.Val

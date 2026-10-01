@@ -390,7 +390,7 @@ func (cc *commitmentCalculator) Stop() {
 	if p := cc.prefetch; p != nil {
 		p.close()
 		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(),
-			"hits", p.hits.Load(), "misses", p.misses.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
+			"dropped", p.dropped.Load(), "drained", p.drained.Load())
 	}
 	// balUpdates isn't closed here: the shared commitment context may still reference it post-exec.
 	if cc.roTx != nil {
@@ -809,6 +809,8 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // root is accepted. Used by BAL compute-ahead, which supplies its own
 // balState-derived updates rather than cc.state.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
+	cc.prefetch.freeze()
+	defer cc.prefetch.release()
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(updates)
 	reader.txNum = t.lastTxNum + 1
@@ -929,6 +931,8 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		return
 	}
 	cc.prefetch.drain()
+	cc.prefetch.freeze()
+	defer cc.prefetch.release()
 	cc.state.FlushToUpdates(cc.updates)
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()
@@ -1197,16 +1201,14 @@ func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {
 	if r.prefetched == nil {
 		return nil, 0, false
 	}
+	data, step, ok := r.prefetched.get(key)
+	if !ok {
+		return nil, 0, false
+	}
 	if _, maxStep, inMem := r.sd.GetLatestFromMemory(kv.CommitmentDomain, key); inMem || maxStep != kv.NoStepBound {
 		return nil, 0, false
 	}
-	data, step, ok := r.prefetched.get(key)
-	if ok {
-		r.prefetched.hits.Add(1)
-	} else {
-		r.prefetched.misses.Add(1)
-	}
-	return data, step, ok
+	return data, step, true
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {

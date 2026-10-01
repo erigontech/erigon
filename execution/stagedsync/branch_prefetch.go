@@ -19,7 +19,6 @@ package stagedsync
 import (
 	"bytes"
 	"context"
-	"hash/maphash"
 	"sync"
 	"sync/atomic"
 
@@ -34,11 +33,8 @@ const (
 	branchPrefetchWorkers  = 8
 	branchPrefetchQueue    = 1 << 16
 	branchPrefetchPerTx    = 256
-	branchPrefetchShards   = 64
 	branchPrefetchMaxBytes = 1 << 30
 )
-
-var branchPrefetchSeed = maphash.MakeSeed()
 
 type prefetchItem struct {
 	key     [length.Addr + length.Hash]byte
@@ -70,18 +66,17 @@ type prefetchedRecord struct {
 	step kv.Step
 }
 
-type prefetchedShard struct {
-	mu      sync.RWMutex
-	records map[string]prefetchedRecord
-}
-
 type branchPrefetcher struct {
-	work   chan prefetchItem
-	wg     sync.WaitGroup
-	shards [branchPrefetchShards]prefetchedShard
-	bytes  atomic.Int64
+	work chan prefetchItem
+	wg   sync.WaitGroup
 
-	hits, misses, dropped, drained atomic.Uint64
+	mu      sync.Mutex
+	records map[string]prefetchedRecord
+	bytes   atomic.Int64
+
+	frozen map[string]prefetchedRecord
+
+	dropped, drained atomic.Uint64
 }
 
 func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {
@@ -136,16 +131,32 @@ func (p *branchPrefetcher) close() {
 	p.wg.Wait()
 }
 
-func (p *branchPrefetcher) shard(key []byte) *prefetchedShard {
-	return &p.shards[maphash.Bytes(branchPrefetchSeed, key)%branchPrefetchShards]
+func (p *branchPrefetcher) freeze() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.frozen, p.records = p.records, nil
+	p.mu.Unlock()
+	p.bytes.Store(0)
+}
+
+func (p *branchPrefetcher) release() {
+	if p != nil {
+		p.frozen = nil
+	}
 }
 
 func (p *branchPrefetcher) get(key []byte) ([]byte, kv.Step, bool) {
-	s := p.shard(key)
-	s.mu.RLock()
-	r, ok := s.records[string(key)]
-	s.mu.RUnlock()
+	r, ok := p.frozen[string(key)]
 	return r.data, r.step, ok
+}
+
+func (p *branchPrefetcher) cached(key []byte) ([]byte, bool) {
+	p.mu.Lock()
+	r, ok := p.records[string(key)]
+	p.mu.Unlock()
+	return r.data, ok
 }
 
 func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
@@ -153,13 +164,12 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 		return data
 	}
 	data = bytes.Clone(data)
-	s := p.shard(key)
-	s.mu.Lock()
-	if s.records == nil {
-		s.records = make(map[string]prefetchedRecord)
+	p.mu.Lock()
+	if p.records == nil {
+		p.records = make(map[string]prefetchedRecord)
 	}
-	s.records[string(key)] = prefetchedRecord{data: data, step: step}
-	s.mu.Unlock()
+	p.records[string(key)] = prefetchedRecord{data: data, step: step}
+	p.mu.Unlock()
 	p.bytes.Add(int64(len(key) + len(data)))
 	return data
 }
@@ -172,7 +182,7 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 			continue
 		}
 		read := func(key []byte) []byte {
-			if data, _, ok := p.get(key); ok {
+			if data, ok := p.cached(key); ok {
 				return data
 			}
 			data, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
