@@ -75,28 +75,44 @@ func (f *ForkChoiceStore) onPayloadAttestationMessage(
 		return err
 	}
 
-	if !isFromBlock {
-		if err := validationContext.validateSignature(msg); err != nil {
+	if isFromBlock {
+		return f.applyValidatedPayloadAttestation(msg.ValidatorIndex, ptcIndices, data, blockRoot, false)
+	}
+	if err := validationContext.validateSignature(msg); err != nil {
+		return err
+	}
+	return f.applyWirePayloadAttestation(msg.ValidatorIndex, ptcIndices, data, blockRoot, firstValidOnly)
+}
+
+// applyWirePayloadAttestation counts a wire message only if it is for the store's current slot.
+// The slot is read under f.mu: OnTick resets the cached head under f.mu after advancing the time,
+// so a vote counted here is always ordered before the next slot's head decision.
+func (f *ForkChoiceStore) applyWirePayloadAttestation(
+	validatorIndex uint64,
+	ptcIndices []int,
+	data *cltypes.PayloadAttestationData,
+	blockRoot common.Hash,
+	firstValidOnly bool,
+) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	currentSlot := f.Slot()
+	if data.Slot > currentSlot {
+		return fmt.Errorf("%w: payload attestation slot %d is after the current slot %d", ErrIgnore, data.Slot, currentSlot)
+	}
+	if data.Slot == currentSlot {
+		return f.recordPayloadAttestationVotes(validatorIndex, ptcIndices, data, blockRoot, firstValidOnly)
+	}
+	if firstValidOnly {
+		f.ptcVoteMu.Lock()
+		err := f.claimFirstValidPayloadAttestation(validatorIndex, data.Slot)
+		f.ptcVoteMu.Unlock()
+		if err != nil {
 			return err
 		}
-		currentSlot := f.Slot()
-		if data.Slot > currentSlot {
-			return fmt.Errorf("%w: payload attestation slot %d is after the current slot %d", ErrIgnore, data.Slot, currentSlot)
-		}
-		if data.Slot < currentSlot {
-			if firstValidOnly {
-				f.ptcVoteMu.Lock()
-				err := f.claimFirstValidPayloadAttestation(msg.ValidatorIndex, data.Slot)
-				f.ptcVoteMu.Unlock()
-				if err != nil {
-					return err
-				}
-			}
-			return fmt.Errorf("%w: %w: slot %d, current slot %d", ErrIgnore, ErrPayloadAttestationNotCurrentSlot, data.Slot, currentSlot)
-		}
 	}
-
-	return f.applyValidatedPayloadAttestation(msg.ValidatorIndex, ptcIndices, data, blockRoot, firstValidOnly)
+	return fmt.Errorf("%w: %w: slot %d, current slot %d", ErrIgnore, ErrPayloadAttestationNotCurrentSlot, data.Slot, currentSlot)
 }
 
 func (f *ForkChoiceStore) applyValidatedPayloadAttestation(
@@ -156,19 +172,34 @@ func (f *ForkChoiceStore) recordPayloadAttestationVotes(
 	return nil
 }
 
+type payloadAttestationSeenKey struct {
+	slot           uint64
+	validatorIndex uint64
+}
+
 // claimFirstValidPayloadAttestation records the first valid gossip message from a validator
-// in a slot. The caller must hold ptcVoteMu so that concurrent candidates have one winner.
+// in a slot. It keeps the latest seen slot and the one before it, since messages for both can
+// be valid gossip within the clock disparity. The caller must hold ptcVoteMu so that
+// concurrent candidates have one winner.
 func (f *ForkChoiceStore) claimFirstValidPayloadAttestation(validatorIndex, slot uint64) error {
-	if f.payloadAttestationSeen != nil && slot < f.payloadAttestationSeenSlot {
-		return fmt.Errorf("%w: payload attestation validation completed after a newer slot", ErrIgnore)
+	if f.payloadAttestationSeenSlot > 0 && slot < f.payloadAttestationSeenSlot-1 {
+		return fmt.Errorf("%w: payload attestation slot %d is before the previous seen slot", ErrIgnore, slot)
 	}
-	if f.payloadAttestationSeen == nil || f.payloadAttestationSeenSlot < slot {
+	if f.payloadAttestationSeen == nil {
+		f.payloadAttestationSeen = make(map[payloadAttestationSeenKey]struct{}, 2*clparams.PtcSize)
+	}
+	if slot > f.payloadAttestationSeenSlot {
 		f.payloadAttestationSeenSlot = slot
-		f.payloadAttestationSeen = make(map[uint64]struct{}, clparams.PtcSize)
+		for key := range f.payloadAttestationSeen {
+			if key.slot+1 < slot {
+				delete(f.payloadAttestationSeen, key)
+			}
+		}
 	}
-	if _, seen := f.payloadAttestationSeen[validatorIndex]; seen {
+	key := payloadAttestationSeenKey{slot: slot, validatorIndex: validatorIndex}
+	if _, seen := f.payloadAttestationSeen[key]; seen {
 		return fmt.Errorf("%w: already processed a valid payload attestation", ErrIgnore)
 	}
-	f.payloadAttestationSeen[validatorIndex] = struct{}{}
+	f.payloadAttestationSeen[key] = struct{}{}
 	return nil
 }

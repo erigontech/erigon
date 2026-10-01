@@ -1112,6 +1112,39 @@ func TestPayloadAttestationServiceAcceptsGossipNotCountedByForkChoice(t *testing
 	require.True(t, pooled)
 }
 
+func TestPayloadAttestationServicePublishesRESTMessageNotCountedByForkChoice(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	root := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 42, root)
+	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.forkchoiceStore = notCurrentSlotPayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+	published := false
+
+	require.NoError(t, service.ProcessRESTMessage(t.Context(), msg, func() error {
+		published = true
+		return nil
+	}))
+
+	require.True(t, published)
+	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 42}))
+}
+
+func TestPayloadAttestationServiceCompletesPendingMessageNotCountedByForkChoice(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, fcu, _ := setupPayloadAttestationService(t, ctrl)
+	root := common.HexToHash("0x1234")
+	msg := newTestPayloadAttestationMessage(100, 42, root)
+	fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: 100}
+	service.forkchoiceStore = notCurrentSlotPayloadAttestationForkchoice{ForkChoiceStorage: fcu}
+	require.NoError(t, service.queuePendingAttestation(root, msg))
+
+	service.pending.processPending(t.Context())
+
+	require.Zero(t, service.pending.count.Load())
+	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 42}))
+}
+
 func TestPayloadAttestationServicePendingQueueCap(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

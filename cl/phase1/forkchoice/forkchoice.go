@@ -199,7 +199,7 @@ type ForkChoiceStore struct {
 	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	payloadAttestationSeenSlot  uint64
-	payloadAttestationSeen      map[uint64]struct{}
+	payloadAttestationSeen      map[payloadAttestationSeenKey]struct{}
 	payloadAttestationContexts  *payloadAttestationValidationContexts
 	// [New in Gloas:EIP7732] Block timeliness tracking.
 	// Pre-GLOAS: stores [block_timely, false] (only index 0 is meaningful).
