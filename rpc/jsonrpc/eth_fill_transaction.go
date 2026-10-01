@@ -140,10 +140,11 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		}
 	}
 
+	if err := ethapi.ChainIDMismatch(args.ChainID, cc.ChainID); err != nil {
+		return nil, err
+	}
 	if args.ChainID == nil {
 		args.ChainID = (*hexutil.U256)(new(uint256.Int).Set(cc.ChainID))
-	} else if have := (*uint256.Int)(args.ChainID); !have.Eq(cc.ChainID) {
-		return nil, fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, cc.ChainID)
 	}
 
 	if args.Gas == nil {
