@@ -741,7 +741,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		),
 		nil, /*notifier*/
 		&vm.Config{},
-		dirs.Tmp,
 		mock.TxPool,
 		sealCancel,
 		latestBlockBuiltStore,

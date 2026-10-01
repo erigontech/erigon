@@ -601,6 +601,28 @@ func TestErigonGetLogsByBlockHashRequiresACanonicalBlock(t *testing.T) {
 	require.Nil(t, logs)
 }
 
+// TestErigonGetLatestLogsByBlockHashRequiresACanonicalBlock pins that a reorged-out
+// sibling is not served the logs of the canonical block at its height.
+func TestErigonGetLatestLogsByBlockHashRequiresACanonicalBlock(t *testing.T) {
+	m, chain, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	opts := filters.LogFilterOptions{LogCount: 10}
+
+	canonical := chain.Blocks[0].Hash()
+	_, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{BlockHash: &canonical}, opts)
+	require.NoError(t, err)
+
+	orphaned := orphanedChain[0].Blocks[0].Hash()
+	logs, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{BlockHash: &orphaned}, opts)
+	require.ErrorContains(t, err, "block not found")
+	require.Nil(t, logs)
+
+	unknown := common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111")
+	logs, err = api.GetLatestLogs(m.Ctx, filters.FilterCriteria{BlockHash: &unknown}, opts)
+	require.ErrorContains(t, err, "block not found")
+	require.Nil(t, logs)
+}
+
 // TestGetLogsByHashIncludesBlockTimestamp pins that erigon_getLogsByHash reports the
 // same blockTimestamp erigon_getLogs reports for the same log.
 func TestGetLogsByHashIncludesBlockTimestamp(t *testing.T) {

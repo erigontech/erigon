@@ -382,7 +382,7 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 		{"traceCall", func(api *DebugAPIImpl, index uint64) (any, error) {
 			ref := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64()))
 			txIndex := hexutil.Uint(index)
-			return streamedResult(func(stream jsonstream.Stream) error {
+			return streamedResult(func(stream *jsonstream.Stream) error {
 				return api.TraceCall(ctx, pruneGatingCallArgs(), &ref, &tracersConfig.TraceConfig{TxIndex: &txIndex}, stream)
 			})
 		}},
@@ -390,7 +390,7 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 			bundles, simulate := pruneGatingBundle(block.NumberU64())
 			txIndex := int(index)
 			simulate.TransactionIndex = &txIndex
-			return streamedResult(func(stream jsonstream.Stream) error {
+			return streamedResult(func(stream *jsonstream.Stream) error {
 				return api.TraceCallMany(ctx, bundles, simulate, nil, stream)
 			})
 		}},
@@ -856,7 +856,7 @@ func TestGenesisRangesRequireContiguousBlocks(t *testing.T) {
 				FromBlock: new(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(from))),
 				ToBlock:   new(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(to))),
 			}
-			return streamedResult(func(stream jsonstream.Stream) error {
+			return streamedResult(func(stream *jsonstream.Stream) error {
 				return apis.trace.Filter(ctx, req, new(bool), nil, stream)
 			})
 		}},

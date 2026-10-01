@@ -69,11 +69,11 @@ type MemoryMutation struct {
 //
 // Common pattern:
 //
-//	batch := NewMemoryBatch(db, tmpDir)
+//	batch := NewMemoryBatch(db)
 //	defer batch.Close()
 //	... some calculations on `batch`
 //	batch.Commit()
-func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*MemoryMutation, error) {
+func NewMemoryBatch(tx kv.TemporalTx) (*MemoryMutation, error) {
 	mem := newMemStore()
 	memDB := &memStoreDB{store: mem}
 
@@ -302,10 +302,6 @@ func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 	return m.readTx.GetOne(table, key)
 }
 
-func (m *MemoryMutation) Last(table string) ([]byte, []byte, error) {
-	panic("not implemented. (MemoryMutation.Last)")
-}
-
 // Has returns whether a key is present in the mutation overlay or underlying DB.
 // Thread-safe: acquires RLock.
 func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
@@ -378,18 +374,6 @@ func (m *MemoryMutation) Prefix(table string, prefix []byte) (stream.KV, error) 
 		return m.Range(table, prefix, nil, order.Asc, kv.Unlim)
 	}
 	return m.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
-}
-
-func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
-	panic("please implement me")
-}
-
-func (m *MemoryMutation) StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	panic("please implement me")
-}
-
-func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	panic("please implement me")
 }
 
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {

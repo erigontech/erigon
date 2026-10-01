@@ -527,7 +527,7 @@ func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, bool, error) {
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
 
 func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
-	return ForEachHeader(ctx, r.sn, walker)
+	return ForEachHeader(r.sn, walker)
 }
 
 // HasBlockFilesRoTx is a tx (e.g. a temporal tx) that can carry a block-files

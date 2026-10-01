@@ -44,6 +44,9 @@ import (
 // executed head, exported so other packages can match on the condition.
 const ErrBlockRangeIntoFuture = "block range extends beyond current head block"
 
+// errBlockRangeIntoFuture rejects a range bound past the executed head as invalid params.
+var errBlockRangeIntoFuture = &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+
 var (
 	errInvalidBlockRange               = "invalid block range params"
 	errExceedBlockRange                = "query block range exceeds server limit, narrow your filter"
@@ -182,7 +185,7 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 		}
 
 		if checkFuture && begin > latest {
-			return 0, 0, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+			return 0, 0, errBlockRangeIntoFuture
 		}
 	}
 	end = latest
@@ -199,7 +202,7 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 		}
 
 		if checkFuture && end > latest {
-			return 0, 0, &rpc.CustomError{Message: ErrBlockRangeIntoFuture, Code: rpc.ErrCodeInvalidParams}
+			return 0, 0, errBlockRangeIntoFuture
 		}
 	}
 	return begin, end, nil

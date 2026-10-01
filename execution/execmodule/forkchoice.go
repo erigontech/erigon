@@ -452,7 +452,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// hashes, stage progress, forkchoice markers, TxNums, etc.). All
 	// pipeline reads cascade through the overlay to the RO tx; writes
 	// stay in memory until commit.
-	if err := currentContext.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+	if err := currentContext.InitBlockOverlay(roTx); err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: init block overlay: %w", err), false)
 	}
 	var tx kv.TemporalRwTx = currentContext.BlockOverlay()
@@ -627,7 +627,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			freshSD.SetInMemHistoryReads(inMemHistoryReads)
 			freshSD.SetStateCache(e.stateCache)
-			if err := freshSD.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+			if err := freshSD.InitBlockOverlay(roTx); err != nil {
 				roTx.Rollback()
 				freshSD.Close()
 				return nil, nil, fmt.Errorf("updateForkChoice: init overlay after hasMore: %w", err)
@@ -701,7 +701,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, stateFlushingInParallel)
 			return nil
 		}
-		if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
+		if err := rawdb.TruncateCanonicalChain(tx, *headNumber+1); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
