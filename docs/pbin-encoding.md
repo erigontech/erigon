@@ -109,6 +109,6 @@ The decoder and cross-row checks are implemented by `execution/commitment/v3/pbt
 
 The `0x20` row format is distinct from the removed legacy `0x10` format and from legacy flags
 values `0x00` through `0x07`. Datadir opening and staged rebuild validation reject those older
-formats with an instruction to rebuild the binary commitment domain. A change to the embedding or
-hash suite also requires rebuilding the binary datadir from genesis; the selected suite is stored
+formats with an instruction to run `commitment convert-pbt`. A change to the embedding or hash
+suite also requires converting into a fresh binary datadir; the selected suite is stored
 in `erigondb.toml` as `trie_hash`.

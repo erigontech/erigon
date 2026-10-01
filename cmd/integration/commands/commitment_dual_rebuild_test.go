@@ -50,55 +50,6 @@ import (
 	"github.com/erigontech/erigon/node/logging"
 )
 
-func TestCommitmentRebuildBinTargetOnExecutedHexBinDatadir(t *testing.T) {
-	for _, hash := range []string{commitment.PBinHashKeccak, commitment.PBinHashBlake3} {
-		t.Run(hash, func(t *testing.T) {
-			fixture := newExecutedHexBinRebuildFixture(t, hash)
-			fixture.close()
-			before := snapshotTree(t, fixture.dirs.DataDir)
-			delete(before, filepath.Join("chaindata", "mdbx.lck"))
-			output := filepath.Join(t.TempDir(), "output")
-
-			previousDatadir := datadirCli
-			previousChaindata := chaindata
-			previousOutput := rebuildOutputDatadir
-			previousNoHistory := noHistory
-			previousYes := yes
-			t.Cleanup(func() {
-				datadirCli = previousDatadir
-				chaindata = previousChaindata
-				rebuildOutputDatadir = previousOutput
-				noHistory = previousNoHistory
-				yes = previousYes
-			})
-			datadirCli = fixture.dirs.DataDir
-			chaindata = fixture.dirs.Chaindata
-			rebuildOutputDatadir = output
-			noHistory = true
-			yes = true
-			statecfg.ExperimentalCommitmentV3 = false
-
-			cmd := &cobra.Command{Use: "rebuild", Run: cmdCommitmentRebuild.Run}
-			utils.CobraFlags(cmd, debug.Flags, utils.MetricFlags, logging.Flags)
-			cmd.Flags().AddFlagSet(cmd.PersistentFlags())
-			cmd.SetContext(t.Context())
-			cmd.Run(cmd, nil)
-
-			outputSettings, err := dbstate.ResolveErigonDBSettings(datadir.Open(output), log.New(), false)
-			require.NoError(t, err)
-			require.Equal(t, dbstate.TrieVariantBin, outputSettings.TrieVariantName())
-			require.Equal(t, hash, outputSettings.TrieHashName())
-
-			outputRoot, outputState := reopenBinOutput(t, output, fixture.rawPath)
-			require.Equal(t, fixture.root, outputRoot)
-			require.Equal(t, fixture.state, outputState)
-			after := snapshotTree(t, fixture.dirs.DataDir)
-			delete(after, filepath.Join("chaindata", "mdbx.lck"))
-			require.Equal(t, before, after)
-		})
-	}
-}
-
 func TestCommitmentRebuildRunResetOnExecutedHexBinDatadir(t *testing.T) {
 	fixture := newExecutedHexBinRebuildFixture(t, commitment.PBinHashKeccak)
 	fixture.close()
@@ -125,6 +76,7 @@ func TestCommitmentRebuildRunResetOnExecutedHexBinDatadir(t *testing.T) {
 	noHistory = false
 	yes = true
 	reset = true
+	statecfg.ExperimentalBinCommitment = false
 
 	cmd := &cobra.Command{Use: "rebuild", Run: cmdCommitmentRebuild.Run}
 	utils.CobraFlags(cmd, debug.Flags, utils.MetricFlags, logging.Flags)
@@ -403,32 +355,6 @@ func newExecutedHexBinRebuildFixture(t *testing.T, hash string) executedHexBinRe
 	stateValue, _, err := roTx.GetLatest(kv.CommitmentBinDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	return executedHexBinRebuildFixture{dirs: dirs, rawPath: dirs.Chaindata, root: root, state: bytes.Clone(stateValue), close: closeDB}
-}
-
-func reopenBinOutput(t *testing.T, output, rawPath string) ([]byte, []byte) {
-	t.Helper()
-	dirs := datadir.Open(output)
-	settings, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
-	require.NoError(t, err)
-	agg := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
-	t.Cleanup(agg.Close)
-	rawDB := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()
-	t.Cleanup(rawDB.Close)
-	require.NoError(t, agg.OpenFolder(rawDB))
-	db, err := temporal.New(rawDB, agg, nil)
-	require.NoError(t, err)
-	t.Cleanup(db.Close)
-	tx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
-	require.NoError(t, err)
-	defer sd.Close()
-	root, err := sd.GetCommitmentCtxForDomain(kv.CommitmentDomain).Trie().RootHash()
-	require.NoError(t, err)
-	stateValue, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
-	require.NoError(t, err)
-	return root, bytes.Clone(stateValue)
 }
 
 func reopenBinSource(t *testing.T, source, rawPath string) ([]byte, []byte) {

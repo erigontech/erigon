@@ -154,7 +154,7 @@ func withResume(cmd *cobra.Command) {
 }
 
 func withRebuildOutputDatadir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&rebuildOutputDatadir, "output.datadir", "", "datadir the rebuilt commitment files are written into; the source datadir stays a read-only input. Required for a bin target, whose files are indistinguishable from hex ones by name")
+	cmd.Flags().StringVar(&rebuildOutputDatadir, "output.datadir", "", "datadir the rebuilt commitment files are written into; the source datadir stays a read-only input")
 	must(cmd.MarkFlagDirname("output.datadir"))
 }
 
@@ -188,6 +188,17 @@ func withExperimentalCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
 	cmd.Flags().BoolVar(&statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Name, statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Usage)
 	cmd.Flags().StringVar(&statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Name, statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Name, statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Usage)
+	cmd.PreRun = func(*cobra.Command, []string) {
+		if statecfg.ExperimentalCommitmentV3 {
+			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		}
+	}
+}
+
+func withRebuildCommitment(cmd *cobra.Command) {
+	def := statecfg.ExperimentalParallelCommitment
+	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
 	cmd.Flags().BoolVar(&statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Name, statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Usage)
 	cmd.PreRun = func(*cobra.Command, []string) {
 		if statecfg.ExperimentalCommitmentV3 {

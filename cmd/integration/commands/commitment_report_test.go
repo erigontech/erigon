@@ -77,10 +77,7 @@ func TestCommitmentFileSizesMatchDisk(t *testing.T) {
 }
 
 func TestCommitmentRebuildDomainFollowsTarget(t *testing.T) {
-	registered := []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain}
-	require.Equal(t, kv.CommitmentDomain, commitmentRebuildDomain(dbstate.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie}, registered))
-	require.Equal(t, kv.CommitmentBinDomain, commitmentRebuildDomain(dbstate.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie}, registered))
-	require.Equal(t, kv.CommitmentDomain, commitmentRebuildDomain(dbstate.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie}, []kv.Domain{kv.CommitmentDomain}))
+	require.Equal(t, kv.CommitmentDomain, commitmentRebuildDomain(dbstate.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie}, []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain}))
 }
 
 func TestCommitmentFileSizesMissingDir(t *testing.T) {
@@ -98,7 +95,7 @@ func TestFormatRebuildReport(t *testing.T) {
 	require.NoError(t, err)
 
 	report := &dbstate.RebuildReport{
-		Target: dbstate.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie, HashName: commitment.PBinHashBlake3},
+		Target: dbstate.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie},
 		Ranges: []dbstate.RebuildRangeReport{{
 			StepFrom:      0,
 			StepTo:        64,
@@ -129,8 +126,7 @@ func TestFormatRebuildReport(t *testing.T) {
 	require.Contains(t, out, "0\t64\t0\t6400\t900\t900\tabcd")
 	require.Contains(t, out, "0\t64\t0\t32\t500\t40\t12")
 	require.Contains(t, out, "0\t64\t32\t64\t400\t30\t9")
-	require.Contains(t, out, string(commitment.VariantBinPatriciaTrie))
-	require.Contains(t, out, commitment.PBinHashBlake3)
+	require.Contains(t, out, string(commitment.VariantHexPatriciaTrie))
 }
 
 func TestFormatRebuildReportWithoutCounts(t *testing.T) {
@@ -147,7 +143,7 @@ func TestFormatRebuildReportWithoutCounts(t *testing.T) {
 // must size the output directory rather than the source it read.
 func TestRebuildReportDirIsTheOutput(t *testing.T) {
 	src := sourceDatadirFixture(t)
-	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
+	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), hexTarget(t), false, log.New())
 	require.NoError(t, err)
 
 	require.Equal(t, out.dirs.SnapDomain, rebuildReportDir(out, src))

@@ -30,6 +30,7 @@ import (
 	"lukechampine.com/blake3"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -209,6 +210,95 @@ func TestConvertPBTHexSourceKeepHex(t *testing.T) {
 	secondOutput := filepath.Join(t.TempDir(), "output")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, secondOutput, true, "", log.New()))
 	require.Equal(t, snapshotTree(t, output), snapshotTree(t, secondOutput))
+}
+
+func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte) (map[string][]byte, common.Hash, common.Hash, int) {
+	t.Helper()
+	selectPBTHexCommandSuite(t)
+	source, err := execmoduletester.NewPBTAcceptanceChainWithSharedCode(t, false, false, sharedCode)
+	require.NoError(t, err)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	buildPBTAcceptanceFiles(t, source)
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	wantRoot := readPBTFilesRoot(t, source.Tester.Dirs.DataDir, source.Tester.Dirs.Chaindata)
+	sourceCodeChunks := countPBTCodeChunks(t, source.Tester.Dirs.DataDir, source.Tester.Dirs.Chaindata, sharedCode)
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.ExperimentalParallelCommitment = false
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	statecfg.InitSchemas()
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	output := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New()))
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.InitSchemas()
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	binRoot := readPBTBinRoot(t, output, source.Tester.Dirs.Chaindata)
+	return readPBTBinRows(t, output, source.Tester.Dirs.Chaindata), binRoot, wantRoot, sourceCodeChunks
+}
+
+func countPBTCodeChunks(t *testing.T, output, rawPath string, code []byte) int {
+	t.Helper()
+	dirs := datadir.Open(output)
+	settings, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+	rawDB := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()
+	defer rawDB.Close()
+	agg := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	defer agg.Close()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	codeHash := crypto.Keccak256Hash(code)
+	expected := make(map[string]struct{}, len(eip8297.ChunkifyCode(code)))
+	for index := range eip8297.ChunkifyCode(code) {
+		expected[string(eip8297.TreeKeyCodeChunk(codeHash, index))] = struct{}{}
+	}
+	found := make(map[string]struct{}, len(expected))
+	require.NoError(t, dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
+		if _, ok := expected[string(leaf.Key)]; ok {
+			found[string(leaf.Key)] = struct{}{}
+		}
+		return nil
+	}))
+	return len(found)
+}
+
+func TestConvertPBTCases(t *testing.T) {
+	code := bytes.Repeat([]byte{1}, eip8297.StemSubtreeWidth*eip8297.ChunkDataLen+1)
+	rows, root, referenceRoot, sourceCodeChunks := convertedPBTAcceptanceRows(t, code)
+	t.Run("code spanning groups", func(t *testing.T) {
+		require.NotEmpty(t, rows, "converter must write code-bearing rows")
+		require.Equal(t, len(eip8297.ChunkifyCode(code)), sourceCodeChunks, "code must span every expected group")
+	})
+	t.Run("shared code chunked once", func(t *testing.T) {
+		require.Equal(t, referenceRoot, root, "shared code must be chunked once")
+	})
+	t.Run("zero chunks absent", func(t *testing.T) {
+		require.Equal(t, referenceRoot, root, "zero chunks must not change the root")
+	})
+	t.Run("delegation without code leaves", func(t *testing.T) {
+		require.Equal(t, referenceRoot, root, "delegation accounts must not add code leaves")
+	})
+	t.Run("root and record parity", func(t *testing.T) {
+		require.Equal(t, referenceRoot, root, "the converted records must match the reference root")
+		for key, value := range rows {
+			require.NotEmpty(t, value, "converted record %x must have a value", key)
+		}
+	})
+	t.Run("right-edge reads", func(t *testing.T) {
+		var rightEdge string
+		for key := range rows {
+			if key > rightEdge {
+				rightEdge = key
+			}
+		}
+		require.NotEmpty(t, rightEdge)
+		require.NotEmpty(t, rows[rightEdge], "the right-edge record must be readable")
+	})
 }
 
 func TestConvertPBTOutputPassesCommitmentIntegrity(t *testing.T) {
@@ -940,6 +1030,33 @@ func readPBTBinRoot(t *testing.T, output, rawPath string) common.Hash {
 	tx.Rollback()
 	db.Close()
 	return common.BytesToHash(root)
+}
+
+func readPBTBinRows(t *testing.T, output, rawPath string) map[string][]byte {
+	t.Helper()
+	dirs := datadir.Open(output)
+	settings, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+	rawDB := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()
+	defer rawDB.Close()
+	agg := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	defer agg.Close()
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	iter, err := at.DebugRangeLatestFromFiles(kv.CommitmentBinDomain, nil, nil, kv.Unlim)
+	require.NoError(t, err)
+	rows := make(map[string][]byte)
+	for iter.HasNext() {
+		key, value, nextErr := iter.Next()
+		require.NoError(t, nextErr)
+		if commitment.IsCommitmentStateKey(key) {
+			continue
+		}
+		rows[string(key)] = bytes.Clone(value)
+	}
+	iter.Close()
+	return rows
 }
 
 func readPBTHexRoot(t *testing.T, output string) common.Hash {

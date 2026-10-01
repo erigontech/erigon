@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -47,21 +46,6 @@ type pbinLeafStreamAccount struct {
 	nonce       uint64
 	balance     uint64
 	slots       map[string][]byte
-}
-
-func TestForEachPBinLeafMatchesPBinEngineRoots(t *testing.T) {
-	selectPBinLeafStreamHash(t)
-	db, agg, _ := rebuildVariantDatadir(t)
-	root, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
-		Variant:  commitment.VariantBinPatriciaTrie,
-		HashName: commitment.PBinHashBlake3,
-	})
-	require.NoError(t, err)
-	require.NotEmpty(t, root)
-	pbinLeafStreamAssertRoot(t, common.BytesToHash(root), pbinLeafStreamLeaves(t, db, agg, true))
-
-	db, agg = pbinLeafStreamDatadir(t)
-	pbinLeafStreamAssertRoot(t, pbinLeafStreamEngineRoot(t, db), pbinLeafStreamLeaves(t, db, agg, false))
 }
 
 func TestForEachPBinLeafFeatures(t *testing.T) {

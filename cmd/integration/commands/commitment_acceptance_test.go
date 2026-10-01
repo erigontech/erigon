@@ -416,7 +416,7 @@ func readCurrentPBTStateRoot(t *testing.T, fixture *execmoduletester.ExecModuleT
 	agg := fixture.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	builder, err := eip8297.NewStreamRootBuilder(eip8297.HashBytes)
+	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
 	require.NoError(t, err)
 	require.NoError(t, dbstate.ForEachPBinLeaf(at, tx, false, func(leaf dbstate.PBinLeaf) error {
 		return builder.Add(leaf.Key, leaf.Value)
@@ -438,7 +438,7 @@ func readPBTFilesRoot(t *testing.T, output, rawPath string) common.Hash {
 	defer agg.Close()
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	builder, err := eip8297.NewStreamRootBuilder(eip8297.HashBytes)
+	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
 	require.NoError(t, err)
 	require.NoError(t, dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
 		return builder.Add(leaf.Key, leaf.Value)

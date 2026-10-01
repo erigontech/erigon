@@ -56,7 +56,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		cfg.Variant = commitment.VariantCommitmentV3
 	}
 	cfg.EnableTrieWarmup = false
-	domains, err := execctx.NewSharedDomains(ctx, opts.TargetTx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(opts.TargetDomain), execctx.WithoutCommitmentSeek())
+	domains, err := execctx.NewSharedDomains(ctx, opts.TargetTx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(opts.TargetDomain), execctx.WithoutCommitmentSeek())
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -70,7 +70,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	}
 	streamSeen := false
 	leaves := func(emit func(PBinLeaf) error) error {
-		return ForEachPBinLeaf(sourceFiles, opts.SourceTx, false, func(leaf PBinLeaf) error {
+		return ForEachPBinLeaf(sourceFiles, opts.SourceTx, true, func(leaf PBinLeaf) error {
 			streamSeen = true
 			if addErr := rootBuilder.Add(leaf.Key, leaf.Value); addErr != nil {
 				return addErr

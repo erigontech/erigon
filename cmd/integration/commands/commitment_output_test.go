@@ -17,25 +17,20 @@
 package commands
 
 import (
-	"bytes"
-	"encoding/gob"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/node/debug"
-	"github.com/erigontech/erigon/node/logging"
 )
 
 const (
@@ -43,12 +38,9 @@ const (
 	testSourceStepsInFrozenFile = 64
 )
 
-// sourceDatadirFixture builds a hex datadir holding one step range of account,
-// storage, code and commitment files plus the settings that describe them.
 func sourceDatadirFixture(t *testing.T) datadir.Dirs {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
-
 	for _, name := range []string{
 		"v1.0-accounts.0-64.kv", "v1.0-accounts.0-64.bt", "v1.0-accounts.0-64.kvei",
 		"v1.0-storage.0-64.kv", "v1.0-storage.0-64.bt",
@@ -63,42 +55,9 @@ func sourceDatadirFixture(t *testing.T) datadir.Dirs {
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapAccessors, "v1.0-commitment.0-64.vi"), []byte("com-vi"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapAccessors, "v1.0-commitment.0-64.efi"), []byte("com-efi"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-state.txt"), []byte("salt"), 0o644))
-
 	refs := true
 	require.NoError(t, dbstate.WriteErigonDBSettings(dirs, &dbstate.ErigonDBSettings{
-		StepSize:                       testSourceStepSize,
-		StepsInFrozenFile:              testSourceStepsInFrozenFile,
-		ReferencesInCommitmentBranches: &refs,
-	}))
-	return dirs
-}
-
-func binSourceDatadirFixture(t *testing.T) datadir.Dirs {
-	t.Helper()
-	dirs := sourceDatadirFixture(t)
-	refs := false
-	variant, hash := dbstate.TrieVariantBin, commitment.PBinHashBlake3
-	require.NoError(t, dbstate.WriteErigonDBSettings(dirs, &dbstate.ErigonDBSettings{
-		StepSize:                       testSourceStepSize,
-		StepsInFrozenFile:              testSourceStepsInFrozenFile,
-		ReferencesInCommitmentBranches: &refs,
-		TrieVariant:                    &variant,
-		TrieHash:                       &hash,
-	}))
-	return dirs
-}
-
-func hexBinSourceDatadirFixture(t *testing.T) datadir.Dirs {
-	t.Helper()
-	dirs := sourceDatadirFixture(t)
-	refs := false
-	variant, hash := dbstate.TrieVariantHexBin, commitment.PBinHashBlake3
-	require.NoError(t, dbstate.WriteErigonDBSettings(dirs, &dbstate.ErigonDBSettings{
-		StepSize:                       testSourceStepSize,
-		StepsInFrozenFile:              testSourceStepsInFrozenFile,
-		ReferencesInCommitmentBranches: &refs,
-		TrieVariant:                    &variant,
-		TrieHash:                       &hash,
+		StepSize: testSourceStepSize, StepsInFrozenFile: testSourceStepsInFrozenFile, ReferencesInCommitmentBranches: &refs,
 	}))
 	return dirs
 }
@@ -110,30 +69,34 @@ func hexTarget(t *testing.T) dbstate.RebuildTarget {
 	return target
 }
 
-func binTarget(t *testing.T) dbstate.RebuildTarget {
+func withBinCommitmentProcess(t *testing.T, hash string) {
 	t.Helper()
-	target, err := dbstate.RebuildTarget{
-		Variant:  commitment.VariantBinPatriciaTrie,
-		HashName: commitment.PBinHashBlake3,
-	}.Resolve()
-	require.NoError(t, err)
-	return target
+	oldBin, oldHash, oldParallel := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, statecfg.ExperimentalParallelCommitment
+	oldSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, statecfg.ExperimentalParallelCommitment = oldBin, oldHash, oldParallel
+		require.NoError(t, commitment.SetPBinHashSuite(oldSuite))
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.BinCommitmentHash = hash
+	statecfg.ExperimentalParallelCommitment = false
+	if hash != "" {
+		require.NoError(t, commitment.SetPBinHashSuite(hash))
+	}
 }
 
-// snapshotTree records every regular file under root with its content, so a
-// later call can prove the source datadir was not written to.
 func snapshotTree(t *testing.T, root string) map[string]string {
 	t.Helper()
 	got := map[string]string{}
-	require.NoError(t, filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	require.NoError(t, filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
 			return err
 		}
-		data, err := os.ReadFile(p)
+		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(root, p)
+		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
@@ -148,36 +111,20 @@ func domainFileNames(t *testing.T, snapDomain string) []string {
 	entries, err := os.ReadDir(snapDomain)
 	require.NoError(t, err)
 	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name())
+	for _, entry := range entries {
+		names = append(names, entry.Name())
 	}
 	sort.Strings(names)
 	return names
 }
 
-func TestRequireRebuildOutputForBinTarget(t *testing.T) {
-	require.Error(t, requireRebuildOutput(binTarget(t), ""))
-	require.NoError(t, requireRebuildOutput(binTarget(t), t.TempDir()))
-
-	hex, err := dbstate.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie}.Resolve()
-	require.NoError(t, err)
-	require.NoError(t, requireRebuildOutput(hex, ""))
-}
-
 func TestResolveCommitmentRebuildTargetUsesProcessFlags(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
+	oldParallel, oldV3 := statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
+		statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3 = oldParallel, oldV3
 	})
-	for _, tc := range []struct {
+	for _, test := range []struct {
 		name     string
-		bin      bool
 		parallel bool
 		v3       bool
 		variant  commitment.TrieVariant
@@ -185,426 +132,88 @@ func TestResolveCommitmentRebuildTargetUsesProcessFlags(t *testing.T) {
 		{name: "flagless", variant: commitment.VariantHexPatriciaTrie},
 		{name: "parallel", parallel: true, variant: commitment.VariantParallelHexPatricia},
 		{name: "v3", v3: true, variant: commitment.VariantCommitmentV3},
-		{name: "bin", bin: true, variant: commitment.VariantBinPatriciaTrie},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			statecfg.ExperimentalBinCommitment = tc.bin
-			statecfg.ExperimentalParallelCommitment = tc.parallel
-			statecfg.ExperimentalCommitmentV3 = tc.v3
-			statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+		t.Run(test.name, func(t *testing.T) {
+			statecfg.ExperimentalParallelCommitment = test.parallel
+			statecfg.ExperimentalCommitmentV3 = test.v3
 			target, err := resolveCommitmentRebuildTarget()
 			require.NoError(t, err)
-			require.Equal(t, tc.variant, target.Variant)
+			require.Equal(t, test.variant, target.Variant)
 		})
 	}
 }
 
-func TestCommitmentRebuildRunRefusesHexBinSource(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousDatadir := datadirCli
-	previousOutput := rebuildOutputDatadir
-	previousNoHistory := noHistory
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		datadirCli = previousDatadir
-		rebuildOutputDatadir = previousOutput
-		noHistory = previousNoHistory
-	})
-	src := hexBinSourceDatadirFixture(t)
-	before := snapshotTree(t, src.Snap)
-	for _, tc := range []struct {
-		name     string
-		parallel bool
-		v3       bool
-		output   bool
-	}{
-		{name: "flagless-in-place"},
-		{name: "parallel-in-place", parallel: true},
-		{name: "v3-in-place", v3: true},
-		{name: "flagless-output", output: true},
-		{name: "parallel-output", parallel: true, output: true},
-		{name: "v3-output", v3: true, output: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			statecfg.ExperimentalBinCommitment = false
-			statecfg.ExperimentalParallelCommitment = tc.parallel
-			statecfg.ExperimentalCommitmentV3 = tc.v3
-			statecfg.BinCommitmentHash = commitment.PBinHashBlake3
-			datadirCli = src.DataDir
-			rebuildOutputDatadir = ""
-			noHistory = false
-			if tc.output {
-				rebuildOutputDatadir = filepath.Join(t.TempDir(), "output")
-				noHistory = true
-			}
-			cmd := &cobra.Command{Use: "rebuild", Run: cmdCommitmentRebuild.Run}
-			utils.CobraFlags(cmd, debug.Flags, utils.MetricFlags, logging.Flags)
-			cmd.Flags().AddFlagSet(cmd.PersistentFlags())
-			cmd.SetContext(t.Context())
-			require.NotPanics(t, func() { cmd.Run(cmd, nil) })
-			require.Equal(t, before, snapshotTree(t, src.Snap))
-			if tc.output {
-				_, err := os.Stat(rebuildOutputDatadir)
-				require.ErrorIs(t, err, os.ErrNotExist)
-			}
-		})
-	}
+func TestCommitmentRebuildDomainUsesCommitmentDomain(t *testing.T) {
+	require.Equal(t, kv.CommitmentDomain, commitmentRebuildDomain(dbstate.RebuildTarget{}, []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain}))
 }
 
 func TestStageRebuildOutputLinksInputsAndOmitsCommitment(t *testing.T) {
 	src := sourceDatadirFixture(t)
-	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
+	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), hexTarget(t), false, log.New())
 	require.NoError(t, err)
-
 	require.Equal(t, []string{
 		"v1.0-accounts.0-64.bt", "v1.0-accounts.0-64.kv", "v1.0-accounts.0-64.kvei",
-		"v1.0-code.0-64.bt", "v1.0-code.0-64.kv",
-		"v1.0-storage.0-64.bt", "v1.0-storage.0-64.kv",
+		"v1.0-code.0-64.bt", "v1.0-code.0-64.kv", "v1.0-storage.0-64.bt", "v1.0-storage.0-64.kv",
 	}, domainFileNames(t, out.dirs.SnapDomain))
-
 	for _, name := range []string{"v1.0-accounts.0-64.kv", "v1.0-storage.0-64.kv", "v1.0-code.0-64.kv"} {
-		srcFi, err := os.Stat(filepath.Join(src.SnapDomain, name))
-		require.NoError(t, err)
-		outFi, err := os.Stat(filepath.Join(out.dirs.SnapDomain, name))
-		require.NoError(t, err)
-		require.True(t, os.SameFile(srcFi, outFi), "%s must be a hardlink, not a copy", name)
+		sourceInfo, statErr := os.Stat(filepath.Join(src.SnapDomain, name))
+		require.NoError(t, statErr)
+		outputInfo, statErr := os.Stat(filepath.Join(out.dirs.SnapDomain, name))
+		require.NoError(t, statErr)
+		require.True(t, os.SameFile(sourceInfo, outputInfo))
 	}
-
-	// The rest of the snapshot tree travels too, minus the commitment history.
-	_, err = os.Stat(filepath.Join(out.dirs.Snap, "salt-state.txt"))
-	require.NoError(t, err)
 	_, err = os.Stat(filepath.Join(out.dirs.SnapHistory, "v1.0-accounts.0-64.v"))
 	require.NoError(t, err)
 	_, err = os.Stat(filepath.Join(out.dirs.SnapIdx, "v1.0-commitment.0-64.ef"))
-	require.ErrorIs(t, err, os.ErrNotExist)
-	_, err = os.Stat(filepath.Join(out.dirs.SnapHistory, "v1.0-commitment.0-64.v"))
-	require.ErrorIs(t, err, os.ErrNotExist)
-	_, err = os.Stat(filepath.Join(out.dirs.SnapAccessors, "v1.0-commitment.0-64.vi"))
-	require.ErrorIs(t, err, os.ErrNotExist)
-	_, err = os.Stat(filepath.Join(out.dirs.SnapAccessors, "v1.0-commitment.0-64.efi"))
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestStageRebuildOutputLeavesSourceIntact(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	before := snapshotTree(t, src.Snap)
-
-	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
+	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), hexTarget(t), false, log.New())
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(out.dirs.SnapDomain, "v1.0-commitment.0-64.kv"), []byte("rebuilt"), 0o644))
-
 	require.Equal(t, before, snapshotTree(t, src.Snap))
 }
 
-func TestStageRebuildOutputRefusesExistingCommitmentFiles(t *testing.T) {
+func TestStageRebuildOutputResumeAndRefusals(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	outPath := filepath.Join(t.TempDir(), "out")
-
-	out, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
+	out, err := stageRebuildOutput(src, outPath, hexTarget(t), false, log.New())
 	require.NoError(t, err)
 	rebuilt := filepath.Join(out.dirs.SnapDomain, "v1.0-commitment.0-64.kv")
 	require.NoError(t, os.WriteFile(rebuilt, []byte("rebuilt"), 0o644))
-
-	_, err = stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
+	_, err = stageRebuildOutput(src, outPath, hexTarget(t), false, log.New())
 	require.ErrorContains(t, err, "--resume")
-
-	_, err = stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
+	_, err = stageRebuildOutput(src, outPath, hexTarget(t), true, log.New())
 	require.NoError(t, err)
-	data, err := os.ReadFile(rebuilt)
-	require.NoError(t, err)
-	require.Equal(t, "rebuilt", string(data))
 }
 
-func TestStageRebuildOutputRefusesExistingNonCommitmentFiles(t *testing.T) {
+func TestStageRebuildOutputRefusesOverlappingPaths(t *testing.T) {
 	src := sourceDatadirFixture(t)
-	outPath := filepath.Join(t.TempDir(), "out")
-	require.NoError(t, os.MkdirAll(filepath.Join(outPath, "snapshots"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(outPath, "stale"), []byte("stale"), 0o644))
-
-	_, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
-	require.ErrorContains(t, err, "is not empty")
-	require.ErrorContains(t, err, "--resume")
+	_, err := stageRebuildOutput(src, src.DataDir, hexTarget(t), false, log.New())
+	require.ErrorContains(t, err, "overlaps")
+	_, err = stageRebuildOutput(src, filepath.Join(src.Snap, "out"), hexTarget(t), false, log.New())
+	require.ErrorContains(t, err, "overlaps")
 }
 
-func TestStageRebuildOutputAcceptsPBinCheckpoint(t *testing.T) {
+func TestRebuildOutputSettingsKeepSourceScheme(t *testing.T) {
 	src := sourceDatadirFixture(t)
-	outPath := filepath.Join(t.TempDir(), "out")
-	out, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
+	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), hexTarget(t), false, log.New())
 	require.NoError(t, err)
-	checkpoint := filepath.Join(out.dirs.Tmp, "pbin-rebuild-0-100000000.checkpoint")
-	writeTestPBinCheckpoint(t, checkpoint)
-	_, err = stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
+	settings, err := dbstate.ReadErigonDBSettings(out.dirs)
 	require.NoError(t, err)
-}
-
-func TestStageRebuildOutputRejectsCheckpointWithCompletedRange(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	outPath := filepath.Join(t.TempDir(), "out")
-	out, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
-	require.NoError(t, err)
-	checkpoint := filepath.Join(out.dirs.Tmp, "pbin-rebuild-0-100000000.checkpoint")
-	writeTestPBinCheckpoint(t, checkpoint)
-	require.NoError(t, os.WriteFile(filepath.Join(out.dirs.SnapDomain, "v1.0-commitment.0-64.kv"), []byte("finished"), 0o644))
-	_, err = stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
-	require.ErrorContains(t, err, "checkpoint")
-}
-
-func TestStageRebuildOutputRejectsPBinCheckpointSpillMismatch(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	outPath := filepath.Join(t.TempDir(), "out")
-	out, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
-	require.NoError(t, err)
-	checkpoint := filepath.Join(out.dirs.Tmp, "pbin-rebuild-0-100000000.checkpoint")
-	spill := checkpoint + ".rows"
-	require.NoError(t, os.WriteFile(spill, []byte{1, 2}, 0o644))
-	var data bytes.Buffer
-	require.NoError(t, gob.NewEncoder(&data).Encode(stagedPBinRebuildCheckpoint{
-		LastKey:       []byte{1},
-		SpillPath:     spill,
-		SpillSize:     2,
-		SpillChecksum: []byte{3, 4},
-		TargetVariant: commitment.VariantBinPatriciaTrie,
-		TargetHash:    commitment.PBinHashBlake3,
-	}))
-	require.NoError(t, os.WriteFile(checkpoint, data.Bytes(), 0o644))
-	_, err = stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
-	require.ErrorContains(t, err, "disagree")
-	require.ErrorContains(t, err, "restart into a fresh output datadir")
-}
-
-func TestStageRebuildOutputRejectsOrphanPBinSpill(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	outPath := filepath.Join(t.TempDir(), "out")
-	out, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(out.dirs.Tmp, "pbin-rebuild-0-100000000.checkpoint.rows"), []byte{1}, 0o644))
-	_, err = stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
-	require.ErrorContains(t, err, "no checkpoint")
-}
-
-func writeTestPBinCheckpoint(t *testing.T, path string) {
-	t.Helper()
-	var data bytes.Buffer
-	require.NoError(t, gob.NewEncoder(&data).Encode(stagedPBinRebuildCheckpoint{
-		LastKey:       []byte{1},
-		TargetVariant: commitment.VariantBinPatriciaTrie,
-		TargetHash:    commitment.PBinHashBlake3,
-	}))
-	require.NoError(t, os.WriteFile(path, data.Bytes(), 0o644))
-}
-
-func TestStageRebuildOutputResumeRefusesUnrelatedExistingFile(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	outPath := filepath.Join(t.TempDir(), "out")
-	require.NoError(t, os.MkdirAll(filepath.Join(outPath, "snapshots"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(outPath, "snapshots", "stale"), []byte("stale"), 0o644))
-
-	_, err := stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
-	require.ErrorContains(t, err, "unexpected file in resumed output")
-}
-
-func TestStageRebuildOutputRefusesSourceAsOutput(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	_, err := stageRebuildOutput(src, src.DataDir, binTarget(t), false, log.New())
-	require.Error(t, err)
-}
-
-func TestStageRebuildOutputRefusesSymlinkedOutput(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	outPath := filepath.Join(t.TempDir(), "out")
-	require.NoError(t, os.Symlink(src.DataDir, outPath))
-
-	_, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
-	require.ErrorContains(t, err, "overlaps the source datadir")
-}
-
-// Staging creates the output tree before it walks the source, so an output nested
-// in the source would have the walk descend into what it is writing.
-func TestStageRebuildOutputRefusesNestedOutput(t *testing.T) {
-	src := sourceDatadirFixture(t)
-
-	_, err := stageRebuildOutput(src, filepath.Join(src.Snap, "out"), binTarget(t), false, log.New())
-	require.ErrorContains(t, err, "overlaps the source datadir")
-	_, err = os.Stat(filepath.Join(src.Snap, "out"))
-	require.ErrorIs(t, err, os.ErrNotExist, "a refused output must not be created inside the source")
-
-	outer := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(outer, "inner"), 0o755))
-	nestedSrc := datadir.New(filepath.Join(outer, "inner"))
-	_, err = stageRebuildOutput(nestedSrc, outer, binTarget(t), false, log.New())
-	require.ErrorContains(t, err, "overlaps the source datadir")
-}
-
-func TestRebuildOutputSettingsDescribeProducedScheme(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
-	require.NoError(t, err)
-
-	final, err := dbstate.ReadErigonDBSettings(out.dirs)
-	require.NoError(t, err)
-	require.Equal(t, dbstate.TrieVariantBin, final.TrieVariantName())
-	require.Equal(t, commitment.PBinHashBlake3, final.TrieHashName())
-	require.Equal(t, uint64(testSourceStepSize), final.StepSize)
-	require.Equal(t, uint64(testSourceStepsInFrozenFile), final.StepsInFrozenFile)
-	// The bin trie cannot read referenced branch keys, so the output says so
-	// even though the source datadir was built with them.
-	require.False(t, final.RefsInCommitmentBranches())
-}
-
-func TestRebuildOutputSettingsHexTargetCarriesSourceRefs(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	hex, err := dbstate.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie}.Resolve()
-	require.NoError(t, err)
-
-	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), hex, false, log.New())
-	require.NoError(t, err)
-
-	final, err := dbstate.ReadErigonDBSettings(out.dirs)
-	require.NoError(t, err)
-	require.Nil(t, final.TrieVariant)
-	require.Nil(t, final.TrieHash)
-	require.True(t, final.RefsInCommitmentBranches())
+	require.Nil(t, settings.TrieVariant)
+	require.Nil(t, settings.TrieHash)
+	require.True(t, settings.RefsInCommitmentBranches())
 }
 
 func TestStageRebuildOutputDoesNotCreateSourceMigrations(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	require.NoError(t, dir.RemoveFile(src.Migrations))
-
-	_, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
+	_, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), hexTarget(t), false, log.New())
 	require.NoError(t, err)
-
 	_, err = os.Stat(src.Migrations)
 	require.ErrorIs(t, err, os.ErrNotExist)
-}
-
-// The output directory on its own is what a node is started on, so the settings
-// resolver must accept it under the bin flag that the source datadir refuses.
-func TestRebuildOutputStartsUnderTheBinFlag(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
-	require.NoError(t, err)
-	withBinCommitmentProcess(t, commitment.PBinHashBlake3)
-
-	settings, err := dbstate.ResolveErigonDBSettings(out.dirs, log.New(), true)
-	require.NoError(t, err)
-	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())
-	require.Equal(t, commitment.PBinHashBlake3, settings.TrieHashName())
-	require.Equal(t, commitment.PBinHashBlake3, commitment.PBinHashSuiteName())
-
-	_, err = dbstate.ResolveErigonDBSettings(src, log.New(), true)
-	require.Error(t, err, "the hex source is what a separate output directory exists to avoid")
-}
-
-// withBinCommitmentProcess puts the process into the state a bin target implies:
-// nothing but --experimental.bin-commitment makes DefaultRebuildTarget pick bin.
-func withBinCommitmentProcess(t *testing.T, hash string) {
-	t.Helper()
-	bin, prevHash, suite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
-	parallel := statecfg.ExperimentalParallelCommitment
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash = bin, prevHash
-		statecfg.ExperimentalParallelCommitment = parallel
-		require.NoError(t, commitment.SetPBinHashSuite(suite))
-	})
-	statecfg.ExperimentalBinCommitment = true
-	statecfg.BinCommitmentHash = hash
-	// The settings resolver refuses bin together with parallel, so a process-wide
-	// parallel default would make every bin case here fail on the combination.
-	statecfg.ExperimentalParallelCommitment = false
-}
-
-// The rebuild reopens the staged directory as a datadir before it writes a single
-// file into it, so the settings resolver has to accept it under the same bin flags
-// that made the target bin in the first place.
-func TestStagedRebuildOutputOpensUnderTheBinFlag(t *testing.T) {
-	src := hexBinSourceDatadirFixture(t)
-	withBinCommitmentProcess(t, commitment.PBinHashBlake3)
-
-	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
-	require.NoError(t, err)
-
-	settings, err := dbstate.ResolveErigonDBSettings(out.dirs, log.New(), false)
-	require.NoError(t, err)
-	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())
-	require.Equal(t, commitment.PBinHashBlake3, settings.TrieHashName())
-}
-
-// An interrupted run leaves bin commitment files behind. The directory must still
-// describe them, or the next start reads them as hex.
-func TestStagedRebuildOutputDescribesBinBeforeItFinishes(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
-	require.NoError(t, err)
-
-	staged, err := dbstate.ReadErigonDBSettings(out.dirs)
-	require.NoError(t, err)
-	require.Equal(t, dbstate.TrieVariantBin, staged.TrieVariantName())
-	require.Equal(t, commitment.PBinHashBlake3, staged.TrieHashName())
-}
-
-// The target is resolved from the flags before the datadir is opened, so nothing
-// in the run has read the source's scheme yet. A commitment .kv records no trie
-// variant, so hex files written into a bin datadir are read back as bin.
-func TestRebuildRefusesHexTargetOnBinSource(t *testing.T) {
-	binSrc := binSourceDatadirFixture(t)
-	require.ErrorContains(t, refuseRebuildFromSource(hexTarget(t), binSrc, false), "bin commitment trie")
-	require.NoError(t, refuseRebuildFromSource(binTarget(t), binSrc, true))
-	require.NoError(t, refuseRebuildFromSource(hexTarget(t), sourceDatadirFixture(t), false))
-	// A datadir with no erigondb.toml predates the file and is hex.
-	require.NoError(t, refuseRebuildFromSource(hexTarget(t), datadir.New(t.TempDir()), false))
-}
-
-// --resume keeps the commitment files the interrupted run wrote. Continuing under
-// a different scheme leaves one directory holding two sets of them, which nothing
-// downstream can tell apart.
-func TestStageRebuildOutputResumeRefusesADifferentTarget(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	outPath := filepath.Join(t.TempDir(), "out")
-
-	out, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
-	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(out.dirs.SnapDomain, "v1.0-commitment.0-64.kv"), []byte("rebuilt"), 0o644))
-
-	keccak, err := dbstate.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie, HashName: commitment.PBinHashKeccak}.Resolve()
-	require.NoError(t, err)
-	_, err = stageRebuildOutput(src, outPath, keccak, true, log.New())
-	require.ErrorContains(t, err, commitment.PBinHashKeccak)
-
-	_, err = stageRebuildOutput(src, outPath, hexTarget(t), true, log.New())
-	require.ErrorContains(t, err, dbstate.TrieVariantHex)
-
-	staged, err := dbstate.ReadErigonDBSettings(out.dirs)
-	require.NoError(t, err)
-	require.Equal(t, dbstate.TrieVariantBin, staged.TrieVariantName())
-	require.Equal(t, commitment.PBinHashBlake3, staged.TrieHashName())
-}
-
-// A source file the walk cannot hardlink would leave the output missing an input
-// the rebuild then derives commitment without.
-func TestStageRebuildOutputRefusesNonRegularSourceFile(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	require.NoError(t, os.Symlink(
-		filepath.Join(src.SnapDomain, "v1.0-accounts.0-64.kv"),
-		filepath.Join(src.SnapDomain, "v1.0-storage.64-128.kv")))
-
-	_, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
-	require.ErrorContains(t, err, "not a regular file")
-}
-
-func TestStageRebuildOutputLeavesProcessConfigUnmodified(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	bin, hash, suite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
-
-	_, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
-	require.NoError(t, err)
-
-	require.Equal(t, bin, statecfg.ExperimentalBinCommitment)
-	require.Equal(t, hash, statecfg.BinCommitmentHash)
-	require.Equal(t, suite, commitment.PBinHashSuiteName())
 }

@@ -48,9 +48,8 @@ its block flags once after both arms complete.
 
 The binary state blob uses marker `0xb1` and row format `0x20`, validated by
 `PBinValidateRowStateFormat` in `execution/commitment/pbin_state_format.go`. Legacy flags and the
-removed `0x10` format are refused at datadir open with an instruction to rebuild the binary
-commitment domain. A staged rebuild validates only its output files through the `newTemporalDB`
-aggregator option.
+removed `0x10` format are refused at datadir open with an instruction to run `commitment convert-pbt`.
+The converter validates only its output files through the files-only aggregator.
 
 The binary trie stores rows and fixed bucket-root records. `docs/pbin-encoding.md` describes the
 key derivation, record bytes, root forms and fold. Rebuilds in `RebuildCommitmentFiles` in
@@ -58,16 +57,14 @@ key derivation, record bytes, root forms and fold. Rebuilds in `RebuildCommitmen
 `BinFeedStorageSlotFromState` in `execution/commitment/commitmentdb/pbin_feed.go` into the
 binary feed emitter, sort by tree key for each source range, cut bounded batches, and resume after
 the recorded completed key. Pending commitment writes form the read overlay while a range is
-processed. For a hex+bin source, the only supported rebuild is a bin target into a fresh
-`--output.datadir` with `--no-history`; the output records `trie_variant = "bin"` and reopens as a
-bin datadir with the execution-committed bin root. In-place rebuilds and hex targets are refused
-before staging and before any commitment file or table is touched. Existing codeless accounts are
-emitted with empty code in every range, so their code size, code-hash and delegation leaves are
-rewritten from the current account instead of retaining fields from the preceding range.
-A rebuilt output is a bin datadir; execution can continue from it only after the EIP-8347 fork.
+processed. A hex datadir is converted with `commitment convert-pbt` into a fresh output datadir.
+Use `--keep-hex` for a hex+bin output; omit it for a post-fork bin-only output. The converter
+records the execution-committed bin root and conversion point, and validates the output before
+writing its settings.
 
 `erigondb.toml` records `trie_variant`, `trie_hash`, and per-domain freeze state. Changing the
-embedding or selected binary hash suite requires rebuilding the binary datadir from genesis.
+embedding or selected binary hash suite requires running `commitment convert-pbt` into a fresh
+binary datadir.
 
 ## Freeze and RPC
 

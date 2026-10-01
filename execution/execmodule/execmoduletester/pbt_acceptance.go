@@ -51,6 +51,10 @@ type PBTAcceptanceChain struct {
 }
 
 func NewPBTAcceptanceChain(tb testing.TB, binary bool, dual bool) (*PBTAcceptanceChain, error) {
+	return NewPBTAcceptanceChainWithSharedCode(tb, binary, dual, bytes.Repeat([]byte{1}, 32))
+}
+
+func NewPBTAcceptanceChainWithSharedCode(tb testing.TB, binary bool, dual bool, sharedCode []byte) (*PBTAcceptanceChain, error) {
 	tb.Helper()
 	config := chain.TestChainBerlinConfig.Copy()
 	if binary {
@@ -68,7 +72,6 @@ func NewPBTAcceptanceChain(tb testing.TB, binary bool, dual bool) (*PBTAcceptanc
 	}
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 	contract := common.Address{6}
-	sharedCode := bytes.Repeat([]byte{1}, 32)
 	delegation := append(append([]byte(nil), eip8297.DelegationMarker[:]...), bytes.Repeat([]byte{7}, 20)...)
 	genesis := &types.Genesis{
 		Config:   config,

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/erigontech/erigon/common"
@@ -46,6 +47,11 @@ type PBinRangeWriter struct {
 	ranges     []pbinRange
 }
 
+const (
+	pbinRangeWriterMaxOps   = 100_000
+	pbinRangeWriterMaxBytes = 64 << 20
+)
+
 type pbinRange struct {
 	start     uint64
 	end       uint64
@@ -63,6 +69,130 @@ type pbinRowStampTracker struct {
 	previous eip8297.Bitpath
 	havePrev bool
 	maximum  uint64
+}
+
+type pbinRangeWriterWrite struct {
+	data []byte
+	prev []byte
+}
+
+type pbinRangeWriterOverlay struct {
+	inner    commitment.PatriciaContext
+	writes   map[string]pbinRangeWriterWrite
+	release  func([]byte)
+	write    func([]byte, []byte, []byte) error
+	finished func() error
+}
+
+func newPBinRangeWriterOverlay() *pbinRangeWriterOverlay {
+	return &pbinRangeWriterOverlay{writes: make(map[string]pbinRangeWriterWrite)}
+}
+
+func (o *pbinRangeWriterOverlay) withInner(inner commitment.PatriciaContext) *pbinRangeWriterOverlay {
+	o.inner = inner
+	return o
+}
+
+func (o *pbinRangeWriterOverlay) withRelease(release func([]byte)) *pbinRangeWriterOverlay {
+	o.release = release
+	return o
+}
+
+func (o *pbinRangeWriterOverlay) withWrite(write func([]byte, []byte, []byte) error) *pbinRangeWriterOverlay {
+	o.write = write
+	return o
+}
+
+func (o *pbinRangeWriterOverlay) withFinished(finished func() error) *pbinRangeWriterOverlay {
+	o.finished = finished
+	return o
+}
+
+func (o *pbinRangeWriterOverlay) FlushFinished(nextKey []byte) error {
+	nextPath := eip8297.PathFromBits(nextKey, int16(len(nextKey)*8))
+	keys := make([]string, 0, len(o.writes))
+	for key := range o.writes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		path, err := eip8297.DecodeBitPath([]byte(key))
+		if err != nil {
+			return err
+		}
+		if path.BitLen <= nextPath.BitLen && eip8297.CommonPrefixBitsAt(&path, 0, &nextPath) == path.BitLen {
+			continue
+		}
+		write := o.writes[key]
+		if o.write != nil {
+			if err := o.write([]byte(key), write.data, write.prev); err != nil {
+				return err
+			}
+		}
+		if err := o.inner.PutBranch([]byte(key), write.data, write.prev); err != nil {
+			return err
+		}
+		if o.release != nil {
+			o.release([]byte(key))
+		}
+		delete(o.writes, key)
+	}
+	if o.finished != nil {
+		return o.finished()
+	}
+	return nil
+}
+
+func (o *pbinRangeWriterOverlay) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	if write, ok := o.writes[string(prefix)]; ok {
+		return bytes.Clone(write.data), 0, nil
+	}
+	return o.inner.Branch(prefix)
+}
+
+func (o *pbinRangeWriterOverlay) PutBranch(prefix, data, prevData []byte) error {
+	key := string(prefix)
+	write := o.writes[key]
+	if write.data == nil {
+		write.prev = bytes.Clone(prevData)
+	}
+	write.data = bytes.Clone(data)
+	o.writes[key] = write
+	return nil
+}
+
+func (o *pbinRangeWriterOverlay) Account(key []byte) (*commitment.Update, error) {
+	return o.inner.Account(key)
+}
+
+func (o *pbinRangeWriterOverlay) Storage(key []byte) (*commitment.Update, error) {
+	return o.inner.Storage(key)
+}
+
+func (o *pbinRangeWriterOverlay) Flush() error {
+	keys := make([]string, 0, len(o.writes))
+	for key := range o.writes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		write := o.writes[key]
+		if o.write != nil {
+			if err := o.write([]byte(key), write.data, write.prev); err != nil {
+				return err
+			}
+		}
+		if err := o.inner.PutBranch([]byte(key), write.data, write.prev); err != nil {
+			return err
+		}
+		if o.release != nil {
+			o.release([]byte(key))
+		}
+	}
+	if o.finished != nil {
+		return o.finished()
+	}
+	return nil
 }
 
 func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64) (*PBinRangeWriter, error) {
@@ -161,7 +291,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		_ = dir.RemoveFile(stampFile.Name())
 	}()
 	var (
-		overlay *pbinRebuildOverlay
+		overlay *pbinRangeWriterOverlay
 		root    []byte
 		seen    bool
 		state   []byte
@@ -199,11 +329,11 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			return advanceErr
 		}
 		domains.GetCommitmentCtx().SetPBinOps(batch)
-		var current *pbinRebuildOverlay
+		var current *pbinRangeWriterOverlay
 		var computeErr error
 		root, computeErr = domains.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, blockNum, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
 			if overlay == nil {
-				overlay = newPBinRebuildOverlay()
+				overlay = newPBinRangeWriterOverlay()
 			}
 			current = overlay.withInner(inner).withWrite(onRow).withFinished(func() error {
 				tracker.clearClosed()
@@ -242,7 +372,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		}
 		return streamErr
 	}
-	if streamErr := pbinForEachRebuildOpStreamLookaheadAfterWithSample(w.aggregator.Dirs().Tmp, pbinRebuildMaxOps, pbinRebuildMaxBytes, nil, visit, stream, nil); streamErr != nil {
+	if streamErr := pbinForEachRebuildOpStreamLookaheadAfterWithSample(w.aggregator.Dirs().Tmp, pbinRangeWriterMaxOps, pbinRangeWriterMaxBytes, nil, visit, stream, nil); streamErr != nil {
 		w.closeRanges()
 		return common.Hash{}, streamErr
 	}

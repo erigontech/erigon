@@ -11,8 +11,8 @@
   file.
 - Import is a test-only bootstrap. It proves an exported snapshot is complete by running a node from it.
 - Missing on `awskii/pbt-v3` today:
-  - `integration commitment rebuild --experimental.bin-commitment` builds a bin-only datadir at the tip, shard by shard,
-    through the incremental engine. There is no path from a hex datadir to hex+bin, and no published-file workflow.
+  - `integration commitment rebuild` has no binary target. `integration commitment convert-pbt` builds binary commitment
+    files from a hex datadir, including a published-file workflow.
   - there is no EIP-8347 artifact code;
   - `export-preimages` pins against the root of whatever `CommitmentDomain` holds, which is wrong on post-fork hex+bin
     and pre-fork bin-only datadirs;
@@ -594,6 +594,8 @@
 - Modify: `cmd/integration/commands/commitment.go`
 - Modify: `cmd/integration/commands/flags.go`
 - Modify: `cmd/integration/commands/commitment_output_test.go`
+- Modify: `cmd/integration/commands/commitment_convert_pbt_test.go`
+- Modify: `cmd/integration/commands/commitment_dual_rebuild_test.go`
 - Modify: `execution/stagedsync/stage_commit_rebuild.go`
 - Modify: `db/state/rebuild_variant_test.go`
 - Delete bin-only tests:
@@ -602,9 +604,9 @@
   - `db/state/squeeze_pbin_resume_test.go`
   - `db/state/squeeze_pbin_checkpoint_test.go`
   - `db/state/rebuild_pbin_state_test.go`
-- Modify: `execution/commitment/backtester/pbin_rebuild_code_test.go`, `execution/commitment/backtester/pbin_m1a_test.go`
+- Delete: `execution/commitment/backtester/pbin_rebuild_code_test.go`, `execution/commitment/backtester/pbin_m1a_test.go`
 
-- [ ] move each bin case worth keeping into the converter's tests first. Confirm each moved case fails against a broken
+- [x] move each bin case worth keeping into the converter's tests first. Confirm each moved case fails against a broken
       converter. The cases:
       - code spanning groups;
       - shared code chunked once;
@@ -612,17 +614,21 @@
       - delegation without code leaves;
       - root and record parity;
       - right-edge reads.
-- [ ] remove the bin path, its flags and settings, `pbinRebuildCheckpoint` and spill files, and
+- [x] remove the bin path, its flags and settings, `pbinRebuildCheckpoint` and spill files, and
       `validatePBinRebuildState`; keep `PBinValidateRowStateFormat` and the open-time refusal
-- [ ] keep the parts the converter or the hex rebuild still use:
+- [x] keep the parts the converter or the hex rebuild still use:
       - the hex rebuild itself;
       - the shared wrapper in `stage_commit_rebuild.go`;
       - the hex assertions in mixed test files;
       - `squeeze_pbin_feed_test.go` and `squeeze_pbin_rebuild_test.go`, which cover the feed and batches the converter
         reuses.
-- [ ] drop the checkpoint cases in `commitment_output_test.go`; point every "rebuild the bin commitment domain" message to
+- [x] drop the checkpoint cases in `commitment_output_test.go`; point every "rebuild the bin commitment domain" message to
       `convert-pbt`
-- [ ] run tests - must pass before task 16
+- [x] run tests - must pass before task 16
+
+NOTES: The two backtester files were entirely bin-rebuild tests, so they were deleted with the removed path. The moved
+converter cases are guarded by the consolidated conversion test: code spanning groups, shared chunks, zero chunks,
+delegation, root and record parity, and right-edge reads.
 
 ### Task 16: Migration documentation
 

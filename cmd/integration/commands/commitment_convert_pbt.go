@@ -152,8 +152,8 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 	if err := os.MkdirAll(stagingDirs.Snap, 0o755); err != nil {
 		return err
 	}
-	if _, err := linkSnapshotsExceptCommitment(sourceDirs.Snap, stagingDirs.Snap); err != nil {
-		return err
+	if _, linkErr := linkSnapshotsExceptCommitment(sourceDirs.Snap, stagingDirs.Snap); linkErr != nil {
+		return linkErr
 	}
 	if sourceSettings != nil {
 		if err := dbstate.WriteErigonDBSettings(stagingDirs, sourceSettings); err != nil {
@@ -169,6 +169,9 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 	}
 	defer sourceDB.Close()
 	sourceAgg := sourceDB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	if err := sourceAgg.ReloadFiles(); err != nil {
+		return fmt.Errorf("commitment convert-pbt: reload source files: %w", err)
+	}
 	sourceTx, err := sourceDB.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -312,6 +315,7 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 func readPBinSourcePoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, keepHex bool, logger log.Logger) (pbinConversionPoint, error) {
 	if keepHex && (settings == nil || settings.TrieVariantName() == dbstate.TrieVariantHex) {
 		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.InitSchemas()
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	}
 	aggOpts := dbstate.New(dirs).Logger(logger)

@@ -769,7 +769,7 @@ func (a *Aggregator) checkPBinStateFormat(db kv.RoDB) error {
 		return nil
 	}
 	if err := validatePBinOpenState(state); err != nil {
-		return fmt.Errorf("OpenFolder: rebuild the bin commitment domain: %w", err)
+		return fmt.Errorf("OpenFolder: run commitment convert-pbt for the bin commitment domain: %w", err)
 	}
 	return nil
 }
