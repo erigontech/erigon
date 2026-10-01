@@ -914,6 +914,7 @@ func New(
 		currentBlockNumber,
 		chainConfig,
 		blkBuilder.Build,
+		blkBuilder.BuildInclusionList,
 		hook,
 		accum,
 		execmoduleCache,

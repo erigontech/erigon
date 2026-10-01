@@ -22,6 +22,7 @@ const (
 	EngineNewPayloadV3 = "engine_newPayloadV3"
 	EngineNewPayloadV4 = "engine_newPayloadV4"
 	EngineNewPayloadV5 = "engine_newPayloadV5"
+	EngineNewPayloadV6 = "engine_newPayloadV6"
 )
 
 const (
@@ -55,3 +56,5 @@ const (
 )
 
 const EngineGetClientVersionV1 = "engine_getClientVersionV1"
+
+const EngineGetInclusionListV1 = "engine_getInclusionListV1"

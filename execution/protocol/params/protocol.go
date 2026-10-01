@@ -254,6 +254,10 @@ const (
 	TxValueCostEIP2780       uint64 = 6_000  // TX_VALUE_COST: recipient balance write and EIP-7708 transfer log
 	ColdAccountAccessEIP2780 uint64 = 3_000  // COLD_ACCOUNT_ACCESS: recipient account touch
 	CreateAccessEIP2780      uint64 = CreateAccessEIP8038
+
+	// 	EIP-7805: Max Inclusion List size in bytes
+	// MAX_BYTES_PER_INCLUSION_LIST = 8192
+	MaxBytesPerInclusionListEIP7805 uint64 = 8192
 )
 
 // EIP-7702: Set EOA account code

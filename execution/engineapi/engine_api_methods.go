@@ -65,6 +65,7 @@ var ourCapabilities = []string{
 	"engine_getBlobsV2",
 	"engine_getBlobsV3",
 	"engine_getBlobsV4",
+	"engine_getInclusionListV1",
 	"POST /engine/v1/payloads",
 	"POST /engine/v2/payloads",
 	"POST /engine/v3/payloads",
@@ -83,6 +84,7 @@ var ourCapabilities = []string{
 	"POST /engine/v1/blobs",
 	"POST /engine/v2/blobs",
 	"POST /engine/v3/blobs",
+	"POST /engine/v1/inclusion_list",
 	"POST /engine/v1/client/version",
 	"POST /engine/v1/capabilities",
 }
@@ -362,4 +364,13 @@ func (e *EngineServer) GetBlobsV4(ctx context.Context, blobHashes []common.Hash,
 	}
 	ret, _ := resp.([]*engine_types.BlobCellsAndProofsV1)
 	return ret, nil
+}
+
+func (e *EngineServer) GetInclusionListV1(ctx context.Context) ([]hexutil.Bytes, error) {
+	e.logger.Debug("[GetInclusionListV1] Received Request, building Inclusion List")
+	resp, err := e.getInclusionList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }

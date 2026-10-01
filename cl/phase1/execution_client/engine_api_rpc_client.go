@@ -94,6 +94,10 @@ func (c *EngineAPIRPCClient) NewPayloadV5(ctx context.Context, payload *engine_t
 	return call[engine_types.PayloadStatus](ctx, c.client, rpc_helper.EngineNewPayloadV5, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests)
 }
 
+func (c *EngineAPIRPCClient) NewPayloadV6(ctx context.Context, payload *engine_types.ExecutionPayload, expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes) (*engine_types.PayloadStatusV2, error) {
+	return call[engine_types.PayloadStatusV2](ctx, c.client, rpc_helper.EngineNewPayloadV6, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionList)
+}
+
 func (c *EngineAPIRPCClient) ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	return call[engine_types.ForkChoiceUpdatedResponse](ctx, c.client, rpc_helper.ForkChoiceUpdatedV1, forkChoiceState, payloadAttributes)
 }
@@ -168,4 +172,8 @@ func (c *EngineAPIRPCClient) GetBlobsV3(ctx context.Context, blobHashes []common
 
 func (c *EngineAPIRPCClient) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellIndices hexutil.Bytes) (engine_types.BlobsBundleV3, error) {
 	return callValue[engine_types.BlobsBundleV3](ctx, c.client, rpc_helper.EngineGetBlobsV4, blobHashes, cellIndices)
+}
+
+func (c *EngineAPIRPCClient) GetInclusionListV1(ctx context.Context) ([]hexutil.Bytes, error) {
+	return callValue[[]hexutil.Bytes](ctx, c.client, rpc_helper.EngineGetInclusionListV1)
 }

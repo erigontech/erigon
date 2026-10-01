@@ -368,6 +368,8 @@ func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
 	require.Contains(t, caps, "engine_newPayloadV1")
 	require.Contains(t, caps, "engine_getPayloadV6")
 	require.Contains(t, caps, "engine_getBlobsV4")
+	require.Contains(t, caps, "engine_newPayloadV6")
+	require.Contains(t, caps, "engine_getInclusionListV1")
 	require.Contains(t, caps, "POST /engine/v1/capabilities")
 	require.Contains(t, caps, "GET /engine/v6/payloads/{payload_id}")
 	require.NotContains(t, caps, "engine_exchangeCapabilities")

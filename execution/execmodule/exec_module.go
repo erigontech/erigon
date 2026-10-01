@@ -199,6 +199,7 @@ type ExecModule struct {
 	// Block building
 	nextPayloadId       uint64
 	builderFunc         builder.BlockBuilderFunc
+	inclusionListFunc   builder.InclusionListFunc
 	builders            map[uint64]*builderEntry
 	buildersByTimestamp map[uint64]uint64
 
@@ -255,6 +256,7 @@ func NewExecModule(
 	currentBlockNumber uint64,
 	config *chain.Config,
 	builderFunc builder.BlockBuilderFunc,
+	inclusionListFunc builder.InclusionListFunc,
 	hook *stageloop.Hook,
 	accum *Accumulation,
 	stateCache *Cache,
@@ -282,6 +284,7 @@ func NewExecModule(
 		builders:                make(map[uint64]*builderEntry),
 		buildersByTimestamp:     make(map[uint64]uint64),
 		builderFunc:             builderFunc,
+		inclusionListFunc:       inclusionListFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
 		hook:                    hook,

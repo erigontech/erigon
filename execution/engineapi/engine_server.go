@@ -1409,6 +1409,29 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	}
 }
 
+func (e *EngineServer) getInclusionList(ctx context.Context) ([]hexutil.Bytes, error) {
+	txns, err := e.executionService.InclusionList(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	encodedTxns, err := types.MarshalTransactionsBinary(txns)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]hexutil.Bytes, 0, len(encodedTxns))
+	total := 0
+	for _, tx := range encodedTxns {
+		if total+len(tx) > int(params.MaxBytesPerInclusionListEIP7805) {
+			continue
+		}
+		list = append(list, tx)
+		total += len(tx)
+	}
+
+	return list, nil
+}
+
 func waitForResponse(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
 	shouldWait, err := waitCondnF()
 	if err != nil || !shouldWait {
