@@ -30,14 +30,15 @@ import (
 )
 
 type PBinConvertOptions struct {
-	SourceAggregator *Aggregator
-	SourceTx         kv.TemporalTx
-	TargetAggregator *Aggregator
-	TargetTx         kv.TemporalRwTx
-	TargetDomain     kv.Domain
-	BlockNum         uint64
-	EndTxNum         uint64
-	Hash             eip8297.HashFn
+	SourceAggregator  *Aggregator
+	SourceTx          kv.TemporalTx
+	TargetAggregator  *Aggregator
+	TargetTx          kv.TemporalRwTx
+	TargetDomain      kv.Domain
+	BlockNum          uint64
+	EndTxNum          uint64
+	Hash              eip8297.HashFn
+	RangeWriterLimits *PBinRangeWriterLimits
 }
 
 func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, error) {
@@ -52,7 +53,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	}
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
-	if len(opts.TargetAggregator.CommitmentDomains()) > 1 {
+	if len(opts.TargetAggregator.CommitmentDomains()) > 1 && opts.TargetDomain != kv.CommitmentBinDomain {
 		cfg.Variant = commitment.VariantCommitmentV3
 	}
 	cfg.EnableTrieWarmup = false
@@ -68,33 +69,26 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	if err != nil {
 		return common.Hash{}, err
 	}
-	streamSeen := false
 	leaves := func(emit func(PBinLeaf) error) error {
 		return ForEachPBinLeaf(sourceFiles, opts.SourceTx, true, func(leaf PBinLeaf) error {
-			streamSeen = true
 			if addErr := rootBuilder.Add(leaf.Key, leaf.Value); addErr != nil {
 				return addErr
 			}
 			return emit(leaf)
 		})
 	}
-	writer, err := NewPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum)
+	var writer *PBinRangeWriter
+	if opts.RangeWriterLimits == nil {
+		writer, err = NewPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum)
+	} else {
+		writer, err = NewPBinRangeWriterWithLimits(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum, *opts.RangeWriterLimits)
+	}
 	if err != nil {
 		return common.Hash{}, err
 	}
 	root, err := writer.WriteAtBlock(ctx, opts.TargetTx, domains, leaves, opts.BlockNum)
 	if err != nil {
 		return common.Hash{}, err
-	}
-	if streamSeen {
-		trie := domains.GetCommitmentCtx().Trie()
-		verifier, ok := trie.(interface{ Verify() error })
-		if !ok {
-			return common.Hash{}, fmt.Errorf("pbin conversion: trie does not support verification")
-		}
-		if verifyErr := verifier.Verify(); verifyErr != nil {
-			return common.Hash{}, fmt.Errorf("pbin conversion: verify: %w", verifyErr)
-		}
 	}
 	streamRoot, err := rootBuilder.RootHash()
 	if err != nil {

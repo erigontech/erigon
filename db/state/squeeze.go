@@ -1106,7 +1106,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
-		firstShard := true
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k, v []byte) {
 				if !keyIter.HasNext() {
@@ -1145,16 +1144,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				domains.EnableParaTrieDB(rwDb)
 			}
 
-			var removals func(func([]byte) error) (uint64, error)
-			if firstShard {
-				removals = func(collect func([]byte) error) (uint64, error) {
-					from, to := r.FromTo()
-					return touchRangeRemovals(acRo, from, to, collect)
-				}
-			}
-			firstShard = false
-
-			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, removals, &rebuiltCommitment{
+			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
 				Variant:  target.Variant,
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
@@ -1271,39 +1261,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, report, nil
 }
 
-// touchRangeRemovals feeds every key the range removes, a zero-length record in
-// its own domain files, into the update set. Shards slice the range in plain-key
-// order while the trie is ordered by tree key, so a removal can land in a later
-// shard than the one re-hashing the branch that still names its leaf, where the
-// bin trie reads it absent and the forward-only fold can no longer drop it.
-func touchRangeRemovals(acRo *AggregatorRoTx, fromTxNum, toTxNum uint64, collect func([]byte) error) (uint64, error) {
-	var touched uint64
-	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
-		s, err := acRo.FileStream(d, fromTxNum, toTxNum)
-		if err != nil {
-			return touched, err
-		}
-		for s.HasNext() {
-			k, v, err := s.Next()
-			if err != nil {
-				s.Close()
-				return touched, err
-			}
-			if len(v) > 0 {
-				continue
-			}
-			if err := collect(k); err != nil {
-				s.Close()
-				return touched, err
-			}
-			touched++
-		}
-		s.Close()
-	}
-	return touched, nil
-}
-
-func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte, []byte), removals func(func([]byte) error) (uint64, error), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
 	aggTx := AggTx(tx)
 	sd.DiscardWrites(kv.AccountsDomain)
 	sd.DiscardWrites(kv.StorageDomain)
@@ -1311,27 +1269,12 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	logger := sd.Logger()
 
-	visComFiles := tx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain)
 	logger.Info(cfg.LogPrefix+" started", "totalKeys", common.PrettyCounter(cfg.Keys), "block", cfg.BlockNumber, "txn", cfg.TxnNumber,
-		"files", fmt.Sprintf("%d %v", len(visComFiles), visComFiles.String()))
+		"files", fmt.Sprintf("%d", len(tx.(kv.WithFreezeInfo).FreezeInfo().Files(kv.CommitmentDomain))))
 
-	// Only a range that inherits commitment files can hold a leaf this range
-	// removes; a range building its own tree never inserts one.
 	sf := time.Now()
 	var processed uint64
 	var err error
-	if removals != nil && len(visComFiles) > 0 {
-		rf := time.Now()
-		touched, err := removals(func(key []byte) error {
-			sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
-			return nil
-		})
-		if err != nil {
-			return nil, fmt.Errorf("%s: inherited removals: %w", cfg.LogPrefix, err)
-		}
-		logger.Info(cfg.LogPrefix+" applied inherited removals", "keys", common.PrettyCounter(touched),
-			"spent", time.Since(rf).String())
-	}
 	// next() signals "no more keys" as (false, nil) but a shard boundary as
 	// (false, key), so the key has to be checked separately from ok.
 	for ok, key, value := next(); ; ok, key, value = next() {

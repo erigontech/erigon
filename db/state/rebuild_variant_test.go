@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -45,4 +46,36 @@ func TestRebuildTargetResolve(t *testing.T) {
 	resolved, err := state.RebuildTarget{MaxShardSteps: 16}.Resolve()
 	require.NoError(t, err)
 	require.Equal(t, uint64(16), resolved.MaxShardSteps)
+}
+
+func TestRebuildCommitmentFilesV3Target(t *testing.T) {
+	previousV3, previousParallel, previousBin, previousHexBin, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.ExperimentalParallelCommitment = previousParallel
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.Schema = previousSchema
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.ExperimentalParallelCommitment = false
+	statecfg.ExperimentalBinCommitment = false
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	target, err := state.DefaultRebuildTarget().Resolve()
+	require.NoError(t, err)
+	require.Equal(t, commitment.VariantCommitmentV3, target.Variant)
+}
+
+func TestRebuildCommitmentFilesDefaultTargetIsProcessVariant(t *testing.T) {
+	previousParallel, previousV3 := statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() {
+		statecfg.ExperimentalParallelCommitment = previousParallel
+		statecfg.ExperimentalCommitmentV3 = previousV3
+	})
+	statecfg.ExperimentalParallelCommitment = false
+	statecfg.ExperimentalCommitmentV3 = false
+	target, err := state.DefaultRebuildTarget().Resolve()
+	require.NoError(t, err)
+	require.Equal(t, commitment.VariantHexPatriciaTrie, target.Variant)
 }

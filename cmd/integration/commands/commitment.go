@@ -373,7 +373,7 @@ type rebuildOutput struct {
 }
 
 func refuseRebuildFromSettings(_ dbstate.RebuildTarget, source *dbstate.ErigonDBSettings, sourcePath string, _ bool) error {
-	if source.TrieVariantName() == dbstate.TrieVariantBin {
+	if source.TrieVariantName() == dbstate.TrieVariantBin || source.TrieVariantName() == dbstate.TrieVariantHexBin {
 		return fmt.Errorf("commitment rebuild: source datadir %s uses the bin commitment trie; use commitment convert-pbt", sourcePath)
 	}
 	return nil

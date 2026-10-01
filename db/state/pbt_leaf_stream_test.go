@@ -157,62 +157,6 @@ func selectPBinLeafStreamHash(t *testing.T) {
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 }
 
-func pbinLeafStreamAssertRoot(t *testing.T, want common.Hash, leaves []state.PBinLeaf) {
-	t.Helper()
-	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
-	require.NoError(t, err)
-	for _, leaf := range leaves {
-		require.NoError(t, builder.Add(leaf.Key, leaf.Value))
-	}
-	root, err := builder.RootHash()
-	require.NoError(t, err)
-	require.Equal(t, want, root)
-	require.NotEmpty(t, leaves)
-}
-
-func pbinLeafStreamEngineRoot(t *testing.T, db kv.TemporalRwDB) common.Hash {
-	t.Helper()
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	cfg := commitment.DefaultTrieConfig()
-	cfg.Variant = commitment.VariantBinPatriciaTrie
-	cfg.EnableTrieWarmup = false
-	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg))
-	require.NoError(t, err)
-	defer sd.Close()
-	sd.GetCommitmentCtx().SetPBinFeed(pbinLeafStreamFeed())
-	root, err := sd.ComputeCommitment(t.Context(), tx, false, 0, 0, "pbin-leaf-stream", nil)
-	require.NoError(t, err)
-	return common.BytesToHash(root)
-}
-
-func pbinLeafStreamFeed() *commitment.PBinFeed {
-	states := pbinLeafStreamAccounts()
-	feed := &commitment.PBinFeed{Accounts: make([]commitment.PBinFeedAccount, 0, len(states))}
-	for _, state := range states {
-		codeHash := state.codeHash
-		if state.codeWritten {
-			codeHash = crypto.Keccak256Hash(state.code)
-		}
-		account := commitment.PBinFeedAccount{
-			Address:     bytes.Clone(state.address),
-			Exists:      true,
-			Nonce:       state.nonce,
-			Balance:     *uint256.NewInt(state.balance),
-			CodeHash:    codeHash,
-			CodeWritten: true,
-			Code:        bytes.Clone(state.code),
-			Slots:       make([]commitment.PBinFeedSlot, 0, len(state.slots)),
-		}
-		for key, value := range state.slots {
-			account.Slots = append(account.Slots, commitment.PBinFeedSlot{Key: []byte(key), Value: bytes.Clone(value)})
-		}
-		feed.Accounts = append(feed.Accounts, account)
-	}
-	return feed
-}
-
 func pbinLeafStreamDatadir(t *testing.T) (kv.TemporalRwDB, *state.Aggregator) {
 	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
 	writePBinLeafStreamRange(t, db, 0, 2*pbinLeafStreamStepSize, pbinLeafStreamAccounts())

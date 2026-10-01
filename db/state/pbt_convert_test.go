@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
 
-func TestConvertPBinMatchesReferenceRootAndVerification(t *testing.T) {
+func TestConvertPBinMatchesReferenceRoot(t *testing.T) {
 	selectPBinConvertHash(t)
 	db, agg := temporal.Open(t, 8)
 	writePBinConvertState(t, db)

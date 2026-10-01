@@ -52,12 +52,10 @@ removed `0x10` format are refused at datadir open with an instruction to run `co
 The converter validates only its output files through the files-only aggregator.
 
 The binary trie stores rows and fixed bucket-root records. `docs/pbin-encoding.md` describes the
-key derivation, record bytes, root forms and fold. Rebuilds in `RebuildCommitmentFiles` in
-`db/state/squeeze.go` stream plain-state keys through `BinFeedAccountFromState` and
-`BinFeedStorageSlotFromState` in `execution/commitment/commitmentdb/pbin_feed.go` into the
-binary feed emitter, sort by tree key for each source range, cut bounded batches, and resume after
-the recorded completed key. Pending commitment writes form the read overlay while a range is
-processed. A hex datadir is converted with `commitment convert-pbt` into a fresh output datadir.
+key derivation, record bytes, root forms and fold. The hex rebuild keeps its existing path.
+`commitment convert-pbt` reads the files-only leaf stream from `db/state/pbt_leaf_stream.go`,
+feeds the bounded range writer in `db/state/pbt_range_writer.go`, and writes a fresh binary target.
+A hex datadir is converted with `commitment convert-pbt` into a fresh output datadir.
 Use `--keep-hex` for a hex+bin output; omit it for a post-fork bin-only output. The converter
 records the execution-committed bin root and conversion point, and validates the output before
 writing its settings.

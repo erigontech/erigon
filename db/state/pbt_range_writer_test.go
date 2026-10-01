@@ -105,6 +105,39 @@ func TestPBinRangeWriterStreamsLeavesIntoBinFiles(t *testing.T) {
 	require.Equal(t, uint64(24), end)
 }
 
+func TestPBinRangeWriterStreamsLeavesIntoBinFilesWithTinyBatches(t *testing.T) {
+	selectPBinRangeWriterHash(t)
+	statecfg.ExperimentalHexBinCommitment = true
+	db, agg := commitmenttemporal.Open(t, 8)
+	writePBinRangeWriterAccounts(t, db, 32)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 3, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	at := agg.BeginFilesRo()
+	t.Cleanup(at.Close)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	defer domains.Close()
+	writer, err := state.NewPBinRangeWriterWithLimits(agg, kv.CommitmentBinDomain, 23, state.PBinRangeWriterLimits{MaxOps: 2, MaxBytes: 1 << 20})
+	require.NoError(t, err)
+	root, err := writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
+		return state.ForEachPBinLeaf(at, nil, true, emit)
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, eip8297.EmptyTreeHash, root)
+	out := agg.BeginFilesRo()
+	defer out.Close()
+	stateValue, found, _, _, err := out.DebugGetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, math.MaxUint64)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotEmpty(t, stateValue)
+}
+
 func TestPBinRangeWriterWritesEmptyTargetRange(t *testing.T) {
 	selectPBinRangeWriterHash(t)
 	statecfg.ExperimentalHexBinCommitment = false

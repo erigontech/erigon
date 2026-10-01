@@ -82,6 +82,10 @@ type pbinConversionPoint struct {
 }
 
 func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger) (err error) {
+	return convertPBTWithLimits(ctx, sourcePath, outputPath, keepHex, chainName, logger, nil)
+}
+
+func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, limits *dbstate.PBinRangeWriterLimits) (err error) {
 	if sourcePath == "" || outputPath == "" {
 		return errors.New("commitment convert-pbt: source and output datadirs are required")
 	}
@@ -252,14 +256,15 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 		targetDomain = kv.CommitmentBinDomain
 	}
 	root, err := dbstate.ConvertPBin(ctx, dbstate.PBinConvertOptions{
-		SourceAggregator: sourceAgg,
-		SourceTx:         sourceTx,
-		TargetAggregator: targetAgg,
-		TargetTx:         targetTx,
-		TargetDomain:     targetDomain,
-		BlockNum:         point.BlockNum,
-		EndTxNum:         point.TxNum,
-		Hash:             eip8297.HashBytes,
+		SourceAggregator:  sourceAgg,
+		SourceTx:          sourceTx,
+		TargetAggregator:  targetAgg,
+		TargetTx:          targetTx,
+		TargetDomain:      targetDomain,
+		BlockNum:          point.BlockNum,
+		EndTxNum:          point.TxNum,
+		Hash:              eip8297.HashBytes,
+		RangeWriterLimits: limits,
 	})
 	targetTx.Rollback()
 	if err != nil {

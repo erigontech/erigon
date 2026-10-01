@@ -29,8 +29,8 @@
   records, leaf derivation, canonical digests), "Verification (dual-check)", "BAL-replay". EIP-8297 is in the same
   directory.
 - Rebuild pieces reused:
-  - `db/state/squeeze.go`: the sorted batch feed `pbinForEachRebuildOpStreamLookaheadAfterWithSample` and
-    `pbinRebuildOverlay` with `FlushFinished`;
+  - `db/state/squeeze.go`: the sorted batch feed `pbinForEachRebuildOpStreamLookaheadAfterWithSample`;
+  - `db/state/pbt_range_writer.go`: the conversion overlay with `FlushFinished`;
   - `cmd/integration/commands/commitment.go`: `stageRebuildOutput`, `linkSnapshotsExceptCommitment`,
     `isCommitmentFileName`, `validateStagedOutput`, `rebuildOutput.settings`;
   - `cmd/integration/commands/stages.go`: the source opening options `SkipPBinStateDBCheck`, `DisableInterDomainDeps`,
@@ -373,8 +373,8 @@
 - Create: `db/state/pbt_range_writer_test.go`
 
 - [x] add the writer signature with a stub. Write tests on a test datadir:
-      - the leaf stream runs through `pbinForEachRebuildOpStreamLookaheadAfterWithSample` and `pbinRebuildOverlay` into
-        the range writer;
+      - the leaf stream runs through `pbinForEachRebuildOpStreamLookaheadAfterWithSample` and the conversion overlay in
+        `pbt_range_writer.go` into the range writer;
       - row stamps equal the max leaf stamp under each prefix, including a row created after its leaves were folded;
       - every range up to S gets a file, and an empty range yields an empty file that merges.
 
@@ -632,8 +632,8 @@ NOTES: import-pbt refuses frozen commitment targets before ResetExec; it does no
 - [x] run tests - must pass before task 16
 
 NOTES: The two backtester files were entirely bin-rebuild tests, so they were deleted with the removed path. The moved
-converter cases are guarded by the consolidated conversion test: code spanning groups, shared chunks, zero chunks,
-delegation, root and record parity, and right-edge reads.
+converter cases use an independently embedded reference state, tiny injectable batches, and a reference right edge;
+recursive verification remains in the converter command after the written files are reopened.
 
 ### Task 16: Migration documentation
 

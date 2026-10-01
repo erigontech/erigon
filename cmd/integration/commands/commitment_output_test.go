@@ -62,6 +62,18 @@ func sourceDatadirFixture(t *testing.T) datadir.Dirs {
 	return dirs
 }
 
+func hexBinSourceDatadirFixture(t *testing.T) datadir.Dirs {
+	t.Helper()
+	dirs := sourceDatadirFixture(t)
+	refs := false
+	variant, hash := dbstate.TrieVariantHexBin, commitment.PBinHashBlake3
+	require.NoError(t, dbstate.WriteErigonDBSettings(dirs, &dbstate.ErigonDBSettings{
+		StepSize: testSourceStepSize, StepsInFrozenFile: testSourceStepsInFrozenFile, ReferencesInCommitmentBranches: &refs,
+		TrieVariant: &variant, TrieHash: &hash,
+	}))
+	return dirs
+}
+
 func hexTarget(t *testing.T) dbstate.RebuildTarget {
 	t.Helper()
 	target, err := dbstate.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie}.Resolve()
@@ -196,6 +208,39 @@ func TestStageRebuildOutputRefusesOverlappingPaths(t *testing.T) {
 	require.ErrorContains(t, err, "overlaps")
 	_, err = stageRebuildOutput(src, filepath.Join(src.Snap, "out"), hexTarget(t), false, log.New())
 	require.ErrorContains(t, err, "overlaps")
+}
+
+func TestStageRebuildOutputRefusesNonRegularSourceFile(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	require.NoError(t, os.Symlink(filepath.Join(src.SnapDomain, "v1.0-accounts.0-64.kv"), filepath.Join(src.SnapDomain, "v1.0-storage.64-128.kv")))
+	_, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), hexTarget(t), false, log.New())
+	require.ErrorContains(t, err, "not a regular file")
+}
+
+func TestStageRebuildOutputRefusesSymlinkedOutput(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	outPath := filepath.Join(t.TempDir(), "out")
+	require.NoError(t, os.Symlink(src.DataDir, outPath))
+	_, err := stageRebuildOutput(src, outPath, hexTarget(t), false, log.New())
+	require.ErrorContains(t, err, "overlaps the source datadir")
+}
+
+func TestStageRebuildOutputResumeRefusesUnrelatedExistingFile(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	outPath := filepath.Join(t.TempDir(), "out")
+	require.NoError(t, os.MkdirAll(filepath.Join(outPath, "snapshots"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outPath, "snapshots", "stale"), []byte("stale"), 0o644))
+	_, err := stageRebuildOutput(src, outPath, hexTarget(t), true, log.New())
+	require.ErrorContains(t, err, "unexpected file in resumed output")
+}
+
+func TestStageRebuildOutputRefusesNonEmptyOutput(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	outPath := filepath.Join(t.TempDir(), "out")
+	require.NoError(t, os.MkdirAll(filepath.Join(outPath, "snapshots"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outPath, "stale"), []byte("stale"), 0o644))
+	_, err := stageRebuildOutput(src, outPath, hexTarget(t), false, log.New())
+	require.ErrorContains(t, err, "is not empty")
 }
 
 func TestRebuildOutputSettingsKeepSourceScheme(t *testing.T) {

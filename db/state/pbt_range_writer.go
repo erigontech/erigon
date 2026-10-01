@@ -45,6 +45,13 @@ type PBinRangeWriter struct {
 	domain     kv.Domain
 	endTxNum   uint64
 	ranges     []pbinRange
+	maxOps     int
+	maxBytes   int
+}
+
+type PBinRangeWriterLimits struct {
+	MaxOps   int
+	MaxBytes int
 }
 
 const (
@@ -116,6 +123,9 @@ func (o *pbinRangeWriterOverlay) FlushFinished(nextKey []byte) error {
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
+		if bytes.Equal([]byte(key), pbt.GlobalRootKey()) {
+			continue
+		}
 		path, err := eip8297.DecodeBitPath([]byte(key))
 		if err != nil {
 			return err
@@ -196,6 +206,17 @@ func (o *pbinRangeWriterOverlay) Flush() error {
 }
 
 func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64) (*PBinRangeWriter, error) {
+	return newPBinRangeWriter(aggregator, domain, endTxNum, PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes})
+}
+
+func NewPBinRangeWriterWithLimits(aggregator *Aggregator, domain kv.Domain, endTxNum uint64, limits PBinRangeWriterLimits) (*PBinRangeWriter, error) {
+	if limits.MaxOps <= 0 || limits.MaxBytes <= 0 {
+		return nil, fmt.Errorf("pbin range writer: invalid batch limits")
+	}
+	return newPBinRangeWriter(aggregator, domain, endTxNum, limits)
+}
+
+func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64, limits PBinRangeWriterLimits) (*PBinRangeWriter, error) {
 	if aggregator == nil {
 		return nil, fmt.Errorf("pbin range writer: nil aggregator")
 	}
@@ -210,12 +231,14 @@ func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 	files := pbinAccountFiles(at.Files(kv.AccountsDomain))
 	if len(files) == 0 {
 		if endTxNum == 0 {
-			return &PBinRangeWriter{aggregator: aggregator, domain: domain}, nil
+			return &PBinRangeWriter{aggregator: aggregator, domain: domain, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes}, nil
 		}
 		return &PBinRangeWriter{
 			aggregator: aggregator,
 			domain:     domain,
 			endTxNum:   endTxNum,
+			maxOps:     limits.MaxOps,
+			maxBytes:   limits.MaxBytes,
 			ranges: []pbinRange{{
 				start:     0,
 				end:       endTxNum + 1,
@@ -253,7 +276,7 @@ func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 		}
 		return nil, fmt.Errorf("pbin range writer: no account range contains %d", endTxNum)
 	}
-	return &PBinRangeWriter{aggregator: aggregator, domain: domain, endTxNum: endTxNum, ranges: ranges}, nil
+	return &PBinRangeWriter{aggregator: aggregator, domain: domain, endTxNum: endTxNum, ranges: ranges, maxOps: limits.MaxOps, maxBytes: limits.MaxBytes}, nil
 }
 
 func pbinAccountFiles(files kv.VisibleFiles) kv.VisibleFiles {
@@ -372,7 +395,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		}
 		return streamErr
 	}
-	if streamErr := pbinForEachRebuildOpStreamLookaheadAfterWithSample(w.aggregator.Dirs().Tmp, pbinRangeWriterMaxOps, pbinRangeWriterMaxBytes, nil, visit, stream, nil); streamErr != nil {
+	if streamErr := pbinForEachRebuildOpStreamLookaheadAfterWithSample(w.aggregator.Dirs().Tmp, w.maxOps, w.maxBytes, nil, visit, stream, nil); streamErr != nil {
 		w.closeRanges()
 		return common.Hash{}, streamErr
 	}
