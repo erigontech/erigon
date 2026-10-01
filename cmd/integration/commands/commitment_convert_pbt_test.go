@@ -291,8 +291,7 @@ func TestConvertPBTCases(t *testing.T) {
 		_, _, _, _, leaves, _ := convertedPBTAcceptanceRows(t, code)
 		codeHash := crypto.Keccak256Hash(code)
 		for index, chunk := range eip8297.ChunkifyCode(code) {
-			key := string(eip8297.TreeKeyCodeChunk(codeHash, index))
-			require.Equal(t, chunk[:], leaves[key], "code chunk %d must be present in its stem", index)
+			require.Equal(t, chunk[:], leaves[string(eip8297.TreeKeyCodeChunk(codeHash, index))], "code chunk %d must be present in its stem", index)
 		}
 	})
 	t.Run("shared code chunked once", func(t *testing.T) {
