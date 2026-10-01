@@ -776,3 +776,5 @@ func TestDecodeStringFieldMatchesUnmarshal(t *testing.T) {
 		require.Equal(t, want, got, in)
 	}
 }
+
+var ParsePositionalArguments = parsePositionalArguments
