@@ -26,7 +26,7 @@ A 3.6.x node upgrades to 3.7 in place: there is no database migration and no re-
 * **Caplin with checkpoint sync disabled**: nodes running `--caplin.checkpoint-sync.disable` re-sync Caplin from genesis on upgrade unless a finalized state is saved locally. Allow checkpoint sync during the upgrade to avoid the replay.
 * **Receipts**: fresh datadirs now keep receipts by default (`--prune.include-receipts`). An existing datadir keeps the setting it was created with; changing it requires a fresh datadir. See [Pruning Modes](../../fundamentals/pruning-modes).
 * **Polygon**: Polygon chain names, datadirs and `--bor.*` / `--polygon.*` flags are no longer accepted. Use [0xPolygon/erigon](https://github.com/0xPolygon/erigon).
-* **JSON-RPC**: several endpoints are stricter or return renamed fields. Review the [v3.7.0 release notes](https://github.com/erigontech/erigon/releases/tag/v3.7.0) if you run applications against the RPC.
+* **JSON-RPC**: `erigon_getLogs` and `erigon_getLatestLogs` now return the block time as `blockTimestamp` (it was `timestamp`), matching `eth_getLogs`, and `erigon_getLogsByHash` now includes it too. Several other endpoints are stricter or return renamed fields. Review the [v3.7.0 release notes](https://github.com/erigontech/erigon/releases/tag/v3.7.0) if you run applications against the RPC.
 
 ## Managing your Data
 
