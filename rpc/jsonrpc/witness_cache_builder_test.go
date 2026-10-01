@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -505,6 +506,58 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	gotBytes, err := jsonstream.Marshal(cached)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "builder-path witness must be byte-identical to on-demand")
+}
+
+func TestBuildAndCacheJoinsRunningBuild(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	const blockNum = uint64(3)
+	hash, _ := buildTestChainHeader(t, m, blockNum)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, false, false)
+	running := mkResult()
+	registerFinishedBuild(api.witnessCache, hash, running)
+
+	samplesBefore := buildDurationSamples(t)
+	require.True(t, api.buildAndCache(ctx, blockNum, hash))
+	cached, ok := api.witnessCache.Get(hash)
+	require.True(t, ok)
+	require.Same(t, running, cached, "the builder must cache the running build's result, not build again")
+	require.Equal(t, samplesBefore+1, buildDurationSamples(t), "a joined build must still record its duration")
+}
+
+func buildDurationSamples(t *testing.T) uint64 {
+	t.Helper()
+	var m dto.Metric
+	require.NoError(t, witnessCacheBuildDuration.Write(&m))
+	return m.GetHistogram().GetSampleCount()
+}
+
+func TestBuildAndCacheHeadCaptureJoinsRunningBuild(t *testing.T) {
+	ctx := context.Background()
+	const buildNum = uint64(6)
+	m, pin, hash := insertHeadCaptureChain(t, ctx, buildNum)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+	running := mkResult()
+	registerFinishedBuild(api.witnessCache, hash, running)
+
+	samplesBefore := buildDurationSamples(t)
+	next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
+	defer next.close()
+	cached, ok := api.witnessCache.Get(hash)
+	require.True(t, ok)
+	require.Same(t, running, cached, "the head-capture builder must cache the running build's result, not build again")
+	require.Equal(t, samplesBefore+1, buildDurationSamples(t), "a joined build must still record its duration")
 }
 
 // insertHeadCaptureChain enables historical commitment, builds a module with no inserted
