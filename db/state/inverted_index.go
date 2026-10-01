@@ -157,11 +157,7 @@ func (ii *InvertedIndex) efAccessorFileNameMask(fromStep, toStep kv.Step) string
 	return fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep)
 }
 
-var (
-	invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
-	invIdxPrefetchWorkers     = dbg.EnvUint("INV_IDX_PREFETCH_WORKERS", uint64(runtime.GOMAXPROCS(0)))
-	invIdxPrefetchBatchSize   = dbg.EnvUint("INV_IDX_PREFETCH_BATCH_SIZE", 1024)
-)
+var invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
 
 func (ii *InvertedIndex) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	accessor, err := recsplit.OpenIndex(fPath)
@@ -336,9 +332,10 @@ func (iit *InvertedIndexRoTx) NewWriter(db kv.RoDB) *InvertedIndexBufferedWriter
 }
 
 type InvertedIndexBufferedWriter struct {
-	index, indexKeys *etl.Collector
-	indexCount       uint64
-	prefetcher       *kv.InvertedIndexPrefetcher
+	index, indexKeys  *etl.Collector
+	indexCount        uint64
+	prefetcher        *kv.InvertedIndexPrefetcher
+	prefetchBatchSize uint64
 
 	discard      bool
 	filenameBase string
@@ -404,7 +401,7 @@ func (w *InvertedIndexBufferedWriter) flushIndex(ctx context.Context, tx kv.RwTx
 	if w.prefetcher == nil {
 		return w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()})
 	}
-	pairs := make([][2][]byte, 0, invIdxPrefetchBatchSize)
+	pairs := make([][2][]byte, 0, w.prefetchBatchSize)
 	var buffer []byte
 	flush := func(next etl.LoadNextFunc) error {
 		if err := w.prefetcher.Prefetch(ctx, pairs); err != nil {
@@ -467,17 +464,19 @@ func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool)
 		panic(fmt.Sprintf("assert: %d %d", iit.ii.stepSize, iit.stepSize))
 	}
 	var prefetcher *kv.InvertedIndexPrefetcher
-	if invIdxPrefetchWorkers > 0 && !discard && db != nil {
-		prefetcher = kv.NewInvertedIndexPrefetcher(db, iit.ii.ValuesTable, invIdxPrefetchWorkers)
+	if !discard && db != nil && dbg.EnvBool("INV_IDX_PREFETCH", true) {
+		workers := dbg.EnvUint("INV_IDX_PREFETCH_WORKERS", uint64(runtime.GOMAXPROCS(0)))
+		prefetcher = kv.NewInvertedIndexPrefetcher(db, iit.ii.ValuesTable, workers)
 	}
 	w := &InvertedIndexBufferedWriter{
-		prefetcher:   prefetcher,
-		name:         iit.name,
-		discard:      discard,
-		filenameBase: iit.ii.FilenameBase,
-		tmpdir:       tmpdir,
-		logger:       iit.ii.logger,
-		stepSize:     iit.stepSize,
+		prefetcher:        prefetcher,
+		prefetchBatchSize: dbg.EnvUint("INV_IDX_PREFETCH_BATCH_SIZE", 1024),
+		name:              iit.name,
+		discard:           discard,
+		filenameBase:      iit.ii.FilenameBase,
+		tmpdir:            tmpdir,
+		logger:            iit.ii.logger,
+		stepSize:          iit.stepSize,
 
 		indexKeysTable: iit.ii.KeysTable,
 		indexTable:     iit.ii.ValuesTable,

@@ -1318,11 +1318,7 @@ type prefetchIndexCursor struct {
 }
 
 func (c *prefetchIndexCursor) Put(k, v []byte) error {
-	if invIdxPrefetchWorkers > 0 {
-		require.GreaterOrEqual(c.t, c.prefetched.Add(-1), int32(0), "prefetch must precede every write")
-	} else {
-		require.Zero(c.t, c.prefetched.Load(), "prefetch must not run when disabled")
-	}
+	require.GreaterOrEqual(c.t, c.prefetched.Add(-1), int32(0), "prefetch must precede every write")
 	return c.RwCursorDupSort.Put(k, v)
 }
 
@@ -1370,6 +1366,7 @@ func (c *prefetchIndexReadCursor) SeekBothRange(k, v []byte) ([]byte, error) {
 }
 
 func TestInvertedIndexPrefetch(t *testing.T) {
+	const workers, batchSize = uint64(3), uint64(1024)
 	type entry struct {
 		txNum uint64
 		key   string
@@ -1445,8 +1442,11 @@ func TestInvertedIndexPrefetch(t *testing.T) {
 				require.NoError(t, err)
 				defer c.Close()
 				cursor := &prefetchIndexCursor{RwCursorDupSort: c, t: t}
-				w := iit.NewWriter(&prefetchIndexDB{RoDB: db, cursor: cursor})
+				prefetchDB := &prefetchIndexDB{RoDB: db, cursor: cursor}
+				w := iit.NewWriter(prefetchDB)
 				defer w.close()
+				w.prefetcher = kv.NewInvertedIndexPrefetcher(prefetchDB, ii.ValuesTable, workers)
+				w.prefetchBatchSize = batchSize
 				for i, e := range entries {
 					require.NoError(t, w.Add([]byte(e.key), e.txNum))
 					if spill && i%2 == 1 {
@@ -1456,18 +1456,9 @@ func TestInvertedIndexPrefetch(t *testing.T) {
 				}
 				require.NoError(t, w.Flush(t.Context(), &prefetchIndexTx{RwTx: tx, table: ii.ValuesTable, cursor: cursor}))
 				require.Zero(t, cursor.prefetched.Load())
-				if invIdxPrefetchWorkers > 0 {
-					workers := invIdxPrefetchWorkers
-					entryCount := uint64(len(entries))
-					batchSize := invIdxPrefetchBatchSize
-					expectedCalls := entryCount
-					if batchSize > 0 {
-						expectedCalls = entryCount/batchSize*min(workers, batchSize) + min(workers, entryCount%batchSize)
-					}
-					require.EqualValues(t, expectedCalls, cursor.prefetchCalls.Load())
-				} else {
-					require.Zero(t, cursor.prefetchCalls.Load())
-				}
+				entryCount := uint64(len(entries))
+				expectedCalls := entryCount/batchSize*min(workers, batchSize) + min(workers, entryCount%batchSize)
+				require.EqualValues(t, expectedCalls, cursor.prefetchCalls.Load())
 				for table, values := range expected {
 					want := make([]string, 0, len(values))
 					for value := range values {
@@ -1497,38 +1488,30 @@ func TestInvertedIndexPrefetchError(t *testing.T) {
 	defer c.Close()
 	wantErr := errors.New("read failed")
 	cursor := &prefetchIndexCursor{RwCursorDupSort: c, t: t, prefetchErr: wantErr}
-	w := iit.NewWriter(&prefetchIndexDB{RoDB: db, cursor: cursor})
+	prefetchDB := &prefetchIndexDB{RoDB: db, cursor: cursor}
+	w := iit.NewWriter(prefetchDB)
 	defer w.close()
+	w.prefetcher = kv.NewInvertedIndexPrefetcher(prefetchDB, ii.ValuesTable, 3)
+	w.prefetchBatchSize = 1024
 	require.NoError(t, w.Add([]byte("key"), 1))
 	err = w.Flush(t.Context(), &prefetchIndexTx{RwTx: tx, table: ii.ValuesTable, cursor: cursor})
-	if invIdxPrefetchWorkers > 0 {
-		require.ErrorIs(t, err, wantErr)
-		value, getErr := tx.GetOne(ii.ValuesTable, []byte("key"))
-		require.NoError(t, getErr)
-		require.Empty(t, value, "failed prefetch must not write a partial batch")
-	} else {
-		require.NoError(t, err)
-		require.Zero(t, cursor.prefetchCalls.Load())
-	}
+	require.ErrorIs(t, err, wantErr)
+	value, getErr := tx.GetOne(ii.ValuesTable, []byte("key"))
+	require.NoError(t, getErr)
+	require.Empty(t, value, "failed prefetch must not write a partial batch")
 }
 
 func TestInvertedIndexPrefetchReuse(t *testing.T) {
-	for _, workers := range []uint64{0, 3} {
+	for _, workers := range []uint64{1, 3} {
 		t.Run(fmt.Sprintf("workers=%d", workers), func(t *testing.T) {
-			previous := invIdxPrefetchWorkers
-			invIdxPrefetchWorkers = workers
-			t.Cleanup(func() { invIdxPrefetchWorkers = previous })
 			db, ii := testDbAndInvertedIndex(t, 16, log.New())
 			iit := ii.beginForTests()
 			defer iit.Close()
 			w := iit.NewWriter(db)
 			defer w.close()
+			w.prefetcher = kv.NewInvertedIndexPrefetcher(db, ii.ValuesTable, workers)
+			w.prefetchBatchSize = 1024
 			p := w.prefetcher
-			if invIdxPrefetchWorkers > 0 {
-				require.NotNil(t, p, "create the prefetcher with the writer")
-			} else {
-				require.Nil(t, p)
-			}
 			for txNum := uint64(1); txNum <= 2; txNum++ {
 				ctx, cancel := context.WithCancel(t.Context())
 				require.NoError(t, w.Add([]byte("key"), txNum))
@@ -1601,6 +1584,6 @@ func TestInvertedIndexPrefetchReadLimit(t *testing.T) {
 	defer cancel()
 	p := kv.NewInvertedIndexPrefetcher(db, kv.TblTracesToIdx, 1)
 	pairs := [][2][]byte{{[]byte("key"), make([]byte, 8)}}
-	require.NoError(t, p.Prefetch(ctx, pairs))
+	require.ErrorIs(t, p.Prefetch(ctx, pairs), kv.ErrReadTxLimitExceeded)
 	require.NoError(t, tx.Put(kv.TblTracesToIdx, pairs[0][0], pairs[0][1]))
 }

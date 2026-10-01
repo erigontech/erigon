@@ -18,44 +18,43 @@ package kv
 
 import (
 	"context"
-	"errors"
 
 	"golang.org/x/sync/errgroup"
 )
 
 type InvertedIndexPrefetcher struct {
+	db      RoDB
+	table   string
 	workers uint64
-	fetch   func(context.Context, [][2][]byte) error
 }
 
 func NewInvertedIndexPrefetcher(db RoDB, table string, workers uint64) *InvertedIndexPrefetcher {
-	return &InvertedIndexPrefetcher{workers: workers, fetch: func(ctx context.Context, pairs [][2][]byte) error {
-		tx, err := db.BeginRo(WithNonBlockingAcquire(ctx))
-		if err != nil {
-			if errors.Is(err, ErrReadTxLimitExceeded) {
-				return nil
-			}
+	return &InvertedIndexPrefetcher{db: db, table: table, workers: workers}
+}
+
+func (p *InvertedIndexPrefetcher) fetch(ctx context.Context, pairs [][2][]byte) error {
+	tx, err := p.db.BeginRo(WithNonBlockingAcquire(ctx))
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	c, err := tx.CursorDupSort(p.table)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for _, pair := range pairs {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		defer tx.Rollback()
-		c, err := tx.CursorDupSort(table)
-		if err != nil {
+		if _, _, err := c.SeekExact(pair[0]); err != nil {
 			return err
 		}
-		defer c.Close()
-		for _, pair := range pairs {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if _, _, err := c.SeekExact(pair[0]); err != nil {
-				return err
-			}
-			if _, err := c.SeekBothRange(pair[0], pair[1]); err != nil {
-				return err
-			}
+		if _, err := c.SeekBothRange(pair[0], pair[1]); err != nil {
+			return err
 		}
-		return nil
-	}}
+	}
+	return nil
 }
 
 func (p *InvertedIndexPrefetcher) Prefetch(ctx context.Context, pairs [][2][]byte) error {
