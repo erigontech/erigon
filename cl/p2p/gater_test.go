@@ -74,15 +74,12 @@ func TestInterceptAcceptStillAppliesThePrivateAddressFilter(t *testing.T) {
 	require.False(t, g.InterceptAccept(addr), "private-range filtering must be unaffected by the new checks")
 }
 
-// TestHostConnsRemoteIPsOnlyReportsInboundConnections reproduces review finding
-// "Aggregate deltas incorrectly retire reservations and undercount occupancy":
-// peerPoolLimiter.allow is only ever invoked for inbound attempts (via
-// InterceptAccept), so it only ever creates reservations for inbound connections. If
-// the live view it reconciles against also counted outbound connections - ones we
-// dialed ourselves, which never went through this limiter at all - an outbound
-// connection to some IP could be misread as "one of this IP's pending reservations
-// just matured" and retire a still-genuinely-pending inbound one, undercounting
-// occupancy. hostConns must only report inbound connections to the limiter.
+// TestHostConnsRemoteIPsOnlyReportsInboundConnections pins that hostConns only reports
+// inbound connections to the limiter: peerPoolLimiter.allow only ever creates
+// reservations for inbound attempts (via InterceptAccept), so an outbound connection -
+// one we dialed ourselves, which never went through this limiter - must not count
+// toward its live-occupancy total or be mistaken by onConnected for a pending inbound
+// reservation maturing.
 func TestHostConnsRemoteIPsOnlyReportsInboundConnections(t *testing.T) {
 	serverKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -120,6 +117,52 @@ func TestHostConnsRemoteIPsOnlyReportsInboundConnections(t *testing.T) {
 
 	ips := (hostConns{server}).remoteIPs()
 	require.Len(t, ips, 1, "only the inbound connection must be reported; the outbound one must be excluded")
+}
+
+// TestSetHostRetiresReservationOnceInboundConnectionGoesLive exercises the Connected
+// notifee through the real SetHost wiring, not just peerPoolLimiter.onConnected in
+// isolation: an inbound connection accepted by InterceptAccept must have its
+// reservation retired once it actually registers live in the real host.
+func TestSetHostRetiresReservationOnceInboundConnectionGoesLive(t *testing.T) {
+	serverKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
+	require.NoError(t, err)
+	g, err := NewGater(&P2PConfig{IpAddr: "127.0.0.1"}, log.Root())
+	require.NoError(t, err)
+	serverOpts = append(serverOpts, libp2p.ConnectionGater(g))
+	server, err := libp2p.New(serverOpts...)
+	require.NoError(t, err)
+	defer server.Close()
+	g.SetHost(server)
+
+	peerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	peerOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, peerKey)
+	require.NoError(t, err)
+	peerHost, err := libp2p.New(peerOpts...)
+	require.NoError(t, err)
+	defer peerHost.Close()
+
+	// allow() itself fails open for loopback and never reserves, and a real local
+	// test connection's remote address is always loopback - so a reservation for
+	// the IP this connection will arrive from is seeded directly, to observe
+	// whether the real Connected notifee retires it.
+	g.poolLimiter.mu.Lock()
+	g.poolLimiter.reservations = append(g.poolLimiter.reservations, peerPoolReservation{
+		ipKey: "127.0.0.1", subscriberKey: "127.0.0.0", asKey: "127.0.0.0", expiresAt: time.Now().Add(time.Minute),
+	})
+	g.poolLimiter.mu.Unlock()
+
+	serverAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_TCP)
+	require.NoError(t, peerHost.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverAddr}}))
+
+	require.Eventually(t, func() bool {
+		g.poolLimiter.mu.Lock()
+		defer g.poolLimiter.mu.Unlock()
+		return len(g.poolLimiter.reservations) == 0
+	}, time.Second, 10*time.Millisecond,
+		"the seeded reservation for the connecting peer's IP must be retired once the connection registers live, through the real SetHost/Notify wiring")
 }
 
 func firstMultiaddrWithProtocol(t *testing.T, addrs []multiaddr.Multiaddr, protocol int) multiaddr.Multiaddr {

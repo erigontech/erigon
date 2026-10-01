@@ -43,7 +43,7 @@ func TestNewPeerPoolLimiterScalesWithMaxPeerCount(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l := newPeerPoolLimiter(tt.maxPeerCount)
+			l := newPeerPoolLimiter(tt.maxPeerCount, nil)
 			require.Equal(t, tt.wantMaxPerIP, l.maxPerIP)
 			require.Equal(t, tt.wantMaxPerSubscriberBlock, l.maxPerSubscriberBlock)
 			require.Equal(t, tt.wantMaxPerASBlock, l.maxPerASBlock)
@@ -56,12 +56,12 @@ func TestNewPeerPoolLimiterScalesWithMaxPeerCount(t *testing.T) {
 }
 
 func TestPeerPoolLimiterAllowsWithoutHostSet(t *testing.T) {
-	l := newPeerPoolLimiter(128)
+	l := newPeerPoolLimiter(128, nil)
 	require.True(t, l.allow(net.ParseIP("203.0.113.5")), "must fail open before setHost is called")
 }
 
 func TestPeerPoolLimiterExemptsLoopback(t *testing.T) {
-	l := newPeerPoolLimiter(128)
+	l := newPeerPoolLimiter(128, nil)
 	l.setHost(&connsFixtureHost{})
 	require.True(t, l.allow(net.ParseIP("127.0.0.1")))
 }
@@ -79,15 +79,18 @@ func TestPeerPoolLimiterCapsConnectionsFromSameIP(t *testing.T) {
 	require.True(t, l.allow(net.ParseIP(ip)), "0 existing connections, under the per-IP cap of 2")
 
 	fixture.conns = []string{ip}
+	l.onConnected(net.ParseIP(ip))
 	require.True(t, l.allow(net.ParseIP(ip)), "1 existing connection, still under the cap")
 
 	fixture.conns = []string{ip, ip}
+	l.onConnected(net.ParseIP(ip))
 	require.False(t, l.allow(net.ParseIP(ip)), "2 existing connections already at the per-IP cap")
 }
 
-// TestPeerPoolLimiterCapsConnectionsFromSameIPv4Slash24 is the user's own scenario:
-// 130.0.0.0/24 filling the whole pool is possible in theory but has a high chance of
-// being an attack, so the subscriber-block tier must stop it well before that point.
+// TestPeerPoolLimiterCapsConnectionsFromSameIPv4Slash24 pins that a single /24 cannot
+// fill the whole pool by spreading across distinct addresses within it - a high enough
+// concentration from one allocation is suspicious even with no individual address
+// repeating, so the subscriber-block tier must stop it well before that point.
 func TestPeerPoolLimiterCapsConnectionsFromSameIPv4Slash24(t *testing.T) {
 	l := &peerPoolLimiter{
 		maxPerIP: 100, maxPerSubscriberBlock: 2, maxPerASBlock: 100,
@@ -105,13 +108,12 @@ func TestPeerPoolLimiterCapsConnectionsFromSameIPv4Slash24(t *testing.T) {
 	require.True(t, l.allow(net.ParseIP("130.0.1.1")))
 }
 
-// TestPeerPoolLimiterCapsConnectionsFromSameIPv4Slash16At75PercentOfPool is the
-// user's other scenario: 130.0.0.0/16 must never occupy more than 75% of the pool,
-// even though it is spread across many distinct /24s so the subscriber-block tier
-// never trips on its own.
+// TestPeerPoolLimiterCapsConnectionsFromSameIPv4Slash16At75PercentOfPool pins that a
+// single /16 can never occupy more than 75% of the pool, even when spread across many
+// distinct /24s so the subscriber-block tier never trips on its own.
 func TestPeerPoolLimiterCapsConnectionsFromSameIPv4Slash16At75PercentOfPool(t *testing.T) {
 	const maxPeerCount = 100
-	l := newPeerPoolLimiter(maxPeerCount)
+	l := newPeerPoolLimiter(maxPeerCount, nil)
 	require.Equal(t, 75, l.maxPerASBlock, "sanity check on the 75%-of-pool AS-block cap for a 100-peer pool")
 
 	fixture := &connsFixtureHost{}
@@ -169,12 +171,12 @@ func TestPeerPoolLimiterCapsConnectionsFromSameIPv6Slash32(t *testing.T) {
 	require.True(t, l.allow(net.ParseIP("2001:db9::1")), "an address in an unrelated /32 must be unaffected")
 }
 
-// TestPeerPoolLimiterEnforcesCapUnderConcurrentAccepts reproduces the TOCTOU race
-// flagged in review on PR #24449: InterceptAccept runs before the connection it is
-// deciding on is registered in the live host's connection list. Deliberately never
-// update the fixture's conns, so every concurrent allow() call sees the same
-// "nothing live yet" snapshot - the cap can only be enforced if the limiter tracks
-// admissions itself, not just by querying the live host.
+// TestPeerPoolLimiterEnforcesCapUnderConcurrentAccepts pins the TOCTOU case:
+// InterceptAccept runs before the connection it is deciding on is registered in the
+// live host's connection list. Deliberately never update the fixture's conns, so every
+// concurrent allow() call sees the same "nothing live yet" snapshot - the cap can only
+// be enforced if the limiter tracks admissions itself, not just by querying the live
+// host.
 func TestPeerPoolLimiterEnforcesCapUnderConcurrentAccepts(t *testing.T) {
 	const maxPerIP = 3
 	l := &peerPoolLimiter{
@@ -235,28 +237,28 @@ func TestPeerPoolLimiterReservationDoesNotDoubleCountOnceLive(t *testing.T) {
 	require.True(t, l.allow(net.ParseIP(ip)), "first admission reserves a slot")
 
 	fixture.conns = []string{ip}
+	l.onConnected(net.ParseIP(ip))
 	require.True(t, l.allow(net.ParseIP(ip)), "the first admission is now live; its reservation must not also count separately")
 
 	fixture.conns = []string{ip, ip}
+	l.onConnected(net.ParseIP(ip))
 	require.False(t, l.allow(net.ParseIP(ip)), "two live connections already occupy the cap of 2")
 }
 
-// TestDefaultPeerPoolReservationTTLCoversLibp2pHandshakeTimeouts guards against
-// review finding "Short reservation expiry allows slow-handshake admission bypass":
-// go-libp2p's shared upgrader allows up to 15s to accept a connection plus 60s to
-// negotiate it, so a reservation shorter than that could expire - and stop counting
-// toward the cap - while a legitimate, still-pending handshake is neither live nor
-// reserved, letting a source accumulate more admissions than the configured cap once
-// enough slow handshakes land.
+// TestDefaultPeerPoolReservationTTLCoversLibp2pHandshakeTimeouts pins that the default
+// TTL outlives go-libp2p's own handshake timeouts (shared upgrader: up to 15s to accept
+// a connection plus 60s to negotiate it). A shorter TTL would let a reservation expire
+// while its handshake is still legitimately pending - neither live nor reserved -
+// letting a source accumulate more admissions than the configured cap.
 func TestDefaultPeerPoolReservationTTLCoversLibp2pHandshakeTimeouts(t *testing.T) {
 	require.GreaterOrEqual(t, defaultPeerPoolReservationTTL, 75*time.Second)
 }
 
-// TestPeerPoolLimiterReservationCountingNeverExceedsCapWithPreExistingLive reproduces
-// review finding "Reservation counting can exceed the configured connection cap":
-// with a cap of 3 and two already-live connections, max(live, reserved) let two
-// concurrent new reservations both pass (max(2,2)==2), which would put the source at
-// 4 connections once both materialized.
+// TestPeerPoolLimiterReservationCountingNeverExceedsCapWithPreExistingLive pins that
+// occupancy counts live and reserved connections additively, not as max(live,
+// reserved): with a cap of 3 and two already-live connections, the max form would let
+// two concurrent new reservations both pass (max(2,2)==2), putting the source at 4
+// connections once both materialized.
 func TestPeerPoolLimiterReservationCountingNeverExceedsCapWithPreExistingLive(t *testing.T) {
 	l := &peerPoolLimiter{
 		maxPerIP: 3, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
@@ -271,10 +273,9 @@ func TestPeerPoolLimiterReservationCountingNeverExceedsCapWithPreExistingLive(t 
 	require.False(t, l.allow(net.ParseIP(ip)), "2nd new admission must be rejected: 2 live + 1 pending reservation already equals the cap")
 }
 
-// TestPeerPoolLimiterBoundsTotalReservations reproduces review finding "Unbounded
-// reservations enable attacker-controlled memory growth": many distinct sources, each
-// individually within its own per-key cap, must not be able to grow the reservation
-// pool without bound.
+// TestPeerPoolLimiterBoundsTotalReservations pins that many distinct sources, each
+// individually within its own per-key cap, cannot grow the reservation pool without
+// bound.
 func TestPeerPoolLimiterBoundsTotalReservations(t *testing.T) {
 	l := &peerPoolLimiter{
 		maxPerIP: 1000, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
@@ -291,103 +292,159 @@ func TestPeerPoolLimiterBoundsTotalReservations(t *testing.T) {
 	require.LessOrEqual(t, len(l.reservations), 3)
 }
 
-// TestPeerPoolLimiterBoundsIPLiveBaselines reproduces review finding "IP baselines
-// accumulate indefinitely after connections close": an IP whose connection later
-// closes and that never attempts to connect again is never reconciled again, so
-// nothing ever deletes its baseline entry. Over a long-running node's lifetime,
-// ordinary peer churn - not even an attacker - would accumulate one entry per
-// source IP ever seen, unbounded.
-func TestPeerPoolLimiterBoundsIPLiveBaselines(t *testing.T) {
+// TestPeerPoolLimiterOnConnectedRetiresExactlyOneReservation pins that confirming one
+// connection live only retires one of that IP's pending reservations, leaving any other
+// still-genuinely-pending ones for the same IP untouched.
+func TestPeerPoolLimiterOnConnectedRetiresExactlyOneReservation(t *testing.T) {
 	l := &peerPoolLimiter{
 		maxPerIP: 1000, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
-		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
-		reservationTTL: time.Minute, now: time.Now, maxIPBaselines: 3,
-	}
-	fixture := &connsFixtureHost{}
-	l.setHost(fixture)
-
-	// 4 distinct IPs each connect once - triggering a reconciled baseline entry -
-	// and then stop attempting, simulating ordinary churn with no attacker involved.
-	for _, ip := range []string{"203.0.113.1", "203.0.113.2", "203.0.113.3", "203.0.113.4"} {
-		fixture.conns = append(fixture.conns, ip)
-		require.True(t, l.allow(net.ParseIP(ip)))
-	}
-
-	require.LessOrEqual(t, len(l.ipLiveBaseline), 3,
-		"baseline tracking must stay bounded even though every IP disconnected without ever being revisited")
-}
-
-// TestPeerPoolLimiterReconciliationDoesNotOverRetireAfterBaselineEviction reproduces
-// review finding "Baseline tracking mishandles LRU eviction and count decreases"
-// (part 1): treating an evicted (or never-seen) key's baseline as 0 makes delta the
-// full live count, which can retire every pending reservation for that key at once
-// even though only one of them actually just matured.
-func TestPeerPoolLimiterReconciliationDoesNotOverRetireAfterBaselineEviction(t *testing.T) {
-	l := &peerPoolLimiter{
-		maxPerIP: 1000, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
-		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
-		reservationTTL: time.Minute, now: time.Now, maxIPBaselines: 1,
-	}
-	fixture := &connsFixtureHost{}
-	l.setHost(fixture)
-
-	ip1, ip2 := "203.0.113.1", "203.0.113.2"
-
-	// ip1's first connection matures immediately (retiring its own reservation),
-	// establishing a tracked baseline of 1.
-	require.True(t, l.allow(net.ParseIP(ip1)))
-	fixture.conns = append(fixture.conns, ip1)
-	require.True(t, l.allow(net.ParseIP(ip1)))
-
-	// A second, still-pending reservation accumulates for ip1 (live count
-	// unchanged, so it doesn't get retired).
-	require.True(t, l.allow(net.ParseIP(ip1)))
-	require.Len(t, l.reservations, 2, "ip1 should have 2 pending reservations")
-
-	// ip2's own admission tracks a baseline for ip2 and, since the bound is 1,
-	// evicts ip1's.
-	fixture.conns = append(fixture.conns, ip2)
-	require.True(t, l.allow(net.ParseIP(ip2)))
-	require.NotContains(t, l.ipLiveBaseline, ip1, "ip1's baseline entry should have been evicted to make room for ip2's")
-
-	// Exactly one of ip1's two pending reservations matures.
-	fixture.conns = append(fixture.conns, ip1)
-	require.True(t, l.allow(net.ParseIP(ip1)))
-
-	ip1Reservations := 0
-	for _, r := range l.reservations {
-		if r.ipKey == ip1 {
-			ip1Reservations++
-		}
-	}
-	require.Equal(t, 2, ip1Reservations,
-		"only the one reservation that matured should have been retired (leaving the other pending one, plus the new reservation from this call); an evicted baseline must not be treated as if ip1 had no pending reservations at all")
-}
-
-// TestPeerPoolLimiterReconciliationTracksLiveCountDecreases reproduces review finding
-// "Baseline tracking mishandles LRU eviction and count decreases" (part 2): a positive
-// baseline left unchanged when live connections decrease makes a later, genuinely
-// matured reservation look like it's still pending until live climbs back above the
-// old high-water mark, over-restricting the source in the meantime.
-func TestPeerPoolLimiterReconciliationTracksLiveCountDecreases(t *testing.T) {
-	ip := "203.0.113.1"
-	l := &peerPoolLimiter{
-		maxPerIP: 3, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
 		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
 		reservationTTL: time.Minute, now: time.Now,
 	}
-	fixture := &connsFixtureHost{conns: []string{ip, ip, ip}} // 3 live connections
+	fixture := &connsFixtureHost{}
 	l.setHost(fixture)
-	require.False(t, l.allow(net.ParseIP(ip)), "already at the cap of 3 live connections; this call also establishes a tracked baseline of 3")
+	ip := net.ParseIP("203.0.113.1")
 
-	// 2 of the 3 close.
-	fixture.conns = []string{ip}
-	require.True(t, l.allow(net.ParseIP(ip)), "only 1 live connection remains, well under the cap")
+	require.True(t, l.allow(ip))
+	require.True(t, l.allow(ip))
+	require.Len(t, l.reservations, 2, "two concurrent attempts from the same IP should both reserve")
 
-	// The new connection from the call above matures: 2 live now.
-	fixture.conns = []string{ip, ip}
-	require.True(t, l.allow(net.ParseIP(ip)),
-		"2 live and 0 pending is still under the cap of 3 - the prior reservation must have been retired once its connection matured, not left stuck counting against a stale baseline of 3 that was never brought down to the real count of 1")
+	l.onConnected(ip)
+	require.Len(t, l.reservations, 1, "only the one reservation whose connection went live should retire")
+}
+
+// TestPeerPoolLimiterLogsEachRejectionAtTraceOnly pins that a cap rejection is visible
+// at Trace level, so it isn't completely silent against the live host - previously
+// nothing logged a peer-pool rejection at all.
+func TestPeerPoolLimiterLogsEachRejectionAtTraceOnly(t *testing.T) {
+	logger := &recordingLogger{}
+	l := &peerPoolLimiter{
+		maxPerIP: 1, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+		reservationTTL: time.Minute, now: time.Now, logger: logger, summaryInterval: 30 * time.Second,
+	}
+	fixture := &connsFixtureHost{conns: []string{"203.0.113.1"}}
+	l.setHost(fixture)
+
+	for range 5 {
+		require.False(t, l.allow(net.ParseIP("203.0.113.1")))
+	}
+
+	require.Len(t, logger.traceMsgs, 5, "every individual rejection should be visible at Trace level")
+	require.Len(t, logger.warnMsgs, 1, "but only one summary line at Warn level")
+}
+
+// TestPeerPoolLimiterLogsPeriodicSummaryNotPerRejection pins that a flood of
+// rejections produces one periodic Warn-level summary rather than flooding the log at
+// the attacker's own request rate.
+func TestPeerPoolLimiterLogsPeriodicSummaryNotPerRejection(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(0, 0)}
+	logger := &recordingLogger{}
+	l := &peerPoolLimiter{
+		maxPerIP: 1, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+		reservationTTL: time.Minute, now: clock.Now, logger: logger, summaryInterval: 30 * time.Second,
+	}
+	fixture := &connsFixtureHost{conns: []string{"203.0.113.1"}}
+	l.setHost(fixture)
+
+	for range 100 {
+		require.False(t, l.allow(net.ParseIP("203.0.113.1")))
+	}
+	require.Len(t, logger.warnMsgs, 1, "100 rejections within one window must produce exactly one summary line")
+
+	clock.advance(31 * time.Second)
+	require.False(t, l.allow(net.ParseIP("203.0.113.1")))
+	require.Len(t, logger.warnMsgs, 2, "a rejection in a new window must produce a new summary line")
+}
+
+// TestPeerPoolLimiterLoggingStaysSilentWhenNothingRejected pins that an allowed
+// connection never logs anything, so the limiter stays silent in steady state.
+func TestPeerPoolLimiterLoggingStaysSilentWhenNothingRejected(t *testing.T) {
+	logger := &recordingLogger{}
+	l := &peerPoolLimiter{
+		maxPerIP: 1000, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+		reservationTTL: time.Minute, now: time.Now, logger: logger, summaryInterval: 30 * time.Second,
+	}
+	l.setHost(&connsFixtureHost{})
+
+	for range 20 {
+		require.True(t, l.allow(net.ParseIP("203.0.113.1")))
+		l.onConnected(net.ParseIP("203.0.113.1"))
+	}
+	require.Empty(t, logger.traceMsgs)
+	require.Empty(t, logger.warnMsgs)
+}
+
+// TestPeerPoolLimiterSubscriberBlockDoesNotDoubleCountMaturedConnections pins that once
+// a reservation's connection is confirmed live, it stops counting toward the
+// subscriber-block tier as a reservation too - not just for its own IP's tier, which
+// the per-attempt reconciliation already covered, but for every other IP sharing its
+// block.
+func TestPeerPoolLimiterSubscriberBlockDoesNotDoubleCountMaturedConnections(t *testing.T) {
+	l := &peerPoolLimiter{
+		maxPerIP: 100, maxPerSubscriberBlock: 12, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+	}
+	fixture := &connsFixtureHost{}
+	l.setHost(fixture)
+
+	for i := 1; i <= 6; i++ {
+		ip := fmt.Sprintf("130.0.0.%d", i)
+		require.True(t, l.allow(net.ParseIP(ip)), "distinct address %d within the subscriber block", i)
+		fixture.conns = append(fixture.conns, ip)
+		l.onConnected(net.ParseIP(ip))
+	}
+
+	require.True(t, l.allow(net.ParseIP("130.0.0.7")),
+		"a 7th distinct, already-matured address must still be admitted under a cap of 12 - each of the first 6 must count once, not twice (live + still-reserved)")
+}
+
+// TestPeerPoolLimiterChurningPeerIsNotPenalizedAfterDisconnecting pins that a
+// reservation retires once its connection is confirmed live even if that connection
+// later closes before any other admission attempt would have observed it live.
+func TestPeerPoolLimiterChurningPeerIsNotPenalizedAfterDisconnecting(t *testing.T) {
+	l := &peerPoolLimiter{
+		maxPerIP: 2, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+	}
+	fixture := &connsFixtureHost{}
+	l.setHost(fixture)
+	ip := net.ParseIP("203.0.113.5")
+
+	for i := range 2 {
+		require.True(t, l.allow(ip), "connect attempt %d", i)
+		fixture.conns = []string{ip.String()}
+		l.onConnected(ip)
+		fixture.conns = nil
+	}
+
+	require.True(t, l.allow(ip), "a peer that connected and disconnected twice, with nothing of its currently live, must not be refused a third time")
+}
+
+// TestPeerPoolLimiterGlobalReservationPoolSurvivesConnectAndCloseChurn pins that
+// ordinary connect-then-disconnect churn across many distinct IPs cannot exhaust the
+// global reservation pool and lock out every other inbound peer.
+func TestPeerPoolLimiterGlobalReservationPoolSurvivesConnectAndCloseChurn(t *testing.T) {
+	l := &peerPoolLimiter{
+		maxPerIP: 1000, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+		reservationTTL: time.Minute, now: time.Now, maxReservations: 10,
+	}
+	fixture := &connsFixtureHost{}
+	l.setHost(fixture)
+
+	for i := range 10 {
+		ip := net.ParseIP(fmt.Sprintf("203.0.113.%d", i+1))
+		require.True(t, l.allow(ip), "attempt %d, each from a distinct IP, should fit within the reservation bound", i)
+		fixture.conns = []string{ip.String()}
+		l.onConnected(ip)
+		fixture.conns = nil
+	}
+
+	require.True(t, l.allow(net.ParseIP("203.0.113.99")),
+		"an 11th distinct IP must still be admitted: all 10 prior connections matured and closed, so none of their reservations should still occupy the global pool")
 }
 
 // connsFixtureHost is a minimal liveConnsSource stand-in: real libp2p hosts are

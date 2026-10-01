@@ -17,7 +17,6 @@
 package p2p
 
 import (
-	"container/list"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -66,12 +65,7 @@ const (
 	// must not be able to grow the reservation pool without bound.
 	defaultPeerPoolMaxReservations = 8192
 
-	// defaultPeerPoolMaxIPBaselines bounds ipLiveBaseline. An IP's baseline entry
-	// is only ever revisited (and so only ever cleaned up) by a later admission
-	// attempt from the same IP; one that connects once and never attempts again
-	// (ordinary peer churn, not an attacker) would otherwise sit in the map
-	// forever. Least-recently-reconciled entries are evicted first.
-	defaultPeerPoolMaxIPBaselines = 8192
+	defaultPeerPoolSummaryInterval = 30 * time.Second
 )
 
 // liveConnsSource gives the occupancy count a live view of currently connected
@@ -97,21 +91,9 @@ type liveConnsSource interface {
 // host's live connection list, so counting only live connections is a TOCTOU race: a
 // burst of concurrent accepts from the same source would all observe the same
 // pre-admission snapshot and could all pass. allow tracks its own short-lived
-// admission reservations, counted *additively* alongside live connections (live +
-// reserved, not max(live, reserved): the max form undercounts whenever a reservation
-// represents a genuinely new connection rather than one already reflected live -
-// e.g. two pre-existing live connections plus two brand new concurrent reservations
-// is 4 pending connections, not max(2,2)=2).
-//
-// Reservations are released two ways: by TTL (since a connection rejected by a later
-// gater hook never fires a close notification, so a notifee-based release would leak),
-// and by reconciliation - once the live host confirms at least one more connection
-// from a given IP than last observed, that many of the IP's oldest reservations are
-// retired immediately rather than waiting out the rest of their TTL. Reconciling at
-// the IP tier is sufficient for the coarser tiers too: a reservation tagged with a
-// subscriber-block or AS-block key is also tagged with the IP key, so retiring it once
-// its own IP's live count catches up removes its contribution from every tier it was
-// counted in.
+// admission reservations, counted additively alongside live connections (occupancy =
+// live + pending). A reservation is released once its connection is confirmed live
+// (see onConnected) or, failing that, once it expires.
 type peerPoolLimiter struct {
 	host atomic.Pointer[liveConnsSource]
 
@@ -120,12 +102,11 @@ type peerPoolLimiter struct {
 	reservationTTL  time.Duration
 	maxReservations int
 	now             func() time.Time
-	// ipLiveBaseline is the live-connection count per IP as of its last
-	// reconciliation, LRU-bounded by maxIPBaselines (see its doc comment).
-	ipLiveBaseline      map[string]int
-	ipLiveBaselineLRU   *list.List
-	ipLiveBaselineElems map[string]*list.Element
-	maxIPBaselines      int
+
+	logger               poolLimiterLogger
+	summaryInterval      time.Duration
+	rejectedSinceSummary int
+	lastSummary          time.Time
 
 	maxPerIP              int
 	maxPerSubscriberBlock int
@@ -135,6 +116,11 @@ type peerPoolLimiter struct {
 	v6SubscriberBlockBits int
 	v4ASBlockBits         int
 	v6ASBlockBits         int
+}
+
+type poolLimiterLogger interface {
+	Trace(msg string, ctx ...any)
+	Warn(msg string, ctx ...any)
 }
 
 type peerPoolReservation struct {
@@ -147,17 +133,15 @@ type peerPoolReservation struct {
 // newPeerPoolLimiter scales its caps with the configured peer pool size rather than
 // using fixed constants, so the limiter stays meaningful for both a small
 // --caplin.max-peer-count and a large one.
-func newPeerPoolLimiter(maxPeerCount uint64) *peerPoolLimiter {
+func newPeerPoolLimiter(maxPeerCount uint64, logger poolLimiterLogger) *peerPoolLimiter {
 	maxPerSubscriberBlock := max(peerPoolLimiterMinPerSubscriberBlock, int(maxPeerCount)/peerPoolLimiterPerSubscriberBlockDivisor)
 	maxPerASBlock := max(maxPerSubscriberBlock, int(float64(maxPeerCount)*peerPoolLimiterASBlockPoolFraction))
 	return &peerPoolLimiter{
 		reservationTTL:        defaultPeerPoolReservationTTL,
 		maxReservations:       defaultPeerPoolMaxReservations,
 		now:                   time.Now,
-		ipLiveBaseline:        make(map[string]int),
-		ipLiveBaselineLRU:     list.New(),
-		ipLiveBaselineElems:   make(map[string]*list.Element),
-		maxIPBaselines:        defaultPeerPoolMaxIPBaselines,
+		logger:                logger,
+		summaryInterval:       defaultPeerPoolSummaryInterval,
 		maxPerIP:              max(peerPoolLimiterMinPerIP, int(maxPeerCount)/peerPoolLimiterPerIPDivisor),
 		maxPerSubscriberBlock: maxPerSubscriberBlock,
 		maxPerASBlock:         maxPerASBlock,
@@ -197,7 +181,6 @@ func (l *peerPoolLimiter) allow(ip net.IP) bool {
 
 	now := l.clock()
 	l.pruneExpiredLocked(now)
-	l.reconcileLocked(ipKey, liveIP)
 
 	var reservedIP, reservedSubscriberBlock, reservedASBlock int
 	for _, r := range l.reservations {
@@ -214,14 +197,15 @@ func (l *peerPoolLimiter) allow(ip net.IP) bool {
 
 	// Additive, not max: a reservation represents a connection attempt in flight
 	// on top of whatever is already live, not an alternate accounting of the same
-	// connections - reconcileLocked above is what retires a reservation once the
-	// live host actually confirms it, so by this point every remaining reservation
-	// is still genuinely pending.
+	// connections - onConnected is what retires a reservation once the live host
+	// actually confirms it, so by this point every remaining reservation is still
+	// genuinely pending.
 	sameIP := liveIP + reservedIP
 	sameSubscriberBlock := liveSubscriberBlock + reservedSubscriberBlock
 	sameASBlock := liveASBlock + reservedASBlock
 
 	if sameIP >= l.maxPerIP || sameSubscriberBlock >= l.maxPerSubscriberBlock || sameASBlock >= l.maxPerASBlock {
+		l.recordRejection(ipKey, now)
 		return false
 	}
 
@@ -229,6 +213,7 @@ func (l *peerPoolLimiter) allow(ip net.IP) bool {
 		// Global memory bound reached. Reject rather than evict: evicting an
 		// unrelated key's reservation here would silently weaken that source's
 		// cap to make room for this one.
+		l.recordRejection(ipKey, now)
 		return false
 	}
 
@@ -239,6 +224,27 @@ func (l *peerPoolLimiter) allow(ip net.IP) bool {
 		expiresAt:     now.Add(l.ttl()),
 	})
 	return true
+}
+
+// onConnected retires one of ip's oldest pending reservations once a connection from
+// it is confirmed live. This is what lets a reservation stop being counted once its
+// connection is live, independent of whether any later admission attempt ever happens
+// to observe that - polling for a live-count increase at the next unrelated allow()
+// call misses a connection whose entire lifecycle completes between two such calls,
+// and misses it entirely for every IP but the one being admitted at that moment.
+func (l *peerPoolLimiter) onConnected(ip net.IP) {
+	if ip == nil {
+		return
+	}
+	ipKey := ip.String()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i, r := range l.reservations {
+		if r.ipKey == ipKey {
+			l.reservations = append(l.reservations[:i], l.reservations[i+1:]...)
+			return
+		}
+	}
 }
 
 func (l *peerPoolLimiter) ttl() time.Duration {
@@ -255,96 +261,39 @@ func (l *peerPoolLimiter) maxReservationsOrDefault() int {
 	return defaultPeerPoolMaxReservations
 }
 
-// reconcileLocked retires ipKey's oldest reservations once the live host confirms at
-// least as many of its connections as were pending, rather than waiting out their full
-// TTL. It must be called with l.mu held, after pruneExpiredLocked.
-func (l *peerPoolLimiter) reconcileLocked(ipKey string, liveIP int) {
-	l.ensureIPLiveBaselineLocked()
-	baseline, tracked := l.ipLiveBaseline[ipKey]
-	if !tracked {
-		// No reliable history: never seen this IP before, or its entry was
-		// LRU-evicted while it may still have had a nonzero baseline and pending
-		// reservations. Treating a miss as baseline 0 would compute delta as the
-		// full live count and could retire every one of this IP's pending
-		// reservations at once, even if only one of them actually just matured.
-		// Assume at most the single most recent admission could have matured
-		// instead - under-retiring is always safe (a stale reservation just
-		// lingers a bit longer, double-counted until it expires or the next
-		// reconciliation), over-retiring is not.
-		baseline = max(0, liveIP-1)
+func (l *peerPoolLimiter) summaryIntervalOrDefault() time.Duration {
+	if l.summaryInterval > 0 {
+		return l.summaryInterval
 	}
-	delta := liveIP - baseline
-	if delta > 0 {
-		retired := 0
-		remaining := l.reservations[:0]
-		for _, r := range l.reservations {
-			if retired < delta && r.ipKey == ipKey {
-				retired++
-				continue
-			}
-			remaining = append(remaining, r)
-		}
-		l.reservations = remaining
-	}
-	if liveIP == 0 {
-		if tracked {
-			l.deleteIPBaselineLocked(ipKey)
-		}
-		return
-	}
-	// Always refresh the baseline to the current reading, not only when it went
-	// up: a baseline left stale after a live count decrease would make a later
-	// genuinely-matured reservation look like it's still pending (delta <= 0
-	// forever, until live climbs back above the old high-water mark), retaining
-	// it until TTL and over-restricting the source in the meantime.
-	l.setIPBaselineLocked(ipKey, liveIP)
+	return defaultPeerPoolSummaryInterval
 }
 
-func (l *peerPoolLimiter) ensureIPLiveBaselineLocked() {
-	if l.ipLiveBaseline == nil {
-		l.ipLiveBaseline = make(map[string]int)
-	}
-	if l.ipLiveBaselineLRU == nil {
-		l.ipLiveBaselineLRU = list.New()
-	}
-	if l.ipLiveBaselineElems == nil {
-		l.ipLiveBaselineElems = make(map[string]*list.Element)
-	}
-}
-
-func (l *peerPoolLimiter) maxIPBaselinesOrDefault() int {
-	if l.maxIPBaselines > 0 {
-		return l.maxIPBaselines
-	}
-	return defaultPeerPoolMaxIPBaselines
-}
-
-// setIPBaselineLocked records ipKey's reconciled live count and marks it
-// most-recently-used, evicting the least-recently-reconciled entry if the bound is
-// exceeded. Must be called with l.mu held.
-func (l *peerPoolLimiter) setIPBaselineLocked(ipKey string, liveIP int) {
-	l.ipLiveBaseline[ipKey] = liveIP
-	if elem, ok := l.ipLiveBaselineElems[ipKey]; ok {
-		l.ipLiveBaselineLRU.MoveToFront(elem)
+// recordRejection logs every rejection at Trace (opt-in, silent by default) and
+// flushes at most one Warn-level summary per summary interval, mirroring
+// ipRateLimiter.recordRejection: a cap refusing a whole CGNAT or cloud block must stay
+// visible without flooding the log at the same rate as the rejections themselves. Must
+// be called with l.mu held.
+func (l *peerPoolLimiter) recordRejection(ipKey string, now time.Time) {
+	if l.logger == nil {
 		return
 	}
-	l.ipLiveBaselineElems[ipKey] = l.ipLiveBaselineLRU.PushFront(ipKey)
-	if l.ipLiveBaselineLRU.Len() <= l.maxIPBaselinesOrDefault() {
-		return
-	}
-	oldest := l.ipLiveBaselineLRU.Back()
-	if oldest == nil {
-		return
-	}
-	l.deleteIPBaselineLocked(oldest.Value.(string))
-}
+	l.logger.Trace("[Caplin] Rejected inbound connection attempt (peer-pool cap)", "ip", ipKey)
 
-func (l *peerPoolLimiter) deleteIPBaselineLocked(ipKey string) {
-	delete(l.ipLiveBaseline, ipKey)
-	if elem, ok := l.ipLiveBaselineElems[ipKey]; ok {
-		l.ipLiveBaselineLRU.Remove(elem)
-		delete(l.ipLiveBaselineElems, ipKey)
+	l.rejectedSinceSummary++
+	interval := l.summaryIntervalOrDefault()
+	elapsed := now.Sub(l.lastSummary)
+	if l.lastSummary.IsZero() {
+		elapsed = interval
 	}
+	if elapsed < interval {
+		return
+	}
+	rejected := l.rejectedSinceSummary
+	l.rejectedSinceSummary = 0
+	l.lastSummary = now
+
+	l.logger.Warn("[Caplin] P2P peer-pool cap rejected inbound connection attempts",
+		"rejected", rejected, "window", interval)
 }
 
 func (l *peerPoolLimiter) liveCounts(src liveConnsSource, ip net.IP, subscriberKey, asKey string) (sameIP, sameSubscriberBlock, sameASBlock int) {

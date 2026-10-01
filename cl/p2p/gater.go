@@ -38,7 +38,7 @@ func NewGater(cfg *P2PConfig, logger log.Logger) (g *Gater, err error) {
 		return nil, err
 	}
 	g.rateLimiter = newIPRateLimiter(defaultIPRateLimiterConfig(), logger, time.Now)
-	g.poolLimiter = newPeerPoolLimiter(cfg.MaxPeerCount)
+	g.poolLimiter = newPeerPoolLimiter(cfg.MaxPeerCount, logger)
 	return g, nil
 }
 
@@ -47,6 +47,22 @@ func NewGater(cfg *P2PConfig, logger log.Logger) (g *Gater, err error) {
 // occupancy check fails open (allow) until this is called.
 func (g *Gater) SetHost(h host.Host) {
 	g.poolLimiter.setHost(hostConns{h})
+	h.Network().Notify(&network.NotifyBundle{ConnectedF: g.onConnected})
+}
+
+// onConnected retires the peer-pool reservation a now-live inbound connection was
+// admitted under, so it stops being counted alongside the live connection it became -
+// including once that connection later closes again, which polling allow() alone would
+// never observe for an IP other than whichever one is attempting admission right then.
+func (g *Gater) onConnected(_ network.Network, conn network.Conn) {
+	if conn.Stat().Direction != network.DirInbound {
+		return
+	}
+	ip, err := manet.ToIP(conn.RemoteMultiaddr())
+	if err != nil {
+		return
+	}
+	g.poolLimiter.onConnected(ip)
 }
 
 // hostConns adapts a live libp2p host.Host to liveConnsSource.
@@ -54,12 +70,11 @@ type hostConns struct {
 	host host.Host
 }
 
-// remoteIPs reports only inbound connections. peerPoolLimiter.allow is only ever
-// invoked for inbound attempts (via InterceptAccept) and only ever creates
-// reservations for them; if this also counted outbound connections - ones we dialed
-// ourselves, which never went through the limiter at all - an outbound connection to
-// some IP could be misread by reconciliation as "one of this IP's pending inbound
-// reservations just matured" and retire a still-genuinely-pending one.
+// remoteIPs reports only inbound connections. peerPoolLimiter only ever creates or
+// retires reservations for inbound attempts; counting an outbound connection here -
+// one we dialed ourselves, which never went through the limiter - would both inflate
+// occupancy for an IP we are not actually being flooded from and risk onConnected
+// mistaking it for a still-genuinely-pending inbound reservation maturing.
 func (h hostConns) remoteIPs() []net.IP {
 	conns := h.host.Network().Conns()
 	ips := make([]net.IP, 0, len(conns))
@@ -92,9 +107,12 @@ func (g *Gater) InterceptAddrDial(_ peer.ID, n multiaddr.Multiaddr) (allow bool)
 // InterceptAccept tests whether an incipient inbound connection is allowed.
 //
 // This is called by the upgrader, or by the transport directly (e.g. QUIC,
-// Bluetooth), straight after it has accepted a connection from its socket. It is the
-// cheapest point to reject abusive traffic: no crypto handshake has run yet, for
-// either transport.
+// Bluetooth), straight after it has accepted a connection from its socket. For TCP
+// this runs before the security handshake, the cheapest point to reject abusive
+// traffic; for QUIC the transport's own Accept already completes the handshake before
+// this is called, since QUIC bundles the crypto handshake into connection
+// establishment itself, so rejecting here still avoids the muxer and application layer
+// but not the handshake cost.
 func (g *Gater) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
 	if !filterConnections(g.filter, n.RemoteMultiaddr()) {
 		return false

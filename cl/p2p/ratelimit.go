@@ -67,10 +67,10 @@ type tokenBucket struct {
 }
 
 // ipRateLimiter bounds inbound connection *attempts* per source IP, independent of
-// peer identity: a libp2p peer ID is a free, self-certified keypair, so deduplicating
-// by peer ID (as InterceptSecured does) gives no protection against a connection
-// flood — an attacker mints a new identity per attempt. This limiter runs in
-// InterceptAccept, before any handshake cost is paid.
+// peer identity: a libp2p peer ID is a free, self-certified keypair, so an
+// identity-based dedup gives no protection against a connection flood — an attacker
+// mints a new identity per attempt. This limiter runs in InterceptAccept, before any
+// handshake cost is paid for TCP.
 type ipRateLimiter struct {
 	cfg    ipRateLimiterConfig
 	logger rateLimiterLogger
