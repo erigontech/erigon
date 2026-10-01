@@ -477,9 +477,8 @@ func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool)
 		tmpdir:            tmpdir,
 		logger:            iit.ii.logger,
 		stepSize:          iit.stepSize,
-
-		indexKeysTable: iit.ii.KeysTable,
-		indexTable:     iit.ii.ValuesTable,
+		indexKeysTable:    iit.ii.KeysTable,
+		indexTable:        iit.ii.ValuesTable,
 	}
 	return w
 }
