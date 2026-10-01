@@ -260,23 +260,43 @@ func (l *peerPoolLimiter) maxReservationsOrDefault() int {
 // TTL. It must be called with l.mu held, after pruneExpiredLocked.
 func (l *peerPoolLimiter) reconcileLocked(ipKey string, liveIP int) {
 	l.ensureIPLiveBaselineLocked()
-	delta := liveIP - l.ipLiveBaseline[ipKey]
-	if delta <= 0 {
-		if liveIP == 0 {
+	baseline, tracked := l.ipLiveBaseline[ipKey]
+	if !tracked {
+		// No reliable history: never seen this IP before, or its entry was
+		// LRU-evicted while it may still have had a nonzero baseline and pending
+		// reservations. Treating a miss as baseline 0 would compute delta as the
+		// full live count and could retire every one of this IP's pending
+		// reservations at once, even if only one of them actually just matured.
+		// Assume at most the single most recent admission could have matured
+		// instead - under-retiring is always safe (a stale reservation just
+		// lingers a bit longer, double-counted until it expires or the next
+		// reconciliation), over-retiring is not.
+		baseline = max(0, liveIP-1)
+	}
+	delta := liveIP - baseline
+	if delta > 0 {
+		retired := 0
+		remaining := l.reservations[:0]
+		for _, r := range l.reservations {
+			if retired < delta && r.ipKey == ipKey {
+				retired++
+				continue
+			}
+			remaining = append(remaining, r)
+		}
+		l.reservations = remaining
+	}
+	if liveIP == 0 {
+		if tracked {
 			l.deleteIPBaselineLocked(ipKey)
 		}
 		return
 	}
-	retired := 0
-	remaining := l.reservations[:0]
-	for _, r := range l.reservations {
-		if retired < delta && r.ipKey == ipKey {
-			retired++
-			continue
-		}
-		remaining = append(remaining, r)
-	}
-	l.reservations = remaining
+	// Always refresh the baseline to the current reading, not only when it went
+	// up: a baseline left stale after a live count decrease would make a later
+	// genuinely-matured reservation look like it's still pending (delta <= 0
+	// forever, until live climbs back above the old high-water mark), retaining
+	// it until TTL and over-restricting the source in the meantime.
 	l.setIPBaselineLocked(ipKey, liveIP)
 }
 

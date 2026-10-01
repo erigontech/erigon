@@ -317,6 +317,79 @@ func TestPeerPoolLimiterBoundsIPLiveBaselines(t *testing.T) {
 		"baseline tracking must stay bounded even though every IP disconnected without ever being revisited")
 }
 
+// TestPeerPoolLimiterReconciliationDoesNotOverRetireAfterBaselineEviction reproduces
+// review finding "Baseline tracking mishandles LRU eviction and count decreases"
+// (part 1): treating an evicted (or never-seen) key's baseline as 0 makes delta the
+// full live count, which can retire every pending reservation for that key at once
+// even though only one of them actually just matured.
+func TestPeerPoolLimiterReconciliationDoesNotOverRetireAfterBaselineEviction(t *testing.T) {
+	l := &peerPoolLimiter{
+		maxPerIP: 1000, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+		reservationTTL: time.Minute, now: time.Now, maxIPBaselines: 1,
+	}
+	fixture := &connsFixtureHost{}
+	l.setHost(fixture)
+
+	ip1, ip2 := "203.0.113.1", "203.0.113.2"
+
+	// ip1's first connection matures immediately (retiring its own reservation),
+	// establishing a tracked baseline of 1.
+	require.True(t, l.allow(net.ParseIP(ip1)))
+	fixture.conns = append(fixture.conns, ip1)
+	require.True(t, l.allow(net.ParseIP(ip1)))
+
+	// A second, still-pending reservation accumulates for ip1 (live count
+	// unchanged, so it doesn't get retired).
+	require.True(t, l.allow(net.ParseIP(ip1)))
+	require.Len(t, l.reservations, 2, "ip1 should have 2 pending reservations")
+
+	// ip2's own admission tracks a baseline for ip2 and, since the bound is 1,
+	// evicts ip1's.
+	fixture.conns = append(fixture.conns, ip2)
+	require.True(t, l.allow(net.ParseIP(ip2)))
+	require.NotContains(t, l.ipLiveBaseline, ip1, "ip1's baseline entry should have been evicted to make room for ip2's")
+
+	// Exactly one of ip1's two pending reservations matures.
+	fixture.conns = append(fixture.conns, ip1)
+	require.True(t, l.allow(net.ParseIP(ip1)))
+
+	ip1Reservations := 0
+	for _, r := range l.reservations {
+		if r.ipKey == ip1 {
+			ip1Reservations++
+		}
+	}
+	require.Equal(t, 2, ip1Reservations,
+		"only the one reservation that matured should have been retired (leaving the other pending one, plus the new reservation from this call); an evicted baseline must not be treated as if ip1 had no pending reservations at all")
+}
+
+// TestPeerPoolLimiterReconciliationTracksLiveCountDecreases reproduces review finding
+// "Baseline tracking mishandles LRU eviction and count decreases" (part 2): a positive
+// baseline left unchanged when live connections decrease makes a later, genuinely
+// matured reservation look like it's still pending until live climbs back above the
+// old high-water mark, over-restricting the source in the meantime.
+func TestPeerPoolLimiterReconciliationTracksLiveCountDecreases(t *testing.T) {
+	ip := "203.0.113.1"
+	l := &peerPoolLimiter{
+		maxPerIP: 3, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+		reservationTTL: time.Minute, now: time.Now,
+	}
+	fixture := &connsFixtureHost{conns: []string{ip, ip, ip}} // 3 live connections
+	l.setHost(fixture)
+	require.False(t, l.allow(net.ParseIP(ip)), "already at the cap of 3 live connections; this call also establishes a tracked baseline of 3")
+
+	// 2 of the 3 close.
+	fixture.conns = []string{ip}
+	require.True(t, l.allow(net.ParseIP(ip)), "only 1 live connection remains, well under the cap")
+
+	// The new connection from the call above matures: 2 live now.
+	fixture.conns = []string{ip, ip}
+	require.True(t, l.allow(net.ParseIP(ip)),
+		"2 live and 0 pending is still under the cap of 3 - the prior reservation must have been retired once its connection matured, not left stuck counting against a stale baseline of 3 that was never brought down to the real count of 1")
+}
+
 // connsFixtureHost is a minimal liveConnsSource stand-in: real libp2p hosts are
 // exercised in gater_test.go's integration tests, but the occupancy math itself
 // (per-IP / per-block counting and RFC 6177 aggregation) doesn't need a live
