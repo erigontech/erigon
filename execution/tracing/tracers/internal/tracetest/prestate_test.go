@@ -198,7 +198,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 	}
 }
 
-func tracePrestateDiff(t *testing.T, config *chain.Config, alloc types.GenesisAlloc, to common.Address) map[common.Address]json.RawMessage {
+func tracePrestateDiff(t *testing.T, config *chain.Config, alloc types.GenesisAlloc, to common.Address) (pre, post map[common.Address]json.RawMessage) {
 	t.Helper()
 	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
 	require.NoError(t, err)
@@ -241,10 +241,11 @@ func tracePrestateDiff(t *testing.T, config *chain.Config, alloc types.GenesisAl
 	res, err := tracer.GetResult()
 	require.NoError(t, err)
 	var out struct {
+		Pre  map[common.Address]json.RawMessage `json:"pre"`
 		Post map[common.Address]json.RawMessage `json:"post"`
 	}
 	require.NoError(t, json.Unmarshal(res, &out))
-	return out.Post
+	return out.Pre, out.Post
 }
 
 func TestPrestateDiffModeSelfdestructSurvivesUnrelatedRevert(t *testing.T) {
@@ -266,7 +267,8 @@ func TestPrestateDiffModeSelfdestructSurvivesUnrelatedRevert(t *testing.T) {
 			reverter:  {Nonce: 1, Code: evmRevert},
 			destroyed: {Nonce: 1, Code: selfdestruct, Balance: big.NewInt(7)},
 		}
-		return tracePrestateDiff(t, chainspec.Mainnet.Config, alloc, driver)[destroyed]
+		_, post := tracePrestateDiff(t, chainspec.Mainnet.Config, alloc, driver)
+		return post[destroyed]
 	}
 
 	require.Nil(t, run(false), "self-destructed account must not appear in post")
@@ -291,6 +293,23 @@ func TestPrestateDiffModeFailedCreateDoesNotMarkCollidedAccountCreated(t *testin
 		victim: {Nonce: 1, Code: []byte{byte(vm.PUSH1), 0xee, byte(vm.SELFDESTRUCT)}, Balance: big.NewInt(7)},
 	}
 
-	post := tracePrestateDiff(t, &cancun, alloc, driver)
+	_, post := tracePrestateDiff(t, &cancun, alloc, driver)
 	require.NotNil(t, post[victim], "a CREATE that collided with the account must not let its SELFDESTRUCT delete it under EIP-6780")
+}
+
+func TestPrestateDiffModeRevertedSelfdestructIsNotDeleted(t *testing.T) {
+	var (
+		driver    = common.HexToAddress("0x00000000000000000000000000000000000000aa")
+		middle    = common.HexToAddress("0x00000000000000000000000000000000000000cc")
+		destroyed = common.HexToAddress("0x00000000000000000000000000000000000000dd")
+	)
+	alloc := types.GenesisAlloc{
+		driver:    {Nonce: 1, Code: append(evmCallTo(0xcc), byte(vm.STOP))},
+		middle:    {Nonce: 1, Code: append(evmCallTo(0xdd), evmRevert...)},
+		destroyed: {Nonce: 1, Code: []byte{byte(vm.PUSH1), 0xee, byte(vm.SELFDESTRUCT)}, Balance: big.NewInt(7)},
+	}
+
+	pre, post := tracePrestateDiff(t, chainspec.Mainnet.Config, alloc, driver)
+	require.Nil(t, pre[destroyed], "reverted SELFDESTRUCT must leave the account out of pre")
+	require.Nil(t, post[destroyed], "reverted SELFDESTRUCT must leave the account out of post")
 }
