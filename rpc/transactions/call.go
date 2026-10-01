@@ -65,7 +65,6 @@ func DoCall(
 
 	state := state.New(stateReader)
 	defer state.Close()
-	state.SetDiscardLogs(true)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -95,7 +94,7 @@ func DoCall(
 	}
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
-	vmConfig := vm.Config{NoBaseFee: true}
+	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true}
 	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state, chainConfig, vmConfig)
 	// stop() runs before cancel() (LIFO), so the callback cannot fire for a later call, and
 	// this EVM is not reused, so a callback already running needs no join.
@@ -212,7 +211,6 @@ func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledC
 	} else {
 		ibs.Reset()
 	}
-	ibs.SetDiscardLogs(true)
 	if r.stateOverrides == nil {
 		return ibs, nil, nil
 	}
@@ -316,7 +314,7 @@ func NewReusableCaller(
 	}
 	initialArgs.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
-	vmConfig := vm.Config{NoBaseFee: true}
+	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true}
 
 	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.New(stateReader), chainConfig, vmConfig)
 

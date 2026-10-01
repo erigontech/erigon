@@ -1497,7 +1497,7 @@ func makeLog(size int) executionFunc {
 		}
 		stack, ibs := &scope.Stack, evm.IntraBlockState()
 		mStart, mSize := stack.pop2Uint64()
-		if ibs.DiscardsLogs() {
+		if evm.config.NoReceipts && (evm.config.Tracer == nil || evm.config.Tracer.OnLog == nil) {
 			for range size {
 				stack.pop()
 			}

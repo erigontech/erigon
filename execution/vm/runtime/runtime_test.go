@@ -107,7 +107,7 @@ func TestExecute(t *testing.T) {
 	}
 }
 
-func TestLogDiscardedWhenStateDiscardsLogs(t *testing.T) {
+func TestLogNotStoredWithoutReceipts(t *testing.T) {
 	t.Parallel()
 	code := []byte{
 		byte(vm.PUSH1), 0x77, // stays below the LOG1 operands
@@ -121,17 +121,15 @@ func TestLogDiscardedWhenStateDiscardsLogs(t *testing.T) {
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
 	}
-	for _, discard := range []bool{false, true} {
+	for _, tc := range []struct {
+		noReceipts bool
+		logs       int
+	}{{false, 1}, {true, 0}} {
 		statedb := state.New(state.NewNoopReader())
-		statedb.SetDiscardLogs(discard)
-		ret, _, err := Execute(code, nil, &Config{State: statedb}, t.TempDir())
+		ret, _, err := Execute(code, nil, &Config{State: statedb, EVMConfig: vm.Config{NoReceipts: tc.noReceipts}}, t.TempDir())
 		require.NoError(t, err)
-		require.Equal(t, uint64(0x77), new(uint256.Int).SetBytes(ret).Uint64(), "discard=%v", discard)
-		wantLogs := 1
-		if discard {
-			wantLogs = 0
-		}
-		require.Len(t, statedb.GetRawLogs(0), wantLogs, "discard=%v", discard)
+		require.Equal(t, uint64(0x77), new(uint256.Int).SetBytes(ret).Uint64(), "noReceipts=%v", tc.noReceipts)
+		require.Len(t, statedb.GetRawLogs(0), tc.logs, "noReceipts=%v", tc.noReceipts)
 	}
 }
 

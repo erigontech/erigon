@@ -238,7 +238,6 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vmCfg
-	vmConfig.NoReceipts = true
 	vmConfig.RestoreState = constCall
 	vmConfig.Tracer = nil // set to nil to avoid trace sysCallContract
 	// Create a new context to be used in the EVM environment
@@ -284,7 +283,7 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
 	)
-	vmConfig := vm.Config{NoReceipts: true}
+	vmConfig := vm.Config{}
 	// Create a new context to be used in the EVM environment
 	author := contract
 	txContext := NewEVMTxContext(msg)
