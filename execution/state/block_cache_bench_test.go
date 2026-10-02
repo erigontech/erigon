@@ -29,6 +29,62 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func BenchmarkBlockStateCacheAccountBlock(b *testing.B) {
+	const txs = 200
+	_, tx, domains := NewTestRwTx(b)
+	domains.SetDisableInlineTouchKey(true)
+	domains.SetInMemHistoryReads(true)
+
+	coinbase := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	senders := make([]accounts.Address, txs)
+	recipients := make([]accounts.Address, txs)
+	for i := range txs {
+		senders[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(1_000_000 + i))))
+		recipients[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(2_000_000 + i))))
+	}
+	seedEnc := reprAcc{nonce: 7, balance: 1_000_000_000, codeHash: accounts.InternCodeHash(common.HexToHash("0xc0de")), incarnation: 1}.enc()
+	for _, addr := range append(append([]accounts.Address{coinbase}, senders...), recipients...) {
+		v := addr.Value()
+		if err := domains.DomainPut(kv.AccountsDomain, tx, v[:], seedEnc, 1, nil); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	rules := &chain.Rules{}
+	getter := domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})
+	fullWrite := func(addr accounts.Address, balance, nonce uint64) []any {
+		return []any{balanceWrite(addr, balance, 0), nonceWrite(addr, nonce, 0), incarnationWrite(addr, 1), codeHashWrite(addr, 0xcd)}
+	}
+
+	blockWrites := make([]*WriteSet, txs)
+	for i := range txs {
+		blockWrites[i] = newWriteSet(append(append(fullWrite(senders[i], 999_000_000, 8), fullWrite(recipients[i], 1_001_000_000, 7)...), fullWrite(coinbase, uint64(1_000_000_000+i), 7)...)...)
+	}
+
+	txNum := uint64(10)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		cache := NewBlockStateCache()
+		reader := NewCurrentCachedReaderV3(getter, cache)
+		for i := range txs {
+			for _, addr := range []accounts.Address{senders[i], recipients[i], coinbase} {
+				if _, err := reader.ReadAccountData(addr); err != nil {
+					b.Fatal(err)
+				}
+			}
+			txNum++
+			if err := blockWrites[i].Apply(domains, tx, 1, txNum, nil, rules, cache, false); err != nil {
+				b.Fatal(err)
+			}
+		}
+		txNum++
+		if err := cache.Flush(domains, tx); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkBlockStateCacheStorageReads(b *testing.B) {
 	const txs = 200
 	_, tx, domains := NewTestRwTx(b)
