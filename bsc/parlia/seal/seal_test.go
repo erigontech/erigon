@@ -18,10 +18,10 @@ package seal
 
 import (
 	"encoding/json"
-	"math/big"
 	"os"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -60,7 +60,7 @@ func TestHashRecoversChapelSealer(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &headers))
 	require.Len(t, headers, 4)
 
-	chainID := big.NewInt(97)
+	chainID := uint256.NewInt(97)
 	for _, h := range headers {
 		t.Run(h.Number.String(), func(t *testing.T) {
 			require.Equal(t, h.BlockHash, h.Hash())
@@ -79,6 +79,6 @@ func TestHashRecoversChapelSealer(t *testing.T) {
 func TestHashRejectsShortExtra(t *testing.T) {
 	t.Parallel()
 
-	_, err := Hash(&types.Header{Extra: make([]byte, crypto.SignatureLength-1)}, big.NewInt(97))
+	_, err := Hash(&types.Header{Extra: make([]byte, crypto.SignatureLength-1)}, uint256.NewInt(97))
 	require.ErrorIs(t, err, ErrMissingSignature)
 }

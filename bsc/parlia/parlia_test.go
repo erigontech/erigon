@@ -36,7 +36,7 @@ func TestSealHashUsesChainID(t *testing.T) {
 	require.NoError(t, err)
 	header := &types.Header{Number: *uint256.NewInt(40000000), Extra: make([]byte, 32+65)}
 
-	want, err := seal.Hash(header, spec.Config.ChainID.ToBig())
+	want, err := seal.Hash(header, spec.Config.ChainID)
 	require.NoError(t, err)
 	require.Equal(t, want, New(spec.Config, log.New()).SealHash(header))
 }

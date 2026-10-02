@@ -285,7 +285,7 @@ func (p *Parlia) Seal(chain rules.ChainHeaderReader, block *types.BlockWithRecei
 }
 
 func (p *Parlia) SealHash(header *types.Header) common.Hash {
-	hash, err := seal.Hash(header, p.chainConfig.ChainID.ToBig())
+	hash, err := seal.Hash(header, p.chainConfig.ChainID)
 	if err != nil {
 		p.logger.Warn("parlia: cannot compute seal hash", "block", header.Number.Uint64(), "err", err)
 		return common.Hash{}

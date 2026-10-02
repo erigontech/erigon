@@ -19,7 +19,8 @@ package seal
 
 import (
 	"errors"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -27,24 +28,17 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-var (
-	ErrMissingSignature = errors.New("parlia: extra-data too short to hold a seal")
-	errNegativeChainID  = errors.New("parlia: negative chain id")
-)
+var ErrMissingSignature = errors.New("parlia: extra-data too short to hold a seal")
 
 // Hash returns the Keccak256 of the header as signed by its validator: chainID first,
 // the seal stripped from Extra, and the post-London fields sealed only from Bohr on,
-// which is when ParentBeaconBlockRoot appears. chainID is unbounded because the
-// double-sign precompile takes it from calldata.
-func Hash(header *types.Header, chainID *big.Int) (common.Hash, error) {
+// which is when ParentBeaconBlockRoot appears.
+func Hash(header *types.Header, chainID *uint256.Int) (common.Hash, error) {
 	if len(header.Extra) < crypto.SignatureLength {
 		return common.Hash{}, ErrMissingSignature
 	}
-	if chainID.Sign() < 0 {
-		return common.Hash{}, errNegativeChainID
-	}
 	fields := []any{
-		chainID.Bytes(),
+		chainID,
 		header.ParentHash,
 		header.UncleHash,
 		header.Coinbase,

@@ -5,9 +5,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/url"
 	"strings"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/bsc/parlia/seal"
 	"github.com/erigontech/erigon/cl/utils/bls"
@@ -531,7 +532,7 @@ func (c *verifyDoubleSignEvidence) RequiredGas(input []byte) uint64 {
 func (c *verifyDoubleSignEvidence) Name() string { return "VerifyDoubleSignEvidence" }
 
 type doubleSignEvidence struct {
-	ChainID      []byte
+	ChainID      uint256.Int
 	HeaderBytes1 []byte
 	HeaderBytes2 []byte
 }
@@ -543,10 +544,6 @@ var errInvalidEvidence = errors.New("invalid double sign evidence")
 func (c *verifyDoubleSignEvidence) Run(input []byte) ([]byte, error) {
 	var evidence doubleSignEvidence
 	if err := rlp.DecodeBytes(input, &evidence); err != nil {
-		return nil, ErrExecutionReverted
-	}
-	// The reference decodes ChainID as an unbounded big integer, which rejects leading zeros.
-	if len(evidence.ChainID) > 0 && evidence.ChainID[0] == 0 {
 		return nil, ErrExecutionReverted
 	}
 	var header1, header2 types.Header
@@ -569,12 +566,11 @@ func (c *verifyDoubleSignEvidence) Run(input []byte) ([]byte, error) {
 		return nil, errInvalidEvidence
 	}
 
-	chainID := new(big.Int).SetBytes(evidence.ChainID)
-	sealHash1, err := seal.Hash(&header1, chainID)
+	sealHash1, err := seal.Hash(&header1, &evidence.ChainID)
 	if err != nil {
 		return nil, err
 	}
-	sealHash2, err := seal.Hash(&header2, chainID)
+	sealHash2, err := seal.Hash(&header2, &evidence.ChainID)
 	if err != nil {
 		return nil, err
 	}
