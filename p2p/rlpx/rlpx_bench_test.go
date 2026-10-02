@@ -28,7 +28,7 @@ import (
 )
 
 func BenchmarkHandshakeRead(b *testing.B) {
-	var input = unhex(eip8HandshakeAuthTests[0].input)
+	input := unhex(eip8HandshakeAuthTests[0].input)
 
 	for b.Loop() {
 		var (

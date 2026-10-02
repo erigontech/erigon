@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+
 	"github.com/erigontech/erigon/db/kv"
 )
 

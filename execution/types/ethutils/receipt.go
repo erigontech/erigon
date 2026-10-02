@@ -27,32 +27,33 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-// RPCReceipt is the RPC form of a receipt. Logs is []*types.RPCLog, types.Logs, []*types.Log, []map[string]any or nil.
-type RPCReceipt struct {
-	BlockHash         common.Hash     `json:"blockHash"`
-	BlockNumber       hexutil.Uint64  `json:"blockNumber"`
-	TransactionHash   common.Hash     `json:"transactionHash"`
-	TransactionIndex  hexutil.Uint64  `json:"transactionIndex"`
-	From              common.Address  `json:"from"`
-	To                *common.Address `json:"to"`
-	Type              hexutil.Uint    `json:"type"`
-	GasUsed           hexutil.Uint64  `json:"gasUsed"`
-	CumulativeGasUsed hexutil.Uint64  `json:"cumulativeGasUsed"`
-	ContractAddress   *common.Address `json:"contractAddress"`
-	Logs              any             `json:"logs"`
-	LogsBloom         *types.Bloom    `json:"logsBloom"`
-	EffectiveGasPrice *hexutil.U256   `json:"effectiveGasPrice,omitempty"`
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCReceipt
 
-	Status       *hexutil.Uint64 `json:"status,omitempty"`
-	Root         hexutil.Bytes   `json:"root,omitempty"`
-	BlobGasPrice *hexutil.U256   `json:"blobGasPrice,omitempty"`
-	BlobGasUsed  *hexutil.Uint64 `json:"blobGasUsed,omitempty"`
+// RPCReceipt is the RPC form of a receipt.
+type RPCReceipt struct {
+	BlockHash         common.Hash     `json:"blockHash" ethjson:"data"`
+	BlockNumber       hexutil.Uint64  `json:"blockNumber" ethjson:"quantity"`
+	TransactionHash   common.Hash     `json:"transactionHash" ethjson:"data"`
+	TransactionIndex  hexutil.Uint64  `json:"transactionIndex" ethjson:"quantity"`
+	From              *common.Address `json:"from" ethjson:"data"`
+	To                *common.Address `json:"to" ethjson:"data"`
+	Type              hexutil.Uint    `json:"type" ethjson:"quantity"`
+	GasUsed           hexutil.Uint64  `json:"gasUsed" ethjson:"quantity"`
+	CumulativeGasUsed hexutil.Uint64  `json:"cumulativeGasUsed" ethjson:"quantity"`
+	ContractAddress   *common.Address `json:"contractAddress" ethjson:"data"`
+	Logs              types.Logs      `json:"logs" ethjson:"objects"`
+	LogsBloom         *types.Bloom    `json:"logsBloom" ethjson:"data"`
+	EffectiveGasPrice *hexutil.U256   `json:"effectiveGasPrice" ethjson:"quantity"`
+
+	Status       *hexutil.Uint64 `json:"status,omitempty" ethjson:"quantity"`
+	Root         hexutil.Bytes   `json:"root,omitempty" ethjson:"data"`
+	BlobGasPrice *hexutil.U256   `json:"blobGasPrice,omitempty" ethjson:"quantity"`
+	BlobGasUsed  *hexutil.Uint64 `json:"blobGasUsed,omitempty" ethjson:"quantity"`
 }
 
 func MarshalReceipt(
@@ -60,7 +61,6 @@ func MarshalReceipt(
 	txn types.Transaction,
 	chainConfig *chain.Config,
 	header *types.Header,
-	txnHash common.Hash,
 	signed bool,
 	withBlockTimestamp bool,
 ) *RPCReceipt {
@@ -74,46 +74,41 @@ func MarshalReceipt(
 		chainId = txn.GetChainID()
 	}
 
-	var from accounts.Address
+	var from *common.Address
 	if signed {
 		signer := types.LatestSignerForChainID(chainId)
-		from, _ = txn.Sender(*signer)
+		sender, _ := txn.Sender(*signer)
+		address := sender.Value()
+		from = &address
 	}
 
-	logsBloom := receipt.LogsBloom()
+	var logsToMarshal types.Logs
 
-	var logsToMarshal any
-
-	if withBlockTimestamp {
-		if receipt.Logs != nil {
-			rpcLogs := make([]*types.RPCLog, 0, len(receipt.Logs))
-			for _, l := range receipt.Logs {
-				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header))
-			}
-			logsToMarshal = rpcLogs
-		} else {
-			logsToMarshal = make([]*types.RPCLog, 0)
+	switch {
+	case withBlockTimestamp:
+		rpcLogs := make(types.Logs, 0, len(receipt.Logs))
+		for _, l := range receipt.Logs {
+			rpcLogs = append(rpcLogs, types.StampedLog(l, header.Time))
 		}
-	} else {
-		if receipt.Logs == nil {
-			logsToMarshal = make([]*types.Log, 0)
-		} else {
-			logsToMarshal = receipt.Logs
-		}
+		logsToMarshal = rpcLogs
+	case receipt.Logs == nil:
+		logsToMarshal = types.Logs{}
+	default:
+		logsToMarshal = receipt.Logs
 	}
 
 	result := &RPCReceipt{
 		BlockHash:         receipt.BlockHash,
 		BlockNumber:       hexutil.Uint64(receipt.BlockNumber.Uint64()),
-		TransactionHash:   txnHash,
+		TransactionHash:   receipt.TxHash,
 		TransactionIndex:  hexutil.Uint64(receipt.TransactionIndex),
-		From:              from.Value(),
+		From:              from,
 		To:                txn.GetTo(),
 		Type:              hexutil.Uint(txn.Type()),
 		GasUsed:           hexutil.Uint64(receipt.GasUsed),
 		CumulativeGasUsed: hexutil.Uint64(receipt.CumulativeGasUsed),
 		Logs:              logsToMarshal,
-		LogsBloom:         &logsBloom,
+		LogsBloom:         receipt.LogsBloom(),
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
@@ -159,6 +154,28 @@ func MarshalReceipt(
 	return result
 }
 
+// RPCLogFromProto is the log a subscription delivers, the same object eth_getLogs returns. The
+// address and both hashes must be set, as every backend sets them.
+func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.Log {
+	at := hexutil.Uint64(l.BlockTimestamp)
+	lg := &types.Log{
+		Address:        gointerfaces.ConvertH160toAddress(l.Address),
+		Topics:         make([]common.Hash, len(l.Topics)),
+		Data:           l.Data,
+		BlockNumber:    hexutil.Uint64(l.BlockNumber),
+		TxHash:         gointerfaces.ConvertH256ToHash(l.TransactionHash),
+		TxIndex:        hexutil.Uint(l.TransactionIndex),
+		BlockHash:      gointerfaces.ConvertH256ToHash(l.BlockHash),
+		Index:          hexutil.Uint(l.LogIndex),
+		Removed:        l.Removed,
+		BlockTimestamp: &at,
+	}
+	for i, topic := range l.Topics {
+		lg.Topics[i] = gointerfaces.ConvertH256ToHash(topic)
+	}
+	return lg
+}
+
 func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *RPCReceipt {
 	txHash := common.Hash(gointerfaces.ConvertH256ToHash(protoReceipt.TransactionHash))
 	status := hexutil.Uint64(protoReceipt.Status)
@@ -167,12 +184,12 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		BlockNumber:       hexutil.Uint64(protoReceipt.BlockNumber),
 		TransactionHash:   txHash,
 		TransactionIndex:  hexutil.Uint64(protoReceipt.TransactionIndex),
-		From:              common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.From)),
-		To:                nonZeroAddress(protoReceipt.To),
+		From:              addressOrNil(protoReceipt.From),
+		To:                addressOrNil(protoReceipt.To),
 		Type:              hexutil.Uint(protoReceipt.Type),
 		GasUsed:           hexutil.Uint64(protoReceipt.GasUsed),
 		CumulativeGasUsed: hexutil.Uint64(protoReceipt.CumulativeGasUsed),
-		ContractAddress:   nonZeroAddress(protoReceipt.ContractAddress),
+		ContractAddress:   addressOrNil(protoReceipt.ContractAddress),
 		Status:            &status,
 	}
 	if n := len(protoReceipt.LogsBloom); n == types.BloomByteLength {
@@ -182,27 +199,17 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		log.Warn("[rpc] subscribed receipt has a malformed logs bloom", "len", n, "txHash", txHash)
 	}
 
-	logs := make([]map[string]any, 0, len(protoReceipt.Logs))
-	for _, protoLog := range protoReceipt.Logs {
-		logEntry := make(map[string]any)
-
-		if protoLog.Address != nil {
-			logEntry["address"] = common.Address(gointerfaces.ConvertH160toAddress(protoLog.Address))
-		}
-
-		topics := make([]common.Hash, len(protoLog.Topics))
-		for i, topic := range protoLog.Topics {
-			topics[i] = common.Hash(gointerfaces.ConvertH256ToHash(topic))
-		}
-		logEntry["topics"] = topics
-		logEntry["data"] = hexutil.Bytes(protoLog.Data)
-		logEntry["transactionHash"] = txHash
-
-		logs = append(logs, logEntry)
+	logs := make(types.Logs, len(protoReceipt.Logs))
+	for i, protoLog := range protoReceipt.Logs {
+		logs[i] = RPCLogFromProto(protoLog)
 	}
 	result.Logs = logs
 
-	if protoReceipt.BaseFee != nil {
+	// A backend that does not send the effective gas price yet leaves the base fee as the
+	// closest approximation it carries.
+	if protoReceipt.EffectiveGasPrice != nil {
+		result.EffectiveGasPrice = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.EffectiveGasPrice))
+	} else if protoReceipt.BaseFee != nil {
 		result.EffectiveGasPrice = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee))
 	}
 	if protoReceipt.BlobGasUsed > 0 {
@@ -215,14 +222,11 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 	return result
 }
 
-func nonZeroAddress(h160 *typesproto.H160) *common.Address {
+func addressOrNil(h160 *typesproto.H160) *common.Address {
 	if h160 == nil {
 		return nil
 	}
 	addr := common.Address(gointerfaces.ConvertH160toAddress(h160))
-	if addr == (common.Address{}) {
-		return nil
-	}
 	return &addr
 }
 
@@ -243,7 +247,7 @@ func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.
 	marshalled := make([]*RPCReceipt, 0, len(receipts))
 	for i, receipt := range receipts {
 		txn := txns[i]
-		marshalled = append(marshalled, MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true, false))
+		marshalled = append(marshalled, MarshalReceipt(receipt, txn, cc, header, true, false))
 	}
 
 	result, err := json.Marshal(marshalled)

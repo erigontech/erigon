@@ -361,7 +361,6 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 			} else {
 				inserted.Add(uint64(len(sds.sidecars)))
 			}
-
 		})
 	}
 	wg.Wait()

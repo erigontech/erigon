@@ -138,11 +138,13 @@ var FastChecks = []Check{
 	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
-var SlowChecks = []Check{CaplinBlobSidecars, StateVerify}
-var DeprecatedChecks = []Check{
-	CommitmentKvDeref, //StateVerify - will overcome
-	StateProgress,
-}
+var (
+	SlowChecks       = []Check{CaplinBlobSidecars, StateVerify}
+	DeprecatedChecks = []Check{
+		CommitmentKvDeref, // StateVerify - will overcome
+		StateProgress,
+	}
+)
 var AllChecks = append(append(append([]Check{TorrentPieces}, FastChecks...), SlowChecks...), DeprecatedChecks...)
 
 // SortChecksByCost returns a copy of checks ordered by their position in FastChecks

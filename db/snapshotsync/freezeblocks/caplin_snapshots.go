@@ -194,6 +194,7 @@ func (v *CaplinView) Close() { v.base.Close() }
 func (v *CaplinView) BeaconBlocks() []*snapshotsync.VisibleSegment {
 	return v.base.Segments(snaptype.BeaconBlocks)
 }
+
 func (v *CaplinView) BlobSidecars() []*snapshotsync.VisibleSegment {
 	return v.base.Segments(snaptype.BlobSidecars)
 }

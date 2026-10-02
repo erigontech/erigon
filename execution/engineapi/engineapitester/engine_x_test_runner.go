@@ -32,7 +32,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common"
@@ -419,12 +418,7 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 	if !ok {
 		return testerEntry{}, fmt.Errorf("pre_alloc %s not found", preAllocHash)
 	}
-	var forkConfigCopy chain.Config
-	err := copier.CopyWithOption(&forkConfigCopy, forkConfig, copier.Option{DeepCopy: true})
-	if err != nil {
-		return testerEntry{}, err
-	}
-	forkConfig = &forkConfigCopy
+	forkConfig = forkConfig.Copy()
 	var genesis types.Genesis
 	if alloc.Environment.GasLimit != 0 {
 		// Earlier builder format stores genesis inputs as environment fields.

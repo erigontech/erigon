@@ -59,7 +59,7 @@ func TestSharedDomainsCommitRejectsAnotherStateVersionWriter(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	require.NoError(t, sd.InitBlockOverlay(rwTx, t.TempDir()))
+	require.NoError(t, sd.InitBlockOverlay(rwTx))
 	_, err = rawdb.IncrementStateVersion(sd.BlockOverlay())
 	require.NoError(t, err)
 

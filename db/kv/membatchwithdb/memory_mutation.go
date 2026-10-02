@@ -69,11 +69,11 @@ type MemoryMutation struct {
 //
 // Common pattern:
 //
-//	batch := NewMemoryBatch(db, tmpDir)
+//	batch := NewMemoryBatch(db)
 //	defer batch.Close()
 //	... some calculations on `batch`
 //	batch.Commit()
-func NewMemoryBatch(tx kv.TemporalTx, tmpDir string, logger log.Logger) (*MemoryMutation, error) {
+func NewMemoryBatch(tx kv.TemporalTx) (*MemoryMutation, error) {
 	mem := newMemStore()
 	memDB := &memStoreDB{store: mem}
 
@@ -302,10 +302,6 @@ func (m *MemoryMutation) GetOne(table string, key []byte) ([]byte, error) {
 	return m.readTx.GetOne(table, key)
 }
 
-func (m *MemoryMutation) Last(table string) ([]byte, []byte, error) {
-	panic("not implemented. (MemoryMutation.Last)")
-}
-
 // Has returns whether a key is present in the mutation overlay or underlying DB.
 // Thread-safe: acquires RLock.
 func (m *MemoryMutation) Has(table string, key []byte) (bool, error) {
@@ -379,20 +375,9 @@ func (m *MemoryMutation) Prefix(table string, prefix []byte) (stream.KV, error) 
 	}
 	return m.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
 }
-func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
-	panic("please implement me")
-}
-func (m *MemoryMutation) StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	panic("please implement me")
-}
-func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
-	panic("please implement me")
-}
 
-// Range merges the db side and the overlay by key, so on a DupSort table a db
-// value is dropped when the overlay holds another value under the same key.
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
+	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit), dupSort: isTablePurelyDupsort(table)}
 	var err error
 	m.mu.RLock()
 	cleared := m.isTableCleared(table)
@@ -422,7 +407,7 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 		return nil, err
 	}
 	if _, err := s.init(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -433,7 +418,19 @@ type rangeIter struct {
 	hasNextDb, hasNextMem                bool
 	nextKdb, nextVdb, nextKmem, nextVmem []byte
 	orderAscend                          bool
+	dupSort                              bool
 	limit                                int64
+}
+
+// Both sides are ordered by key and, on a DupSort table, by value within a
+// key: there the overlay value adds a dup instead of replacing the db one, so
+// only an identical (key, value) pair collapses into a single row.
+func (s *rangeIter) compare() int {
+	c := bytes.Compare(s.nextKdb, s.nextKmem)
+	if c != 0 || !s.dupSort {
+		return c
+	}
+	return bytes.Compare(s.nextVdb, s.nextVmem)
 }
 
 func (s *rangeIter) Close() {
@@ -446,6 +443,7 @@ func (s *rangeIter) Close() {
 		s.iterMem = nil
 	}
 }
+
 func (s *rangeIter) init() (*rangeIter, error) {
 	s.hasNextDb = s.iterDb != nil && s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
@@ -469,10 +467,11 @@ func (s *rangeIter) HasNext() bool {
 	}
 	return s.hasNextDb || s.hasNextMem
 }
+
 func (s *rangeIter) Next() (k, v []byte, err error) {
 	s.limit--
 	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
-	c := bytes.Compare(s.nextKdb, s.nextKmem)
+	c := s.compare()
 	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
 		k = s.nextKdb
 		v = s.nextVdb
@@ -527,7 +526,7 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 		return nil, err
 	}
 	if err := s.init(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -576,6 +575,7 @@ func (s *rangeDupSortIter) HasNext() bool {
 	}
 	return s.hasNextDb || s.hasNextMem
 }
+
 func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 	s.limit--
 	k = s.key
@@ -1026,7 +1026,7 @@ func (m *MemoryMutation) GetLatestValSize(name kv.Domain, k []byte) (size int, f
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	if m.DomainReader != nil {
 		val, ok, err := m.DomainReader.GetAsOf(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
@@ -1056,7 +1056,7 @@ func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uin
 func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	if m.DomainReader != nil {
 		val, ok, err := m.DomainReader.HistorySeek(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
@@ -1089,9 +1089,11 @@ func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
 	}
 	return m.db.Debug().HistoryStartFrom(name)
 }
+
 func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
 	panic("not supported")
 }
+
 func (m *MemoryMutation) Debug() kv.TemporalDebugTx {
 	if m.db == nil {
 		return nil
@@ -1244,7 +1246,7 @@ func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 func (v *OverlayTemporalReadView) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
 		val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
@@ -1265,7 +1267,7 @@ func (v *OverlayTemporalReadView) IndexRange(name kv.InvertedIdx, k []byte, from
 func (v *OverlayTemporalReadView) HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
 		val, ok, err := v.MemoryMutation.DomainReader.HistorySeek(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
@@ -1380,9 +1382,11 @@ func (td temporaldb) ReadOnly() bool {
 func (td temporaldb) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 	return td.memoryMutation.memDb.Update(ctx, f)
 }
+
 func (td temporaldb) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
 	return td.memoryMutation.memDb.UpdateNosync(ctx, f)
 }
+
 func (td temporaldb) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return td.memoryMutation.memDb.View(ctx, f)
 }

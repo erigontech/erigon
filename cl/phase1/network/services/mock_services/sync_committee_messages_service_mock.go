@@ -15,6 +15,7 @@ import (
 
 	clparams "github.com/erigontech/erigon/cl/clparams"
 	services "github.com/erigontech/erigon/cl/phase1/network/services"
+	common "github.com/erigontech/erigon/common"
 	peer "github.com/libp2p/go-libp2p/core/peer"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -78,6 +79,42 @@ func (c *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall) Do(f func(peer
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall) DoAndReturn(f func(peer.ID, []byte, clparams.StateVersion) (*services.SyncCommitteeMessageForGossip, error)) *MockSyncCommitteeMessagesServiceDecodeGossipMessageCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// MarkPublished mocks base method.
+func (m *MockSyncCommitteeMessagesService) MarkPublished(subnet, slot, validatorIndex uint64, beaconBlockRoot common.Hash, signature common.Bytes96) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "MarkPublished", subnet, slot, validatorIndex, beaconBlockRoot, signature)
+}
+
+// MarkPublished indicates an expected call of MarkPublished.
+func (mr *MockSyncCommitteeMessagesServiceMockRecorder) MarkPublished(subnet, slot, validatorIndex, beaconBlockRoot, signature any) *MockSyncCommitteeMessagesServiceMarkPublishedCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkPublished", reflect.TypeOf((*MockSyncCommitteeMessagesService)(nil).MarkPublished), subnet, slot, validatorIndex, beaconBlockRoot, signature)
+	return &MockSyncCommitteeMessagesServiceMarkPublishedCall{Call: call}
+}
+
+// MockSyncCommitteeMessagesServiceMarkPublishedCall wrap *gomock.Call
+type MockSyncCommitteeMessagesServiceMarkPublishedCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncCommitteeMessagesServiceMarkPublishedCall) Return() *MockSyncCommitteeMessagesServiceMarkPublishedCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncCommitteeMessagesServiceMarkPublishedCall) Do(f func(uint64, uint64, uint64, common.Hash, common.Bytes96)) *MockSyncCommitteeMessagesServiceMarkPublishedCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncCommitteeMessagesServiceMarkPublishedCall) DoAndReturn(f func(uint64, uint64, uint64, common.Hash, common.Bytes96)) *MockSyncCommitteeMessagesServiceMarkPublishedCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

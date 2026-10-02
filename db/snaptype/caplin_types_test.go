@@ -23,7 +23,6 @@ import (
 )
 
 func TestEnumeration(t *testing.T) {
-
 	if snaptype.BlobSidecars.Enum() != snaptype.CaplinEnums.BlobSidecars {
 		t.Fatal("enum mismatch", snaptype.BlobSidecars, snaptype.BlobSidecars.Enum(), snaptype.CaplinEnums.BlobSidecars)
 	}
@@ -34,7 +33,6 @@ func TestEnumeration(t *testing.T) {
 }
 
 func TestNames(t *testing.T) {
-
 	if snaptype.BeaconBlocks.Name() != snaptype.CaplinEnums.BeaconBlocks.String() {
 		t.Fatal("name mismatch", snaptype.BeaconBlocks, snaptype.BeaconBlocks.Name(), snaptype.CaplinEnums.BeaconBlocks.String())
 	}
@@ -42,5 +40,4 @@ func TestNames(t *testing.T) {
 	if snaptype.BlobSidecars.Name() != snaptype.CaplinEnums.BlobSidecars.String() {
 		t.Fatal("name mismatch", snaptype.BlobSidecars, snaptype.BlobSidecars.Name(), snaptype.CaplinEnums.BlobSidecars.String())
 	}
-
 }

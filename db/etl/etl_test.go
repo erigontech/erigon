@@ -726,7 +726,6 @@ func TestSortable(t *testing.T) {
 
 	require.Equal([][]byte{{1}, {1}, {1}, {1}, {1}, {1}, {1}, {2}, {2}, {2}}, keys)
 	require.Equal([][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}, {1}, {20}, nil}, vals)
-
 }
 
 // drainBuffer reads what the buffer has left, in the order it hands it back.
