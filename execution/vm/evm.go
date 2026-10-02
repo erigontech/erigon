@@ -86,8 +86,10 @@ type EVM struct {
 	returnData []byte // Last CALL's return data for subsequent reuse
 
 	// Pointers before counters: interleaving them adds a word of padding.
-	addrCache *addressCache
-	addrOps   uint32
+	internCache *storageKeyCache
+	addrCache   *addressCache
+	internOps   uint32
+	addrOps     uint32
 }
 
 // evmSizeClass is the Go allocation size class EVM fills. One more word moves
@@ -99,8 +101,60 @@ type EVM struct {
 // grows an embedded type such as evmtypes.BlockContext.
 const evmSizeClass = 448
 
+// storageKeyCacheSize must comfortably exceed a contract's live slot count,
+// or conflict misses dominate.
+const storageKeyCacheSize = 1024
+
+// storageKeyCacheMinOps delays the table until interning has cost more than
+// zeroing 40KB: a hit saves ~16ns, so an EVM resolving fewer keys than this
+// cannot win the allocation back however well the keys repeat.
+const storageKeyCacheMinOps = 128
+
+// slotIndex masks rather than divides, so the size has to be a power of two.
+var _ [0]struct{} = [storageKeyCacheSize & (storageKeyCacheSize - 1)]struct{}{}
+
+// storageKeyCache memoizes InternKey by the source stack word. Interning is a
+// pure function and a live handle keeps its entry alive, so the cache never
+// goes stale and is never cleared. Words are stored beside the handles because
+// that is cheaper than recovering them via handle.Value(); the pointer-free
+// words go last so the GC scan stops at the handles.
+type storageKeyCache struct {
+	handles [storageKeyCacheSize]accounts.StorageKey
+	words   [storageKeyCacheSize]uint256.Int
+}
+
+// slotIndex mixes all four limbs: keccak-derived slots differ across the whole
+// word, array and scalar slots only in the lowest.
+func slotIndex(word *uint256.Int) uint64 {
+	return (word[0] ^ word[1] ^ word[2] ^ word[3]) & (storageKeyCacheSize - 1)
+}
+
+// A nil handle marks an unused entry; the zero word is a legitimate key.
+func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey {
+	h := accounts.InternKey(word.Bytes32())
+	c.words[i], c.handles[i] = *word, h
+	return h
+}
+
+// internStorageKey returns word interned as a StorageKey, skipping unique.Make
+// for words seen before. Short-lived EVMs intern uncached: the table only earns
+// back its allocation over a few hundred storage ops.
 func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
-	return accounts.InternKey(word.Bytes32())
+	c := evm.internCache
+	if c == nil {
+		if evm.internOps < storageKeyCacheMinOps {
+			evm.internOps++
+			return accounts.InternKey(word.Bytes32())
+		}
+		c = new(storageKeyCache)
+		evm.internCache = c
+		return c.fill(slotIndex(word), word)
+	}
+	i := slotIndex(word)
+	if h := c.handles[i]; h != accounts.NilKey && c.words[i] == *word {
+		return h
+	}
+	return c.fill(i, word)
 }
 
 // Address streams are far narrower than storage-key streams — a handful of
@@ -117,12 +171,11 @@ const AddressCacheSize = addressCacheSize
 
 var _ [0]struct{} = [addressCacheSize & (addressCacheSize - 1)]struct{}{}
 
-// addressCache memoizes InternAddress by the source stack word. Interning is a
-// pure function and a live handle keeps its entry alive, so the cache never goes
-// stale and is never cleared. Words sit beside the handles because that is
-// cheaper than handle.Value(). A stack word may hold anything above the low 20
-// bytes, so index, compare and stored word all drop those bits and one entry then
-// serves an address whatever the rest of its word holds.
+// addressCache is storageKeyCache for InternAddress; see that type for why the
+// entries never go stale and why the words sit beside the handles. It differs in
+// its key: a stack word may hold anything above the low 20 bytes, so index,
+// compare and stored word all drop those bits and one entry then serves an
+// address whatever the rest of its word holds.
 type addressCache struct {
 	handles [addressCacheSize]accounts.Address
 	words   [addressCacheSize]uint256.Int

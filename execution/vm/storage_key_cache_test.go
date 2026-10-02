@@ -58,10 +58,28 @@ func assertMemoMatches[H comparable](t *testing.T, rounds int, memo func(*uint25
 	}
 }
 
+func TestInternStorageKeyMatchesInternKey(t *testing.T) {
+	evm := &EVM{}
+	assertMemoMatches(t, storageKeyCacheMinOps+10, evm.internStorageKey,
+		func(w *uint256.Int) accounts.StorageKey { return accounts.InternKey(w.Bytes32()) })
+}
+
 func TestInternAddressMatchesInternAddress(t *testing.T) {
 	evm := &EVM{}
 	assertMemoMatches(t, addressCacheMinOps+10, evm.internAddress,
 		func(w *uint256.Int) accounts.Address { return accounts.InternAddress(w.Bytes20()) })
+}
+
+func TestStorageKeyCacheNotAllocatedForShortLivedEVM(t *testing.T) {
+	evm := &EVM{}
+	word := uint256.NewInt(7)
+	for range storageKeyCacheMinOps {
+		evm.internStorageKey(word)
+	}
+	assert.Nil(t, evm.internCache)
+
+	evm.internStorageKey(word)
+	assert.NotNil(t, evm.internCache)
 }
 
 func TestAddressCacheNotAllocatedForShortLivedEVM(t *testing.T) {
@@ -204,6 +222,25 @@ func TestInternAddressInternsTheZeroAddressOnAnEmptyBucket(t *testing.T) {
 		"the zero address must intern, not read as the empty entry it collides with")
 }
 
+// TestInternStorageKeyInternsTheZeroKeyOnAnEmptyBucket is the same guard on the
+// key table: slot 0 is a legitimate key, and an empty entry holds its word.
+func TestInternStorageKeyInternsTheZeroKeyOnAnEmptyBucket(t *testing.T) {
+	evm := &EVM{}
+	var zero uint256.Int
+
+	for i := range uint64(storageKeyCacheMinOps + 1) {
+		word := uint256.Int{i + 1, 0, 0, 0}
+		require.NotEqual(t, slotIndex(&zero), slotIndex(&word))
+		evm.internStorageKey(&word)
+	}
+	require.NotNil(t, evm.internCache)
+	require.Equal(t, accounts.NilKey, evm.internCache.handles[slotIndex(&zero)],
+		"the zero word must probe an entry nothing has filled")
+
+	require.True(t, accounts.InternKey(common.Hash{}) == evm.internStorageKey(&zero),
+		"slot 0 must intern, not read as the empty entry it collides with")
+}
+
 // TestInternAddressSurvivesResetBetweenBlocks pins what makes the memo worth
 // having on a reused worker EVM: interning is pure, so a warmed entry stays
 // valid across blocks and clearing it would throw away exactly the reuse the
@@ -225,3 +262,5 @@ func TestInternAddressSurvivesResetBetweenBlocks(t *testing.T) {
 }
 
 var internSink accounts.Address
+
+var keySink accounts.StorageKey
