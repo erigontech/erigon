@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -106,19 +107,17 @@ func TestSystemCallStoragePropagation_BlockStateCache(t *testing.T) {
 		// Read from cache (empty) → fallthrough to sd.mem
 		val, ok := cache.GetCurrentStorage(addr, slot)
 		if !ok {
-			val, ok = cache.GetCommittedStorage(addr, slot)
-		}
-		if !ok {
 			// Fallthrough to sd.mem (simulates ReaderV3.ReadAccountStorage)
-			val = sdMem[string(composite)]
-			ok = len(val) > 0
+			enc := sdMem[string(composite)]
+			val.SetBytes(enc)
+			ok = len(enc) > 0
 			if ok {
 				// Populate committed cache (like CachedReaderV3 does)
 				cache.PutCommittedStorage(addr, slot, val)
 			}
 		}
 
-		t.Logf("Block %d: read slot4=%x (from %s)", blockIdx, val, func() string {
+		t.Logf("Block %d: read slot4=%x (from %s)", blockIdx, val.Bytes(), func() string {
 			if ok {
 				return "sd.mem"
 			}
@@ -128,9 +127,9 @@ func TestSystemCallStoragePropagation_BlockStateCache(t *testing.T) {
 		// Verify we read the expected value
 		if blockIdx > 0 {
 			expectedVal := values[blockIdx-1]
-			assert.True(t, bytes.Equal(val, expectedVal),
+			assert.True(t, bytes.Equal(val.Bytes(), expectedVal),
 				"Block %d should read value written by block %d: got %x, want %x",
-				blockIdx, blockIdx-1, val, expectedVal)
+				blockIdx, blockIdx-1, val.Bytes(), expectedVal)
 		}
 
 		// System call writes new value to cache.
@@ -172,7 +171,7 @@ func TestBlockStateCacheStorageWriteLog(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x42})
 	slot := accounts.InternKey([32]byte{0x01})
 
-	cache.PutCommittedStorage(addr, slot, []byte{0x01})
+	cache.PutCommittedStorage(addr, slot, *uint256.NewInt(0x01))
 
 	// Write same value — must still produce a writeLog entry so Flush
 	// emits a DomainPut and the commitment touch is recorded.
@@ -190,7 +189,7 @@ func TestBlockStateCacheStorageWriteLog(t *testing.T) {
 	// Current view returns the latest write.
 	val, ok := cache.GetCurrentStorage(addr, slot)
 	require.True(t, ok)
-	assert.Equal(t, []byte{0x02}, val, "Should have the latest value")
+	assert.Equal(t, *uint256.NewInt(0x02), val, "Should have the latest value")
 }
 
 // TestBlockStateCacheWriteLogPerTxNum verifies the system-call storage
@@ -207,7 +206,7 @@ func TestBlockStateCacheWriteLogPerTxNum(t *testing.T) {
 	oldVal := []byte{0x3f, 0x2f}
 	newVal := []byte{0x7c, 0x1f}
 
-	cache.PutCommittedStorage(addr, slot, oldVal)
+	cache.PutCommittedStorage(addr, slot, *new(uint256.Int).SetBytes(oldVal))
 	cache.WriteStorage(addr, slot, newVal, 42)
 
 	require.Len(t, cache.writeLog, 1)
@@ -220,9 +219,9 @@ func TestBlockStateCacheWriteLogPerTxNum(t *testing.T) {
 
 	val, ok := cache.GetCurrentStorage(addr, slot)
 	require.True(t, ok)
-	assert.Equal(t, newVal, val)
+	assert.Equal(t, newVal, val.Bytes())
 
 	committed, ok := cache.GetCommittedStorage(addr, slot)
 	require.True(t, ok)
-	assert.Equal(t, oldVal, committed)
+	assert.Equal(t, oldVal, committed.Bytes())
 }

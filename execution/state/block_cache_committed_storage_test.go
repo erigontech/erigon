@@ -20,16 +20,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// committedStorage is a write-once, immutable pre-block view backed by a
-// lock-free sync.Map. These pin the value semantics the reader relies on — in
-// particular a cached empty slot (ok=true, nil value) must stay distinct from
-// an uncached miss (ok=false).
 func TestBlockStateCache_CommittedStorage_Semantics(t *testing.T) {
 	t.Parallel()
 
@@ -39,22 +36,22 @@ func TestBlockStateCache_CommittedStorage_Semantics(t *testing.T) {
 
 	got, ok := cache.GetCommittedStorage(addr, key)
 	require.False(t, ok, "uncached slot must miss")
-	require.Nil(t, got)
+	require.True(t, got.IsZero())
 
-	cache.PutCommittedStorage(addr, key, []byte{0x01, 0x02})
+	cache.PutCommittedStorage(addr, key, *uint256.NewInt(0x0102))
 	got, ok = cache.GetCommittedStorage(addr, key)
 	require.True(t, ok)
-	require.Equal(t, []byte{0x01, 0x02}, got)
+	require.Equal(t, *uint256.NewInt(0x0102), got)
 
 	emptyKey := accounts.InternKey(common.Hash{0x33})
-	cache.PutCommittedStorage(addr, emptyKey, nil)
+	cache.PutCommittedStorage(addr, emptyKey, uint256.Int{})
 	got, ok = cache.GetCommittedStorage(addr, emptyKey)
 	require.True(t, ok, "a cached empty slot must report ok=true, not a miss")
-	require.Nil(t, got)
+	require.True(t, got.IsZero())
 
 	got, ok = cache.GetCurrentStorage(addr, key)
 	require.True(t, ok, "GetCurrentStorage must fall back to committed when unwritten")
-	require.Equal(t, []byte{0x01, 0x02}, got)
+	require.Equal(t, *uint256.NewInt(0x0102), got)
 }
 
 // All worker goroutines of a block share one cache and read committed storage
@@ -72,7 +69,7 @@ func TestBlockStateCache_CommittedStorage_ConcurrentAccess(t *testing.T) {
 		keyList[i] = accounts.InternKey(common.Hash{byte(i + 1)})
 	}
 	// write-once value, deterministic in (addr,key) so reads can be checked.
-	val := func(ai, ki int) []byte { return []byte{byte(ai + 1), byte(ki + 1)} }
+	val := func(ai, ki int) uint256.Int { return *uint256.NewInt(uint64(ai+1)<<8 | uint64(ki+1)) }
 
 	cache := NewBlockStateCache()
 	var wg sync.WaitGroup

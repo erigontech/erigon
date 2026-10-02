@@ -96,11 +96,9 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 0,
 	}
-	postEnc := accounts.SerialiseV3(postAcc)
-
 	blockCache := NewBlockStateCache()
 	blockCache.PutCommittedAccount(addr, preAcc)
-	blockCache.WriteAccount(addr, postEnc, 100)
+	blockCache.WriteAccount(addr, postAcc, 100)
 
 	// Sanity: CurrentCachedReaderV3 (the reader used for non-historic
 	// blocks) sees the post-tx28 value.
