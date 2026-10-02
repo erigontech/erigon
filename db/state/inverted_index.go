@@ -473,7 +473,7 @@ func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool)
 	}
 	w := &InvertedIndexBufferedWriter{
 		prefetcher:        prefetcher,
-		prefetchBatchSize: dbg.EnvUint("INV_IDX_PREFETCH_BATCH_SIZE", 1024),
+		prefetchBatchSize: dbg.EnvUint("INV_IDX_PREFETCH_BATCH_SIZE", 65536),
 		name:              iit.name,
 		discard:           discard,
 		filenameBase:      iit.ii.FilenameBase,
