@@ -2,8 +2,10 @@ package p2p
 
 import (
 	"net"
+	"sync/atomic"
 
 	"github.com/libp2p/go-libp2p/core/control"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
@@ -23,6 +25,7 @@ var privateCIDRList = []string{
 
 type Gater struct {
 	filter *multiaddr.Filters
+	host   atomic.Pointer[host.Host]
 }
 
 func NewGater(cfg *P2PConfig) (g *Gater, err error) {
@@ -32,6 +35,15 @@ func NewGater(cfg *P2PConfig) (g *Gater, err error) {
 		return nil, err
 	}
 	return g, nil
+}
+
+// SetHost lets the gater see live connections once the host exists. NewP2Pmanager
+// registers the gater before libp2p.New returns the host it gates, so InterceptSecured
+// fails open (allow) until this is called - and libp2p.New can itself start accepting
+// connections before it returns, so one or more can complete and register during that
+// same window.
+func (g *Gater) SetHost(h host.Host) {
+	g.host.Store(&h)
 }
 
 // InterceptPeerDial tests whether we're permitted to Dial the specified peer.
@@ -63,8 +75,21 @@ func (g *Gater) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
 // This is called by the upgrader, after it has performed the security
 // handshake, and before it negotiates the muxer, or by the directly by the
 // transport, at the exact same checkpoint.
-func (g *Gater) InterceptSecured(_ network.Direction, _ peer.ID, _ network.ConnMultiaddrs) (allow bool) {
-	return true
+//
+// Two peers that discover each other via discv5 can each independently dial the
+// other around the same time, possibly over different transports: go-libp2p does not
+// deduplicate connections across transports (swarm.addConn appends unconditionally),
+// so without this check the peer could end up with more than one live connection. Once
+// any connection to a peer already exists, a new one is rejected rather than admitted
+// alongside it; an already-established connection is never closed to make room for a
+// new one, since closing it can race with the application layer's own use of that
+// connection.
+func (g *Gater) InterceptSecured(_ network.Direction, p peer.ID, _ network.ConnMultiaddrs) (allow bool) {
+	hostPtr := g.host.Load()
+	if hostPtr == nil {
+		return true
+	}
+	return len((*hostPtr).Network().ConnsToPeer(p)) == 0
 }
 
 // InterceptUpgraded tests whether a fully capable connection is allowed.

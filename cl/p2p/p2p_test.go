@@ -25,14 +25,17 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -127,6 +130,67 @@ func TestNewP2PManagerLogsBoundAndAdvertisedQUIC(t *testing.T) {
 	require.Contains(t, logs, advertisedQUIC)
 }
 
+// TestNewP2PManagerRejectsSecondConnectionFromAnAlreadyConnectedPeer exercises the
+// gater through the production NewP2Pmanager wiring, not just the Gater type in
+// isolation, so a regression in the SetHost/ConnectionGater wiring itself is caught.
+func TestNewP2PManagerRejectsSecondConnectionFromAnAlreadyConnectedPeer(t *testing.T) {
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	networkConfigCopy := *networkConfig
+	networkConfigCopy.BootNodes = nil
+	cfg := &P2PConfig{
+		NetworkConfig: &networkConfigCopy,
+		BeaconConfig:  beaconConfig,
+		IpAddr:        "127.0.0.1",
+		TmpDir:        t.TempDir(),
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	manager, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
+	require.NoError(t, err)
+	listener := manager.UDPv5Listener()
+	localNodeDB := listener.LocalNode().Database()
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, manager.Host().Close())
+		listener.Close()
+		localNodeDB.Close()
+	})
+	host := manager.Host()
+
+	peerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	tcpOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1", DisableQUIC: true}, peerKey)
+	require.NoError(t, err)
+	tcpClient, err := libp2p.New(tcpOpts...)
+	require.NoError(t, err)
+	defer tcpClient.Close()
+
+	tcpAddr := firstMultiaddrWithProtocol(t, host.Addrs(), multiaddr.P_TCP)
+	require.NoError(t, tcpClient.Connect(t.Context(), peer.AddrInfo{ID: host.ID(), Addrs: []multiaddr.Multiaddr{tcpAddr}}))
+	require.Len(t, host.Network().ConnsToPeer(tcpClient.ID()), 1)
+
+	// A second client host shares the same peer identity, since go-libp2p's
+	// Connect() silently reuses the existing connection once a peer is already
+	// marked Connected instead of dialing a fresh one.
+	quicOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, peerKey)
+	require.NoError(t, err)
+	quicClient, err := libp2p.New(quicOpts...)
+	require.NoError(t, err)
+	defer quicClient.Close()
+
+	quicAddr := firstMultiaddrWithProtocol(t, host.Addrs(), multiaddr.P_QUIC_V1)
+	_ = quicClient.Connect(t.Context(), peer.AddrInfo{ID: host.ID(), Addrs: []multiaddr.Multiaddr{quicAddr}})
+
+	require.Eventually(t, func() bool {
+		return len(quicClient.Network().ConnsToPeer(host.ID())) == 0
+	}, time.Second, 10*time.Millisecond, "the production-wired gater must reject a second connection from the same peer identity")
+
+	require.Len(t, host.Network().ConnsToPeer(tcpClient.ID()), 1, "the first connection must survive untouched")
+}
+
 func TestNewP2PManagerRejectsSharedDiscoveryAndQUICPort(t *testing.T) {
 	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
 	require.NoError(t, err)
@@ -142,6 +206,58 @@ func TestNewP2PManagerRejectsSharedDiscoveryAndQUICPort(t *testing.T) {
 
 	_, err = NewP2Pmanager(t.Context(), cfg, log.Root(), clock)
 	require.EqualError(t, err, "discovery and QUIC ports must differ: 9000")
+}
+
+func TestNewP2PManagerAllowsSharedDiscoveryAndQUICPortWhenQUICDisabled(t *testing.T) {
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	networkConfigCopy := *networkConfig
+	networkConfigCopy.BootNodes = nil
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
+
+	for range 10 {
+		discoveryPort, _, err := availableCaplinTestPorts()
+		if errors.Is(err, syscall.EADDRINUSE) {
+			continue
+		}
+		require.NoError(t, err)
+
+		cfg := &P2PConfig{
+			NetworkConfig: &networkConfigCopy,
+			BeaconConfig:  beaconConfig,
+			IpAddr:        "127.0.0.1",
+			Port:          discoveryPort,
+			TCPPort:       0,
+			QUICPort:      uint(discoveryPort),
+			DisableQUIC:   true,
+			TmpDir:        t.TempDir(),
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		manager, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
+		if errors.Is(err, syscall.EADDRINUSE) {
+			cancel()
+			continue
+		}
+		require.NoError(t, err)
+		listener := manager.UDPv5Listener()
+		localNodeDB := listener.LocalNode().Database()
+		t.Cleanup(func() {
+			cancel()
+			require.NoError(t, manager.Host().Close())
+			listener.Close()
+			localNodeDB.Close()
+		})
+
+		require.Zero(t, cfg.QUICPort)
+		_, ok := listener.LocalNode().Node().QUICEndpoint()
+		require.False(t, ok, "ENR must not advertise a QUIC endpoint when QUIC is disabled")
+		for _, addr := range manager.Host().Network().ListenAddresses() {
+			_, err := addr.ValueForProtocol(multiaddr.P_QUIC_V1)
+			require.Error(t, err, "host must not listen on QUIC when disabled")
+		}
+		return
+	}
+	t.Fatal("could not claim a discovery port after 10 attempts")
 }
 
 func TestDiscoveryAndQUICPortConflict(t *testing.T) {
@@ -165,6 +281,7 @@ func TestDiscoveryAndQUICPortConflict(t *testing.T) {
 		{name: "ephemeral discovery explicit quic", cfg: P2PConfig{IpAddr: "127.0.0.1", Port: 0, QUICPort: 9000}},
 		{name: "explicit discovery ephemeral quic", cfg: P2PConfig{IpAddr: "127.0.0.1", Port: 9000, QUICPort: 0}},
 		{name: "different ports", cfg: P2PConfig{IpAddr: "127.0.0.1", Port: 9000, QUICPort: 9001}},
+		{name: "quic disabled ignores same-port collision", cfg: P2PConfig{IpAddr: "127.0.0.1", Port: 9000, QUICPort: 9000, DisableQUIC: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
