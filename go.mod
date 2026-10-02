@@ -171,6 +171,7 @@ require (
 	github.com/filecoin-project/go-clock v0.1.0 // indirect
 	github.com/fjl/gencodec v0.1.2 // indirect
 	github.com/flynn/noise v1.1.0 // indirect
+	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/garslo/gogen v0.0.0-20170306192744-1d203ffc1f61 // indirect
 	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
 	github.com/go-llsqlite/crawshaw v0.6.1-0.20260214000938-869ff8135169 // indirect

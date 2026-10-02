@@ -19,14 +19,18 @@ package app
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 	"lukechampine.com/blake3"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
@@ -51,8 +55,10 @@ func TestVerifyPBTAcceptsSoundArtifacts(t *testing.T) {
 	slotValue[31] = 2
 	address32 := eip8297.RightAlign32(address[:])
 	addressHash := common.Hash(blake3.Sum256(address32[:]))
+	emptyCodeHash := eip8297.CodeHashValue(common.Hash{})
 	entries := []eip8297.Entry{
 		{Key: eip8297.TreeKey(eip8297.AccountZone, addressHash[:], eip8297.BasicDataLeafKey), Value: basic[:]},
+		{Key: eip8297.TreeKey(eip8297.AccountZone, addressHash[:], eip8297.CodeHashLeafKey), Value: emptyCodeHash[:]},
 		{Key: eip8297.TreeKey(eip8297.AccountZone, addressHash[:], eip8297.HeaderStorageOffset+1), Value: slotValue[:]},
 	}
 	root := eip8297.StateRootWithHash(entries, pbtVerifyHash)
@@ -120,12 +126,13 @@ func TestVerifyPBTAcceptsSoundArtifacts(t *testing.T) {
 	require.NoError(t, os.WriteFile(preimagesPath, surplusPreimages.Bytes(), 0o644))
 	require.ErrorIs(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7), errVerifyPBTInvalid)
 	require.NoError(t, os.WriteFile(preimagesPath, preimages.Bytes(), 0o644))
-	wrongRoot := *header
+	wrongRoot := &types.Header{Number: header.Number, Root: header.Root}
 	wrongRoot.Root[0] ^= 1
 	db = temporaltest.NewTestDB(t, dirs, temporaltest.WithOpenExisting())
 	tx, err = db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
-	require.NoError(t, rawdb.WriteHeader(tx, &wrongRoot))
+	defer tx.Rollback()
+	require.NoError(t, rawdb.WriteHeader(tx, wrongRoot))
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, wrongRoot.Hash(), 7))
 	require.NoError(t, tx.Commit())
 	db.Close()
@@ -151,7 +158,7 @@ func TestVerifyPBTChecksCodeChunks(t *testing.T) {
 	var basic [eip8297.ValueLength]byte
 	basic[eip8297.BasicDataCodeSizeOffset+3] = byte(len(code))
 	var chunk [eip8297.ValueLength]byte
-	copy(chunk[:], code)
+	copy(chunk[1:], code)
 	var codeCache eip8297.DigestCache
 	codeCache.Sum = pbtVerifyHash
 	entries := []eip8297.Entry{
@@ -183,4 +190,86 @@ func TestVerifyPBTChecksCodeChunks(t *testing.T) {
 		break
 	}
 	require.Error(t, verifyPBTCode(state))
+}
+
+func TestVerifyPBTHiveFixtures(t *testing.T) {
+	anchor := newHiveVerifyAnchor(t)
+	root := filepath.Join("testdata", "hive-pbt-fixtures")
+	validSnapshot := filepath.Join(root, "valid", "snapshot.bin")
+	validPreimages := filepath.Join(root, "valid", "preimages.bin")
+	require.NoError(t, verifyPBTFiles(t.Context(), anchor, validSnapshot, validPreimages, 0))
+
+	preimageCases, err := os.ReadDir(filepath.Join(root, "preimages"))
+	require.NoError(t, err)
+	require.Len(t, preimageCases, 13)
+	for _, entry := range preimageCases {
+		t.Run(entry.Name(), func(t *testing.T) {
+			err := verifyPBTFiles(t.Context(), anchor, validSnapshot, filepath.Join(root, "preimages", entry.Name(), "preimages.bin"), 0)
+			require.ErrorIs(t, err, errVerifyPBTInvalid)
+		})
+	}
+	snapshotCases, err := os.ReadDir(filepath.Join(root, "snapshot"))
+	require.NoError(t, err)
+	require.Len(t, snapshotCases, 53)
+	for _, entry := range snapshotCases {
+		t.Run(entry.Name(), func(t *testing.T) {
+			preimages := validPreimages
+			if entry.Name() == "anchored-elsewhere" {
+				preimages = filepath.Join(root, "snapshot", entry.Name(), "preimages.bin")
+			}
+			err := verifyPBTFiles(t.Context(), anchor, filepath.Join(root, "snapshot", entry.Name(), "snapshot.bin"), preimages, 0)
+			require.ErrorIs(t, err, errVerifyPBTInvalid)
+		})
+	}
+}
+
+func TestVerifyPBTCommandPrintsRejection(t *testing.T) {
+	anchor := newHiveVerifyAnchor(t)
+	root := filepath.Join("testdata", "hive-pbt-fixtures")
+	snapshot := filepath.Join(t.TempDir(), "snapshot.bin")
+	valid, err := os.ReadFile(filepath.Join(root, "valid", "snapshot.bin"))
+	require.NoError(t, err)
+	valid[len(valid)-1] ^= 1
+	require.NoError(t, os.WriteFile(snapshot, valid, 0o644))
+	preimages := filepath.Join(root, "valid", "preimages.bin")
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stderr = w
+	cmd := &cli.Command{Flags: []cli.Flag{
+		&cli.StringFlag{Name: utils.DataDirFlag.Name},
+		&cli.StringFlag{Name: "snapshot"},
+		&cli.StringFlag{Name: "preimages"},
+		&cli.Uint64Flag{Name: "block"},
+	}}
+	require.NoError(t, cmd.Set(utils.DataDirFlag.Name, anchor))
+	require.NoError(t, cmd.Set("snapshot", snapshot))
+	require.NoError(t, cmd.Set("preimages", preimages))
+	require.NoError(t, cmd.Set("block", "0"))
+	runErr := doVerifyPBT(t.Context(), cmd)
+	require.NoError(t, w.Close())
+	os.Stderr = oldStderr
+	stderr, err := io.ReadAll(r)
+	require.NoError(t, err)
+	var exitErr cli.ExitCoder
+	require.ErrorAs(t, runErr, &exitErr)
+	require.Equal(t, 1, exitErr.ExitCode())
+	require.Contains(t, string(stderr), "verify-pbt: artifact rejected")
+}
+
+func newHiveVerifyAnchor(t *testing.T) string {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithOpenExisting())
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	root := common.HexToHash("0xb5656f58d12a56427942e7a422755496122c7fceba8b3af277f0df13da57d50c")
+	header := &types.Header{Number: *uint256.NewInt(0), Root: root}
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), 0))
+	require.NoError(t, rawdb.WriteChainConfig(tx, header.Hash(), &chain.Config{ChainName: "mainnet"}))
+	require.NoError(t, tx.Commit())
+	db.Close()
+	return dirs.DataDir
 }

@@ -1104,6 +1104,11 @@ func TestConvertPBTRefusesCommitmentFileWithoutAccessor(t *testing.T) {
 	require.False(t, conversionStarted)
 	_, statErr := os.Stat(output)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
+	commands := printedPBTCommands(err.Error(), "ERIGON_COMMITMENT_V3=true erigon snapshots index")
+	require.Len(t, commands, 1)
+	erigonBinary := buildPBTTestErigon(t)
+	runPrintedPBTCommand(t, erigonBinary, commands[0])
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, filepath.Join(t.TempDir(), "converted"), true, "", log.New(), pbtConvertHooks{}))
 }
 
 func TestRemovePBTFilesPastPointKeepsOnlyPublishedRanges(t *testing.T) {

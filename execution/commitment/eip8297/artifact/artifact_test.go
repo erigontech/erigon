@@ -123,6 +123,16 @@ func heapObjects() uint64 {
 	return samples[0].Value.Uint64()
 }
 
+func allocatedBytes(run func() error) (uint64, error) {
+	runtime.GC()
+	samples := []metrics.Sample{{Name: "/gc/heap/allocs:bytes"}}
+	metrics.Read(samples)
+	before := samples[0].Value.Uint64()
+	err := run()
+	metrics.Read(samples)
+	return samples[0].Value.Uint64() - before, err
+}
+
 func heapPeakDelta(run func() error) (uint64, error) {
 	runtime.GC()
 	base := heapObjects()
@@ -784,7 +794,7 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	require.GreaterOrEqual(t, snapshotInfo.Size(), int64(128<<20))
 	require.GreaterOrEqual(t, preimageInfo.Size(), int64(128<<20))
 	readGroups := 0
-	readerPeak, err := heapPeakDelta(func() error {
+	readerAlloc, err := allocatedBytes(func() error {
 		_, err := ReadSnapshotStreamAt(snapshot, snapshotInfo.Size(), SnapshotStreamCallbacks{
 			Storage: func(_ common.Hash, groups func(func(Group) error) error) error {
 				return groups(func(group Group) error {
@@ -797,9 +807,9 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readGroups)
-	require.Less(t, readerPeak, uint64(32<<20))
+	require.Less(t, readerAlloc, uint64(slotCount)*256)
 	readSlots := 0
-	preimagePeak, err := heapPeakDelta(func() error {
+	preimageAlloc, err := allocatedBytes(func() error {
 		return ReadPreimagesStream(preimages, preimageInfo.Size(), func(_ common.Address, slots func(func([32]byte) error) error) error {
 			return slots(func([32]byte) error {
 				readSlots++
@@ -809,9 +819,9 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readSlots)
-	require.Less(t, preimagePeak, uint64(32<<20))
+	require.Less(t, preimageAlloc, uint64(slotCount)*128)
 	seen := 0
-	peak, err := heapPeakDelta(func() error {
+	alloc, err := allocatedBytes(func() error {
 		return joinAtWithBuffer(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), eip8297.HashBytes, func(common.Address, [32]byte) error {
 			seen++
 			return nil
@@ -819,7 +829,7 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, slotCount, seen)
-	require.Less(t, peak, uint64(32<<20))
+	require.Less(t, alloc, uint64(slotCount)*1500)
 }
 
 func TestPreimageReaderAllocationsStayBounded(t *testing.T) {
@@ -918,6 +928,8 @@ func TestWritePreimagesStreamUnderThresholdDoesNotTouchScratchDirectory(t *testi
 	scratchDir := t.TempDir()
 	sentinel := filepath.Join(scratchDir, "sentinel")
 	require.NoError(t, os.WriteFile(sentinel, []byte("sentinel"), 0o644))
+	require.NoError(t, os.Chmod(scratchDir, 0o500))
+	t.Cleanup(func() { require.NoError(t, os.Chmod(scratchDir, 0o755)) })
 	before, err := os.Stat(scratchDir)
 	require.NoError(t, err)
 	var output bytes.Buffer

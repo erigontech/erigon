@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
@@ -63,6 +64,7 @@ func doVerifyPBT(ctx context.Context, cliCtx *cli.Command) error {
 	if err == nil {
 		return nil
 	}
+	_, _ = fmt.Fprintln(os.Stderr, err)
 	if errors.Is(err, errVerifyPBTInvalid) {
 		return cli.Exit(err, 1)
 	}
@@ -77,6 +79,7 @@ type verifyPBTState struct {
 	addresses    map[common.Hash]common.Address
 	addressSlots map[common.Address]map[[32]byte]struct{}
 	usedCode     map[string]struct{}
+	codeSizes    map[common.Hash]uint64
 }
 
 func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath string, block uint64) (err error) {
@@ -107,18 +110,18 @@ func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath st
 
 	state, err := readPBTVerificationState(snapshot, snapshotInfo.Size())
 	if err != nil {
-		return fmt.Errorf("%w: snapshot: %v", errVerifyPBTInvalid, err)
+		return fmt.Errorf("%w: snapshot: %w", errVerifyPBTInvalid, err)
 	}
 	tmp, err := os.MkdirTemp("", "erigon-verify-pbt-")
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tmp)
+	defer dir.RemoveAll(tmp)
 	if err := artifact.JoinAt(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), pbtVerifyHash, nil, tmp); err != nil {
-		return fmt.Errorf("%w: preimages: %v", errVerifyPBTInvalid, err)
+		return fmt.Errorf("%w: preimages: %w", errVerifyPBTInvalid, err)
 	}
 	if err := readPBTVerificationPreimages(preimages, preimageInfo.Size(), state); err != nil {
-		return fmt.Errorf("%w: preimages: %v", errVerifyPBTInvalid, err)
+		return fmt.Errorf("%w: preimages: %w", errVerifyPBTInvalid, err)
 	}
 	if err := verifyPBTCode(state); err != nil {
 		return fmt.Errorf("%w: code: %v", errVerifyPBTInvalid, err)
@@ -141,6 +144,7 @@ func readPBTVerificationState(src io.ReaderAt, size int64) (*verifyPBTState, err
 		addresses:    make(map[common.Hash]common.Address),
 		addressSlots: make(map[common.Address]map[[32]byte]struct{}),
 		usedCode:     make(map[string]struct{}),
+		codeSizes:    make(map[common.Hash]uint64),
 	}
 	builder, err := eip8297.NewStreamRootBuilder(pbtVerifyHash)
 	if err != nil {
@@ -154,9 +158,8 @@ func readPBTVerificationState(src io.ReaderAt, size int64) (*verifyPBTState, err
 		Code: func(group artifact.Group) error {
 			for _, entry := range group.Entries {
 				key := eip8297.TreeKey(eip8297.CodeZone, group.StemHash[:], entry.Index)
-				value := pbtVerifyCodeValue(entry.Value)
-				state.code[string(key)] = value
-				if err := builder.Add(key, value); err != nil {
+				state.code[string(key)] = bytes.Clone(entry.Value)
+				if err := builder.Add(key, pbtVerifyCodeRootValue(entry.Value)); err != nil {
 					return err
 				}
 			}
@@ -193,14 +196,23 @@ func readPBTVerificationState(src io.ReaderAt, size int64) (*verifyPBTState, err
 }
 
 func verifyPBTHeaderLeaves(builder *eip8297.StreamRootBuilder, header artifact.Header, state *verifyPBTState) error {
-	basic := make([]byte, eip8297.ValueLength)
-	copy(basic[eip8297.BasicDataCodeSizeOffset+4-len(header.CodeSize):], header.CodeSize)
-	copy(basic[eip8297.BasicDataNonceOffset+8-len(header.Nonce):], header.Nonce)
-	copy(basic[eip8297.BasicDataBalanceOffset+16-len(header.Balance):], header.Balance)
-	if err := builder.Add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.BasicDataLeafKey), basic); err != nil {
+	codeSize := bytesToUint64(header.CodeSize)
+	if header.Kind == 2 {
+		codeSize = eip8297.DelegationCodeLength
+	}
+	basic, err := eip8297.EncodeBasicData(bytesToUint64(header.Nonce), uint256.NewInt(0).SetBytes(header.Balance), codeSize)
+	if err != nil {
+		return err
+	}
+	if err := builder.Add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.BasicDataLeafKey), basic[:]); err != nil {
 		return err
 	}
 	switch header.Kind {
+	case 0:
+		emptyCodeHash := eip8297.CodeHashValue(common.Hash{})
+		if err := builder.Add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.CodeHashLeafKey), emptyCodeHash[:]); err != nil {
+			return err
+		}
 	case 1:
 		if err := builder.Add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.CodeHashLeafKey), header.CodeHash[:]); err != nil {
 			return err
@@ -224,9 +236,9 @@ func verifyPBTHeaderLeaves(builder *eip8297.StreamRootBuilder, header artifact.H
 	return nil
 }
 
-func pbtVerifyCodeValue(value []byte) []byte {
+func pbtVerifyCodeRootValue(value []byte) []byte {
 	result := make([]byte, eip8297.ValueLength)
-	copy(result, value)
+	copy(result[len(result)-len(value):], value)
 	return result
 }
 
@@ -253,7 +265,8 @@ func readPBTVerificationPreimages(src io.ReaderAt, size int64, state *verifyPBTS
 
 func verifyPBTCode(state *verifyPBTState) error {
 	cache := eip8297.DigestCache{Sum: pbtVerifyHash}
-	for stem, header := range state.headers {
+	for stem := range state.headers {
+		header := state.headers[stem]
 		if header.Kind != 1 {
 			continue
 		}
@@ -261,16 +274,26 @@ func verifyPBTCode(state *verifyPBTState) error {
 		if codeSize == 0 {
 			return fmt.Errorf("code size is zero for %x", stem)
 		}
+		if previous, ok := state.codeSizes[header.CodeHash]; ok && previous != codeSize {
+			return fmt.Errorf("code size for %x differs: %d and %d", header.CodeHash, previous, codeSize)
+		}
+		state.codeSizes[header.CodeHash] = codeSize
 		chunks := (codeSize + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen
 		code := make([]byte, chunks*eip8297.ChunkDataLen)
-		for index := uint64(0); index < chunks; index++ {
+		chunkValues := make([][]byte, chunks)
+		for index := range chunks {
 			key := cache.CodeChunkKey(header.CodeHash, int(index))
 			value, ok := state.code[string(key)]
 			if !ok {
 				continue
 			}
+			chunkValues[index] = value
 			state.usedCode[string(key)] = struct{}{}
-			copy(code[index*eip8297.ChunkDataLen:], value[:eip8297.ChunkDataLen])
+			chunk := value
+			if len(chunk) == eip8297.ValueLength {
+				chunk = chunk[1:]
+			}
+			copy(code[index*eip8297.ChunkDataLen:], chunk)
 		}
 		code = code[:codeSize]
 		if eip8297.IsDelegation(code) {
@@ -278,6 +301,12 @@ func verifyPBTCode(state *verifyPBTState) error {
 		}
 		if got := common.BytesToHash(crypto.Keccak256(code)); got != header.CodeHash {
 			return fmt.Errorf("code hash mismatch for %x: account %x code %x", stem, header.CodeHash, got)
+		}
+		for index, expected := range eip8297.ChunkifyCode(code) {
+			want := bytes.TrimLeft(expected[:], "\x00")
+			if !bytes.Equal(chunkValues[index], want) {
+				return fmt.Errorf("code chunk mismatch for %x at index %d", header.CodeHash, index)
+			}
 		}
 	}
 	for key := range state.code {
@@ -291,7 +320,8 @@ func verifyPBTCode(state *verifyPBTState) error {
 func verifyPBTMPT(state *verifyPBTState) (common.Hash, error) {
 	accountsTrie := trie.NewInMemoryTrieRLPEncoded(nil)
 	cache := eip8297.DigestCache{Sum: pbtVerifyHash}
-	for stem, header := range state.headers {
+	for stem := range state.headers {
+		header := state.headers[stem]
 		address, ok := state.addresses[stem]
 		if !ok {
 			return common.Hash{}, fmt.Errorf("missing address preimage for %x", stem)
