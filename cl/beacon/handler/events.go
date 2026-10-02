@@ -30,7 +30,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const eventStreamWriteQueueSize = 1024
+const (
+	eventStreamWriteQueueSize = 1024
+	eventStreamWriteTimeout   = 30 * time.Second
+)
 
 var validTopics = map[event.EventTopic]struct{}{
 	// operation events
@@ -93,12 +96,8 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 	writerDone := make(chan struct{})
 	go func() {
 		defer close(writerDone)
-		for msg := range writeCh {
-			if _, err := w.Write(msg); err != nil {
-				log.Warn("failed to write event", "err", err)
-				continue
-			}
-			w.(http.Flusher).Flush()
+		if err := writeEventStream(w, writeCh); err != nil {
+			log.Warn("failed to write event", "err", err, "remote", r.RemoteAddr)
 		}
 	}()
 	defer func() {
@@ -112,7 +111,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		case writeCh <- msg:
 			return true
 		default:
-			log.Warn("event stream client is not keeping up, closing stream")
+			log.Warn("event stream client is not keeping up, closing stream", "remote", r.RemoteAddr, "topics", subscribeTopics)
 			return false
 		}
 	}
@@ -136,7 +135,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 				log.Warn("failed to encode data", "err", err, "topic", e.Event)
 				continue
 			}
-			if !enqueue([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", e.Event, string(buf)))) {
+			if !enqueue(fmt.Appendf(nil, "event: %s\ndata: %s\n\n", e.Event, buf)) {
 				return
 			}
 		case <-ticker.C:
@@ -144,6 +143,8 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			if !enqueue([]byte(":\n\n")) {
 				return
 			}
+		case <-writerDone:
+			return
 		case err := <-stateSub.Err():
 			log.Warn("event error", "err", err)
 			return
@@ -155,4 +156,31 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
+}
+
+func writeEventStream(w http.ResponseWriter, writeCh <-chan []byte) error {
+	rc := http.NewResponseController(w)
+	for msg := range writeCh {
+		if err := setWriteDeadline(rc, time.Now().Add(eventStreamWriteTimeout)); err != nil {
+			return err
+		}
+		if _, err := w.Write(msg); err != nil {
+			return err
+		}
+		if err := rc.Flush(); err != nil {
+			return err
+		}
+		// A passed deadline cannot be extended, so leaving it armed would cut a healthy stream that is idle between keepalives.
+		if err := setWriteDeadline(rc, time.Time{}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func setWriteDeadline(rc *http.ResponseController, deadline time.Time) error {
+	if err := rc.SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	return nil
 }
