@@ -26,12 +26,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	pbtengine "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -270,6 +272,70 @@ func TestPBinWitnessInputNewAccountMatchesEngineRoot(t *testing.T) {
 	engineRoot, err := pbtengine.NewTrie(postContext).Process(postOps)
 	require.NoError(t, err)
 	require.Equal(t, engineRoot, resolverRoot, "the witness driver must match the engine root for a funded new account")
+}
+
+func TestPBinWitnessInputIgnoresStaleDelegationCode(t *testing.T) {
+	address := common.HexToAddress("0x5300000000000000000000000000000000000000")
+	target := common.HexToAddress("0x5400000000000000000000000000000000000000")
+	designator := types.AddressToDelegation(accounts.InternAddress(target))
+	original := &accounts.Account{Nonce: 15, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	inner := &pbinCodeReader{
+		fakeStateReader: &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: original}},
+		codes:           map[common.Address][]byte{address: designator},
+	}
+	rs := NewRecordingState(inner)
+	updated := *original
+	updated.Balance = *uint256.NewInt(2)
+	require.NoError(t, rs.UpdateAccountData(accounts.InternAddress(address), original, &updated))
+
+	input, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	require.Len(t, input.Accounts, 1, "a balance-only touch must emit an account update")
+	basic, err := eip8297.EncodeBasicData(updated.Nonce, &updated.Balance, 0)
+	require.NoError(t, err)
+	require.Equal(t, basic[:], input.Accounts[0].Values[eip8297.BasicDataLeafKey], "an empty code hash must ignore stale code size")
+
+	emptyCodeHash := eip8297.CodeHashValue(common.Hash{})
+	preBasic, err := eip8297.EncodeBasicData(original.Nonce, &original.Balance, 0)
+	require.NoError(t, err)
+	preContext := newPBinWitnessInputContext()
+	preEntries := []eip8297.Entry{
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), Value: preBasic[:]},
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.CodeHashLeafKey), Value: emptyCodeHash[:]},
+	}
+	preRoot, err := pbtengine.NewTrie(preContext).Process(pbinWitnessInputEntriesToOps(preEntries))
+	require.NoError(t, err)
+	_, _, witnessRoot, err := pbtengine.NewTrie(preContext).Witness(context.Background(), preRoot, input.PBinDriverInput)
+	require.NoError(t, err)
+
+	postContext := newPBinWitnessInputContext()
+	postContext.records = clonePBinWitnessInputRecords(preContext.records)
+	postRoot, err := pbtengine.NewTrie(postContext).Process([]pbtengine.Op{
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), Value: basic},
+	})
+	require.NoError(t, err)
+	require.Equal(t, postRoot, witnessRoot, "the witness post-root must match the block anchor")
+}
+
+func TestPBinWitnessInputReDelegationWritesDelegation(t *testing.T) {
+	address := common.HexToAddress("0x5500000000000000000000000000000000000000")
+	target := common.HexToAddress("0x5600000000000000000000000000000000000000")
+	designator := types.AddressToDelegation(accounts.InternAddress(target))
+	original := &accounts.Account{Nonce: 15, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	inner := &pbinCodeReader{
+		fakeStateReader: &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: original}},
+		codes:           map[common.Address][]byte{address: designator},
+	}
+	rs := NewRecordingState(inner)
+	updated := *original
+	updated.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(designator))
+	require.NoError(t, rs.UpdateAccountData(accounts.InternAddress(address), original, &updated))
+	require.NoError(t, rs.UpdateAccountCode(accounts.InternAddress(address), 0, updated.CodeHash, designator))
+
+	input, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	require.Len(t, input.Accounts, 1, "a re-delegation must emit an account update")
+	require.Equal(t, designator, input.Accounts[0].Delegation, "a re-delegation must emit its delegation write")
 }
 
 func TestPBinWitnessInputCodelessAccountFromEmptyStateIncludesCodeHash(t *testing.T) {

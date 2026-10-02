@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	eipWitness "github.com/erigontech/erigon/execution/commitment/eip8297/witness"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -102,6 +103,7 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 		update := eipWitness.PBinAccountUpdate{Address: append([]byte(nil), address[:]...)}
 		_, created := rs.CreatedContracts[address]
 		_, deletedInBlock := rs.DeletedInBlock[address]
+		original, originalOK := rs.originalAccounts[address]
 		if (created || deletedInBlock) && rs.innerExists(address) {
 			update.ResetStorage = true
 		}
@@ -110,7 +112,6 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 			if err != nil {
 				return pbinWitnessInput{}, fmt.Errorf("pbin witness: account %s basic data: %w", address, err)
 			}
-			original, originalOK := rs.originalAccounts[address]
 			if !originalOK || original == nil {
 				update.Values = map[byte][]byte{eip8297.BasicDataLeafKey: basic}
 				if code, delegated := rs.ModifiedCode[address]; !delegated || !eip8297.IsDelegation(code) {
@@ -135,7 +136,7 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 			}
 		}
 		if code, modified := rs.ModifiedCode[address]; modified {
-			oldCode, err := rs.inner.ReadAccountCode(accounts.InternAddress(address))
+			oldCode, err := (pbinAccountCodeReader{inner: rs.inner, account: original}).ReadAccountCode(accounts.InternAddress(address))
 			if err != nil || !bytes.Equal(oldCode, code) {
 				if eip8297.IsDelegation(code) {
 					update.Delegation = cloneNonNil(code)
@@ -187,20 +188,40 @@ func pbinReadNeedsProof(address common.Address, source recordingReadSource) bool
 	return source&recordingReadSystemCall != 0 && address != systemAddress
 }
 
+type pbinAccountCodeReader struct {
+	inner   state.StateReader
+	account *accounts.Account
+}
+
+func (r pbinAccountCodeReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	if r.account != nil && r.account.IsEmptyCodeHash() {
+		return nil, nil
+	}
+	return r.inner.ReadAccountCode(address)
+}
+
+func (r pbinAccountCodeReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	if r.account != nil && r.account.IsEmptyCodeHash() {
+		return 0, nil
+	}
+	return r.inner.ReadAccountCodeSize(address)
+}
+
 func pbinAccountBasicValue(rs *RecordingState, address common.Address, account *accounts.Account, original bool) ([]byte, error) {
+	codeReader := pbinAccountCodeReader{inner: rs.inner, account: account}
 	codeSize := uint64(0)
 	if !original {
 		if code, changed := rs.ModifiedCode[address]; changed {
 			codeSize = uint64(len(code))
 		} else {
-			size, err := rs.inner.ReadAccountCodeSize(accounts.InternAddress(address))
+			size, err := codeReader.ReadAccountCodeSize(accounts.InternAddress(address))
 			if err != nil {
 				return nil, err
 			}
 			codeSize = uint64(size)
 		}
 	} else {
-		code, err := rs.inner.ReadAccountCode(accounts.InternAddress(address))
+		code, err := codeReader.ReadAccountCode(accounts.InternAddress(address))
 		if err != nil {
 			return nil, err
 		}
