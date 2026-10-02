@@ -123,13 +123,13 @@ func doExportPBT(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer tx.Rollback()
 	br := freezeblocks.NewBlockReader(blockSnaps)
-	return runExportPBTWithReadbackHookAndTxNumReader(ctx, tx, br.TxnumReader(), func(blockNum uint64) (*types.Header, error) {
+	return runExportPBTWithTxNumReader(ctx, tx, br.TxnumReader(), func(blockNum uint64) (*types.Header, error) {
 		return br.HeaderByNumber(ctx, tx, blockNum)
 	}, cliCtx.String("out"), logger, nil)
 }
 
 func runExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger) error {
-	return runExportPBTWithReadbackHookAndTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, nil)
+	return runExportPBTWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, nil)
 }
 
 func RunExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger) error {
@@ -137,10 +137,10 @@ func RunExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (
 }
 
 func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
-	return runExportPBTWithReadbackHookAndTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, beforeReadback)
+	return runExportPBTWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, beforeReadback)
 }
 
-func runExportPBTWithReadbackHookAndTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
+func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
 	if tx == nil || headerAt == nil {
 		return fmt.Errorf("export-pbt: missing input")
 	}

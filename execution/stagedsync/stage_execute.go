@@ -166,6 +166,17 @@ func checkUnwindConversionPoint(dirs datadir.Dirs, txNum uint64) error {
 	return nil
 }
 
+func checkUnwindConversionBlock(dirs datadir.Dirs, blockNum uint64) error {
+	conversionBlock, conversionTxNum, ok, err := state.ReadErigonDBConversionPoint(dirs)
+	if err != nil {
+		return err
+	}
+	if ok && blockNum < conversionBlock {
+		return fmt.Errorf("%w: %w", ErrTooDeepUnwind, state.NewConversionFloorError(conversionBlock, conversionTxNum, blockNum, state.ConversionFloorBlock))
+	}
+	return nil
+}
+
 func stoppedHexShadowUnwindError(unwindPoint, activationBlock uint64) error {
 	if unwindPoint >= activationBlock {
 		return nil
@@ -614,16 +625,8 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 	if !ok {
-		conversionBlock, _, hasConversionPoint, conversionErr := state.ReadErigonDBConversionPoint(rwTx.Debug().Dirs())
-		if conversionErr != nil {
-			return conversionErr
-		}
-		if hasConversionPoint && u.UnwindPoint < conversionBlock {
-			_, conversionTx, _, err := state.ReadErigonDBConversionPoint(rwTx.Debug().Dirs())
-			if err != nil {
-				return err
-			}
-			return fmt.Errorf("%w: %w", ErrTooDeepUnwind, state.NewConversionFloorError(conversionBlock, conversionTx, u.UnwindPoint, state.ConversionFloorBlock))
+		if err := checkUnwindConversionBlock(rwTx.Debug().Dirs(), u.UnwindPoint); err != nil {
+			return err
 		}
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	}

@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
@@ -946,13 +945,8 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 		return err
 	}
 	if !ok {
-		conversionBlock, conversionTx, hasConversionPoint, conversionErr := dbstate.ReadErigonDBConversionPoint(applyTx.Debug().Dirs())
-		if conversionErr != nil {
-			return conversionErr
-		}
-		if hasConversionPoint && unwindTo < conversionBlock {
-			floor := dbstate.NewConversionFloorError(conversionBlock, conversionTx, unwindTo, dbstate.ConversionFloorBlock)
-			return fmt.Errorf("%w: %w", ErrTooDeepUnwind, floor)
+		if err := checkUnwindConversionBlock(applyTx.Debug().Dirs(), unwindTo); err != nil {
+			return err
 		}
 		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
 	}

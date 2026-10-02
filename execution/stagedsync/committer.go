@@ -544,7 +544,6 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		cc.lastBlockResultSeen = blockNum
 
 		// Break logic: in per-block mode, compute at every block boundary.
-		// Skip the first block if it's a partial block (resumed mid-block).
 		// `forcePerBlockCompute` overrides dbg.BatchCommitments to mirror
 		// serial's gate (exec3_serial.go around the `if !dbg.BatchCommitments
 		// || shouldGenerateChangesets || ...` check) — per-block compute is

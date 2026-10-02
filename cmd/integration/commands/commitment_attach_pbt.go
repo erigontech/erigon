@@ -63,6 +63,21 @@ var (
 	pbtAttachHexRootFn            = pbtAttachHexRoot
 )
 
+type pbtAttachHooks struct {
+	step       func(string) error
+	leafStamps func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error)
+	genesis    func(context.Context, datadir.Dirs, datadir.Dirs, log.Logger) error
+	hexRoot    func(context.Context, datadir.Dirs, *dbstate.ErigonDBSettings, uint64, uint64, log.Logger) (common.Hash, bool, error)
+}
+
+func defaultPBTAttachHooks() pbtAttachHooks {
+	return pbtAttachHooks{
+		leafStamps: validatePBTAttachLeafStamps,
+		genesis:    validatePBTAttachGenesis,
+		hexRoot:    pbtAttachHexRoot,
+	}
+}
+
 func init() {
 	withChain(cmdCommitmentAttachPBT)
 	withDataDir(cmdCommitmentAttachPBT)
@@ -101,11 +116,33 @@ type pbtAttachFile struct {
 }
 
 func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, logger log.Logger) error {
+	return attachPBTWithHooks(ctx, nodePath, publishedPath, chainName, logger, pbtAttachHooks{
+		step:       attachPBTStepHook,
+		leafStamps: validatePBTAttachLeafStampsFn,
+		genesis:    validatePBTAttachGenesisFn,
+		hexRoot:    pbtAttachHexRootFn,
+	})
+}
+
+func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName string, logger log.Logger, hooks pbtAttachHooks) error {
+	defaults := defaultPBTAttachHooks()
+	if hooks.leafStamps == nil {
+		hooks.leafStamps = defaults.leafStamps
+	}
+	if hooks.genesis == nil {
+		hooks.genesis = defaults.genesis
+	}
+	if hooks.hexRoot == nil {
+		hooks.hexRoot = defaults.hexRoot
+	}
 	if nodePath == "" || publishedPath == "" {
 		return errors.New("commitment attach-pbt: node and published datadirs are required")
 	}
 	nodeDirs := datadir.Open(nodePath)
 	publishedDirs := datadir.Open(publishedPath)
+	if err := checkPBTChainName(ctx, nodeDirs, chainName); err != nil {
+		return err
+	}
 	marker, err := dbstate.ReadPBTAttachMarker(nodeDirs)
 	if err != nil {
 		return err
@@ -215,7 +252,7 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	}
 	closeBlockReader()
 	rawDB.Close()
-	publishedPbtRoot, err := validatePBTAttachPublishedPoint(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
+	publishedPbtRoot, err := validatePBTAttachPublishedPointWithLeafStamps(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger, hooks.leafStamps)
 	if err != nil {
 		return err
 	}
@@ -229,7 +266,7 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	var publishedHexRoot common.Hash
 	var publishedHexFound bool
 	if marker == nil {
-		publishedHexRoot, publishedHexFound, err = pbtAttachHexRootFn(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
+		publishedHexRoot, publishedHexFound, err = hooks.hexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
 		if err != nil {
 			return err
 		}
@@ -248,7 +285,7 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 				return fmt.Errorf("commitment attach-pbt: published root %s differs from header root %s at block %d", wantHeaderRoot, headerRoot, blockNum)
 			}
 		}
-		if err := validatePBTAttachGenesisFn(ctx, nodeDirs, publishedDirs, logger); err != nil {
+		if err := hooks.genesis(ctx, nodeDirs, publishedDirs, logger); err != nil {
 			return err
 		}
 		nodePbtRoot, err := pbtAttachNodePbtRoot(ctx, nodeDirs, nodeSettings, publishedSettings.TrieHashName(), logger)
@@ -287,26 +324,26 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 			return err
 		}
 	}
-	if err := runPBTAttachStepHook("marker"); err != nil {
+	if err := runPBTAttachStepHook(hooks.step, "marker"); err != nil {
 		return err
 	}
 	if err := adoptPBTFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
 		return err
 	}
-	if err := runPBTAttachStepHook("swap"); err != nil {
+	if err := runPBTAttachStepHook(hooks.step, "swap"); err != nil {
 		return err
 	}
 	if err := resetPBTExecution(ctx, nodeDirs, publishedSettings, logger); err != nil {
 		return err
 	}
-	if err := runPBTAttachStepHook("reset"); err != nil {
+	if err := runPBTAttachStepHook(hooks.step, "reset"); err != nil {
 		return err
 	}
 	if blockEnd {
 		var shadowRoot common.Hash
 		if afterFork {
 			if !publishedHexFound {
-				publishedHexRoot, publishedHexFound, err = pbtAttachHexRootFn(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
+				publishedHexRoot, publishedHexFound, err = hooks.hexRoot(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
 				if err != nil {
 					return err
 				}
@@ -328,17 +365,17 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if err := dbstate.WriteErigonDBSettings(nodeDirs, finalSettings); err != nil {
 		return err
 	}
-	if err := runPBTAttachStepHook("settings"); err != nil {
+	if err := runPBTAttachStepHook(hooks.step, "settings"); err != nil {
 		return err
 	}
 	return dbstate.RemovePBTAttachMarker(nodeDirs)
 }
 
-func runPBTAttachStepHook(step string) error {
-	if attachPBTStepHook == nil {
+func runPBTAttachStepHook(hook func(string) error, step string) error {
+	if hook == nil {
 		return nil
 	}
-	return attachPBTStepHook(step)
+	return hook(step)
 }
 
 func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, hashName string, logger log.Logger) (common.Hash, error) {
@@ -549,6 +586,10 @@ func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datad
 }
 
 func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) (common.Hash, error) {
+	return validatePBTAttachPublishedPointWithLeafStamps(ctx, dirs, settings, blockNum, txNum, logger, validatePBTAttachLeafStampsFn)
+}
+
+func validatePBTAttachPublishedPointWithLeafStamps(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger, leafStamps func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error)) (common.Hash, error) {
 	configurePBTSourceVariant(settings)
 	if err := eip8297.SetHashSuite(settings.TrieHashName()); err != nil {
 		return common.Hash{}, err
@@ -638,7 +679,7 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 			return common.Hash{}, fmt.Errorf("commitment attach-pbt: published %s state is (%d, %d), want (%d, %d)", check.name, gotBlock, gotTx, blockNum, txNum)
 		}
 	}
-	return validatePBTAttachLeafStampsFn(txNum, func(emit func(dbstate.PBinLeaf) error) error {
+	return leafStamps(txNum, func(emit func(dbstate.PBinLeaf) error) error {
 		return dbstate.ForEachPBinLeaf(at, nil, true, emit)
 	})
 }

@@ -52,7 +52,7 @@ func TestPBTCommandsUseFrozenBlockFiles(t *testing.T) {
 	})
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = false
-	statecfg.ExperimentalCommitmentV3 = false
+	statecfg.ConfigureCommitmentV3Records(false)
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	chain, err := execmoduletester.NewPBTAcceptanceChain(t, true, false)
@@ -154,7 +154,7 @@ func TestPBTConvertUsesFrozenBlockFilesMidBlock(t *testing.T) {
 	})
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = false
-	statecfg.ExperimentalCommitmentV3 = false
+	statecfg.ConfigureCommitmentV3Records(false)
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	chain, err := execmoduletester.NewPBTAcceptanceChain(t, true, false)
