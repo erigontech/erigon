@@ -3237,9 +3237,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				be.finalizedResults[tx] = txResult
 				txResult.cumulativeBlobGasUsed = be.blobGasUsed
 				be.publishTasks.pushPending(tx)
-				if next := tx + 1; next < len(be.tasks) && i+1 < len(toValidate) && toValidate[i+1] != next {
-					be.scheduleExecutionUpTo(ctx, pe, next)
-				}
 			}
 		} else {
 			cntInvalid++
@@ -3271,6 +3268,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.txIncarnations[tx]++
 			if r := be.retryLimitResult(tx, txVersion.TxIndex, be.txIncarnations[tx], "validator-invalid retries", nil); r != nil {
 				return r, nil
+			}
+			if cntInvalid == 1 && i+1 < len(toValidate) && tx == be.validateTasks.maxComplete()+1 {
+				be.scheduleExecutionUpTo(ctx, pe, tx)
 			}
 		}
 	}
