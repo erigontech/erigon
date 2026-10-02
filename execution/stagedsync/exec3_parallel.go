@@ -2659,17 +2659,6 @@ func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList type
 
 func (be *blockExecutor) number() uint64 { return be.block.NumberU64() }
 
-func (be *blockExecutor) releaseSenderSuccessor(tx int) {
-	next, ok := be.senderSuccessor[tx]
-	if !ok {
-		return
-	}
-	delete(be.senderSuccessor, tx)
-	if !be.execTasks.checkComplete(next) && !be.execTasks.checkPending(next) && !be.execTasks.checkInProgress(next) {
-		be.execTasks.pushPending(next)
-	}
-}
-
 func (be *blockExecutor) hash() common.Hash { return be.block.Hash() }
 
 func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
@@ -3125,7 +3114,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if valid {
 			if cntInvalid == 0 {
 				be.validateTasks.markComplete(tx)
-				be.releaseSenderSuccessor(tx)
+				if next, ok := be.senderSuccessor[tx]; ok {
+					delete(be.senderSuccessor, tx)
+					be.execTasks.pushPending(next)
+				}
 
 				be.finalizedResults[tx] = txResult
 
