@@ -116,7 +116,7 @@ func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath st
 	if err != nil {
 		return err
 	}
-	defer dir.RemoveAll(tmp)
+	defer func() { _ = dir.RemoveAll(tmp) }()
 	if err := artifact.JoinAt(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), pbtVerifyHash, nil, tmp); err != nil {
 		return fmt.Errorf("%w: preimages: %w", errVerifyPBTInvalid, err)
 	}
@@ -124,11 +124,11 @@ func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath st
 		return fmt.Errorf("%w: preimages: %w", errVerifyPBTInvalid, err)
 	}
 	if err := verifyPBTCode(state); err != nil {
-		return fmt.Errorf("%w: code: %v", errVerifyPBTInvalid, err)
+		return fmt.Errorf("%w: code: %w", errVerifyPBTInvalid, err)
 	}
 	root, err := verifyPBTMPT(state)
 	if err != nil {
-		return fmt.Errorf("%w: mpt: %v", errVerifyPBTInvalid, err)
+		return fmt.Errorf("%w: mpt: %w", errVerifyPBTInvalid, err)
 	}
 	if err := verifyPBTHeaderRoot(ctx, dataDir, block, root); err != nil {
 		return err
