@@ -782,7 +782,79 @@ func (ef *EliasFano) AppendBytes(buf []byte) []byte {
 	return buf
 }
 
-// Read inputs the state of golomb rice encoding from a reader s
+// ReadEliasFanoChecked is ReadEliasFano for bytes that may be corrupt. The
+// plain form derives its layout from the count and universe in the header and
+// allocates from it, so a forged header panics in makeslice before any caller
+// can look at the result.
+func ReadEliasFanoChecked(r []byte) (*EliasFano, int, error) {
+	if len(r) < 16 {
+		return nil, 0, fmt.Errorf("elias-fano header needs 16 bytes, got %d", len(r))
+	}
+	probe := &EliasFano{
+		count: binary.BigEndian.Uint64(r[:8]),
+		u:     binary.BigEndian.Uint64(r[8:16]),
+	}
+	// count is stored as n-1, so 0 is a one-element sequence. These two values
+	// are the ones computeLayout cannot survive: count+1 overflows to a zero
+	// divisor, and universe 0 underflows maxOffset.
+	if probe.count == math.MaxUint64 || probe.u == 0 {
+		return nil, 0, fmt.Errorf("elias-fano count %d, universe %d", probe.count, probe.u)
+	}
+	_, _, _, totalWords := probe.computeLayout()
+	if avail := (len(r) - 16) / uint64Size; totalWords < 0 || totalWords > avail {
+		return nil, 0, fmt.Errorf("elias-fano needs %d words, %d available", totalWords, avail)
+	}
+	ef, n := ReadEliasFano(r)
+	if err := ef.checkUpperBits(); err != nil {
+		return nil, 0, err
+	}
+	return ef, n, nil
+}
+
+// checkUpperBits replays the jump-table construction against the upper bits and
+// compares, which is the same single pass a bit count would cost. A lookup jumps
+// to the bit an entry names and then walks the slice unchecked, so an entry the
+// bits do not agree with is an out-of-range index rather than a wrong answer.
+func (ef *EliasFano) checkUpperBits() error {
+	mismatch := func(what string, i, want, got uint64) error {
+		return fmt.Errorf("elias-fano %s for element %d is %d, upper bits say %d", what, i, got, want)
+	}
+	var c, lastSuperQ uint64
+	for i := uint64(0); i < uint64(len(ef.upperBits)); i++ {
+		for word := ef.upperBits[i]; word != 0; word &= word - 1 {
+			b := uint64(bits.TrailingZeros64(word))
+			if c&superQMask == 0 {
+				lastSuperQ = i*64 + b
+				idx := (c / superQ) * superQSize
+				if idx >= uint64(len(ef.jump)) {
+					return fmt.Errorf("elias-fano jump table holds %d words, element %d reads word %d", len(ef.jump), c, idx)
+				}
+				if ef.jump[idx] != lastSuperQ {
+					return mismatch("superQ jump", c, lastSuperQ, ef.jump[idx])
+				}
+			}
+			if c&qMask == 0 {
+				jumpSuperQ := (c / superQ) * superQSize
+				jumpInsideSuperQ := (c % superQ) / q
+				idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
+				if idx64 >= uint64(len(ef.jump)) {
+					return fmt.Errorf("elias-fano jump table holds %d words, element %d reads word %d", len(ef.jump), c, idx64)
+				}
+				want := i*64 + b - lastSuperQ
+				if got := (ef.jump[idx64] >> shift) & 0xffffffff; got != want {
+					return mismatch("jump offset", c, want, got)
+				}
+			}
+			c++
+		}
+	}
+	if c != ef.count+1 {
+		return fmt.Errorf("elias-fano upper bits hold %d values, header says %d", c, ef.count+1)
+	}
+	return nil
+}
+
+// ReadEliasFano inputs the state of golomb rice encoding from a reader s
 func ReadEliasFano(r []byte) (*EliasFano, int) {
 	ef := &EliasFano{
 		count: binary.BigEndian.Uint64(r[:8]),
