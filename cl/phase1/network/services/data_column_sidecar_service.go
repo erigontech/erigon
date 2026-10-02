@@ -214,8 +214,17 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return ErrIgnore
 	}
 
-	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot
-	if blockHeader.Slot <= s.forkChoice.FinalizedSlot() {
+	// One finalized checkpoint for both finality checks below, so that a checkpoint update between
+	// them cannot turn an ignored sidecar into a rejected one.
+	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
+	// [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that
+	// block_header.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch).
+	// FinalizedSlot() is the last slot of the finalized epoch, so it is not this bound.
+	finalizedStartSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, s.cfg.SlotsPerEpoch)
+	if !ok {
+		return errors.New("finalized checkpoint slot is not representable")
+	}
+	if blockHeader.Slot <= finalizedStartSlot {
 		return ErrIgnore
 	}
 
@@ -237,10 +246,19 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return fmt.Errorf("data column sidecar should be from a higher slot than the parent block, but got %d <= %d", blockHeader.Slot, parentHeader.Slot)
 	}
 
-	// [REJECT] The finalized checkpoint is an ancestor
-	finalizedCheckpoint := s.forkChoice.FinalizedCheckpoint()
-	finalizedSlot := finalizedCheckpoint.Epoch * s.cfg.SlotsPerEpoch
-	if s.forkChoice.Ancestor(blockHeader.ParentRoot, finalizedSlot).Root != finalizedCheckpoint.Root {
+	// [REJECT] The finalized checkpoint is an ancestor. Like block gossip, look it up no earlier than the
+	// anchor slot, where fork choice history begins.
+	ancestorSlot := finalizedStartSlot
+	if anchorSlot := s.forkChoice.AnchorSlot(); ancestorSlot < anchorSlot {
+		ancestorSlot = anchorSlot
+	}
+	ancestor := s.forkChoice.Ancestor(blockHeader.ParentRoot, ancestorSlot)
+	if ancestor.Root == (common.Hash{}) {
+		// Fork choice no longer has the path, e.g. it was pruned while finality advanced. That is not the
+		// sender's fault, so ignore the sidecar instead of rejecting it.
+		return ErrIgnore
+	}
+	if ancestor.Root != finalizedCheckpoint.Root {
 		return errors.New("finalized checkpoint is not an ancestor of the sidecar's block")
 	}
 
