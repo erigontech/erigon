@@ -27,6 +27,7 @@ import (
 	"maps"
 	"math/big"
 	"math/bits"
+	"slices"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto/secp256r1"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -69,23 +71,51 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 	return maps.Clone(Precompiles(chainRules))
 }
 
-func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+// forkTier indexes forkSets. It is derived from chainRules by the single
+// switch in forkTierFor, so the contracts map and the address list
+// for a fork can never drift apart the way two independent switches could.
+type forkTier int8
+
+const (
+	forkHomestead forkTier = iota
+	forkByzantium
+	forkIstanbul
+	forkBerlin
+	forkCancun
+	forkPrague
+	forkOsaka
+	forkTierCount
+)
+
+type mergedPrecompileSet struct {
+	contracts PrecompiledContracts
+	addresses []accounts.Address
+}
+
+var forkSets [forkTierCount]mergedPrecompileSet
+
+func forkTierFor(chainRules *chain.Rules) forkTier {
 	switch {
 	case chainRules.IsOsaka:
-		return PrecompiledContractsOsaka
+		return forkOsaka
 	case chainRules.IsPrague:
-		return PrecompiledContractsPrague
+		return forkPrague
 	case chainRules.IsCancun:
-		return PrecompiledContractsCancun
+		return forkCancun
 	case chainRules.IsBerlin:
-		return PrecompiledContractsBerlin
+		return forkBerlin
 	case chainRules.IsIstanbul:
-		return PrecompiledContractsIstanbul
+		return forkIstanbul
 	case chainRules.IsByzantium:
-		return PrecompiledContractsByzantium
+		return forkByzantium
 	default:
-		return PrecompiledContractsHomestead
+		return forkHomestead
 	}
+}
+
+// Precompiles returns the precompiles active under chainRules.
+func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	return forkSets[forkTierFor(chainRules)].contracts
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -193,57 +223,37 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 }
 
 var (
-	PrecompiledAddressesOsaka     []accounts.Address
-	PrecompiledAddressesPrague    []accounts.Address
-	PrecompiledAddressesCancun    []accounts.Address
-	PrecompiledAddressesBerlin    []accounts.Address
-	PrecompiledAddressesIstanbul  []accounts.Address
-	PrecompiledAddressesByzantium []accounts.Address
 	PrecompiledAddressesHomestead []accounts.Address
+	PrecompiledAddressesByzantium []accounts.Address
+	PrecompiledAddressesIstanbul  []accounts.Address
+	PrecompiledAddressesBerlin    []accounts.Address
+	PrecompiledAddressesCancun    []accounts.Address
+	PrecompiledAddressesPrague    []accounts.Address
+	PrecompiledAddressesOsaka     []accounts.Address
 )
 
 func init() {
-	for k := range PrecompiledContractsHomestead {
-		PrecompiledAddressesHomestead = append(PrecompiledAddressesHomestead, k)
-	}
-	for k := range PrecompiledContractsByzantium {
-		PrecompiledAddressesByzantium = append(PrecompiledAddressesByzantium, k)
-	}
-	for k := range PrecompiledContractsIstanbul {
-		PrecompiledAddressesIstanbul = append(PrecompiledAddressesIstanbul, k)
-	}
-	for k := range PrecompiledContractsBerlin {
-		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
-	}
-	for k := range PrecompiledContractsCancun {
-		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
-	}
-	for k := range PrecompiledContractsPrague {
-		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
-	}
-	for k := range PrecompiledContractsOsaka {
-		PrecompiledAddressesOsaka = append(PrecompiledAddressesOsaka, k)
+	for tier, tierSet := range [forkTierCount]struct {
+		contracts PrecompiledContracts
+		addresses *[]accounts.Address
+	}{
+		forkHomestead: {PrecompiledContractsHomestead, &PrecompiledAddressesHomestead},
+		forkByzantium: {PrecompiledContractsByzantium, &PrecompiledAddressesByzantium},
+		forkIstanbul:  {PrecompiledContractsIstanbul, &PrecompiledAddressesIstanbul},
+		forkBerlin:    {PrecompiledContractsBerlin, &PrecompiledAddressesBerlin},
+		forkCancun:    {PrecompiledContractsCancun, &PrecompiledAddressesCancun},
+		forkPrague:    {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
+		forkOsaka:     {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
+	} {
+		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
+		*tierSet.addresses = forkSets[tier].addresses
 	}
 }
 
-// ActivePrecompiles returns the precompiles enabled with the current configuration.
+// ActivePrecompiles returns the addresses of the precompiles enabled with the
+// current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
-	switch {
-	case rules.IsOsaka:
-		return PrecompiledAddressesOsaka
-	case rules.IsPrague:
-		return PrecompiledAddressesPrague
-	case rules.IsCancun:
-		return PrecompiledAddressesCancun
-	case rules.IsBerlin:
-		return PrecompiledAddressesBerlin
-	case rules.IsIstanbul:
-		return PrecompiledAddressesIstanbul
-	case rules.IsByzantium:
-		return PrecompiledAddressesByzantium
-	default:
-		return PrecompiledAddressesHomestead
-	}
+	return forkSets[forkTierFor(rules)].addresses
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.
@@ -251,20 +261,19 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64, tracer *tracing.Hooks,
-) (ret []byte, remainingGas uint64, err error) {
+func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas mdgas.MdGas, tracer *tracing.Hooks) ([]byte, mdgas.MdGas, error) {
 	gasCost := p.RequiredGas(input)
-	if suppliedGas < gasCost {
-		return nil, 0, ErrOutOfGas
+	if suppliedGas.Execution < gasCost {
+		return nil, suppliedGas, ErrOutOfGas
 	}
 
-	if tracer != nil && tracer.OnGasChange != nil {
-		tracer.OnGasChange(suppliedGas, suppliedGas-gasCost, tracing.GasChangeCallPrecompiledContract)
+	remaining := suppliedGas
+	remaining.Execution -= gasCost
+	if tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(suppliedGas, remaining, tracing.GasChangeCallPrecompiledContract)
 	}
-
-	suppliedGas -= gasCost
 	output, err := p.Run(input)
-	return output, suppliedGas, err
+	return output, remaining, err
 }
 
 // ECRECOVER implemented as a native contract.
@@ -319,6 +328,7 @@ type sha256hash struct{}
 func (c *sha256hash) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.Sha256PerWordGas + params.Sha256BaseGas
 }
+
 func (c *sha256hash) Run(input []byte) ([]byte, error) {
 	h := sha256.Sum256(input)
 	return h[:], nil
@@ -338,6 +348,7 @@ type ripemd160hash struct{}
 func (c *ripemd160hash) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.Ripemd160PerWordGas + params.Ripemd160BaseGas
 }
+
 func (c *ripemd160hash) Run(input []byte) ([]byte, error) {
 	ripemd := ripemd160.New()
 	ripemd.Write(input)
@@ -360,6 +371,7 @@ type dataCopy struct{}
 func (c *dataCopy) RequiredGas(input []byte) uint64 {
 	return ToWordSize(uint64(len(input)))*params.IdentityPerWordGas + params.IdentityBaseGas
 }
+
 func (c *dataCopy) Run(in []byte) ([]byte, error) {
 	return bytes.Clone(in), nil
 }
@@ -430,7 +442,6 @@ func modExpMultComplexityEip198(x uint32) uint64 {
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bigModExp) RequiredGas(input []byte) uint64 {
-
 	var minGas uint64
 	var adjExpFactor uint64
 	var finalDivisor uint64

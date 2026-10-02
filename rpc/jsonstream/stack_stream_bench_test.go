@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"bytes"
 	"io"
 	"strings"
 	"testing"
@@ -24,12 +25,11 @@ import (
 
 func BenchmarkStreamAcquire(b *testing.B) {
 	result := strings.Repeat("0xabcdef", 512)
-	write := func(s Stream) {
+	write := func(s *Stream) {
 		s.WriteObjectStart()
-		s.WriteObjectField("jsonrpc")
+		s.Field("jsonrpc")
 		s.WriteString("2.0")
-		s.WriteMore()
-		s.WriteObjectField("result")
+		s.Field("result")
 		s.WriteString(result)
 		s.WriteObjectEnd()
 	}
@@ -50,4 +50,20 @@ func BenchmarkStreamAcquire(b *testing.B) {
 			Put(s)
 		}
 	})
+}
+
+// Mirrors the response path: pooled stream, envelope, one big pre-encoded result.
+func BenchmarkWriteRawBytesLargeResult(b *testing.B) {
+	payload := append([]byte(`"`), bytes.Repeat([]byte("a"), 4<<20)...)
+	payload = append(payload, '"')
+	b.ReportAllocs()
+	for b.Loop() {
+		s := Get(io.Discard)
+		s.WriteObjectStart()
+		s.Field("result")
+		s.WriteRawBytes(payload)
+		s.WriteObjectEnd()
+		_ = s.Flush()
+		Put(s)
+	}
 }

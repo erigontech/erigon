@@ -339,6 +339,7 @@ type ReadHeap struct {
 
 func (rh ReadHeap) Len() int           { return len(rh.items) }
 func (rh ReadHeap) Less(i, j int) bool { return rh.items[i].GetSequence() < rh.items[j].GetSequence() }
+
 func (rh ReadHeap) Swap(i, j int) {
 	// Swap queue positions in the B-tree leaves too
 	rh.items[i].SetQueuePos(j)
@@ -570,7 +571,6 @@ func (sc *StateCache) GetStorageByHashedAddress(addrHash common.Hash, incarnatio
 		return nil, true
 	}
 	return nil, false
-
 }
 
 // SetAccountRead adds given account address to the cache, marking it as a absent
@@ -844,6 +844,7 @@ func (sc *StateCache) TotalCount() (res int) {
 	}
 	return
 }
+
 func (sc *StateCache) WriteCount() (res int) {
 	for i := range len(sc.readWrites) {
 		res += sc.writes[i].Len()

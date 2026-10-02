@@ -48,7 +48,7 @@ func TestOverlayGetBeginEnd(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	latestExecuted, _, _, err := rpchelper.GetBlockNumber(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
+	latestExecuted, _, _, err := rpchelper.GetBlockNumber(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader)
 	require.NoError(t, err)
 
 	begin, end, err := getBeginEnd(m.Ctx, tx, api, filters.FilterCriteria{FromBlock: big.NewInt(2), ToBlock: big.NewInt(5)})

@@ -540,3 +540,110 @@ func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {
 		})
 	}
 }
+
+func TestBranchCache_UnpinContractDropsTheTrunk(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	var hash [32]byte
+	for i := range hash {
+		hash[i] = byte(i + 1)
+	}
+	prefixAt := func(storageNibbles int) []byte {
+		total := 64 + storageNibbles
+		p := make([]byte, total/2+1)
+		copy(p[1:], hash[:])
+		for i := 33; i < len(p); i++ {
+			p[i] = byte(i * 7)
+		}
+		return p
+	}
+
+	depths := []int{0, int(c.maxDepth), int(c.maxDepth) + 2}
+	prefixes := make([][]byte, 0, len(depths))
+	for _, d := range depths {
+		p := prefixAt(d)
+		got, ok := ContractHashFromPrefix(p)
+		require.Truef(t, ok, "depth %d must route as storage", d)
+		require.Equalf(t, hash, got, "depth %d must carry the contract hash", d)
+		var nibBuf [4]byte
+		require.Equalf(t, d, storageNibbles(p, &nibBuf), "depth %d prefix must have %d storage nibbles", d, d)
+		c.PinEntry(p, []byte(fmt.Sprintf("v%d", d)), 0, 100)
+		prefixes = append(prefixes, p)
+	}
+	require.Equal(t, len(depths), c.PinnedCount())
+
+	other := prefixAt(0)
+	other[1] ^= 0xff
+	c.PinEntry(other, []byte("other"), 0, 100)
+	require.Equal(t, len(depths)+1, c.PinnedCount())
+
+	c.UnpinContract(hash[:])
+
+	require.Equal(t, 1, c.PinnedCount(), "only the other contract's pin must survive")
+	for i, p := range prefixes {
+		_, _, ok := c.Get(p)
+		require.Falsef(t, ok, "depth %d must be gone after UnpinContract", depths[i])
+	}
+	_, _, ok := c.Get(other)
+	require.True(t, ok, "a different contract's trunk must be untouched")
+
+	var nibBuf [4]byte
+	_, _, routed := c.storageRoute(prefixes[0], false, &nibBuf)
+	require.False(t, routed, "a demoted contract must stop routing to a dead trunk")
+
+	c.PinEntry(prefixes[0], []byte("repin"), 0, 100)
+	require.Equal(t, 2, c.PinnedCount(), "re-promotion must rebuild the trunk and count once")
+	got, _, ok := c.Get(prefixes[0])
+	require.True(t, ok)
+	require.Equal(t, "repin", string(got))
+}
+
+func TestBranchCache_UnpinContractDoesNotResurrectTheTail(t *testing.T) {
+	c := NewBranchCache(100)
+	defer c.Close()
+
+	var hash [32]byte
+	for i := range hash {
+		hash[i] = byte(i + 1)
+	}
+	prefix := make([]byte, 35)
+	copy(prefix[1:], hash[:])
+	prefix[33], prefix[34] = 0xab, 0xcd
+
+	c.Put(prefix, []byte("v1-before-promotion"), 0, 100)
+	_, _, ok := c.Get(prefix)
+	require.True(t, ok, "the pre-promotion write lands in the tail")
+
+	c.PinEntry(prefix, []byte("v2-pinned"), 0, 200)
+	c.Put(prefix, []byte("v3-while-pinned"), 0, 300)
+	got, _, ok := c.Get(prefix)
+	require.True(t, ok)
+	require.Equal(t, "v3-while-pinned", string(got), "a pinned prefix reads from the trunk")
+
+	c.UnpinContract(hash[:])
+
+	got, _, ok = c.Get(prefix)
+	require.Falsef(t, ok, "demote must miss, not republish the shadowed tail copy (got %q)", got)
+	require.Zero(t, c.PinnedCount())
+}
+
+func TestBranchCache_GetBeforeDoesNotEvict(t *testing.T) {
+	c := NewBranchCache(twoTailKeyCapacity)
+	key := []byte{0x1a, 0xb0, 0x00}
+	c.Put(key, []byte("canonical"), 3, 100)
+	for _, bound := range []uint64{0, 99, 100} {
+		_, _, ok := c.GetBefore(key, bound)
+		require.False(t, ok)
+	}
+	got, step, ok := c.GetBefore(key, 101)
+	require.True(t, ok)
+	require.Equal(t, uint64(3), step)
+	require.Equal(t, []byte("canonical"), got)
+	got, _, ok = c.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("canonical"), got)
+	c.Unwind(100)
+	_, _, ok = c.GetBefore(key, 101)
+	require.False(t, ok, "a local bound must still honor canonical invalidation")
+}

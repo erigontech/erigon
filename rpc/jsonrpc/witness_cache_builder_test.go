@@ -19,17 +19,18 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -39,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -193,18 +195,18 @@ func TestWitnessCacheStorePublishes(t *testing.T) {
 	defer cache.unsubscribe(ch)
 
 	hash := hashN(0x42)
-	enc := json.RawMessage(`{"state":["0x01"],"codes":[],"keys":[],"headers":[]}`)
-	api.storeWitness(7, hash, enc)
+	result := mkResult()
+	api.storeWitness(7, hash, result)
 
 	cached, ok := cache.Get(hash)
 	require.True(t, ok, "storeWitness must insert into the cache")
-	require.True(t, bytes.Equal(enc, cached.cachedJSON), "cached bytes must be the stored bytes")
+	require.Same(t, result, cached, "the cache must hold the stored result")
 
 	select {
 	case push := <-ch:
 		require.Equal(t, uint64(7), push.num)
 		require.Equal(t, hash, push.hash)
-		require.True(t, bytes.Equal(enc, push.json), "pushed bytes must be the identical cached bytes")
+		require.Same(t, result, push.result, "the push must carry the cached result")
 	case <-time.After(time.Second):
 		t.Fatal("storeWitness must publish to the feed")
 	}
@@ -219,13 +221,13 @@ func TestCacheAddAloneDoesNotPublish(t *testing.T) {
 	defer cache.unsubscribe(ch)
 
 	hash := hashN(0x77)
-	enc := json.RawMessage(`{"state":["0x02"],"codes":[],"keys":[],"headers":[]}`)
+	result := mkResult()
 
-	cache.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
+	cache.Add(hash, result)
 	require.True(t, cache.Contains(hash), "Add caches")
 	require.Empty(t, ch, "Add alone must not publish")
 
-	cache.store(9, hash, enc)
+	cache.store(9, hash, result)
 	require.Len(t, ch, 1, "store caches and publishes")
 }
 
@@ -283,7 +285,7 @@ func TestBuildPathsPublish(t *testing.T) {
 }
 
 // requireBuildPublished asserts a build published (num, hash) exactly once carrying the
-// bytes it cached. A witness that lands in the cache with no push is the bypass this
+// result it cached. A witness that lands in the cache with no push is the bypass this
 // guards: the insert went somewhere other than store.
 func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResultCache, num uint64, hash common.Hash) {
 	t.Helper()
@@ -293,7 +295,7 @@ func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResu
 		require.Equal(t, hash, push.hash)
 		cached, ok := cache.Get(hash)
 		require.True(t, ok, "a published witness must also be cached")
-		require.True(t, bytes.Equal(cached.cachedJSON, push.json), "pushed bytes must be the cached bytes")
+		require.Same(t, cached, push.result, "the push must carry the cached result")
 		require.Empty(t, ch, "one build publishes exactly once")
 	case <-time.After(30 * time.Second):
 		if cache.Contains(hash) {
@@ -388,9 +390,10 @@ func TestBuildAndCacheHeadCaptureStalePin(t *testing.T) {
 // must populate the cache and be byte-identical to the durable on-demand build that reads
 // the same parent commitment from history.
 func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
-	previousSchema := statecfg.Schema
+	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
 
 	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
 	ctx := context.Background()
@@ -424,9 +427,9 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 	cached, ok := api.witnessCache.Get(hash)
 	require.True(t, ok, "head-capture build must populate the cache")
 
-	wantBytes, err := want.MarshalFastJSON()
+	wantBytes, err := jsonstream.Marshal(want)
 	require.NoError(t, err)
-	gotBytes, err := cached.MarshalFastJSON()
+	gotBytes, err := jsonstream.Marshal(cached)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "head-capture witness must match the durable on-demand build")
 }
@@ -454,9 +457,10 @@ func TestNewWitnessCacheBuilderAPISelectsMode(t *testing.T) {
 // TestWitnessCacheBuilderParity drives the full builder path against the test exec
 // module and asserts the cached witness bytes are identical to the on-demand build.
 func TestWitnessCacheBuilderParity(t *testing.T) {
-	previousSchema := statecfg.Schema
+	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	dbg.AssertEnabled = true
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -495,13 +499,65 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
 	require.NoError(t, err)
 
-	// Compare the served form (rpc.fastJSONResult path): the cache stores a shell
-	// carrying only pre-marshaled bytes, so MarshalFastJSON is what a hit serves.
-	wantBytes, err := want.MarshalFastJSON()
+	// Compare the served form: the cache stores a shell carrying only pre-marshaled
+	// bytes, so MarshalFastJSONTo is what a hit serves.
+	wantBytes, err := jsonstream.Marshal(want)
 	require.NoError(t, err)
-	gotBytes, err := cached.MarshalFastJSON()
+	gotBytes, err := jsonstream.Marshal(cached)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "builder-path witness must be byte-identical to on-demand")
+}
+
+func TestBuildAndCacheJoinsRunningBuild(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	const blockNum = uint64(3)
+	hash, _ := buildTestChainHeader(t, m, blockNum)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, false, false)
+	running := mkResult()
+	registerFinishedBuild(api.witnessCache, hash, running)
+
+	samplesBefore := buildDurationSamples(t)
+	require.True(t, api.buildAndCache(ctx, blockNum, hash))
+	cached, ok := api.witnessCache.Get(hash)
+	require.True(t, ok)
+	require.Same(t, running, cached, "the builder must cache the running build's result, not build again")
+	require.Equal(t, samplesBefore+1, buildDurationSamples(t), "a joined build must still record its duration")
+}
+
+func buildDurationSamples(t *testing.T) uint64 {
+	t.Helper()
+	var m dto.Metric
+	require.NoError(t, witnessCacheBuildDuration.Write(&m))
+	return m.GetHistogram().GetSampleCount()
+}
+
+func TestBuildAndCacheHeadCaptureJoinsRunningBuild(t *testing.T) {
+	ctx := context.Background()
+	const buildNum = uint64(6)
+	m, pin, hash := insertHeadCaptureChain(t, ctx, buildNum)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+	running := mkResult()
+	registerFinishedBuild(api.witnessCache, hash, running)
+
+	samplesBefore := buildDurationSamples(t)
+	next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
+	defer next.close()
+	cached, ok := api.witnessCache.Get(hash)
+	require.True(t, ok)
+	require.Same(t, running, cached, "the head-capture builder must cache the running build's result, not build again")
+	require.Equal(t, samplesBefore+1, buildDurationSamples(t), "a joined build must still record its duration")
 }
 
 // insertHeadCaptureChain enables historical commitment, builds a module with no inserted
