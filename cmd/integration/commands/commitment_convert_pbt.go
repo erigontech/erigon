@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -92,6 +93,9 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	}
 	sourceDirs := datadir.Open(sourcePath)
 	outputDirs := datadir.Open(outputPath)
+	if err := checkPBTChainName(ctx, sourceDirs, chainName); err != nil {
+		return err
+	}
 	if nested, overlapErr := pathsOverlap(sourceDirs.DataDir, outputDirs.DataDir); overlapErr != nil {
 		return overlapErr
 	} else if nested {
@@ -106,11 +110,8 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		return fmt.Errorf("commitment convert-pbt: output datadir %s is not empty", outputDirs.DataDir)
 	}
 
-	oldDatadir, oldChaindata, oldRebuildOutput := datadirCli, chaindata, rebuildOutputDatadir
 	oldBin, oldHexBin, oldV3, oldHash, oldSchema := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.BinCommitmentHash, statecfg.Schema
 	defer func() {
-		datadirCli, chaindata = oldDatadir, oldChaindata
-		rebuildOutputDatadir = oldRebuildOutput
 		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.BinCommitmentHash, statecfg.Schema = oldBin, oldHexBin, oldV3, oldHash, oldSchema
 	}()
 
@@ -173,20 +174,30 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 			return err
 		}
 	}
-	datadirCli = stagingDirs.DataDir
-	chaindata = sourceDirs.Chaindata
-	rebuildOutputDatadir = stagingDirs.DataDir
-	sourceDB, err := openDBReadOnly(ctx, dbCfg(dbcfg.ChainDB, sourceDirs.Chaindata), logger)
+	sourceRawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, sourceDirs.Chaindata), true)
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: open source: %w", err)
 	}
+	sourceAgg, err := dbstate.NewPBTStateAggregator(sourceDirs, sourceSettings, logger).Open(ctx)
+	if err != nil {
+		sourceRawDB.Close()
+		return fmt.Errorf("commitment convert-pbt: open source state: %w", err)
+	}
+	if err := sourceAgg.OpenFolder(sourceRawDB); err != nil {
+		sourceAgg.Close()
+		sourceRawDB.Close()
+		return fmt.Errorf("commitment convert-pbt: open source files: %w", err)
+	}
+	sourceDB, err := dbtemporal.New(sourceRawDB, sourceAgg, nil)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: open source temporal view: %w", err)
+	}
 	defer sourceDB.Close()
-	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, sourceDirs, sourceDB, logger)
+	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, sourceDirs, sourceRawDB, logger)
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: open block snapshots: %w", err)
 	}
 	defer closeBlockReader()
-	sourceAgg := sourceDB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	if err := sourceAgg.ReloadFiles(); err != nil {
 		return fmt.Errorf("commitment convert-pbt: reload source files: %w", err)
 	}
@@ -341,6 +352,38 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		return err
 	}
 	removeOutput = false
+	return nil
+}
+
+func checkPBTChainName(ctx context.Context, dirs datadir.Dirs, expected string) error {
+	if expected == "" {
+		return nil
+	}
+	rawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: open source chain config: %w", err)
+	}
+	defer rawDB.Close()
+	tx, err := rawDB.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: read genesis hash: %w", err)
+	}
+	config, err := rawdb.ReadChainConfig(tx, genesisHash)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: read chain config: %w", err)
+	}
+	if config == nil || config.ChainName != expected {
+		got := "unknown"
+		if config != nil {
+			got = config.ChainName
+		}
+		return fmt.Errorf("commitment convert-pbt: chain %q does not match source chain %q", expected, got)
+	}
 	return nil
 }
 
