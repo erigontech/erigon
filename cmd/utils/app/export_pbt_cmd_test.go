@@ -18,6 +18,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -56,6 +57,14 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func runExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger) error {
+	return runExportPBTWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, nil)
+}
+
+func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
+	return runExportPBTWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, beforeReadback)
+}
 
 func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
 	createCount := 0

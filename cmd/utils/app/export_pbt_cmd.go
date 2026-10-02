@@ -128,16 +128,8 @@ func doExportPBT(ctx context.Context, cliCtx *cli.Command) error {
 	}, cliCtx.String("out"), logger, nil)
 }
 
-func runExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger) error {
-	return runExportPBTWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, nil)
-}
-
 func RunExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger) error {
-	return runExportPBT(ctx, tx, headerAt, outDir, logger)
-}
-
-func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
-	return runExportPBTWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, beforeReadback)
+	return runExportPBTWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, nil)
 }
 
 func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
