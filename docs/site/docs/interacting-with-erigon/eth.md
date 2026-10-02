@@ -48,13 +48,15 @@ Methods that execute a call object — among them `eth_call`, `eth_estimateGas`,
 | an empty `blobVersionedHashes` list | from Cancun on | `blob txn must contain at least one blob versioned hash` |
 | a blob versioned hash with the wrong version byte | from Cancun on | `blob txn versioned hash has invalid version byte` |
 
+On 3.7 the `trace_call` family takes no `blobVersionedHashes`, so the blob rows do not apply to it.
+
 `eth_createAccessList` therefore rejects every request on a block before Berlin, including a plain transfer.
 
 ### eth\_syncing and eth\_subscribe("syncing")
 
-`eth_syncing` returns `false` once the node is fewer than 8 blocks behind the highest block it has seen; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). On 3.7 `eth_syncing` reports `startingBlock` as `0x0`; the subscription reports the block it was at when it first saw the node syncing.
+`eth_syncing` returns `false` when the current block is within 8 blocks of the highest block seen, in either direction; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). A node more than 8 blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. On 3.7 `eth_syncing` reports `startingBlock` as `0x0`; the subscription reports the block it was at when it first saw the node syncing.
 
-`eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then one message per change: the same object with `syncing: true` while syncing, or `false` once synced.
+`eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
 
 ### eth\_getProof
 

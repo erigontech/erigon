@@ -44,7 +44,7 @@ This section details common error messages and provides clear, actionable steps 
 
   ```bash
   # Export the runtime tunables, then pass --batchSize as an Erigon flag:
-  export GOMEMLIMIT=26GiB               # cap total Go heap (set below your physical/container limit)
+  export GOMEMLIMIT=20GiB               # cap total Go heap (e.g. below the 80% default on a 32 GB host)
   export GOGC=80                        # collect garbage more aggressively
   export GOMAXPROCS=$(( $(nproc) / 2 )) # show Erigon fewer cores → smaller RAM estimates
 
