@@ -3262,7 +3262,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			be.execTasks.clearComplete(tx)
 			// Defer: validator-invalid may be race-induced (worker raced an
 			// exec-loop flush). Drain predicate in scheduleExecution waits.
-			be.execTasks.pushDeferred(tx)
+			if be.validateTasks.maxComplete() >= tx-1 {
+				be.execTasks.pushDeferred(tx)
+			} else {
+				be.execTasks.pushPending(tx)
+			}
 			be.preValidated[tx] = false
 			be.txIncarnations[tx]++
 			if r := be.retryLimitResult(tx, txVersion.TxIndex, be.txIncarnations[tx], "validator-invalid retries", nil); r != nil {
@@ -3590,6 +3594,9 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 				if be.execTasks.isBlocked(nextTx) || !be.blockIO.HasReads(txIndex) ||
 					be.versionMap.ValidateVersion(txIndex, be.blockIO,
 						func(_, writtenVersion state.Version) state.VersionValidity {
+							if writtenVersion.TxIndex == state.UnknownDep {
+								return state.VersionValid
+							}
 							wi := writtenVersion.TxIndex + 1
 							if wi >= 0 && wi < len(be.txIncarnations) &&
 								writtenVersion.TxIndex < maxValidated &&

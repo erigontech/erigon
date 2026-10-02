@@ -1388,7 +1388,12 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				// typed by the caller; no boxing.
 			default:
 				valid = VersionInvalid
-				invReason = "done-notmap"
+				if version.TxIndex == UnknownDep {
+					valid = checkVersion(version, rr.Version())
+				}
+				if valid == VersionInvalid {
+					invReason = "done-notmap"
+				}
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
@@ -1568,7 +1573,12 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 	rs := lastIO.ReadSet(txIdx)
 	valid = VersionValid
 	// ok checks one validity result, latching valid; ok==false stops the scan.
-	ok := func(v VersionValidity) bool { valid = v; return v == VersionValid }
+	ok := func(v VersionValidity) bool {
+		if v != VersionValid {
+			valid = v
+		}
+		return v != VersionInvalid
+	}
 	// noValueRead validates a path whose recorded value carries no tiebreaker
 	// (self-destruct / create-contract / code / code-size): the version/status
 	// check is authoritative. One ReadStatus, no value comparison.

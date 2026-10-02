@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,6 +71,8 @@ type testExecTask struct {
 	nonce        int
 	strictNonce  bool
 	dependencies []int
+	recordIO     bool
+	onExecute    func(start, end time.Time)
 }
 
 type PathGenerator func(i int, j int, total int) opkey
@@ -202,6 +205,11 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	dirs datadir.Dirs,
 	calcFees bool,
 ) *exec.TxResult {
+	if t.onExecute != nil {
+		start := time.Now()
+		defer func() { t.onExecute(start, time.Now()) }()
+	}
+
 	// Sleep for 50 microsecond to simulate setup time
 	sleepWithContext(t.ctx, time.Microsecond*50) //nolint:errcheck
 
@@ -267,6 +275,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 		return &exec.TxResult{Err: protocol.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
+	if t.recordIO {
+		return &exec.TxResult{TxIn: t.readMap, TxOut: t.writeMap}
+	}
 	return &exec.TxResult{}
 }
 
@@ -1978,6 +1989,53 @@ func TestSameSenderSuccessorWaitsForPredecessorValidation(t *testing.T) {
 	runParallel(t, tasks, func(pe *parallelExecutor) error {
 		if aborts := pe.abortCount.Load(); aborts != 0 {
 			return fmt.Errorf("same-sender successor re-executed: abortCount=%d execCount=%d", aborts, pe.execCount.Load())
+		}
+		return nil
+	}, false, logger(true))
+}
+
+func TestEarlyInvalidRetryOverlapsPredecessorRetry(t *testing.T) {
+	x := accounts.InternAddress(common.HexToAddress("0xa1"))
+	s := accounts.InternAddress(common.HexToAddress("0xa2"))
+	b := accounts.InternAddress(common.HexToAddress("0xa3"))
+	slot := accounts.InternKey(common.BigToHash(big.NewInt(1)))
+
+	var mu sync.Mutex
+	spans := map[int][][2]time.Time{}
+	task := func(i int, ops []Op, d time.Duration) exec.Task {
+		from := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(0x5e00 + i))))
+		ops = append([]Op{{opType: readType, key: opkey{addr: from, path: state.NoncePath}}}, ops...)
+		ops = append(ops, Op{opType: otherType, duration: d})
+		task := NewTestExecTask(i-1, ops, from, 0)
+		task.recordIO = true
+		task.onExecute = func(start, end time.Time) {
+			mu.Lock()
+			defer mu.Unlock()
+			spans[i] = append(spans[i], [2]time.Time{start, end})
+		}
+		return task
+	}
+	tasks := []exec.Task{
+		task(0, []Op{
+			{opType: writeType, key: opkey{addr: x, key: slot, path: state.StoragePath}, val: 1},
+			{opType: writeType, key: opkey{addr: s, key: slot, path: state.StoragePath}, val: 1},
+		}, 60*time.Millisecond),
+		task(1, []Op{
+			{opType: readType, key: opkey{addr: x, key: slot, path: state.StoragePath}},
+		}, 30*time.Millisecond),
+		task(2, []Op{
+			{opType: readType, key: opkey{addr: b, path: state.BalancePath}},
+			{opType: readType, key: opkey{addr: s, key: slot, path: state.StoragePath}},
+		}, time.Millisecond),
+	}
+	runParallel(t, tasks, func(pe *parallelExecutor) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(spans[1]) < 2 || len(spans[2]) < 2 {
+			return fmt.Errorf("expected tx 1 and tx 2 to re-execute: executions tx1=%d tx2=%d", len(spans[1]), len(spans[2]))
+		}
+		if retryStart, predRetryEnd := spans[2][1][0], spans[1][1][1]; !retryStart.Before(predRetryEnd) {
+			return fmt.Errorf("tx 2 retry started %v after tx 1 retry ended; want it to overlap", retryStart.Sub(predRetryEnd))
 		}
 		return nil
 	}, false, logger(true))

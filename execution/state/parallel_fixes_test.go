@@ -32,6 +32,13 @@ func (r *emptyReader) SetTrace(bool, string)                                   {
 func (r *emptyReader) Trace() bool                                             { return false }
 func (r *emptyReader) TracePrefix() string                                     { return "" }
 
+func exactVersion(rv, wv Version) VersionValidity {
+	if rv != wv {
+		return VersionInvalid
+	}
+	return VersionValid
+}
+
 // TestValueTiebreaker_BalancePath verifies that validation does not
 // invalidate a StorageRead when the versionMap Done value matches the
 // read value. This prevents unnecessary re-executions that cause
@@ -71,7 +78,7 @@ func TestValueTiebreaker_DifferentBalance(t *testing.T) {
 
 	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
 		readVal, liveBalance, eqUint256, absentUint256, recordBalance,
-		func(rv, wv Version) VersionValidity { return VersionValid },
+		exactVersion,
 		false, "")
 
 	assert.Equal(t, VersionInvalid, valid, "Should be invalid when StorageRead value differs from versionMap Done value")
@@ -89,14 +96,14 @@ func TestValueTiebreaker_NoncePath(t *testing.T) {
 	// Same nonce from storage → valid
 	valid := validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
 		uint64(42), liveNonce, eqUint64, absentUint64, recordNonce,
-		func(rv, wv Version) VersionValidity { return VersionValid },
+		exactVersion,
 		false, "")
 	assert.Equal(t, VersionValid, valid, "Same nonce should be valid")
 
 	// Different nonce → invalid
 	valid = validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
 		uint64(41), liveNonce, eqUint64, absentUint64, recordNonce,
-		func(rv, wv Version) VersionValidity { return VersionValid },
+		exactVersion,
 		false, "")
 	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")
 }
