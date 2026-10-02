@@ -388,10 +388,7 @@ func (r *PBinWitnessResolver) resolveRange(path eip8297.Bitpath, key []byte, rec
 
 func (r *PBinWitnessResolver) resolveSingle(path eip8297.Bitpath, key []byte, record *Record, slot int, node, wanted, target eip8297.Bitpath, expected *common.Hash) ([]byte, bool, error) {
 	cell := &record.Cells[slot]
-	parentSplit := node.BitLen - 1
-	if node.BitLen == 0 {
-		parentSplit = path.BitLen
-	}
+	parentSplit := witnessParentSplit(path, node)
 	prefix := rowPrefix(&path, slot, parentSplit+1, path.BitLen+4)
 	if cell.Kind == BranchCell {
 		prefix.Append(&cell.Prefix)
@@ -442,8 +439,7 @@ func (r *PBinWitnessResolver) resolveSingle(path eip8297.Bitpath, key []byte, re
 		if edge != 0 {
 			childHash = cell.Right
 		}
-		row := &rowNode{path: path}
-		childRowPath, err := rowChildPath(row, slot, cell.Prefix, branchSplit(row, slot, &rowCell{Cell: cell, Kind: BranchCell}))
+		childRowPath, err := witnessChildRowPath(path, slot, cell)
 		if err != nil {
 			return nil, false, err
 		}
@@ -592,34 +588,7 @@ func (r *PBinWitnessResolver) tryGroupRange(path eip8297.Bitpath, key []byte, re
 	if err := r.collectRange(path, key, record, slots, from, to, node, stem, values, nil, &complete); err != nil {
 		return nil, false, err
 	}
-	if !complete || len(values) < 2 {
-		return nil, false, nil
-	}
-	subs := make([]byte, 0, len(values))
-	for sub := range values {
-		subs = append(subs, sub)
-	}
-	slices.Sort(subs)
-	group := witness.PBinGroup{Position: uint16(node.BitLen), Stem: slices.Clone(stem), Subs: subs, Values: make([][]byte, len(subs))}
-	for i, sub := range subs {
-		group.Values[i] = values[sub]
-	}
-	blob, err := witness.PBinEncodeGroup(group)
-	if err != nil {
-		return nil, false, err
-	}
-	groupHash, err := witness.PBinHashBlob(blob)
-	if err != nil {
-		return nil, false, err
-	}
-	branchHashValue, err := witness.PBinHashBlob(branch)
-	if err != nil {
-		return nil, false, err
-	}
-	if groupHash != branchHashValue {
-		return nil, false, fmt.Errorf("pbin witness: stored pointer does not match group blob at position %d", node.BitLen)
-	}
-	return blob, true, nil
+	return r.encodeGroup(stem, values, complete, node, branch)
 }
 
 func (r *PBinWitnessResolver) tryGroupExt(base eip8297.Bitpath, record *Record, node eip8297.Bitpath, branch []byte) ([]byte, bool, error) {
@@ -644,39 +613,11 @@ func (r *PBinWitnessResolver) tryGroupExt(base eip8297.Bitpath, record *Record, 
 	if err := r.collectExt(base, record, node, stem, values, nil, &complete); err != nil {
 		return nil, false, err
 	}
-	if !complete || len(values) < 2 {
-		return nil, false, nil
-	}
-	subs := make([]byte, 0, len(values))
-	for sub := range values {
-		subs = append(subs, sub)
-	}
-	slices.Sort(subs)
-	group := witness.PBinGroup{Position: uint16(node.BitLen), Stem: slices.Clone(stem), Subs: subs, Values: make([][]byte, len(subs))}
-	for i, sub := range subs {
-		group.Values[i] = values[sub]
-	}
-	blob, err := witness.PBinEncodeGroup(group)
-	if err != nil {
-		return nil, false, err
-	}
-	groupHash, err := witness.PBinHashBlob(blob)
-	if err != nil {
-		return nil, false, err
-	}
-	branchHashValue, err := witness.PBinHashBlob(branch)
-	if err != nil {
-		return nil, false, err
-	}
-	if groupHash != branchHashValue {
-		return nil, false, fmt.Errorf("pbin witness: stored pointer does not match group blob at position %d", node.BitLen)
-	}
-	return blob, true, nil
+	return r.encodeGroup(stem, values, complete, node, branch)
 }
 
 func (r *PBinWitnessResolver) tryGroupChild(path eip8297.Bitpath, slot int, cell *Cell, node eip8297.Bitpath, branch []byte) ([]byte, bool, error) {
-	row := &rowNode{path: path}
-	childRowPath, err := rowChildPath(row, slot, cell.Prefix, branchSplit(row, slot, &rowCell{Cell: cell, Kind: BranchCell}))
+	childRowPath, err := witnessChildRowPath(path, slot, cell)
 	if err != nil {
 		return nil, false, err
 	}
@@ -703,6 +644,10 @@ func (r *PBinWitnessResolver) tryGroupChild(path eip8297.Bitpath, slot int, cell
 	if err := r.collectChildAt(childRowPath, appendPathBit(branchEnd, 1), stem, values, nil, &complete); err != nil {
 		return nil, false, err
 	}
+	return r.encodeGroup(stem, values, complete, node, branch)
+}
+
+func (r *PBinWitnessResolver) encodeGroup(stem []byte, values map[byte][]byte, complete bool, node eip8297.Bitpath, branch []byte) ([]byte, bool, error) {
 	if !complete || len(values) < 2 {
 		return nil, false, nil
 	}
@@ -742,10 +687,7 @@ func (r *PBinWitnessResolver) firstKeyRange(path eip8297.Bitpath, record *Record
 		if err != nil {
 			return nil, err
 		}
-		parentSplit := node.BitLen - 1
-		if node.BitLen == 0 {
-			parentSplit = path.BitLen
-		}
+		parentSplit := witnessParentSplit(path, node)
 		prefix := rowPrefix(&path, slots[from], parentSplit+1, folded.split)
 		edgePath := node
 		edgePath.Append(&prefix)
@@ -762,18 +704,14 @@ func (r *PBinWitnessResolver) firstKeyRange(path eip8297.Bitpath, record *Record
 	if cell.Kind != BranchCell {
 		return nil, fmt.Errorf("pbin witness: unknown row cell kind %d", cell.Kind)
 	}
-	parentSplit := node.BitLen - 1
-	if node.BitLen == 0 {
-		parentSplit = path.BitLen
-	}
+	parentSplit := witnessParentSplit(path, node)
 	prefix := rowPrefix(&path, slots[from], parentSplit+1, path.BitLen+4)
 	prefix.Append(&cell.Prefix)
 	branchNode := node
 	branchNode.Append(&prefix)
 	child := branchNode
 	child.AppendBit(0)
-	row := &rowNode{path: path}
-	childRowPath, err := rowChildPath(row, slots[from], cell.Prefix, branchSplit(row, slots[from], &rowCell{Cell: cell, Kind: BranchCell}))
+	childRowPath, err := witnessChildRowPath(path, slots[from], cell)
 	if err != nil {
 		return nil, err
 	}
@@ -827,10 +765,7 @@ func (r *PBinWitnessResolver) collectRange(path eip8297.Bitpath, key []byte, rec
 	if from == to {
 		return nil
 	}
-	parentSplit := node.BitLen - 1
-	if node.BitLen == 0 {
-		parentSplit = path.BitLen
-	}
+	parentSplit := witnessParentSplit(path, node)
 	if to-from > 1 {
 		folded, err := foldRange(path, record, slots, from, to, parentSplit, nil)
 		if err != nil {
@@ -883,9 +818,8 @@ func (r *PBinWitnessResolver) collectRange(path eip8297.Bitpath, key []byte, rec
 	}
 	branchEnd := branchNode
 	branchEnd.Append(&prefix)
-	if branchNode.HasPrefix(&stemPath) {
-		row := &rowNode{path: path}
-		childRowPath, err := rowChildPath(row, slots[from], cell.Prefix, branchSplit(row, slots[from], &rowCell{Cell: cell, Kind: BranchCell}))
+	if branchNode.HasPrefix(&stemPath) || stemPath.BitLen == branchEnd.BitLen {
+		childRowPath, err := witnessChildRowPath(path, slots[from], cell)
 		if err != nil {
 			return err
 		}
@@ -898,25 +832,13 @@ func (r *PBinWitnessResolver) collectRange(path eip8297.Bitpath, key []byte, rec
 		*complete = false
 		return nil
 	}
-	if stemPath.BitLen == branchEnd.BitLen {
-		row := &rowNode{path: path}
-		childRowPath, err := rowChildPath(row, slots[from], cell.Prefix, branchSplit(row, slots[from], &rowCell{Cell: cell, Kind: BranchCell}))
-		if err != nil {
-			return err
-		}
-		if err := r.collectChildAt(childRowPath, appendPathBit(branchEnd, 0), stem, values, &cell.Left, complete); err != nil {
-			return err
-		}
-		return r.collectChildAt(childRowPath, appendPathBit(branchEnd, 1), stem, values, &cell.Right, complete)
-	}
 	edge := stemPath.Bit(branchEnd.BitLen)
 	*complete = false
 	childHash := cell.Left
 	if edge != 0 {
 		childHash = cell.Right
 	}
-	row := &rowNode{path: path}
-	childRowPath, err := rowChildPath(row, slots[from], cell.Prefix, branchSplit(row, slots[from], &rowCell{Cell: cell, Kind: BranchCell}))
+	childRowPath, err := witnessChildRowPath(path, slots[from], cell)
 	if err != nil {
 		return err
 	}
@@ -973,15 +895,7 @@ func (r *PBinWitnessResolver) collectExt(base eip8297.Bitpath, record *Record, n
 		*complete = false
 		return nil
 	}
-	if absolute.HasPrefix(&stemPath) {
-		window := absolute
-		window.Truncate((absolute.BitLen / 4) * 4)
-		if err := r.collectChildAt(window, appendPathBit(absolute, 0), stem, values, &record.Left, complete); err != nil {
-			return err
-		}
-		return r.collectChildAt(window, appendPathBit(absolute, 1), stem, values, &record.Right, complete)
-	}
-	if stemPath.BitLen == absolute.BitLen {
+	if absolute.HasPrefix(&stemPath) || stemPath.BitLen == absolute.BitLen {
 		window := absolute
 		window.Truncate((absolute.BitLen / 4) * 4)
 		if err := r.collectChildAt(window, appendPathBit(absolute, 0), stem, values, &record.Left, complete); err != nil {
@@ -1003,6 +917,19 @@ func (r *PBinWitnessResolver) collectExt(base eip8297.Bitpath, record *Record, n
 func appendPathBit(path eip8297.Bitpath, bit uint64) eip8297.Bitpath {
 	path.AppendBit(bit)
 	return path
+}
+
+func witnessChildRowPath(path eip8297.Bitpath, slot int, cell *Cell) (eip8297.Bitpath, error) {
+	row := &rowNode{path: path}
+	rowCell := &rowCell{Cell: cell, Kind: BranchCell}
+	return rowChildPath(row, slot, cell.Prefix, branchSplit(row, rowCell))
+}
+
+func witnessParentSplit(path, node eip8297.Bitpath) int16 {
+	if node.BitLen == 0 {
+		return path.BitLen
+	}
+	return node.BitLen - 1
 }
 
 func pbinDecodeWitnessPath(path []byte) (eip8297.Bitpath, error) {

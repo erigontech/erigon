@@ -265,10 +265,7 @@ func rowTopPrefix(n *rowNode, split int16) (eip8297.Bitpath, error) {
 
 func rowChildPath(parent *rowNode, slot int, prefix eip8297.Bitpath, split int16) (eip8297.Bitpath, error) {
 	path := parent.path
-	var slotPath eip8297.Bitpath
-	for i := range 4 {
-		slotPath.AppendBit(uint64((slot >> (3 - i)) & 1))
-	}
+	slotPath := eip8297.PathFromBits([]byte{byte(slot) << 4}, 4)
 	path.Append(&slotPath)
 	window := (split / 4) * 4
 	need := window - path.BitLen
@@ -280,18 +277,18 @@ func rowChildPath(parent *rowNode, slot int, prefix eip8297.Bitpath, split int16
 	return path, nil
 }
 
-func branchSplit(n *rowNode, slot int, cell *rowCell) int16 {
+func branchSplit(n *rowNode, cell *rowCell) int16 {
 	return n.path.BitLen + 4 + cell.Prefix.BitLen
 }
 
 func branchPath(n *rowNode, slot int, cell *rowCell) eip8297.Bitpath {
-	path := n.path
-	var slotPath eip8297.Bitpath
-	for i := range 4 {
-		slotPath.AppendBit(uint64((slot >> (3 - i)) & 1))
-	}
+	return branchPathFrom(n.path, slot, &cell.Prefix)
+}
+
+func branchPathFrom(path eip8297.Bitpath, slot int, prefix *eip8297.Bitpath) eip8297.Bitpath {
+	slotPath := eip8297.PathFromBits([]byte{byte(slot) << 4}, 4)
 	path.Append(&slotPath)
-	path.Append(&cell.Prefix)
+	path.Append(prefix)
 	return path
 }
 

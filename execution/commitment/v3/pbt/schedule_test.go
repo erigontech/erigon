@@ -826,7 +826,7 @@ func storedRowPathDepth(ctx *trieTestContext, rowPath eip8297.Bitpath, target *e
 	if firstDifference(&full, target) < full.BitLen {
 		return 1
 	}
-	split := branchSplit(row, slot, cell)
+	split := branchSplit(row, cell)
 	childPath, err := rowChildPath(row, slot, cell.Prefix, split)
 	if err != nil {
 		return 1

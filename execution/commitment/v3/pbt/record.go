@@ -565,20 +565,15 @@ func rowLeafSuffix(path eip8297.Bitpath, slot int, key []byte) (eip8297.Bitpath,
 	if !ok || len(key) != keyBytes {
 		return eip8297.Bitpath{}, recordError(ZoneError, "leaf key uses a reserved zone")
 	}
-	for i := range 4 {
-		if full.Bit(path.BitLen+int16(i)) != uint64((slot>>(3-i))&1) {
-			return eip8297.Bitpath{}, recordError(SuffixLengthError, "leaf key does not match the row slot")
-		}
+	if slotAt(&full, path.BitLen) != slot {
+		return eip8297.Bitpath{}, recordError(SuffixLengthError, "leaf key does not match the row slot")
 	}
 	return full.Slice(path.BitLen+4, full.BitLen), nil
 }
 
 func rowLeafKey(path eip8297.Bitpath, slot int, suffix eip8297.Bitpath) ([]byte, error) {
 	full := path
-	var slotPath eip8297.Bitpath
-	for i := range 4 {
-		slotPath.AppendBit(uint64((slot >> (3 - i)) & 1))
-	}
+	slotPath := eip8297.PathFromBits([]byte{byte(slot) << 4}, 4)
 	full.Append(&slotPath)
 	full.Append(&suffix)
 	key := full.AppendPackedBits(nil)
@@ -609,7 +604,7 @@ func rowZone(path *eip8297.Bitpath, slot int) byte {
 		return byte(slot) << 4
 	}
 	if path.BitLen < 8 {
-		return pathNibble(path, 0)<<4 | byte(slot)
+		return byte(slotAt(path, 0))<<4 | byte(slot)
 	}
 	return pathByte(path, 0)
 }
@@ -642,7 +637,7 @@ func rowKeyLength(path *eip8297.Bitpath, slot int) (int, error) {
 
 func validateRowPath(path *eip8297.Bitpath) error {
 	if path.BitLen < 8 {
-		zone := pathNibble(path, 0)
+		zone := byte(slotAt(path, 0))
 		if zone != 0 && zone != 0xf {
 			return recordError(ZoneError, "row path uses a reserved zone")
 		}
@@ -661,7 +656,7 @@ func rootExtensionKeyLength(k recordKey, path *eip8297.Bitpath) (int, error) {
 	if path.BitLen < 4 {
 		return 0, recordError(ZoneError, "root extension does not identify a zone")
 	}
-	zone := pathNibble(path, 0)
+	zone := byte(slotAt(path, 0))
 	if zone == 0 {
 		if path.BitLen >= 8 {
 			zone = pathByte(path, 0)
@@ -728,14 +723,6 @@ func pathByte(path *eip8297.Bitpath, byteIndex int) byte {
 	var out byte
 	for i := range 8 {
 		out |= byte(path.Bit(int16(byteIndex*8+i))) << uint(7-i)
-	}
-	return out
-}
-
-func pathNibble(path *eip8297.Bitpath, from int16) byte {
-	var out byte
-	for i := range 4 {
-		out |= byte(path.Bit(from+int16(i))) << uint(3-i)
 	}
 	return out
 }

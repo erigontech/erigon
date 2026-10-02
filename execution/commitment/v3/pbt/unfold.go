@@ -113,7 +113,7 @@ func (t *Trie) loadBranchChild(parent *rowNode, slot int) (*rowNode, error) {
 	if cell.child != nil {
 		return cell.child, nil
 	}
-	split := branchSplit(parent, slot, cell)
+	split := branchSplit(parent, cell)
 	path, err := rowChildPath(parent, slot, cell.Prefix, split)
 	if err != nil {
 		return nil, err
