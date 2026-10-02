@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"slices"
@@ -305,9 +306,8 @@ func (a *ApiHandler) writeValidatorsResponse(
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		var body string
 		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
-			var err error
-			body, err = buildValidatorsResponse(filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false, a.forkchoiceStore.IsRootOptimistic(root))
-			return err
+			body = buildValidatorsResponse(filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false, a.forkchoiceStore.IsRootOptimistic(root))
+			return nil
 		}); err != nil {
 			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is not synced")).WriteTo(w)
 			return
@@ -347,7 +347,7 @@ func (a *ApiHandler) writeValidatorsResponse(
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validatorSet, true, isOptimistic)
+		writeValidatorsResponseBody(w, buildValidatorsResponse(filterIndicies, statusFilters, stateEpoch, balances, validatorSet, true, isOptimistic))
 		return
 	}
 	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
@@ -368,7 +368,7 @@ func (a *ApiHandler) writeValidatorsResponse(
 		beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found")).WriteTo(w)
 		return
 	}
-	responseValidators(w, filterIndicies, statusFilters, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic)
+	writeValidatorsResponseBody(w, buildValidatorsResponse(filterIndicies, statusFilters, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic))
 }
 
 func parseQueryValidatorIndex(syncedData synced_data.SyncedData, id string) (uint64, error) {
@@ -607,23 +607,14 @@ func (d directString) MarshalJSON() ([]byte, error) {
 	return []byte(d), nil
 }
 
-func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) {
-	body, err := buildValidatorsResponse(filterIndicies, filterStatuses, stateEpoch, balances, validators, finalized, optimistic)
-	if err != nil {
-		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-		return
-	}
-	writeValidatorsResponseBody(w, body)
-}
-
 func writeValidatorsResponseBody(w http.ResponseWriter, body string) {
 	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write([]byte(body)); err != nil {
+	if _, err := io.WriteString(w, body); err != nil {
 		log.Error("failed to write response", "err", err)
 	}
 }
 
-func buildValidatorsResponse(filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) (string, error) {
+func buildValidatorsResponse(filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) string {
 	b := stringsBuilderPool.Get().(*strings.Builder)
 	defer func() {
 		b.Reset()
@@ -634,12 +625,9 @@ func buildValidatorsResponse(filterIndicies []uint64, filterStatuses []validator
 	if optimistic {
 		isOptimistic = "true"
 	}
-	if _, err := b.WriteString("{\"execution_optimistic\":" + isOptimistic + ",\"finalized\":" + strconv.FormatBool(finalized) + ",\"data\":"); err != nil {
-		return "", err
-	}
+	b.WriteString("{\"execution_optimistic\":" + isOptimistic + ",\"finalized\":" + strconv.FormatBool(finalized) + ",\"data\":")
 	b.WriteString("[")
 	first := true
-	var err error
 	validators.Range(func(i int, v solid.Validator, l int) bool {
 		if len(filterIndicies) > 0 && !slices.Contains(filterIndicies, uint64(i)) {
 			return true
@@ -650,15 +638,13 @@ func buildValidatorsResponse(filterIndicies []uint64, filterStatuses []validator
 			return true
 		}
 		if !first {
-			if _, err = b.WriteString(","); err != nil {
-				return false
-			}
+			b.WriteString(",")
 		}
 		first = false
 		// if _, err = b.WriteString(fmt.Sprintf(validatorJsonTemplate, i, status.String(), balances.Get(i), v.PublicKey(), v.WithdrawalCredentials(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
 		// 	return false
 		// }
-		if _, err = b.WriteString("{\"index\":\"" + strconv.FormatUint(uint64(i), 10) +
+		b.WriteString("{\"index\":\"" + strconv.FormatUint(uint64(i), 10) +
 			"\",\"status\":\"" + status.String() +
 			"\",\"balance\":\"" + strconv.FormatUint(balances.Get(i), 10) +
 			"\",\"validator\":{\"pubkey\":\"" + common.Bytes48(v.PublicKey()).Hex() +
@@ -668,19 +654,11 @@ func buildValidatorsResponse(filterIndicies []uint64, filterStatuses []validator
 			",\"activation_eligibility_epoch\":\"" + strconv.FormatUint(v.ActivationEligibilityEpoch(), 10) +
 			"\",\"activation_epoch\":\"" + strconv.FormatUint(v.ActivationEpoch(), 10) +
 			"\",\"exit_epoch\":\"" + strconv.FormatUint(v.ExitEpoch(), 10) +
-			"\",\"withdrawable_epoch\":\"" + strconv.FormatUint(v.WithdrawableEpoch(), 10) + "\"}}"); err != nil {
-			return false
-		}
-
+			"\",\"withdrawable_epoch\":\"" + strconv.FormatUint(v.WithdrawableEpoch(), 10) + "\"}}")
 		return true
 	})
-	if err != nil {
-		return "", err
-	}
-	if _, err = b.WriteString("]}\n"); err != nil {
-		return "", err
-	}
-	return b.String(), nil
+	b.WriteString("]}\n")
+	return b.String()
 }
 
 func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) (*beaconhttp.BeaconResponse, error) {

@@ -19,6 +19,8 @@ package handler
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,19 +31,33 @@ import (
 )
 
 type blockingResponseWriter struct {
-	header  http.Header
+	*httptest.ResponseRecorder
 	started chan struct{}
 	release chan struct{}
+
+	mu     sync.Mutex
+	writes int
 }
 
-func (w *blockingResponseWriter) Header() http.Header { return w.header }
-
-func (w *blockingResponseWriter) WriteHeader(int) {}
-
 func (w *blockingResponseWriter) Write(b []byte) (int, error) {
-	close(w.started)
+	return w.record(func() (int, error) { return w.ResponseRecorder.Write(b) })
+}
+
+func (w *blockingResponseWriter) WriteString(s string) (int, error) {
+	return w.record(func() (int, error) { return w.ResponseRecorder.WriteString(s) })
+}
+
+func (w *blockingResponseWriter) record(write func() (int, error)) (int, error) {
+	w.mu.Lock()
+	n, err := write()
+	w.writes++
+	first := w.writes == 1
+	w.mu.Unlock()
+	if first {
+		close(w.started)
+	}
 	<-w.release
-	return len(b), nil
+	return n, err
 }
 
 func TestGetValidatorsHeadDoesNotHoldHeadStateWhileWriting(t *testing.T) {
@@ -51,10 +67,16 @@ func TestGetValidatorsHeadDoesNotHoldHeadStateWhileWriting(t *testing.T) {
 	require.NoError(t, err)
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
 
-	w := &blockingResponseWriter{header: http.Header{}, started: make(chan struct{}), release: make(chan struct{})}
-	defer close(w.release)
+	w := &blockingResponseWriter{ResponseRecorder: httptest.NewRecorder(), started: make(chan struct{}), release: make(chan struct{})}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(w.release) }) }
+	t.Cleanup(release)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/states/head/validators", nil)
-	go h.mux.ServeHTTP(w, req)
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		h.mux.ServeHTTP(w, req)
+	}()
 
 	select {
 	case <-w.started:
@@ -70,4 +92,16 @@ func TestGetValidatorsHeadDoesNotHoldHeadStateWhileWriting(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("head state update blocked while a validators response was being written")
 	}
+
+	release()
+	select {
+	case <-served:
+	case <-time.After(5 * time.Second):
+		t.Fatal("validators handler did not return")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	require.Equal(t, http.StatusOK, w.Code)
+	require.True(t, strings.HasPrefix(w.Body.String(), `{"execution_optimistic":`), w.Body.String())
+	require.Equal(t, 1, w.writes)
 }

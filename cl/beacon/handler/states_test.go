@@ -613,7 +613,7 @@ func TestResponseValidatorsDoesNotParkResponseInPool(t *testing.T) {
 		balances.Append(uint64(i))
 	}
 
-	responseValidators(httptest.NewRecorder(), nil, nil, 0, balances, validators, true, false)
+	writeValidatorsResponseBody(httptest.NewRecorder(), buildValidatorsResponse(nil, nil, 0, balances, validators, true, false))
 
 	require.Zero(t, seed.Len(), "pooled builder still holds the whole response")
 }
