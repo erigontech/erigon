@@ -128,47 +128,6 @@ func (m *MockMsgReadWriter) WriteToReadBuffer(data []byte) {
 	m.readBuf.Write(data)
 }
 
-// MockPeer implements p2p.Peer for testing purposes
-type MockPeer struct {
-	pubkey [64]byte
-	name   string
-}
-
-func NewMockPeer(pubkey [64]byte, name string) *MockPeer {
-	return &MockPeer{pubkey: pubkey, name: name}
-}
-
-func (m *MockPeer) Pubkey() [64]byte {
-	return m.pubkey
-}
-
-func (m *MockPeer) Name() string {
-	return m.name
-}
-
-func (m *MockPeer) Fullname() string {
-	return fmt.Sprintf("%s/%x", m.name, m.pubkey[:4])
-}
-
-func (m *MockPeer) ID() enode.ID {
-	var id enode.ID
-	copy(id[:], m.pubkey[:])
-	return id
-}
-
-func (m *MockPeer) Info() *p2p.PeerInfo {
-	// Simplified mock, as NetworkInfo is not directly accessible or needed for this test
-	return &p2p.PeerInfo{
-		ID:   m.ID().String(),
-		Name: m.Name(),
-		// Removed Network field entirely to avoid p2p.NetworkInfo dependency
-	}
-}
-
-func (m *MockPeer) Disconnect(reason *p2p.PeerError) {
-	// No-op for mock
-}
-
 func createDummyStatusData(networkID uint64, bestHash common.Hash, totalDifficulty *big.Int, genesisHash common.Hash, minimumBlockHeight uint64, maxBlockHeight uint64) *sentryproto.StatusData {
 	return &sentryproto.StatusData{
 		NetworkId:       networkID,
@@ -547,7 +506,6 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.H
 		},
 	}
 	return s
-
 }
 
 func startHandshake(

@@ -27,10 +27,12 @@ var (
 	mxPinnedHits    = metrics.GetOrCreateCounter("commitment_branchcache_pinned_hits_total")
 	mxPinnedMisses  = metrics.GetOrCreateCounter("commitment_branchcache_pinned_misses_total")
 	mxPinnedEntries = metrics.GetOrCreateGauge("commitment_branchcache_pinned_entries")
+	mxStaleEvicted  = metrics.GetOrCreateCounter("commitment_branchcache_stale_evicted_total")
 
 	mxAdaptivePromoted = metrics.GetOrCreateCounter("commitment_adaptive_pin_promoted_total")
 	mxAdaptiveExtended = metrics.GetOrCreateCounter("commitment_adaptive_pin_extended_total")
 	mxAdaptiveDemoted  = metrics.GetOrCreateCounter("commitment_adaptive_pin_demoted_total")
+	mxAdaptiveRebuilt  = metrics.GetOrCreateCounter("commitment_adaptive_pin_rebuilt_total")
 	mxAdaptiveActive   = metrics.GetOrCreateGauge("commitment_adaptive_pin_active_contracts")
 
 	mxPreloadDurationSecondsTotal = metrics.GetOrCreateCounter("commitment_trunk_preload_duration_seconds_total")
@@ -52,6 +54,10 @@ func (c *BranchCache) PublishMetrics() {
 	}
 	if delta := misses - c.lastPublishedPinnedMisses.Swap(misses); delta > 0 {
 		mxPinnedMisses.AddUint64(delta)
+	}
+	stale := c.staleEvicted.Load()
+	if delta := stale - c.lastPublishedStaleEvicted.Swap(stale); delta > 0 {
+		mxStaleEvicted.AddUint64(delta)
 	}
 	mxPinnedEntries.SetUint64(uint64(c.PinnedCount()))
 }
