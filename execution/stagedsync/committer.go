@@ -1400,13 +1400,13 @@ func (cc *commitmentCalculator) ShadowDomainStopped(domain kv.Domain) bool {
 	return ok && p.CommitmentDomainStopped(domain)
 }
 
-func recordStoppedCommitmentDomains(tx kv.TemporalRwTx, local ...map[kv.Domain]bool) error {
+func recordStoppedCommitmentDomains(tx kv.TemporalRwTx, local map[kv.Domain]bool) error {
 	stopped, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool })
-	if !ok && len(local) == 0 {
+	if !ok && local == nil {
 		return nil
 	}
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-		isStopped := len(local) != 0 && local[0][domain]
+		isStopped := local != nil && local[domain]
 		if !isStopped && ok {
 			isStopped = stopped.CommitmentDomainStopped(domain)
 		}

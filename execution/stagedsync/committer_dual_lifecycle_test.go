@@ -212,7 +212,7 @@ func TestRecordStoppedCommitmentDomainsPersistsStop(t *testing.T) {
 	stopper, ok := tx.AggTx().(interface{ StopCommitmentDomain(kv.Domain) })
 	require.True(t, ok)
 	stopper.StopCommitmentDomain(kv.CommitmentBinDomain)
-	require.NoError(t, recordStoppedCommitmentDomains(tx))
+	require.NoError(t, recordStoppedCommitmentDomains(tx, nil))
 	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
 	require.NoError(t, err)
 	require.True(t, stopped)

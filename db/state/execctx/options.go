@@ -65,9 +65,7 @@ func WithPBinOnly() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.pbinOnly = true }
 }
 
-// WithoutCommitmentSeek skips restoring the persisted trie state. A rebuild that
-// produces a scheme other than the one the DB's blob was written under cannot
-// decode it, and recomputes every key in the shard from files regardless.
+// WithoutCommitmentSeek skips restoring persisted trie state when a caller rebuilds it from files.
 func WithoutCommitmentSeek() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.skipCommitmentSeek = true }
 }
