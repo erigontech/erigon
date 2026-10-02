@@ -1156,7 +1156,7 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 		_, err := tx3.Selfdestruct(addr, eip8246)
 		require.NoError(t, err)
 		require.NoError(t, tx3.MakeWriteSet(&chain.Rules{IsAmsterdam: eip8246}, NewNoopWriter()))
-		vm.FlushVersionedWrites(tx3.VersionedWrites(), true, "")
+		vm.FlushVersionedWrites(tx3.VersionedWrites(), true)
 
 		ibs := New(reader)
 		ibs.SetTxContext(0, 4)

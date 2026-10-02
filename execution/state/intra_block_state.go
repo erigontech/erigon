@@ -34,10 +34,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -1173,7 +1173,7 @@ func (ibs *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 		}
 		return nil, false
 	}
-	acc.Root.SetBytes(trie.EmptyRoot[:])
+	acc.Root.SetBytes(empty.RootHash[:])
 	return acc, true
 }
 
@@ -2140,7 +2140,7 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		original = &previous.original
 	}
 
-	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
+	account.Root.SetBytes(empty.RootHash[:]) // old storage should be ignored
 	newobj = newObject(ibs, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
@@ -2756,7 +2756,7 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if ibs.versionMap == nil {
 		return
 	}
-	ibs.versionMap.FlushVersionedWrites(writes, true, "")
+	ibs.versionMap.FlushVersionedWrites(writes, true)
 }
 
 func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {

@@ -36,14 +36,12 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type SendersCfg struct {
@@ -56,7 +54,7 @@ type SendersCfg struct {
 	readAheader     *exec.BlockReadAheader
 }
 
-func StageSendersCfg(chainCfg *chain.Config, syncCfg ethconfig.Sync, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader dbservices.FullBlockReader, readAheader *exec.BlockReadAheader) SendersCfg {
+func StageSendersCfg(chainCfg *chain.Config, badBlockHalt bool, tmpdir string, blockReader dbservices.FullBlockReader, readAheader *exec.BlockReadAheader) SendersCfg {
 	const sendersBatchSize = 1000
 	return SendersCfg{
 		batchSize:       sendersBatchSize,

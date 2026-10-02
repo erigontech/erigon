@@ -203,7 +203,7 @@ type EngineWriter interface {
 
 var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
-func DefaultBlockPostValidation(chainConfig *chain.Config, header *types.Header,
+func DefaultBlockPostValidation(header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger,
 ) error {

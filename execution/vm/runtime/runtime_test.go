@@ -173,7 +173,6 @@ func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 			Value:    *uint256.NewInt(1),
 			State:    statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
 	require.Equal(t, mdgas.MdGas{Execution: gasLimit}, gasRemaining)
@@ -202,7 +201,6 @@ func TestCreateInsufficientBalancePreservesPreAmsterdamTrace(t *testing.T) {
 			Value:       *uint256.NewInt(1),
 			State:       statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
 	require.Equal(t, []byte{byte(vm.CREATE)}, entered)
@@ -234,7 +232,6 @@ func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
 			GasLimit:  gasLimit,
 			State:     statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrRuntimeOutOfGas)
 	require.Equal(
@@ -473,7 +470,7 @@ func TestBlockhash(t *testing.T) {
 func TestEip2929Cases(t *testing.T) {
 	tmpdir := t.TempDir()
 	id := 1
-	prettyPrint := func(comment string, code []byte) {
+	prettyPrint := func(code []byte) {
 		instrs := make([]string, 0)
 		it := asm.NewInstructionIterator(code)
 		for it.Next() {
@@ -521,9 +518,7 @@ func TestEip2929Cases(t *testing.T) {
 
 			byte(vm.STOP),
 		}
-		prettyPrint("This checks `EXT`(codehash,codesize,balance) of precompiles, which should be `100`, "+
-			"and later checks the same operations twice against some non-precompiles. "+
-			"Those are cheaper second time they are accessed. Lastly, it checks the `BALANCE` of `origin` and `this`.", code)
+		prettyPrint(code)
 	}
 
 	{ // EXTCODECOPY
@@ -540,8 +535,7 @@ func TestEip2929Cases(t *testing.T) {
 
 			byte(vm.STOP),
 		}
-		prettyPrint("This checks `extcodecopy( 0xff,0,0,0,0)` twice, (should be expensive first time), "+
-			"and then does `extcodecopy( this,0,0,0,0)`.", code)
+		prettyPrint(code)
 	}
 
 	{ // SLOAD + SSTORE
@@ -559,8 +553,7 @@ func TestEip2929Cases(t *testing.T) {
 			// Read slot in access list (0x1)
 			byte(vm.PUSH1), 0x01, byte(vm.SLOAD), // SLOAD( 0x1)
 		}
-		prettyPrint("This checks `sload( 0x1)` followed by `sstore(loc: 0x01, val:0x11)`, then 'naked' sstore:"+
-			"`sstore(loc: 0x02, val:0x11)` twice, and `sload(0x2)`, `sload(0x1)`. ", code)
+		prettyPrint(code)
 	}
 	{ // Call variants
 		code := []byte{
@@ -576,8 +569,7 @@ func TestEip2929Cases(t *testing.T) {
 			byte(vm.PUSH1), 0x0, byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1),
 			byte(vm.PUSH1), 0xff, byte(vm.PUSH1), 0x0, byte(vm.STATICCALL), byte(vm.POP),
 		}
-		prettyPrint("This calls the `identity`-precompile (cheap), then calls an account (expensive) and `staticcall`s the same"+
-			"account (cheap)", code)
+		prettyPrint(code)
 	}
 }
 
@@ -974,5 +966,67 @@ func TestOpcodeMaskStillReportsFaults(t *testing.T) {
 			require.Empty(t, opcodes, "the mask excludes every opcode this code runs")
 			require.NotEmpty(t, faults, "an excluded opcode that faults must still reach OnFault")
 		})
+	}
+}
+
+// TestFastPathMatchesGenericPath runs each program with tracing off (the
+// interpreter's fast path) and on (the jump-table path) under every gas limit
+// up to completion, and requires identical results.
+func TestFastPathMatchesGenericPath(t *testing.T) {
+	t.Parallel()
+	fill := func(n int, tail ...byte) []byte {
+		code := make([]byte, 0, 2*n+len(tail))
+		for range n {
+			code = append(code, byte(vm.PUSH1), 0)
+		}
+		return append(code, tail...)
+	}
+	programs := map[string][]byte{
+		"mix": {
+			byte(vm.PUSH1), 1, byte(vm.PUSH1), 2, byte(vm.PUSH2), 0x01, 0x03,
+			byte(vm.DUP2), byte(vm.DUP1), byte(vm.DUP3), byte(vm.ADD), byte(vm.SWAP1), byte(vm.SWAP2), byte(vm.POP),
+			byte(vm.PUSH1), 19, byte(vm.JUMP), byte(vm.STOP), byte(vm.STOP),
+			byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.PUSH1), 28, byte(vm.JUMPI),
+			byte(vm.PUSH1), 1, byte(vm.PUSH1), 31, byte(vm.JUMPI), byte(vm.STOP),
+			byte(vm.JUMPDEST),
+			byte(vm.PUSH1), 0x00, byte(vm.MSTORE), byte(vm.PUSH1), 0x20, byte(vm.MSTORE),
+			byte(vm.PUSH1), 0x40, byte(vm.MSTORE), byte(vm.PUSH1), 0x60, byte(vm.MSTORE),
+			byte(vm.PUSH1), 0x80, byte(vm.PUSH1), 0x00, byte(vm.RETURN),
+		},
+		"push2 truncated":  {byte(vm.PUSH2), 0xff},
+		"underflow ADD":    {byte(vm.PUSH1), 1, byte(vm.ADD)},
+		"underflow POP":    {byte(vm.POP)},
+		"underflow DUP1":   {byte(vm.DUP1)},
+		"underflow DUP2":   {byte(vm.PUSH1), 1, byte(vm.DUP2)},
+		"underflow DUP3":   {byte(vm.PUSH1), 1, byte(vm.PUSH1), 1, byte(vm.DUP3)},
+		"underflow SWAP1":  {byte(vm.PUSH1), 1, byte(vm.SWAP1)},
+		"underflow SWAP2":  {byte(vm.PUSH1), 1, byte(vm.PUSH1), 1, byte(vm.SWAP2)},
+		"underflow JUMP":   {byte(vm.JUMP)},
+		"underflow JUMPI":  {byte(vm.PUSH1), 1, byte(vm.JUMPI)},
+		"invalid JUMP":     {byte(vm.PUSH1), 3, byte(vm.JUMP), byte(vm.STOP)},
+		"invalid JUMPI":    {byte(vm.PUSH1), 1, byte(vm.PUSH1), 5, byte(vm.JUMPI), byte(vm.STOP)},
+		"overflow PUSH1":   fill(1024, byte(vm.PUSH1), 0),
+		"overflow PUSH2":   fill(1024, byte(vm.PUSH2), 0, 0),
+		"overflow DUP1":    fill(1024, byte(vm.DUP1)),
+		"full stack SWAP2": fill(1024, byte(vm.SWAP2), byte(vm.ADD), byte(vm.POP)),
+	}
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	ibs := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer ibs.Close()
+	hooks := &tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {}}
+	i := 0
+	for name, code := range programs {
+		i++
+		address := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(0x1000 + i))))
+		require.NoError(t, ibs.SetCode(address, code, tracing.CodeChangeUnspecified))
+		maxGas := uint64(3*len(code) + 20)
+		for gas := uint64(0); gas <= maxGas; gas++ {
+			fastRet, fastLeft, fastErr := Call(address, nil, &Config{State: ibs, GasLimit: gas})
+			ret, left, err := Call(address, nil, &Config{State: ibs, GasLimit: gas, EVMConfig: vm.Config{Tracer: hooks}})
+			require.Equal(t, fmt.Sprint(err), fmt.Sprint(fastErr), "%s gas %d", name, gas)
+			require.Equal(t, left, fastLeft, "%s gas %d", name, gas)
+			require.Equal(t, ret, fastRet, "%s gas %d", name, gas)
+		}
 	}
 }

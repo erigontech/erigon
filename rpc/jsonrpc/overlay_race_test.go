@@ -418,7 +418,7 @@ func signOverlayRaceTestTxWithTip(t *testing.T, m *execmoduletester.ExecModuleTe
 	t.Helper()
 	signer := types.LatestSigner(m.ChainConfig)
 	txn, err := types.SignTx(
-		types.NewEIP1559Transaction(*m.ChainConfig.ChainID, nonce, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, nil, uint256.NewInt(tip), uint256.NewInt(1_000_000_000_000), nil),
+		types.NewEIP1559Transaction(*m.ChainConfig.ChainID, nonce, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(tip), uint256.NewInt(1_000_000_000_000), nil),
 		*signer, m.Key,
 	)
 	require.NoError(t, err)
