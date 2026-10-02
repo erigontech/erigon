@@ -127,15 +127,16 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	}
 	nodeDirs := datadir.Open(nodePath)
 	publishedDirs := datadir.Open(publishedPath)
-	if err := checkPBTChainName(ctx, nodeDirs, chainName, "commitment attach-pbt"); err != nil {
+	if err := checkPBTChainName(ctx, nodeDirs, chainName, "commitment attach-pbt", "node"); err != nil {
 		return err
 	}
 	marker, err := dbstate.ReadPBTAttachMarker(nodeDirs)
 	if err != nil {
 		return fmt.Errorf("%w; remove only %s and rerun attach-pbt --from %s", err, dbstate.PBTAttachMarkerPath(nodeDirs), publishedPath)
 	}
+	nodeV3 := false
 	if marker == nil {
-		if _, err := dbstate.EnableCommitmentV3FromFiles(nodeDirs); err != nil {
+		if nodeV3, err = dbstate.EnableCommitmentV3FromFiles(nodeDirs); err != nil {
 			return err
 		}
 	}
@@ -221,7 +222,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	var nodeBlock, nodeTx uint64
 	if marker == nil {
 		var root common.Hash
-		nodeBlock, nodeTx, root, err = pbtAttachNodeHexState(ctx, nodeDirs, nodeSettings, logger)
+		nodeBlock, nodeTx, root, err = pbtAttachNodeHexState(ctx, nodeDirs, nodeSettings, nodeV3, logger)
 		if err != nil {
 			return err
 		}
@@ -298,7 +299,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		if err := hooks.genesis(ctx, nodeDirs, publishedDirs, logger); err != nil {
 			return err
 		}
-		nodePbtRoot, err := pbtAttachNodePbtRoot(ctx, nodeDirs, nodeSettings, publishedSettings.TrieHashName(), logger)
+		nodePbtRoot, err := pbtAttachNodePbtRoot(ctx, nodeDirs, nodeSettings, nodeV3, publishedSettings.TrieHashName(), logger)
 		if err != nil {
 			return err
 		}
@@ -388,8 +389,19 @@ func runPBTAttachStepHook(hook func(string) error, step string) error {
 	return hook(step)
 }
 
-func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, hashName string, logger log.Logger) (common.Hash, error) {
+func configurePBTNodeVariant(settings *dbstate.ErigonDBSettings, v3 bool) {
+	if v3 && settings.TrieVariantName() == dbstate.TrieVariantHex {
+		statecfg.ConfigureCommitmentV3Records(true)
+		statecfg.ExperimentalBinCommitment = false
+		statecfg.ExperimentalHexBinCommitment = false
+		statecfg.BinCommitmentHash = ""
+		return
+	}
 	configurePBTSourceVariant(settings)
+}
+
+func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, v3 bool, hashName string, logger log.Logger) (common.Hash, error) {
+	configurePBTNodeVariant(settings, v3)
 	if err := eip8297.SetHashSuite(hashName); err != nil {
 		return common.Hash{}, err
 	}
@@ -505,13 +517,13 @@ func pbtAttachHexRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.
 	return common.BytesToHash(root), true, nil
 }
 
-func pbtAttachNodeHexState(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger) (uint64, uint64, common.Hash, error) {
+func pbtAttachNodeHexState(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, v3 bool, logger log.Logger) (uint64, uint64, common.Hash, error) {
 	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
 		return 0, 0, common.Hash{}, err
 	}
 	defer db.Close()
-	configurePBTSourceVariant(settings)
+	configurePBTNodeVariant(settings, v3)
 	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		return 0, 0, common.Hash{}, err

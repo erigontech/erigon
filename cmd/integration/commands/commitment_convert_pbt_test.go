@@ -337,6 +337,33 @@ func TestConvertPBTSourceWithoutBinaryTables(t *testing.T) {
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 
+func TestConvertPBTPublishedRootMatchesDualShadowRoot(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
+	require.NoError(t, err)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	buildPBTAcceptanceFiles(t, source)
+	raw := dbCfg(dbcfg.ChainDB, source.Tester.Dirs.Chaindata).MustOpen()
+	var shadow []byte
+	require.NoError(t, raw.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		shadow, err = rawdb.ReadShadowStateRoot(tx, source.Chain.Blocks[3].Hash(), 4)
+		shadow = bytes.Clone(shadow)
+		return err
+	}))
+	raw.Close()
+	output := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
+	require.NoError(t, err)
+	blockNum, _, ok, err := settings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(4), blockNum)
+	require.NotEmpty(t, shadow)
+	require.Equal(t, common.BytesToHash(shadow), readPBTBinRoot(t, output, source.Tester.Dirs.Chaindata))
+}
+
 func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte, maxOps int) (map[string][]byte, common.Hash, common.Hash, string, map[string][]byte, map[string][]byte, string) {
 	t.Helper()
 	selectPBTHexCommandSuite(t)
@@ -1056,13 +1083,25 @@ func TestConvertPBTRefusesCommitmentFileWithoutAccessor(t *testing.T) {
 	source.Tester.Close()
 	lastTx := pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata)
 	buildPBTAcceptanceFilesAtWithMerge(t, source, lastTx, true)
-	matches, err := filepath.Glob(filepath.Join(source.Tester.Dirs.SnapDomain, "*-commitment.*.bt"))
-	require.NoError(t, err)
-	require.NotEmpty(t, matches)
-	require.NoError(t, dir.RemoveFile(matches[0]))
+	for _, root := range []string{source.Tester.Dirs.SnapDomain, source.Tester.Dirs.SnapAccessors} {
+		for _, pattern := range []string{"*-commitment.*.kvi", "*-commitment.*.kvei"} {
+			matches, err := filepath.Glob(filepath.Join(root, pattern))
+			require.NoError(t, err)
+			for _, match := range matches {
+				require.NoError(t, dir.RemoveFile(match))
+			}
+		}
+	}
 	output := filepath.Join(t.TempDir(), "output")
-	err = convertPBT(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New())
+	conversionStarted := false
+	err = convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{
+		afterOutput: func() error {
+			conversionStarted = true
+			return nil
+		},
+	})
 	require.ErrorContains(t, err, "no accessor")
+	require.False(t, conversionStarted)
 	_, statErr := os.Stat(output)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
