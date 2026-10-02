@@ -123,9 +123,7 @@ var (
 
 func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
 	var sd *execctx.SharedDomains
-	var stateCache *cache.StateCache
 	if c.execModule != nil {
-		stateCache = c.execModule.stateCache
 		c.execModule.lock.RLock()
 		sd = c.execModule.currentContext
 		c.execModule.lock.RUnlock()
@@ -135,12 +133,15 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 	if sd == nil && c.publishedSD != nil {
 		sd = c.publishedSD()
 	}
+	if sd == nil && c.execModule != nil {
+		sd = c.execModule.ReadSharedDomains(ctx, tx)
+	}
 
 	var view *CacheView
 	if sd != nil {
 		view = &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
 	} else {
-		view = &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}
+		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
 	}
 	return view, nil
 }
@@ -228,7 +229,13 @@ type ExecModule struct {
 	publishedSD    func() *execctx.SharedDomains // fallback while an FCU commits
 
 	// stateCache is a cache for state data (accounts, storage, code)
-	stateCache  *cache.StateCache
+	stateCache *cache.StateCache
+	// readSD serves RPC reads on a node that never executes a payload, so
+	// currentContext and publishedSD stay nil and there is nothing to read
+	// through. Built once and reused: AsStateGetter rebinds the cache frontier
+	// to each caller's tx.
+	readSDOnce  sync.Once
+	readSD      *execctx.SharedDomains
 	readAheader *exec.BlockReadAheader
 
 	stateTransitionObserver StateTransitionObserver
@@ -350,9 +357,30 @@ func newDomainStateCache(budget datasize.ByteSize) *cache.StateCache {
 // Close releases the domain state cache's reservation in the shared memory
 // envelope.
 func (e *ExecModule) Close() {
+	if e.readSD != nil {
+		e.readSD.Close()
+	}
 	if e.stateCache != nil {
 		e.stateCache.Close()
 	}
+}
+
+// ReadSharedDomains returns the SharedDomains RPC reads fall back to, or nil if
+// one cannot be built for tx.
+func (e *ExecModule) ReadSharedDomains(ctx context.Context, tx kv.TemporalTx) *execctx.SharedDomains {
+	e.readSDOnce.Do(func() {
+		sd, err := execctx.NewSharedDomains(ctx, tx, e.logger)
+		if err != nil {
+			if sd != nil {
+				sd.Close()
+			}
+			e.logger.Debug("[rpc] no SharedDomains for reads", "err", err)
+			return
+		}
+		sd.SetStateCache(e.stateCache)
+		e.readSD = sd
+	})
+	return e.readSD
 }
 
 // closeModuleContext closes and clears e.currentContext. The nil swap happens
