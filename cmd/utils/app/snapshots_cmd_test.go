@@ -27,9 +27,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/datastruct/btindex"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -1523,4 +1526,43 @@ func Test_removeAccessorsForRebuild(t *testing.T) {
 		confirmExist(t, f)
 	}
 	confirmExist(t, dataTorrent)
+}
+
+func TestCheckCommitmentFileHasRoot_Bt(t *testing.T) {
+	for name, c := range map[string]struct {
+		keys     []string
+		hasState bool
+	}{
+		"no state key": {[]string{"\x41\xa2", "abc"}, false},
+		"v3 state key": {[]string{"\x41\xa2", "\x42", "abc"}, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tmp := t.TempDir()
+			kvPath := filepath.Join(tmp, "v3.0-commitment.0-1.kv")
+			compression := statecfg.Schema.CommitmentDomain.Compression
+			comp, err := seg.NewCompressor(t.Context(), t.Name(), kvPath, tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+			require.NoError(t, err)
+			defer comp.Close()
+			w := seg.NewWriter(comp, compression)
+			for _, k := range c.keys {
+				for _, word := range []string{k, "v"} {
+					_, err = w.Write([]byte(word))
+					require.NoError(t, err)
+				}
+			}
+			require.NoError(t, comp.Compress())
+			data, err := seg.NewDecompressor(kvPath)
+			require.NoError(t, err)
+			defer data.Close()
+			bt, err := btindex.CreateBtreeIndexWithDecompressor(filepath.Join(tmp, "v2.0-commitment.0-1.bt"), filepath.Join(tmp, "v1.2-commitment.0-1.kvei"),
+				seg.NewReader(data.MakeGetter(), compression), 1, background.NewProgressSet(), tmp, log.New(), true, statecfg.AccessorBTree|statecfg.AccessorExistence)
+			require.NoError(t, err)
+			bt.Close()
+
+			hasState, broken, _, err := checkCommitmentFileHasRoot(kvPath)
+			require.NoError(t, err)
+			require.Equal(t, c.hasState, hasState)
+			require.False(t, broken)
+		})
+	}
 }
