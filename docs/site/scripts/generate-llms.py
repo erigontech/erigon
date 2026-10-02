@@ -1623,8 +1623,8 @@ _RELEASE_ANCHOR_RE = re.compile(r"erigon[:_/-]v?(\d+\.\d+\.\d+)(?!\.?\d)")
 #
 #   {/* llms-pinned-version: Measured on Erigon 3.6.1 */}
 #
-# Every occurrence of a declared phrase is left out of the mask and out of the
-# hazard scan. Declare the whole phrase, not the bare number: the phrase is
+# Every occurrence of a declared phrase is left out of the mask, on every page.
+# The hazard scan skips it only on the page that declares it. Declare the whole phrase, not the bare number: the phrase is
 # matched in the corpus, where `3.6.1` alone is also every expansion of the
 # token.
 _PINNED_VERSION_RE = re.compile(r"\{/\*\s*llms-pinned-version:\s*(.*?)\s*\*/\}")
