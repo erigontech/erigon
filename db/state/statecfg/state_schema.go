@@ -450,6 +450,14 @@ func EnableCommitmentV3Records(c *DomainCfg) {
 	c.Hist.FileVersion.DataV.Current = version.V3_0
 }
 
+func ConfigureCommitmentV3Records(enabled bool) {
+	ExperimentalCommitmentV3 = enabled
+	InitSchemas()
+	if enabled {
+		EnableCommitmentV3Records(&Schema.CommitmentDomain)
+	}
+}
+
 func DisableCommitmentV3Records(c *DomainCfg) {
 	c.CommitmentV3Records = false
 	c.Accessors = AccessorHashMap

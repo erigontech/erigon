@@ -351,7 +351,7 @@ func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbst
 		return common.Hash{}, err
 	}
 	defer db.Close()
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -434,7 +434,7 @@ func writePBTAttachShadowRoot(ctx context.Context, dirs datadir.Dirs, blockHash 
 
 func pbtAttachHexRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) (common.Hash, bool, error) {
 	configurePBTSourceVariant(settings)
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		return common.Hash{}, false, err
 	}
@@ -465,7 +465,7 @@ func pbtAttachNodeHexState(ctx context.Context, dirs datadir.Dirs, settings *dbs
 	}
 	defer db.Close()
 	configurePBTSourceVariant(settings)
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		return 0, 0, common.Hash{}, err
 	}
@@ -553,7 +553,7 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	if err := eip8297.SetHashSuite(settings.TrieHashName()); err != nil {
 		return common.Hash{}, err
 	}
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -672,7 +672,7 @@ func verifyPBTAttachPublishedBin(ctx context.Context, dirs datadir.Dirs, setting
 		return err
 	}
 	configurePBTSourceVariant(settings)
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		return err
 	}
@@ -1170,7 +1170,7 @@ func resetPBTExecution(ctx context.Context, dirs datadir.Dirs, settings *dbstate
 	if err != nil {
 		return err
 	}
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		rawDB.Close()
 		return err

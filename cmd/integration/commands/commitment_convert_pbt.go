@@ -135,9 +135,7 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	}
 	configurePBTSourceVariant(sourceSettings)
 	if detectedV3 && (sourceSettings == nil || sourceSettings.TrieVariantName() == dbstate.TrieVariantHex) {
-		statecfg.ExperimentalCommitmentV3 = true
-		statecfg.InitSchemas()
-		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		statecfg.ConfigureCommitmentV3Records(true)
 	}
 	point, err := readPBinSourcePoint(ctx, sourceDirs, sourceSettings, keepHex, logger)
 	if err != nil {
@@ -227,14 +225,7 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	}
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = keepHex
-	statecfg.ExperimentalCommitmentV3 = keepHex
-	if keepHex {
-		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	} else {
-		statecfg.ExperimentalCommitmentV3 = false
-		statecfg.InitSchemas()
-		statecfg.DisableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	}
+	statecfg.ConfigureCommitmentV3Records(keepHex)
 	targetSettings := &dbstate.ErigonDBSettings{
 		StepSize:                       sourceAgg.StepSize(),
 		StepsInFrozenFile:              sourceAgg.StepsInFrozenFile(),
@@ -246,7 +237,7 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	}
 	targetSettings.TrieVariant = &trieVariant
 	targetSettings.TrieHash = &hashName
-	targetAgg, err := dbstate.New(outputDirs).Logger(logger).WithErigonDBSettings(targetSettings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	targetAgg, err := dbstate.NewPBTStateAggregator(outputDirs, targetSettings, logger).Open(ctx)
 	if err != nil {
 		return err
 	}
@@ -355,15 +346,9 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 
 func readPBinSourcePoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, keepHex bool, logger log.Logger) (pbinConversionPoint, error) {
 	if keepHex && (settings == nil || settings.TrieVariantName() == dbstate.TrieVariantHex) {
-		statecfg.ExperimentalCommitmentV3 = true
-		statecfg.InitSchemas()
-		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		statecfg.ConfigureCommitmentV3Records(true)
 	}
-	aggOpts := dbstate.New(dirs).Logger(logger)
-	if settings != nil {
-		aggOpts = aggOpts.WithErigonDBSettings(settings)
-	}
-	aggOpts = aggOpts.SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps()
+	aggOpts := dbstate.NewPBTStateAggregator(dirs, settings, logger)
 	agg, err := aggOpts.Open(ctx)
 	if err != nil {
 		return pbinConversionPoint{}, fmt.Errorf("commitment convert-pbt: open source point: %w", err)
@@ -395,14 +380,12 @@ func configurePBTSourceVariant(settings *dbstate.ErigonDBSettings) {
 	case dbstate.TrieVariantHexBin:
 		statecfg.ExperimentalBinCommitment = true
 		statecfg.ExperimentalHexBinCommitment = true
-		statecfg.ExperimentalCommitmentV3 = true
-		statecfg.InitSchemas()
-		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		statecfg.ConfigureCommitmentV3Records(true)
 		statecfg.BinCommitmentHash = settings.TrieHashName()
 	case dbstate.TrieVariantBin:
 		statecfg.ExperimentalBinCommitment = true
 		statecfg.ExperimentalHexBinCommitment = false
-		statecfg.ExperimentalCommitmentV3 = false
+		statecfg.ConfigureCommitmentV3Records(false)
 		statecfg.BinCommitmentHash = settings.TrieHashName()
 	}
 }
@@ -466,7 +449,7 @@ func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings 
 	defer func() { _ = dir.RemoveAll(chaindataDir) }()
 	rawDB := mdbx.New(dbcfg.ChainDB, logger).Path(chaindataDir).MustOpen()
 	defer rawDB.Close()
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		return err
 	}
@@ -526,7 +509,7 @@ func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	}); err != nil {
 		return err
 	}
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		return err
 	}

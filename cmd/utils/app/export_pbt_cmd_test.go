@@ -58,6 +58,16 @@ import (
 )
 
 func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
+	createCount := 0
+	syncCount := 0
+	restorePreimageHooks := artifact.SetPreimageScratchHooksForTest(func(dir, pattern string) (*os.File, error) {
+		createCount++
+		return os.CreateTemp(dir, pattern)
+	}, nil, func(file *os.File) error {
+		syncCount++
+		return file.Sync()
+	})
+	t.Cleanup(restorePreimageHooks)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
@@ -100,6 +110,8 @@ func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
 	require.NoError(t, json.Unmarshal(metaBytes, &meta))
 	require.Equal(t, root.Hex(), meta.PBTRoot)
 	require.Equal(t, commitment.PBinHashBlake3, meta.HashSuite)
+	require.Zero(t, createCount, "export must not create a scratch file for each account")
+	require.Zero(t, syncCount, "export must not sync a scratch file for each account")
 }
 
 func TestRunExportPBTRefusesChangedBinRecord(t *testing.T) {

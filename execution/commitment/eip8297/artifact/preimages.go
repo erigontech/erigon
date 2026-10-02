@@ -44,47 +44,28 @@ var (
 	preimageScratchFileFlush  = func(writer *bufio.Writer) error {
 		return writer.Flush()
 	}
+	preimageScratchFileSync = func(file *os.File) error {
+		return file.Sync()
+	}
 )
 
-type PreimageIterator func(func(Preimage) error) error
+func SetPreimageScratchHooksForTest(create func(string, string) (*os.File, error), flush func(*bufio.Writer) error, sync func(*os.File) error) func() {
+	previousCreate, previousFlush, previousSync := preimageScratchFileCreate, preimageScratchFileFlush, preimageScratchFileSync
+	if create != nil {
+		preimageScratchFileCreate = create
+	}
+	if flush != nil {
+		preimageScratchFileFlush = flush
+	}
+	if sync != nil {
+		preimageScratchFileSync = sync
+	}
+	return func() {
+		preimageScratchFileCreate, preimageScratchFileFlush, preimageScratchFileSync = previousCreate, previousFlush, previousSync
+	}
+}
 
 type PreimageStreamIterator func(func(common.Address, func(func([32]byte) error) error) error) error
-
-func WritePreimages(dst io.Writer, records any) error {
-	var iterate PreimageIterator
-	switch value := records.(type) {
-	case []Preimage:
-		iterate = func(yield func(Preimage) error) error {
-			for _, record := range value {
-				if err := yield(record); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-	case PreimageIterator:
-		iterate = value
-	case func(func(Preimage) error) error:
-		iterate = PreimageIterator(value)
-	default:
-		return ErrPreimages
-	}
-	if iterate == nil {
-		return ErrPreimages
-	}
-	return WritePreimagesStream(dst, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
-		return iterate(func(record Preimage) error {
-			return yield(record.Address, func(slotYield func([32]byte) error) error {
-				for _, slot := range record.Slots {
-					if err := slotYield(slot); err != nil {
-						return err
-					}
-				}
-				return nil
-			})
-		})
-	})
-}
 
 func WritePreimagesStream(dst io.Writer, iterate PreimageStreamIterator) error {
 	return WritePreimagesStreamWithScratch(dst, iterate, os.TempDir())

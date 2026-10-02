@@ -50,7 +50,6 @@ import (
 
 var (
 	importPBTSnapshot string
-	importPBTSwapHook func(string) error
 )
 
 type pbtImportMeta struct {
@@ -85,6 +84,10 @@ var cmdCommitmentImportPBT = &cobra.Command{
 }
 
 func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, logger log.Logger) error {
+	return importPBTWithHook(ctx, dataDir, snapshotPath, chainName, logger, nil)
+}
+
+func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName string, logger log.Logger, swapHook func(string) error) error {
 	if dataDir == "" || snapshotPath == "" {
 		return errors.New("commitment import-pbt: datadir and snapshot are required")
 	}
@@ -161,9 +164,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	if !detected {
 		return errors.New("commitment import-pbt: target is not a v3 hex datadir")
 	}
-	statecfg.ExperimentalCommitmentV3 = true
-	statecfg.InitSchemas()
-	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.ConfigureCommitmentV3Records(true)
 	requestedHash := statecfg.BinCommitmentHash
 	if requestedHash == "" {
 		requestedHash = meta.HashSuite
@@ -315,11 +316,9 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	}
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
-	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.ConfigureCommitmentV3Records(true)
 	statecfg.BinCommitmentHash = meta.HashSuite
-	statecfg.InitSchemas()
-	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	targetAgg, err := dbstate.New(stageDirs).Logger(logger).WithErigonDBSettings(finalSettings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	targetAgg, err := dbstate.NewPBTStateAggregator(stageDirs, finalSettings, logger).Open(ctx)
 	if err != nil {
 		return err
 	}
@@ -403,8 +402,8 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	if err := verifyPBTImportRows(ctx, stageDirs, finalSettings, logger, dirs.Chaindata); err != nil {
 		return err
 	}
-	if importPBTSwapHook != nil {
-		if err := importPBTSwapHook("staging-built"); err != nil {
+	if swapHook != nil {
+		if err := swapHook("staging-built"); err != nil {
 			return err
 		}
 	}
@@ -436,8 +435,8 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 			_ = dbstate.RemovePBTImportMarker(dirs)
 		}
 	}()
-	if importPBTSwapHook != nil {
-		if err := importPBTSwapHook("files-moved"); err != nil {
+	if swapHook != nil {
+		if err := swapHook("files-moved"); err != nil {
 			return err
 		}
 	}
@@ -445,8 +444,8 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		return err
 	}
 	checkpointWritten = true
-	if importPBTSwapHook != nil {
-		if err := importPBTSwapHook("before-settings"); err != nil {
+	if swapHook != nil {
+		if err := swapHook("before-settings"); err != nil {
 			return err
 		}
 	}
@@ -454,8 +453,8 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		return err
 	}
 	settingsWritten = true
-	if importPBTSwapHook != nil {
-		if err := importPBTSwapHook("settings-written"); err != nil {
+	if swapHook != nil {
+		if err := swapHook("settings-written"); err != nil {
 			return err
 		}
 	}
@@ -475,7 +474,7 @@ func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		return err
 	}
 	defer rawDB.Close()
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		return err
 	}
@@ -525,7 +524,7 @@ func writePBTImportCheckpoint(ctx context.Context, dirs datadir.Dirs, settings *
 		return fmt.Errorf("commitment import-pbt: open target for checkpoint: %w", err)
 	}
 	defer rawDB.Close()
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		return err
 	}
@@ -611,7 +610,7 @@ func validatePBTImportNoBinFiles(dirs datadir.Dirs) error {
 }
 
 func readPBTImportHexCheckpoint(ctx context.Context, dirs datadir.Dirs, rawDB kv.RwDB, settings *dbstate.ErigonDBSettings, logger log.Logger) (uint64, uint64, error) {
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
 		return 0, 0, err
 	}

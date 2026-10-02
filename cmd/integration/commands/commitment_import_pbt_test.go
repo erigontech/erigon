@@ -163,25 +163,24 @@ func TestImportPBTReplacesConvertAndAttachWithFilesBeforeCheckpoint(t *testing.T
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	before := snapshotTree(t, target.Tester.Dirs.DataDir)
 	target.Tester.Close()
-	t.Cleanup(func() { importPBTSwapHook = nil })
-	importPBTSwapHook = func(step string) error {
+	swapHook := func(step string) error {
 		if step == "staging-built" {
 			return errors.New("test staging failure")
 		}
 		return nil
 	}
-	require.ErrorContains(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()), "test staging failure")
+	require.ErrorContains(t, importPBTWithHook(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New(), swapHook), "test staging failure")
 	require.Equal(t, before, snapshotTree(t, target.Tester.Dirs.DataDir), "staging failure must not change the target")
-	importPBTSwapHook = func(step string) error {
+	swapHook = func(step string) error {
 		if step == "files-moved" {
 			return errors.New("test move failure")
 		}
 		return nil
 	}
 	settingsBeforeMoveFailure := snapshotTree(t, target.Tester.Dirs.DataDir)
-	require.ErrorContains(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()), "test move failure")
+	require.ErrorContains(t, importPBTWithHook(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New(), swapHook), "test move failure")
 	require.Equal(t, settingsBeforeMoveFailure, snapshotTree(t, target.Tester.Dirs.DataDir), "move failure must not change the target")
-	importPBTSwapHook = func(step string) error {
+	swapHook = func(step string) error {
 		if step == "before-settings" {
 			return errors.New("test settings failure")
 		}
@@ -189,20 +188,19 @@ func TestImportPBTReplacesConvertAndAttachWithFilesBeforeCheckpoint(t *testing.T
 	}
 	settingsBeforeWriteFailure := snapshotTree(t, target.Tester.Dirs.Snap)
 	rowsBeforeWriteFailure := countPBTImportRows(t, target.Tester.Dirs.Chaindata, kv.TblCommitmentBinVals)
-	require.ErrorContains(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()), "test settings failure")
+	require.ErrorContains(t, importPBTWithHook(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New(), swapHook), "test settings failure")
 	require.True(t, reflect.DeepEqual(settingsBeforeWriteFailure, snapshotTree(t, target.Tester.Dirs.Snap)), "settings failure must not change snapshot files")
 	require.Equal(t, rowsBeforeWriteFailure, countPBTImportRows(t, target.Tester.Dirs.Chaindata, kv.TblCommitmentBinVals), "settings failure must remove the checkpoint row")
-	importPBTSwapHook = func(step string) error {
+	swapHook = func(step string) error {
 		if step == "files-moved" {
 			panic("test interrupted after move")
 		}
 		return nil
 	}
 	require.Panics(t, func() {
-		_ = importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New())
+		_ = importPBTWithHook(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New(), swapHook)
 	})
 	require.FileExists(t, dbstate.PBTImportMarkerPath(datadir.Open(target.Tester.Dirs.DataDir)))
-	importPBTSwapHook = nil
 	require.NoError(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()))
 	after := snapshotTree(t, target.Tester.Dirs.DataDir)
 	require.NotEqual(t, before, after)
