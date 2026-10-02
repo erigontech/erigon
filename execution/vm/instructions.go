@@ -1497,6 +1497,12 @@ func makeLog(size int) executionFunc {
 		}
 		stack, ibs := &scope.Stack, evm.IntraBlockState()
 		mStart, mSize := stack.pop2Uint64()
+		if evm.config.NoReceipts && (evm.config.Tracer == nil || evm.config.Tracer.OnLog == nil) {
+			for range size {
+				stack.pop()
+			}
+			return pc, nil, nil
+		}
 		mem := scope.Memory.GetPtr(mStart, mSize)
 		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
 		// This is a non-consensus field, but assigned here because
