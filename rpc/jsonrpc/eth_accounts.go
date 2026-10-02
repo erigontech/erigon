@@ -58,11 +58,11 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 		return nil, nil, err
 	}
 
-	if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber); err != nil {
+	if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber); err != nil {
 		return nil, nil, err
 	}
 
-	if err = rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return nil, nil, err
 	}
 
