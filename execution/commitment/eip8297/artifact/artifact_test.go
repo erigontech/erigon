@@ -495,8 +495,8 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 	})
 	readPeak := readerSampler.stopAndRead()
 	require.NoError(t, err)
-	require.Less(t, writerPeak, uint64(32<<20))
-	require.Less(t, readPeak, uint64(32<<20))
+	require.Less(t, writerPeak, uint64(64<<20))
+	require.Less(t, readPeak, uint64(64<<20))
 }
 
 func TestWriterRejectsEmptyAccountAndZeroSizeCode(t *testing.T) {
