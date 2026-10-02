@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 
@@ -206,7 +207,7 @@ func TestTraceFilterRejectsNonCanonicalBlockHash(t *testing.T) {
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
 	err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &sideHash}, nil, nil, jsonstream.New(io.Discard))
-	require.ErrorContains(t, err, "block not found")
+	requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", sideHash))
 }
 
 func TestTraceBlockUsesCommittedBlockBody(t *testing.T) {

@@ -1465,6 +1465,16 @@ func requireBlockRangeIntoFuture(t *testing.T, err error) {
 	require.EqualError(t, err, ErrBlockRangeIntoFuture)
 }
 
+// requireResourceNotFound checks the -32001 a blockHash selector returns for a
+// block it cannot serve, and that the message names why.
+func requireResourceNotFound(t *testing.T, err error, message string) {
+	t.Helper()
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeResourceNotFound, rpcErr.ErrorCode())
+	require.ErrorContains(t, err, message)
+}
+
 // TestTraceFilter_FutureToBlockErrors pins that an explicit toBlock past the
 // executed head is invalid params, even when its canonical header resolves or
 // the forkchoice head ("latest") is ahead of execution, instead of silently
@@ -1504,7 +1514,8 @@ func TestTraceFilter_FutureFromBlockErrors(t *testing.T) {
 
 // TestTraceFilter_BlockHashUsesCommittedView pins that blockHash selects only
 // a block of the committed view, as eth_getLogs does: a published head that is
-// not committed yet, or an overlay reorg at an executed height, is not found.
+// not committed yet, or an overlay reorg at an executed height, is not found
+// (-32001).
 func TestTraceFilter_BlockHashUsesCommittedView(t *testing.T) {
 	base, m, overlayHeader := newOverlayAheadTestAPI(t)
 	reorgHeader := writeOverlayReorgHeader(t, base, m)
@@ -1516,7 +1527,7 @@ func TestTraceFilter_BlockHashUsesCommittedView(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &hash}, new(bool), nil, jsonstream.New(nil))
-			require.EqualError(t, err, fmt.Sprintf("block not found: %x", hash))
+			requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", hash))
 		})
 	}
 }
@@ -1532,7 +1543,7 @@ func TestTraceFilter_UnknownBlockErrors(t *testing.T) {
 
 	t.Run("blockHash", func(t *testing.T) {
 		err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &unknownHash}, new(bool), nil, jsonstream.New(nil))
-		require.EqualError(t, err, fmt.Sprintf("block not found: %x", unknownHash))
+		requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", unknownHash))
 	})
 	t.Run("fromBlock number", func(t *testing.T) {
 		err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &unknownNumber}, new(bool), nil, jsonstream.New(nil))

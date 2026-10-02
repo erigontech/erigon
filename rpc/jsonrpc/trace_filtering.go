@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime"
 	"slices"
@@ -392,12 +393,18 @@ func (api *TraceAPIImpl) resolveFilterBound(ctx context.Context, tx kv.Tx, bound
 // eth_getLogs does: only a canonical block of tx, so that a side-chain hash is
 // never answered with the canonical block at its height. The block must also
 // be executed, so that an empty result always belongs to the requested block.
+// An unknown, noncanonical or unexecuted block is not found (-32001); a body
+// below the prune boundary keeps the pruned-history error.
 func (api *TraceAPIImpl) resolveFilterBlockHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
 	blockNum, err := api.resolveLogsBlockHash(ctx, tx, hash)
-	if err != nil {
-		return 0, err
+	if err == nil {
+		err = rpchelper.CheckBlockExecuted(tx, blockNum)
 	}
-	return blockNum, rpchelper.CheckBlockExecuted(tx, blockNum)
+	var notExecuted *rpchelper.BlockNotExecutedError
+	if errors.Is(err, errBlockHashNotFound) || errors.As(err, &notExecuted) {
+		return 0, &rpc.ResourceNotFoundError{Message: err.Error()}
+	}
+	return blockNum, err
 }
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsonstream.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {

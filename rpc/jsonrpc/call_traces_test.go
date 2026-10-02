@@ -716,7 +716,7 @@ func TestFilterBlockHash(t *testing.T) {
 	t.Run("unknown", func(t *testing.T) {
 		for _, req := range []map[string]any{{"blockHash": common.Hash{0xff}}, {"blockHash": common.Hash{0xff}, "count": 0}} {
 			_, err := call(req)
-			require.ErrorContains(t, err, "block not found")
+			requireResourceNotFound(t, err, "block not found")
 		}
 	})
 
@@ -726,7 +726,7 @@ func TestFilterBlockHash(t *testing.T) {
 		require.NotEqual(t, hash, replacement)
 		for _, req := range []map[string]any{byHash, with(byHash, map[string]any{"count": 0})} {
 			_, err := call(req)
-			require.ErrorContains(t, err, "block not found")
+			requireResourceNotFound(t, err, "block not found")
 		}
 		require.Equal(t, []int{2}, blockNumbersFromTraces(t, []byte(traces(t, map[string]any{"blockHash": replacement}))))
 		require.JSONEq(t, traces(t, block2), traces(t, map[string]any{"blockHash": replacement}))
@@ -734,8 +734,8 @@ func TestFilterBlockHash(t *testing.T) {
 }
 
 // TestFilterBlockHashAheadOfExecution pins that a blockHash naming
-// a canonical block that is not executed yet is an error, even with count 0,
-// rather than an empty result for a block the node cannot trace.
+// a canonical block that is not executed yet is not found (-32001), even with
+// count 0, rather than an empty result for a block the node cannot trace.
 func TestFilterBlockHashAheadOfExecution(t *testing.T) {
 	t.Parallel()
 	m, aheadHash := newBlockAheadOfExecutionTester(t)
@@ -747,7 +747,7 @@ func TestFilterBlockHashAheadOfExecution(t *testing.T) {
 	for _, req := range []map[string]any{{"blockHash": aheadHash}, {"blockHash": aheadHash, "count": 0}} {
 		var result json.RawMessage
 		err := client.CallContext(t.Context(), &result, "trace_filter", req)
-		require.ErrorContains(t, err, "is not executed")
+		requireResourceNotFound(t, err, "is not executed")
 	}
 }
 
