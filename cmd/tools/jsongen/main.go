@@ -120,7 +120,7 @@ import (
 )
 
 // %[4]s writes the fields %[2]s declares, in that order.
-func (x *%[2]s) %[4]s(s *jsonstream.StackStream) error {
+func (x *%[2]s) %[4]s(s *jsonstream.Stream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -134,7 +134,7 @@ func (x *%[2]s) %[4]s(s *jsonstream.StackStream) error {
 }
 
 // %[5]s writes those fields without the enclosing object, for a type another object inlines.
-func (x *%[2]s) %[5]s(s *jsonstream.StackStream) error {
+func (x *%[2]s) %[5]s(s *jsonstream.Stream) error {
 %[3]s	return nil
 }
 `

@@ -391,7 +391,7 @@ func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 }
 
 func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
-	return tx.aggtx.Retire(ctx, cutoffs)
+	return tx.aggtx.Retire(cutoffs)
 }
 
 func (tx *tx) Rollback() {

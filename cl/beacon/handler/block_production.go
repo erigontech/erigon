@@ -33,7 +33,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/erigontech/erigon/cl/abstract"
@@ -63,6 +65,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -103,16 +106,116 @@ const (
 // produced block still reaches attesters in time to earn the proposer boost.
 const payloadPublicationDivisor = 4
 
-// defaultGraffiti is used when the validator does not specify a graffiti. It follows the
-// client-version graffiti standard, encoding the execution and consensus client codes and
-// their commit prefixes so client-diversity tooling can attribute proposed blocks. See
+// identificationSegment builds the client-version graffiti standard's EL+CL code and commit
+// prefix segment, so client-diversity tooling can attribute proposed blocks. See
 // https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
-func (a *ApiHandler) defaultGraffiti() common.Hash {
-	graffiti := caplinClientCode + graffitiCommitPrefix(version.GitCommit)
-	if el := a.executionClientVersion(); el != nil {
-		graffiti = graffitiClientCode(el.Code) + graffitiCommitPrefix(el.Commit) + graffiti
+func (a *ApiHandler) identificationSegment() string {
+	return identificationSegmentFor(a.executionClientVersion())
+}
+
+func identificationSegmentFor(el *engine_types.ClientVersionV1) string {
+	segment := caplinClientCode + graffitiCommitPrefix(version.GitCommit)
+	if el != nil {
+		segment = graffitiClientCode(el.Code) + graffitiCommitPrefix(el.Commit) + segment
 	}
-	return graffitiFromString(graffiti)
+	return segment
+}
+
+// defaultGraffiti is used when the validator does not specify a graffiti.
+func (a *ApiHandler) defaultGraffiti() common.Hash {
+	return graffitiFromString(a.identificationSegment())
+}
+
+// combinedGraffiti prefixes the identification segment (see defaultGraffiti) to a
+// caller-supplied graffiti, truncating the caller's text to whatever room remains in the
+// 32-byte field.
+func (a *ApiHandler) combinedGraffiti(custom common.Hash) common.Hash {
+	customText := bytes.TrimRight(custom[:], "\x00")
+	if len(customText) == 0 {
+		return a.defaultGraffiti()
+	}
+	segment := a.identificationSegment()
+	if available := len(custom) - len(segment) - 1; len(customText) > available {
+		customText = truncateAtRuneBoundary(customText, available)
+		a.warnGraffitiTruncatedOnce()
+	}
+	return graffitiFromString(segment + " " + string(customText))
+}
+
+// truncateAtRuneBoundary cuts text to at most n bytes, backing off up to UTFMax-1 bytes to
+// clear a rune the cut would otherwise split. It looks only at the n bytes being kept, so
+// invalid bytes beyond the cut (graffiti isn't required to be UTF-8) can't suppress this.
+// Go's utf8 package cannot tell a truncated-but-otherwise-valid lead byte apart from a byte
+// that is simply never valid, so within that bound this may drop a genuinely standalone
+// invalid byte along with a truly split rune; it never drops more than that bound, and it
+// keeps the hard cut if no boundary turns up within it.
+func truncateAtRuneBoundary(text []byte, n int) []byte {
+	cut := text[:n]
+	backedOff := cut
+	for len(backedOff) > 0 && len(cut)-len(backedOff) < utf8.UTFMax {
+		if r, size := utf8.DecodeLastRune(backedOff); r == utf8.RuneError && size == 1 {
+			backedOff = backedOff[:len(backedOff)-1]
+			continue
+		}
+		break
+	}
+	if len(cut)-len(backedOff) < utf8.UTFMax {
+		return backedOff
+	}
+	return cut
+}
+
+// warnGraffitiTruncatedOnce warns, once, that supplied graffiti has been truncated to fit the
+// identification segment.
+func (a *ApiHandler) warnGraffitiTruncatedOnce() {
+	if a.logger == nil {
+		return
+	}
+	a.graffitiTruncatedWarnOnce.Do(func() {
+		a.logger.Warn("[Beacon API] Supplied graffiti truncated to fit the EL+CL identification segment; set --beacon.api.preserve-graffiti to disable")
+	})
+}
+
+// graffitiFromHex decodes a hex-encoded graffiti query parameter, right-padding it to match
+// the client-version standard instead of common.HexToHash's left-pad-as-a-number convention.
+func graffitiFromHex(s string) common.Hash {
+	var graffiti common.Hash
+	copy(graffiti[:], hexutil.FromHex(s))
+	return graffiti
+}
+
+// requestGraffiti resolves the graffiti for a block-production request, applying the
+// identification standard unless the operator opted out via --beacon.api.preserve-graffiti.
+func (a *ApiHandler) requestGraffiti(hasCustom bool, custom common.Hash) common.Hash {
+	if !hasCustom {
+		return a.defaultGraffiti()
+	}
+	if a.routerCfg.PreserveGraffiti {
+		return custom
+	}
+	return a.combinedGraffiti(custom)
+}
+
+// LogGraffitiIdentification logs the default graffiti identification segment once, intended
+// to be called at beacon-node startup, then triggers the execution client's version lookup so
+// logGraffitiIdentificationOnce can log it again once that resolves. Logging first, from only
+// the cached value, keeps the trigger from racing the log line if the lookup resolves fast.
+func (a *ApiHandler) LogGraffitiIdentification() {
+	if a.logger != nil {
+		a.logger.Info("[Beacon API] Default graffiti", "segment", identificationSegmentFor(a.cachedExecutionClientVersion()))
+	}
+	a.triggerELClientVersionFetch()
+}
+
+// logGraffitiIdentificationOnce logs the resolved default graffiti identification segment
+// exactly once, even if a retry after a transient engine error calls it again.
+func (a *ApiHandler) logGraffitiIdentificationOnce() {
+	if a.logger == nil {
+		return
+	}
+	a.elIdentificationLogOnce.Do(func() {
+		a.logger.Info("[Beacon API] Default graffiti updated", "segment", a.identificationSegment())
+	})
 }
 
 // elClientVersionUnavailable is a sentinel cached when the execution client does not
@@ -125,11 +228,17 @@ var elClientVersionUnavailable = &engine_types.ClientVersionV1{}
 // consensus-only graffiti and later proposals pick up the execution client code once the
 // fetch has populated the cache (the version is static for the lifetime of a connection).
 func (a *ApiHandler) executionClientVersion() *engine_types.ClientVersionV1 {
-	if cached := a.elClientVersion.Load(); cached != nil {
-		return normalizeELClientVersion(cached)
+	if cached := a.cachedExecutionClientVersion(); cached != nil {
+		return cached
 	}
 	a.triggerELClientVersionFetch()
 	return nil
+}
+
+// cachedExecutionClientVersion returns the connected execution client's version if already
+// cached, without triggering a fetch.
+func (a *ApiHandler) cachedExecutionClientVersion() *engine_types.ClientVersionV1 {
+	return normalizeELClientVersion(a.elClientVersion.Load())
 }
 
 // triggerELClientVersionFetch starts a single background fetch of the execution client
@@ -174,6 +283,9 @@ func (a *ApiHandler) fetchExecutionClientVersion() {
 	}
 	el := versions[0]
 	a.elClientVersion.Store(&el)
+	// Only this path changes the logged segment: the unavailable sentinel above still
+	// resolves to the same consensus-only segment already logged at startup.
+	a.logGraffitiIdentificationOnce()
 }
 
 func normalizeELClientVersion(v *engine_types.ClientVersionV1) *engine_types.ClientVersionV1 {
@@ -599,12 +711,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if r.URL.Query().Has("skip_randao_verification") {
 		randaoReveal = common.Bytes96{0xc0} // infinity bls signature
 	}
-	var graffiti common.Hash
-	if r.URL.Query().Has("graffiti") {
-		graffiti = common.HexToHash(r.URL.Query().Get("graffiti"))
-	} else {
-		graffiti = a.defaultGraffiti()
-	}
+	query := r.URL.Query()
+	graffiti := a.requestGraffiti(query.Has("graffiti"), graffitiFromHex(query.Get("graffiti")))
 
 	targetSlotStr := chi.URLParam(r, "slot")
 	targetSlot, err := strconv.ParseUint(targetSlotStr, 10, 64)
@@ -2075,11 +2183,15 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	requestBundles, err := a.requestBlobBundles(block)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
 	waitForIntegration := apiVersion == 2
 	forwardToBuilder := func() {
 		a.forwardPublishedBlockToBuilder(r.Header.Get("Eth-Builder-Url"), block.SignedBlock)
 	}
-	if err := a.broadcastBlockWithIntegrationWaitAndPublication(ctx, block.SignedBlock, validation, waitForIntegration, forwardToBuilder); err != nil {
+	if err := a.broadcastBlockWithIntegrationWaitAndPublication(ctx, block.SignedBlock, requestBundles, validation, waitForIntegration, forwardToBuilder); err != nil {
 		if errors.Is(err, errPublishedBlockAccepted) {
 			return beaconhttp.NewAcceptedResponse(), nil
 		}
@@ -2089,6 +2201,99 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	return newBeaconResponse(nil), nil
+}
+
+// requestBlobBundles returns the blob bundles for every commitment of a published block, so that a
+// beacon node that did not produce the block can still build its sidecars. Bundles this node already
+// has are taken from its cache; the rest come from the request and are KZG-verified. Nothing is
+// written to the cache, since the block itself is validated only later.
+func (a *ApiHandler) requestBlobBundles(block *cltypes.DenebSignedBeaconBlock) (map[common.Bytes48]BlobBundle, error) {
+	if block == nil || block.SignedBlock == nil || block.SignedBlock.Block == nil || block.SignedBlock.Block.Body == nil ||
+		block.Blobs == nil || block.Blobs.Len() == 0 {
+		return nil, nil
+	}
+	version := block.SignedBlock.Version()
+	epoch := block.SignedBlock.Block.Slot / a.beaconChainCfg.SlotsPerEpoch
+	if slotVersion := a.beaconChainCfg.GetCurrentStateVersion(epoch); version != slotVersion {
+		return nil, fmt.Errorf("block is labelled %s but its slot is in %s", version, slotVersion)
+	}
+	maxBlobs := a.beaconChainCfg.MaxBlobsPerBlockByVersion(version)
+	cellProofs := version >= clparams.FuluVersion
+	proofsPerBlob := 1
+	if cellProofs {
+		maxBlobs = a.beaconChainCfg.GetBlobParameters(epoch).MaxBlobsPerBlock
+		proofsPerBlob = goethkzg.CellsPerExtBlob
+	}
+	commitments := block.SignedBlock.Block.Body.GetBlobKzgCommitments()
+	if commitments == nil {
+		return nil, errors.New("request has blobs but the block has no blob_kzg_commitments")
+	}
+	if commitments.Len() > int(maxBlobs) {
+		return nil, fmt.Errorf("block has more than %d blob commitments", maxBlobs)
+	}
+	if commitments.Len() != block.Blobs.Len() || block.KZGProofs == nil || block.KZGProofs.Len() != block.Blobs.Len()*proofsPerBlob {
+		return nil, errors.New("blobs and kzg_proofs do not match the block's blob commitments")
+	}
+	bundles := make(map[common.Bytes48]BlobBundle, block.Blobs.Len())
+	var unverified []BlobBundle
+	for i := range block.Blobs.Len() {
+		commitment := common.Bytes48(*commitments.Get(i))
+		if cached, ok := a.blobBundles.Get(commitment); ok && len(cached.KzgProofs) == proofsPerBlob {
+			bundles[commitment] = cached
+			continue
+		}
+		proofs := make([]common.Bytes48, proofsPerBlob)
+		for j := range proofs {
+			proofs[j] = common.Bytes48(*block.KZGProofs.Get(i*proofsPerBlob + j))
+		}
+		unverified = append(unverified, BlobBundle{Commitment: commitment, Blob: block.Blobs.Get(i), KzgProofs: proofs})
+	}
+	if err := verifyBlobBundles(unverified, cellProofs); err != nil {
+		return nil, fmt.Errorf("invalid blob kzg proofs: %w", err)
+	}
+	for _, bundle := range unverified {
+		bundles[bundle.Commitment] = bundle
+	}
+	return bundles, nil
+}
+
+// verifyBlobBundles checks the bundles' KZG proofs. From Fulu on it also keeps each blob's cells on
+// its bundle, so the column build does not compute them again.
+func verifyBlobBundles(bundles []BlobBundle, cellProofs bool) error {
+	if len(bundles) == 0 {
+		return nil
+	}
+	if !cellProofs {
+		blobs := make([]*goethkzg.Blob, len(bundles))
+		commitments := make([]goethkzg.KZGCommitment, len(bundles))
+		proofs := make([]goethkzg.KZGProof, len(bundles))
+		for i, bundle := range bundles {
+			blobs[i] = (*goethkzg.Blob)(bundle.Blob)
+			commitments[i] = goethkzg.KZGCommitment(bundle.Commitment)
+			proofs[i] = goethkzg.KZGProof(bundle.KzgProofs[0])
+		}
+		return kzg.Ctx().VerifyBlobKZGProofBatch(blobs, commitments, proofs)
+	}
+	var (
+		commitments []goethkzg.KZGCommitment
+		cellIndices []uint64
+		cells       []*goethkzg.Cell
+		proofs      []goethkzg.KZGProof
+	)
+	for i := range bundles {
+		blobCells, err := das.ComputeCells(bundles[i].Blob)
+		if err != nil {
+			return err
+		}
+		bundles[i].Cells = blobCells
+		for j := range blobCells {
+			commitments = append(commitments, goethkzg.KZGCommitment(bundles[i].Commitment))
+			cellIndices = append(cellIndices, uint64(j))
+			cells = append(cells, (*goethkzg.Cell)(&blobCells[j]))
+			proofs = append(proofs, goethkzg.KZGProof(bundles[i].KzgProofs[j]))
+		}
+	}
+	return kzg.Ctx().VerifyCellKZGProofBatch(commitments, cellIndices, cells, proofs)
 }
 
 func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cltypes.SignedBeaconBlock) {
@@ -2474,18 +2679,28 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 }
 
 func (a *ApiHandler) broadcastBlockWithIntegrationWait(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation, waitForIntegration bool) error {
-	return a.broadcastBlockWithIntegrationWaitAndPublication(ctx, blk, validation, waitForIntegration, nil)
+	return a.broadcastBlockWithIntegrationWaitAndPublication(ctx, blk, nil, validation, waitForIntegration, nil)
 }
 
+// requestBundles, when non-nil, holds the blob bundles for every commitment of blk; otherwise they
+// come from the cache of bundles this node produced.
 func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 	ctx context.Context,
 	blk *cltypes.SignedBeaconBlock,
+	requestBundles map[common.Bytes48]BlobBundle,
 	validation BlockPublishingValidation,
 	waitForIntegration bool,
 	onBlockPublished func(),
 ) error {
 	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
 	defer finishBlockWork()
+	lookupBundle := func(commitment common.Bytes48) (BlobBundle, bool) {
+		if requestBundles != nil {
+			bundle, ok := requestBundles[commitment]
+			return bundle, ok
+		}
+		return a.blobBundles.Get(commitment)
+	}
 
 	if a.blockService == nil {
 		return errors.New("block integration service unavailable")
@@ -2535,7 +2750,7 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 			if commitment == nil {
 				return fmt.Errorf("missing commitment %d", i)
 			}
-			bundle, has := a.blobBundles.Get(common.Bytes48(*commitment))
+			bundle, has := lookupBundle(common.Bytes48(*commitment))
 			if !has {
 				return fmt.Errorf("missing blob bundle for commitment %x", commitment)
 			}
@@ -2581,7 +2796,7 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 		}
 
 		if kzgCommitments != nil && kzgCommitments.Len() > 0 {
-			cellsAndProofsPerBlob, payloadDataPending, err := collectPublishedPayloadData(kzgCommitments, isGloas, a.blobBundles.Get)
+			cellsAndProofsPerBlob, payloadDataPending, err := collectPublishedPayloadData(kzgCommitments, isGloas, lookupBundle)
 			if err != nil {
 				return err
 			}
@@ -2731,9 +2946,12 @@ func collectPublishedPayloadData(
 		if bundle.Blob == nil {
 			return nil, false, fmt.Errorf("nil blob bundle for commitment %x", commitment)
 		}
-		cells, err := das.ComputeCells(bundle.Blob)
-		if err != nil {
-			return nil, false, err
+		cells := bundle.Cells
+		if cells == nil {
+			var err error
+			if cells, err = das.ComputeCells(bundle.Blob); err != nil {
+				return nil, false, err
+			}
 		}
 		proofs := make([]cltypes.KZGProof, len(bundle.KzgProofs))
 		for i := range proofs {

@@ -71,6 +71,7 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		AllowedOrigins:   cfg.AllowedOrigins,
 		AllowedMethods:   cfg.AllowedMethods,
 		AllowCredentials: cfg.AllowCredentials,
+		PreserveGraffiti: cfg.PreserveGraffiti,
 	}
 	if err := rcfg.UnwrapEndpointsList(cfg.AllowedEndpoints); err != nil {
 		return err

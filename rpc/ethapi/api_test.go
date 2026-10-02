@@ -350,7 +350,7 @@ func (s *jsonSink) Write(p []byte) (int, error) { *s = append(*s, p...); return 
 
 // fastJSON renders v through MarshalFastJSONTo on a pooled stream, as the server does.
 func fastJSON[T interface {
-	MarshalFastJSONTo(w *jsonstream.StackStream) error
+	MarshalFastJSONTo(w *jsonstream.Stream) error
 }](t *testing.T, v T) string {
 	t.Helper()
 	var b jsonSink

@@ -283,6 +283,8 @@ type OeTracer struct {
 	lastOp       vm.OpCode
 	lastMemOff   uint64
 	lastMemLen   uint64
+	callMemOff   uint64 // Output window of the last operation, pushed onto memOffStack/memLenStack if it enters a frame
+	callMemLen   uint64
 	memOffStack  []uint64
 	memLenStack  []uint64
 	lastOffStack *VmTraceOp
@@ -405,18 +407,6 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 	return tx, nil
 }
 
-// checkChainID rejects a call object whose chainId names another chain. Such a call is invalid
-// whatever the state, so it is invalid params rather than an execution error.
-func (args *TraceCallParam) checkChainID(chainID *uint256.Int) error {
-	if args.ChainID == nil {
-		return nil
-	}
-	if have := (*uint256.Int)(args.ChainID); !have.Eq(chainID) {
-		return &rpc.InvalidParamsError{Message: fmt.Sprintf("chainId does not match node's (have=%v, want=%v)", have, chainID)}
-	}
-	return nil
-}
-
 func (ot *OeTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
@@ -424,6 +414,7 @@ func (ot *OeTracer) Tracer() *tracers.Tracer {
 			OnEnterV2:  ot.OnEnterV2,
 			OnExitV2:   ot.OnExitV2,
 			OnOpcodeV2: ot.OnOpcodeV2,
+			OnFaultV2:  ot.OnFaultV2,
 		},
 		GetResult: ot.GetResult,
 		Stop:      ot.Stop,
@@ -447,6 +438,8 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 			if !ot.compat {
 				ot.idx = append(ot.idx, fmt.Sprintf("%d-", len(vmT.Ops)-1))
 			}
+			ot.memOffStack = append(ot.memOffStack, ot.callMemOff)
+			ot.memLenStack = append(ot.memLenStack, ot.callMemLen)
 		}
 		if ot.lastVmOp != nil {
 			vmTrace = &VmTrace{Ops: []*VmTraceOp{}}
@@ -756,8 +749,10 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 			}
 			ot.lastOffStack = nil
 		}
-		if ot.lastOp == vm.STOP && vm.OpCode(op) == vm.STOP && len(ot.vmOpStack) == 0 {
-			// Looks like OE is "optimising away" the second STOP
+		// The interpreter reports running off the end of the code as a STOP at or beyond len(code),
+		// and reports an operation it rejects before execution with that error. Neither executed.
+		if pc >= uint64(len(scope.Code())) || rejectedBeforeExecution(err) {
+			ot.lastVmOp = nil
 			return
 		}
 		ot.lastVmOp = &VmTraceOp{Ex: &VmTraceEx{}}
@@ -774,17 +769,19 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 		ot.lastVmOp.Cost = int(cost.Execution)
 		ot.lastVmOp.StateGasCost = cost.State
 		ot.lastVmOp.Pc = int(pc)
-		ot.lastVmOp.Ex.Push = []string{}
-		gasRemaining := scope.Gas()
-		ot.lastVmOp.Ex.StateGasRemaining = gasRemaining.State
-		if err == nil {
-			ot.lastVmOp.Ex.GasRemaining = int(gasRemaining.Execution)
-		} else {
-			ot.lastVmOp.Ex.GasRemaining = int(gas.Execution) - int(cost.Execution)
-		}
 		if !ot.compat {
 			ot.lastVmOp.Op = vm.OpCode(op).String()
 		}
+		if err != nil {
+			// The operation began executing and halted exceptionally, so it has no effects.
+			ot.lastVmOp.Ex = nil
+			return
+		}
+		ot.lastVmOp.Ex.Push = []string{}
+		gasRemaining := scope.Gas()
+		ot.lastVmOp.Ex.StateGasRemaining = gasRemaining.State
+		ot.lastVmOp.Ex.GasRemaining = int(gasRemaining.Execution)
+		ot.callMemOff, ot.callMemLen = 0, 0
 		switch vm.OpCode(op) {
 		case vm.MSTORE, vm.MLOAD:
 			if len(st) > 0 {
@@ -808,27 +805,46 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 			}
 		case vm.STATICCALL, vm.DELEGATECALL:
 			if len(st) > 5 {
-				ot.memOffStack = append(ot.memOffStack, tracers.StackBack(st, 4).Uint64())
-				ot.memLenStack = append(ot.memLenStack, tracers.StackBack(st, 5).Uint64())
+				ot.callMemOff = tracers.StackBack(st, 4).Uint64()
+				ot.callMemLen = tracers.StackBack(st, 5).Uint64()
 			}
 		case vm.CALL, vm.CALLCODE:
 			if len(st) > 6 {
-				ot.memOffStack = append(ot.memOffStack, tracers.StackBack(st, 5).Uint64())
-				ot.memLenStack = append(ot.memLenStack, tracers.StackBack(st, 6).Uint64())
+				ot.callMemOff = tracers.StackBack(st, 5).Uint64()
+				ot.callMemLen = tracers.StackBack(st, 6).Uint64()
 			}
-		case vm.CREATE, vm.CREATE2, vm.SELFDESTRUCT:
-			// Effectively disable memory output
-			ot.memOffStack = append(ot.memOffStack, 0)
-			ot.memLenStack = append(ot.memLenStack, 0)
 		case vm.SSTORE:
 			if len(st) > 1 {
 				ot.lastVmOp.Ex.Store = &VmTraceStore{Key: tracers.StackBack(st, 0).Hex(), Val: tracers.StackBack(st, 1).Hex()}
 			}
 		}
-		if ot.lastVmOp.Ex.GasRemaining < 0 {
-			ot.lastVmOp.Ex = nil
-		}
 	}
+}
+
+// OnFaultV2 is called when an operation reported by OnOpcodeV2 fails during execution.
+func (ot *OeTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
+	if ot.r.VmTrace == nil || ot.lastVmOp == nil || errors.Is(err, vm.ErrExecutionReverted) {
+		return
+	}
+	if rejectedBeforeExecution(err) {
+		vmTrace := ot.r.VmTrace
+		if len(ot.vmOpStack) > 0 {
+			vmTrace = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
+		}
+		vmTrace.Ops = vmTrace.Ops[:len(vmTrace.Ops)-1]
+		ot.lastVmOp = nil
+		return
+	}
+	ot.lastVmOp.Ex = nil
+}
+
+// rejectedBeforeExecution reports whether err rejects an operation before it executes:
+// an undefined opcode (including the designated INVALID, 0xFE) or a stack underflow or overflow.
+func rejectedBeforeExecution(err error) bool {
+	var underflow *vm.ErrStackUnderflow
+	var overflow *vm.ErrStackOverflow
+	var invalid *vm.ErrInvalidOpCode
+	return errors.As(err, &underflow) || errors.As(err, &overflow) || errors.As(err, &invalid)
 }
 
 func (ot *OeTracer) GetResult() (json.RawMessage, error) {
@@ -1212,7 +1228,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-	if err := args.checkChainID(chainConfig.ChainID); err != nil {
+	if err := ethapi.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
 		return nil, err
 	}
 	engine := api.engine()
@@ -1437,7 +1453,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 	for i := range callParams {
-		if err := callParams[i].checkChainID(chainConfig.ChainID); err != nil {
+		if err := ethapi.CheckChainID(callParams[i].ChainID, chainConfig.ChainID); err != nil {
 			return nil, fmt.Errorf("call %d: %w", i, err)
 		}
 	}
@@ -1681,7 +1697,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 
 func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
-	msg *types.Message, callParam TraceCallParam,
+	txn types.Transaction, callParam TraceCallParam,
 	header *types.Header, requireCanonical, gasBailout bool, txIndex int,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
@@ -1714,6 +1730,15 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	blockCtx := transactions.NewEVMBlockContext(engine, header, requireCanonical, dbtx, api._blockReader, chainConfig)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 		return nil, err
+	}
+	chainRules := blockCtx.Rules(chainConfig)
+	signer := types.MakeSigner(chainConfig, blockCtx.BlockNumber, blockCtx.Time)
+	if err := checkOverriddenSigner(traceConfig, signer, txn); err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
+	}
+	msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, chainRules)
+	if err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
 	}
 
 	if isHistoricalStateReader {
@@ -1779,12 +1804,14 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
+		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
+	}
 	execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	if err != nil {
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
 
-	chainRules := blockCtx.Rules(chainConfig)
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)
