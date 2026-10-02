@@ -455,7 +455,10 @@ func ConfigureCommitmentV3Records(enabled bool) {
 	InitSchemas()
 	if enabled {
 		EnableCommitmentV3Records(&Schema.CommitmentDomain)
+		return
 	}
+	DisableCommitmentV3Records(&Schema.CommitmentDomain)
+	DisableCommitmentV3Records(&Schema.CommitmentBinDomain)
 }
 
 func DisableCommitmentV3Records(c *DomainCfg) {
