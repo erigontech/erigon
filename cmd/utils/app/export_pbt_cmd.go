@@ -243,6 +243,7 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 			return err
 		}
 	}
+	logger.Info("PBT export progress", "phase", "snapshot readback")
 	snapshotRead, err := os.Open(snapshotPath)
 	if err != nil {
 		return err
@@ -268,6 +269,7 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 	if err := artifact.JoinAt(snapshotRead, snapshotInfo.Size(), preimageRead, preimageInfo.Size(), eip8297.HashBytes, nil, scratchDir); err != nil {
 		return fmt.Errorf("export-pbt: join preimages: %w", err)
 	}
+	logger.Info("PBT export progress", "phase", "preimage join")
 	if snapshotMeta.SnapshotDigest != snapshotDigest {
 		return fmt.Errorf("export-pbt: snapshot digest changed during read-back")
 	}
@@ -275,6 +277,7 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 	if err != nil {
 		return err
 	}
+	logger.Info("PBT export progress", "phase", "preimage digest")
 	chainConfig, err := exportChainConfig(tx)
 	if err != nil {
 		return err

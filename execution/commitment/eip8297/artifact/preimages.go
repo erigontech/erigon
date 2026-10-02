@@ -301,7 +301,14 @@ func joinAtWithBuffer(snapshot io.ReaderAt, snapshotSize int64, preimages io.Rea
 		return err
 	}
 	expectedReader := bufio.NewReaderSize(expected, 1<<20)
+	joined := uint64(0)
+	nextProgress := time.Now().Add(30 * time.Second)
 	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		joined++
+		if now := time.Now(); !now.Before(nextProgress) {
+			nextProgress = now.Add(30 * time.Second)
+			log.Root().Info("PBT preimage join progress", "phase", "preimage join", "records", joined, "key_prefix", hex.EncodeToString(key[:min(len(key), 8)]))
+		}
 		want, wantOK, err := readJoinItem(expectedReader)
 		if err != nil {
 			return err
@@ -387,7 +394,14 @@ func checkPreimageSetAtWithBuffer(preimages io.ReaderAt, preimageSize int64, exp
 		return err
 	}
 	expectedReader := bufio.NewReaderSize(expectedFile, 64<<10)
+	checked := uint64(0)
+	nextProgress := time.Now().Add(30 * time.Second)
 	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		checked++
+		if now := time.Now(); !now.Before(nextProgress) {
+			nextProgress = now.Add(30 * time.Second)
+			log.Root().Info("PBT preimage check progress", "phase", "preimage check", "records", checked, "key_prefix", hex.EncodeToString(key[:min(len(key), 8)]))
+		}
 		want, wantOK, err := readJoinItem(expectedReader)
 		if err != nil {
 			return err

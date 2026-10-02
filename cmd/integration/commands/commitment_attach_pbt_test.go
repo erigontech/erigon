@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -403,9 +404,16 @@ func TestPBTAttachFilesAheadOfPointRemedy(t *testing.T) {
 	first, found := pbtAttachFirstStepPastPoint(files, 8, 17)
 	require.True(t, found)
 	require.Equal(t, uint64(3), first)
-	err := pbtAttachFilesAheadError("/node", "hoodi", first, 10, 2, 17)
+	err := pbtAttachFilesAheadError("/node", "hoodi", first, 8, 10, 2, 17)
 	require.ErrorContains(t, err, "snapshots rm-state --datadir=/node --chain=hoodi --step=3+")
 	require.ErrorContains(t, err, "stage_exec --datadir=/node --reset")
+	spanning := []pbtAttachFile{{domain: kv.AccountsDomain, from: 1, to: 2, path: "accounts.1-2.kv", data: true}}
+	first, found = pbtAttachFirstStepPastPoint(spanning, 8, 9)
+	require.True(t, found)
+	require.Equal(t, uint64(1), first)
+	err = pbtAttachFilesAheadError("/node", "hoodi", first, 8, 10, 2, 9)
+	require.ErrorContains(t, err, "stage_exec cannot stop at a mid-block point")
+	require.NotContains(t, err.Error(), "rm-state")
 }
 
 func runPBTOfflineCommand(t *testing.T, binary string, args ...string) {
@@ -610,6 +618,9 @@ func TestAdoptPBTFilesKeepsTorrentSidecarsWithBytes(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(publishedFile), 0o755))
 	require.NoError(t, os.WriteFile(nodeFile, []byte("old"), 0o644))
 	require.NoError(t, os.WriteFile(nodeFile+".torrent", []byte("old torrent"), 0o644))
+	orphan := filepath.Join(node.SnapDomain, "v1.0-storage.0-1.kv")
+	require.NoError(t, os.WriteFile(orphan, []byte("orphan"), 0o644))
+	require.NoError(t, os.WriteFile(orphan+".torrent", []byte("orphan torrent"), 0o644))
 	require.NoError(t, os.WriteFile(publishedFile, []byte("new"), 0o644))
 	require.NoError(t, os.WriteFile(publishedFile+".torrent", []byte("new torrent"), 0o644))
 	require.NoError(t, adoptPBTFiles(node, published, 8, 7))
@@ -619,6 +630,19 @@ func TestAdoptPBTFilesKeepsTorrentSidecarsWithBytes(t *testing.T) {
 	got, err = os.ReadFile(nodeFile + ".torrent")
 	require.NoError(t, err)
 	require.Equal(t, []byte("new torrent"), got)
+	var unpaired []string
+	require.NoError(t, filepath.Walk(node.DataDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(path, ".torrent") {
+			if _, statErr := os.Stat(strings.TrimSuffix(path, ".torrent")); errors.Is(statErr, fs.ErrNotExist) {
+				unpaired = append(unpaired, path)
+			}
+		}
+		return nil
+	}))
+	require.Empty(t, unpaired)
 }
 
 func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
@@ -860,7 +884,7 @@ func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
 	setExecutionProgress(t, source.Chaindata, 1)
 	before := snapshotTree(t, source.DataDir)
 	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "published leaf stamp 15")
+	require.ErrorContains(t, err, "stage_exec cannot stop at a mid-block point")
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 

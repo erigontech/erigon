@@ -122,11 +122,22 @@ func TestForEachPBinLeafIgnoresClearedDelegationResidue(t *testing.T) {
 	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
 	address := pbinLeafStreamAddress(0x66)
 	designator := append(append([]byte(nil), eip8297.DelegationMarker[:]...), bytes.Repeat([]byte{0x42}, 20)...)
-	writePBinLeafStreamRange(t, db, 0, pbinLeafStreamStepSize, []pbinLeafStreamAccount{{
-		address: address, code: designator, codeWritten: true, hasCodeHash: true, codeHash: empty.CodeHash, nonce: 1, balance: 2,
-	}})
-	require.NoError(t, agg.BuildFiles(db, pbinLeafStreamStepSize, unboundedFinalityCtx))
+	writePBinLeafStreamRange(t, db, 0, 2*pbinLeafStreamStepSize, []pbinLeafStreamAccount{
+		{address: address, code: designator, codeWritten: true, hasCodeHash: true, codeHash: empty.CodeHash, nonce: 1, balance: 2},
+		{address: pbinLeafStreamAddress(0x67), nonce: 1, balance: 1},
+		{address: address, nonce: 1, balance: 2},
+		{address: pbinLeafStreamAddress(0x68), nonce: 1, balance: 1},
+	})
+	require.NoError(t, agg.BuildFiles(db, 2*pbinLeafStreamStepSize, unboundedFinalityCtx))
 	leaves := pbinLeafStreamLeaves(t, db, agg, true)
+	require.NotEmpty(t, leaves)
+	require.Contains(t, func() []string {
+		keys := make([]string, 0, len(leaves))
+		for _, leaf := range leaves {
+			keys = append(keys, string(leaf.Key))
+		}
+		return keys
+	}(), string(eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey)))
 	for _, leaf := range leaves {
 		require.NotEqual(t, eip8297.CodeZone, leaf.Key[0])
 		if bytes.Equal(eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey), leaf.Key) {

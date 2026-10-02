@@ -112,6 +112,7 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	if len(at.Files(domain)) == 0 {
 		return eip8297.EmptyTreeHash, nil
 	}
+	log.Root().Info("PBT verification started", "phase", "pbt verify", "domain", domain.String())
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(domain), execctx.WithoutCommitmentSeek())
 	if err != nil {
 		return common.Hash{}, err
@@ -134,7 +135,9 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	if err != nil {
 		return common.Hash{}, err
 	}
-	return common.BytesToHash(root), nil
+	result := common.BytesToHash(root)
+	log.Root().Info("PBT verification finished", "phase", "pbt verify", "domain", domain.String(), "root", result)
+	return result, nil
 }
 
 func pbinConversionTrieConfig() commitment.TrieConfig {

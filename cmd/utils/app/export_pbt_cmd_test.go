@@ -572,6 +572,8 @@ func newPBTExportDBWithAccount(t *testing.T, withAccount bool) (kv.TemporalRwDB,
 		storageValue := bytes.Repeat([]byte{0x22}, 32)
 		account := accounts.Account{Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
 		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address, accounts.SerialiseV3(&account), 1, nil))
+		residue := append(append([]byte(nil), eip8297.DelegationMarker[:]...), bytes.Repeat([]byte{0x42}, 20)...)
+		require.NoError(t, domains.DomainPut(kv.CodeDomain, tx, address, residue, 1, nil))
 		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, storageValue, 1, nil))
 		binCtx.SetPBinFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{{
 			Address: address, Exists: true, CodeWritten: true, Balance: *uint256.NewInt(1), CodeHash: common.Hash(empty.CodeHash),

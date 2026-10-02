@@ -113,9 +113,6 @@ func BinFeedAccountFromState(address []byte, slotKeys [][]byte, codeWritten, wip
 		if err != nil {
 			return commitment.PBinFeedAccount{}, err
 		}
-		if !eip8297.IsEmptyCodeHash(account.CodeHash) && len(code) == 0 {
-			return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: code missing for address %x with account hash %x", address, account.CodeHash)
-		}
 		account.Code = bytes.Clone(code)
 	}
 	account.Slots = make([]commitment.PBinFeedSlot, 0, len(slotKeys))
