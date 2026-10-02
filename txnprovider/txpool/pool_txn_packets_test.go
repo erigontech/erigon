@@ -306,7 +306,9 @@ func TestEIP7702BatchPoisoning(t *testing.T) {
 			r.Equal(byte(DynamicFeeTxnType), slots.Txns[0].TxType())
 			r.Equal(byte(DynamicFeeTxnType), slots.Txns[2].TxType())
 
-			// Keep invalid authorizations for admission and intrinsic gas accounting.
+			// Invalid authorization signatures must not reject the transaction or its
+			// siblings. Preserve the full list because EIP-7702 charges intrinsic gas
+			// for every tuple; recovery is deferred until pool admission.
 			setCodeSlot := slots.Txns[1]
 			r.Equal(byte(SetCodeTxnType), setCodeSlot.TxType())
 			r.Len(setCodeSlot.Txn.GetAuthorizations(), 1)

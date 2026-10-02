@@ -1802,7 +1802,10 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.TxType() == SetCodeTxnType {
-		// Recover after admission checks. Invalid tuples do not invalidate the transaction.
+		// Defer ECDSA recovery until after fee, gas, nonce, balance and replacement
+		// checks, so rejected transactions cannot trigger expensive work for every tuple.
+		// EIP-7702 skips invalid tuples without rejecting the enclosing transaction;
+		// only successfully recovered authorities are indexed below.
 		slot := mt.TxnSlot
 		auths := slot.Txn.GetAuthorizations()
 		slot.AuthAndNonces = make([]AuthAndNonce, 0, len(auths))

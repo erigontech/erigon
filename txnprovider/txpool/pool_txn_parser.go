@@ -441,8 +441,13 @@ type TxnSlot struct {
 	Traced   bool              // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
 	Size     uint32            // Cached size of the RLP payload (persists after Rlp is set to nil)
 
-	BlobBundles   []PoolBlobBundle // Zero-copy blob data for EIP-4844 wrapped blob txns
-	AuthAndNonces []AuthAndNonce   // Recovered during admission; gas accounting uses Txn.GetAuthorizations().
+	BlobBundles []PoolBlobBundle // Zero-copy blob data for EIP-4844 wrapped blob txns
+
+	// AuthAndNonces holds recovered authority/nonce pairs for pool replacement.
+	// It is populated after cheap admission checks and omits invalid tuples.
+	// Gas accounting must use the full Txn.GetAuthorizations() list because
+	// EIP-7702 charges for every tuple, including invalid ones.
+	AuthAndNonces []AuthAndNonce
 }
 
 // Accessor methods that delegate to the stored Transaction.
