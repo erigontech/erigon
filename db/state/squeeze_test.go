@@ -378,12 +378,7 @@ func testRebuildCommitmentBasedOnFiles(t *testing.T, v3 bool) {
 		//db.Close()
 	}
 
-	if v3 {
-		schema, enabled := statecfg.Schema, statecfg.ExperimentalCommitmentV3
-		t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = schema, enabled })
-		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-		statecfg.ExperimentalCommitmentV3 = true
-	}
+	useCommitmentSchema(t, v3)
 	agg = testAgg(t, agg.Dirs(), agg.StepSize(), log.New())
 	db, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
@@ -476,14 +471,18 @@ func TestAggregator_RebuildCommitmentWithHistory(t *testing.T) {
 	}
 }
 
-func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, resume bool) {
+func useCommitmentSchema(t *testing.T, v3 bool) {
 	schema, enabled := statecfg.Schema, statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = schema, enabled })
-	statecfg.EnableHistoricalCommitment()
 	if v3 {
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 		statecfg.ExperimentalCommitmentV3 = true
 	}
+}
+
+func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, resume bool) {
+	useCommitmentSchema(t, v3)
+	statecfg.EnableHistoricalCommitment()
 	const stepSize = 16
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
@@ -608,16 +607,12 @@ func testRebuildCommitmentWithHistory(t *testing.T, v3 bool, filedSteps uint64, 
 		direct[i] = true
 	}
 	if resume {
-		commitsIn := func(step uint64) (n int) {
-			for _, last := range lastTxNums {
-				if last/stepSize == step {
-					n++
-				}
-			}
-			return n
+		commitsIn := map[uint64]int{}
+		for _, last := range lastTxNums {
+			commitsIn[last/stepSize]++
 		}
 		resumeStep := uint64(1)
-		for commitsIn(resumeStep) < 2 || slices.Contains(lastTxNums, (resumeStep+1)*stepSize-1) {
+		for commitsIn[resumeStep] < 2 || slices.Contains(lastTxNums, (resumeStep+1)*stepSize-1) {
 			resumeStep++
 		}
 		require.Less(t, resumeStep, filedSteps-1, "no step with two blocks and none ending on its boundary")

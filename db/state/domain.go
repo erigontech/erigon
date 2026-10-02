@@ -745,20 +745,6 @@ func (c Collation) Close() {
 	c.HistoryCollation.Close()
 }
 
-func (d *Domain) dumpStepWithHistory(ctx context.Context, step kv.Step, batch *TemporalMemBatch) (StaticFiles, error) {
-	wal := batch.domainWriters[d.Name]
-	defer wal.Close()
-	coll, err := d.collateETL(ctx, step, step+1, wal.valsCollector(), nil, "")
-	if err != nil {
-		return StaticFiles{}, err
-	}
-	if coll.HistoryCollation, err = d.History.collateETL(ctx, step, wal.h.valsCollector()); err != nil {
-		coll.Close()
-		return StaticFiles{}, err
-	}
-	return d.buildFiles(ctx, step, coll, background.NewProgressSet())
-}
-
 func (d *Domain) dumpStepRangeOnDisk(ctx context.Context, stepFrom, stepTo kv.Step, batch *TemporalMemBatch, vt valueTransformer) error {
 	return d.dumpStepRangeToPath(ctx, stepFrom, stepTo, batch, vt, "", true)
 }
