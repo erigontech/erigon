@@ -32,7 +32,7 @@ func scoreDecay(totalDurationDecay time.Duration, beaconConfig *clparams.BeaconC
 	return math.Pow(gossip.DecayToZero, 1/float64(numOfTimes))
 }
 
-func (s *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []pubsub.Option {
+func (p *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []pubsub.Option {
 	oneSlotDuration := time.Duration(beaconConfig.SecondsPerSlot) * time.Second
 	oneEpochDuration := time.Duration(beaconConfig.SlotsPerEpoch) * oneSlotDuration
 
@@ -63,10 +63,10 @@ func (s *p2pManager) pubsubOptions(beaconConfig *clparams.BeaconChainConfig) []p
 	pubsubQueueSize := 600
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
-		pubsub.WithMessageIdFn(s.msgId),
+		pubsub.WithMessageIdFn(p.msgId),
 		pubsub.WithNoAuthor(),
 		pubsub.WithPeerOutboundQueueSize(pubsubQueueSize),
-		pubsub.WithMaxMessageSize(int(s.cfg.NetworkConfig.GossipMaxSizeBellatrix)),
+		pubsub.WithMaxMessageSize(int(p.cfg.NetworkConfig.GossipMaxSizeBellatrix)),
 		pubsub.WithValidateQueueSize(pubsubQueueSize),
 		pubsub.WithPeerScore(scoreParams, thresholds),
 		pubsub.WithGossipSubParams(pubsubGossipParam()),

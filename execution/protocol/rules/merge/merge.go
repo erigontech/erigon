@@ -311,14 +311,13 @@ func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime u
 	return *ProofOfStakeDifficulty
 }
 
-func (c *Merge) TxDependencies(h *types.Header) [][]int {
+func (s *Merge) TxDependencies(h *types.Header) [][]int {
 	return nil
 }
 
 // verifyHeader checks whether a Proof-of-Stake header conforms to the consensus rules of the
 // stock Ethereum rules engine with EIP-3675 modifications.
 func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *types.Header) error {
-
 	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("extra-data longer than %d bytes (%d)", params.MaximumExtraDataSize, len(header.Extra))
 	}
@@ -458,31 +457,35 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		}
 	}
 
-	if config.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
-		// Only allocate VMContext when a tracer is attached; this avoids a
-		// heap allocation on every Cancun block during normal (un-traced) import.
-		var vmContext *tracing.VMContext
-		if tracer != nil {
-			random := header.MixDigest
-			execCtx := evmtypes.BlockContext{BlockNumber: header.Number.Uint64(), Time: header.Time}
-			// GasPrice is intentionally zero — system calls have no gas price.
-			vmContext = &tracing.VMContext{
-				Coinbase:        accounts.InternAddress(header.Coinbase),
-				BlockNumber:     header.Number.Uint64(),
-				Time:            header.Time,
-				Random:          &random,
-				ChainConfig:     config,
-				IntraBlockState: state,
-				Rules:           execCtx.Rules(config),
-			}
+	// Only allocate VMContext when a tracer is attached; this avoids a
+	// heap allocation on every block during normal (un-traced) import.
+	var vmContext *tracing.VMContext
+	if tracer != nil {
+		random := header.MixDigest
+		execCtx := evmtypes.BlockContext{BlockNumber: header.Number.Uint64(), Time: header.Time}
+		// GasPrice is intentionally zero — system calls have no gas price.
+		vmContext = &tracing.VMContext{
+			Coinbase:        accounts.InternAddress(header.Coinbase),
+			BlockNumber:     header.Number.Uint64(),
+			Time:            header.Time,
+			Random:          &random,
+			ChainConfig:     config,
+			IntraBlockState: state,
+			Rules:           execCtx.Rules(config),
 		}
+	}
+	if config.IsCancun(header.Time) && header.ParentBeaconBlockRoot != nil {
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer, vmContext)
 	}
-	if config.IsPrague(header.Time) {
-		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
-			return err
+	if config.IsPrague(header.Time) && header.Number.Sign() != 0 {
+		tracer.EmitSystemCallStart(vmContext)
+		if tracer != nil && tracer.OnSystemCallEnd != nil {
+			defer tracer.OnSystemCallEnd()
+		}
+		if _, err := syscall(params.HistoryStorageAddress, header.ParentHash[:], state, header, false /* constCall */); err != nil {
+			logger.Warn("Failed to call history storage contract", "err", err)
 		}
 	}
 	return nil
@@ -502,7 +505,8 @@ func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 
 func (s *Merge) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
 	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 

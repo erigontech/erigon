@@ -19,7 +19,10 @@ package forkchoice
 import (
 	"encoding/binary"
 	"math/rand"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -28,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 )
@@ -90,6 +94,61 @@ func TestSetUnequivocatingInvalidatesHeadCache(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
 }
 
+func TestProcessAttestingIndiciesInvalidatesGloasHeadCacheOnlyForNewMessages(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	f := newGloasWeightTreeTestStore()
+	f.beaconCfg = &cfg
+	cachedHead := common.HexToHash("0xbeef")
+	f.headHash = cachedHead
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+	attestation := &solid.Attestation{Data: &solid.AttestationData{
+		Slot:            1,
+		BeaconBlockRoot: common.HexToHash("0xaaaa"),
+		Target:          solid.Checkpoint{Epoch: 0},
+	}}
+
+	f.ProcessAttestingIndicies(attestation, []uint64{1})
+
+	require.Equal(t, common.Hash{}, f.headHash, "a new latest message must invalidate the cached head")
+	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+	f.headHash = cachedHead
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+
+	f.ProcessAttestingIndicies(attestation, []uint64{1})
+
+	require.Equal(t, cachedHead, f.headHash, "an unchanged latest message must preserve the cached head")
+	require.Equal(t, cltypes.PayloadStatusFull, f.headPayloadStatus)
+}
+
+func TestProcessAttestingIndiciesKeepsPreGloasHeadCache(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	f := newGloasWeightTreeTestStore()
+	f.beaconCfg = &cfg
+	f.headHash = common.HexToHash("0xbeef")
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+	attestation := &solid.Attestation{Data: &solid.AttestationData{
+		Slot:            1,
+		BeaconBlockRoot: common.HexToHash("0xaaaa"),
+		Target:          solid.Checkpoint{Epoch: 0},
+	}}
+
+	f.ProcessAttestingIndicies(attestation, []uint64{1})
+
+	require.Equal(t, common.HexToHash("0xbeef"), f.headHash)
+	require.Equal(t, cltypes.PayloadStatusFull, f.headPayloadStatus)
+	latestMessage, found := f.getLatestMessage(1)
+	require.True(t, found)
+	require.Equal(t, attestation.Data.BeaconBlockRoot, latestMessage.Root)
+}
+
 func TestGetHeadPublishesCachedSelection(t *testing.T) {
 	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	manager.OnSelectedHead(common.Hash{0xaa}, 100)
@@ -129,7 +188,7 @@ func TestGetHeadPublishesAnchorFallback(t *testing.T) {
 	require.Equal(t, slot, selectedSlot)
 }
 
-func TestGetHeadPublishesGloasSelection(t *testing.T) {
+func TestGetHeadNodeRefreshesGloasSelection(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
 	cfg.BellatrixForkEpoch = 0
@@ -165,6 +224,302 @@ func TestGetHeadPublishesGloasSelection(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, selectedRoot, publishedRoot)
 	require.Equal(t, selectedSlot, publishedSlot)
+	head, _, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+
+	store.mu.Lock()
+	store.headHash = common.Hash{}
+	store.headPayloadStatus = cltypes.PayloadStatusPending
+	store.mu.Unlock()
+
+	head, _, err = store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+
+	// A recomputation may select a different root. The old root must not inherit
+	// the new head's status, and the published selection must advance with it.
+	childRoot := common.Hash{0xbb}
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Block.Slot = 11
+	child.Block.ParentRoot = root
+	graph.headers[childRoot] = child.SignedBeaconBlockHeader().Header
+	graph.blocks[childRoot] = child
+	store.updateChildren(10, root, childRoot)
+	store.OnTick(12 * cfg.SecondsPerSlot)
+
+	head, selectedSlot, err = store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: childRoot, PayloadStatus: cltypes.PayloadStatusEmpty}, head)
+	require.Equal(t, uint64(11), selectedSlot)
+	publishedRoot, publishedSlot, ok = manager.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, childRoot, publishedRoot)
+	require.Equal(t, uint64(11), publishedSlot)
+}
+
+type countingHeadForkGraph struct {
+	*getFinalizedExecutionHashForkGraph
+	leafVisits atomic.Int32
+}
+
+func (g *countingHeadForkGraph) GetCurrentJustifiedCheckpoint(root common.Hash) (solid.Checkpoint, bool) {
+	g.leafVisits.Add(1)
+	return g.getFinalizedExecutionHashForkGraph.GetCurrentJustifiedCheckpoint(root)
+}
+
+type headSnapshotForkGraph struct {
+	*getFinalizedExecutionHashForkGraph
+	onGetBlock func()
+}
+
+func (g *headSnapshotForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	if g.onGetBlock != nil {
+		g.onGetBlock()
+	}
+	return g.getFinalizedExecutionHashForkGraph.GetBlock(root)
+}
+
+func (g *headSnapshotForkGraph) HasEnvelope(root common.Hash) bool {
+	return g.blocks[root] != nil
+}
+
+func (g *headSnapshotForkGraph) PayloadAccepted(root common.Hash) (bool, bool) {
+	return true, g.blocks[root] != nil
+}
+
+func newHeadSnapshotTestStore() (*ForkChoiceStore, *headSnapshotForkGraph) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	root := common.Hash{0xaa}
+	checkpoint := solid.Checkpoint{Root: root}
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = 11
+	graph := &headSnapshotForkGraph{getFinalizedExecutionHashForkGraph: &getFinalizedExecutionHashForkGraph{
+		headers:          map[common.Hash]*cltypes.BeaconBlockHeader{root: block.SignedBeaconBlockHeader().Header},
+		blocks:           map[common.Hash]*cltypes.SignedBeaconBlock{root: block},
+		currentJustified: checkpoint,
+	}}
+	store := newGloasWeightTreeTestStore()
+	store.beaconCfg = &cfg
+	store.forkGraph = graph
+	store.justifiedCheckpoint.Store(checkpoint)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.proposerBoostRoot.Store(common.Hash{})
+	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
+	store.time.Store(12 * cfg.SecondsPerSlot)
+	return store, graph
+}
+
+func TestGloasHeadUsesOneSlotForPayloadDecisions(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		advanceAtRead int
+		weightOnEmpty bool
+	}{
+		{name: "clock advances during EMPTY tiebreaker", advanceAtRead: 3},
+		{name: "clock advances before weights", advanceAtRead: 1, weightOnEmpty: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, graph := newHeadSnapshotTestStore()
+			checkpoint := store.justifiedCheckpoint.Load().(solid.Checkpoint)
+			if test.weightOnEmpty {
+				store.checkpointStates.Store(checkpoint, &checkpointState{
+					beaconConfig: store.beaconCfg, validatorSetSize: 1,
+					balances: []uint64{32}, actives: []byte{1}, slasheds: []byte{0},
+				})
+				store.setLatestMessage(0, LatestMessage{Slot: 12, Root: checkpoint.Root})
+			}
+			reads := 0
+			graph.onGetBlock = func() {
+				reads++
+				if reads == test.advanceAtRead {
+					// OnTick can advance time while the head walk holds f.mu. Both
+					// variants must use the slot captured before that clock update.
+					store.time.Store(13 * store.beaconCfg.SecondsPerSlot)
+				}
+			}
+
+			head, slot, err := store.GetHeadNode()
+
+			require.NoError(t, err)
+			require.Equal(t, uint64(13), store.Slot(), "the clock must advance during the head walk")
+			require.Equal(t, uint64(11), slot)
+			require.Equal(t, ForkChoiceNode{Root: checkpoint.Root, PayloadStatus: cltypes.PayloadStatusFull}, head)
+		})
+	}
+}
+
+func TestPreGloasHeadClearsPayloadStatus(t *testing.T) {
+	store, _ := newHeadSnapshotTestStore()
+	store.beaconCfg.GloasForkEpoch = 1
+	store.beaconCfg.InitializeForkSchedule()
+	store.headPayloadStatus = cltypes.PayloadStatusFull
+
+	head, _, err := store.GetHeadNode()
+
+	require.NoError(t, err)
+	require.Equal(t, cltypes.PayloadStatusPending, head.PayloadStatus)
+	require.Equal(t, cltypes.PayloadStatusPending, store.headPayloadStatus)
+}
+
+func TestPreGloasHeadReadCrossesGloasBoundary(t *testing.T) {
+	for _, refresh := range []bool{false, true} {
+		name := "without another head reader"
+		if refresh {
+			name = "with a newer cached Gloas head"
+		}
+		t.Run(name, func(t *testing.T) {
+			store, graph := newHeadSnapshotTestStore()
+			store.beaconCfg.GloasForkEpoch = 1
+			store.beaconCfg.InitializeForkSchedule()
+			store.publicKeysRegistry = public_keys_registry.NewInMemoryPublicKeysRegistry()
+			checkpoint := store.justifiedCheckpoint.Load().(solid.Checkpoint)
+			cs, _ := store.checkpointStates.LoadAndDelete(checkpoint)
+			store.unrealizedJustifiedCheckpoint.Store(checkpoint)
+			store.unrealizedFinalizedCheckpoint.Store(solid.Checkpoint{})
+			graph.states = map[common.Hash]*state2.CachingBeaconState{checkpoint.Root: state2.New(store.beaconCfg)}
+			graph.getStateStarted = make(chan common.Hash, 1)
+			graph.getStateRelease = make(chan struct{})
+			release := sync.OnceFunc(func() { close(graph.getStateRelease) })
+			type result struct {
+				head ForkChoiceNode
+				err  error
+			}
+			results := make(chan result, 1)
+			var wg sync.WaitGroup
+			t.Cleanup(func() {
+				release()
+				wg.Wait()
+			})
+			wg.Go(func() {
+				head, _, err := store.GetHeadNode()
+				results <- result{head: head, err: err}
+			})
+			select {
+			case <-graph.getStateStarted:
+			case <-time.After(5 * time.Second):
+				t.Fatal("pre-Gloas head read did not reach checkpoint lookup")
+			}
+
+			// Cross the fork while the pre-fork reader is outside f.mu for disk I/O.
+			store.checkpointStates.Store(checkpoint, cs)
+			store.OnTick(store.beaconCfg.SlotsPerEpoch * store.beaconCfg.SecondsPerSlot)
+			want := ForkChoiceNode{Root: checkpoint.Root, PayloadStatus: cltypes.PayloadStatusFull}
+			if refresh {
+				head, _, err := store.GetHeadNode()
+				require.NoError(t, err)
+				require.Equal(t, want, head)
+			}
+			release()
+			select {
+			case got := <-results:
+				require.NoError(t, got.err)
+				require.Equal(t, want, got.head)
+			case <-time.After(5 * time.Second):
+				t.Fatal("head read did not finish")
+			}
+			wg.Wait()
+			require.Equal(t, want.Root, store.headHash)
+			require.Equal(t, want.PayloadStatus, store.headPayloadStatus)
+		})
+	}
+}
+
+func TestGloasConcurrentHeadReadsShareRecomputation(t *testing.T) {
+	const readers = 8
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	root := common.Hash{0xaa}
+	checkpoint := solid.Checkpoint{Root: root}
+	graph := &countingHeadForkGraph{getFinalizedExecutionHashForkGraph: &getFinalizedExecutionHashForkGraph{
+		headers:          map[common.Hash]*cltypes.BeaconBlockHeader{root: {Slot: 10}},
+		currentJustified: checkpoint,
+		getStateStarted:  make(chan common.Hash, readers),
+		getStateRelease:  make(chan struct{}),
+	}}
+	store := newGloasWeightTreeTestStore()
+	store.beaconCfg = &cfg
+	store.forkGraph = graph
+	store.justifiedCheckpoint.Store(checkpoint)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.proposerBoostRoot.Store(common.Hash{})
+
+	var wg sync.WaitGroup
+	release := sync.OnceFunc(func() { close(graph.getStateRelease) })
+	t.Cleanup(func() {
+		release()
+		wg.Wait()
+	})
+	results := make(chan ForkChoiceNode, readers)
+	for range readers {
+		wg.Go(func() {
+			head, _, _ := store.GetHeadNode()
+			results <- head
+		})
+	}
+	// Park every reader after its cache miss. Once released, only the first
+	// reader needs to walk the tree; the others must reuse that result.
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for range readers {
+		select {
+		case <-graph.getStateStarted:
+		case <-timeout.C:
+			t.Fatal("head readers did not reach checkpoint lookup")
+		}
+	}
+	release()
+	wg.Wait()
+	for range readers {
+		require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusEmpty}, <-results)
+	}
+	require.Equal(t, int32(1), graph.leafVisits.Load(), "one cache invalidation must cause only one tree walk")
+}
+
+func TestGetHeadNodeUsesPreGloasForkChoice(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	manager := synced_data.NewSyncedDataManager(&cfg, true)
+	root := common.Hash{0xaa}
+	checkpoint := solid.Checkpoint{Root: root}
+	graph := &getFinalizedExecutionHashForkGraph{
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+			root: {Slot: 10},
+		},
+		blocks:           map[common.Hash]*cltypes.SignedBeaconBlock{},
+		currentJustified: checkpoint,
+	}
+	store := newGloasWeightTreeTestStore()
+	store.beaconCfg = &cfg
+	store.forkGraph = graph
+	store.syncedDataManager = manager
+	store.justifiedCheckpoint.Store(checkpoint)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.proposerBoostRoot.Store(common.Hash{})
+	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
+
+	head, slot, err := store.GetHeadNode()
+
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusPending}, head)
+	require.Equal(t, uint64(10), slot)
+	publishedRoot, publishedSlot, selected := manager.SelectedHead()
+	require.True(t, selected)
+	require.Equal(t, head.Root, publishedRoot)
+	require.Equal(t, slot, publishedSlot)
 }
 
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
@@ -520,7 +875,7 @@ func TestGloasWeightTreeNilCheckpointStateReturnsZero(t *testing.T) {
 	tree = f.gloasWeightTree.prepare(justified, nil)
 
 	require.Zero(t, tree.GetAttestationScore(node))
-	require.Zero(t, tree.GetWeight(node))
+	require.Zero(t, tree.GetWeight(node, f.Slot()))
 }
 
 func TestGloasWeightTreeRecomputeDeepChain(t *testing.T) {
@@ -718,4 +1073,16 @@ func TestApplyWeightDeltaDoesNotUnderflow(t *testing.T) {
 	require.Equal(t, uint64(13), applyWeightDelta(10, 3, true))
 	require.Equal(t, uint64(7), applyWeightDelta(10, 3, false))
 	require.Zero(t, applyWeightDelta(3, 10, false))
+}
+
+func TestGetHeadNodeReturnsCachedSnapshot(t *testing.T) {
+	headRoot := common.Hash{0x41}
+	store := &ForkChoiceStore{
+		headHash:          headRoot,
+		headPayloadStatus: cltypes.PayloadStatusFull,
+	}
+
+	head, _, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusFull}, head)
 }

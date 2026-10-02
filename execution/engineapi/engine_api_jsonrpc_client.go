@@ -106,7 +106,8 @@ func DialJsonRpcClient(url string, jwtSecret []byte, logger log.Logger, opts ...
 	// Always retry on transient server errors (e.g., server shutting down returning
 	// empty response or 503 Service Unavailable).
 	defaultCheckers := make([]RetryableErrChecker, 0, 2+len(options.retryableErrCheckers))
-	defaultCheckers = append(defaultCheckers,
+	defaultCheckers = append(
+		defaultCheckers,
 		ErrContainsRetryableErrChecker("empty response from JSON-RPC server"),
 		ErrContainsRetryableErrChecker("503 Service Unavailable"),
 	)
@@ -424,6 +425,17 @@ func (c *JsonRpcClient) GetBlobsV3(ctx context.Context, blobHashes []common.Hash
 	return backoff.RetryWithData(func() ([]*enginetypes.BlobAndProofV2, error) {
 		var result []*enginetypes.BlobAndProofV2
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getBlobsV3", blobHashes)
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return result, nil
+	}, c.backOff(ctx))
+}
+
+func (c *JsonRpcClient) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellIndices hexutil.Bytes) ([]*enginetypes.BlobCellsAndProofsV1, error) {
+	return backoff.RetryWithData(func() ([]*enginetypes.BlobCellsAndProofsV1, error) {
+		var result []*enginetypes.BlobCellsAndProofsV1
+		err := c.rpcClient.CallContext(ctx, &result, "engine_getBlobsV4", blobHashes, cellIndices)
 		if err != nil {
 			return nil, c.maybeMakePermanent(err)
 		}

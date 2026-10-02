@@ -278,7 +278,7 @@ func TestEmbeddedRPCOverlayTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *test
 	require.NoError(t, err)
 	defer freshDomains.Close()
 	freshDomains.BindStateCache(stateCache)
-	require.NoError(t, freshDomains.InitBlockOverlay(freshTx, t.TempDir()))
+	require.NoError(t, freshDomains.InitBlockOverlay(freshTx))
 
 	overlayTx := freshDomains.BlockOverlay().NewReadView(rpcTx)
 	events := shards.NewEvents()

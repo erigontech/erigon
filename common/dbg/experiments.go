@@ -38,7 +38,7 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
-	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
+	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", uint64(estimate.AlmostAllCPUs())) // used only in offline-tooling
 
 	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
@@ -57,7 +57,7 @@ var (
 
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
-	//state v3
+	// state v3
 	noPrune              = EnvBool("NO_PRUNE", false)
 	noRetire             = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
 	noMerge              = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
@@ -142,7 +142,6 @@ var (
 	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)
-	UseCodeStore                  = EnvBool("USE_CODE_STORE", false)
 	DisableAdaptivePin            = EnvBool("DISABLE_ADAPTIVE_PIN", true)
 	AssertStateCache              = EnvBool("ASSERT_STATE_CACHE", false)
 	ReadAhead                     = EnvBool("READ_AHEAD", true)
@@ -412,12 +411,14 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 	}
 }
 
-var tracedBlocks map[uint64]struct{}
-var traceAllBlocks bool
-var tracedTxIndexes map[int64]struct{}
-var tracedAccounts map[unique.Handle[common.Address]]struct{}
-var traceAllDomains bool
-var tracedDomains map[uint16]struct{}
+var (
+	tracedBlocks    map[uint64]struct{}
+	traceAllBlocks  bool
+	tracedTxIndexes map[int64]struct{}
+	tracedAccounts  map[unique.Handle[common.Address]]struct{}
+	traceAllDomains bool
+	tracedDomains   map[uint16]struct{}
+)
 
 var traceInit sync.Once
 

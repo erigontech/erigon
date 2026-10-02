@@ -182,6 +182,18 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 	return tx, sd, nil
 }
 
+type initialSyncPublicationError struct {
+	err error
+}
+
+func (e *initialSyncPublicationError) Error() string {
+	return e.err.Error()
+}
+
+func (e *initialSyncPublicationError) Unwrap() error {
+	return e.err
+}
+
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
 // It downloads block files, then executes them in a hasMore loop until
 // all frozen blocks are processed.
@@ -314,7 +326,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			}
 			return nil
 		}); err != nil {
-			return err
+			return &initialSyncPublicationError{err: err}
 		}
 	}
 	return nil

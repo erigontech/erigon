@@ -261,9 +261,8 @@ func TestDBSeedQuery(t *testing.T) {
 	// times to avoid flakes.
 	const attempts = 15
 	var err error
-	tmpDir := t.TempDir()
 	for range attempts {
-		if err = testSeedQuery(tmpDir); err == nil {
+		if err = testSeedQuery(); err == nil {
 			return
 		}
 	}
@@ -272,7 +271,7 @@ func TestDBSeedQuery(t *testing.T) {
 	}
 }
 
-func testSeedQuery(tmpDir string) error {
+func testSeedQuery() error {
 	db, err := OpenDB("")
 	if err != nil {
 		panic(err)
@@ -503,6 +502,8 @@ func TestDBExpireV5(t *testing.T) {
 	defer db.Close()
 
 	ip := netip.AddrFrom4([4]byte{127, 0, 0, 1})
-	db.UpdateFindFailsV5(ID{}, ip, 4)
+	if err := db.UpdateFindFailsV5(ID{}, ip, 4); err != nil {
+		t.Fatal(err)
+	}
 	db.expireNodes()
 }

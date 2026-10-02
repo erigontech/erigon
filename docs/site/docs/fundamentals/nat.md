@@ -121,6 +121,8 @@ This flag sets the external address advertised in the **discv5 ENR** and **libp2
 :::tip For validators running behind NAT or inside Docker
 Set **both** `--nat` and `--caplin.nat` to the same external IP, otherwise your execution-layer peers and consensus-layer peers will see different (or no) reachable addresses.
 
+UPnP and NAT-PMP gateway discovery do not cross Docker's default bridge network, so use `extip` or host networking in that setup.
+
 ```bash
 --nat extip:203.0.113.114 --caplin.nat extip:203.0.113.114
 ```

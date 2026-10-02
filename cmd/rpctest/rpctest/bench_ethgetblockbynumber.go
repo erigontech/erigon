@@ -38,7 +38,7 @@ func BenchEthGetBlockByNumber2(erigonURL, gethURL string, needCompare, latest bo
 	defer cleanup()
 
 	var resultsCh chan CallResult = nil
-	var nBlocks = 0
+	nBlocks := 0
 
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
