@@ -26,6 +26,7 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -62,8 +63,57 @@ type CallArgs struct {
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
+var callArgsParsers fastjson.ParserPool
+
 // UnmarshalJSON decodes a call object and rejects one whose data and input disagree.
+// data and input are hex-decoded straight from the parsed object: encoding/json would
+// scan a large calldata string twice, once to validate and once to decode.
 func (args *CallArgs) UnmarshalJSON(raw []byte) error {
+	type callArgs CallArgs
+	p := callArgsParsers.Get()
+	defer callArgsParsers.Put(p)
+	v, err := p.ParseBytes(raw)
+	if err != nil || v.Type() != fastjson.TypeObject {
+		return args.unmarshalStd(raw)
+	}
+	o := v.GetObject()
+	var calldata [2]*hexutil.Bytes
+	var found [2]bool
+	for i, key := range [2]string{"data", "input"} {
+		f := o.Get(key)
+		if f == nil {
+			continue
+		}
+		found[i] = true
+		if f.Type() != fastjson.TypeNull {
+			s, err := f.StringBytes()
+			if err != nil {
+				return args.unmarshalStd(raw)
+			}
+			calldata[i] = new(hexutil.Bytes)
+			if err := calldata[i].UnmarshalText(s); err != nil {
+				return args.unmarshalStd(raw)
+			}
+		}
+		o.Del(key)
+		if o.Get(key) != nil { // duplicate key: encoding/json keeps the last one
+			return args.unmarshalStd(raw)
+		}
+	}
+	if err := json.Unmarshal(v.MarshalTo(nil), (*callArgs)(args)); err != nil {
+		return err
+	}
+	if found[0] {
+		args.Data = calldata[0]
+	}
+	if found[1] {
+		args.Input = calldata[1]
+	}
+	return CheckCallData(args.Data, args.Input)
+}
+
+// unmarshalStd decodes with encoding/json alone, so malformed input gets its error messages.
+func (args *CallArgs) unmarshalStd(raw []byte) error {
 	type callArgs CallArgs
 	if err := json.Unmarshal(raw, (*callArgs)(args)); err != nil {
 		return err
