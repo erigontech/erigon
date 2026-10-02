@@ -80,7 +80,7 @@ service ETHBACKEND {
   rpc SetHead(SetHeadRequest) returns (SetHeadReply);
 
   // Returns body metadata and the user transaction count without reading transactions.
-  // Both the block hash and height are required.
+  // Requires a non-zero block hash and its height; height zero selects genesis.
   rpc BlockBody(BlockRequest) returns (BlockBodyReply);
 }
 

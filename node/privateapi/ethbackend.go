@@ -362,13 +362,17 @@ func (s *EthBackendServer) BlockBody(ctx context.Context, req *remoteproto.Block
 	if hash == nil || hash.Hi == nil || hash.Lo == nil {
 		return nil, status.Error(codes.InvalidArgument, "block hash is required")
 	}
+	blockHash := gointerfaces.ConvertH256ToHash(hash)
+	if blockHash == (common.Hash{}) {
+		return nil, status.Error(codes.InvalidArgument, "block hash must be non-zero")
+	}
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	body, txCount, err := s.blockReader.Body(ctx, tx, gointerfaces.ConvertH256ToHash(hash), req.BlockHeight)
+	body, txCount, err := s.blockReader.Body(ctx, tx, blockHash, req.BlockHeight)
 	if err != nil {
 		return nil, err
 	}

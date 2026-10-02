@@ -124,23 +124,6 @@ func TestPruneGateArchive(t *testing.T) {
 	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, 0))
 }
 
-// Keep a focused short-suite check: the full endpoint matrix is skipped with -short.
-func TestBlockTransactionCountsDoNotNeedTransactions(t *testing.T) {
-	t.Parallel()
-
-	wide := prune.Distance(pruneGatingChainLen * 3)
-	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
-		mode: prune.Mode{Initialised: true, History: wide, Blocks: prune.Distance(2)},
-	})
-
-	byNumber, err := apis.eth.GetBlockTransactionCountByNumber(t.Context(), rpc.BlockNumber(chainInfo.old.num))
-	require.NoError(t, err)
-	require.NotNil(t, byNumber)
-	byHash, err := apis.eth.GetBlockTransactionCountByHash(t.Context(), chainInfo.old.hash)
-	require.NoError(t, err)
-	require.NotNil(t, byHash)
-}
-
 // TestReceiptsGateFollowsRetention pins checkReceiptsAvailable against the
 // retention actually applied to the receipt cache. Enabling the cache says
 // only that it exists on disk, not how much of it is kept: RCacheDomain is

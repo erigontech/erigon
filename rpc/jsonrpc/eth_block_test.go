@@ -399,36 +399,36 @@ func TestBlockTransactionCountsWithoutTransactionData(t *testing.T) {
 	remoteReader := freezeblocks.NewRemoteBlockReader(client)
 	backend := rpcservices.NewRemoteBackend(client, m.DB, remoteReader)
 
-	mode := prune.FullMode
-	mode.History, mode.Blocks = prune.Distance(2), prune.Distance(2)
-	for _, tc := range []struct {
+	want := hexutil.Uint(len(block.Transactions()))
+	zero := hexutil.Uint(0)
+	hashCases := []struct {
+		name string
+		hash common.Hash
+		want *hexutil.Uint
+	}{
+		{"canonical hash", block.Hash(), &want},
+		{"noncanonical hash", orphanedChains[0].Blocks[0].Hash(), &zero},
+		{"genesis", m.Genesis.Hash(), &zero},
+		{"unknown hash", common.Hash{0xff}, nil},
+	}
+	mode := prune.Mode{Initialised: true, History: prune.Distance(2), Blocks: prune.Distance(2)}
+	for _, reader := range []struct {
 		name string
 		base *BaseAPI
 	}{
 		{"local", newBaseApiForTest(m)},
 		{"remote", NewBaseApi(nil, m.StateCache, backend, m.Engine, nil)},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.base._pruneMode.Store(&mode)
-			api := newEthApiForTest(tc.base, m.DB, nil, nil)
-			want := hexutil.Uint(len(block.Transactions()))
+		t.Run(reader.name, func(t *testing.T) {
+			reader.base._pruneMode.Store(&mode)
+			api := newEthApiForTest(reader.base, m.DB, nil, nil)
 			t.Run("by number", func(t *testing.T) {
 				count, err := api.GetBlockTransactionCountByNumber(ctx, rpc.BlockNumber(block.NumberU64()))
 				require.NoError(t, err)
 				require.NotNil(t, count)
 				require.Equal(t, want, *count)
 			})
-			zero := hexutil.Uint(0)
-			for _, tc := range []struct {
-				name string
-				hash common.Hash
-				want *hexutil.Uint
-			}{
-				{"canonical hash", block.Hash(), &want},
-				{"noncanonical hash", orphanedChains[0].Blocks[0].Hash(), &zero},
-				{"genesis", m.Genesis.Hash(), &zero},
-				{"unknown hash", common.Hash{0xff}, nil},
-			} {
+			for _, tc := range hashCases {
 				t.Run(tc.name, func(t *testing.T) {
 					count, err := api.GetBlockTransactionCountByHash(ctx, tc.hash)
 					require.NoError(t, err)
@@ -444,11 +444,14 @@ func TestRemoteBlockBodyMetadata(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	reader := freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn))
 	hash := common.Hash{1}
+	uncle := m.Genesis.Header()
+	uncle.Extra = []byte("uncle metadata")
+	uncle.Hash()
 	for _, tc := range []struct {
 		name string
 		body types.BodyForStorage
 	}{
-		{"uncles", types.BodyForStorage{TxCount: 3, Uncles: []*types.Header{m.Genesis.Header()}}},
+		{"uncles", types.BodyForStorage{TxCount: 3, Uncles: []*types.Header{uncle}}},
 		{"empty withdrawals", types.BodyForStorage{TxCount: 2, Withdrawals: []*types.Withdrawal{}}},
 		{"withdrawals", types.BodyForStorage{TxCount: 4, Withdrawals: []*types.Withdrawal{{Index: 1, Validator: 2, Address: common.Address{3}, Amount: 4}}}},
 	} {
@@ -461,7 +464,11 @@ func TestRemoteBlockBodyMetadata(t *testing.T) {
 			require.NotNil(t, body)
 			require.Empty(t, body.Transactions)
 			require.Equal(t, tc.body.TxCount-2, count)
-			require.Equal(t, tc.body.Uncles, body.Uncles)
+			wantUncles, err := rlp.EncodeToBytes(tc.body.Uncles)
+			require.NoError(t, err)
+			gotUncles, err := rlp.EncodeToBytes(body.Uncles)
+			require.NoError(t, err)
+			require.Equal(t, wantUncles, gotUncles)
 			require.Equal(t, tc.body.Withdrawals, body.Withdrawals)
 		})
 	}

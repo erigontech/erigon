@@ -100,7 +100,7 @@ type ETHBACKENDClient interface {
 	FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*FrozenBlocksReply, error)
 	SetHead(ctx context.Context, in *SetHeadRequest, opts ...grpc.CallOption) (*SetHeadReply, error)
 	// Returns body metadata and the user transaction count without reading transactions.
-	// Both the block hash and height are required.
+	// Requires a non-zero block hash and its height; height zero selects genesis.
 	BlockBody(ctx context.Context, in *BlockRequest, opts ...grpc.CallOption) (*BlockBodyReply, error)
 }
 
@@ -456,7 +456,7 @@ type ETHBACKENDServer interface {
 	FrozenBlocks(context.Context, *emptypb.Empty) (*FrozenBlocksReply, error)
 	SetHead(context.Context, *SetHeadRequest) (*SetHeadReply, error)
 	// Returns body metadata and the user transaction count without reading transactions.
-	// Both the block hash and height are required.
+	// Requires a non-zero block hash and its height; height zero selects genesis.
 	BlockBody(context.Context, *BlockRequest) (*BlockBodyReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }

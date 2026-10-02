@@ -332,7 +332,7 @@ func (r *RemoteBlockReader) Header(ctx context.Context, tx kv.Getter, hash commo
 	return block.Header(), nil
 }
 
-func (r *RemoteBlockReader) Body(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txCount uint32, err error) {
+func (r *RemoteBlockReader) Body(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (*types.Body, uint32, error) {
 	reply, err := r.client.BlockBody(ctx, &remoteproto.BlockRequest{BlockHash: gointerfaces.ConvertHashToH256(hash), BlockHeight: blockHeight})
 	if err != nil {
 		return nil, 0, err
@@ -340,7 +340,7 @@ func (r *RemoteBlockReader) Body(ctx context.Context, _ kv.Getter, hash common.H
 	if len(reply.BodyRlp) == 0 {
 		return nil, 0, nil
 	}
-	body = new(types.Body)
+	body := new(types.Body)
 	if err := rlp.DecodeBytes(reply.BodyRlp, body); err != nil {
 		return nil, 0, err
 	}

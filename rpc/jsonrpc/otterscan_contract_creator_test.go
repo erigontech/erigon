@@ -50,9 +50,7 @@ func TestGetContractCreator(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			base := newBaseApiForTest(m)
-			mode := prune.ArchiveMode
-			mode.History, mode.Blocks = tc.history, tc.blocks
-			base._pruneMode.Store(&mode)
+			base._pruneMode.Store(&prune.Mode{Initialised: true, History: tc.history, Blocks: tc.blocks})
 			api := NewOtterscanAPI(base, m.DB, 25)
 
 			result, err := api.GetContractCreator(m.Ctx, addr)

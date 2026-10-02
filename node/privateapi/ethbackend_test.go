@@ -24,9 +24,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -38,11 +35,7 @@ func TestNewEthBackendServerRejectsNilChainConfig(t *testing.T) {
 }
 
 func TestBlockBodyRejectsInvalidHash(t *testing.T) {
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	server := &EthBackendServer{
-		db:          db,
-		blockReader: freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles()),
-	}
+	server := &EthBackendServer{}
 	for _, tc := range []struct {
 		name string
 		hash *typesproto.H256
@@ -51,12 +44,11 @@ func TestBlockBodyRejectsInvalidHash(t *testing.T) {
 		{"empty", &typesproto.H256{}},
 		{"missing high half", &typesproto.H256{Lo: &typesproto.H128{}}},
 		{"missing low half", &typesproto.H256{Hi: &typesproto.H128{}}},
+		{"zero", &typesproto.H256{Hi: &typesproto.H128{}, Lo: &typesproto.H128{}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			require.NotPanics(t, func() {
-				_, err := server.BlockBody(t.Context(), &remoteproto.BlockRequest{BlockHash: tc.hash, BlockHeight: 1})
-				require.Equal(t, codes.InvalidArgument, status.Code(err))
-			})
+			_, err := server.BlockBody(t.Context(), &remoteproto.BlockRequest{BlockHash: tc.hash, BlockHeight: 1})
+			require.Equal(t, codes.InvalidArgument, status.Code(err))
 		})
 	}
 }

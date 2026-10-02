@@ -23,6 +23,8 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -59,6 +61,15 @@ func TestGetTransactionBySenderAndNonce(t *testing.T) {
 		//reply, err = api.GetTransactionBySenderAndNonce(m.Ctx, expectCreator, 39)
 		//require.NoError(err)
 		//require.Nil(reply)
+	})
+	t.Run("pruned transactions", func(t *testing.T) {
+		base := newBaseApiForTest(m)
+		base._pruneMode.Store(&prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: prune.Distance(1)})
+		api := NewOtterscanAPI(base, m.DB, 25)
+
+		result, err := api.GetTransactionBySenderAndNonce(m.Ctx, expectCreator, 0)
+		require.ErrorIs(t, err, state.ErrPruned)
+		require.Nil(t, result)
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)
