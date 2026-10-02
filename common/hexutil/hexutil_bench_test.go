@@ -17,6 +17,8 @@
 package hexutil
 
 import (
+	"encoding/hex"
+	"fmt"
 	"math/big"
 	"testing"
 )
@@ -31,5 +33,27 @@ func BenchmarkEncodeBig(b *testing.B) {
 		for _, bigint := range inputs {
 			EncodeBig(bigint)
 		}
+	}
+}
+
+func BenchmarkAppendQuoted(b *testing.B) {
+	for _, n := range []int{20, 32, 64, 256, 1024} {
+		src := make([]byte, n)
+		for i := range src {
+			src[i] = byte(i * 7)
+		}
+		dst := make([]byte, 0, QuotedLen(n))
+		b.Run(fmt.Sprintf("stdlib/%d", n), func(b *testing.B) {
+			b.SetBytes(int64(n))
+			for b.Loop() {
+				dst = append(hex.AppendEncode(append(dst[:0], `"0x`...), src), '"')
+			}
+		})
+		b.Run(fmt.Sprintf("hexutil/%d", n), func(b *testing.B) {
+			b.SetBytes(int64(n))
+			for b.Loop() {
+				dst = AppendQuoted(dst[:0], src)
+			}
+		})
 	}
 }
