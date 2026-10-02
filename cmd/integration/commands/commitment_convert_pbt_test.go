@@ -337,7 +337,7 @@ func TestConvertPBTSourceWithoutBinaryTables(t *testing.T) {
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 
-func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte) (map[string][]byte, common.Hash, common.Hash, string, map[string][]byte, map[string][]byte, string) {
+func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte, maxOps int) (map[string][]byte, common.Hash, common.Hash, string, map[string][]byte, map[string][]byte, string) {
 	t.Helper()
 	selectPBTHexCommandSuite(t)
 	source, err := execmoduletester.NewPBTAcceptanceChainWithSharedCode(t, false, false, sharedCode)
@@ -356,7 +356,7 @@ func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte) (map[string][]b
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	output := filepath.Join(t.TempDir(), "output")
-	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New()))
+	require.NoError(t, convertPBTWithOptions(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), pbtConvertHooks{rangeWriterLimits: &dbstate.PBinRangeWriterLimits{MaxOps: maxOps, MaxBytes: 1 << 30}}))
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.InitSchemas()
@@ -404,7 +404,7 @@ func pbtAcceptanceReferenceEntries(source *execmoduletester.PBTAcceptanceChain) 
 func TestConvertPBTCases(t *testing.T) {
 	code := bytes.Repeat([]byte{1}, eip8297.StemSubtreeWidth*eip8297.ChunkDataLen+1)
 	t.Run("code spanning groups", func(t *testing.T) {
-		rows, binRoot, wantRoot, _, _, _, _ := convertedPBTAcceptanceRows(t, code)
+		rows, binRoot, wantRoot, _, _, _, _ := convertedPBTAcceptanceRows(t, code, 2)
 		codeHash := crypto.Keccak256Hash(code)
 		for index, chunk := range eip8297.ChunkifyCode(code) {
 			require.Equal(t, chunk[:], rows[string(eip8297.TreeKeyCodeChunk(codeHash, index))], "code chunk %d must be present in its stem", index)
@@ -412,7 +412,7 @@ func TestConvertPBTCases(t *testing.T) {
 		require.Equal(t, wantRoot, binRoot, "code spanning groups root")
 	})
 	t.Run("shared code chunked once", func(t *testing.T) {
-		rows, binRoot, wantRoot, _, _, referenceRows, _ := convertedPBTAcceptanceRows(t, code)
+		rows, binRoot, wantRoot, _, _, referenceRows, _ := convertedPBTAcceptanceRows(t, code, 2)
 		wantCode := make(map[string][]byte)
 		gotCode := make(map[string][]byte)
 		for key, value := range referenceRows {
@@ -429,7 +429,7 @@ func TestConvertPBTCases(t *testing.T) {
 		require.Equal(t, wantRoot, binRoot, "shared code chunks root")
 	})
 	t.Run("zero chunks absent", func(t *testing.T) {
-		rows, binRoot, wantRoot, _, _, _, _ := convertedPBTAcceptanceRows(t, code)
+		rows, binRoot, wantRoot, _, _, _, _ := convertedPBTAcceptanceRows(t, code, 2)
 		zeroCodeHash := crypto.Keccak256Hash(make([]byte, 31))
 		for index := range eip8297.ChunkifyCode(make([]byte, 31)) {
 			require.NotContains(t, rows, string(eip8297.TreeKeyCodeChunk(zeroCodeHash, index)), "zero code chunks must be absent")
@@ -437,7 +437,7 @@ func TestConvertPBTCases(t *testing.T) {
 		require.Equal(t, wantRoot, binRoot, "zero chunks root")
 	})
 	t.Run("delegation without code leaves", func(t *testing.T) {
-		rows, binRoot, wantRoot, _, _, _, _ := convertedPBTAcceptanceRows(t, code)
+		rows, binRoot, wantRoot, _, _, _, _ := convertedPBTAcceptanceRows(t, code, 2)
 		delegation := append(append([]byte(nil), eip8297.DelegationMarker[:]...), bytes.Repeat([]byte{7}, 20)...)
 		delegationHash := crypto.Keccak256Hash(delegation)
 		for index := range eip8297.ChunkifyCode(delegation) {
@@ -446,15 +446,15 @@ func TestConvertPBTCases(t *testing.T) {
 		require.Equal(t, wantRoot, binRoot, "delegation root")
 	})
 	t.Run("root and record parity", func(t *testing.T) {
-		tinyRows, tinyRoot, tinyWantRoot, _, _, _, tinyOutput := convertedPBTAcceptanceRows(t, code)
-		defaultRows, defaultRoot, defaultWantRoot, _, _, _, defaultOutput := convertedPBTAcceptanceRows(t, code)
+		tinyRows, tinyRoot, tinyWantRoot, _, _, _, tinyOutput := convertedPBTAcceptanceRows(t, code, 2)
+		defaultRows, defaultRoot, defaultWantRoot, _, _, _, defaultOutput := convertedPBTAcceptanceRows(t, code, 100_000)
 		require.Equal(t, defaultRows, tinyRows, "multi-batch rows must match the default writer")
 		require.Equal(t, defaultRoot, tinyRoot, "multi-batch root must match the default writer")
 		require.Equal(t, defaultWantRoot, tinyWantRoot, "multi-batch reference root")
 		require.Equal(t, pbtCommitmentBinKVBytes(t, defaultOutput), pbtCommitmentBinKVBytes(t, tinyOutput), "multi-batch files must match the default writer")
 	})
 	t.Run("right-edge reads", func(t *testing.T) {
-		rows, binRoot, wantRoot, rightEdge, _, _, _ := convertedPBTAcceptanceRows(t, code)
+		rows, binRoot, wantRoot, rightEdge, _, _, _ := convertedPBTAcceptanceRows(t, code, 2)
 		require.NotEmpty(t, rows[rightEdge], "the right-edge row must be present in the output")
 		require.Equal(t, wantRoot, binRoot, "right-edge root")
 	})

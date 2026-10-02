@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
@@ -110,15 +109,12 @@ func BinFeedAccountFromState(address []byte, slotKeys [][]byte, codeWritten, wip
 		if err != nil {
 			return commitment.PBinFeedAccount{}, err
 		}
-		if eip8297.IsEmptyCodeHash(account.CodeHash) {
-			code = nil
-		} else {
-			if len(code) == 0 {
-				return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: code missing for %x", address)
-			}
-			if crypto.Keccak256Hash(code) != account.CodeHash {
-				return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: code hash mismatch for %x", address)
-			}
+		code, err = eip8297.AccountCode(address, account.CodeHash, code)
+		if err != nil {
+			return commitment.PBinFeedAccount{}, err
+		}
+		if !eip8297.IsEmptyCodeHash(account.CodeHash) && len(code) == 0 {
+			return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: code missing for address %x with account hash %x", address, account.CodeHash)
 		}
 		account.Code = bytes.Clone(code)
 	}

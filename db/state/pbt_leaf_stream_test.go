@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -114,6 +115,37 @@ func TestForEachPBinLeafEIP8297ZeroValuesAndDeletionDropsCodeWhenLastHolderIsDel
 	root, err := builder.RootHash()
 	require.NoError(t, err)
 	require.Equal(t, eip8297.StateRootWithHash(entries, eip8297.SelectedHash()), root)
+}
+
+func TestForEachPBinLeafIgnoresClearedDelegationResidue(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+	address := pbinLeafStreamAddress(0x66)
+	designator := append(append([]byte(nil), eip8297.DelegationMarker[:]...), bytes.Repeat([]byte{0x42}, 20)...)
+	writePBinLeafStreamRange(t, db, 0, pbinLeafStreamStepSize, []pbinLeafStreamAccount{{
+		address: address, code: designator, codeWritten: true, hasCodeHash: true, codeHash: empty.CodeHash, nonce: 1, balance: 2,
+	}})
+	require.NoError(t, agg.BuildFiles(db, pbinLeafStreamStepSize, unboundedFinalityCtx))
+	leaves := pbinLeafStreamLeaves(t, db, agg, true)
+	for _, leaf := range leaves {
+		require.NotEqual(t, eip8297.CodeZone, leaf.Key[0])
+		if bytes.Equal(eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey), leaf.Key) {
+			require.Equal(t, make([]byte, eip8297.ValueLength), leaf.Value)
+		}
+	}
+	entries := make([]eip8297.Entry, 0, len(leaves))
+	for _, leaf := range leaves {
+		entries = append(entries, eip8297.Entry{Key: leaf.Key, Value: leaf.Value})
+	}
+	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
+	require.NoError(t, err)
+	for _, leaf := range leaves {
+		require.NoError(t, builder.Add(leaf.Key, leaf.Value))
+	}
+	root, err := builder.RootHash()
+	require.NoError(t, err)
+	want := eip8297.StateRootWithHash(entries, eip8297.SelectedHash())
+	require.Equal(t, want, root)
 }
 
 func TestForEachPBinLeafCombinesStamps(t *testing.T) {
@@ -233,7 +265,7 @@ func writePBinLeafStreamRange(t *testing.T, db kv.TemporalRwDB, fromTxNum, toTxN
 	for i, state := range states {
 		txNum := fromTxNum + uint64(i)*(toTxNum-fromTxNum)/uint64(len(states))
 		codeHash := state.codeHash
-		if state.codeWritten {
+		if state.codeWritten && !state.hasCodeHash {
 			codeHash = crypto.Keccak256Hash(state.code)
 		}
 		account := accounts.Account{Nonce: state.nonce, Balance: *uint256.NewInt(state.balance), CodeHash: accounts.EmptyCodeHash}

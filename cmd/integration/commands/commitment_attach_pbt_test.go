@@ -382,15 +382,45 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 }
 
 func TestPBTAttachPointRemedies(t *testing.T) {
-	blockEnd := pbtAttachNodePointError("/node", "hoodi", 10, 20, 5, 13, true)
-	require.ErrorContains(t, blockEnd, "--unwind=6")
+	blockEnd := pbtAttachNodePointError("/node", "hoodi", 10, 20, 10, 5, 13, true)
+	require.ErrorContains(t, blockEnd, "--unwind=5")
 	require.ErrorContains(t, blockEnd, "--block=5")
-	midBlock := pbtAttachNodePointError("/node", "hoodi", 10, 20, 5, 13, false)
+	midBlock := pbtAttachNodePointError("/node", "hoodi", 10, 20, 10, 5, 13, false)
 	require.ErrorContains(t, midBlock, "--reset")
 	require.NotContains(t, midBlock.Error(), "--unwind=")
-	behind := pbtAttachNodePointError("/node", "hoodi", 4, 10, 5, 13, true)
-	require.ErrorContains(t, behind, "node is behind conversion point")
+	behind := pbtAttachNodePointError("/node", "hoodi", 4, 10, 4, 5, 13, true)
+	require.ErrorContains(t, behind, "behind conversion point")
 	require.NotContains(t, behind.Error(), "--unwind=")
+}
+
+func TestPBTAttachFilesAheadOfPointRemedy(t *testing.T) {
+	files := []pbtAttachFile{{domain: kv.AccountsDomain, from: 3, to: 4, path: "accounts.3-4.kv", data: true}}
+	first, found := pbtAttachFirstStepPastPoint(files, 8, 17)
+	require.True(t, found)
+	require.Equal(t, uint64(3), first)
+	err := pbtAttachFilesAheadError("/node", "hoodi", first, 10, 2, 17)
+	require.ErrorContains(t, err, "snapshots rm-state --datadir=/node --chain=hoodi --step=3+")
+	require.ErrorContains(t, err, "stage_exec --datadir=/node --reset")
+}
+
+func TestAdoptPBTFilesKeepsTorrentSidecarsWithBytes(t *testing.T) {
+	node := datadir.New(filepath.Join(t.TempDir(), "node"))
+	published := datadir.New(filepath.Join(t.TempDir(), "published"))
+	nodeFile := filepath.Join(node.SnapDomain, "v1.0-accounts.0-1.kv")
+	publishedFile := filepath.Join(published.SnapDomain, "v1.0-accounts.0-1.kv")
+	require.NoError(t, os.MkdirAll(filepath.Dir(nodeFile), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(publishedFile), 0o755))
+	require.NoError(t, os.WriteFile(nodeFile, []byte("old"), 0o644))
+	require.NoError(t, os.WriteFile(nodeFile+".torrent", []byte("old torrent"), 0o644))
+	require.NoError(t, os.WriteFile(publishedFile, []byte("new"), 0o644))
+	require.NoError(t, os.WriteFile(publishedFile+".torrent", []byte("new torrent"), 0o644))
+	require.NoError(t, adoptPBTFiles(node, published, 8, 7))
+	got, err := os.ReadFile(nodeFile)
+	require.NoError(t, err)
+	require.Equal(t, []byte("new"), got)
+	got, err = os.ReadFile(nodeFile + ".torrent")
+	require.NoError(t, err)
+	require.Equal(t, []byte("new torrent"), got)
 }
 
 func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {

@@ -25,6 +25,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -52,11 +53,13 @@ type PBinRangeWriter struct {
 	stateInFiles bool
 }
 
-type pbinRangeWriterLimits struct {
+type PBinRangeWriterLimits struct {
 	MaxOps              int
 	MaxBytes            int
 	NoRangePastFrontier bool
 }
+
+type pbinRangeWriterLimits = PBinRangeWriterLimits
 
 const (
 	pbinRangeWriterMaxOps   = 100_000
@@ -409,7 +412,20 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return current.FlushFinished(nextKey)
 	}
 	stream := func(emit func(pbt.Op) error) error {
+		var leavesWritten uint64
+		nextProgress := time.Now().Add(30 * time.Second)
 		streamErr := leaves(func(leaf PBinLeaf) error {
+			leavesWritten++
+			if leavesWritten&4095 == 0 {
+				if now := time.Now(); !now.Before(nextProgress) {
+					nextProgress = now.Add(30 * time.Second)
+					prefix := leaf.Key
+					if len(prefix) > 8 {
+						prefix = prefix[:8]
+					}
+					log.Root().Info("PBT range writer progress", "phase", "range writer", "leaves", leavesWritten, "key_prefix", fmt.Sprintf("%x", prefix))
+				}
+			}
 			if len(leaf.Value) != eip8297.ValueLength {
 				return fmt.Errorf("pbin range writer: leaf %x has value length %d", leaf.Key, len(leaf.Value))
 			}

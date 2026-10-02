@@ -295,10 +295,7 @@ func New(
 	}
 
 	dirs := stack.Config().Dirs
-	if err := state.RefusePBTAttachMarker(dirs); err != nil {
-		return nil, err
-	}
-	if err := state.RefusePBTImportMarker(dirs); err != nil {
+	if err := refusePBTStartupMarkers(dirs); err != nil {
 		return nil, err
 	}
 
@@ -1060,6 +1057,13 @@ func New(
 	}
 
 	return backend, nil
+}
+
+func refusePBTStartupMarkers(dirs datadir.Dirs) error {
+	if err := state.RefusePBTAttachMarker(dirs); err != nil {
+		return err
+	}
+	return state.RefusePBTImportMarker(dirs)
 }
 
 func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {

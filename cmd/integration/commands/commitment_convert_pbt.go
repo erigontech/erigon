@@ -56,8 +56,9 @@ var (
 )
 
 type pbtConvertHooks struct {
-	afterOutput func() error
-	standalone  func(datadir.Dirs) error
+	afterOutput       func() error
+	standalone        func(datadir.Dirs) error
+	rangeWriterLimits *dbstate.PBinRangeWriterLimits
 }
 
 func init() {
@@ -272,14 +273,15 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		targetDomain = kv.CommitmentBinDomain
 	}
 	root, err := dbstate.ConvertPBin(ctx, dbstate.PBinConvertOptions{
-		SourceAggregator: sourceAgg,
-		SourceTx:         sourceTx,
-		TargetAggregator: targetAgg,
-		TargetTx:         targetTx,
-		TargetDomain:     targetDomain,
-		BlockNum:         point.BlockNum,
-		EndTxNum:         point.TxNum,
-		Hash:             eip8297.HashBytes,
+		SourceAggregator:  sourceAgg,
+		SourceTx:          sourceTx,
+		TargetAggregator:  targetAgg,
+		TargetTx:          targetTx,
+		TargetDomain:      targetDomain,
+		BlockNum:          point.BlockNum,
+		EndTxNum:          point.TxNum,
+		Hash:              eip8297.HashBytes,
+		RangeWriterLimits: hooks.rangeWriterLimits,
 	})
 	targetTx.Rollback()
 	if err != nil {

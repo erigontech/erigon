@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
@@ -271,7 +272,7 @@ func TestPBTAttachRejectsNodePBTStateMismatchWithoutMutation(t *testing.T) {
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
 	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "node is at block")
+	require.ErrorContains(t, err, "node checkpoint is block")
 	require.ErrorContains(t, err, "stage_exec --datadir")
 	require.ErrorContains(t, err, "--reset")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
@@ -315,8 +316,17 @@ func TestPBTAttachRejectsStateBeyondCheckpointWithoutMutation(t *testing.T) {
 	doms, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	fresh := common.Address{0xee}
-	account := accounts.Account{Balance: *uint256.NewInt(5)}
+	code := []byte{0x60, 0x00}
+	codeHash := common.Hash(keccak.Sum256(code))
+	account := accounts.Account{Balance: *uint256.NewInt(5), CodeHash: accounts.InternCodeHash(codeHash)}
 	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, fresh[:], accounts.SerialiseV3(&account), conversionTx+3, nil))
+	slotKey := make([]byte, 20+32)
+	copy(slotKey, fresh[:])
+	slot := common.Hash{1}
+	value := common.Hash{2}
+	copy(slotKey[len(fresh):], slot[:])
+	require.NoError(t, doms.DomainPut(kv.StorageDomain, tx, slotKey, value[:], conversionTx+3, nil))
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, fresh[:], code, conversionTx+3, nil))
 	require.NoError(t, doms.Commit(t.Context(), tx))
 	doms.Close()
 	require.NoError(t, tx.Commit())
@@ -325,6 +335,37 @@ func TestPBTAttachRejectsStateBeyondCheckpointWithoutMutation(t *testing.T) {
 	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
 	require.ErrorContains(t, err, "node PBT root")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+	resetPBTAcceptanceExecution(t, node)
+	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
+	dual, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	require.NoError(t, dual.Tester.InsertChain(dual.Chain))
+	reopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
+		execmoduletester.WithGenesisSpec(node.Genesis),
+		execmoduletester.WithKey(node.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+		execmoduletester.WithEnableDomain(kv.CommitmentBinDomain),
+	)
+	defer reopened.Close()
+	require.NoError(t, reopened.ReExecuteTo(t.Context(), node.Chain.TopBlock.NumberU64()))
+	attachedRaw := reopened.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	dualRaw := dual.Tester.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	for block := uint64(1); block <= node.Chain.TopBlock.NumberU64(); block++ {
+		var attachedRoot, dualRoot []byte
+		require.NoError(t, attachedRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			attachedRoot, err = rawdb.ReadShadowStateRoot(tx, node.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		require.NoError(t, dualRaw.View(t.Context(), func(tx kv.Tx) error {
+			var err error
+			dualRoot, err = rawdb.ReadShadowStateRoot(tx, dual.Chain.Blocks[block-1].Hash(), block)
+			return err
+		}))
+		require.Equal(t, dualRoot, attachedRoot, "shadow root at block %d", block)
+	}
 }
 
 func TestPBTAttachRejectsNodeHexStateMismatchWithoutMutation(t *testing.T) {
@@ -376,7 +417,7 @@ func TestPBTAttachRejectsNodeCheckpointMismatchWithoutMutation(t *testing.T) {
 	overwritePBTImportHexCheckpoint(t, node.Tester.Dirs.DataDir, 1, 6, 8)
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
 	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, node.Tester.ChainConfig.ChainName, log.New())
-	require.ErrorContains(t, err, "node is behind conversion point")
+	require.ErrorContains(t, err, "behind conversion point")
 	require.ErrorContains(t, err, "txNum 6")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
 }

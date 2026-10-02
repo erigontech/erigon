@@ -20,10 +20,12 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	keccak "github.com/erigontech/fastkeccak"
@@ -73,6 +75,7 @@ func WritePreimagesStreamWithScratch(dst io.Writer, iterate PreimageStreamIterat
 	}()
 	var previous common.Hash
 	index := 0
+	nextProgress := time.Now().Add(30 * time.Second)
 	destination := bufio.NewWriterSize(dst, 1<<20)
 	writeErr := iterate(func(address common.Address, slots func(func([32]byte) error) error) error {
 		digest := common.Hash(keccak.Sum256(address[:]))
@@ -81,6 +84,12 @@ func WritePreimagesStreamWithScratch(dst io.Writer, iterate PreimageStreamIterat
 		}
 		previous = digest
 		index++
+		if index&4095 == 0 {
+			if now := time.Now(); !now.Before(nextProgress) {
+				nextProgress = now.Add(30 * time.Second)
+				log.Root().Info("PBT preimage writer progress", "phase", "preimage writer", "accounts", index, "key_prefix", hex.EncodeToString(address[:8]))
+			}
+		}
 		if slots == nil {
 			return ErrPreimages
 		}

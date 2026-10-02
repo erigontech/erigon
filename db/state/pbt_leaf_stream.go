@@ -19,7 +19,9 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -92,11 +94,13 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 	collector := etl.NewCollector("pbin-leaf-stream", at.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
 	defer collector.Close()
 	emitter := pbt.NewRebuildFeedOpEmitter()
+	progress := pbinStreamProgress{next: time.Now().Add(30 * time.Second)}
 	for accountsCursor.ok || codeCursor.ok || storageCursor.ok {
 		address, err := pbinNextAddress(accountsCursor, codeCursor, storageCursor)
 		if err != nil {
 			return err
 		}
+		progress.account(address)
 		if accountsCursor.ok && bytes.Equal(accountsCursor.key, address) {
 			var account accounts.Account
 			if err := accounts.DeserialiseV3(&account, accountsCursor.value); err != nil {
@@ -105,8 +109,10 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 			codeStamp := uint64(0)
 			var code []byte
 			if codeCursor.ok && bytes.Equal(codeCursor.key, address) {
-				code = bytes.Clone(codeCursor.value)
-				codeStamp = codeCursor.stamp
+				if !eip8297.IsEmptyCodeHash(account.CodeHash.Value()) {
+					code = bytes.Clone(codeCursor.value)
+					codeStamp = codeCursor.stamp
+				}
 				if err := codeCursor.advance(); err != nil {
 					return err
 				}
@@ -159,7 +165,42 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 			}
 		}
 	}
-	return pbinLoadSortedLeaves(collector, emit)
+	return pbinLoadSortedLeaves(collector, emit, &progress)
+}
+
+type pbinStreamProgress struct {
+	next     time.Time
+	accounts uint64
+	leaves   uint64
+}
+
+func (p *pbinStreamProgress) account(key []byte) {
+	p.accounts++
+	if p.accounts&4095 != 0 {
+		return
+	}
+	p.report(key)
+}
+
+func (p *pbinStreamProgress) leaf(key []byte) {
+	p.leaves++
+	if p.leaves&4095 != 0 {
+		return
+	}
+	p.report(key)
+}
+
+func (p *pbinStreamProgress) report(key []byte) {
+	now := time.Now()
+	if now.Before(p.next) {
+		return
+	}
+	p.next = now.Add(30 * time.Second)
+	prefix := key
+	if len(prefix) > 8 {
+		prefix = prefix[:8]
+	}
+	log.Root().Info("PBT leaf stream progress", "phase", "leaf stream", "accounts", p.accounts, "leaves", p.leaves, "key_prefix", hex.EncodeToString(prefix))
 }
 
 func pbinOpenLatestCursor(at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, filesOnly bool) (pbinLatestCursor, error) {
@@ -274,7 +315,7 @@ func pbinCollectLeaf(collector *etl.Collector, leaf PBinLeaf) error {
 	return collector.Collect(leaf.Key, encoded)
 }
 
-func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error) error {
+func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, progress *pbinStreamProgress) error {
 	if collector == nil {
 		return fmt.Errorf("pbin leaf stream: nil collector")
 	}
@@ -302,6 +343,9 @@ func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error) e
 		}
 		if err := flush(); err != nil {
 			return err
+		}
+		if progress != nil {
+			progress.leaf(key)
 		}
 		previousKey = bytes.Clone(key)
 		previousValue = bytes.Clone(value[8:])

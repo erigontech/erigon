@@ -19,15 +19,18 @@ package artifact
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
+	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -77,6 +80,8 @@ func (w *Writer) WriteStream(dst io.Writer, leaves KVIterator, root SnapshotRoot
 	var previous []byte
 	var zone byte
 	var haveZone bool
+	var leafCount uint64
+	nextProgress := time.Now().Add(30 * time.Second)
 	var header *headerBuilder
 	var code *groupBuilder
 	var storage *storageBuilder
@@ -131,6 +136,17 @@ func (w *Writer) WriteStream(dst io.Writer, leaves KVIterator, root SnapshotRoot
 		return flushStorage()
 	}
 	err := leaves(func(key, value []byte) error {
+		leafCount++
+		if leafCount&4095 == 0 {
+			if now := time.Now(); !now.Before(nextProgress) {
+				nextProgress = now.Add(30 * time.Second)
+				prefix := key
+				if len(prefix) > 8 {
+					prefix = prefix[:8]
+				}
+				log.Root().Info("PBT snapshot writer progress", "phase", "snapshot writer", "leaves", leafCount, "key_prefix", hex.EncodeToString(prefix))
+			}
+		}
 		if previous != nil && bytes.Compare(key, previous) <= 0 {
 			return ErrUnsorted
 		}

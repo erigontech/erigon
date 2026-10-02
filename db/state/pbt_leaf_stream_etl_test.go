@@ -40,7 +40,7 @@ func TestPBinLeafStreamDeduplicatesAndRejectsConflicts(t *testing.T) {
 	require.NoError(t, pbinLoadSortedLeaves(collector, func(leaf PBinLeaf) error {
 		leaves = append(leaves, leaf)
 		return nil
-	}))
+	}, nil))
 	require.Len(t, leaves, 1)
 	require.EqualValues(t, 7, leaves[0].Stamp)
 
@@ -50,5 +50,5 @@ func TestPBinLeafStreamDeduplicatesAndRejectsConflicts(t *testing.T) {
 	other[0] = 1
 	require.NoError(t, pbinCollectLeaf(conflicting, PBinLeaf{Key: key, Value: value, Stamp: 1}))
 	require.NoError(t, pbinCollectLeaf(conflicting, PBinLeaf{Key: key, Value: other, Stamp: 2}))
-	require.Error(t, pbinLoadSortedLeaves(conflicting, func(PBinLeaf) error { return nil }))
+	require.Error(t, pbinLoadSortedLeaves(conflicting, func(PBinLeaf) error { return nil }, nil))
 }

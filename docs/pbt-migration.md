@@ -74,13 +74,17 @@ node files already end there, run:
 integration stage_exec --datadir=<node-datadir> --chain=<chain> --reset --experimental.commitment-v3
 ```
 
-If the node is past the point, the error prints an unwind count for a block-end
-point. Run that command, then run the stage command at `B`. For a mid-block
-point, first remove state files with `erigon snapshots rm-state --step=<from>+`
-until the files end at `S`, then use `--reset`, because a block-end stage target
-cannot select the middle of a block:
+If the node's files extend past the point, first run the printed
+`erigon snapshots rm-state --step=<from>+` command, then the printed reset
+command. If the node is past the point but its files end there, the error
+prints an unwind count for a block-end point. Run that command, then run the
+stage command at `B`. For a mid-block point, use only the reset remedy after
+the files end at `S`, because a block-end stage target cannot select the
+middle of a block:
 
 ```sh
+erigon snapshots rm-state --datadir=<node-datadir> --chain=<chain> --step=<from>+ --experimental.commitment-v3
+integration stage_exec --datadir=<node-datadir> --chain=<chain> --reset --experimental.commitment-v3
 integration stage_exec --datadir=<node-datadir> --unwind=<count> --chain=<chain> --experimental.commitment-v3
 integration stage_exec --datadir=<node-datadir> --chain=<chain> --block=<B> --experimental.commitment-v3
 ```

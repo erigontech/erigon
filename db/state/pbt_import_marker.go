@@ -27,10 +27,11 @@ import (
 const PBTImportMarkerFileName = "import-pbt.in-progress.json"
 
 type PBTImportMarker struct {
-	SnapshotPath string            `json:"snapshot_path"`
-	SnapshotHash string            `json:"snapshot_hash"`
-	Files        []string          `json:"files"`
-	Settings     *ErigonDBSettings `json:"settings"`
+	SnapshotPath     string            `json:"snapshot_path"`
+	SnapshotHash     string            `json:"snapshot_hash"`
+	Files            []string          `json:"files"`
+	Settings         *ErigonDBSettings `json:"settings"`
+	PreviousSettings *ErigonDBSettings `json:"previous_settings,omitempty"`
 }
 
 func PBTImportMarkerPath(dirs datadir.Dirs) string {
@@ -66,10 +67,13 @@ func RemovePBTImportMarker(dirs datadir.Dirs) error {
 func RefusePBTImportMarker(dirs datadir.Dirs) error {
 	marker, err := ReadPBTImportMarker(dirs)
 	if err != nil {
-		return fmt.Errorf("commitment import-pbt marker is invalid; remove only %s and commitment-bin files before retrying: %w", PBTImportMarkerPath(dirs), err)
+		return fmt.Errorf("commitment import-pbt marker is invalid; remove %s and all commitment-bin files, restore the previous hex-only erigondb.toml, then rerun import-pbt: %w", PBTImportMarkerPath(dirs), err)
 	}
 	if marker == nil {
 		return nil
+	}
+	if marker.PreviousSettings != nil {
+		return fmt.Errorf("commitment import-pbt is incomplete for %s; remove the marker and commitment-bin files, restore the previous hex-only erigondb.toml, then rerun import-pbt --snapshot %s", marker.SnapshotPath, marker.SnapshotPath)
 	}
 	return fmt.Errorf("commitment import-pbt is incomplete for %s; rerun import-pbt --snapshot %s", marker.SnapshotPath, marker.SnapshotPath)
 }

@@ -142,5 +142,6 @@ func TestBinFeedFromStateRejectsMissingCode(t *testing.T) {
 		pbinReaderValue(kv.AccountsDomain, address[:]): accounts.SerialiseV3(&account),
 	}}
 	_, err := BinFeedFromState(map[string]struct{}{string(address[:]): {}}, map[string]struct{}{string(address[:]): {}}, nil, reader)
-	require.ErrorContains(t, err, "code missing")
+	require.ErrorContains(t, err, "code hash mismatch")
+	require.ErrorContains(t, err, address.Hex()[2:])
 }

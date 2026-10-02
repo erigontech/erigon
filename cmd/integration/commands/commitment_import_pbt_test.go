@@ -30,6 +30,7 @@ import (
 
 	app "github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -86,6 +87,55 @@ func TestImportPBTEndToEndWhenFilesReachCheckpoint(t *testing.T) {
 			require.Equal(t, value, after[path], "import must not rewrite state-domain file %s", path)
 		}
 	}
+}
+
+func TestImportPBTRecoveryRejectsMissingMovedFile(t *testing.T) {
+	fixture := newPBTImportFixture(t)
+	hook := func(step string) error {
+		if step == "settings-written" {
+			panic("interrupt after settings")
+		}
+		return nil
+	}
+	require.Panics(t, func() {
+		_ = importPBTWithHook(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New(), hook)
+	})
+	dirs := datadir.Open(fixture.dataDir)
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment-bin.*.kv"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	require.NoError(t, dir.RemoveFile(files[0]))
+	err = importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New())
+	require.ErrorContains(t, err, "rerun import-pbt")
+	settings, err := dbstate.ReadErigonDBSettings(dirs)
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantHex, settings.TrieVariantName())
+	remaining, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment-bin.*.kv"))
+	require.NoError(t, err)
+	require.Empty(t, remaining)
+}
+
+func TestImportPBTRecoveryRejectsCorruptMarker(t *testing.T) {
+	fixture := newPBTImportFixture(t)
+	hook := func(step string) error {
+		if step == "settings-written" {
+			panic("interrupt after settings")
+		}
+		return nil
+	}
+	require.Panics(t, func() {
+		_ = importPBTWithHook(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New(), hook)
+	})
+	dirs := datadir.Open(fixture.dataDir)
+	require.NoError(t, os.WriteFile(dbstate.PBTImportMarkerPath(dirs), []byte("{"), 0o644))
+	err := importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New())
+	require.ErrorContains(t, err, "partial import was removed")
+	settings, err := dbstate.ReadErigonDBSettings(dirs)
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantHex, settings.TrieVariantName())
+	remaining, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment-bin.*.kv"))
+	require.NoError(t, err)
+	require.Empty(t, remaining)
 }
 
 func TestImportPBTHexCheckpointMismatchRefusesProductionPath(t *testing.T) {
@@ -636,7 +686,9 @@ func overwritePBTImportHexCheckpoint(t *testing.T, dataDir string, blockNum, che
 	require.NoError(t, err)
 	previous, _, err := domains.GetLatest(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State)
 	require.NoError(t, err)
-	state, err := commitment.EncodeCommitmentV3State(make([]byte, 32), blockNum, checkpointTx, nil)
+	_, _, previousRoot, err := commitment.DecodeCommitmentV3State(previous)
+	require.NoError(t, err)
+	state, err := commitment.EncodeCommitmentV3State(previousRoot, blockNum, checkpointTx, nil)
 	require.NoError(t, err)
 	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, state, storageTx, previous))
 	require.NoError(t, domains.Flush(t.Context(), tx))

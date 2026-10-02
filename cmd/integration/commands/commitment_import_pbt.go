@@ -107,9 +107,15 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 	if err := validatePBTImportDigest(snapshot, snapshotInfo.Size(), meta.SnapshotDigest); err != nil {
 		return err
 	}
-	marker, err := dbstate.ReadPBTImportMarker(dirs)
-	if err != nil {
-		return fmt.Errorf("%w; remove only %s and commitment-bin files before retrying", err, dbstate.PBTImportMarkerPath(dirs))
+	marker, markerErr := dbstate.ReadPBTImportMarker(dirs)
+	if markerErr != nil {
+		if settings, settingsErr := dbstate.ReadErigonDBSettings(dirs); settingsErr == nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
+			if cleanupErr := recoverPBTImportSettings(dirs, settings, nil); cleanupErr != nil {
+				return fmt.Errorf("%w; partial import cleanup failed: %w", markerErr, cleanupErr)
+			}
+			return fmt.Errorf("%w; partial import was removed, rerun import-pbt --snapshot %s", markerErr, snapshotPath)
+		}
+		return fmt.Errorf("%w; remove only %s and commitment-bin files before retrying import-pbt --snapshot %s", markerErr, dbstate.PBTImportMarkerPath(dirs), snapshotPath)
 	}
 	absSnapshotPath, err := filepath.Abs(snapshotPath)
 	if err != nil {
@@ -139,7 +145,10 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 	if marker != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
 		if marker.Settings.TrieHashName() == settings.TrieHashName() && marker.Settings.ConversionTxNum != nil && *marker.Settings.ConversionTxNum == meta.TxNum && marker.Settings.ConversionBlockNum != nil && *marker.Settings.ConversionBlockNum == meta.Block {
 			if err := validatePBTImportRecoveryFiles(dirs, marker); err != nil {
-				return err
+				if cleanupErr := recoverPBTImportSettings(dirs, settings, marker); cleanupErr != nil {
+					return fmt.Errorf("%w; partial import cleanup failed: %w", err, cleanupErr)
+				}
+				return fmt.Errorf("%w; partial import was removed, rerun import-pbt --snapshot %s", err, snapshotPath)
 			}
 			return dbstate.RemovePBTImportMarker(dirs)
 		}
@@ -410,7 +419,7 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 	if err != nil {
 		return err
 	}
-	if err := dbstate.WritePBTImportMarker(dirs, &dbstate.PBTImportMarker{SnapshotPath: absSnapshotPath, SnapshotHash: meta.SnapshotDigest, Files: stagedFiles, Settings: finalSettings}); err != nil {
+	if err := dbstate.WritePBTImportMarker(dirs, &dbstate.PBTImportMarker{SnapshotPath: absSnapshotPath, SnapshotHash: meta.SnapshotDigest, Files: stagedFiles, Settings: finalSettings, PreviousSettings: settings}); err != nil {
 		return err
 	}
 	if marker != nil {
@@ -711,6 +720,29 @@ func validatePBTImportRecoveryFiles(dirs datadir.Dirs, marker *dbstate.PBTImport
 		}
 	}
 	return nil
+}
+
+func recoverPBTImportSettings(dirs datadir.Dirs, current *dbstate.ErigonDBSettings, marker *dbstate.PBTImportMarker) error {
+	if err := removePBTImportFilesForRecovery(dirs); err != nil {
+		return err
+	}
+	var previous *dbstate.ErigonDBSettings
+	if marker != nil && marker.PreviousSettings != nil {
+		previous = marker.PreviousSettings
+	} else {
+		variant := dbstate.TrieVariantHex
+		previous = &dbstate.ErigonDBSettings{
+			StepSize:                       current.StepSize,
+			StepsInFrozenFile:              current.StepsInFrozenFile,
+			ReferencesInCommitmentBranches: current.ReferencesInCommitmentBranches,
+			FrozenAtTxNum:                  current.FrozenAtTxNum,
+			TrieVariant:                    &variant,
+		}
+	}
+	if err := dbstate.WriteErigonDBSettings(dirs, previous); err != nil {
+		return err
+	}
+	return dbstate.RemovePBTImportMarker(dirs)
 }
 
 func removePBTImportFiles(files []string) {

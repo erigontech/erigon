@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -78,6 +79,17 @@ func CodeHashValue(codeHash common.Hash) [ValueLength]byte {
 // empty-bytecode hash, and the unset hash a state read leaves behind.
 func IsEmptyCodeHash(codeHash common.Hash) bool {
 	return codeHash == (common.Hash{}) || codeHash == empty.CodeHash
+}
+
+func AccountCode(address []byte, codeHash common.Hash, code []byte) ([]byte, error) {
+	if IsEmptyCodeHash(codeHash) {
+		return nil, nil
+	}
+	actual := common.Hash(keccak.Sum256(code))
+	if actual != codeHash {
+		return nil, fmt.Errorf("pbin: code hash mismatch for address %x: account %x, code %x", address, codeHash, actual)
+	}
+	return code, nil
 }
 
 // EIP-7702 delegation indicators (eip:"Delegation"). Classification reads the

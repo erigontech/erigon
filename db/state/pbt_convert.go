@@ -30,14 +30,15 @@ import (
 )
 
 type PBinConvertOptions struct {
-	SourceAggregator *Aggregator
-	SourceTx         kv.TemporalTx
-	TargetAggregator *Aggregator
-	TargetTx         kv.TemporalRwTx
-	TargetDomain     kv.Domain
-	BlockNum         uint64
-	EndTxNum         uint64
-	Hash             eip8297.HashFn
+	SourceAggregator  *Aggregator
+	SourceTx          kv.TemporalTx
+	TargetAggregator  *Aggregator
+	TargetTx          kv.TemporalRwTx
+	TargetDomain      kv.Domain
+	BlockNum          uint64
+	EndTxNum          uint64
+	Hash              eip8297.HashFn
+	RangeWriterLimits *PBinRangeWriterLimits
 }
 
 func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, error) {
@@ -72,7 +73,12 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 			return emit(leaf)
 		})
 	}
-	writer, err := NewPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum)
+	var writer *PBinRangeWriter
+	if opts.RangeWriterLimits == nil {
+		writer, err = NewPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum)
+	} else {
+		writer, err = newPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum, pbinRangeWriterLimits(*opts.RangeWriterLimits))
+	}
 	if err != nil {
 		return common.Hash{}, err
 	}

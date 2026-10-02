@@ -412,6 +412,7 @@ func TestDoExportPBTHexOnlyDefaultsToBlake3(t *testing.T) {
 	tx.Rollback()
 	fixture.Tester.Close()
 	outDir := filepath.Join(t.TempDir(), "export")
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
 	cmd := &cli.Command{Flags: []cli.Flag{
 		&cli.StringFlag{Name: utils.DataDirFlag.Name},
 		&cli.StringFlag{Name: "out"},

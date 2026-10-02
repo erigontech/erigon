@@ -37,5 +37,21 @@ func TestPBTImportMarkerRoundTripAndInvalidStartupRefusal(t *testing.T) {
 	require.ErrorContains(t, RefusePBTImportMarker(dirs), "rerun import-pbt --snapshot /tmp/snapshot")
 	require.NoError(t, RemovePBTImportMarker(dirs))
 	require.NoError(t, os.WriteFile(PBTImportMarkerPath(dirs), []byte("{"), 0o644))
-	require.ErrorContains(t, RefusePBTImportMarker(dirs), "remove only ")
+	require.ErrorContains(t, RefusePBTImportMarker(dirs), "remove ")
+}
+
+func TestPBTImportMarkerRecoveryNamesCleanupRemedy(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	variant := TrieVariantHexBin
+	previousVariant := TrieVariantHex
+	hash := "blake3"
+	marker := &PBTImportMarker{
+		SnapshotPath:     "/tmp/snapshot",
+		SnapshotHash:     "digest",
+		Files:            []string{"domain/v3.0-commitment-bin.0-1.kv"},
+		Settings:         &ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash},
+		PreviousSettings: &ErigonDBSettings{TrieVariant: &previousVariant},
+	}
+	require.NoError(t, WritePBTImportMarker(dirs, marker))
+	require.ErrorContains(t, RefusePBTImportMarker(dirs), "restore the previous hex-only erigondb.toml")
 }

@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"sort"
 
-	keccak "github.com/erigontech/fastkeccak"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -118,12 +116,16 @@ func (e *FeedOpEmitter) EmitAccount(account commitment.PBinFeedAccount, emit fun
 	if !account.Exists {
 		return nil
 	}
+	if account.CodeWritten {
+		code, err := eip8297.AccountCode(address, account.CodeHash, account.Code)
+		if err != nil {
+			return err
+		}
+		account.Code = code
+	}
 
 	basicKey := eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey)
 	if account.CodeWritten {
-		if err := feedCodeHash(account); err != nil {
-			return err
-		}
 		basic, err := eip8297.EncodeBasicData(account.Nonce, &account.Balance, uint64(len(account.Code)))
 		if err != nil {
 			return err
@@ -206,14 +208,6 @@ func (e *FeedOpEmitter) EmitStorageSlot(address []byte, slot commitment.PBinFeed
 
 func (e *FeedOpEmitter) Stats() commitment.PBinCodeStats { return e.stats }
 
-func feedCodeHash(account commitment.PBinFeedAccount) error {
-	actual := common.Hash(keccak.Sum256(account.Code))
-	if eip8297.CodeHashValue(actual) != eip8297.CodeHashValue(account.CodeHash) {
-		return fmt.Errorf("pbin: code hash does not match code")
-	}
-	return nil
-}
-
 func (t *Trie) ProcessFeed(feed *commitment.PBinFeed) (common.Hash, error) {
 	ops, err := TranslateFeed(feed)
 	if err != nil {
@@ -227,7 +221,7 @@ func feedCodeStats(feed *commitment.PBinFeed) commitment.PBinCodeStats {
 	seen := make(map[common.Hash]struct{})
 	for i := range feed.Accounts {
 		account := &feed.Accounts[i]
-		if !account.CodeWritten || len(account.Code) == 0 || eip8297.IsDelegation(account.Code) {
+		if !account.CodeWritten || len(account.Code) == 0 || eip8297.IsEmptyCodeHash(account.CodeHash) || eip8297.IsDelegation(account.Code) {
 			continue
 		}
 		stats.CodeBearingAccounts++

@@ -198,6 +198,17 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		return err
 	}
 	if marker == nil {
+		nodeFiles, fileErr := pbtAttachFiles(nodeDirs)
+		if fileErr != nil {
+			return fileErr
+		}
+		if firstStep, ok := pbtAttachFirstStepPastPoint(pbtAttachVisibleFiles(nodeFiles), publishedSettings.StepSize, txNum); ok {
+			progress, progressErr := pbtAttachExecutionProgress(ctx, nodeDirs)
+			if progressErr != nil {
+				return progressErr
+			}
+			return pbtAttachFilesAheadError(nodeDirs.DataDir, chainName, firstStep, progress, blockNum, txNum)
+		}
 		if err := validatePBTAttachFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
 			return err
 		}
@@ -219,7 +230,11 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			if err != nil {
 				blockEnd = true
 			}
-			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, blockNum, txNum, blockEnd)
+			progress, progressErr := pbtAttachExecutionProgress(ctx, nodeDirs)
+			if progressErr != nil {
+				return progressErr
+			}
+			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, progress, blockNum, txNum, blockEnd)
 		}
 		nodeHexRoot = root
 	}
@@ -232,7 +247,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		return err
 	}
 	if marker == nil {
-		if err := checkPBTNodeProgress(ctx, rawDB, nodeDirs.DataDir, chainName, nodeTx, blockNum, txNum, blockEnd); err != nil {
+		if err := checkPBTNodeProgress(ctx, rawDB, nodeDirs.DataDir, chainName, nodeBlock, nodeTx, blockNum, txNum, blockEnd); err != nil {
 			rawDB.Close()
 			return err
 		}
@@ -526,16 +541,24 @@ func pbtAttachNodeHexState(ctx context.Context, dirs datadir.Dirs, settings *dbs
 	return gotBlock, gotTx, common.BytesToHash(root), nil
 }
 
-func pbtAttachNodePointError(dataDir, chainName string, nodeBlock, nodeTx, blockNum, txNum uint64, blockEnd bool) error {
+func pbtAttachNodePointError(dataDir, chainName string, nodeBlock, nodeTx, executionProgress, blockNum, txNum uint64, blockEnd bool) error {
 	reset := fmt.Sprintf("integration stage_exec --datadir=%s --reset --chain=%s --experimental.commitment-v3", dataDir, chainName)
-	if nodeBlock < blockNum || (nodeBlock == blockNum && nodeTx < txNum) {
-		return fmt.Errorf("commitment attach-pbt: node is behind conversion point at block %d txNum %d, conversion point is block %d txNum %d; run %s", nodeBlock, nodeTx, blockNum, txNum, reset)
+	if executionProgress < blockNum || nodeBlock < blockNum || (nodeBlock == blockNum && nodeTx < txNum) {
+		return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, behind conversion point block %d txNum %d; run %s", nodeBlock, nodeTx, executionProgress, blockNum, txNum, reset)
 	}
 	if !blockEnd {
-		return fmt.Errorf("commitment attach-pbt: node is at block %d txNum %d, conversion point is mid-block %d txNum %d; run %s", nodeBlock, nodeTx, blockNum, txNum, reset)
+		return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, conversion point is mid-block %d txNum %d; run %s", nodeBlock, nodeTx, executionProgress, blockNum, txNum, reset)
 	}
-	unwind := nodeBlock - blockNum + 1
-	return fmt.Errorf("commitment attach-pbt: node is at block %d txNum %d, conversion point is block %d txNum %d; run %s when the node files end at the point, or run integration stage_exec --datadir=%s --unwind=%d --chain=%s --experimental.commitment-v3 followed by integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3", nodeBlock, nodeTx, blockNum, txNum, reset, dataDir, unwind, chainName, dataDir, blockNum, chainName)
+	if executionProgress <= blockNum {
+		return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, conversion point is block %d txNum %d; run %s", nodeBlock, nodeTx, executionProgress, blockNum, txNum, reset)
+	}
+	unwind := executionProgress - blockNum
+	return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, conversion point is block %d txNum %d; run %s when the node files end at the point, or run integration stage_exec --datadir=%s --unwind=%d --chain=%s --experimental.commitment-v3 followed by integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3", nodeBlock, nodeTx, executionProgress, blockNum, txNum, reset, dataDir, unwind, chainName, dataDir, blockNum, chainName)
+}
+
+func pbtAttachFilesAheadError(dataDir, chainName string, firstStep, executionProgress, blockNum, txNum uint64) error {
+	reset := fmt.Sprintf("integration stage_exec --datadir=%s --reset --chain=%s --experimental.commitment-v3", dataDir, chainName)
+	return fmt.Errorf("commitment attach-pbt: node files extend past conversion point block %d txNum %d; remove state from step %d onward with erigon snapshots rm-state --datadir=%s --chain=%s --step=%d+ --experimental.commitment-v3, then run %s (execution progress is block %d)", blockNum, txNum, firstStep, dataDir, chainName, firstStep, reset, executionProgress)
 }
 
 func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datadir.Dirs, logger log.Logger) error {
@@ -1002,7 +1025,7 @@ func pbtAttachDomain(domain kv.Domain) bool {
 	return slices.Contains(pbtAttachDomains, domain)
 }
 
-func checkPBTNodeProgress(ctx context.Context, db kv.RoDB, dataDir, chainName string, nodeTx, blockNum, txNum uint64, blockEnd bool) error {
+func checkPBTNodeProgress(ctx context.Context, db kv.RoDB, dataDir, chainName string, nodeBlock, nodeTx, blockNum, txNum uint64, blockEnd bool) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1013,9 +1036,39 @@ func checkPBTNodeProgress(ctx context.Context, db kv.RoDB, dataDir, chainName st
 		return err
 	}
 	if progress > blockNum {
-		return pbtAttachNodePointError(dataDir, chainName, progress, nodeTx, blockNum, txNum, blockEnd)
+		return pbtAttachNodePointError(dataDir, chainName, nodeBlock, nodeTx, progress, blockNum, txNum, blockEnd)
 	}
 	return nil
+}
+
+func pbtAttachExecutionProgress(ctx context.Context, dirs datadir.Dirs) (uint64, error) {
+	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+	var progress uint64
+	err = db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		progress, err = stages.GetStageProgress(tx, stages.Execution)
+		return err
+	})
+	return progress, err
+}
+
+func pbtAttachFirstStepPastPoint(files []pbtAttachFile, stepSize, endTxNum uint64) (uint64, bool) {
+	var first uint64
+	found := false
+	for _, file := range files {
+		if !pbtAttachDomain(file.domain) || file.from*stepSize <= endTxNum {
+			continue
+		}
+		if !found || file.from < first {
+			first = file.from
+			found = true
+		}
+	}
+	return first, found
 }
 
 func checkPBTNodePositionWithFiles(ctx context.Context, db kv.RoDB, reader *freezeblocks.BlockReader, view *blocksnapshots.View, blockNum, txNum uint64) error {
@@ -1058,7 +1111,7 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 		if !pbtAttachAdoptsFile(file) {
 			continue
 		}
-		if err := dir.RemoveFile(file.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := removePBTFileWithSidecar(file.path); err != nil {
 			return err
 		}
 		touched[filepath.Dir(file.path)] = struct{}{}
@@ -1081,6 +1134,9 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 			return err
 		}
 		if err := linkOrCopyPBTFile(file.path, dst); err != nil {
+			return err
+		}
+		if err := syncPBTFileSidecar(file.path, dst); err != nil {
 			return err
 		}
 		touched[filepath.Dir(dst)] = struct{}{}
@@ -1141,7 +1197,7 @@ func removePBTFilesPastPoint(dirs datadir.Dirs, stepSize, endTxNum uint64) error
 			}
 			parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
 			if ok && parsed.From*stepSize > endTxNum {
-				if err := dir.RemoveFile(path); err != nil {
+				if err := removePBTFileWithSidecar(path); err != nil {
 					return err
 				}
 				touched[filepath.Dir(path)] = struct{}{}
@@ -1157,6 +1213,34 @@ func removePBTFilesPastPoint(dirs datadir.Dirs, stepSize, endTxNum uint64) error
 		}
 	}
 	return nil
+}
+
+func removePBTFileWithSidecar(path string) error {
+	if err := dir.RemoveFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if err := dir.RemoveFile(path + ".torrent"); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func removePBTPath(path string) error {
+	if err := dir.RemoveFile(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func syncPBTFileSidecar(src, dst string) error {
+	_, err := os.Stat(src + ".torrent")
+	if errors.Is(err, fs.ErrNotExist) {
+		return removePBTPath(dst + ".torrent")
+	}
+	if err != nil {
+		return err
+	}
+	return linkOrCopyPBTFile(src+".torrent", dst+".torrent")
 }
 
 func linkOrCopyPBTFile(src, dst string) error {
