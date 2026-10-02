@@ -64,11 +64,11 @@ import (
 )
 
 func convertPBTWithOutputTestHook(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, hook func() error) error {
-	return convertPBTWithOptions(ctx, sourcePath, outputPath, keepHex, chainName, logger, nil, pbtConvertHooks{afterOutput: hook})
+	return convertPBTWithOptions(ctx, sourcePath, outputPath, keepHex, chainName, logger, pbtConvertHooks{afterOutput: hook})
 }
 
 func convertPBTWithStandaloneTestHook(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, hook func(datadir.Dirs) error) error {
-	return convertPBTWithOptions(ctx, sourcePath, outputPath, keepHex, chainName, logger, nil, pbtConvertHooks{standalone: hook})
+	return convertPBTWithOptions(ctx, sourcePath, outputPath, keepHex, chainName, logger, pbtConvertHooks{standalone: hook})
 }
 
 func TestIsCommitmentFileNameAcceptsCommitmentBin(t *testing.T) {
@@ -338,10 +338,6 @@ func TestConvertPBTSourceWithoutBinaryTables(t *testing.T) {
 }
 
 func convertedPBTAcceptanceRows(t *testing.T, sharedCode []byte) (map[string][]byte, common.Hash, common.Hash, string, map[string][]byte, map[string][]byte, string) {
-	return convertedPBTAcceptanceRowsWithLimits(t, sharedCode, &dbstate.PBinRangeWriterLimits{MaxOps: 2, MaxBytes: 1 << 20})
-}
-
-func convertedPBTAcceptanceRowsWithLimits(t *testing.T, sharedCode []byte, limits *dbstate.PBinRangeWriterLimits) (map[string][]byte, common.Hash, common.Hash, string, map[string][]byte, map[string][]byte, string) {
 	t.Helper()
 	selectPBTHexCommandSuite(t)
 	source, err := execmoduletester.NewPBTAcceptanceChainWithSharedCode(t, false, false, sharedCode)
@@ -360,11 +356,7 @@ func convertedPBTAcceptanceRowsWithLimits(t *testing.T, sharedCode []byte, limit
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	output := filepath.Join(t.TempDir(), "output")
-	if limits == nil {
-		require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New()))
-	} else {
-		require.NoError(t, convertPBTWithLimits(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New(), limits))
-	}
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New()))
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.InitSchemas()
@@ -455,7 +447,7 @@ func TestConvertPBTCases(t *testing.T) {
 	})
 	t.Run("root and record parity", func(t *testing.T) {
 		tinyRows, tinyRoot, tinyWantRoot, _, _, _, tinyOutput := convertedPBTAcceptanceRows(t, code)
-		defaultRows, defaultRoot, defaultWantRoot, _, _, _, defaultOutput := convertedPBTAcceptanceRowsWithLimits(t, code, nil)
+		defaultRows, defaultRoot, defaultWantRoot, _, _, _, defaultOutput := convertedPBTAcceptanceRows(t, code)
 		require.Equal(t, defaultRows, tinyRows, "multi-batch rows must match the default writer")
 		require.Equal(t, defaultRoot, tinyRoot, "multi-batch root must match the default writer")
 		require.Equal(t, defaultWantRoot, tinyWantRoot, "multi-batch reference root")

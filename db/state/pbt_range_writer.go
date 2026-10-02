@@ -52,7 +52,7 @@ type PBinRangeWriter struct {
 	stateInFiles bool
 }
 
-type PBinRangeWriterLimits struct {
+type pbinRangeWriterLimits struct {
 	MaxOps              int
 	MaxBytes            int
 	NoRangePastFrontier bool
@@ -210,21 +210,14 @@ func (o *pbinRangeWriterOverlay) Flush() error {
 }
 
 func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64) (*PBinRangeWriter, error) {
-	return newPBinRangeWriter(aggregator, domain, endTxNum, PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes})
-}
-
-func NewPBinRangeWriterWithLimits(aggregator *Aggregator, domain kv.Domain, endTxNum uint64, limits PBinRangeWriterLimits) (*PBinRangeWriter, error) {
-	if limits.MaxOps <= 0 || limits.MaxBytes <= 0 {
-		return nil, fmt.Errorf("pbin range writer: invalid batch limits")
-	}
-	return newPBinRangeWriter(aggregator, domain, endTxNum, limits)
+	return newPBinRangeWriter(aggregator, domain, endTxNum, pbinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes})
 }
 
 func NewPBinRangeWriterWithinFiles(aggregator *Aggregator, domain kv.Domain, endTxNum uint64) (*PBinRangeWriter, error) {
-	return newPBinRangeWriter(aggregator, domain, endTxNum, PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes, NoRangePastFrontier: true})
+	return newPBinRangeWriter(aggregator, domain, endTxNum, pbinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes, NoRangePastFrontier: true})
 }
 
-func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64, limits PBinRangeWriterLimits) (*PBinRangeWriter, error) {
+func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64, limits pbinRangeWriterLimits) (*PBinRangeWriter, error) {
 	if aggregator == nil {
 		return nil, fmt.Errorf("pbin range writer: nil aggregator")
 	}

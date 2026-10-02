@@ -29,7 +29,7 @@ func TestPBTImportMarkerRoundTripAndInvalidStartupRefusal(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	variant := TrieVariantHexBin
 	hash := "blake3"
-	marker := &PBTImportMarker{SnapshotPath: "/tmp/snapshot", SnapshotHash: "digest", Settings: &ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash}}
+	marker := &PBTImportMarker{SnapshotPath: "/tmp/snapshot", SnapshotHash: "digest", Files: []string{"domain/v3.0-commitment-bin.0-1.kv"}, Settings: &ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash}}
 	require.NoError(t, WritePBTImportMarker(dirs, marker))
 	got, err := ReadPBTImportMarker(dirs)
 	require.NoError(t, err)

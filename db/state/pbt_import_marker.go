@@ -29,6 +29,7 @@ const PBTImportMarkerFileName = "import-pbt.in-progress.json"
 type PBTImportMarker struct {
 	SnapshotPath string            `json:"snapshot_path"`
 	SnapshotHash string            `json:"snapshot_hash"`
+	Files        []string          `json:"files"`
 	Settings     *ErigonDBSettings `json:"settings"`
 }
 
@@ -45,7 +46,7 @@ func ReadPBTImportMarker(dirs datadir.Dirs) (*PBTImportMarker, error) {
 	if err != nil {
 		return nil, fmt.Errorf("decode %s: %w", PBTImportMarkerFileName, err)
 	}
-	if marker.SnapshotPath == "" || marker.SnapshotHash == "" || marker.Settings == nil {
+	if marker.SnapshotPath == "" || marker.SnapshotHash == "" || len(marker.Files) == 0 || marker.Settings == nil {
 		return nil, fmt.Errorf("decode %s: incomplete marker", PBTImportMarkerFileName)
 	}
 	return &marker, nil

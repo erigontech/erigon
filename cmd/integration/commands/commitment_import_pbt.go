@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/spf13/cobra"
@@ -137,7 +138,7 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 	}
 	if marker != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
 		if marker.Settings.TrieHashName() == settings.TrieHashName() && marker.Settings.ConversionTxNum != nil && *marker.Settings.ConversionTxNum == meta.TxNum && marker.Settings.ConversionBlockNum != nil && *marker.Settings.ConversionBlockNum == meta.Block {
-			if err := validatePBTImportRecoveryFiles(dirs); err != nil {
+			if err := validatePBTImportRecoveryFiles(dirs, marker); err != nil {
 				return err
 			}
 			return dbstate.RemovePBTImportMarker(dirs)
@@ -405,7 +406,11 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 			return err
 		}
 	}
-	if err := dbstate.WritePBTImportMarker(dirs, &dbstate.PBTImportMarker{SnapshotPath: absSnapshotPath, SnapshotHash: meta.SnapshotDigest, Settings: finalSettings}); err != nil {
+	stagedFiles, err := pbtImportBinFileNames(stageDirs)
+	if err != nil {
+		return err
+	}
+	if err := dbstate.WritePBTImportMarker(dirs, &dbstate.PBTImportMarker{SnapshotPath: absSnapshotPath, SnapshotHash: meta.SnapshotDigest, Files: stagedFiles, Settings: finalSettings}); err != nil {
 		return err
 	}
 	if marker != nil {
@@ -674,17 +679,38 @@ func movePBTImportBinFiles(stageDirs, targetDirs datadir.Dirs) ([]string, error)
 	return moved, nil
 }
 
-func validatePBTImportRecoveryFiles(dirs datadir.Dirs) error {
+func pbtImportBinFileNames(dirs datadir.Dirs) ([]string, error) {
 	files, err := pbtAttachFiles(dirs)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	names := make([]string, 0)
 	for _, file := range files {
-		if file.domain == kv.CommitmentBinDomain && file.data {
-			return nil
+		if file.domain == kv.CommitmentBinDomain {
+			rel, err := filepath.Rel(dirs.Snap, file.path)
+			if err != nil {
+				return nil, err
+			}
+			names = append(names, rel)
 		}
 	}
-	return errors.New("commitment import-pbt: recovery files are missing; remove the import marker and commitment-bin files before retrying")
+	if len(names) == 0 {
+		return nil, errors.New("commitment import-pbt: staged binary commitment files are missing")
+	}
+	slices.Sort(names)
+	return names, nil
+}
+
+func validatePBTImportRecoveryFiles(dirs datadir.Dirs, marker *dbstate.PBTImportMarker) error {
+	if marker == nil || len(marker.Files) == 0 {
+		return errors.New("commitment import-pbt: recovery marker has no file list; remove the import marker and commitment-bin files before retrying")
+	}
+	for _, name := range marker.Files {
+		if _, err := os.Stat(filepath.Join(dirs.Snap, name)); err != nil {
+			return fmt.Errorf("commitment import-pbt: recovery file %s is missing; remove the import marker and commitment-bin files before retrying", name)
+		}
+	}
+	return nil
 }
 
 func removePBTImportFiles(files []string) {

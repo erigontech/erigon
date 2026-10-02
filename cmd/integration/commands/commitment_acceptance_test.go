@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	app "github.com/erigontech/erigon/cmd/utils/app"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -48,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
@@ -276,6 +279,54 @@ func TestPBTAttachRejectsNodePBTStateMismatchWithoutMutation(t *testing.T) {
 	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
 }
 
+func TestPBTAttachRejectsStateBeyondCheckpointWithoutMutation(t *testing.T) {
+	selectPBTCommandSuite(t)
+	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	buildPBTAcceptanceFilesAt(t, node, 7)
+	resetPBTAcceptanceExecution(t, node)
+	node.Tester.Close()
+
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	copyPBTStateSalt(t, node, source)
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
+	buildPBTAcceptanceFiles(t, source)
+	source.Tester.Close()
+	selectPBTCommandSuite(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(published))
+	require.NoError(t, err)
+	_, conversionTx, ok, err := settings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	m := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
+		execmoduletester.WithGenesisSpec(node.Genesis),
+		execmoduletester.WithKey(node.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	tx, err := m.DB.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	doms, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	fresh := common.Address{0xee}
+	account := accounts.Account{Balance: *uint256.NewInt(5)}
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, fresh[:], accounts.SerialiseV3(&account), conversionTx+3, nil))
+	require.NoError(t, doms.Commit(t.Context(), tx))
+	doms.Close()
+	require.NoError(t, tx.Commit())
+	m.Close()
+	before := snapshotTree(t, node.Tester.Dirs.DataDir)
+	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
+	require.ErrorContains(t, err, "node PBT root")
+	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+}
+
 func TestPBTAttachRejectsNodeHexStateMismatchWithoutMutation(t *testing.T) {
 	selectPBTCommandSuite(t)
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
@@ -302,6 +353,31 @@ func TestPBTAttachRejectsNodeHexStateMismatchWithoutMutation(t *testing.T) {
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
 	err = attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), hooks)
 	require.ErrorContains(t, err, "node hex root")
+	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+}
+
+func TestPBTAttachRejectsNodeCheckpointMismatchWithoutMutation(t *testing.T) {
+	selectPBTCommandSuite(t)
+	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	buildPBTAcceptanceFilesAt(t, node, 7)
+	resetPBTAcceptanceExecution(t, node)
+	node.Tester.Close()
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	copyPBTStateSalt(t, node, source)
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
+	buildPBTAcceptanceFiles(t, source)
+	source.Tester.Close()
+	selectPBTCommandSuite(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
+	overwritePBTImportHexCheckpoint(t, node.Tester.Dirs.DataDir, 1, 6, 8)
+	before := snapshotTree(t, node.Tester.Dirs.DataDir)
+	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, node.Tester.ChainConfig.ChainName, log.New())
+	require.ErrorContains(t, err, "node is behind conversion point")
+	require.ErrorContains(t, err, "txNum 6")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
 }
 

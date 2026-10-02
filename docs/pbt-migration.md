@@ -74,13 +74,14 @@ node files already end there, run:
 integration stage_exec --datadir=<node-datadir> --chain=<chain> --reset --experimental.commitment-v3
 ```
 
-If the node is past the point, unwind behind `B`, then run the stage command
-at `B`. This is the block-end remedy; for a mid-block point, first restore the
-files to `S` and use `--reset`, because a block-end stage target cannot select
-the middle of a block:
+If the node is past the point, the error prints an unwind count for a block-end
+point. Run that command, then run the stage command at `B`. For a mid-block
+point, first remove state files with `erigon snapshots rm-state --step=<from>+`
+until the files end at `S`, then use `--reset`, because a block-end stage target
+cannot select the middle of a block:
 
 ```sh
-integration stage_exec --datadir=<node-datadir> --unwind=<B-1> --chain=<chain> --experimental.commitment-v3
+integration stage_exec --datadir=<node-datadir> --unwind=<count> --chain=<chain> --experimental.commitment-v3
 integration stage_exec --datadir=<node-datadir> --chain=<chain> --block=<B> --experimental.commitment-v3
 ```
 
@@ -111,7 +112,9 @@ shadow record.
 
 A refused attach leaves the node unchanged. An interrupted attach leaves an
 in-progress marker and the node refuses to start until the same
-`attach-pbt --from` operation is rerun. Recovery removes the marker last.
+`attach-pbt --from` operation is rerun. If the marker cannot be decoded,
+remove only the marker and rerun `attach-pbt --from <published-datadir>`;
+do not remove adopted files. Recovery removes the marker last.
 
 ## Dual window and automatic hex stop
 
@@ -147,11 +150,12 @@ readers and exact-set join before the meta is published. The streamed root
 must match the bin root when the pinned datadir has one.
 
 `integration stage_exec --block=<B>` executes and commits block `B`. To recover
-from a mid-block pin, run
+from a mid-block pin, remove state files through `S`, reset to the point, and
+run the next block end:
 `COMMITMENT_V3=true integration stage_exec --datadir=<datadir> --chain=<chain> --block=<next block number> --experimental.commitment-v3`,
 then run
 `COMMITMENT_V3=true erigon snapshots export-pbt --datadir=<datadir> --chain=<chain> --out=<export-dir> --experimental.bin-commitment.hash=<suite>`.
-Export has no block flag. `export-preimages` uses the same pin for a
+Export defaults to BLAKE3 and has no block flag. `export-preimages` uses the same pin for a
 preimage-only operation. Export does not require restoring every shadow domain;
 a lagging or frozen shadow is not the pin.
 

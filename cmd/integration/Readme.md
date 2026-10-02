@@ -144,7 +144,7 @@ integration stage_exec --datadir=<node> --chain=<chain> --experimental.commitmen
 ```
 
 Pass `--experimental.bin-commitment.hash=<suite>` to `export-pbt` and
-`import-pbt`. The
+`import-pbt`. `export-pbt` defaults to BLAKE3. The
 producer and node must use the network's hash suite; attach refuses a suite
 mismatch. The EIP-8297 reference implementation uses BLAKE3, but the suite is
 a network choice.

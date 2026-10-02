@@ -87,14 +87,10 @@ type pbinConversionPoint struct {
 }
 
 func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger) (err error) {
-	return convertPBTWithOptions(ctx, sourcePath, outputPath, keepHex, chainName, logger, nil, pbtConvertHooks{})
+	return convertPBTWithOptions(ctx, sourcePath, outputPath, keepHex, chainName, logger, pbtConvertHooks{})
 }
 
-func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, limits *dbstate.PBinRangeWriterLimits) (err error) {
-	return convertPBTWithOptions(ctx, sourcePath, outputPath, keepHex, chainName, logger, limits, pbtConvertHooks{})
-}
-
-func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, limits *dbstate.PBinRangeWriterLimits, hooks pbtConvertHooks) (err error) {
+func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, hooks pbtConvertHooks) (err error) {
 	if sourcePath == "" || outputPath == "" {
 		return errors.New("commitment convert-pbt: source and output datadirs are required")
 	}
@@ -293,15 +289,14 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		targetDomain = kv.CommitmentBinDomain
 	}
 	root, err := dbstate.ConvertPBin(ctx, dbstate.PBinConvertOptions{
-		SourceAggregator:  sourceAgg,
-		SourceTx:          sourceTx,
-		TargetAggregator:  targetAgg,
-		TargetTx:          targetTx,
-		TargetDomain:      targetDomain,
-		BlockNum:          point.BlockNum,
-		EndTxNum:          point.TxNum,
-		Hash:              eip8297.HashBytes,
-		RangeWriterLimits: limits,
+		SourceAggregator: sourceAgg,
+		SourceTx:         sourceTx,
+		TargetAggregator: targetAgg,
+		TargetTx:         targetTx,
+		TargetDomain:     targetDomain,
+		BlockNum:         point.BlockNum,
+		EndTxNum:         point.TxNum,
+		Hash:             eip8297.HashBytes,
 	})
 	targetTx.Rollback()
 	if err != nil {
@@ -620,6 +615,28 @@ func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, blockReader *freez
 	}
 	blockEnd = maxTxNum == point.TxNum
 	return header, blockEnd, afterFork, nil
+}
+
+func removePBTStateHistoryIndexFiles(dirs datadir.Dirs) error {
+	files, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return err
+	}
+	touched := make(map[string]struct{})
+	for _, file := range files {
+		if pbtAttachStateDomain(file.domain) && !pbtAttachAdoptsFile(file) {
+			if err := dir.RemoveFile(file.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return err
+			}
+			touched[filepath.Dir(file.path)] = struct{}{}
+		}
+	}
+	for directory := range touched {
+		if err := dir.FsyncDir(directory); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func linkPBinHexFiles(sourceDir, outputDir string) error {

@@ -47,4 +47,7 @@ func TestPBTAttachMarkerRoundTripAndStartupRefusal(t *testing.T) {
 	_, err = os.Stat(PBTAttachMarkerPath(dirs))
 	require.ErrorIs(t, err, os.ErrNotExist)
 	require.NoError(t, RefusePBTAttachMarker(dirs))
+	require.NoError(t, os.WriteFile(PBTAttachMarkerPath(dirs), []byte("{"), 0o644))
+	require.ErrorContains(t, RefusePBTAttachMarker(dirs), "remove only")
+	require.ErrorContains(t, RefusePBTAttachMarker(dirs), "rerun attach-pbt --from <published-dir>")
 }

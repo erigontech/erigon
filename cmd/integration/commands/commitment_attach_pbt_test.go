@@ -300,6 +300,16 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		require.ErrorContains(t, err, "spans conversion txNum 7")
 		require.Equal(t, before, snapshotTree(t, node.DataDir))
 	})
+	t.Run("frozen torrent sidecar does not set the history frontier", func(t *testing.T) {
+		node, published := newPBTAttachFileTrees(t, true)
+		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 7)
+		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 7)
+		require.NoError(t, os.MkdirAll(node.SnapHistory, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(node.SnapHistory, "v1.0-accounts.0-0.kvei.torrent"), []byte("torrent"), 0o644))
+		files, err := pbtAttachFiles(node)
+		require.NoError(t, err)
+		require.NoError(t, validatePBTAttachHistoryFrontier(files, 8, 7))
+	})
 	t.Run("hash", func(t *testing.T) {
 		node, published := newPBTAttachFileTrees(t, true)
 		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 7)
@@ -369,6 +379,18 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
 		require.ErrorContains(t, err, "node hex state is missing")
 	})
+}
+
+func TestPBTAttachPointRemedies(t *testing.T) {
+	blockEnd := pbtAttachNodePointError("/node", "hoodi", 10, 20, 5, 13, true)
+	require.ErrorContains(t, blockEnd, "--unwind=6")
+	require.ErrorContains(t, blockEnd, "--block=5")
+	midBlock := pbtAttachNodePointError("/node", "hoodi", 10, 20, 5, 13, false)
+	require.ErrorContains(t, midBlock, "--reset")
+	require.NotContains(t, midBlock.Error(), "--unwind=")
+	behind := pbtAttachNodePointError("/node", "hoodi", 4, 10, 5, 13, true)
+	require.ErrorContains(t, behind, "node is behind conversion point")
+	require.NotContains(t, behind.Error(), "--unwind=")
 }
 
 func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {

@@ -64,7 +64,7 @@ func RemovePBTAttachMarker(dirs datadir.Dirs) error {
 func RefusePBTAttachMarker(dirs datadir.Dirs) error {
 	marker, err := ReadPBTAttachMarker(dirs)
 	if err != nil {
-		return fmt.Errorf("commitment attach-pbt marker is invalid; remove %s and adopted files before retrying: %w", PBTAttachMarkerPath(dirs), err)
+		return fmt.Errorf("commitment attach-pbt marker is invalid; remove only %s and rerun attach-pbt --from <published-dir>: %w", PBTAttachMarkerPath(dirs), err)
 	}
 	if marker == nil {
 		return nil

@@ -174,7 +174,7 @@ func TestPBinRangeWriterStreamsLeavesIntoBinFilesWithTinyBatches(t *testing.T) {
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	defer domains.Close()
-	writer, err := state.NewPBinRangeWriterWithLimits(agg, kv.CommitmentBinDomain, 23, state.PBinRangeWriterLimits{MaxOps: 2, MaxBytes: 1 << 20})
+	writer, err := state.NewPBinRangeWriterWithLimitsForTest(agg, kv.CommitmentBinDomain, 23, 2, 1<<20)
 	require.NoError(t, err)
 	root, err := writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
 		return state.ForEachPBinLeaf(at, nil, true, emit)

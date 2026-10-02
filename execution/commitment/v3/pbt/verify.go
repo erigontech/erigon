@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -114,11 +115,7 @@ func (t *Trie) verify() error {
 		}
 		if verifyErr == nil && root.self.BitLen >= 264 && pathByte(&root.self, 0) == eip8297.StorageZone {
 			bucketPath := root.self.Slice(0, 264)
-			if root.self.BitLen < 268 {
-				verifyErr = t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: RowRoot, row: row})
-			} else {
-				verifyErr = t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: ExtRoot, self: root.self.Slice(264, root.self.BitLen), left: root.left, right: root.right})
-			}
+			verifyErr = t.verifyBucketBranch(&bucketPath, &root.self, row, root.left, root.right)
 		}
 	case RowRoot:
 		_, verifyErr = t.verifyRow(root.row)
@@ -204,11 +201,7 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 		full := branchPath(row, slot, cell)
 		if row.path.BitLen < 264 && full.BitLen >= 264 && pathByte(&full, 0) == eip8297.StorageZone {
 			bucketPath := full.Slice(0, 264)
-			if full.BitLen < 268 {
-				if err := t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: RowRoot, row: child}); err != nil {
-					return FoldResult{}, err
-				}
-			} else if err := t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: ExtRoot, self: full.Slice(264, full.BitLen), left: cell.Left, right: cell.Right}); err != nil {
+			if err := t.verifyBucketBranch(&bucketPath, &full, child, cell.Left, cell.Right); err != nil {
 				return FoldResult{}, err
 			}
 		}
@@ -238,6 +231,13 @@ func (t *Trie) verifyBuckets() error {
 func (t *Trie) releaseVerifiedChild(cell *rowCell, child *rowNode) {
 	cell.child = nil
 	child.parent = nil
+}
+
+func (t *Trie) verifyBucketBranch(bucketPath, branchPath *eip8297.Bitpath, row *rowNode, left, right common.Hash) error {
+	if branchPath.BitLen < bucketPath.BitLen+4 {
+		return t.verifyBucketRecordPath(bucketPath, bucketDescriptor{form: RowRoot, row: row})
+	}
+	return t.verifyBucketRecordPath(bucketPath, bucketDescriptor{form: ExtRoot, self: branchPath.Slice(bucketPath.BitLen, branchPath.BitLen), left: left, right: right})
 }
 
 func (t *Trie) verifyBucketRecordPath(path *eip8297.Bitpath, descriptor bucketDescriptor) error {
