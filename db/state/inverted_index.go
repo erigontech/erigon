@@ -333,8 +333,7 @@ func (iit *InvertedIndexRoTx) NewWriter(db kv.RoDB) *InvertedIndexBufferedWriter
 
 type InvertedIndexBufferedWriter struct {
 	index, indexKeys  *etl.Collector
-	indexCount        uint64
-	prefetcher        *kv.InvertedIndexPrefetcher
+	prefetcher        *invertedIndexPrefetcher
 	prefetchBatchSize uint64
 
 	discard      bool
@@ -372,11 +371,7 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	if w.index == nil {
 		w.index = newWriterCollector(w.filenameBase+".ii.vals", w.tmpdir, w.logger)
 	}
-	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
-		return err
-	}
-	w.indexCount++
-	return nil
+	return w.index.Collect(indexKey, w.txNumBytes[:])
 }
 
 func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
@@ -404,7 +399,10 @@ func (w *InvertedIndexBufferedWriter) flushIndex(ctx context.Context, tx kv.RwTx
 	pairs := make([][2][]byte, 0, w.prefetchBatchSize)
 	var buffer []byte
 	flush := func(next etl.LoadNextFunc) error {
-		if err := w.prefetcher.Prefetch(ctx, pairs); err != nil {
+		if err := w.prefetcher.prefetch(ctx, pairs); err != nil {
+			w.logger.Warn("inverted index flush prefetch failed", "table", w.indexTable, "err", err)
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 		for _, pair := range pairs {
@@ -416,20 +414,21 @@ func (w *InvertedIndexBufferedWriter) flushIndex(ctx context.Context, tx kv.RwTx
 		buffer = buffer[:0]
 		return nil
 	}
-	remaining := w.indexCount
-	return w.index.Load(tx, w.indexTable, func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	if err := w.index.Load(tx, w.indexTable, func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		start := len(buffer)
 		buffer = append(buffer, k...)
 		key := buffer[start:]
 		start = len(buffer)
 		buffer = append(buffer, v...)
 		pairs = append(pairs, [2][]byte{key, buffer[start:]})
-		remaining--
-		if len(pairs) == cap(pairs) || remaining == 0 {
+		if uint64(len(pairs)) >= w.prefetchBatchSize {
 			return flush(next)
 		}
 		return nil
-	}, etl.TransformArgs{Quit: ctx.Done()})
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	return flush(func(_, k, v []byte) error { return tx.Put(w.indexTable, k, v) })
 }
 
 func (w *InvertedIndexBufferedWriter) keysCollector() *etl.Collector {
@@ -456,17 +455,16 @@ func (w *InvertedIndexBufferedWriter) close() {
 	if w.indexKeys != nil {
 		w.indexKeys.Close()
 	}
-	w.indexCount = 0
 }
 
 func (iit *InvertedIndexRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *InvertedIndexBufferedWriter {
 	if iit.ii.stepSize != iit.stepSize {
 		panic(fmt.Sprintf("assert: %d %d", iit.ii.stepSize, iit.stepSize))
 	}
-	var prefetcher *kv.InvertedIndexPrefetcher
+	var prefetcher *invertedIndexPrefetcher
 	if !discard && db != nil && dbg.EnvBool("INV_IDX_PREFETCH", true) {
 		workers := dbg.EnvUint("INV_IDX_PREFETCH_WORKERS", uint64(runtime.GOMAXPROCS(0)))
-		prefetcher = kv.NewInvertedIndexPrefetcher(db, iit.ii.ValuesTable, workers)
+		prefetcher = newInvertedIndexPrefetcher(db, iit.ii.ValuesTable, workers)
 	}
 	w := &InvertedIndexBufferedWriter{
 		prefetcher:        prefetcher,

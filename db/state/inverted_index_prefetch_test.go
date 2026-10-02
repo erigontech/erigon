@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package kv
+package state
 
 import (
 	"context"
@@ -23,36 +23,77 @@ import (
 	"testing/synctest"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
-type prefetchTestDB struct {
-	RoDB
-	newCursor func(context.Context) CursorDupSort
+func TestInvertedIndexPrefetchCursor(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		for _, value := range []string{"one", "three"} {
+			if err := tx.Put(kv.TblTracesToIdx, []byte("key"), []byte(value)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	c, err := tx.RwCursorDupSort(kv.TblTracesToIdx)
+	require.NoError(t, err)
+	defer c.Close()
+	require.NoError(t, c.Put([]byte("uncommitted"), []byte("value")))
+	k, v, err := c.SeekBothExact([]byte("key"), []byte("three"))
+	require.NoError(t, err)
+	wantKey, wantValue := string(k), string(v)
+	pairs := [][2][]byte{
+		{[]byte("key"), []byte("one")},
+		{[]byte("key"), []byte("two")},
+		{[]byte("missing"), []byte("value")},
+		{[]byte("uncommitted"), []byte("value")},
+	}
+	p := newInvertedIndexPrefetcher(db, kv.TblTracesToIdx, 3)
+	require.NoError(t, p.prefetch(t.Context(), pairs))
+	k, v, err = c.Current()
+	require.NoError(t, err)
+	require.Equal(t, wantKey, string(k))
+	require.Equal(t, wantValue, string(v))
+	v, err = tx.GetOne(kv.TblTracesToIdx, []byte("uncommitted"))
+	require.NoError(t, err)
+	require.Equal(t, "value", string(v))
+	require.NoError(t, p.prefetch(t.Context(), nil))
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	require.ErrorIs(t, p.prefetch(ctx, pairs), context.Canceled)
 }
 
-func (db *prefetchTestDB) BeginRo(ctx context.Context) (Tx, error) {
+type prefetchTestDB struct {
+	kv.RoDB
+	newCursor func(context.Context) kv.CursorDupSort
+}
+
+func (db *prefetchTestDB) BeginRo(ctx context.Context) (kv.Tx, error) {
 	return &prefetchTestTx{cursor: db.newCursor(ctx)}, nil
 }
 
 type prefetchTestTx struct {
-	Tx
-	cursor CursorDupSort
+	kv.Tx
+	cursor kv.CursorDupSort
 }
 
-func (tx *prefetchTestTx) CursorDupSort(string) (CursorDupSort, error) {
+func (tx *prefetchTestTx) CursorDupSort(string) (kv.CursorDupSort, error) {
 	return tx.cursor, nil
 }
 
 func (tx *prefetchTestTx) Rollback() {}
 
 type prefetchTestCursor struct {
-	CursorDupSort
+	kv.CursorDupSort
 	seek  func([]byte, []byte) error
 	close func()
-}
-
-func (c *prefetchTestCursor) SeekExact(key []byte) ([]byte, []byte, error) {
-	return key, nil, nil
 }
 
 func (c *prefetchTestCursor) SeekBothRange(key, value []byte) ([]byte, error) {
@@ -71,7 +112,7 @@ func TestInvertedIndexPrefetcherBatches(t *testing.T) {
 		started := make(chan [][2][]byte, workers)
 		release, releaseReads := context.WithCancel(t.Context())
 		defer releaseReads()
-		db := &prefetchTestDB{newCursor: func(context.Context) CursorDupSort {
+		db := &prefetchTestDB{newCursor: func(context.Context) kv.CursorDupSort {
 			var batch [][2][]byte
 			return &prefetchTestCursor{
 				seek: func(key, value []byte) error {
@@ -84,13 +125,13 @@ func TestInvertedIndexPrefetcherBatches(t *testing.T) {
 				},
 			}
 		}}
-		p := NewInvertedIndexPrefetcher(db, "index", workers)
+		p := newInvertedIndexPrefetcher(db, "index", workers)
 		var pairs [][2][]byte
 		for key := range 7 {
 			pairs = append(pairs, [2][]byte{{byte(key)}, nil})
 		}
 		done := make(chan error, 1)
-		go func() { done <- p.Prefetch(t.Context(), pairs) }()
+		go func() { done <- p.prefetch(t.Context(), pairs) }()
 		synctest.Wait()
 		require.Len(t, started, workers)
 		require.Empty(t, done, "Prefetch must wait for its readers")
@@ -108,11 +149,11 @@ func TestInvertedIndexPrefetcherBatches(t *testing.T) {
 		require.Len(t, done, 1)
 		require.NoError(t, <-done)
 
-		require.NoError(t, p.Prefetch(t.Context(), pairs[:2]))
+		require.NoError(t, p.prefetch(t.Context(), pairs[:2]))
 		require.Len(t, started, 2, "worker count must not exceed pair count")
 		require.Len(t, <-started, 1)
 		require.Len(t, <-started, 1)
-		require.NoError(t, p.Prefetch(t.Context(), nil))
+		require.NoError(t, p.prefetch(t.Context(), nil))
 		require.Empty(t, started)
 	})
 }
@@ -123,7 +164,7 @@ func TestInvertedIndexPrefetcherErrorWaitsForReaders(t *testing.T) {
 		wantErr := errors.New("read failed")
 		release, releaseReads := context.WithCancel(ctx)
 		defer releaseReads()
-		db := &prefetchTestDB{newCursor: func(context.Context) CursorDupSort {
+		db := &prefetchTestDB{newCursor: func(context.Context) kv.CursorDupSort {
 			return &prefetchTestCursor{seek: func(key, value []byte) error {
 				switch key[0] {
 				case 0:
@@ -134,16 +175,16 @@ func TestInvertedIndexPrefetcherErrorWaitsForReaders(t *testing.T) {
 				return nil
 			}}
 		}}
-		p := NewInvertedIndexPrefetcher(db, "index", 2)
+		p := newInvertedIndexPrefetcher(db, "index", 2)
 		done := make(chan error, 1)
-		go func() { done <- p.Prefetch(ctx, [][2][]byte{{{0}, nil}, {{1}, nil}}) }()
+		go func() { done <- p.prefetch(ctx, [][2][]byte{{{0}, nil}, {{1}, nil}}) }()
 		synctest.Wait()
 		require.Empty(t, done, "an error must not release buffers still used by another reader")
 		releaseReads()
 		synctest.Wait()
 		require.Len(t, done, 1)
 		require.ErrorIs(t, <-done, wantErr)
-		require.NoError(t, p.Prefetch(ctx, [][2][]byte{{{2}, nil}}))
+		require.NoError(t, p.prefetch(ctx, [][2][]byte{{{2}, nil}}))
 	})
 }
 
@@ -151,7 +192,7 @@ func TestInvertedIndexPrefetcherCancellation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		db := &prefetchTestDB{newCursor: func(ctx context.Context) CursorDupSort {
+		db := &prefetchTestDB{newCursor: func(ctx context.Context) kv.CursorDupSort {
 			return &prefetchTestCursor{seek: func(key, value []byte) error {
 				if key[0] == 0 {
 					<-ctx.Done()
@@ -160,16 +201,16 @@ func TestInvertedIndexPrefetcherCancellation(t *testing.T) {
 				return nil
 			}}
 		}}
-		p := NewInvertedIndexPrefetcher(db, "index", 1)
+		p := newInvertedIndexPrefetcher(db, "index", 1)
 		done := make(chan error, 1)
-		go func() { done <- p.Prefetch(ctx, [][2][]byte{{{0}, nil}}) }()
+		go func() { done <- p.prefetch(ctx, [][2][]byte{{{0}, nil}}) }()
 		synctest.Wait()
 		require.Empty(t, done)
 		cancel()
 		synctest.Wait()
 		require.Len(t, done, 1)
 		require.ErrorIs(t, <-done, context.Canceled)
-		require.ErrorIs(t, p.Prefetch(ctx, nil), context.Canceled)
-		require.NoError(t, p.Prefetch(t.Context(), [][2][]byte{{{1}, nil}}))
+		require.ErrorIs(t, p.prefetch(ctx, nil), context.Canceled)
+		require.NoError(t, p.prefetch(t.Context(), [][2][]byte{{{1}, nil}}))
 	})
 }
