@@ -434,16 +434,6 @@ type legacyReachNode struct {
 	value []byte
 }
 
-func (r *legacyReach) push(depth int, value []byte) {
-	if len(r.chain) < cap(r.chain) {
-		r.chain = r.chain[:len(r.chain)+1]
-	} else {
-		r.chain = append(r.chain, legacyReachNode{})
-	}
-	n := &r.chain[len(r.chain)-1]
-	n.depth, n.value = depth, append(n.value[:0], value...)
-}
-
 func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 	path, err := decodeLegacyPrefix(legacyKey, r.keysV2)
 	if err != nil || len(path) == 0 {
@@ -464,7 +454,7 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		r.push(0, root)
+		r.chain = append(r.chain, legacyReachNode{0, bytes.Clone(root)})
 	}
 	for {
 		n := r.chain[len(r.chain)-1]
@@ -476,14 +466,14 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 			return false, err
 		}
 		if next == len(path) {
-			r.push(next, value)
+			r.chain = append(r.chain, legacyReachNode{next, bytes.Clone(value)})
 			return true, nil
 		}
 		child, _, _, _, err := r.dt.getLatestFromFiles(encodeLegacyPrefix(path[:next], r.keysV2), nil, r.maxStep)
 		if err != nil || len(child) < 4 || binary.BigEndian.Uint16(child[2:4]) == 0 {
 			return false, err
 		}
-		r.push(next, child)
+		r.chain = append(r.chain, legacyReachNode{next, bytes.Clone(child)})
 	}
 }
 

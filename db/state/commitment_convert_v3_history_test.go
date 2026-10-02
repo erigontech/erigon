@@ -81,19 +81,7 @@ func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps 
 	addrs, _ := generateInputData(t, length.Addr, 1, 40)
 	slots := storageSlotsSharingFirstNibble(t)
 	storageKey := func(a, j int) []byte { return append(bytes.Clone(addrs[a]), slots[j]...) }
-	put := func(d kv.Domain, k, v []byte, txNum uint64) {
-		prev, _, getErr := domains.GetLatest(d, rwTx, k)
-		require.NoError(t, getErr)
-		require.NoError(t, domains.DomainPut(d, rwTx, k, v, txNum, prev))
-	}
-	del := func(d kv.Domain, k []byte, txNum uint64) {
-		prev, _, getErr := domains.GetLatest(d, rwTx, k)
-		require.NoError(t, getErr)
-		if len(prev) == 0 {
-			return
-		}
-		require.NoError(t, domains.DomainDel(d, rwTx, k, txNum, prev))
-	}
+	put, del, _ := domainWriter(t, domains, rwTx)
 
 	roots := map[uint64][]byte{}
 	txCount := stepSize * uint64(steps)
@@ -154,36 +142,15 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	const stepSize, steps = 4, 2
-	db, agg := testDbAndAggregatorv3(t, stepSize)
-	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	put, del, putAccount := domainWriter(t, domains, rwTx)
 	ctx := t.Context()
-
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
-	require.NoError(t, err)
-	defer domains.Close()
 
 	addrs, _ := generateInputData(t, length.Addr, 1, 4)
 	owner := addrs[0]
 	pairs := storageSlotPairs(t)
 	slots := [][]byte{pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1]}
 	slot := func(s []byte) []byte { return append(bytes.Clone(owner), s...) }
-	put := func(d kv.Domain, k, v []byte, txNum uint64) {
-		prev, _, getErr := domains.GetLatest(d, rwTx, k)
-		require.NoError(t, getErr)
-		require.NoError(t, domains.DomainPut(d, rwTx, k, v, txNum, prev))
-	}
-	del := func(d kv.Domain, k []byte, txNum uint64) {
-		prev, _, getErr := domains.GetLatest(d, rwTx, k)
-		require.NoError(t, getErr)
-		require.NoError(t, domains.DomainDel(d, rwTx, k, txNum, prev))
-	}
-	putAccount := func(addr []byte, txNum uint64) {
-		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
-		put(kv.AccountsDomain, addr, accounts.SerialiseV3(&acc), txNum)
-	}
 
 	roots := map[uint64][]byte{}
 	for txNum := range uint64(stepSize * steps) {

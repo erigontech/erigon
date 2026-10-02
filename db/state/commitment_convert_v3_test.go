@@ -188,6 +188,39 @@ func storageSlotWithHashPrefix(tb testing.TB, prefix []byte, next *uint64) []byt
 	}
 }
 
+func convertTestDomains(t *testing.T, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator, kv.TemporalRwTx, *execctx.SharedDomains) {
+	t.Helper()
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(rwTx.Rollback) //nolint:gocritic
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithParaTrieDB(db))
+	require.NoError(t, err)
+	t.Cleanup(domains.Close)
+	return db, agg, rwTx, domains
+}
+
+func domainWriter(t *testing.T, domains *execctx.SharedDomains, tx kv.TemporalRwTx) (put func(d kv.Domain, k, v []byte, txNum uint64), del func(d kv.Domain, k []byte, txNum uint64), putAccount func(addr []byte, txNum uint64)) {
+	put = func(d kv.Domain, k, v []byte, txNum uint64) {
+		prev, _, err := domains.GetLatest(d, tx, k)
+		require.NoError(t, err)
+		require.NoError(t, domains.DomainPut(d, tx, k, v, txNum, prev))
+	}
+	del = func(d kv.Domain, k []byte, txNum uint64) {
+		prev, _, err := domains.GetLatest(d, tx, k)
+		require.NoError(t, err)
+		if len(prev) != 0 {
+			require.NoError(t, domains.DomainDel(d, tx, k, txNum, prev))
+		}
+	}
+	putAccount = func(addr []byte, txNum uint64) {
+		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
+		put(kv.AccountsDomain, addr, accounts.SerialiseV3(&acc), txNum)
+	}
+	return put, del, putAccount
+}
+
 func TestConvertCommitmentFiles_V3CollapsedStorageBranch(t *testing.T) {
 	for _, keysV2 := range []bool{false, true} {
 		t.Run(fmt.Sprintf("keysV2=%t", keysV2), func(t *testing.T) {
@@ -198,16 +231,9 @@ func TestConvertCommitmentFiles_V3CollapsedStorageBranch(t *testing.T) {
 
 func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 bool) {
 	const stepSize, steps = 4, 2
-	db, agg := testDbAndAggregatorv3(t, stepSize)
-	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	put, del, putAccount := domainWriter(t, domains, rwTx)
 	ctx := t.Context()
-
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
-	require.NoError(t, err)
-	defer domains.Close()
 
 	addrs, _ := generateInputData(t, length.Addr, 1, 2)
 	owner := addrs[0]
@@ -224,20 +250,6 @@ func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 boo
 		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0xe, 0xa}, &next),
 	}
 	slot := func(s []byte) []byte { return append(bytes.Clone(owner), s...) }
-	put := func(d kv.Domain, k, v []byte, txNum uint64) {
-		prev, _, getErr := domains.GetLatest(d, rwTx, k)
-		require.NoError(t, getErr)
-		require.NoError(t, domains.DomainPut(d, rwTx, k, v, txNum, prev))
-	}
-	del := func(d kv.Domain, k []byte, txNum uint64) {
-		prev, _, getErr := domains.GetLatest(d, rwTx, k)
-		require.NoError(t, getErr)
-		require.NoError(t, domains.DomainDel(d, rwTx, k, txNum, prev))
-	}
-	putAccount := func(addr []byte, txNum uint64) {
-		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
-		put(kv.AccountsDomain, addr, accounts.SerialiseV3(&acc), txNum)
-	}
 	for txNum := range uint64(stepSize * steps) {
 		switch txNum {
 		case 0:
@@ -260,7 +272,7 @@ func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 boo
 		default:
 			putAccount(addrs[1], txNum)
 		}
-		_, err = domains.ComputeCommitment(ctx, rwTx, true, txNum, txNum, "", nil)
+		_, err := domains.ComputeCommitment(ctx, rwTx, true, txNum, txNum, "", nil)
 		require.NoError(t, err)
 	}
 	require.NoError(t, domains.Flush(ctx, rwTx))
