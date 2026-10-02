@@ -402,7 +402,6 @@ func (w *InvertedIndexBufferedWriter) flushIndex(ctx context.Context, tx kv.RwTx
 	}
 	defer w.prefetcher.close()
 	pairs := make([][2][]byte, 0, w.prefetchBatchSize)
-	var buffer []byte
 	flush := func(next etl.LoadNextFunc) error {
 		if err := w.prefetcher.prefetch(ctx, pairs); err != nil {
 			w.logger.Warn("inverted index flush prefetch failed", "table", w.indexTable, "err", err)
@@ -416,16 +415,10 @@ func (w *InvertedIndexBufferedWriter) flushIndex(ctx context.Context, tx kv.RwTx
 			}
 		}
 		pairs = pairs[:0]
-		buffer = buffer[:0]
 		return nil
 	}
 	if err := w.index.Load(tx, w.indexTable, func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		start := len(buffer)
-		buffer = append(buffer, k...)
-		key := buffer[start:]
-		start = len(buffer)
-		buffer = append(buffer, v...)
-		pairs = append(pairs, [2][]byte{key, buffer[start:]})
+		pairs = append(pairs, [2][]byte{k, v})
 		if uint64(len(pairs)) >= w.prefetchBatchSize {
 			return flush(next)
 		}
