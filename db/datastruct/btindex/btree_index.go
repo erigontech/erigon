@@ -58,8 +58,10 @@ const (
 )
 
 // BtInterp enables interpolation search in the leaf window, falling back to binary after BtInterpBudget probes.
-var BtInterp = dbg.EnvBool("BT_INTERP", true)
-var BtInterpBudget = uint64(dbg.EnvInt("BT_INTERP_BUDGET", 8))
+var (
+	BtInterp       = dbg.EnvBool("BT_INTERP", true)
+	BtInterpBudget = uint64(dbg.EnvInt("BT_INTERP_BUDGET", 8))
+)
 
 var BtPrefixSeed = dbg.EnvBool("BT_PREFIX_SEED", true)
 
@@ -392,7 +394,7 @@ func CreateBtreeIndexWithDecompressor(indexPath string, existenceFilterPath stri
 
 // OpenBtreeIndexAndDataFile opens btree index file and data file and returns it along with BtIndex instance
 // Mostly useful for testing
-func OpenBtreeIndexAndDataFile(indexPath, dataPath string, compressed seg.FileCompression, trace bool) (_ *seg.Decompressor, _ *BtIndex, err error) {
+func OpenBtreeIndexAndDataFile(indexPath, dataPath string, compressed seg.FileCompression) (_ *seg.Decompressor, _ *BtIndex, err error) {
 	d, err := seg.NewDecompressor(dataPath)
 	if err != nil {
 		return nil, nil, err

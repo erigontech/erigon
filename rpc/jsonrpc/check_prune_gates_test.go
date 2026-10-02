@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -82,7 +81,7 @@ func TestPruneGateBoundary(t *testing.T) {
 			require.NoError(t, tc.gate(oldest), "the oldest retained block is served")
 
 			err := tc.gate(oldest - 1)
-			require.ErrorIs(t, err, state.PrunedError)
+			require.ErrorIs(t, err, state.ErrPruned)
 			require.Contains(t, err.Error(), tc.boundary, "the error must name the boundary that rejected")
 		})
 	}
@@ -106,7 +105,7 @@ func TestCallBundleGatesTxBlockAndStateBlockSeparately(t *testing.T) {
 
 	_, err = apis.eth.CallBundle(ctx, []common.Hash{chainInfo.recent.txHash},
 		rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num)), nil)
-	require.ErrorIs(t, err, state.PrunedError, "the state asked for is outside the history window")
+	require.ErrorIs(t, err, state.ErrPruned, "the state asked for is outside the history window")
 }
 
 // TestPruneGateArchive pins that an archive node never gates, including at
@@ -205,7 +204,7 @@ func TestReceiptsGateFollowsRetention(t *testing.T) {
 			defer tx.Rollback()
 
 			require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, tc.served))
-			require.ErrorIs(t, apis.eth.checkReceiptsAvailable(ctx, tx, tc.refused), state.PrunedError)
+			require.ErrorIs(t, apis.eth.checkReceiptsAvailable(ctx, tx, tc.refused), state.ErrPruned)
 		})
 	}
 }
@@ -229,7 +228,7 @@ func TestReceiptsGateKeepAll(t *testing.T) {
 	defer tx.Rollback()
 
 	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, 0))
-	require.ErrorIs(t, apis.eth.checkPruneHistory(ctx, tx, 0), state.PrunedError,
+	require.ErrorIs(t, apis.eth.checkPruneHistory(ctx, tx, 0), state.ErrPruned,
 		"history is still pruned; only the receipts survive")
 }
 
@@ -255,7 +254,7 @@ func TestReceiptsGateFollowsHistoryWhereTheCacheIsNotServed(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	require.ErrorIs(t, apis.eth.checkReceiptsAvailable(ctx, tx, 0), state.PrunedError,
+	require.ErrorIs(t, apis.eth.checkReceiptsAvailable(ctx, tx, 0), state.ErrPruned,
 		"a cache the generator will not serve does not widen availability")
 }
 
@@ -284,7 +283,7 @@ func TestReceiptEndpointsCloseWhenTheCacheIsNotServed(t *testing.T) {
 	dbg.AssertEnabled = true
 
 	_, err = apis.eth.GetBlockReceipts(ctx, old)
-	require.ErrorIs(t, err, state.PrunedError,
+	require.ErrorIs(t, err, state.ErrPruned,
 		"without the cache the block is only reachable by re-executing, which history no longer allows")
 }
 
@@ -335,7 +334,7 @@ func TestReceiptsGateFollowsHistoryWherePostStateIsComputed(t *testing.T) {
 	require.Less(t, historyOldest, pruneGatingByzantiumHeight, "history must reach below the fork for this to test anything")
 
 	err = apis.eth.checkReceiptsAvailable(ctx, tx, historyOldest-1)
-	require.ErrorIs(t, err, state.PrunedError, "a pre-Byzantium receipt below history cannot be re-executed")
+	require.ErrorIs(t, err, state.ErrPruned, "a pre-Byzantium receipt below history cannot be re-executed")
 	require.Contains(t, err.Error(), "history is available")
 
 	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, historyOldest),
@@ -374,7 +373,7 @@ func TestReceiptsGateReadsFrozenBlocksNotStageProgress(t *testing.T) {
 
 	historyOldest := pruneGatingDistance.PruneTo(pruneGatingChainLen)
 	err = apis.eth.checkReceiptsAvailable(ctx, tx, historyOldest-1)
-	require.ErrorIs(t, err, state.PrunedError,
+	require.ErrorIs(t, err, state.ErrPruned,
 		"no snapshot file is on disk, so the post state is still computed and follows history")
 }
 
@@ -428,7 +427,7 @@ func TestBlockReceiptsGateCombinesBothBoundaries(t *testing.T) {
 
 			err = apis.eth.checkBlockReceiptsAvailable(ctx, tx, chainInfo.old.num)
 			if tc.fires {
-				require.ErrorIs(t, err, state.PrunedError)
+				require.ErrorIs(t, err, state.ErrPruned)
 			} else {
 				require.NoError(t, err)
 			}
@@ -498,7 +497,7 @@ func TestLogsGateTakesHistoryOnlyForIndexSearch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, tc.crit)
 			if tc.fires {
-				require.ErrorIs(t, err, state.PrunedError)
+				require.ErrorIs(t, err, state.ErrPruned)
 				require.Contains(t, err.Error(), "history is available")
 			} else {
 				require.NoError(t, err)
@@ -532,9 +531,9 @@ func TestLogsGateSkipsThePostStateLegPreByzantium(t *testing.T) {
 
 	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, below, filters.FilterCriteria{}),
 		"an unfiltered query reads the kept cache, which carries every field it needs")
-	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, below, addressFilter(below)), state.PrunedError,
+	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, below, addressFilter(below)), state.ErrPruned,
 		"an indexed filter searches LogAddrIdx, retired at the history cutoff")
-	require.ErrorIs(t, apis.eth.checkReceiptsAvailable(ctx, tx, below), state.PrunedError,
+	require.ErrorIs(t, apis.eth.checkReceiptsAvailable(ctx, tx, below), state.ErrPruned,
 		"a full receipt still needs the post state a re-execution computes")
 }
 
@@ -566,7 +565,7 @@ func TestCapabilitiesAgreeWithTheLogsGatePreByzantium(t *testing.T) {
 
 	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, oldest, addressFilter(oldest)),
 		"the advertised oldest block must be served")
-	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, oldest-1, addressFilter(oldest-1)), state.PrunedError,
+	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, oldest-1, addressFilter(oldest-1)), state.ErrPruned,
 		"the block below the advertised oldest must be refused")
 	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, oldest-1, filters.FilterCriteria{}),
 		"an unfiltered query reads past the advertised boundary, never short of it")
@@ -591,7 +590,7 @@ func TestLogsGateRequiresBlockBodies(t *testing.T) {
 	defer tx.Rollback()
 
 	err = apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, filters.FilterCriteria{})
-	require.ErrorIs(t, err, state.PrunedError)
+	require.ErrorIs(t, err, state.ErrPruned)
 	require.Contains(t, err.Error(), "blocks are available")
 }
 
@@ -645,7 +644,7 @@ func TestBlocksGateAppliesChainHistoryExpiry(t *testing.T) {
 	defer tx.Rollback()
 
 	err = apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
-	require.ErrorIs(t, err, state.PrunedError)
+	require.ErrorIs(t, err, state.ErrPruned)
 	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", pruneGatingMergeHeight))
 
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, pruneGatingMergeHeight),
@@ -653,7 +652,7 @@ func TestBlocksGateAppliesChainHistoryExpiry(t *testing.T) {
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.recent.num))
 
 	_, err = apis.eth.GetBlockByNumber(ctx, rpc.BlockNumber(chainInfo.old.num), false)
-	require.ErrorIs(t, err, state.PrunedError, "the endpoints must see the same boundary")
+	require.ErrorIs(t, err, state.ErrPruned, "the endpoints must see the same boundary")
 }
 
 // TestLogsByBlockHashNamesThePruneBoundary pins that a filter pinned to a block
@@ -689,7 +688,7 @@ func TestLogsByBlockHashNamesThePruneBoundary(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tc.call()
-			require.ErrorIs(t, err, state.PrunedError)
+			require.ErrorIs(t, err, state.ErrPruned)
 			require.Contains(t, err.Error(), "blocks are available")
 		})
 	}
@@ -734,7 +733,7 @@ func TestBlockHistoryGateCombinesBothBoundaries(t *testing.T) {
 				require.NoError(t, err)
 				return
 			}
-			require.ErrorIs(t, err, state.PrunedError)
+			require.ErrorIs(t, err, state.ErrPruned)
 			require.Contains(t, err.Error(), tc.boundary, "the error must name the leg that rejected")
 
 			oldest := pruneGatingDistance.PruneTo(chainInfo.head)
@@ -770,7 +769,7 @@ func TestReplayLogEndpointsRequireBlockBodies(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tc.call(chainInfo.old.num)
-			require.ErrorIs(t, err, state.PrunedError)
+			require.ErrorIs(t, err, state.ErrPruned)
 			require.Contains(t, err.Error(), "blocks are available")
 
 			_, err = tc.call(chainInfo.recent.num)
@@ -798,8 +797,8 @@ func TestGatesTakeNoEmptyBlockExemption(t *testing.T) {
 	require.Less(t, empty+1, pruneGatingDistance.PruneTo(pruneGatingChainLen),
 		"the empty block and the one above it must sit below the history cutoff")
 
-	require.ErrorIs(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, empty), state.PrunedError)
-	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, empty, filters.FilterCriteria{}), state.PrunedError)
+	require.ErrorIs(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, empty), state.ErrPruned)
+	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, empty, filters.FilterCriteria{}), state.ErrPruned)
 
 	for _, tc := range []struct {
 		name string
@@ -813,11 +812,11 @@ func TestGatesTakeNoEmptyBlockExemption(t *testing.T) {
 		{"erigon_getLogs_single", func() (any, error) { return apis.erigon.GetLogs(ctx, blockFilter(empty)) }},
 		{"erigon_getLogsByHash", func() (any, error) { return apis.erigon.GetLogsByHash(ctx, chainInfo.empty.hash) }},
 		{"ots_getBlockDetails", func() (any, error) { return apis.ots.GetBlockDetails(ctx, rpc.BlockNumber(empty)) }},
-		{"graphql_getBlockDetails", func() (any, error) { return apis.graphql.GetBlockDetails(ctx, rpc.BlockNumber(empty)) }},
+		{"graphql_getBlockDetails", func() (any, error) { return apis.graphql.GetBlockDetails(ctx, rpc.BlockNumber(empty), nil) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tc.call()
-			require.ErrorIs(t, err, state.PrunedError)
+			require.ErrorIs(t, err, state.ErrPruned)
 		})
 	}
 
@@ -829,7 +828,7 @@ func TestGatesTakeNoEmptyBlockExemption(t *testing.T) {
 // byzantiumChainConfig moves Byzantium and every later fork to at, so the blocks
 // below it carry a post state the receipt cache does not store.
 func byzantiumChainConfig(at uint64) *chain.Config {
-	cfg := pruneGatingChainConfig()
+	cfg := chain.TestChainBerlinConfig.Copy()
 	for _, fork := range []**uint64{
 		&cfg.ByzantiumBlock, &cfg.ConstantinopleBlock, &cfg.PetersburgBlock,
 		&cfg.IstanbulBlock, &cfg.MuirGlacierBlock, &cfg.BerlinBlock,
@@ -842,28 +841,9 @@ func byzantiumChainConfig(at uint64) *chain.Config {
 // mergeHeightChainConfig declares a merge point, which is what turns
 // KeepPostMergeBlocksPruneMode from a no-op into chain history expiry.
 func mergeHeightChainConfig(height uint64) *chain.Config {
-	cfg := pruneGatingChainConfig()
+	cfg := chain.TestChainBerlinConfig.Copy()
 	cfg.MergeHeight = &height
 	return cfg
-}
-
-// pruneGatingChainConfig mirrors TestChainBerlinConfig, which cannot be copied
-// because chain.Config carries a sync.Once.
-func pruneGatingChainConfig() *chain.Config {
-	return &chain.Config{
-		ChainID:               uint256.NewInt(1337),
-		Rules:                 chain.EtHashRules,
-		HomesteadBlock:        common.NewUint64(0),
-		TangerineWhistleBlock: common.NewUint64(0),
-		SpuriousDragonBlock:   common.NewUint64(0),
-		ByzantiumBlock:        common.NewUint64(0),
-		ConstantinopleBlock:   common.NewUint64(0),
-		PetersburgBlock:       common.NewUint64(0),
-		IstanbulBlock:         common.NewUint64(0),
-		MuirGlacierBlock:      common.NewUint64(0),
-		BerlinBlock:           common.NewUint64(0),
-		Ethash:                new(chain.EthashConfig),
-	}
 }
 
 // TestCapabilitiesAgreeWithGates pins eth_capabilities against the gates it
@@ -916,7 +896,7 @@ func TestCapabilitiesAgreeWithGates(t *testing.T) {
 					if oldest == 0 {
 						return
 					}
-					require.ErrorIs(t, pair.gate(oldest-1), state.PrunedError,
+					require.ErrorIs(t, pair.gate(oldest-1), state.ErrPruned,
 						"the block below the advertised oldest must be refused")
 				})
 			}
@@ -958,7 +938,7 @@ func TestCapabilitiesAdvertiseTheReceiptWindow(t *testing.T) {
 		"a filtered log query searches the indices, which follow history")
 
 	require.NoError(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, wideOldest))
-	require.ErrorIs(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, wideOldest-1), state.PrunedError)
+	require.ErrorIs(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, wideOldest-1), state.ErrPruned)
 }
 
 // TestCapabilitiesTakeThePreByzantiumRequirement pins the receipts field against the
@@ -990,7 +970,7 @@ func TestCapabilitiesTakeThePreByzantiumRequirement(t *testing.T) {
 	oldest := uint64(*caps.Receipts.OldestBlock)
 	require.Equal(t, historyOldest, oldest, "below the fork the kept cache does not answer")
 	require.NoError(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, oldest))
-	require.ErrorIs(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, oldest-1), state.PrunedError)
+	require.ErrorIs(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, oldest-1), state.ErrPruned)
 }
 
 // TestCapabilitiesRenderAWindowThatHasNotStarted pins the retention rendered when
@@ -1089,14 +1069,14 @@ func TestBlocksGateTellsExpiryFromLegacyArchive(t *testing.T) {
 	require.Equal(t, pruneGatingMergeHeight, oldest, "the fixture must hold no body below the merge point")
 
 	err = apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
-	require.ErrorIs(t, err, state.PrunedError)
+	require.ErrorIs(t, err, state.ErrPruned)
 	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", pruneGatingMergeHeight))
 
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, pruneGatingMergeHeight))
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.recent.num))
 
 	_, err = apis.eth.GetBlockByNumber(ctx, rpc.BlockNumber(chainInfo.old.num), false)
-	require.ErrorIs(t, err, state.PrunedError, "the endpoints must see the same boundary")
+	require.ErrorIs(t, err, state.ErrPruned, "the endpoints must see the same boundary")
 }
 
 // rangeFilter spans two blocks, the shape the single-block helpers cannot express.
@@ -1110,7 +1090,7 @@ func rangeFilter(begin, end uint64) filters.FilterCriteria {
 // noByzantiumChainConfig declares a chain that never reaches Byzantium, so every
 // receipt on it carries a post state the cache does not store.
 func noByzantiumChainConfig() *chain.Config {
-	cfg := pruneGatingChainConfig()
+	cfg := chain.TestChainBerlinConfig.Copy()
 	for _, fork := range []**uint64{
 		&cfg.ByzantiumBlock, &cfg.ConstantinopleBlock, &cfg.PetersburgBlock,
 		&cfg.IstanbulBlock, &cfg.MuirGlacierBlock, &cfg.BerlinBlock,
@@ -1136,6 +1116,11 @@ func TestBlocksGateDoesNotSettleExpiryBeforeBlocksArrive(t *testing.T) {
 		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
 	})
 	ctx := t.Context()
+
+	// A walk that answered nothing is held for a TTL of its own, which is what keeps a
+	// datadir without block data from being walked on every request. This test is about
+	// what the walk reads, so it takes one per call.
+	apis.eth._preMergeUnsettledTTL = 0
 
 	canonicalHash := func(num uint64) common.Hash {
 		tx, err := apis.eth.db.BeginTemporalRo(ctx)
@@ -1182,7 +1167,7 @@ func TestBlocksGateDoesNotSettleExpiryBeforeBlocksArrive(t *testing.T) {
 		}
 	})
 	require.Zero(t, oldestAvailable(), "the fixture must hold no body at all")
-	require.ErrorIs(t, gateOnOldBlock(), state.PrunedError,
+	require.ErrorIs(t, gateOnOldBlock(), state.ErrPruned,
 		"holding no body is not evidence of an archive datadir")
 
 	write(func(rwTx kv.TemporalRwTx) {
@@ -1333,7 +1318,7 @@ func TestBlocksGateAppliesExpiryWhenOldestIsMidChain(t *testing.T) {
 	require.Less(t, oldest, chainInfo.old.num, "the probed block's body must still be on disk")
 
 	err = apis.eth.checkPruneBlocks(ctx, tx, oldest-1)
-	require.ErrorIs(t, err, state.PrunedError)
+	require.ErrorIs(t, err, state.ErrPruned)
 	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", oldest))
 
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, oldest))
@@ -1382,7 +1367,7 @@ func TestBlocksGateRequiresPreMergeTransactions(t *testing.T) {
 	require.NotNil(t, body, "the pre-merge body the probe must not trust")
 
 	err = apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
-	require.ErrorIs(t, err, state.PrunedError)
+	require.ErrorIs(t, err, state.ErrPruned)
 	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", pruneGatingMergeHeight))
 
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, pruneGatingMergeHeight))
@@ -1434,7 +1419,7 @@ func TestBlocksGateReopensWhenOlderBlocksArrive(t *testing.T) {
 		defer tx.Rollback()
 		return apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
 	}
-	require.ErrorIs(t, gateOnOldBlock(), state.PrunedError,
+	require.ErrorIs(t, gateOnOldBlock(), state.ErrPruned,
 		"without pre-merge blocks the datadir reads as expiry")
 
 	rwTx, err = apis.rwDB.BeginTemporalRw(ctx)
@@ -1489,7 +1474,7 @@ func TestLogsByHashGateAppliesOnCachedReceipts(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	_, err = apis.erigon.GetLogsByHash(ctx, chainInfo.old.hash)
-	require.ErrorIs(t, err, state.PrunedError)
+	require.ErrorIs(t, err, state.ErrPruned)
 }
 
 // TestCapabilitiesTakeTheNoByzantiumRequirement pins the same pre-Byzantium
@@ -1517,7 +1502,7 @@ func TestCapabilitiesTakeTheNoByzantiumRequirement(t *testing.T) {
 	require.Equal(t, historyOldest, uint64(*caps.Receipts.OldestBlock))
 
 	require.NoError(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, historyOldest))
-	require.ErrorIs(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, historyOldest-1), state.PrunedError)
+	require.ErrorIs(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, historyOldest-1), state.ErrPruned)
 }
 
 // TestLogsByBlockHashReportsAMissingBody pins that a block the gate serves but whose
@@ -1639,7 +1624,7 @@ func TestBlocksGateResolvesExpiryFromDiskWhateverTheHistory(t *testing.T) {
 				require.NoError(t, err)
 				return
 			}
-			require.ErrorIs(t, err, state.PrunedError)
+			require.ErrorIs(t, err, state.ErrPruned)
 		})
 	}
 }
@@ -1671,7 +1656,7 @@ func TestBlocksGateCachesTheVerdictForAShortWhile(t *testing.T) {
 	require.NoError(t, gateOnOldBlock(), "within the window the remembered verdict answers")
 
 	apis.eth._preMergeData.SetTTL(0)
-	require.ErrorIs(t, gateOnOldBlock(), state.PrunedError, "past the window the datadir is read again")
+	require.ErrorIs(t, gateOnOldBlock(), state.ErrPruned, "past the window the datadir is read again")
 }
 
 // TestBlocksGateSkipsAnEmptySampledBlock pins that a sampled block without transactions
@@ -1749,7 +1734,7 @@ func TestEmptyBlockReceiptsNeedNoStateHistory(t *testing.T) {
 	require.NotEmpty(t, withTxns.Transactions())
 
 	_, err = apis.eth.receiptsGenerator.GetReceipts(ctx, chainConfig, view, withTxns, eth.ReceiptsOpts{})
-	require.ErrorIs(t, err, state.PrunedError, "the control block must reach the unavailable history")
+	require.ErrorIs(t, err, state.ErrPruned, "the control block must reach the unavailable history")
 }
 
 // TestFeeHistoryGateTakesTheOldestBlockOfTheRange pins that the reward-percentile gate
@@ -1768,7 +1753,7 @@ func TestFeeHistoryGateTakesTheOldestBlockOfTheRange(t *testing.T) {
 	retained := rpc.DecimalOrHex(head - oldest + 1)
 
 	_, err := apis.eth.FeeHistory(ctx, retained+1, rpc.BlockNumber(head), []float64{50})
-	require.ErrorIs(t, err, state.PrunedError)
+	require.ErrorIs(t, err, state.ErrPruned)
 	require.Contains(t, err.Error(), "blocks are available")
 
 	_, err = apis.eth.FeeHistory(ctx, retained+1, rpc.BlockNumber(head), nil)
@@ -1799,7 +1784,7 @@ func TestReceiptCacheServesBlocksWhoseHistoryIsRetired(t *testing.T) {
 
 	bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num))
 	_, err := apis.eth.GetBalance(ctx, testAddr, &bnh)
-	require.ErrorIs(t, err, state.PrunedError, "the history window must already refuse state for this block")
+	require.ErrorIs(t, err, state.ErrPruned, "the history window must already refuse state for this block")
 
 	for _, ep := range receiptGatedEndpoints() {
 		t.Run(ep.name, func(t *testing.T) {
@@ -1830,7 +1815,7 @@ func TestReceiptsWithoutCacheStopAtRetiredHistory(t *testing.T) {
 	for _, ep := range receiptGatedEndpoints() {
 		t.Run(ep.name, func(t *testing.T) {
 			_, err := ep.call(ctx, apis, chainInfo.old)
-			require.ErrorIs(t, err, state.PrunedError)
+			require.ErrorIs(t, err, state.ErrPruned)
 		})
 	}
 }
