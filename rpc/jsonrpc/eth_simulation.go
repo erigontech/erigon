@@ -386,13 +386,12 @@ func (s *simulator) sanitizeCall(
 		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit))
 	}
 
+	if err := ethapi.ChainIDMismatch(args.ChainID, s.chainConfig.ChainID); err != nil {
+		return err
+	}
 	if args.ChainID == nil {
 		// Copy the chain ID to avoid aliasing the live chainConfig pointer.
 		args.ChainID = (*hexutil.U256)(new(uint256.Int).Set(s.chainConfig.ChainID))
-	} else {
-		if have := (*uint256.Int)(args.ChainID); !have.Eq(s.chainConfig.ChainID) {
-			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, s.chainConfig.ChainID)
-		}
 	}
 	if baseFee == nil {
 		// If there's no base fee, then it must be a non-1559 execution
