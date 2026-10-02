@@ -34,7 +34,7 @@ func BenchmarkWitnesses(b *testing.B) {
 		for _, a := range targets {
 			toWitness.TouchPlainKey(string(a), nil, toWitness.TouchAccount)
 		}
-		_, _, _, err := hph.Witnesses(ctx, toWitness, false, "")
+		_, _, _, err := hph.Witnesses(ctx, toWitness, false)
 		toWitness.Close()
 		require.NoError(b, err)
 	}

@@ -26,12 +26,14 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // JsonStreamLogger is an EVM state logger and implements Tracer.
@@ -42,7 +44,7 @@ import (
 type JsonStreamLogger struct {
 	ctx    context.Context
 	cfg    LogConfig
-	stream jsonstream.Stream
+	stream *jsonstream.Stream
 	// Scratch for the hex helpers below. Every result aliases it, so only one is
 	// live at a time: hand it to the stream, which copies, before encoding the next.
 	hexEncodeBuf [128]byte
@@ -55,7 +57,7 @@ type JsonStreamLogger struct {
 }
 
 // NewStructLogger returns a new logger
-func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream jsonstream.Stream) *JsonStreamLogger {
+func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsonstream.Stream) *JsonStreamLogger {
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,
@@ -73,8 +75,8 @@ func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 		Hooks: &tracing.Hooks{
 			OnTxStart:           l.OnTxStart,
 			OnSystemCallStartV2: l.OnSystemCallStartV2,
-			OnExit:              l.OnExit,
-			OnOpcode:            l.OnOpcode,
+			OnExitV2:            l.OnExitV2,
+			OnOpcodeV2:          l.OnOpcodeV2,
 		},
 	}
 }
@@ -103,20 +105,19 @@ func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
 	return common.ToStringZeroCopy(append(b, '"'))
 }
 
-// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes. It goes through
-// hexEncodeBuf so a caller's local array does not escape through the Stream interface.
+// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes.
 func (l *JsonStreamLogger) writeWord(word []byte) {
 	padded := l.hexEncodeBuf[:32]
 	clear(padded[copy(padded, word):])
 	l.stream.WriteHex(padded)
 }
 
-func (l *JsonStreamLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (l *JsonStreamLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	l.writePrologueOnce()
 }
 
 // writePrologueOnce opens the response object and the structLogs array. Every
-// frame exits through OnExit, and the caller closes one object and one array, so
+// frame exits through OnExitV2, and the caller closes one object and one array, so
 // a second prologue would leave the response unbalanced.
 func (l *JsonStreamLogger) writePrologueOnce() {
 	if !l.firstCapture {
@@ -124,12 +125,12 @@ func (l *JsonStreamLogger) writePrologueOnce() {
 	}
 	l.firstCapture = false
 	l.stream.WriteObjectStart()
-	l.stream.WriteObjectField("structLogs")
+	l.stream.Field("structLogs")
 	l.stream.WriteArrayStart()
 }
 
-// OnOpcode also tracks SLOAD/SSTORE ops to track storage change.
-func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+// OnOpcodeV2 also tracks SLOAD/SSTORE ops to track storage change.
+func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	contractAddr := scope.Address()
 	memory := scope.MemoryData()
 	stack := scope.StackData()
@@ -147,9 +148,6 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		return
 	}
 	l.writePrologueOnce()
-	if l.opcodeSteps > 0 {
-		l.stream.WriteMore()
-	}
 	l.opcodeSteps++
 	var outputStorage bool
 	if !l.cfg.DisableStorage {
@@ -180,77 +178,65 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	}
 	// create a new snapshot of the EVM.
 	l.stream.WriteObjectStart()
-	l.stream.WriteObjectField("pc")
-	l.stream.WriteUint64(pc)
-	l.stream.WriteMore()
-	l.stream.WriteObjectField("op")
+	l.stream.Field("pc")
+	l.stream.Uint(pc)
+	l.stream.Field("op")
 	l.stream.WriteString(op.String())
-	l.stream.WriteMore()
-	l.stream.WriteObjectField("gas")
-	l.stream.WriteUint64(gas)
-	l.stream.WriteMore()
-	l.stream.WriteObjectField("gasCost")
-	l.stream.WriteUint64(cost)
-	l.stream.WriteMore()
-	l.stream.WriteObjectField("depth")
-	l.stream.WriteInt(depth)
+	l.stream.Field("gas")
+	l.stream.Uint(gas.Execution)
+	l.stream.Field("gasCost")
+	l.stream.Uint(cost.Execution)
+	if cost.State != 0 {
+		l.stream.Field("stateGasCost")
+		l.stream.Int(cost.State)
+	}
+	if gas.State != 0 {
+		l.stream.Field("stateGasReservoir")
+		l.stream.Uint(gas.State)
+	}
+	l.stream.Field("depth")
+	l.stream.Int(int64(depth))
 	refund := l.env.IntraBlockState.GetRefund()
 	if refund != 0 {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("refund")
-		l.stream.WriteUint64(refund)
+		l.stream.Field("refund")
+		l.stream.Uint(refund)
 	}
 
 	if err != nil {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("error")
+		l.stream.Field("error")
 		l.stream.WriteString(err.Error())
 	}
 	if !l.cfg.DisableStack {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("stack")
+		l.stream.Field("stack")
 		l.stream.WriteArrayStart()
 		for i := range stack {
-			if i > 0 {
-				l.stream.WriteMore()
-			}
 			l.stream.WriteRaw(l.hexQuoted(&stack[i]))
 		}
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableMemory && len(memory) > 0 {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("memory")
+		l.stream.Field("memory")
 		l.stream.WriteArrayStart()
 		for i := 0; i < len(memory); i += 32 {
 			end := min(i+32, len(memory))
-			if i > 0 {
-				l.stream.WriteMore()
-			}
 			l.writeWord(memory[i:end])
 		}
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableReturnData && len(rData) > 0 {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("returnData")
-		l.stream.WriteHex(rData)
+		ethjson.Data(l.stream, "returnData", rData)
 	}
 	if outputStorage {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("storage")
+		l.stream.Field("storage")
 		l.stream.WriteObjectStart()
 		// Sorted by location for easier comparison with geth
 		s := l.storage[contractAddr]
 		l.locations = slices.AppendSeq(l.locations[:0], maps.Keys(s))
 		l.locations.Sort()
 		for i := range l.locations {
-			if i > 0 {
-				l.stream.WriteMore()
-			}
 			loc := &l.locations[i]
 			value := s[*loc]
-			l.stream.WriteObjectField(l.hexWithPrefix(loc))
+			l.stream.Field(l.hexWithPrefix(loc))
 			l.writeWord(value[:])
 		}
 		l.stream.WriteObjectEnd()
