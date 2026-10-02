@@ -100,8 +100,16 @@ func (tx *prefetchTestTx) Rollback() {
 
 type prefetchTestCursor struct {
 	kv.CursorDupSort
-	seek  func([]byte, []byte) error
-	close func()
+	seekExact func([]byte) error
+	seek      func([]byte, []byte) error
+	close     func()
+}
+
+func (c *prefetchTestCursor) SeekExact(key []byte) ([]byte, []byte, error) {
+	if c.seekExact != nil {
+		return nil, nil, c.seekExact(key)
+	}
+	return nil, nil, nil
 }
 
 func (c *prefetchTestCursor) SeekBothRange(key, value []byte) ([]byte, error) {
@@ -169,35 +177,49 @@ func TestInvertedIndexPrefetcherBatches(t *testing.T) {
 }
 
 func TestInvertedIndexPrefetcherErrorWaitsForReaders(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		ctx := t.Context()
-		wantErr := errors.New("read failed")
-		release, releaseReads := context.WithCancel(ctx)
-		defer releaseReads()
-		db := &prefetchTestDB{newCursor: func(context.Context) kv.CursorDupSort {
-			return &prefetchTestCursor{seek: func(key, value []byte) error {
-				switch key[0] {
-				case 0:
-					return wantErr
-				case 1:
-					<-release.Done()
-				}
-				return nil
-			}}
-		}}
-		p := newInvertedIndexPrefetcher(db, "index", 2)
-		require.NoError(t, p.open(ctx))
-		defer p.close()
-		done := make(chan error, 1)
-		go func() { done <- p.prefetch(ctx, [][2][]byte{{{0}, nil}, {{1}, nil}}) }()
-		synctest.Wait()
-		require.Empty(t, done, "an error must not release buffers still used by another reader")
-		releaseReads()
-		synctest.Wait()
-		require.Len(t, done, 1)
-		require.ErrorIs(t, <-done, wantErr)
-		require.NoError(t, p.prefetch(ctx, [][2][]byte{{{2}, nil}}))
-	})
+	for _, lookup := range []string{"first", "range"} {
+		t.Run(lookup, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx := t.Context()
+				wantErr := errors.New("read failed")
+				release, releaseReads := context.WithCancel(ctx)
+				defer releaseReads()
+				db := &prefetchTestDB{newCursor: func(context.Context) kv.CursorDupSort {
+					return &prefetchTestCursor{
+						seekExact: func(key []byte) error {
+							if lookup == "first" && key[0] == 0 {
+								return wantErr
+							}
+							return nil
+						},
+						seek: func(key, value []byte) error {
+							switch key[0] {
+							case 0:
+								if lookup == "range" {
+									return wantErr
+								}
+							case 1:
+								<-release.Done()
+							}
+							return nil
+						},
+					}
+				}}
+				p := newInvertedIndexPrefetcher(db, "index", 2)
+				require.NoError(t, p.open(ctx))
+				defer p.close()
+				done := make(chan error, 1)
+				go func() { done <- p.prefetch(ctx, [][2][]byte{{{0}, nil}, {{1}, nil}}) }()
+				synctest.Wait()
+				require.Empty(t, done, "an error must not release buffers still used by another reader")
+				releaseReads()
+				synctest.Wait()
+				require.Len(t, done, 1)
+				require.ErrorIs(t, <-done, wantErr)
+				require.NoError(t, p.prefetch(ctx, [][2][]byte{{{2}, nil}}))
+			})
+		})
+	}
 }
 
 func TestInvertedIndexPrefetcherCancellation(t *testing.T) {

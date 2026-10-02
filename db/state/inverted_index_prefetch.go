@@ -82,6 +82,11 @@ func (p *invertedIndexPrefetcher) fetch(ctx context.Context, tx kv.Tx, pairs [][
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		// we do SeekExact here on purpose to warm the first duplicate's leaf page,
+		// which mdbx put reads even when the insertion position is on another page.
+		if _, _, err := c.SeekExact(pair[0]); err != nil {
+			return err
+		}
 		if _, err := c.SeekBothRange(pair[0], pair[1]); err != nil {
 			return err
 		}
