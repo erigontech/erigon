@@ -580,3 +580,31 @@ func TestRPCBlockTransactionCountIsANumber(t *testing.T) {
 	n := uint64(15)
 	require.Contains(t, fastJSON(t, &RPCBlock{TransactionCount: &n}), `"transactionCount":15`)
 }
+
+func TestCallArgsUnmarshalMatchesEncodingJSON(t *testing.T) {
+	for _, in := range []string{
+		`{"to":"0x0000000000000000000000000000000000000001","data":"0x0102","gas":"0x10"}`,
+		`{"input":"0x0102","value":"0x1"}`,
+		`{"data":"0x0102","input":"0x0102"}`,
+		`{"data":"0x0102","input":"0x0103"}`,
+		`{"data":null,"input":"0x"}`,
+		`{"data":"0x01","data":"0x02"}`,
+		`{"Data":"0x01"}`,
+		`{"data":"0x0"}`,
+		`{"data":"01"}`,
+		`{"data":1}`,
+		`{"data":"0x01"`,
+		`[]`,
+		`{"accessList":[{"address":"0x0000000000000000000000000000000000000002","storageKeys":[]}],"data":"0xaa"}`,
+	} {
+		var got, want CallArgs
+		gotErr := got.UnmarshalJSON([]byte(in))
+		wantErr := want.unmarshalStd([]byte(in))
+		require.Equal(t, wantErr == nil, gotErr == nil, in)
+		if wantErr == nil {
+			require.Equal(t, want, got, in)
+		} else {
+			require.Equal(t, wantErr.Error(), gotErr.Error(), in)
+		}
+	}
+}
