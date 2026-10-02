@@ -40,13 +40,13 @@ func (ct *OverlayCreateTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart: nil,
-			OnEnter:   ct.OnEnter,
+			OnEnterV2: ct.OnEnterV2,
 		},
 	}
 }
 
 // Rest of the frames
-func (ct *OverlayCreateTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (ct *OverlayCreateTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	if ct.isCapturing {
 		return
 	}

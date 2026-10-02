@@ -292,6 +292,7 @@ func (*ForkChoiceState) EncodingSizeSSZ() int { return 96 }
 func (s *ForkChoiceState) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, s.HeadHash[:], s.SafeBlockHash[:], s.FinalizedBlockHash[:])
 }
+
 func (s *ForkChoiceState) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, s.HeadHash[:], s.SafeBlockHash[:], s.FinalizedBlockHash[:])
 }
@@ -376,10 +377,12 @@ func (a *PayloadAttributes) decodeSSZ(buf []byte, version int, strict bool) erro
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
 	case clparams.DenebVersion, clparams.ElectraVersion, clparams.FuluVersion:
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
-		a.ParentBeaconBlockRoot = &fields.parentBeaconBlockRoot
+		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
+		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
 	default: // GloasVersion+
 		a.Withdrawals = withdrawalsFromList(fields.withdrawals)
-		a.ParentBeaconBlockRoot = &fields.parentBeaconBlockRoot
+		parentBeaconBlockRoot := fields.parentBeaconBlockRoot
+		a.ParentBeaconBlockRoot = &parentBeaconBlockRoot
 		slotNumber := hexutil.Uint64(fields.slotNumber)
 		a.SlotNumber = &slotNumber
 		tgl := hexutil.Uint64(fields.targetGasLimit)
@@ -549,6 +552,7 @@ func (*BlobAndProofV1) EncodingSizeSSZ() int { return sszBlobBytes + sszKZGBytes
 func (b *BlobAndProofV1) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, newBlob(b.Blob), newKZGProof(b.Proof))
 }
+
 func (b *BlobAndProofV1) DecodeSSZ(buf []byte, version int) error {
 	blob := &cltypes.Blob{}
 	proof := &cltypes.KZGProof{}
@@ -570,6 +574,7 @@ func (b *BlobAndProofV2) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	return ssz2.MarshalSSZ(dst, newBlob(b.Blob), proofs)
 }
+
 func (b *BlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
 	blob := &cltypes.Blob{}
 	proofs := solid.NewStaticListSSZ[*cltypes.KZGProof](sszCellsPerExtBlob, sszKZGBytes)
@@ -615,9 +620,11 @@ func (n *NullableBlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (n *NullableBlobAndProofV2) EncodingSizeSSZ() int { out, _ := n.EncodeSSZ(nil); return len(out) }
+
 func (n *NullableBlobAndProofV2) HashSSZ() ([32]byte, error) {
 	return [32]byte{}, nil
 }
+
 func (*NullableBlobAndProofV2) Clone() clonable.Clonable {
 	return &NullableBlobAndProofV2{}
 }

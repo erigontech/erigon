@@ -38,6 +38,7 @@ type metaTxn struct {
 	timestamp                 uint64 // when it was added to pool
 	subPool                   SubPoolMarker
 	currentSubPool            SubPoolType
+	announced                 bool // has entered pending once; a later return is not announced
 	minedBlockNum             uint64
 }
 

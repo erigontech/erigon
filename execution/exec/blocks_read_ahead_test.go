@@ -362,7 +362,7 @@ func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
 	baseTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer baseTx.Rollback()
-	overlay, err := membatchwithdb.NewMemoryBatch(baseTx, dirs.Tmp, log.New())
+	overlay, err := membatchwithdb.NewMemoryBatch(baseTx)
 	require.NoError(t, err)
 	require.NoError(t, rawdb.WriteBlockAccessListBytes(overlay, header.Hash(), header.Number.Uint64(), balBytes))
 	// The regression requires the BAL to be present only in BlockOverlay.
@@ -736,7 +736,8 @@ func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 		TemporalGetter: stubTemporalGetter{v: []byte("pre-delete-record")},
 		stepSize:       1_562_500,
 		view: sc.View(cache.FrontierWithStateVersion(
-			cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }), 1)),
+			cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }), 1,
+		)),
 	}
 
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})

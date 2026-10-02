@@ -125,7 +125,8 @@ func printSample(t *testing.T, iter int) {
 	require.NoError(t, err)
 	mapsLines := bytes.Count(mapsBytes, []byte{'\n'})
 
-	fmt.Printf("%d,%d,%d,%d,%d,%d\n",
+	fmt.Printf(
+		"%d,%d,%d,%d,%d,%d\n",
 		iter,
 		rssKb/1024,
 		vmKb/1024/1024,

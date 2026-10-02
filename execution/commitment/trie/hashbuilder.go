@@ -232,7 +232,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		popped++
 	}
 	var accountCode CodeNode
-	var codeHash = accounts.EmptyCodeHash
+	codeHash := accounts.EmptyCodeHash
 
 	if fieldSet&uint32(8) != 0 {
 		var codeHashValue common.Hash

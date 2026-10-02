@@ -59,12 +59,23 @@ import (
 
 var (
 	latestNumOrHash             = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	latestExecutedNumOrHash     = rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
 	errPendingStateNotSupported = errors.New("pending state is not supported")
 )
 
 func rejectPendingState(blockNrOrHash rpc.BlockNumberOrHash) error {
 	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
 		return errPendingStateNotSupported
+	}
+	return nil
+}
+
+// requireBlockSelector rejects a block selector that carries neither a number nor a
+// hash. Used by the methods whose selector is mandatory, so it has no default to
+// fall back on.
+func requireBlockSelector(blockNrOrHash rpc.BlockNumberOrHash) error {
+	if blockNrOrHash.BlockNumber == nil && blockNrOrHash.BlockHash == nil {
+		return &rpc.InvalidParamsError{Message: "block selector must carry a blockNumber or a blockHash"}
 	}
 	return nil
 }
@@ -105,6 +116,9 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	if err != nil {
 		return nil, err
 	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
+		return nil, err
+	}
 	engine := api.engine()
 
 	if args.Gas == nil || uint64(*args.Gas) == 0 {
@@ -129,7 +143,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +172,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		args = *argsOrNil
 	}
 
-	dbtx, err := api.db.BeginTemporalRo(ctx)
+	dbtx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, err
 	}
@@ -168,30 +182,25 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if blockNrOrHash == nil {
 		blockNrOrHash = &latestNumOrHash
 	}
+	// The pending block is a proposal with no executed state behind it, so
+	// estimate at the latest executed block instead.
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		blockNrOrHash = &latestExecutedNumOrHash
+	}
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
 		return 0, err
 	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
+		return 0, err
+	}
 	engine := api.engine()
 
-	header, isLatest, err := api.headerByNumberOrHash(ctx, dbtx, *blockNrOrHash)
+	header, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, dbtx, *blockNrOrHash)
 	if err != nil {
 		return 0, err
 	}
-
-	// try to check if it is a pending block
-	if header == nil {
-		b := api.filters.LastPendingBlock()
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, dbtx, api._blockReader, api.filters)
-		if err != nil {
-			return 0, err
-		}
-		if b != nil && blockNum == b.NumberU64() {
-			header = b.HeaderNoCopy()
-		}
-	}
-
 	if header == nil {
 		return 0, fmt.Errorf("could not find the header %s in cache or db", blockNrOrHash.String())
 	}
@@ -207,13 +216,12 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, err
 	}
 
-	stateTx := api.filters.WithTemporalOverlay(dbtx)
-	err = rpchelper.CheckBlockExecuted(stateTx, header.Number.Uint64())
+	err = rpchelper.CheckBlockExecuted(dbtx, header.Number.Uint64())
 	if err != nil {
 		return 0, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
 	}
@@ -229,7 +237,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	// Determine the highest gas limit can be used during the estimation.
-	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
+	if args.Gas != nil && uint64(*args.Gas) >= mdgas.MinTxGas(chainConfig.IsAmsterdam(effectiveHeader.Time)) {
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
@@ -463,7 +471,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
+	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +521,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 		commitmentStartingTxNum := roTx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 		if lastTxnInBlock < commitmentStartingTxNum {
-			return nil, fmt.Errorf("%w: commitment start: %d, last tx: %d", state.PrunedError, commitmentStartingTxNum, lastTxnInBlock)
+			return nil, fmt.Errorf("%w: commitment start: %d, last tx: %d", state.ErrPruned, commitmentStartingTxNum, lastTxnInBlock)
 		}
 
 		sdCtx.SetHistoryStateReader(roTx, lastTxnInBlock)
@@ -643,7 +651,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 	defer tx.Rollback()
 
-	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil) // DoCall cannot be executed on non-canonical blocks
+	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -796,7 +804,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// fold superset, so the op-stream carries the same data and the stateless verifier isn't
 	// fed redundant memoizationOff nodes. leanNodes is the same set, root first, without code
 	// attached — the form the node-set self-verifier consumes.
-	witnessTrie, leanNodes, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, "eth_getWitness", true /* produceExclusionProofs */)
+	witnessTrie, leanNodes, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, true /* produceExclusionProofs */)
 	if err != nil {
 		return nil, err
 	}
@@ -954,9 +962,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	if err != nil {
 		return nil, err
 	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
+		return nil, err
+	}
 	engine := api.engine()
 
-	header, latest, err := api.headerByNumberOrHash(ctx, tx, bNrOrHash)
+	header, latest, err := api.canonicalHeaderByNumberOrHash(ctx, tx, bNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -979,7 +990,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			return nil, err
 		}
 
-		err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64())
+		err = rpchelper.CheckBlockExecuted(tx, header.Number.Uint64())
 		if err != nil {
 			return nil, err
 		}
@@ -1099,7 +1110,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, config)
+		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, config), txCtx, ibs, chainConfig, config)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {

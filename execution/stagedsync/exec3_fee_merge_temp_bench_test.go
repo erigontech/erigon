@@ -35,26 +35,32 @@ func benchFeeDropSets(n int, coinbase accounts.Address) (prev, next *state.Write
 		binary.BigEndian.PutUint64(a[12:], uint64(i+1))
 		addr := accounts.InternAddress(a)
 		base.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
-			WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}})
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath},
+		})
 		base.SetNonce(addr, &state.VersionedWrite[uint64]{
-			WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath}})
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.NoncePath},
+		})
 		var h common.Hash
 		binary.BigEndian.PutUint64(h[24:], uint64(i+1))
 		key := accounts.InternKey(h)
 		base.SetStorage(addr, key, &state.VersionedWrite[uint256.Int]{
-			WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: key}})
+			WriteHeader: state.WriteHeader{Address: addr, Path: state.StoragePath, Key: key},
+		})
 	}
 	for _, tip := range []**state.WriteSet{&prev, &next} {
 		ws := &state.WriteSet{}
 		ws.SetBalance(coinbase, &state.VersionedWrite[uint256.Int]{
-			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.BalancePath}})
+			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.BalancePath},
+		})
 		ws.SetAddress(coinbase, &state.VersionedWrite[*accounts.Account]{
-			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.AddressPath}, Val: &accounts.Account{}})
+			WriteHeader: state.WriteHeader{Address: coinbase, Path: state.AddressPath}, Val: &accounts.Account{},
+		})
 		*tip = base.MergeInto(ws)
 	}
 	// The half of the credit this round stopped emitting.
 	prev.SetSelfDestruct(coinbase, &state.VersionedWrite[bool]{
-		WriteHeader: state.WriteHeader{Address: coinbase, Path: state.SelfDestructPath}, Val: true})
+		WriteHeader: state.WriteHeader{Address: coinbase, Path: state.SelfDestructPath}, Val: true,
+	})
 	return prev, next
 }
 

@@ -513,9 +513,11 @@ type refreshReader struct {
 func (r *refreshReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
 	return r.account, nil
 }
+
 func (r *refreshReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
 	return r.account, nil
 }
+
 func (r *refreshReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }

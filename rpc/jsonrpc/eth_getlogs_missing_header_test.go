@@ -48,7 +48,8 @@ const (
 func setupMissingHeaderChain(t *testing.T) *execmoduletester.ExecModuleTester {
 	t.Helper()
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(&types.Genesis{
 			Config: chain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},

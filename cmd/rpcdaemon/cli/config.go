@@ -97,9 +97,7 @@ var rootCmd = &cobra.Command{
 	Short: "rpcdaemon is JSON RPC server that connects to Erigon node for remote DB access",
 }
 
-var (
-	stateCacheStr string
-)
+var stateCacheStr string
 
 func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
@@ -190,7 +188,6 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	}
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-
 		err := cfg.StateCache.CacheSize.UnmarshalText([]byte(stateCacheStr))
 		if err != nil {
 			return fmt.Errorf("state.cache value of %v is not valid", stateCacheStr)
@@ -343,7 +340,8 @@ func EmbeddedServices(ctx context.Context,
 func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient,
 	stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine,
-	ff *rpchelper.Filters, err error) {
+	ff *rpchelper.Filters, err error,
+) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, errors.New("either remote db or local db must be specified")
 	}
@@ -459,8 +457,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 
-		//TODO - its probably better to use:  <-blockReader.Ready() here - but it depends how
-		//this is called at a process level
+		// TODO - its probably better to use:  <-blockReader.Ready() here - but it depends how
+		// this is called at a process level
 		allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(rawDB)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, nil, err
@@ -760,7 +758,6 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 			defer cancel()
 			_ = listener.Shutdown(shutdownCtx)
 			logger.Info("HTTP endpoint closed", "url", httpAddr)
-
 		}()
 	}
 	if cfg.HttpsURL != "" {
@@ -882,7 +879,7 @@ func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 	jwtSecret := make([]byte, 32)
 	rand.Read(jwtSecret)
 
-	if err := os.WriteFile(cfg.JWTSecretPath, []byte(hexutil.Encode(jwtSecret)), 0600); err != nil {
+	if err := os.WriteFile(cfg.JWTSecretPath, []byte(hexutil.Encode(jwtSecret)), 0o600); err != nil {
 		return nil, err
 	}
 	logger.Info("Generated JWT secret", "path", cfg.JWTSecretPath)
@@ -1007,7 +1004,6 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockRea
 		auraKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKV).
 			WithBucketsConfig(kv.AuRaTablesCfg).
 			Open()
-
 		if err != nil {
 			return err
 		}
@@ -1093,7 +1089,8 @@ func (e *remoteRulesEngine) GetPostApplyMessageFunc() evmtypes.PostApplyMessageF
 
 func (e *remoteRulesEngine) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
 	if err := e.validateEngineReady(); err != nil {
 		return err
 	}
