@@ -28,7 +28,7 @@ import (
 
 func createMockFile(t *testing.T, dir string, name string) {
 	t.Helper()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("DUMMY-CONTENT"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("DUMMY-CONTENT"), 0o644))
 }
 
 func setupWorkingStateMockDatadir(t *testing.T) datadir.Dirs {

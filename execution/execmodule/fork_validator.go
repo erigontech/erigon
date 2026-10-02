@@ -139,7 +139,7 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	defer fv.lock.Unlock()
 	start := time.Now()
 	if fv.sharedDom != nil {
-		if err := fv.sharedDom.FlushPendingUpdates(ctx, tx); err != nil {
+		if err := fv.sharedDom.FlushPendingUpdates(tx); err != nil {
 			return err
 		}
 		sdTxNum, _, err := sd.SeekCommitment(ctx, tx)
@@ -276,8 +276,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	fv.extendingForkNotifications = fv.executor.ValidationNotifications()
 	fv.extendingForkNotifications.Accumulator.Reset(0)
 	fv.extendingForkNotifications.RecentReceipts.Clear()
-	status, latestValidHash, validationError, criticalError =
-		fv.validateAndStorePayload(fv.ctx, fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
+	status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(fv.ctx, fv.sharedDom, tx, header, body, unwindPoint, headersChain, bodiesChain)
 
 	if fv.sharedDom != nil &&
 		(criticalError != nil || status == engine_types.InvalidStatus) {
