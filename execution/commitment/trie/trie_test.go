@@ -129,7 +129,7 @@ func TestLargeValue(t *testing.T) {
 
 // TestRandomCases tests som cases that were found via random fuzzing
 func TestRandomCases(t *testing.T) {
-	var rt = []randTestStep{
+	rt := []randTestStep{
 		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 0
 		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 1
 		{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000002")},   // step 2
@@ -159,7 +159,6 @@ func TestRandomCases(t *testing.T) {
 		//{op: 1, key: common.Hex2Bytes("fd"), value: common.Hex2Bytes("")}, // step 25
 	}
 	runRandTest(rt)
-
 }
 
 // randTest is a sequence of random trie operations replayed by runRandTest.
@@ -234,7 +233,7 @@ func runRandTest(rt randTest) bool {
 func TestDeepHash(t *testing.T) {
 	acc := accounts.NewAccount()
 	prefix := "prefix"
-	var testdata = [][]struct {
+	testdata := [][]struct {
 		key   string
 		value string
 	}{
@@ -614,7 +613,6 @@ func TestRLPEncodeDecodeWithAccountsAndStorage(t *testing.T) {
 		require.True(t, ok)
 		require.EqualValues(t, testAccounts[i], acc)
 	}
-
 }
 
 // The witness prune paths (WitnessNodesForKeys and WitnessNodesForKeysFromNodes, the

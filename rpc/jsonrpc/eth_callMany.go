@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -50,13 +52,20 @@ type StateContext struct {
 	TransactionIndex *int
 }
 
-func validateBundles(bundles []Bundle) error {
-	for _, bundle := range bundles {
-		if len(bundle.Transactions) != 0 {
-			return nil
+func validateBundles(bundles []Bundle, chainID *uint256.Int) error {
+	empty := true
+	for b, bundle := range bundles {
+		for i := range bundle.Transactions {
+			if err := ethapi.CheckChainID(bundle.Transactions[i].ChainID, chainID); err != nil {
+				return fmt.Errorf("bundle %d, transaction %d: %w", b, i, err)
+			}
+			empty = false
 		}
 	}
-	return errors.New("empty bundles")
+	if empty {
+		return errors.New("empty bundles")
+	}
+	return nil
 }
 
 // setupEVMTimeout cancels the EVM registered via the returned store func once timeout
@@ -107,7 +116,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	)
 
 	overrideBlockHash = make(map[uint64]common.Hash)
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -116,13 +125,13 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	if err != nil {
 		return nil, err
 	}
-	if err := validateBundles(bundles); err != nil {
+	if err := validateBundles(bundles, chainConfig.ChainID); err != nil {
 		return nil, err
 	}
 
 	defer func(start time.Time) { log.Trace("Executing EVM callMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -132,12 +141,12 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNum)
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -162,12 +171,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// The state a block starts from is its parent state plus the opening system
 	// transaction. Addressing it by the block itself keeps block 0 representable,
 	// where the parent block number would underflow.
-	stateTx := api.filters.WithTemporalOverlay(tx)
-	cacheView, err := api.stateCache.View(ctx, stateTx)
+	cacheView, err := api.stateCache.View(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	stateReader, err := rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, stateTx, blockNum, 0, api._txNumReader)
+	stateReader, err := rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, tx, blockNum, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +246,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		results := []map[string]any{}
 		for i := range bundle.Transactions {
 			txn := &bundle.Transactions[i]
-			if txn.Gas == nil || *(txn.Gas) == 0 {
+			if txn.Gas == nil || *txn.Gas == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
 			msg, err := txn.ToMessage(api.GasCap, &blockCtx.BaseFee)

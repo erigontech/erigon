@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestBlobsBundleV2MarshalFastJSONMatchesReflection(t *testing.T) {
@@ -42,7 +43,7 @@ func TestBlobsBundleV2MarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal([]*BlobAndProofV2(bundle))
 			require.NoError(t, err)
-			got, err := bundle.MarshalFastJSON()
+			got, err := jsonstream.Marshal(bundle)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
 		})
@@ -70,7 +71,7 @@ func TestBlobsBundleV3MarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal([]*BlobCellsAndProofsV1(bundle))
 			require.NoError(t, err)
-			got, err := bundle.MarshalFastJSON()
+			got, err := jsonstream.Marshal(bundle)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
 		})
@@ -89,7 +90,7 @@ func TestBlobsBundleV1MarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal([]*BlobAndProofV1(bundle))
 			require.NoError(t, err)
-			got, err := bundle.MarshalFastJSON()
+			got, err := jsonstream.Marshal(bundle)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
 		})

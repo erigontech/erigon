@@ -19,107 +19,17 @@ package ethapi
 import (
 	"encoding/json"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
-
-// MarshalFastJSONTo writes the header as its own object. RPCBlock flattens the same fields
-// into its own object instead, through WriteFieldsTo.
-func (h *RPCHeader) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	if h == nil {
-		s.WriteNil()
-		return nil
-	}
-	s.WriteObjectStart()
-	h.WriteFieldsTo(s)
-	s.WriteObjectEnd()
-	return nil
-}
-
-// WriteFieldsTo writes the header's fields without the enclosing object, in the order the
-// struct declares them so the bytes match reflection exactly. The caller owns the braces,
-// which is how RPCBlock flattens the embedded header into its own object.
-func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
-	s.WriteObjectField("number")
-	if h.Number == nil {
-		s.WriteNil()
-	} else {
-		s.WriteQuotedText(h.Number)
-	}
-	jsonstream.Field(s, "hash")
-	if h.Hash == nil {
-		s.WriteNil()
-	} else {
-		s.WriteHex(h.Hash[:])
-	}
-	jsonstream.Field(s, "parentHash").WriteHex(h.ParentHash[:])
-	jsonstream.Field(s, "nonce")
-	if h.Nonce == nil {
-		s.WriteNil()
-	} else {
-		s.WriteHex(h.Nonce[:])
-	}
-	jsonstream.Field(s, "mixHash").WriteHex(h.MixHash[:])
-	jsonstream.Field(s, "sha3Uncles").WriteHex(h.Sha3Uncles[:])
-	jsonstream.Field(s, "logsBloom")
-	if h.LogsBloom == nil {
-		s.WriteNil()
-	} else {
-		s.WriteHex(h.LogsBloom[:])
-	}
-	jsonstream.Field(s, "stateRoot").WriteHex(h.StateRoot[:])
-	jsonstream.Field(s, "miner")
-	if h.Miner == nil {
-		s.WriteNil()
-	} else {
-		s.WriteHex(h.Miner[:])
-	}
-	jsonstream.Text(s, "difficulty", h.Difficulty)
-	jsonstream.Field(s, "extraData").WriteHex(h.ExtraData)
-	jsonstream.Text(s, "gasLimit", &h.GasLimit)
-	jsonstream.Text(s, "gasUsed", &h.GasUsed)
-	jsonstream.Text(s, "timestamp", &h.Timestamp)
-	jsonstream.Field(s, "transactionsRoot").WriteHex(h.TransactionsRoot[:])
-	jsonstream.Field(s, "receiptsRoot").WriteHex(h.ReceiptsRoot[:])
-
-	// omitempty: a nil pointer is left out entirely.
-	if h.BaseFeePerGas != nil {
-		jsonstream.Text(s, "baseFeePerGas", h.BaseFeePerGas)
-	}
-	if h.WithdrawalsRoot != nil {
-		jsonstream.Field(s, "withdrawalsRoot").WriteHex(h.WithdrawalsRoot[:])
-	}
-	if h.BlobGasUsed != nil {
-		jsonstream.Text(s, "blobGasUsed", h.BlobGasUsed)
-	}
-	if h.ExcessBlobGas != nil {
-		jsonstream.Text(s, "excessBlobGas", h.ExcessBlobGas)
-	}
-	if h.ParentBeaconBlockRoot != nil {
-		jsonstream.Field(s, "parentBeaconBlockRoot").WriteHex(h.ParentBeaconBlockRoot[:])
-	}
-	if h.RequestsHash != nil {
-		jsonstream.Field(s, "requestsHash").WriteHex(h.RequestsHash[:])
-	}
-	if h.BlockAccessListHash != nil {
-		jsonstream.Field(s, "blockAccessListHash").WriteHex(h.BlockAccessListHash[:])
-	}
-	if h.SlotNumber != nil {
-		jsonstream.Text(s, "slotNumber", h.SlotNumber)
-	}
-	if h.AuraSeal != nil {
-		jsonstream.Field(s, "auraSeal").WriteHex(*h.AuraSeal)
-	}
-	if h.AuraStep != nil {
-		jsonstream.Text(s, "auraStep", h.AuraStep)
-	}
-}
 
 // MarshalFastJSONTo writes the whole block. It must exist: RPCBlock embeds RPCHeader, so
 // without it the promoted header method would satisfy the fast-JSON interface and a block
 // would serialise as a bare header, losing its transactions.
-func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if b == nil {
 		s.WriteNil()
 		return nil
@@ -130,73 +40,93 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	// first write, never with half a result already streamed.
 	hashes, hashesOK := b.Transactions.([]common.Hash)
 	full, fullOK := b.Transactions.([]*RPCTransaction)
-	var rawTxs, txCount, calls []byte
+	var rawTxs []byte
 	var err error
 	if !hashesOK && !fullOK {
 		if rawTxs, err = marshalIfSet(b.Transactions); err != nil {
 			return err
 		}
 	}
-	if txCount, err = marshalIfSet(b.TransactionCount); err != nil {
-		return err
-	}
-	if calls, err = marshalIfSet(b.Calls); err != nil {
+	callErrs, err := marshalCallErrors(b.Calls)
+	if err != nil {
 		return err
 	}
 
 	s.WriteObjectStart()
-	b.RPCHeader.WriteFieldsTo(s)
+	if err := b.RPCHeader.writeJSONFields(s); err != nil {
+		return err
+	}
 
-	jsonstream.Text(s, "size", &b.Size)
+	ethjson.Quantity(s, "size", b.Size)
 
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
 	case hashesOK:
 		jsonstream.HexesField(s, "transactions", hashes)
 	case fullOK:
-		jsonstream.Field(s, "transactions")
+		s.Field("transactions")
 		jsonstream.ArrayValue(s, full, writeTxElem)
 	case rawTxs != nil:
-		jsonstream.Field(s, "transactions").WriteRawBytes(rawTxs)
+		s.Field("transactions").WriteRawBytes(rawTxs)
 	}
 
 	jsonstream.HexesField(s, "uncles", b.Uncles)
 
 	if b.Withdrawals != nil {
-		jsonstream.Field(s, "withdrawals")
-		jsonstream.ArrayValue(s, *b.Withdrawals, writeWithdrawalElem)
+		s.Field("withdrawals")
+		if err := b.Withdrawals.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
 	}
-	if txCount != nil {
-		jsonstream.Field(s, "transactionCount").WriteRawBytes(txCount)
+	if b.TransactionCount != nil {
+		s.Field("transactionCount").Uint(*b.TransactionCount)
 	}
 	if b.TotalDifficulty != nil {
-		jsonstream.Text(s, "totalDifficulty", b.TotalDifficulty)
+		ethjson.Quantity256(s, "totalDifficulty", (*uint256.Int)(b.TotalDifficulty))
 	}
-	if calls != nil {
-		jsonstream.Field(s, "calls").WriteRawBytes(calls)
+	if b.Calls != nil {
+		s.Field("calls").WriteArrayStart()
+		for i := range b.Calls {
+			b.Calls[i].writeTo(s, callErrs[i])
+		}
+		s.WriteArrayEnd()
 	}
 	s.WriteObjectEnd()
 	return nil
 }
 
-// writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
-func writeTxElem(s *jsonstream.StackStream, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(s) }
-
-func writeWithdrawalElem(s *jsonstream.StackStream, wd **types.Withdrawal) {
-	if *wd == nil {
-		s.WriteNil()
-		return
+// marshalCallErrors encodes the calls' errors up front, the one part of a call result that
+// needs the reflection encoder, so a failure is reported before the block's first write.
+func marshalCallErrors(calls []CallResult) ([][]byte, error) {
+	if calls == nil {
+		return nil, nil
 	}
+	errs := make([][]byte, len(calls))
+	for i := range calls {
+		var err error
+		if errs[i], err = marshalIfSet(calls[i].Error); err != nil {
+			return nil, err
+		}
+	}
+	return errs, nil
+}
+
+func (r *CallResult) writeTo(s *jsonstream.Stream, callErr []byte) {
 	s.WriteObjectStart()
-	s.WriteObjectField("index").WriteQuotedText(&(*wd).Index)
-	s.WriteMore()
-	s.WriteObjectField("validatorIndex").WriteQuotedText(&(*wd).Validator)
-	s.WriteMore()
-	s.WriteObjectField("address").WriteHex((*wd).Address[:])
-	s.WriteMore()
-	s.WriteObjectField("amount").WriteQuotedText(&(*wd).Amount)
+	s.Field("returnData").WriteString(r.ReturnData)
+	s.Field("logs")
+	_ = r.Logs.MarshalFastJSONTo(s)
+	ethjson.Quantity(s, "gasUsed", r.GasUsed)
+	ethjson.Quantity(s, "maxUsedGas", r.MaxUsedGas)
+	ethjson.Quantity(s, "status", r.Status)
+	if callErr != nil {
+		s.Field("error").WriteRawBytes(callErr)
+	}
 	s.WriteObjectEnd()
 }
+
+// writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
+func writeTxElem(s *jsonstream.Stream, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(s) }
 
 // marshalIfSet encodes v unless it is absent, so the caller states each field once.
 func marshalIfSet(v any) ([]byte, error) {
@@ -204,4 +134,23 @@ func marshalIfSet(v any) ([]byte, error) {
 		return nil, nil
 	}
 	return json.Marshal(v)
+}
+
+// RPCBlocks is a list of blocks as a reply carries it. The RPC encoder only consults the
+// top-level result for a fast marshaller, so a plain slice would take the reflection path.
+type RPCBlocks []*RPCBlock
+
+func (bs RPCBlocks) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	if bs == nil {
+		s.WriteNil()
+		return nil
+	}
+	s.WriteArrayStart()
+	for _, b := range bs {
+		if err := b.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	s.WriteArrayEnd()
+	return nil
 }

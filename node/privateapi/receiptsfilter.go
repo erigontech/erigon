@@ -22,11 +22,14 @@ import (
 	"io"
 	"sync"
 
+	"github.com/holiman/uint256"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -39,6 +42,7 @@ type ReceiptsFilterAggregator struct {
 	receiptsFilterLock sync.Mutex
 	nextFilterId       uint64
 	events             *shards.Events
+	chainConfig        *chain.Config
 	signer             *types.Signer
 }
 
@@ -56,6 +60,7 @@ func NewReceiptsFilterAggregator(events *shards.Events, chainConfig *chain.Confi
 		receiptsFilters: make(map[uint64]*ReceiptsFilter),
 		nextFilterId:    0,
 		events:          events,
+		chainConfig:     chainConfig,
 		signer:          types.LatestSigner(chainConfig),
 	}
 }
@@ -253,5 +258,36 @@ func (a *ReceiptsFilterAggregator) receiptNotificationToProto(rn *notifications.
 		}
 	}
 
+	// The RPC side has neither the transaction nor the chain config the fees are derived from.
+	if rn.Tx != nil && rn.Header != nil {
+		protoReceipt.EffectiveGasPrice = gointerfaces.ConvertUint256IntToH256(effectiveGasPrice(rn.Tx, rn.Header.BaseFee))
+		if numBlobs := len(rn.Tx.GetBlobHashes()); numBlobs > 0 {
+			protoReceipt.BlobGasUsed = misc.GetBlobGasUsed(numBlobs)
+			if price := a.blobGasPrice(rn.Tx, rn.Header); price != nil {
+				protoReceipt.BlobGasPrice = gointerfaces.ConvertUint256IntToH256(price)
+			}
+		}
+	}
+
 	return protoReceipt
+}
+
+func effectiveGasPrice(txn types.Transaction, baseFee *uint256.Int) *uint256.Int {
+	if baseFee == nil {
+		return txn.GetTipCap()
+	}
+	tip := txn.GetEffectiveGasTip(baseFee)
+	return new(uint256.Int).Add(baseFee, &tip)
+}
+
+func (a *ReceiptsFilterAggregator) blobGasPrice(txn types.Transaction, header *types.Header) *uint256.Int {
+	if header.ExcessBlobGas == nil {
+		return nil
+	}
+	price, err := misc.GetBlobGasPrice(a.chainConfig, *header.ExcessBlobGas, header.Time)
+	if err != nil {
+		log.Warn("[rpc] cannot derive the blob gas price of a subscribed receipt", "err", err, "txHash", txn.Hash())
+		return nil
+	}
+	return &price
 }

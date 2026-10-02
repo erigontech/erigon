@@ -154,7 +154,7 @@ func allProcesses(procs []*process.Process) []*ProcessInfo {
 			name = "Unknown"
 		}
 
-		//remove gopls process as it is what we use to get info
+		// remove gopls process as it is what we use to get info
 		if name == "gopls" {
 			continue
 		}

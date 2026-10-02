@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -28,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -135,7 +135,7 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 }
 
 // GetFilterLogs implements eth_getFilterLogs.
-func (api *APIImpl) GetFilterLogs(ctx context.Context, index string) (types.RPCLogs, error) {
+func (api *APIImpl) GetFilterLogs(ctx context.Context, index string) (types.Logs, error) {
 	if api.filters == nil {
 		return nil, rpc.ErrNotificationsUnsupported
 	}
@@ -182,7 +182,15 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 					log.Warn(closedWarn)
 					return
 				}
-				notify(emit, item)
+				err := rpc.CoalesceNotifications(notifier, func() {
+					notify(emit, item)
+					for range len(ch) {
+						notify(emit, <-ch)
+					}
+				})
+				if err != nil {
+					log.Warn("[rpc] notification batch write failed, connection closed", "err", err)
+				}
 			case <-rpcSub.Err():
 				return
 			}
@@ -192,23 +200,33 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 	return rpcSub, nil
 }
 
+type fastMarshaler interface {
+	MarshalFastJSONTo(*jsonstream.Stream) error
+}
+
 // sharedJSON gives every remote subscriber the bytes of one encoding of the event, and an
-// in-process one the value itself.
-type sharedJSON[T any] struct {
+// in-process one the value itself. V keeps the payload on the streaming encoder: a type
+// without one does not compile here, instead of falling back to reflection at runtime.
+type sharedJSON[T any, V fastMarshaler] struct {
 	ev    *rpchelper.Shared[T]
-	value func(T) any
+	value func(T) V
 }
 
-func (s sharedJSON[T]) MarshalFastJSON() ([]byte, error) {
-	return s.ev.Encode(func(v T) ([]byte, error) { return json.Marshal(s.value(v)) })
+func (s sharedJSON[T, V]) MarshalFastJSONTo(w *jsonstream.Stream) error {
+	enc, err := s.ev.Encode(func(v T) ([]byte, error) { return jsonstream.Marshal(s.value(v)) })
+	if err != nil {
+		return err
+	}
+	w.WriteRawBytes(enc)
+	return nil
 }
 
-func (s sharedJSON[T]) LocalValue() any { return s.value(s.ev.Value) }
+func (s sharedJSON[T, V]) LocalValue() any { return s.value(s.ev.Value) }
 
-func headerValue(h *types.Header) any { return h }
+func headerValue(h *types.Header) *types.Header { return h }
 
-func subscribeReceiptsValue(rs []*remoteproto.SubscribeReceiptsReply) any {
-	out := make([]*ethutils.RPCReceipt, len(rs))
+func subscribeReceiptsValue(rs []*remoteproto.SubscribeReceiptsReply) ethutils.RPCReceipts {
+	out := make(ethutils.RPCReceipts, len(rs))
 	for i, r := range rs {
 		out[i] = ethutils.MarshalSubscribeReceipt(r)
 	}
@@ -227,7 +245,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 		},
 		func(emit func(payload any), h *rpchelper.Shared[*types.Header]) {
 			if h != nil && h.Value != nil {
-				emit(sharedJSON[*types.Header]{h, headerValue})
+				emit(sharedJSON[*types.Header, *types.Header]{h, headerValue})
 			}
 		},
 		"[rpc] new heads channel was closed")
@@ -272,14 +290,14 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 	return subscribeRPC(ctx,
-		func() (<-chan *types.RPCLog, func(), error) {
+		func() (<-chan *types.Log, func(), error) {
 			logs, id, err := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit, rpchelper.ProtocolWS)
 			if err != nil {
 				return nil, nil, err
 			}
 			return logs, func() { api.filters.UnsubscribeLogs(id) }, nil
 		},
-		func(emit func(payload any), h *types.RPCLog) {
+		func(emit func(payload any), h *types.Log) {
 			if h != nil {
 				emit(h)
 			}
@@ -306,7 +324,7 @@ func (api *APIImpl) TransactionReceipts(ctx context.Context, crit *filters.Recei
 		},
 		func(emit func(payload any), r *rpchelper.Shared[[]*remoteproto.SubscribeReceiptsReply]) {
 			if r != nil && len(r.Value) > 0 {
-				emit(sharedJSON[[]*remoteproto.SubscribeReceiptsReply]{r, subscribeReceiptsValue})
+				emit(sharedJSON[[]*remoteproto.SubscribeReceiptsReply, ethutils.RPCReceipts]{r, subscribeReceiptsValue})
 			}
 		},
 		"[rpc] receipts channel was closed")
