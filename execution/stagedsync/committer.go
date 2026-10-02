@@ -302,6 +302,12 @@ func newCommitmentCalculator(
 	if err != nil {
 		return nil, fmt.Errorf("commitmentCalculator: open roTx: %w", err)
 	}
+	ok := false
+	defer func() {
+		if !ok {
+			roTx.Rollback()
+		}
+	}()
 	// roTx lives for the calculator's lifetime — rolled back in Stop(), not
 	// deferred here. Safe across collate/prune cycles because the calculator
 	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
@@ -316,6 +322,7 @@ func newCommitmentCalculator(
 	// (written sequentially by this calculator).
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
 
+	ok = true
 	return &commitmentCalculator{
 		doms:                 doms,
 		db:                   db,

@@ -74,8 +74,15 @@ func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(
 				e.lock.RUnlock()
 				return nil, nil, err
 			}
+			ok := false
+			defer func() {
+				if !ok {
+					roTx.Rollback()
+				}
+			}()
 			view := overlay.NewReadView(roTx)
 			e.lock.RUnlock()
+			ok = true
 			return view, func() { roTx.Rollback() }, nil
 		}
 	}
