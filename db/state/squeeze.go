@@ -929,11 +929,9 @@ type RebuildRangeReport struct {
 // cache lives for one shard, so a ratio taken over the whole datadir overstates
 // what the rebuild saves.
 type RebuildShardReport struct {
-	StepFrom            kv.Step
-	StepTo              kv.Step
-	Keys                uint64
-	CodeBearingAccounts uint64
-	UniqueCodeHashes    uint64
+	StepFrom kv.Step
+	StepTo   kv.Step
+	Keys     uint64
 }
 
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
@@ -1160,11 +1158,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				return nil, nil, err
 			}
 			rangeReport.Shards = append(rangeReport.Shards, RebuildShardReport{
-				StepFrom:            rebuiltCommit.StepFrom,
-				StepTo:              rebuiltCommit.StepTo,
-				Keys:                rebuiltCommit.KeysProcessed,
-				CodeBearingAccounts: rebuiltCommit.CodeStats.CodeBearingAccounts,
-				UniqueCodeHashes:    rebuiltCommit.CodeStats.UniqueCodeHashes,
+				StepFrom: rebuiltCommit.StepFrom,
+				StepTo:   rebuiltCommit.StepTo,
+				Keys:     rebuiltCommit.KeysProcessed,
 			})
 			domains.Close()
 
@@ -1296,18 +1292,14 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		}
 	}
 	collectionSpent := time.Since(sf)
-	var codeStats commitment.PBinCodeStats
 	rh, err := sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 	if err != nil {
 		return nil, err
 	}
-	if trie, ok := sd.GetCommitmentCtx().Trie().(codeStatsTrie); ok {
-		codeStats = trie.CodeStats()
-	}
 
 	logger.Info(cfg.LogPrefix+" now sealing (dumping on disk)", "root", hex.EncodeToString(rh),
 		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys),
-		"codeBearingAccounts", codeStats.CodeBearingAccounts, "uniqueCodeHashes", codeStats.UniqueCodeHashes)
+		"keysProcessed", processed)
 
 	sb := time.Now()
 	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.GetMemBatch().(*TemporalMemBatch), nil)
@@ -1327,67 +1319,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		TxnTo:         cfg.TxnTo,
 		Keys:          cfg.Keys,
 		KeysProcessed: processed,
-		CodeStats:     codeStats,
 	}, nil
-}
-
-func pbinRebuildFeedStream(keys *etl.Collector, reader commitmentdb.StateReader, emitter *pbt.FeedOpEmitter, emit func(pbt.Op) error) error {
-	return pbinRebuildFeedStreamWithSample(keys, reader, emitter, emit, nil)
-}
-
-func pbinRebuildFeedStreamWithSample(keys *etl.Collector, reader commitmentdb.StateReader, emitter *pbt.FeedOpEmitter, emit func(pbt.Op) error, _ func()) error {
-	var address []byte
-	var previousKey []byte
-	var emitted bool
-	var accountExists bool
-	emitAccount := func() error {
-		account, err := commitmentdb.BinFeedAccountFromState(address, nil, true, false, reader)
-		if err != nil {
-			return err
-		}
-		accountExists = account.Exists
-		emitted = true
-		return emitter.EmitAccount(account, emit)
-	}
-	err := keys.Load(nil, "", func(key, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if len(key) != length.Addr && len(key) != length.Addr+length.Hash {
-			return fmt.Errorf("commitment rebuild: plain key has length %d", len(key))
-		}
-		if bytes.Equal(previousKey, key) {
-			return nil
-		}
-		previousKey = bytes.Clone(key)
-		keyAddress := key[:length.Addr]
-		if !bytes.Equal(address, keyAddress) {
-			address = bytes.Clone(keyAddress)
-			emitted = false
-		}
-		if !emitted {
-			if err := emitAccount(); err != nil {
-				return err
-			}
-		}
-		if len(key) == length.Addr+length.Hash && accountExists {
-			slot, err := commitmentdb.BinFeedStorageSlotFromState(address, key[length.Addr:], reader)
-			if err != nil {
-				return err
-			}
-			if err := emitter.EmitStorageSlot(address, slot, emit); err != nil {
-				return err
-			}
-		}
-		return nil
-	}, etl.TransformArgs{})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// codeStatsTrie is the optional capability of an engine to report the code its
-// last Process chunkified; only the bin engine chunkifies code at all.
-type codeStatsTrie interface {
-	CodeStats() commitment.PBinCodeStats
 }
 
 type rebuiltCommitment struct {
@@ -1399,7 +1331,6 @@ type rebuiltCommitment struct {
 	TxnTo         uint64
 	Keys          uint64 // amount of keys in this range
 	KeysProcessed uint64 // amount of keys this shard walked. set once commit is finished
-	CodeStats     commitment.PBinCodeStats
 	BlockNumber   uint64 // block number for this commitment
 	TxnNumber     uint64 // tx number for this commitment
 	LogPrefix     string
@@ -1408,23 +1339,6 @@ type rebuiltCommitment struct {
 const (
 	pbinRebuildOpCollectorBufferBudget = 64 * datasize.MB
 )
-
-func PBinRebuildOpCollectorBudget() uint64 { return uint64(pbinRebuildOpCollectorBufferBudget) }
-
-func pbinForEachRebuildBatch(ops []pbt.Op, tmpDir string, maxOps, maxBytes int, visit func([]pbt.Op, bool) error) error {
-	return pbinForEachRebuildBatchAfter(ops, tmpDir, maxOps, maxBytes, nil, visit)
-}
-
-func pbinForEachRebuildBatchAfter(ops []pbt.Op, tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, bool) error) error {
-	return pbinForEachRebuildOpStreamAfter(tmpDir, maxOps, maxBytes, afterKey, visit, func(emit func(pbt.Op) error) error {
-		for i := range ops {
-			if err := emit(ops[i]); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
 
 func pbinForEachRebuildOpStreamAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, bool) error, stream func(func(pbt.Op) error) error) error {
 	return pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, maxOps, maxBytes, afterKey, func(batch []pbt.Op, _ []byte, final bool) error {

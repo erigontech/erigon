@@ -688,11 +688,11 @@ func formatRebuildReport(files []commitmentFileSize, report *dbstate.RebuildRepo
 		fmt.Fprintf(&b, "%d\t%d\t%d\t%d\t%d\t%d\t%x\n", r.StepFrom, r.StepTo, r.TxnFrom, r.TxnTo, r.KeysInFiles, r.KeysProcessed, r.RootHash)
 	}
 
-	b.WriteString("\n# rebuild_shards\nrange_step_from\trange_step_to\tstep_from\tstep_to\tkeys\tcode_accounts\tunique_code_hashes\n")
+	b.WriteString("\n# rebuild_shards\nrange_step_from\trange_step_to\tstep_from\tstep_to\tkeys\n")
 	for _, r := range report.Ranges {
 		for _, s := range r.Shards {
-			fmt.Fprintf(&b, "%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
-				r.StepFrom, r.StepTo, s.StepFrom, s.StepTo, s.Keys, s.CodeBearingAccounts, s.UniqueCodeHashes)
+			fmt.Fprintf(&b, "%d\t%d\t%d\t%d\t%d\n",
+				r.StepFrom, r.StepTo, s.StepFrom, s.StepTo, s.Keys)
 		}
 	}
 	return b.String()

@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -34,6 +35,51 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func pbinRebuildFeedStream(keys *etl.Collector, reader commitmentdb.StateReader, emitter *pbt.FeedOpEmitter, emit func(pbt.Op) error) error {
+	var address []byte
+	var previousKey []byte
+	var emitted bool
+	var accountExists bool
+	emitAccount := func() error {
+		account, err := commitmentdb.BinFeedAccountFromState(address, nil, true, false, reader)
+		if err != nil {
+			return err
+		}
+		accountExists = account.Exists
+		emitted = true
+		return emitter.EmitAccount(account, emit)
+	}
+	return keys.Load(nil, "", func(key, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if len(key) != length.Addr && len(key) != length.Addr+length.Hash {
+			return fmt.Errorf("commitment rebuild: plain key has length %d", len(key))
+		}
+		if bytes.Equal(previousKey, key) {
+			return nil
+		}
+		previousKey = bytes.Clone(key)
+		keyAddress := key[:length.Addr]
+		if !bytes.Equal(address, keyAddress) {
+			address = bytes.Clone(keyAddress)
+			emitted = false
+		}
+		if !emitted {
+			if err := emitAccount(); err != nil {
+				return err
+			}
+		}
+		if len(key) == length.Addr+length.Hash && accountExists {
+			slot, err := commitmentdb.BinFeedStorageSlotFromState(address, key[length.Addr:], reader)
+			if err != nil {
+				return err
+			}
+			if err := emitter.EmitStorageSlot(address, slot, emit); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, etl.TransformArgs{})
+}
 
 type pbinAbsentAccountReader struct {
 	address []byte

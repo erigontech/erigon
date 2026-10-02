@@ -105,8 +105,8 @@ func TestFormatRebuildReport(t *testing.T) {
 			KeysProcessed: 900,
 			RootHash:      []byte{0xab, 0xcd},
 			Shards: []dbstate.RebuildShardReport{
-				{StepFrom: 0, StepTo: 32, Keys: 500, CodeBearingAccounts: 40, UniqueCodeHashes: 12},
-				{StepFrom: 32, StepTo: 64, Keys: 400, CodeBearingAccounts: 30, UniqueCodeHashes: 9},
+				{StepFrom: 0, StepTo: 32, Keys: 500},
+				{StepFrom: 32, StepTo: 64, Keys: 400},
 			},
 		}},
 	}
@@ -115,7 +115,7 @@ func TestFormatRebuildReport(t *testing.T) {
 	for _, field := range []string{
 		"file\tstep_from\tstep_to\tbytes",
 		"step_from\tstep_to\ttxn_from\ttxn_to\tkeys_in_files\tkeys_processed\troot",
-		"range_step_from\trange_step_to\tstep_from\tstep_to\tkeys\tcode_accounts\tunique_code_hashes",
+		"range_step_from\trange_step_to\tstep_from\tstep_to\tkeys",
 	} {
 		require.Contains(t, out, field, "the report's column names are what makes it pasteable")
 	}
@@ -124,8 +124,8 @@ func TestFormatRebuildReport(t *testing.T) {
 	require.Contains(t, out, "v1.0-commitment.64-128.kv\t64\t128\t512")
 	require.Contains(t, out, "total\t0\t128\t4608")
 	require.Contains(t, out, "0\t64\t0\t6400\t900\t900\tabcd")
-	require.Contains(t, out, "0\t64\t0\t32\t500\t40\t12")
-	require.Contains(t, out, "0\t64\t32\t64\t400\t30\t9")
+	require.Contains(t, out, "0\t64\t0\t32\t500")
+	require.Contains(t, out, "0\t64\t32\t64\t400")
 	require.Contains(t, out, string(commitment.VariantHexPatriciaTrie))
 }
 
