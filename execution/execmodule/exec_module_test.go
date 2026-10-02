@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -240,6 +239,64 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	root, err := extendingSd.GetCommitmentCtx().Trie().RootHash()
 	require.NoError(t, err)
 	require.Equal(t, chainPack.Headers[0].Root, common.BytesToHash(root))
+}
+
+func TestUpdateForkChoiceRejectsSiblingHashes(t *testing.T) {
+	for _, mode := range []struct {
+		name     string
+		parallel bool
+	}{{"synchronous", false}, {"parallel", true}} {
+		t.Run(mode.name, func(t *testing.T) {
+			for _, field := range []string{"safe", "finalized"} {
+				t.Run(field, func(t *testing.T) {
+					m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(mode.parallel))
+					a, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+						b.SetCoinbase(common.Address{0x81})
+					})
+					require.NoError(t, err)
+					b, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+						b.SetCoinbase(common.Address{0x82})
+					})
+					require.NoError(t, err)
+					_, err = m.InsertBlocks(t.Context(), a.Blocks)
+					require.NoError(t, err)
+					_, err = m.InsertBlocks(t.Context(), b.Blocks)
+					require.NoError(t, err)
+					validation, err := m.ValidateChain(t.Context(), a.Blocks[0].Header())
+					require.NoError(t, err)
+					require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+					var safe, finalized common.Hash
+					if field == "safe" {
+						safe = b.Blocks[0].Hash()
+					} else {
+						finalized = b.Blocks[0].Hash()
+					}
+					result, err := m.ExecModule.UpdateForkChoice(t.Context(), a.Blocks[0].Hash(), safe, finalized)
+					require.NoError(t, err)
+					m.ExecModule.WaitIdle(t.Context())
+					require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
+				})
+			}
+		})
+	}
+}
+
+func TestUpdateForkChoiceParallelFlushingAcceptsAncestorHashes(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(true))
+	chainPack, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+	_, err = m.InsertBlocks(t.Context(), chainPack.Blocks)
+	require.NoError(t, err)
+	head := chainPack.Blocks[1]
+	validation, err := m.ValidateChain(t.Context(), head.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	result, err := m.ExecModule.UpdateForkChoice(t.Context(), head.Hash(), chainPack.Blocks[0].Hash(), m.Genesis.Hash())
+	require.NoError(t, err)
+	m.ExecModule.WaitIdle(t.Context())
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	require.Equal(t, head.Hash(), result.LatestValidHash)
 }
 
 func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeight(t *testing.T) {
@@ -717,7 +774,8 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 		release: make(chan struct{}),
 	}
 	t.Cleanup(func() { close(engine.release) })
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithChainConfig(chain.AllProtocolChanges),
 		execmoduletester.WithEngine(engine),
 	)
@@ -1147,7 +1205,8 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
@@ -1168,7 +1227,8 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 		tx, txErr := types.SignTx(
 			types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(100),
 				params.TxGas, uint256.NewInt(baseFee), nil),
-			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		)
 		require.NoError(t, txErr)
 		var buf bytes.Buffer
 		err = tx.EncodeRLP(&buf)
@@ -1245,7 +1305,8 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	// nonce 1: simple transfer
 	tx1, err := types.SignTx(
 		types.NewTransaction(1, common.Address{2}, uint256.NewInt(5_000), params.TxGas, uint256.NewInt(baseFee), nil),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
 	require.NoError(t, err)
 
 	// nonce 2: contract creation (Changer bytecode)
@@ -1253,13 +1314,15 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	require.NoError(t, err)
 	tx2, err := types.SignTx(
 		types.NewContractCreation(2, uint256.NewInt(0), 300_000, uint256.NewInt(baseFee), changerBytecode),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
 	require.NoError(t, err)
 
 	// nonce 3: simple transfer
 	tx3, err := types.SignTx(
 		types.NewTransaction(3, common.Address{3}, uint256.NewInt(3_000), params.TxGas, uint256.NewInt(baseFee), nil),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
 	require.NoError(t, err)
 
 	// Add all 3 to pool.
@@ -1461,7 +1524,8 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		Ethash:                        new(chain.EthashConfig),
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithTxPool(),
 		execmoduletester.WithChainConfig(cfg),
 		execmoduletester.WithExperimentalBAL(),
@@ -1648,10 +1712,9 @@ func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
 
 func TestGetPayloadBodiesPreAmsterdamBlockAccessList(t *testing.T) {
 	t.Parallel()
-	var config chain.Config
-	require.NoError(t, copier.CopyWithOption(&config, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	config := chain.AllProtocolChanges.Copy()
 	config.AmsterdamTime = nil
-	m, chainPack := newPayloadBodiesBALTestChain(t, &config)
+	m, chainPack := newPayloadBodiesBALTestChain(t, config)
 	block := chainPack.Blocks[0]
 	require.Nil(t, block.Header().BlockAccessListHash)
 	requirePayloadBodiesBlockAccessList(t, m, block, nil)
@@ -1885,7 +1948,8 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 		},
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
@@ -1973,7 +2037,8 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 		},
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
@@ -1984,7 +2049,8 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	// Runtime: base = calldataload(0); sstore(base+i, 1) for i in 0..3.
 	deployCode, err := hex.DecodeString(
 		"601d600c600039601d6000f3" + // initcode: deploy 29-byte runtime
-			"6000356001815560018160010155600181600201556001816003015500") // runtime
+			"6000356001815560018160010155600181600201556001816003015500",
+	) // runtime
 	require.NoError(t, err)
 
 	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
@@ -2115,7 +2181,8 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 		Alloc:    alloc,
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(keys[0]),
 		execmoduletester.WithTxPool(),
@@ -2215,7 +2282,8 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 		Alloc:    alloc,
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(keys[0]),
 		execmoduletester.WithTxPool(),
@@ -2320,7 +2388,8 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -2392,8 +2461,8 @@ func TestInsertBlocksRejectsInvalidBlockAccessList(t *testing.T) {
 	block := chainPack.Blocks[0]
 	header := block.Header()
 	invalidBAL := types.BlockAccessList{
-		{Address: accounts.InternAddress(common.Address{2})},
-		{Address: accounts.InternAddress(common.Address{1})},
+		{Address: common.Address{2}},
+		{Address: common.Address{1}},
 	}
 	encoded, err := types.EncodeBlockAccessListBytes(invalidBAL)
 	require.NoError(t, err)
@@ -2413,7 +2482,7 @@ func TestInsertBlocksRejectsBlockAccessListHashMismatch(t *testing.T) {
 
 	block := chainPack.Blocks[0]
 	header := block.Header()
-	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	bal := types.BlockAccessList{{Address: common.Address{1}}}
 	wrongHash := common.Hash{1}
 	header.BlockAccessListHash = &wrongHash
 	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(bal))
@@ -2508,7 +2577,8 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -2644,7 +2714,8 @@ func TestLargeBatchExecGeneratesChangesetsForReorgWindow(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithAlwaysGenerateChangesets(false),
 	)
@@ -2680,7 +2751,8 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithAlwaysGenerateChangesets(false),
 	)
@@ -2811,7 +2883,8 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithGenesisSpec(&types.Genesis{
 			Config: chain.AllProtocolChanges, // Amsterdam-at-0 → every block carries a BAL
@@ -2947,8 +3020,7 @@ func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -2965,7 +3037,8 @@ func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -3048,8 +3121,7 @@ func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("c87f65ff3f271bf5dc8643484f66b200109caffe4bf98c4cb393dc35740b28c0")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -3066,7 +3138,8 @@ func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -3148,8 +3221,7 @@ func TestAuraSystemAddressRetainedUnderParallelExec(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	auraCfg := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(auraCfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	auraCfg := chain.AllProtocolChanges.Copy()
 	auraCfg.CancunTime = nil
 	auraCfg.PragueTime = nil
 	auraCfg.OsakaTime = nil
@@ -3169,7 +3241,8 @@ func TestAuraSystemAddressRetainedUnderParallelExec(t *testing.T) {
 			sysAddr:    {Balance: big.NewInt(0)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -3227,8 +3300,7 @@ func TestPreCancunSameTxStoreAndDie(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -3245,7 +3317,8 @@ func TestPreCancunSameTxStoreAndDie(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -3322,8 +3395,7 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -3340,7 +3412,8 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)

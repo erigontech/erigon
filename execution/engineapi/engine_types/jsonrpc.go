@@ -46,7 +46,7 @@ type ExecutionPayload struct {
 	GasUsed         hexutil.Uint64        `json:"gasUsed"`
 	Timestamp       hexutil.Uint64        `json:"timestamp"`
 	ExtraData       hexutil.Bytes         `json:"extraData"`
-	BaseFeePerGas   *hexutil.Big          `json:"baseFeePerGas"`
+	BaseFeePerGas   *hexutil.U256         `json:"baseFeePerGas"`
 	BlockHash       common.Hash           `json:"blockHash"`
 	Transactions    []hexutil.Bytes       `json:"transactions"`
 	Withdrawals     []*types.Withdrawal   `json:"withdrawals"`
@@ -76,20 +76,15 @@ type PayloadAttributes struct {
 	SSZVersion            clparams.StateVersion `json:"-"`
 }
 
-// TransitionConfiguration represents the correct configurations of the CL and the EL
-type TransitionConfiguration struct {
-	TerminalTotalDifficulty *hexutil.Big `json:"terminalTotalDifficulty"`
-	TerminalBlockHash       common.Hash  `json:"terminalBlockHash"`
-	TerminalBlockNumber     *hexutil.Big `json:"terminalBlockNumber"`
-}
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobsBundle
 
 // BlobsBundle holds the blobs of an execution payload.
 // It covers both BlobsBundleV1 (https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#blobsbundlev1)
 // and BlobsBundleV2 (https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#blobsbundlev2)
 type BlobsBundle struct {
-	Commitments []hexutil.Bytes       `json:"commitments"`
-	Proofs      []hexutil.Bytes       `json:"proofs"`
-	Blobs       []hexutil.Bytes       `json:"blobs"`
+	Commitments []hexutil.Bytes       `json:"commitments" ethjson:"datalist"`
+	Proofs      []hexutil.Bytes       `json:"proofs" ethjson:"datalist"`
+	Blobs       []hexutil.Bytes       `json:"blobs" ethjson:"datalist"`
 	SSZVersion  clparams.StateVersion `json:"-"`
 }
 
@@ -130,15 +125,24 @@ func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 }
 
 // BlobAndProofV1 holds one item for engine_getBlobsV1
+//
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobAndProofV1
 type BlobAndProofV1 struct {
-	Blob  hexutil.Bytes `json:"blob"`
-	Proof hexutil.Bytes `json:"proof"`
+	Blob  hexutil.Bytes `json:"blob" ethjson:"data"`
+	Proof hexutil.Bytes `json:"proof" ethjson:"data"`
 }
 
 // BlobAndProofV2 holds one item for engine_getBlobsV2/engine_getBlobsV3
+//
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobAndProofV2
 type BlobAndProofV2 struct {
-	Blob       hexutil.Bytes   `json:"blob"`
-	CellProofs []hexutil.Bytes `json:"proofs"`
+	Blob       hexutil.Bytes   `json:"blob" ethjson:"data"`
+	CellProofs []hexutil.Bytes `json:"proofs" ethjson:"datalist"`
+}
+
+type BlobCellsAndProofsV1 struct {
+	BlobCells []*hexutil.Bytes `json:"blob_cells"`
+	Proofs    []*hexutil.Bytes `json:"proofs"`
 }
 
 type ExecutionPayloadBody struct {
@@ -166,7 +170,7 @@ type ForkChoiceUpdatedResponse struct {
 
 type GetPayloadResponse struct {
 	ExecutionPayload      *ExecutionPayload `json:"executionPayload"`
-	BlockValue            *hexutil.Big      `json:"blockValue"`
+	BlockValue            *hexutil.U256     `json:"blockValue"`
 	BlobsBundle           *BlobsBundle      `json:"blobsBundle"`
 	ExecutionRequests     []hexutil.Bytes   `json:"executionRequests"`
 	ShouldOverrideBuilder bool              `json:"shouldOverrideBuilder"`
@@ -179,8 +183,8 @@ type ClientVersionV1 struct {
 	Commit  string `json:"commit"`
 }
 
-func (c ClientVersionV1) String() string {
-	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", c.Code, c.Name, c.Version, c.Commit)
+func (v ClientVersionV1) String() string {
+	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", v.Code, v.Name, v.Version, v.Commit)
 }
 
 // NewClientVersionV1 builds a ClientVersionV1 from a git commit hash, using its leading
@@ -264,7 +268,7 @@ func ConvertRpcBlockToExecutionPayload(payload *executionproto.Block) *Execution
 		GasUsed:       hexutil.Uint64(header.GasUsed),
 		Timestamp:     hexutil.Uint64(header.Timestamp),
 		ExtraData:     header.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(header.BlockHash),
 		Transactions:  transactions,
 	}
@@ -306,7 +310,7 @@ func ConvertPayloadFromRpc(payload *typesproto.ExecutionPayload) *ExecutionPaylo
 		GasUsed:       hexutil.Uint64(payload.GasUsed),
 		Timestamp:     hexutil.Uint64(payload.Timestamp),
 		ExtraData:     payload.ExtraData,
-		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
 	}

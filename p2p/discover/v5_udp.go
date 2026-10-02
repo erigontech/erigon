@@ -615,10 +615,10 @@ func (t *UDPv5) dispatch() {
 			t.sendNextCall(c.id)
 
 		case r := <-t.sendCh:
-			t.send(r.destID, r.destAddr, r.msg, nil)
+			_, _ = t.send(r.destID, r.destAddr, r.msg, nil)
 
 		case p := <-t.packetInCh:
-			t.handlePacket(p.Data, p.Addr)
+			_ = t.handlePacket(p.Data, p.Addr)
 			// Arm next read.
 			t.readNextCh <- struct{}{}
 
@@ -847,7 +847,7 @@ func (t *UDPv5) handle(p v5wire.Packet, fromID enode.ID, fromAddr netip.AddrPort
 	case *v5wire.Unknown:
 		t.handleUnknown(p, fromID, fromAddr)
 	case *v5wire.Whoareyou:
-		t.handleWhoareyou(p, fromID, fromAddr)
+		t.handleWhoareyou(p, fromAddr)
 	case *v5wire.Ping:
 		t.handlePing(p, fromID, fromAddr)
 	case *v5wire.Pong:
@@ -878,7 +878,7 @@ func (t *UDPv5) handleUnknown(p *v5wire.Unknown, fromID enode.ID, fromAddr netip
 		if t.trace {
 			t.log.Trace("[p2p] Repeating discv5 handshake challenge", "id", fromID, "addr", fromAddr)
 		}
-		t.sendResponse(fromID, fromAddr, currentChallenge)
+		_ = t.sendResponse(fromID, fromAddr, currentChallenge)
 		return
 	}
 
@@ -889,7 +889,7 @@ func (t *UDPv5) handleUnknown(p *v5wire.Unknown, fromID enode.ID, fromAddr netip
 		challenge.Node = n
 		challenge.RecordSeq = n.Seq()
 	}
-	t.sendResponse(fromID, fromAddr, challenge)
+	_ = t.sendResponse(fromID, fromAddr, challenge)
 }
 
 var (
@@ -898,8 +898,8 @@ var (
 )
 
 // handleWhoareyou resends the active call as a handshake packet.
-func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr netip.AddrPort) {
-	c, err := t.matchWithCall(fromID, p.Nonce)
+func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromAddr netip.AddrPort) {
+	c, err := t.matchWithCall(p.Nonce)
 	if err != nil {
 		if t.trace {
 			t.log.Trace("[p2p] Invalid "+p.Name(), "addr", fromAddr, "err", err)
@@ -926,7 +926,7 @@ func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr n
 }
 
 // matchWithCall checks whether a handshake attempt matches the active call.
-func (t *UDPv5) matchWithCall(fromID enode.ID, nonce v5wire.Nonce) (*callV5, error) {
+func (t *UDPv5) matchWithCall(nonce v5wire.Nonce) (*callV5, error) {
 	c := t.activeCallByAuth[nonce]
 	if c == nil {
 		return nil, errChallengeNoCall
@@ -948,7 +948,7 @@ func (t *UDPv5) handlePing(p *v5wire.Ping, fromID enode.ID, fromAddr netip.AddrP
 	} else {
 		remoteIP = fromAddr.Addr().AsSlice()
 	}
-	t.sendResponse(fromID, fromAddr, &v5wire.Pong{
+	_ = t.sendResponse(fromID, fromAddr, &v5wire.Pong{
 		ReqID:  p.ReqID,
 		ToIP:   remoteIP,
 		ToPort: fromAddr.Port(),
@@ -960,7 +960,7 @@ func (t *UDPv5) handlePing(p *v5wire.Ping, fromID enode.ID, fromAddr netip.AddrP
 func (t *UDPv5) handleFindnode(p *v5wire.Findnode, fromID enode.ID, fromAddr netip.AddrPort) {
 	nodes := t.collectTableNodes(fromAddr.Addr(), p.Distances, findnodeResultLimit)
 	for _, resp := range packNodes(p.ReqID, nodes) {
-		t.sendResponse(fromID, fromAddr, resp)
+		_ = t.sendResponse(fromID, fromAddr, resp)
 	}
 }
 
@@ -968,7 +968,7 @@ func (t *UDPv5) handleFindnode(p *v5wire.Findnode, fromID enode.ID, fromAddr net
 func (t *UDPv5) collectTableNodes(rip netip.Addr, distances []uint, limit int) []*enode.Node {
 	var bn []*enode.Node
 	var nodes []*enode.Node
-	var processed = make(map[uint]struct{})
+	processed := make(map[uint]struct{})
 	for _, dist := range distances {
 		// Reject duplicate / invalid distances.
 		_, seen := processed[dist]

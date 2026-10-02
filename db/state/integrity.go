@@ -32,6 +32,7 @@ func (at *AggregatorRoTx) IntegrityKey(domain kv.Domain, k []byte) error {
 	}
 	return nil
 }
+
 func (at *AggregatorRoTx) IntegrityInvertedIndexKey(domain kv.Domain, k []byte) error {
 	return at.d[domain].IntegrityKey(k)
 }
@@ -91,6 +92,7 @@ func (dt *DomainRoTx) IntegrityDomainFilesWithKey(k []byte) (res []string, err e
 	}
 	return res, nil
 }
+
 func (dt *DomainRoTx) IntegrityKey(k []byte) error {
 	for _, f := range dt.ht.iit.files {
 		item := f.src

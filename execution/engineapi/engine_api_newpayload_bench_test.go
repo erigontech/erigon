@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -78,7 +77,7 @@ func makeBenchNewPayloadRequest(b *testing.B, numTx int) []byte {
 		GasUsed:       30_000_000,
 		Timestamp:     1700000000,
 		ExtraData:     []byte("benchmark"),
-		BaseFeePerGas: (*hexutil.Big)(big.NewInt(1_000_000_000)),
+		BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(1_000_000_000)),
 		BlockHash:     common.Hash{0x05},
 		Transactions:  txs,
 		Withdrawals:   withdrawals,
@@ -94,14 +93,16 @@ func makeBenchNewPayloadRequest(b *testing.B, numTx int) []byte {
 		b.Fatal(err)
 	}
 	return []byte(fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":1,"method":"engine_newPayloadV4","params":[%s,[],%s,[]]}`, enc, root))
+		`{"jsonrpc":"2.0","id":1,"method":"engine_newPayloadV4","params":[%s,[],%s,[]]}`, enc, root,
+	))
 }
 
 type npStub struct{ n int }
 
 func (s *npStub) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
-	executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	executionRequests []hexutil.Bytes,
+) (*engine_types.PayloadStatus, error) {
 	s.n = len(payload.Transactions)
 	return &engine_types.PayloadStatus{Status: engine_types.ValidStatus}, nil
 }

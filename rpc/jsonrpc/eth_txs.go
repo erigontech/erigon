@@ -25,7 +25,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -91,11 +90,6 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, uint64(txnIndex), baseFee), nil
 	}
 
-	curHeader := rawdb.ReadCurrentHeader(tx)
-	if curHeader == nil {
-		return nil, nil
-	}
-
 	// No finalized transaction, try to retrieve it from the pool
 	reply, err := api.txPool.Transactions(ctx, &txpoolproto.TransactionsRequest{Hashes: []*typesproto.H256{gointerfaces.ConvertHashToH256(txnHash)}})
 	if err != nil {
@@ -112,7 +106,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, nil
 		}
 
-		return newRPCPendingTransaction(txn, curHeader, chainConfig), nil
+		return newRPCPendingTransaction(txn), nil
 	}
 
 	// Transaction unknown, return as such
@@ -175,7 +169,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), tx, api._blockReader, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), tx, api._blockReader)
 	if err != nil {
 		return nil, nil
 	}
@@ -212,7 +206,7 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), tx, api._blockReader, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), tx, api._blockReader)
 	if err != nil {
 		return nil, nil
 	}
@@ -257,7 +251,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	}
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockNumberAndIndex
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -307,7 +301,7 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return newRPCRawTransactionFromBlockIndex(b, uint64(index))
 	}
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
