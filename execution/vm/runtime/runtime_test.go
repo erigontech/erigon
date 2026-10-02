@@ -173,7 +173,6 @@ func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 			Value:    *uint256.NewInt(1),
 			State:    statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
 	require.Equal(t, mdgas.MdGas{Execution: gasLimit}, gasRemaining)
@@ -202,7 +201,6 @@ func TestCreateInsufficientBalancePreservesPreAmsterdamTrace(t *testing.T) {
 			Value:       *uint256.NewInt(1),
 			State:       statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
 	require.Equal(t, []byte{byte(vm.CREATE)}, entered)
@@ -234,7 +232,6 @@ func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
 			GasLimit:  gasLimit,
 			State:     statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrRuntimeOutOfGas)
 	require.Equal(
@@ -473,7 +470,7 @@ func TestBlockhash(t *testing.T) {
 func TestEip2929Cases(t *testing.T) {
 	tmpdir := t.TempDir()
 	id := 1
-	prettyPrint := func(comment string, code []byte) {
+	prettyPrint := func(code []byte) {
 		instrs := make([]string, 0)
 		it := asm.NewInstructionIterator(code)
 		for it.Next() {
@@ -521,9 +518,7 @@ func TestEip2929Cases(t *testing.T) {
 
 			byte(vm.STOP),
 		}
-		prettyPrint("This checks `EXT`(codehash,codesize,balance) of precompiles, which should be `100`, "+
-			"and later checks the same operations twice against some non-precompiles. "+
-			"Those are cheaper second time they are accessed. Lastly, it checks the `BALANCE` of `origin` and `this`.", code)
+		prettyPrint(code)
 	}
 
 	{ // EXTCODECOPY
@@ -540,8 +535,7 @@ func TestEip2929Cases(t *testing.T) {
 
 			byte(vm.STOP),
 		}
-		prettyPrint("This checks `extcodecopy( 0xff,0,0,0,0)` twice, (should be expensive first time), "+
-			"and then does `extcodecopy( this,0,0,0,0)`.", code)
+		prettyPrint(code)
 	}
 
 	{ // SLOAD + SSTORE
@@ -559,8 +553,7 @@ func TestEip2929Cases(t *testing.T) {
 			// Read slot in access list (0x1)
 			byte(vm.PUSH1), 0x01, byte(vm.SLOAD), // SLOAD( 0x1)
 		}
-		prettyPrint("This checks `sload( 0x1)` followed by `sstore(loc: 0x01, val:0x11)`, then 'naked' sstore:"+
-			"`sstore(loc: 0x02, val:0x11)` twice, and `sload(0x2)`, `sload(0x1)`. ", code)
+		prettyPrint(code)
 	}
 	{ // Call variants
 		code := []byte{
@@ -576,8 +569,7 @@ func TestEip2929Cases(t *testing.T) {
 			byte(vm.PUSH1), 0x0, byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1),
 			byte(vm.PUSH1), 0xff, byte(vm.PUSH1), 0x0, byte(vm.STATICCALL), byte(vm.POP),
 		}
-		prettyPrint("This calls the `identity`-precompile (cheap), then calls an account (expensive) and `staticcall`s the same"+
-			"account (cheap)", code)
+		prettyPrint(code)
 	}
 }
 

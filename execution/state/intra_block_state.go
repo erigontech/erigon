@@ -2756,7 +2756,7 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if ibs.versionMap == nil {
 		return
 	}
-	ibs.versionMap.FlushVersionedWrites(writes, true, "")
+	ibs.versionMap.FlushVersionedWrites(writes, true)
 }
 
 func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {
