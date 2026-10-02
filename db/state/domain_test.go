@@ -60,7 +60,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type rndGen struct {
@@ -151,7 +150,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	err = dir.RemoveFile(fn)
 	require.NoError(t, err)
-	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	err = os.WriteFile(fn, make([]byte, 33), 0o644)
 	require.NoError(t, err)
 
 	scanDirsRes, err := scanDirs(d.dirs)
@@ -246,7 +245,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		}
 		require.Equal(t, []string{"key1", "value1.2", "key2", "value2.1"}, words)
 		// Check index
-		//require.Equal(t, 2, int(sf.valuesIdx.KeyCount()))
+		// require.Equal(t, 2, int(sf.valuesIdx.KeyCount()))
 		require.Equal(t, 2, int(sf.valuesBt.KeyCount()))
 
 		//r := recsplit.NewIndexReader(sf.valuesIdx)
@@ -469,7 +468,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.Equal(t, p2, v)
 }
 
-func fillDomain(t *testing.T, d *Domain, db kv.RwDB, logger log.Logger) uint64 {
+func fillDomain(t *testing.T, d *Domain, db kv.RwDB) uint64 {
 	t.Helper()
 	require := require.New(t)
 	ctx := t.Context()
@@ -516,7 +515,7 @@ func fillDomain(t *testing.T, d *Domain, db kv.RwDB, logger log.Logger) uint64 {
 func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	t.Helper()
 	db, d := testDbAndDomain(t, logger)
-	txs := fillDomain(t, d, db, logger)
+	txs := fillDomain(t, d, db)
 	return db, d, txs
 }
 
@@ -1293,7 +1292,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 				}
 				continue
 				//fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
-			} else { //warm data
+			} else { // warm data
 				if keyNum == 0 || keyNum == 1 {
 					continue
 				}
@@ -1322,7 +1321,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 		}
 	}
 
-	//warm keys
+	// warm keys
 	binary.BigEndian.PutUint64(v[:], txCount)
 	for keyNum := uint64(2); keyNum < keyCount; keyNum++ {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount-1, keyNum)
@@ -1444,7 +1443,6 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	from, to := domainRoTx.stepsRangeInDB(tx)
 	require.Equal(t, 3, int(from))
 	require.Equal(t, 4, int(to))
-
 }
 
 func TestDomain_OpenFilesWithDeletions(t *testing.T) {
@@ -1717,15 +1715,14 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1217: %s\n", time.Since(t)) }(time.Now())
 	var prev []byte
 	for i = range vals {
-
 		for j := 0; j < len(keys); j++ {
-			acc := accounts3.Account{
+			acc := accounts.Account{
 				Nonce:       uint64(i),
 				Balance:     *uint256.NewInt(uint64(i * 100_000)),
 				CodeHash:    accounts.EmptyCodeHash,
 				Incarnation: 0,
 			}
-			buf := accounts3.SerialiseV3(&acc)
+			buf := accounts.SerialiseV3(&acc)
 
 			err = writer.PutWithPrev(keys[j], buf, uint64(i), prev)
 			require.NoError(t, err)
@@ -1834,7 +1831,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 					continue
 				}
 				//fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
-			} else { //warm data
+			} else { // warm data
 				if keyNum == 0 || keyNum == 1 {
 					continue
 				}
@@ -2779,7 +2776,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Parallel()
 
 	pruningKey := common.FromHex("701b39aee8d1ee500442d2874a6e6d0cc9dad8d9")
-	writeOneKey := func(t *testing.T, d *Domain, db kv.RwDB, maxTx, stepSize uint64) {
+	writeOneKey := func(t *testing.T, d *Domain, db kv.RwDB, maxTx uint64) {
 		t.Helper()
 
 		ctx := t.Context()
@@ -2868,7 +2865,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple history inside 1step", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(13), uint64(17)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 3*stepSize, stepSize)
+		writeOneKey(t, d, db, 3*stepSize)
 
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
@@ -2880,7 +2877,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple history between 2 steps", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(8), uint64(17)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 3*stepSize, stepSize)
+		writeOneKey(t, d, db, 3*stepSize)
 
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
@@ -2892,7 +2889,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple prune whole step", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(10)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 3*stepSize, stepSize)
+		writeOneKey(t, d, db, 3*stepSize)
 
 		ctx := t.Context()
 		rotx, err := db.BeginRo(ctx)
@@ -2935,7 +2932,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple history discard", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(20)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 2*stepSize, stepSize)
+		writeOneKey(t, d, db, 2*stepSize)
 
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
@@ -3094,7 +3091,7 @@ func testTraceKey(t *testing.T, largeVals bool) {
 	db, d := testDbAndDomain(t, logger)
 	d.HistoryLargeValues = largeVals
 
-	txs := fillDomain(t, d, db, logger)
+	txs := fillDomain(t, d, db)
 	err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, d, txs)
 		return nil
@@ -3324,7 +3321,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 	writer = domainRoTx.NewWriter()
 	defer writer.Close()
 
-	dbOnlyKeyNums := make(map[uint64]bool) //keys only in MDBX
+	dbOnlyKeyNums := make(map[uint64]bool) // keys only in MDBX
 	dbTxNum := txs + 1
 	for keyNum := uint64(11); keyNum <= uint64(20); keyNum++ {
 		var k [8]byte
@@ -3549,7 +3546,7 @@ func filledDomainWithHashMapAccessor(t *testing.T, logger log.Logger) (kv.RwDB, 
 	d.DisableFsync()
 	t.Cleanup(d.Close)
 
-	txs := fillDomain(t, d, db, logger)
+	txs := fillDomain(t, d, db)
 	return db, d, txs
 }
 

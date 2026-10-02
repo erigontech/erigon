@@ -149,11 +149,11 @@ func (u *ParticipationBitList) HashSSZProgressive() ([32]byte, error) {
 	return merkle_tree.ProgressiveBasicListRoot(u.Bytes(), uint64(u.l))
 }
 
-func (arr *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
-	elements := arr.u
-	offset := 32*(arr.l/32) + 32
-	if len(arr.u) <= offset {
-		elements = append(elements, make([]byte, offset-len(arr.u)+1)...)
+func (u *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
+	elements := u.u
+	offset := 32*(u.l/32) + 32
+	if len(u.u) <= offset {
+		elements = append(elements, make([]byte, offset-len(u.u)+1)...)
 	}
 	elements = elements[:offset]
 	for i := range depth {
@@ -163,11 +163,11 @@ func (arr *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
 			elements = append(elements, merkle_tree.ZeroHashes[i][:]...)
 		}
 		outputLen := len(elements) / 2
-		arr.makeBuf(outputLen)
-		if err := merkle_tree.HashByteSlice(arr.buf, elements); err != nil {
+		u.makeBuf(outputLen)
+		if err := merkle_tree.HashByteSlice(u.buf, elements); err != nil {
 			return err
 		}
-		elements = arr.buf
+		elements = u.buf
 	}
 	copy(xs, elements[:32])
 	return nil

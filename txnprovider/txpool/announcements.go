@@ -58,6 +58,7 @@ func (a Announcements) Len() int {
 func (a Announcements) Less(i, j int) bool {
 	return bytes.Compare(a.hashes[i*length.Hash:(i+1)*length.Hash], a.hashes[j*length.Hash:(j+1)*length.Hash]) < 0
 }
+
 func (a Announcements) Swap(i, j int) {
 	a.ts[i], a.ts[j] = a.ts[j], a.ts[i]
 	a.sizes[i], a.sizes[j] = a.sizes[j], a.sizes[i]

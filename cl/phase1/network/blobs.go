@@ -154,8 +154,10 @@ type blobBackfillRequestSchedule struct {
 	validationReady func()
 }
 
-type blobBackfillCandidateAcceptor func(context.Context, *PeerAndSidecars) (progress, complete bool, err error)
-type blobBackfillRequestFactory func() *solid.ListSSZ[*cltypes.BlobIdentifier]
+type (
+	blobBackfillCandidateAcceptor func(context.Context, *PeerAndSidecars) (progress, complete bool, err error)
+	blobBackfillRequestFactory    func() *solid.ListSSZ[*cltypes.BlobIdentifier]
+)
 
 func requestBlobsForBackfill(ctx context.Context, r blobRequester, req blobBackfillRequestFactory, accept blobBackfillCandidateAcceptor) (*PeerAndSidecars, error) {
 	ticker := time.NewTicker(requestBlobRetryInterval)

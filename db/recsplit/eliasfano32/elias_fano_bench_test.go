@@ -65,7 +65,6 @@ func BenchmarkRead(b *testing.B) {
 			ef.Reset(buf.Bytes()).Seek(1)
 		}
 	})
-
 }
 
 func BenchmarkEF(b *testing.B) {

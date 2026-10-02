@@ -132,36 +132,6 @@ type TxnExecutor struct {
 	noFeeBurnAndTip bool
 }
 
-type runtimeGasAccounting struct {
-	auth     mdgas.MdGasUsage
-	topLevel mdgas.MdGasUsage
-	frame    mdgas.MdGasUsage
-}
-
-func (g runtimeGasAccounting) total() mdgas.MdGasUsage {
-	return mdgas.MdGasUsage{
-		Execution:  g.auth.Execution + g.topLevel.Execution + g.frame.Execution,
-		State:      g.auth.State + g.topLevel.State + g.frame.State,
-		StateSpill: g.auth.StateSpill + g.topLevel.StateSpill + g.frame.StateSpill,
-	}
-}
-
-func (g *runtimeGasAccounting) consumeAllExecutionGas(execution uint64) {
-	*g = runtimeGasAccounting{frame: mdgas.MdGasUsage{Execution: execution}}
-}
-
-func (g *runtimeGasAccounting) refillTopLevelState(gasRemaining *mdgas.MdGas, restoreState bool, vmerr error) {
-	RefillTopLevelGas(gasRemaining, &g.topLevel, restoreState, vmerr)
-}
-
-func (g *runtimeGasAccounting) finishFrame(gas, gasRemaining mdgas.MdGas, vmerr error) {
-	if vmerr == nil {
-		return
-	}
-	g.frame.State = 0
-	g.frame.Execution = gas.Total() - gasRemaining.Total()
-}
-
 // Message represents a message sent to a contract.
 type Message interface {
 	From() accounts.Address
@@ -218,7 +188,8 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 }
 
 func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, engine rules.EngineReader) (
-	*evmtypes.ExecutionResult, error) {
+	*evmtypes.ExecutionResult, error,
+) {
 	// Only zero-gas transactions may be service ones
 	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
 		blockContext := evm.Context
@@ -275,8 +246,8 @@ func (st *TxnExecutor) buyGas(fees upfrontTxnFees, gasBailout bool) error {
 		}
 	}
 
-	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil {
-		st.evm.Config().Tracer.OnGasChange(0, st.msg.Gas(), tracing.GasChangeTxInitialBalance)
+	if tracer := st.evm.Config().Tracer; tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(mdgas.MdGas{}, mdgas.MdGas{Execution: st.msg.Gas()}, tracing.GasChangeTxInitialBalance)
 	}
 
 	return nil
@@ -388,6 +359,9 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	requiredIntrinsicGas := max(intrinsicGasResult.ExecutionGas, intrinsicGasResult.FloorGasCost)
 	if st.msg.CheckGas() && rules.IsOsaka {
 		if rules.IsAmsterdam {
+			if gas > params.MaxTxnTotalGasLimit {
+				return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
+			}
 			// EIP-8037: TX_MAX_GAS_LIMIT applies to the execution gas dimension only.
 			if requiredIntrinsicGas > params.MaxTxnGasLimit {
 				return upfrontTxnFees{}, fmt.Errorf("%w: execution gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
@@ -521,7 +495,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 	st.gasRemaining, _, err = st.verifyAuthorities(auths, rules.ChainID, st.gasRemaining)
 	if err == nil && !contractCreation {
-		st.gasRemaining, gasUsed.topLevel, err = st.prepareTopLevelCall(st.gasRemaining)
+		st.gasRemaining, gasUsed.topLevel, err = st.handleRuntimeCall(st.gasRemaining)
 	}
 	if err != nil {
 		if !rules.IsAmsterdam {
@@ -529,8 +503,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 		}
 		st.state.RevertToSnapshot(runtimeSnapshot, err)
 		if errors.Is(err, vm.ErrRuntimeOutOfGas) {
-			st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
-			st.traceRuntimeFailure(vm.CALL, st.to(), runtimeGas, st.gasRemaining, err)
+			st.handleRuntimeFailure(vm.CALL, st.to(), runtimeGas, err)
 			return &evmtypes.ExecutionResult{Err: err}, nil
 		}
 		return nil, err
@@ -542,18 +515,20 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 
 	ret, st.gasRemaining, _, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, false)
 	if !contractCreation {
-		gasUsed.refillTopLevelState(&st.gasRemaining, vmConfig.RestoreState, vmerr)
+		gasUsed.refillTopLevelState(&st.gasRemaining, vmConfig.RestoreState, vmerr, vmConfig.Tracer)
 	}
 
 	result := &evmtypes.ExecutionResult{
-		ReceiptGasUsed:        st.txnGasUsed,
-		BlockExecutionGasUsed: st.blockExecutionGasUsed,
-		BlockStateGasUsed:     st.blockStateGasUsed,
-		Err:                   vmerr,
-		Reverted:              errors.Is(vmerr, vm.ErrExecutionReverted),
-		ReturnData:            ret,
-		SenderInitBalance:     senderInitBalance,
-		CoinbaseInitBalance:   coinbaseInitBalance,
+		TxnGasUsage: mdgas.TxnGasUsage{
+			BlockExecutionGasUsed: st.blockExecutionGasUsed,
+			BlockStateGasUsed:     st.blockStateGasUsed,
+		},
+		ReceiptGasUsed:      st.txnGasUsed,
+		Err:                 vmerr,
+		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
+		ReturnData:          ret,
+		SenderInitBalance:   senderInitBalance,
+		CoinbaseInitBalance: coinbaseInitBalance,
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {
@@ -643,8 +618,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	intrinsicGas := intrinsicGasResult.ExecutionGas
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
 
-	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
-		t.OnGasChange(st.msg.Gas(), st.gasRemaining.Total(), tracing.GasChangeTxIntrinsicGas)
+	if tracer := st.evm.Config().Tracer; tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(mdgas.MdGas{Execution: st.msg.Gas()}, st.gasRemaining, tracing.GasChangeTxIntrinsicGas)
 	}
 
 	var bailout bool
@@ -683,10 +658,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			}
 			if vmerr == nil && createNonce+1 >= createNonce {
 				createAddress = accounts.InternAddress(types.CreateAddress(sender.Value(), createNonce))
-				st.gasRemaining, gasUsed.topLevel, vmerr = st.prepareTopLevelCreate(createAddress, st.gasRemaining)
+				st.gasRemaining, gasUsed.topLevel, vmerr = st.handleRuntimeCreate(createAddress, st.gasRemaining)
 			}
 		} else {
-			st.gasRemaining, gasUsed.topLevel, vmerr = st.prepareTopLevelCall(st.gasRemaining)
+			st.gasRemaining, gasUsed.topLevel, vmerr = st.handleRuntimeCall(st.gasRemaining)
 		}
 	}
 	if vmerr != nil {
@@ -702,13 +677,14 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 				return nil, err
 			}
 		}
-		st.gasRemaining = mdgas.MdGas{State: runtimeGas.State}
-		gasUsed.consumeAllExecutionGas(runtimeGas.Execution)
-		typ, destination := vm.CALL, st.to()
+		typ := vm.CALL
+		destination := st.to()
 		if contractCreation {
-			typ, destination = vm.CREATE, createAddress
+			typ = vm.CREATE
+			destination = createAddress
 		}
-		st.traceRuntimeFailure(typ, destination, runtimeGas, st.gasRemaining, vmerr)
+		frameGasUsed := st.handleRuntimeFailure(typ, destination, runtimeGas, vmerr)
+		gasUsed = runtimeGasAccounting{frame: frameGasUsed}
 	} else {
 		frameGas := st.gasRemaining
 		if contractCreation {
@@ -717,50 +693,62 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			ret, st.gasRemaining, gasUsed.frame, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 		}
 		gasUsed.finishFrame(frameGas, st.gasRemaining, vmerr)
-		gasUsed.refillTopLevelState(&st.gasRemaining, vmConfig.RestoreState, vmerr)
+		gasUsed.refillTopLevelState(&st.gasRemaining, vmConfig.RestoreState, vmerr, vmConfig.Tracer)
 	}
 
 	totalGasUsed := gasUsed.total()
-	switch {
-	case refunds && !gasBailout:
-		refundQuotient := params.RefundQuotient
-		if rules.IsLondon {
-			refundQuotient = params.RefundQuotientEIP3529
-		}
-		switch {
-		case rules.IsAmsterdam:
-			combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
-			st.blockStateGasUsed = combined.StateClamped()
-			st.blockExecutionGasUsed = max(combined.Execution, intrinsicGasResult.FloorGasCost)
-			st.txnGasUsedB4Refunds = combined.Total()
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-		case rules.IsPrague:
-			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-			st.blockExecutionGasUsed = st.txnGasUsed
-		default:
-			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
-			st.blockExecutionGasUsed = st.txnGasUsed
-		}
-		if err := st.refundGas(); err != nil {
-			return nil, err
-		}
-	case rules.IsAmsterdam:
+	if rules.IsAmsterdam {
 		combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
 		st.blockStateGasUsed = combined.StateClamped()
 		st.blockExecutionGasUsed = max(combined.Execution, intrinsicGasResult.FloorGasCost)
 		st.txnGasUsedB4Refunds = combined.Total()
-		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
-	default:
-		// No-refund path: gasBailout (trace_call) or !refunds.
-		// Don't apply Prague floor or refunds — just record raw gas used.
+	} else {
 		st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
-		st.txnGasUsed = st.txnGasUsedB4Refunds
-		st.blockExecutionGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
+	}
+	gasLeft := st.gasRemaining
+	gasTracing := vmConfig.Tracer.HasGasChangeHook()
+	applyRefunds := refunds && !gasBailout
+	var refund uint64
+	if applyRefunds {
+		refundQuotient := params.RefundQuotient
+		if rules.IsLondon {
+			refundQuotient = params.RefundQuotientEIP3529
+		}
+		var old mdgas.MdGas
+		if gasTracing {
+			old = gasLeft
+		}
+		refund = min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+		gasLeft.Execution += refund
+		if gasTracing {
+			vmConfig.Tracer.EmitGasChange(old, gasLeft, tracing.GasChangeTxRefunds)
+		}
+	}
+	st.txnGasUsed = st.msg.Gas() - gasLeft.Total()
+	if st.txnGasUsed < intrinsicGasResult.FloorGasCost && (rules.IsAmsterdam || (rules.IsPrague && applyRefunds)) {
+		var old mdgas.MdGas
+		if gasTracing {
+			old = gasLeft
+		}
+		floorAdjustment := intrinsicGasResult.FloorGasCost - st.txnGasUsed
+		executionAdjustment := min(floorAdjustment, gasLeft.Execution)
+		gasLeft.Execution -= executionAdjustment
+		// calls that skip the execution gas cap can pay part of the floor from state gas.
+		gasLeft.State -= floorAdjustment - executionAdjustment
+		st.txnGasUsed = intrinsicGasResult.FloorGasCost
+		if gasTracing {
+			vmConfig.Tracer.EmitGasChange(old, gasLeft, tracing.GasChangeTxDataFloor)
+		}
+	}
+	if applyRefunds {
+		if !rules.IsAmsterdam {
+			st.blockExecutionGasUsed = st.txnGasUsed
+		}
+		if err := st.refundGas(gasLeft); err != nil {
+			return nil, err
+		}
+	} else if !rules.IsAmsterdam {
+		st.blockExecutionGasUsed = st.msg.Gas()
 	}
 	// EIP-8037: deduct the actual per-dimension usage from the block pool.
 	// Pre-Amsterdam only the execution dimension exists.
@@ -816,17 +804,20 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	result = &evmtypes.ExecutionResult{
-		ReceiptGasUsed:        st.txnGasUsed,
-		BlockExecutionGasUsed: st.blockExecutionGasUsed,
-		BlockStateGasUsed:     st.blockStateGasUsed,
-		MaxGasUsed:            max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
-		Err:                   vmerr,
-		Reverted:              errors.Is(vmerr, vm.ErrExecutionReverted),
-		ReturnData:            ret,
-		SenderInitBalance:     senderInitBalance,
-		CoinbaseInitBalance:   coinbaseInitBalance,
-		FeeTipped:             tipAmount,
-		FeeBurnt:              burnAmount,
+		TxnGasUsage: mdgas.TxnGasUsage{
+			BlockExecutionGasUsed: st.blockExecutionGasUsed,
+			BlockStateGasUsed:     st.blockStateGasUsed,
+			GasRefund:             refund,
+		},
+		ReceiptGasUsed:      st.txnGasUsed,
+		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
+		Err:                 vmerr,
+		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
+		ReturnData:          ret,
+		SenderInitBalance:   senderInitBalance,
+		CoinbaseInitBalance: coinbaseInitBalance,
+		FeeTipped:           tipAmount,
+		FeeBurnt:            burnAmount,
 	}
 
 	result.BurntContractAddress = burntContractAddress
@@ -854,20 +845,20 @@ func validateSetCodePrerequisites(auths []types.Authorization, contractCreation,
 	return nil
 }
 
-func (st *TxnExecutor) traceRuntimeFailure(typ vm.OpCode, destination accounts.Address, startGas, gasRemaining mdgas.MdGas, err error) {
-	TraceTopLevelFailure(st.evm, typ, st.msg.From(), destination, st.data, startGas, gasRemaining, st.value, err)
+func (st *TxnExecutor) handleRuntimeFailure(typ vm.OpCode, destination accounts.Address, startGas mdgas.MdGas, err error) mdgas.MdGasUsage {
+	return HandleRuntimeFailure(st.evm, typ, st.msg.From(), destination, st.data, startGas, &st.gasRemaining, st.value, err)
 }
 
-func (st *TxnExecutor) prepareTopLevelCall(gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
-	gasRemaining, gasUsed, err := PrepareTopLevelCall(st.evm, st.to(), st.value, gasRemaining)
+func (st *TxnExecutor) handleRuntimeCall(gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
+	gasRemaining, gasUsed, err := HandleRuntimeCall(st.evm, st.to(), st.value, gasRemaining)
 	if err != nil && !errors.Is(err, vm.ErrRuntimeOutOfGas) {
 		err = fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 	}
 	return gasRemaining, gasUsed, err
 }
 
-func (st *TxnExecutor) prepareTopLevelCreate(destination accounts.Address, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
-	gasRemaining, gasUsed, err := PrepareTopLevelCreate(st.evm, destination, gasRemaining)
+func (st *TxnExecutor) handleRuntimeCreate(destination accounts.Address, gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {
+	gasRemaining, gasUsed, err := HandleRuntimeCreate(st.evm, destination, gasRemaining)
 	if err != nil && !errors.Is(err, vm.ErrRuntimeOutOfGas) {
 		err = fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 	}
@@ -941,11 +932,11 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 			return gasRemaining, gasUsed, fmt.Errorf("%w: %w", ErrTxnExecutionFailed, err)
 		}
 		if isAmsterdam {
-			if !exists && !mdgas.Consume(&gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas) {
+			if !exists && !consumeGas(&gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas, st.evm.Config().Tracer, tracing.GasChangeTxAuthorization) {
 				return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 			}
 			if _, written := writtenAccounts[authority]; !written {
-				if !mdgas.Consume(&gasRemaining, &gasUsed, params.AccountWriteCostEIP8038, mdgas.ExecutionGas) {
+				if !consumeGas(&gasRemaining, &gasUsed, params.AccountWriteCostEIP8038, mdgas.ExecutionGas, st.evm.Config().Tracer, tracing.GasChangeTxAuthorization) {
 					return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 				}
 				writtenAccounts[authority] = struct{}{}
@@ -957,7 +948,7 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 			}
 			if auth.Address != (common.Address{}) {
 				if !preTxDelegated && !delegationSetFor[authority] {
-					if !mdgas.Consume(&gasRemaining, &gasUsed, params.StateGasAuthBase, mdgas.StateGas) {
+					if !consumeGas(&gasRemaining, &gasUsed, params.StateGasAuthBase, mdgas.StateGas, st.evm.Config().Tracer, tracing.GasChangeTxAuthorization) {
 						return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 					}
 				}
@@ -987,13 +978,19 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	return gasRemaining, gasUsed, nil
 }
 
-func (st *TxnExecutor) refundGas() error {
+func (st *TxnExecutor) refundGas(gasLeft mdgas.MdGas) error {
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := u256.Mul(u256.U64(st.msg.Gas()-st.txnGasUsed), *st.gasPrice)
+	remaining := u256.Mul(u256.U64(gasLeft.Total()), *st.gasPrice)
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
 		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %s\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining.String())
 	}
-	return st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
+	if err := st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn); err != nil {
+		return err
+	}
+	if tracer := st.evm.Config().Tracer; gasLeft.Total() > 0 && tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(gasLeft, mdgas.MdGas{}, tracing.GasChangeTxLeftOverReturned)
+	}
+	return nil
 }
 
 func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Authorization, accessTuples types.AccessList) (mdgas.IntrinsicGasCalcResult, bool) {
