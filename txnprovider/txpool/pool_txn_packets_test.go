@@ -306,9 +306,7 @@ func TestEIP7702BatchPoisoning(t *testing.T) {
 			r.Equal(byte(DynamicFeeTxnType), slots.Txns[0].TxType())
 			r.Equal(byte(DynamicFeeTxnType), slots.Txns[2].TxType())
 
-			// SetCode tx is accepted, but its single auth tuple was skipped.
-			// Gas billing still sees the original auth list (length 1) because
-			// per EIP-7702 the sender pays for every tuple regardless of validity.
+			// Keep invalid authorizations for admission and intrinsic gas accounting.
 			setCodeSlot := slots.Txns[1]
 			r.Equal(byte(SetCodeTxnType), setCodeSlot.TxType())
 			r.Len(setCodeSlot.Txn.GetAuthorizations(), 1)

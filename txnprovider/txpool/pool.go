@@ -1802,6 +1802,22 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.TxType() == SetCodeTxnType {
+		// Recover after admission checks. Invalid tuples do not invalidate the transaction.
+		slot := mt.TxnSlot
+		auths := slot.Txn.GetAuthorizations()
+		slot.AuthAndNonces = make([]AuthAndNonce, 0, len(auths))
+		for i := range auths {
+			auth := &auths[i]
+			if !auth.ChainID.IsUint64() {
+				continue
+			}
+			authority, err := auth.RecoverSigner()
+			if err != nil {
+				continue
+			}
+			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{authority, auth.Nonce})
+		}
+
 		for _, a := range mt.TxnSlot.AuthAndNonces {
 			// Self authorization nonce should be senderNonce + 1
 			if a.authority == senderAddr && a.nonce != mt.TxnSlot.Nonce+1 {

@@ -628,9 +628,61 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 }
 
+func TestSetCodeAuthorizationAdmission(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(key.PublicKey)
+
+	for _, tc := range []struct {
+		name   string
+		gas    uint64
+		feeCap uint64
+		reason txpoolcfg.DiscardReason
+	}{
+		{"underpriced", 100_000, 0, txpoolcfg.UnderPriced},
+		{"intrinsic gas", 21_000, 2, txpoolcfg.IntrinsicGas},
+		{"insufficient funds", 100_000, common.Ether, txpoolcfg.InsufficientFunds},
+		{"accepted", 100_000, 2, txpoolcfg.Success},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
+			require.NoError(t, err)
+			txn := newTestSetCodeTxnSlot(0, 0, 0, tc.feeCap, tc.gas).Txn.(*types.SetCodeTransaction)
+			txn.ChainID = pool.chainID
+			txn.Authorizations = []types.Authorization{auth, {}}
+			var encoded bytes.Buffer
+			require.NoError(t, txn.MarshalBinary(&encoded))
+			parseCtx := NewTxnParseContext(pool.chainID)
+			parseCtx.WithSender(false)
+			parseCtx.ValidateRLP(ValidateSerializedTxn)
+			var slot TxnSlot
+			_, err = parseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, nil, false, false, nil)
+			require.NoError(t, err)
+
+			var txns TxnSlots
+			txns.Append(&slot, sender[:], false)
+			reasons, err := pool.AddLocalTxns(ctx, txns)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
+			if tc.reason == txpoolcfg.Success {
+				require.Equal(t, []AuthAndNonce{{authority, 0}}, slot.AuthAndNonces)
+				require.Contains(t, pool.auths, AuthAndNonce{authority, 0})
+			} else {
+				require.Empty(t, slot.AuthAndNonces)
+				require.Empty(t, pool.auths)
+			}
+		})
+	}
+}
+
 func TestMultipleAuthorizations(t *testing.T) {
-	addrA := common.HexToAddress("0xa")
-	addrB := common.HexToAddress("0xb")
+	keyA, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	keyB, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	addrA := crypto.PubkeyToAddress(keyA.PublicKey)
+	addrB := crypto.PubkeyToAddress(keyB.PublicKey)
 	cases := []struct {
 		title          string
 		sender         common.Address
@@ -813,7 +865,13 @@ func TestMultipleAuthorizations(t *testing.T) {
 			var txnSlot1 *TxnSlot
 			if c.authority != nil {
 				txnSlot1 = newTestSetCodeTxnSlot(c.senderNonce, 0, c.tipcap, c.feecap, 100000)
-				txnSlot1.AuthAndNonces = []AuthAndNonce{{*c.authority, c.authNonce}}
+				key := keyA
+				if *c.authority == addrB {
+					key = keyB
+				}
+				auth, err := types.SignAuthorization(key, pool.chainID, common.Address{1}, c.authNonce)
+				require.NoError(t, err)
+				txnSlot1.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
 			} else {
 				txnSlot1 = newTestTxnSlot(c.senderNonce, 0, c.tipcap, c.feecap, 100000)
 			}
