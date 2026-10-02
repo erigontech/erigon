@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -49,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/eip8297/artifact"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -174,39 +177,107 @@ func TestVerifyPBTRejectsOversizedCodeDeclaration(t *testing.T) {
 	require.ErrorContains(t, pbtVerifyGenerateCodeExpected(requirements, expected, scratch), "EIP maximum")
 }
 
+func TestVerifyPBTAcceptsExportWithLeadingZeroCodeChunk(t *testing.T) {
+	verifyPBTRealExportWithSharedCode(t, []byte{0, 1})
+}
+
+func TestVerifyPBTAcceptsExportWithShortFinalCodeChunk(t *testing.T) {
+	code := append(bytes.Repeat([]byte{0x5b}, 31), 0, 0x5b, 0x5b)
+	verifyPBTRealExportWithSharedCode(t, code)
+}
+
+func verifyPBTRealExportWithSharedCode(t *testing.T, code []byte) {
+	t.Helper()
+	selectPBTExportSuite(t)
+	fixture, err := execmoduletester.NewPBTAcceptanceChainWithSharedCode(t, false, true, code)
+	require.NoError(t, err)
+	require.NoError(t, fixture.Tester.InsertChain(fixture.Chain))
+	dirs := fixture.Tester.Dirs
+	tx, err := fixture.Tester.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	outDir := filepath.Join(t.TempDir(), "export")
+	require.NoError(t, runExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
+		if block == 0 {
+			return fixture.Tester.Genesis.HeaderNoCopy(), nil
+		}
+		return fixture.Chain.Headers[block-1], nil
+	}, outDir, log.New()))
+	tx.Rollback()
+	fixture.Tester.Close()
+	snapshot := filepath.Join(outDir, pbtSnapshotFileName)
+	preimages := filepath.Join(outDir, pbtPreimagesFileName)
+	validErr, _ := runVerifyPBTTestCommandAtBlock(t, dirs.DataDir, snapshot, preimages, 4)
+	require.NoError(t, validErr)
+	invalidErr, stderr := runVerifyPBTTestCommandAtBlock(t, dirs.DataDir, snapshot, preimages, 3)
+	assertVerifyPBTRejected(t, invalidErr, stderr)
+}
+
 func TestVerifyPBTHiveFixtures(t *testing.T) {
-	anchor := newHiveVerifyAnchor(t)
+	manifest := readHivePBTManifest(t)
+	anchor := newHiveVerifyAnchor(t, common.HexToHash(manifest.Genesis.StateRoot))
 	root := filepath.Join("testdata", "hive-pbt-fixtures")
-	validSnapshot := filepath.Join(root, "valid", "snapshot.bin")
-	validPreimages := filepath.Join(root, "valid", "preimages.bin")
+	validSnapshot := filepath.Join(root, manifest.Valid.Snapshot)
+	validPreimages := filepath.Join(root, manifest.Valid.Preimages)
 	validErr, _ := runVerifyPBTTestCommand(t, anchor, validSnapshot, validPreimages)
 	require.NoError(t, validErr)
 
-	preimageCases, err := os.ReadDir(filepath.Join(root, "preimages"))
-	require.NoError(t, err)
-	require.Len(t, preimageCases, 13)
-	for _, entry := range preimageCases {
-		t.Run(entry.Name(), func(t *testing.T) {
-			err, stderr := runVerifyPBTTestCommand(t, anchor, validSnapshot, filepath.Join(root, "preimages", entry.Name(), "preimages.bin"))
+	var preimageCount, snapshotCount, produceCount int
+	for _, testCase := range manifest.Cases {
+		if testCase.Suite == "produce" {
+			produceCount++
+			continue
+		}
+		t.Run(testCase.ID, func(t *testing.T) {
+			snapshot := filepath.Join(root, testCase.Snapshot)
+			preimages := filepath.Join(root, testCase.Preimages)
+			err, stderr := runVerifyPBTTestCommand(t, anchor, snapshot, preimages)
 			assertVerifyPBTRejected(t, err, stderr)
 		})
+		switch testCase.Suite {
+		case "preimages":
+			preimageCount++
+		case "snapshot":
+			snapshotCount++
+		default:
+			t.Fatalf("unknown hive fixture suite %q", testCase.Suite)
+		}
 	}
-	snapshotCases, err := os.ReadDir(filepath.Join(root, "snapshot"))
+	require.Equal(t, 13, preimageCount)
+	require.Equal(t, 53, snapshotCount)
+	require.Equal(t, 2, produceCount)
+}
+
+type hivePBTManifest struct {
+	Genesis struct {
+		StateRoot string `json:"stateRoot"`
+	} `json:"genesis"`
+	Valid struct {
+		Snapshot  string `json:"snapshot"`
+		Preimages string `json:"preimages"`
+	} `json:"valid"`
+	Cases []struct {
+		ID        string `json:"id"`
+		Suite     string `json:"suite"`
+		Snapshot  string `json:"snapshot"`
+		Preimages string `json:"preimages"`
+	} `json:"cases"`
+}
+
+func readHivePBTManifest(t *testing.T) hivePBTManifest {
+	t.Helper()
+	manifestBytes, err := os.ReadFile(filepath.Join("testdata", "hive-pbt-fixtures", "manifest.json"))
 	require.NoError(t, err)
-	require.Len(t, snapshotCases, 53)
-	for _, entry := range snapshotCases {
-		t.Run(entry.Name(), func(t *testing.T) {
-			preimages := validPreimages
-			if entry.Name() == "anchored-elsewhere" {
-				preimages = filepath.Join(root, "snapshot", entry.Name(), "preimages.bin")
-			}
-			err, stderr := runVerifyPBTTestCommand(t, anchor, filepath.Join(root, "snapshot", entry.Name(), "snapshot.bin"), preimages)
-			assertVerifyPBTRejected(t, err, stderr)
-		})
-	}
+	var manifest hivePBTManifest
+	require.NoError(t, json.Unmarshal(manifestBytes, &manifest))
+	return manifest
 }
 
 func runVerifyPBTTestCommand(t *testing.T, anchor, snapshot, preimages string) (error, string) {
+	return runVerifyPBTTestCommandAtBlock(t, anchor, snapshot, preimages, 0)
+}
+
+func runVerifyPBTTestCommandAtBlock(t *testing.T, anchor, snapshot, preimages string, block uint64) (error, string) {
 	t.Helper()
 	cmd := &cli.Command{Flags: []cli.Flag{
 		&cli.StringFlag{Name: utils.DataDirFlag.Name},
@@ -217,7 +288,7 @@ func runVerifyPBTTestCommand(t *testing.T, anchor, snapshot, preimages string) (
 	require.NoError(t, cmd.Set(utils.DataDirFlag.Name, anchor))
 	require.NoError(t, cmd.Set("snapshot", snapshot))
 	require.NoError(t, cmd.Set("preimages", preimages))
-	require.NoError(t, cmd.Set("block", "0"))
+	require.NoError(t, cmd.Set("block", fmt.Sprint(block)))
 	oldStderr := os.Stderr
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
@@ -256,7 +327,8 @@ func TestVerifyPBTUsesFrozenBlockFiles(t *testing.T) {
 }
 
 func TestVerifyPBTClassifiesSnapshotIO(t *testing.T) {
-	anchor := newHiveVerifyAnchor(t)
+	manifest := readHivePBTManifest(t)
+	anchor := newHiveVerifyAnchor(t, common.HexToHash(manifest.Genesis.StateRoot))
 	root := filepath.Join("testdata", "hive-pbt-fixtures", "valid")
 	scratch := filepath.Join(t.TempDir(), "scratch-file")
 	require.NoError(t, os.WriteFile(scratch, nil, 0o644))
@@ -406,7 +478,8 @@ func newMeasuredPBTAnchor(t *testing.T, root common.Hash) string {
 }
 
 func TestVerifyPBTCommandPrintsRejection(t *testing.T) {
-	anchor := newHiveVerifyAnchor(t)
+	manifest := readHivePBTManifest(t)
+	anchor := newHiveVerifyAnchor(t, common.HexToHash(manifest.Genesis.StateRoot))
 	root := filepath.Join("testdata", "hive-pbt-fixtures")
 	snapshot := filepath.Join(t.TempDir(), "snapshot.bin")
 	valid, err := os.ReadFile(filepath.Join(root, "valid", "snapshot.bin"))
@@ -440,7 +513,8 @@ func TestVerifyPBTCommandPrintsRejection(t *testing.T) {
 }
 
 func TestVerifyPBTCommandPrintsRejectionInFreshProcess(t *testing.T) {
-	anchor := newHiveVerifyAnchor(t)
+	manifest := readHivePBTManifest(t)
+	anchor := newHiveVerifyAnchor(t, common.HexToHash(manifest.Genesis.StateRoot))
 	root := filepath.Join("testdata", "hive-pbt-fixtures")
 	snapshot := filepath.Join(t.TempDir(), "snapshot.bin")
 	valid, err := os.ReadFile(filepath.Join(root, "valid", "snapshot.bin"))
@@ -486,14 +560,13 @@ func TestVerifyPBTCommandHelperProcess(t *testing.T) {
 	os.Exit(2)
 }
 
-func newHiveVerifyAnchor(t *testing.T) string {
+func newHiveVerifyAnchor(t *testing.T, root common.Hash) string {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithOpenExisting())
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	root := common.HexToHash("0xb5656f58d12a56427942e7a422755496122c7fceba8b3af277f0df13da57d50c")
 	header := &types.Header{Number: *uint256.NewInt(0), Root: root}
 	require.NoError(t, rawdb.WriteHeader(tx, header))
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), 0))

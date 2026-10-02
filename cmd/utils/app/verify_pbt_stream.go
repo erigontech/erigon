@@ -192,7 +192,7 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 				return err
 			}
 			if header.Kind == 1 {
-				if err := codeRequirements.Collect(header.CodeHash[:], pbtVerifyCodeRequirement(bytesToUint64(header.CodeSize))); err != nil {
+				if err := codeRequirements.Collect(header.CodeHash[:], pbtVerifyCodeRequirement(common.BytesToUint64(header.CodeSize))); err != nil {
 					return err
 				}
 			}
@@ -712,7 +712,7 @@ func pbtVerifyBuildAccountRows(accountsPath, storagePath string, output *etl.Col
 }
 
 func pbtVerifyAccount(header artifact.Header, root common.Hash) (pbtVerifyAccountRecord, error) {
-	account := accounts.Account{Nonce: bytesToUint64(header.Nonce), Root: root}
+	account := accounts.Account{Nonce: common.BytesToUint64(header.Nonce), Root: root}
 	account.Balance.SetBytes(header.Balance)
 	switch header.Kind {
 	case 0:

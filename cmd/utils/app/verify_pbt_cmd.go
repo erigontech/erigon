@@ -73,7 +73,11 @@ func doVerifyPBT(ctx context.Context, cliCtx *cli.Command) error {
 func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath string, block uint64, scratchDirs ...string) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("%w: malformed input: %v", errVerifyPBTInvalid, recovered)
+			if recoveredErr, ok := recovered.(error); ok {
+				err = fmt.Errorf("%w: malformed input: %w", errVerifyPBTInvalid, recoveredErr)
+			} else {
+				err = fmt.Errorf("%w: malformed input: %v", errVerifyPBTInvalid, recovered)
+			}
 		}
 	}()
 
@@ -130,7 +134,11 @@ func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath st
 	if err != nil {
 		return err
 	}
-	defer func() { _ = dir.RemoveAll(tmp) }()
+	defer func() {
+		if removeErr := dir.RemoveAll(tmp); err == nil {
+			err = removeErr
+		}
+	}()
 	_, root, err := verifyPBTStreamingState(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), tmp)
 	if err != nil {
 		if !pbtVerifyIsIOError(err) {
@@ -153,14 +161,6 @@ func pbtVerifyIsIOError(err error) bool {
 func trimPBTValue(value []byte) []byte {
 	value = slices.Clone(value)
 	return bytes.TrimLeft(value, "\x00")
-}
-
-func bytesToUint64(value []byte) uint64 {
-	var result uint64
-	for _, b := range value {
-		result = result<<8 | uint64(b)
-	}
-	return result
 }
 
 func verifyPBTHeaderRoot(ctx context.Context, dataDir string, block uint64, root common.Hash) error {
