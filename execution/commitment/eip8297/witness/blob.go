@@ -17,12 +17,10 @@
 package witness
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/bits"
-	"sort"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -186,10 +184,6 @@ func PBinPath(walk *eip8297.Bitpath) []byte {
 	return eip8297.AppendBitPrefix(nil, walk)
 }
 
-func PBinSortPaths(paths [][]byte) {
-	sort.Slice(paths, func(i, j int) bool { return bytes.Compare(paths[i], paths[j]) < 0 })
-}
-
 func pbinValidateKey(key []byte) error {
 	if err := pbinValidateKeyLength(len(key)); err != nil {
 		return err
@@ -276,10 +270,6 @@ func pbinDecodeGroup(blob []byte) (PBinGroup, error) {
 }
 
 func pbinFoldGroup(group *PBinGroup) common.Hash {
-	if len(group.Subs) == 1 {
-		key := append(append([]byte(nil), group.Stem...), group.Subs[0])
-		return eip8297.HashBytes(eip8297.LeafPreimage(nil, key, group.Values[0]))
-	}
 	return pbinFoldRange(group, 0, len(group.Subs), 0, int(group.Position), len(group.Stem)*8)
 }
 

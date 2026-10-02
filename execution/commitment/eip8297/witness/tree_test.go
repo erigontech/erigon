@@ -29,10 +29,14 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
+func newPBinEmptyTree() *PBinTree {
+	return &PBinTree{resolved: make(map[string]PBinResolvedNode)}
+}
+
 func TestPBinTreeRandomLeafSets(t *testing.T) {
 	pbinUseBlake3(t)
 	for _, entries := range pbinTreeTestEntries() {
-		tree := NewPBinEmptyTree()
+		tree := newPBinEmptyTree()
 		for index, entry := range entries {
 			require.NoError(t, tree.Put(entry.Key, entry.Value))
 			wantAfter := eip8297.StateRootWithHash(entries[:index+1], func(preimage []byte) common.Hash {
@@ -84,7 +88,7 @@ func TestPBinTreeGroupShapeTransitions(t *testing.T) {
 	pbinUseBlake3(t)
 	key0 := eip8297.TreeKeyAccount([]byte{3}, 0)
 	key1 := eip8297.TreeKeyAccount([]byte{3}, 1)
-	tree := NewPBinEmptyTree()
+	tree := newPBinEmptyTree()
 	require.NoError(t, tree.Put(key0, pbinValueBytes(1)))
 	require.NoError(t, tree.Put(key1, pbinValueBytes(2)))
 	require.NoError(t, tree.Delete(key0))
@@ -149,7 +153,7 @@ func TestPBinTreeChecksPointersAndGroupPositions(t *testing.T) {
 	pbinUseBlake3(t)
 	key0 := eip8297.TreeKeyAccount([]byte{12}, 0)
 	key1 := eip8297.TreeKeyAccount([]byte{13}, 0)
-	eager := NewPBinEmptyTree()
+	eager := newPBinEmptyTree()
 	require.NoError(t, eager.Put(key0, pbinValueBytes(1)))
 	require.NoError(t, eager.Put(key1, pbinValueBytes(2)))
 	store := pbinStoreTree(t, eager)
@@ -166,7 +170,7 @@ func TestPBinTreeChecksPointersAndGroupPositions(t *testing.T) {
 
 	sameStem := eip8297.TreeKeyAccount([]byte{14}, 0)
 	sameStem1 := eip8297.TreeKeyAccount([]byte{14}, 1)
-	groupTree := NewPBinEmptyTree()
+	groupTree := newPBinEmptyTree()
 	require.NoError(t, groupTree.Put(sameStem, pbinValueBytes(3)))
 	require.NoError(t, groupTree.Put(sameStem1, pbinValueBytes(4)))
 	groupStore := pbinStoreTree(t, groupTree)
@@ -179,7 +183,7 @@ func TestPBinTreeChecksPointersAndGroupPositions(t *testing.T) {
 
 func pbinLazyTree(t *testing.T, entries []eip8297.Entry) (*PBinTree, map[string]int) {
 	t.Helper()
-	eager := NewPBinEmptyTree()
+	eager := newPBinEmptyTree()
 	for _, entry := range entries {
 		require.NoError(t, eager.Put(entry.Key, entry.Value))
 	}

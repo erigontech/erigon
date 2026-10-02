@@ -185,7 +185,7 @@ func TestPBinPathsUseEncodedOrder(t *testing.T) {
 	require.Empty(t, PBinPath(&root))
 	require.Equal(t, eip8297.AppendBitPrefix(nil, &short), PBinPath(&short))
 	paths := [][]byte{PBinPath(&long), PBinPath(&root), PBinPath(&short)}
-	PBinSortPaths(paths)
+	slices.SortFunc(paths, bytes.Compare)
 	require.True(t, slices.IsSortedFunc(paths, bytes.Compare))
 }
 

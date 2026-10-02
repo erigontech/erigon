@@ -137,6 +137,8 @@ func (s *RecordingState) MarkSystemAddrTouchedInTx() { s.systemAddrTouchedInTx =
 
 func (s *RecordingState) markPBinSystemAddrTouchedInTx() { s.pbtSystemAddrTouchedInTx = true }
 
+func (s *RecordingState) setSystemCallScope(active bool) { s.systemCallScope = active }
+
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
 	if len(addrs) == 0 {
 		return
@@ -175,12 +177,6 @@ func (s *RecordingState) recordStorageRead(addr common.Address, key common.Hash,
 		s.storageReadSources[addr] = make(map[common.Hash]recordingReadSource)
 	}
 	s.storageReadSources[addr][key] |= source
-}
-
-func withRecordingSystemCallScope(recordingState *RecordingState, call func() error) error {
-	recordingState.systemCallScope = true
-	defer func() { recordingState.systemCallScope = false }()
-	return call()
 }
 
 func (s *RecordingState) recordPBTCode(code []byte) {
@@ -792,14 +788,18 @@ func (api *BaseAPI) buildAccessedState(
 	}
 	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		recordingState.systemCallScope = true
-		defer func() { recordingState.systemCallScope = false }()
-		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
+		var result []byte
+		err := withSystemCallScope(recordingState, func() error {
+			var err error
+			result, err = protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
+			return err
+		})
+		return result, err
 	}
 	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize block: %w", err)
 	}
-	if err = withRecordingSystemCallScope(recordingState, func() error { return ibs.FinalizeTx(blockRules, recordingState) }); err != nil {
+	if err = withSystemCallScope(recordingState, func() error { return ibs.FinalizeTx(blockRules, recordingState) }); err != nil {
 		return nil, nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
 	}
 
@@ -833,9 +833,13 @@ func (api *BaseAPI) buildAccessedState(
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		recordingState.systemCallScope = true
-		defer func() { recordingState.systemCallScope = false }()
-		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
+		var result []byte
+		err := withSystemCallScope(recordingState, func() error {
+			var err error
+			result, err = protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
+			return err
+		})
+		return result, err
 	}
 
 	// Collect logs accumulated during transaction execution into a synthetic receipt
@@ -849,7 +853,7 @@ func (api *BaseAPI) buildAccessedState(
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
-	if err = withRecordingSystemCallScope(recordingState, func() error { return ibs.CommitBlock(blockRules, recordingState) }); err != nil {
+	if err = withSystemCallScope(recordingState, func() error { return ibs.CommitBlock(blockRules, recordingState) }); err != nil {
 		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
@@ -1080,37 +1084,44 @@ func (api *DebugAPIImpl) witnessAnchors(ctx context.Context, tx kv.TemporalTx, i
 	return parentRoot, postRoot, nil
 }
 
-func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.TemporalTx, info *witnessBlockInfo, trie witnessTrie, chainConfig *chain.Config, skipHistory bool) error {
+type witnessAvailability struct {
+	settings   *dbstate.ErigonDBSettings
+	domain     kv.Domain
+	parentRoot common.Hash
+	postRoot   common.Hash
+}
+
+func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.TemporalTx, info *witnessBlockInfo, trie witnessTrie, chainConfig *chain.Config, skipHistory bool) (witnessAvailability, error) {
 	trieName := witnessTrieName(trie)
 	variant := dbstate.TrieVariantHex
 	settings, err := dbstate.ReadErigonDBSettings(api.dirs)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+		return witnessAvailability{}, err
 	}
 	if settings != nil {
 		variant = settings.TrieVariantName()
 	}
 	domain := api.witnessCommitmentDomain(trie, variant)
 	if (trie == witnessTrieMPT && variant == dbstate.TrieVariantBin) || (trie == witnessTriePBT && variant == dbstate.TrieVariantHex) {
-		return fmt.Errorf("%s commitment domain is missing from datadir", trieName)
+		return witnessAvailability{}, fmt.Errorf("%s commitment domain is missing from datadir", trieName)
 	}
 	provider, ok := tx.AggTx().(interface{ CommitmentDomains() []kv.Domain })
 	if !ok {
-		return fmt.Errorf("%s commitment domain is unavailable", trieName)
+		return witnessAvailability{}, fmt.Errorf("%s commitment domain is unavailable", trieName)
 	}
 	hasDomain := slices.Contains(provider.CommitmentDomains(), domain)
 	if trie == witnessTriePBT && variant == dbstate.TrieVariantBin {
 		hasDomain = slices.Contains(provider.CommitmentDomains(), kv.CommitmentDomain)
 	}
 	if !hasDomain {
-		return fmt.Errorf("%s commitment domain is missing from datadir", trieName)
+		return witnessAvailability{}, fmt.Errorf("%s commitment domain is missing from datadir", trieName)
 	}
 
 	parentTxNum := uint64(0)
 	if info.BlockNum > 0 {
 		parentTxNum, err = api._txNumReader.Max(ctx, tx, info.ParentNum)
 		if err != nil {
-			return err
+			return witnessAvailability{}, err
 		}
 	}
 	lifecycle, hasLifecycle := tx.AggTx().(interface {
@@ -1125,26 +1136,29 @@ func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.Tem
 		frozenAt, frozen = settingsFrozenAt, true
 	}
 	if frozen && frozenAt < parentTxNum {
-		return fmt.Errorf("%s commitment is frozen before parent block %d at txnum %d", trieName, info.ParentNum, frozenAt)
+		return witnessAvailability{}, fmt.Errorf("%s commitment is frozen before parent block %d at txnum %d", trieName, info.ParentNum, frozenAt)
 	}
 	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, domain)
 	if err != nil {
-		return err
+		return witnessAvailability{}, err
 	}
 	if hasLifecycle && lifecycle.CommitmentDomainStopped(domain) {
 		stopped = true
 	}
 	if stopped && tx.Debug().DomainProgress(domain) < parentTxNum {
-		return fmt.Errorf("%s commitment was stopped before parent block %d", trieName, info.ParentNum)
+		return witnessAvailability{}, fmt.Errorf("%s commitment was stopped before parent block %d", trieName, info.ParentNum)
 	}
 	if !skipHistory {
 		historyStart := tx.Debug().HistoryStartFrom(domain)
 		if info.FirstTxNumInBlock < historyStart {
-			return fmt.Errorf("%s commitment history pruned: start %d, last tx: %d", trieName, historyStart, info.FirstTxNumInBlock)
+			return witnessAvailability{}, fmt.Errorf("%s commitment history pruned: start %d, last tx: %d", trieName, historyStart, info.FirstTxNumInBlock)
 		}
 	}
-	_, _, err = api.witnessAnchors(ctx, tx, info, trie, chainConfig)
-	return err
+	parentRoot, postRoot, err := api.witnessAnchors(ctx, tx, info, trie, chainConfig)
+	if err != nil {
+		return witnessAvailability{}, err
+	}
+	return witnessAvailability{settings: settings, domain: domain, parentRoot: parentRoot, postRoot: postRoot}, nil
 }
 
 func (api *DebugAPIImpl) witnessCommitmentDomain(trie witnessTrie, variant string) kv.Domain {
@@ -1172,21 +1186,16 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	if err != nil {
 		return nil, err
 	}
-	binTrie := requestedTrie == witnessTriePBT
-	variant := dbstate.TrieVariantHex
-	if settings, settingsErr := dbstate.ReadErigonDBSettings(api.dirs); settingsErr == nil && settings != nil {
-		variant = settings.TrieVariantName()
-	}
-	commitmentDomain := api.witnessCommitmentDomain(requestedTrie, variant)
-	if err := api.checkWitnessAvailability(ctx, tx, info, requestedTrie, chainConfig, hc != nil); err != nil {
-		return nil, err
-	}
-	parentRoot, postRoot, err := api.witnessAnchors(ctx, tx, info, requestedTrie, chainConfig)
+	availability, err := api.checkWitnessAvailability(ctx, tx, info, requestedTrie, chainConfig, hc != nil)
 	if err != nil {
 		return nil, err
 	}
+	binTrie := requestedTrie == witnessTriePBT
+	commitmentDomain := availability.domain
+	parentRoot, postRoot := availability.parentRoot, availability.postRoot
 
 	engine := api.engine()
+	fullEngine, fullEngineOK := engine.(rules.Engine)
 
 	accessed, accessedBlockHashes, err := api.buildAccessedState(ctx, tx, block, chainConfig, engine, firstTxNumInBlock, mode)
 	if err != nil {
@@ -1250,8 +1259,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		if parentRoot == eip8297.EmptyTreeHash && len(result.State) == 0 {
 			result.Keys = nil
 		}
-		fullEngine, ok := engine.(rules.Engine)
-		if !ok {
+		if !fullEngineOK {
 			return nil, fmt.Errorf("engine does not support full rules.Engine interface")
 		}
 		if err := verifyPBinWitnessAgainstBlock(ctx, result, block, parentRoot, postRoot, chainConfig, fullEngine); err != nil {
@@ -1266,7 +1274,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		postRoot, accessed, mode, binTrie)
+		postRoot, accessed, mode)
 	if err != nil {
 		return nil, err
 	}
@@ -1286,15 +1294,14 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	result.Headers = headers
 	result.headerByNumber = byNumber
 
-	fullEngine, ok := engine.(rules.Engine)
-	if !ok {
+	if !fullEngineOK {
 		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
 	}
 	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine, postRoot); err != nil {
 		return nil, fmt.Errorf("%w: %w", errWitnessVerifyFailed, err)
 	}
 
-	result.State = appendLegacyEmptyStorageNode(result.State, mode, binTrie)
+	result.State = appendLegacyEmptyStorageNode(result.State, mode)
 	if !binTrie {
 		if len(result.State) > 0 {
 			result.legacyRoot = bytes.Clone(result.State[0])
@@ -1311,8 +1318,8 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 // account leaf carries an empty storage root (EmptyRoot appears only as an account-leaf
 // storage-root field). It is an MPT artifact: canonical mode omits it and the binary trie
 // has no such node. Called after stateless verification, which rejects the bare node.
-func appendLegacyEmptyStorageNode(nodes []hexutil.Bytes, mode witnessMode, binTrie bool) []hexutil.Bytes {
-	if mode != witnessModeLegacy || binTrie {
+func appendLegacyEmptyStorageNode(nodes []hexutil.Bytes, mode witnessMode) []hexutil.Bytes {
+	if mode != witnessModeLegacy {
 		return nodes
 	}
 	for _, node := range nodes {
@@ -1595,12 +1602,7 @@ func detectCollapseSiblings(
 	expectedBlockRoot common.Hash,
 	accessed *accessedState,
 	mode witnessMode,
-	binTrie bool,
 ) (siblingPaths [][]byte, err error) {
-	if binTrie {
-		return nil, nil
-	}
-
 	// Set up split reader: commitment from block beginning (durable) or the pinned
 	// parent snapshot (head-capture), plain state from block end. withHistory=false
 	// so branch updates are written using PutBranch().
@@ -2485,30 +2487,20 @@ type statelessWitnessState interface {
 }
 
 type pbinSystemCallScoped interface {
-	setPBinSystemCallScope(bool)
+	setSystemCallScope(bool)
 }
 
 type pbinSystemAddressAccessed interface {
 	latchPBinSystemAddressRead()
 }
 
-func withPBinSystemCallScope(stateless statelessWitnessState, call func() ([]byte, error)) ([]byte, error) {
+func withSystemCallScope(stateless any, call func() error) error {
 	scoped, ok := stateless.(pbinSystemCallScoped)
 	if !ok {
 		return call()
 	}
-	scoped.setPBinSystemCallScope(true)
-	defer scoped.setPBinSystemCallScope(false)
-	return call()
-}
-
-func withPBinSystemCallError(stateless statelessWitnessState, call func() error) error {
-	scoped, ok := stateless.(pbinSystemCallScoped)
-	if !ok {
-		return call()
-	}
-	scoped.setPBinSystemCallScope(true)
-	defer scoped.setPBinSystemCallScope(false)
+	scoped.setSystemCallScope(true)
+	defer scoped.setSystemCallScope(false)
 	return call()
 }
 
@@ -2531,14 +2523,18 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 
 	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return withPBinSystemCallScope(stateless, func() ([]byte, error) {
-			return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
+		var result []byte
+		err := withSystemCallScope(stateless, func() error {
+			var err error
+			result, err = protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
+			return err
 		})
+		return result, err
 	}
 	if err := engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return fmt.Errorf("verification: failed to initialize block: %w", err)
 	}
-	if err := withPBinSystemCallError(stateless, func() error { return ibs.FinalizeTx(blockRules, stateless) }); err != nil {
+	if err := withSystemCallScope(stateless, func() error { return ibs.FinalizeTx(blockRules, stateless) }); err != nil {
 		return fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
 	}
 
@@ -2578,9 +2574,13 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return withPBinSystemCallScope(stateless, func() ([]byte, error) {
-			return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
+		var result []byte
+		err := withSystemCallScope(stateless, func() error {
+			var err error
+			result, err = protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
+			return err
 		})
+		return result, err
 	}
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.
@@ -2594,7 +2594,7 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 		return fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	if err := withPBinSystemCallError(stateless, func() error { return ibs.CommitBlock(blockRules, stateless) }); err != nil {
+	if err := withSystemCallScope(stateless, func() error { return ibs.CommitBlock(blockRules, stateless) }); err != nil {
 		return fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
 	}
 	if _, ok := stateless.(*pbinWitnessStateless); ok {

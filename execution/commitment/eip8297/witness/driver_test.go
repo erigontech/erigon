@@ -41,7 +41,7 @@ func TestPBinDriverBuildsEmbeddingInOrder(t *testing.T) {
 	codeHashValue := eip8297.CodeHashValue(codeHash)
 	delegation := append([]byte{0xef, 0x01, 0x00}, make([]byte, eip8297.DelegationCodeLength-3)...)
 	delegationValue := eip8297.EncodeDelegation(delegation)
-	tree := NewPBinEmptyTree()
+	tree := newPBinEmptyTree()
 	root, resolved, err := tree.Apply(PBinDriverInput{
 		Storage: []PBinStorageWrite{
 			{Address: addressB, Slot: slot64, Value: storage64},
@@ -99,12 +99,12 @@ func TestPBinDriverReadsBeforeWrites(t *testing.T) {
 func TestPBinDriverDeletesZeroAccountValue(t *testing.T) {
 	pbinUseBlake3(t)
 	key := eip8297.TreeKeyAccount([]byte{12}, eip8297.BasicDataLeafKey)
-	tree := NewPBinEmptyTree()
+	tree := newPBinEmptyTree()
 	_, _, err := tree.Apply(PBinDriverInput{Accounts: []PBinAccountUpdate{{Address: []byte{12}, Values: map[byte][]byte{eip8297.BasicDataLeafKey: pbinValueBytes(1)}}}})
 	require.NoError(t, err)
 	root, _, err := tree.Apply(PBinDriverInput{Accounts: []PBinAccountUpdate{{Address: []byte{12}, Values: map[byte][]byte{eip8297.BasicDataLeafKey: make([]byte, eip8297.ValueLength)}}}})
 	require.NoError(t, err)
-	want := NewPBinEmptyTree().RootHash()
+	want := newPBinEmptyTree().RootHash()
 	require.Equal(t, want, root)
 	_, present, err := tree.Read(key)
 	require.NoError(t, err)

@@ -341,7 +341,7 @@ func TestPBinWitnessStatelessSyntheticSystemAccessIsSuppressed(t *testing.T) {
 	rootOnly := &ExecutionWitnessResult{Keys: []hexutil.Bytes{f.result.Keys[0]}, State: []hexutil.Bytes{f.result.State[0]}}
 	stateless, err := newPBinWitnessStateless(rootOnly, f.root)
 	require.NoError(t, err)
-	stateless.setPBinSystemCallScope(true)
+	stateless.setSystemCallScope(true)
 	account, err := stateless.ReadAccountData(params.SystemAddress)
 	require.NoError(t, err)
 	require.Nil(t, account)
@@ -373,7 +373,7 @@ func TestPBinWitnessStatelessTamperedSystemBlobErrors(t *testing.T) {
 		candidate.State[index][len(candidate.State[index])-1] ^= 1
 		stateless, err := newPBinWitnessStateless(candidate, root)
 		require.NoError(t, err)
-		stateless.setPBinSystemCallScope(true)
+		stateless.setSystemCallScope(true)
 		_, err = stateless.ReadAccountData(params.SystemAddress)
 		if err != nil {
 			require.ErrorContains(t, err, "hashes to")
@@ -430,7 +430,7 @@ func TestPBinWitnessStatelessSystemContractsNeedProof(t *testing.T) {
 		t.Run(address.Value().Hex()+"-absent", func(t *testing.T) {
 			stateless, err := newPBinWitnessStateless(rootOnly, f.root)
 			require.NoError(t, err)
-			stateless.setPBinSystemCallScope(true)
+			stateless.setSystemCallScope(true)
 			_, err = stateless.ReadAccountData(address)
 			require.ErrorIs(t, err, commitment.ErrPBinWitnessBlinded)
 			require.ErrorIs(t, stateless.resolveError, commitment.ErrPBinWitnessBlinded)
@@ -439,7 +439,7 @@ func TestPBinWitnessStatelessSystemContractsNeedProof(t *testing.T) {
 		result, root := pbinSystemContractWitness(t, address.Value())
 		stateless, err := newPBinWitnessStateless(result, root)
 		require.NoError(t, err)
-		stateless.setPBinSystemCallScope(true)
+		stateless.setSystemCallScope(true)
 		code, err := stateless.ReadAccountCode(address)
 		require.NoError(t, err)
 		require.NotEmpty(t, code)
@@ -449,7 +449,7 @@ func TestPBinWitnessStatelessSystemContractsNeedProof(t *testing.T) {
 			trimmed.State = append(trimmed.State[:index], trimmed.State[index+1:]...)
 			stateless, err = newPBinWitnessStateless(trimmed, root)
 			if err == nil {
-				stateless.setPBinSystemCallScope(true)
+				stateless.setSystemCallScope(true)
 				_, err = stateless.ReadAccountCode(address)
 			}
 			require.Error(t, err, "removing system-contract proof entry %d must fail", index)

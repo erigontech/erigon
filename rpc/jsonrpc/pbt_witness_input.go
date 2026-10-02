@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -66,11 +67,7 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 		key := eip8297.TreeKeyAccount(address[:], eip8297.CodeHashLeafKey)
 		readKeys[string(key)] = key
 	}
-	result.Reads = make([][]byte, 0, len(readKeys))
-	for _, key := range readKeys {
-		result.Reads = append(result.Reads, key)
-	}
-	slices.SortFunc(result.Reads, bytes.Compare)
+	result.Reads = slices.SortedFunc(maps.Values(readKeys), bytes.Compare)
 
 	for address, keys := range rs.ModifiedStorage {
 		for slot := range keys {
@@ -139,9 +136,9 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 			oldCode, err := (pbinAccountCodeReader{inner: rs.inner, account: original}).ReadAccountCode(accounts.InternAddress(address))
 			if err != nil || !bytes.Equal(oldCode, code) {
 				if eip8297.IsDelegation(code) {
-					update.Delegation = cloneNonNil(code)
+					update.Delegation = append([]byte{}, code...)
 				} else {
-					update.Code = cloneNonNil(code)
+					update.Code = append([]byte{}, code...)
 				}
 			}
 		}
@@ -155,25 +152,7 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 		}
 		result.Deletes = append(result.Deletes, append([]byte(nil), address[:]...))
 	}
-	slices.SortFunc(result.Storage, func(a, b eipWitness.PBinStorageWrite) int {
-		if result := bytes.Compare(a.Address, b.Address); result != 0 {
-			return result
-		}
-		return bytes.Compare(a.Slot, b.Slot)
-	})
-	slices.SortFunc(result.Accounts, func(a, b eipWitness.PBinAccountUpdate) int { return bytes.Compare(a.Address, b.Address) })
-	slices.SortFunc(result.Deletes, bytes.Compare)
-
-	codeSet := make(map[string][]byte, len(rs.pbtCodeReads))
-	for key, code := range rs.pbtCodeReads {
-		codeSet[key] = append([]byte(nil), code...)
-	}
-	for _, code := range codeSet {
-		if len(code) > 0 {
-			result.Codes = append(result.Codes, code)
-		}
-	}
-	slices.SortFunc(result.Codes, bytes.Compare)
+	result.Codes = slices.SortedFunc(maps.Values(rs.pbtCodeReads), bytes.Compare)
 	return result, nil
 }
 
@@ -232,10 +211,4 @@ func pbinAccountBasicValue(rs *RecordingState, address common.Address, account *
 		return nil, err
 	}
 	return value[:], nil
-}
-
-func cloneNonNil(value []byte) []byte {
-	result := make([]byte, len(value))
-	copy(result, value)
-	return result
 }

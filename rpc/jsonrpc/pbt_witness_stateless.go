@@ -101,8 +101,14 @@ type pbinWitnessStateless struct {
 	tracePrefix string
 }
 
-func (s *pbinWitnessStateless) setPBinSystemCallScope(active bool) {
+func (s *pbinWitnessStateless) setSystemCallScope(active bool) {
 	s.systemCallScope = active
+}
+
+func (s *pbinWitnessStateless) enterSyntheticRead(addr common.Address) func() {
+	previous := s.syntheticSystemRead
+	s.syntheticSystemRead = previous || (s.systemCallScope && isPBinSystemAddress(addr))
+	return func() { s.syntheticSystemRead = previous }
 }
 
 func (s *pbinWitnessStateless) latchPBinResolveError(err error) {
@@ -215,9 +221,7 @@ func (s *pbinWitnessStateless) ReadAccountDataForDebug(address accounts.Address)
 
 func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addr := address.Value()
-	previousSynthetic := s.syntheticSystemRead
-	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr))
-	defer func() { s.syntheticSystemRead = previousSynthetic }()
+	defer s.enterSyntheticRead(addr)()
 	if account, ok := s.accountUpdates[addr]; ok {
 		return account, nil
 	}
@@ -235,15 +239,7 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 	}
 	s.preStateAccounts[addr] = present
 	if !present {
-		delegation, delegationPresent, err := s.readDelegation(addr)
-		if err != nil {
-			return nil, err
-		}
-		if delegationPresent {
-			s.preStateAccounts[addr] = true
-			return &accounts.Account{Root: empty.RootHash, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(delegation))}, nil
-		}
-		codeHash, codeHashPresent, err := s.readCodeHash(addr)
+		codeHash, codeHashPresent, err := s.readAccountCodeHash(addr)
 		if err != nil {
 			return nil, err
 		}
@@ -267,15 +263,7 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 	account := &accounts.Account{Root: empty.RootHash}
 	account.Nonce = binary.BigEndian.Uint64(value[eip8297.BasicDataNonceOffset:])
 	account.Balance.SetBytes(value[eip8297.BasicDataBalanceOffset : eip8297.BasicDataBalanceOffset+16])
-	delegation, delegationPresent, err := s.readDelegation(addr)
-	if err != nil {
-		return nil, err
-	}
-	if delegationPresent {
-		account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
-		return account, nil
-	}
-	codeHash, codeHashPresent, err := s.readCodeHash(addr)
+	codeHash, codeHashPresent, err := s.readAccountCodeHash(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -284,6 +272,17 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 	}
 	account.CodeHash = accounts.InternCodeHash(codeHash)
 	return account, nil
+}
+
+func (s *pbinWitnessStateless) readAccountCodeHash(addr common.Address) (common.Hash, bool, error) {
+	delegation, present, err := s.readDelegation(addr)
+	if err != nil {
+		return common.Hash{}, false, err
+	}
+	if present {
+		return crypto.Keccak256Hash(delegation), true, nil
+	}
+	return s.readCodeHash(addr)
 }
 
 func (s *pbinWitnessStateless) readCodeHash(addr common.Address) (common.Hash, bool, error) {
@@ -316,9 +315,7 @@ func (s *pbinWitnessStateless) readDelegation(addr common.Address) ([]byte, bool
 
 func (s *pbinWitnessStateless) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addr, slot := address.Value(), key.Value()
-	previousSynthetic := s.syntheticSystemRead
-	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr))
-	defer func() { s.syntheticSystemRead = previousSynthetic }()
+	defer s.enterSyntheticRead(addr)()
 	if writes, ok := s.storageWrites[addr]; ok {
 		if value, ok := writes[slot]; ok {
 			return value, !value.IsZero(), nil
@@ -349,9 +346,7 @@ func (s *pbinWitnessStateless) ReadAccountStorage(address accounts.Address, key 
 
 func (s *pbinWitnessStateless) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addr := address.Value()
-	previousSynthetic := s.syntheticSystemRead
-	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr))
-	defer func() { s.syntheticSystemRead = previousSynthetic }()
+	defer s.enterSyntheticRead(addr)()
 	if code, ok := s.codeUpdates[addr]; ok {
 		return bytes.Clone(code), nil
 	}
@@ -437,7 +432,7 @@ func (s *pbinWitnessStateless) UpdateAccountCode(address accounts.Address, _ uin
 		copyAccount.Copy(account)
 		s.accountUpdates[addr] = copyAccount
 	}
-	s.codeUpdates[addr] = cloneNonNil(code)
+	s.codeUpdates[addr] = append([]byte{}, code...)
 	s.accountUpdates[addr].CodeHash = codeHash
 	return nil
 }
@@ -496,7 +491,7 @@ func (s *pbinWitnessStateless) Finalize(ctx context.Context) (common.Hash, error
 			if eip8297.IsDelegation(code) {
 				update.Delegation = bytes.Clone(code)
 			} else {
-				update.Code = cloneNonNil(code)
+				update.Code = append([]byte{}, code...)
 			}
 		} else if delegation, present, err := s.readDelegation(addr); err != nil {
 			return common.Hash{}, err

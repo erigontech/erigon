@@ -17,28 +17,17 @@
 package jsonrpc
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 )
 
-func TestPBinWitnessSkipsCollapseDetection(t *testing.T) {
-	var paths [][]byte
-	var err error
-	require.NotPanics(t, func() {
-		paths, err = detectCollapseSiblings(context.Background(), nil, nil, nil, nil, 0, 0, 0, 0, common.Hash{}, nil, witnessModeLegacy, true)
-	})
-	require.NoError(t, err)
-	require.Empty(t, paths)
-}
-
-func TestPBinWitnessOmitsEmptyStorageNode(t *testing.T) {
+func TestWitnessAppendsEmptyStorageNode(t *testing.T) {
 	accountLeaf := hexutil.Bytes(append([]byte{0xf8, 0x44}, trie.EmptyRoot[:]...))
 	nodes := []hexutil.Bytes{accountLeaf}
-	require.Equal(t, nodes, appendLegacyEmptyStorageNode(nodes, witnessModeLegacy, true))
+	want := append(append([]hexutil.Bytes{}, nodes...), hexutil.Bytes{0x80})
+	require.Equal(t, want, appendLegacyEmptyStorageNode(nodes, witnessModeLegacy))
 }
