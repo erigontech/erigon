@@ -32,7 +32,7 @@
 
 ---
 
-# Erigon v3.7.1 — Velvet Vibrissae — TBD
+# Erigon v3.7.1 — Velvet Vibrissae — 2026-10-02
 
 v3.7.1 makes **Caplin ready for Glamsterdam on Sepolia**. Upgrade Sepolia nodes before **6 October 2026, 13:53:36 UTC** (epoch `353024`). This bugfix release is recommended for all users; no re-sync is required from 3.7.0. Operators using custom graffiti or non-default Caplin ports should review the breaking changes below.
 
