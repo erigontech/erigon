@@ -34,7 +34,9 @@ type sharedDomainOptions struct {
 	useSharedBranchCache bool
 	hexCommitmentOnly    bool
 	commitmentDomain     *kv.Domain
+	commitmentDomainOnly bool
 	skipCommitmentSeek   bool
+	pbinOnly             bool
 	localCacheUnwind     bool
 	mem                  kv.TemporalMemBatch
 	paraTrieDB           kv.TemporalRoDB
@@ -52,9 +54,18 @@ func WithCommitmentDomain(domain kv.Domain) SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.commitmentDomain = &domain }
 }
 
-// WithoutCommitmentSeek skips restoring the persisted trie state. A rebuild that
-// produces a scheme other than the one the DB's blob was written under cannot
-// decode it, and recomputes every key in the shard from files regardless.
+func WithCommitmentDomainOnly(domain kv.Domain) SharedDomainOption {
+	return func(o *sharedDomainOptions) {
+		o.commitmentDomain = &domain
+		o.commitmentDomainOnly = true
+	}
+}
+
+func WithPBinOnly() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.pbinOnly = true }
+}
+
+// WithoutCommitmentSeek skips restoring persisted trie state when a caller rebuilds it from files.
 func WithoutCommitmentSeek() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.skipCommitmentSeek = true }
 }

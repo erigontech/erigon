@@ -21,13 +21,11 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
-func (t *Trie) Verify() error {
-	if t.ctx == nil {
-		return fmt.Errorf("nil Patricia context")
-	}
+func (t *Trie) newVerifier() *Trie {
 	verifier := &Trie{
 		ctx:                   t.ctx,
 		rootKey:               bytes.Clone(t.rootKey),
@@ -40,6 +38,10 @@ func (t *Trie) Verify() error {
 		dirtyRows:             make(map[string]*rowNode),
 		bucketDirty:           make(map[string][]byte),
 		mergeCreatedStems:     make(map[string]struct{}),
+		verifyOnly:            true,
+	}
+	if _, ok := t.ctx.(interface{ Records() map[string][]byte }); ok {
+		verifier.verifiedBucketKeys = make(map[string]struct{})
 	}
 	if t.ownedPrefix != nil {
 		prefix := *t.ownedPrefix
@@ -48,13 +50,25 @@ func (t *Trie) Verify() error {
 	if len(t.upperStops) != 0 {
 		verifier.upperStops = append([]eip8297.Bitpath(nil), t.upperStops...)
 	}
-	return verifier.verify()
+	return verifier
+}
+
+func (t *Trie) Verify() error {
+	if t.ctx == nil {
+		return fmt.Errorf("nil Patricia context")
+	}
+	return t.newVerifier().verify()
 }
 
 func (t *Trie) verify() error {
 	root, err := t.loadRoot()
 	if err != nil {
 		return err
+	}
+	if _, ok := t.ctx.(interface{ Records() map[string][]byte }); ok {
+		t.verifiedBucketKeys = make(map[string]struct{})
+	} else {
+		t.verifiedBucketKeys = nil
 	}
 	if root.row == nil && root.form == RowRoot {
 		return t.verifyBuckets()
@@ -63,6 +77,15 @@ func (t *Trie) verify() error {
 	switch root.form {
 	case LeafRoot:
 		verifyErr = t.verifyRootRecord()
+		if verifyErr == nil && root.leaf.Key[0] == eip8297.StorageZone {
+			path, err := keyPath(root.leaf.Key)
+			if err != nil {
+				verifyErr = err
+			} else {
+				bucketPath := path.Slice(0, 264)
+				verifyErr = t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: LeafRoot, leaf: root.leaf})
+			}
+		}
 	case ExtRoot:
 		if err := t.verifyRootRecord(); err != nil {
 			verifyErr = err
@@ -89,6 +112,10 @@ func (t *Trie) verify() error {
 		}
 		if root.self != wantSelf {
 			verifyErr = fmt.Errorf("root extension prefix does not match its top row")
+		}
+		if verifyErr == nil && root.self.BitLen >= 264 && pathByte(&root.self, 0) == eip8297.StorageZone {
+			bucketPath := root.self.Slice(0, 264)
+			verifyErr = t.verifyBucketBranch(&bucketPath, &root.self, row, root.left, root.right)
 		}
 	case RowRoot:
 		_, verifyErr = t.verifyRow(root.row)
@@ -139,6 +166,19 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 	}
 	for slot := range row.cells {
 		cell := row.cell(slot)
+		if cell.Kind == LeafCell {
+			if row.path.BitLen < 264 && cell.Key[0] == eip8297.StorageZone {
+				path, err := keyPath(cell.Key)
+				if err != nil {
+					return FoldResult{}, err
+				}
+				bucketPath := path.Slice(0, 264)
+				if err := t.verifyBucketRecordPath(&bucketPath, bucketDescriptor{form: LeafRoot, leaf: *cell.Cell}); err != nil {
+					return FoldResult{}, err
+				}
+			}
+			continue
+		}
 		if cell.Kind != BranchCell {
 			continue
 		}
@@ -150,55 +190,93 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 		if err != nil {
 			return FoldResult{}, err
 		}
-		full, err := rowTopPrefix(child, childResult.Split)
+		top, err := rowTopPrefix(child, childResult.Split)
 		if err != nil {
 			return FoldResult{}, err
 		}
-		wantPrefix := full.Slice(row.path.BitLen+4, childResult.Split)
+		wantPrefix := top.Slice(row.path.BitLen+4, childResult.Split)
 		if cell.Prefix != wantPrefix || cell.Left != childResult.Left || cell.Right != childResult.Right {
 			return FoldResult{}, fmt.Errorf("row %x cell %d does not match its child", row.key, slot)
 		}
+		full := branchPath(row, slot, cell)
+		if row.path.BitLen < 264 && full.BitLen >= 264 && pathByte(&full, 0) == eip8297.StorageZone {
+			bucketPath := full.Slice(0, 264)
+			if err := t.verifyBucketBranch(&bucketPath, &full, child, cell.Left, cell.Right); err != nil {
+				return FoldResult{}, err
+			}
+		}
+		t.releaseVerifiedChild(cell, child)
 	}
 	return rowFoldResult(row)
 }
 
 func (t *Trie) verifyBuckets() error {
-	want, err := t.expectedBucketRecords()
+	records, ok := t.ctx.(interface{ Records() map[string][]byte })
+	if !ok {
+		return nil
+	}
+	for key, data := range records.Records() {
+		if len(data) == 0 {
+			continue
+		}
+		if _, err := bucketPathForKey([]byte(key)); err == nil {
+			if _, found := t.verifiedBucketKeys[key]; !found {
+				return fmt.Errorf("orphan bucket record %x", []byte(key))
+			}
+		}
+	}
+	return nil
+}
+
+func (t *Trie) releaseVerifiedChild(cell *rowCell, child *rowNode) {
+	cell.child = nil
+	child.parent = nil
+}
+
+func (t *Trie) verifyBucketBranch(bucketPath, branchPath *eip8297.Bitpath, row *rowNode, left, right common.Hash) error {
+	if branchPath.BitLen < bucketPath.BitLen+4 {
+		return t.verifyBucketRecordPath(bucketPath, bucketDescriptor{form: RowRoot, row: row})
+	}
+	return t.verifyBucketRecordPath(bucketPath, bucketDescriptor{form: ExtRoot, self: branchPath.Slice(bucketPath.BitLen, branchPath.BitLen), left: left, right: right})
+}
+
+func (t *Trie) verifyBucketRecordPath(path *eip8297.Bitpath, descriptor bucketDescriptor) error {
+	key, err := EncodeRowKey(path)
 	if err != nil {
 		return err
 	}
-	for key := range want {
-		descriptor := want[key]
-		data, _, err := t.ctx.Branch([]byte(key))
-		if err != nil {
-			return err
-		}
-		if len(data) == 0 {
-			return fmt.Errorf("bucket record %x is missing", []byte(key))
-		}
-		record := descriptor.record()
-		wantData, err := EncodeRecord([]byte(key), &record)
-		if err != nil {
-			return err
-		}
-		if !bytes.Equal(data, wantData) {
-			return fmt.Errorf("bucket record %x does not match its upper cell", []byte(key))
-		}
-		if _, err := DecodeRecord([]byte(key), data); err != nil {
-			return err
+	if t.verifiedBucketKeys != nil {
+		if _, found := t.verifiedBucketKeys[string(key)]; found {
+			return nil
 		}
 	}
-	if lister, ok := t.ctx.(interface{ Records() map[string][]byte }); ok {
-		for key, data := range lister.Records() {
-			if len(data) == 0 {
-				continue
-			}
-			if _, err := bucketPathForKey([]byte(key)); err == nil {
-				if _, ok := want[key]; !ok {
-					return fmt.Errorf("orphan bucket record %x", []byte(key))
-				}
-			}
-		}
+	if err := t.verifyBucketRecord(key, descriptor); err != nil {
+		return err
+	}
+	if t.verifiedBucketKeys != nil {
+		t.verifiedBucketKeys[string(key)] = struct{}{}
+	}
+	return nil
+}
+
+func (t *Trie) verifyBucketRecord(key []byte, descriptor bucketDescriptor) error {
+	data, _, err := t.ctx.Branch(key)
+	if err != nil {
+		return err
+	}
+	if len(data) == 0 {
+		return fmt.Errorf("bucket record %x is missing", key)
+	}
+	record := descriptor.record()
+	wantData, err := EncodeRecord(key, &record)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(data, wantData) {
+		return fmt.Errorf("bucket record %x does not match its upper cell", key)
+	}
+	if _, err := DecodeRecord(key, data); err != nil {
+		return err
 	}
 	return nil
 }

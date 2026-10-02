@@ -14,27 +14,31 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state
+package temporaltest
 
 import (
 	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/db/datadir"
 )
 
-func TestReadPBinRebuildCheckpointRejectsChangedSpill(t *testing.T) {
-	dir := t.TempDir()
-	spillPath := filepath.Join(dir, "rows")
-	checkpointPath := filepath.Join(dir, "checkpoint")
-	require.NoError(t, os.WriteFile(spillPath, []byte{1, 2, 3}, 0o644))
-	overlay := newPBinRebuildOverlay().withSpill(spillPath)
-	target := RebuildTarget{Variant: commitment.VariantBinPatriciaTrie, HashName: commitment.PBinHashBlake3}
-	require.NoError(t, writePBinRebuildCheckpoint(checkpointPath, []byte{1}, overlay, target))
-	require.NoError(t, os.WriteFile(spillPath, []byte{4, 5, 6}, 0o644))
-	_, err := readPBinRebuildCheckpoint(checkpointPath, target)
-	require.ErrorContains(t, err, "checkpoint and spill disagree")
+func TestNewTestDBNilUsesDataDir(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := NewTestDB(nil, dirs)
+	defer db.Close()
+	entries, err := os.ReadDir(dirs.DataDir)
+	require.NoError(t, err)
+
+	var found bool
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "erigon-memdb-") {
+			found = true
+			break
+		}
+	}
+	require.True(t, found)
 }

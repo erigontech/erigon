@@ -168,6 +168,7 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		&exportPreimagesCommand,
+		&exportPBTCommand,
 		{
 			Name:    "accessor",
 			Aliases: []string{"index"},

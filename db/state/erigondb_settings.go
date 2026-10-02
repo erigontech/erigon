@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -13,7 +14,9 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -25,6 +28,22 @@ const (
 	TrieVariantHexBin = "hex+bin"
 )
 
+var ErrConversionFloor = kv.ErrConversionFloor
+
+type (
+	ConversionFloorKind  = kv.ConversionFloorKind
+	ConversionFloorError = kv.ConversionFloorError
+)
+
+const (
+	ConversionFloorBlock = kv.ConversionFloorBlock
+	ConversionFloorTx    = kv.ConversionFloorTx
+)
+
+func NewConversionFloorError(blockNum, txNum, requested uint64, kind ConversionFloorKind) error {
+	return kv.NewConversionFloorError(blockNum, txNum, requested, kind)
+}
+
 type ErigonDBSettings struct {
 	StepSize                       uint64            `toml:"step_size"`
 	StepsInFrozenFile              uint64            `toml:"steps_in_frozen_file"`
@@ -32,6 +51,8 @@ type ErigonDBSettings struct {
 	TrieVariant                    *string           `toml:"trie_variant,omitempty"`
 	TrieHash                       *string           `toml:"trie_hash,omitempty"`
 	FrozenAtTxNum                  map[string]uint64 `toml:"frozen_at_txnum,omitempty"`
+	ConversionBlockNum             *uint64           `toml:"conversion_block,omitempty"`
+	ConversionTxNum                *uint64           `toml:"conversion_txnum,omitempty"`
 }
 
 // RefsInCommitmentBranches resolves the commitment "references in branches" regime,
@@ -66,6 +87,18 @@ func (s *ErigonDBSettings) FrozenAt(domain kv.Domain) (uint64, bool) {
 	}
 	txNum, ok := s.FrozenAtTxNum[domain.String()]
 	return txNum, ok
+}
+
+func (s *ErigonDBSettings) ConversionPoint() (blockNum, txNum uint64, ok bool, err error) {
+	blockSet := s != nil && s.ConversionBlockNum != nil
+	txSet := s != nil && s.ConversionTxNum != nil
+	if !blockSet && !txSet {
+		return 0, 0, false, nil
+	}
+	if blockSet != txSet {
+		return 0, 0, false, errors.New("erigondb.toml: conversion point requires conversion_block and conversion_txnum")
+	}
+	return *s.ConversionBlockNum, *s.ConversionTxNum, true, nil
 }
 
 func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
@@ -134,6 +167,105 @@ func ReadErigonDBSettings(dirs datadir.Dirs) (*ErigonDBSettings, error) {
 	return readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
 }
 
+func EnableCommitmentV3FromFiles(dirs datadir.Dirs) (bool, error) {
+	settings, err := ReadErigonDBSettings(dirs)
+	if err == nil && settings.TrieVariantName() == TrieVariantBin {
+		return false, nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	hasLegacy, detected, err := commitmentFileVersions(dirs)
+	if err != nil {
+		return false, err
+	}
+	if hasLegacy && detected {
+		return false, errors.New("commitment files straddle v3.0")
+	}
+	if detected {
+		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.InitSchemas()
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		return true, nil
+	}
+	return false, nil
+}
+
+func commitmentFileVersions(dirs datadir.Dirs) (bool, bool, error) {
+	type commitmentDataFile struct {
+		from, to uint64
+		version  version.Version
+	}
+	var files []commitmentDataFile
+	err := filepath.WalkDir(dirs.SnapDomain, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return filepath.SkipDir
+			}
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		parsed, _, ok := snaptype.ParseFileName(dirs.SnapDomain, entry.Name())
+		if ok && parsed.TypeString == kv.CommitmentDomain.String() && filepath.Ext(entry.Name()) == ".kv" {
+			files = append(files, commitmentDataFile{from: parsed.From, to: parsed.To, version: parsed.Version})
+		}
+		return nil
+	})
+	if err != nil {
+		return false, false, err
+	}
+	var hasLegacy, hasV3 bool
+	for i, file := range files {
+		covered := false
+		for j, other := range files {
+			if i != j && other.from <= file.from && other.to >= file.to && (other.from < file.from || other.to > file.to) {
+				covered = true
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+		if file.version.Less(version.V3_0) {
+			hasLegacy = true
+		} else {
+			hasV3 = true
+		}
+	}
+	return hasLegacy, hasV3, nil
+}
+
+func ReadErigonDBConversionPoint(dirs datadir.Dirs) (blockNum, txNum uint64, ok bool, err error) {
+	settings, err := ReadErigonDBSettings(dirs)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, err
+	}
+	return settings.ConversionPoint()
+}
+
+func ResolveErigonDBStepSize(dirs datadir.Dirs) (uint64, error) {
+	settings, err := ReadErigonDBSettings(dirs)
+	if err == nil {
+		return settings.StepSize, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return 0, err
+	}
+	preverifiedExists, err := dir.FileExist(filepath.Join(dirs.Snap, datadir.PreverifiedFileName))
+	if err != nil {
+		return 0, err
+	}
+	if preverifiedExists {
+		return config3.LegacyStepSize, nil
+	}
+	return config3.DefaultStepSize, nil
+}
+
 // WriteErigonDBSettings writes a datadir's erigondb.toml.
 func WriteErigonDBSettings(dirs datadir.Dirs, s *ErigonDBSettings) error {
 	return writeErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), s)
@@ -156,7 +288,31 @@ func writeErigonDBSettings(path string, s *ErigonDBSettings) error {
 	if err != nil {
 		return err
 	}
-	return dir.WriteFileWithFsync(path, data, 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = dir.RemoveFile(tmpName)
+	}()
+	if err := tmp.Chmod(0o644); err != nil {
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	return dir.FsyncDir(filepath.Dir(path))
 }
 
 // ResolveErigonDBSettings determines the active ErigonDB settings:
@@ -232,13 +388,13 @@ func resolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 		trieHash = &h
 	}
 
-	preverifiedExists, err := dir.FileExist(filepath.Join(dirs.Snap, datadir.PreverifiedFileName))
+	stepSize, err := ResolveErigonDBStepSize(dirs)
 	if err != nil {
 		return nil, err
 	}
 
 	// Legacy datadir (Erigon <= 3.3): write legacy settings so erigondb.toml exists on disk.
-	if preverifiedExists {
+	if stepSize == config3.LegacyStepSize {
 		if statecfg.ExperimentalBinCommitment {
 			return nil, errors.New("--experimental.bin-commitment: this datadir already has hex commitment state; the bin trie needs a fresh datadir")
 		}
@@ -246,7 +402,7 @@ func resolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 			return nil, errors.New("genesis schedules EIP-8297 but this datadir already has hex commitment state; the bin trie needs a fresh datadir")
 		}
 		settings := &ErigonDBSettings{
-			StepSize:                       config3.LegacyStepSize,
+			StepSize:                       stepSize,
 			StepsInFrozenFile:              config3.LegacyStepsInFrozenFile,
 			ReferencesInCommitmentBranches: &refs,
 		}
@@ -261,7 +417,7 @@ func resolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader 
 
 	// Fresh datadir, no preverified.toml: use default settings.
 	settings := &ErigonDBSettings{
-		StepSize:                       config3.DefaultStepSize,
+		StepSize:                       stepSize,
 		StepsInFrozenFile:              config3.DefaultStepsInFrozenFile,
 		ReferencesInCommitmentBranches: &refs,
 		TrieVariant:                    trieVariant,

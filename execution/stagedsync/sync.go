@@ -155,6 +155,9 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 				return err
 			}
 			if !ok {
+				if err := checkUnwindConversionBlock(ttx.Debug().Dirs(), unwindPoint); err != nil {
+					return err
+				}
 				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
 			}
 			unwindPoint = unwindPointWithCommitment

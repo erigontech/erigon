@@ -548,6 +548,22 @@ func TestProcessFeedZeroMergeDeletesExistingBasicData(t *testing.T) {
 	require.Equal(t, want, got, "zero BASIC_DATA merge must delete the leaf")
 }
 
+func TestTranslateFeedIgnoresClearedDelegationResidue(t *testing.T) {
+	address := common.Hex2Bytes("000000000000000000000000000000000000000d")
+	account := feedAccount(address)
+	account.CodeWritten = true
+	account.Code = append([]byte{0xef, 0x01, 0x00}, bytes.Repeat([]byte{0x08}, 20)...)
+	account.CodeHash = empty.CodeHash
+	ops, err := TranslateFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{account}})
+	require.NoError(t, err)
+	for _, op := range ops {
+		require.NotEqual(t, eip8297.CodeZone, op.Key[0])
+		if bytes.Equal(eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey), op.Key) {
+			require.Empty(t, op.Value)
+		}
+	}
+}
+
 func TestTranslateFeedRejectsCodeHashMismatch(t *testing.T) {
 	address := common.Hex2Bytes("000000000000000000000000000000000000000b")
 	account := feedAccount(address)
@@ -555,7 +571,10 @@ func TestTranslateFeedRejectsCodeHashMismatch(t *testing.T) {
 	account.Code = []byte{1}
 	account.CodeHash = common.Hash{2}
 	_, err := TranslateFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{account}})
-	require.ErrorContains(t, err, "code hash does not match code")
+	require.ErrorContains(t, err, "code hash mismatch")
+	require.ErrorContains(t, err, "address")
+	require.ErrorContains(t, err, "account")
+	require.ErrorContains(t, err, "code")
 }
 
 func TestTranslateFeedRejectsDelegationCodeHash(t *testing.T) {
@@ -564,7 +583,7 @@ func TestTranslateFeedRejectsDelegationCodeHash(t *testing.T) {
 	account.Code = append([]byte{0xef, 0x01, 0x00}, bytes.Repeat([]byte{0x08}, 20)...)
 	account.CodeHash = common.Hash{1}
 	_, err := TranslateFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{account}})
-	require.ErrorContains(t, err, "code hash does not match code")
+	require.ErrorContains(t, err, "code hash mismatch")
 }
 
 func TestProcessFeedZeroCodeChunkIsDeleted(t *testing.T) {

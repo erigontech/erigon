@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/state"
 )
 
 func TestRemoveContents(t *testing.T) {
@@ -56,4 +59,21 @@ func TestPBinCommitmentWarningNamesRefusedMethods(t *testing.T) {
 		require.Contains(t, pbinCommitmentUnsupportedMethods, method)
 	}
 	require.NotContains(t, pbinCommitmentUnsupportedMethods, "debug_executionWitness is supported")
+}
+
+func TestRefusePBTStartupMarkersChecksBothMarkers(t *testing.T) {
+	for _, name := range []string{"attach", "import"} {
+		t.Run(name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			if name == "attach" {
+				variant := state.TrieVariantHexBin
+				require.NoError(t, state.WritePBTAttachMarker(dirs, &state.PBTAttachMarker{PublishedPath: "/tmp/published", Settings: &state.ErigonDBSettings{TrieVariant: &variant}}))
+			} else {
+				variant := state.TrieVariantHexBin
+				hash := "blake3"
+				require.NoError(t, state.WritePBTImportMarker(dirs, &state.PBTImportMarker{SnapshotPath: "/tmp/snapshot", SnapshotHash: "digest", Files: []string{"domain/v3.0-commitment-bin.0-1.kv"}, Settings: &state.ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash}}))
+			}
+			require.Error(t, refusePBTStartupMarkers(dirs))
+		})
+	}
 }

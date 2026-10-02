@@ -945,6 +945,9 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 		return err
 	}
 	if !ok {
+		if err := checkUnwindConversionBlock(applyTx.Debug().Dirs(), unwindTo); err != nil {
+			return err
+		}
 		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
 	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)

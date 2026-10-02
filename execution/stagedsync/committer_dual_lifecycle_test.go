@@ -137,12 +137,12 @@ func dualHexFeed(key []byte, update commitment.Update) *commitment.Feed {
 	return &commitment.Feed{Keys: 1, Accounts: []commitment.FeedAccount{{Hash: feedHash, Update: &update}}}
 }
 
-func TestStoppedShadowSurvivesCalculatorReplacement(t *testing.T) {
+func TestStoppedShadowIsDiscardedWithCalculator(t *testing.T) {
 	_, tx, doms := dualCalculatorTest(t)
 	first := &commitmentCalculator{roTx: tx, doms: doms}
 	first.stopShadowDomain(kv.CommitmentBinDomain)
 	second := &commitmentCalculator{roTx: tx, doms: doms}
-	require.True(t, second.ShadowDomainStopped(kv.CommitmentBinDomain))
+	require.False(t, second.ShadowDomainStopped(kv.CommitmentBinDomain))
 }
 
 type dualReplayContext struct {
@@ -212,7 +212,7 @@ func TestRecordStoppedCommitmentDomainsPersistsStop(t *testing.T) {
 	stopper, ok := tx.AggTx().(interface{ StopCommitmentDomain(kv.Domain) })
 	require.True(t, ok)
 	stopper.StopCommitmentDomain(kv.CommitmentBinDomain)
-	require.NoError(t, recordStoppedCommitmentDomains(tx))
+	require.NoError(t, recordStoppedCommitmentDomains(tx, nil))
 	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
 	require.NoError(t, err)
 	require.True(t, stopped)

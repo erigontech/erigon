@@ -29,11 +29,31 @@ import (
 
 func pbinRebuildBatches(ops []pbt.Op, tmpDir string, maxOps, maxBytes int) ([][]pbt.Op, error) {
 	var batches [][]pbt.Op
-	err := pbinForEachRebuildBatch(ops, tmpDir, maxOps, maxBytes, func(batch []pbt.Op, _ bool) error {
+	err := pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, maxOps, maxBytes, nil, func(batch []pbt.Op, _ []byte, _ bool) error {
 		batches = append(batches, append([]pbt.Op(nil), batch...))
+		return nil
+	}, func(emit func(pbt.Op) error) error {
+		for i := range ops {
+			if err := emit(ops[i]); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return batches, err
+}
+
+func pbinForEachRebuildBatch(ops []pbt.Op, tmpDir string, maxOps, maxBytes int, visit func([]pbt.Op, bool) error) error {
+	return pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, maxOps, maxBytes, nil, func(batch []pbt.Op, _ []byte, final bool) error {
+		return visit(batch, final)
+	}, func(emit func(pbt.Op) error) error {
+		for i := range ops {
+			if err := emit(ops[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func TestPBinRebuildBatchesFollowTreeKeyOrder(t *testing.T) {

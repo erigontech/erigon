@@ -769,7 +769,7 @@ func (a *Aggregator) checkPBinStateFormat(db kv.RoDB) error {
 		return nil
 	}
 	if err := validatePBinOpenState(state); err != nil {
-		return fmt.Errorf("OpenFolder: rebuild the bin commitment domain: %w", err)
+		return fmt.Errorf("OpenFolder: run commitment convert-pbt for the bin commitment domain: %w", err)
 	}
 	return nil
 }
@@ -1998,6 +1998,13 @@ func (at *AggregatorRoTx) SetCanonicalCommitmentDomain(domain kv.Domain) {
 
 func (at *AggregatorRoTx) StopCommitmentDomain(domain kv.Domain) {
 	at.a.StopCommitmentDomain(domain)
+}
+
+func (at *AggregatorRoTx) CommitmentStopper() func(kv.Domain) {
+	a := at.a
+	return func(domain kv.Domain) {
+		a.StopCommitmentDomain(domain)
+	}
 }
 
 func (at *AggregatorRoTx) CommitmentDomainStopped(domain kv.Domain) bool {

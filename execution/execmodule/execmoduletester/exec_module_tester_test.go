@@ -18,16 +18,27 @@ package execmoduletester_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 )
+
+func TestWithDataDirCloseLeavesDirectory(t *testing.T) {
+	dirs := datadir.New(filepath.Join(t.TempDir(), "node"))
+	m := execmoduletester.New(t, execmoduletester.WithDataDir(dirs))
+	m.Close()
+	_, err := os.Stat(dirs.DataDir)
+	require.NoError(t, err)
+}
 
 // CLI usage (e.g. evm blocktest via BlockTest.RunCLI) constructs the tester with
 // a nil testing.TB and owns its lifecycle. New must not dereference tb.

@@ -74,11 +74,12 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.
 		}
 	}
 	logger.Info("[integrity] CommitmentRoot files discovered", "total", len(allFiles), "kvFiles", len(files), "onlyCheckLastFile", onlyCheckLastFile, "onlyRecomputeLastFile", onlyRecomputeLastFile)
-	if len(files) == 0 {
+	hasBinDomain := slices.Contains(aggTx.CommitmentDomains(), kv.CommitmentBinDomain)
+	if len(files) == 0 && !hasBinDomain {
 		logger.Warn("[integrity] CommitmentRoot: no commitment .kv files found, nothing to check")
 		return nil
 	}
-	if onlyCheckLastFile {
+	if onlyCheckLastFile && len(files) != 0 {
 		files = files[len(files)-1:]
 	}
 	var integrityErr error
@@ -97,7 +98,67 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.
 			continue
 		}
 	}
+	if hasBinDomain {
+		if err := checkPBinCommitmentStateFiles(tx); err != nil {
+			err = fmt.Errorf("%w: binary commitment state: %w", ErrIntegrity, err)
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+		}
+		err = state.VerifyPBinDomain(ctx, tx, aggTx.Agg(), kv.CommitmentBinDomain)
+		if err != nil {
+			err = fmt.Errorf("%w: binary commitment: %w", ErrIntegrity, err)
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+		}
+	}
 	return integrityErr
+}
+
+func checkPBinCommitmentStateFiles(tx kv.TemporalTx) error {
+	allFiles := tx.Debug().DomainFiles(kv.CommitmentBinDomain)
+	files := make([]state.VisibleFile, 0, len(allFiles))
+	for _, file := range allFiles {
+		if strings.HasSuffix(file.Fullpath(), ".kv") {
+			files = append(files, file)
+		}
+	}
+	if len(files) == 0 {
+		return errors.New("commitment state is missing from binary files")
+	}
+	_, conversionTx, hasConversion, err := state.ReadErigonDBConversionPoint(tx.Debug().Dirs())
+	if err != nil {
+		return err
+	}
+	latest := files[len(files)-1]
+	latestValue, found, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, fileLookupMaxTxNum(latest.EndRootNum()))
+	if err != nil {
+		return err
+	}
+	if !found || len(latestValue) == 0 || start != latest.StartRootNum() || end != latest.EndRootNum() {
+		return fmt.Errorf("latest binary commitment state is missing from %s", filepath.Base(latest.Fullpath()))
+	}
+	for _, file := range files[:len(files)-1] {
+		_, found, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, fileLookupMaxTxNum(file.EndRootNum()))
+		if err != nil {
+			return err
+		}
+		if !found {
+			if hasConversion && file.EndRootNum() <= conversionTx {
+				continue
+			}
+			return fmt.Errorf("binary commitment state is missing from %s", filepath.Base(file.Fullpath()))
+		}
+		if start != file.StartRootNum() || end != file.EndRootNum() {
+			return fmt.Errorf("binary commitment state range does not match %s", filepath.Base(file.Fullpath()))
+		}
+	}
+	return nil
 }
 
 func checkCommitmentRootInFile(ctx context.Context, db kv.TemporalRoDB, br dbservices.FullBlockReader, f state.VisibleFile, recompute bool, logger log.Logger) error {
@@ -146,7 +207,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 	var info commitmentRootInfo
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
-	maxTxNum := endTxNum - 1
+	maxTxNum := fileLookupMaxTxNum(endTxNum)
 	stateKey, v, ok, start, end, err := latestCommitmentStateFromFiles(tx, maxTxNum)
 	if err != nil {
 		return info, err
@@ -164,8 +225,8 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 	if err != nil {
 		return info, fmt.Errorf("%w: commitment root could not be extracted: %w", ErrIntegrity, err)
 	}
-	if txNum >= endTxNum {
-		return info, fmt.Errorf("%w: commitment root txNum is gte endTxNum: %d >= %d", ErrIntegrity, txNum, endTxNum)
+	if txNum > endTxNum {
+		return info, fmt.Errorf("%w: commitment root txNum is gt endTxNum: %d > %d", ErrIntegrity, txNum, endTxNum)
 	}
 	if txNum < startTxNum {
 		return info, fmt.Errorf("%w: commitment root txNum is lt startTxNum: %d < %d", ErrIntegrity, txNum, startTxNum)
@@ -228,8 +289,15 @@ func ExtractCommitmentStateRoot(stateKey, value []byte) ([]byte, uint64, uint64,
 	return commitment.HexTrieExtractStateRoot(value)
 }
 
+func fileLookupMaxTxNum(endTxNum uint64) uint64 {
+	if endTxNum == 0 {
+		return 0
+	}
+	return endTxNum - 1
+}
+
 func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
-	maxTxNum := f.EndRootNum() - 1
+	maxTxNum := f.EndRootNum()
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithHexCommitmentOnly())
 	if err != nil {
 		return nil, err
@@ -239,7 +307,7 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	} else {
 		sd.GetCommitmentCtx().SetTraceWriter(nil)
 	}
-	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, maxTxNum))
+	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, fileLookupMaxTxNum(maxTxNum)))
 	latestTxNum, _, err := sd.SeekCommitment(ctx, tx) // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err

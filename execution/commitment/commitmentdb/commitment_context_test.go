@@ -205,6 +205,19 @@ func TestSeekCommitmentsIgnoresStoppedShadowOnRecreation(t *testing.T) {
 	require.False(t, binCtx.justRestored.Load())
 }
 
+func TestSeekCommitmentsIgnoresStoppedHexShadowOnRecreation(t *testing.T) {
+	hexCtx := seekContext(t, kv.CommitmentDomain, commitment.VariantHexPatriciaTrie, 7, 22, true)
+	binCtx := seekContext(t, kv.CommitmentBinDomain, commitment.VariantBinPatriciaTrie, 9, 28, true)
+	tx := &seekTemporalTx{agg: seekCommitmentLifecycle{stopped: map[kv.Domain]bool{kv.CommitmentDomain: true}}}
+
+	txNum, blockNum, err := SeekCommitments(t.Context(), tx, hexCtx, binCtx)
+	require.NoError(t, err)
+	require.EqualValues(t, 28, txNum)
+	require.EqualValues(t, 9, blockNum)
+	require.False(t, hexCtx.justRestored.Load())
+	require.True(t, binCtx.justRestored.Load())
+}
+
 func TestSeekCommitmentsRejectsInvalidFrozenCheckpoint(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

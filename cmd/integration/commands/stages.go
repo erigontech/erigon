@@ -743,6 +743,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		dirs, br, genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader())
 
 	if unwind > 0 {
+		if err := validateStageExecUnwind(s.BlockNumber, unwind); err != nil {
+			return err
+		}
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 			minUnwindableBlockNum, _, err := rawtemporaldb.CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
 			if err != nil {
@@ -882,6 +885,13 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if execProgress >= block {
 			break
 		}
+	}
+	return nil
+}
+
+func validateStageExecUnwind(progress, unwind uint64) error {
+	if unwind > progress {
+		return fmt.Errorf("cannot unwind %d blocks from execution progress %d", unwind, progress)
 	}
 	return nil
 }

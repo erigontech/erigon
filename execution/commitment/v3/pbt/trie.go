@@ -68,6 +68,7 @@ type Trie struct {
 	upperStops             []eip8297.Bitpath
 	root                   *treeRoot
 	rootLoaded             bool
+	verifyOnly             bool
 	roundPending           bool
 	rootDirty              bool
 	foldedRoot             common.Hash
@@ -87,6 +88,7 @@ type Trie struct {
 	originalLeaves         map[string]*Cell
 	droppedLeafKeys        map[string]struct{}
 	mergeCreatedStems      map[string]struct{}
+	verifiedBucketKeys     map[string]struct{}
 }
 
 func NewTrie(ctx commitment.PatriciaContext) *Trie {

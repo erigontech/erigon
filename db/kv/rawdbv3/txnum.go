@@ -210,6 +210,15 @@ func (t TxNumsReader) Max(ctx context.Context, tx kv.Tx, blockNum uint64) (maxTx
 	return t.MaxWithCursor(ctx, tx, c, blockNum)
 }
 
+func (t TxNumsReader) MaxExact(ctx context.Context, tx kv.Tx, blockNum uint64) (maxTxNum uint64, found bool, err error) {
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, false, err
+	}
+	defer c.Close()
+	return t.index.MaxTxNum(ctx, tx, c, blockNum)
+}
+
 // MinWithCursor - returns minTxNum in given block using a caller-provided cursor.
 // Min = `max(blockNum-1)+1`. If block not found - return last available value (`latest`/`pending` state).
 // Use this when iterating many blocks to avoid repeated cursor open/close overhead.

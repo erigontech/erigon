@@ -50,6 +50,14 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	}
 }
 
+func NewPBTStateAggregator(dirs datadir.Dirs, settings *ErigonDBSettings, logger log.Logger) AggOpts {
+	opts := New(dirs).Logger(logger).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps()
+	if settings != nil {
+		opts = opts.WithErigonDBSettings(settings)
+	}
+	return opts
+}
+
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 	return New(dirs).DisableFsync().GenSaltIfNeed(true).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
 }

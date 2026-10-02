@@ -21,8 +21,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"crypto/sha256"
-	"encoding/gob"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -118,7 +116,7 @@ func init() {
 	withReset(cmdCommitmentRebuild)
 	withSqueeze(cmdCommitmentRebuild)
 	withBlock(cmdCommitmentRebuild)
-	withExperimentalCommitment(cmdCommitmentRebuild)
+	withRebuildCommitment(cmdCommitmentRebuild)
 	withUnwind(cmdCommitmentRebuild)
 	withIntegrityChecks(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
@@ -324,42 +322,14 @@ type rebuildOutput struct {
 	source *dbstate.ErigonDBSettings
 }
 
-// requireRebuildOutput refuses a bin rebuild that would write into its source:
-// nothing in a commitment .kv filename or header records the trie variant, so bin
-// files left in a hex datadir are read as hex.
-func requireRebuildOutput(target dbstate.RebuildTarget, outPath string) error {
-	if target.Variant == commitment.VariantBinPatriciaTrie && outPath == "" {
-		return errors.New("a bin rebuild needs --output.datadir: a commitment .kv does not record its trie variant, so bin files written into the source datadir would later be read as hex")
+func refuseRebuildFromSettings(_ dbstate.RebuildTarget, source *dbstate.ErigonDBSettings, sourcePath string) error {
+	if source.TrieVariantName() == dbstate.TrieVariantBin || source.TrieVariantName() == dbstate.TrieVariantHexBin {
+		return fmt.Errorf("commitment rebuild: source datadir %s uses the bin commitment trie; use commitment convert-pbt", sourcePath)
 	}
 	return nil
 }
 
-// refuseSqueezeForBinTarget rejects --squeeze for a bin rebuild. Squeeze rewrites
-// commitment values through BranchData, and a bin branch payload is not BranchData:
-// the same field bits name different things in the two encodings, so the pass would
-// read a branch flag as a plain-key flag and rewrite bytes that are not keys.
-func refuseSqueezeForBinTarget(target dbstate.RebuildTarget, squeeze bool) error {
-	if !squeeze || target.Variant != commitment.VariantBinPatriciaTrie {
-		return nil
-	}
-	return errors.New("--squeeze cannot run against a bin rebuild target: squeeze replaces plain keys in BranchData values, and a bin branch payload is not BranchData — its field bits carry other meanings, so the pass would rewrite bytes that are not plain keys")
-}
-
-func refuseRebuildFromSettings(target dbstate.RebuildTarget, source *dbstate.ErigonDBSettings, sourcePath string, hasOutput bool) error {
-	if source.TrieVariantName() == dbstate.TrieVariantHexBin {
-		if target.Variant == commitment.VariantBinPatriciaTrie && hasOutput {
-			return nil
-		}
-		return fmt.Errorf("commitment rebuild: source datadir %s uses hex+bin; the supported command is integration commitment rebuild --experimental.bin-commitment --experimental.bin-commitment.hash=%s --output.datadir=<fresh-dir> --no-history", sourcePath, source.TrieHashName())
-	}
-	if source.TrieVariantName() != dbstate.TrieVariantBin || target.Variant == commitment.VariantBinPatriciaTrie || hasOutput {
-		return nil
-	}
-	return fmt.Errorf("commitment rebuild: source datadir %s was built with the bin commitment trie, but the target is %s; rerun with --experimental.bin-commitment --experimental.bin-commitment.hash=%s and --output.datadir",
-		sourcePath, target.Variant, source.TrieHashName())
-}
-
-func refuseRebuildFromSource(target dbstate.RebuildTarget, src datadir.Dirs, hasOutput bool) error {
+func refuseRebuildFromSource(target dbstate.RebuildTarget, src datadir.Dirs) error {
 	source, err := dbstate.ReadErigonDBSettings(src)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -367,7 +337,7 @@ func refuseRebuildFromSource(target dbstate.RebuildTarget, src datadir.Dirs, has
 	if err != nil {
 		return fmt.Errorf("commitment rebuild: read source erigondb.toml: %w", err)
 	}
-	return refuseRebuildFromSettings(target, source, src.DataDir, hasOutput)
+	return refuseRebuildFromSettings(target, source, src.DataDir)
 }
 
 func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.RebuildTarget, resume bool, logger log.Logger) (*rebuildOutput, error) {
@@ -452,9 +422,6 @@ func validateStagedOutput(src, out datadir.Dirs, want *dbstate.ErigonDBSettings)
 		}
 		return err
 	}
-	if err := validatePBinRebuildCheckpoints(src, out, want); err != nil {
-		return err
-	}
 	return filepath.WalkDir(out.DataDir, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -471,10 +438,6 @@ func validateStagedOutput(src, out datadir.Dirs, want *dbstate.ErigonDBSettings)
 			return err
 		}
 		if snapRel == "." || strings.HasPrefix(snapRel, ".."+string(filepath.Separator)) {
-			tmpRel, tmpErr := filepath.Rel(out.Tmp, path)
-			if tmpErr == nil && tmpRel != "." && !strings.HasPrefix(tmpRel, ".."+string(filepath.Separator)) && isPBinRebuildCheckpointName(entry.Name()) {
-				return nil
-			}
 			return fmt.Errorf("commitment rebuild: unexpected file outside snapshots: %s", rel)
 		}
 		if snapRel == dbstate.ERIGONDB_SETTINGS_FILE {
@@ -506,133 +469,6 @@ func validateStagedOutput(src, out datadir.Dirs, want *dbstate.ErigonDBSettings)
 	})
 }
 
-type stagedPBinRebuildCheckpointWrite struct {
-	Data []byte
-	Prev []byte
-}
-
-type stagedPBinRebuildCheckpoint struct {
-	LastKey       []byte
-	Writes        map[string]stagedPBinRebuildCheckpointWrite
-	SpillPath     string
-	SpillSize     int64
-	SpillChecksum []byte
-	TargetVariant commitment.TrieVariant
-	TargetHash    string
-}
-
-func isPBinRebuildCheckpointName(name string) bool {
-	return strings.HasPrefix(name, "pbin-rebuild-") && (strings.HasSuffix(name, ".checkpoint") || strings.HasSuffix(name, ".checkpoint.rows"))
-}
-
-func pbinRebuildCheckpointRange(name string) (uint64, uint64, error) {
-	base := strings.TrimSuffix(strings.TrimSuffix(name, ".rows"), ".checkpoint")
-	parts := strings.Split(strings.TrimPrefix(base, "pbin-rebuild-"), "-")
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("commitment rebuild: invalid pbin checkpoint name %s", name)
-	}
-	from, err := strconv.ParseUint(parts[0], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("commitment rebuild: invalid pbin checkpoint name %s", name)
-	}
-	to, err := strconv.ParseUint(parts[1], 10, 64)
-	if err != nil {
-		return 0, 0, fmt.Errorf("commitment rebuild: invalid pbin checkpoint name %s", name)
-	}
-	return from, to, nil
-}
-
-func validatePBinRebuildCheckpoints(src, out datadir.Dirs, want *dbstate.ErigonDBSettings) error {
-	entries, err := os.ReadDir(out.Tmp)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	settings, err := dbstate.ReadErigonDBSettings(src)
-	if err != nil {
-		return err
-	}
-	files, err := commitmentFilesIn(out.SnapDomain)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !isPBinRebuildCheckpointName(entry.Name()) {
-			continue
-		}
-		checkpointPath := filepath.Join(out.Tmp, entry.Name())
-		if checkpointName, ok := strings.CutSuffix(entry.Name(), ".rows"); ok {
-			if _, err := os.Stat(filepath.Join(out.Tmp, checkpointName)); err != nil {
-				return fmt.Errorf("commitment rebuild: spill has no checkpoint: %s", entry.Name())
-			}
-			continue
-		}
-		data, err := os.ReadFile(checkpointPath)
-		if err != nil {
-			return err
-		}
-		checkpoint := new(stagedPBinRebuildCheckpoint)
-		if err := gob.NewDecoder(bytes.NewReader(data)).Decode(checkpoint); err != nil {
-			return fmt.Errorf("commitment rebuild: invalid checkpoint %s: %w", entry.Name(), err)
-		}
-		if len(checkpoint.LastKey) == 0 {
-			return fmt.Errorf("commitment rebuild: invalid checkpoint %s: missing last key", entry.Name())
-		}
-		if want.TrieVariantName() != dbstate.TrieVariantBin || checkpoint.TargetVariant != commitment.VariantBinPatriciaTrie || checkpoint.TargetHash != want.TrieHashName() {
-			return fmt.Errorf("commitment rebuild: checkpoint target differs; restart into a fresh output datadir")
-		}
-		from, to, err := pbinRebuildCheckpointRange(entry.Name())
-		if err != nil {
-			return err
-		}
-		for _, file := range files {
-			parsed, _, ok := snaptype.ParseFileName(out.SnapDomain, file)
-			if ok && uint64(parsed.From)*settings.StepSize == from && uint64(parsed.To)*settings.StepSize == to {
-				return fmt.Errorf("commitment rebuild: checkpoint %s is already covered by %s", entry.Name(), file)
-			}
-		}
-		if checkpoint.SpillPath != "" {
-			expected := filepath.Join(out.Tmp, entry.Name()+".rows")
-			if filepath.Clean(checkpoint.SpillPath) != filepath.Clean(expected) {
-				return fmt.Errorf("commitment rebuild: checkpoint %s names an unexpected spill", entry.Name())
-			}
-			info, err := os.Stat(expected)
-			if err != nil {
-				if os.IsNotExist(err) {
-					return fmt.Errorf("commitment rebuild: checkpoint and spill disagree; restart into a fresh output datadir")
-				}
-				return fmt.Errorf("commitment rebuild: checkpoint %s has no spill", entry.Name())
-			}
-			if info.Size() != checkpoint.SpillSize {
-				return fmt.Errorf("commitment rebuild: checkpoint and spill disagree; restart into a fresh output datadir")
-			}
-			spill, err := os.Open(expected)
-			if err != nil {
-				return err
-			}
-			hash := sha256.New()
-			_, copyErr := io.Copy(hash, spill)
-			closeErr := spill.Close()
-			if copyErr != nil {
-				return copyErr
-			}
-			if closeErr != nil {
-				return closeErr
-			}
-			if len(checkpoint.SpillChecksum) == 0 || !bytes.Equal(hash.Sum(nil), checkpoint.SpillChecksum) {
-				return fmt.Errorf("commitment rebuild: checkpoint and spill disagree; restart into a fresh output datadir")
-			}
-		} else if _, err := os.Stat(filepath.Join(out.Tmp, entry.Name()+".rows")); err == nil {
-			return fmt.Errorf("commitment rebuild: checkpoint and spill disagree; restart into a fresh output datadir")
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return nil
-}
-
 // requireKeptFilesMatchTarget refuses a --resume run under a scheme other than the
 // one the kept commitment files were built with. Staging is about to overwrite the
 // toml that describes them, which is the only record of what they are.
@@ -651,16 +487,11 @@ func requireKeptFilesMatchTarget(out datadir.Dirs, want *dbstate.ErigonDBSetting
 }
 
 func (o *rebuildOutput) settings() *dbstate.ErigonDBSettings {
-	bin := o.target.Variant == commitment.VariantBinPatriciaTrie
-	refs := o.source.RefsInCommitmentBranches() && !bin
+	refs := o.source.RefsInCommitmentBranches()
 	s := &dbstate.ErigonDBSettings{
 		StepSize:                       o.source.StepSize,
 		StepsInFrozenFile:              o.source.StepsInFrozenFile,
 		ReferencesInCommitmentBranches: &refs,
-	}
-	if bin {
-		variant, hash := dbstate.TrieVariantBin, o.target.HashName
-		s.TrieVariant, s.TrieHash = &variant, &hash
 	}
 	return s
 }
@@ -711,6 +542,11 @@ func resolvePathForOverlap(path string) (string, error) {
 
 func isCommitmentFileName(name string) bool {
 	parsed, _, ok := snaptype.ParseFileName("", name)
+	return ok && (parsed.TypeString == kv.CommitmentDomain.String() || parsed.TypeString == kv.CommitmentBinDomain.String())
+}
+
+func isHexCommitmentFileName(name string) bool {
+	parsed, _, ok := snaptype.ParseFileName("", name)
 	return ok && parsed.TypeString == kv.CommitmentDomain.String()
 }
 
@@ -735,7 +571,7 @@ func commitmentFileSizes(snapDomain string) ([]commitmentFileSize, error) {
 	}
 	var sizes []commitmentFileSize
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".kv" || !isCommitmentFileName(e.Name()) {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".kv" || !isHexCommitmentFileName(e.Name()) {
 			continue
 		}
 		info, err := e.Info()
@@ -780,7 +616,7 @@ func rebuildReportDir(out *rebuildOutput, src datadir.Dirs) string {
 func formatRebuildReport(files []commitmentFileSize, report *dbstate.RebuildReport) string {
 	var b strings.Builder
 	if report != nil {
-		fmt.Fprintf(&b, "# commitment_rebuild target=%s hash=%s\n", report.Target.Variant, report.Target.HashName)
+		fmt.Fprintf(&b, "# commitment_rebuild target=%s\n", report.Target.Variant)
 	}
 
 	b.WriteString("# commitment_files\nfile\tstep_from\tstep_to\tbytes\n")
@@ -802,11 +638,11 @@ func formatRebuildReport(files []commitmentFileSize, report *dbstate.RebuildRepo
 		fmt.Fprintf(&b, "%d\t%d\t%d\t%d\t%d\t%d\t%x\n", r.StepFrom, r.StepTo, r.TxnFrom, r.TxnTo, r.KeysInFiles, r.KeysProcessed, r.RootHash)
 	}
 
-	b.WriteString("\n# rebuild_shards\nrange_step_from\trange_step_to\tstep_from\tstep_to\tkeys\tcode_accounts\tunique_code_hashes\n")
+	b.WriteString("\n# rebuild_shards\nrange_step_from\trange_step_to\tstep_from\tstep_to\tkeys\n")
 	for _, r := range report.Ranges {
 		for _, s := range r.Shards {
-			fmt.Fprintf(&b, "%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
-				r.StepFrom, r.StepTo, s.StepFrom, s.StepTo, s.Keys, s.CodeBearingAccounts, s.UniqueCodeHashes)
+			fmt.Fprintf(&b, "%d\t%d\t%d\t%d\t%d\n",
+				r.StepFrom, r.StepTo, s.StepFrom, s.StepTo, s.Keys)
 		}
 	}
 	return b.String()
@@ -822,7 +658,7 @@ func commitmentFilesIn(snapDomain string) ([]string, error) {
 	}
 	var found []string
 	for _, e := range entries {
-		if !e.IsDir() && isCommitmentFileName(e.Name()) {
+		if !e.IsDir() && isHexCommitmentFileName(e.Name()) {
 			found = append(found, e.Name())
 		}
 	}
@@ -883,66 +719,47 @@ var cmdCommitmentRebuild = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-
-		sourceDirs := datadir.Open(datadirCli)
-		target, err := resolveCommitmentRebuildTarget()
-		if err != nil {
+		if err := runCommitmentRebuild(cmd, args, logger, ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error(err.Error())
-			return
-		}
-		target.MaxShardSteps = rebuildMaxShardSteps
-		if err := checkRebuildFlags(target, rebuildOutputDatadir != ""); err != nil {
-			logger.Error(err.Error())
-			return
-		}
-		if reset {
-			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
-			if err != nil {
-				logger.Error("Opening DB", "error", err)
-				return
-			}
-			defer db.Close()
-			if err := rawdbreset.Reset(ctx, db, stages.Execution); err != nil {
-				logger.Error(err.Error())
-			}
-			return
-		}
-		if err := refuseRebuildFromSource(target, sourceDirs, rebuildOutputDatadir != ""); err != nil {
-			logger.Error(err.Error())
-			return
-		}
-		if err := requireRebuildOutput(target, rebuildOutputDatadir); err != nil {
-			logger.Error(err.Error())
-			return
-		}
-		var out *rebuildOutput
-		if rebuildOutputDatadir != "" {
-			if out, err = stageRebuildOutput(datadir.Open(datadirCli), rebuildOutputDatadir, target, resume, logger); err != nil {
-				logger.Error(err.Error())
-				return
-			}
-			// openDB and allSnapshots take their dirs from datadirCli, so pointing it at
-			// the staged datadir is what makes the rebuild write there. chaindata was
-			// resolved from the source before this and stays the source's.
-			datadirCli = out.dirs.DataDir
-		}
-
-		// Migrations write to the source chaindata, which an output run treats as a
-		// read-only input.
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), out == nil, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := commitmentRebuild(db, cmd.Context(), logger, target, out); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
 		}
 	},
+}
+
+func runCommitmentRebuild(cmd *cobra.Command, args []string, logger log.Logger, ctx context.Context) error {
+	_ = args
+	sourceDirs := datadir.Open(datadirCli)
+	target, err := resolveCommitmentRebuildTarget()
+	if err != nil {
+		return err
+	}
+	target.MaxShardSteps = rebuildMaxShardSteps
+	if err := checkRebuildFlags(rebuildOutputDatadir != ""); err != nil {
+		return err
+	}
+	if reset {
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			return fmt.Errorf("opening DB: %w", err)
+		}
+		defer db.Close()
+		return rawdbreset.Reset(ctx, db, stages.Execution)
+	}
+	if err := refuseRebuildFromSource(target, sourceDirs); err != nil {
+		return err
+	}
+	var out *rebuildOutput
+	if rebuildOutputDatadir != "" {
+		if out, err = stageRebuildOutput(datadir.Open(datadirCli), rebuildOutputDatadir, target, resume, logger); err != nil {
+			return err
+		}
+		datadirCli = out.dirs.DataDir
+	}
+	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), out == nil, chain, logger)
+	if err != nil {
+		return fmt.Errorf("opening DB: %w", err)
+	}
+	defer db.Close()
+	return commitmentRebuild(db, cmd.Context(), logger, target, out)
 }
 
 func resolveCommitmentRebuildTarget() (dbstate.RebuildTarget, error) {
@@ -951,7 +768,7 @@ func resolveCommitmentRebuildTarget() (dbstate.RebuildTarget, error) {
 
 // checkRebuildFlags refuses the flag combinations a rebuild cannot honour. It runs
 // before the output datadir is staged, so a refused run touches no filesystem.
-func checkRebuildFlags(target dbstate.RebuildTarget, hasOutput bool) error {
+func checkRebuildFlags(hasOutput bool) error {
 	if clearCommitment && resume {
 		return errors.New("--clear-commitment and --resume are mutually exclusive")
 	}
@@ -967,18 +784,15 @@ func checkRebuildFlags(target dbstate.RebuildTarget, hasOutput bool) error {
 	if hasOutput && !noHistory {
 		return errors.New("--output.datadir needs --no-history: the staged directory holds no commitment history files to extend, and the with-history rebuild ignores the rebuild target")
 	}
-	return refuseSqueezeForBinTarget(target, squeeze)
+	return nil
 }
 
-func commitmentRebuildDomain(target dbstate.RebuildTarget, domains []kv.Domain) kv.Domain {
-	if target.Variant == commitment.VariantBinPatriciaTrie && slices.Contains(domains, kv.CommitmentBinDomain) {
-		return kv.CommitmentBinDomain
-	}
+func commitmentRebuildDomain(_ dbstate.RebuildTarget, _ []kv.Domain) kv.Domain {
 	return kv.CommitmentDomain
 }
 
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, rebuildTarget dbstate.RebuildTarget, out *rebuildOutput) error {
-	if err := checkRebuildFlags(rebuildTarget, out != nil); err != nil {
+	if err := checkRebuildFlags(out != nil); err != nil {
 		return err
 	}
 	if reset {
@@ -999,7 +813,7 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		}
 	}
 	if source != nil {
-		if err := refuseRebuildFromSettings(rebuildTarget, source, dirs.DataDir, out != nil); err != nil {
+		if err := refuseRebuildFromSettings(rebuildTarget, source, dirs.DataDir); err != nil {
 			return err
 		}
 	}

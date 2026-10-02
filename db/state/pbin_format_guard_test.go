@@ -52,7 +52,7 @@ func TestOpenFolderRejectsLegacyPBinStateFormats(t *testing.T) {
 			putPBinOpenState(t, temporalDB, []byte{commitment.PBinStateMarker, format, 0, 0})
 			err := agg.OpenFolder(db)
 			require.ErrorContains(t, err, "OpenFolder")
-			require.ErrorContains(t, err, "rebuild the bin commitment domain")
+			require.ErrorContains(t, err, "commitment convert-pbt")
 		})
 	}
 
@@ -63,7 +63,7 @@ func TestOpenFolderRejectsLegacyPBinStateFormats(t *testing.T) {
 		putPBinOpenState(t, temporalDB, pbinOpenStateEnvelope(state))
 		err := agg.OpenFolder(db)
 		require.ErrorContains(t, err, "OpenFolder")
-		require.ErrorContains(t, err, "rebuild the bin commitment domain")
+		require.ErrorContains(t, err, "commitment convert-pbt")
 	})
 }
 
@@ -100,7 +100,7 @@ func TestOpenFolderRejectsTruncatedCurrentPBinState(t *testing.T) {
 			putPBinOpenState(t, temporalDB, []byte{commitment.PBinStateMarker, commitment.PBinRowStateFormat, 0, 0, 0}[:length])
 			err := agg.OpenFolder(temporalDB)
 			require.ErrorContains(t, err, "OpenFolder")
-			require.ErrorContains(t, err, "rebuild the bin commitment domain")
+			require.ErrorContains(t, err, "commitment convert-pbt")
 		})
 	}
 }
@@ -151,7 +151,7 @@ func TestOpenFolderRejectsLegacyPBinStateInFiles(t *testing.T) {
 	output = state.NewTest(dirs).StepSize(1).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
 	err = output.OpenFolder(nil)
 	require.ErrorContains(t, err, "OpenFolder")
-	require.ErrorContains(t, err, "rebuild the bin commitment domain")
+	require.ErrorContains(t, err, "commitment convert-pbt")
 }
 
 func TestOpenFolderRejectsLegacyPBinStateInDualDomain(t *testing.T) {
@@ -175,7 +175,7 @@ func TestOpenFolderRejectsLegacyPBinStateInDualDomain(t *testing.T) {
 	putPBinOpenStateForDomain(t, db, kv.CommitmentBinDomain, []byte{commitment.PBinStateMarker, 0x10, 0, 0})
 	err := agg.OpenFolder(db)
 	require.ErrorContains(t, err, "OpenFolder")
-	require.ErrorContains(t, err, "rebuild the bin commitment domain")
+	require.ErrorContains(t, err, "commitment convert-pbt")
 }
 
 func putPBinOpenState(t *testing.T, db kv.TemporalRwDB, value []byte) {

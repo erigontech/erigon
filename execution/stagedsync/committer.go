@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"runtime/debug"
 	"runtime/pprof"
@@ -15,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -24,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -34,6 +37,7 @@ type commitmentResult struct {
 	txNum      uint64
 	rootHash   []byte
 	shadowRoot []byte
+	stopped    map[kv.Domain]bool
 	err        error
 }
 
@@ -124,7 +128,9 @@ type commitmentCalculator struct {
 
 	// lastTarget tracks the most recent block boundary so that
 	// computeAndPublish knows which block to compute for.
-	lastTarget commitTarget
+	lastTarget               commitTarget
+	activationFromTargets    uint64
+	hasActivationFromTargets bool
 
 	// lastComputedBlock tracks the block number of the last computed
 	// commitment to avoid duplicate computation when commitComputeRequest
@@ -213,7 +219,11 @@ type commitmentCalculator struct {
 	// deltas); blocks below it accumulate in batch mode. The last
 	// pre-window block triggers a transition compute (computeTransition)
 	// so no pre-window branch deltas leak into a window block's changeset.
-	perBlockFrom uint64
+	perBlockFrom       uint64
+	maxReorgDepth      uint64
+	activationBlock    uint64
+	hasActivationBlock bool
+	blockReader        dbservices.FullBlockReader
 
 	wg   sync.WaitGroup
 	done chan struct{}
@@ -522,19 +532,18 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// A failed block may contain only partial state. Do not compute its
 		// commitment; the apply loop owns error classification.
 		if r.Err != nil {
+			cc.shadowStopped = nil
 			return
 		}
 		target := targetOf(r)
 		blockNum := target.blockNum
+		cc.recordBlockTarget(target)
 
 		// Track the latest block boundary. lastBlockResultSeen opens the
 		// compute-ahead gate for the next block (its baseline is now in sd.mem).
-		cc.lastTarget = target
 		cc.lastBlockResultSeen = blockNum
-		cc.hasSeenBlockResult = true
 
 		// Break logic: in per-block mode, compute at every block boundary.
-		// Skip the first block if it's a partial block (resumed mid-block).
 		// `forcePerBlockCompute` overrides dbg.BatchCommitments to mirror
 		// serial's gate (exec3_serial.go around the `if !dbg.BatchCommitments
 		// || shouldGenerateChangesets || ...` check) — per-block compute is
@@ -556,15 +565,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				cc.state.ResetBlockFlags()
 			}
 		case cc.perBlockCompute(blockNum):
-			if cc.lastComputedBlock == 0 && r.isPartial {
-				// First block is partial (resumed mid-block).
-				// Compute it (like serial does) to save trie state, then
-				// restore that state so the next full block starts from
-				// the same trie state as serial's batch 2 start.
-				cc.computeWithoutCheck(ctx, target)
-			} else {
-				cc.computeAndCheck(ctx, target)
-			}
+			cc.computeAndCheck(ctx, target)
 			if blockNum+1 == cc.perBlockFrom {
 				// Pre-window per-block computes (BatchCommitments off) defer
 				// branch writes too — flush the boundary block's pending update
@@ -603,6 +604,15 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.publish(ctx, commitmentResult{blockNum: cc.lastComputedBlock})
 		}
 	}
+}
+
+func (cc *commitmentCalculator) recordBlockTarget(target commitTarget) {
+	if cc.chainConfig != nil && cc.hasSeenBlockResult && !cc.chainConfig.IsBinaryTrie(cc.lastTarget.blockTime) && cc.chainConfig.IsBinaryTrie(target.blockTime) {
+		cc.activationFromTargets = target.blockNum
+		cc.hasActivationFromTargets = true
+	}
+	cc.lastTarget = target
+	cc.hasSeenBlockResult = true
 }
 
 // handleBlockRequest records the per-block mode from a blockRequest —
@@ -1211,6 +1221,9 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 
 	canonicalDomain := cc.canonicalCommitmentDomain(t.blockTime)
 	shadowDomain := otherCommitmentDomain(canonicalDomain)
+	if canonicalDomain == kv.CommitmentBinDomain {
+		cc.stopHexShadowAtWindow(ctx, t)
+	}
 	if cc.ShadowDomainStopped(canonicalDomain) {
 		return dualCommitmentResult{}, fmt.Errorf("commitment domain %s is stopped", canonicalDomain)
 	}
@@ -1293,6 +1306,45 @@ func otherCommitmentDomain(domain kv.Domain) kv.Domain {
 	return kv.CommitmentBinDomain
 }
 
+func shouldStopHexShadow(activationBlock, maxReorgDepth, blockNum uint64) bool {
+	return blockNum > activationBlock && blockNum-activationBlock > maxReorgDepth
+}
+
+func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t commitTarget) {
+	if cc.chainConfig == nil || !cc.chainConfig.IsBinaryTrie(t.blockTime) || cc.ShadowDomainStopped(kv.CommitmentDomain) {
+		return
+	}
+	if !cc.hasActivationBlock {
+		switch {
+		case cc.hasActivationFromTargets:
+			cc.activationBlock = cc.activationFromTargets
+			cc.hasActivationBlock = true
+		default:
+			if cc.blockReader == nil {
+				return
+			}
+			searchBlock := t.blockNum
+			canSearch := true
+			if cc.hasFirstBlock {
+				if cc.firstBlockNum == 0 {
+					canSearch = false
+				} else {
+					searchBlock = cc.firstBlockNum - 1
+				}
+			}
+			if !cc.hasActivationBlock && canSearch {
+				if activationBlock, found, err := binaryTrieActivationBlockWithHead(ctx, cc.roTx, cc.blockReader, cc.chainConfig, searchBlock, &types.Header{Time: t.blockTime}); err == nil && found {
+					cc.activationBlock = activationBlock
+					cc.hasActivationBlock = true
+				}
+			}
+		}
+	}
+	if cc.hasActivationBlock && shouldStopHexShadow(cc.activationBlock, cc.maxReorgDepth, t.blockNum) {
+		cc.stopShadowDomain(kv.CommitmentDomain)
+	}
+}
+
 func (cc *commitmentCalculator) canonicalCommitmentDomain(blockTime uint64) kv.Domain {
 	if cc.chainConfig != nil && cc.chainConfig.IsBinaryTrie(blockTime) {
 		return kv.CommitmentBinDomain
@@ -1329,11 +1381,6 @@ func (cc *commitmentCalculator) stopShadowDomain(domain kv.Domain) {
 		cc.shadowStopped = make(map[kv.Domain]bool)
 	}
 	cc.shadowStopped[domain] = true
-	if cc.roTx != nil {
-		if p, ok := cc.roTx.AggTx().(interface{ StopCommitmentDomain(kv.Domain) }); ok {
-			p.StopCommitmentDomain(domain)
-		}
-	}
 	if cc.doms != nil {
 		if ctx := cc.doms.GetCommitmentCtxForDomain(domain); ctx != nil {
 			ctx.ResetPendingUpdates()
@@ -1342,21 +1389,27 @@ func (cc *commitmentCalculator) stopShadowDomain(domain kv.Domain) {
 }
 
 func (cc *commitmentCalculator) ShadowDomainStopped(domain kv.Domain) bool {
-	if cc.roTx != nil {
-		if p, ok := cc.roTx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool }); ok && p.CommitmentDomainStopped(domain) {
-			return true
-		}
+	if cc.shadowStopped[domain] {
+		return true
 	}
-	return cc.shadowStopped[domain]
+	if cc.roTx == nil {
+		return false
+	}
+	p, ok := cc.roTx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool })
+	return ok && p.CommitmentDomainStopped(domain)
 }
 
-func recordStoppedCommitmentDomains(tx kv.TemporalRwTx) error {
+func recordStoppedCommitmentDomains(tx kv.TemporalRwTx, local map[kv.Domain]bool) error {
 	stopped, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool })
-	if !ok {
+	if !ok && local == nil {
 		return nil
 	}
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-		if !stopped.CommitmentDomainStopped(domain) {
+		isStopped := local != nil && local[domain]
+		if !isStopped && ok {
+			isStopped = stopped.CommitmentDomainStopped(domain)
+		}
+		if !isStopped {
 			continue
 		}
 		if err := rawdb.WriteCommitmentDomainStopped(tx, domain); err != nil {
@@ -1428,12 +1481,6 @@ func (cc *commitmentCalculator) computeAndPublish(ctx context.Context, target co
 	cc.compute(ctx, target, computeMode{checkRoot: true, publishRoot: true})
 }
 
-// computeWithoutCheck computes the first partial block's commitment without
-// verifying the root (its trie state doesn't match the header).
-func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, target commitTarget) {
-	cc.compute(ctx, target, computeMode{label: "partial-block "})
-}
-
 func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, target commitTarget) {
 	cc.compute(ctx, target, computeMode{label: "step-boundary ", midBlock: true})
 }
@@ -1478,6 +1525,9 @@ func (cc *commitmentCalculator) computeTransition(ctx context.Context, target co
 }
 
 func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult) {
+	if len(cc.shadowStopped) != 0 {
+		r.stopped = maps.Clone(cc.shadowStopped)
+	}
 	// Best-effort send; log only genuine errors as a breadcrumb (the apply loop
 	// surfaces the authoritative one). Wrong-root and shutdown cancels are expected.
 	if r.err != nil && cc.logger != nil &&

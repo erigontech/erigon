@@ -11,8 +11,8 @@
   file.
 - Import is a test-only bootstrap. It proves an exported snapshot is complete by running a node from it.
 - Missing on `awskii/pbt-v3` today:
-  - `integration commitment rebuild --experimental.bin-commitment` builds a bin-only datadir at the tip, shard by shard,
-    through the incremental engine. There is no path from a hex datadir to hex+bin, and no published-file workflow.
+  - `integration commitment rebuild` has no binary target. `integration commitment convert-pbt` builds binary commitment
+    files from a hex datadir, including a published-file workflow.
   - there is no EIP-8347 artifact code;
   - `export-preimages` pins against the root of whatever `CommitmentDomain` holds, which is wrong on post-fork hex+bin
     and pre-fork bin-only datadirs;
@@ -29,8 +29,8 @@
   records, leaf derivation, canonical digests), "Verification (dual-check)", "BAL-replay". EIP-8297 is in the same
   directory.
 - Rebuild pieces reused:
-  - `db/state/squeeze.go`: the sorted batch feed `pbinForEachRebuildOpStreamLookaheadAfterWithSample` and
-    `pbinRebuildOverlay` with `FlushFinished`;
+  - `db/state/squeeze.go`: the sorted batch feed `pbinForEachRebuildOpStreamLookaheadAfterWithSample`;
+  - `db/state/pbt_range_writer.go`: the conversion overlay with `FlushFinished`;
   - `cmd/integration/commands/commitment.go`: `stageRebuildOutput`, `linkSnapshotsExceptCommitment`,
     `isCommitmentFileName`, `validateStagedOutput`, `rebuildOutput.settings`;
   - `cmd/integration/commands/stages.go`: the source opening options `SkipPBinStateDBCheck`, `DisableInterDomainDeps`,
@@ -126,12 +126,13 @@
    zone `0x00`, code zone `0x01`, storage zone `0xff`, grouped by stem. So the same stream feeds the converter, the
    artifact writer and a new streaming reference root.
 2. The converter feeds the stream through the pbt engine in sorted batches. A range writer places each finished row in
-   the published state-file range of the newest write under it. There is no history and no intermediate state record;
-   every range up to S gets a file.
+   the published state-file range of the newest write under it. Accounts, storage and code history and inverted-index
+   files are omitted; source commitment history and indexes are retained when present. Every range up to S gets a file.
 3. Attach adopts published files, resets the node's execution state with `ResetExec` and re-executes from S. The
    automatic hex stop ends dual mode after the fork window.
-4. Export writes the artifact and the preimage file from one shared pin at a block end. Import rebuilds a test node's
-   state from them through the ordinary commitment fold and runs it forward.
+4. Export writes the artifact and the preimage file from one shared pin at a block end. Test-only import replaces
+   conversion and attach by reading the artifact, staging commitment-bin files, switching settings last, and running
+   the node forward in dual mode.
 
 ## Technical Details
 
@@ -171,20 +172,27 @@
 ### Conversion point and unwind floor
 
 - `erigondb.toml` gains the conversion point (block, txNum).
-- `CanUnwindToBlockNum`, `CanUnwindBeforeBlockNum`, `UnwindExecutionStage`/`unwindExec3` and the in-memory unwind path
-  refuse an unwind argument U <= C (an unwind to U drops `[U, inf)`).
+- `CanUnwindToBlockNum`, `CanUnwindBeforeBlockNum` and `UnwindExecutionStage`/`unwindExec3` refuse `U < C_block`;
+  block-numbered unwinds drop `(U, tip]`. The in-memory and temporal tx-number paths refuse
+  `txNumUnwindTo <= C_txNum`, because they drop `[txNumUnwindTo, inf)`.
 - `SharedDomains.Unwind` has no error return: either its callers check the floor first, or it gains an error return,
   whichever is the smaller diff. Each site gets its own test.
 
 ### Converter
 
 - `integration commitment convert-pbt [--keep-hex] --output.datadir <dir>`.
-- the source opens through rebuild's opening path with both commitment domains' files excluded.
-  `isCommitmentFileName` learns `commitmentbin`; today a dual source's bin files would be linked.
+  - the source opens through rebuild's opening path with both commitment domains' files excluded. The read-only source
+    open accepts existing tables without creating the branch's optional binary tables; it reads only headers and
+    snapshot-aware `TxNums` from chaindata and block snapshots. v3 commitment files are detected before opening, even
+    when the settings file does not record v3. `isCommitmentFileName` learns `commitmentbin`; today a dual source's bin
+    files would be linked.
 - outputs:
   - `--keep-hex`: hex commitment files hardlinked, rows in `CommitmentBinDomain`, `trie_variant = hex+bin`. The source's
-    hex must be v3 (state key `0x42`, marker `0x04`) and its state record must sit at S; otherwise refuse and say to run
-    `commitment convert --v3` or to collate first.
+    hex must be v3 (state key `0x42`, marker `0x04`). The source is read from files only; every leaf provenance stamp
+    must be at or before S. Stamps are file-granular, so a last file whose writes reach F−1 after S is refused with the
+    message to wait for the next step. Ranges starting after S are not published. Otherwise refuse
+    and say to run `commitment convert --v3` or to collate first.
+    Commitment history and its index/accessors are copied through S when present in the source.
   - without `--keep-hex`: rows in `CommitmentDomain`, `trie_variant = bin`, refused unless S is post-fork (a pre-fork
     bin-only output cannot boot: execution checks its bin root against an MPT header).
 - the output records `trie_hash` and the conversion point at S.
@@ -198,12 +206,23 @@
 
 - `integration commitment attach-pbt --from <published dir>` on a stopped node:
   1. check the published settings: same step size and ranges as the node's files up to S, hex and bin both present, and
-     a `trie_hash` equal to the node's configured suite;
-  2. adopt the published state and commitment files up to S and remove the node's own state and commitment files past
-     S;
+     a `trie_hash` equal to the node's configured suite. The state salt must match the node's state salt; block salts
+     remain node-owned. For accounts, storage and code, the published set must carry the `.kv`, `.bt`, `.kvi` and
+     `.kvei` files that attach replaces. Commitment history and inverted-index files are published and adopted when
+     present in the source; their absence is accepted. State history and inverted-index files are not published or
+     adopted.
+  2. require every published leaf provenance stamp to be at or before S, adopt the published state and commitment files
+     up to S, keep the node's own accounts, storage and code history and inverted-index files through S, and remove node
+     files starting after S; commitment history and indexes are adopted only when published, and a state-domain history
+     or index file spanning S is refused because it cannot be cut safely;
   3. run `ResetExec` (state, history, commitment tables and stop markers cleared; block data kept);
   4. write `trie_variant = hex+bin`, the published `trie_hash` and the conversion point.
-- on restart `SeekCommitments` restores the checkpoint at S; the node re-executes from there in dual mode.
+- on restart `SeekCommitments` restores the checkpoint at S; the node re-executes from there in dual mode. Published
+  state ranges start at or before S; a file-granular stamp after S is refused before adoption. A conversion-point
+  datadir keeps state files visible when retained history ends at S, so mixed state and history ranges can reopen,
+  collate and merge.
+- at a block-end S before the fork, attach writes the published PBT root as the shadow root. After the fork it writes
+  the adopted hex root; if that root is unavailable, it writes no shadow record.
 - a mid-block S is covered: executors skip transactions through the restored checkpoint, and the rest of the block
   executes once.
 - the command never wipes chaindata or block files.
@@ -218,7 +237,8 @@
 
 - one pin serves `export-pbt` and `export-preimages`:
   - the live commitment checkpoint (B, T) of the domain canonical at B;
-  - a real mapping from B to T, with T equal to B's last txNum (`Max(B)` falls back silently when B is absent);
+  - a real mapping from B to T, with T equal to B's last txNum, resolved from the database or block snapshots; a
+    missing mapping is an error rather than a fallback to the latest database row;
   - pre-fork bin-only and post-fork hex-only datadirs refused;
   - before the fork the hex root must equal `header(B).Root`, after it the bin root;
   - no restore of every active domain just to accept a lagging shadow.
@@ -228,23 +248,23 @@
 
 ### Artifact (spec "PBT snapshot artifact")
 
-- layout: `pbtRoot[32] | headerCount[8] | headerRecord* | codeCount[8] | group* | storageCount[8] | storageRecord*`,
-  counts big-endian, no trailing bytes.
+- layout: `record* | end[1] | pbtRoot[32]`, with end tag `0x07`, no section counts or group counts, and no trailing bytes.
 - integers: `name[≤w]` is a one-byte length followed by a minimal big-endian integer (zero is length 0). Erigon's compact
   code-leaf codec trims trailing zeros and is not used.
-- header record: `addressHash | nonce[≤8] | balance[≤16] | kind | codeRef | slotCount[1] | (slot[1] | value[≤32])*`,
-  every slot below `HEADER_STORAGE_SLOTS` (64).
+- header records use tags `0x00`, `0x01` and `0x02`: `kind | addressHash | nonce[≤8] | balance[≤16] | codeRef |
+  slotCount[1] | (slot[1] | value[≤32])*`, with every slot below `HEADER_STORAGE_SLOTS` (64).
   - kind 0: no code, and nonce and balance not both zero (even with storage). The account's code hash is
     `keccak256("")`.
   - kind 1: `codeHash[32] | codeSize[≤4]`, size > 0, the code never a designator.
   - kind 2: `target[20]`, for exactly 23 bytes starting `ef0100`. The account's code hash is
     `keccak256(ef0100 ‖ target)`.
-- code group: `stemHash | n[1] | (subIndex[1] | value[≤32]) * (n+1)`, non-zero values only.
-- storage record: `addressHash | groupCount[≤8] | group*`, with `groupCount > 0`.
+- code groups use tag `0x03`: `stemHash | n[1] | (subIndex[1] | value[≤32]) * (n+1)`, where `n=0` is valid.
+- storage records use `0x04 | addressHash`, followed by `0x05` single-leaf groups or `0x06` multi-leaf groups. A storage
+  account has at least one group, and `0x06` has more than one leaf. Records are ordered by zone.
 - the writer refuses records the spec forbids (kind 0 with nonce and balance both zero, kind 1 with size 0) rather than
   writing them.
-- the writer buffers each storage record, spilling past a threshold, because `groupCount` is variable-width and
-  precedes the groups. `pbtRoot` and the three counts are patched at their offsets at the end.
+- the writer streams in one pass: nothing is patched or buffered; it hashes the bytes as it writes them and takes
+  `pbtRoot` at the end.
 - the codec takes a plain (key, value) iterator defined in `eip8297/artifact`, so `db/state` adapts to it without an
   import cycle.
 - `snapshotDigest` is keccak256 of the finished file.
@@ -257,7 +277,8 @@
 
 - `erigon snapshots export-pbt --out <dir>`, registered beside `export-preimages` in `cmd/utils/app/snapshots_cmd.go`.
 - uses the shared pin; one temporal transaction pins the aggregator and block-file views for both files.
-- `pbtRoot` comes from the reference root and must equal the datadir's bin root when one exists at (B, T).
+- one leaf stream feeds the writer and the reference root in one pass; `pbtRoot` must equal the datadir's bin root when
+  one exists at (B, T).
 - before finishing, the export reads back both of its output files with the strict readers and the join.
 - output files: `pbt-snapshot.bin`, the preimage file, and a meta JSON with chain id, block number and hash, T, the hash
   suite, stateRoot, pbtRoot, section counts, snapshotDigest, preimageDigest and a finalized flag. The canonical artifact
@@ -265,22 +286,22 @@
 
 ### Import (test-only)
 
-- `integration commitment import-pbt --snapshot <file> --preimages <file> --block <hash> --datadir <dir>`, run on a
-  copy of a node's datadir.
-- `--block` is checked against the local canonical header. N must be a block where bin is canonical (PBT from genesis,
-  or after the fork); the output is bin-only.
+- `integration commitment import-pbt --snapshot <file> --datadir <dir>`, run on a stopped v3 hex-only node at the
+  block in the snapshot metadata. The command takes `--chain` and
+  `--experimental.bin-commitment.hash=<suite>`.
+- The metadata chain id, block number and hash, exact block-end txNum, hash suite, state root and snapshot digest are
+  checked against the node. The header, canonical hash, and txNum come from the block reader, so frozen blocks work.
 - steps:
-  1. `ResetExec`;
-  2. strict readers and the exact-set join;
-  3. write accounts (incarnation 1 for accounts with code, 0 otherwise), storage and address-keyed code through
-     `SharedDomains` at N's last txNum T; the ordinary bin commitment fold then writes the rows and the commitment-state
-     record at (N, T), as the genesis path does.
+  1. validate metadata and the digest without opening a writable database;
+  2. stream artifact leaves into `PBinRangeWriter` in a staging directory, with all rows stamped at the import point;
+  3. compare the written root with the artifact root and verify the written rows;
+  4. move only the commitment-bin files into the node and write hex+bin settings, the hash suite, and the conversion
+     point last.
 - checks:
-  - the bin root equals `pbtRoot`, which equals `header(N).stateRoot`;
-  - code: missing chunks read as 31 zero bytes, truncated to `codeSize`, the keccak equals the code hash, re-chunking
-    gives the artifact's chunks, one `codeSize` per code hash, no surplus code groups.
-- shared bytecode expands into address-keyed code rows; delegated accounts store their 23-byte designator; codeless
-  accounts have no code row.
+  - the written bin root equals the artifact `pbtRoot` and the metadata root;
+  - the target's state and hex files remain unchanged; no bin history is created;
+  - a failed staging move leaves files and settings unchanged. Import has no preimage or block-hash flag and does not
+    reset execution or rewrite the state database.
 
 ## What Goes Where
 
@@ -296,16 +317,16 @@
 - Modify: `db/state/domain_stream.go`
 - Create: `db/state/domain_stream_stamp_test.go`
 
-- [ ] add the stamp accessor with a stub. Write tests:
+- [x] add the stamp accessor with a stub. Write tests:
       - a key whose newest value is in a file reports that file's range;
       - a DB value reports its step;
       - a key present in several files and the DB reports the newest source.
 
       Confirm they fail at the stamp assertions.
-- [ ] record `nextStamp` in `advanceInFiles` beside the selected key and value, before equal-key cursors advance
-- [ ] write tests for iteration through `DomainRoTx.DebugRangeLatest` and `DebugRangeLatestFromFiles`, and for keys
+- [x] record `nextStamp` in `advanceInFiles` beside the selected key and value, before equal-key cursors advance
+- [x] write tests for iteration through `DomainRoTx.DebugRangeLatest` and `DebugRangeLatestFromFiles`, and for keys
       deleted in a newer range
-- [ ] run tests - must pass before task 2
+- [x] run tests - must pass before task 2
 
 ### Task 2: Streaming reference root
 
@@ -313,15 +334,15 @@
 - Create: `execution/commitment/eip8297/stream_root.go`
 - Create: `execution/commitment/eip8297/stream_root_test.go`
 
-- [ ] add the builder signature with a stub. Write tests:
+- [x] add the builder signature with a stub. Write tests:
       - on random sorted leaf sets, the streaming root equals `reference.go`'s root under both suites; the sets cover
         all zones, header and overflow storage, code stems and groups of 1 to 256 values;
       - the empty stream gives the zero root.
 
       Confirm they fail at the root comparison.
-- [ ] implement the depth-bounded builder with compressed prefixes and full leaf keys; take the hash suite explicitly
-- [ ] write tests rejecting unsorted input, duplicate keys and zero values
-- [ ] run tests - must pass before task 3
+- [x] implement the depth-bounded builder with compressed prefixes and full leaf keys; take the hash suite explicitly
+- [x] write tests rejecting unsorted input, duplicate keys and zero values
+- [x] run tests - must pass before task 3
 
 ### Task 3: Shared leaf stream
 
@@ -329,16 +350,16 @@
 - Create: `db/state/pbt_leaf_stream.go`
 - Create: `db/state/pbt_leaf_stream_test.go`
 
-- [ ] add the stream signature with a stub. Write tests:
+- [x] add the stream signature with a stub. Write tests:
       - the stream over a test datadir yields the same leaves as the pbt engine's state after executing the same chain;
       - stamps combine by max: basic data over account and code, and a chunk shared by two accounts.
 
       Confirm they fail at the leaf and stamp assertions.
-- [ ] implement the stream over accounts, storage and code (files-only or files-plus-DB), translating through
+- [x] implement the stream over accounts, storage and code (files-only or files-plus-DB), translating through
       `NewRebuildFeedOpEmitter` with `CodeWritten=true`, dropping zero values, attaching stamps in the emit callback
-- [ ] sort by tree key through ETL, keeping the max stamp of identical payloads and rejecting conflicting ones
-- [ ] write tests for delegated accounts, all-zero bytecode, code shared across accounts and an empty state
-- [ ] run tests - must pass before task 4
+- [x] sort by tree key through ETL, keeping the max stamp of identical payloads and rejecting conflicting ones
+- [x] write tests for delegated accounts, all-zero bytecode, code shared across accounts and an empty state
+- [x] run tests - must pass before task 4
 
 ### Task 4: Conversion point and unwind floor
 
@@ -352,13 +373,14 @@
 - Create: `execution/stagedsync/stage_execute_floor_test.go`
 - Create: `db/state/execctx/domain_shared_floor_test.go`
 
-- [ ] add the conversion-point fields; write a settings round-trip test and confirm it fails before the fields exist
-- [ ] write one test per site: an unwind argument U <= C is refused by `CanUnwindToBlockNum`/`CanUnwindBeforeBlockNum`,
-      by `UnwindExecutionStage`/`unwindExec3`, and on the in-memory `SharedDomains.Unwind` path; U > C passes. Confirm
-      each fails at its refusal assertion
-- [ ] enforce the floor at each site, choosing between caller-side checks and an error return on
+- [x] add the conversion-point fields; write a settings round-trip test and confirm it fails before the fields exist
+- [x] write one test per site: block-numbered unwinds refuse U < C_block while U = C_block passes at
+      `CanUnwindToBlockNum`/`CanUnwindBeforeBlockNum` and `UnwindExecutionStage`/`unwindExec3`; the in-memory
+      tx-number path refuses txNumUnwindTo <= C_txNum while a greater tx number passes. Confirm each fails at its
+      refusal assertion
+- [x] enforce the floor at each site, choosing between caller-side checks and an error return on
       `SharedDomains.Unwind` by the smaller diff
-- [ ] run tests - must pass before task 5
+- [x] run tests - must pass before task 5
 
 ### Task 5: Engine feed and range writer
 
@@ -366,20 +388,20 @@
 - Create: `db/state/pbt_range_writer.go`
 - Create: `db/state/pbt_range_writer_test.go`
 
-- [ ] add the writer signature with a stub. Write tests on a test datadir:
-      - the leaf stream runs through `pbinForEachRebuildOpStreamLookaheadAfterWithSample` and `pbinRebuildOverlay` into
-        the range writer;
+- [x] add the writer signature with a stub. Write tests on a test datadir:
+      - the leaf stream runs through `pbinForEachRebuildOpStreamLookaheadAfterWithSample` and the conversion overlay in
+        `pbt_range_writer.go` into the range writer;
       - row stamps equal the max leaf stamp under each prefix, including a row created after its leaves were folded;
       - every range up to S gets a file, and an empty range yields an empty file that merges.
 
       Confirm they fail at the stamp and file assertions.
-- [ ] implement row stamping from the sorted leaf stream and the mapping of stamps to the published accounts ranges
-- [ ] build one file per range with `(*Domain).buildFileRange` from a sorted `Collation`, writing the commitment-state
+- [x] implement row stamping from the sorted leaf stream and the mapping of stamps to the published accounts ranges
+- [x] build one file per range with `(*Domain).buildFileRange` from a sorted `Collation`, writing the commitment-state
       record in the newest range
-- [ ] write tests:
+- [x] write tests:
       - the aggregator's visible files after writing: no hidden state files;
       - a merge across the written ranges
-- [ ] run tests - must pass before task 6
+- [x] run tests - must pass before task 6
 
 ### Task 6: convert-pbt command
 
@@ -390,7 +412,7 @@
 - Create: `cmd/integration/commands/commitment_convert_pbt_test.go`
 - Modify: `cmd/integration/commands/commitment.go`
 
-- [ ] add the command with a stub. Write tests on a hex test datadir converted with `--keep-hex`:
+- [x] add the command with a stub. Write tests on a hex test datadir converted with `--keep-hex`:
       - the hex+bin output's bin root equals the reference root;
       - its rows equal the engine's rows built incrementally over the same state;
       - converting twice gives byte-identical files;
@@ -398,19 +420,19 @@
       - the output's `erigondb.toml` holds `trie_hash` and the conversion point at S.
 
       Confirm they fail at the first assertion.
-- [ ] implement source opening (rebuild's options, both commitment domains excluded; `isCommitmentFileName` covers
+- [x] implement source opening (rebuild's options, both commitment domains excluded; `isCommitmentFileName` covers
       `commitmentbin`) on top of task 5's feed and writer
-- [ ] implement the outputs:
+- [x] implement the outputs:
       - `--keep-hex`: the v3 hex check and the alignment of its state record with S;
       - bin-only: refused before the fork;
       - the completion check: recursive `Verify`, reference root, header root at a post-fork block end;
       - settings written last.
-- [ ] write tests:
+- [x] write tests:
       - a corrupted non-root row makes the completion check fail and the output get removed;
       - refusals: a legacy hex source with `--keep-hex`, a hex record not at S, a pre-fork bin-only output;
       - a source that is itself hex+bin or bin;
       - the empty state
-- [ ] run tests - must pass before task 7
+- [x] run tests - must pass before task 7
 
 ### Task 7: Bin-aware commitment integrity
 
@@ -418,15 +440,15 @@
 - Modify: `db/integrity/commitment_integrity.go`
 - Create: `db/integrity/commitment_integrity_bin_test.go`
 
-- [ ] write tests:
+- [x] write tests:
       - integrity passes on a converted hex+bin datadir;
       - a corrupted bin row or bin root there fails `CheckCommitmentRoot`;
       - the zero root is accepted.
 
       Confirm they fail at those assertions.
-- [ ] check the bin domain on hex+bin datadirs, accept converted ranges without per-file state records, accept the zero
+- [x] check the bin domain on hex+bin datadirs, accept converted ranges without per-file state records, accept the zero
       root
-- [ ] run tests - must pass before task 8
+- [x] run tests - must pass before task 8
 
 ### Task 8: Attach published files
 
@@ -434,21 +456,21 @@
 - Create: `cmd/integration/commands/commitment_attach_pbt.go`
 - Create: `cmd/integration/commands/commitment_attach_pbt_test.go`
 
-- [ ] add the command with a stub. Write a test:
+- [x] add the command with a stub. Write a test:
       - a node past S attaches files converted from a copy of its datadir at S;
       - it restarts and re-executes to its tip in dual mode;
       - its bin roots equal the shadow roots of a node that ran dual from genesis on the same chain.
 
       Confirm it fails at the root comparison.
-- [ ] implement the command:
+- [x] implement the command:
       - check the published settings (ranges, step size, both commitment domains, `trie_hash` against the node's suite);
       - swap the files;
       - run `ResetExec`;
       - write `trie_variant`, `trie_hash` and the conversion point.
-- [ ] write a test with an S that ends mid-block: the remainder of that block executes exactly once after restart
-- [ ] write tests for refusals: mismatched ranges or S, a published set without hex or bin, a different `trie_hash`, a
+- [x] write a test with an S that ends mid-block: the remainder of that block executes exactly once after restart
+- [x] write tests for refusals: mismatched ranges or S, a published set without hex or bin, a different `trie_hash`, a
       node behind S
-- [ ] run tests - must pass before task 9
+- [x] run tests - must pass before task 9
 
 ### Task 9: Automatic hex stop after the fork window
 
@@ -457,17 +479,17 @@
 - Modify: `execution/stagedsync/stage_execute.go`
 - Create: `execution/stagedsync/committer_hex_stop_test.go`
 
-- [ ] write tests:
+- [x] write tests:
       - the hex domain keeps folding until the head is the stage loop's `MaxReorgDepth` blocks past activation, and
         stops on the next block;
       - `debug_migrationProgress` then reports `ShadowStopped`;
       - an unwind across the activation block is refused after the stop.
 
       Confirm they fail at the stop assertion.
-- [ ] implement the stop through `stopShadowDomain` and `recordStoppedCommitmentDomains`, reading the window from the
+- [x] implement the stop through `stopShadowDomain` and `recordStoppedCommitmentDomains`, reading the window from the
       sync config
-- [ ] write tests for a restart after the stop and for a reorg inside the window before the stop
-- [ ] run tests - must pass before task 10
+- [x] write tests for a restart after the stop and for a reorg inside the window before the stop
+- [x] run tests - must pass before task 10
 
 ### Task 10: Shared export pin
 
@@ -476,15 +498,15 @@
 - Create: `cmd/utils/app/export_pin_test.go`
 - Modify: `cmd/utils/app/export_preimages_cmd.go`
 
-- [ ] confirm `7853b9226e3` is an ancestor of HEAD
-- [ ] add the pin signature with a stub. Write the pin-matrix tests; confirm they fail at the pin assertions. Cases:
+- [x] confirm `7853b9226e3` is an ancestor of HEAD
+- [x] add the pin signature with a stub. Write the pin-matrix tests; confirm they fail at the pin assertions. Cases:
       - hex-only, hex+bin before and after the fork, bin-only;
       - a block end, a mid-block checkpoint, a missing B mapping;
       - a lagging or frozen shadow.
-- [ ] implement the pin; `export-preimages` switches to it, replacing `pinnedStateRoot` and its
+- [x] implement the pin; `export-preimages` switches to it, replacing `pinnedStateRoot` and its
       `WithSequentialCommitment`
-- [ ] write a test that `export-preimages` keeps the v3 hex variant when opening a hex+bin datadir
-- [ ] run tests - must pass before task 11
+- [x] write a test that `export-preimages` keeps the v3 hex variant when opening a hex+bin datadir
+- [x] run tests - must pass before task 11
 
 ### Task 11: PBT snapshot codec and preimage join
 
@@ -495,28 +517,29 @@
 - Create: `execution/commitment/eip8297/artifact/artifact_test.go`
 - Create: `execution/commitment/eip8297/artifact/testdata/golden.json`
 
-- [ ] write a golden artifact by hand from the spec text (kinds 0, 1 and 2, header slots, code groups, storage groups)
+- [x] write a golden artifact by hand from the spec text (kinds 0, 1 and 2, header slots, code groups, storage groups)
       with its snapshotDigest. Add the codec signatures with stubs; write tests that the writer reproduces the golden
       artifact and the reader accepts it; confirm they fail at the byte comparison
-- [ ] implement the writer over a plain (key, value) iterator:
-      - minimal big-endian integers;
-      - section counts and root patched at the end;
-      - storage records buffered with a spill threshold;
+- [x] implement the writer over a plain (key, value) iterator:
+      - tagged records in zone order, followed by the end tag and the pbtRoot trailer;
+      - minimal big-endian integers and canonical single-leaf or multi-leaf storage groups;
       - refusal of kind-0 empty accounts and kind-1 size-0 code;
-      - the digest over the finished file.
-- [ ] implement the strict reader:
+      - the digest over the complete stream, including the trailer.
+- [x] implement the strict reader:
       - widths and leading zeros;
       - kinds;
       - strict ordering;
       - non-zero values;
       - header slots below 64;
       - storage records matched to header records by a second cursor over the header section;
-      - counts and trailing bytes.
-- [ ] implement the strict preimage reader and the exact-set join
-- [ ] write the reject tables (one case per artifact rule; for preimages: unsorted address, duplicate address, unsorted
+      - the end tag and root trailer, with only the per-record counts remaining.
+- [x] implement the strict preimage reader and the exact-set join
+- [x] write the reject tables (one case per artifact rule; for preimages: unsorted address, duplicate address, unsorted
       or duplicate slot, truncated record, trailing byte; for the join: a missing and a surplus preimage), round trips on
       random states, and the empty snapshot
-- [ ] run tests - must pass before task 12
+- [x] run tests - must pass before task 12
+- [x] ➕ stream the artifact writer, reader, preimage codec and exact-set join with bounded memory
+- [x] ➕ follow EIP-8347 66daa411: tagged records, end tag and pbtRoot trailer, single-leaf storage groups
 
 ### Task 12: export-pbt command
 
@@ -525,21 +548,21 @@
 - Create: `cmd/utils/app/export_pbt_cmd_test.go`
 - Modify: `cmd/utils/app/snapshots_cmd.go`
 
-- [ ] add the command with a stub. Write tests:
+- [x] add the command with a stub. Write tests:
       - an export on a hex+bin test datadir reads back through the strict readers and the join;
       - `pbtRoot` equals the datadir's bin root;
       - a tampered bin record in the datadir makes the export refuse.
 
       Confirm they fail at those assertions.
-- [ ] implement the command: the shared pin, the leaf stream into the codec with `pbtRoot` from the reference root, the
+- [x] implement the command: the shared pin, the leaf stream into the codec with `pbtRoot` from the reference root, the
       bin-root cross-check, the preimage file in the same view, the read-back check, the meta JSON
-- [ ] write tests:
+- [x] write tests:
       - both digests are stable across two runs;
       - the empty state;
       - a node stopped with `integration stage_exec --block B`;
       - replay equals conversion: at the same block, the export from task 8's attached node and from a node converted
         at that block give equal `snapshotDigest`
-- [ ] run tests - must pass before task 13
+- [x] run tests - must pass before task 13
 
 ### Task 13: export-preimages exact set and metadata
 
@@ -547,41 +570,17 @@
 - Modify: `cmd/utils/app/export_preimages_cmd.go`
 - Modify: `cmd/utils/app/export_preimages_cmd_test.go`
 
-- [ ] write tests: the exact-set check fails on a missing and on a surplus preimage (header slots 0-63 and overflow
+- [x] write tests: the exact-set check fails on a missing and on a surplus preimage (header slots 0-63 and overflow
       entries), and the meta carries `preimageDigest` and the block hash; confirm they fail first
-- [ ] run the exact-set join from task 11 on the written file, and add `preimageDigest` and the block hash to the meta
-- [ ] add a spill threshold for the per-account preimage buffer and test a large account
-- [ ] run tests - must pass before task 14
+- [x] run the exact-set join from task 11 on the written file, and add `preimageDigest` and the block hash to the meta
+- [x] add a spill threshold for the per-account preimage buffer and test a large account
+- [x] run tests - must pass before task 14
 
 ### Task 14: import-pbt test bootstrap
 
-**Files:**
-- Create: `db/state/pbt_import.go`
-- Create: `db/state/pbt_import_test.go`
-- Create: `cmd/integration/commands/commitment_import_pbt.go`
-- Create: `cmd/integration/commands/commitment_import_pbt_test.go`
-
-- [ ] add the command with a stub. Write the acceptance test in `commitment_import_pbt_test.go` on a chain with PBT
-      from genesis. The chain covers kinds 0, 1 and 2, shared code, code with an all-zero 31-byte chunk, and header and
-      overflow slots. The test:
-      1. exports at N from node A;
-      2. copies A's datadir;
-      3. imports with `--block` set to N's hash;
-      4. asserts Execution progress is N;
-      5. executes to the tip, where every root must equal A's.
-
-      Confirm it fails at the progress or root assertion.
-- [ ] implement:
-      - the `--block` check against the local canonical header, refusing N where bin is not canonical;
-      - `ResetExec`;
-      - the readers and the join;
-      - writes through `SharedDomains` at T with incarnation normalized and address-keyed code;
-      - the ordinary bin fold producing the rows and the commitment-state record.
-- [ ] implement the checks (roots against `pbtRoot` and `header(N).stateRoot`, code rules, kind 2 code hash
-      `keccak256(ef0100 ‖ target)`)
-- [ ] write tests for each failing check (wrong chunk, `codeSize` disagreement, designator under kind 1, missing and
-      surplus preimage) and for the empty state
-- [ ] run tests - must pass before task 15
+The original bootstrap design was replaced by Task 19. The artifact reader and
+streaming leaf adapter remain covered there; the database reset, preimage join,
+code reconstruction and bin-only bootstrap path were removed.
 
 ### Task 15: Remove rebuild's bin target
 
@@ -590,6 +589,8 @@
 - Modify: `cmd/integration/commands/commitment.go`
 - Modify: `cmd/integration/commands/flags.go`
 - Modify: `cmd/integration/commands/commitment_output_test.go`
+- Modify: `cmd/integration/commands/commitment_convert_pbt_test.go`
+- Modify: `cmd/integration/commands/commitment_dual_rebuild_test.go`
 - Modify: `execution/stagedsync/stage_commit_rebuild.go`
 - Modify: `db/state/rebuild_variant_test.go`
 - Delete bin-only tests:
@@ -598,9 +599,9 @@
   - `db/state/squeeze_pbin_resume_test.go`
   - `db/state/squeeze_pbin_checkpoint_test.go`
   - `db/state/rebuild_pbin_state_test.go`
-- Modify: `execution/commitment/backtester/pbin_rebuild_code_test.go`, `execution/commitment/backtester/pbin_m1a_test.go`
+- Delete: `execution/commitment/backtester/pbin_rebuild_code_test.go`, `execution/commitment/backtester/pbin_m1a_test.go`
 
-- [ ] move each bin case worth keeping into the converter's tests first. Confirm each moved case fails against a broken
+- [x] move each bin case worth keeping into the converter's tests first. Confirm each moved case fails against a broken
       converter. The cases:
       - code spanning groups;
       - shared code chunked once;
@@ -608,17 +609,21 @@
       - delegation without code leaves;
       - root and record parity;
       - right-edge reads.
-- [ ] remove the bin path, its flags and settings, `pbinRebuildCheckpoint` and spill files, and
+- [x] remove the bin path, its flags and settings, `pbinRebuildCheckpoint` and spill files, and
       `validatePBinRebuildState`; keep `PBinValidateRowStateFormat` and the open-time refusal
-- [ ] keep the parts the converter or the hex rebuild still use:
+- [x] keep the parts the converter or the hex rebuild still use:
       - the hex rebuild itself;
       - the shared wrapper in `stage_commit_rebuild.go`;
       - the hex assertions in mixed test files;
       - `squeeze_pbin_feed_test.go` and `squeeze_pbin_rebuild_test.go`, which cover the feed and batches the converter
         reuses.
-- [ ] drop the checkpoint cases in `commitment_output_test.go`; point every "rebuild the bin commitment domain" message to
+- [x] drop the checkpoint cases in `commitment_output_test.go`; point every "rebuild the bin commitment domain" message to
       `convert-pbt`
-- [ ] run tests - must pass before task 16
+- [x] run tests - must pass before task 16
+
+NOTES: The two backtester files were entirely bin-rebuild tests, so they were deleted with the removed path. The moved
+converter cases use an independently embedded reference state, tiny injectable batches, and a reference right edge;
+recursive verification remains in the converter command after the written files are reopened.
 
 ### Task 16: Migration documentation
 
@@ -627,7 +632,7 @@
 - Modify: `cmd/integration/Readme.md`
 - Modify: `docs/pbin-dual-commitment.md`
 
-- [ ] document these in `docs/pbt-migration.md`:
+- [x] document these in `docs/pbt-migration.md`:
       - producer conversion and publication;
       - attach;
       - the dual window and the automatic hex stop;
@@ -635,21 +640,21 @@
       - import (test-only);
       - the conversion point;
       - the command entry points.
-- [ ] replace the bin rebuild instructions in `cmd/integration/Readme.md` and `docs/pbin-dual-commitment.md`
-- [ ] cite code by name, never by line number
-- [ ] run `make lint` - must pass before task 17
+- [x] replace the bin rebuild instructions in `cmd/integration/Readme.md` and `docs/pbin-dual-commitment.md`
+- [x] cite code by name, never by line number
+- [x] run `make lint` - must pass before task 17
 
 ### Task 17: Verify acceptance criteria
 
 **Files:**
 - none (verification only)
 
-- [ ] every requirement in the Overview is implemented
-- [ ] the pin matrix, the reject tables and the refusal cases are covered by tests
-- [ ] run the full suites: `go test ./db/state/... ./db/integrity/... ./db/rawdb/... ./execution/commitment/...
+- [x] every requirement in the Overview is implemented
+- [x] the pin matrix, the reject tables and the refusal cases are covered by tests
+- [x] run the full suites: `go test ./db/state/... ./db/integrity/... ./db/rawdb/... ./execution/commitment/...
       ./execution/stagedsync/... ./cmd/integration/... ./cmd/utils/app/...`
-- [ ] run `make lint` until clean and `make erigon integration`
-- [ ] mutation-check the key guards; each must turn a named test red when reverted:
+- [x] run `make lint` until clean and `make erigon integration`
+- [x] mutation-check the key guards; each must turn a named test red when reverted:
       - row stamping from the leaf stream;
       - the unwind floor at each site;
       - the recursive `Verify` completion check;
@@ -663,8 +668,19 @@
 - Modify: `docs/plans/completed/20260925-pbt-v3-rows.md`
 - Move: this plan to `docs/plans/completed/`
 
-- [ ] mark the rows plan's rebuild tasks as superseded by `convert-pbt`
-- [ ] move this plan to `docs/plans/completed/`
+- [x] mark the rows plan's rebuild tasks as superseded by `convert-pbt`
+- [x] move this plan to `docs/plans/completed/`
+
+### Task 19: ➕ import as a test-only substitute for convert and attach
+
+- [x] replace the old bootstrap path with snapshot-only import, read-only validation, staged commitment-bin files,
+      row verification, and a last-step hex+bin settings switch
+- [x] cover acceptance parity with conversion, unchanged state-domain files, checkpoint and settings guards, and
+      post-import dual re-execution
+- [x] cover metadata, digest, canonical block, txNum, target variant, hash-suite, and frozen-block refusals without
+      changing the datadir
+- [x] leave a failed staging move or settings write without adopted files or settings
+- [x] update the operator documentation and remove the obsolete preimage and block flags
 
 ## Post-Completion
 

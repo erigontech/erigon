@@ -119,31 +119,44 @@ integration stage_exec
 # Option 2 is good 
 ```
 
-## How to re-gen CommitmentDomain
+## Commitment migration
 
 ```sh
 # hex, in place
 integration commitment rebuild --datadir=<datadir>
 
-# EIP-8297 binary trie, derived from a hex datadir (offline migration).
-# --output.datadir is required for a bin target: a commitment .kv records no trie
-# variant, so bin files left beside hex ones would later be read as hex.
-integration commitment rebuild --datadir=<src> --output.datadir=<out> --no-history \
-  --experimental.bin-commitment --experimental.bin-commitment.hash=blake3
+# Convert v3 hex files into a fresh PBT output datadir.
+integration commitment convert-pbt --datadir=<src> --chain=<chain> --output.datadir=<out> --keep-hex \
+  --experimental.bin-commitment.hash=<suite>
 
-# resume an interrupted run; without --resume a non-empty output is refused
-integration commitment rebuild --datadir=<src> --output.datadir=<out> --no-history --resume ...
+# Attach the published output to a stopped node.
+integration commitment attach-pbt --datadir=<node> --chain=<chain> --from=<out> \
+  --experimental.bin-commitment.hash=<suite>
+
+# Test-only substitute for conversion and attach.
+integration stage_exec --datadir=<node> --chain=<chain> --block=<X> --experimental.commitment-v3
+erigon snapshots export-pbt --datadir=<node> --chain=<chain> --out=<export> \
+  --experimental.bin-commitment.hash=<suite>
+integration commitment import-pbt --datadir=<node> --chain=<chain> \
+  --snapshot=<export>/pbt-snapshot.bin --experimental.bin-commitment.hash=<suite>
+integration stage_exec --datadir=<node> --chain=<chain> --experimental.commitment-v3 \
+  --experimental.bin-commitment --experimental.bin-commitment.hash=<suite>
 ```
 
-The output datadir is staged with hardlinks to the source's account/storage/code files, so it must
-be on the same filesystem as the source and must not sit inside it. Size the output volume for the
-whole state, not for the commitment files alone: the merge loop that runs after each rebuilt range
-rewrites the merged account/storage/code files into the output and drops the links, so the hardlinks
-save the initial copy and nothing after it. `--output.datadir` requires
-`--no-history` and is refused together with `--reset` and `--clear-commitment`, all of which write
-to the source; `--squeeze` is refused for a bin target. The run prints `commitment_files`,
-`rebuild_ranges` and `rebuild_shards` as tab-separated tables. Start a node on the output with
-`--experimental.bin-commitment` — the run writes the matching `erigondb.toml` there.
+Pass `--experimental.bin-commitment.hash=<suite>` to `export-pbt` and
+`import-pbt`. `export-pbt` defaults to BLAKE3. The
+producer and node must use the network's hash suite; attach refuses a suite
+mismatch. The EIP-8297 reference implementation uses BLAKE3, but the suite is
+a network choice.
+
+For a v3 source without a recorded schema setting, prefix these commands with
+`COMMITMENT_V3=true`. Current commands detect v3 commitment files before they
+open the source. The same environment setting can be used with
+`erigon snapshots export-pbt` and `integration commitment import-pbt`.
+
+`integration commitment rebuild` remains the hex rebuild and has no binary target. Use
+`convert-pbt` to produce the binary files, then publish and attach the output. See
+`docs/pbt-migration.md` for the operator checks and recovery rules.
 
 ## Convert legacy binary-trie record files
 

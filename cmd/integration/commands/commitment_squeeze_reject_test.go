@@ -18,126 +18,108 @@ package commands
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/logging"
 )
 
-func resolveTarget(t *testing.T, variant commitment.TrieVariant) dbstate.RebuildTarget {
-	t.Helper()
-	target, err := dbstate.RebuildTarget{Variant: variant}.Resolve()
-	require.NoError(t, err)
-	return target
-}
-
-// withRebuildFlags restores the command's flag globals, which the rebuild reads
-// directly, so one test's combination does not leak into the next.
 func withRebuildFlags(t *testing.T, set func()) {
 	t.Helper()
-	prevSqueeze, prevClear, prevResume, prevNoHistory, prevReset, prevDatadir :=
-		squeeze, clearCommitment, resume, noHistory, reset, datadirCli
+	previous := struct {
+		squeeze, clear, resume, noHistory, reset bool
+		datadir, output                          string
+	}{squeeze, clearCommitment, resume, noHistory, reset, datadirCli, rebuildOutputDatadir}
 	t.Cleanup(func() {
-		squeeze, clearCommitment, resume, noHistory, reset, datadirCli =
-			prevSqueeze, prevClear, prevResume, prevNoHistory, prevReset, prevDatadir
+		squeeze, clearCommitment, resume, noHistory, reset, datadirCli, rebuildOutputDatadir = previous.squeeze, previous.clear, previous.resume, previous.noHistory, previous.reset, previous.datadir, previous.output
 	})
 	squeeze, clearCommitment, resume, noHistory, reset = false, false, false, false, false
+	rebuildOutputDatadir = ""
 	datadirCli = t.TempDir()
-	set()
-}
-
-func TestRefuseSqueezeForBinTarget(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		variant commitment.TrieVariant
-		squeeze bool
-		wantErr bool
-	}{
-		{"bin with squeeze", commitment.VariantBinPatriciaTrie, true, true},
-		{"bin without squeeze", commitment.VariantBinPatriciaTrie, false, false},
-		{"hex with squeeze", commitment.VariantHexPatriciaTrie, true, false},
-		{"hex without squeeze", commitment.VariantHexPatriciaTrie, false, false},
-		{"parallel hex with squeeze", commitment.VariantParallelHexPatricia, true, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := refuseSqueezeForBinTarget(resolveTarget(t, tc.variant), tc.squeeze)
-			if !tc.wantErr {
-				require.NoError(t, err)
-				return
-			}
-			require.ErrorContains(t, err, "--squeeze")
-			require.ErrorContains(t, err, "BranchData")
-		})
+	if set != nil {
+		set()
 	}
-}
-
-// TestCommitmentRebuildRefusesSqueezeBeforeAnyWork passes a nil db on purpose:
-// the check has to run before the rebuild reads the database or the filesystem,
-// so a version that squeezes first and errors last cannot pass.
-func TestCommitmentRebuildRefusesSqueezeBeforeAnyWork(t *testing.T) {
-	withRebuildFlags(t, func() { squeeze, reset = true, true })
-
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	err := commitmentRebuild(db, context.Background(), log.New(), binTarget(t), nil)
-	require.ErrorContains(t, err, "--squeeze")
 }
 
 func TestCommitmentRebuildRefusesHexBinSourceBeforeAnyWork(t *testing.T) {
 	src := hexBinSourceDatadirFixture(t)
 	before := snapshotTree(t, src.Snap)
-	withRebuildFlags(t, func() {
-		datadirCli = src.DataDir
-	})
-
+	withRebuildFlags(t, func() { datadirCli = src.DataDir })
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	err := commitmentRebuild(db, context.Background(), log.New(), hexTarget(t), nil)
-	require.ErrorContains(t, err, "supported command")
+	require.ErrorContains(t, err, "convert-pbt")
 	require.Equal(t, before, snapshotTree(t, src.Snap))
 }
 
-// Every one of these writes to the source datadir or to files the staged output
-// does not hold, so the refusal has to come from the flags alone — the run is
-// rejected before the output datadir is created and the source is hardlinked in.
+func TestCommitmentRebuildRunRefusesHexBinSource(t *testing.T) {
+	src := hexBinSourceDatadirFixture(t)
+	for _, output := range []bool{false, true} {
+		t.Run(fmt.Sprintf("output=%t", output), func(t *testing.T) {
+			chainDirs := datadir.New(t.TempDir())
+			require.NoError(t, os.MkdirAll(chainDirs.Chaindata, 0o755))
+			sourceDB := temporaltest.NewTestDB(nil, chainDirs, temporaltest.WithOpenExisting())
+			sourceDB.Close()
+			withRebuildFlags(t, func() {
+				datadirCli = src.DataDir
+				chaindata = chainDirs.Chaindata
+				if output {
+					noHistory = true
+					rebuildOutputDatadir = filepath.Join(t.TempDir(), "output")
+				}
+			})
+			before := snapshotTree(t, src.DataDir)
+			outputPath := rebuildOutputDatadir
+			cmd := &cobra.Command{Use: "rebuild"}
+			utils.CobraFlags(cmd, debug.Flags, utils.MetricFlags, logging.Flags)
+			cmd.Flags().AddFlagSet(cmd.PersistentFlags())
+			cmd.SetContext(t.Context())
+			var err error
+			require.NotPanics(t, func() {
+				err = runCommitmentRebuild(cmd, nil, log.New(), cmd.Context())
+			})
+			require.ErrorContains(t, err, "use commitment convert-pbt")
+			require.Equal(t, before, snapshotTree(t, src.DataDir))
+			if output {
+				_, err := os.Stat(outputPath)
+				require.ErrorIs(t, err, os.ErrNotExist)
+			}
+		})
+	}
+}
+
 func TestCheckRebuildFlags(t *testing.T) {
-	for _, tc := range []struct {
+	for _, test := range []struct {
 		name    string
 		set     func()
 		output  bool
 		wantErr string
 	}{
-		{"output with no-history", func() { noHistory = true }, true, ""},
-		{"output without no-history", func() {}, true, "--no-history"},
-		{"output with clear-commitment", func() { noHistory, clearCommitment = true, true }, true, "--clear-commitment"},
-		{"output with reset", func() { noHistory, reset = true, true }, true, "--reset"},
-		{"clear-commitment with resume", func() { clearCommitment, resume = true, true }, false, "--resume"},
-		{"clear-commitment with no-history", func() { clearCommitment, noHistory = true, true }, false, "--no-history"},
-		{"in-place plain run", func() {}, false, ""},
+		{name: "output with no-history", set: func() { noHistory = true }, output: true},
+		{name: "output without no-history", output: true, wantErr: "--no-history"},
+		{name: "output with clear-commitment", set: func() { noHistory, clearCommitment = true, true }, output: true, wantErr: "--clear-commitment"},
+		{name: "output with reset", set: func() { noHistory, reset = true, true }, output: true, wantErr: "--reset"},
+		{name: "clear-commitment with resume", set: func() { clearCommitment, resume = true, true }, wantErr: "--resume"},
+		{name: "clear-commitment with no-history", set: func() { clearCommitment, noHistory = true, true }, wantErr: "--no-history"},
+		{name: "in-place plain run"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			withRebuildFlags(t, tc.set)
-			err := checkRebuildFlags(resolveTarget(t, commitment.VariantHexPatriciaTrie), tc.output)
-			if tc.wantErr == "" {
+		t.Run(test.name, func(t *testing.T) {
+			withRebuildFlags(t, test.set)
+			err := checkRebuildFlags(test.output)
+			if test.wantErr == "" {
 				require.NoError(t, err)
 				return
 			}
-			require.ErrorContains(t, err, tc.wantErr)
+			require.ErrorContains(t, err, test.wantErr)
 		})
 	}
-}
-
-// The datadir's own scheme does not decide this: a bin rebuild reading a
-// hex-configured datadir is the migration case Task 1 exists for.
-func TestRefuseSqueezeIgnoresDatadirScheme(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	settings, err := dbstate.ReadErigonDBSettings(src)
-	require.NoError(t, err)
-	require.Nil(t, settings.TrieVariant)
-
-	require.Error(t, refuseSqueezeForBinTarget(binTarget(t), true))
-	require.NoError(t, refuseSqueezeForBinTarget(resolveTarget(t, commitment.VariantHexPatriciaTrie), true))
 }

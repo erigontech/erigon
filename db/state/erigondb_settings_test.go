@@ -61,6 +61,136 @@ func TestErigonDBSettingsRoundTrip(t *testing.T) {
 	require.True(t, *got.ReferencesInCommitmentBranches)
 }
 
+func TestErigonDBSettingsConversionPointRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "erigondb.toml")
+	blockNum, txNum := uint64(123), uint64(456)
+	require.NoError(t, writeErigonDBSettings(path, &ErigonDBSettings{
+		StepSize: 100, StepsInFrozenFile: 8,
+		ConversionBlockNum: &blockNum, ConversionTxNum: &txNum,
+	}))
+
+	got, err := readErigonDBSettings(path)
+	require.NoError(t, err)
+	blockNum, txNum, ok, err := got.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(123), blockNum)
+	require.Equal(t, uint64(456), txNum)
+	_, _, ok, err = (&ErigonDBSettings{}).ConversionPoint()
+	require.NoError(t, err)
+	require.False(t, ok)
+	_, _, ok, err = (&ErigonDBSettings{ConversionBlockNum: &blockNum}).ConversionPoint()
+	require.ErrorContains(t, err, "requires conversion_block and conversion_txnum")
+	require.False(t, ok)
+}
+
+func TestResolveErigonDBStepSizeUsesFirstStartChoice(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		preverified bool
+		want        uint64
+	}{
+		{name: "fresh", want: config3.DefaultStepSize},
+		{name: "legacy", preverified: true, want: config3.LegacyStepSize},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			if tc.preverified {
+				require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), nil, 0o644))
+			}
+			got, err := ResolveErigonDBStepSize(dirs)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestResolveErigonDBStepSizeReadsExistingSettings(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	refs := false
+	require.NoError(t, WriteErigonDBSettings(dirs, &ErigonDBSettings{StepSize: 123, ReferencesInCommitmentBranches: &refs}))
+	got, err := ResolveErigonDBStepSize(dirs)
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), got)
+}
+
+func TestEnableCommitmentV3FromFiles(t *testing.T) {
+	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+	})
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+	detected, err := EnableCommitmentV3FromFiles(dirs)
+	require.NoError(t, err)
+	require.True(t, detected)
+	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
+}
+
+func TestEnableCommitmentV3FromFilesIgnoresV3HistoryIndex(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	files := []string{
+		"v2.0-commitment.0-1.kv",
+		"v2.0-commitment.0-1.kvi",
+		"v3.0-commitment.0-1.ef",
+		"v3.0-commitment.0-1.efi",
+		"v2.0-commitment.0-1.v",
+		"v2.0-commitment.0-1.vi",
+	}
+	for _, name := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), nil, 0o644))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapHistory, "v3.0-commitment.0-1.ef"), nil, 0o644))
+	detected, err := EnableCommitmentV3FromFiles(dirs)
+	require.NoError(t, err)
+	require.False(t, detected)
+	entries, err := os.ReadDir(dirs.SnapDomain)
+	require.NoError(t, err)
+	require.Len(t, entries, len(files))
+}
+
+func TestEnableCommitmentV3FromFilesRefusesStraddledCommitmentData(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	for _, name := range []string{"v2.0-commitment.0-1.kv", "v3.0-commitment.1-2.kv"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), nil, 0o644))
+	}
+	_, err := EnableCommitmentV3FromFiles(dirs)
+	require.ErrorContains(t, err, "straddle v3.0")
+}
+
+func TestEnableCommitmentV3FromFilesIgnoresSupersededLegacyCommitmentData(t *testing.T) {
+	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+	})
+	dirs := datadir.New(t.TempDir())
+	for _, name := range []string{"v2.0-commitment.0-1.kv", "v2.0-commitment.1-2.kv", "v3.0-commitment.0-2.kv"} {
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), nil, 0o644))
+	}
+	detected, err := EnableCommitmentV3FromFiles(dirs)
+	require.NoError(t, err)
+	require.True(t, detected)
+}
+
+func TestEnableCommitmentV3FromFilesIgnoresBinDatadir(t *testing.T) {
+	previousBin, previousHexBin, previousV3, previousSchema := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+	})
+	dirs := datadir.New(t.TempDir())
+	variant := TrieVariantBin
+	require.NoError(t, WriteErigonDBSettings(dirs, &ErigonDBSettings{TrieVariant: &variant}))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
+	detected, err := EnableCommitmentV3FromFiles(dirs)
+	require.NoError(t, err)
+	require.False(t, detected)
+}
+
 func TestErigonDBSettingsTrieVariantRoundTrip(t *testing.T) {
 	t.Parallel()
 	for _, variant := range []string{TrieVariantHex, TrieVariantBin, TrieVariantHexBin} {

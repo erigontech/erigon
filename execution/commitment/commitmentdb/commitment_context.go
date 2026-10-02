@@ -416,6 +416,10 @@ func (sdc *SharedDomainsCommitmentContext) Trie() commitment.Trie {
 	return sdc.patriciaTrie
 }
 
+func (sdc *SharedDomainsCommitmentContext) PrepareForVerification(tx kv.TemporalTx) {
+	sdc.trieContext(tx, 0, 0, context.Background(), nil, nil)
+}
+
 // TouchKey marks plainKey as updated and applies different fn for different key types
 // (different behaviour for Code, Account and Storage key modifications).
 func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val []byte) {
