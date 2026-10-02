@@ -103,9 +103,13 @@ func TestUnwindExecutionStageConversionTxFloor(t *testing.T) {
 func TestUnwindExecutionStageConversionPointMayBeMidBlock(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(10_000))
+	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
+	for blockNum := uint64(0); blockNum <= 7; blockNum++ {
+		require.NoError(t, rawdbv3.TxNums.Append(tx, blockNum, blockNum*10+9))
+	}
 
 	conversionBlock := uint64(5)
 	conversionTx := uint64(53)
@@ -114,10 +118,14 @@ func TestUnwindExecutionStageConversionPointMayBeMidBlock(t *testing.T) {
 		ConversionTxNum:    &conversionTx,
 	}))
 
-	blockStart := uint64(50)
-	blockEnd := uint64(59)
-	require.Greater(t, conversionTx, blockStart)
-	require.Less(t, conversionTx, blockEnd)
+	doms, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	defer doms.Close()
+	_, err = unwindDomsToBlock(context.Background(), tx, br, doms, conversionBlock-1, nil)
+	require.ErrorContains(t, err, "conversion point")
+	require.ErrorIs(t, err, state.ErrConversionFloor)
+	_, err = unwindDomsToBlock(context.Background(), tx, br, doms, conversionBlock, nil)
+	require.NoError(t, err)
 }
 
 func TestSyncUnwindToConversionBlockFloorIsTyped(t *testing.T) {
