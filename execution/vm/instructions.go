@@ -375,8 +375,7 @@ func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	address := scope.peekAddress(evm)
 	slot := scope.Stack.peek()
-	// BAL: BALANCE is a real state access per EIP-7928 — mark as non-revertable
-	// so the system address is included when explicitly queried by user txs.
+	// BAL: BALANCE is a real state access per EIP-7928 — mark as non-revertable.
 	evm.IntraBlockState().MarkAddressAccess(address, false)
 	balance, err := evm.IntraBlockState().GetBalance(address)
 	if err != nil {
