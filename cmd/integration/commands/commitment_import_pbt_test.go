@@ -188,8 +188,10 @@ func TestImportPBTReplacesConvertAndAttachWithFilesBeforeCheckpoint(t *testing.T
 		return nil
 	}
 	settingsBeforeWriteFailure := snapshotTree(t, target.Tester.Dirs.Snap)
+	rowsBeforeWriteFailure := countPBTImportRows(t, target.Tester.Dirs.Chaindata, kv.TblCommitmentBinVals)
 	require.ErrorContains(t, importPBT(t.Context(), target.Tester.Dirs.DataDir, filepath.Join(output, "pbt-snapshot.bin"), "", log.New()), "test settings failure")
 	require.True(t, reflect.DeepEqual(settingsBeforeWriteFailure, snapshotTree(t, target.Tester.Dirs.Snap)), "settings failure must not change snapshot files")
+	require.Equal(t, rowsBeforeWriteFailure, countPBTImportRows(t, target.Tester.Dirs.Chaindata, kv.TblCommitmentBinVals), "settings failure must remove the checkpoint row")
 	importPBTSwapHook = func(step string) error {
 		if step == "files-moved" {
 			panic("test interrupted after move")
@@ -649,6 +651,22 @@ func overwritePBTImportHexCheckpoint(t *testing.T, dataDir string, blockNum, che
 
 func readPBTImportCheckpoint(t *testing.T, dataDir string) (uint64, uint64) {
 	t.Helper()
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	previousHash := statecfg.BinCommitmentHash
+	previousSchema := statecfg.Schema
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.ExperimentalParallelCommitment = previousParallel
+		statecfg.BinCommitmentHash = previousHash
+		statecfg.Schema = previousSchema
+		_ = commitment.SetPBinHashSuite(previousSuite)
+	})
 	dirs := datadir.Open(dataDir)
 	resolved, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
@@ -667,4 +685,16 @@ func readPBTImportCheckpoint(t *testing.T, dataDir string) (uint64, uint64) {
 	require.NotEmpty(t, value, "import must write the bin checkpoint")
 	tx, block := commitmentdb.DecodeTxBlockNums(value)
 	return block, tx
+}
+
+func countPBTImportRows(t *testing.T, chaindata, table string) uint64 {
+	t.Helper()
+	db := dbCfg(dbcfg.ChainDB, chaindata).MustOpen()
+	defer db.Close()
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	count, err := tx.Count(table)
+	require.NoError(t, err)
+	return count
 }

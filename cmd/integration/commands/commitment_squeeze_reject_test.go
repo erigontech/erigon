@@ -64,6 +64,7 @@ func TestCommitmentRebuildRefusesHexBinSourceBeforeAnyWork(t *testing.T) {
 func TestCommitmentRebuildRunRefusesHexBinSource(t *testing.T) {
 	src := hexBinSourceDatadirFixture(t)
 	chainDirs := datadir.New(t.TempDir())
+	require.NoError(t, os.MkdirAll(chainDirs.Chaindata, 0o755))
 	sourceDB := temporaltest.NewTestDB(nil, chainDirs)
 	sourceDB.Close()
 	for _, output := range []bool{false, true} {

@@ -499,51 +499,20 @@ func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	return nil
 }
 
-func removePBTImportCheckpoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, blockHash common.Hash, blockNum uint64, logger log.Logger) error {
+func removePBTImportCheckpoint(ctx context.Context, dirs datadir.Dirs, _ *dbstate.ErigonDBSettings, _ uint64, blockHash common.Hash, blockNum uint64, _ log.Logger) error {
 	rawDB, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
 	if err != nil {
 		return err
 	}
 	defer rawDB.Close()
-	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
-	if err := agg.OpenFolder(rawDB); err != nil {
-		return err
-	}
-	db, err := dbtemporal.New(rawDB, agg, nil)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	tx, err := db.BeginTemporalRw(ctx)
+	tx, err := rawDB.BeginRw(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	cfg := commitment.DefaultTrieConfig()
-	cfg.Variant = commitment.VariantBinPatriciaTrie
-	cfg.EnableTrieWarmup = false
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(kv.CommitmentBinDomain), execctx.WithoutCommitmentSeek())
-	if err != nil {
+	if err := tx.Delete(kv.TblCommitmentBinVals, commitment.KeyCommitmentState); err != nil {
 		return err
 	}
-	value, _, err := domains.GetLatest(kv.CommitmentBinDomain, tx, commitment.KeyCommitmentState)
-	if err != nil {
-		domains.Close()
-		return err
-	}
-	if err := domains.DomainDel(kv.CommitmentBinDomain, tx, commitment.KeyCommitmentState, txNum, value); err != nil {
-		domains.Close()
-		return err
-	}
-	if err := domains.Flush(ctx, tx); err != nil {
-		domains.Close()
-		return err
-	}
-	domains.Close()
 	if err := tx.Delete(kv.ShadowStateRoot, dbutils.BlockBodyKey(blockNum, blockHash)); err != nil {
 		return err
 	}
