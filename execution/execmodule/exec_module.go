@@ -234,7 +234,7 @@ type ExecModule struct {
 	// currentContext and publishedSD stay nil and there is nothing to read
 	// through. Built once and reused: AsStateGetter rebinds the cache frontier
 	// to each caller's tx.
-	readSDOnce  sync.Once
+	readSDMu    sync.Mutex
 	readSD      *execctx.SharedDomains
 	readAheader *exec.BlockReadAheader
 
@@ -368,18 +368,21 @@ func (e *ExecModule) Close() {
 // ReadSharedDomains returns the SharedDomains RPC reads fall back to, or nil if
 // one cannot be built for tx.
 func (e *ExecModule) ReadSharedDomains(ctx context.Context, tx kv.TemporalTx) *execctx.SharedDomains {
-	e.readSDOnce.Do(func() {
-		sd, err := execctx.NewSharedDomains(ctx, tx, e.logger)
-		if err != nil {
-			if sd != nil {
-				sd.Close()
-			}
-			e.logger.Debug("[rpc] no SharedDomains for reads", "err", err)
-			return
+	e.readSDMu.Lock()
+	defer e.readSDMu.Unlock()
+	if e.readSD != nil {
+		return e.readSD
+	}
+	sd, err := execctx.NewSharedDomains(ctx, tx, e.logger)
+	if err != nil {
+		if sd != nil {
+			sd.Close()
 		}
-		sd.SetStateCache(e.stateCache)
-		e.readSD = sd
-	})
+		e.logger.Debug("[rpc] no SharedDomains for reads", "err", err)
+		return nil
+	}
+	sd.SetStateCache(e.stateCache)
+	e.readSD = sd
 	return e.readSD
 }
 
