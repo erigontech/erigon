@@ -61,6 +61,20 @@ func TestTrieVerifyReleasesVerifiedRows(t *testing.T) {
 	require.LessOrEqual(t, len(verifier.rows), 2)
 }
 
+func TestTrieVerifyReportsProgress(t *testing.T) {
+	ctx := newTrieTestContext()
+	entries := make([]Op, 2)
+	entries[0] = Op{Key: trieCodeKey(0, 0, 1), Value: testTrieValue(1)}
+	entries[1] = Op{Key: trieCodeKey(0, 2, 2), Value: testTrieValue(2)}
+	_, err := NewTrie(ctx).Process(entries)
+	require.NoError(t, err)
+	var calls int
+	trie := NewTrie(ctx)
+	trie.SetVerifyProgress(func([]byte) { calls++ })
+	require.NoError(t, trie.Verify())
+	require.Positive(t, calls)
+}
+
 func TestTrieVerifyUnlinksVerifiedChildren(t *testing.T) {
 	ctx := newTrieTestContext()
 	entries := make([]Op, 128)

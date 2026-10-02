@@ -89,10 +89,15 @@ type Trie struct {
 	droppedLeafKeys        map[string]struct{}
 	mergeCreatedStems      map[string]struct{}
 	verifiedBucketKeys     map[string]struct{}
+	verifyProgress         func([]byte)
 }
 
 func NewTrie(ctx commitment.PatriciaContext) *Trie {
 	return &Trie{ctx: ctx, rows: make(map[string]*rowNode), dirtyRows: make(map[string]*rowNode), bucketDirty: make(map[string][]byte), mergeCreatedStems: make(map[string]struct{})}
+}
+
+func (t *Trie) SetVerifyProgress(progress func([]byte)) {
+	t.verifyProgress = progress
 }
 
 func (t *Trie) Reset() {

@@ -37,8 +37,10 @@ func TestPBTImportMarkerRoundTripAndInvalidStartupRefusal(t *testing.T) {
 	require.ErrorContains(t, RefusePBTImportMarker(dirs), "integration commitment import-pbt --datadir="+dirs.DataDir+" --snapshot=/tmp/snapshot")
 	require.NoError(t, RemovePBTImportMarker(dirs))
 	require.NoError(t, os.WriteFile(PBTImportMarkerPath(dirs), []byte("{"), 0o644))
-	require.ErrorContains(t, RefusePBTImportMarker(dirs), "integration commitment import-pbt --datadir="+dirs.DataDir+" --snapshot=<snapshot>")
-	require.NotContains(t, RefusePBTImportMarker(dirs).Error(), "restore the previous")
+	err = RefusePBTImportMarker(dirs)
+	require.ErrorContains(t, err, "integration commitment import-pbt --datadir="+dirs.DataDir+" --snapshot=<snapshot>")
+	require.NotContains(t, err.Error(), "marker is invalid")
+	require.NotContains(t, err.Error(), "restore the previous")
 }
 
 func TestPBTImportMarkerRecoveryNamesCleanupRemedy(t *testing.T) {
@@ -55,6 +57,7 @@ func TestPBTImportMarkerRecoveryNamesCleanupRemedy(t *testing.T) {
 	}
 	require.NoError(t, WritePBTImportMarker(dirs, marker))
 	require.ErrorContains(t, RefusePBTImportMarker(dirs), "integration commitment import-pbt --datadir="+dirs.DataDir+" --snapshot=/tmp/snapshot")
+	require.NotContains(t, RefusePBTImportMarker(dirs).Error(), "incomplete for")
 }
 
 func TestPBTImportMarkerAtomicReplacementIgnoresTargetMode(t *testing.T) {

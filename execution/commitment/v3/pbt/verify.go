@@ -39,6 +39,7 @@ func (t *Trie) newVerifier() *Trie {
 		bucketDirty:           make(map[string][]byte),
 		mergeCreatedStems:     make(map[string]struct{}),
 		verifyOnly:            true,
+		verifyProgress:        t.verifyProgress,
 	}
 	if t.ownedPrefix != nil {
 		prefix := *t.ownedPrefix
@@ -146,6 +147,9 @@ func (t *Trie) verifyRootRecord() error {
 }
 
 func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
+	if t.verifyProgress != nil {
+		t.verifyProgress(row.key)
+	}
 	record := row.record()
 	data, err := EncodeRecord(row.key, &record)
 	if err != nil {

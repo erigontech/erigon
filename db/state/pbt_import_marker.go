@@ -67,10 +67,10 @@ func RemovePBTImportMarker(dirs datadir.Dirs) error {
 func RefusePBTImportMarker(dirs datadir.Dirs) error {
 	marker, err := ReadPBTImportMarker(dirs)
 	if err != nil {
-		return fmt.Errorf("commitment import-pbt marker is invalid; rerun integration commitment import-pbt --datadir=%s --snapshot=<snapshot>: %w", dirs.DataDir, err)
+		return fmt.Errorf("integration commitment import-pbt --datadir=%s --snapshot=<snapshot>: %w", dirs.DataDir, err)
 	}
 	if marker == nil {
 		return nil
 	}
-	return fmt.Errorf("commitment import-pbt is incomplete for %s; rerun integration commitment import-pbt --datadir=%s --snapshot=%s", marker.SnapshotPath, dirs.DataDir, marker.SnapshotPath)
+	return fmt.Errorf("integration commitment import-pbt --datadir=%s --snapshot=%s", dirs.DataDir, marker.SnapshotPath)
 }
