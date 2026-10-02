@@ -17,199 +17,56 @@
 package engine_types
 
 import (
-	"encoding/hex"
-
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // BlobsBundleV1, BlobsBundleV2, and BlobsBundleV3 are engine_getBlobs response slices.
-// MarshalFastJSON encodes them into one buffer, matching json.Marshal of the underlying slice.
+// MarshalFastJSONTo streams them one blob at a time, matching json.Marshal of the underlying slice.
 type (
 	BlobsBundleV1 []*BlobAndProofV1
 	BlobsBundleV2 []*BlobAndProofV2
 	BlobsBundleV3 []*BlobCellsAndProofsV1
 )
 
-func (bundle BlobsBundleV1) MarshalFastJSON() ([]byte, error) {
-	if bundle == nil {
-		return jsonNull(), nil
-	}
-	size := len("[]")
-	for i, b := range bundle {
-		if i > 0 {
-			size++
-		}
-		size += blobV1JSONLen(b)
-	}
-	out := make([]byte, 0, size)
-	out = append(out, '[')
-	for i, b := range bundle {
-		if i > 0 {
-			out = append(out, ',')
-		}
-		out = appendBlobV1JSON(out, b)
-	}
-	return append(out, ']'), nil
+func (bundle BlobsBundleV1) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	jsonstream.ArrayValue(s, bundle, writeMarshaler[*BlobAndProofV1])
+	return nil
 }
 
-func (bundle BlobsBundleV2) MarshalFastJSON() ([]byte, error) {
-	if bundle == nil {
-		return jsonNull(), nil
-	}
-	size := len("[]")
-	for i, b := range bundle {
-		if i > 0 {
-			size++
-		}
-		size += blobV2JSONLen(b)
-	}
-	out := make([]byte, 0, size)
-	out = append(out, '[')
-	for i, b := range bundle {
-		if i > 0 {
-			out = append(out, ',')
-		}
-		out = appendBlobV2JSON(out, b)
-	}
-	return append(out, ']'), nil
+func (bundle BlobsBundleV2) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	jsonstream.ArrayValue(s, bundle, writeMarshaler[*BlobAndProofV2])
+	return nil
 }
 
-func (bundle BlobsBundleV3) MarshalFastJSON() ([]byte, error) {
-	if bundle == nil {
-		return jsonNull(), nil
-	}
-	size := len("[]")
-	for i, b := range bundle {
-		if i > 0 {
-			size++
-		}
-		if b == nil {
-			size += len("null")
-			continue
-		}
-		size += len(`{"blob_cells":`) + hexPtrArrayLen(b.BlobCells) +
-			len(`,"proofs":`) + hexPtrArrayLen(b.Proofs) + len("}")
-	}
-	out := make([]byte, 0, size)
-	out = append(out, '[')
-	for i, b := range bundle {
-		if i > 0 {
-			out = append(out, ',')
-		}
-		if b == nil {
-			out = append(out, "null"...)
-			continue
-		}
-		out = append(out, `{"blob_cells":`...)
-		out = appendHexPtrArray(out, b.BlobCells)
-		out = append(out, `,"proofs":`...)
-		out = appendHexPtrArray(out, b.Proofs)
-		out = append(out, '}')
-	}
-	return append(out, ']'), nil
+func (bundle BlobsBundleV3) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	jsonstream.ArrayValue(s, bundle, writeBlobCellsV1)
+	return nil
 }
 
-func hexPtrArrayLen(arr []*hexutil.Bytes) int {
-	if arr == nil {
-		return len("null")
-	}
-	n := len("[]")
-	for i, b := range arr {
-		if i > 0 {
-			n++
-		}
-		if b == nil {
-			n += len("null")
-		} else {
-			n += quotedHexLen(len(*b))
-		}
-	}
-	return n
-}
-
-func appendHexPtrArray(dst []byte, arr []*hexutil.Bytes) []byte {
-	if arr == nil {
-		return append(dst, "null"...)
-	}
-	dst = append(dst, '[')
-	for i, b := range arr {
-		if i > 0 {
-			dst = append(dst, ',')
-		}
-		if b == nil {
-			dst = append(dst, "null"...)
-		} else {
-			dst = appendQuotedHex(dst, *b)
-		}
-	}
-	return append(dst, ']')
-}
-
-func appendBlobV1JSON(dst []byte, b *BlobAndProofV1) []byte {
+func writeBlobCellsV1(s *jsonstream.Stream, bp **BlobCellsAndProofsV1) {
+	b := *bp
 	if b == nil {
-		return append(dst, "null"...)
+		s.WriteNil()
+		return
 	}
-	dst = append(dst, `{"blob":`...)
-	dst = appendQuotedHex(dst, b.Blob)
-	dst = append(dst, `,"proof":`...)
-	dst = appendQuotedHex(dst, b.Proof)
-	return append(dst, '}')
+	s.WriteObjectStart()
+	s.Field("blob_cells")
+	jsonstream.ArrayValue(s, b.BlobCells, writeHexPtr)
+	s.Field("proofs")
+	jsonstream.ArrayValue(s, b.Proofs, writeHexPtr)
+	s.WriteObjectEnd()
 }
 
-func blobV1JSONLen(b *BlobAndProofV1) int {
-	if b == nil {
-		return len("null")
+func writeHexPtr(s *jsonstream.Stream, b **hexutil.Bytes) {
+	if *b == nil {
+		s.WriteNil()
+		return
 	}
-	return len(`{"blob":`) + quotedHexLen(len(b.Blob)) + len(`,"proof":`) + quotedHexLen(len(b.Proof)) + len("}")
+	s.WriteHex(**b)
 }
 
-func appendBlobV2JSON(dst []byte, b *BlobAndProofV2) []byte {
-	if b == nil {
-		return append(dst, "null"...)
-	}
-	dst = append(dst, `{"blob":`...)
-	dst = appendQuotedHex(dst, b.Blob)
-	dst = append(dst, `,"proofs":`...)
-	if b.CellProofs == nil {
-		dst = append(dst, "null"...)
-	} else {
-		dst = append(dst, '[')
-		for i, p := range b.CellProofs {
-			if i > 0 {
-				dst = append(dst, ',')
-			}
-			dst = appendQuotedHex(dst, p)
-		}
-		dst = append(dst, ']')
-	}
-	return append(dst, '}')
+// writeMarshaler writes one element of a slice whose elements write themselves.
+func writeMarshaler[M jsonstream.Marshaler](s *jsonstream.Stream, m *M) {
+	_ = (*m).MarshalFastJSONTo(s)
 }
-
-func blobV2JSONLen(b *BlobAndProofV2) int {
-	if b == nil {
-		return len("null")
-	}
-	n := len(`{"blob":`) + quotedHexLen(len(b.Blob)) + len(`,"proofs":`) + len("}")
-	if b.CellProofs == nil {
-		n += len("null")
-	} else {
-		n += len("[]")
-		for i, p := range b.CellProofs {
-			if i > 0 {
-				n++
-			}
-			n += quotedHexLen(len(p))
-		}
-	}
-	return n
-}
-
-func quotedHexLen(n int) int { return len(`"0x`) + 2*n + len(`"`) }
-
-func appendQuotedHex(dst, src []byte) []byte {
-	dst = append(dst, '"', '0', 'x')
-	dst = hex.AppendEncode(dst, src)
-	return append(dst, '"')
-}
-
-func jsonNull() []byte { return []byte("null") }

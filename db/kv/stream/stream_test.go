@@ -56,7 +56,6 @@ func TestUnion(t *testing.T) {
 		res, err = stream.ToArray[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{8, 7}, res)
-
 	})
 	t.Run("empty left", func(t *testing.T) {
 		s1 := stream.EmptyU64
@@ -474,7 +473,7 @@ func TestPaginated(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1, 2, 3, 4, 5, 6, 7}, res)
 
-		//idempotency
+		// idempotency
 		require.False(t, s1.HasNext())
 		require.False(t, s1.HasNext())
 	})
@@ -497,7 +496,7 @@ func TestPaginated(t *testing.T) {
 		require.ErrorIs(t, err, testErr)
 		require.Equal(t, []uint64{1, 2, 3}, res)
 
-		//idempotency
+		// idempotency
 		require.True(t, s1.HasNext())
 		require.True(t, s1.HasNext())
 		_, err = s1.Next()
@@ -511,7 +510,7 @@ func TestPaginated(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, res)
 
-		//idempotency
+		// idempotency
 		require.False(t, s1.HasNext())
 		require.False(t, s1.HasNext())
 	})
@@ -600,7 +599,7 @@ func TestPaginatedDual(t *testing.T) {
 		require.Equal(t, [][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}}, keys)
 		require.Equal(t, [][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}}, values)
 
-		//idempotency
+		// idempotency
 		require.False(t, s1.HasNext())
 		require.False(t, s1.HasNext())
 	})
@@ -624,7 +623,7 @@ func TestPaginatedDual(t *testing.T) {
 		require.Equal(t, [][]byte{{1}, {2}, {3}}, keys)
 		require.Equal(t, [][]byte{{1}, {2}, {3}}, values)
 
-		//idempotency
+		// idempotency
 		require.True(t, s1.HasNext())
 		require.True(t, s1.HasNext())
 		_, _, err = s1.Next()
@@ -639,7 +638,7 @@ func TestPaginatedDual(t *testing.T) {
 		require.Nil(t, keys)
 		require.Nil(t, values)
 
-		//idempotency
+		// idempotency
 		require.False(t, s1.HasNext())
 		require.False(t, s1.HasNext())
 	})
@@ -683,7 +682,6 @@ func TestFilter(t *testing.T) {
 			}
 			return
 		})
-
 	}
 	t.Run("dual", func(t *testing.T) {
 		s2 := stream.FilterKV(createKVIter(), func(k, v []byte) bool { return bytes.Equal(k, []byte{1}) })

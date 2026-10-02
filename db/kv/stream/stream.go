@@ -92,6 +92,7 @@ func (it *ArrStream[V]) Next() (v V, err error) {
 	it.i++
 	return v, nil
 }
+
 func (it *ArrStream[V]) NextBatch() ([]V, error) {
 	v := it.arr[it.i:]
 	it.i = len(it.arr)
@@ -229,6 +230,7 @@ func Union[T cmp.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 func (m *UnionUno[T]) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHas) || (m.limit != 0 && m.yHas)
 }
+
 func (m *UnionUno[T]) advanceX() {
 	if m.err != nil {
 		return
@@ -238,6 +240,7 @@ func (m *UnionUno[T]) advanceX() {
 		m.xNextK, m.err = m.x.Next()
 	}
 }
+
 func (m *UnionUno[T]) advanceY() {
 	if m.err != nil {
 		return
@@ -284,6 +287,7 @@ func (m *UnionUno[T]) Next() (res T, _ error) {
 	m.advanceY()
 	return k, nil
 }
+
 func (m *UnionUno[T]) Close() {
 	m.x.Close()
 	m.y.Close()
@@ -315,9 +319,11 @@ func Intersect[T cmp.Ordered](x, y Uno[T], asc order.By, limit int) Uno[T] {
 	m.advance()
 	return m
 }
+
 func (m *Intersected[T]) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHasNext && m.yHasNext)
 }
+
 func (m *Intersected[T]) advance() {
 	m.advanceX()
 	m.advanceY()
@@ -344,7 +350,6 @@ func (m *Intersected[T]) advance() {
 				m.advanceX()
 				continue
 			}
-
 		}
 	}
 	m.xHasNext = false
@@ -359,6 +364,7 @@ func (m *Intersected[T]) advanceX() {
 		m.xNextK, m.err = m.x.Next()
 	}
 }
+
 func (m *Intersected[T]) advanceY() {
 	if m.err != nil {
 		return
@@ -380,6 +386,7 @@ func (m *Intersected[T]) Next() (res T, err error) {
 	m.advance()
 	return k, nil
 }
+
 func (m *Intersected[T]) Close() {
 	m.x.Close()
 	m.y.Close()
@@ -407,6 +414,7 @@ func (m *TransformedDuo[K, V]) Next() (k K, v V, err error) {
 	k, v, m.err = m.transform(k, v)
 	return k, v, m.err
 }
+
 func (m *TransformedDuo[K, v]) Close() {
 	m.it.Close()
 }
@@ -433,6 +441,7 @@ func (m *TransformedDuoV[K, V, VR]) Next() (k K, vr VR, err error) {
 	k, vr, m.err = m.transform(k, v)
 	return k, vr, m.err
 }
+
 func (m *TransformedDuoV[K, V, VR]) Close() {
 	m.it.Close()
 }
@@ -454,6 +463,7 @@ func FilterDuo[K, V any](it Duo[K, V], filter func(K, V) bool) *FilteredDuo[K, V
 	i.advance()
 	return i
 }
+
 func (m *FilteredDuo[K, V]) advance() {
 	if m.err != nil {
 		return
@@ -485,6 +495,7 @@ func (m *FilteredDuo[K, V]) Next() (k K, v V, err error) {
 	m.advance()
 	return k, v, nil
 }
+
 func (m *FilteredDuo[K, v]) Close() {
 	m.it.Close()
 }
@@ -505,6 +516,7 @@ func Filter[T any](it Uno[T], filter func(T) bool) *Filtered[T] {
 	i.advance()
 	return i
 }
+
 func (m *Filtered[T]) advance() {
 	if m.err != nil {
 		return
@@ -535,6 +547,7 @@ func (m *Filtered[T]) Next() (k T, err error) {
 	m.advance()
 	return k, nil
 }
+
 func (m *Filtered[T]) Close() {
 	m.it.Close()
 }
@@ -627,6 +640,7 @@ type PaginatedDuo[K, V any] struct {
 func PaginateDuo[K, V any](f NextPageDuo[K, V]) *PaginatedDuo[K, V] {
 	return &PaginatedDuo[K, V]{nextPage: f}
 }
+
 func (it *PaginatedDuo[K, V]) HasNext() bool {
 	for it.err == nil && it.i >= len(it.keys) {
 		if it.initialized && it.nextPageToken == "" {
@@ -669,16 +683,19 @@ func Trace[T any](it Uno[T], logger log.Logger, prefix string) *Traced[T] {
 	}
 	return &Traced[T]{it: it, logger: logger, prefix: prefix}
 }
+
 func (m *Traced[T]) HasNext() bool {
 	res := m.it.HasNext()
 	m.logger.Warn(m.prefix, "hasNext", res)
 	return res
 }
+
 func (m *Traced[T]) Next() (k T, err error) {
 	k, err = m.it.Next()
 	m.logger.Warn(m.prefix, "next", k)
 	return k, err
 }
+
 func (m *Traced[T]) Close() {
 	m.it.Close()
 }
@@ -696,11 +713,13 @@ func TraceDuo[K, V any](it Duo[K, V], logger log.Logger, prefix string) *TracedD
 	}
 	return &TracedDuo[K, V]{it: it, logger: logger, prefix: prefix}
 }
+
 func (m *TracedDuo[K, V]) HasNext() bool {
 	res := m.it.HasNext()
 	m.logger.Warn(m.prefix, "hasNext", res)
 	return res
 }
+
 func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
 	k, v, err = m.it.Next()
 	switch typedK := any(k).(type) {
@@ -711,6 +730,7 @@ func (m *TracedDuo[K, V]) Next() (k K, v V, err error) {
 	}
 	return k, v, err
 }
+
 func (m *TracedDuo[K, V]) Close() {
 	m.it.Close()
 }
@@ -755,6 +775,7 @@ func Union2[K cmp.Ordered, V any](x, y Duo[K, V], asc order.By, limit int) Duo[K
 func (m *UnionDuo[K, V]) HasNext() bool {
 	return m.err != nil || (m.limit != 0 && m.xHas) || (m.limit != 0 && m.yHas)
 }
+
 func (m *UnionDuo[K, V]) advanceX() {
 	if m.err != nil {
 		return
@@ -764,6 +785,7 @@ func (m *UnionDuo[K, V]) advanceX() {
 		m.xNextK, m.xNextV, m.err = m.x.Next()
 	}
 }
+
 func (m *UnionDuo[K, V]) advanceY() {
 	if m.err != nil {
 		return
@@ -810,6 +832,7 @@ func (m *UnionDuo[K, V]) Next() (res K, resV V, _ error) {
 	m.advanceY()
 	return k, v, nil
 }
+
 func (m *UnionDuo[K, V]) Close() {
 	m.x.Close()
 	m.y.Close()

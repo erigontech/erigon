@@ -50,7 +50,6 @@ func segFileCount(t *testing.T, dir string) int {
 // nothing (an empty word would permanently shadow the DB), while genuinely
 // sparse tables keep dumping empties.
 func TestDumpCaplinStateRefusesEmptyMandatoryRoots(t *testing.T) {
-
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())

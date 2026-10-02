@@ -645,7 +645,8 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		hitRate = float64(hits) / float64(total) * 100
 	}
 	sizeBytes := c.currentSize.Load()
-	log.Debug(name+" cache stats",
+	log.Debug(
+		name+" cache stats",
 		"mode", c.mode.String(),
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
