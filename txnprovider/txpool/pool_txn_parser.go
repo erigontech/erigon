@@ -443,8 +443,8 @@ type TxnSlot struct {
 
 	BlobBundles []PoolBlobBundle // Zero-copy blob data for EIP-4844 wrapped blob txns
 
-	// AuthAndNonces holds recovered authority/nonce pairs for pool replacement.
-	// It is populated after cheap admission checks and omits invalid tuples.
+	// AuthAndNonces holds recovered authority/nonce pairs for pool reservations.
+	// Invalid tuples and authorizations for other chains are omitted.
 	// Gas accounting must use the full Txn.GetAuthorizations() list because
 	// EIP-7702 charges for every tuple, including invalid ones.
 	AuthAndNonces []AuthAndNonce

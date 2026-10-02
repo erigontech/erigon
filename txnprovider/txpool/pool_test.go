@@ -639,40 +639,48 @@ func TestSetCodeAuthorizationAdmission(t *testing.T) {
 		feeCap uint64
 		reason txpoolcfg.DiscardReason
 	}{
-		{"underpriced", 100_000, 0, txpoolcfg.UnderPriced},
+		{"gas limit", params.MaxTxnGasLimit + 1, 2, txpoolcfg.GasLimitTooHigh},
 		{"intrinsic gas", 21_000, 2, txpoolcfg.IntrinsicGas},
 		{"insufficient funds", 100_000, common.Ether, txpoolcfg.InsufficientFunds},
 		{"accepted", 100_000, 2, txpoolcfg.Success},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
-			auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
-			require.NoError(t, err)
-			txn := newTestSetCodeTxnSlot(0, 0, 0, tc.feeCap, tc.gas).Txn.(*types.SetCodeTransaction)
-			txn.ChainID = pool.chainID
-			txn.Authorizations = []types.Authorization{auth, {}}
-			var encoded bytes.Buffer
-			require.NoError(t, txn.MarshalBinary(&encoded))
-			parseCtx := NewTxnParseContext(pool.chainID)
-			parseCtx.WithSender(false)
-			parseCtx.ValidateRLP(ValidateSerializedTxn)
-			var slot TxnSlot
-			_, err = parseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, nil, false, false, nil)
-			require.NoError(t, err)
+		for _, local := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/local=%t", tc.name, local), func(t *testing.T) {
+				ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+				auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
+				require.NoError(t, err)
+				txn := newTestSetCodeTxnSlot(0, 0, 0, tc.feeCap, tc.gas).Txn.(*types.SetCodeTransaction)
+				txn.ChainID = pool.chainID
+				txn.Authorizations = []types.Authorization{auth, {}}
+				var encoded bytes.Buffer
+				require.NoError(t, txn.MarshalBinary(&encoded))
+				parseCtx := NewTxnParseContext(pool.chainID)
+				parseCtx.WithSender(false)
+				parseCtx.ValidateRLP(ValidateSerializedTxn)
+				var slot TxnSlot
+				_, err = parseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, nil, false, false, nil)
+				require.NoError(t, err)
 
-			var txns TxnSlots
-			txns.Append(&slot, sender[:], false)
-			reasons, err := pool.AddLocalTxns(ctx, txns)
-			require.NoError(t, err)
-			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
-			if tc.reason == txpoolcfg.Success {
-				require.Equal(t, []AuthAndNonce{{authority, 0}}, slot.AuthAndNonces)
-				require.Contains(t, pool.auths, AuthAndNonce{authority, 0})
-			} else {
-				require.Empty(t, slot.AuthAndNonces)
-				require.Empty(t, pool.auths)
-			}
-		})
+				var txns TxnSlots
+				txns.Append(&slot, sender[:], local)
+				if local {
+					reasons, err := pool.AddLocalTxns(ctx, txns)
+					require.NoError(t, err)
+					require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
+				} else {
+					pool.started.Store(true)
+					pool.AddRemoteTxns(ctx, txns, nil, nil)
+					require.NoError(t, pool.processRemoteTxns(ctx))
+				}
+				if tc.reason == txpoolcfg.Success {
+					require.Equal(t, []AuthAndNonce{{authority, 0}}, slot.AuthAndNonces)
+					require.Contains(t, pool.auths, AuthAndNonce{authority, 0})
+				} else {
+					require.Empty(t, slot.AuthAndNonces)
+					require.Empty(t, pool.auths)
+				}
+			})
+		}
 	}
 }
 
@@ -1460,7 +1468,6 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	require.NoError(t, err)
 
 	txn := newTestSetCodeTxnSlot(0, 0, 0, 21000, 500000)
-	txn.AuthAndNonces = []AuthAndNonce{{nonce: 0, authority: common.Address{}}}
 
 	txns := TxnSlots{
 		Txns:    append([]*TxnSlot{}, txn),

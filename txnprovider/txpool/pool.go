@@ -302,6 +302,9 @@ func (p *TxPool) start(ctx context.Context) error {
 
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) (err error) {
 	defer newBlockTimer.ObserveDuration(time.Now())
+	for _, txn := range unwindTxns.Txns {
+		p.recoverAuthorizations(txn)
+	}
 
 	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
@@ -406,7 +409,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView)
+	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView, nil)
 	if err != nil {
 		return err
 	}
@@ -534,7 +537,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 	defer p.forgetUnusedSenders(senderIDsOf(p.unprocessedRemoteTxns))
 
-	validateReasons, newTxns, err := p.validateTxns(p.unprocessedRemoteTxns, cacheView)
+	validateReasons, newTxns, err := p.validateTxns(p.unprocessedRemoteTxns, cacheView, nil)
 	if err != nil {
 		return err
 	}
@@ -979,7 +982,7 @@ func (p *TxPool) CountContent() (int, int, int) {
 	return p.pending.Len(), p.baseFee.Len(), p.queued.Len()
 }
 
-func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
+func (p *TxPool) AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient) {
 	if p.cfg.NoGossip {
 		// if no gossip, then
 		// disable adding remote transactions
@@ -988,10 +991,18 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 	}
 
 	defer addRemoteTxnsTimer.ObserveDuration(time.Now())
+	reasons, err := p.prepareAuthorizations(ctx, newTxns, false)
+	if err != nil {
+		p.logger.Warn("[txpool] prepare remote authorizations", "err", err)
+		return
+	}
 	p.lock.Lock()
 	defer p.lock.Unlock()
 	src := remoteSource{peerID: peerID, sentry: sentry}
 	for i, txn := range newTxns.Txns {
+		if i < len(reasons) && reasons[i] != txpoolcfg.NotSet {
+			continue
+		}
 		hashS := string(txn.IDHash[:])
 		_, ok := p.unprocessedRemoteByHash[hashS]
 		if ok {
@@ -1376,15 +1387,88 @@ func ValidateSerializedTxn(serializedTxn []byte) error {
 	return nil
 }
 
+func (p *TxPool) recoverAuthorizations(tx *TxnSlot) {
+	if tx.TxType() != SetCodeTxnType {
+		return
+	}
+	auths := tx.Txn.GetAuthorizations()
+	tx.AuthAndNonces = make([]AuthAndNonce, 0, len(auths))
+	for i := range auths {
+		auth := &auths[i]
+		if !auth.ChainID.IsZero() && !auth.ChainID.Eq(&p.chainID) {
+			continue
+		}
+		authority, err := auth.RecoverSigner()
+		if err != nil {
+			continue
+		}
+		tx.AuthAndNonces = append(tx.AuthAndNonces, AuthAndNonce{authority, auth.Nonce})
+	}
+}
+
+// Precheck SetCode transactions under the pool lock, then recover their
+// authorization signers without it. The caller must validate the surviving
+// transactions again with a fresh state view before inserting them.
+func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots, local bool) ([]txpoolcfg.DiscardReason, error) {
+	if err := txns.Valid(); err != nil {
+		return nil, err
+	}
+	var setCode TxnSlots
+	var indices []int
+	for i, txn := range txns.Txns {
+		if txn.TxType() == SetCodeTxnType {
+			setCode.Append(txn, txns.Senders.At(i), local && txns.IsLocal[i])
+			indices = append(indices, i)
+		}
+	}
+	if len(indices) == 0 {
+		return nil, nil
+	}
+
+	coreDB, cache := p.chainDB()
+	coreTx, err := coreDB.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer coreTx.Rollback()
+	view, err := cache.View(ctx, coreTx)
+	if err != nil {
+		return nil, err
+	}
+	precheckReasons, goodTxns, err := func() ([]txpoolcfg.DiscardReason, TxnSlots, error) {
+		p.lock.Lock()
+		defer p.lock.Unlock()
+		if err := p.senders.registerNewSenders(&setCode, p.logger); err != nil {
+			return nil, TxnSlots{}, err
+		}
+		defer p.forgetUnusedSenders(senderIDsOf(&setCode))
+		return p.validateTxns(&setCode, view, nil)
+	}()
+	if err != nil {
+		return nil, err
+	}
+	coreTx.Rollback()
+
+	reasons := make([]txpoolcfg.DiscardReason, len(txns.Txns))
+	for i, index := range indices {
+		reasons[index] = precheckReasons[i]
+	}
+	for _, txn := range goodTxns.Txns {
+		p.recoverAuthorizations(txn)
+	}
+	return reasons, nil
+}
+
 // validateTxns returns per-slot discard reasons and the txns that passed.
 // For a remote (IsLocal=false) batch, validation short-circuits on the first
 // UnmatchedBlobTxExt: trailing reasons stay NotSet but those txns are not in
 // goodTxns, so callers reading reasons in isolation must also consult goodTxns
 // to distinguish "accepted" from "not validated".
-func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (reasons []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
-	// reasons is pre-sized for direct indexing, with the default zero
-	// value DiscardReason of NotSet
-	reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
+func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
+	// Keep precheck failures; NotSet entries still need validation.
+	if reasons == nil {
+		reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
+	}
 
 	if err := txns.Valid(); err != nil {
 		return reasons, goodTxns, err
@@ -1393,6 +1477,9 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (rea
 	goodCount := 0
 	checkedCount := len(txns.Txns)
 	for i, txn := range txns.Txns {
+		if reasons[i] != txpoolcfg.NotSet {
+			continue
+		}
 		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache)
 		if err != nil {
 			if reason == txpoolcfg.ErrGetSenderInfo {
@@ -1466,6 +1553,10 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 }
 
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	reasons, err := p.prepareAuthorizations(ctx, newTxns, true)
+	if err != nil {
+		return nil, err
+	}
 	coreDb, cache := p.chainDB()
 	coreTx, err := coreDb.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1488,7 +1579,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 
 	originalTxns := newTxns
 
-	reasons, goodTxns, err := p.validateTxns(&newTxns, cacheView)
+	reasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, reasons)
 	if err != nil {
 		return nil, err
 	}
@@ -1564,6 +1655,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 
 		if reason := p.addLocked(mt, &announcements); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
+			p.discardReasonsLRU.Add(string(txn.IDHash[:]), reason)
 			continue
 		}
 		discardReasons[i] = txpoolcfg.NotSet // unnecessary
@@ -1733,6 +1825,11 @@ func (p *TxPool) updateInSubPool(mt *metaTxn) {
 }
 
 func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.DiscardReason {
+	// A rejected candidate must not release another transaction's reservations
+	// when discarded. Retain the recovered pairs only after admission succeeds.
+	authorities := mt.TxnSlot.AuthAndNonces
+	mt.TxnSlot.AuthAndNonces = nil
+
 	// Insert to pending pool, if pool doesn't have txn with same Nonce and bigger Tip
 	found := p.all.get(mt.TxnSlot.SenderID, mt.TxnSlot.Nonce)
 	if found != nil {
@@ -1802,26 +1899,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 
 	// Check if we have txn with same authorization in the pool
 	if mt.TxnSlot.TxType() == SetCodeTxnType {
-		// Defer ECDSA recovery until after fee, gas, nonce, balance and replacement
-		// checks, so rejected transactions cannot trigger expensive work for every tuple.
-		// EIP-7702 skips invalid tuples without rejecting the enclosing transaction;
-		// only successfully recovered authorities are indexed below.
-		slot := mt.TxnSlot
-		auths := slot.Txn.GetAuthorizations()
-		slot.AuthAndNonces = make([]AuthAndNonce, 0, len(auths))
-		for i := range auths {
-			auth := &auths[i]
-			if !auth.ChainID.IsUint64() {
-				continue
-			}
-			authority, err := auth.RecoverSigner()
-			if err != nil {
-				continue
-			}
-			slot.AuthAndNonces = append(slot.AuthAndNonces, AuthAndNonce{authority, auth.Nonce})
-		}
-
-		for _, a := range mt.TxnSlot.AuthAndNonces {
+		for _, a := range authorities {
 			// Self authorization nonce should be senderNonce + 1
 			if a.authority == senderAddr && a.nonce != mt.TxnSlot.Nonce+1 {
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
@@ -1832,13 +1910,15 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 				return txpoolcfg.ErrAuthorityReserved
 			}
 		}
-		for _, a := range mt.TxnSlot.AuthAndNonces {
+		mt.TxnSlot.AuthAndNonces = authorities
+		for _, a := range authorities {
 			p.auths[AuthAndNonce{a.authority, a.nonce}] = mt
 		}
 	}
 
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	p.byHash[hashStr] = mt
+	p.discardReasonsLRU.Remove(hashStr)
 
 	if replaced := p.all.replaceOrInsert(mt, p.logger); replaced != nil {
 		if dbg.AssertEnabled {
@@ -2760,6 +2840,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 		if reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
 			continue
 		}
+		p.recoverAuthorizations(txn)
 		txns.Resize(uint(i + 1))
 		txns.Txns[i] = txn
 		txns.IsLocal[i] = isLocalTx

@@ -596,6 +596,9 @@ func TestSetCodeAuthRecoveryDeferred(t *testing.T) {
 	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
 	require.NoError(t, setCodeTx.DecodeRLP(rlpStream))
 	require.Equal(t, setCodeTx.Authorizations, txn.Txn.GetAuthorizations())
+	authority, err := txn.Txn.GetAuthorizations()[0].RecoverSigner()
+	require.NoError(t, err)
+	require.Equal(t, common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3"), authority)
 	require.Empty(t, txn.AuthAndNonces)
 }
 
