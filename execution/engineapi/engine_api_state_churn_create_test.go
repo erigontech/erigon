@@ -51,7 +51,8 @@ func TestEngineApiReorgAcrossContractCreationAtSameAddress(t *testing.T) {
 	// The side fork diverges at the deploy block itself: same deploy initcode
 	// and nonce (hence the same contract address), different gas price (hence
 	// a different transaction and block hash).
-	sidePayloads, sideAddr, sideRef := buildRecordedChurnChain(ctx, t, logger, sharedGenesis, coinbaseKey, tweak, 6,
+	sidePayloads, sideAddr, sideRef := buildRecordedChurnChain(
+		ctx, t, logger, sharedGenesis, coinbaseKey, tweak, 6,
 		func(k int) int64 { return int64(k) + 1_000_000 },
 		func(opts *bind.TransactOpts) { opts.GasPrice = big.NewInt(2_000_000_000) },
 	)

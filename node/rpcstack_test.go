@@ -108,8 +108,10 @@ func TestWebsocketOrigins(t *testing.T) {
 	tests := []originTest{
 		{
 			spec: "*", // allow all
-			expOk: []string{"", "http://test", "https://test", "http://test:8540", "https://test:8540",
-				"http://test.com", "https://foo.test", "http://testa", "http://atestb:8540", "https://atestb:8540"},
+			expOk: []string{
+				"", "http://test", "https://test", "http://test:8540", "https://test:8540",
+				"http://test.com", "https://foo.test", "http://testa", "http://atestb:8540", "https://atestb:8540",
+			},
 		},
 		{
 			spec:    "test",
@@ -124,7 +126,8 @@ func TestWebsocketOrigins(t *testing.T) {
 				"test",                                // no scheme, required by spec
 				"http://test",                         // wrong scheme
 				"http://test.foo", "https://a.test.x", // subdomain variatoins
-				"http://testx:8540", "https://xtest:8540"},
+				"http://testx:8540", "https://xtest:8540",
+			},
 		},
 		// ip tests
 		{
@@ -135,7 +138,8 @@ func TestWebsocketOrigins(t *testing.T) {
 				"http://12.34.56.78:443", // wrong scheme
 				"http://1.12.34.56.78",   // wrong 'domain name'
 				"http://12.34.56.78.a",   // wrong 'domain name'
-				"https://87.65.43.21", "http://87.65.43.21:8540", "https://87.65.43.21:8540"},
+				"https://87.65.43.21", "http://87.65.43.21:8540", "https://87.65.43.21:8540",
+			},
 		},
 		// port tests
 		{
@@ -144,7 +148,8 @@ func TestWebsocketOrigins(t *testing.T) {
 			expFail: []string{
 				"http://test", "https://test", // spec says port required
 				"http://test:8541", "https://test:8541", // wrong port
-				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540"},
+				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540",
+			},
 		},
 		// scheme and port
 		{
@@ -155,16 +160,20 @@ func TestWebsocketOrigins(t *testing.T) {
 				"http://test",                           // missing port, + wrong scheme
 				"http://test:8540",                      // wrong scheme
 				"http://test:8541", "https://test:8541", // wrong port
-				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540"},
+				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540",
+			},
 		},
 		// several allowed origins
 		{
 			spec: "localhost,http://127.0.0.1",
-			expOk: []string{"localhost", "http://localhost", "https://localhost:8443",
-				"http://127.0.0.1", "http://127.0.0.1:8080"},
+			expOk: []string{
+				"localhost", "http://localhost", "https://localhost:8443",
+				"http://127.0.0.1", "http://127.0.0.1:8080",
+			},
 			expFail: []string{
 				"https://127.0.0.1", // wrong scheme
-				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540"},
+				"http://bad", "https://bad", "http://bad:8540", "https://bad:8540",
+			},
 		},
 	}
 	for _, tc := range tests {
@@ -236,7 +245,7 @@ func wsRequest(t *testing.T, url, browserOrigin string) error {
 }
 
 func TestAllowList(t *testing.T) {
-	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) //don't allow RPC modules
+	allowList := rpc.AllowList(map[string]struct{}{"net_version": {}}) // don't allow RPC modules
 	url := startHTTPServer(t, allowList, nil, nil)
 
 	assert.False(t, testCustomRequest(t, url, "rpc_modules"))
@@ -442,8 +451,8 @@ func newSelfSignedCert(t *testing.T) (certFile, keyFile string, roots *x509.Cert
 	dir := t.TempDir()
 	certFile = filepath.Join(dir, "cert.pem")
 	keyFile = filepath.Join(dir, "key.pem")
-	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0600))
-	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0600))
+	require.NoError(t, os.WriteFile(certFile, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600))
+	require.NoError(t, os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}), 0o600))
 	return certFile, keyFile, roots
 }
 

@@ -339,7 +339,7 @@ func TestServerPeerLimits(t *testing.T) {
 	clientkey := newkey()
 	clientnode := enode.NewV4(&clientkey.PublicKey, nil, 0, 0)
 
-	var tp = &setupTransport{
+	tp := &setupTransport{
 		pubkey: &clientkey.PublicKey,
 		phs: protoHandshake{
 			Pubkey: crypto.MarshalPubkey(&clientkey.PublicKey),

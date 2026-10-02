@@ -319,7 +319,7 @@ var DefaultForwardOrder = UnwindOrder{
 	// Stages below don't use Internet
 	stages.Senders,
 	stages.Execution,
-	//stages.CustomTrace,
+	// stages.CustomTrace,
 	stages.TxLookup,
 	stages.Finish,
 }
@@ -328,14 +328,16 @@ var DefaultForwardOrder = UnwindOrder{
 // The unwind order is important and not always just stages going backwards.
 // Let's say, there is txn pool can be unwound only after execution.
 // It's ok to remove some stage from here to disable only unwind of stage
-type UnwindOrder []stages.SyncStage
-type PruneOrder []stages.SyncStage
+type (
+	UnwindOrder []stages.SyncStage
+	PruneOrder  []stages.SyncStage
+)
 
 var DefaultUnwindOrder = UnwindOrder{
 	stages.Finish,
 	stages.TxLookup,
 
-	//stages.CustomTrace,
+	// stages.CustomTrace,
 	stages.Execution,
 	stages.Senders,
 
