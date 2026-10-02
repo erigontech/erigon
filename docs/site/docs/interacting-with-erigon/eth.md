@@ -38,7 +38,7 @@ Erigon does not support the `pending` block tag for `eth_call`, `eth_createAcces
 
 ### Fork-gated call fields
 
-Methods that execute a call object — among them `eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_simulateV1`, `eth_callMany`, `debug_traceCall` and the `trace_call` family — validate it against the fork active at the requested block, as a transaction would be:
+Methods that execute a call object — among them `eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_simulateV1`, `eth_callMany`, `debug_traceCall` and the `trace_call` family — validate it against the fork active at the effective execution block, as a transaction would be. For `eth_simulateV1` that is each simulated block, which runs after the selected parent, and block overrides can move it to a different fork than the parent's:
 
 | Call carries | Rejected when | Error |
 |---|---|---|
@@ -54,7 +54,7 @@ On 3.7 the `trace_call` family takes no `blobVersionedHashes`, so the blob rows 
 
 ### eth\_syncing and eth\_subscribe("syncing")
 
-`eth_syncing` returns `false` when the current block is within 8 blocks of the highest block seen, in either direction; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). A node more than 8 blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. On 3.7 `eth_syncing` reports `startingBlock` as `0x0`; the subscription reports the block it was at when it first saw the node syncing.
+`eth_syncing` returns `false` when the current block is fewer than 8 blocks from the highest block seen, in either direction; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). A node 8 or more blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. On 3.7 `eth_syncing` reports `startingBlock` as `0x0`; the subscription reports the block it was at when it first saw the node syncing.
 
 `eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
 
