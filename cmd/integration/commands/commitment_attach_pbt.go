@@ -55,9 +55,7 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-var (
-	attachPBTFrom string
-)
+var attachPBTFrom string
 
 type pbtAttachHooks struct {
 	step       func(string) error
