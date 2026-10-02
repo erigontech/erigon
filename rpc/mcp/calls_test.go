@@ -27,7 +27,7 @@ func (f *fakeCaller) CallContext(ctx context.Context, result any, method string,
 		return f.err
 	}
 	if f.result != nil {
-		*(result.(*json.RawMessage)) = f.result
+		*result.(*json.RawMessage) = f.result
 	}
 	return nil
 }

@@ -17,7 +17,8 @@ type blockValidator struct {
 
 func newBlockValidator(engine rules.Engine, blockGasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool, receipts types.Receipts,
 	header *types.Header, txns types.Transactions,
-	chainConfig *chain.Config, logger log.Logger) *blockValidator {
+	chainConfig *chain.Config, logger log.Logger,
+) *blockValidator {
 	bv := &blockValidator{done: make(chan error, 1)}
 	go func() {
 		bv.done <- validateBlockPostExecution(engine, chainConfig, header, blockGasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
@@ -27,7 +28,8 @@ func newBlockValidator(engine rules.Engine, blockGasUsed, blobGasUsed uint64, ch
 
 func validateBlockPostExecution(engine rules.Engine, chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
 	err := engine.ValidateBlockPostExecution(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 	switch {
 	case err != nil && dbg.LogHashMismatchReason():

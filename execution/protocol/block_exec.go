@@ -42,9 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-var (
-	blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
-)
+var blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
 
 type SyncMode string
 
@@ -240,7 +238,6 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vmCfg
-	vmConfig.NoReceipts = true
 	vmConfig.RestoreState = constCall
 	vmConfig.Tracer = nil // set to nil to avoid trace sysCallContract
 	// Create a new context to be used in the EVM environment
@@ -286,12 +283,11 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
 	)
-	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
 	author := contract
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
+	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vm.Config{})
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
 		State:     0, // state gas reservoir will consume from execution gas for sys calls
