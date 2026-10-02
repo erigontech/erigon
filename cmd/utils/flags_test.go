@@ -110,6 +110,26 @@ func TestRpcGasCap_UserValuePreserved(t *testing.T) {
 	require.NoError(t, app.Run(context.Background(), []string{"erigon", "--rpc.gascap=30000000"}))
 }
 
+func TestCaplinDiscoveryPortsCanBeConfiguredIndependently(t *testing.T) {
+	discoveryPort := CaplinDiscoveryPortFlag
+	tcpPort := CaplinDiscoveryTCPPortFlag
+	quicPort := CaplinDiscoveryQUICPortFlag
+	cmd := &cli.Command{Flags: []cli.Flag{&discoveryPort, &tcpPort, &quicPort}}
+	cmd.Action = func(_ context.Context, cmd *cli.Command) error {
+		require.Equal(t, uint64(9000), cmd.Uint64(CaplinDiscoveryPortFlag.Name))
+		require.Equal(t, uint64(9000), cmd.Uint64(CaplinDiscoveryTCPPortFlag.Name))
+		require.Equal(t, uint64(9001), cmd.Uint64(CaplinDiscoveryQUICPortFlag.Name))
+		return nil
+	}
+
+	require.NoError(t, cmd.Run(t.Context(), []string{
+		"erigon",
+		"--caplin.discovery.port=9000",
+		"--caplin.discovery.tcpport=9000",
+		"--caplin.discovery.quicport=9001",
+	}))
+}
+
 func TestResolveChainName(t *testing.T) {
 	tests := []struct {
 		name string

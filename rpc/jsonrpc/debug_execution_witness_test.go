@@ -51,14 +51,19 @@ type fakeStateReader struct {
 func (r *fakeStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return r.accounts[address.Value()], nil
 }
+
 func (r *fakeStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return r.accounts[address.Value()], nil
 }
+
 func (r *fakeStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error)  { return nil, nil }
+
+func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) { return nil, nil }
+
 func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
+
 func (r *fakeStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	return 0, nil
 }
@@ -565,6 +570,20 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
 		require.NoError(t, err)
 		require.Same(t, sentinel, result, "a cached by-number request serves the stored pointer")
+	})
+
+	t.Run("by-number miss waits for the running build", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, true, true)
+		registerFinishedBuild(cache, block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		hitBefore, awaitBefore := witnessCacheHitCounter.GetValueUint64(), witnessCacheAwaitCounter.GetValueUint64()
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "a cache-only miss must serve the running build, not out-of-window")
+		require.Equal(t, hitBefore, witnessCacheHitCounter.GetValueUint64(), "a joined build is not a resident hit")
+		require.Equal(t, awaitBefore+1, witnessCacheAwaitCounter.GetValueUint64(), "a joined build counts as an await")
 	})
 
 	t.Run("by-hash orphan is reorged-away, never serves the resident entry", func(t *testing.T) {

@@ -189,7 +189,7 @@ func openTestDB(dbDir string) kv.RwDB {
 func writeTestDB(t *testing.T, dbDir string, deleted int) {
 	t.Helper()
 	const batch = 2_000
-	require.NoError(t, os.MkdirAll(dbDir, 0755))
+	require.NoError(t, os.MkdirAll(dbDir, 0o755))
 	db := openTestDB(dbDir)
 	defer db.Close()
 	for from := 0; from < testRows; from += batch {
@@ -229,12 +229,13 @@ func TestCompactInPlace(t *testing.T) {
 	writeTestDB(t, dbDir, deleted)
 
 	dataFile := filepath.Join(dbDir, dataFileName)
-	require.NoError(t, os.Chmod(dataFile, 0600))
+	require.NoError(t, os.Chmod(dataFile, 0o600))
 	before := dataFileStat(t, dbDir)
 
 	require.NoError(t, CompactInPlace(t.Context(), dbDir, dbcfg.ChainDB, log.New()))
 
 	after := dataFileStat(t, dbDir)
+	require.False(t, os.SameFile(before, after), "compaction must replace the original file")
 	require.Less(t, after.Size(), before.Size())
 	require.Equal(t, before.Mode().Perm(), after.Mode().Perm())
 	require.FileExists(t, filepath.Join(dbDir, lockFileName))
@@ -281,7 +282,9 @@ func TestAutoCompactDatadir(t *testing.T) {
 
 	require.NoError(t, ApplyMigrations(t.Context(), dirs, log.New()))
 
-	require.Less(t, dataFileStat(t, dirs.Chaindata).Size(), bloated.Size())
+	after := dataFileStat(t, dirs.Chaindata)
+	require.False(t, os.SameFile(bloated, after), "auto-compaction must replace the bloated file")
+	require.Less(t, after.Size(), bloated.Size())
 	require.True(t, os.SameFile(healthy, dataFileStat(t, dirs.TxPool)), "a healthy db must not be rewritten")
 }
 
@@ -326,8 +329,8 @@ func TestDatadirDBs(t *testing.T) {
 	root := t.TempDir()
 	mkDB := func(parts ...string) string {
 		p := filepath.Join(append([]string{root}, parts...)...)
-		require.NoError(t, os.MkdirAll(p, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(p, dataFileName), nil, 0644))
+		require.NoError(t, os.MkdirAll(p, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(p, dataFileName), nil, 0o644))
 		return p
 	}
 	chaindata := mkDB("chaindata")

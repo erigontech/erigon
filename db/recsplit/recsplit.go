@@ -146,14 +146,14 @@ type RecSplit struct {
 	// v=1 falsePositeves=true - as fuse filter (%9 bits/key). Doesn't require `enum=true`
 	dataStructureVersion version.DataStructureVersion
 
-	//v0 fields
+	// v0 fields
 	existenceFV0 *os.File
 	existenceWV0 *bufio.Writer
 
-	//v1 fields
+	// v1 fields
 	existenceFV1 *fusefilter.WriterOffHeap
 
-	//v2 fields
+	// v2 fields
 	existenceFV2 *fusefilter.WriterSharded
 
 	offsetFile   *os.File      // Temp file for offsets (already sorted, no need for etl.Collector)
@@ -235,8 +235,10 @@ type Timings struct {
 
 // DefaultLeafSize - LeafSize=8 and BucketSize=100, use about 1.8 bits per key. Increasing the leaf and bucket
 // sizes gives more compact structures (1.56 bits per key), at the	price of a slower construction time
-const DefaultLeafSize = 8
-const DefaultBucketSize = 100 // typical from 100 to 2000, with smaller buckets giving slightly larger but faster function
+const (
+	DefaultLeafSize   = 8
+	DefaultBucketSize = 100 // typical from 100 to 2000, with smaller buckets giving slightly larger but faster function
+)
 
 // NewRecSplit creates a new RecSplit instance with given number of keys and given bucket size
 // Typical bucket size is 100 - 2000, larger bucket sizes result in smaller representations of hash functions, at a cost of slower access
@@ -248,9 +250,11 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}
 
 	if len(args.StartSeed) == 0 {
-		args.StartSeed = []uint64{0x106393c187cae2a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
+		args.StartSeed = []uint64{
+			0x106393c187cae2a, 0x6453cec3f7376937, 0x643e521ddbd2be98, 0x3740c6412f6572cb, 0x717d47562f1ce470, 0x4cd6eb4c63befb7c, 0x9bfd8c5e18c8da73,
 			0x082f20e10092a9a3, 0x2ada2ce68d21defc, 0xe33cb4f3e7c6466b, 0x3980be458c509c59, 0xc466fd9584828e8c, 0x45f0aabe1a61ede6, 0xf6e7b8b33ad9b98d,
-			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a}
+			0x4ef95e25f4b4983d, 0x81175195173b92d3, 0x4e50927d8dd15978, 0x1ea2099d1fafae7f, 0x425c8a06fbaaa815, 0xcd4216006c74052a,
+		}
 	}
 	bucketCount := (args.KeyCount + args.BucketSize - 1) / args.BucketSize
 	if bucketCount > math.MaxUint32 {
@@ -302,7 +306,6 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			}
 			rs.existenceWV0 = bufiopool.Writer(rs.existenceFV0)
 		}
-
 	}
 	if args.KeyCount > 0 && rs.lessFalsePositives && rs.dataStructureVersion >= 1 {
 		rs.existenceFV1, rs.existenceFV2, err = newExistenceFilterWriter(rs.filePath, rs.dataStructureVersion)
@@ -385,6 +388,7 @@ func (sc *recsplitScratch) golombParamSlow(m uint16) int {
 	}
 	return int(sc.golombRice[m] >> 27)
 }
+
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		_ = rs.indexF.Close()
@@ -1133,7 +1137,7 @@ func (rs *RecSplit) flushExistenceFilter() error {
 	if rs.dataStructureVersion == 0 && rs.enums && rs.keysAdded > 0 && rs.lessFalsePositives {
 		defer rs.existenceFV0.Close()
 
-		//Write len of array
+		// Write len of array
 		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
 		if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 			return err

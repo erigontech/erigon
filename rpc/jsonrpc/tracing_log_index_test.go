@@ -78,11 +78,14 @@ func logIndexTestGenesis(sender common.Address) *types.Genesis {
 			emitOneAddr: emitter(log0(program.New()).Op(vm.STOP).Bytes()),
 			emitTwoAddr: emitter(log0(log0(program.New())).Op(vm.STOP).Bytes()),
 			emitAroundAddr: emitter(
-				log0(callTo(log0(program.New()), emitOneAddr)).Op(vm.STOP).Bytes()),
+				log0(callTo(log0(program.New()), emitOneAddr)).Op(vm.STOP).Bytes(),
+			),
 			emitAndRevertAddr: emitter(
-				log0(program.New()).Push(0).Push(0).Op(vm.REVERT).Bytes()),
+				log0(program.New()).Push(0).Push(0).Op(vm.REVERT).Bytes(),
+			),
 			emitAroundRevertAddr: emitter(
-				log0(callTo(log0(program.New()), emitAndRevertAddr)).Op(vm.STOP).Bytes()),
+				log0(callTo(log0(program.New()), emitAndRevertAddr)).Op(vm.STOP).Bytes(),
+			),
 		},
 	}
 }
@@ -105,7 +108,8 @@ func createLogIndexTestModule(t *testing.T) (*execmoduletester.ExecModuleTester,
 		b.SetCoinbase(common.Address{1})
 		for nonce, to := range []common.Address{emitTwoAddr, emitOneAddr, emitAroundAddr, emitAroundRevertAddr} {
 			txn, err := types.SignTx(
-				types.NewTransaction(uint64(nonce), to, &u256.Num0, 200000, &u256.Num1, nil), signer, key)
+				types.NewTransaction(uint64(nonce), to, &u256.Num0, 200000, &u256.Num1, nil), signer, key,
+			)
 			require.NoError(t, err)
 			b.AddTx(txn)
 			hashes = append(hashes, txn.Hash())

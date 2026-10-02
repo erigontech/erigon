@@ -78,12 +78,15 @@ type RwWrapper struct {
 func (w RwWrapper) Update(ctx context.Context, f func(tx RwTx) error) error {
 	return errors.New("Update not implemented")
 }
+
 func (w RwWrapper) UpdateNosync(ctx context.Context, f func(tx RwTx) error) error {
 	return errors.New("UpdateNosync not implemented")
 }
+
 func (w RwWrapper) BeginRw(ctx context.Context) (RwTx, error) {
 	return nil, errors.New("BeginRw not implemented")
 }
+
 func (w RwWrapper) BeginRwNosync(ctx context.Context) (RwTx, error) {
 	return nil, errors.New("BeginRwNosync not implemented")
 }

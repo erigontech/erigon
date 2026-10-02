@@ -21,7 +21,6 @@ package testutil
 
 import (
 	"context"
-	context2 "context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -44,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -300,7 +300,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	blockNum, txNum := readBlockNr, uint64(1)
 
 	defer func() {
-		rootBytes, rootBytesErr := sd.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
+		rootBytes, rootBytesErr := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 		if rootBytesErr != nil {
 			if err != nil {
 				err = fmt.Errorf("ComputeCommitment: %w: %w", rootBytesErr, err)
@@ -396,8 +396,12 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 		statedb.RevertToSnapshot(snapshot, err)
 	}
 	statedb.PopSnapshot(snapshot)
-	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
-		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
+	if vmconfig.Tracer.HasTxEndHook() {
+		var txnGasUsage mdgas.TxnGasUsage
+		if res != nil {
+			txnGasUsage = res.TxnGasUsage
+		}
+		vmconfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: gasUsed}, txnGasUsage, err)
 	}
 	if err != nil {
 		return statedb, root, gasUsed, err
@@ -433,7 +437,7 @@ func MakePreState(rules *chain.Rules, db kv.TemporalRoDB, tx kv.TemporalRwTx, al
 	if err != nil {
 		return nil, err
 	}
-	if err := sd.Flush(context2.Background(), tx); err != nil {
+	if err := sd.Flush(context.Background(), tx); err != nil {
 		return nil, err
 	}
 	return statedb, nil
