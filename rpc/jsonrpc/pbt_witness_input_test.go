@@ -335,6 +335,9 @@ func TestPBinWitnessInputReDelegationWritesDelegation(t *testing.T) {
 	input, err := buildPBinWitnessInput(rs)
 	require.NoError(t, err)
 	require.Len(t, input.Accounts, 1, "a re-delegation must emit an account update")
+	basic, err := eip8297.EncodeBasicData(original.Nonce, &original.Balance, uint64(len(designator)))
+	require.NoError(t, err)
+	require.Equal(t, basic[:], input.Accounts[0].Values[eip8297.BasicDataLeafKey], "the original basic data must use the code-hash-aware code size")
 	require.Equal(t, designator, input.Accounts[0].Delegation, "a re-delegation must emit its delegation write")
 }
 
