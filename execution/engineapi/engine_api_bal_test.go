@@ -890,9 +890,9 @@ func TestEngineApiBALSelfDestruct(t *testing.T) {
 
 // TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance asserts
 // the EIP-7928 rule that a zero-value SELFDESTRUCT to SystemAddress is still
-// recorded in the BAL: the SELFDESTRUCT is itself the state access that
-// satisfies the SystemAddress carve-out, so the entry survives even with no
-// value transferred and every change-set empty.
+// recorded in the BAL: the SELFDESTRUCT is a state access on the beneficiary,
+// so the entry is present even with no value transferred and every change-set
+// empty.
 func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
@@ -926,7 +926,7 @@ func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance(t *t
 
 		sysEntry := findAccountChanges(bal, params.SystemAddress)
 		require.NotNilf(t, sysEntry,
-			"BAL must include a SystemAddress entry: EIP-7928 records SELFDESTRUCT as an access on the beneficiary even when no value is transferred, and the SystemAddress carve-out is satisfied because the SELFDESTRUCT is the access itself\n%s",
+			"BAL must include a SystemAddress entry: EIP-7928 records SELFDESTRUCT as an access on the beneficiary even when no value is transferred\n%s",
 			bal.DebugString())
 
 		require.Empty(t, sysEntry.StorageChanges, "SystemAddress entry should have no storage changes")
@@ -1074,8 +1074,8 @@ func TestEngineApiBALIncludesSystemAddressAsDelegationTarget(t *testing.T) {
 }
 
 // TestEngineApiBALIncludesOrdinaryBeneficiaryOnSelfdestructWithZeroBalance
-// guards that ordinary EOA beneficiaries (where the SystemAddress carve-out
-// does not apply) still appear in the BAL on a zero-balance SELFDESTRUCT.
+// guards that ordinary EOA beneficiaries also appear in the BAL on a
+// zero-balance SELFDESTRUCT.
 func TestEngineApiBALIncludesOrdinaryBeneficiaryOnSelfdestructWithZeroBalance(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
