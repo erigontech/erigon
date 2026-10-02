@@ -80,6 +80,7 @@ files to `S` and use `--reset`, because a block-end stage target cannot select
 the middle of a block:
 
 ```sh
+integration stage_exec --datadir=<node-datadir> --unwind=<B-1> --chain=<chain> --experimental.commitment-v3
 integration stage_exec --datadir=<node-datadir> --chain=<chain> --block=<B> --experimental.commitment-v3
 ```
 
