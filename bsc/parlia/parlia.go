@@ -217,7 +217,13 @@ func (p *Parlia) Prepare(chain rules.ChainHeaderReader, header *types.Header, st
 
 func (p *Parlia) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
 	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
-	return p.upgradeSystemContracts(chain, header, ibs)
+	if err := p.upgradeSystemContracts(chain, header, ibs); err != nil {
+		return err
+	}
+	if p.chainConfig.IsPrague(header.Time) {
+		return misc.StoreBlockHashesEip2935(header, ibs)
+	}
+	return nil
 }
 
 func (p *Parlia) upgradeSystemContracts(chain rules.ChainHeaderReader, header *types.Header, ibs *state.IntraBlockState) error {
