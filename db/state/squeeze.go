@@ -1340,12 +1340,6 @@ const (
 	pbinRebuildOpCollectorBufferBudget = 64 * datasize.MB
 )
 
-func pbinForEachRebuildOpStreamAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, bool) error, stream func(func(pbt.Op) error) error) error {
-	return pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, maxOps, maxBytes, afterKey, func(batch []pbt.Op, _ []byte, final bool) error {
-		return visit(batch, final)
-	}, stream)
-}
-
 func pbinForEachRebuildOpStreamLookaheadAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, []byte, bool) error, stream func(func(pbt.Op) error) error) error {
 	return pbinForEachRebuildOpStreamLookaheadAfterWithSample(tmpDir, maxOps, maxBytes, afterKey, visit, stream, nil)
 }

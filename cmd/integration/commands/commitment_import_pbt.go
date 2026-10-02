@@ -48,9 +48,7 @@ import (
 	"github.com/erigontech/erigon/node/debug"
 )
 
-var (
-	importPBTSnapshot string
-)
+var importPBTSnapshot string
 
 type pbtImportMeta struct {
 	ChainID        string `json:"chainId"`
