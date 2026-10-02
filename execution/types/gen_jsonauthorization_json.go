@@ -11,7 +11,7 @@ import (
 )
 
 // MarshalFastJSONTo writes the fields JsonAuthorization declares, in that order.
-func (x *JsonAuthorization) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (x *JsonAuthorization) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -25,7 +25,7 @@ func (x *JsonAuthorization) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 }
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
-func (x *JsonAuthorization) writeJSONFields(s *jsonstream.StackStream) error {
+func (x *JsonAuthorization) writeJSONFields(s *jsonstream.Stream) error {
 	ethjson.Quantity256(s, "chainId", (*uint256.Int)(&x.ChainID))
 	ethjson.Data(s, "address", x.Address[:])
 	ethjson.Quantity(s, "nonce", x.Nonce)

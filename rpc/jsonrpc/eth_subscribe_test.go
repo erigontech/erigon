@@ -134,7 +134,7 @@ func TestEthSubscribeReceipts(t *testing.T) {
 // pointer receiver or a renamed method fails here instead of sending {} to every subscriber.
 var (
 	_ interface {
-		MarshalFastJSONTo(*jsonstream.StackStream) error
+		MarshalFastJSONTo(*jsonstream.Stream) error
 	} = sharedJSON[*types.Header, *types.Header]{}
 	_ interface{ LocalValue() any } = sharedJSON[*types.Header, *types.Header]{}
 )
@@ -154,7 +154,7 @@ func TestSharedJSONEncodesTheValue(t *testing.T) {
 // shows which one ran.
 type fastOnly struct{}
 
-func (fastOnly) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (fastOnly) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	w.WriteRaw(`"fast"`)
 	return nil
 }
