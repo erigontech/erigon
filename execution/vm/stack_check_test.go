@@ -87,6 +87,8 @@ func TestStackBoundsInvariant(t *testing.T) {
 // interpreter's fast path to every jump table it can run with.
 func TestFastPathMatchesJumpTables(t *testing.T) {
 	t.Parallel()
+	// DUPs are makeDup closures, whose code pointers differ by inlining site,
+	// so they are checked by behaviour instead of by function identity.
 	type want struct {
 		execute         executionFunc
 		gas             uint64
@@ -95,9 +97,9 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	fast := map[OpCode]want{
 		PUSH1:    {opPush1, GasFastestStep, 0, 1},
 		PUSH2:    {opPush2, GasFastestStep, 0, 1},
-		DUP1:     {makeDup(1), GasFastestStep, 1, 2},
-		DUP2:     {makeDup(2), GasFastestStep, 2, 3},
-		DUP3:     {makeDup(3), GasFastestStep, 3, 4},
+		DUP1:     {nil, GasFastestStep, 1, 2},
+		DUP2:     {nil, GasFastestStep, 2, 3},
+		DUP3:     {nil, GasFastestStep, 3, 4},
 		SWAP1:    {opSwap1, GasFastestStep, 2, 2},
 		SWAP2:    {opSwap2, GasFastestStep, 3, 3},
 		ADD:      {opAdd, GasFastestStep, 2, 1},
@@ -113,7 +115,7 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		&shanghaiInstructionSet, &cancunInstructionSet, &pragueInstructionSet,
 		&osakaInstructionSet, &amsterdamInstructionSet,
 	}
-	for _, jt := range tables[:len(tables):len(tables)] {
+	for _, jt := range tables {
 		for eip := range activators {
 			cp := copyJumpTable(jt)
 			require.NoError(t, EnableEIP(eip, cp))
@@ -123,7 +125,18 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	for i, jt := range tables {
 		for op, w := range fast {
 			got := &jt[op]
-			require.Equal(t, reflect.ValueOf(w.execute).Pointer(), reflect.ValueOf(got.execute).Pointer(), "table %d %s execute", i, op)
+			if w.execute != nil {
+				require.Equal(t, reflect.ValueOf(w.execute).Pointer(), reflect.ValueOf(got.execute).Pointer(), "table %d %s execute", i, op)
+			} else {
+				scope := new(CallContext)
+				for v := range uint64(4) {
+					scope.Stack.pushRef().SetUint64(v)
+				}
+				_, _, err := got.execute(0, nil, scope)
+				require.NoError(t, err)
+				require.Equal(t, 5, scope.Stack.len(), "table %d %s stack", i, op)
+				require.Equal(t, uint64(4-w.numPop), scope.Stack.peek().Uint64(), "table %d %s top", i, op)
+			}
 			require.Equal(t, w.gas, got.constantGas, "table %d %s gas", i, op)
 			require.Equal(t, w.numPop, got.numPop, "table %d %s numPop", i, op)
 			require.Equal(t, w.numPush, got.numPush, "table %d %s numPush", i, op)
