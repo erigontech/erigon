@@ -34,6 +34,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -69,7 +70,7 @@ func withCodeHash(codeHash common.Hash) func(*accounts.Account) {
 func TestEmptyTrie(t *testing.T) {
 	var trie Trie
 	res := trie.Hash()
-	exp := EmptyRoot
+	exp := empty.RootHash
 	if res != exp {
 		t.Errorf("expected %x got %x", exp, res)
 	}
@@ -289,7 +290,7 @@ func randomAccountWithCode(random *rand.Rand, codeValue []byte) accounts.Account
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
 	acc.Balance.SetFromBig(new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil)))
-	acc.Root = EmptyRoot
+	acc.Root = empty.RootHash
 	if codeValue == nil {
 		acc.CodeHash = accounts.EmptyCodeHash
 	} else {
@@ -628,7 +629,7 @@ func TestWitnessPruneOmitsInlinedNodes(t *testing.T) {
 	contract := &accounts.Account{
 		Nonce:    7,
 		Balance:  *uint256.NewInt(5),
-		Root:     EmptyRoot,
+		Root:     empty.RootHash,
 		CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{0x60, 0x00})),
 	}
 	stateTrie.UpdateAccount(crypto.Keccak256(contractAddr[:]), contract)
