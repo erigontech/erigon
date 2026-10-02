@@ -238,12 +238,12 @@ run_leg_m() {
 leg="$START_LEG"
 cycle=1
 while [[ "$CYCLES" == "0" || "$cycle" -le "$CYCLES" ]]; do
+  rc=0
   case "$leg" in
-    P) run_leg_p "$cycle" ;;
-    M) run_leg_m "$cycle" ;;
+    P) run_leg_p "$cycle" || rc=$? ;;
+    M) run_leg_m "$cycle" || rc=$? ;;
     *) echo "unknown leg $leg" >&2; exit 1 ;;
   esac
-  rc=$?
   if [[ "$rc" != "0" ]]; then
     echo "[continuous-soak] cycle $cycle leg $leg FAILED with rc=$rc — stopping" >&2
     exit "$rc"
