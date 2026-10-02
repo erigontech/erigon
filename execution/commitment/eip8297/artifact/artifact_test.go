@@ -45,25 +45,7 @@ import (
 
 type PreimageIterator func(func(Preimage) error) error
 
-func WritePreimages(dst io.Writer, records any) error {
-	var iterate PreimageIterator
-	switch value := records.(type) {
-	case []Preimage:
-		iterate = func(yield func(Preimage) error) error {
-			for _, record := range value {
-				if err := yield(record); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-	case PreimageIterator:
-		iterate = value
-	case func(func(Preimage) error) error:
-		iterate = PreimageIterator(value)
-	default:
-		return ErrPreimages
-	}
+func WritePreimages(dst io.Writer, iterate PreimageIterator) error {
 	if iterate == nil {
 		return ErrPreimages
 	}
@@ -79,6 +61,17 @@ func WritePreimages(dst io.Writer, records any) error {
 			})
 		})
 	})
+}
+
+func preimageSliceIterator(records []Preimage) PreimageIterator {
+	return func(yield func(Preimage) error) error {
+		for _, record := range records {
+			if err := yield(record); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 }
 
 type goldenArtifact struct {
@@ -529,7 +522,7 @@ func TestPreimageReaderRejectsUnsortedDuplicateAndTruncatedRecords(t *testing.T)
 	addressA := common.Address{1}
 	records := []Preimage{{Address: addressA}}
 	var encoded bytes.Buffer
-	require.NoError(t, WritePreimages(&encoded, records))
+	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator(records)))
 	_, err := readPreimages(t, append(encoded.Bytes(), 1))
 	require.Error(t, err, "a trailing byte must not be accepted as a preimage record")
 	duplicate := append(bytes.Clone(encoded.Bytes()), encoded.Bytes()...)
@@ -542,7 +535,7 @@ func TestPreimageReaderRejectsUnsortedDuplicateAndTruncatedRecords(t *testing.T)
 		return bytes.Compare(left[:], right[:]) < 0
 	})
 	encoded.Reset()
-	require.NoError(t, WritePreimages(&encoded, addressRecords))
+	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator(addressRecords)))
 	unsortedAddresses := bytes.Clone(encoded.Bytes())
 	firstAddress := bytes.Clone(unsortedAddresses[:20])
 	copy(unsortedAddresses[:20], unsortedAddresses[24:44])
@@ -557,7 +550,7 @@ func TestPreimageReaderRejectsUnsortedDuplicateAndTruncatedRecords(t *testing.T)
 	})
 	records = []Preimage{{Address: addressA, Slots: slots}}
 	encoded.Reset()
-	require.NoError(t, WritePreimages(&encoded, records))
+	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator(records)))
 	unsortedSlots := bytes.Clone(encoded.Bytes())
 	firstSlot := bytes.Clone(unsortedSlots[24:56])
 	copy(unsortedSlots[24:56], unsortedSlots[56:88])
@@ -614,14 +607,14 @@ func TestPreimageJoinMergesTreeKeysAcrossAddressOrders(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	require.NoError(t, WritePreimages(&preimages, records))
+	require.NoError(t, WritePreimages(&preimages, preimageSliceIterator(records)))
 	require.NoError(t, JoinAt(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), bytes.NewReader(preimages.Bytes()), int64(preimages.Len()), eip8297.HashBytes, nil, t.TempDir()))
 
 	testJoinError := func(name string, mutate func([]Preimage) []Preimage, want string) {
 		t.Run(name, func(t *testing.T) {
 			mutated := mutate(append([]Preimage(nil), records...))
 			var encoded bytes.Buffer
-			require.NoError(t, WritePreimages(&encoded, mutated))
+			require.NoError(t, WritePreimages(&encoded, preimageSliceIterator(mutated)))
 			err := JoinAt(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), eip8297.HashBytes, nil, t.TempDir())
 			require.ErrorContains(t, err, want)
 		})
@@ -677,7 +670,7 @@ func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
 	expected := [][]byte{headerKey, headerSlotKey, overflowKey}
 	record := Preimage{Address: address, Slots: [][32]byte{headerSlot, overflowSlot}}
 	var encoded bytes.Buffer
-	require.NoError(t, WritePreimages(&encoded, []Preimage{record}))
+	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator([]Preimage{record})))
 	yieldExpected := func(yield func([]byte) error) error {
 		for _, key := range expected {
 			if err := yield(key); err != nil {
@@ -709,7 +702,7 @@ func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
 		return bytes.Compare(left[:], right[:]) < 0
 	})
 	encoded.Reset()
-	require.NoError(t, WritePreimages(&encoded, []Preimage{{Address: address, Slots: extraSlots}}))
+	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator([]Preimage{{Address: address, Slots: extraSlots}})))
 	require.ErrorContains(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), yieldExpected, eip8297.HashBytes, t.TempDir()), "surplus key")
 }
 
@@ -824,7 +817,7 @@ func TestPreimageReaderAllocationsStayBounded(t *testing.T) {
 		return bytes.Compare(left[:], right[:]) < 0
 	})
 	var encoded bytes.Buffer
-	require.NoError(t, WritePreimages(&encoded, records))
+	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator(records)))
 	allocations := testing.AllocsPerRun(3, func() {
 		err := ReadPreimagesStream(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), func(common.Address, func(func([32]byte) error) error) error {
 			return nil
