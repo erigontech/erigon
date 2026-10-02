@@ -38,7 +38,7 @@ func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB,
 }
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
-func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
+func (m *Merger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	cfg := m.snCfg
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
@@ -90,7 +90,6 @@ func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType sn
 
 func (m *Merger) mergeSubSegment(
 	ctx context.Context,
-	v *View,
 	sn snaptype.FileInfo,
 	toMerge []*DirtySegment,
 	snapDir string,
@@ -121,7 +120,7 @@ func (m *Merger) mergeSubSegment(
 	if len(toMerge) == 0 {
 		return
 	}
-	if newDirtySegment, err = m.merge(ctx, v, toMerge, sn, snapDir, nil); err != nil {
+	if newDirtySegment, err = m.merge(ctx, toMerge, sn, snapDir); err != nil {
 		err = fmt.Errorf("mergeByAppendSegments: %w", err)
 		return
 	}
@@ -222,7 +221,6 @@ func (m *Merger) Merge(
 		for _, t := range snapTypes {
 			newDirtySegment, err := m.mergeSubSegment(
 				ctx,
-				v,
 				t.FileInfo(snapDir, r.From(), r.To()),
 				toMerge[t.Enum()],
 				snapDir,
@@ -247,7 +245,7 @@ func (m *Merger) Merge(
 			}
 		}
 
-		//TODO: or move it inside `integrateMergedDirtyFiles`, or move `integrateMergedDirtyFiles` here. Merge can be long - means call `integrateMergedDirtyFiles` earlier can make sense.
+		// TODO: or move it inside `integrateMergedDirtyFiles`, or move `integrateMergedDirtyFiles` here. Merge can be long - means call `integrateMergedDirtyFiles` earlier can make sense.
 		toMergeFileNames := make([]string, 0, 16)
 		for _, segments := range toMerge {
 			for _, segment := range segments {
@@ -329,8 +327,8 @@ func (m *Merger) integrateMergedDirtyFiles(snapshots *BaseRoSnapshots, in, out m
 	}
 }
 
-func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, targetFile snaptype.FileInfo, snapDir string, logEvery *time.Ticker) (*DirtySegment, error) {
-	var word = make([]byte, 0, 4096)
+func (m *Merger) merge(ctx context.Context, toMerge []*DirtySegment, targetFile snaptype.FileInfo, snapDir string) (*DirtySegment, error) {
+	word := make([]byte, 0, 4096)
 	var expectedTotal int
 	cList := make([]*seg.Decompressor, len(toMerge))
 	defer func() {

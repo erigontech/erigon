@@ -138,7 +138,8 @@ func TestResetCheapDiskExample(t *testing.T) {
 		}
 		endEntries := append(
 			slices.Clone(startEntries[:7]),
-			fsEntry{Name: ".", Mode: fs.ModeDir})
+			fsEntry{Name: ".", Mode: fs.ModeDir},
+		)
 		makeEntries(t, startEntries, testRoot)
 		rootFS := testRoot.FS()
 		printFs(t, rootFS)

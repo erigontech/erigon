@@ -255,7 +255,7 @@ func TestGenerator(t *testing.T) {
 				// outsize, outoffset, insize, inoffset
 				byte(vm.PUSH1), 0, byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1),
 				byte(vm.DUP1),        // value
-				byte(vm.PUSH1), 0xbb, //address
+				byte(vm.PUSH1), 0xbb, // address
 				byte(vm.GAS), // gas
 				byte(vm.CALL),
 				byte(vm.POP),
@@ -269,7 +269,7 @@ func TestGenerator(t *testing.T) {
 				// outsize, outoffset, insize, inoffset
 				byte(vm.PUSH1), 0, byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1),
 				byte(vm.PUSH1), 0, // value
-				byte(vm.PUSH1), 0xcc, //address
+				byte(vm.PUSH1), 0xcc, // address
 				byte(vm.GAS), // gas
 				byte(vm.CALLCODE),
 				byte(vm.POP),
@@ -282,7 +282,7 @@ func TestGenerator(t *testing.T) {
 			want: []byte{
 				// outsize, outoffset, insize, inoffset
 				byte(vm.PUSH1), 0, byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1),
-				byte(vm.PUSH1), 0xdd, //address
+				byte(vm.PUSH1), 0xdd, // address
 				byte(vm.GAS), // gas
 				byte(vm.STATICCALL),
 				byte(vm.POP),
@@ -295,7 +295,7 @@ func TestGenerator(t *testing.T) {
 			want: []byte{
 				// outsize, outoffset, insize, inoffset
 				byte(vm.PUSH1), 0, byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1),
-				byte(vm.PUSH1), 0xee, //address
+				byte(vm.PUSH1), 0xee, // address
 				byte(vm.GAS), // gas
 				byte(vm.DELEGATECALL),
 				byte(vm.POP),

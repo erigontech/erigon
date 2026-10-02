@@ -538,15 +538,21 @@ func TestGetCode_RejectsParentAccountAboveStagedUnwindBound(t *testing.T) {
 	})
 	require.NoError(t, parent.DomainPut(kv.AccountsDomain, rwTx, addr, deadForkAccount, 40, nil)) // step 2
 
-	codeStore := cache.NewCodeStore(1<<20, 1<<20)
-	require.NoError(t, codeStore.PutByHash(rwTx, codeHash[:], deadForkCode))
-	child.SetCodeStore(codeStore)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	child.BindStateCache(stateCache)
+	cachedAddr := common.Address{0xc3}
+	seed(t, stateCache, rwTx, kv.CodeDomain, cachedAddr[:], deadForkCode, 5)
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
 	var diffs [kv.DomainLen][]kv.DomainEntryDiff
 	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{{Key: string(addr) + string(stepBytes), Value: nil}}
 	child.Unwind(10, &diffs)
+
+	cachedCode, cached := stateCache.View(nil).GetCodeByHash(codeHash[:])
+	require.True(t, cached)
+	require.Equal(t, deadForkCode, cachedCode)
 
 	got, ok, err := child.GetCode(rwTx, addr, 40)
 	require.NoError(t, err)
@@ -611,7 +617,6 @@ func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
 	db := newTestDb(t, stepSize)
 	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	codeStore := cache.NewCodeStore(1<<20, 1<<20)
 
 	addr := make([]byte, 20)
 	addr[0] = 0xdd
@@ -628,7 +633,6 @@ func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
 	require.NoError(t, err)
 	defer seedDomains.Close()
 	seedDomains.BindStateCache(stateCache)
-	seedDomains.SetCodeStore(codeStore)
 	seedDomains.SetTxNum(20)
 	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, addr, account, 20, nil))
 	require.NoError(t, seedDomains.DomainPut(kv.CodeDomain, seedTx, addr, code, 20, nil))
@@ -647,7 +651,6 @@ func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
 	require.NoError(t, err)
 	defer unwindDomains.Close()
 	unwindDomains.BindStateCache(stateCache)
-	unwindDomains.SetCodeStore(codeStore)
 	unwindDomains.Unwind(10, &diffs)
 
 	futureAddr := make([]byte, 20)
