@@ -4,14 +4,14 @@ These vectors were generated from geth-pbt ref `origin/pbt` at `793dedb`.
 The export was made without changing the checkout:
 
 ```sh
-git -C /Users/awskii/org/wrk/go-ethereum archive --format=tar --prefix=geth-793dedb/ 793dedb | tar -x -C /tmp/tandem-pbt-witness
+git -C <go-ethereum checkout> archive --format=tar --prefix=geth-793dedb/ 793dedb | tar -x -C /tmp/geth-blobs
 ```
 
 The throwaway generator was saved as `trie/bintrie/blob_vectors_test.go` in
 the export and run with:
 
 ```sh
-GOCACHE=/tmp/tandem-pbt-witness/geth-gocache GOPROXY=off go test ./trie/bintrie/ -run '^TestGenerateBlobVectors$' -count=1
+GOPROXY=off go test ./trie/bintrie/ -run '^TestGenerateBlobVectors$' -count=1
 ```
 
 ```go
@@ -115,7 +115,7 @@ func TestGenerateBlobVectors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile("/tmp/tandem-pbt-witness/geth_blobs.json", append(data, '\n'), 0o644); err != nil {
+	if err := os.WriteFile("/tmp/geth-blobs/geth_blobs.json", append(data, '\n'), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

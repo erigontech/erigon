@@ -195,7 +195,6 @@ func TestPBinWitnessPackageDependencies(t *testing.T) {
 	require.NoError(t, err)
 	cmd := exec.CommandContext(context.Background(), "go", "list", "-deps", "./execution/commitment/eip8297/witness")
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "GOCACHE=/tmp/tandem-pbt-v3-gocache")
 	out, err := cmd.Output()
 	require.NoError(t, err)
 	for dep := range strings.SplitSeq(string(out), "\n") {
