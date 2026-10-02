@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,7 +55,10 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), node.Tester.DB))
+	require.NoError(t, node.Tester.ReExecuteTo(t.Context(), 2))
 	buildPBTAcceptanceFilesAt(t, node, 7)
+	resetPBTAcceptanceExecution(t, node)
 	node.Tester.Close()
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
@@ -154,6 +156,7 @@ func TestPBTAttachPostForkBlockEndShadowRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
 	buildPBTAcceptanceFilesAt(t, node, 7)
+	resetPBTAcceptanceExecution(t, node)
 	node.Tester.Close()
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
@@ -201,6 +204,7 @@ func TestPBTAttachRejectsPublishedRootMismatchWithoutMutation(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
 	buildPBTAcceptanceFilesAt(t, node, 7)
+	resetPBTAcceptanceExecution(t, node)
 	node.Tester.Close()
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
 	require.NoError(t, err)
@@ -218,8 +222,35 @@ func TestPBTAttachRejectsPublishedRootMismatchWithoutMutation(t *testing.T) {
 	t.Cleanup(func() { validatePBTAttachLeafStampsFn = previousRoot })
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
 	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "differs from header root")
+	require.ErrorContains(t, err, "published binary rows root")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+}
+
+func TestPBTAttachRejectsCorruptedPublishedBinaryRowsWithoutMutation(t *testing.T) {
+	disablePBTAttachGenesisValidation(t)
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+		statecfg.BinCommitmentHash = previousHash
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, _ := newPBTConversionSource(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	require.NoError(t, corruptPBTOutputRow(t.Context(), datadir.Open(published)))
+	setExecutionProgress(t, source.Chaindata, 1)
+	before := snapshotTree(t, source.DataDir)
+	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
+	require.ErrorContains(t, err, "published binary rows")
+	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 
 func TestPBTAttachRejectsNodePBTStateMismatchWithoutMutation(t *testing.T) {
@@ -238,15 +269,14 @@ func TestPBTAttachRejectsNodePBTStateMismatchWithoutMutation(t *testing.T) {
 	selectPBTCommandSuite(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
-	previousRoot := pbtAttachNodePbtRootFn
-	pbtAttachNodePbtRootFn = func(context.Context, datadir.Dirs, *dbstate.ErigonDBSettings, uint64, string, log.Logger) (common.Hash, error) {
-		return common.Hash{0xaa}, nil
-	}
-	t.Cleanup(func() { pbtAttachNodePbtRootFn = previousRoot })
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
 	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "node PBT root")
+	require.ErrorContains(t, err, "node is at block")
+	require.ErrorContains(t, err, "stage_exec --datadir")
+	require.ErrorContains(t, err, "--reset")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+	resetPBTAcceptanceExecution(t, node)
+	require.NoError(t, attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New()))
 }
 
 func TestPBTAttachRejectsNodeHexStateMismatchWithoutMutation(t *testing.T) {
@@ -255,6 +285,7 @@ func TestPBTAttachRejectsNodeHexStateMismatchWithoutMutation(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
 	buildPBTAcceptanceFilesAt(t, node, 7)
+	resetPBTAcceptanceExecution(t, node)
 	node.Tester.Close()
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
 	require.NoError(t, err)
@@ -279,7 +310,7 @@ func TestPBTAttachRejectsNodeHexStateMismatchWithoutMutation(t *testing.T) {
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
 }
 
-func TestPBTAttachRejectsMissingPublishedGenesis(t *testing.T) {
+func TestValidatePBTAttachGenesisRejectsMissingHeader(t *testing.T) {
 	selectPBTCommandSuite(t)
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
 	require.NoError(t, err)
@@ -325,6 +356,7 @@ func TestPBTAttachRunsGenesisValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
 	buildPBTAcceptanceFilesAt(t, node, 7)
+	resetPBTAcceptanceExecution(t, node)
 	node.Tester.Close()
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
 	require.NoError(t, err)
@@ -335,14 +367,48 @@ func TestPBTAttachRunsGenesisValidation(t *testing.T) {
 	selectPBTCommandSuite(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
-	previousGenesis := validatePBTAttachGenesisFn
-	validatePBTAttachGenesisFn = func(context.Context, datadir.Dirs, datadir.Dirs, log.Logger) error {
-		return errors.New("published genesis differs")
-	}
-	t.Cleanup(func() { validatePBTAttachGenesisFn = previousGenesis })
+	rawDB := dbCfg(dbcfg.ChainDB, node.Tester.Dirs.Chaindata).MustOpen()
+	genesisHash := common.Hash{0xff}
+	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := rawdb.WriteCanonicalHash(tx, genesisHash, 0); err != nil {
+			return err
+		}
+		return rawdb.WriteChainConfig(tx, genesisHash, node.Tester.ChainConfig)
+	}))
+	rawDB.Close()
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
 	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "published genesis differs")
+	require.ErrorContains(t, err, "genesis hash")
+	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
+}
+
+func TestPBTAttachRejectsMissingPublishedGenesis(t *testing.T) {
+	selectPBTCommandSuite(t)
+	node, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	buildPBTAcceptanceFilesAt(t, node, 7)
+	resetPBTAcceptanceExecution(t, node)
+	node.Tester.Close()
+
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	copyPBTStateSalt(t, node, source)
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
+	buildPBTAcceptanceFiles(t, source)
+	source.Tester.Close()
+	selectPBTCommandSuite(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
+	require.NoError(t, filepath.WalkDir(datadir.Open(published).Snap, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() || !strings.Contains(entry.Name(), "headers") {
+			return walkErr
+		}
+		return dir.RemoveFile(path)
+	}))
+	before := snapshotTree(t, node.Tester.Dirs.DataDir)
+	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
+	require.ErrorContains(t, err, "published genesis is missing")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
 }
 
@@ -351,6 +417,8 @@ func TestPBTAttachAcceptanceAtMidBlockConversionPoint(t *testing.T) {
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), node.Tester.DB))
+	require.NoError(t, node.Tester.ReExecuteTo(t.Context(), 3))
 	buildPBTAcceptanceFilesAt(t, node, 9)
 	node.Tester.Close()
 
@@ -360,6 +428,15 @@ func TestPBTAttachAcceptanceAtMidBlockConversionPoint(t *testing.T) {
 	require.NoError(t, source.Tester.InsertChain(source.Chain))
 	buildPBTAcceptanceFilesAt(t, source, 9)
 	source.Tester.Close()
+	resetNode := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(datadir.Open(node.Tester.Dirs.DataDir)),
+		execmoduletester.WithGenesisSpec(node.Genesis),
+		execmoduletester.WithKey(node.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), resetNode.DB))
+	resetNode.Close()
 	selectPBTCommandSuite(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
@@ -471,7 +548,8 @@ func TestPBTAttachedReplayMatchesConvertedState(t *testing.T) {
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
-	buildPBTAcceptanceFiles(t, node)
+	buildPBTAcceptanceFilesAt(t, node, 10)
+	resetPBTAcceptanceExecution(t, node)
 	node.Tester.Close()
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
@@ -575,6 +653,25 @@ func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptan
 	tx.Rollback()
 	rawDB.Close()
 	buildPBTAcceptanceFilesAt(t, fixture, lastTxNum)
+}
+
+func resetPBTAcceptanceExecution(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain) {
+	t.Helper()
+	settings, err := dbstate.ReadErigonDBSettings(fixture.Tester.Dirs)
+	require.NoError(t, err)
+	options := []execmoduletester.Option{
+		execmoduletester.WithExistingDataDir(fixture.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(fixture.Genesis),
+		execmoduletester.WithKey(fixture.Key),
+		execmoduletester.WithStepSize(settings.StepSize),
+		execmoduletester.WithoutGenesisCommit(),
+	}
+	if settings.TrieVariantName() == dbstate.TrieVariantHexBin {
+		options = append(options, execmoduletester.WithEnableDomain(kv.CommitmentBinDomain))
+	}
+	tester := execmoduletester.New(t, options...)
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), tester.DB))
+	tester.Close()
 }
 
 func buildPBTAcceptanceFilesAt(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain, lastTxNum uint64) {

@@ -246,6 +246,7 @@ func TestConvertPBTUsesRequestedKeccakSuite(t *testing.T) {
 }
 
 func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
+	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
@@ -773,9 +774,15 @@ func corruptPBTOutputRow(ctx context.Context, dirs datadir.Dirs) error {
 	variant := dbstate.TrieVariantHexBin
 	hash := commitment.PBinHashBlake3
 	settings := &dbstate.ErigonDBSettings{StepSize: 8, StepsInFrozenFile: 1, ReferencesInCommitmentBranches: &refs, TrieVariant: &variant, TrieHash: &hash}
+	if existing, readErr := dbstate.ReadErigonDBSettings(dirs); readErr == nil {
+		settings = existing
+		settings.TrieVariant = &variant
+		settings.TrieHash = &hash
+	}
 	if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
 		return err
 	}
+	configurePBTSourceVariant(settings)
 	rawPath, err := os.MkdirTemp("", "convert-pbt-corrupt-chaindata-")
 	if err != nil {
 		return err
@@ -914,7 +921,8 @@ func TestConvertPBTRemovesFilesStartingAfterConversionPoint(t *testing.T) {
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
-	buildPBTAcceptanceFiles(t, node)
+	buildPBTAcceptanceFilesAt(t, node, 7)
+	resetPBTAcceptanceExecution(t, node)
 	node.Tester.Close()
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)

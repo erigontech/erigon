@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -198,6 +199,7 @@ func TestConfiguredPBTNodeHashUsesPersistedSuite(t *testing.T) {
 }
 
 func TestAttachPBTResetsAndReopensAtPublishedRoot(t *testing.T) {
+	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
@@ -360,15 +362,18 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		node, published := newPBTAttachFileTrees(t, true)
 		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 7)
 		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 7)
+		require.NoError(t, os.WriteFile(filepath.Join(node.Snap, "salt-state.txt"), []byte{0, 0, 0, 1}, 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(published.Snap, "salt-state.txt"), []byte{0, 0, 0, 1}, 0o644))
 		require.NoError(t, os.MkdirAll(node.Chaindata, 0o755))
 		rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(node.Chaindata).MustOpen()
 		rawDB.Close()
 		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
-		require.ErrorContains(t, err, "behind conversion block")
+		require.ErrorContains(t, err, "node hex state is missing")
 	})
 }
 
 func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
+	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
@@ -416,6 +421,7 @@ func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
 }
 
 func TestAttachPBTRetryAfterPartialSwap(t *testing.T) {
+	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
@@ -460,6 +466,7 @@ func TestAttachPBTRetryAfterPartialSwap(t *testing.T) {
 }
 
 func TestAttachPBTRetryAfterPartialSettingsWrite(t *testing.T) {
+	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
@@ -530,6 +537,7 @@ func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) 
 }
 
 func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
+	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
@@ -622,6 +630,15 @@ func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
 	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
 	require.ErrorContains(t, err, "published leaf stamp 15")
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
+}
+
+func disablePBTAttachGenesisValidation(t *testing.T) {
+	t.Helper()
+	previous := validatePBTAttachGenesisFn
+	validatePBTAttachGenesisFn = func(context.Context, datadir.Dirs, datadir.Dirs, log.Logger) error {
+		return nil
+	}
+	t.Cleanup(func() { validatePBTAttachGenesisFn = previous })
 }
 
 func renamePBTFilesRange(t *testing.T, root, from, to string) {

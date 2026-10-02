@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io/fs"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -47,8 +48,11 @@ func configurePBTExportHash(dirs datadir.Dirs, cliCtx *cli.Command) (func(), err
 		statecfg.BinCommitmentHash = oldHash
 		_ = commitment.SetPBinHashSuite(oldSuite)
 	}
-	requested := cliCtx.String("experimental.bin-commitment.hash")
+	requested := cliCtx.String(utils.ExperimentalBinCommitmentHashFlag.Name)
 	if variant == state.TrieVariantHex {
+		if requested == "" {
+			requested = oldHash
+		}
 		statecfg.ExperimentalBinCommitment = false
 		statecfg.ExperimentalHexBinCommitment = false
 		statecfg.BinCommitmentHash = ""

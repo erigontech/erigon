@@ -97,32 +97,44 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 }
 
 func VerifyPBinDomain(ctx context.Context, tx kv.TemporalTx, aggregator *Aggregator, domain kv.Domain) error {
+	_, err := VerifyPBinDomainRoot(ctx, tx, aggregator, domain)
+	return err
+}
+
+func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Aggregator, domain kv.Domain) (common.Hash, error) {
 	if tx == nil || aggregator == nil {
-		return fmt.Errorf("pbin verification: missing database input")
+		return common.Hash{}, fmt.Errorf("pbin verification: missing database input")
 	}
 	cfg := pbinConversionTrieConfig()
 	cfg.EnableTrieWarmup = false
 	at := aggregator.BeginFilesRo()
 	defer at.Close()
 	if len(at.Files(domain)) == 0 {
-		return nil
+		return eip8297.EmptyTreeHash, nil
 	}
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(domain), execctx.WithoutCommitmentSeek())
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	defer domains.Close()
 	commitmentCtx := domains.GetCommitmentCtxForDomain(domain)
 	if commitmentCtx == nil {
-		return fmt.Errorf("pbin verification: commitment domain %s is unavailable", domain)
+		return common.Hash{}, fmt.Errorf("pbin verification: commitment domain %s is unavailable", domain)
 	}
 	commitmentCtx.PrepareForVerification(tx)
 	trie := commitmentCtx.Trie()
 	verifier, ok := trie.(interface{ Verify() error })
 	if !ok {
-		return fmt.Errorf("pbin verification: trie does not support verification")
+		return common.Hash{}, fmt.Errorf("pbin verification: trie does not support verification")
 	}
-	return verifier.Verify()
+	if verifyErr := verifier.Verify(); verifyErr != nil {
+		return common.Hash{}, verifyErr
+	}
+	root, err := trie.RootHash()
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return common.BytesToHash(root), nil
 }
 
 func pbinConversionTrieConfig() commitment.TrieConfig {

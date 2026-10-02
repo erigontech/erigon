@@ -37,6 +37,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -59,7 +61,6 @@ var (
 	validatePBTAttachLeafStampsFn = validatePBTAttachLeafStamps
 	validatePBTAttachGenesisFn    = validatePBTAttachGenesis
 	pbtAttachHexRootFn            = pbtAttachHexRoot
-	pbtAttachNodePbtRootFn        = pbtAttachNodePbtRoot
 )
 
 func init() {
@@ -179,12 +180,23 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	} else if err := validatePBTAttachPublishedFiles(publishedDirs, publishedSettings.StepSize, txNum); err != nil {
 		return err
 	}
+	var nodeHexRoot common.Hash
+	if marker == nil {
+		nodeBlock, nodeTx, root, stateErr := pbtAttachNodeHexState(ctx, nodeDirs, nodeSettings, logger)
+		if stateErr != nil {
+			return stateErr
+		}
+		if nodeBlock != blockNum || nodeTx != txNum {
+			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, blockNum, txNum)
+		}
+		nodeHexRoot = root
+	}
 	rawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata), true)
 	if err != nil {
 		return err
 	}
 	if marker == nil {
-		if err := checkPBTNodeProgress(ctx, rawDB, blockNum); err != nil {
+		if err := checkPBTNodeProgress(ctx, rawDB, nodeDirs.DataDir, chainName, blockNum, txNum); err != nil {
 			rawDB.Close()
 			return err
 		}
@@ -207,21 +219,22 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if err != nil {
 		return err
 	}
+	if err := verifyPBTAttachPublishedBin(ctx, publishedDirs, publishedSettings, blockNum, txNum, publishedPbtRoot, logger); err != nil {
+		return err
+	}
 	blockHash, headerRoot, blockEnd, afterFork, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
 	if err != nil {
 		return err
 	}
+	var publishedHexRoot common.Hash
+	var publishedHexFound bool
 	if marker == nil {
-		publishedHexRoot, found, err := pbtAttachHexRootFn(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
+		publishedHexRoot, publishedHexFound, err = pbtAttachHexRootFn(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
 		if err != nil {
 			return err
 		}
-		if !found {
+		if !publishedHexFound {
 			return fmt.Errorf("commitment attach-pbt: published hex root is missing at (%d, %d)", blockNum, txNum)
-		}
-		nodeHexRoot, err := pbtAttachNodeHexRoot(ctx, nodeDirs, nodeSettings, blockNum, txNum, logger)
-		if err != nil {
-			return err
 		}
 		if nodeHexRoot != publishedHexRoot {
 			return fmt.Errorf("commitment attach-pbt: node hex root %s differs from published root %s at (%d, %d)", nodeHexRoot, publishedHexRoot, blockNum, txNum)
@@ -238,7 +251,7 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 		if err := validatePBTAttachGenesisFn(ctx, nodeDirs, publishedDirs, logger); err != nil {
 			return err
 		}
-		nodePbtRoot, err := pbtAttachNodePbtRootFn(ctx, nodeDirs, nodeSettings, txNum, publishedSettings.TrieHashName(), logger)
+		nodePbtRoot, err := pbtAttachNodePbtRoot(ctx, nodeDirs, nodeSettings, publishedSettings.TrieHashName(), logger)
 		if err != nil {
 			return err
 		}
@@ -292,10 +305,14 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if blockEnd {
 		var shadowRoot common.Hash
 		if afterFork {
-			if hexRoot, found, err := pbtAttachHexRootFn(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger); err != nil {
-				return err
-			} else if found {
-				shadowRoot = hexRoot
+			if !publishedHexFound {
+				publishedHexRoot, publishedHexFound, err = pbtAttachHexRootFn(ctx, publishedDirs, publishedSettings, blockNum, txNum, logger)
+				if err != nil {
+					return err
+				}
+			}
+			if publishedHexFound {
+				shadowRoot = publishedHexRoot
 			} else {
 				blockEnd = false
 			}
@@ -324,7 +341,7 @@ func runPBTAttachStepHook(step string) error {
 	return attachPBTStepHook(step)
 }
 
-func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, txNum uint64, hashName string, logger log.Logger) (common.Hash, error) {
+func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, hashName string, logger log.Logger) (common.Hash, error) {
 	configurePBTSourceVariant(settings)
 	if err := eip8297.SetHashSuite(hashName); err != nil {
 		return common.Hash{}, err
@@ -353,7 +370,7 @@ func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbst
 	if err != nil {
 		return common.Hash{}, err
 	}
-	if err := dbstate.ForEachPBinLeafAt(ctx, at, roTx, txNum+1, func(leaf dbstate.PBinLeaf) error {
+	if err := dbstate.ForEachPBinLeaf(at, roTx, false, func(leaf dbstate.PBinLeaf) error {
 		return builder.Add(leaf.Key, leaf.Value)
 	}); err != nil {
 		return common.Hash{}, err
@@ -441,49 +458,44 @@ func pbtAttachHexRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.
 	return common.BytesToHash(root), true, nil
 }
 
-func pbtAttachNodeHexRoot(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) (common.Hash, error) {
+func pbtAttachNodeHexState(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, logger log.Logger) (uint64, uint64, common.Hash, error) {
 	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
-		return common.Hash{}, err
+		return 0, 0, common.Hash{}, err
 	}
 	defer db.Close()
 	configurePBTSourceVariant(settings)
 	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
 	if err != nil {
-		return common.Hash{}, err
+		return 0, 0, common.Hash{}, err
 	}
 	defer agg.Close()
 	if err := agg.OpenFolder(db); err != nil {
-		return common.Hash{}, err
+		return 0, 0, common.Hash{}, err
 	}
 	at := agg.BeginFilesRo()
 	defer at.Close()
 	roTx, err := db.BeginRo(ctx)
 	if err != nil {
-		return common.Hash{}, err
+		return 0, 0, common.Hash{}, err
 	}
 	defer roTx.Rollback()
-	value, found, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentV3State, txNum)
+	value, _, found, err := at.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, roTx, kv.GetLatestOptions{})
 	if err != nil {
-		return common.Hash{}, err
+		return 0, 0, common.Hash{}, err
 	}
 	if !found {
-		value, _, found, err = at.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, roTx, kv.GetLatestOptions{}.WithMaxStep(kv.Step(txNum/settings.StepSize)))
-	}
-	if err != nil {
-		return common.Hash{}, err
-	}
-	if !found {
-		return common.Hash{}, fmt.Errorf("commitment attach-pbt: node hex state is missing at (%d, %d)", blockNum, txNum)
+		return 0, 0, common.Hash{}, fmt.Errorf("commitment attach-pbt: node hex state is missing")
 	}
 	gotBlock, gotTx, root, err := commitment.DecodeCommitmentV3State(value)
 	if err != nil {
-		return common.Hash{}, err
+		return 0, 0, common.Hash{}, err
 	}
-	if gotBlock != blockNum || gotTx != txNum {
-		return common.Hash{}, fmt.Errorf("commitment attach-pbt: node hex state is (%d, %d), want (%d, %d)", gotBlock, gotTx, blockNum, txNum)
-	}
-	return common.BytesToHash(root), nil
+	return gotBlock, gotTx, common.BytesToHash(root), nil
+}
+
+func pbtAttachNodePointError(dataDir, chainName string, nodeBlock, nodeTx, blockNum, txNum uint64) error {
+	return fmt.Errorf("commitment attach-pbt: node is at block %d txNum %d, conversion point is block %d txNum %d; run integration stage_exec --datadir=%s --reset --chain=%s --experimental.commitment-v3 when the node files end at the point, or run integration stage_exec --datadir=%s --unwind=%d --chain=%s --experimental.commitment-v3 followed by integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3", nodeBlock, nodeTx, blockNum, txNum, dataDir, chainName, dataDir, blockNum-1, chainName, dataDir, blockNum, chainName)
 }
 
 func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datadir.Dirs, logger log.Logger) error {
@@ -528,16 +540,7 @@ func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datad
 		return err
 	}
 	if genesis == nil {
-		for _, pattern := range []string{"*headers.seg", "*bodies.seg", "*transactions.seg"} {
-			files, globErr := filepath.Glob(filepath.Join(publishedDirs.Snap, pattern))
-			if globErr != nil {
-				return globErr
-			}
-			if len(files) != 0 {
-				return errors.New("commitment attach-pbt: published genesis is missing")
-			}
-		}
-		return nil
+		return errors.New("commitment attach-pbt: published genesis is missing")
 	}
 	if genesis.Hash() != nodeGenesis {
 		return fmt.Errorf("commitment attach-pbt: genesis hash %s differs from node genesis %s", genesis.Hash(), nodeGenesis)
@@ -638,6 +641,63 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	return validatePBTAttachLeafStampsFn(txNum, func(emit func(dbstate.PBinLeaf) error) error {
 		return dbstate.ForEachPBinLeaf(at, nil, true, emit)
 	})
+}
+
+func verifyPBTAttachPublishedBin(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, wantRoot common.Hash, logger log.Logger) error {
+	if err := os.MkdirAll(dirs.Tmp, 0o755); err != nil {
+		return err
+	}
+	chaindataPath, err := os.MkdirTemp(dirs.Tmp, "attach-pbt-chaindata-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.RemoveAll(chaindataPath) }()
+	rawDB, err := mdbx.New(dbcfg.ChainDB, logger).Path(chaindataPath).Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer rawDB.Close()
+	if err := rawDB.Update(ctx, func(tx kv.RwTx) error {
+		for currentBlock := uint64(0); currentBlock <= blockNum; currentBlock++ {
+			maxTxNum := txNum
+			if currentBlock == 0 && blockNum != 0 {
+				maxTxNum = 0
+			}
+			if err := rawdbv3.TxNums.Append(tx, currentBlock, maxTxNum); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	configurePBTSourceVariant(settings)
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(rawDB); err != nil {
+		return err
+	}
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	root, err := dbstate.VerifyPBinDomainRoot(ctx, tx, agg, kv.CommitmentBinDomain)
+	if err != nil {
+		return fmt.Errorf("commitment attach-pbt: verify published binary rows: %w", err)
+	}
+	if root != wantRoot {
+		return fmt.Errorf("commitment attach-pbt: published binary rows root %s differs from published state root %s", root, wantRoot)
+	}
+	return nil
 }
 
 func validatePBTAttachLeafStamps(txNum uint64, forEach func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) {
@@ -913,7 +973,7 @@ func pbtAttachDomain(domain kv.Domain) bool {
 	return slices.Contains(pbtAttachDomains, domain)
 }
 
-func checkPBTNodeProgress(ctx context.Context, db kv.RoDB, blockNum uint64) error {
+func checkPBTNodeProgress(ctx context.Context, db kv.RoDB, dataDir, chainName string, blockNum, txNum uint64) error {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -923,8 +983,8 @@ func checkPBTNodeProgress(ctx context.Context, db kv.RoDB, blockNum uint64) erro
 	if err != nil {
 		return err
 	}
-	if progress < blockNum {
-		return fmt.Errorf("commitment attach-pbt: node is behind conversion block %d", blockNum)
+	if progress > blockNum {
+		return pbtAttachNodePointError(dataDir, chainName, progress, 0, blockNum, txNum)
 	}
 	return nil
 }
@@ -1079,7 +1139,7 @@ func linkOrCopyPBTFile(src, dst string) error {
 		return statErr
 	}
 	if err := os.Link(src, dst); err == nil {
-		return nil
+		return dir.FsyncDir(filepath.Dir(dst))
 	}
 	in, err := os.Open(src)
 	if err != nil {

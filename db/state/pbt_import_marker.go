@@ -17,13 +17,10 @@
 package state
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 )
 
@@ -40,15 +37,12 @@ func PBTImportMarkerPath(dirs datadir.Dirs) string {
 }
 
 func ReadPBTImportMarker(dirs datadir.Dirs) (*PBTImportMarker, error) {
-	data, err := os.ReadFile(PBTImportMarkerPath(dirs))
-	if errors.Is(err, os.ErrNotExist) {
+	var marker PBTImportMarker
+	found, err := readPBTMarker(PBTImportMarkerPath(dirs), &marker)
+	if !found && err == nil {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
-	}
-	var marker PBTImportMarker
-	if err := json.Unmarshal(data, &marker); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", PBTImportMarkerFileName, err)
 	}
 	if marker.SnapshotPath == "" || marker.SnapshotHash == "" || marker.Settings == nil {
@@ -61,49 +55,17 @@ func WritePBTImportMarker(dirs datadir.Dirs, marker *PBTImportMarker) error {
 	if marker == nil || marker.SnapshotPath == "" || marker.SnapshotHash == "" || marker.Settings == nil {
 		return errors.New("import-pbt marker is incomplete")
 	}
-	data, err := json.Marshal(marker)
-	if err != nil {
-		return err
-	}
-	path := PBTImportMarkerPath(dirs)
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		_ = tmp.Close()
-		_ = dir.RemoveFile(tmpPath)
-	}()
-	if err := tmp.Chmod(0o644); err != nil {
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	return dir.FsyncDir(dirs.Snap)
+	return writePBTMarker(PBTImportMarkerPath(dirs), marker)
 }
 
 func RemovePBTImportMarker(dirs datadir.Dirs) error {
-	if err := dir.RemoveFile(PBTImportMarkerPath(dirs)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return dir.FsyncDir(dirs.Snap)
+	return removePBTMarker(PBTImportMarkerPath(dirs))
 }
 
 func RefusePBTImportMarker(dirs datadir.Dirs) error {
 	marker, err := ReadPBTImportMarker(dirs)
 	if err != nil {
-		return fmt.Errorf("commitment import-pbt marker is invalid; rerun import-pbt --snapshot <snapshot>: %w", err)
+		return fmt.Errorf("commitment import-pbt marker is invalid; remove %s and commitment-bin files before retrying: %w", PBTImportMarkerPath(dirs), err)
 	}
 	if marker == nil {
 		return nil

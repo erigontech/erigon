@@ -18,14 +18,12 @@ package state
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
@@ -74,43 +72,6 @@ func ForEachPBinLeaf(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(P
 	}
 	defer codeCursor.close()
 	storageCursor, err := pbinOpenLatestCursor(at, roTx, kv.StorageDomain, filesOnly)
-	if err != nil {
-		return err
-	}
-	defer storageCursor.close()
-	if err := accountsCursor.advance(); err != nil {
-		return err
-	}
-	if err := codeCursor.advance(); err != nil {
-		return err
-	}
-	if err := storageCursor.advance(); err != nil {
-		return err
-	}
-	return pbinForEachLeaf(at, accountsCursor, codeCursor, storageCursor, emit)
-}
-
-func ForEachPBinLeafAt(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, txNum uint64, emit func(PBinLeaf) error) error {
-	if at == nil {
-		return fmt.Errorf("pbin leaf stream: nil aggregator transaction")
-	}
-	if roTx == nil {
-		return fmt.Errorf("pbin leaf stream: nil database transaction")
-	}
-	if emit == nil {
-		return fmt.Errorf("pbin leaf stream: nil emitter")
-	}
-	accountsCursor, err := pbinOpenAsOfCursor(ctx, at, roTx, kv.AccountsDomain, txNum)
-	if err != nil {
-		return err
-	}
-	defer accountsCursor.close()
-	codeCursor, err := pbinOpenAsOfCursor(ctx, at, roTx, kv.CodeDomain, txNum)
-	if err != nil {
-		return err
-	}
-	defer codeCursor.close()
-	storageCursor, err := pbinOpenAsOfCursor(ctx, at, roTx, kv.StorageDomain, txNum)
 	if err != nil {
 		return err
 	}
@@ -226,18 +187,6 @@ func pbinOpenLatestCursor(at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, file
 		return pbinLatestCursor{}, err
 	}
 	return pbinLatestCursor{iter: iter, stampReader: stampReader}, nil
-}
-
-func pbinOpenAsOfCursor(ctx context.Context, at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, txNum uint64) (pbinLatestCursor, error) {
-	domainRoTx := at.DbgDomain(domain)
-	if domainRoTx == nil {
-		return pbinLatestCursor{}, fmt.Errorf("pbin leaf stream: domain %s is unavailable", domain)
-	}
-	iter, err := domainRoTx.RangeAsOf(ctx, roTx, nil, nil, txNum, order.Asc, kv.Unlim)
-	if err != nil {
-		return pbinLatestCursor{}, err
-	}
-	return pbinLatestCursor{iter: iter}, nil
 }
 
 func (c *pbinLatestCursor) close() {

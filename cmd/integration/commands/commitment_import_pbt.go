@@ -107,7 +107,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	}
 	marker, err := dbstate.ReadPBTImportMarker(dirs)
 	if err != nil {
-		return fmt.Errorf("%w; rerun import-pbt --snapshot %s", err, snapshotPath)
+		return fmt.Errorf("%w; remove %s and commitment-bin files before retrying", err, dbstate.PBTImportMarkerPath(dirs))
 	}
 	absSnapshotPath, err := filepath.Abs(snapshotPath)
 	if err != nil {
@@ -136,6 +136,9 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	}
 	if marker != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
 		if marker.Settings.TrieHashName() == settings.TrieHashName() && marker.Settings.ConversionTxNum != nil && *marker.Settings.ConversionTxNum == meta.TxNum && marker.Settings.ConversionBlockNum != nil && *marker.Settings.ConversionBlockNum == meta.Block {
+			if err := validatePBTImportRecoveryFiles(dirs); err != nil {
+				return err
+			}
 			return dbstate.RemovePBTImportMarker(dirs)
 		}
 		return fmt.Errorf("commitment import-pbt: incomplete marker does not match target settings")
@@ -162,6 +165,9 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	statecfg.InitSchemas()
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	requestedHash := statecfg.BinCommitmentHash
+	if requestedHash == "" {
+		requestedHash = meta.HashSuite
+	}
 	if requestedHash != "" && requestedHash != meta.HashSuite {
 		return fmt.Errorf("commitment import-pbt: hash suite %q does not match snapshot suite %q", requestedHash, meta.HashSuite)
 	}
@@ -258,7 +264,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	}
 	if lastTx != meta.TxNum {
 		readTx.Rollback()
-		return fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.commitment-v3", meta.Block, meta.TxNum, meta.Block, lastTx, dataDir, meta.Block, chainConfig.ChainName, dataDir, chainConfig.ChainName)
+		return fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", meta.Block, meta.TxNum, meta.Block, lastTx, dataDir, meta.Block+1, chainConfig.ChainName, dataDir, chainConfig.ChainName, meta.HashSuite)
 	}
 	if common.HexToHash(meta.StateRoot) != header.Root {
 		readTx.Rollback()
@@ -270,7 +276,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		return err
 	}
 	if hexBlock != meta.Block || hexTx != meta.TxNum {
-		return fmt.Errorf("commitment import-pbt: hex commitment checkpoint is (%d, %d), want (%d, %d) at block %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.commitment-v3", hexBlock, hexTx, meta.Block, meta.TxNum, meta.Block, dataDir, meta.Block, chainConfig.ChainName, dataDir, chainConfig.ChainName)
+		return fmt.Errorf("commitment import-pbt: hex commitment checkpoint is (%d, %d), want (%d, %d) at block %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", hexBlock, hexTx, meta.Block, meta.TxNum, meta.Block, dataDir, meta.Block+1, chainConfig.ChainName, dataDir, chainConfig.ChainName, meta.HashSuite)
 	}
 	closeBlockReader()
 	closeBlockReader = nil
@@ -365,6 +371,10 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		})
 		return streamErr
 	}, meta.Block)
+	if err != nil {
+		domains.Close()
+		return err
+	}
 	checkpointState := writer.PBinCommitmentState()
 	checkpointInFiles := writer.PBinCommitmentStateInFiles()
 	if !checkpointInFiles {
@@ -378,14 +388,10 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 		}
 	}
 	domains.Close()
-	if err != nil {
-		return err
-	}
 	wantRoot := common.HexToHash(meta.PBTRoot)
 	if root != artifactRoot || root != wantRoot {
-		return fmt.Errorf("commitment import-pbt: written root %s differs from artifact root %s", root, wantRoot)
+		return fmt.Errorf("commitment import-pbt: written root %s differs from artifact root %s or metadata root %s", root, artifactRoot, wantRoot)
 	}
-	domains.Close()
 	if checkpointInFiles {
 		targetTx.Rollback()
 	} else if err := targetTx.Commit(); err != nil {
@@ -663,7 +669,7 @@ func readPBTImportHexCheckpoint(ctx context.Context, dirs datadir.Dirs, rawDB kv
 }
 
 func pbtImportProgressError(progress uint64, meta pbtImportMeta, dataDir, chainName string) error {
-	return fmt.Errorf("commitment import-pbt: target is at block %d, snapshot is at block %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.commitment-v3", progress, meta.Block, dataDir, progress, chainName, dataDir, chainName)
+	return fmt.Errorf("commitment import-pbt: target is at block %d, snapshot is at block %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", progress, meta.Block, dataDir, progress, chainName, dataDir, chainName, meta.HashSuite)
 }
 
 func movePBTImportBinFiles(stageDirs, targetDirs datadir.Dirs) ([]string, error) {
@@ -672,6 +678,7 @@ func movePBTImportBinFiles(stageDirs, targetDirs datadir.Dirs) ([]string, error)
 		return nil, err
 	}
 	moved := make([]string, 0)
+	destinationDirs := make(map[string]struct{})
 	for _, file := range files {
 		if file.domain != kv.CommitmentBinDomain {
 			continue
@@ -688,16 +695,40 @@ func movePBTImportBinFiles(stageDirs, targetDirs datadir.Dirs) ([]string, error)
 			return moved, err
 		}
 		moved = append(moved, destination)
+		destinationDirs[filepath.Dir(destination)] = struct{}{}
 	}
 	if len(moved) == 0 {
 		return moved, errors.New("commitment import-pbt: staged binary commitment files are missing")
 	}
+	for destinationDir := range destinationDirs {
+		if err := dir.FsyncDir(destinationDir); err != nil {
+			return moved, err
+		}
+	}
 	return moved, nil
 }
 
+func validatePBTImportRecoveryFiles(dirs datadir.Dirs) error {
+	files, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		if file.domain == kv.CommitmentBinDomain && file.data {
+			return nil
+		}
+	}
+	return errors.New("commitment import-pbt: recovery files are missing; remove the import marker and commitment-bin files before retrying")
+}
+
 func removePBTImportFiles(files []string) {
+	directories := make(map[string]struct{})
 	for _, file := range files {
 		_ = dir.RemoveFile(file)
+		directories[filepath.Dir(file)] = struct{}{}
+	}
+	for directory := range directories {
+		_ = dir.FsyncDir(directory)
 	}
 }
 
@@ -706,11 +737,18 @@ func removePBTImportFilesForRecovery(dirs datadir.Dirs) error {
 	if err != nil {
 		return err
 	}
+	directories := make(map[string]struct{})
 	for _, file := range files {
 		if file.domain == kv.CommitmentBinDomain {
 			if err := dir.RemoveFile(file.path); err != nil {
 				return err
 			}
+			directories[filepath.Dir(file.path)] = struct{}{}
+		}
+	}
+	for directory := range directories {
+		if err := dir.FsyncDir(directory); err != nil {
+			return err
 		}
 	}
 	return nil

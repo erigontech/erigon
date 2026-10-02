@@ -135,14 +135,16 @@ integration commitment attach-pbt --datadir=<node> --chain=<chain> --from=<out> 
 
 # Test-only substitute for conversion and attach.
 integration stage_exec --datadir=<node> --chain=<chain> --block=<X> --experimental.commitment-v3
-erigon snapshots export-pbt --datadir=<node> --chain=<chain> --out=<export>
+erigon snapshots export-pbt --datadir=<node> --chain=<chain> --out=<export> \
+  --experimental.bin-commitment.hash=<suite>
 integration commitment import-pbt --datadir=<node> --chain=<chain> \
   --snapshot=<export>/pbt-snapshot.bin --experimental.bin-commitment.hash=<suite>
 integration stage_exec --datadir=<node> --chain=<chain> --experimental.commitment-v3 \
   --experimental.bin-commitment --experimental.bin-commitment.hash=<suite>
 ```
 
-Pass `--experimental.bin-commitment.hash=<suite>` to both commands. The
+Pass `--experimental.bin-commitment.hash=<suite>` to `export-pbt` and
+`import-pbt`. The
 producer and node must use the network's hash suite; attach refuses a suite
 mismatch. The EIP-8297 reference implementation uses BLAKE3, but the suite is
 a network choice.

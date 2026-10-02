@@ -346,7 +346,7 @@ func TestDoExportPBTHexOnlyDefaultsToBlake3(t *testing.T) {
 	tx, err := fixture.Tester.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	builder, err := eip8297.NewStreamRootBuilder(eip8297.HashBytes)
+	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
 	require.NoError(t, err)
 	require.NoError(t, state.ForEachPBinLeaf(state.AggTx(tx), tx, false, func(leaf state.PBinLeaf) error {
 		return builder.Add(leaf.Key, leaf.Value)
@@ -370,6 +370,42 @@ func TestDoExportPBTHexOnlyDefaultsToBlake3(t *testing.T) {
 	require.NoError(t, json.Unmarshal(metaBytes, &meta))
 	require.Equal(t, commitment.PBinHashBlake3, meta.HashSuite)
 	require.Equal(t, want.Hex(), meta.PBTRoot)
+}
+
+func TestConfigurePBTExportHashDefaultsForPreimages(t *testing.T) {
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.BinCommitmentHash = previousHash
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	dirs := datadir.New(t.TempDir())
+	variant := state.TrieVariantHex
+	require.NoError(t, state.WriteErigonDBSettings(dirs, &state.ErigonDBSettings{TrieVariant: &variant}))
+	cmd := &cli.Command{Flags: []cli.Flag{&utils.ExperimentalBinCommitmentHashFlag}}
+	statecfg.BinCommitmentHash = ""
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
+	restore, err := configurePBTExportHash(dirs, cmd)
+	require.NoError(t, err)
+	require.Equal(t, commitment.PBinHashBlake3, commitment.PBinHashSuiteName())
+	restore()
+	statecfg.BinCommitmentHash = commitment.PBinHashKeccak
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
+	restore, err = configurePBTExportHash(dirs, cmd)
+	require.NoError(t, err)
+	require.Equal(t, commitment.PBinHashKeccak, commitment.PBinHashSuiteName())
+	restore()
+}
+
+func TestConfigurePBTExportHashRejectsDatadirMismatch(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	variant, hash := state.TrieVariantHexBin, commitment.PBinHashBlake3
+	refs := false
+	require.NoError(t, state.WriteErigonDBSettings(dirs, &state.ErigonDBSettings{StepSize: 8, StepsInFrozenFile: 1, ReferencesInCommitmentBranches: &refs, TrieVariant: &variant, TrieHash: &hash}))
+	cmd := &cli.Command{Flags: []cli.Flag{&utils.ExperimentalBinCommitmentHashFlag}}
+	require.NoError(t, cmd.Set(utils.ExperimentalBinCommitmentHashFlag.Name, commitment.PBinHashKeccak))
+	_, err := configurePBTExportHash(dirs, cmd)
+	require.ErrorContains(t, err, "differs from datadir trie_hash")
 }
 
 func buildFrozenPBTExportDatadir(t *testing.T) datadir.Dirs {

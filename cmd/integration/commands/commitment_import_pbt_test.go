@@ -36,10 +36,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -84,6 +86,15 @@ func TestImportPBTEndToEndWhenFilesReachCheckpoint(t *testing.T) {
 			require.Equal(t, value, after[path], "import must not rewrite state-domain file %s", path)
 		}
 	}
+}
+
+func TestImportPBTHexCheckpointMismatchRefusesProductionPath(t *testing.T) {
+	fixture := newPBTImportFixture(t)
+	overwritePBTImportHexCheckpoint(t, fixture.dataDir, 1, 6, 8)
+	before := snapshotTree(t, fixture.dataDir)
+	err := importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New())
+	require.ErrorContains(t, err, "hex commitment checkpoint")
+	require.Equal(t, before, snapshotTree(t, fixture.dataDir))
 }
 
 func TestImportPBTReplacesConvertAndAttachWithFilesBeforeCheckpoint(t *testing.T) {
@@ -133,6 +144,7 @@ func TestImportPBTReplacesConvertAndAttachWithFilesBeforeCheckpoint(t *testing.T
 	require.NoError(t, convertedTarget.Tester.ReExecuteTo(t.Context(), 2))
 	copyPBTStateSalt(t, source, convertedTarget)
 	buildPBTAcceptanceFilesAt(t, convertedTarget, 6)
+	resetPBTAcceptanceExecution(t, convertedTarget)
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	require.NoError(t, attachPBT(t.Context(), convertedTarget.Tester.Dirs.DataDir, converted, "", log.New()))
@@ -307,6 +319,7 @@ func TestImportPBTMatchesConvertAndAttachWithStepSizedFiles(t *testing.T) {
 	require.NoError(t, convertedTarget.Tester.ReExecuteTo(t.Context(), 7))
 	copyPBTStateSalt(t, source, convertedTarget)
 	buildPBTAcceptanceFilesAt(t, convertedTarget, 23)
+	resetPBTAcceptanceExecution(t, convertedTarget)
 	convertedTarget.Tester.Close()
 	selectPBTCommandSuite(t)
 	require.NoError(t, attachPBT(t.Context(), convertedTarget.Tester.Dirs.DataDir, convertedDir, "", log.New()))
@@ -603,6 +616,34 @@ func setImportExecutionProgress(t *testing.T, dataDir string, progress uint64) {
 	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
 		return stages.SaveStageProgress(tx, stages.Execution, progress)
 	}))
+	rawDB.Close()
+}
+
+func overwritePBTImportHexCheckpoint(t *testing.T, dataDir string, blockNum, checkpointTx, storageTx uint64) {
+	t.Helper()
+	dirs := datadir.Open(dataDir)
+	settings, err := dbstate.ReadErigonDBSettings(dirs)
+	require.NoError(t, err)
+	rawDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	agg := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	previous, _, err := domains.GetLatest(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State)
+	require.NoError(t, err)
+	state, err := commitment.EncodeCommitmentV3State(make([]byte, 32), blockNum, checkpointTx, nil)
+	require.NoError(t, err)
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, state, storageTx, previous))
+	require.NoError(t, domains.Flush(t.Context(), tx))
+	domains.Close()
+	require.NoError(t, tx.Commit())
+	db.Close()
+	agg.Close()
 	rawDB.Close()
 }
 

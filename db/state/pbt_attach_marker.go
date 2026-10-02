@@ -17,13 +17,10 @@
 package state
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/datadir"
 )
 
@@ -39,15 +36,12 @@ func PBTAttachMarkerPath(dirs datadir.Dirs) string {
 }
 
 func ReadPBTAttachMarker(dirs datadir.Dirs) (*PBTAttachMarker, error) {
-	data, err := os.ReadFile(PBTAttachMarkerPath(dirs))
-	if errors.Is(err, os.ErrNotExist) {
+	var marker PBTAttachMarker
+	found, err := readPBTMarker(PBTAttachMarkerPath(dirs), &marker)
+	if !found && err == nil {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err
-	}
-	var marker PBTAttachMarker
-	if err := json.Unmarshal(data, &marker); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", PBTAttachMarkerFileName, err)
 	}
 	if marker.PublishedPath == "" || marker.Settings == nil {
@@ -60,27 +54,17 @@ func WritePBTAttachMarker(dirs datadir.Dirs, marker *PBTAttachMarker) error {
 	if marker == nil || marker.PublishedPath == "" || marker.Settings == nil {
 		return errors.New("attach-pbt marker is incomplete")
 	}
-	data, err := json.Marshal(marker)
-	if err != nil {
-		return err
-	}
-	if err := dir.WriteFileWithFsync(PBTAttachMarkerPath(dirs), data, 0o644); err != nil {
-		return err
-	}
-	return dir.FsyncDir(dirs.Snap)
+	return writePBTMarker(PBTAttachMarkerPath(dirs), marker)
 }
 
 func RemovePBTAttachMarker(dirs datadir.Dirs) error {
-	if err := dir.RemoveFile(PBTAttachMarkerPath(dirs)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return dir.FsyncDir(dirs.Snap)
+	return removePBTMarker(PBTAttachMarkerPath(dirs))
 }
 
 func RefusePBTAttachMarker(dirs datadir.Dirs) error {
 	marker, err := ReadPBTAttachMarker(dirs)
 	if err != nil {
-		return err
+		return fmt.Errorf("commitment attach-pbt marker is invalid; remove %s and adopted files before retrying: %w", PBTAttachMarkerPath(dirs), err)
 	}
 	if marker == nil {
 		return nil

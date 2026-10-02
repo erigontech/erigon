@@ -37,5 +37,5 @@ func TestPBTImportMarkerRoundTripAndInvalidStartupRefusal(t *testing.T) {
 	require.ErrorContains(t, RefusePBTImportMarker(dirs), "rerun import-pbt --snapshot /tmp/snapshot")
 	require.NoError(t, RemovePBTImportMarker(dirs))
 	require.NoError(t, os.WriteFile(PBTImportMarkerPath(dirs), []byte("{"), 0o644))
-	require.ErrorContains(t, RefusePBTImportMarker(dirs), "rerun import-pbt --snapshot <snapshot>")
+	require.ErrorContains(t, RefusePBTImportMarker(dirs), "remove ")
 }
