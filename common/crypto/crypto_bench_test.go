@@ -21,8 +21,9 @@ package crypto
 
 import (
 	"encoding/binary"
-	keccak "github.com/erigontech/fastkeccak"
 	"testing"
+
+	keccak "github.com/erigontech/fastkeccak"
 )
 
 func BenchmarkSha3(b *testing.B) {
