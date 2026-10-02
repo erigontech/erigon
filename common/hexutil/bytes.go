@@ -46,6 +46,14 @@ func (b Bytes) AppendText(dst []byte) ([]byte, error) {
 	return hex.AppendEncode(dst, b), nil
 }
 
+// QuotedLen is the length of n bytes encoded by AppendQuoted.
+func QuotedLen(n int) int { return len(`"0x"`) + 2*n }
+
+// AppendQuoted appends b as a 0x-prefixed hex JSON string.
+func AppendQuoted(dst, b []byte) []byte {
+	return append(hex.AppendEncode(append(dst, `"`+HexPrefix...), b), '"')
+}
+
 // UnmarshalJSON implements json.Unmarshaler.
 func (b *Bytes) UnmarshalJSON(input []byte) error {
 	if !isString(input) {

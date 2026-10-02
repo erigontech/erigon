@@ -205,7 +205,6 @@ type Ethereum struct {
 }
 
 func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
-
 	isCommitmentHistoryEnabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
 	if err != nil {
 		return err
@@ -234,7 +233,8 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	if cfg.KeepExecutionProofs != isCommitmentHistoryEnabled {
 		return fmt.Errorf(
 			"flag '--prune.experimental.include-commitment-history' mismatch: db: %v; config: %v. please restart Erigon '--prune.experimental.include-commitment-history=%v' or delete the chaindata folder: %s",
-			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, cfg.KeepExecutionProofs, dirs.Chaindata)
+			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, cfg.KeepExecutionProofs, dirs.Chaindata,
+		)
 	}
 	if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
 		return err
@@ -299,9 +299,6 @@ func New(
 	}
 
 	// Assemble the Ethereum object
-	if config.ExperimentalParallelCommitment {
-		statecfg.ExperimentalParallelCommitment = true
-	}
 	stack.Config().ExecWorkerCount = config.Sync.ExecWorkerCount
 	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
@@ -380,7 +377,6 @@ func New(
 	var genesis *types.Block
 	var compatErr *chain.ConfigCompatError
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-
 		genesisConfig, err := rawdb.ReadGenesis(tx)
 		if err != nil {
 			return err
@@ -803,7 +799,6 @@ func New(
 		),
 		backend.notifications.Events,
 		&vm.Config{},
-		tmpdir,
 		txnProvider,
 		backend.sealCancel,
 		latestBlockBuiltStore,
@@ -831,7 +826,8 @@ func New(
 			stack.Config().PrivateApiRateLimit,
 			creds,
 			stack.Config().HealthCheck,
-			logger)
+			logger,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("private api: %w", err)
 		}
@@ -924,6 +920,7 @@ func New(
 		logger,
 		backend.engine,
 		config.Sync,
+		config.ExperimentalBAL,
 		config.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		backend.readAheader,
@@ -1120,7 +1117,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	if config.MCPAddress != "" {
 		mcpSrv := rpc.NewServer(httpRpcCfg.RpcBatchConcurrency, httpRpcCfg.TraceRequests, httpRpcCfg.DebugSingleRequest, httpRpcCfg.RpcStreamingDisable, s.logger, httpRpcCfg.RPCSlowLogThreshold)
 		for _, api := range apisForNamespaces(allAPIs, mcpNamespaces) {
-			if err := mcpSrv.RegisterName(api.Namespace, api.Service); err != nil {
+			if err := mcpSrv.RegisterAPI(api); err != nil {
 				return err
 			}
 		}
@@ -1299,12 +1296,12 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		}
 		agg.SetSnapshotBuildSema(blockSnapBuildSema)
 		agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
-		if allSegmentsDownloadComplete {
-			_ = agg.OpenFolder(db)
-		}
 		temporalDb, err = temporal.New(db, agg, allSnapshots)
 		if err != nil {
 			return nil, nil, nil, nil, err
+		}
+		if allSegmentsDownloadComplete {
+			_ = temporalDb.OpenStateSnapshots(ctx)
 		}
 	}
 

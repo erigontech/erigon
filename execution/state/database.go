@@ -30,17 +30,28 @@ import (
 )
 
 const (
-	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
+	// FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
 	FirstContractIncarnation = 1
-	//NonContractIncarnation incarnation for non contracts
+	// NonContractIncarnation incarnation for non contracts
 	NonContractIncarnation = 0
 )
+
+// HasAccount answers whether the account exists. A reader that can tell without decoding
+// the account says so with a HasAccount method of its own; the rest read and discard.
+func HasAccount(r StateReader, address accounts.Address) (bool, error) {
+	if h, ok := r.(interface {
+		HasAccount(accounts.Address) (bool, error)
+	}); ok {
+		return h.HasAccount(address)
+	}
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
 
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
 	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
-	HasStorage(address accounts.Address) (bool, error)
 	ReadAccountCode(address accounts.Address) ([]byte, error)
 	ReadAccountCodeSize(address accounts.Address) (int, error)
 	ReadAccountIncarnation(address accounts.Address) (uint64, error)
@@ -114,8 +125,7 @@ func (nw *NoopWriter) CreateContract(address accounts.Address) error {
 	return nil
 }
 
-type NoopReader struct {
-}
+type NoopReader struct{}
 
 var noopReader = &NoopReader{}
 
@@ -127,15 +137,19 @@ func (*NoopReader) SetTx(kv.TemporalTx) {}
 func (*NoopReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
 func (*NoopReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
 func (*NoopReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (*NoopReader) HasStorage(address accounts.Address) (bool, error)               { return false, nil }
-func (*NoopReader) ReadAccountCode(address accounts.Address) ([]byte, error)        { return nil, nil }
-func (*NoopReader) ReadAccountCodeSize(address accounts.Address) (int, error)       { return 0, nil }
+
+func (*NoopReader) ReadAccountCode(address accounts.Address) ([]byte, error) { return nil, nil }
+
+func (*NoopReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
+
 func (*NoopReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) { return 0, nil }
 
 func (*NoopReader) SetTrace(_ bool, _ string) {}

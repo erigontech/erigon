@@ -2,6 +2,16 @@
 
 Use B2-level English in code, code-comments, github. Use programming terminology freely and exactly
 
+## Ponytail
+
+Use [Ponytail](https://github.com/DietrichGebert/ponytail) for coding tasks to keep changes simple.
+
+- Reuse an existing installation. Otherwise, follow the upstream [installation instructions](https://github.com/DietrichGebert/ponytail#install) and [portability guide](https://github.com/DietrichGebert/ponytail/blob/main/docs/agent-portability.md) for your agent and version. Prefer user-local setup, complete prerequisites and activation steps, and verify it is loaded.
+- If native integration is unavailable, clone Ponytail outside the Erigon checkout and read `skills/ponytail/SKILL.md` from that checkout at the start of each coding session. Preserve existing agent configuration and this `AGENTS.md`.
+- Before handing off code changes, use `ponytail-review` through your agent's invocation syntax, or read and apply `skills/ponytail-review/SKILL.md` from the Ponytail checkout. Review the current diff for unnecessary complexity; this supplements correctness, security, and performance checks.
+
+Explicit task requirements and Erigon's guidelines take precedence, including TDD, test coverage, and comment rules. Keep downloaded files and personal settings out of commits.
+
 ## Build & Test
 
 ```bash
@@ -27,6 +37,7 @@ Before committing, always verify changes with: `make lint && make erigon integra
 | Directory | Purpose | Component Docs |
 |-----------|---------|----------------|
 | `cmd/` | Entry points: erigon, rpcdaemon, caplin, sentry, downloader | - |
+| `execution/commitment/` | Sequential and parallel commitment tries | [parallel-patricia-hashed.md](docs/design/parallel-patricia-hashed.md) |
 | `execution/stagedsync/` | Staged sync pipeline | [agents.md](execution/stagedsync/agents.md) |
 | `db/` | Storage: MDBX, snapshots, ETL | [agents.md](db/agents.md) |
 | `cl/` | Consensus layer (Caplin) | [agents.md](cl/agents.md) |
@@ -51,6 +62,12 @@ When fixing bugs or adding new features, follow the test-driven development (TDD
 ### Before adding a test
 
 Inspect the relevant existing tests first. Verify whether one already covers the behavior and fails for the intended reason when the implementation is incorrect. If it does, use that failure as the Red step and do not add duplicate coverage. Add a new test only when the existing suite does not protect the required behavior or when a more focused regression test materially improves failure diagnosis.
+
+### Before changing a bound or constant
+
+A deliberate tolerance and an off-by-one are indistinguishable at the call site. Before changing a bound, threshold or rounding expression, read the code that *produces* the value being compared against and confirm the intended relationship.
+
+A red test does not settle this. It proves the code disagrees with your expectation, not that your expectation matches the system's contract — a test that encodes the same wrong assumption as the change passes for the wrong reason.
 
 ### For bug fixes
 
@@ -219,7 +236,7 @@ Before running `git push`, always run `make lint` first and fix all issues. Run 
 
 The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
 
-A finding printed with a path outside the repo (e.g. `../erigon.worktrees/<name>/...`) is usually the repo's own file: golangci-lint's cache is shared across git worktrees and keyed by file content, so it can replay an issue under a sibling worktree's path. Such paths also escape path-based exclusions in `.golangci.yml`, so baselined findings can resurface. Remedy: `go tool golangci-lint cache clean` and re-run, or set `GOLANGCI_LINT_CACHE` to a per-worktree directory.
+A finding printed with a path outside the repo (e.g. `../erigon.worktrees/<name>/...`) is usually the repo's own file: golangci-lint's cache is shared across git worktrees and keyed by file content, so it can replay an issue under a sibling worktree's path. Such paths also escape path-based exclusions in `.golangci.yml`, so baselined findings can resurface. Remedy: `go tool -modfile=golangci-lint.mod golangci-lint cache clean` and re-run, or set `GOLANGCI_LINT_CACHE` to a per-worktree directory.
 
 Common lint categories and fixes:
 - **ruleguard (defer tx.Rollback/cursor.Close):** The error check must come *before* `defer tx.Rollback()`. Never remove an explicit `.Close()` or `.Rollback()` — add `defer` as a safety net alongside it, since the timing of the explicit call may matter.

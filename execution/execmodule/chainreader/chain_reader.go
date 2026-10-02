@@ -365,15 +365,28 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(ctx context.Context, id uint64)
 	if header.BlobGasUsed != nil {
 		eth1Block.BlobGasUsed = *header.BlobGasUsed
 	}
+	if header.SlotNumber != nil {
+		eth1Block.SlotNumber = *header.SlotNumber
+	}
+	if header.BlockAccessListHash != nil && block.BlockAccessListSidecar() != nil {
+		encoded, err := block.BlockAccessListSidecar().Bytes()
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("encode block access list: %w", err)
+		}
+		eth1Block.BlockAccessList = solid.NewByteListSSZ(clparams.MainnetBeaconConfig.MaxBytesPerTransaction)
+		if err := eth1Block.BlockAccessList.SetBytes(encoded); err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
 
 	// Withdrawals
 	withdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
 	for _, w := range block.Withdrawals() {
 		withdrawals.Append(&cltypes.Withdrawal{
-			Amount:    w.Amount,
+			Amount:    uint64(w.Amount),
 			Address:   w.Address,
-			Index:     w.Index,
-			Validator: w.Validator,
+			Index:     uint64(w.Index),
+			Validator: uint64(w.Validator),
 		})
 	}
 	eth1Block.Withdrawals = withdrawals

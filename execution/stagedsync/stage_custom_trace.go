@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
@@ -90,7 +89,8 @@ func NewProduce(produceList []string) Produce {
 
 func StageCustomTraceCfg(produce []string, db kv.TemporalRwDB, dirs datadir.Dirs, br dbservices.FullBlockReader,
 	cc *chain.Config, engine rules.Engine,
-	genesis *types.Genesis, syncCfg ethconfig.Sync) CustomTraceCfg {
+	genesis *types.Genesis, syncCfg ethconfig.Sync,
+) CustomTraceCfg {
 	execArgs := &exec.ExecArgs{
 		ChainDB:     db,
 		BlockReader: br,
@@ -154,9 +154,6 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 	// re-executes from
 	defer unalignProduced(cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator), cfg.Produce)()
 
-	//agg := cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	//stepSize := agg.StepSize()
-
 	// 1. Require stage_exec > 0: means don't need handle "half-block execution case here"
 	// 2. Require stage_exec > 0: means has enough state-history
 	var execProgress uint64
@@ -213,7 +210,7 @@ Loop:
 		case <-logEvery.C:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
-			//TODO: log progress and list of domains/files
+			// TODO: log progress and list of domains/files
 			logger.Info("[snapshots] Building files", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		}
 	}
@@ -287,12 +284,12 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 
 	}
 
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	stepSize := db.StepSize()
 	var fromStep, toStep kv.Step
-	var finalityCtx dbfinality.Context
+	var finalityCtx kv.FinalityContext
 	if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		var err error
-		finalityCtx, err = execfinality.Resolve(tx, maxReorgDepth, false, execfinality.WithTxNumsReader(db, cfg.BlockReader.TxnumReader()))
+		finalityCtx, err = execfinality.Resolve(tx, maxReorgDepth, false, cfg.BlockReader.TxnumReader())
 		if err != nil {
 			return err
 		}
@@ -304,14 +301,14 @@ func customTraceBatchProduce(ctx context.Context, produce Produce, cfg *exec.Exe
 		if err != nil {
 			return err
 		}
-		if lastTxNum/agg.StepSize() > 0 {
-			toStep = kv.Step(lastTxNum / agg.StepSize())
+		if lastTxNum/stepSize > 0 {
+			toStep = kv.Step(lastTxNum / stepSize)
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
-	if err := agg.BuildFiles2(ctx, db, fromStep, toStep, finalityCtx, true); err != nil {
+	if err := db.BuildFiles2(ctx, fromStep, toStep, finalityCtx, true); err != nil {
 		return err
 	}
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -437,7 +434,8 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 			default:
 			}
 			return nil
-		}), tx, cfg, logger); err != nil {
+		},
+	), tx, cfg, logger); err != nil {
 		return err
 	}
 
@@ -445,7 +443,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 }
 
 func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
-	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
+	// TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
 	dbg := tx.Debug()
 	txNum := uint64(math.MaxUint64)
 	if produce.ReceiptDomain {
@@ -470,7 +468,7 @@ func progressOfDomains(tx kv.TemporalTx, produce Produce) uint64 {
 }
 
 func firstStepNotInFiles(tx kv.TemporalTx, produce Produce) kv.Step {
-	//TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
+	// TODO: need better way to detect start point. What if domain/index is sparse (has rare events).
 	ac := dbstate.AggTx(tx)
 	fromStep := kv.Step(math.MaxUint64)
 	if produce.ReceiptDomain {
