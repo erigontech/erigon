@@ -67,12 +67,18 @@ func allocBuckets() []keccakBucket {
 	n := 1 << dbg.EnvInt("KECCAK_CACHE_BITS", 17)
 	size := n * int(unsafe.Sizeof(keccakBucket{}))
 	if dbg.EnvBool("KECCAK_CACHE_HUGE", false) {
-		mem, err := unix.Mmap(-1, 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_PRIVATE|unix.MAP_ANON)
+		const huge = 2 << 20
+		mem, err := unix.Mmap(-1, 0, size+huge, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_PRIVATE|unix.MAP_ANON)
 		fmt.Fprintf(os.Stderr, "[kcvar] pid=%d huge mmap size=%d err=%v\n", os.Getpid(), size, err)
 		if err == nil {
-			merr := unix.Madvise(mem, 14) // MADV_HUGEPAGE on linux
-			fmt.Fprintf(os.Stderr, "[kcvar] pid=%d madvise err=%v addr=%p\n", os.Getpid(), merr, &mem[0])
-			return unsafe.Slice((*keccakBucket)(unsafe.Pointer(&mem[0])), n)
+			off := (huge - int(uintptr(unsafe.Pointer(&mem[0]))%huge)) % huge
+			m := mem[off : off+size]
+			merr := unix.Madvise(m, 14) // MADV_HUGEPAGE on linux
+			for i := 0; i < size; i += huge {
+				m[i] = 0 // fault in each huge page now, not during the first block
+			}
+			fmt.Fprintf(os.Stderr, "[kcvar] pid=%d madvise err=%v addr=%p\n", os.Getpid(), merr, &m[0])
+			return unsafe.Slice((*keccakBucket)(unsafe.Pointer(&m[0])), n)
 		}
 	}
 	return make([]keccakBucket, n)
