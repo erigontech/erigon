@@ -21,8 +21,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestWarmuperFactoryMustNotOutliveCloseAndWait(t *testing.T) {
@@ -255,57 +253,5 @@ func TestCloseLeavesWorkChannelOpen(t *testing.T) {
 			t.Fatal("Close must not close w.work")
 		}
 	default:
-	}
-}
-
-type emptyBranchContext struct{}
-
-func (emptyBranchContext) Branch([]byte) ([]byte, kv.Step, error) { return nil, 0, nil }
-func (emptyBranchContext) PutBranch([]byte, []byte, []byte) error { return nil }
-func (emptyBranchContext) Account([]byte) (*Update, error)        { return nil, nil }
-func (emptyBranchContext) Storage([]byte) (*Update, error)        { return nil, nil }
-
-func TestTryWarmKeyDropsOnFullQueueWithoutLeakingOutstanding(t *testing.T) {
-	t.Parallel()
-	release := make(chan struct{})
-	w := NewWarmuper(context.Background(), WarmupConfig{
-		Enabled: true,
-		CtxFactory: func(ctx context.Context) (PatriciaContext, func()) {
-			select {
-			case <-release:
-			case <-ctx.Done():
-			}
-			return emptyBranchContext{}, nil
-		},
-		NumWorkers: 1,
-		MaxDepth:   WarmupMaxDepth,
-	})
-	w.Start()
-	defer w.CloseAndWait()
-
-	sent := make(chan struct{})
-	go func() {
-		defer close(sent)
-		key := make([]byte, 64)
-		for range 64 + 10 {
-			w.TryWarmKey(key)
-		}
-	}()
-	select {
-	case <-sent:
-	case <-time.After(5 * time.Second):
-		t.Fatal("TryWarmKey blocked on a full queue")
-	}
-
-	close(release)
-	waited := make(chan error, 1)
-	go func() { waited <- w.WaitBufferFree(0) }()
-	select {
-	case err := <-waited:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("WaitBufferFree hung: a dropped key stayed outstanding")
 	}
 }

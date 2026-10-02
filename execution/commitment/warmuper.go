@@ -219,18 +219,6 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int, gen uint64) {
 	}
 }
 
-func (w *Warmuper) TryWarmKey(hashedKey []byte) {
-	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
-		return
-	}
-	w.outstanding[0].Add(1)
-	select {
-	case w.work <- warmupWorkItem{hashedKey: hashedKey}:
-	default:
-		w.releaseGen(0)
-	}
-}
-
 func (w *Warmuper) releaseGen(gen uint64) {
 	if w.outstanding[gen%arenaRingSize].Add(-1) == 0 {
 		w.mu.Lock()

@@ -913,7 +913,7 @@ func (cc *commitmentCalculator) prefetchKey(ctx context.Context, plainKey []byte
 	if cc.prefetch == nil {
 		cc.prefetch = exec.StartBranchPrefetch(ctx, cc.db, dbg.TrieBALWarmupers)
 	}
-	cc.prefetch.TryWarmKey(commitment.KeyToHexNibbleHash(plainKey))
+	cc.prefetch.WarmKey(commitment.KeyToHexNibbleHash(plainKey), 0, 0)
 }
 
 func (cc *commitmentCalculator) finishPrefetch() {

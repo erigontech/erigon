@@ -240,7 +240,7 @@ func TestBranchPrefetchReadsTouchedKeysThroughBranchCache(t *testing.T) {
 	}
 	prefetch := StartBranchPrefetch(t.Context(), &singleTxRoDB{tx: tx}, 1)
 	address := common.Address{19: 2}
-	prefetch.TryWarmKey(commitment.KeyToHexNibbleHash(address[:]))
+	prefetch.WarmKey(commitment.KeyToHexNibbleHash(address[:]), 0, 0)
 	require.NoError(t, prefetch.WaitBufferFree(0))
 	prefetch.CloseAndWait()
 
