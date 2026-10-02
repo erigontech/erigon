@@ -109,7 +109,7 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 	}
 	marker, err := dbstate.ReadPBTImportMarker(dirs)
 	if err != nil {
-		return fmt.Errorf("%w; remove %s and commitment-bin files before retrying", err, dbstate.PBTImportMarkerPath(dirs))
+		return fmt.Errorf("%w; remove only %s and commitment-bin files before retrying", err, dbstate.PBTImportMarkerPath(dirs))
 	}
 	absSnapshotPath, err := filepath.Abs(snapshotPath)
 	if err != nil {

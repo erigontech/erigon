@@ -66,7 +66,7 @@ func RemovePBTImportMarker(dirs datadir.Dirs) error {
 func RefusePBTImportMarker(dirs datadir.Dirs) error {
 	marker, err := ReadPBTImportMarker(dirs)
 	if err != nil {
-		return fmt.Errorf("commitment import-pbt marker is invalid; remove %s and commitment-bin files before retrying: %w", PBTImportMarkerPath(dirs), err)
+		return fmt.Errorf("commitment import-pbt marker is invalid; remove only %s and commitment-bin files before retrying: %w", PBTImportMarkerPath(dirs), err)
 	}
 	if marker == nil {
 		return nil
