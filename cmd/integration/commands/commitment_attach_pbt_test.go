@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 )
 
@@ -52,6 +53,18 @@ func TestValidatePBTAttachFilesRequiresBothCommitmentDomains(t *testing.T) {
 	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 8), "do not cover conversion txNum")
 	require.NoError(t, dir.RemoveFile(filepath.Join(published.SnapDomain, "v1.0-commitment-bin.0-1.kv")))
 	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 7), "commitment-bin")
+}
+
+func TestValidatePBTAttachLeafStampsRejectsAfterConversion(t *testing.T) {
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previousSuite)) })
+	require.NoError(t, eip8297.SetHashSuite(commitment.PBinHashBlake3))
+	value := make([]byte, 32)
+	value[31] = 1
+	_, err := validatePBTAttachLeafStamps(7, func(emit func(state.PBinLeaf) error) error {
+		return emit(state.PBinLeaf{Key: []byte{0x01}, Value: value, Stamp: 8})
+	})
+	require.ErrorContains(t, err, "published leaf stamp 8 is after conversion txNum 7")
 }
 
 func TestPBTAttachVisibleFilesPrefersMergedRanges(t *testing.T) {

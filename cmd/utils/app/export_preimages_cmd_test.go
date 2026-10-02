@@ -325,18 +325,25 @@ type exportOpts struct {
 
 type exportHeapSampler struct {
 	peak atomic.Uint64
+	base uint64
 	stop chan struct{}
 	done chan struct{}
 }
 
 func startExportHeapSampler() *exportHeapSampler {
-	sampler := &exportHeapSampler{stop: make(chan struct{}), done: make(chan struct{})}
+	samples := []metrics.Sample{{Name: "/memory/classes/heap/objects:bytes"}}
+	metrics.Read(samples)
+	sampler := &exportHeapSampler{base: samples[0].Value.Uint64(), stop: make(chan struct{}), done: make(chan struct{})}
 	go func() {
 		defer close(sampler.done)
-		samples := []metrics.Sample{{Name: "/memory/classes/heap/objects:bytes"}}
 		read := func() {
 			metrics.Read(samples)
 			value := samples[0].Value.Uint64()
+			if value <= sampler.base {
+				value = 0
+			} else {
+				value -= sampler.base
+			}
 			for {
 				previous := sampler.peak.Load()
 				if value <= previous || sampler.peak.CompareAndSwap(previous, value) {

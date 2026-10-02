@@ -221,7 +221,7 @@ func runExportWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawd
 	}, eip8297.HashBytes, tmpDir); err != nil {
 		return fmt.Errorf("export aborted (preimage set): %w", err)
 	}
-	preimageDigest, err := digestPBTFile(outputFile)
+	preimageDigest, err := digestPBTFile(outputFile, logger, "preimage digest")
 	if err != nil {
 		return err
 	}

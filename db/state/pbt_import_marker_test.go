@@ -34,10 +34,10 @@ func TestPBTImportMarkerRoundTripAndInvalidStartupRefusal(t *testing.T) {
 	got, err := ReadPBTImportMarker(dirs)
 	require.NoError(t, err)
 	require.Equal(t, marker, got)
-	require.ErrorContains(t, RefusePBTImportMarker(dirs), "rerun import-pbt --snapshot /tmp/snapshot")
+	require.ErrorContains(t, RefusePBTImportMarker(dirs), "integration commitment import-pbt --datadir="+dirs.DataDir+" --snapshot=/tmp/snapshot")
 	require.NoError(t, RemovePBTImportMarker(dirs))
 	require.NoError(t, os.WriteFile(PBTImportMarkerPath(dirs), []byte("{"), 0o644))
-	require.ErrorContains(t, RefusePBTImportMarker(dirs), "remove ")
+	require.ErrorContains(t, RefusePBTImportMarker(dirs), "integration commitment import-pbt --datadir="+dirs.DataDir+" --snapshot=<snapshot>")
 	require.NotContains(t, RefusePBTImportMarker(dirs).Error(), "restore the previous")
 }
 
@@ -54,5 +54,19 @@ func TestPBTImportMarkerRecoveryNamesCleanupRemedy(t *testing.T) {
 		PreviousSettings: &ErigonDBSettings{TrieVariant: &previousVariant},
 	}
 	require.NoError(t, WritePBTImportMarker(dirs, marker))
-	require.ErrorContains(t, RefusePBTImportMarker(dirs), "then rerun import-pbt --snapshot /tmp/snapshot")
+	require.ErrorContains(t, RefusePBTImportMarker(dirs), "integration commitment import-pbt --datadir="+dirs.DataDir+" --snapshot=/tmp/snapshot")
+}
+
+func TestPBTImportMarkerAtomicReplacementIgnoresTargetMode(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	variant := TrieVariantHexBin
+	hash := "blake3"
+	old := &PBTImportMarker{SnapshotPath: "/tmp/old", SnapshotHash: "old", Files: []string{"old"}, Settings: &ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash}}
+	newMarker := &PBTImportMarker{SnapshotPath: "/tmp/new", SnapshotHash: "new", Files: []string{"new"}, Settings: &ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash}}
+	require.NoError(t, WritePBTImportMarker(dirs, old))
+	require.NoError(t, os.Chmod(PBTImportMarkerPath(dirs), 0o444))
+	require.NoError(t, WritePBTImportMarker(dirs, newMarker))
+	got, err := ReadPBTImportMarker(dirs)
+	require.NoError(t, err)
+	require.Equal(t, newMarker, got)
 }
