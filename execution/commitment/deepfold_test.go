@@ -648,6 +648,7 @@ func TestDeepFold_EmptyStorageThenRepopulate(t *testing.T) {
 func storageLocsForNibble(nibble byte, n, seed int) []string {
 	return slotLocsForHexPrefix([]byte{nibble}, n, seed)
 }
+
 func slotLocsForHexPrefix(nibblePrefix []byte, n, seed int) []string {
 	out := make([]string, 0, n)
 	var s [32]byte

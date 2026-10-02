@@ -913,7 +913,8 @@ var packUnpackTests = []packUnpackTest{
 				A *big.Int
 				B []*big.Int
 			}{big.NewInt(1), []*big.Int{big.NewInt(1), big.NewInt(2)}},
-			B: []*big.Int{big.NewInt(1), big.NewInt(2)}},
+			B: []*big.Int{big.NewInt(1), big.NewInt(2)},
+		},
 		packed: "0000000000000000000000000000000000000000000000000000000000000020" + // struct a
 			"0000000000000000000000000000000000000000000000000000000000000040" + // a offset
 			"00000000000000000000000000000000000000000000000000000000000000e0" + // b offset
