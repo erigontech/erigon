@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -128,11 +129,14 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 		sd = c.execModule.currentContext
 		c.execModule.lock.RUnlock()
 	}
+	src := dbgViewCur
 	// Fall back to the published SD from Events while an FCU commits
 	// (currentContext is nil but the SD is still valid in memory).
 	if sd == nil && c.publishedSD != nil {
 		sd = c.publishedSD()
+		src = dbgViewPub
 	}
+	dbgCountView(sd, src)
 
 	var view *CacheView
 	if sd != nil {
@@ -143,8 +147,38 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 	return view, nil
 }
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
-func (c *Cache) Evict() int                                  { return 0 }
-func (c *Cache) Len() int                                    { return 0 }
+
+const (
+	dbgViewCur = iota
+	dbgViewPub
+)
+
+var (
+	dbgViewCounts  [5]atomic.Uint64 // cur+cache, cur-nocache, pub+cache, pub-nocache, nil-sd
+	dbgViewLastLog atomic.Int64
+)
+
+func dbgCountView(sd *execctx.SharedDomains, src int) {
+	switch {
+	case sd == nil:
+		dbgViewCounts[4].Add(1)
+	case sd.HasStateCache():
+		dbgViewCounts[src*2].Add(1)
+	default:
+		dbgViewCounts[src*2+1].Add(1)
+	}
+	now := time.Now().UnixNano()
+	last := dbgViewLastLog.Load()
+	if now-last < int64(time.Second) || !dbgViewLastLog.CompareAndSwap(last, now) {
+		return
+	}
+	log.Info("[dbg-statecache] Cache.View",
+		"curCached", dbgViewCounts[0].Load(), "curNoCache", dbgViewCounts[1].Load(),
+		"pubCached", dbgViewCounts[2].Load(), "pubNoCache", dbgViewCounts[3].Load(),
+		"nilSD", dbgViewCounts[4].Load())
+}
+func (c *Cache) Evict() int { return 0 }
+func (c *Cache) Len() int   { return 0 }
 func (c *Cache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*kvcache.CacheValidationResult, error) {
 	return &kvcache.CacheValidationResult{Enabled: false}, nil
 }

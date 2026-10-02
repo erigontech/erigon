@@ -222,6 +222,8 @@ func (sd *SharedDomains) cacheViewFor(tx kv.TemporalTx) cache.ReadView {
 // content-addressed fills still work. Safe on a nil cache.
 func (sd *SharedDomains) cacheReader() cache.ReadView { return sd.stateCache.View(nil) }
 
+func (sd *SharedDomains) HasStateCache() bool { return sd.stateCache != nil }
+
 func IsDomainAheadOfBlocks(ctx context.Context, tx kv.TemporalRwTx, logger log.Logger) bool {
 	doms, err := NewSharedDomains(ctx, tx, logger)
 	if doms != nil {
