@@ -1298,8 +1298,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	}
 
 	logger.Info(cfg.LogPrefix+" now sealing (dumping on disk)", "root", hex.EncodeToString(rh),
-		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys),
-		"keysProcessed", processed)
+		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
 
 	sb := time.Now()
 	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.GetMemBatch().(*TemporalMemBatch), nil)

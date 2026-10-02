@@ -78,6 +78,14 @@ func TestTrieVerifyUnlinksVerifiedChildren(t *testing.T) {
 		row, err = verifier.extTopRow(root)
 		require.NoError(t, err)
 	}
+	var children []*rowNode
+	for slot := range row.cells {
+		if row.cell(slot).Kind == BranchCell {
+			child, loadErr := verifier.loadBranchChild(row, slot)
+			require.NoError(t, loadErr)
+			children = append(children, child)
+		}
+	}
 	_, err = verifier.verifyRow(row)
 	require.NoError(t, err)
 	check := func(row *rowNode) {
@@ -92,6 +100,9 @@ func TestTrieVerifyUnlinksVerifiedChildren(t *testing.T) {
 	}
 	if verifier.root != nil {
 		check(row)
+	}
+	for _, child := range children {
+		require.Nil(t, child.parent)
 	}
 }
 

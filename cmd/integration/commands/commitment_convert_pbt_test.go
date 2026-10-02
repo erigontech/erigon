@@ -1019,6 +1019,54 @@ func TestConvertPBTRefusesSourceFileEndAfterPoint(t *testing.T) {
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
+func TestConvertPBTUsesStateFilesWhenCommitmentFilesLag(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
+	source.Tester.Close()
+	lastTx := pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata)
+	buildPBTAcceptanceFilesAtWithMerge(t, source, lastTx, false)
+	for _, root := range []string{source.Tester.Dirs.SnapDomain, source.Tester.Dirs.SnapHistory, source.Tester.Dirs.SnapIdx, source.Tester.Dirs.SnapAccessors} {
+		entries, err := os.ReadDir(root)
+		require.NoError(t, err)
+		for _, entry := range entries {
+			parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
+			if ok && parsed.TypeString == kv.CommitmentDomain.String() && parsed.From >= 6 {
+				require.NoError(t, dir.RemoveFile(filepath.Join(root, entry.Name())))
+			}
+		}
+	}
+	output := filepath.Join(t.TempDir(), "output")
+	selectPBTCommandSuite(t)
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
+	require.NoError(t, err)
+	_, txNum, ok, err := settings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(4), txNum)
+}
+
+func TestConvertPBTRefusesCommitmentFileWithoutAccessor(t *testing.T) {
+	selectPBTHexCommandSuite(t)
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))
+	source.Tester.Close()
+	lastTx := pbtAcceptanceLastTxNumRaw(t, source.Tester.Dirs.Chaindata)
+	buildPBTAcceptanceFilesAtWithMerge(t, source, lastTx, true)
+	matches, err := filepath.Glob(filepath.Join(source.Tester.Dirs.SnapDomain, "*-commitment.*.bt"))
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+	require.NoError(t, dir.RemoveFile(matches[0]))
+	output := filepath.Join(t.TempDir(), "output")
+	err = convertPBT(t.Context(), source.Tester.Dirs.DataDir, output, true, "", log.New())
+	require.ErrorContains(t, err, "no accessor")
+	_, statErr := os.Stat(output)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
 func TestRemovePBTFilesPastPointKeepsOnlyPublishedRanges(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	files := []struct {

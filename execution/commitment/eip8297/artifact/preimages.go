@@ -44,26 +44,7 @@ var (
 	preimageScratchFileFlush  = func(writer *bufio.Writer) error {
 		return writer.Flush()
 	}
-	preimageScratchFileSync = func(file *os.File) error {
-		return file.Sync()
-	}
 )
-
-func SetPreimageScratchHooksForTest(create func(string, string) (*os.File, error), flush func(*bufio.Writer) error, sync func(*os.File) error) func() {
-	previousCreate, previousFlush, previousSync := preimageScratchFileCreate, preimageScratchFileFlush, preimageScratchFileSync
-	if create != nil {
-		preimageScratchFileCreate = create
-	}
-	if flush != nil {
-		preimageScratchFileFlush = flush
-	}
-	if sync != nil {
-		preimageScratchFileSync = sync
-	}
-	return func() {
-		preimageScratchFileCreate, preimageScratchFileFlush, preimageScratchFileSync = previousCreate, previousFlush, previousSync
-	}
-}
 
 type PreimageStreamIterator func(func(common.Address, func(func([32]byte) error) error) error) error
 

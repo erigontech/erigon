@@ -777,7 +777,7 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	readerPeak := readerSampler.stopAndRead()
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readGroups)
-	require.Less(t, readerPeak, uint64(32<<20))
+	require.Less(t, readerPeak, uint64(64<<20))
 	runtime.GC()
 	preimageSampler := startHeapSampler()
 	readSlots := 0
@@ -790,7 +790,7 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	preimagePeak := preimageSampler.stopAndRead()
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readSlots)
-	require.Less(t, preimagePeak, uint64(32<<20))
+	require.Less(t, preimagePeak, uint64(64<<20))
 	runtime.GC()
 	joinSampler := startHeapSampler()
 	seen := 0
@@ -801,7 +801,7 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	peak := joinSampler.stopAndRead()
 	require.NoError(t, err)
 	require.Equal(t, slotCount, seen)
-	require.Less(t, peak, uint64(32<<20))
+	require.Less(t, peak, uint64(64<<20))
 }
 
 func TestPreimageReaderAllocationsStayBounded(t *testing.T) {

@@ -127,7 +127,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	}
 	nodeDirs := datadir.Open(nodePath)
 	publishedDirs := datadir.Open(publishedPath)
-	if err := checkPBTChainName(ctx, nodeDirs, chainName); err != nil {
+	if err := checkPBTChainName(ctx, nodeDirs, chainName, "commitment attach-pbt"); err != nil {
 		return err
 	}
 	marker, err := dbstate.ReadPBTAttachMarker(nodeDirs)

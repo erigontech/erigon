@@ -27,6 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -96,7 +97,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	}
 	sourceDirs := datadir.Open(sourcePath)
 	outputDirs := datadir.Open(outputPath)
-	if err := checkPBTChainName(ctx, sourceDirs, chainName); err != nil {
+	if err := checkPBTChainName(ctx, sourceDirs, chainName, "commitment convert-pbt"); err != nil {
 		return err
 	}
 	if nested, overlapErr := pathsOverlap(sourceDirs.DataDir, outputDirs.DataDir); overlapErr != nil {
@@ -158,24 +159,6 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	}
 	if _, err = linkSnapshotsExceptCommitment(sourceDirs.Snap, outputDirs.Snap); err != nil {
 		return err
-	}
-
-	stagingRoot, err := os.MkdirTemp(filepath.Dir(outputDirs.DataDir), ".convert-pbt-source-")
-	if err != nil {
-		return err
-	}
-	stagingDirs := datadir.Open(stagingRoot)
-	defer func() { _ = dir.RemoveAll(stagingDirs.DataDir) }()
-	if err := os.MkdirAll(stagingDirs.Snap, 0o755); err != nil {
-		return err
-	}
-	if _, linkErr := linkSnapshotsExceptCommitment(sourceDirs.Snap, stagingDirs.Snap); linkErr != nil {
-		return linkErr
-	}
-	if sourceSettings != nil {
-		if err := dbstate.WriteErigonDBSettings(stagingDirs, sourceSettings); err != nil {
-			return err
-		}
 	}
 	sourceRawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, sourceDirs.Chaindata), true)
 	if err != nil {
@@ -325,6 +308,9 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if err := removePBTInvisibleFiles(visibleRanges, sourceDirs, outputDirs); err != nil {
 		return err
 	}
+	if err := validatePBTOutputAccessors(outputDirs); err != nil {
+		return err
+	}
 	conversionBlock, conversionTx := point.BlockNum, point.TxNum
 	finalSettings := &dbstate.ErigonDBSettings{
 		StepSize:                       targetSettings.StepSize,
@@ -347,7 +333,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if err := verifyPBTOutputRows(ctx, outputDirs, finalSettings, targetDomain, point, logger); err != nil {
 		return err
 	}
-	if err := verifyPBTOutputStandalone(ctx, outputDirs, finalSettings, point, logger); err != nil {
+	if err := verifyPBTOutputStandalone(ctx, outputDirs, finalSettings, point, root, logger); err != nil {
 		return err
 	}
 	if err := dbstate.WriteErigonDBSettings(outputDirs, finalSettings); err != nil {
@@ -357,7 +343,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	return nil
 }
 
-func checkPBTChainName(ctx context.Context, dirs datadir.Dirs, expected string) error {
+func checkPBTChainName(ctx context.Context, dirs datadir.Dirs, expected, command string) error {
 	if expected == "" {
 		return nil
 	}
@@ -384,7 +370,7 @@ func checkPBTChainName(ctx context.Context, dirs datadir.Dirs, expected string) 
 		if config != nil {
 			got = config.ChainName
 		}
-		return fmt.Errorf("commitment convert-pbt: chain %q does not match source chain %q", expected, got)
+		return fmt.Errorf("%s: chain %q does not match source chain %q", command, expected, got)
 	}
 	return nil
 }
@@ -485,7 +471,7 @@ func readPBinConversionPointFromFiles(at *dbstate.AggregatorRoTx, variant string
 	return pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, nil
 }
 
-func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, point pbinConversionPoint, logger log.Logger) error {
+func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, point pbinConversionPoint, wantRoot common.Hash, logger log.Logger) error {
 	configurePBTSourceVariant(settings)
 	chaindataDir, err := os.MkdirTemp("", "convert-pbt-chaindata-")
 	if err != nil {
@@ -527,6 +513,24 @@ func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings 
 	}
 	if txNum != point.TxNum || blockNum != point.BlockNum {
 		return fmt.Errorf("commitment convert-pbt: standalone output checkpoint is (%d, %d), want (%d, %d)", blockNum, txNum, point.BlockNum, point.TxNum)
+	}
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	builder, err := eip8297.NewStreamRootBuilder(eip8297.HashBytes)
+	if err != nil {
+		return err
+	}
+	if err := dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
+		return builder.Add(leaf.Key, leaf.Value)
+	}); err != nil {
+		return fmt.Errorf("commitment convert-pbt: standalone output leaves: %w", err)
+	}
+	gotRoot, err := builder.RootHash()
+	if err != nil {
+		return err
+	}
+	if gotRoot != wantRoot {
+		return fmt.Errorf("commitment convert-pbt: standalone output root %x differs from converted root %x", gotRoot, wantRoot)
 	}
 	return nil
 }
@@ -742,6 +746,39 @@ func removePBTInvisibleFiles(visibleRanges map[string]struct{}, sourceDirs, outp
 	return nil
 }
 
+func validatePBTOutputAccessors(dirs datadir.Dirs) error {
+	files, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return err
+	}
+	files = pbtAttachVisibleFiles(files)
+	have := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		have[pbtAttachFileKind(file)] = struct{}{}
+	}
+	for _, file := range files {
+		ext := filepath.Ext(file.path)
+		var complete bool
+		switch ext {
+		case ".kv":
+			_, hasKvi := have[pbtAttachFileKind(pbtAttachFile{domain: file.domain, from: file.from, to: file.to, path: ".kvi"})]
+			_, hasBT := have[pbtAttachFileKind(pbtAttachFile{domain: file.domain, from: file.from, to: file.to, path: ".bt"})]
+			_, hasKvei := have[pbtAttachFileKind(pbtAttachFile{domain: file.domain, from: file.from, to: file.to, path: ".kvei"})]
+			complete = hasKvi || hasBT && hasKvei
+		case ".v":
+			_, complete = have[pbtAttachFileKind(pbtAttachFile{domain: file.domain, from: file.from, to: file.to, path: ".vi"})]
+		case ".ef":
+			_, complete = have[pbtAttachFileKind(pbtAttachFile{domain: file.domain, from: file.from, to: file.to, path: ".efi"})]
+		default:
+			continue
+		}
+		if !complete {
+			return fmt.Errorf("commitment convert-pbt: published %s file %s has no accessor; collate first", file.domain, file.path)
+		}
+	}
+	return nil
+}
+
 func pbtVisibleSnapshotFiles(sourceAgg *dbstate.Aggregator, sourceDirs datadir.Dirs) map[string]struct{} {
 	visibleRanges := make(map[string]struct{})
 	at := sourceAgg.BeginFilesRo()
@@ -767,7 +804,7 @@ func addPBTCommitmentVisibleFiles(visibleRanges map[string]struct{}, dirs datadi
 		from, to          uint64
 	}
 	var files []commitmentFile
-	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx} {
+	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			continue
