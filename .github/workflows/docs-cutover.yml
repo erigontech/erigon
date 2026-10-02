@@ -532,9 +532,11 @@ jobs:
           tgt_oldest="$(printf '%s\n' $tgt_list | sort -V | head -n1)"
           # ...and only when the target is at the archive cap, i.e. it gave up an
           # old archive because it took on a new one. A target under the cap
-          # has lost versions that a real bump keeps. Keep in step with the cap
-          # in docs-version-bump.yml.
-          archive_cap=5
+          # has lost versions that a real bump keeps. The cap is read from the
+          # bump workflow the target will run; if it cannot be read, no waiver.
+          bump_yml="$(gh api "repos/{owner}/{repo}/contents/.github/workflows/docs-version-bump.yml?ref=${TARGET_BRANCH}" \
+            --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
+          archive_cap="$(printf '%s\n' "$bump_yml" | sed -n "s/.*jq '\.\[:\([0-9][0-9]*\)\]'.*/\1/p" | head -n1)"
           tgt_count="$(echo $tgt_list | wc -w)"
 
           # ...and only when both inventories are well-formed: `wc -w` counts
@@ -550,8 +552,12 @@ jobs:
               printf '%s' "$v" | grep -qE '^v[0-9]+\.[0-9]+$' || inventory_ok=0
             done
           done
+          if [ -z "$archive_cap" ]; then
+            inventory_ok=0
+            echo "::warning::Could not read the archive cap from docs-version-bump.yml on ${TARGET_BRANCH}."
+          fi
           if [ "$inventory_ok" -ne 1 ]; then
-            echo "::warning::versions.json on ${CURRENT_BRANCH} or ${TARGET_BRANCH} repeats an entry or holds a label that is not vX.Y."
+            echo "::warning::versions.json on ${CURRENT_BRANCH} or ${TARGET_BRANCH} repeats an entry or holds a label that is not vX.Y, or the archive cap is unreadable."
             echo "The archive-cap waiver is withheld: every version missing from ${TARGET_BRANCH} will be reported below."
           fi
 
