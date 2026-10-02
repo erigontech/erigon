@@ -91,7 +91,8 @@ func TestByteLRUConcurrentSameKeyStaysBounded(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	require.LessOrEqual(t, b.Len(), 32, "a 1MB cache of 64KB entries holds 16, and must stay near that")
+	b.c.CleanUp()
+	require.LessOrEqual(t, b.Len(), 16, "a 1MB cache of 64KB entries holds 16")
 }
 
 func TestByteLRUAddReplacesLiveKey(t *testing.T) {
