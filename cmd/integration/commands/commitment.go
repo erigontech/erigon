@@ -432,6 +432,11 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		if err := rwTx.Commit(); err != nil {
 			return err
 		}
+		if !withHistory {
+			if err := rawdbreset.ResetExec(ctx, db); err != nil {
+				return err
+			}
+		}
 	} else {
 		rwTx.Rollback()
 	}
@@ -609,6 +614,11 @@ Examples:
 }
 
 func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
+	if opts.TargetV3 {
+		if err := rawdbreset.ResetExec(ctx, db); err != nil {
+			return err
+		}
+	}
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	agg.PresetOfflineMerge()
 	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
