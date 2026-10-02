@@ -55,7 +55,8 @@ func (gu *GasUsed) AddResult(result *evmtypes.ExecutionResult) {
 func SetGasUsed(h *types.Header, gu *GasUsed) {
 	h.GasUsed = gu.BlockGasUsed()
 	if h.BlobGasUsed != nil {
-		h.BlobGasUsed = &gu.Blob
+		blobGasUsed := gu.Blob
+		h.BlobGasUsed = &blobGasUsed
 	}
 }
 
@@ -97,9 +98,6 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	}
 
 	txContext := NewEVMTxContext(msg)
-	if cfg.TraceJumpDest {
-		txContext.TxHash = txn.Hash()
-	}
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)

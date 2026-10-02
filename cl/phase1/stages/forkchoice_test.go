@@ -15,11 +15,38 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
+
+func TestPayloadAttributesUseSepoliaGasLimitScheduleAtGloas(t *testing.T) {
+	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
+	headSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+	headState := state.New(config)
+	headState.SetVersion(clparams.FuluVersion)
+	require.NoError(t, headState.SetSlot(headSlot))
+	emitter := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.State().Subscribe(events)
+	defer subscription.Unsubscribe()
+	cfg := &Cfg{
+		beaconCfg: config,
+		ethClock:  eth_clock.NewEthereumClock(0, common.Hash{}, config),
+		emitter:   emitter,
+	}
+
+	require.NoError(t, emitNextPaylodAttributesEvent(cfg, headSlot, common.Hash{}, headState))
+
+	require.Len(t, events, 1)
+	attrs := (<-events).Data.(*beaconevents.PayloadAttributesData).Data.PayloadAttributes
+	require.NotNil(t, attrs.TargetGasLimit)
+	require.Equal(t, hexutil.Uint64(200_000_000), *attrs.TargetGasLimit)
+}
 
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)

@@ -981,7 +981,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
 		defer cc.doms.SwapCommitmentDiffLocked(nil)()
-		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
 	}(); err != nil {
 		return nil, nil, err
 	}
@@ -1090,7 +1090,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	if err := func() error {
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
-		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
 	}(); err != nil {
 		return nil, err
 	}
