@@ -28,6 +28,10 @@ const (
 	maxGloasEnvelopeRecoveryPending   = 128
 	maxPendingGloasPayloadsPerCycle   = 32
 	gloasPayloadRetryBudget           = 2 * time.Second
+	// Pause after a failed block request, e.g. a peer rate-limiting us. Same pacing as forward
+	// sync (forwardRequestRetryInterval); retrying at once floods peers until the stage deadline.
+	chainTipRequestRetryInterval = 300 * time.Millisecond
+	chainTipNoPeersRetryInterval = 2 * time.Second
 )
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
@@ -128,14 +132,15 @@ func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count ui
 			return nil, ctx.Err()
 		default:
 		}
+		retryInterval := chainTipRequestRetryInterval
 		if errors.Is(err, peers.ErrNoPeers) {
-			// Back off when no peers are available to avoid CPU-burning tight loops.
-			log.Debug("[Caplin] no peers available, backing off before retrying block request", "from", from, "count", count)
-			select {
-			case <-time.After(2 * time.Second):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
+			retryInterval = chainTipNoPeersRetryInterval
+		}
+		log.Debug("[Caplin] block request failed, backing off before retrying", "from", from, "count", count, "retryIn", retryInterval, "err", err)
+		select {
+		case <-time.After(retryInterval):
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
 		blocks, pid, err = cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	}
