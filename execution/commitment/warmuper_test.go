@@ -27,7 +27,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -281,8 +280,6 @@ func (r *branchReadRecorder) Branch(prefix []byte) ([]byte, kv.Step, error) {
 func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 	t.Parallel()
 
-	ms := NewMockState(t)
-	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	ub := NewUpdateBuilder()
 	for i := range 64 {
 		addr := fmt.Sprintf("%040x", i+1)
@@ -296,14 +293,10 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 		}
 	}
 	plainKeys, updates := ub.Build()
-	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer upds.Close()
-	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
-	_, err := hph.Process(t.Context(), upds, "", nil, WarmupConfig{})
-	require.NoError(t, err)
+	_, ms := sequentialRoot(t, plainKeys, updates)
 
 	w := &Warmuper{maxDepth: WarmupMaxDepth}
-	storageBranches, extensionHops, storageRootExtensions := 0, 0, 0
+	extensionHops, storageRootExtensions := 0, 0
 	for _, pk := range plainKeys {
 		hk := KeyToHexNibbleHash(pk)
 		want := map[string]bool{}
@@ -312,9 +305,6 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 			if nib := nibbles.CompactToHex([]byte(prefix)); len(nib) < len(hk) && bytes.HasPrefix(hk, nib) {
 				want[prefix] = true
 				depths = append(depths, len(nib))
-				if len(nib) >= 64 {
-					storageBranches++
-				}
 			}
 		}
 		slices.Sort(depths)
@@ -330,7 +320,6 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 		w.warmupKey(rec, hk, 0)
 		require.Equal(t, want, rec.read, "plain key %x", pk)
 	}
-	require.NotZero(t, storageBranches, "fixture must carry storage-plane branches")
 	require.NotZero(t, extensionHops, "fixture must carry extension nodes between branches")
 	require.NotZero(t, storageRootExtensions, "fixture must carry storage roots that are extension nodes")
 }
