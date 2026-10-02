@@ -132,6 +132,36 @@ func TestOnHeadStateWithBlockRootDemotesPriorHeadToPrevious(t *testing.T) {
 	}))
 }
 
+func TestFailedHeadUpdateKeepsHead(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	for i := range 2 {
+		good := state.New(&clparams.MainnetBeaconConfig)
+		require.NoError(t, good.SetSlot(uint64(100+i)))
+		require.NoError(t, manager.OnHeadStateWithBlockRoot(good, common.Hash{byte(1 + i)}))
+	}
+
+	broken := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, broken.SetSlot(100))
+	broken.AddPreviousEpochAttestation(&solid.PendingAttestation{
+		AggregationBits: solid.NewBitList(0, 2048),
+		Data:            &solid.AttestationData{Slot: 200},
+	})
+	require.Error(t, manager.OnHeadStateWithBlockRoot(broken, common.Hash{0xff}))
+
+	root, slot, ok := manager.StateHead()
+	require.True(t, ok)
+	require.Equal(t, common.Hash{0x02}, root)
+	require.Equal(t, uint64(101), slot)
+	require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		require.Equal(t, uint64(101), headState.Slot())
+		return nil
+	}))
+	require.NoError(t, manager.ViewPreviousHeadState(func(headState *state.CachingBeaconState) error {
+		require.Equal(t, uint64(100), headState.Slot())
+		return nil
+	}))
+}
+
 // TestOnHeadStateWithBlockRootSerializesConcurrentWriters verifies that a
 // writer cannot be overtaken and overwritten by a writer that starts later.
 // Deterministic: holds writeLock directly to represent a writer already
