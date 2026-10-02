@@ -968,3 +968,65 @@ func TestOpcodeMaskStillReportsFaults(t *testing.T) {
 		})
 	}
 }
+
+// TestFastPathMatchesGenericPath runs each program with tracing off (the
+// interpreter's fast path) and on (the jump-table path) under every gas limit
+// up to completion, and requires identical results.
+func TestFastPathMatchesGenericPath(t *testing.T) {
+	t.Parallel()
+	fill := func(n int, tail ...byte) []byte {
+		code := make([]byte, 0, 2*n+len(tail))
+		for range n {
+			code = append(code, byte(vm.PUSH1), 0)
+		}
+		return append(code, tail...)
+	}
+	programs := map[string][]byte{
+		"mix": {
+			byte(vm.PUSH1), 1, byte(vm.PUSH1), 2, byte(vm.PUSH2), 0x01, 0x03,
+			byte(vm.DUP2), byte(vm.DUP1), byte(vm.DUP3), byte(vm.ADD), byte(vm.SWAP1), byte(vm.SWAP2), byte(vm.POP),
+			byte(vm.PUSH1), 19, byte(vm.JUMP), byte(vm.STOP), byte(vm.STOP),
+			byte(vm.JUMPDEST), byte(vm.PUSH1), 0, byte(vm.PUSH1), 28, byte(vm.JUMPI),
+			byte(vm.PUSH1), 1, byte(vm.PUSH1), 31, byte(vm.JUMPI), byte(vm.STOP),
+			byte(vm.JUMPDEST),
+			byte(vm.PUSH1), 0x00, byte(vm.MSTORE), byte(vm.PUSH1), 0x20, byte(vm.MSTORE),
+			byte(vm.PUSH1), 0x40, byte(vm.MSTORE), byte(vm.PUSH1), 0x60, byte(vm.MSTORE),
+			byte(vm.PUSH1), 0x80, byte(vm.PUSH1), 0x00, byte(vm.RETURN),
+		},
+		"push2 truncated":  {byte(vm.PUSH2), 0xff},
+		"underflow ADD":    {byte(vm.PUSH1), 1, byte(vm.ADD)},
+		"underflow POP":    {byte(vm.POP)},
+		"underflow DUP1":   {byte(vm.DUP1)},
+		"underflow DUP2":   {byte(vm.PUSH1), 1, byte(vm.DUP2)},
+		"underflow DUP3":   {byte(vm.PUSH1), 1, byte(vm.PUSH1), 1, byte(vm.DUP3)},
+		"underflow SWAP1":  {byte(vm.PUSH1), 1, byte(vm.SWAP1)},
+		"underflow SWAP2":  {byte(vm.PUSH1), 1, byte(vm.PUSH1), 1, byte(vm.SWAP2)},
+		"underflow JUMP":   {byte(vm.JUMP)},
+		"underflow JUMPI":  {byte(vm.PUSH1), 1, byte(vm.JUMPI)},
+		"invalid JUMP":     {byte(vm.PUSH1), 3, byte(vm.JUMP), byte(vm.STOP)},
+		"invalid JUMPI":    {byte(vm.PUSH1), 1, byte(vm.PUSH1), 5, byte(vm.JUMPI), byte(vm.STOP)},
+		"overflow PUSH1":   fill(1024, byte(vm.PUSH1), 0),
+		"overflow PUSH2":   fill(1024, byte(vm.PUSH2), 0, 0),
+		"overflow DUP1":    fill(1024, byte(vm.DUP1)),
+		"full stack SWAP2": fill(1024, byte(vm.SWAP2), byte(vm.ADD), byte(vm.POP)),
+	}
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	ibs := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer ibs.Close()
+	hooks := &tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {}}
+	i := 0
+	for name, code := range programs {
+		i++
+		address := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(0x1000 + i))))
+		require.NoError(t, ibs.SetCode(address, code, tracing.CodeChangeUnspecified))
+		maxGas := uint64(3*len(code) + 20)
+		for gas := uint64(0); gas <= maxGas; gas++ {
+			fastRet, fastLeft, fastErr := Call(address, nil, &Config{State: ibs, GasLimit: gas})
+			ret, left, err := Call(address, nil, &Config{State: ibs, GasLimit: gas, EVMConfig: vm.Config{Tracer: hooks}})
+			require.Equal(t, fmt.Sprint(err), fmt.Sprint(fastErr), "%s gas %d", name, gas)
+			require.Equal(t, left, fastLeft, "%s gas %d", name, gas)
+			require.Equal(t, ret, fastRet, "%s gas %d", name, gas)
+		}
+	}
+}

@@ -17,9 +17,12 @@
 package vm
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 // TestStackBoundsCheckEquivalence proves the interpreter's single unsigned
@@ -76,6 +79,56 @@ func TestStackBoundsInvariant(t *testing.T) {
 			require.NotNilf(t, op, "%s[0x%02X] nil entry", name, i)
 			require.GreaterOrEqualf(t, op.numPop, 0, "%s[0x%02X]", name, i)
 			require.LessOrEqualf(t, op.numPop, op.maxStack, "%s[0x%02X]", name, i)
+		}
+	}
+}
+
+// TestFastPathMatchesJumpTables pins the constants hard-coded in the
+// interpreter's fast path to every jump table it can run with.
+func TestFastPathMatchesJumpTables(t *testing.T) {
+	t.Parallel()
+	type want struct {
+		execute         executionFunc
+		gas             uint64
+		numPop, numPush int
+	}
+	fast := map[OpCode]want{
+		PUSH1:    {opPush1, GasFastestStep, 0, 1},
+		PUSH2:    {opPush2, GasFastestStep, 0, 1},
+		DUP1:     {makeDup(1), GasFastestStep, 1, 2},
+		DUP2:     {makeDup(2), GasFastestStep, 2, 3},
+		DUP3:     {makeDup(3), GasFastestStep, 3, 4},
+		SWAP1:    {opSwap1, GasFastestStep, 2, 2},
+		SWAP2:    {opSwap2, GasFastestStep, 3, 3},
+		ADD:      {opAdd, GasFastestStep, 2, 1},
+		POP:      {opPop, GasQuickStep, 1, 0},
+		JUMPDEST: {opJumpdest, params.JumpdestGas, 0, 0},
+		JUMP:     {opJump, GasMidStep, 1, 0},
+		JUMPI:    {opJumpi, GasSlowStep, 2, 0},
+	}
+	tables := []*JumpTable{
+		&frontierInstructionSet, &homesteadInstructionSet, &tangerineWhistleInstructionSet,
+		&spuriousDragonInstructionSet, &byzantiumInstructionSet, &constantinopleInstructionSet,
+		&istanbulInstructionSet, &berlinInstructionSet, &londonInstructionSet,
+		&shanghaiInstructionSet, &cancunInstructionSet, &pragueInstructionSet,
+		&osakaInstructionSet, &amsterdamInstructionSet,
+	}
+	for _, jt := range tables[:len(tables):len(tables)] {
+		for eip := range activators {
+			cp := copyJumpTable(jt)
+			require.NoError(t, EnableEIP(eip, cp))
+			tables = append(tables, cp)
+		}
+	}
+	for i, jt := range tables {
+		for op, w := range fast {
+			got := &jt[op]
+			require.Equal(t, reflect.ValueOf(w.execute).Pointer(), reflect.ValueOf(got.execute).Pointer(), "table %d %s execute", i, op)
+			require.Equal(t, w.gas, got.constantGas, "table %d %s gas", i, op)
+			require.Equal(t, w.numPop, got.numPop, "table %d %s numPop", i, op)
+			require.Equal(t, w.numPush, got.numPush, "table %d %s numPush", i, op)
+			require.Nil(t, got.dynamicGas, "table %d %s dynamicGas", i, op)
+			require.Nil(t, got.memorySize, "table %d %s memorySize", i, op)
 		}
 	}
 }

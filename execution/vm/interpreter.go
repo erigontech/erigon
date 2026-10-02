@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -474,7 +475,105 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	stack := &callContext.Stack
 	jt := evm.jt
 
+run:
 	for {
+		op = contract.GetOp(pc)
+		// The hottest constant-gas opcodes skip the jump table and its indirect
+		// call. A failed stack or gas check falls through to the generic path,
+		// which reports the error. TestFastPathMatchesJumpTables pins the constants.
+		if !anyTrace {
+			sLen, gas := stack.len(), callContext.gas
+			switch op {
+			case PUSH1:
+				if sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					pc, _, _ = opPush1(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case PUSH2:
+				if sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					pc, _, _ = opPush2(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case DUP1:
+				if sLen >= 1 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(0)
+					pc++
+					continue
+				}
+			case DUP2:
+				if sLen >= 2 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(1)
+					pc++
+					continue
+				}
+			case DUP3:
+				if sLen >= 3 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(2)
+					pc++
+					continue
+				}
+			case SWAP1:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(1)
+					pc++
+					continue
+				}
+			case SWAP2:
+				if sLen >= 3 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(2)
+					pc++
+					continue
+				}
+			case ADD:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					x, y := stack.pop1Peek1()
+					y.Add(x, y)
+					pc++
+					continue
+				}
+			case POP:
+				if sLen >= 1 && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					stack.drop()
+					pc++
+					continue
+				}
+			case JUMPDEST:
+				if gas >= params.JumpdestGas {
+					callContext.gas = gas - params.JumpdestGas
+					pc++
+					continue
+				}
+			case JUMP:
+				if sLen >= 1 && gas >= GasMidStep {
+					callContext.gas = gas - GasMidStep
+					if pc, res, err = opJump(pc, evm, callContext); err != nil {
+						break run
+					}
+					pc++
+					continue
+				}
+			case JUMPI:
+				if sLen >= 2 && gas >= GasSlowStep {
+					callContext.gas = gas - GasSlowStep
+					if pc, res, err = opJumpi(pc, evm, callContext); err != nil {
+						break run
+					}
+					pc++
+					continue
+				}
+			}
+		}
 		callContext.cacheGen++
 		if debug {
 			// Capture pre-execution values for tracing.
@@ -484,7 +583,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
-		op = contract.GetOp(pc)
 		operation := &jt[op]
 		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
