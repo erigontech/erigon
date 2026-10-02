@@ -373,7 +373,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// versionedWriteHit uses), so a written path never takes this branch.
 	if !commited {
 		if _, dirty := s.journal.dirties[addr]; !dirty {
-			if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
+			if path == StoragePath {
+				// Return the value with the header, so readStateForSet does not probe again.
+				if tr, ok := s.versionedReads.GetStorage(addr, key); ok && (tr.Source == MapRead || tr.Source == StorageRead) {
+					r.outcome = outcomeMapDone
+					r.mapStorageVal = tr.Val
+					r.source = tr.Source
+					r.version = tr.Version
+					return
+				}
+			} else if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
 				(prHeader.Source == MapRead || prHeader.Source == StorageRead) {
 				r.outcome = outcomeReadSetHit
 				r.source = prHeader.Source
