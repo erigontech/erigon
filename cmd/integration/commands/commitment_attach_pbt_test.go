@@ -19,7 +19,7 @@ package commands
 import (
 	"context"
 	"errors"
-	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -403,9 +403,16 @@ func TestPBTAttachFilesAheadOfPointRemedy(t *testing.T) {
 	first, found := pbtAttachFirstStepPastPoint(files, 8, 17)
 	require.True(t, found)
 	require.Equal(t, uint64(3), first)
-	err := pbtAttachFilesAheadError("/node", "hoodi", first, 10, 2, 17)
+	err := pbtAttachFilesAheadError("/node", "hoodi", first, 8, 10, 2, 17)
 	require.ErrorContains(t, err, "snapshots rm-state --datadir=/node --chain=hoodi --step=3+")
 	require.ErrorContains(t, err, "stage_exec --datadir=/node --reset")
+	spanning := []pbtAttachFile{{domain: kv.AccountsDomain, from: 1, to: 2, path: "accounts.1-2.kv", data: true}}
+	first, found = pbtAttachFirstStepPastPoint(spanning, 8, 9)
+	require.True(t, found)
+	require.Equal(t, uint64(1), first)
+	err = pbtAttachFilesAheadError("/node", "hoodi", first, 8, 10, 2, 9)
+	require.ErrorContains(t, err, "stage_exec cannot stop at a mid-block point")
+	require.NotContains(t, err.Error(), "rm-state")
 }
 
 func runPBTOfflineCommand(t *testing.T, binary string, args ...string) {
@@ -441,17 +448,56 @@ func runPBTOfflineCommand(t *testing.T, binary string, args ...string) {
 		require.NoError(t, err, "helper for %s: %s", strings.Join(args, " "), output)
 		return
 	}
-	commandPath := filepath.Join(workingDir, "..", "..", "..", "build", "bin", binary)
+	commandPath := binary
+	if !filepath.IsAbs(commandPath) {
+		commandPath = filepath.Join(workingDir, "..", "..", "..", "build", "bin", binary)
+	}
 	command := exec.CommandContext(t.Context(), commandPath, args...)
 	command.Env = append(os.Environ(), "ERIGON_COMMITMENT_V3=true")
-	if binary == "erigon" {
+	if filepath.Base(commandPath) == "erigon" {
 		command.Stdin = strings.NewReader("1\n")
 	}
 	output, err := command.CombinedOutput()
 	require.NoError(t, err, "%s %s: %s", commandPath, strings.Join(args, " "), output)
-	if binary == "erigon" {
+	if filepath.Base(commandPath) == "erigon" {
 		t.Logf("rm-state output: %s", output)
 	}
+}
+
+func printedPBTCommands(message, prefix string) [][]string {
+	var commands [][]string
+	for offset := 0; offset < len(message); {
+		index := strings.Index(message[offset:], prefix)
+		if index < 0 {
+			break
+		}
+		index += offset
+		fields := strings.Fields(message[index:])
+		command := make([]string, 0, len(fields))
+		for _, field := range fields {
+			field = strings.Trim(field, ",.;")
+			if len(command) > 0 && (field == "when" || field == "followed" || field == "then" || field == "or") {
+				break
+			}
+			command = append(command, field)
+		}
+		if len(command) > 0 && strings.Contains(command[0], "=") {
+			command = command[1:]
+		}
+		commands = append(commands, command)
+		offset = index + len(prefix)
+	}
+	return commands
+}
+
+func runPrintedPBTCommand(t *testing.T, erigonBinary string, command []string) {
+	t.Helper()
+	require.NotEmpty(t, command)
+	binary := command[0]
+	if binary == "erigon" {
+		binary = erigonBinary
+	}
+	runPBTOfflineCommand(t, binary, command[1:]...)
 }
 
 func TestPBTAttachRemedyHelperProcess(t *testing.T) {
@@ -559,20 +605,25 @@ func newPBTAttachRemedyFixture(t *testing.T, stepSize, sourceTx, nodeFileTx uint
 }
 
 func TestPBTAttachPrintedRemediesRunInFreshProcesses(t *testing.T) {
+	erigonBinary := buildPBTTestErigon(t)
 	t.Run("block end", func(t *testing.T) {
 		nodeDirs, published := newPBTAttachRemedyFixture(t, 1, 7, 7)
 		err := attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New())
-		require.ErrorContains(t, err, "--unwind=2")
-		runPBTOfflineCommand(t, "integration", "stage_exec", "--datadir="+nodeDirs.DataDir, "--unwind=2", "--chain=test", "--experimental.commitment-v3")
-		runPBTOfflineCommand(t, "integration", "stage_exec", "--datadir="+nodeDirs.DataDir, "--block=2", "--chain=test", "--experimental.commitment-v3")
+		require.Error(t, err)
+		commands := printedPBTCommands(err.Error(), "integration stage_exec")
+		require.GreaterOrEqual(t, len(commands), 2)
+		for _, command := range commands[len(commands)-2:] {
+			runPrintedPBTCommand(t, erigonBinary, command)
+		}
 		require.NoError(t, attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New()))
 	})
 	t.Run("mid block", func(t *testing.T) {
 		nodeDirs, published := newPBTAttachRemedyFixture(t, 1, 9, 9)
 		err := attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New())
-		require.ErrorContains(t, err, "--reset")
-		require.NotContains(t, err.Error(), "--unwind=")
-		runPBTOfflineCommand(t, "integration", "stage_exec", "--datadir="+nodeDirs.DataDir, "--reset", "--chain=test", "--experimental.commitment-v3")
+		require.Error(t, err)
+		commands := printedPBTCommands(err.Error(), "integration stage_exec")
+		require.Len(t, commands, 1)
+		runPrintedPBTCommand(t, erigonBinary, commands[0])
 		require.NoError(t, attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New()))
 	})
 	for _, test := range []struct {
@@ -587,18 +638,28 @@ func TestPBTAttachPrintedRemediesRunInFreshProcesses(t *testing.T) {
 			nodeDirs, published := newPBTAttachRemedyFixture(t, 1, test.pointTx, test.nodeTx)
 			err := attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New())
 			require.Error(t, err)
-			files, fileErr := pbtAttachFiles(nodeDirs)
-			require.NoError(t, fileErr)
-			settings, settingsErr := state.ReadErigonDBSettings(datadir.Open(published))
-			require.NoError(t, settingsErr)
-			firstStep, found := pbtAttachFirstStepPastPoint(pbtAttachVisibleFiles(files), settings.StepSize, test.pointTx)
-			require.True(t, found)
-			require.ErrorContains(t, err, fmt.Sprintf("--step=%d+", firstStep))
-			runPBTOfflineCommand(t, "erigon", "snapshots", "rm-state", "--datadir="+nodeDirs.DataDir, "--chain=test", fmt.Sprintf("--step=%d+", firstStep), "--experimental.commitment-v3")
-			runPBTOfflineCommand(t, "integration", "stage_exec", "--datadir="+nodeDirs.DataDir, "--reset", "--chain=test", "--experimental.commitment-v3")
+			commands := printedPBTCommands(err.Error(), "erigon snapshots rm-state")
+			require.Len(t, commands, 1)
+			runPrintedPBTCommand(t, erigonBinary, commands[0])
+			commands = printedPBTCommands(err.Error(), "integration stage_exec")
+			require.Len(t, commands, 1)
+			runPrintedPBTCommand(t, erigonBinary, commands[0])
 			require.NoError(t, attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New()))
 		})
 	}
+}
+
+func buildPBTTestErigon(t *testing.T) string {
+	t.Helper()
+	workingDir, err := os.Getwd()
+	require.NoError(t, err)
+	root := filepath.Join(workingDir, "..", "..", "..")
+	binary := filepath.Join(t.TempDir(), "erigon")
+	command := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/erigon")
+	command.Dir = root
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "go build ./cmd/erigon: %s", output)
+	return binary
 }
 
 func TestAdoptPBTFilesKeepsTorrentSidecarsWithBytes(t *testing.T) {
@@ -610,6 +671,9 @@ func TestAdoptPBTFilesKeepsTorrentSidecarsWithBytes(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(publishedFile), 0o755))
 	require.NoError(t, os.WriteFile(nodeFile, []byte("old"), 0o644))
 	require.NoError(t, os.WriteFile(nodeFile+".torrent", []byte("old torrent"), 0o644))
+	orphan := filepath.Join(node.SnapDomain, "v1.0-storage.0-1.kv")
+	require.NoError(t, os.WriteFile(orphan, []byte("orphan"), 0o644))
+	require.NoError(t, os.WriteFile(orphan+".torrent", []byte("orphan torrent"), 0o644))
 	require.NoError(t, os.WriteFile(publishedFile, []byte("new"), 0o644))
 	require.NoError(t, os.WriteFile(publishedFile+".torrent", []byte("new torrent"), 0o644))
 	require.NoError(t, adoptPBTFiles(node, published, 8, 7))
@@ -619,6 +683,19 @@ func TestAdoptPBTFilesKeepsTorrentSidecarsWithBytes(t *testing.T) {
 	got, err = os.ReadFile(nodeFile + ".torrent")
 	require.NoError(t, err)
 	require.Equal(t, []byte("new torrent"), got)
+	var unpaired []string
+	require.NoError(t, filepath.WalkDir(node.DataDir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && strings.HasSuffix(path, ".torrent") {
+			if _, statErr := os.Stat(strings.TrimSuffix(path, ".torrent")); errors.Is(statErr, fs.ErrNotExist) {
+				unpaired = append(unpaired, path)
+			}
+		}
+		return nil
+	}))
+	require.Empty(t, unpaired)
 }
 
 func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
@@ -860,7 +937,7 @@ func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
 	setExecutionProgress(t, source.Chaindata, 1)
 	before := snapshotTree(t, source.DataDir)
 	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "published leaf stamp 15")
+	require.ErrorContains(t, err, "stage_exec cannot stop at a mid-block point")
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 

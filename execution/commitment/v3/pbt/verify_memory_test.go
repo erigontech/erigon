@@ -57,6 +57,9 @@ func (c *pbinVerifyMemoryContext) Storage([]byte) (*commitment.Update, error) {
 func TestPBinVerifierWithoutRecordsDoesNotAllocateBucketKeyIndex(t *testing.T) {
 	ctx := &pbinVerifyMemoryContext{records: make(map[string][]byte)}
 	trie := NewTrie(ctx)
+	_, err := trie.Process([]Op{{Key: trieCodeKey(0, 0, 1), Value: testTrieValue(1)}})
+	require.NoError(t, err)
 	verifier := trie.newVerifier()
+	require.NoError(t, verifier.verify())
 	require.Nil(t, verifier.verifiedBucketKeys)
 }

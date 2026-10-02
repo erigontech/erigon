@@ -208,7 +208,7 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			if progressErr != nil {
 				return progressErr
 			}
-			return pbtAttachFilesAheadError(nodeDirs.DataDir, chainName, firstStep, progress, blockNum, txNum)
+			return pbtAttachFilesAheadError(nodeDirs.DataDir, chainName, firstStep, publishedSettings.StepSize, progress, blockNum, txNum)
 		}
 		if err := validatePBTAttachFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
 			return err
@@ -568,7 +568,10 @@ func pbtAttachNodePointError(dataDir, chainName string, nodeBlock, nodeTx, execu
 	return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, conversion point is block %d txNum %d; run %s when the node files end at the point, or run integration stage_exec --datadir=%s --unwind=%d --chain=%s --experimental.commitment-v3 followed by integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3", nodeBlock, nodeTx, executionProgress, blockNum, txNum, reset, dataDir, unwind, chainName, dataDir, blockNum, chainName)
 }
 
-func pbtAttachFilesAheadError(dataDir, chainName string, firstStep, executionProgress, blockNum, txNum uint64) error {
+func pbtAttachFilesAheadError(dataDir, chainName string, firstStep, stepSize, executionProgress, blockNum, txNum uint64) error {
+	if firstStep*stepSize <= txNum {
+		return fmt.Errorf("commitment attach-pbt: node file range starting at step %d spans conversion txNum %d; stage_exec cannot stop at a mid-block point, so no printed command can reach it", firstStep, txNum)
+	}
 	reset := fmt.Sprintf("integration stage_exec --datadir=%s --reset --chain=%s --experimental.commitment-v3", dataDir, chainName)
 	return fmt.Errorf("commitment attach-pbt: node files extend past conversion point block %d txNum %d; remove state from step %d onward with erigon snapshots rm-state --datadir=%s --chain=%s --step=%d+ --experimental.commitment-v3, then run %s (execution progress is block %d)", blockNum, txNum, firstStep, dataDir, chainName, firstStep, reset, executionProgress)
 }
@@ -1072,7 +1075,7 @@ func pbtAttachFirstStepPastPoint(files []pbtAttachFile, stepSize, endTxNum uint6
 	var first uint64
 	found := false
 	for _, file := range files {
-		if !pbtAttachDomain(file.domain) || file.from*stepSize <= endTxNum {
+		if !pbtAttachAdoptsFile(file) || file.to*stepSize <= endTxNum+1 {
 			continue
 		}
 		if !found || file.from < first {

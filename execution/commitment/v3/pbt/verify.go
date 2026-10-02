@@ -40,9 +40,6 @@ func (t *Trie) newVerifier() *Trie {
 		mergeCreatedStems:     make(map[string]struct{}),
 		verifyOnly:            true,
 	}
-	if _, ok := t.ctx.(interface{ Records() map[string][]byte }); ok {
-		verifier.verifiedBucketKeys = make(map[string]struct{})
-	}
 	if t.ownedPrefix != nil {
 		prefix := *t.ownedPrefix
 		verifier.ownedPrefix = &prefix

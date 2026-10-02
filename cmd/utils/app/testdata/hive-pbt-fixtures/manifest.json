@@ -1,0 +1,1282 @@
+{
+  "genesis": {
+    "file": "genesis.json",
+    "stateRoot": "0xb5656f58d12a56427942e7a422755496122c7fceba8b3af277f0df13da57d50c"
+  },
+  "valid": {
+    "snapshot": "valid/snapshot.bin",
+    "preimages": "valid/preimages.bin",
+    "snapshotDigest": "0x5d688e1b25e248b6e0a64d6436391b008bb505da8e849261ff0d934642949c0c",
+    "preimageDigest": "0xe0af5df37c748df3eb3ba0adb07b138e19ffaeccfd6e2eaf7c46ebaf7dc60d2b"
+  },
+  "cases": [
+    {
+      "id": "preimages/trailing-byte",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/trailing-byte/preimages.bin",
+      "clause": "preimages.no-trailing-bytes",
+      "description": "Clause: preimages.no-trailing-bytes\npreimages: 1472 -\u003e 1473 bytes, first differs at 1472, no longer parses",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1473,
+          "firstDiff": 1472,
+          "parses": false
+        }
+      }
+    },
+    {
+      "id": "preimages/truncated-record",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/truncated-record/preimages.bin",
+      "clause": "preimages.record-self-delimiting",
+      "description": "Clause: preimages.record-self-delimiting\nthe file ends inside a slot key\npreimages: 1472 -\u003e 1447 bytes, first differs at 1447, no longer parses; removed 0000000000000000000000000000000000000502:77f673054f2c046e 000000000000000000000000000000000000020e:e3b0c44298fc1c14",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1447,
+          "firstDiff": 1447,
+          "parses": false,
+          "removed": [
+            "0000000000000000000000000000000000000502:77f673054f2c046e",
+            "000000000000000000000000000000000000020e:e3b0c44298fc1c14"
+          ]
+        }
+      }
+    },
+    {
+      "id": "preimages/slot-count-huge",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/slot-count-huge/preimages.bin",
+      "clause": "preimages.record-self-delimiting",
+      "description": "Clause: preimages.record-self-delimiting\nthe first record claims 2^32-1 slots\npreimages: 1472 -\u003e 1472 bytes, first differs at 20, no longer parses; removed 0000000000000000000000000000000000000402:e3b0c44298fc1c14 000000000000000000000000000000000000020c:e3b0c44298fc1c14 0000000000000000000000000000000000000404:e3b0c44298fc1c14 000000000000000000000000000000000000020b:e3b0c44298fc1c14",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1472,
+          "firstDiff": 20,
+          "parses": false,
+          "removed": [
+            "0000000000000000000000000000000000000402:e3b0c44298fc1c14",
+            "000000000000000000000000000000000000020c:e3b0c44298fc1c14",
+            "0000000000000000000000000000000000000404:e3b0c44298fc1c14",
+            "000000000000000000000000000000000000020b:e3b0c44298fc1c14"
+          ]
+        }
+      }
+    },
+    {
+      "id": "preimages/raw-address-order",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/raw-address-order/preimages.bin",
+      "clause": "preimages.hashed-key-order",
+      "description": "Clause: preimages.hashed-key-order\nsorted by raw address\npreimages: 1472 -\u003e 1472 bytes, first differs at 18; reordered",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1472,
+          "firstDiff": 18,
+          "parses": true,
+          "reordered": true
+        }
+      }
+    },
+    {
+      "id": "preimages/raw-slot-order",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/raw-slot-order/preimages.bin",
+      "clause": "preimages.hashed-key-order",
+      "description": "Clause: preimages.hashed-key-order\nslots sorted by number\npreimages: 1472 -\u003e 1472 bytes, first differs at 326; changed 0000000000000000000000000000000000000501:cbb5b07db1aa8a32 0000000000000000000000000000000000000403:2a30e8ea70a33b71 0000000000000000000000000000000000000502:522ea4bfbb7dd489",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1472,
+          "firstDiff": 326,
+          "parses": true,
+          "changed": [
+            "0000000000000000000000000000000000000501:cbb5b07db1aa8a32",
+            "0000000000000000000000000000000000000403:2a30e8ea70a33b71",
+            "0000000000000000000000000000000000000502:522ea4bfbb7dd489"
+          ]
+        }
+      }
+    },
+    {
+      "id": "preimages/duplicate-address",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/duplicate-address/preimages.bin",
+      "clause": "preimages.address-appears-once",
+      "description": "Clause: preimages.address-appears-once\nrecord 1 repeated in place; a strict-ascent check reports the equal key as out of order, which is the same clause read the other way\npreimages: 1472 -\u003e 1496 bytes, first differs at 66; reordered",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1496,
+          "firstDiff": 66,
+          "parses": true,
+          "reordered": true
+        }
+      }
+    },
+    {
+      "id": "preimages/duplicate-slot",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/duplicate-slot/preimages.bin",
+      "clause": "preimages.no-duplicate-slots",
+      "description": "Clause: preimages.no-duplicate-slots\nstorageSpread's second slot repeated in place\npreimages: 1472 -\u003e 1504 bytes, first differs at 295; changed 0000000000000000000000000000000000000501:23a1bdd8b0494c1f",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1504,
+          "firstDiff": 295,
+          "parses": true,
+          "changed": [
+            "0000000000000000000000000000000000000501:23a1bdd8b0494c1f"
+          ]
+        }
+      }
+    },
+    {
+      "id": "preimages/address-split",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/address-split/preimages.bin",
+      "clause": "preimages.address-appears-once",
+      "description": "Clause: preimages.address-appears-once\nstorageSpread's record split into two, verbatim: a loader that merges by address accepts it\npreimages: 1472 -\u003e 1496 bytes, first differs at 295; changed 0000000000000000000000000000000000000501:d390f01cef95d11c 0000000000000000000000000000000000000501:b9623097b4080098; reordered",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1496,
+          "firstDiff": 295,
+          "parses": true,
+          "changed": [
+            "0000000000000000000000000000000000000501:d390f01cef95d11c",
+            "0000000000000000000000000000000000000501:b9623097b4080098"
+          ],
+          "reordered": true
+        }
+      }
+    },
+    {
+      "id": "preimages/missing-account",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/missing-account/preimages.bin",
+      "clause": "verification.records-match-preimages",
+      "description": "Clause: verification.records-match-preimages\npreimages: 1472 -\u003e 1448 bytes, first differs at 186; removed 0000000000000000000000000000000000000101:e3b0c44298fc1c14",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1448,
+          "firstDiff": 186,
+          "parses": true,
+          "removed": [
+            "0000000000000000000000000000000000000101:e3b0c44298fc1c14"
+          ]
+        }
+      }
+    },
+    {
+      "id": "preimages/missing-header-slot",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/missing-header-slot/preimages.bin",
+      "clause": "verification.records-match-preimages",
+      "description": "Clause: verification.records-match-preimages\nslot 63 of storageSpread\npreimages: 1472 -\u003e 1440 bytes, first differs at 295; changed 0000000000000000000000000000000000000501:5b91c72834c44362",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1440,
+          "firstDiff": 295,
+          "parses": true,
+          "changed": [
+            "0000000000000000000000000000000000000501:5b91c72834c44362"
+          ]
+        }
+      }
+    },
+    {
+      "id": "preimages/missing-overflow-slot",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/missing-overflow-slot/preimages.bin",
+      "clause": "verification.records-match-preimages",
+      "description": "Clause: verification.records-match-preimages\nslot 256 of storageSpread; its stem is a one-way hash, so the leaf can never be keyed\npreimages: 1472 -\u003e 1440 bytes, first differs at 295; changed 0000000000000000000000000000000000000501:fae19bf632c7f5fc",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1440,
+          "firstDiff": 295,
+          "parses": true,
+          "changed": [
+            "0000000000000000000000000000000000000501:fae19bf632c7f5fc"
+          ]
+        }
+      }
+    },
+    {
+      "id": "preimages/empty-file",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/empty-file/preimages.bin",
+      "clause": "verification.records-match-preimages",
+      "description": "Clause: verification.records-match-preimages\npreimages: 1472 -\u003e 0 bytes, first differs at 0; removed 0000000000000000000000000000000000000402:e3b0c44298fc1c14 000000000000000000000000000000000000020c:e3b0c44298fc1c14 0000000000000000000000000000000000000404:e3b0c44298fc1c14 000000000000000000000000000000000000020b:e3b0c44298fc1c14",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 0,
+          "firstDiff": 0,
+          "parses": true,
+          "removed": [
+            "0000000000000000000000000000000000000402:e3b0c44298fc1c14",
+            "000000000000000000000000000000000000020c:e3b0c44298fc1c14",
+            "0000000000000000000000000000000000000404:e3b0c44298fc1c14",
+            "000000000000000000000000000000000000020b:e3b0c44298fc1c14"
+          ]
+        }
+      }
+    },
+    {
+      "id": "preimages/slot-on-wrong-account",
+      "suite": "preimages",
+      "snapshot": "valid/snapshot.bin",
+      "preimages": "preimages/slot-on-wrong-account/preimages.bin",
+      "clause": "verification.records-match-preimages",
+      "description": "Clause: verification.records-match-preimages\nstorageSpread's slot 64 named under storageValues: the set is intact, the binding is not\npreimages: 1472 -\u003e 1472 bytes, first differs at 295; changed 0000000000000000000000000000000000000501:8c46df5d1338c377 0000000000000000000000000000000000000502:fad64028c55f718a",
+      "effect": {
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1472,
+          "firstDiff": 295,
+          "parses": true,
+          "changed": [
+            "0000000000000000000000000000000000000501:8c46df5d1338c377",
+            "0000000000000000000000000000000000000502:fad64028c55f718a"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/wrong-claimed-root",
+      "suite": "snapshot",
+      "snapshot": "snapshot/wrong-claimed-root/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.internal-consistency",
+      "description": "Clause: verification.internal-consistency\nthe trailer's last byte flipped\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 12204",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 12204,
+          "parses": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/truncated-stream",
+      "suite": "snapshot",
+      "snapshot": "snapshot/truncated-stream/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.record-self-delimiting",
+      "description": "Clause: snapshot.record-self-delimiting\nthe file ends inside the root\nsnapshot: 12205 -\u003e 12204 bytes, first differs at 12204, no longer parses",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12204,
+          "firstDiff": 12204,
+          "parses": false
+        }
+      }
+    },
+    {
+      "id": "snapshot/trailing-garbage",
+      "suite": "snapshot",
+      "snapshot": "snapshot/trailing-garbage/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.no-trailing-bytes",
+      "description": "Clause: snapshot.no-trailing-bytes\nsnapshot: 12205 -\u003e 12207 bytes, first differs at 12205, no longer parses",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12207,
+          "firstDiff": 12205,
+          "parses": false
+        }
+      }
+    },
+    {
+      "id": "snapshot/missing-end",
+      "suite": "snapshot",
+      "snapshot": "snapshot/missing-end/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.end-tag",
+      "description": "Clause: snapshot.end-tag\nthe file stops after the last record, with no end tag or root\nsnapshot: 12205 -\u003e 12172 bytes, first differs at 12172, no longer parses",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12172,
+          "firstDiff": 12172,
+          "parses": false
+        }
+      }
+    },
+    {
+      "id": "snapshot/truncated-record",
+      "suite": "snapshot",
+      "snapshot": "snapshot/truncated-record/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.record-self-delimiting",
+      "description": "Clause: snapshot.record-self-delimiting\nthe file ends inside the last storage group\nsnapshot: 12205 -\u003e 12171 bytes, first differs at 12171, no longer parses; removed ffff9369bab66563cd8aa7d9fb55e735bc20d6c209e09c5cde826f537a5c53bb1fda642e24bd60e7f2374bfaf25f871a7c1211109c37e9dcc2c466c3995de671462c=12",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12171,
+          "firstDiff": 12171,
+          "parses": false,
+          "removed": [
+            "ffff9369bab66563cd8aa7d9fb55e735bc20d6c209e09c5cde826f537a5c53bb1fda642e24bd60e7f2374bfaf25f871a7c1211109c37e9dcc2c466c3995de671462c=12"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/unknown-tag",
+      "suite": "snapshot",
+      "snapshot": "snapshot/unknown-tag/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.known-tag",
+      "description": "Clause: snapshot.known-tag\nthe first header record tagged 0x08, one past the end tag\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 0, no longer parses; removed 0024b3b4d16f572a5034fccf36fe217ee40a3fd10d2b7adb54594d72608bb66e9800=1f000000000000000000000000000000000000000000000001 0024b3b4d16f572a5034fccf36fe217ee40a3fd10d2b7adb54594d72608bb66e9801=a707f8a78fcde1950ab3f18ad1af0d120d7097919c5c7f80051cb151c161ea5c 0026c706f12ced4eba335fde6ff5d9d2455e4b0fb6e43e17a5086aa5b9cba3147300=18000000000000000000000000000000000000000000000001 0026c706f12ced4eba335fde6ff5d9d2455e4b0fb6e43e17a5086aa5b9cba3147301=d07ad01bcd0bba8e6b49e9a45b4d20d6bca9aebaff800b6e87b1cea7104c3d7b",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 0,
+          "parses": false,
+          "removed": [
+            "0024b3b4d16f572a5034fccf36fe217ee40a3fd10d2b7adb54594d72608bb66e9800=1f000000000000000000000000000000000000000000000001",
+            "0024b3b4d16f572a5034fccf36fe217ee40a3fd10d2b7adb54594d72608bb66e9801=a707f8a78fcde1950ab3f18ad1af0d120d7097919c5c7f80051cb151c161ea5c",
+            "0026c706f12ced4eba335fde6ff5d9d2455e4b0fb6e43e17a5086aa5b9cba3147300=18000000000000000000000000000000000000000000000001",
+            "0026c706f12ced4eba335fde6ff5d9d2455e4b0fb6e43e17a5086aa5b9cba3147301=d07ad01bcd0bba8e6b49e9a45b4d20d6bca9aebaff800b6e87b1cea7104c3d7b"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/header-after-code",
+      "suite": "snapshot",
+      "snapshot": "snapshot/header-after-code/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.zone-order",
+      "description": "Clause: snapshot.zone-order\nthe last header record moved after the first code group\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 2028",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 2028,
+          "parses": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/code-after-storage",
+      "suite": "snapshot",
+      "snapshot": "snapshot/code-after-storage/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.zone-order",
+      "description": "Clause: snapshot.zone-order\nthe last code group moved after the last storage group\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 11608",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 11608,
+          "parses": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/orphan-storage-group",
+      "suite": "snapshot",
+      "snapshot": "snapshot/orphan-storage-group/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.storage-group-follows-account",
+      "description": "Clause: snapshot.storage-group-follows-account\nthe first storage account record dropped, so its groups follow the last code group\nsnapshot: 12205 -\u003e 12172 bytes, first differs at 11675, no longer parses; removed ff29922499a6c60c61bb6af20b521800621eb6ab35ba377d1f3f1915767b952d98d04ae5678b7b5041ca154feb790f55aa6a3b6d6d1779828e46ad3762ca86cf342c=03 ff358d8dce8f3b4226e1afbd5121b462cc6e368637294c94867634b8a00d9075a011a8ff2b9a1ab15e806f7c1ba953ad9c880b31e875604fb88e9cf4e8e900fcb340=02 ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d3b1353d94bcc614c272d746817e70427c8ebe1de63a6f553d4be8bc99c95e34740=a2 ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d3b1353d94bcc614c272d746817e70427c8ebe1de63a6f553d4be8bc99c95e347ff=a3",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12172,
+          "firstDiff": 11675,
+          "parses": false,
+          "removed": [
+            "ff29922499a6c60c61bb6af20b521800621eb6ab35ba377d1f3f1915767b952d98d04ae5678b7b5041ca154feb790f55aa6a3b6d6d1779828e46ad3762ca86cf342c=03",
+            "ff358d8dce8f3b4226e1afbd5121b462cc6e368637294c94867634b8a00d9075a011a8ff2b9a1ab15e806f7c1ba953ad9c880b31e875604fb88e9cf4e8e900fcb340=02",
+            "ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d3b1353d94bcc614c272d746817e70427c8ebe1de63a6f553d4be8bc99c95e34740=a2",
+            "ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d3b1353d94bcc614c272d746817e70427c8ebe1de63a6f553d4be8bc99c95e347ff=a3"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/empty-storage-account",
+      "suite": "snapshot",
+      "snapshot": "snapshot/empty-storage-account/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.storage-account-holds-group",
+      "description": "Clause: snapshot.storage-account-holds-group\na storage account record for eoaBalance, which has no overflow storage; the leaves are the valid ones\nsnapshot: 12205 -\u003e 12238 bytes, first differs at 12104",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12238,
+          "firstDiff": 12104,
+          "parses": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/single-group-as-multi",
+      "suite": "snapshot",
+      "snapshot": "snapshot/single-group-as-multi/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.one-leaf-group-form",
+      "description": "Clause: snapshot.one-leaf-group-form\na one-leaf storage group written with tag 0x06 and n 0\nsnapshot: 12205 -\u003e 12206 bytes, first differs at 11708",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12206,
+          "firstDiff": 11708,
+          "parses": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/storage-account-split",
+      "suite": "snapshot",
+      "snapshot": "snapshot/storage-account-split/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.storage-record-ascending-order",
+      "description": "Clause: snapshot.storage-record-ascending-order\nan account's storage groups split over two storage account records; same leaves, two records: a loader that checks only the derived leaf order accepts it\nsnapshot: 12205 -\u003e 12238 bytes, first differs at 11886",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12238,
+          "firstDiff": 11886,
+          "parses": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/code-stem-split",
+      "suite": "snapshot",
+      "snapshot": "snapshot/code-stem-split/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.code-group-ascending-order",
+      "description": "Clause: snapshot.code-group-ascending-order\na code group's chunks split over two records with the same stem; same leaves, two records: a loader that checks only the derived leaf order accepts it\nsnapshot: 12205 -\u003e 12239 bytes, first differs at 2122",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12239,
+          "firstDiff": 2122,
+          "parses": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/headers-out-of-order",
+      "suite": "snapshot",
+      "snapshot": "snapshot/headers-out-of-order/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.header-ascending-order",
+      "description": "Clause: snapshot.header-ascending-order\nthe first two header records swapped\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 1; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 1,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/header-duplicate",
+      "suite": "snapshot",
+      "snapshot": "snapshot/header-duplicate/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.header-ascending-order",
+      "description": "Clause: snapshot.header-ascending-order\nthe first header record repeated in place\nsnapshot: 12205 -\u003e 12276 bytes, first differs at 72; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12276,
+          "firstDiff": 72,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/header-slots-out-of-order",
+      "suite": "snapshot",
+      "snapshot": "snapshot/header-slots-out-of-order/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.header-slot-ascending-order",
+      "description": "Clause: snapshot.header-slot-ascending-order\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 468; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 468,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/header-slot-duplicate",
+      "suite": "snapshot",
+      "snapshot": "snapshot/header-slot-duplicate/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.header-slot-ascending-order",
+      "description": "Clause: snapshot.header-slot-ascending-order\nsnapshot: 12205 -\u003e 12208 bytes, first differs at 467; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12208,
+          "firstDiff": 467,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/code-groups-out-of-order",
+      "suite": "snapshot",
+      "snapshot": "snapshot/code-groups-out-of-order/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.code-group-ascending-order",
+      "description": "Clause: snapshot.code-group-ascending-order\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 2090; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 2090,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/code-group-duplicate",
+      "suite": "snapshot",
+      "snapshot": "snapshot/code-group-duplicate/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.code-group-ascending-order",
+      "description": "Clause: snapshot.code-group-ascending-order\nthe first code group repeated in place: a loader that merges by key accepts it\nsnapshot: 12205 -\u003e 12306 bytes, first differs at 2191; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12306,
+          "firstDiff": 2191,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/storage-records-out-of-order",
+      "suite": "snapshot",
+      "snapshot": "snapshot/storage-records-out-of-order/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.storage-record-ascending-order",
+      "description": "Clause: snapshot.storage-record-ascending-order\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 11676; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 11676,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/storage-record-duplicate",
+      "suite": "snapshot",
+      "snapshot": "snapshot/storage-record-duplicate/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.storage-record-ascending-order",
+      "description": "Clause: snapshot.storage-record-ascending-order\nthe first storage account record repeated in place: a loader that merges by key accepts it\nsnapshot: 12205 -\u003e 12274 bytes, first differs at 11745; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12274,
+          "firstDiff": 11745,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/storage-groups-out-of-order",
+      "suite": "snapshot",
+      "snapshot": "snapshot/storage-groups-out-of-order/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.storage-group-ascending-order",
+      "description": "Clause: snapshot.storage-group-ascending-order\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 11847; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 11847,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/storage-group-duplicate",
+      "suite": "snapshot",
+      "snapshot": "snapshot/storage-group-duplicate/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.storage-group-ascending-order",
+      "description": "Clause: snapshot.storage-group-ascending-order\nsnapshot: 12205 -\u003e 12245 bytes, first differs at 11887; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12245,
+          "firstDiff": 11887,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/group-entries-out-of-order",
+      "suite": "snapshot",
+      "snapshot": "snapshot/group-entries-out-of-order/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.group-entry-ascending-order",
+      "description": "Clause: snapshot.group-entry-ascending-order\na storage group's entries swapped\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 11880; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 11880,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/group-entry-duplicate",
+      "suite": "snapshot",
+      "snapshot": "snapshot/group-entry-duplicate/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.group-entry-ascending-order",
+      "description": "Clause: snapshot.group-entry-ascending-order\na storage group's first entry repeated in place\nsnapshot: 12205 -\u003e 12208 bytes, first differs at 11879; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12208,
+          "firstDiff": 11879,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/code-entries-out-of-order",
+      "suite": "snapshot",
+      "snapshot": "snapshot/code-entries-out-of-order/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.group-entry-ascending-order",
+      "description": "Clause: snapshot.group-entry-ascending-order\na code group's entries swapped\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 2123; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 2123,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/code-entry-duplicate",
+      "suite": "snapshot",
+      "snapshot": "snapshot/code-entry-duplicate/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.group-entry-ascending-order",
+      "description": "Clause: snapshot.group-entry-ascending-order\na code group's first entry repeated in place\nsnapshot: 12205 -\u003e 12238 bytes, first differs at 2122; reordered; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12238,
+          "firstDiff": 2122,
+          "parses": true,
+          "reordered": true,
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/kind0-empty-account",
+      "suite": "snapshot",
+      "snapshot": "snapshot/kind0-empty-account/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.kind0-not-empty",
+      "description": "Clause: snapshot.kind0-not-empty\neoaBalance's nonce and balance cleared with kind 0 kept\nsnapshot: 12205 -\u003e 12202 bytes, first differs at 838; removed 00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d700=0f4240",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12202,
+          "firstDiff": 838,
+          "parses": true,
+          "removed": [
+            "00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d700=0f4240"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/kind1-code-size-zero",
+      "suite": "snapshot",
+      "snapshot": "snapshot/kind1-code-size-zero/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.code-size-nonzero",
+      "description": "Clause: snapshot.code-size-nonzero\neoaBalance rewritten as kind 1 with codeHash keccak('') and codeSize cleared: the leaf set and root are unchanged\nsnapshot: 12205 -\u003e 12238 bytes, first differs at 804",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12238,
+          "firstDiff": 804,
+          "parses": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/kind1-delegation-bytecode",
+      "suite": "snapshot",
+      "snapshot": "snapshot/kind1-delegation-bytecode/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.code-limb-not-delegation",
+      "description": "Clause: verification.code-limb-not-delegation\ndelegatedA rewritten as kind 1 whose sole code chunk holds exactly the EIP-7702 indicator\nsnapshot: 12205 -\u003e 12286 bytes, first differs at 474; added 00467cf32ae19840b31b7fc73d1d0c690ed6224f2028dd39ca5aecaa647a072fd001=0dae4d2d62448c761338c2842f309d20030cd4ed70f4a61739f5cf39f24c57ad 0186bfa763b38b4d16ca2fd51b3188bb125a91ca270baadd155423d6718e0a9e4d00=ef010000000000000000000000000000000000000004ff0000000000000000; removed 00467cf32ae19840b31b7fc73d1d0c690ed6224f2028dd39ca5aecaa647a072fd002=ef010000000000000000000000000000000000000004ff000000000000000000",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12286,
+          "firstDiff": 474,
+          "parses": true,
+          "added": [
+            "00467cf32ae19840b31b7fc73d1d0c690ed6224f2028dd39ca5aecaa647a072fd001=0dae4d2d62448c761338c2842f309d20030cd4ed70f4a61739f5cf39f24c57ad",
+            "0186bfa763b38b4d16ca2fd51b3188bb125a91ca270baadd155423d6718e0a9e4d00=ef010000000000000000000000000000000000000004ff0000000000000000"
+          ],
+          "removed": [
+            "00467cf32ae19840b31b7fc73d1d0c690ed6224f2028dd39ca5aecaa647a072fd002=ef010000000000000000000000000000000000000004ff000000000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/slot-out-of-range",
+      "suite": "snapshot",
+      "snapshot": "snapshot/slot-out-of-range/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.header-slot-below-64",
+      "description": "Clause: snapshot.header-slot-below-64\na header slot at sub-index 64\nsnapshot: 12205 -\u003e 12208 bytes, first differs at 842; added 00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d780=01",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12208,
+          "firstDiff": 842,
+          "parses": true,
+          "added": [
+            "00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d780=01"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/integer-leading-zero",
+      "suite": "snapshot",
+      "snapshot": "snapshot/integer-leading-zero/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.integer-leading-zero",
+      "description": "Clause: snapshot.integer-leading-zero\neoaNonce's nonce given a leading zero byte\nsnapshot: 12205 -\u003e 12206 bytes, first differs at 353",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12206,
+          "firstDiff": 353,
+          "parses": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/integer-too-long",
+      "suite": "snapshot",
+      "snapshot": "snapshot/integer-too-long/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.integer-width",
+      "description": "Clause: snapshot.integer-width\neoaBalance's balance widened past the 16-byte field width\nsnapshot: 12205 -\u003e 12222 bytes, first differs at 838, no longer parses; removed 00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d700=0f4240 00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d701=c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470 0066ff5cd96472405b9cc2fad137f6fd2ba96146ac6fd31c4f9532368d225ec78500=3e000000000000000000000000000000000000000000000001 0066ff5cd96472405b9cc2fad137f6fd2ba96146ac6fd31c4f9532368d225ec78501=2e795758918d9c804da815b3be88b798e63d21d668c624228fbd697bff25ea3b",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12222,
+          "firstDiff": 838,
+          "parses": false,
+          "removed": [
+            "00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d700=0f4240",
+            "00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d701=c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+            "0066ff5cd96472405b9cc2fad137f6fd2ba96146ac6fd31c4f9532368d225ec78500=3e000000000000000000000000000000000000000000000001",
+            "0066ff5cd96472405b9cc2fad137f6fd2ba96146ac6fd31c4f9532368d225ec78501=2e795758918d9c804da815b3be88b798e63d21d668c624228fbd697bff25ea3b"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/value-too-long",
+      "suite": "snapshot",
+      "snapshot": "snapshot/value-too-long/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.integer-width",
+      "description": "Clause: snapshot.integer-width\nstorageHeader's slot 7 widened to 33 bytes\nsnapshot: 12205 -\u003e 12237 bytes, first differs at 2023, no longer parses; removed 00f6e5c66507bf6e1c1e2fcf4b945f8dd92c2a03a5b28a72cacad2239635bb7a0200=01 00f6e5c66507bf6e1c1e2fcf4b945f8dd92c2a03a5b28a72cacad2239635bb7a0201=c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470 00f6e5c66507bf6e1c1e2fcf4b945f8dd92c2a03a5b28a72cacad2239635bb7a0247=04 00f6e5c66507bf6e1c1e2fcf4b945f8dd92c2a03a5b28a72cacad2239635bb7a027f=05",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12237,
+          "firstDiff": 2023,
+          "parses": false,
+          "removed": [
+            "00f6e5c66507bf6e1c1e2fcf4b945f8dd92c2a03a5b28a72cacad2239635bb7a0200=01",
+            "00f6e5c66507bf6e1c1e2fcf4b945f8dd92c2a03a5b28a72cacad2239635bb7a0201=c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+            "00f6e5c66507bf6e1c1e2fcf4b945f8dd92c2a03a5b28a72cacad2239635bb7a0247=04",
+            "00f6e5c66507bf6e1c1e2fcf4b945f8dd92c2a03a5b28a72cacad2239635bb7a027f=05"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/zero-value-present",
+      "suite": "snapshot",
+      "snapshot": "snapshot/zero-value-present/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.no-zero-values",
+      "description": "Clause: snapshot.no-zero-values\nslot 5 of storageSpread held as 32 zero bytes; no tree can commit to it, so the valid root stays\nsnapshot: 12205 -\u003e 12207 bytes, first differs at 467; added 003b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d45=; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12207,
+          "firstDiff": 467,
+          "parses": true,
+          "added": [
+            "003b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d45="
+          ],
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/zero-code-chunk-present",
+      "suite": "snapshot",
+      "snapshot": "snapshot/zero-code-chunk-present/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.no-zero-values",
+      "description": "Clause: snapshot.no-zero-values\nthe zero-valued middle chunk of codeZeroChunk's code, which the converter omits\nsnapshot: 12205 -\u003e 12207 bytes, first differs at 11207; added 01a05a038c578027c571fa59b6a22ce9505f126767aa4668d86785dec4c8bd430f01=; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12207,
+          "firstDiff": 11207,
+          "parses": true,
+          "added": [
+            "01a05a038c578027c571fa59b6a22ce9505f126767aa4668d86785dec4c8bd430f01="
+          ],
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/zero-storage-entry-present",
+      "suite": "snapshot",
+      "snapshot": "snapshot/zero-storage-entry-present/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.no-zero-values",
+      "description": "Clause: snapshot.no-zero-values\na zero-valued entry in storageSpread's overflow group at slot 257\nsnapshot: 12205 -\u003e 12207 bytes, first differs at 11919; added ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d412f3db99c819b5f2b8c4444bb04aba88c45186dd1f3db875746ffbce77ab30501=; root kept",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12207,
+          "firstDiff": 11919,
+          "parses": true,
+          "added": [
+            "ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d412f3db99c819b5f2b8c4444bb04aba88c45186dd1f3db875746ffbce77ab30501="
+          ],
+          "rootKept": true
+        }
+      }
+    },
+    {
+      "id": "snapshot/flipped-value",
+      "suite": "snapshot",
+      "snapshot": "snapshot/flipped-value/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.consensus-anchoring",
+      "description": "Clause: verification.consensus-anchoring\neoaBalance's balance, root recomputed\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 841; changed 00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d700=0f4241",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 841,
+          "parses": true,
+          "changed": [
+            "00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d700=0f4241"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/delegation-target-changed",
+      "suite": "snapshot",
+      "snapshot": "snapshot/delegation-target-changed/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.consensus-anchoring",
+      "description": "Clause: verification.consensus-anchoring\none byte of delegatedA's target; the MPT code hash is keccak of the indicator, which check 2 must derive\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 529; changed 00467cf32ae19840b31b7fc73d1d0c690ed6224f2028dd39ca5aecaa647a072fd002=ef010000000000000000000000000000000000000004fe000000000000000000",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 529,
+          "parses": true,
+          "changed": [
+            "00467cf32ae19840b31b7fc73d1d0c690ed6224f2028dd39ca5aecaa647a072fd002=ef010000000000000000000000000000000000000004fe000000000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/wrong-code-size",
+      "suite": "snapshot",
+      "snapshot": "snapshot/wrong-code-size/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.code-limb",
+      "description": "Clause: verification.code-limb\ncodeChunkExact claims 7 bytes\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 1712; changed 00de6aa80c5d5372fcefaacd56c0de779c1a2ef98428d0783deead7daf6c78102c00=07000000000000000000000000000000000000000000000001",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 1712,
+          "parses": true,
+          "changed": [
+            "00de6aa80c5d5372fcefaacd56c0de779c1a2ef98428d0783deead7daf6c78102c00=07000000000000000000000000000000000000000000000001"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/missing-code-chunk",
+      "suite": "snapshot",
+      "snapshot": "snapshot/missing-code-chunk/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.code-limb",
+      "description": "Clause: verification.code-limb\nchunk 0 of the 31-byte JUMPDEST code\nsnapshot: 12205 -\u003e 12138 bytes, first differs at 11108; removed 0195a90454030edacd7a6ff4aa46267eeff5da505ebc3f11ed185b320b2602933000=5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12138,
+          "firstDiff": 11108,
+          "parses": true,
+          "removed": [
+            "0195a90454030edacd7a6ff4aa46267eeff5da505ebc3f11ed185b320b2602933000=5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/flipped-pushdata-byte",
+      "suite": "snapshot",
+      "snapshot": "snapshot/flipped-pushdata-byte/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.code-limb",
+      "description": "Clause: verification.code-limb\nchunk 0 of the 31-byte JUMPDEST code, count 0 to 1\nsnapshot: 12205 -\u003e 12206 bytes, first differs at 11142; changed 0195a90454030edacd7a6ff4aa46267eeff5da505ebc3f11ed185b320b2602933000=015b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12206,
+          "firstDiff": 11142,
+          "parses": true,
+          "changed": [
+            "0195a90454030edacd7a6ff4aa46267eeff5da505ebc3f11ed185b320b2602933000=015b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/orphan-code-leaves",
+      "suite": "snapshot",
+      "snapshot": "snapshot/orphan-code-leaves/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.no-unreferenced-code",
+      "description": "Clause: verification.no-unreferenced-code\nchunks under a code hash no account holds\nsnapshot: 12205 -\u003e 12242 bytes, first differs at 11108; added 01892101328229bdf4a79cce16a6008f4ede2ed9eb7007df95721e2204bd78cf7200=01",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12242,
+          "firstDiff": 11108,
+          "parses": true,
+          "added": [
+            "01892101328229bdf4a79cce16a6008f4ede2ed9eb7007df95721e2204bd78cf7200=01"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/chunk-beyond-code-size",
+      "suite": "snapshot",
+      "snapshot": "snapshot/chunk-beyond-code-size/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.code-limb",
+      "description": "Clause: verification.code-limb\na chunk at index 1 for 31 bytes of code\nsnapshot: 12205 -\u003e 12208 bytes, first differs at 11140; added 0195a90454030edacd7a6ff4aa46267eeff5da505ebc3f11ed185b320b2602933001=01",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12208,
+          "firstDiff": 11140,
+          "parses": true,
+          "added": [
+            "0195a90454030edacd7a6ff4aa46267eeff5da505ebc3f11ed185b320b2602933001=01"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/shared-code-size-mismatch",
+      "suite": "snapshot",
+      "snapshot": "snapshot/shared-code-size-mismatch/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.code-limb",
+      "description": "Clause: verification.code-limb\nsharedB's codeSize set to 62 while sharedA holds 93 for the same code hash: a verifier that takes one holder's size and skips the rest accepts it\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 802; changed 0051b43d25161213e37c0073993f590e12895e698f215330a6ad6ca14d153abe5d00=3e000000000000000000000000000000000000000000000002",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 802,
+          "parses": true,
+          "changed": [
+            "0051b43d25161213e37c0073993f590e12895e698f215330a6ad6ca14d153abe5d00=3e000000000000000000000000000000000000000000000002"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/surplus-account-leaves",
+      "suite": "snapshot",
+      "snapshot": "snapshot/surplus-account-leaves/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.records-match-preimages",
+      "description": "Clause: verification.records-match-preimages\nan account with no preimage record\nsnapshot: 12205 -\u003e 12242 bytes, first differs at 1515; added 00ad19977c82fe964030933cdeb34e866fc1ccff737a443b895cc60ffd717d42c100=01 00ad19977c82fe964030933cdeb34e866fc1ccff737a443b895cc60ffd717d42c101=c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12242,
+          "firstDiff": 1515,
+          "parses": true,
+          "added": [
+            "00ad19977c82fe964030933cdeb34e866fc1ccff737a443b895cc60ffd717d42c100=01",
+            "00ad19977c82fe964030933cdeb34e866fc1ccff737a443b895cc60ffd717d42c101=c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/storage-leaf-missing",
+      "suite": "snapshot",
+      "snapshot": "snapshot/storage-leaf-missing/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.consensus-anchoring",
+      "description": "Clause: verification.consensus-anchoring\nstorageSpread's slot 64 leaf dropped while the preimages still name it; its storage root no longer matches\nsnapshot: 12205 -\u003e 12201 bytes, first differs at 11846; removed ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d3b1353d94bcc614c272d746817e70427c8ebe1de63a6f553d4be8bc99c95e34740=a2",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12201,
+          "firstDiff": 11846,
+          "parses": true,
+          "removed": [
+            "ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d3b1353d94bcc614c272d746817e70427c8ebe1de63a6f553d4be8bc99c95e34740=a2"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/orphan-storage-leaf",
+      "suite": "snapshot",
+      "snapshot": "snapshot/orphan-storage-leaf/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "snapshot.storage-account-has-header",
+      "description": "Clause: snapshot.storage-account-has-header\na storage account record, holding one leaf, for an address with no header record\nsnapshot: 12205 -\u003e 12274 bytes, first differs at 12104; added fff7d01b2a895d6c17aafaa414c406387237ca0632955088dee695bfa078ecfb0bd539fbf91ef8acf4f44fb5782d6f01eadccd0b587ea79da9b29d5891989a8ba940=01",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12274,
+          "firstDiff": 12104,
+          "parses": true,
+          "added": [
+            "fff7d01b2a895d6c17aafaa414c406387237ca0632955088dee695bfa078ecfb0bd539fbf91ef8acf4f44fb5782d6f01eadccd0b587ea79da9b29d5891989a8ba940=01"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/delegation-with-code-leaves",
+      "suite": "snapshot",
+      "snapshot": "snapshot/delegation-with-code-leaves/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.no-unreferenced-code",
+      "description": "Clause: verification.no-unreferenced-code\nchunks under keccak(indicator), whose value is the indicator chunk itself; the MPT code hash of delegatedA is that hash, so a code-hash-to-chunks mapping would accept them\nsnapshot: 12205 -\u003e 12272 bytes, first differs at 11108; added 0186bfa763b38b4d16ca2fd51b3188bb125a91ca270baadd155423d6718e0a9e4d00=ef010000000000000000000000000000000000000004ff0000000000000000",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12272,
+          "firstDiff": 11108,
+          "parses": true,
+          "added": [
+            "0186bfa763b38b4d16ca2fd51b3188bb125a91ca270baadd155423d6718e0a9e4d00=ef010000000000000000000000000000000000000004ff0000000000000000"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/header-slot-in-storage-zone",
+      "suite": "snapshot",
+      "snapshot": "snapshot/header-slot-in-storage-zone/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "embedding.header-holds-slots-0-63",
+      "description": "Clause: embedding.header-holds-slots-0-63\nstorageSpread's slot 0 keyed as overflow\nsnapshot: 12205 -\u003e 12205 bytes, first differs at 467; added ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d3b1353d94bcc614c272d746817e70427c8ebe1de63a6f553d4be8bc99c95e34700=a0; removed 003b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d40=a0",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12205,
+          "firstDiff": 467,
+          "parses": true,
+          "added": [
+            "ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d3b1353d94bcc614c272d746817e70427c8ebe1de63a6f553d4be8bc99c95e34700=a0"
+          ],
+          "removed": [
+            "003b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d40=a0"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/storage-leaf-unkeyable",
+      "suite": "snapshot",
+      "snapshot": "snapshot/storage-leaf-unkeyable/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "embedding.storage-key-derivation",
+      "description": "Clause: embedding.storage-key-derivation\nstorageSpread's slot 512 keyed under tree_index 0\nsnapshot: 12205 -\u003e 12172 bytes, first differs at 11879; added ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d3b1353d94bcc614c272d746817e70427c8ebe1de63a6f553d4be8bc99c95e347c8=a6; removed ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24da669f0b8125bd88035ad1c2b4d68989d86d90a22e273b808729476f57439c41d00=a6",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12172,
+          "firstDiff": 11879,
+          "parses": true,
+          "added": [
+            "ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24d3b1353d94bcc614c272d746817e70427c8ebe1de63a6f553d4be8bc99c95e347c8=a6"
+          ],
+          "removed": [
+            "ff3b2159c6e73ba3a2be5aeaafa747cf6d05c6396aa48678020031cf23cb55d24da669f0b8125bd88035ad1c2b4d68989d86d90a22e273b808729476f57439c41d00=a6"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/anchored-elsewhere",
+      "suite": "snapshot",
+      "snapshot": "snapshot/anchored-elsewhere/snapshot.bin",
+      "preimages": "snapshot/anchored-elsewhere/preimages.bin",
+      "clause": "verification.consensus-anchoring",
+      "description": "Clause: verification.consensus-anchoring\neoaBalance removed from both files: internally consistent, but not the anchor state\nsnapshot: 12205 -\u003e 12166 bytes, first differs at 804; removed 00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d700=0f4240 00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d701=c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470\npreimages: 1472 -\u003e 1448 bytes, first differs at 186; removed 0000000000000000000000000000000000000101:e3b0c44298fc1c14",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 12166,
+          "firstDiff": 804,
+          "parses": true,
+          "removed": [
+            "00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d700=0f4240",
+            "00625f16e92d4446e934d822637cb58ff949dca9742c9f82a05c1d2f736e6a87d701=c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+          ]
+        },
+        "preimages": {
+          "validLen": 1472,
+          "caseLen": 1448,
+          "firstDiff": 186,
+          "parses": true,
+          "removed": [
+            "0000000000000000000000000000000000000101:e3b0c44298fc1c14"
+          ]
+        }
+      }
+    },
+    {
+      "id": "snapshot/empty-against-nonempty-anchor",
+      "suite": "snapshot",
+      "snapshot": "snapshot/empty-against-nonempty-anchor/snapshot.bin",
+      "preimages": "valid/preimages.bin",
+      "clause": "verification.consensus-anchoring",
+      "description": "Clause: verification.consensus-anchoring\nno records and the empty-tree root, against the fixture's non-empty anchor\nsnapshot: 12205 -\u003e 33 bytes, first differs at 0; removed 0024b3b4d16f572a5034fccf36fe217ee40a3fd10d2b7adb54594d72608bb66e9800=1f000000000000000000000000000000000000000000000001 0024b3b4d16f572a5034fccf36fe217ee40a3fd10d2b7adb54594d72608bb66e9801=a707f8a78fcde1950ab3f18ad1af0d120d7097919c5c7f80051cb151c161ea5c 0026c706f12ced4eba335fde6ff5d9d2455e4b0fb6e43e17a5086aa5b9cba3147300=18000000000000000000000000000000000000000000000001 0026c706f12ced4eba335fde6ff5d9d2455e4b0fb6e43e17a5086aa5b9cba3147301=d07ad01bcd0bba8e6b49e9a45b4d20d6bca9aebaff800b6e87b1cea7104c3d7b",
+      "effect": {
+        "snapshot": {
+          "validLen": 12205,
+          "caseLen": 33,
+          "firstDiff": 0,
+          "parses": true,
+          "removed": [
+            "0024b3b4d16f572a5034fccf36fe217ee40a3fd10d2b7adb54594d72608bb66e9800=1f000000000000000000000000000000000000000000000001",
+            "0024b3b4d16f572a5034fccf36fe217ee40a3fd10d2b7adb54594d72608bb66e9801=a707f8a78fcde1950ab3f18ad1af0d120d7097919c5c7f80051cb151c161ea5c",
+            "0026c706f12ced4eba335fde6ff5d9d2455e4b0fb6e43e17a5086aa5b9cba3147300=18000000000000000000000000000000000000000000000001",
+            "0026c706f12ced4eba335fde6ff5d9d2455e4b0fb6e43e17a5086aa5b9cba3147301=d07ad01bcd0bba8e6b49e9a45b4d20d6bca9aebaff800b6e87b1cea7104c3d7b"
+          ]
+        }
+      }
+    },
+    {
+      "id": "produce/missing-account-preimage",
+      "suite": "produce",
+      "defect": [
+        "drop-preimage",
+        "0x4599828688a5c37132b6fc04e35760b4753ce68708a7b7d4d97b940047557fdb"
+      ],
+      "clause": "converter.preimage-set-matches-leaves",
+      "description": "Clause: converter.preimage-set-matches-leaves\nthe source has no preimage for account 0x0000000000000000000000000000000000000101\ndefect: drop-preimage 0x4599828688a5c37132b6fc04e35760b4753ce68708a7b7d4d97b940047557fdb"
+    },
+    {
+      "id": "produce/missing-slot-preimage",
+      "suite": "produce",
+      "defect": [
+        "drop-preimage",
+        "0xa66cc928b5edb82af9bd49922954155ab7b0942694bea4ce44661d9a8736c688"
+      ],
+      "clause": "converter.preimage-set-matches-leaves",
+      "description": "Clause: converter.preimage-set-matches-leaves\nthe source has no preimage for slot 7, held by 0x0000000000000000000000000000000000000505\ndefect: drop-preimage 0xa66cc928b5edb82af9bd49922954155ab7b0942694bea4ce44661d9a8736c688"
+    }
+  ]
+}

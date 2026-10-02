@@ -1344,7 +1344,7 @@ func pbinForEachRebuildOpStreamLookaheadAfter(tmpDir string, maxOps, maxBytes in
 }
 
 func pbinForEachRebuildOpStreamLookaheadAfterWithSample(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, []byte, bool) error, stream func(func(pbt.Op) error) error, sample func(int)) error {
-	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(pbinRebuildOpCollectorBufferBudget), log.Root())
+	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(pbinRebuildOpCollectorBufferBudget), log.Root()).SortAndFlushInBackground(true)
 	defer collector.Close()
 	emit := func(op pbt.Op) error {
 		key := batchOperationKey(op)
