@@ -98,7 +98,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	}
 	sourceDirs := datadir.Open(sourcePath)
 	outputDirs := datadir.Open(outputPath)
-	if err := checkPBTChainName(ctx, sourceDirs, chainName, "commitment convert-pbt"); err != nil {
+	if err := checkPBTChainName(ctx, sourceDirs, chainName, "commitment convert-pbt", "source"); err != nil {
 		return err
 	}
 	if nested, overlapErr := pathsOverlap(sourceDirs.DataDir, outputDirs.DataDir); overlapErr != nil {
@@ -142,6 +142,9 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	configurePBTSourceVariant(sourceSettings)
 	if detectedV3 && (sourceSettings == nil || sourceSettings.TrieVariantName() == dbstate.TrieVariantHex) {
 		statecfg.ConfigureCommitmentV3Records(true)
+	}
+	if err := validatePBTSourceAccessors(sourceDirs); err != nil {
+		return err
 	}
 	point, err := readPBinSourcePoint(ctx, sourceDirs, sourceSettings, keepHex, logger)
 	if err != nil {
@@ -210,7 +213,6 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if !keepHex && !afterFork {
 		return fmt.Errorf("commitment convert-pbt: bin-only output requires a conversion point after the binary trie fork")
 	}
-
 	hashName := requestedHash
 	if hashName == "" && sourceSettings != nil && (variant == dbstate.TrieVariantBin || variant == dbstate.TrieVariantHexBin) {
 		hashName = sourceSettings.TrieHashName()
@@ -345,13 +347,13 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	return nil
 }
 
-func checkPBTChainName(ctx context.Context, dirs datadir.Dirs, expected, command string) error {
+func checkPBTChainName(ctx context.Context, dirs datadir.Dirs, expected, command, role string) error {
 	if expected == "" {
 		return nil
 	}
 	rawDB, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
-		return fmt.Errorf("commitment convert-pbt: open source chain config: %w", err)
+		return fmt.Errorf("%s: open %s chain config: %w", command, role, err)
 	}
 	defer rawDB.Close()
 	tx, err := rawDB.BeginRo(ctx)
@@ -361,18 +363,18 @@ func checkPBTChainName(ctx context.Context, dirs datadir.Dirs, expected, command
 	defer tx.Rollback()
 	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
-		return fmt.Errorf("commitment convert-pbt: read genesis hash: %w", err)
+		return fmt.Errorf("%s: read %s genesis hash: %w", command, role, err)
 	}
 	config, err := rawdb.ReadChainConfig(tx, genesisHash)
 	if err != nil {
-		return fmt.Errorf("commitment convert-pbt: read chain config: %w", err)
+		return fmt.Errorf("%s: read %s chain config: %w", command, role, err)
 	}
 	if config == nil || config.ChainName != expected {
 		got := "unknown"
 		if config != nil {
 			got = config.ChainName
 		}
-		return fmt.Errorf("%s: chain %q does not match source chain %q", command, expected, got)
+		return fmt.Errorf("%s: chain %q does not match %s chain %q", command, expected, role, got)
 	}
 	return nil
 }
@@ -748,7 +750,15 @@ func removePBTInvisibleFiles(visibleRanges map[string]struct{}, sourceDirs, outp
 	return nil
 }
 
+func validatePBTSourceAccessors(dirs datadir.Dirs) error {
+	return validatePBTFileAccessors(dirs, "source", fmt.Sprintf("ERIGON_COMMITMENT_V3=true erigon snapshots index --datadir=%s", dirs.DataDir))
+}
+
 func validatePBTOutputAccessors(dirs datadir.Dirs) error {
+	return validatePBTFileAccessors(dirs, "published", "")
+}
+
+func validatePBTFileAccessors(dirs datadir.Dirs, scope, remedy string) error {
 	files, err := pbtAttachFiles(dirs)
 	if err != nil {
 		return err
@@ -775,7 +785,10 @@ func validatePBTOutputAccessors(dirs datadir.Dirs) error {
 			continue
 		}
 		if !complete {
-			return fmt.Errorf("commitment convert-pbt: published %s file %s has no accessor; collate first", file.domain, file.path)
+			if remedy != "" {
+				return fmt.Errorf("commitment convert-pbt: %s %s file %s has no accessor; run %s", scope, file.domain, file.path, remedy)
+			}
+			return fmt.Errorf("commitment convert-pbt: %s %s file %s has no accessor", scope, file.domain, file.path)
 		}
 	}
 	return nil

@@ -25,6 +25,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"runtime"
 	"runtime/metrics"
 	"sort"
@@ -114,6 +115,24 @@ func startHeapSampler() *heapSampler {
 		}
 	}()
 	return sampler
+}
+
+func heapObjects() uint64 {
+	samples := []metrics.Sample{{Name: "/memory/classes/heap/objects:bytes"}}
+	metrics.Read(samples)
+	return samples[0].Value.Uint64()
+}
+
+func heapPeakDelta(run func() error) (uint64, error) {
+	runtime.GC()
+	base := heapObjects()
+	sampler := startHeapSampler()
+	err := run()
+	peak := sampler.stopAndRead()
+	if peak < base {
+		return 0, err
+	}
+	return peak - base, err
 }
 
 func (s *heapSampler) stopAndRead() uint64 {
@@ -764,44 +783,43 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, snapshotInfo.Size(), int64(128<<20))
 	require.GreaterOrEqual(t, preimageInfo.Size(), int64(128<<20))
-	readerSampler := startHeapSampler()
 	readGroups := 0
-	_, err = ReadSnapshotStreamAt(snapshot, snapshotInfo.Size(), SnapshotStreamCallbacks{
-		Storage: func(_ common.Hash, groups func(func(Group) error) error) error {
-			return groups(func(group Group) error {
-				readGroups += len(group.Entries)
-				return nil
-			})
-		},
+	readerPeak, err := heapPeakDelta(func() error {
+		_, err := ReadSnapshotStreamAt(snapshot, snapshotInfo.Size(), SnapshotStreamCallbacks{
+			Storage: func(_ common.Hash, groups func(func(Group) error) error) error {
+				return groups(func(group Group) error {
+					readGroups += len(group.Entries)
+					return nil
+				})
+			},
+		})
+		return err
 	})
-	readerPeak := readerSampler.stopAndRead()
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readGroups)
-	require.Less(t, readerPeak, uint64(64<<20))
-	runtime.GC()
-	preimageSampler := startHeapSampler()
+	require.Less(t, readerPeak, uint64(32<<20))
 	readSlots := 0
-	err = ReadPreimagesStream(preimages, preimageInfo.Size(), func(_ common.Address, slots func(func([32]byte) error) error) error {
-		return slots(func([32]byte) error {
-			readSlots++
-			return nil
+	preimagePeak, err := heapPeakDelta(func() error {
+		return ReadPreimagesStream(preimages, preimageInfo.Size(), func(_ common.Address, slots func(func([32]byte) error) error) error {
+			return slots(func([32]byte) error {
+				readSlots++
+				return nil
+			})
 		})
 	})
-	preimagePeak := preimageSampler.stopAndRead()
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readSlots)
-	require.Less(t, preimagePeak, uint64(64<<20))
-	runtime.GC()
-	joinSampler := startHeapSampler()
+	require.Less(t, preimagePeak, uint64(32<<20))
 	seen := 0
-	err = joinAtWithBuffer(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), eip8297.HashBytes, func(common.Address, [32]byte) error {
-		seen++
-		return nil
-	}, 1<<20, t.TempDir())
-	peak := joinSampler.stopAndRead()
+	peak, err := heapPeakDelta(func() error {
+		return joinAtWithBuffer(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), eip8297.HashBytes, func(common.Address, [32]byte) error {
+			seen++
+			return nil
+		}, 1<<20, t.TempDir())
+	})
 	require.NoError(t, err)
 	require.Equal(t, slotCount, seen)
-	require.Less(t, peak, uint64(64<<20))
+	require.Less(t, peak, uint64(32<<20))
 }
 
 func TestPreimageReaderAllocationsStayBounded(t *testing.T) {
@@ -894,6 +912,25 @@ func TestWritePreimagesStreamWithScratchReusesScratchAcrossAccounts(t *testing.T
 	entries, err := os.ReadDir(scratchDir)
 	require.NoError(t, err)
 	require.Empty(t, entries)
+}
+
+func TestWritePreimagesStreamUnderThresholdDoesNotTouchScratchDirectory(t *testing.T) {
+	scratchDir := t.TempDir()
+	sentinel := filepath.Join(scratchDir, "sentinel")
+	require.NoError(t, os.WriteFile(sentinel, []byte("sentinel"), 0o644))
+	before, err := os.Stat(scratchDir)
+	require.NoError(t, err)
+	var output bytes.Buffer
+	address := common.Address{1}
+	require.NoError(t, WritePreimagesStreamWithScratch(&output, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+		return yield(address, func(slotYield func([32]byte) error) error {
+			var slot [32]byte
+			return slotYield(slot)
+		})
+	}, scratchDir))
+	after, err := os.Stat(scratchDir)
+	require.NoError(t, err)
+	require.Equal(t, before.ModTime(), after.ModTime())
 }
 
 type testLeaf struct {

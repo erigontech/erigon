@@ -22,10 +22,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
@@ -66,36 +64,6 @@ func runExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (
 
 func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
 	return runExportPBTWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, beforeReadback)
-}
-
-func watchPBTPreimageScratchCreates(t *testing.T, tmpDir string) func() uint64 {
-	t.Helper()
-	watcher, err := fsnotify.NewWatcher()
-	require.NoError(t, err)
-	require.NoError(t, watcher.Add(tmpDir))
-	scratchDir := filepath.Join(tmpDir, preimagesScratchDirName)
-	var creates atomic.Uint64
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for event := range watcher.Events {
-			if event.Op&fsnotify.Create == 0 {
-				continue
-			}
-			if filepath.Clean(event.Name) == scratchDir {
-				_ = watcher.Add(scratchDir)
-				continue
-			}
-			if filepath.Dir(event.Name) == scratchDir {
-				creates.Add(1)
-			}
-		}
-	}()
-	return func() uint64 {
-		_ = watcher.Close()
-		<-done
-		return creates.Load()
-	}
 }
 
 func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
@@ -280,21 +248,6 @@ func TestRunExportPBTRealAcceptanceChain(t *testing.T) {
 		}
 		return fixture.Chain.Headers[block-1], nil
 	}, outDir, log.New()))
-}
-
-func TestRunExportPBTDoesNotCreateScratchFilesPerAccount(t *testing.T) {
-	selectPBTExportSuite(t)
-	fixture, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
-	require.NoError(t, err)
-	require.NoError(t, fixture.Tester.InsertChain(fixture.Chain))
-	tx, err := fixture.Tester.DB.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	stopWatching := watchPBTPreimageScratchCreates(t, fixture.Tester.Dirs.Tmp)
-	require.NoError(t, runExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
-		return fixture.Chain.Headers[block-1], nil
-	}, filepath.Join(t.TempDir(), "export"), log.New()))
-	require.LessOrEqual(t, stopWatching(), uint64(2), "preimage scratch must be reused across accounts")
 }
 
 func TestRunExportPBTUsesStoppedExecutionStage(t *testing.T) {

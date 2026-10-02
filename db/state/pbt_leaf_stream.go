@@ -91,9 +91,10 @@ func ForEachPBinLeaf(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(P
 }
 
 func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCursor pbinLatestCursor, emit func(PBinLeaf) error) error {
-	collector := etl.NewCollector("pbin-leaf-stream", at.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
+	collector := etl.NewCollector("pbin-leaf-stream", at.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()).SortAndFlushInBackground(true)
 	defer collector.Close()
 	emitter := pbt.NewRebuildFeedOpEmitter()
+	leafCollector := pbinLeafCollector{}
 	progress := pbinStreamProgress{next: time.Now().Add(30 * time.Second)}
 	for accountsCursor.ok || codeCursor.ok || storageCursor.ok {
 		address, err := pbinNextAddress(accountsCursor, codeCursor, storageCursor)
@@ -110,7 +111,7 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 			var code []byte
 			if codeCursor.ok && bytes.Equal(codeCursor.key, address) {
 				if !eip8297.IsEmptyCodeHash(account.CodeHash.Value()) {
-					code = bytes.Clone(codeCursor.value)
+					code = codeCursor.value
 					codeStamp = codeCursor.stamp
 				}
 				if err := codeCursor.advance(); err != nil {
@@ -120,7 +121,7 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 			accountStamp := accountsCursor.stamp
 			leafStamp := max(accountStamp, codeStamp)
 			feedAccount := commitment.PBinFeedAccount{
-				Address:     bytes.Clone(address),
+				Address:     address,
 				Exists:      true,
 				Nonce:       account.Nonce,
 				Balance:     account.Balance,
@@ -133,7 +134,7 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 				if len(op.Key) > 0 && op.Key[0] == eip8297.CodeZone {
 					stamp = codeStamp
 				}
-				return pbinCollectOp(collector, op, stamp)
+				return pbinCollectOp(collector, &leafCollector, op, stamp)
 			}); err != nil {
 				return err
 			}
@@ -141,10 +142,10 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 				return err
 			}
 			for storageCursor.ok && bytes.Equal(storageCursor.key[:len(address)], address) {
-				slot := commitment.PBinFeedSlot{Key: bytes.Clone(storageCursor.key[len(address):]), Value: bytes.Clone(storageCursor.value)}
+				slot := commitment.PBinFeedSlot{Key: storageCursor.key[len(address):], Value: storageCursor.value}
 				stamp := storageCursor.stamp
 				if err := emitter.EmitStorageSlot(address, slot, func(op pbt.Op) error {
-					return pbinCollectOp(collector, op, stamp)
+					return pbinCollectOp(collector, &leafCollector, op, stamp)
 				}); err != nil {
 					return err
 				}
@@ -269,7 +270,7 @@ func pbinNextAddress(cursors ...pbinLatestCursor) ([]byte, error) {
 		}
 		candidate := cursor.key[:pbinAddressLength]
 		if address == nil || bytes.Compare(candidate, address) < 0 {
-			address = bytes.Clone(candidate)
+			address = candidate
 		}
 	}
 	return address, nil
@@ -286,11 +287,11 @@ func pbinSkipAddress(cursor *pbinLatestCursor, address []byte) error {
 	return nil
 }
 
-func pbinCollectOp(collector *etl.Collector, op pbt.Op, stamp uint64) error {
+func pbinCollectOp(collector *etl.Collector, scratch *pbinLeafCollector, op pbt.Op, stamp uint64) error {
 	if len(op.Value) == 0 || pbinAllZero(op.Value[:]) {
 		return nil
 	}
-	return pbinCollectLeaf(collector, PBinLeaf{Key: op.Key, Value: op.Value[:], Stamp: stamp})
+	return scratch.collect(collector, op.Key, op.Value[:], stamp)
 }
 
 func pbinAllZero(value []byte) bool {
@@ -303,16 +304,23 @@ func pbinAllZero(value []byte) bool {
 }
 
 func pbinCollectLeaf(collector *etl.Collector, leaf PBinLeaf) error {
+	return (&pbinLeafCollector{}).collect(collector, leaf.Key, leaf.Value, leaf.Stamp)
+}
+
+type pbinLeafCollector struct {
+	value [8 + eip8297.ValueLength]byte
+}
+
+func (c *pbinLeafCollector) collect(collector *etl.Collector, key, value []byte, stamp uint64) error {
 	if collector == nil {
 		return fmt.Errorf("pbin leaf stream: nil collector")
 	}
-	if len(leaf.Value) != eip8297.ValueLength {
-		return fmt.Errorf("pbin leaf stream: value has length %d, want %d", len(leaf.Value), eip8297.ValueLength)
+	if len(value) != eip8297.ValueLength {
+		return fmt.Errorf("pbin leaf stream: value has length %d, want %d", len(value), eip8297.ValueLength)
 	}
-	encoded := make([]byte, 8+len(leaf.Value))
-	binary.BigEndian.PutUint64(encoded, leaf.Stamp)
-	copy(encoded[8:], leaf.Value)
-	return collector.Collect(leaf.Key, encoded)
+	binary.BigEndian.PutUint64(c.value[:], stamp)
+	copy(c.value[8:], value)
+	return collector.Collect(key, c.value[:])
 }
 
 func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, progress *pbinStreamProgress) error {

@@ -19,8 +19,11 @@ package commands
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -37,7 +40,9 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 )
 
 func TestValidatePBTAttachFilesRequiresBothCommitmentDomains(t *testing.T) {
@@ -401,6 +406,199 @@ func TestPBTAttachFilesAheadOfPointRemedy(t *testing.T) {
 	err := pbtAttachFilesAheadError("/node", "hoodi", first, 10, 2, 17)
 	require.ErrorContains(t, err, "snapshots rm-state --datadir=/node --chain=hoodi --step=3+")
 	require.ErrorContains(t, err, "stage_exec --datadir=/node --reset")
+}
+
+func runPBTOfflineCommand(t *testing.T, binary string, args ...string) {
+	t.Helper()
+	workingDir, err := os.Getwd()
+	require.NoError(t, err)
+	if binary == "integration" && len(args) > 0 && args[0] == "stage_exec" {
+		datadirPath := ""
+		op := ""
+		value := "0"
+		for _, arg := range args[1:] {
+			switch {
+			case strings.HasPrefix(arg, "--datadir="):
+				datadirPath = strings.TrimPrefix(arg, "--datadir=")
+			case arg == "--reset":
+				op = "reset"
+			case strings.HasPrefix(arg, "--unwind="):
+				op = "unwind"
+				value = strings.TrimPrefix(arg, "--unwind=")
+			case strings.HasPrefix(arg, "--block="):
+				op = "block"
+				value = strings.TrimPrefix(arg, "--block=")
+			}
+		}
+		command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestPBTAttachRemedyHelperProcess$")
+		command.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS=1",
+			"PBT_REMEDY_DATADIR="+datadirPath,
+			"PBT_REMEDY_OP="+op,
+			"PBT_REMEDY_VALUE="+value,
+		)
+		output, err := command.CombinedOutput()
+		require.NoError(t, err, "helper for %s: %s", strings.Join(args, " "), output)
+		return
+	}
+	commandPath := filepath.Join(workingDir, "..", "..", "..", "build", "bin", binary)
+	command := exec.CommandContext(t.Context(), commandPath, args...)
+	command.Env = append(os.Environ(), "ERIGON_COMMITMENT_V3=true")
+	if binary == "erigon" {
+		command.Stdin = strings.NewReader("1\n")
+	}
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "%s %s: %s", commandPath, strings.Join(args, " "), output)
+	if binary == "erigon" {
+		t.Logf("rm-state output: %s", output)
+	}
+}
+
+func TestPBTAttachRemedyHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	fixture, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
+	require.NoError(t, err)
+	fixture.Genesis.Config.ChainName = "test"
+	genesisHash := fixture.Tester.Genesis.Hash()
+	chainspec.RegisterChainSpec("pbt-remedy", chainspec.Spec{
+		Name:        "pbt-remedy",
+		GenesisHash: genesisHash,
+		Config:      fixture.Genesis.Config,
+		Genesis:     fixture.Genesis,
+	})
+	fixture.Tester.Close()
+	previousDatadir, previousChaindata, previousChain := datadirCli, chaindata, chain
+	previousReset, previousUnwind, previousBlock := reset, unwind, block
+	t.Cleanup(func() {
+		datadirCli, chaindata, chain = previousDatadir, previousChaindata, previousChain
+		reset, unwind, block = previousReset, previousUnwind, previousBlock
+	})
+	datadirCli = os.Getenv("PBT_REMEDY_DATADIR")
+	chaindata = filepath.Join(datadirCli, "chaindata")
+	chain = "pbt-remedy"
+	reset, unwind, block = false, 0, 0
+	switch os.Getenv("PBT_REMEDY_OP") {
+	case "reset":
+		reset = true
+	case "unwind":
+		unwind, err = strconv.ParseUint(os.Getenv("PBT_REMEDY_VALUE"), 10, 64)
+		require.NoError(t, err)
+	case "block":
+		block, err = strconv.ParseUint(os.Getenv("PBT_REMEDY_VALUE"), 10, 64)
+		require.NoError(t, err)
+	default:
+		t.Fatalf("unknown remedy operation")
+	}
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	db, err := openDB(t.Context(), dbCfg(dbcfg.ChainDB, chaindata), true, chain, log.New())
+	require.NoError(t, err)
+	defer db.Close()
+	require.NoError(t, stageExec(db, t.Context(), log.New()))
+}
+
+func newPBTAttachRemedyFixture(t *testing.T, stepSize, sourceTx, nodeFileTx uint64) (datadir.Dirs, string) {
+	t.Helper()
+	selectPBTHexCommandSuite(t)
+	node, err := execmoduletester.NewPBTAcceptanceChainWithStepSize(t, false, false, stepSize)
+	require.NoError(t, err)
+	require.NoError(t, node.Tester.InsertChain(node.Chain))
+	node.Tester.ChainConfig.ChainName = "test"
+	node.Genesis.Config.ChainName = "test"
+	rawDB := node.Tester.DB.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		return rawdb.WriteChainConfig(tx, genesisHash, node.Tester.ChainConfig)
+	}))
+	require.NoError(t, rawDB.View(t.Context(), func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		config, err := rawdb.ReadChainConfig(tx, genesisHash)
+		require.NoError(t, err)
+		require.Equal(t, "test", config.ChainName)
+		return nil
+	}))
+	buildPBTAcceptanceFilesAt(t, node, nodeFileTx)
+	nodeDirs := node.Tester.Dirs
+	checkDB := dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata).MustOpen()
+	require.NoError(t, checkDB.View(t.Context(), func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		config, err := rawdb.ReadChainConfig(tx, genesisHash)
+		require.NoError(t, err)
+		require.Equal(t, "test", config.ChainName)
+		return nil
+	}))
+	checkDB.Close()
+
+	source, err := execmoduletester.NewPBTAcceptanceChainWithStepSize(t, false, false, stepSize)
+	require.NoError(t, err)
+	copyPBTStateSalt(t, node, source)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	buildPBTAcceptanceFilesAt(t, source, sourceTx)
+	sourceSettings, settingsErr := state.ReadErigonDBSettings(datadir.Open(source.Tester.Dirs.DataDir))
+	require.NoError(t, settingsErr)
+	sourcePoint, pointErr := readPBinSourcePoint(t.Context(), source.Tester.Dirs, sourceSettings, true, log.New())
+	require.NoError(t, pointErr)
+	_, sourceFound, sourceRootErr := pbtAttachHexRoot(t.Context(), source.Tester.Dirs, sourceSettings, sourcePoint.BlockNum, sourcePoint.TxNum, log.New())
+	require.NoError(t, sourceRootErr)
+	require.True(t, sourceFound)
+	published := filepath.Join(t.TempDir(), "published")
+	selectPBTCommandSuite(t)
+	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
+	return nodeDirs, published
+}
+
+func TestPBTAttachPrintedRemediesRunInFreshProcesses(t *testing.T) {
+	t.Run("block end", func(t *testing.T) {
+		nodeDirs, published := newPBTAttachRemedyFixture(t, 1, 7, 7)
+		err := attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New())
+		require.ErrorContains(t, err, "--unwind=2")
+		runPBTOfflineCommand(t, "integration", "stage_exec", "--datadir="+nodeDirs.DataDir, "--unwind=2", "--chain=test", "--experimental.commitment-v3")
+		runPBTOfflineCommand(t, "integration", "stage_exec", "--datadir="+nodeDirs.DataDir, "--block=2", "--chain=test", "--experimental.commitment-v3")
+		require.NoError(t, attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New()))
+	})
+	t.Run("mid block", func(t *testing.T) {
+		nodeDirs, published := newPBTAttachRemedyFixture(t, 1, 9, 9)
+		err := attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New())
+		require.ErrorContains(t, err, "--reset")
+		require.NotContains(t, err.Error(), "--unwind=")
+		runPBTOfflineCommand(t, "integration", "stage_exec", "--datadir="+nodeDirs.DataDir, "--reset", "--chain=test", "--experimental.commitment-v3")
+		require.NoError(t, attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New()))
+	})
+	for _, test := range []struct {
+		name    string
+		pointTx uint64
+		nodeTx  uint64
+	}{
+		{name: "past block end", pointTx: 7, nodeTx: 15},
+		{name: "past mid block", pointTx: 13, nodeTx: 15},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			nodeDirs, published := newPBTAttachRemedyFixture(t, 1, test.pointTx, test.nodeTx)
+			err := attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New())
+			require.Error(t, err)
+			files, fileErr := pbtAttachFiles(nodeDirs)
+			require.NoError(t, fileErr)
+			settings, settingsErr := state.ReadErigonDBSettings(datadir.Open(published))
+			require.NoError(t, settingsErr)
+			firstStep, found := pbtAttachFirstStepPastPoint(pbtAttachVisibleFiles(files), settings.StepSize, test.pointTx)
+			require.True(t, found)
+			require.ErrorContains(t, err, fmt.Sprintf("--step=%d+", firstStep))
+			runPBTOfflineCommand(t, "erigon", "snapshots", "rm-state", "--datadir="+nodeDirs.DataDir, "--chain=test", fmt.Sprintf("--step=%d+", firstStep), "--experimental.commitment-v3")
+			runPBTOfflineCommand(t, "integration", "stage_exec", "--datadir="+nodeDirs.DataDir, "--reset", "--chain=test", "--experimental.commitment-v3")
+			require.NoError(t, attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New()))
+		})
+	}
 }
 
 func TestAdoptPBTFilesKeepsTorrentSidecarsWithBytes(t *testing.T) {

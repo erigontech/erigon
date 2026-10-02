@@ -741,6 +741,9 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 	if err != nil {
 		return false, false, "", err
 	}
+	if c == nil {
+		return false, false, "", nil
+	}
 	defer c.Close()
 
 	if bytes.Equal(c.Key(), []byte(stateKey)) {

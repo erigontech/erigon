@@ -295,7 +295,7 @@ func joinAtWithBuffer(snapshot io.ReaderAt, snapshotSize int64, preimages io.Rea
 	if _, err := expected.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	collector := etl.NewCollector("pbt-join", tmpDir, etl.NewSortableBuffer(bufferSize), log.Root())
+	collector := etl.NewCollector("pbt-join", tmpDir, etl.NewSortableBuffer(bufferSize), log.Root()).SortAndFlushInBackground(true)
 	defer collector.Close()
 	if err := collectJoinItems(preimages, preimageSize, hashFn, collector); err != nil {
 		return err
@@ -381,7 +381,7 @@ func checkPreimageSetAtWithBuffer(preimages io.ReaderAt, preimageSize int64, exp
 	if _, err := expectedFile.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	collector := etl.NewCollector("pbt-preimage-check", tmpDir, etl.NewSortableBuffer(bufferSize), log.Root())
+	collector := etl.NewCollector("pbt-preimage-check", tmpDir, etl.NewSortableBuffer(bufferSize), log.Root()).SortAndFlushInBackground(true)
 	defer collector.Close()
 	if err := collectJoinItems(preimages, preimageSize, hashFn, collector); err != nil {
 		return err
