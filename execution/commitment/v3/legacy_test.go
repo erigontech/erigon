@@ -26,64 +26,40 @@ import (
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
+	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
 
 type legacyWorld struct {
-	branches map[string][]byte
-	written  map[string][]byte
-	accounts map[string]commitment.Update
-	storage  map[string]commitment.Update
-	trie     *commitment.HexPatriciaHashed
+	*runner.Memory
+	trie    *commitment.HexPatriciaHashed
+	written map[string][]byte
+	touched map[string]struct{}
 }
 
 func newLegacyWorld() *legacyWorld {
-	w := &legacyWorld{
-		branches: map[string][]byte{},
-		accounts: map[string]commitment.Update{},
-		storage:  map[string]commitment.Update{},
-	}
+	w := &legacyWorld{Memory: runner.NewMemory(runner.ContextSpec{}), touched: map[string]struct{}{}}
 	w.trie = commitment.NewHexPatriciaHashed(length.Addr, w, commitment.TrieConfig{})
 	return w
 }
 
-func (w *legacyWorld) Branch(key []byte) ([]byte, kv.Step, error) {
-	return bytes.Clone(w.branches[string(key)]), 0, nil
-}
-
-func (w *legacyWorld) PutBranch(key, data, _ []byte) error {
-	w.branches[string(key)] = bytes.Clone(data)
+func (w *legacyWorld) PutBranch(key, data, prev []byte) error {
 	w.written[string(key)] = bytes.Clone(data)
-	return nil
+	return w.Memory.PutBranch(key, data, prev)
 }
 
-func (w *legacyWorld) Account(key []byte) (*commitment.Update, error) {
-	if u, ok := w.accounts[string(key)]; ok {
-		return &u, nil
-	}
-	return &commitment.Update{Flags: commitment.DeleteUpdate}, nil
-}
+type legacyValues struct{ *runner.Memory }
 
-func (w *legacyWorld) Storage(key []byte) (*commitment.Update, error) {
-	if u, ok := w.storage[string(key)]; ok {
-		return &u, nil
-	}
-	return &commitment.Update{Flags: commitment.DeleteUpdate}, nil
-}
-
-type legacyValues legacyWorld
-
-func (v *legacyValues) Account(key []byte) ([]byte, error) {
-	u, ok := v.accounts[string(key)]
-	if !ok {
-		return nil, nil
+func (v legacyValues) Account(key []byte) ([]byte, error) {
+	u, err := v.Memory.Account(key)
+	if err != nil || u.Deleted() {
+		return nil, err
 	}
 	acc := accounts.Account{Nonce: u.Nonce, Balance: u.Balance, CodeHash: accounts.EmptyCodeHash}
 	if u.CodeHash != empty.CodeHash {
@@ -92,70 +68,56 @@ func (v *legacyValues) Account(key []byte) ([]byte, error) {
 	return accounts.SerialiseV3(&acc), nil
 }
 
-func (v *legacyValues) Storage(key []byte) ([]byte, error) {
-	u, ok := v.storage[string(key)]
-	if !ok {
-		return nil, nil
+func (v legacyValues) Storage(key []byte) ([]byte, error) {
+	u, err := v.Memory.Storage(key)
+	if err != nil || u.Deleted() {
+		return nil, err
 	}
 	return bytes.Clone(u.Storage[:u.StorageLen]), nil
 }
 
+func (w *legacyWorld) apply(op commitmenttest.Op) {
+	w.Apply([]commitmenttest.Op{op})
+	w.touched[string(op.Key)] = struct{}{}
+}
+
 func (w *legacyWorld) setAccount(addr []byte, nonce, balance uint64) {
-	w.accounts[string(addr)] = commitment.Update{
-		Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-		Nonce:    nonce,
-		Balance:  *uint256.NewInt(balance),
-		CodeHash: empty.CodeHash,
-	}
+	w.apply(accountOp(addr, commitmenttest.AccountSpec{Nonce: nonce, Balance: balance, CodeHash: empty.CodeHash}))
 }
 
 func (w *legacyWorld) setSlot(addr, slot []byte, value uint64) {
-	var u commitment.Update
-	trimmed := bytes.TrimLeft(binary.BigEndian.AppendUint64(nil, value), "\x00")
-	u.Flags = commitment.StorageUpdate
-	u.StorageLen = int8(copy(u.Storage[:], trimmed))
-	w.storage[string(append(bytes.Clone(addr), slot...))] = u
+	w.apply(commitmenttest.Op{Key: slotKey(addr, slot), Storage: bytes.TrimLeft(binary.BigEndian.AppendUint64(nil, value), "\x00")})
 }
 
-func (w *legacyWorld) process(t *testing.T, touched map[string]struct{}) []byte {
+func (w *legacyWorld) live(key []byte) bool {
+	u, err := w.Memory.Storage(key)
+	return err == nil && !u.Deleted()
+}
+
+func (w *legacyWorld) process(t *testing.T) []byte {
 	t.Helper()
 	w.written = map[string][]byte{}
 	batch := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
-	for _, key := range slices.Sorted(maps.Keys(touched)) {
-		var u commitment.Update
-		switch stored, ok := w.accounts[key]; {
-		case len(key) == length.Addr && ok:
-			u = stored
-		case len(key) == length.Addr:
-			u.Flags = commitment.DeleteUpdate
-		default:
-			if stored, ok := w.storage[key]; ok {
-				u = stored
-			} else {
-				u.Flags = commitment.DeleteUpdate
-			}
+	defer batch.Close()
+	for _, key := range slices.Sorted(maps.Keys(w.touched)) {
+		read := w.Memory.Storage
+		if len(key) == length.Addr {
+			read = w.Memory.Account
 		}
-		batch.TouchPlainKeyDirect(key, &u)
+		u, err := read([]byte(key))
+		require.NoError(t, err)
+		batch.TouchPlainKeyDirect(key, u)
 	}
+	w.touched = map[string]struct{}{}
 	root, err := w.trie.Process(context.Background(), batch, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	return root
 }
 
-func (w *legacyWorld) legacyState(t *testing.T, blockNum, txNum uint64) []byte {
-	t.Helper()
-	trieState, err := w.trie.EncodeCurrentState(nil)
-	require.NoError(t, err)
-	out := binary.BigEndian.AppendUint64(nil, txNum)
-	out = binary.BigEndian.AppendUint64(out, blockNum)
-	out = binary.BigEndian.AppendUint16(out, uint16(len(trieState)))
-	return append(out, trieState...)
-}
-
-func convertLegacyRound(t *testing.T, w *legacyWorld, prevs map[string][]byte, incremental bool, records map[string][]byte) {
+func (w *legacyWorld) convert(t *testing.T, prevs map[string][]byte, incremental bool, records map[string][]byte) []byte {
 	t.Helper()
 	grouped := map[string][]LegacyEntry{}
-	conv := NewLegacyConverter((*legacyValues)(w), false, incremental)
+	conv := NewLegacyConverter(legacyValues{w.Memory}, false, incremental)
 	for _, key := range slices.Sorted(maps.Keys(w.written)) {
 		err := conv.Convert([]byte(key), w.written[key], prevs[key], func(k, v []byte, kind LegacyKind) error {
 			grouped[string(k)] = append(grouped[string(k)], LegacyEntry{Kind: kind, Value: bytes.Clone(v)})
@@ -170,10 +132,6 @@ func convertLegacyRound(t *testing.T, w *legacyWorld, prevs map[string][]byte, i
 			records[key] = value
 		}
 	}
-}
-
-func verifyRecords(t *testing.T, records map[string][]byte) ([]byte, uint64) {
-	t.Helper()
 	hasher, matcher := NewRecordHasher(), NewRecordMatcher()
 	for _, key := range slices.Sorted(maps.Keys(records)) {
 		if len(records[key]) == 0 || key == string(commitment.KeyCommitmentV3State) {
@@ -185,7 +143,8 @@ func verifyRecords(t *testing.T, records map[string][]byte) ([]byte, uint64) {
 	}
 	root, count, _, err := matcher.Finish()
 	require.NoError(t, err)
-	return root[:], count
+	require.Positive(t, count)
+	return root[:]
 }
 
 type legacyAccount struct {
@@ -204,169 +163,158 @@ func randBytes(rng *rand.Rand, n int) []byte {
 	return b
 }
 
-func slotsSharingPrefix(rng *rand.Rand, nibbles int) [][]byte {
-	first := randBytes(rng, 32)
-	want := unpackPath(keccakSlice(first), 64, nil)[:nibbles]
-	for {
-		next := randBytes(rng, 32)
-		if bytes.Equal(unpackPath(keccakSlice(next), 64, nil)[:nibbles], want) {
-			return [][]byte{first, next}
+func seedLegacyWorld(t *testing.T, rng *rand.Rand) (*legacyWorld, []legacyAccount, []byte) {
+	t.Helper()
+	var accounts []legacyAccount
+	add := func(slots ...[]byte) {
+		accounts = append(accounts, legacyAccount{addr: randBytes(rng, length.Addr), slots: slots})
+	}
+	sharingPrefix := func(nibbles int) {
+		first := randBytes(rng, 32)
+		want := unpackPath(keccakSlice(first), 64, nil)[:nibbles]
+		for {
+			next := randBytes(rng, 32)
+			if bytes.Equal(unpackPath(keccakSlice(next), 64, nil)[:nibbles], want) {
+				add(first, next)
+				return
+			}
 		}
 	}
-}
-
-func buildLegacyAccounts(rng *rand.Rand) []legacyAccount {
-	var out []legacyAccount
-	add := func(slots [][]byte) {
-		out = append(out, legacyAccount{addr: randBytes(rng, length.Addr), slots: slots})
-	}
 	for range 120 {
-		add(nil)
+		add()
 	}
 	for range 40 {
-		add([][]byte{randBytes(rng, 32)})
+		add(randBytes(rng, 32))
 	}
 	for range 10 {
-		add(slotsSharingPrefix(rng, 1))
+		sharingPrefix(1)
 	}
 	for range 3 {
-		add(slotsSharingPrefix(rng, 2))
+		sharingPrefix(2)
 	}
 	for range 15 {
 		slots := make([][]byte, 30)
 		for i := range slots {
 			slots[i] = randBytes(rng, 32)
 		}
-		add(slots)
+		add(slots...)
 	}
-	return out
-}
-
-func seedLegacyWorld(t *testing.T, rng *rand.Rand) (*legacyWorld, []legacyAccount, []byte) {
-	t.Helper()
 	w := newLegacyWorld()
-	accounts := buildLegacyAccounts(rng)
-	touched := map[string]struct{}{}
+	t.Cleanup(w.trie.Release)
 	for i, acc := range accounts {
 		w.setAccount(acc.addr, uint64(i+1), uint64(1000+i))
-		touched[string(acc.addr)] = struct{}{}
 		for j, slot := range acc.slots {
 			w.setSlot(acc.addr, slot, uint64(j+1))
-			touched[string(append(bytes.Clone(acc.addr), slot...))] = struct{}{}
 		}
 	}
-	root := w.process(t, touched)
+	root := w.process(t)
 	return w, accounts, root
 }
 
-func TestConvertLegacyTrieMatchesHexPatriciaRoot(t *testing.T) {
-	w, _, root := seedLegacyWorld(t, rand.New(rand.NewSource(7)))
+func TestConversion(t *testing.T) {
+	t.Run("trie_matches_hex_patricia_root", func(t *testing.T) {
+		w, accounts, root := seedLegacyWorld(t, rand.New(rand.NewSource(7)))
+		records := map[string][]byte{}
+		require.Equal(t, root, w.convert(t, nil, false, records))
 
-	records := map[string][]byte{}
-	convertLegacyRound(t, w, nil, false, records)
-	got, count := verifyRecords(t, records)
-	require.Equal(t, root, got)
-	require.Positive(t, count)
+		trieState, err := w.trie.EncodeCurrentState(nil)
+		require.NoError(t, err)
+		legacy := binary.BigEndian.AppendUint64(binary.BigEndian.AppendUint64(nil, 22), 11)
+		legacy = append(binary.BigEndian.AppendUint16(legacy, uint16(len(trieState))), trieState...)
+		state, err := ConvertLegacyState(legacy)
+		require.NoError(t, err)
+		blockNum, txNum, stateRoot, err := commitment.DecodeCommitmentV3State(state)
+		require.NoError(t, err)
+		require.Equal(t, root, stateRoot)
+		require.Equal(t, uint64(11), blockNum)
+		require.Equal(t, uint64(22), txNum)
+		ctx := newMockContext()
+		ctx.branches = records
+		tr := &Trie{}
+		tr.ResetContext(ctx)
+		defer tr.Release()
+		blockNum, txNum, err = tr.RestoreState(state)
+		require.NoError(t, err)
+		require.Equal(t, uint64(11), blockNum)
+		require.Equal(t, uint64(22), txNum)
+		restoredRoot, err := tr.RootHash()
+		require.NoError(t, err)
+		require.Equal(t, root, restoredRoot)
+		op := accountOp(accounts[0].addr, commitmenttest.AccountSpec{Nonce: 12, Balance: 23, CodeHash: empty.CodeHash})
+		w.apply(op)
+		nextRoot, err := tr.Process(context.Background(), testUpdates(t, commitment.ModeCollect, []commitmenttest.Op{op}), "", nil, commitment.WarmupConfig{})
+		require.NoError(t, err)
+		require.Equal(t, w.process(t), nextRoot)
+		require.Zero(t, ctx.accountCalls)
+		require.Zero(t, ctx.storageCalls)
+	})
 
-	state, err := ConvertLegacyState(w.legacyState(t, 11, 22))
-	require.NoError(t, err)
-	blockNum, txNum, stateRoot, err := commitment.DecodeCommitmentV3State(state)
-	require.NoError(t, err)
-	require.Equal(t, root, stateRoot)
-	require.Equal(t, uint64(11), blockNum)
-	require.Equal(t, uint64(22), txNum)
-}
-
-func TestConvertLegacyIncrementalTombstonesDroppedStorageRoots(t *testing.T) {
-	rng := rand.New(rand.NewSource(11))
-	w, accounts, _ := seedLegacyWorld(t, rng)
-	records := map[string][]byte{}
-	convertLegacyRound(t, w, nil, false, records)
-	prevs := maps.Clone(w.branches)
-
-	touched := map[string]struct{}{}
-	dropSlots := func(acc legacyAccount, keep int) {
-		for _, slot := range acc.slots[keep:] {
-			key := string(append(bytes.Clone(acc.addr), slot...))
-			delete(w.storage, key)
-			touched[key] = struct{}{}
+	t.Run("incremental_tombstones_dropped_storage_roots", func(t *testing.T) {
+		w, accounts, _ := seedLegacyWorld(t, rand.New(rand.NewSource(11)))
+		records := map[string][]byte{}
+		w.convert(t, nil, false, records)
+		prevs := w.Records()
+		dropSlots := func(acc legacyAccount, keep int) {
+			for _, slot := range acc.slots[keep:] {
+				w.apply(commitmenttest.Op{Key: slotKey(acc.addr, slot), Delete: true})
+			}
 		}
-	}
-	for i, acc := range accounts {
-		switch {
-		case len(acc.slots) == 0 && i%2 == 0:
-			w.setAccount(acc.addr, 7, uint64(i))
-			touched[string(acc.addr)] = struct{}{}
-		case len(acc.slots) == 1 && i%2 == 0:
-			dropSlots(acc, 0)
-		case len(acc.slots) == 1:
-			delete(w.accounts, string(acc.addr))
-			touched[string(acc.addr)] = struct{}{}
-			dropSlots(acc, 0)
-		case len(acc.slots) == 2:
-			dropSlots(acc, 1)
-		case len(acc.slots) > 2 && i%3 == 0:
-		case len(acc.slots) > 2 && i%3 == 1:
-			dropSlots(acc, 1)
-		case len(acc.slots) > 2:
-			dropSlots(acc, 0)
+		for i, acc := range accounts {
+			switch {
+			case len(acc.slots) == 0 && i%2 == 0:
+				w.setAccount(acc.addr, 7, uint64(i))
+			case len(acc.slots) == 1 && i%2 == 0:
+				dropSlots(acc, 0)
+			case len(acc.slots) == 1:
+				w.apply(commitmenttest.Op{Key: acc.addr, Delete: true})
+				dropSlots(acc, 0)
+			case len(acc.slots) == 2:
+				dropSlots(acc, 1)
+			case len(acc.slots) > 2 && i%3 == 0:
+			case len(acc.slots) > 2 && i%3 == 1:
+				dropSlots(acc, 1)
+			case len(acc.slots) > 2:
+				dropSlots(acc, 0)
+			}
 		}
-	}
-	root := w.process(t, touched)
-
-	convertLegacyRound(t, w, prevs, true, records)
-	got, _ := verifyRecords(t, records)
-	require.Equal(t, root, got)
-
-	for _, acc := range accounts {
-		hasStorage := false
-		for _, slot := range acc.slots {
-			_, ok := w.storage[string(append(bytes.Clone(acc.addr), slot...))]
-			hasStorage = hasStorage || ok
+		root := w.process(t)
+		require.Equal(t, root, w.convert(t, prevs, true, records))
+		for _, acc := range accounts {
+			if !slices.ContainsFunc(acc.slots, func(slot []byte) bool { return w.live(slotKey(acc.addr, slot)) }) {
+				require.Empty(t, records[string(StorageNodeKey(keccak.Sum256(acc.addr), nil, nil))], "account %x has no storage but keeps a storage root record", acc.addr)
+			}
 		}
-		if !hasStorage {
-			require.Empty(t, records[string(StorageNodeKey(keccak.Sum256(acc.addr), nil, nil))], "account %x has no storage but keeps a storage root record", acc.addr)
+	})
+
+	t.Run("drops_stale_storage_root_after_collapse", func(t *testing.T) {
+		rng := rand.New(rand.NewSource(3))
+		w := newLegacyWorld()
+		t.Cleanup(w.trie.Release)
+		for i := range 8 {
+			w.setAccount(randBytes(rng, length.Addr), uint64(i+1), uint64(100+i))
 		}
-	}
-}
-
-func TestConvertLegacyDropsStaleStorageRootAfterCollapse(t *testing.T) {
-	rng := rand.New(rand.NewSource(3))
-	w := newLegacyWorld()
-	touched := map[string]struct{}{}
-	for i := range 8 {
-		addr := randBytes(rng, length.Addr)
-		w.setAccount(addr, uint64(i+1), uint64(100+i))
-		touched[string(addr)] = struct{}{}
-	}
-	owner := randBytes(rng, length.Addr)
-	w.setAccount(owner, 1, 1)
-	touched[string(owner)] = struct{}{}
-	slots := [][]byte{randBytes(rng, 32)}
-	for {
-		next := randBytes(rng, 32)
-		if keccakSlice(next)[0]>>4 != keccakSlice(slots[0])[0]>>4 {
-			slots = append(slots, next)
-			break
+		owner := randBytes(rng, length.Addr)
+		w.setAccount(owner, 1, 1)
+		slots := [][]byte{randBytes(rng, 32)}
+		for {
+			next := randBytes(rng, 32)
+			if keccakSlice(next)[0]>>4 != keccakSlice(slots[0])[0]>>4 {
+				slots = append(slots, next)
+				break
+			}
 		}
-	}
-	for j, slot := range slots {
-		w.setSlot(owner, slot, uint64(j+1))
-		touched[string(append(bytes.Clone(owner), slot...))] = struct{}{}
-	}
-	w.process(t, touched)
-	storageRootKey := string(append([]byte{0}, keccakSlice(owner)...))
-	stale := w.branches[storageRootKey]
-	require.NotEmpty(t, stale)
+		for j, slot := range slots {
+			w.setSlot(owner, slot, uint64(j+1))
+		}
+		w.process(t)
+		storageRootKey := string(append([]byte{0}, keccakSlice(owner)...))
+		stale := w.Records()[storageRootKey]
+		require.NotEmpty(t, stale)
 
-	dropped := string(append(bytes.Clone(owner), slots[1]...))
-	delete(w.storage, dropped)
-	root := w.process(t, map[string]struct{}{dropped: {}})
-
-	w.written = maps.Clone(w.branches)
-	w.written[storageRootKey] = stale
-	records := map[string][]byte{}
-	convertLegacyRound(t, w, nil, false, records)
-	got, _ := verifyRecords(t, records)
-	require.Equal(t, root, got)
+		w.apply(commitmenttest.Op{Key: slotKey(owner, slots[1]), Delete: true})
+		root := w.process(t)
+		w.written = w.Records()
+		w.written[storageRootKey] = stale
+		require.Equal(t, root, w.convert(t, nil, false, map[string][]byte{}))
+	})
 }

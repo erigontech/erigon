@@ -405,7 +405,8 @@ func (cc *commitmentCalculator) Stop() {
 	cc.wg.Wait()
 	if p := cc.state.prefetch; p != nil {
 		p.close()
-		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load())
+		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load(),
+			"hits", p.hits.Load(), "misses", p.misses.Load(), "dropped", p.dropped.Load(), "drained", p.drained.Load())
 	}
 	// balUpdates isn't closed here: the shared commitment context may still reference it post-exec.
 	if cc.roTx != nil {
@@ -624,6 +625,9 @@ func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blo
 	if cc.hasSeenBlockResult && req.blockNum <= cc.lastBlockResultSeen {
 		return
 	}
+	if len(req.bal) > 0 && !dbg.IgnoreBAL {
+		cc.state.prefetch.addBAL(req.bal)
+	}
 	mode := calcModeIncremental
 	if len(req.bal) > 0 && !dbg.IgnoreBAL && dbg.BALDrivenCommitment {
 		mode = calcModeBALDriven
@@ -793,7 +797,17 @@ func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req 
 // flushes it to a fresh updates buffer, and computes the root at t. Shared by
 // the block-end compute-ahead and the mid-block step checkpoints so the two can't drift.
 func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blockRequest, maxTxIndex uint32, emptyRemoval bool, eip8246 bool, t commitTarget) (dualCommitmentResult, func() error, error) {
-	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, commitmentDomain: cc.doms.GetCommitmentContext().CommitmentDomain(), txNum: req.firstTxNum}
+	var prefetch *branchPrefetcher
+	if cc.state != nil {
+		prefetch = cc.state.prefetch
+	}
+	commitmentDomain := kv.CommitmentDomain
+	if ctx := cc.doms.GetCommitmentCtxForDomain(kv.CommitmentDomain); ctx != nil {
+		commitmentDomain = ctx.CommitmentDomain()
+	} else if ctx := cc.doms.GetCommitmentContext(); ctx != nil {
+		commitmentDomain = ctx.CommitmentDomain()
+	}
+	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, commitmentDomain: commitmentDomain, txNum: req.firstTxNum, prefetched: prefetch}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
 	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil, eip8246)
 	if err := balState.LazyLoadErr(); err != nil {
@@ -1034,6 +1048,11 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	} else {
 		cc.state.FlushToUpdates(cc.updates)
 	}
+	if !m.midBlock {
+		cc.state.ResetBlockFlags()
+	}
+
+	cc.asOfReader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
 
 	var rh, shadowRoot []byte
@@ -1073,8 +1092,6 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		})
 		return
 	}
-	cc.state.ResetBlockFlags()
-
 	mismatch := m.checkRoot && headerRootMismatch(rh, t.stateRoot[:])
 	if flushOwn != nil {
 		if mismatch {
@@ -1641,7 +1658,13 @@ func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {
 	if _, maxStep, inMem := r.sd.GetLatestFromMemory(r.commitmentDomain, key); inMem || maxStep != kv.NoStepBound {
 		return nil, 0, false
 	}
-	return r.prefetched.getDomain(r.commitmentDomain, key)
+	data, step, ok := r.prefetched.getDomain(r.commitmentDomain, key)
+	if ok {
+		r.prefetched.hits.Add(1)
+	} else {
+		r.prefetched.misses.Add(1)
+	}
+	return data, step, ok
 }
 
 func (r *asOfStateReader) LeafRefs(key, data []byte) *commitment.LeafRefs {

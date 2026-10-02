@@ -1226,19 +1226,17 @@ Examples:
   integration commitment convert --continue --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
   integration commitment convert --restore --datadir /path/to/datadir --chain mainnet
   integration commitment convert --v3 --datadir /path/to/datadir --chain mainnet`,
-	Run: func(cmd *cobra.Command, args []string) {
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		if convertRestore && (cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
-			logger.Error("--restore is mutually exclusive with --squeeze/--nibbles.v2")
-			return
+			return errors.New("--restore is mutually exclusive with --squeeze/--nibbles.v2")
 		}
 		if convertV3 && (convertRestore || cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
-			logger.Error("--v3 is mutually exclusive with --restore/--squeeze/--nibbles.v2")
-			return
+			return errors.New("--v3 is mutually exclusive with --restore/--squeeze/--nibbles.v2")
 		}
 		if convertRestore && convertContinue {
-			logger.Error("--continue is mutually exclusive with --restore")
-			return
+			return errors.New("--continue is mutually exclusive with --restore")
 		}
 		if convertRestore {
 			// Restore is a filesystem-only operation. Dispatch before openDB so
@@ -1246,19 +1244,13 @@ Examples:
 			// MDBX/aggregator/snapshots can't open — which is exactly when
 			// --restore is most needed.
 			dirs := datadir.New(datadirCli)
-			if err := dbstate.RestoreCommitmentFiles(cmd.Context(), dirs, logger); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					logger.Error(err.Error())
-				}
-			}
-			return
+			return dbstate.RestoreCommitmentFiles(cmd.Context(), dirs, logger)
 		}
 
 		if convertV3 {
 			legacyHistory, err := filepath.Glob(filepath.Join(datadir.New(datadirCli).SnapHistory, "*-commitment.*.v"))
 			if err != nil {
-				logger.Error("Listing commitment history", "error", err)
-				return
+				return fmt.Errorf("listing commitment history: %w", err)
 			}
 			if len(legacyHistory) > 0 {
 				statecfg.EnableHistoricalCommitment()
@@ -1267,8 +1259,7 @@ Examples:
 
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
 
@@ -1278,12 +1269,7 @@ Examples:
 			Continue:        convertContinue,
 			TargetV3:        convertV3,
 		}
-		if err := commitmentConvert(db, cmd.Context(), logger, opts); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return commitmentConvert(db, cmd.Context(), logger, opts)
 	},
 }
 

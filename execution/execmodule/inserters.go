@@ -34,6 +34,8 @@ import (
 
 // flushBlockOverlayToDB flushes the block overlay to DB, bounding memory
 // during bulk inserts. Not called for single-block chain-tip inserts.
+// It drops the whole module SD: RPC and getter views fall back to the
+// FCU-published SD only while currentContext is nil.
 func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.SharedDomains) error {
 	overlay := sd.BlockOverlay()
 	if overlay == nil {
@@ -50,7 +52,7 @@ func (e *ExecModule) flushBlockOverlayToDB(ctx context.Context, sd *execctx.Shar
 	if err := rwTx.Commit(); err != nil {
 		return fmt.Errorf("ethereumExecutionModule.InsertBlocks: commit overlay: %w", err)
 	}
-	sd.CloseBlockOverlay()
+	e.closeModuleContext()
 	return nil
 }
 

@@ -17,76 +17,44 @@
 package v3
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/diagnostics/metrics"
-	"github.com/erigontech/erigon/execution/commitment"
 )
 
-func TestProcessPublishesCommitmentMetrics(t *testing.T) {
-	keys := metrics.GetOrCreateCounter("commitment_keys_total")
-	readBytes := metrics.GetOrCreateCounter("commitment_branch_read_bytes_total")
-	writeBytes := metrics.GetOrCreateCounter("commitment_branch_write_bytes_total")
-	writes := metrics.GetOrCreateCounter("commitment_branch_writes_total")
+func TestMetrics(t *testing.T) {
+	names := []string{"commitment_keys_total", "commitment_branch_read_bytes_total", "commitment_branch_write_bytes_total", "commitment_branch_writes_total"}
+	read := func() []uint64 {
+		values := make([]uint64, len(names))
+		for i, name := range names {
+			values[i] = metrics.GetOrCreateCounter(name).GetValueUint64()
+		}
+		return values
+	}
 
-	entries := benchEntries("storage", 64)
-	grown := benchEntries("storage", 128)
-	dir := t.TempDir()
-	c := newShardedContext()
-	tr := &Trie{}
-	tr.ResetContext(c)
-	tr.SetTrieContextFactory(c.factory)
-	defer tr.Release()
+	t.Run("process", func(t *testing.T) {
+		c := newShardedContext()
+		cfg := v3Config{trie: &Trie{}}
+		defer cfg.trie.Release()
+		runV3(t, c, cfg, benchEntries("storage", 64))
+		grown := benchEntries("storage", 128)
+		before := read()
+		runV3(t, c, cfg, grown)
+		after := read()
+		require.EqualValues(t, len(grown), after[0]-before[0], "commitment_keys_total counts each key of the round once")
+		for i := 1; i < len(names); i++ {
+			require.Positive(t, after[i]-before[i], "%s moved", names[i])
+		}
+	})
 
-	u := benchUpdatesIn(dir, commitment.ModeCollect, entries)
-	_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-
-	beforeKeys := keys.GetValueUint64()
-	beforeRead := readBytes.GetValueUint64()
-	beforeWrite := writeBytes.GetValueUint64()
-	beforeWrites := writes.GetValueUint64()
-
-	u = benchUpdatesIn(dir, commitment.ModeCollect, grown)
-	_, err = tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-
-	require.EqualValues(t, len(grown), keys.GetValueUint64()-beforeKeys,
-		"commitment_keys_total counts each key of the round once")
-	require.Positive(t, readBytes.GetValueUint64()-beforeRead,
-		"commitment_branch_read_bytes_total moved")
-	require.Positive(t, writeBytes.GetValueUint64()-beforeWrite,
-		"commitment_branch_write_bytes_total moved")
-	require.Positive(t, writes.GetValueUint64()-beforeWrites,
-		"commitment_branch_writes_total moved")
-}
-
-func TestDeferredProcessPublishesBranchWrites(t *testing.T) {
-	writeBytes := metrics.GetOrCreateCounter("commitment_branch_write_bytes_total")
-	writes := metrics.GetOrCreateCounter("commitment_branch_writes_total")
-
-	entries := benchEntries("storage", 64)
-	dir := t.TempDir()
-	c := newShardedContext()
-	tr := &Trie{}
-	tr.ResetContext(c)
-	tr.SetTrieContextFactory(c.factory)
-	tr.SetDeferCommitmentUpdates(true)
-	defer tr.Release()
-
-	beforeBytes := writeBytes.GetValueUint64()
-	beforeWrites := writes.GetValueUint64()
-
-	u := benchUpdatesIn(dir, commitment.ModeCollect, entries)
-	_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-	require.NotNil(t, tr.TakeDeferredDeltas())
-
-	require.Positive(t, writeBytes.GetValueUint64()-beforeBytes,
-		"deferred rounds still bill commitment_branch_write_bytes_total")
-	require.Positive(t, writes.GetValueUint64()-beforeWrites,
-		"deferred rounds still bill commitment_branch_writes_total")
+	t.Run("deferred_bills_branch_writes", func(t *testing.T) {
+		before := read()
+		runV3(t, newShardedContext(), v3Config{deferred: true}, benchEntries("storage", 64))
+		after := read()
+		for i := 2; i < len(names); i++ {
+			require.Positive(t, after[i]-before[i], "deferred rounds still bill %s", names[i])
+		}
+	})
 }

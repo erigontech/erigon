@@ -125,7 +125,7 @@ func TestTraceCallUsesCommittedState(t *testing.T) {
 	result, err := api.Call(m.Ctx, TraceCallParam{
 		From: &bankAddress,
 		To:   &contractAddress,
-		Data: input,
+		Data: &input,
 	}, []string{TraceTypeTrace}, &latest, nil)
 	require.NoError(t, err)
 
@@ -360,7 +360,7 @@ func TestCommittedStateMethodsRejectPendingTag(t *testing.T) {
 	})
 
 	t.Run("debug_executionWitness", func(t *testing.T) {
-		_, err := debugAPI.ExecutionWitness(m.Ctx, pending, nil)
+		_, err := debugAPI.ExecutionWitness(m.Ctx, pending, nil, nil)
 		require.EqualError(t, err, "pending state is not supported")
 	})
 }
@@ -387,7 +387,7 @@ func TestExecutionWitnessCacheUsesCommittedView(t *testing.T) {
 	defer tx.Rollback()
 
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
-	got, hit, reorgedAway := api.serveFromWitnessCache(m.Ctx, tx, latest, witnessModeLegacy)
+	got, hit, reorgedAway := api.serveFromWitnessCache(m.Ctx, tx, latest, witnessModeLegacy, witnessTrieMPT, witnessTrieMPT)
 	require.True(t, hit)
 	require.False(t, reorgedAway)
 	require.Same(t, want, got)

@@ -383,8 +383,26 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
-	start := time.Now()
-	result, err := api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		log.Warn("[witness-cache] resolve chain config", "block", num, "err", err)
+		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
+	defaultTrie, err := resolveWitnessTrie(nil, chainConfig.IsBinaryTrie(info.Block.Time()))
+	if err != nil {
+		log.Warn("[witness-cache] resolve trie", "block", num, "err", err)
+		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
+	result, err := api.witnessCache.buildOnce(ctx, hash, func() (*ExecutionWitnessResult, error) {
+		start := time.Now()
+		r, err := api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy, defaultTrie)
+		if err == nil {
+			witnessCacheBuildDuration.ObserveDuration(start)
+		}
+		return r, err
+	})
 	if err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()
@@ -394,7 +412,6 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
-	witnessCacheBuildDuration.ObserveDuration(start)
 	api.storeWitness(num, hash, result)
 	witnessCacheBuildOKCounter.Inc()
 	return true
@@ -467,8 +484,26 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
-	start := time.Now()
-	result, err := api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy)
+	chainConfig, err := api.chainConfig(ctx, committedTx)
+	if err != nil {
+		log.Warn("[witness-cache] resolve chain config", "block", num, "err", err)
+		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
+	defaultTrie, err := resolveWitnessTrie(nil, chainConfig.IsBinaryTrie(info.Block.Time()))
+	if err != nil {
+		log.Warn("[witness-cache] resolve trie", "block", num, "err", err)
+		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
+	result, err := api.witnessCache.buildOnce(ctx, hash, func() (*ExecutionWitnessResult, error) {
+		start := time.Now()
+		r, err := api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy, defaultTrie)
+		if err == nil {
+			witnessCacheBuildDuration.ObserveDuration(start)
+		}
+		return r, err
+	})
 	if err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()
@@ -478,7 +513,6 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
-	witnessCacheBuildDuration.ObserveDuration(start)
 	api.storeWitness(num, hash, result)
 	witnessCacheBuildOKCounter.Inc()
 	return true

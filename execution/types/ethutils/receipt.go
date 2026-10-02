@@ -30,26 +30,25 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 //go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCReceipt
 
 // RPCReceipt is the RPC form of a receipt.
 type RPCReceipt struct {
-	BlockHash         common.Hash          `json:"blockHash" ethjson:"data"`
-	BlockNumber       hexutil.Uint64       `json:"blockNumber" ethjson:"quantity"`
-	TransactionHash   common.Hash          `json:"transactionHash" ethjson:"data"`
-	TransactionIndex  hexutil.Uint64       `json:"transactionIndex" ethjson:"quantity"`
-	From              *common.Address      `json:"from" ethjson:"data"`
-	To                *common.Address      `json:"to" ethjson:"data"`
-	Type              hexutil.Uint         `json:"type" ethjson:"quantity"`
-	GasUsed           hexutil.Uint64       `json:"gasUsed" ethjson:"quantity"`
-	CumulativeGasUsed hexutil.Uint64       `json:"cumulativeGasUsed" ethjson:"quantity"`
-	ContractAddress   *common.Address      `json:"contractAddress" ethjson:"data"`
-	Logs              jsonstream.Marshaler `json:"logs" ethjson:"objects"`
-	LogsBloom         *types.Bloom         `json:"logsBloom" ethjson:"data"`
-	EffectiveGasPrice *hexutil.U256        `json:"effectiveGasPrice" ethjson:"quantity"`
+	BlockHash         common.Hash     `json:"blockHash" ethjson:"data"`
+	BlockNumber       hexutil.Uint64  `json:"blockNumber" ethjson:"quantity"`
+	TransactionHash   common.Hash     `json:"transactionHash" ethjson:"data"`
+	TransactionIndex  hexutil.Uint64  `json:"transactionIndex" ethjson:"quantity"`
+	From              *common.Address `json:"from" ethjson:"data"`
+	To                *common.Address `json:"to" ethjson:"data"`
+	Type              hexutil.Uint    `json:"type" ethjson:"quantity"`
+	GasUsed           hexutil.Uint64  `json:"gasUsed" ethjson:"quantity"`
+	CumulativeGasUsed hexutil.Uint64  `json:"cumulativeGasUsed" ethjson:"quantity"`
+	ContractAddress   *common.Address `json:"contractAddress" ethjson:"data"`
+	Logs              types.Logs      `json:"logs" ethjson:"objects"`
+	LogsBloom         *types.Bloom    `json:"logsBloom" ethjson:"data"`
+	EffectiveGasPrice *hexutil.U256   `json:"effectiveGasPrice" ethjson:"quantity"`
 
 	Status       *hexutil.Uint64 `json:"status,omitempty" ethjson:"quantity"`
 	Root         hexutil.Bytes   `json:"root,omitempty" ethjson:"data"`
@@ -83,13 +82,13 @@ func MarshalReceipt(
 		from = &address
 	}
 
-	var logsToMarshal jsonstream.Marshaler
+	var logsToMarshal types.Logs
 
 	switch {
 	case withBlockTimestamp:
-		rpcLogs := make(types.RPCLogs, 0, len(receipt.Logs))
+		rpcLogs := make(types.Logs, 0, len(receipt.Logs))
 		for _, l := range receipt.Logs {
-			rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header))
+			rpcLogs = append(rpcLogs, types.StampedLog(l, header.Time))
 		}
 		logsToMarshal = rpcLogs
 	case receipt.Logs == nil:
@@ -157,20 +156,19 @@ func MarshalReceipt(
 
 // RPCLogFromProto is the log a subscription delivers, the same object eth_getLogs returns. The
 // address and both hashes must be set, as every backend sets them.
-func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.RPCLog {
-	lg := &types.RPCLog{
-		Log: types.Log{
-			Address:     gointerfaces.ConvertH160toAddress(l.Address),
-			Topics:      make([]common.Hash, len(l.Topics)),
-			Data:        l.Data,
-			BlockNumber: hexutil.Uint64(l.BlockNumber),
-			TxHash:      gointerfaces.ConvertH256ToHash(l.TransactionHash),
-			TxIndex:     hexutil.Uint(l.TransactionIndex),
-			BlockHash:   gointerfaces.ConvertH256ToHash(l.BlockHash),
-			Index:       hexutil.Uint(l.LogIndex),
-			Removed:     l.Removed,
-		},
-		BlockTimestamp: hexutil.Uint64(l.BlockTimestamp),
+func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.Log {
+	at := hexutil.Uint64(l.BlockTimestamp)
+	lg := &types.Log{
+		Address:        gointerfaces.ConvertH160toAddress(l.Address),
+		Topics:         make([]common.Hash, len(l.Topics)),
+		Data:           l.Data,
+		BlockNumber:    hexutil.Uint64(l.BlockNumber),
+		TxHash:         gointerfaces.ConvertH256ToHash(l.TransactionHash),
+		TxIndex:        hexutil.Uint(l.TransactionIndex),
+		BlockHash:      gointerfaces.ConvertH256ToHash(l.BlockHash),
+		Index:          hexutil.Uint(l.LogIndex),
+		Removed:        l.Removed,
+		BlockTimestamp: &at,
 	}
 	for i, topic := range l.Topics {
 		lg.Topics[i] = gointerfaces.ConvertH256ToHash(topic)
@@ -187,11 +185,11 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		TransactionHash:   txHash,
 		TransactionIndex:  hexutil.Uint64(protoReceipt.TransactionIndex),
 		From:              addressOrNil(protoReceipt.From),
-		To:                nonZeroAddress(protoReceipt.To),
+		To:                addressOrNil(protoReceipt.To),
 		Type:              hexutil.Uint(protoReceipt.Type),
 		GasUsed:           hexutil.Uint64(protoReceipt.GasUsed),
 		CumulativeGasUsed: hexutil.Uint64(protoReceipt.CumulativeGasUsed),
-		ContractAddress:   nonZeroAddress(protoReceipt.ContractAddress),
+		ContractAddress:   addressOrNil(protoReceipt.ContractAddress),
 		Status:            &status,
 	}
 	if n := len(protoReceipt.LogsBloom); n == types.BloomByteLength {
@@ -201,7 +199,7 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		log.Warn("[rpc] subscribed receipt has a malformed logs bloom", "len", n, "txHash", txHash)
 	}
 
-	logs := make(types.RPCLogs, len(protoReceipt.Logs))
+	logs := make(types.Logs, len(protoReceipt.Logs))
 	for i, protoLog := range protoReceipt.Logs {
 		logs[i] = RPCLogFromProto(protoLog)
 	}
@@ -230,14 +228,6 @@ func addressOrNil(h160 *typesproto.H160) *common.Address {
 	}
 	addr := common.Address(gointerfaces.ConvertH160toAddress(h160))
 	return &addr
-}
-
-func nonZeroAddress(h160 *typesproto.H160) *common.Address {
-	addr := addressOrNil(h160)
-	if addr == nil || *addr == (common.Address{}) {
-		return nil
-	}
-	return addr
 }
 
 func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {

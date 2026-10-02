@@ -723,14 +723,20 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	if parentHeader == nil {
 		return nil, fmt.Errorf("parent header %d not found", parentNum)
 	}
-	expectedParentRoot := parentHeader.Root
-
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, fmt.Errorf("error loading chain config: %w", err)
 	}
 	if chainConfig.IsBinaryTrie(block.Time()) {
 		return nil, execctx.ErrBinCommitmentUnsupported
+	}
+	expectedParentRoot, err := witnessAnchorForBlock(tx, parentHeader, parentNum, witnessTrieMPT, chainConfig)
+	if err != nil {
+		return nil, err
+	}
+	expectedPostRoot, err := witnessAnchorForBlock(tx, block.HeaderNoCopy(), blockNr, witnessTrieMPT, chainConfig)
+	if err != nil {
+		return nil, err
 	}
 	engine := api.engine()
 	fullEngine, ok := engine.(rules.Engine)
@@ -793,7 +799,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, nil, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNr, parentNum,
-		block.Root(), accessed, witnessModeLegacy, false /* binTrie: WithHexCommitmentOnly refuses bin above */)
+		expectedPostRoot, accessed, witnessModeLegacy, false /* binTrie: WithHexCommitmentOnly refuses bin above */)
 	if err != nil {
 		return nil, err
 	}
@@ -863,11 +869,11 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		for i, node := range leanNodes {
 			verifyResult.State[i] = node
 		}
-		newStateRoot, _, err := execBlockStatelessly(verifyResult, block, chainConfig, fullEngine)
+		newStateRoot, _, err := execBlockStatelessly(verifyResult, block, chainConfig, fullEngine, expectedPostRoot)
 		if err != nil {
 			logger.Warn("stateless re-execution failed for witness", "block", blockNr, "err", err)
-		} else if newStateRoot != block.Root() {
-			logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", block.Root())
+		} else if newStateRoot != expectedPostRoot {
+			logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", expectedPostRoot)
 		}
 	}
 

@@ -243,6 +243,20 @@ func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.Tempora
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
 }
 
+func (sdc *SharedDomainsCommitmentContext) SetPBinWitnessStateReader(reader StateReader) {
+	sdc.SetStateReader(reader)
+	stepSize := uint64(0)
+	if sdc.sharedDomains != nil {
+		stepSize = sdc.sharedDomains.StepSize()
+	}
+	sdc.patriciaTrie.ResetContext(&TrieContext{
+		commitmentDomain: sdc.CommitmentDomain(),
+		stepSize:         stepSize,
+		stateReader:      reader,
+		readCodeSize:     sdc.variant == commitment.VariantBinPatriciaTrie,
+	})
+}
+
 func (sdc *SharedDomainsCommitmentContext) SetTraceWriter(w io.Writer) {
 	// Wrap once so the main and per-worker TrieContexts share one mutex-guarded
 	// writer: concurrent workers trace branch reads/writes without racing.
@@ -438,12 +452,24 @@ func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 	sdc.updates.TouchHashedKey(hashedKey)
 }
 
-func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Context) (map[string][]byte, []byte, error) {
-	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+type witnessTrie interface {
+	WitnessesByHash(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool) (byHash map[string][]byte, provedKeys [][]byte, rootHash []byte, err error)
+}
+
+func (sdc *SharedDomainsCommitmentContext) witnessTrie() (witnessTrie, error) {
+	wt, ok := sdc.Trie().(witnessTrie)
 	if !ok {
-		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+		return nil, fmt.Errorf("commitment trie %s cannot build witnesses", sdc.Trie().Variant())
 	}
-	byHash, _, rootHash, err := hexPatriciaHashed.WitnessesByHash(ctx, sdc.updates, false)
+	return wt, nil
+}
+
+func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Context) (map[string][]byte, []byte, error) {
+	wt, err := sdc.witnessTrie()
+	if err != nil {
+		return nil, nil, err
+	}
+	byHash, _, rootHash, err := wt.WitnessesByHash(ctx, sdc.updates, false)
 	return byHash, rootHash, err
 }
 
@@ -451,11 +477,11 @@ func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Contex
 // superset to the proof paths of the fold's keys, returning the RLP node bytes
 // (root first) and the root hash. This is the strict-verifier (reth) form.
 func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool) (nodes [][]byte, rootHash []byte, err error) {
-	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
-	if !ok {
-		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+	wt, err := sdc.witnessTrie()
+	if err != nil {
+		return nil, nil, err
 	}
-	byHash, provedKeys, rootHash, err := hexPatriciaHashed.WitnessesByHash(ctx, sdc.updates, produceExclusionProofs)
+	byHash, provedKeys, rootHash, err := wt.WitnessesByHash(ctx, sdc.updates, produceExclusionProofs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -502,9 +528,10 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 	if tracer != nil && sdc.variant == commitment.VariantBinPatriciaTrie {
 		panic(pbinUnsupported("collapse tracing"))
 	}
-	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
-	if ok {
-		hexPatriciaHashed.SetCollapseTracer(tracer)
+	if t, ok := sdc.Trie().(interface {
+		SetCollapseTracer(commitment.CollapseTracer)
+	}); ok {
+		t.SetCollapseTracer(tracer)
 	}
 }
 
@@ -526,16 +553,24 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte)
 		return 0, errors.New("BranchChildCount cannot read while deferred branch updates are pending")
 	}
 
-	key := nibbles.HexToCompact(nibblePrefix)
-	enc, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(sdc.CommitmentDomain(), key)
-	if ok {
-		return commitment.BranchData(enc).ChildCount(), nil
+	read := func(key []byte) ([]byte, error) {
+		enc, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(sdc.CommitmentDomain(), key)
+		if ok {
+			return enc, nil
+		}
+		if maxStep != kv.NoStepBound {
+			return nil, fmt.Errorf("BranchChildCount cannot fall through a staged unwind at step %d", maxStep)
+		}
+		enc, _, err := stateReader.Read(sdc.CommitmentDomain(), key, sdc.sharedDomains.StepSize())
+		return enc, err
 	}
-	if maxStep != kv.NoStepBound {
-		return 0, fmt.Errorf("BranchChildCount cannot fall through a staged unwind at step %d", maxStep)
+	if t, ok := sdc.Trie().(interface {
+		BranchChildCount(read func([]byte) ([]byte, error), nibblePrefix []byte) (int, error)
+	}); ok {
+		return t.BranchChildCount(read, nibblePrefix)
 	}
 
-	enc, _, err := stateReader.Read(sdc.CommitmentDomain(), key, sdc.sharedDomains.StepSize())
+	enc, err := read(nibbles.HexToCompact(nibblePrefix))
 	if err != nil {
 		return 0, err
 	}

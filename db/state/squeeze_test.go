@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
 
 type testAggConfig struct {
@@ -129,18 +130,7 @@ func testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDi
 
 func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *state.Aggregator) {
 	tb.Helper()
-	logger := log.New()
-	dirs := datadir.New(tb.TempDir())
-	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-	tb.Cleanup(db.Close)
-
-	agg := testAgg(tb, dirs, aggStep, logger)
-	err := agg.OpenFolder(db)
-	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg, nil)
-	require.NoError(tb, err)
-	tb.Cleanup(tdb.Close)
-	return tdb, agg
+	return commitmenttemporal.Open(tb, aggStep)
 }
 
 func testAgg(tb testing.TB, dirs datadir.Dirs, aggStep uint64, logger log.Logger) *state.Aggregator {

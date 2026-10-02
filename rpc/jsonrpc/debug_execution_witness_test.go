@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
@@ -141,6 +143,24 @@ func TestRecordingState_accountExists(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecordingStateDeleteAccountClearsModifiedCode(t *testing.T) {
+	address := common.HexToAddress("0x5600000000000000000000000000000000000000")
+	code := []byte{0x60, 0x01, 0x00}
+	rs := NewRecordingState(&fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Nonce: 1}}})
+	require.NoError(t, rs.UpdateAccountCode(accounts.InternAddress(address), 0, accounts.InternCodeHash(crypto.Keccak256Hash(code)), code))
+	require.NoError(t, rs.DeleteAccount(accounts.InternAddress(address), nil))
+	funded := &accounts.Account{Balance: *uint256.NewInt(1)}
+	require.NoError(t, rs.UpdateAccountData(accounts.InternAddress(address), nil, funded))
+
+	input, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	require.Len(t, input.Accounts, 1)
+	require.Nil(t, input.Accounts[0].Code)
+	basic, err := eip8297.EncodeBasicData(0, &funded.Balance, 0)
+	require.NoError(t, err)
+	require.Equal(t, basic[:], input.Accounts[0].Values[eip8297.BasicDataLeafKey])
 }
 
 // hasEmptyCode reports whether the legacy code set carries the single empty `0x`
@@ -373,7 +393,7 @@ func TestResolveWitnessMode(t *testing.T) {
 	str := func(s string) *string { return &s }
 
 	t.Run("param selects mode", func(t *testing.T) {
-		got, err := resolveWitnessMode(str("legacy"), false)
+		got, err := resolveWitnessMode(str("legacy"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -381,7 +401,7 @@ func TestResolveWitnessMode(t *testing.T) {
 			t.Errorf("param legacy should resolve to legacy mode, got %v", got)
 		}
 
-		got, err = resolveWitnessMode(str("canonical"), false)
+		got, err = resolveWitnessMode(str("canonical"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -391,13 +411,13 @@ func TestResolveWitnessMode(t *testing.T) {
 	})
 
 	t.Run("unknown param rejected", func(t *testing.T) {
-		if _, err := resolveWitnessMode(str("bogus"), false); err == nil {
+		if _, err := resolveWitnessMode(str("bogus")); err == nil {
 			t.Error("expected error for unknown mode param")
 		}
 	})
 
 	t.Run("legacy default when param nil", func(t *testing.T) {
-		got, err := resolveWitnessMode(nil, false)
+		got, err := resolveWitnessMode(nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -478,7 +498,7 @@ func TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent(t *testing.T) {
 	info, err := api.resolveWitnessBlock(ctx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
 	require.NoError(t, err)
 
-	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
+	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy, witnessTrieMPT)
 	require.Error(t, err, "a mispinned parent must fail a validation gate")
 	require.Nil(t, result, "no witness is produced on gate failure")
 }
@@ -512,12 +532,12 @@ func TestHeadCaptureFailClosedYieldsOutOfWindow(t *testing.T) {
 	require.NoError(t, err)
 
 	// The tip-pinned tx carries block 13's commitment, not parent(3): a validation gate fails.
-	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy)
+	result, err := api.buildWitnessResultHeadCapture(ctx, tx, tx, info, witnessModeLegacy, witnessTrieMPT)
 	require.Error(t, err, "a stale parent view must fail a validation gate")
 	require.Nil(t, result, "no wrong witness is produced on gate failure")
 	require.Equal(t, 0, api.witnessCache.Len(), "a gate failure caches nothing")
 
-	served, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	served, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 	require.ErrorIs(t, err, errWitnessOutOfWindow, "cache-only never recomputes a failed block from history")
 	require.Nil(t, served)
 }
@@ -546,7 +566,7 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		api.witnessCache = newWitnessResultCache(96, 0, true /*headCapture*/, true /*cacheOnly*/)
 		t.Cleanup(func() { api.witnessCache = nil })
 
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 		require.ErrorIs(t, err, errWitnessOutOfWindow)
 		require.Nil(t, result, "a cache-only miss must not build a witness")
 	})
@@ -556,7 +576,7 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		t.Cleanup(func() { api.witnessCache = nil })
 
 		canonical := "canonical"
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical, nil)
 		require.ErrorIs(t, err, errWitnessCanonicalUnavailable)
 		require.Nil(t, result, "a cache-only node never builds a canonical witness")
 	})
@@ -567,9 +587,20 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
 
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 		require.NoError(t, err)
 		require.Same(t, sentinel, result, "a cached by-number request serves the stored pointer")
+	})
+
+	t.Run("by-number miss waits for the running build", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, true, true)
+		registerFinishedBuild(cache, block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "a cache-only miss must serve the running build, not out-of-window")
 	})
 
 	t.Run("by-hash orphan is reorged-away, never serves the resident entry", func(t *testing.T) {
@@ -600,23 +631,23 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		tx, err := api.db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
-		result, hit, reorgedAway := api.serveFromWitnessCache(ctx, tx, byHash, witnessModeLegacy)
+		result, hit, reorgedAway := api.serveFromWitnessCache(ctx, tx, byHash, witnessModeLegacy, witnessTrieMPT, witnessTrieMPT)
 		require.False(t, hit, "a non-canonical by-hash request must not serve its resident entry")
 		require.True(t, reorgedAway, "an orphan hash must be flagged reorged-away")
 		require.Nil(t, result)
 
-		_, err = api.ExecutionWitness(ctx, byHash, nil)
+		_, err = api.ExecutionWitness(ctx, byHash, nil, nil)
 		require.ErrorIs(t, err, errWitnessReorgedAway)
 
 		// requireCanonical: true must still land in the reorged-away bucket, not the generic
 		// out-of-window one: the serve path owns the canonical check for the orphan signal.
 		byHashRequireCanonical := rpc.BlockNumberOrHash{BlockHash: &forkHash, RequireCanonical: true}
-		result, hit, reorgedAway = api.serveFromWitnessCache(ctx, tx, byHashRequireCanonical, witnessModeLegacy)
+		result, hit, reorgedAway = api.serveFromWitnessCache(ctx, tx, byHashRequireCanonical, witnessModeLegacy, witnessTrieMPT, witnessTrieMPT)
 		require.False(t, hit)
 		require.True(t, reorgedAway, "requireCanonical must not collapse an orphan into a plain miss")
 		require.Nil(t, result)
 
-		_, err = api.ExecutionWitness(ctx, byHashRequireCanonical, nil)
+		_, err = api.ExecutionWitness(ctx, byHashRequireCanonical, nil, nil)
 		require.ErrorIs(t, err, errWitnessReorgedAway)
 	})
 }
@@ -774,10 +805,10 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 	bad := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
 
 	dbg.AssertEnabled = false
-	require.NoError(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
+	require.NoError(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine, block.Root()),
 		"without the gate a witness is never replayed, so a wrong one passes")
 
 	dbg.AssertEnabled = true
-	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
+	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine, block.Root()),
 		"under the gate the stateless replay rejects a wrong witness")
 }

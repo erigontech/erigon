@@ -769,9 +769,19 @@ type codeAccessTracker interface {
 	OnCodeAccess(accounts.Address, []byte)
 }
 
+type delegationAccessTracker interface {
+	OnDelegationTarget(accounts.Address)
+}
+
 func (sdb *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
 	if hook, ok := sdb.stateReader.(codeAccessTracker); ok {
 		hook.OnCodeAccess(addr, code)
+	}
+}
+
+func (sdb *IntraBlockState) callDelegationAccessHook(addr accounts.Address) {
+	if hook, ok := sdb.stateReader.(delegationAccessTracker); ok {
+		hook.OnDelegationTarget(addr)
 	}
 }
 
@@ -822,6 +832,7 @@ func (sdb *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.Cod
 	dd, ok, err := sdb.GetDelegatedDesignation(addr)
 
 	if ok {
+		sdb.callDelegationAccessHook(dd)
 		return sdb.GetCodeHash(dd)
 	}
 
@@ -840,6 +851,7 @@ func (sdb *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {
 	code, err := sdb.getCode(addr, false)
 	// eip-7702
 	if delegation, ok := types.ParseDelegation(code); ok {
+		sdb.callDelegationAccessHook(delegation)
 		return sdb.getCode(delegation, false)
 	}
 	if err != nil {

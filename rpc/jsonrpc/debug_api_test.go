@@ -1458,7 +1458,7 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("genesis block", func(t *testing.T) {
 		// Note: commitment history starts from 1 in this test suite
 		blockNum := rpc.BlockNumber(0)
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil, nil)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -1472,7 +1472,7 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("by block number", func(t *testing.T) {
 		// Test with block number 1
 		blockNum := rpc.BlockNumber(1)
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil, nil)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -1497,7 +1497,7 @@ func TestExecutionWitness(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash}, nil, nil)
 
 		require.NoError(t, err)
 		require.NotNil(t, result)
@@ -1506,7 +1506,7 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("multiple blocks", func(t *testing.T) {
 		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
 			bn := rpc.BlockNumber(blockNum)
-			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+			result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 
 			require.NoError(t, err, "ExecutionWitness failed for block %d", blockNum)
 			require.NotNil(t, result, "Result should not be nil for block %d", blockNum)
@@ -1516,7 +1516,7 @@ func TestExecutionWitness(t *testing.T) {
 
 	t.Run("latest block", func(t *testing.T) {
 		blockNum := rpc.LatestBlockNumber
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, result)
 		require.NotNil(t, result.State, "State should not be nil")
@@ -1527,7 +1527,7 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("result bytes stable and sorted", func(t *testing.T) {
 		for blockNum := uint64(1); blockNum <= latestBlockNum; blockNum++ {
 			bn := rpc.BlockNumber(blockNum)
-			first, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+			first, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 			require.NoError(t, err, "block %d", blockNum)
 			for i := 1; i < len(first.State); i++ {
 				require.LessOrEqual(t, bytes.Compare(first.State[i-1], first.State[i]), 0,
@@ -1536,7 +1536,7 @@ func TestExecutionWitness(t *testing.T) {
 			firstBytes, err := json.Marshal(first)
 			require.NoError(t, err)
 
-			second, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+			second, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 			require.NoError(t, err, "block %d", blockNum)
 			secondBytes, err := json.Marshal(second)
 			require.NoError(t, err)
@@ -1548,7 +1548,7 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("non-existent block", func(t *testing.T) {
 		// Very high block number that doesn't exist
 		blockNum := rpc.BlockNumber(999999999)
-		_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil)
+		_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum}, nil, nil)
 		require.Error(t, err, "should error for non-existent block")
 	})
 }
@@ -1589,7 +1589,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 		t.Cleanup(func() { api.witnessCache = nil })
 
 		hitBefore := witnessCacheHitCounter.GetValueUint64()
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 		require.NoError(t, err)
 		require.Same(t, sentinel, result, "legacy request must serve the cached pointer")
 		require.Equal(t, uint64(1), witnessCacheHitCounter.GetValueUint64()-hitBefore, "a hit increments the hit counter once")
@@ -1602,7 +1602,7 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 		t.Cleanup(func() { api.witnessCache = nil })
 
 		canonical := "canonical"
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, &canonical, nil)
 		require.NoError(t, err)
 		require.NotSame(t, sentinel, result, "canonical request must never serve the legacy cache")
 		require.NotNil(t, result.State, "canonical request must build a real witness on demand")
@@ -1613,16 +1613,27 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 		t.Cleanup(func() { api.witnessCache = nil })
 
 		missBefore := witnessCacheMissCounter.GetValueUint64()
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 		require.NoError(t, err)
 		require.NotSame(t, sentinel, result)
 		require.NotNil(t, result.State, "miss must build a real witness on demand")
 		require.Equal(t, uint64(1), witnessCacheMissCounter.GetValueUint64()-missBefore, "a miss increments the miss counter once")
 	})
 
+	t.Run("legacy miss joins the running build", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, false, false)
+		registerFinishedBuild(cache, block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "a legacy miss must take the running build's result, not build again")
+	})
+
 	t.Run("nil cache path unaffected", func(t *testing.T) {
 		api.witnessCache = nil
-		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 		require.NoError(t, err)
 		require.NotSame(t, sentinel, result)
 		require.NotNil(t, result.State)

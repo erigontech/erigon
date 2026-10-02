@@ -37,6 +37,9 @@ type Trie struct {
 	fanOutMin       int
 	deferUpdates    bool
 	deferred        deltaParts
+	collapseTracer  commitment.CollapseTracer
+	preRecs         map[string][]byte
+	preRoot         []byte
 }
 
 func NewTrie(tmpdir string, _ commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
@@ -91,6 +94,8 @@ func (t *Trie) SetDeferCommitmentUpdates(deferUpdates bool) { t.deferUpdates = d
 
 func (t *Trie) SetStorageFanOutMin(n int) { t.fanOutMin = n }
 
+func (t *Trie) SetCollapseTracer(tracer commitment.CollapseTracer) { t.collapseTracer = tracer }
+
 func (t *Trie) TakeDeferredDeltas() [][]commitment.BranchDelta {
 	parts := t.deferred
 	t.deferred = nil
@@ -102,7 +107,7 @@ func (t *Trie) Process(
 	updates *commitment.Updates,
 	logPrefix string,
 	onProgress func(*commitment.CommitProgress),
-	warmup commitment.WarmupConfig,
+	_ commitment.WarmupConfig,
 ) ([]byte, error) {
 	if updates == nil {
 		return nil, errors.New("commitment v3: nil updates")
@@ -110,15 +115,20 @@ func (t *Trie) Process(
 	if updates.Mode() != commitment.ModeCollect {
 		return nil, errors.New("commitment v3: Process requires ModeCollect updates")
 	}
-	var warmuper *commitment.Warmuper
-	if warmup.Enabled {
-		warmup.Key = warmupKeyV3
-		warmup.Step = warmupStepV3
-		warmuper = commitment.NewWarmuper(ctx, warmup)
-		defer warmuper.CloseAndWait()
+	var sorted func([]feedEntry) error
+	t.preRecs, t.preRoot = nil, nil
+	if t.collapseTracer != nil {
+		if t.ctx != nil && t.ctxFactory == nil {
+			inner := t.ctx
+			cache := &recordCache{PatriciaContext: inner, recs: make(map[string][]byte)}
+			t.ctx = cache
+			t.preRecs, t.preRoot = cache.recs, bytes.Clone(t.root)
+			defer func() { t.ctx = inner }()
+		}
+		sorted = func(items []feedEntry) error { return traceCollapses(t.ctx, items, t.collapseTracer) }
 	}
 	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {
-		return partitionUpdates(ctx, updates, t.scheduleWorkers, warmuper)
+		return partitionUpdates(ctx, updates, t.scheduleWorkers, sorted)
 	})
 }
 
