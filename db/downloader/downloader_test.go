@@ -172,7 +172,7 @@ func TestChangeInfoHashOfSameFile(t *testing.T) {
 	//		ErigonV1.24 node must keep using existing file instead of downloading new one.
 	err = test.downloader.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("bb"), "a.seg")
 	// I'm not sure if this is a good idea.
-	//require.Error(err)
+	// require.Error(err)
 	_ = err
 	tt, ok = test.downloader.torrentClient.Torrent(snaptype.Hex2InfoHash("aa"))
 	require.True(ok)
@@ -304,7 +304,6 @@ func TestAddDel(t *testing.T) {
 	err = server.Delete(ctx, []string{f1Abs, f2})
 	require.NoError(err)
 	require.Equal(0, len(test.downloader.torrentClient.Torrents()))
-
 }
 
 // downloaderTest holds test fixtures for Downloader tests.
@@ -1405,4 +1404,27 @@ func TestVerifyDataFailFastClosesFiles(t *testing.T) {
 		require.NoError(test.downloader.VerifyData(test.downloader.ctx, nil, true))
 	}
 	require.Less(openFdCount(t)-before, runs/2, "VerifyFileFailFast leaks a file descriptor per verified file")
+}
+
+func TestAddTorrentsFromDiskSkipsMalformedTorrent(t *testing.T) {
+	require := require.New(t)
+	test := newDownloaderTest(t)
+	d := test.downloader
+
+	corruptName := "0-corrupt.seg.torrent"
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, corruptName), []byte("not a torrent"), 0o644))
+
+	segName := "v1-000000-001000-headers.seg"
+	require.NoError(os.WriteFile(filepath.Join(test.dirs.Snap, segName), []byte("headers data"), 0o644))
+	ok, err := BuildTorrentIfNeed(t.Context(), segName, test.dirs.Snap, d.torrentFS)
+	require.NoError(err)
+	require.True(ok)
+
+	incomplete, err := d.AddTorrentsFromDisk(t.Context())
+	require.NoError(err)
+	require.Zero(incomplete)
+
+	torrents := d.torrentClient.Torrents()
+	require.Len(torrents, 1)
+	require.Equal(segName, torrents[0].Name())
 }

@@ -47,8 +47,8 @@ type EndpointError struct {
 }
 
 var (
-	ErrorCantFindBeaconState = errors.New("Could not find beacon state")
-	ErrorSszNotSupported     = errors.New("This endpoint does not support SSZ response")
+	ErrorCantFindBeaconState = errors.New("could not find beacon state")
+	ErrorSszNotSupported     = errors.New("this endpoint does not support SSZ response")
 )
 
 func WrapEndpointError(err error) *EndpointError {
@@ -129,7 +129,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 				endpointError.WriteTo(w)
 			} else {
 				// Failsafe: If the error is nil, write a generic 500 error
-				NewEndpointError(http.StatusInternalServerError, errors.New("Internal Server Error")).WriteTo(w)
+				NewEndpointError(http.StatusInternalServerError, errors.New("internal server error")).WriteTo(w)
 			}
 			return
 		}
@@ -148,6 +148,14 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 			// Many consumers rely on this header for fork-specific types.
 			if beaconResponse.Version != nil && w.Header().Get("Eth-Consensus-Version") == "" {
 				w.Header().Set("Eth-Consensus-Version", beaconResponse.Version.String())
+			}
+			if beaconResponse.noContent {
+				statusCode := beaconResponse.statusCode
+				if statusCode == 0 {
+					statusCode = http.StatusNoContent
+				}
+				w.WriteHeader(statusCode)
+				return
 			}
 		}
 		switch responseEncodingForAccept(contentType, supportsSSZ(ans)) {
@@ -185,7 +193,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		case responseEncodingEventStream:
 			return
 		default:
-			http.Error(w, "content type must include application/json, application/octet-stream, or text/event-stream, got "+contentType, http.StatusBadRequest)
+			http.Error(w, "content type must include application/json, application/octet-stream, or text/event-stream, got "+contentType, http.StatusNotAcceptable)
 		}
 	}
 }

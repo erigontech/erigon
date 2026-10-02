@@ -47,7 +47,7 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 	// Fill in previous epoch participation from the pre state's pending attestations
 	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, i2 int) error {
 		attestationData := pa.Data
-		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay, false)
+		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay, 0, false)
 		if err != nil {
 			return err
 		}
@@ -303,12 +303,10 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	forkData.CurrentVersion = utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion))
 	b.SetFork(forkData)
 
-	// Get the latest block hash from the previous execution payload header
-	latestBlockHash := b.LatestExecutionPayloadHeader().BlockHash
+	latestPayloadHeader := b.LatestExecutionPayloadHeader()
+	latestBlockHeader := b.LatestBlockHeader()
+	latestBlockHash := latestPayloadHeader.BlockHash
 
-	// Replace latest_execution_payload_header with latest_execution_payload_bid
-	// The bid contains only the block_hash from the previous header
-	// Compute the execution_requests_root for an empty ExecutionRequests
 	emptyRequests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
 	emptyRequestsRoot, err := emptyRequests.HashSSZ()
 	if err != nil {
@@ -316,16 +314,16 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	}
 
 	bid := &cltypes.ExecutionPayloadBid{
-		ParentBlockHash:       common.Hash{},
+		ParentBlockHash:       latestPayloadHeader.ParentHash,
+		ParentBlockRoot:       latestBlockHeader.ParentRoot,
 		BlockHash:             latestBlockHash,
-		BuilderIndex:          0,
-		Slot:                  0,
+		PrevRandao:            latestPayloadHeader.PrevRandao,
+		GasLimit:              latestPayloadHeader.GasLimit,
+		BuilderIndex:          clparams.BuilderIndexSelfBuild,
+		Slot:                  latestBlockHeader.Slot,
 		Value:                 0,
 		BlobKzgCommitments:    *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 		ExecutionRequestsRoot: emptyRequestsRoot,
-		PrevRandao:            common.Hash{},
-		GasLimit:              b.LatestExecutionPayloadHeader().GasLimit,
-		ParentBlockRoot:       common.Hash{},
 	}
 	b.SetLatestExecutionPayloadBid(bid)
 

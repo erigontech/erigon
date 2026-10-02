@@ -19,10 +19,8 @@ package solid
 import (
 	"encoding/binary"
 	"encoding/json"
-	"unsafe"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/length"
@@ -125,9 +123,6 @@ func (v Validator) WithdrawalCredentials() (o common.Hash) {
 }
 
 func (v Validator) EffectiveBalance() uint64 {
-	if utils.IsSysLittleEndian {
-		return *(*uint64)(unsafe.Pointer(&v[80]))
-	}
 	return binary.LittleEndian.Uint64(v[80:88])
 }
 
@@ -136,30 +131,18 @@ func (v Validator) Slashed() bool {
 }
 
 func (v Validator) ActivationEligibilityEpoch() uint64 {
-	if utils.IsSysLittleEndian {
-		return *(*uint64)(unsafe.Pointer(&v[89]))
-	}
 	return binary.LittleEndian.Uint64(v[89:97])
 }
 
 func (v Validator) ActivationEpoch() uint64 {
-	if utils.IsSysLittleEndian {
-		return *(*uint64)(unsafe.Pointer(&v[97]))
-	}
 	return binary.LittleEndian.Uint64(v[97:105])
 }
 
 func (v Validator) ExitEpoch() uint64 {
-	if utils.IsSysLittleEndian {
-		return *(*uint64)(unsafe.Pointer(&v[105]))
-	}
 	return binary.LittleEndian.Uint64(v[105:113])
 }
 
 func (v Validator) WithdrawableEpoch() uint64 {
-	if utils.IsSysLittleEndian {
-		return *(*uint64)(unsafe.Pointer(&v[113]))
-	}
 	return binary.LittleEndian.Uint64(v[113:121])
 }
 
@@ -191,10 +174,6 @@ func (v Validator) SetWithdrawalCredentials(o common.Hash) {
 }
 
 func (v Validator) SetEffectiveBalance(i uint64) {
-	if utils.IsSysLittleEndian {
-		*(*uint64)(unsafe.Pointer(&v[80])) = i
-		return
-	}
 	binary.LittleEndian.PutUint64(v[80:88], i)
 }
 
@@ -211,34 +190,18 @@ func (v Validator) SetSlashed(b bool) {
 }
 
 func (v Validator) SetActivationEligibilityEpoch(i uint64) {
-	if utils.IsSysLittleEndian {
-		*(*uint64)(unsafe.Pointer(&v[89])) = i
-		return
-	}
 	binary.LittleEndian.PutUint64(v[89:97], i)
 }
 
 func (v Validator) SetActivationEpoch(i uint64) {
-	if utils.IsSysLittleEndian {
-		*(*uint64)(unsafe.Pointer(&v[97])) = i
-		return
-	}
 	binary.LittleEndian.PutUint64(v[97:105], i)
 }
 
 func (v Validator) SetExitEpoch(i uint64) {
-	if utils.IsSysLittleEndian {
-		*(*uint64)(unsafe.Pointer(&v[105])) = i
-		return
-	}
 	binary.LittleEndian.PutUint64(v[105:113], i)
 }
 
 func (v Validator) SetWithdrawableEpoch(i uint64) {
-	if utils.IsSysLittleEndian {
-		*(*uint64)(unsafe.Pointer(&v[113])) = i
-		return
-	}
 	binary.LittleEndian.PutUint64(v[113:121], i)
 }
 

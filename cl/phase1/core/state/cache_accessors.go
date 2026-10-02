@@ -238,6 +238,7 @@ func (b *CachingBeaconState) CommitteeCount(epoch uint64) uint64 {
 func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 	data *solid.AttestationData,
 	inclusionDelay uint64,
+	parentSlot uint64,
 	skipAssert bool,
 ) ([]uint8, error) {
 	var justifiedCheckpoint solid.Checkpoint
@@ -276,7 +277,7 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(
 			}
 			payloadMatch = true
 		} else {
-			slotIndex := data.Slot % b.BeaconConfig().SlotsPerHistoricalRoot
+			slotIndex := parentSlot % b.BeaconConfig().SlotsPerHistoricalRoot
 			aval := b.GetExecutionPayloadAvailability()
 			payloadAvailable := aval.GetBitAt(int(slotIndex))
 			payloadMatch = (data.CommitteeIndex == 1) == payloadAvailable
@@ -538,6 +539,10 @@ func (b *CachingBeaconState) GetValidatorActivationChurnLimit() uint64 {
 // Falls back to ComputePTC when the requested slot is outside the
 // ptcWindow's 3-epoch range (e.g. state advanced far past the parent).
 func (b *CachingBeaconState) GetPTC(slot uint64) ([]uint64, error) {
+	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
+	if epoch < b.BeaconConfig().GloasForkEpoch {
+		return nil, fmt.Errorf("GetPTC: slot %d is pre-Gloas", slot)
+	}
 	if b.Version() >= clparams.GloasVersion {
 		ptc, err := b.GetPTCFromWindow(slot)
 		if err == nil {

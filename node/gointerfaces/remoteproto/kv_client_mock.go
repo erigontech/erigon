@@ -131,50 +131,6 @@ func (c *MockKVClientGetLatestCall) DoAndReturn(f func(context.Context, *GetLate
 	return c
 }
 
-// HasPrefix mocks base method.
-func (m *MockKVClient) HasPrefix(ctx context.Context, in *HasPrefixReq, opts ...grpc.CallOption) (*HasPrefixReply, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, in}
-	for _, a := range opts {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "HasPrefix", varargs...)
-	ret0, _ := ret[0].(*HasPrefixReply)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// HasPrefix indicates an expected call of HasPrefix.
-func (mr *MockKVClientMockRecorder) HasPrefix(ctx, in any, opts ...any) *MockKVClientHasPrefixCall {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, in}, opts...)
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasPrefix", reflect.TypeOf((*MockKVClient)(nil).HasPrefix), varargs...)
-	return &MockKVClientHasPrefixCall{Call: call}
-}
-
-// MockKVClientHasPrefixCall wrap *gomock.Call
-type MockKVClientHasPrefixCall struct {
-	*gomock.Call
-}
-
-// Return rewrite *gomock.Call.Return
-func (c *MockKVClientHasPrefixCall) Return(arg0 *HasPrefixReply, arg1 error) *MockKVClientHasPrefixCall {
-	c.Call = c.Call.Return(arg0, arg1)
-	return c
-}
-
-// Do rewrite *gomock.Call.Do
-func (c *MockKVClientHasPrefixCall) Do(f func(context.Context, *HasPrefixReq, ...grpc.CallOption) (*HasPrefixReply, error)) *MockKVClientHasPrefixCall {
-	c.Call = c.Call.Do(f)
-	return c
-}
-
-// DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockKVClientHasPrefixCall) DoAndReturn(f func(context.Context, *HasPrefixReq, ...grpc.CallOption) (*HasPrefixReply, error)) *MockKVClientHasPrefixCall {
-	c.Call = c.Call.DoAndReturn(f)
-	return c
-}
-
 // HistoryRange mocks base method.
 func (m *MockKVClient) HistoryRange(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error) {
 	m.ctrl.T.Helper()

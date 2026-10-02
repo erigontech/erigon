@@ -83,7 +83,7 @@ type stateObject struct {
 	db       *IntraBlockState
 
 	// Write caches.
-	//trie Trie // storage trie, which becomes non-nil on first access
+	// trie Trie // storage trie, which becomes non-nil on first access
 	code accounts.Code // contract bytecode, hash + canonical bytes
 
 	originStorage Storage // Storage cache of original entries to dedup rewrites
@@ -218,6 +218,7 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 	}
 	so.db.storageReadCount++
 	so.db.stateReader.SetTrace(false, "")
+	so.db.recordStateReadError(err)
 
 	if err != nil {
 		return uint256.Int{}, err
@@ -439,6 +440,7 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 		so.db.codeReadCount++
 	}
 	so.db.stateReader.SetTrace(false, "")
+	so.db.recordStateReadError(err)
 
 	if err != nil {
 		return accounts.Code{}, fmt.Errorf("can't read code for %x: %w", so.Address(), err)

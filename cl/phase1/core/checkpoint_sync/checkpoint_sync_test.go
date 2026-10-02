@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/genesisdb"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
@@ -46,6 +47,24 @@ func newMockHttpServer(expectedState *state.CachingBeaconState, sent *bool) *htt
 	return mockServer
 }
 
+func TestCheckpointEnvelopeRejectsConfiguredRequestLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxBuilderDepositRequestsPerPayload = 1
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+	envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+
+	syncer := &RemoteCheckpointSync{beaconConfig: &cfg, net: chainspec.MainnetChainID, timeout: CheckpointHttpTimeout}
+	_, err = syncer.fetchEnvelope(context.Background(), server.URL+"/eth/v2/debug/beacon/states/finalized")
+	require.ErrorContains(t, err, "builder deposits")
+}
+
 // newMockFailingHttpServer creates a mock HTTP server that always fails with 500 so remote
 // checkpoint sync returns a non-cancel error and the resume logic falls back to disk.
 func newMockFailingHttpServer() *httptest.Server {
@@ -61,6 +80,27 @@ func setCheckpointURLs(t *testing.T, urls ...string) {
 	prev := clparams.ConfigurableCheckpointsURLs
 	t.Cleanup(func() { clparams.ConfigurableCheckpointsURLs = prev })
 	clparams.ConfigurableCheckpointsURLs = urls
+}
+
+func TestRemoteCheckpointSyncEnabled(t *testing.T) {
+	tests := []struct {
+		name   string
+		config clparams.CaplinConfig
+		urls   []string
+		want   bool
+	}{
+		{name: "mainnet defaults", want: true},
+		{name: "disabled", config: clparams.CaplinConfig{DisabledCheckpointSync: true}, want: false},
+		{name: "devnet without custom URL", config: clparams.CaplinConfig{CustomConfigPath: "devnet.yaml"}, want: false},
+		{name: "devnet with custom URL", config: clparams.CaplinConfig{CustomConfigPath: "devnet.yaml"}, urls: []string{"https://checkpoint.example"}, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setCheckpointURLs(t, test.urls...)
+			require.Equal(t, test.want, RemoteCheckpointSyncEnabled(test.config))
+		})
+	}
 }
 
 // newMockSlowHttpServer creates a mock HTTP server that never responds and exits gracefully when context is cancelled
@@ -167,6 +207,55 @@ func TestNormalizeCheckpointURL(t *testing.T) {
 		got := normalizeCheckpointURL(tt.input)
 		assert.Equal(t, tt.want, got, "normalizeCheckpointURL(%q)", tt.input)
 	}
+}
+
+func TestRemoteCheckpointSyncFetchEnvelopeUsesStandardPath(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/eth/v1/beacon/execution_payload_envelopes/finalized" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(encoded)
+	}))
+	t.Cleanup(server.Close)
+
+	syncer := &RemoteCheckpointSync{beaconConfig: &cfg, timeout: time.Second}
+	got, err := syncer.fetchEnvelope(t.Context(), server.URL+"/eth/v2/debug/beacon/states/finalized")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+}
+
+func TestRemoteCheckpointSyncRejectsOversizedEnvelopeResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, clparams.MaxChunkSize+1))
+	}))
+	defer server.Close()
+	syncer := &RemoteCheckpointSync{beaconConfig: &clparams.MainnetBeaconConfig, net: chainspec.MainnetChainID, timeout: time.Second}
+
+	_, err := syncer.fetchEnvelope(context.Background(), server.URL+beaconStatePath)
+	require.ErrorContains(t, err, "too large")
+}
+
+func TestRemoteCheckpointSyncRejectsPreGloasEnvelopeVersion(t *testing.T) {
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig),
+	}
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Eth-Consensus-Version", clparams.FuluVersion.String())
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+	syncer := &RemoteCheckpointSync{&clparams.MainnetBeaconConfig, chainspec.MainnetChainID, time.Second}
+
+	_, err = syncer.fetchEnvelope(context.Background(), server.URL+beaconStatePath)
+	require.ErrorContains(t, err, "consensus version")
 }
 
 func TestRemoteCheckpointSyncRejectsHTML(t *testing.T) {

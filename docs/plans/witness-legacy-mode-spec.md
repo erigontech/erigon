@@ -44,8 +44,8 @@ when empty.
 
 The set of RLP-encoded trie nodes proving every account and storage slot the block reads or writes, drawn from
 the account trie and from the storage tries of touched accounts. It is produced by an on-the-fly fold over the
-accessed hashed keys (`HexPatriciaHashed.Witnesses` captures the superset node set, `WitnessNodes` prunes it to
-the lean set): each key contributes the nodes on its root→leaf path together with the branch sibling hashes
+accessed hashed keys (`HexPatriciaHashed.WitnessesByHash` captures the node set indexed by hash, read-only, so
+off-path cells keep their stored hashes; `WitnessNodes` prunes it to the lean set): each key contributes the nodes on its root→leaf path together with the branch sibling hashes
 required to recompute every node hash up to the root.
 The accessed-key set is first augmented by a collapse-detection pass (`detectCollapseSiblings`, run against a
 split reader — parent commitment plus end-of-block state) so the proof also covers branch siblings that a
@@ -111,9 +111,9 @@ structural differences.
 
 Before returning, the producer self-verifies the witness: `verifyWitnessStateless` re-executes the block using
 only the witness as state, and asserts that the resulting post-state root equals `block.Root()`. A witness that
-fails this check is never returned — the call errors. The check is on by default and can be disabled for
-diagnostics with `ERIGON_WITNESS_NO_VERIFY=true`. `WITNESS_STRICT_VERIFY=true` tightens it further, making
-re-execution error on any unresolved (missing) trie node instead of treating it as empty.
+fails this check is never returned — the call errors. The check runs only with `ERIGON_ASSERT=true`.
+`WITNESS_STRICT_VERIFY=true` tightens it further, making re-execution error on any unresolved (missing) trie
+node instead of treating it as empty.
 
 A witness is a **sufficient** proof, not a canonical-minimal one: re-execution to the correct root is the only
 correctness condition, so two conforming producers may legitimately differ in which redundant nodes or codes
@@ -128,8 +128,10 @@ serving fills that gap for the last N blocks: with `--witness.cache.head-capture
 the same block-hash-keyed LRU the durable path uses. The commitment parent state is read from a *pinned parent
 RO snapshot* (a temporal tx lagging the tip by one committed block, whose commitment-latest equals the parent's
 commitment); the account/storage/code parent and block-end state come from the history a minimal node still
-retains. Each built witness passes the same self-verification gates before it is cached, so a stale or
-incomplete view fails closed and simply leaves that block uncached — never a wrong witness.
+retains. Each built witness passes the same checks as the durable path before it is cached. By default that is
+the parent state-root check, plus the block-end commitment check every non-empty build runs through
+`detectCollapseSiblings`. Stateless re-execution, which also catches a missing node, code or key, runs only
+with `ERIGON_ASSERT=true`.
 
 Flags (embedded RPC only):
 
@@ -166,8 +168,8 @@ Serving semantics in head-capture mode:
   `collectAccessedState` (codes/keys), `collectAccessedHeaders`, `detectCollapseSiblings`, `buildWitnessTrie`,
   `verifyWitnessStateless`, the `{0x80}` append.
 - **Builder** — `commitmentdb.SharedDomainsCommitmentContext.Witness` / `WitnessNodes` →
-  `execution/commitment/hex_patricia_hashed.go` `Witnesses` (untouched storage root emitted as a bare
-  `HashNode`), pruned to the lean set by `trie.WitnessNodesForKeysFromNodes`.
+  `execution/commitment/hex_patricia_hashed.go` `WitnessesByHash` (read-only fold, untouched storage root emitted
+  as a bare `HashNode`), pruned to the lean set by `trie.WitnessNodesForKeysByHash`.
 - **Head-capture cache** — `rpc/jsonrpc/witness_cache.go` (LRU with count + byte cap, mode fields),
   `rpc/jsonrpc/witness_cache_builder.go` (`WitnessCacheMode`, rolling-pin lifecycle, `buildAndCacheHeadCapture`),
   `rpc/jsonrpc/debug_execution_witness.go` (`headCaptureSource`, `buildWitnessResultHeadCapture`,

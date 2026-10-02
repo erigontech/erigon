@@ -42,9 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-var (
-	blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
-)
+var blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
 
 type SyncMode string
 
@@ -54,8 +52,8 @@ const (
 )
 
 type RejectedTx struct {
-	Index int    `json:"index"    gencodec:"required"`
-	Err   string `json:"error"    gencodec:"required"`
+	Index int    `json:"index"`
+	Err   string `json:"error"`
 }
 
 type RejectedTxs []*RejectedTx
@@ -65,10 +63,10 @@ type EphemeralExecResult struct {
 	TxRoot      common.Hash           `json:"txRoot"`
 	ReceiptRoot common.Hash           `json:"receiptsRoot"`
 	LogsHash    common.Hash           `json:"logsHash"`
-	Bloom       types.Bloom           `json:"logsBloom"        gencodec:"required"`
+	Bloom       types.Bloom           `json:"logsBloom"`
 	Receipts    types.Receipts        `json:"receipts"`
 	Rejected    RejectedTxs           `json:"rejected,omitempty"`
-	Difficulty  *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	Difficulty  *math.HexOrDecimal256 `json:"currentDifficulty"`
 	GasUsed     math.HexOrDecimal64   `json:"gasUsed"`
 }
 
@@ -240,7 +238,6 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vmCfg
-	vmConfig.NoReceipts = true
 	vmConfig.RestoreState = constCall
 	vmConfig.Tracer = nil // set to nil to avoid trace sysCallContract
 	// Create a new context to be used in the EVM environment
@@ -286,12 +283,11 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
 	)
-	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
 	author := contract
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
+	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vm.Config{})
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
 		State:     0, // state gas reservoir will consume from execution gas for sys calls
