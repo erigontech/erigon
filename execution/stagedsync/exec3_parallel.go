@@ -829,10 +829,27 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	if pe.verdict != nil {
 		pe.logger.Warn(fmt.Sprintf("[%s] Invalid block", pe.logPrefix),
 			"block", pe.verdict.blockNum, "hash", pe.verdict.blockHash, "err", pe.verdict.err)
+		pe.logVerdictReadFrontiers(rwTx)
 		return nil, rwTx, nil
 	}
 
 	return lastHeader, rwTx, nil
+}
+
+// logVerdictReadFrontiers records what the state reads were bounded by when a
+// block was judged invalid. A state-dependent verdict against a canonical block
+// means a read answered as of an older point than exec had reached, and the
+// per-domain frontier is what would show that.
+func (pe *parallelExecutor) logVerdictReadFrontiers(tx kv.TemporalRwTx) {
+	if tx == nil {
+		return
+	}
+	args := []any{"viewID", tx.ViewID()}
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+		end, ok := tx.Debug().DomainVisibleEnd(d)
+		args = append(args, d.String()+"End", end, d.String()+"Ok", ok)
+	}
+	pe.logger.Warn("[dbg-verdict-frontier] read frontiers at invalid-block verdict", args...)
 }
 
 func (pe *parallelExecutor) runApplyLoop(logPrefix string, applyResults <-chan applyResult, rootResults <-chan commitmentResult, apply func() error) (err error) {
