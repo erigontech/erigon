@@ -87,6 +87,19 @@ func (gp *GasPool) StateGasAvailable() uint64 {
 	return gp.stateGas
 }
 
+// BlockGasRemaining returns the gas left against the block gas limit: the
+// smaller of the two EIP-8037 remainders. It is not an inclusion check, since
+// only the execution contribution is capped at MaxTxnGasLimit; use
+// CheckBlockGasInclusion for that.
+func (gp *GasPool) BlockGasRemaining() uint64 {
+	if gp == nil {
+		return 0
+	}
+	gp.mu.RLock()
+	defer gp.mu.RUnlock()
+	return min(gp.executionGas, gp.stateGas)
+}
+
 // ConsumeExecution deducts amount from the execution dimension, failing if the
 // remainder would go negative.
 func (gp *GasPool) ConsumeExecution(amount uint64) error {

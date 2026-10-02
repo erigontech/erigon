@@ -53,3 +53,27 @@ func TestInclusionContributions(t *testing.T) {
 		require.Equal(t, gas, state)
 	})
 }
+
+// TestGasPoolBlockGasRemaining pins it to the smaller EIP-8037 remainder, since
+// a block's gas used is the larger of the two dimensions.
+func TestGasPoolBlockGasRemaining(t *testing.T) {
+	tests := []struct {
+		name             string
+		execution, state uint64 // consumed from a 30M pool
+		want             uint64
+	}{
+		{"execution binds", 20_000_000, 5_000_000, 10_000_000},
+		{"state binds", 5_000_000, 28_000_000, 2_000_000},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gp := NewGasPool(30_000_000, 0)
+			require.NoError(t, gp.ConsumeExecution(tc.execution))
+			require.NoError(t, gp.ConsumeState(tc.state))
+			require.Equal(t, tc.want, gp.BlockGasRemaining())
+		})
+	}
+
+	var nilPool *GasPool
+	require.Zero(t, nilPool.BlockGasRemaining())
+}
