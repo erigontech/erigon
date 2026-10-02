@@ -127,8 +127,10 @@ func EnvDuration(envVarName string, defaultVal time.Duration) time.Duration {
 	return defaultVal
 }
 
-var TrieTraceFile = EnvString("TRIE_TRACE_FILE", "")
-var TrieTraceBlock = EnvUint("TRIE_TRACE_BLOCK", 0)
+var (
+	TrieTraceFile  = EnvString("TRIE_TRACE_FILE", "")
+	TrieTraceBlock = EnvUint("TRIE_TRACE_BLOCK", 0)
+)
 
 func MustParseInt(strNum string) int64 {
 	cleanNum := strings.ReplaceAll(strNum, "_", "")
@@ -147,6 +149,7 @@ func MustParseUint(strNum string) uint64 {
 	}
 	return parsed
 }
+
 func MustParseInts(strNum, separator string) []int64 {
 	if strings.EqualFold(strNum, "all") || strings.EqualFold(strNum, "true") {
 		return []int64{math.MaxInt64}
@@ -158,6 +161,7 @@ func MustParseInts(strNum, separator string) []int64 {
 	}
 	return ints
 }
+
 func MustParseUints(strNum, separator string) []uint64 {
 	if strings.EqualFold(strNum, "all") || strings.EqualFold(strNum, "true") {
 		return []uint64{math.MaxUint64}

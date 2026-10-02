@@ -68,6 +68,7 @@ func newHasher(valueNodesRlpEncoded bool) *hasher {
 	h.valueNodesRlpEncoded = valueNodesRlpEncoded
 	return h
 }
+
 func returnHasherToPool(h *hasher) {
 	h.callback = nil
 	hashersPool.Put(h)

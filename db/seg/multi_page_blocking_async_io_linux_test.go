@@ -106,7 +106,7 @@ func TestMultiPageBlockingAsyncIO(t *testing.T) {
 
 	mapping, err := mmap.OpenRo(file, len(payload))
 	require.NoError(t, err)
-	defer mapping.Unmap()
+	defer func() { require.NoError(t, mapping.Unmap()) }()
 
 	region := mapping[:2*page]
 	require.NoError(t, unix.Madvise(mapping, unix.MADV_DONTNEED))

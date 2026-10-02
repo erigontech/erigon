@@ -90,11 +90,6 @@ func anacrolixToErigonLogLevel(level analog.Level) log.Lvl {
 	}
 }
 
-type noopHandler struct{}
-
-func (b noopHandler) Handle(r analog.Record) {
-}
-
 type adapterHandler struct{}
 
 func (b adapterHandler) Handle(r analog.Record) {

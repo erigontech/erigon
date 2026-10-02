@@ -55,7 +55,7 @@ func (d *DiagnosticClient) HandleConnections(w http.ResponseWriter, r *http.Requ
 		log.Debug("[Diagnostics] Error upgrading to WebSocket", "err", err)
 		return
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 
 	log.Debug("[Diagnostics] WebSocket client connected")
 	d.setConnection(conn)

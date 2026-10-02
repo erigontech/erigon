@@ -26,8 +26,10 @@ import (
 
 type Address unique.Handle[common.Address]
 
-var ZeroAddress = InternAddress(common.Address{})
-var NilAddress = Address{}
+var (
+	ZeroAddress = InternAddress(common.Address{})
+	NilAddress  = Address{}
+)
 
 func InternAddress(a common.Address) Address {
 	return Address(unique.Make(a))
@@ -61,7 +63,7 @@ func (a Address) String() string {
 
 func (a Address) Format(s fmt.State, c rune) {
 	if a == NilAddress {
-		s.Write([]byte("<nil>"))
+		_, _ = s.Write([]byte("<nil>"))
 		return
 	}
 	a.Value().Format(s, c)
@@ -113,8 +115,10 @@ func (a Address) Cmp(o Address) int {
 
 type StorageKey unique.Handle[common.Hash]
 
-var ZeroKey = InternKey(common.Hash{})
-var NilKey = StorageKey{}
+var (
+	ZeroKey = InternKey(common.Hash{})
+	NilKey  = StorageKey{}
+)
 
 func InternKey(k common.Hash) StorageKey {
 	return StorageKey(unique.Make(k))
@@ -140,7 +144,7 @@ func (k StorageKey) String() string {
 
 func (k StorageKey) Format(s fmt.State, c rune) {
 	if k == NilKey {
-		s.Write([]byte("<nil>"))
+		_, _ = s.Write([]byte("<nil>"))
 		return
 	}
 	k.Value().Format(s, c)
@@ -164,9 +168,11 @@ func (k StorageKey) Cmp(o StorageKey) int {
 
 type CodeHash unique.Handle[common.Hash]
 
-var ZeroCodeHash = InternCodeHash(common.Hash{})
-var NilCodeHash = CodeHash{}
-var EmptyCodeHash = InternCodeHash(empty.CodeHash)
+var (
+	ZeroCodeHash  = InternCodeHash(common.Hash{})
+	NilCodeHash   = CodeHash{}
+	EmptyCodeHash = InternCodeHash(empty.CodeHash)
+)
 
 func InternCodeHash(k common.Hash) CodeHash {
 	return CodeHash(unique.Make(k))
@@ -200,7 +206,7 @@ func (h CodeHash) String() string {
 
 func (h CodeHash) Format(s fmt.State, c rune) {
 	if h == NilCodeHash {
-		s.Write([]byte("<nil>"))
+		_, _ = s.Write([]byte("<nil>"))
 		return
 	}
 	h.Value().Format(s, c)

@@ -24,10 +24,8 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execfinality"
@@ -113,9 +111,8 @@ func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalR
 }
 
 // RunPrune executes pruning on the main pipeline.
-func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (dbfinality.Context, error) {
-	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle,
-		execfinality.WithTxNumsReader(pe.db, pe.blockReader.TxnumReader()))
+func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (kv.FinalityContext, error) {
+	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader())
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +182,18 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 	return tx, sd, nil
 }
 
+type initialSyncPublicationError struct {
+	err error
+}
+
+func (e *initialSyncPublicationError) Error() string {
+	return e.err.Error()
+}
+
+func (e *initialSyncPublicationError) Unwrap() error {
+	return e.err
+}
+
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
 // It downloads block files, then executes them in a hasMore loop until
 // all frozen blocks are processed.
@@ -252,7 +261,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}
 	}
 
-	var finalityCtx dbfinality.Context
+	var finalityCtx kv.FinalityContext
 	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
@@ -267,11 +276,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			}
 			// Prune runs via PruneFn (sync.RunPrune); kick file building so
 			// snapshot files advance as PFB processes frozen blocks.
-			if hasAgg, ok := pe.db.(dbstate.HasAgg); ok {
-				if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-					agg.BuildFilesInBackground(pe.db, agg.EndTxNumMinimax()+agg.StepSize(), finalityCtx)
-				}
-			}
+			pe.db.BuildFilesInBackground(finalityCtx)
 			// Last iter: skip BeginTemporalRw — no next iter will use it.
 			if !hasMore {
 				return nil, nil, nil
@@ -321,10 +326,20 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			}
 			return nil
 		}); err != nil {
-			return err
+			return &initialSyncPublicationError{err: err}
 		}
 	}
 	return nil
+}
+
+// lastValidationExecStageTiming reports the Execution stage duration of the most
+// recent ValidateBlock, so on a multi-header fork this is the last block's, not
+// the whole validation's.
+func (pe *PipelineExecutor) lastValidationExecStageTiming() time.Duration {
+	if pe.validationSync == nil {
+		return 0
+	}
+	return pe.validationSync.LastStageTiming(stages.Execution)
 }
 
 // ValidateBlock executes a fork validation by running the pipeline block-by-block

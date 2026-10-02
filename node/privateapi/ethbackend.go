@@ -90,6 +90,9 @@ type EthBackend interface {
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader dbservices.FullBlockReader,
 	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
 ) *EthBackendServer {
+	if chainConfig == nil {
+		panic("privateapi: NewEthBackendServer: nil chainConfig")
+	}
 	s := &EthBackendServer{
 		ctx:                   ctx,
 		eth:                   eth,
@@ -97,7 +100,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB
 		db:                    db,
 		blockReader:           blockReader,
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
-		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events),
+		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events, chainConfig),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
 		chainConfig:           chainConfig,
@@ -315,7 +318,7 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 	defer tx.Rollback()
 
 	var blockHash common.Hash
-	var blockHeight = req.BlockHeight
+	blockHeight := req.BlockHeight
 	if req.BlockHash != nil {
 		blockHash = gointerfaces.ConvertH256ToHash(req.BlockHash)
 	} else if req.BlockHeight > 0 {

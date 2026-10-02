@@ -247,12 +247,12 @@ func (h *sessionState) writeFrame(conn io.Writer, code uint64, data []byte) erro
 	h.enc.XORKeyStream(header, header)
 
 	// Write header MAC.
-	h.wbuf.Write(h.egressMAC.computeHeader(header))
+	h.wbuf.Write(h.egressMAC.computeHeader(header)) //nolint:errcheck
 
 	// Encode and encrypt the frame data.
 	offset := len(h.wbuf.data)
 	h.wbuf.data = rlp.AppendUint64(h.wbuf.data, code)
-	h.wbuf.Write(data)
+	h.wbuf.Write(data) //nolint:errcheck
 	if padding := fsize % 16; padding > 0 {
 		h.wbuf.appendZero(16 - padding)
 	}
@@ -260,7 +260,7 @@ func (h *sessionState) writeFrame(conn io.Writer, code uint64, data []byte) erro
 	h.enc.XORKeyStream(framedata, framedata)
 
 	// Write frame MAC.
-	h.wbuf.Write(h.egressMAC.computeFrame(framedata))
+	h.wbuf.Write(h.egressMAC.computeFrame(framedata)) //nolint:errcheck
 
 	_, err := conn.Write(h.wbuf.data)
 	return err
@@ -492,11 +492,11 @@ func (h *handshakeState) secrets(auth, authResp []byte) (Secrets, error) {
 
 	// setup sha3 instances for the MACs
 	mac1 := keccak.NewFastKeccak()
-	mac1.Write(xor(s.MAC, h.respNonce))
-	mac1.Write(auth)
+	mac1.Write(xor(s.MAC, h.respNonce)) //nolint:errcheck
+	mac1.Write(auth)                    //nolint:errcheck
 	mac2 := keccak.NewFastKeccak()
-	mac2.Write(xor(s.MAC, h.initNonce))
-	mac2.Write(authResp)
+	mac2.Write(xor(s.MAC, h.initNonce)) //nolint:errcheck
+	mac2.Write(authResp)                //nolint:errcheck
 	if h.initiator {
 		s.EgressMAC, s.IngressMAC = mac1, mac2
 	} else {
