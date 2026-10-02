@@ -145,6 +145,7 @@ func (s *snapshotSD) AsStateGetter(tx kv.TemporalTx, _ execctxapi.StateGetterOpt
 	s.getters.Add(1)
 	return &snapshotGetter{tx: tx.(*snapshotTx)}
 }
+
 func (s *snapshotSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel {
 	s.putDels.Add(1)
 	return nil

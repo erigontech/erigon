@@ -58,8 +58,7 @@ func NewApp(desc string) *cli.Command {
 			return
 		}
 		// For cli.Exit errors, just exit with the code
-		var exitErr cli.ExitCoder
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[cli.ExitCoder](err); ok {
 			cli.OsExiter(exitErr.ExitCode())
 		} else {
 			// For other errors, print them and exit

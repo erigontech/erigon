@@ -21,13 +21,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc"
 )
 
-var (
-	errTimestampTooOld = errors.New("timestamp too old")
-)
+var errTimestampTooOld = errors.New("timestamp too old")
 
 func checkTime(
 	r *http.Request,
@@ -39,12 +36,8 @@ func checkTime(
 		return err
 	}
 	timestamp := 0
-	if ts, ok := i["timestamp"]; ok {
-		if cs, ok := ts.(hexutil.Uint64); ok {
-			timestamp = int(uint64(cs))
-		} else if cs, ok := ts.(uint64); ok {
-			timestamp = int(cs)
-		}
+	if i != nil {
+		timestamp = int(i.Timestamp)
 	}
 	if timestamp < seconds {
 		return fmt.Errorf("%w: got ts: %d, need: %d", errTimestampTooOld, timestamp, seconds)

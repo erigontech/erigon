@@ -315,7 +315,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Download only the snapshots that are for the header chain.
 
 	// How do we get to the real Downloader if we need? Get the stack trace.
-	//panic("here")
+	// panic("here")
 
 	if err := snapshotsync.SyncSnapshots(
 		ctx,
@@ -397,7 +397,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
 			return err
 		}
-		if err := agg.OpenFolder(cfg.db); err != nil {
+		if err := cfg.db.OpenStateSnapshots(ctx); err != nil {
 			return err
 		}
 
@@ -559,7 +559,7 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservic
 }
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
-func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
+func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	if dbg.NoPrune() {
 		return nil
 	}
@@ -577,7 +577,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			log.LvlDebug,
 			cfg.getSeederClient(),
 			func() error {
-				filesDeleted, err := retireBlockSnapshots(ctx, cfg, logger)
+				filesDeleted, err := retireBlockSnapshots(ctx, cfg)
 				if filesDeleted && cfg.notifier != nil {
 					cfg.notifier.Events.OnNewSnapshot()
 				}
@@ -587,7 +587,8 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 				if cfg.notifier != nil {
 					cfg.notifier.Events.OnRetirementDone()
 				}
-			})
+			},
+		)
 		if cfg.notifier != nil {
 			cfg.notifier.Events.OnRetirementStart(started)
 		}
@@ -608,7 +609,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	return nil
 }
 
-func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
+func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg) (bool, error) {
 	if dbg.NoRetire() {
 		return false, nil
 	}

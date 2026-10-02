@@ -61,7 +61,7 @@ type BlockHeaderProcessor interface {
 type BlockOperationProcessor interface {
 	ProcessProposerSlashing(s abstract.BeaconState, propSlashing *cltypes.ProposerSlashing) error
 	ProcessAttesterSlashing(s abstract.BeaconState, attSlashing *cltypes.AttesterSlashing) error
-	ProcessAttestations(s abstract.BeaconState, attestations *solid.ListSSZ[*solid.Attestation]) error
+	ProcessAttestations(s abstract.BeaconState, attestations *solid.ListSSZ[*solid.Attestation], parentSlot uint64) error
 	ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) error
 	ProcessVoluntaryExit(s abstract.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit) error
 	ProcessBlsToExecutionChange(state abstract.BeaconState, signedChange *cltypes.SignedBLSToExecutionChange) error

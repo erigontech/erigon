@@ -49,6 +49,7 @@ func BenchmarkWebsocketEmptyCall(b *testing.B) {
 		}
 	}
 }
+
 func BenchmarkWebsocket16kb(b *testing.B) {
 	logger := log.New()
 

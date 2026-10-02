@@ -27,34 +27,34 @@ func (p SortedItems) searchName(name string) (int, bool) {
 }
 
 // Preverified.Typed was breaking sort invariance.
-func (me SortedItems) assertSorted() {
-	panicif.False(slices.IsSortedFunc(me, preverifiedItemCompare))
+func (p SortedItems) assertSorted() {
+	panicif.False(slices.IsSortedFunc(p, preverifiedItemCompare))
 }
 
 func preverifiedItemCompare(a, b Item) int {
 	return strings.Compare(a.Name, b.Name)
 }
 
-func (me SortedItems) Get(name string) (item Item, found bool) {
-	i, found := me.searchName(name)
+func (p SortedItems) Get(name string) (item Item, found bool) {
+	i, found := p.searchName(name)
 	if found {
-		item = me[i]
+		item = p[i]
 	}
 	return
 }
 
-func (me SortedItems) Contains(name string, ignoreVersion ...bool) bool {
+func (p SortedItems) Contains(name string, ignoreVersion ...bool) bool {
 	if len(ignoreVersion) > 0 && ignoreVersion[0] {
-		_, name, _ := strings.Cut(name, "-")
-		for _, item := range me {
+		_, wantNoVersion, _ := strings.Cut(name, "-")
+		for _, item := range p {
 			_, noVersion, _ := strings.Cut(item.Name, "-")
-			if noVersion == name {
+			if noVersion == wantNoVersion {
 				return true
 			}
 		}
 		return false
 	}
-	_, found := me.searchName(name)
+	_, found := p.searchName(name)
 	return found
 }
 

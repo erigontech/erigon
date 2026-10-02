@@ -138,6 +138,7 @@ func (r *syncStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([
 // Clone/CloneForWorker keep the source reader and its lock: the point of this
 // wrapper is that every copy resolves against the one pinned snapshot.
 func (r *syncStateReader) Clone(kv.TemporalTx) StateReader { return newSyncStateReader(r.mu, r.src) }
+
 func (r *syncStateReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
 	return newSyncStateReader(r.mu, r.src)
 }
@@ -334,6 +335,7 @@ func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]
 // parent commitment. The witness build runs sequential commitment, so these
 // are not exercised on the hot path, but preserving the pinned tx is correct.
 func (r *txLatestReader) Clone(kv.TemporalTx) StateReader { return &txLatestReader{tx: r.tx} }
+
 func (r *txLatestReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
 	return &txLatestReader{tx: r.tx}
 }

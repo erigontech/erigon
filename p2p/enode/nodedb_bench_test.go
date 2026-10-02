@@ -81,7 +81,7 @@ func BenchmarkNodeDBGeometry(b *testing.B) {
 		}
 		b.ReportMetric(float64(worst.Milliseconds()), "ms_worst")
 		db.Close()
-		dir.RemoveFile(db.Path())
+		_ = dir.RemoveFile(db.Path())
 	}
 
 	b.Run("20kb", func(b *testing.B) {

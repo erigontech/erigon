@@ -123,10 +123,10 @@ func (r *ExecutionEngineReader) Withdrawals(number uint64, hash common.Hash) (*s
 				continue
 			}
 			ret.Append(&cltypes.Withdrawal{
-				Index:     w.Index,
-				Validator: w.Validator,
+				Index:     uint64(w.Index),
+				Validator: uint64(w.Validator),
 				Address:   w.Address,
-				Amount:    w.Amount,
+				Amount:    uint64(w.Amount),
 			})
 		}
 		return ret, nil
@@ -147,10 +147,10 @@ func (r *ExecutionEngineReader) Withdrawals(number uint64, hash common.Hash) (*s
 			continue
 		}
 		ret.Append(&cltypes.Withdrawal{
-			Index:     w.Index,
-			Validator: w.Validator,
+			Index:     uint64(w.Index),
+			Validator: uint64(w.Validator),
 			Address:   w.Address,
-			Amount:    w.Amount,
+			Amount:    uint64(w.Amount),
 		})
 	}
 	return ret, nil

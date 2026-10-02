@@ -36,6 +36,37 @@ type finalityContextStub struct {
 
 var unboundedFinalityCtx = finalityContextStub{ready: true}
 
+type temporalRoDBStub struct {
+	kv.RoDB
+}
+
+func (temporalRoDBStub) OnFilesChange(kv.OnFilesChange, kv.OnFilesChange) {
+}
+
+func (temporalRoDBStub) MaxPrunableStepsBacklog() uint64 {
+	return 0
+}
+
+func (temporalRoDBStub) StepSize() uint64 {
+	return 0
+}
+
+func (temporalRoDBStub) ViewTemporal(context.Context, func(kv.TemporalTx) error) error {
+	panic("not implemented")
+}
+
+func (temporalRoDBStub) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
+	panic("not implemented")
+}
+
+func (temporalRoDBStub) Debug() kv.TemporalDebugDB {
+	panic("not implemented")
+}
+
+func asTemporalRoDB(db kv.RoDB) kv.TemporalRoDB {
+	return temporalRoDBStub{RoDB: db}
+}
+
 func (c finalityContextStub) PruneToBlockNum() uint64 {
 	return 0
 }
@@ -48,7 +79,7 @@ func (c finalityContextStub) MaxReorgDepth() uint64 {
 	return c.maxReorgDepth
 }
 
-func (c finalityContextStub) ReadyForCollation(_ context.Context, _ kv.RoDB, _ uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
+func (c finalityContextStub) ReadyForCollation(_ context.Context, _ kv.TemporalRoDB, _ uint64) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
 	return c.finalisedBlockNum, c.lastBlockInStep, c.lastBlockInDB, c.lastTxInDB, c.ready, nil
 }
 
@@ -61,7 +92,7 @@ func TestReadyForCollationPreservesFinalityContextResult(t *testing.T) {
 		lastTxInDB:        25,
 		ready:             true,
 	}
-	finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB, ready, err := agg.readyForCollation(t.Context(), db, kv.Step(0), finalityCtx)
+	finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB, ready, err := agg.readyForCollation(t.Context(), asTemporalRoDB(db), kv.Step(0), finalityCtx)
 	require.NoError(t, err)
 	require.True(t, ready)
 	require.Equal(t, uint64(12), finalisedBlockNum)

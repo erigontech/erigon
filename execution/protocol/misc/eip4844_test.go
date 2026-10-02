@@ -26,7 +26,7 @@ import (
 )
 
 func TestFakeExponential(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		factor, num, denom uint64
 		want               uint64
 	}{
