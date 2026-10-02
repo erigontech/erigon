@@ -1350,8 +1350,8 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			}
 			if !sender.IsNil() {
 				if tx, ok := prevSenderTx[sender]; ok {
-					executor.execTasks.addDependency(tx, i)
 					executor.execTasks.clearPending(i)
+					executor.senderSuccessor[tx] = i
 				}
 
 				prevSenderTx[sender] = i
@@ -2551,7 +2551,8 @@ type blockExecutor struct {
 	txIncarnations []int
 
 	// A map that stores the estimated dependency of a transaction if it is aborted without any known dependency
-	estimateDeps map[int][]int
+	estimateDeps    map[int][]int
+	senderSuccessor map[int]int
 
 	// A map that records whether a transaction result has been speculatively validated
 	preValidated map[int]bool
@@ -2643,6 +2644,7 @@ func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList type
 		feeMergeTemp:     map[int]feeMerge{},
 		settledInput:     map[int]bool{},
 		estimateDeps:     map[int][]int{},
+		senderSuccessor:  map[int]int{},
 		preValidated:     map[int]bool{},
 		blockIO:          &state.VersionedIO{},
 		versionMap:       state.NewVersionMap(accessList),
@@ -2656,6 +2658,17 @@ func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList type
 }
 
 func (be *blockExecutor) number() uint64 { return be.block.NumberU64() }
+
+func (be *blockExecutor) releaseSenderSuccessor(tx int) {
+	next, ok := be.senderSuccessor[tx]
+	if !ok {
+		return
+	}
+	delete(be.senderSuccessor, tx)
+	if !be.execTasks.checkComplete(next) && !be.execTasks.checkPending(next) && !be.execTasks.checkInProgress(next) {
+		be.execTasks.pushPending(next)
+	}
+}
 
 func (be *blockExecutor) hash() common.Hash { return be.block.Hash() }
 
@@ -3112,6 +3125,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if valid {
 			if cntInvalid == 0 {
 				be.validateTasks.markComplete(tx)
+				be.releaseSenderSuccessor(tx)
 
 				be.finalizedResults[tx] = txResult
 
