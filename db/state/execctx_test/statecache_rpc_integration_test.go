@@ -544,9 +544,9 @@ func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
-	agg := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
+	agg := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context())
 	tb.Cleanup(agg.Close)
-	err := agg.OpenFolder()
+	err := agg.OpenFolder(db)
 	require.NoError(tb, err)
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(tb, err)

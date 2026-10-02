@@ -21,7 +21,9 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -52,6 +54,30 @@ func TestRoundtrip(t *testing.T) {
 		if have != want {
 			t.Errorf("test %d: have\n%v\nwant:\n%v\n", i, have, want)
 		}
+	}
+}
+
+func TestDumpRejectsTruncatedList(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		hex  string
+	}{
+		{"flat list one byte short", "0xc201"},
+		{"nested list one byte short", "0xc3c101"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var out strings.Builder
+			in := newInStream(bytes.NewReader(common.FromHex(tc.hex)), 0)
+			err := rlpToText(in, &out)
+			if err == nil {
+				t.Fatalf("want error for truncated list %s, got nil (output: %s)", tc.hex, out.String())
+			}
+			if errors.Is(err, io.EOF) {
+				t.Fatalf("truncated list %s must not be reported as a clean io.EOF, got: %v", tc.hex, err)
+			}
+		})
 	}
 }
 

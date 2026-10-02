@@ -385,40 +385,6 @@ func TestValidateRead_ChangedValueInvalidatesStorageRead(t *testing.T) {
 	}
 }
 
-func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
-	mvh2 := NewVersionMap(nil)
-	ap2 := getAddress(2)
-
-	const n = 10000
-	randInts := make([]int, n)
-	for i := range randInts {
-		randInts[i] = rand.Intn(1000000000000000)
-	}
-
-	for i := 0; b.Loop(); i++ {
-		idx := randInts[i%n]
-		writeFor(mvh2, ap2, AddressPath, accounts.NilKey, Version{0, 0, idx, 1}, valueFor(AddressPath, idx, 1), true)
-	}
-}
-
-func BenchmarkReadTimeSameLocationDifferentTxIdx(b *testing.B) {
-	mvh2 := NewVersionMap(nil)
-	ap2 := getAddress(2)
-	txIdxSlice := []int{}
-
-	for b.Loop() {
-		txIdx := rand.Intn(1000000000000000)
-		txIdxSlice = append(txIdxSlice, txIdx)
-		writeFor(mvh2, ap2, AddressPath, accounts.NilKey, Version{0, 0, txIdx, 1}, valueFor(AddressPath, txIdx, 1), true)
-	}
-
-	b.ResetTimer()
-
-	for _, value := range txIdxSlice {
-		readFor(mvh2, ap2, AddressPath, accounts.NilKey, value)
-	}
-}
-
 func TestTimeComplexity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -906,8 +872,8 @@ func TestGetVersionedAccount_SynthesizesCreatedFromBAL(t *testing.T) {
 // land, so the recorded read is non-nil and survives both validation and the
 // mid-execution dependency re-check once the creator flushes.
 func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
-	balFedChanges := func(addr accounts.Address) []*types.AccountChanges {
-		return []*types.AccountChanges{{
+	balFedChanges := func(addr accounts.Address) types.BlockAccessList {
+		return []types.AccountChanges{{
 			Address: addr,
 			BalanceChanges: []*types.BalanceChange{{
 				Index: 1,
@@ -915,8 +881,8 @@ func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
 			}},
 		}}
 	}
-	contractFedChanges := func(addr accounts.Address) []*types.AccountChanges {
-		return []*types.AccountChanges{{
+	contractFedChanges := func(addr accounts.Address) types.BlockAccessList {
+		return []types.AccountChanges{{
 			Address: addr,
 			NonceChanges: []*types.NonceChange{{
 				Index: 1,
@@ -974,7 +940,7 @@ func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
 	}
 	feeds := []struct {
 		name    string
-		changes func(accounts.Address) []*types.AccountChanges
+		changes func(accounts.Address) types.BlockAccessList
 		balance uint64
 		nonce   uint64
 	}{
@@ -1362,7 +1328,7 @@ func TestSynthesizedAccountRecordsNoIncarnationGuess(t *testing.T) {
 		}
 		return VersionInvalid
 	}
-	vm := NewVersionMap([]*types.AccountChanges{{
+	vm := NewVersionMap([]types.AccountChanges{{
 		Address:      addr,
 		NonceChanges: []*types.NonceChange{{Index: 227, Value: 1}},
 	}})
@@ -1399,7 +1365,7 @@ func TestDBLoadedAccountRecordsNoIncarnationDefault(t *testing.T) {
 	}
 	deployed := accounts.NewCode([]byte{0x60, 0x80, 0x60, 0x40})
 	reader := &codeReader{addr: addr, account: &accounts.Account{Balance: *uint256.NewInt(9), CodeHash: accounts.EmptyCodeHash}}
-	vm := NewVersionMap([]*types.AccountChanges{{
+	vm := NewVersionMap([]types.AccountChanges{{
 		Address:      addr,
 		NonceChanges: []*types.NonceChange{{Index: 227, Value: 1}},
 		CodeChanges:  []*types.CodeChange{{Index: 227, Bytecode: deployed.Bytes}},
@@ -1428,7 +1394,7 @@ func TestDBLoadedAccountRecordsNoIncarnationDefault(t *testing.T) {
 func TestBALPrePopulatesDerivedCodeCells(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xcd, 0x01})
 	bytecode := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
-	vm := NewVersionMap([]*types.AccountChanges{{
+	vm := NewVersionMap([]types.AccountChanges{{
 		Address:     addr,
 		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: bytecode}},
 	}})
@@ -1446,7 +1412,7 @@ func TestBALPrePopulatesDerivedCodeCells(t *testing.T) {
 
 func TestBALPrePopulatesDerivedCodeCells_ClearedCode(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xcd, 0x02})
-	vm := NewVersionMap([]*types.AccountChanges{{
+	vm := NewVersionMap([]types.AccountChanges{{
 		Address:     addr,
 		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: nil}},
 	}})
@@ -1500,7 +1466,7 @@ func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
 // EVM, so the load re-reads the fresh cells and reconciles the record.
 func TestBALFedReaderSurvivesCreatorFlushMidLoad(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xfd, 0x01})
-	vm := NewVersionMap([]*types.AccountChanges{{
+	vm := NewVersionMap([]types.AccountChanges{{
 		Address: addr,
 		NonceChanges: []*types.NonceChange{{
 			Index: 1,

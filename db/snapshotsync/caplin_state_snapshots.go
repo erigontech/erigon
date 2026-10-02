@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime/debug"
 	"slices"
@@ -81,11 +82,10 @@ func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmp
 func getKvGetterForStateTable(db kv.RoDB, tableName string) KeyValueGetter {
 	return func(numId uint64) ([]byte, []byte, error) {
 		var key, value []byte
-		var err error
 		if err := db.View(context.TODO(), func(tx kv.Tx) error {
 			key = base_encoding.Encode64ToBytes4(numId)
-			value, err = tx.GetOne(tableName, key)
-			value = bytes.Clone(value)
+			v, err := tx.GetOne(tableName, key)
+			value = bytes.Clone(v)
 			return err
 		}); err != nil {
 			return nil, nil, err
@@ -135,6 +135,9 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 		Compression: map[string]bool{},
 	}
 }
+
+// caplinDownloaderPrefix: the downloader is rooted at dirs.Snap, these live in dirs.SnapCaplin.
+const caplinDownloaderPrefix = "caplin"
 
 // value: chunked(ssz(SignedBeaconBlocks))
 // slot       -> beacon_slot_segment_offset
@@ -229,11 +232,24 @@ func (s *CaplinStateSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
+// RemoveOverlaps re-keys the base's dir-relative names to what the downloader registered.
 func (s *CaplinStateSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	if s == nil {
 		return nil
 	}
+	if onDelete != nil {
+		notify := onDelete
+		onDelete = func(l []string) error { return notify(downloaderKeys(l)) }
+	}
 	return s.BaseRoSnapshots.RemoveOverlaps(onDelete)
+}
+
+func downloaderKeys(names []string) []string {
+	keys := make([]string, len(names))
+	for i, name := range names {
+		keys[i] = path.Join(caplinDownloaderPrefix, filepath.ToSlash(name))
+	}
+	return keys
 }
 
 func (s *CaplinStateSnapshots) IndicesMax() uint64 {
@@ -541,6 +557,8 @@ func planStateDump(coverage map[string][]Range, toSlot, blocksPerFile uint64) []
 	return jobs
 }
 
+// DumpCaplinState must not run concurrently with RemoveOverlaps, which sweeps every .tmp in
+// the output directory. Both run on loopStates; parallelising the dump breaks that.
 func (s *CaplinStateSnapshots) DumpCaplinState(ctx context.Context, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 	coverage := make(map[string][]Range, len(s.snapshotTypes.KeyValueGetters))
 	for name := range s.snapshotTypes.KeyValueGetters {

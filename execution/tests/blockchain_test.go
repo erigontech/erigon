@@ -106,7 +106,7 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	})
 	require.NoError(t, err)
 
-	canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
+	err = canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
 		if hash2, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}

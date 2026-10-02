@@ -124,7 +124,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			statedb, err := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
+			statedb, err := testutil.MakePreState(rules, m.DB, dbTx, test.Genesis.Alloc, context.BlockNumber)
 			require.NoError(t, err)
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {

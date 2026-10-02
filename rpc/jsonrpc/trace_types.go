@@ -77,7 +77,7 @@ type TraceAction struct {
 	Balance        string         `json:"balance,omitempty"`
 	CallType       string         `json:"callType,omitempty"`
 	From           common.Address `json:"from"`
-	Gas            hexutil.Big    `json:"gas"`
+	Gas            hexutil.U256   `json:"gas"`
 	Init           hexutil.Bytes  `json:"init,omitempty"`
 	Input          hexutil.Bytes  `json:"input,omitempty"`
 	RefundAddress  string         `json:"refundAddress,omitempty"`
@@ -88,43 +88,43 @@ type TraceAction struct {
 type CallTraceAction struct {
 	From     common.Address `json:"from"`
 	CallType string         `json:"callType"`
-	Gas      hexutil.Big    `json:"gas"`
+	Gas      hexutil.U256   `json:"gas"`
 	Input    hexutil.Bytes  `json:"input"`
 	To       common.Address `json:"to"`
-	Value    hexutil.Big    `json:"value"`
+	Value    hexutil.U256   `json:"value"`
 }
 
 type CreateTraceAction struct {
 	From           common.Address `json:"from"`
 	CreationMethod string         `json:"creationMethod"`
-	Gas            hexutil.Big    `json:"gas"`
+	Gas            hexutil.U256   `json:"gas"`
 	Init           hexutil.Bytes  `json:"init"`
-	Value          hexutil.Big    `json:"value"`
+	Value          hexutil.U256   `json:"value"`
 }
 
 type SuicideTraceAction struct {
 	Address       common.Address `json:"address"`
 	RefundAddress common.Address `json:"refundAddress"`
-	Balance       hexutil.Big    `json:"balance"`
+	Balance       hexutil.U256   `json:"balance"`
 }
 
 type RewardTraceAction struct {
 	Author     common.Address `json:"author"`
 	RewardType string         `json:"rewardType"`
-	Value      hexutil.Big    `json:"value"`
+	Value      hexutil.U256   `json:"value"`
 }
 
 type CreateTraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
 	Address *common.Address `json:"address,omitempty"`
 	Code    hexutil.Bytes   `json:"code"`
-	GasUsed *hexutil.Big    `json:"gasUsed"`
+	GasUsed *hexutil.U256   `json:"gasUsed"`
 }
 
 // TraceResult A parity formatted trace result
 type TraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	GasUsed *hexutil.Big  `json:"gasUsed"`
+	GasUsed *hexutil.U256 `json:"gasUsed"`
 	Output  hexutil.Bytes `json:"output"`
 }
 

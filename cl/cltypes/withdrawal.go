@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/types"
@@ -63,19 +64,19 @@ func (obj *Withdrawal) HashSSZ() ([32]byte, error) { // the [32]byte is temporar
 
 func convertExecutionWithdrawalToConsensusWithdrawal(executionWithdrawal *types.Withdrawal) *Withdrawal {
 	return &Withdrawal{
-		Index:     executionWithdrawal.Index,
-		Validator: executionWithdrawal.Validator,
+		Index:     uint64(executionWithdrawal.Index),
+		Validator: uint64(executionWithdrawal.Validator),
 		Address:   executionWithdrawal.Address,
-		Amount:    executionWithdrawal.Amount,
+		Amount:    uint64(executionWithdrawal.Amount),
 	}
 }
 
 func convertConsensusWithdrawalToExecutionWithdrawal(consensusWithdrawal *Withdrawal) *types.Withdrawal {
 	return &types.Withdrawal{
-		Index:     consensusWithdrawal.Index,
-		Validator: consensusWithdrawal.Validator,
+		Index:     hexutil.Uint64(consensusWithdrawal.Index),
+		Validator: hexutil.Uint64(consensusWithdrawal.Validator),
 		Address:   consensusWithdrawal.Address,
-		Amount:    consensusWithdrawal.Amount,
+		Amount:    hexutil.Uint64(consensusWithdrawal.Amount),
 	}
 }
 

@@ -3,7 +3,11 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -137,4 +141,70 @@ func TestJSONMarshaling(t *testing.T) {
 	} else {
 		t.Errorf("Block structure not preserved")
 	}
+}
+
+// logs_tail keeps only the requested number of lines while scanning, so the
+// ring it fills has to unwrap back into file order.
+func TestReadLogTail(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "erigon.log")
+	var content strings.Builder
+	for i := range 10 {
+		fmt.Fprintf(&content, "line %d\n", i)
+	}
+	require.NoError(t, os.WriteFile(file, []byte(content.String()), 0600))
+
+	lines, err := readLogTail(file, 3, "")
+	require.NoError(t, err)
+	require.Equal(t, []string{"line 7", "line 8", "line 9"}, lines)
+
+	// Fewer matches than asked for: no wraparound to unwrap.
+	lines, err = readLogTail(file, 3, "line 1")
+	require.NoError(t, err)
+	require.Equal(t, []string{"line 1"}, lines)
+
+	// Exactly as many as asked for.
+	lines, err = readLogTail(file, 10, "")
+	require.NoError(t, err)
+	require.Len(t, lines, 10)
+	require.Equal(t, "line 0", lines[0])
+}
+
+// logs_stats counts levels off the token the log formats emit ("[EROR]", or
+// "lvl":"eror" under --log.dir.json). Scanning the whole line instead puts
+// every info line carrying an err= key in the error count, and finds no EROR
+// line at all, since the level is spelled without the second "r".
+func TestLogStatsCountsLevelTokens(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "erigon.log")
+	require.NoError(t, os.WriteFile(file, []byte(
+		"[EROR] [09-04|08:52:12.133] rpc failed reason=timeout\n"+
+			"[INFO] [09-04|08:52:12.134] p2p peer dropped err=nil\n"+
+			"[WARN] [09-04|08:52:12.135] no error here\n"+
+			`{"lvl":"eror","msg":"json mode"}`+"\n"), 0600))
+
+	stats, err := getLogStats(file)
+	require.NoError(t, err)
+	require.Equal(t, 4, stats["total_lines"])
+	require.Equal(t, 2, stats["error_lines"])
+	require.Equal(t, 1, stats["warn_lines"])
+	require.Equal(t, 1, stats["info_lines"])
+}
+
+// torrent.log comes from slog, which spells the key "level" and the value in
+// upper case.
+func TestLogStatsCountsSlogLevels(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "torrent.log")
+	require.NoError(t, os.WriteFile(file, []byte(
+		`{"time":"2026-09-04T08:52:12Z","level":"WARN","msg":"piece failed"}`+"\n"+
+			`{"time":"2026-09-04T08:52:13Z","level":"ERROR","msg":"tracker gone"}`+"\n"+
+			`{"time":"2026-09-04T08:52:14Z","level":"INFO","msg":"seeding"}`+"\n"), 0600))
+
+	stats, err := getLogStats(file)
+	require.NoError(t, err)
+	require.Equal(t, 3, stats["total_lines"])
+	require.Equal(t, 1, stats["error_lines"])
+	require.Equal(t, 1, stats["warn_lines"])
+	require.Equal(t, 1, stats["info_lines"])
 }

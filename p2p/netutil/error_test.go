@@ -51,11 +51,13 @@ func TestIsPacketTooBig(t *testing.T) {
 			for i := range buf {
 				buf[i] = byte(i)
 			}
-			sender.Write(buf)
+			_, _ = sender.Write(buf)
 		}()
 
 		buf := make([]byte, recvN)
-		listener.SetDeadline(time.Now().Add(1 * time.Second))
+		if err := listener.SetDeadline(time.Now().Add(1 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
 		n, _, err := listener.ReadFrom(buf)
 		if err != nil {
 			var nerr net.Error

@@ -507,7 +507,10 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 
 			if accountWithAddress, ok := b.accountUpdates[addrHash]; ok && accountWithAddress.Account != nil {
-				ok, root := tds.t.DeepHash(addrHash[:])
+				ok, root, err := tds.t.DeepHash(addrHash[:])
+				if err != nil {
+					return nil, err
+				}
 				if ok {
 					accountWithAddress.Account.Root = root
 					//fmt.Printf("(b)Set %x root for addrHash %x\n", root, addrHash)
@@ -609,19 +612,6 @@ func (tds *TrieDbState) ReadAccountStorage(address accounts.Address, key account
 	var res uint256.Int
 	(&res).SetBytes(enc)
 	return res, true, nil
-}
-
-func (tds *TrieDbState) HasStorage(address accounts.Address) (bool, error) {
-	addressValue := address.Value()
-	addrHash := crypto.Keccak256Hash(addressValue[:])
-	// check if we know about any storage updates with non-empty values
-	for _, v := range tds.currentBuffer.storageUpdates[addrHash] {
-		if len(v) > 0 {
-			return true, nil
-		}
-	}
-	// fallback to underlying state reader if we don't know of non-empty storage slots yet
-	return tds.StateReader.HasStorage(address)
 }
 
 func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) {

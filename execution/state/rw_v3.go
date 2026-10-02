@@ -224,19 +224,13 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 			}
 
 			// Contract creation: clear stale storage before writing new account.
-			//
-			// An address with no committed account holds no committed storage:
-			// storage is only written for an account that exists, and deleting
-			// an account wipes its storage prefix. So probe the account first —
-			// that read is served by the per-file existence filters, while the
-			// prefix walk has to seek the .bt index of every storage .kv file.
 			if d.createContract {
-				prevAcc, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+				hasAcc, err := hasCommittedAccount(domains, roTx, address[:])
 				if err != nil {
 					return err
 				}
-				if len(prevAcc) == 0 {
-					if err := assertNoCommittedStorage(domains, roTx, address[:]); err != nil {
+				if !hasAcc {
+					if err := assertNoCommittedStorage(domains, roTx, address[:], "createContract"); err != nil {
 						return err
 					}
 				} else if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
@@ -832,22 +826,50 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 	return nil, nil, nil, nil
 }
 
+// hasCommittedAccount probes the account domain for addr. An address with no
+// committed account holds no committed storage: storage is only written for an
+// account that exists, and deleting an account wipes its storage prefix. The
+// probe is served by the per-file existence filters, while a storage-prefix walk
+// has to seek the .bt index of every storage .kv file — the same price whether
+// the address owns a thousand slots or none.
+func hasCommittedAccount(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) (bool, error) {
+	enc, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addr)
+	if err != nil {
+		return false, err
+	}
+	return len(enc) > 0, nil
+}
+
 // assertNoCommittedStorage panics when addr has committed storage but no
-// committed account, so a violation of that invariant surfaces instead of
-// silently skipping a storage wipe. No-op unless asserts are enabled.
-func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) error {
+// committed account, so a violation of the hasCommittedAccount invariant
+// surfaces instead of silently skipping a storage wipe. The what argument names
+// the caller so a trip points at the right path. No-op unless asserts are
+// enabled.
+func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte, what string) error {
 	if !dbg.AssertEnabled {
 		return nil
 	}
-	found := 0
+	// IteratePrefix does not resolve through sd.parent, while the account probe
+	// does, so a row this walk returns may already be tombstoned there. Re-read
+	// each hit the way the probe reads, or a parent-deleted address trips the
+	// assert on a state that is valid. The re-reads happen after the walk:
+	// IteratePrefix holds the domain's RLock across the callback, and GetLatest
+	// takes it again, which a writer queued between the two turns into a deadlock.
+	var candidates [][]byte
 	if err := domains.IteratePrefix(kv.StorageDomain, addr, roTx, func(k, v []byte) (bool, error) {
-		found++
-		return false, nil
+		candidates = append(candidates, bytes.Clone(k))
+		return true, nil
 	}); err != nil {
 		return err
 	}
-	if found > 0 {
-		panic(fmt.Sprintf("createContract: %x has storage but no account", addr))
+	for _, k := range candidates {
+		cur, _, err := domains.GetLatest(kv.StorageDomain, roTx, k)
+		if err != nil {
+			return err
+		}
+		if len(cur) > 0 {
+			panic(fmt.Sprintf("%s: %x has storage but no account", what, addr))
+		}
 	}
 	return nil
 }
@@ -1443,17 +1465,6 @@ func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accoun
 	return v, ok, nil
 }
 
-func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
-	r.addr = address.Value()
-	// this is an optimization, but also checks the account is checked in the domain
-	// for being deleted on unwind before we try to access the storage
-	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{}); len(enc) == 0 {
-		return false, err
-	}
-	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, r.addr[:])
-	return hasStorage, err
-}
-
 func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	_, acc, err := r.readAccountData(address)
 	return acc, err
@@ -1679,27 +1690,6 @@ func (r *bufferedReader) ReadAccountStorage(address accounts.Address, key accoun
 	return r.reader.ReadAccountStorage(address, key)
 }
 
-func (r *bufferedReader) HasStorage(address accounts.Address) (bool, error) {
-	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
-
-	if ok {
-		if so.data == &deleted {
-			r.bufferedState.accountsMutex.RUnlock()
-			return false, nil
-		}
-
-		if so.storage != nil && so.storage.Len() > 0 {
-			// TODO - we really need to return the first key
-			// for this we need to order the list of hashes
-			r.bufferedState.accountsMutex.RUnlock()
-			return true, nil
-		}
-	}
-	r.bufferedState.accountsMutex.RUnlock()
-	return r.reader.HasStorage(address)
-}
-
 func (r *bufferedReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	var code []byte
 	r.bufferedState.accountsMutex.RLock()
@@ -1784,10 +1774,11 @@ func returnReadList(v ReadLists) {
 	if v == nil {
 		return
 	}
-	//for _, tbl := range v {
-	//	clear(tbl.Keys)
-	//	clear(tbl.Vals)
-	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	//}
+	// Not optional: Vals pins what the txn read until the list is reused.
+	for _, tbl := range v {
+		clear(tbl.Keys)
+		clear(tbl.Vals)
+		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	}
 	readListPool.Put(v)
 }

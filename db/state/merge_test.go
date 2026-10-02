@@ -1377,7 +1377,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context(), db)
+	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
 	setup := func() (account *Domain) {
 		require.NoError(t, agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger))

@@ -108,7 +108,11 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 		case verification := <-incoming:
 			aggregateVerificationData = append(aggregateVerificationData, verification)
 			if len(aggregateVerificationData) >= batchSignatureVerificationThreshold {
-				b.processSignatureVerification(aggregateVerificationData)
+				// Failing signatures are already reprocessed and their senders banned
+				// inside processSignatureVerification; the error here is diagnostic only.
+				if err := b.processSignatureVerification(aggregateVerificationData); err != nil {
+					log.Debug("[BatchVerifier] batch signature verification failed", "err", err)
+				}
 				ticker.Reset(batchCheckInterval)
 				// clear the slice
 				aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
@@ -117,7 +121,9 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 			if len(aggregateVerificationData) == 0 {
 				continue
 			}
-			b.processSignatureVerification(aggregateVerificationData)
+			if err := b.processSignatureVerification(aggregateVerificationData); err != nil {
+				log.Debug("[BatchVerifier] batch signature verification failed", "err", err)
+			}
 			// clear the slice
 			aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
 		}
@@ -161,7 +167,9 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 		if err != nil {
 			log.Crit("[BatchVerifier] signature verification failed with the error: " + err.Error())
 			if b.sentinel != nil && v.SendingPeer != nil {
-				b.sentinel.BanPeer(b.ctx, v.SendingPeer)
+				if _, err := b.sentinel.BanPeer(b.ctx, v.SendingPeer); err != nil {
+					log.Debug("[BatchVerifier] failed to ban peer", "peer", v.SendingPeer.Pid, "err", err)
+				}
 			}
 			continue
 		}
@@ -172,7 +180,9 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 			}
 			log.Debug("[BatchVerifier] received invalid signature on the gossip", "peer", v.SendingPeer.Pid)
 			if b.sentinel != nil && v.SendingPeer != nil {
-				b.sentinel.BanPeer(b.ctx, v.SendingPeer)
+				if _, err := b.sentinel.BanPeer(b.ctx, v.SendingPeer); err != nil {
+					log.Debug("[BatchVerifier] failed to ban peer", "peer", v.SendingPeer.Pid, "err", err)
+				}
 				alreadyBanned = true
 			}
 			continue

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-cmp/cmp"
+	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/db/datadir"
@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -43,7 +44,7 @@ import (
 type Generator struct {
 	stateCache    kvcache.Cache
 	receiptsCache *lru.Cache[common.Hash, types.Receipts]
-	receiptCache  *lru.Cache[uint64, *types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
+	receiptCache  *cache.ByteLRU[*types.Receipt] // keyed by txNum: avoids TxnByIdxInBlock (snapshot read) on cache hit
 
 	// blockExecMutex ensuring that only 1 block with given hash
 	// executed at a time - all parallel requests for same hash will wait for results
@@ -86,11 +87,6 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 		panic(err)
 	}
 
-	receiptCache, err := lru.New[uint64, *types.Receipt](receiptsCacheLimit * 100) // think they should be connected in some of that way
-	if err != nil {
-		panic(err)
-	}
-
 	txNumReader := blockReader.TxnumReader()
 
 	var f *rpchelper.Filters
@@ -106,7 +102,7 @@ func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, eng
 		engine:             engine,
 		receiptsCacheTrace: receiptsCacheTrace,
 		receiptCacheTrace:  receiptsCacheTrace,
-		receiptCache:       receiptCache,
+		receiptCache:       newReceiptCache(datasize.ByteSize(receiptsCacheLimit*100) * datasize.KB),
 		evmTimeout:         evmTimeout,
 
 		blockExecMutex: &loaderMutex[common.Hash]{},
@@ -157,7 +153,43 @@ func (g *Generator) TryGetCachedReceipt(blockHash common.Hash, txNum uint64, txI
 }
 
 var rpcDisableRCache = dbg.EnvBool("RPC_DISABLE_RCACHE", false)
+
+// PersistedReceiptsServed reports whether a receipt found in the persistent cache is
+// returned as the answer. Where it is not, the block is re-executed instead and reaches
+// only as far back as state history, whatever the receipt retention is.
+func PersistedReceiptsServed() bool { return !rpcDisableRCache && !dbg.AssertEnabled }
+
 var rpcDisableRLRU = dbg.EnvBool("RPC_DISABLE_RLRU", false)
+
+// PersistedReceipt returns the receipt from the persistent cache without generating it; ok is false
+// when the receipt is not served from there.
+func (g *Generator) PersistedReceipt(ctx context.Context, tx kv.TemporalTx, header *types.Header, txIndex int, txNum uint64) (*types.Receipt, bool, error) {
+	if !PersistedReceiptsServed() {
+		return nil, false, nil
+	}
+	txnHash, ok, err := g.blockReader.TxnHashByIdxInBlock(ctx, tx, header.Number.Uint64(), txIndex)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	receipt, ok, err := readPersistedReceipt(g.filters.WithTemporalOverlay(tx), header.Number.Uint64(), header.Hash(), txnHash, txNum)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	g.addToCacheReceipt(txNum, receipt)
+	return receipt, true, nil
+}
+
+func readPersistedReceipt(tx kv.TemporalTx, blockNum uint64, blockHash, txnHash common.Hash, txNum uint64) (*types.Receipt, bool, error) {
+	receipt, ok, err := rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
+		TxNum:     txNum,
+		BlockNum:  blockNum,
+		BlockHash: blockHash,
+		TxnHash:   txnHash,
+		// Receipts served from this cache carry no Bloom; the consumers that return one derive it lazily.
+		DontCalcBloom: true,
+	})
+	return receipt, ok && receipt != nil, err
+}
 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := g.blockReader.TxnumReader()
@@ -197,11 +229,14 @@ func (g *Generator) addToCacheReceipts(header *types.Header, receipts types.Rece
 	g.receiptsCache.Add(header.Hash(), receipts)
 }
 
+func newReceiptCache(maxBytes datasize.ByteSize) *cache.ByteLRU[*types.Receipt] {
+	return cache.NewByteLRU(maxBytes, func(_ uint64, r *types.Receipt) int64 { return int64(r.Size()) + cache.ByteLRUEntryOverheadBytes })
+}
+
 func (g *Generator) addToCacheReceipt(txNum uint64, receipt *types.Receipt) {
 	if rpcDisableRLRU {
 		return
 	}
-	//g.receiptCache.Add(txNum, receipt.Copy()) // .Copy() helps pprof to attribute memory to cache - instead of evm (where it was allocated). but 5% perf
 	g.receiptCache.Add(txNum, receipt)
 }
 
@@ -258,16 +293,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	if !rpcDisableRCache && !calculatePostState {
 		var ok bool
 		var err error
-		receiptFromDB, ok, err = rawdb.ReadReceiptCacheV2(tx, rawdb.RCacheV2Query{
-			TxNum:     txNum,
-			BlockNum:  blockNum,
-			BlockHash: blockHash,
-			TxnHash:   txnHash,
-		})
+		receiptFromDB, ok, err = readPersistedReceipt(tx, blockNum, blockHash, txnHash, txNum)
 		if err != nil {
 			return nil, err
 		}
-		if ok && receiptFromDB != nil && !dbg.AssertEnabled {
+		if ok && PersistedReceiptsServed() {
 			g.addToCacheReceipt(txNum, receiptFromDB)
 			return receiptFromDB, nil
 		}
@@ -287,6 +317,11 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	}
 
 	cumGasUsed, _, logIdxAfterTx, err = rawtemporaldb.ReceiptAsOf(tx, txNum+1)
+	if err != nil {
+		return nil, err
+	}
+
+	firstLogIndex, err = rawtemporaldb.FirstLogIndex(tx, txNum, index)
 	if err != nil {
 		return nil, err
 	}
@@ -432,11 +467,6 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", g.evmTimeout)
 	}
 
-	if rawtemporaldb.ReceiptStoresFirstLogIdx(tx) {
-		firstLogIndex = logIdxAfterTx
-	} else {
-		firstLogIndex = logIdxAfterTx - uint32(len(receipt.Logs))
-	}
 	receipt.BlockHash = blockHash
 	receipt.CumulativeGasUsed = cumGasUsed
 	receipt.TransactionIndex = uint(index)
@@ -453,6 +483,22 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 		g.assertEqualReceipts(receipt, receiptFromDB)
 	}
 	return receipt, nil
+}
+
+// PostStateCalculated reports whether the receipts of this block carry a post state
+// that has to be computed. The persistent cache does not store that field, so those
+// receipts are re-executed and reach only as far as state history — which is what the
+// RPC availability gates must answer for. The fork check comes first: FrozenBlocks is a
+// backend call on a remote rpcdaemon, and every receipt request reaches this.
+func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEnabled bool, blockReader dbservices.FullBlockReader) bool {
+	if cfg.IsByzantium(blockNum) {
+		return false
+	}
+	if commitmentHistoryEnabled {
+		return true
+	}
+	frozen, observed := blockReader.FrozenBlocksObserved()
+	return observed && frozen == 0
 }
 
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
@@ -477,19 +523,19 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return receipts, nil
 	}
 
-	select {
-	case g.execSem <- struct{}{}:
-		defer func() { <-g.execSem }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-
 	err = rpchelper.CheckBlockExecuted(g.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	calculatePostState := (opts.CommitmentHistoryEnabled || g.blockReader.FrozenBlocks() == 0) && !cfg.IsByzantium(blockNum)
+	// A block with no transactions has no receipts to derive, and preparing an
+	// execution environment for it would need state history that may be pruned.
+	if len(block.Transactions()) == 0 {
+		g.addToCacheReceipts(block.HeaderNoCopy(), receipts)
+		return receipts, nil
+	}
+
+	calculatePostState := PostStateCalculated(cfg, blockNum, opts.CommitmentHistoryEnabled, g.blockReader)
 
 	// Now the snapshot have not the `postState` field. Therefore, for pre-Byzantium blocks,
 	// we must skip persistent receipts and re-calculate
@@ -500,10 +546,17 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		if err != nil {
 			return nil, err
 		}
-		if len(receiptsFromDB) > 0 && !dbg.AssertEnabled {
+		if len(receiptsFromDB) > 0 && PersistedReceiptsServed() {
 			g.addToCacheReceipts(block.HeaderNoCopy(), receiptsFromDB)
 			return receiptsFromDB, nil
 		}
+	}
+
+	select {
+	case g.execSem <- struct{}{}:
+		defer func() { <-g.execSem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 
 	var genEnv *ReceiptEnv
@@ -675,7 +728,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 		a := toJson(generated.Logs[i])
 		b := toJson(fromDB.Logs[i])
 		if a != b {
-			panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), generated.BlockNumber.Uint64(), generated.TransactionIndex))
+			panic(fmt.Sprintf("assert: generated=%s, fromDB=%s, bn=%d, txnIdx=%d", a, b, generated.BlockNumber.Uint64(), generated.TransactionIndex))
 		}
 	}
 	fromDB.Logs, generated.Logs = nil, nil
@@ -683,7 +736,7 @@ func (g *Generator) assertEqualReceipts(fromExecution, fromDB *types.Receipt) {
 	a := toJson(generated)
 	b := toJson(fromDB)
 	if a != b {
-		panic(fmt.Sprintf("assert: %v, bn=%d, txnIdx=%d", cmp.Diff(a, b), generated.BlockNumber.Uint64(), generated.TransactionIndex))
+		panic(fmt.Sprintf("assert: generated=%s, fromDB=%s, bn=%d, txnIdx=%d", a, b, generated.BlockNumber.Uint64(), generated.TransactionIndex))
 	}
 }
 

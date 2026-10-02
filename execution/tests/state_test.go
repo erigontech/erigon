@@ -72,7 +72,7 @@ func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { dir.RemoveAll(tmpDir) })
+		t.Cleanup(func() { _ = dir.RemoveAll(tmpDir) })
 		dirs := datadir.New(tmpDir)
 		db := temporaltest.NewTestDB(t, dirs)
 		for _, subtest := range test.Subtests() {
@@ -86,6 +86,7 @@ func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
 						return sdErr
 					}
 					defer sd.Close()
+					sd.EnableParaTrieDB(db)
 					_, _, err = test.Run(t, sd, tx, subtest, vmconfig)
 					tx.Rollback()
 					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {

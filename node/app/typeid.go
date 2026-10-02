@@ -337,8 +337,8 @@ func TypeIdValues(typeIds any) []TypeId {
 	}
 
 	var values []TypeId
-	for i := 0; i < s.NumField(); i++ {
-		if value, ok := reflect.TypeAssert[TypeId](s.Field(i)); ok {
+	for _, field := range s.Fields() {
+		if value, ok := reflect.TypeAssert[TypeId](field); ok {
 			values = append(values, value)
 		}
 	}

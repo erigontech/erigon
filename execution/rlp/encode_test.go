@@ -25,7 +25,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime"
 	"sync"
 	"testing"
 
@@ -426,11 +425,11 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 		wg.Go(func() {
 			for range 1000 {
 				_, r, _ := EncodeToReader("foo")
-				io.ReadAll(r)
-				r.Read(buf)
-				r.Read(buf)
-				r.Read(buf)
-				r.Read(buf)
+				_, _ = io.ReadAll(r)
+				_, _ = r.Read(buf)
+				_, _ = r.Read(buf)
+				_, _ = r.Read(buf)
+				_, _ = r.Read(buf)
 			}
 		})
 	}
@@ -438,31 +437,6 @@ func TestEncodeToReaderReturnToPool(t *testing.T) {
 }
 
 var sink any
-
-func BenchmarkPutint(b *testing.B) {
-	buf := make([]byte, 8)
-	for b.Loop() {
-		putint(buf, 0x12345678)
-		sink = buf
-	}
-}
-
-func BenchmarkEncodeUint256Ints(b *testing.B) {
-	ints := make([]*uint256.Int, 200)
-	for i := range ints {
-		ints[i] = new(uint256.Int).Lsh(uint256.NewInt(1), uint(i))
-	}
-	out := bytes.NewBuffer(make([]byte, 0, 4096))
-
-	b.ReportAllocs()
-
-	for b.Loop() {
-		out.Reset()
-		if err := Encode(out, ints); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
 
 func TestStringLen56(t *testing.T) {
 	str := hexutil.MustDecodeHex("7907ca011864321def1e92a3021868f397516ce37c959f25f8dddd3161d7b8301152b35f135c814fae9f487206471b6b0d713cd51a2d3598")
@@ -498,7 +472,7 @@ func TestEncodeUint256Buffer(t *testing.T) {
 
 	var writer3 bytes.Buffer
 	var buf31 [31]byte
-	require.Panics(t, func() { EncodeUint256(i, &writer3, buf31[:]) })
+	require.Panics(t, func() { _ = EncodeUint256(i, &writer3, buf31[:]) })
 }
 
 func TestEncodeUint256Random(t *testing.T) {
@@ -520,35 +494,6 @@ func TestEncodeUint256Random(t *testing.T) {
 			assert.Equal(t, i, *uint256.NewInt(0).SetBytes(decoded))
 		})
 	}
-}
-
-func BenchmarkEncodeConcurrentInterface(b *testing.B) {
-	type struct1 struct {
-		A string
-		B *uint256.Int
-		C [20]byte
-	}
-	value := []any{
-		uint(999),
-		&struct1{A: "hello", B: uint256.NewInt(0xFFFFFFFF)},
-		[10]byte{1, 2, 3, 4, 5, 6},
-		[]string{"yeah", "yeah", "yeah"},
-	}
-
-	var wg sync.WaitGroup
-	for cpu := 0; cpu < runtime.NumCPU(); cpu++ {
-		wg.Go(func() {
-			var buffer bytes.Buffer
-			for i := 0; i < b.N; i++ {
-				buffer.Reset()
-				err := Encode(&buffer, value)
-				if err != nil {
-					panic(err)
-				}
-			}
-		})
-	}
-	wg.Wait()
 }
 
 type ptrTestAddr [20]byte

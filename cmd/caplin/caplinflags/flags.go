@@ -33,6 +33,7 @@ var CliFlags = []cli.Flag{
 	&EngineApiHostFlag,
 	&EngineApiPortFlag,
 	&MevRelayUrl,
+	&utils.CaplinAllowPrivateBuilderURLs,
 	&JwtSecret,
 	&CustomConfig,
 	&CustomGenesisState,

@@ -36,12 +36,11 @@ const (
 	DefaultAccountCacheBytes = 150 * datasize.MB
 	DefaultStorageCacheBytes = 1 * datasize.GB
 
-	// Per-domain avg entry size used to translate the byte budget into the
-	// entry-count cap the underlying sharded LRU is sized against. Account
-	// and storage are near-fixed: addr + record or addr+slot + value plus
-	// entry overhead.
-	avgAccountEntryBytes = 96 // 20 addr + ~50 account record + 24 overhead
-	avgStorageEntryBytes = 88 // 52 addr+slot + ~12 value + 24 overhead
+	// Per-domain avg bytes held outside freelru's element, translating the byte
+	// budget into the entry-count cap. Entry bookkeeping is excluded: it sits
+	// inside the element, which the slot charge already covers.
+	avgAccountPayloadBytes = 70 // 20 addr + ~50 account record
+	avgStoragePayloadBytes = 64 // 52 addr+slot + ~12 value
 )
 
 // StateCache is a unified cache for domain data (Account, Storage, Code).
@@ -88,8 +87,8 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 		sc.disableFills = true
 		log.Info("[cache] STATE_CACHE_FILLS=false — read fills disabled, only post-commit publication populates the cache")
 	}
-	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountEntryBytes, mode)
-	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStorageEntryBytes, mode)
+	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountPayloadBytes, mode)
+	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStoragePayloadBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
 	// CommitmentDomain deliberately gets no cache: commitment data lives in the
 	// BranchCache, and the nil slot short-circuits every StateCache path for it
@@ -337,7 +336,12 @@ func prepareStateUpdate(update StateUpdate) preparedStateUpdate {
 		txNum:  update.TxNum,
 	}
 	if update.Domain == kv.CodeDomain && len(update.Value) > 0 {
-		prepared.codeHash = crypto.Keccak256(prepared.value)
+		// GetCodeByHash is called with a 32-byte keccak; anything else would
+		// file the entry under an address no reader queries.
+		prepared.codeHash = update.CodeHash
+		if len(prepared.codeHash) != len(common.Hash{}) {
+			prepared.codeHash = crypto.Keccak256(prepared.value)
+		}
 	}
 	return prepared
 }
@@ -505,11 +509,6 @@ func (c *StateCache) finishPublication(committedStateVersion uint64) {
 
 func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
 	hasUnwind bool, updates []StateUpdate) {
-	prepared := make([]preparedStateUpdate, len(updates))
-	for i := range updates {
-		prepared[i] = prepareStateUpdate(updates[i])
-	}
-
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
 	if !c.beginPublication(sourceStateVersion, committedStateVersion, unwindToTxNum, hasUnwind) {
@@ -519,8 +518,9 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 	// Sub-caches synchronize their own reads and writes. While publishing is
 	// true, admission-gated fills cannot mutate state entries or read appliedEnd,
 	// so the serialized applier can install the batch without admissionMu.
-	for i := range prepared {
-		c.applyPrepared(prepared[i])
+	// One at a time: preparing the batch up front clones every value at once.
+	for i := range updates {
+		c.applyPrepared(prepareStateUpdate(updates[i]))
 	}
 
 	c.finishPublication(committedStateVersion)

@@ -106,9 +106,12 @@ type TxResult struct {
 	ExecutionResult   evmtypes.ExecutionResult
 	ValidationResults []AAValidationResult
 	Err               error
-	Coinbase          accounts.Address
-	TxIn              state.ReadSet
-	TxOut             *state.WriteSet
+	// Operational reports that Err is an execution infrastructure failure, not a block-validity verdict.
+	Operational bool
+	Coinbase    accounts.Address
+	FeePolicy   evmtypes.FeePolicy
+	TxIn        state.ReadSet
+	TxOut       *state.WriteSet
 
 	Receipt *types.Receipt
 	Logs    []*types.Log
@@ -577,6 +580,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 
 		result.Coinbase = evm.Context.Coinbase
+		result.FeePolicy = evm.Context.FeePolicy
 
 		// MA applytx
 		result.ExecutionResult, result.Err = func() (evmtypes.ExecutionResult, error) {
@@ -597,8 +601,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			}
 
 			if applyErr != nil {
-				var abortErr protocol.ErrExecAbortError
-				if !errors.As(applyErr, &abortErr) {
+				if _, ok := errors.AsType[*protocol.ErrExecPanic](applyErr); ok {
+					result.Operational = true
+					return evmtypes.ExecutionResult{}, applyErr
+				}
+				if _, ok := errors.AsType[protocol.ErrExecAbortError](applyErr); !ok {
 					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
 				}
 
@@ -621,6 +628,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 		}
 
+	}
+	if stateErr := ibs.StateReadError(); stateErr != nil && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+		result.Operational = true
+		result.Err = stateErr
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
@@ -700,7 +711,6 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 		return &result
 	}
 
-	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
 	validationRes := result.ValidationResults[0]
 	result.ValidationResults = result.ValidationResults[1:]
 
@@ -724,50 +734,31 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	return &result
 }
 
-// executeSystemTx runs a consensus system transaction as a free call (no gas
-// pool, no intrinsic gas): the engine performs the surrounding state effect
-// (reward move), then the executor bumps the sender nonce and makes the call.
-func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *state.IntraBlockState) (result *TxResult) {
-	result = &TxResult{}
-
-	// Under the parallel executor a versioned read may panic ErrDependency; turn
-	// it into a retriable abort, as the metered path does in TxnExecutor.Execute.
-	if ibs.IsVersioned() {
-		defer func() {
-			if r := recover(); r != nil {
-				if err, ok := r.(error); !ok || !errors.Is(err, state.ErrDependency) {
-					log.Debug("Recovered from system-tx exec failure", "err", r, "stack", dbg.Stack())
-				}
-				depTxIndex := ibs.DepTxIndex()
-				var originErr error
-				if depTxIndex < 0 {
-					originErr = fmt.Errorf("system tx exec failure: %v", r)
-				}
-				result.Err = protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: originErr}
-			}
-		}()
-	}
+// executeSystemTx runs a consensus system transaction as a free call: no gas
+// pool, no intrinsic gas, and the engine owns the surrounding state effect.
+func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *state.IntraBlockState) *TxResult {
+	var result TxResult
 
 	msg, err := txTask.TxMessage()
 	if err != nil {
 		result.Err = err
-		return result
+		return &result
 	}
 	from := msg.From()
 
-	if err = engine.(rules.SystemTxEngine).ApplySystemTx(txTask.Tx(), ibs, txTask.Header); err != nil {
+	if err = engine.ApplySystemTx(txTask.Tx(), ibs, txTask.Header); err != nil {
 		result.Err = err
-		return result
+		return &result
 	}
 
 	nonce, err := ibs.GetNonce(from)
 	if err != nil {
 		result.Err = err
-		return result
+		return &result
 	}
 	if err = ibs.SetNonce(from, nonce+1, tracing.NonceChangeEoACall); err != nil {
 		result.Err = err
-		return result
+		return &result
 	}
 
 	rules := txTask.Rules()
@@ -775,11 +766,11 @@ func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *sta
 		ibs.Prepare(rules, from, evm.Context.Coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
 	}
 
-	_, _, gasUsed, callErr := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
-	if callErr != nil {
+	_, _, gasUsed, err := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
+	if err != nil {
 		// A reverted system tx is a consensus violation: reject the block.
-		result.Err = callErr
-		return result
+		result.Err = err
+		return &result
 	}
 	result.ExecutionResult.ReceiptGasUsed = gasUsed.Total()
 	result.ExecutionResult.BlockExecutionGasUsed = gasUsed.Total()
@@ -789,7 +780,7 @@ func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *sta
 	}
 	result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 
-	return result
+	return &result
 }
 
 // TxTaskQueue non-thread-safe priority-queue

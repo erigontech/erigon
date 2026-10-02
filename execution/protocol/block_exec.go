@@ -54,8 +54,8 @@ const (
 )
 
 type RejectedTx struct {
-	Index int    `json:"index"    gencodec:"required"`
-	Err   string `json:"error"    gencodec:"required"`
+	Index int    `json:"index"`
+	Err   string `json:"error"`
 }
 
 type RejectedTxs []*RejectedTx
@@ -65,10 +65,10 @@ type EphemeralExecResult struct {
 	TxRoot      common.Hash           `json:"txRoot"`
 	ReceiptRoot common.Hash           `json:"receiptsRoot"`
 	LogsHash    common.Hash           `json:"logsHash"`
-	Bloom       types.Bloom           `json:"logsBloom"        gencodec:"required"`
+	Bloom       types.Bloom           `json:"logsBloom"`
 	Receipts    types.Receipts        `json:"receipts"`
 	Rejected    RejectedTxs           `json:"rejected,omitempty"`
-	Difficulty  *math.HexOrDecimal256 `json:"currentDifficulty" gencodec:"required"`
+	Difficulty  *math.HexOrDecimal256 `json:"currentDifficulty"`
 	GasUsed     math.HexOrDecimal64   `json:"gasUsed"`
 }
 

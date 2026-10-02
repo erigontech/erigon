@@ -46,13 +46,16 @@ func AddValidatorToRegistry(
 	pubkey [48]byte,
 	withdrawalCredentials common.Hash,
 	amount uint64,
-) {
+) error {
 	// Append validator
-	s.AddValidator(state.GetValidatorFromDeposit(s, pubkey, withdrawalCredentials, amount), amount)
+	if err := s.AddValidator(state.GetValidatorFromDeposit(s, pubkey, withdrawalCredentials, amount), amount); err != nil {
+		return err
+	}
 	if s.Version() >= clparams.AltairVersion {
 		// Altair forward
 		s.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
 		s.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
 		s.AddInactivityScore(0)
 	}
+	return nil
 }

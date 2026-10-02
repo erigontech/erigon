@@ -251,11 +251,8 @@ func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsO
 	}
 }
 
-// txLatestReader reads a domain's latest state straight from a pinned RO tx via
-// tx.GetLatest, bypassing any SharedDomains in-memory batch or aggregator-shared
-// branch cache. The head-capture build's own commitment fold mutates that shared
-// cache, so a SharedDomains-backed latest reader would observe post-state branches;
-// reading the pinned snapshot directly keeps the parent(B) commitment plane clean.
+// txLatestReader reads directly from a pinned RO transaction, bypassing
+// SharedDomains memory so commitment reads remain on the pinned parent view.
 type txLatestReader struct {
 	tx kv.TemporalTx
 }

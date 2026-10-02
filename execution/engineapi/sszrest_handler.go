@@ -152,8 +152,7 @@ func writeEngineError(w http.ResponseWriter, err error) {
 	if err == nil {
 		return
 	}
-	var rpcErr rpc.Error
-	if errors.As(err, &rpcErr) {
+	if rpcErr, ok := errors.AsType[rpc.Error](err); ok {
 		switch rpcErr.ErrorCode() {
 		case engine_helpers.UnknownPayloadErr.Code:
 			writeSSZError(w, http.StatusNotFound, err.Error())

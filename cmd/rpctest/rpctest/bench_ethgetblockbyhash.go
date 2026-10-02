@@ -58,8 +58,7 @@ func BenchEthGetBlockByHash(erigonURL, gethURL string, needCompare, latest bool,
 		}
 
 		nBlocks++
-		var request string
-		request = reqGen.getBlockByHash(b.Result.Hash, true)
+		request := reqGen.getBlockByHash(b.Result.Hash, true)
 		errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, b.Result.Hash)
 
 		if err := requestAndCompare(request, "eth_getBlockByHash", errCtx, reqGen, needCompare, rec, errs, resultsCh,

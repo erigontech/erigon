@@ -31,7 +31,16 @@ permissions:
   contents: read
 
 jobs:
+  # Skips the suites below on docs-only PRs; see changes.yml.
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      contents: read
+      pull-requests: read
+
   mainnet-rpc-integ-tests:
+    needs: [changes]
+    if: needs.changes.outputs.code != 'false'
     runs-on: [ self-hosted, qa, Ethereum, rpc-integration-commitment ]
     env:
       ERIGON_TESTBED_AREA: /opt/erigon-testbed

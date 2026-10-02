@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 
@@ -45,6 +46,8 @@ func (s *StateChangeSet) Copy() *StateChangeSet {
 }
 
 func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
+	out = slices.Grow(out, serializeDiffSetBufLen(diffSet))
+
 	// Version prefix: [0, 1]. Two bytes so we can distinguish from the old format where
 	// byte[0] is dictLen (>=1 for non-empty, 0 only when diffSetLen is also 0).
 	// New format: byte[0]==0, byte[1]>0 (version). Old format: byte[0]>=1 or both bytes==0.
@@ -52,29 +55,6 @@ func SerializeDiffSet(diffSet []kv.DomainEntryDiff, out []byte) []byte {
 
 	if len(diffSet) == 0 {
 		return append(out, 0, 0, 0, 0) // diffSet len (4) = 0
-	}
-
-	totalKeyLen := 0
-	totalValueLen := 0
-	for i := range diffSet {
-		totalKeyLen += len(diffSet[i].Key)
-		if diffSet[i].Value != nil {
-			totalValueLen += len(diffSet[i].Value)
-		}
-	}
-
-	// Format: version(2) + uint32(len) + per entry: uint32(keyLen) + key + uint8(hasValue) + [uint32(valLen) + val]
-	totalSize := len(out) + 4 + len(diffSet)*(4+1) + totalKeyLen + totalValueLen
-	// Add space for value length prefixes (only for entries with values)
-	for i := range diffSet {
-		if diffSet[i].Value != nil {
-			totalSize += 4
-		}
-	}
-	if cap(out) < totalSize {
-		ret := make([]byte, len(out), totalSize)
-		copy(ret, out)
-		out = ret
 	}
 	ret := out
 

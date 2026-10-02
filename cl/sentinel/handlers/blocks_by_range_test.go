@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -117,7 +116,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 
 		_, err := stream.Read(forkDigest)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
+			if err == io.EOF { //nolint:errorlint // intentional bare sentinel check
 				t.Fatal("Stream is empty")
 			} else {
 				require.NoError(t, err)
@@ -155,11 +154,13 @@ func TestBlocksByRootHandler(t *testing.T) {
 		require.Equal(t, expBlocks[i].Block.ParentRoot, block.Block.ParentRoot)
 		require.Equal(t, expBlocks[i].Block.ProposerIndex, block.Block.ProposerIndex)
 		require.Equal(t, expBlocks[i].Block.Body.ExecutionPayload.BlockNumber, block.Block.Body.ExecutionPayload.BlockNumber)
-		stream.Read(make([]byte, 1))
+		if _, err := stream.Read(make([]byte, 1)); err != nil && err != io.EOF { //nolint:errorlint // intentional bare sentinel check
+			require.NoError(t, err)
+		}
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if !errors.Is(err, io.EOF) {
+	if err != io.EOF { //nolint:errorlint // intentional bare sentinel check
 		t.Fatal("Stream is not empty")
 	}
 

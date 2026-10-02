@@ -235,7 +235,7 @@ func (hi *DomainLatestIterFile) initCursorOnDB(domainRoTx *DomainRoTx) error {
 		if err != nil {
 			return err
 		}
-		for key != nil && len(key) > 8 && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
+		for len(key) > 8 && (hi.to == nil || bytes.Compare(key[:len(key)-8], hi.to) < 0) {
 			k := key[:len(key)-8]
 			stepBytes := key[len(key)-8:]
 			step := ^binary.BigEndian.Uint64(stepBytes)
@@ -296,7 +296,7 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 		if err != nil {
 			return err
 		}
-		if initial == nil || len(initial) <= 8 {
+		if len(initial) <= 8 {
 			break
 		}
 		baseKey := initial[:len(initial)-8]
@@ -306,11 +306,11 @@ func (hi *DomainLatestIterFile) advanceLargeValsDBCursor(ci1 *CursorItem) error 
 			if err != nil {
 				return err
 			}
-			if k == nil || len(k) <= 8 || !bytes.Equal(k[:len(k)-8], baseKey) {
+			if len(k) <= 8 || !bytes.Equal(k[:len(k)-8], baseKey) {
 				break
 			}
 		}
-		if k == nil || len(k) <= 8 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
+		if len(k) <= 8 || !(hi.to == nil || bytes.Compare(k[:len(k)-8], hi.to) < 0) {
 			break
 		}
 		stepBytes := k[len(k)-8:]
@@ -475,12 +475,11 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 	filesEndTxNum := dt.files.EndTxNum()
 
 	if ramIter.Seek(string(prefix)) {
-		k := common.ToBytesZeroCopy(ramIter.Key())
+		ramKey := common.ToBytesZeroCopy(ramIter.Key())
+		ramVal := ramIter.Value()[len(ramIter.Value())-1].data
 
-		v = ramIter.Value()[len(ramIter.Value())-1].data
-
-		if len(k) > 0 && bytes.HasPrefix(k, prefix) {
-			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: bytes.Clone(k), val: bytes.Clone(v), iter: ramIter, endTxNum: math.MaxUint64, reverse: true})
+		if len(ramKey) > 0 && bytes.HasPrefix(ramKey, prefix) {
+			heap.Push(cpPtr, &CursorItem{t: RAM_CURSOR, key: bytes.Clone(ramKey), val: bytes.Clone(ramVal), iter: ramIter, endTxNum: math.MaxUint64, reverse: true})
 		}
 	}
 

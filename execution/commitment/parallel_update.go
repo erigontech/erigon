@@ -68,27 +68,26 @@ func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
 	return pu.keyArena.intern(plainKey)
 }
 
-func (pu *parallelUpdate) Reset() {
-	if pu.trie != nil {
-		pu.trie.Reset()
-	}
-	pu.deferredMu.Lock()
-	for _, upd := range pu.deferredCombined {
-		putDeferredUpdate(upd)
-	}
-	pu.deferredCombined = pu.deferredCombined[:0]
-	pu.deferredMu.Unlock()
-	pu.keyArena.reset()
-}
-
-func (pu *parallelUpdate) Close() {
-	pu.trie = nil
+func (pu *parallelUpdate) drainDeferred() {
 	pu.deferredMu.Lock()
 	for _, upd := range pu.deferredCombined {
 		putDeferredUpdate(upd)
 	}
 	pu.deferredCombined = nil
 	pu.deferredMu.Unlock()
+}
+
+func (pu *parallelUpdate) Reset() {
+	if pu.trie != nil {
+		pu.trie.Reset()
+	}
+	pu.drainDeferred()
+	pu.keyArena.reset()
+}
+
+func (pu *parallelUpdate) Close() {
+	pu.trie = nil
+	pu.drainDeferred()
 	pu.keyArena.reset()
 }
 

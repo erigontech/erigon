@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -533,7 +534,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 
 		k, v, _, err := bt.dataLookup(0, getter)
 		require.NoError(t, err)
-		cur.Reset(0, getter)
+		require.NoError(t, cur.Reset(0, getter))
 
 		require.Equal(t, k, cur.Key())
 		require.Equal(t, v, cur.Value())
@@ -711,47 +712,6 @@ func TestBtIndex_MStoredInFile(t *testing.T) {
 	require.Equal(t, wantM, bt.M(), "M must come from the file, not from DefaultBtreeM")
 }
 
-func BenchmarkBtIndex_Get(b *testing.B) {
-	keyCount := 1_000_000
-	if testing.Short() {
-		keyCount = 10_000
-	}
-	compress := seg.CompressKeys
-
-	for _, M := range []uint64{256, 128, 64, 32} {
-		tmp := b.TempDir()
-		kvPath := generateKV(b, tmp, 20, 10, keyCount, log.New(), compress)
-		keys, err := pivotKeysFromKV(kvPath)
-		require.NoError(b, err)
-
-		indexPath := filepath.Join(tmp, fmt.Sprintf("m%d.bt", M))
-		buildBtreeIndexWithM(b, kvPath, indexPath, compress, M, log.New())
-
-		b.Run(fmt.Sprintf("M%d", M), func(b *testing.B) {
-			decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
-			require.NoError(b, err)
-			defer bt.Close()
-			defer decomp.Close()
-
-			getter := seg.NewReader(decomp.MakeGetter(), compress)
-			rnd := newRnd(uint64(b.N))
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for b.Loop() {
-				p := rnd.IntN(len(keys))
-				k, _, _, found, err := bt.Get(keys[p], getter)
-				if err != nil {
-					b.Fatal(err)
-				}
-				if !found || !bytes.Equal(keys[p], k) {
-					b.Fatal("key not found or mismatch")
-				}
-			}
-		})
-	}
-}
-
 func TestDecodeNodes(t *testing.T) {
 	const M = 256
 	for _, keys := range [][][]byte{
@@ -770,11 +730,11 @@ func TestDecodeNodes(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, buf.Len(), n)
 		if len(keys) == 0 {
-			require.Nil(t, got)
+			require.Nil(t, got.nodeOfft)
 			continue
 		}
-		require.EqualValues(t, len(keys), got.Count())
-		bp := &BpsTree{keysBlob: buf.Bytes(), nodeOfftEF: got, nodeStride: M}
+		require.Len(t, got.nodeOfft, len(keys))
+		bp := &BpsTree{keysBlob: buf.Bytes(), nodeOfft: got.nodeOfft, nodeStride: M}
 		for i := range keys {
 			require.Equal(t, uint64(i)*M, bp.nodeDi(i)) // di recomputed, not stored
 			require.True(t, bytes.Equal(keys[i], bp.nodeKey(i)))
@@ -799,10 +759,10 @@ func TestDecodeListNodesV0_Validation(t *testing.T) {
 		return buf.Bytes()
 	}
 
-	off, stride, _, err := decodeListNodesV0(build(0, 32, 64, 96))
+	nd, _, err := decodeListNodesV0(build(0, 32, 64, 96))
 	require.NoError(t, err)
-	require.Equal(t, uint64(32), stride)
-	require.EqualValues(t, 4, off.Count())
+	require.Equal(t, uint64(32), nd.stride)
+	require.Len(t, nd.nodeOfft, 4)
 
 	// di0==0 is required, so stride=di1 can't underflow; corrupt progressions are rejected
 	for name, dis := range map[string][]uint64{
@@ -810,7 +770,7 @@ func TestDecodeListNodesV0_Validation(t *testing.T) {
 		"zero stride":        {0, 0},
 		"broken progression": {0, 32, 999},
 	} {
-		_, _, _, err := decodeListNodesV0(build(dis...))
+		_, _, err := decodeListNodesV0(build(dis...))
 		require.Errorf(t, err, "expected error for %q", name)
 	}
 }
@@ -848,7 +808,7 @@ func Test_BtreeIndex_GetValSize(t *testing.T) {
 	getter := seg.NewReader(kvFile.MakeGetter(), compressFlags)
 
 	for _, key := range keys {
-		_, value, _, found, err := index.Get(key, getter)
+		_, value, _, found, err := index.Get(key, nil, getter)
 		require.NoError(t, err)
 		require.True(t, found)
 		size, found, err := index.GetValSize(key, getter)
@@ -862,4 +822,23 @@ func Test_BtreeIndex_GetValSize(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, found)
 	require.Zero(t, size)
+}
+
+func TestAddKeyRefusesNodeSectionOverUint32(t *testing.T) {
+	iw, err := NewBtIndexWriter(BtIndexWriterArgs{
+		IndexFile: filepath.Join(t.TempDir(), "over.bt"),
+		TmpDir:    t.TempDir(),
+		M:         1,
+		KeyCount:  4,
+		MaxOffset: 1024,
+	}, log.New())
+	require.NoError(t, err)
+	defer iw.Close()
+
+	require.NoError(t, iw.AddKey([]byte("k0"), 0))
+
+	iw.writer.written = uint64(math.MaxUint32) + 2
+	err = iw.AddKey([]byte("k1"), 1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "node section offset")
 }

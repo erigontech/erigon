@@ -137,10 +137,6 @@ func (a *prefixArena) nodeCount() int {
 	return a.priorNodes + a.nextIdx
 }
 
-func popcount(n *prefixNode) int {
-	return bits.OnesCount16(n.bitmap)
-}
-
 func childIndex(n *prefixNode, nib byte) (int, bool) {
 	mask := uint16(1) << nib
 	idx := bits.OnesCount16(n.bitmap & (mask - 1))

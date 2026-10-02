@@ -63,6 +63,12 @@ type VMContext struct {
 	ChainConfig     *chain.Config
 	IntraBlockState IntraBlockState
 
+	// Rules is the resolved rule set the EVM ran under. Tracers classify
+	// precompiles from it rather than rebuilding one, so a chain whose forks or
+	// precompile set are resolved per-chain cannot dispatch in the EVM and stay
+	// invisible to the tracer.
+	Rules *chain.Rules
+
 	TxHash common.Hash
 }
 
@@ -311,6 +317,10 @@ const (
 	GasChangeCallFailedExecution GasChangeReason = 14
 	// GasChangeDelegatedDesignation is the amount of gas that will be charged for resolution of delegated designation.
 	GasChangeDelegatedDesignation GasChangeReason = 15
+	// GasChangeCallStateGasReturned is EIP-8037 state gas moving out of the reservoir back into gas_left, after a
+	// child frame refilled a slot this frame had spilled gas_left to allocate. This value is always positive. It is
+	// not GasChangeCallLeftOverRefunded: no gas crosses a frame boundary, it changes dimension within one frame.
+	GasChangeCallStateGasReturned GasChangeReason = 16
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.

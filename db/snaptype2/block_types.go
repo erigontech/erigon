@@ -332,8 +332,12 @@ var (
 					if err := txnHashIdx.Build(ctx); err != nil {
 						if errors.Is(err, recsplit.ErrCollision) {
 							logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-							txnHashIdx.ResetNextSalt()
-							txnHash2BlockNumIdx.ResetNextSalt()
+							if resetErr := txnHashIdx.ResetNextSalt(); resetErr != nil {
+								return resetErr
+							}
+							if resetErr := txnHash2BlockNumIdx.ResetNextSalt(); resetErr != nil {
+								return resetErr
+							}
 							continue
 						}
 						return fmt.Errorf("txnHashIdx: %w", err)
@@ -341,8 +345,12 @@ var (
 					if err := txnHash2BlockNumIdx.Build(ctx); err != nil {
 						if errors.Is(err, recsplit.ErrCollision) {
 							logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-							txnHashIdx.ResetNextSalt()
-							txnHash2BlockNumIdx.ResetNextSalt()
+							if resetErr := txnHashIdx.ResetNextSalt(); resetErr != nil {
+								return resetErr
+							}
+							if resetErr := txnHash2BlockNumIdx.ResetNextSalt(); resetErr != nil {
+								return resetErr
+							}
 							continue
 						}
 						return fmt.Errorf("txnHash2BlockNumIdx: %w", err)

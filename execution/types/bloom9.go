@@ -120,6 +120,11 @@ func (b Bloom) MarshalText() ([]byte, error) {
 	return hexutil.Bytes(b[:]).MarshalText()
 }
 
+// AppendText implements encoding.TextAppender (alloc-free MarshalText).
+func (b Bloom) AppendText(dst []byte) ([]byte, error) {
+	return hexutil.Bytes(b[:]).AppendText(dst)
+}
+
 // UnmarshalText b as a hex string with 0x prefix.
 func (b *Bloom) UnmarshalText(input []byte) error {
 	return hexutil.UnmarshalFixedText("Bloom", input, b[:])

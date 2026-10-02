@@ -24,9 +24,30 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc"
 )
+
+func TestFilterCriteriaValidateTopicPositions(t *testing.T) {
+	criteria := FilterCriteria{
+		Topics: [][]common.Hash{
+			{{1}, {2}},
+			{{3}, {4}},
+			{{5}, {6}},
+			{{7}, {8}},
+		},
+	}
+	require.NoError(t, criteria.ValidateTopicPositions())
+
+	criteria.Topics = append(criteria.Topics, []common.Hash{{9}})
+	err := criteria.ValidateTopicPositions()
+	var invalidParams *rpc.InvalidParamsError
+	require.ErrorAs(t, err, &invalidParams)
+	require.Equal(t, rpc.ErrCodeInvalidParams, invalidParams.ErrorCode())
+	require.EqualError(t, err, "query exceeds the maximum of 4 topics")
+}
 
 func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 	var (

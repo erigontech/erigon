@@ -30,7 +30,7 @@ type simulateV1TestService struct{}
 func (simulateV1TestService) SimulateV1(context.Context, SimulationRequest, rpc.BlockNumberOrHash) (SimulationResult, error) {
 	return SimulationResult{
 		{
-			"calls": []CallResult{
+			Calls: []CallResult{
 				{
 					ReturnData: "0x",
 					GasUsed:    hexutil.Uint64(0x5208),
@@ -549,7 +549,7 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result, 1)
 
-	calls, ok := result[0]["calls"].([]CallResult)
+	calls, ok := result[0].Calls.([]CallResult)
 	require.True(t, ok, "expected typed call results")
 	require.Len(t, calls, 1)
 

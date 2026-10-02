@@ -346,10 +346,10 @@ func TestFilterWithTopicMapEquivalence(t *testing.T) {
 	}
 }
 
-func TestErigonLogJSONBlockTimestamp(t *testing.T) {
+func TestRPCLogJSONBlockTimestamp(t *testing.T) {
 	t.Parallel()
 
-	el := &ErigonLog{
+	el := &RPCLog{
 		Log: Log{
 			Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 			Topics:  []common.Hash{common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
@@ -366,56 +366,207 @@ func TestErigonLogJSONBlockTimestamp(t *testing.T) {
 	require.Contains(t, s, `"blockTimestamp":"0x6553f100"`)
 	require.NotContains(t, s, `"timestamp"`)
 
-	var decoded ErigonLog
+	var decoded RPCLog
 	require.NoError(t, json.Unmarshal(b, &decoded))
 	require.Equal(t, el.BlockTimestamp, decoded.BlockTimestamp)
 	require.Equal(t, el.Address, decoded.Address)
 	require.Equal(t, el.TxHash, decoded.TxHash)
 }
 
-func TestErigonLogUnmarshalJSONBlockTimestamp(t *testing.T) {
+func TestRPCLogUnmarshalJSONBlockTimestamp(t *testing.T) {
 	t.Parallel()
 
 	input := `{"address":"0x2222222222222222222222222222222222222222","blockHash":"0x222233334444555566667777888899990000aaaabbbbccccddddeeeeffff1111","blockNumber":"0x200000","blockTimestamp":"0x60000000","data":"0x4455","logIndex":"0x5","topics":["0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"transactionHash":"0x33334444555566667777888899990000aaaabbbbccccddddeeeeffff11112222","transactionIndex":"0x6"}`
 
-	var log ErigonLog
+	var log RPCLog
 	require.NoError(t, json.Unmarshal([]byte(input), &log))
 	require.Equal(t, hexutil.Uint64(0x60000000), log.BlockTimestamp)
 	require.Equal(t, common.HexToAddress("0x2222222222222222222222222222222222222222"), log.Address)
 }
 
-func TestErigonLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
+func TestRPCLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
 	t.Parallel()
 
 	input := `{"address":"0x3333333333333333333333333333333333333333","blockHash":"0x4444555566667777888899990000aaaabbbbccccddddeeeeffff111122223333","blockNumber":"0x300000","timestamp":"0x70000000","data":"0x6677","logIndex":"0x8","topics":["0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],"transactionHash":"0x555566667777888899990000aaaabbbbccccddddeeeeffff1111222233334444","transactionIndex":"0x9"}`
 
-	var log ErigonLog
+	var log RPCLog
 	require.NoError(t, json.Unmarshal([]byte(input), &log))
 	require.Equal(t, hexutil.Uint64(0), log.BlockTimestamp)
 	require.Equal(t, common.HexToAddress("0x3333333333333333333333333333333333333333"), log.Address)
 }
 
-func TestErigonAndRPCLogTimestampConsistency(t *testing.T) {
+func TestAppendFilteredRPCLogs(t *testing.T) {
 	t.Parallel()
 
-	log := Log{
-		Address: common.HexToAddress("0x4444444444444444444444444444444444444444"),
-		Topics:  []common.Hash{common.HexToHash("0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")},
-		Data:    hexutil.Bytes{0x88, 0x99},
-		TxHash:  common.HexToHash("0x7777888899990000aaaabbbbccccddddeeeeffff111122223333444455556666"),
+	logs := Logs{
+		{
+			Address:     common.HexToAddress("0x5555555555555555555555555555555555555555"),
+			Topics:      []common.Hash{common.HexToHash("0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")},
+			Data:        hexutil.Bytes{0xaa},
+			BlockNumber: 0x1234,
+			TxHash:      common.HexToHash("0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"),
+			TxIndex:     7,
+			BlockHash:   common.HexToHash("0x99990000aaaabbbbccccddddeeeeffff11112222333344445555666677778888"),
+			Index:       1,
+			Removed:     false,
+		},
+		{
+			Address:     common.HexToAddress("0x6666666666666666666666666666666666666666"),
+			Topics:      []common.Hash{common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")},
+			Data:        hexutil.Bytes{0xbb},
+			BlockNumber: 0x1234,
+			TxHash:      common.HexToHash("0x2222333344445555666677778888999900001111aaaabbbbccccddddeeeeffff"),
+			TxIndex:     8,
+			BlockHash:   common.HexToHash("0x99990000aaaabbbbccccddddeeeeffff11112222333344445555666677778888"),
+			Index:       2,
+			Removed:     true,
+		},
 	}
-	ts := hexutil.Uint64(1800000000)
 
-	erigonB, err := json.Marshal(&ErigonLog{Log: log, BlockTimestamp: ts})
-	require.NoError(t, err)
-	rpcB, err := json.Marshal(&RPCLog{Log: log, BlockTimestamp: ts})
-	require.NoError(t, err)
+	rpcLogs := logs.AppendFilteredRPCLogs(nil, nil, nil, 1900000000, 0)
 
-	var erigonMap, rpcMap map[string]any
-	require.NoError(t, json.Unmarshal(erigonB, &erigonMap))
-	require.NoError(t, json.Unmarshal(rpcB, &rpcMap))
+	require.Len(t, rpcLogs, len(logs))
+	for i, rpcLog := range rpcLogs {
+		require.Equal(t, hexutil.Uint64(1900000000), rpcLog.BlockTimestamp)
+		require.Equal(t, *logs[i], rpcLog.Log)
+	}
+}
 
-	require.Equal(t, rpcMap["blockTimestamp"], erigonMap["blockTimestamp"])
-	require.Nil(t, erigonMap["timestamp"])
-	require.Nil(t, rpcMap["timestamp"])
+func TestAppendFilteredRPCLogsEmpty(t *testing.T) {
+	t.Parallel()
+
+	// Appending nothing must leave dst as it was, so an empty eth_getLogs result
+	// stays non-nil and serialises `[]` and not `null`.
+	for _, logs := range []Logs{{}, nil} {
+		rpcLogs := logs.AppendFilteredRPCLogs(RPCLogs{}, nil, nil, 1, 0)
+		require.NotNil(t, rpcLogs)
+		require.Len(t, rpcLogs, 0)
+	}
+}
+
+// AppendFilteredRPCLogs must select exactly what FilterWithTopicMap selects.
+func TestAppendFilteredRPCLogsMatchesFilter(t *testing.T) {
+	t.Parallel()
+
+	addrA := common.HexToAddress("0xaa")
+	addrB := common.HexToAddress("0xbb")
+	topicX := common.HexToHash("0x11")
+	topicY := common.HexToHash("0x22")
+	logs := Logs{
+		{Address: addrA, Topics: []common.Hash{topicX, topicY}},
+		{Address: addrA, Topics: []common.Hash{topicY, topicX}},
+		{Address: addrB, Topics: []common.Hash{topicX}},
+		{Address: addrB},
+	}
+
+	for name, tc := range map[string]struct {
+		addrs  []common.Address
+		topics [][]common.Hash
+	}{
+		"no filter":        {},
+		"address":          {addrs: []common.Address{addrB}},
+		"topic position 0": {topics: [][]common.Hash{{topicX}}},
+		"topic position 1": {topics: [][]common.Hash{nil, {topicX}}},
+		"topic union":      {topics: [][]common.Hash{{topicX, topicY}}},
+		"address + topic":  {addrs: []common.Address{addrA}, topics: [][]common.Hash{{topicX}}},
+		"no match":         {addrs: []common.Address{common.HexToAddress("0xcc")}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			addrMap := make(map[common.Address]struct{}, len(tc.addrs))
+			for _, a := range tc.addrs {
+				addrMap[a] = struct{}{}
+			}
+			topicMap := BuildTopicMap(tc.topics)
+
+			var want RPCLogs
+			for _, l := range logs.FilterWithTopicMap(addrMap, topicMap, 0) {
+				want = append(want, &RPCLog{Log: *l, BlockTimestamp: 7})
+			}
+			require.Equal(t, want, logs.AppendFilteredRPCLogs(nil, addrMap, topicMap, 7, 0))
+
+			if len(want) > 1 {
+				// limit stops the walk, so an over-cap receipt is not fully converted.
+				require.Len(t, logs.AppendFilteredRPCLogs(nil, addrMap, topicMap, 7, 1), 1)
+			}
+		})
+	}
+}
+
+// Pins the maxLogs accounting matchFilter's two return values exist to preserve: the
+// budget is spent on every log the filter considers, matching or not, and never on one
+// it skips outright.
+func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
+	t.Parallel()
+
+	addr := common.HexToAddress("0xaa")
+	topicX := common.HexToHash("0x11")
+	topicY := common.HexToHash("0x22")
+	logs := Logs{
+		{Address: addr, Topics: []common.Hash{topicY}},
+		{Address: addr, Topics: []common.Hash{topicX}},
+	}
+	addrMap := map[common.Address]struct{}{addr: {}}
+	topicMap := BuildTopicMap([][]common.Hash{{topicX}})
+
+	require.Empty(t, logs.FilterWithTopicMap(addrMap, topicMap, 1))
+	require.Len(t, logs.FilterWithTopicMap(addrMap, topicMap, 2), 1)
+
+	// A skipped log does not spend the budget.
+	other := Logs{{Address: common.HexToAddress("0xbb"), Topics: []common.Hash{topicX}}, logs[1]}
+	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
+}
+
+// MarshalFastJSON replaces json.Marshal for these results, so it must match it byte for byte and
+// allocate once. Malloc size-class slack can hide a short fastJSONLen from the allocation count,
+// so the bound is checked directly as well.
+func TestRPCLogsMarshalFastJSON(t *testing.T) {
+	maxed := func(topics []common.Hash, data []byte, removed bool) *RPCLog {
+		return &RPCLog{
+			Log: Log{
+				Address:     common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
+				Topics:      topics,
+				Data:        data,
+				BlockNumber: hexutil.Uint64(^uint64(0)),
+				TxHash:      common.HexToHash("0xaabb"),
+				TxIndex:     hexutil.Uint(^uint(0)),
+				BlockHash:   common.HexToHash("0xccdd"),
+				Index:       hexutil.Uint(^uint(0)),
+				Removed:     removed,
+			},
+			BlockTimestamp: hexutil.Uint64(^uint64(0)),
+		}
+	}
+	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+
+	for name, logs := range map[string]RPCLogs{
+		"nil":                nil,
+		"empty":              {},
+		"zero":               {{}},
+		"nil-topics":         {maxed(nil, []byte{1, 2, 3}, false)},
+		"empty-topics":       {maxed([]common.Hash{}, nil, false)},
+		"many-topics":        {maxed([]common.Hash{topic, {}, topic, {}}, make([]byte, 4096), false)},
+		"removed-nil-topics": {maxed(nil, nil, true)},
+		"nil-entries":        {nil, maxed([]common.Hash{topic}, []byte{9}, false), nil},
+		"many-nil-topics":    {maxed(nil, nil, false), maxed(nil, nil, true), maxed(nil, nil, false)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(logs)
+			require.NoError(t, err)
+			got, err := logs.MarshalFastJSON()
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+			if n := testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }); n != 1 {
+				t.Fatalf("MarshalFastJSON allocated %v times, want 1", n)
+			}
+
+			for _, l := range logs {
+				want, err := json.Marshal(l)
+				require.NoError(t, err)
+				got, err := l.MarshalFastJSON()
+				require.NoError(t, err)
+				require.Equal(t, string(want), string(got))
+				require.LessOrEqual(t, len(got), l.fastJSONLen())
+			}
+		})
+	}
 }

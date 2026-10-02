@@ -95,8 +95,7 @@ func HandleError(err error, stream jsonstream.Stream) {
 		stream.WriteObjectField("error")
 		stream.WriteObjectStart()
 		stream.WriteObjectField("code")
-		var ec Error
-		if errors.As(err, &ec) {
+		if ec, ok := errors.AsType[Error](err); ok {
 			stream.WriteInt(ec.ErrorCode())
 		} else {
 			stream.WriteInt(ErrCodeDefault)
@@ -104,8 +103,7 @@ func HandleError(err error, stream jsonstream.Stream) {
 		stream.WriteMore()
 		stream.WriteObjectField("message")
 		stream.WriteString(err.Error())
-		var de DataError
-		if errors.As(err, &de) {
+		if de, ok := errors.AsType[DataError](err); ok {
 			stream.WriteMore()
 			stream.WriteObjectField("data")
 			data, derr := json.Marshal(de.ErrorData())
@@ -173,7 +171,9 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
-			h.conn.WriteJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"}))
+			if err := h.conn.WriteJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"})); err != nil {
+				h.logger.Debug("Failed to write RPC error response", "err", err)
+			}
 		})
 		return
 	}
@@ -216,12 +216,11 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				default:
 				}
 
-				// handleCallMsg yields one of three:
-				// non-streaming response: res != nil, encoded here via writeTo.
-				// streamed response: res == nil, already written to the stream.
-				// notification: no response, leaving buf empty (only non-empty buffers reply).
+				// A non-nil res is an error answer that still has to be written. On nil the answer
+				// is already in the stream, or the message needs none.
 				buf := bytes.NewBuffer(nil)
-				stream := jsonstream.New(buf)
+				stream := jsonstream.Get(buf)
+				defer jsonstream.Put(stream)
 				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
 					res.writeTo(stream)
 				}
@@ -233,27 +232,47 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		}
 		wg.Wait()
 		h.addSubscriptions(cp.notifiers)
-		out := jsonstream.New(nil)
-		out.WriteArrayStart()
-		wrote := false
-		for _, answer := range answersWithNils {
-			if answer == nil {
-				continue
-			}
-			if wrote {
-				out.WriteMore()
-			}
-			wrote = true
-			out.WriteRawBytes(answer)
-		}
-		out.WriteArrayEnd()
-		if wrote {
-			h.conn.WriteJSON(cp.ctx, rawResponse(out.Buffer()))
-		}
+		h.sendBatchAnswers(cp.ctx, answersWithNils)
 		for _, n := range cp.notifiers {
-			n.activate()
+			if err := n.activate(); err != nil {
+				h.logger.Debug("Failed to activate RPC notifier", "err", err)
+			}
 		}
 	})
+}
+
+// sendBatchAnswers sends the answers in request order, leaving out calls that have none.
+func (h *handler) sendBatchAnswers(ctx context.Context, answers [][]byte) {
+	batch := slices.DeleteFunc(answers, func(answer []byte) bool { return answer == nil })
+	if len(batch) == 0 {
+		return
+	}
+	if err := h.conn.WriteJSON(ctx, rawBatch(batch)); err != nil {
+		h.logger.Debug("Failed to write RPC batch response", "err", err)
+	}
+}
+
+// answerBuffered serves a call for a transport that has no stream to write
+// through: the whole response is built in a pooled stream and sent in one piece.
+// It owns the stream, so the pool gets it back on any exit.
+func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
+	stream := jsonstream.Get(nil)
+	defer jsonstream.Put(stream)
+
+	h.answerInto(cp, msg, stream)
+	if err := h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer())); err != nil {
+		h.logger.Debug("Failed to write RPC response", "err", err)
+	}
+}
+
+// answerInto runs the call and leaves its response in stream. The call writes a success
+// itself; only an error answer is encoded here.
+func (h *handler) answerInto(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) {
+	answer := h.handleCallMsg(cp, msg, stream)
+	h.addSubscriptions(cp.notifiers)
+	if answer != nil {
+		answer.writeTo(stream)
+	}
 }
 
 func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage) {
@@ -268,7 +287,9 @@ func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage
 			break
 		}
 	}
-	h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp})
+	if err := h.conn.WriteJSON(cp.ctx, []*jsonrpcMessage{resp}); err != nil {
+		h.logger.Debug("Failed to write RPC batch-too-large response", "err", err)
+	}
 }
 
 // handleMsg handles a single message.
@@ -277,23 +298,16 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
-		needWriteStream := false
 		if stream == nil {
-			stream = jsonstream.New(nil)
-			needWriteStream = true
-		}
-		answer := h.handleCallMsg(cp, msg, stream)
-		h.addSubscriptions(cp.notifiers)
-		if answer != nil {
-			answer.writeTo(stream)
-		}
-		if needWriteStream {
-			h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer()))
+			h.answerBuffered(cp, msg)
 		} else {
+			h.answerInto(cp, msg, stream)
 			stream.WriteRaw("\n")
 		}
 		for _, n := range cp.notifiers {
-			n.activate()
+			if err := n.activate(); err != nil {
+				h.logger.Debug("Failed to activate RPC notifier", "err", err)
+			}
 		}
 	})
 }
@@ -490,7 +504,8 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 	}
 }
 
-// handleCallMsg executes a call message and returns the answer.
+// handleCallMsg executes a call message. It returns the error answer, or nil once the
+// response is in the stream or the message needs none.
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
 	switch {
 	case msg.isNotification():
@@ -641,7 +656,10 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		if err != nil {
 			return msg.errorResponse(remapDBOverload(ctx, err))
 		}
-		return msg.response(result)
+		if msg.isNotification() {
+			return nil
+		}
+		return msg.writeResponse(stream, result)
 	}
 
 	stream.WriteObjectStart()
@@ -662,35 +680,26 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 			stream.WriteMore()
 		}
 		HandleError(err, stream)
+	} else if !rs.Written() {
+		// A response carries exactly one of result and error, so a callback that
+		// succeeded without writing still owes a result.
+		rs.WriteNil()
 	}
 	stream.WriteObjectEnd()
 	return nil
 }
 
-// writeTo writes a success response's already-encoded Result (and id) directly rather than
-// re-encoding it; any other message falls back to json.Marshal. Output equals json.Marshal(msg)
-// except '<', '>', '&' and U+2028/2029 in the id/result are left unescaped (valid JSON, same value).
+// writeTo writes a response built as a message, such as an error; success results go through
+// writeResponse. Nothing here may reach the underlying writer: the response must stay in the
+// stream buffer until the caller flushes, or the HTTP status is committed before ServeHTTP can set it.
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
-	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
-		buf, err := json.Marshal(msg)
-		if err != nil {
-			buf, err = json.Marshal(msg.errorResponse(err))
-		}
-		if err == nil {
-			stream.WriteRawBytes(buf)
-		}
-		return
+	buf, err := json.Marshal(msg)
+	if err != nil {
+		buf, err = json.Marshal(msg.errorResponse(err))
 	}
-	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
-	stream.WriteString(msg.Version)
-	stream.WriteMore()
-	stream.WriteObjectField("id")
-	stream.WriteRawBytes(msg.ID)
-	stream.WriteMore()
-	stream.WriteObjectField("result")
-	stream.WriteRawBytes(msg.Result)
-	stream.WriteObjectEnd()
+	if err == nil {
+		stream.WriteRawBytes(buf)
+	}
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.

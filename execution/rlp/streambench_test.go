@@ -119,7 +119,7 @@ func BenchmarkDecodeStringFields(b *testing.B) {
 	encoded, err := EncodeToBytes(&benchHandshake{
 		Version:    5,
 		Name:       "erigon/v3.6.0-dev/linux-amd64/go1.25.0",
-		Caps:       []benchCap{{"eth", 68}, {"eth", 69}, {"snap", 1}, {"wit", 0}},
+		Caps:       []benchCap{{"eth", 68}, {"eth", 69}, {"eth", 70}, {"snap", 1}},
 		ListenPort: 30303,
 		ID:         bytes.Repeat([]byte{0xab}, 64),
 	})

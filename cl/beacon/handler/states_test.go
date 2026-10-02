@@ -23,6 +23,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -595,4 +597,23 @@ func TestGetPendingQueuesConsensusVersionHeader(t *testing.T) {
 	}
 	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_consolidations"])
 	require.Equal(t, versions["pending_partial_withdrawals"], versions["pending_deposits"])
+}
+
+// The response can be hundreds of MB on mainnet, so it must not stay in the pool.
+func TestResponseValidatorsDoesNotParkResponseInPool(t *testing.T) {
+	seed := new(strings.Builder)
+	saved := stringsBuilderPool
+	stringsBuilderPool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { stringsBuilderPool = saved })
+
+	const count = 16
+	validators := solid.NewValidatorSetWithLength(count, count)
+	balances := solid.NewUint64ListSSZ(count)
+	for i := range count {
+		balances.Append(uint64(i))
+	}
+
+	responseValidators(httptest.NewRecorder(), nil, nil, 0, balances, validators, true, false)
+
+	require.Zero(t, seed.Len(), "pooled builder still holds the whole response")
 }

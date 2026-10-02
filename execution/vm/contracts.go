@@ -27,6 +27,7 @@ import (
 	"maps"
 	"math/big"
 	"math/bits"
+	"slices"
 
 	"github.com/consensys/gnark-crypto/ecc"
 	bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381"
@@ -69,27 +70,55 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 	return maps.Clone(Precompiles(chainRules))
 }
 
-func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
-	switch {
-	case chainRules.IsParlia:
-		// BSC base cross-chain precompiles. Later BSC-fork sets (Nano+, Cancun
-		// KZG, Prague BLS) are added as those forks are reached.
-		return PrecompiledContractsIstanbulForBSC
-	case chainRules.IsOsaka:
-		return PrecompiledContractsOsaka
-	case chainRules.IsPrague:
-		return PrecompiledContractsPrague
-	case chainRules.IsCancun:
-		return PrecompiledContractsCancun
-	case chainRules.IsBerlin:
-		return PrecompiledContractsBerlin
-	case chainRules.IsIstanbul:
-		return PrecompiledContractsIstanbul
-	case chainRules.IsByzantium:
-		return PrecompiledContractsByzantium
-	default:
-		return PrecompiledContractsHomestead
+// forkTier indexes forkSets. It is derived from chainRules by the single
+// switch in forkTierFor, so the contracts map and the address list
+// for a fork can never drift apart the way two independent switches could.
+type forkTier int8
+
+const (
+	forkHomestead forkTier = iota
+	forkByzantium
+	forkIstanbul
+	forkBerlin
+	forkCancun
+	forkPrague
+	forkOsaka
+	forkIstanbulBSC
+	forkTierCount
+)
+
+type mergedPrecompileSet struct {
+	contracts PrecompiledContracts
+	addresses []accounts.Address
+}
+
+var forkSets [forkTierCount]mergedPrecompileSet
+
+func forkTierFor(chainRules *chain.Rules) forkTier {
+	if chainRules.IsParlia && chainRules.IsIstanbul {
+		return forkIstanbulBSC
 	}
+	switch {
+	case chainRules.IsOsaka:
+		return forkOsaka
+	case chainRules.IsPrague:
+		return forkPrague
+	case chainRules.IsCancun:
+		return forkCancun
+	case chainRules.IsBerlin:
+		return forkBerlin
+	case chainRules.IsIstanbul:
+		return forkIstanbul
+	case chainRules.IsByzantium:
+		return forkByzantium
+	default:
+		return forkHomestead
+	}
+}
+
+// Precompiles returns the precompiles active under chainRules.
+func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
+	return forkSets[forkTierFor(chainRules)].contracts
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -197,72 +226,50 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 }
 
 // PrecompiledContractsIstanbulForBSC is the Istanbul set plus BSC's cross-chain
-// light-client precompiles (0x64/0x65), active from Chapel genesis.
+// light-client precompiles.
 var PrecompiledContractsIstanbulForBSC = func() PrecompiledContracts {
 	m := maps.Clone(PrecompiledContractsIstanbul)
-	m[accounts.InternAddress(common.BytesToAddress([]byte{100}))] = &tmHeaderValidate{}
-	m[accounts.InternAddress(common.BytesToAddress([]byte{101}))] = &iavlMerkleProofValidate{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{0x64}))] = &tmHeaderValidate{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{0x65}))] = &iavlMerkleProofValidate{}
 	return m
 }()
 
 var (
-	PrecompiledAddressesOsaka          []accounts.Address
-	PrecompiledAddressesPrague         []accounts.Address
-	PrecompiledAddressesCancun         []accounts.Address
-	PrecompiledAddressesBerlin         []accounts.Address
-	PrecompiledAddressesIstanbul       []accounts.Address
-	PrecompiledAddressesIstanbulForBSC []accounts.Address
-	PrecompiledAddressesByzantium      []accounts.Address
-	PrecompiledAddressesHomestead      []accounts.Address
+	PrecompiledAddressesHomestead []accounts.Address
+	PrecompiledAddressesByzantium []accounts.Address
+	PrecompiledAddressesIstanbul  []accounts.Address
+	PrecompiledAddressesBerlin    []accounts.Address
+	PrecompiledAddressesCancun    []accounts.Address
+	PrecompiledAddressesPrague    []accounts.Address
+	PrecompiledAddressesOsaka     []accounts.Address
 )
 
 func init() {
-	for k := range PrecompiledContractsHomestead {
-		PrecompiledAddressesHomestead = append(PrecompiledAddressesHomestead, k)
-	}
-	for k := range PrecompiledContractsByzantium {
-		PrecompiledAddressesByzantium = append(PrecompiledAddressesByzantium, k)
-	}
-	for k := range PrecompiledContractsIstanbul {
-		PrecompiledAddressesIstanbul = append(PrecompiledAddressesIstanbul, k)
-	}
-	for k := range PrecompiledContractsIstanbulForBSC {
-		PrecompiledAddressesIstanbulForBSC = append(PrecompiledAddressesIstanbulForBSC, k)
-	}
-	for k := range PrecompiledContractsBerlin {
-		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
-	}
-	for k := range PrecompiledContractsCancun {
-		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
-	}
-	for k := range PrecompiledContractsPrague {
-		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
-	}
-	for k := range PrecompiledContractsOsaka {
-		PrecompiledAddressesOsaka = append(PrecompiledAddressesOsaka, k)
+	for tier, tierSet := range [forkTierCount]struct {
+		contracts PrecompiledContracts
+		addresses *[]accounts.Address
+	}{
+		forkHomestead: {PrecompiledContractsHomestead, &PrecompiledAddressesHomestead},
+		forkByzantium: {PrecompiledContractsByzantium, &PrecompiledAddressesByzantium},
+		forkIstanbul:  {PrecompiledContractsIstanbul, &PrecompiledAddressesIstanbul},
+		forkBerlin:    {PrecompiledContractsBerlin, &PrecompiledAddressesBerlin},
+		forkCancun:    {PrecompiledContractsCancun, &PrecompiledAddressesCancun},
+		forkPrague:    {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
+		forkOsaka:     {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
+
+		forkIstanbulBSC: {PrecompiledContractsIstanbulForBSC, nil},
+	} {
+		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
+		if tierSet.addresses != nil {
+			*tierSet.addresses = forkSets[tier].addresses
+		}
 	}
 }
 
-// ActivePrecompiles returns the precompiles enabled with the current configuration.
+// ActivePrecompiles returns the addresses of the precompiles enabled with the
+// current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
-	switch {
-	case rules.IsParlia:
-		return PrecompiledAddressesIstanbulForBSC
-	case rules.IsOsaka:
-		return PrecompiledAddressesOsaka
-	case rules.IsPrague:
-		return PrecompiledAddressesPrague
-	case rules.IsCancun:
-		return PrecompiledAddressesCancun
-	case rules.IsBerlin:
-		return PrecompiledAddressesBerlin
-	case rules.IsIstanbul:
-		return PrecompiledAddressesIstanbul
-	case rules.IsByzantium:
-		return PrecompiledAddressesByzantium
-	default:
-		return PrecompiledAddressesHomestead
-	}
+	return forkSets[forkTierFor(rules)].addresses
 }
 
 // RunPrecompiledContract runs and evaluates the output of a precompiled contract.

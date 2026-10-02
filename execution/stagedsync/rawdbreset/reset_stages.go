@@ -43,9 +43,6 @@ import (
 
 func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br dbservices.FullBlockReader, logger log.Logger) error {
 	// don't reset senders here
-	if err := db.Update(ctx, ResetWitnesses); err != nil {
-		return err
-	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
 	}
@@ -216,19 +213,6 @@ func ResetTxLookup(tx kv.RwTx) error {
 		return err
 	}
 	if err := stages.SaveStagePruneProgress(tx, stages.TxLookup, 0); err != nil {
-		return err
-	}
-	return nil
-}
-
-func ResetWitnesses(tx kv.RwTx) error {
-	if err := tx.ClearTable(kv.Witnesses); err != nil {
-		return err
-	}
-	if err := tx.ClearTable(kv.WitnessSizes); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.WitnessProcessing, 0); err != nil {
 		return err
 	}
 	return nil

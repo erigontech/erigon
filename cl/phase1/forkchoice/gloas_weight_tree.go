@@ -228,10 +228,10 @@ func growGloasContributions(applied []gloasVoteContribution, size int) []gloasVo
 	if len(applied) >= size {
 		return applied
 	}
-	nextCap := max(cap(applied)*2, size)
-	next := make([]gloasVoteContribution, size, nextCap)
-	copy(next, applied)
-	return next
+	oldLen := len(applied)
+	applied = slices.Grow(applied, size-oldLen)[:size]
+	clear(applied[oldLen:])
+	return applied
 }
 
 func (t *gloasWeightTree) addValidatorContribution(validatorIndex uint64, cs *checkpointState) {

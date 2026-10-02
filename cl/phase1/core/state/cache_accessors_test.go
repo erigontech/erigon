@@ -40,9 +40,9 @@ func TestComputeNextSyncCommittee_ZeroActiveValidators(t *testing.T) {
 		v.SetExitEpoch(0) // already exited → not active at any epoch
 		v.SetPublicKey(pk)
 		v.SetEffectiveBalance(2000000000)
-		s.AddValidator(v, 2000000000)
+		require.NoError(t, s.AddValidator(v, 2000000000))
 	}
-	s.SetSlot(8160)
+	require.NoError(t, s.SetSlot(8160))
 
 	_, err := s.ComputeNextSyncCommittee()
 	require.Error(t, err)

@@ -656,11 +656,14 @@ func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, stat
 	//return nil
 }
 
-func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) {
+func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) error {
 	for addressValue, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		address := accounts.InternAddress(addressValue)
-		state.SetCode(address, rewrittenCode, tracing.CodeChangeUnspecified)
+		if err := state.SetCode(address, rewrittenCode, tracing.CodeChangeUnspecified); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
@@ -674,7 +677,9 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 		return err
 	}
 
-	c.rewriteBytecode(blockNum, state)
+	if err := c.rewriteBytecode(blockNum, state); err != nil {
+		return err
+	}
 
 	syscall := func(addr accounts.Address, data []byte) ([]byte, error) {
 		return syscallCustom(addr, data, state, header, false /* constCall */)
@@ -778,6 +783,14 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 }
 
 func (c *AuRa) TxDependencies(h *types.Header) [][]int {
+	return nil
+}
+
+func (c *AuRa) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
+	return false, nil
+}
+
+func (c *AuRa) ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error {
 	return nil
 }
 
@@ -1180,7 +1193,7 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 	amounts := make([]uint64, 0, len(withdrawals))
 	addresses := make([]common.Address, 0, len(withdrawals))
 	for _, w := range withdrawals {
-		amounts = append(amounts, w.Amount)
+		amounts = append(amounts, uint64(w.Amount))
 		addresses = append(addresses, w.Address)
 	}
 
@@ -1194,6 +1207,10 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 		log.Warn("ExecuteSystemWithdrawals", "err", err)
 	}
 	return err
+}
+
+func (c *AuRa) FeePolicy(header *types.Header) evmtypes.FeePolicy {
+	return evmtypes.FeePolicy{}
 }
 
 func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
