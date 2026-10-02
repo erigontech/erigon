@@ -530,9 +530,6 @@ func (t *Trie) ownsRecordKey(key []byte) bool {
 	if len(key) == 0 {
 		return false
 	}
-	if bytes.Equal(key, GlobalRootKey()) {
-		return t.ownedPrefix.BitLen == 0
-	}
 	return ownsRecordKey(key, t.ownedPrefix)
 }
 

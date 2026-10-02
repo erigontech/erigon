@@ -48,7 +48,6 @@ func ChunkifyCode(code []byte) [][ValueLength]byte {
 	// pushdataAt[i] is how many bytes from i on are still PUSHDATA. It runs a whole
 	// chunk past the code so a PUSH32 on the last byte has room.
 	pushdataAt := make([]byte, len(padded)+ValueLength)
-	clear(pushdataAt)
 	for pos := 0; pos < len(padded); {
 		var pushdata int
 		if padded[pos] >= Push1 && padded[pos] <= Push32 {
