@@ -582,7 +582,49 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 
 		// execute the operation
-		pc, res, err = operation.execute(pc, evm, callContext)
+		switch op {
+		case PUSH1:
+			pc, res, err = opPush1(pc, evm, callContext)
+		case PUSH2:
+			pc, res, err = opPush2(pc, evm, callContext)
+		case JUMP:
+			pc, res, err = opJump(pc, evm, callContext)
+		case JUMPI:
+			pc, res, err = opJumpi(pc, evm, callContext)
+		case JUMPDEST:
+		case POP:
+			stack.drop()
+		case DUP1, DUP2, DUP3, DUP4, DUP5, DUP6, DUP7, DUP8:
+			stack.dup(int(op - DUP1))
+		case SWAP1:
+			pc, res, err = opSwap1(pc, evm, callContext)
+		case SWAP2:
+			pc, res, err = opSwap2(pc, evm, callContext)
+		case SWAP3:
+			pc, res, err = opSwap3(pc, evm, callContext)
+		case SWAP4:
+			pc, res, err = opSwap4(pc, evm, callContext)
+		case ADD:
+			pc, res, err = opAdd(pc, evm, callContext)
+		case SUB:
+			pc, res, err = opSub(pc, evm, callContext)
+		case AND:
+			pc, res, err = opAnd(pc, evm, callContext)
+		case ISZERO:
+			pc, res, err = opIszero(pc, evm, callContext)
+		case LT:
+			pc, res, err = opLt(pc, evm, callContext)
+		case GT:
+			pc, res, err = opGt(pc, evm, callContext)
+		case EQ:
+			pc, res, err = opEq(pc, evm, callContext)
+		case MLOAD:
+			pc, res, err = opMload(pc, evm, callContext)
+		case MSTORE:
+			pc, res, err = opMstore(pc, evm, callContext)
+		default:
+			pc, res, err = operation.execute(pc, evm, callContext)
+		}
 		if err != nil {
 			break
 		}
