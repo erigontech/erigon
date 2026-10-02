@@ -57,7 +57,7 @@ func TestValueTiebreaker_BalancePath(t *testing.T) {
 
 	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
 		readVal, liveBalance, eqUint256, absentUint256, recordBalance, // value tiebreaker
-		func(rv, wv Version) VersionValidity { return VersionValid },
+		exactVersion,
 		false, "")
 
 	assert.Equal(t, VersionValid, valid, "Should be valid when StorageRead value matches versionMap Done value")
