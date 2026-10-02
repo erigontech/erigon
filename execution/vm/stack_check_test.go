@@ -123,6 +123,15 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		}
 	}
 	for i, jt := range tables {
+		push0 := &jt[PUSH0]
+		if push0.numPush == 1 {
+			require.Equal(t, reflect.ValueOf(opPush0).Pointer(), reflect.ValueOf(push0.execute).Pointer(), "table %d PUSH0 execute", i)
+			require.Equal(t, GasQuickStep, push0.constantGas, "table %d PUSH0 gas", i)
+			require.Zero(t, push0.numPop, "table %d PUSH0 numPop", i)
+			require.Nil(t, push0.dynamicGas, "table %d PUSH0 dynamicGas", i)
+		} else {
+			require.Equal(t, reflect.ValueOf(opUndefined).Pointer(), reflect.ValueOf(push0.execute).Pointer(), "table %d PUSH0 execute", i)
+		}
 		for op, w := range fast {
 			got := &jt[op]
 			if w.execute != nil {

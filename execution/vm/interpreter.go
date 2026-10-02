@@ -474,6 +474,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	anyTrace := dbg.TraceDynamicGas || debug || trace
 	stack := &callContext.Stack
 	jt := evm.jt
+	hasPush0 := jt[PUSH0].numPush == 1
 
 run:
 	for {
@@ -484,6 +485,13 @@ run:
 		if !anyTrace {
 			sLen, gas := stack.len(), callContext.gas
 			switch op {
+			case PUSH0:
+				if hasPush0 && sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					stack.pushRef().Clear()
+					pc++
+					continue
+				}
 			case PUSH1:
 				if sLen < stackLimit && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
