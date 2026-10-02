@@ -361,6 +361,8 @@ func TestBSCForkPrecompileSets(t *testing.T) {
 	cancun.IsShanghai, cancun.IsCancun = true, true
 	haber := cancun
 	haber.IsHaber = true
+	prague := haber
+	prague.IsPrague = true
 
 	for _, tc := range []struct {
 		name       string
@@ -371,14 +373,16 @@ func TestBSCForkPrecompileSets(t *testing.T) {
 		doubleSign bool
 		pointEval  bool
 		p256       PrecompiledContract
+		eip2537    bool
 	}{
-		{"planck", chain.Rules{IsParlia: true, IsNano: true, IsMoran: true, IsPlanck: true}, false, nil, &bigModExp{eip2565: false}, false, false, nil},
-		{"luban", chain.Rules{IsParlia: true, IsNano: true, IsMoran: true, IsPlanck: true, IsLuban: true}, true, &cometBFTLightBlockValidate{}, &bigModExp{eip2565: false}, false, false, nil},
-		{"plato", chain.Rules{IsParlia: true, IsNano: true, IsMoran: true, IsPlanck: true, IsLuban: true, IsPlato: true}, true, &cometBFTLightBlockValidate{}, &bigModExp{eip2565: false}, false, false, nil},
-		{"hertz", hertz, true, &cometBFTLightBlockValidateHertz{}, &bigModExp{eip2565: true}, false, false, nil},
-		{"feynman", feynman, true, &cometBFTLightBlockValidateHertz{}, &bigModExp{eip2565: true}, true, false, nil},
-		{"cancun", cancun, true, &cometBFTLightBlockValidateHertz{}, &bigModExp{eip2565: true}, true, true, nil},
-		{"haber", haber, true, &cometBFTLightBlockValidateHertz{}, &bigModExp{eip2565: true}, true, true, &p256Verify{eip7951: false}},
+		{"planck", chain.Rules{IsParlia: true, IsNano: true, IsMoran: true, IsPlanck: true}, false, nil, &bigModExp{eip2565: false}, false, false, nil, false},
+		{"luban", chain.Rules{IsParlia: true, IsNano: true, IsMoran: true, IsPlanck: true, IsLuban: true}, true, &cometBFTLightBlockValidate{}, &bigModExp{eip2565: false}, false, false, nil, false},
+		{"plato", chain.Rules{IsParlia: true, IsNano: true, IsMoran: true, IsPlanck: true, IsLuban: true, IsPlato: true}, true, &cometBFTLightBlockValidate{}, &bigModExp{eip2565: false}, false, false, nil, false},
+		{"hertz", hertz, true, &cometBFTLightBlockValidateHertz{}, &bigModExp{eip2565: true}, false, false, nil, false},
+		{"feynman", feynman, true, &cometBFTLightBlockValidateHertz{}, &bigModExp{eip2565: true}, true, false, nil, false},
+		{"cancun", cancun, true, &cometBFTLightBlockValidateHertz{}, &bigModExp{eip2565: true}, true, true, nil, false},
+		{"haber", haber, true, &cometBFTLightBlockValidateHertz{}, &bigModExp{eip2565: true}, true, true, &p256Verify{eip7951: false}, false},
+		{"prague", prague, true, &cometBFTLightBlockValidateHertz{}, &bigModExp{eip2565: true}, true, true, &p256Verify{eip7951: false}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			set := Precompiles(&tc.rules)
@@ -399,6 +403,12 @@ func TestBSCForkPrecompileSets(t *testing.T) {
 				require.Equal(t, tc.p256, set[addr(0x01, 0x00)])
 			} else {
 				require.NotContains(t, set, addr(0x01, 0x00))
+			}
+			if tc.eip2537 {
+				require.IsType(t, &bls12381G1Add{}, set[addr(0x0b)])
+				require.IsType(t, &bls12381MapFp2ToG2{}, set[addr(0x11)])
+			} else {
+				require.NotContains(t, set, addr(0x0b))
 			}
 			if tc.doubleSign {
 				require.IsType(t, &verifyDoubleSignEvidence{}, set[addr(104)])
