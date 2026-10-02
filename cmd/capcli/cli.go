@@ -694,7 +694,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	}
 
 	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1431,7 +1431,7 @@ func (c *DumpStateSnapshots) Run(ctx context.Context) error {
 		return err
 	}
 	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}

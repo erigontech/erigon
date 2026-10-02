@@ -125,15 +125,19 @@ func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 }
 
 // BlobAndProofV1 holds one item for engine_getBlobsV1
+//
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobAndProofV1
 type BlobAndProofV1 struct {
-	Blob  hexutil.Bytes `json:"blob"`
-	Proof hexutil.Bytes `json:"proof"`
+	Blob  hexutil.Bytes `json:"blob" ethjson:"data"`
+	Proof hexutil.Bytes `json:"proof" ethjson:"data"`
 }
 
 // BlobAndProofV2 holds one item for engine_getBlobsV2/engine_getBlobsV3
+//
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobAndProofV2
 type BlobAndProofV2 struct {
-	Blob       hexutil.Bytes   `json:"blob"`
-	CellProofs []hexutil.Bytes `json:"proofs"`
+	Blob       hexutil.Bytes   `json:"blob" ethjson:"data"`
+	CellProofs []hexutil.Bytes `json:"proofs" ethjson:"datalist"`
 }
 
 type BlobCellsAndProofsV1 struct {
