@@ -56,6 +56,8 @@ func TestInvertedIndexPrefetchCursor(t *testing.T) {
 		{[]byte("uncommitted"), []byte("value")},
 	}
 	p := newInvertedIndexPrefetcher(db, kv.TblTracesToIdx, 3)
+	require.NoError(t, p.open(t.Context()))
+	defer p.close()
 	require.NoError(t, p.prefetch(t.Context(), pairs))
 	k, v, err = c.Current()
 	require.NoError(t, err)
@@ -73,22 +75,28 @@ func TestInvertedIndexPrefetchCursor(t *testing.T) {
 type prefetchTestDB struct {
 	kv.RoDB
 	newCursor func(context.Context) kv.CursorDupSort
+	rollback  func()
 }
 
 func (db *prefetchTestDB) BeginRo(ctx context.Context) (kv.Tx, error) {
-	return &prefetchTestTx{cursor: db.newCursor(ctx)}, nil
+	return &prefetchTestTx{newCursor: func() kv.CursorDupSort { return db.newCursor(ctx) }, rollback: db.rollback}, nil
 }
 
 type prefetchTestTx struct {
 	kv.Tx
-	cursor kv.CursorDupSort
+	newCursor func() kv.CursorDupSort
+	rollback  func()
 }
 
 func (tx *prefetchTestTx) CursorDupSort(string) (kv.CursorDupSort, error) {
-	return tx.cursor, nil
+	return tx.newCursor(), nil
 }
 
-func (tx *prefetchTestTx) Rollback() {}
+func (tx *prefetchTestTx) Rollback() {
+	if tx.rollback != nil {
+		tx.rollback()
+	}
+}
 
 type prefetchTestCursor struct {
 	kv.CursorDupSort
@@ -126,6 +134,8 @@ func TestInvertedIndexPrefetcherBatches(t *testing.T) {
 			}
 		}}
 		p := newInvertedIndexPrefetcher(db, "index", workers)
+		require.NoError(t, p.open(t.Context()))
+		defer p.close()
 		var pairs [][2][]byte
 		for key := range 7 {
 			pairs = append(pairs, [2][]byte{{byte(key)}, nil})
@@ -176,6 +186,8 @@ func TestInvertedIndexPrefetcherErrorWaitsForReaders(t *testing.T) {
 			}}
 		}}
 		p := newInvertedIndexPrefetcher(db, "index", 2)
+		require.NoError(t, p.open(ctx))
+		defer p.close()
 		done := make(chan error, 1)
 		go func() { done <- p.prefetch(ctx, [][2][]byte{{{0}, nil}, {{1}, nil}}) }()
 		synctest.Wait()
@@ -202,6 +214,8 @@ func TestInvertedIndexPrefetcherCancellation(t *testing.T) {
 			}}
 		}}
 		p := newInvertedIndexPrefetcher(db, "index", 1)
+		require.NoError(t, p.open(ctx))
+		defer p.close()
 		done := make(chan error, 1)
 		go func() { done <- p.prefetch(ctx, [][2][]byte{{{0}, nil}}) }()
 		synctest.Wait()
