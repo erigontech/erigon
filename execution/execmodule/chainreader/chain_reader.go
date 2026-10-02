@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/engineadapter"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -331,7 +332,7 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(ctx context.Context, id uint64)
 	}
 
 	// The beacon block producer supplies the consensus version.
-	eth1Block, err := payload.ToEth1Block(clparams.Phase0Version, &clparams.MainnetBeaconConfig)
+	eth1Block, err := engineadapter.ToEth1Block(payload, clparams.Phase0Version, &clparams.MainnetBeaconConfig)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

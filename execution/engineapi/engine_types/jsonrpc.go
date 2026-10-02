@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/version"
@@ -35,26 +34,25 @@ import (
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash      common.Hash           `json:"parentHash"`
-	FeeRecipient    common.Address        `json:"feeRecipient"`
-	StateRoot       common.Hash           `json:"stateRoot"`
-	ReceiptsRoot    common.Hash           `json:"receiptsRoot"`
-	LogsBloom       hexutil.Bytes         `json:"logsBloom"`
-	PrevRandao      common.Hash           `json:"prevRandao"`
-	BlockNumber     hexutil.Uint64        `json:"blockNumber"`
-	GasLimit        hexutil.Uint64        `json:"gasLimit"`
-	GasUsed         hexutil.Uint64        `json:"gasUsed"`
-	Timestamp       hexutil.Uint64        `json:"timestamp"`
-	ExtraData       hexutil.Bytes         `json:"extraData"`
-	BaseFeePerGas   *hexutil.U256         `json:"baseFeePerGas"`
-	BlockHash       common.Hash           `json:"blockHash"`
-	Transactions    []hexutil.Bytes       `json:"transactions"`
-	Withdrawals     []*types.Withdrawal   `json:"withdrawals"`
-	BlobGasUsed     *hexutil.Uint64       `json:"blobGasUsed"`
-	ExcessBlobGas   *hexutil.Uint64       `json:"excessBlobGas"`
-	SlotNumber      *hexutil.Uint64       `json:"slotNumber,omitempty"`
-	BlockAccessList *hexutil.Bytes        `json:"blockAccessList,omitempty"`
-	SSZVersion      clparams.StateVersion `json:"-"`
+	ParentHash      common.Hash         `json:"parentHash"`
+	FeeRecipient    common.Address      `json:"feeRecipient"`
+	StateRoot       common.Hash         `json:"stateRoot"`
+	ReceiptsRoot    common.Hash         `json:"receiptsRoot"`
+	LogsBloom       hexutil.Bytes       `json:"logsBloom"`
+	PrevRandao      common.Hash         `json:"prevRandao"`
+	BlockNumber     hexutil.Uint64      `json:"blockNumber"`
+	GasLimit        hexutil.Uint64      `json:"gasLimit"`
+	GasUsed         hexutil.Uint64      `json:"gasUsed"`
+	Timestamp       hexutil.Uint64      `json:"timestamp"`
+	ExtraData       hexutil.Bytes       `json:"extraData"`
+	BaseFeePerGas   *hexutil.U256       `json:"baseFeePerGas"`
+	BlockHash       common.Hash         `json:"blockHash"`
+	Transactions    []hexutil.Bytes     `json:"transactions"`
+	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
+	BlobGasUsed     *hexutil.Uint64     `json:"blobGasUsed"`
+	ExcessBlobGas   *hexutil.Uint64     `json:"excessBlobGas"`
+	SlotNumber      *hexutil.Uint64     `json:"slotNumber,omitempty"`
+	BlockAccessList *hexutil.Bytes      `json:"blockAccessList,omitempty"`
 }
 
 // ForkChoiceState is the head/safe/finalized triple of engine_forkchoiceUpdated.
@@ -66,14 +64,13 @@ type ForkChoiceState struct {
 
 // PayloadAttributes represent the attributes required to start assembling a payload
 type PayloadAttributes struct {
-	Timestamp             hexutil.Uint64        `json:"timestamp"`
-	PrevRandao            common.Hash           `json:"prevRandao"`
-	SuggestedFeeRecipient common.Address        `json:"suggestedFeeRecipient"`
-	Withdrawals           []*types.Withdrawal   `json:"withdrawals"`
-	ParentBeaconBlockRoot *common.Hash          `json:"parentBeaconBlockRoot"`
-	SlotNumber            *hexutil.Uint64       `json:"slotNumber"`
-	TargetGasLimit        *hexutil.Uint64       `json:"targetGasLimit"`
-	SSZVersion            clparams.StateVersion `json:"-"`
+	Timestamp             hexutil.Uint64      `json:"timestamp"`
+	PrevRandao            common.Hash         `json:"prevRandao"`
+	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient"`
+	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
+	ParentBeaconBlockRoot *common.Hash        `json:"parentBeaconBlockRoot"`
+	SlotNumber            *hexutil.Uint64     `json:"slotNumber"`
+	TargetGasLimit        *hexutil.Uint64     `json:"targetGasLimit"`
 }
 
 //go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobsBundle
@@ -82,10 +79,9 @@ type PayloadAttributes struct {
 // It covers both BlobsBundleV1 (https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#blobsbundlev1)
 // and BlobsBundleV2 (https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#blobsbundlev2)
 type BlobsBundle struct {
-	Commitments []hexutil.Bytes       `json:"commitments" ethjson:"datalist"`
-	Proofs      []hexutil.Bytes       `json:"proofs" ethjson:"datalist"`
-	Blobs       []hexutil.Bytes       `json:"blobs" ethjson:"datalist"`
-	SSZVersion  clparams.StateVersion `json:"-"`
+	Commitments []hexutil.Bytes `json:"commitments" ethjson:"datalist"`
+	Proofs      []hexutil.Bytes `json:"proofs" ethjson:"datalist"`
+	Blobs       []hexutil.Bytes `json:"blobs" ethjson:"datalist"`
 }
 
 // BlobsBundleFromTransactions builds a BlobsBundle by extracting blobs,

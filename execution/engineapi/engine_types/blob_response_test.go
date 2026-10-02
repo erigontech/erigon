@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -51,7 +52,7 @@ func TestBlobsBundleV2MarshalFastJSONMatchesReflection(t *testing.T) {
 }
 
 func TestBlobsBundleV3MarshalFastJSONMatchesReflection(t *testing.T) {
-	full := blobCellsAndProofsBundle(128, sszCellsPerExtBlob)
+	full := blobCellsAndProofsBundle(128, int(params.CellsPerExtBlob))
 	var nilBytes hexutil.Bytes
 	cases := map[string]BlobsBundleV3{
 		"nil bundle":       nil,
@@ -120,7 +121,7 @@ func blobCellsAndProofsBundle(blobs, cells int) []*BlobCellsAndProofsV1 {
 			for k := range cell {
 				cell[k] = byte(i + j + k)
 			}
-			proof := make(hexutil.Bytes, sszKZGBytes)
+			proof := make(hexutil.Bytes, len(types.KZGProof{}))
 			for k := range proof {
 				proof[k] = byte(j + k)
 			}
@@ -137,13 +138,13 @@ func worstCaseBundleV2() BlobsBundleV2 {
 	const blobs = 128
 	bundle := make(BlobsBundleV2, blobs)
 	for i := range bundle {
-		blob := make(hexutil.Bytes, sszBlobBytes)
+		blob := make(hexutil.Bytes, params.BlobSize)
 		for j := range blob {
 			blob[j] = byte(i + j)
 		}
-		proofs := make([]hexutil.Bytes, sszCellsPerExtBlob)
+		proofs := make([]hexutil.Bytes, params.CellsPerExtBlob)
 		for c := range proofs {
-			p := make(hexutil.Bytes, sszKZGBytes)
+			p := make(hexutil.Bytes, len(types.KZGProof{}))
 			for j := range p {
 				p[j] = byte(c + j)
 			}

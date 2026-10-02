@@ -14,6 +14,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/engineadapter"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -206,7 +207,7 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	e.logger.Info("[SSZ-REST] handled new payload", "path", r.URL.Path)
-	writeSSZ(w, status)
+	writeSSZ(w, (*engineadapter.PayloadStatus)(status))
 }
 
 func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Request, version int, payloadID string) {
@@ -226,9 +227,8 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 			writeEngineError(w, err)
 			return
 		}
-		resp.SSZVersion = clparams.BellatrixVersion
 		e.logger.Info("[SSZ-REST] handled get payload", "path", r.URL.Path)
-		writeSSZ(w, resp)
+		writeSSZ(w, &engineadapter.ExecutionPayload{ExecutionPayload: *resp, SSZVersion: clparams.BellatrixVersion})
 	default:
 		resp, err := callGetPayload(r.Context(), e, version, id)
 		if err != nil {
