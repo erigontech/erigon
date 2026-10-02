@@ -36,7 +36,6 @@ func (t *Trie) newVerifier() *Trie {
 		suppressBucketRecords: t.suppressBucketRecords,
 		verifyOnly:            true,
 	}
-	initTrieMaps(verifier)
 	if t.ownedPrefix != nil {
 		prefix := *t.ownedPrefix
 		verifier.ownedPrefix = &prefix

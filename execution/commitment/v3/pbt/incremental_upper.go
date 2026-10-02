@@ -72,7 +72,8 @@ func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (
 		}
 		t.rootDirty = true
 	}
-	keys := slices.Sorted(maps.Keys(changed))
+	keys := slices.AppendSeq(make([]string, 0, len(changed)), maps.Keys(changed))
+	slices.Sort(keys)
 	for _, key := range keys {
 		result := changed[key]
 		prefix := result.prefix

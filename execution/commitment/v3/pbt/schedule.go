@@ -162,7 +162,8 @@ func buildPhasePlanWithThreshold(ops []Op, threshold int) (phasePlan, error) {
 				groups[name] = append(groups[name], op)
 				prefixes[name] = prefix
 			}
-			groupNames := slices.Sorted(maps.Keys(groups))
+			groupNames := slices.AppendSeq(make([]string, 0, len(groups)), maps.Keys(groups))
+			slices.Sort(groupNames)
 			dependencies := make([]int, 0, len(groupNames))
 			for _, name := range groupNames {
 				index := len(tasks)

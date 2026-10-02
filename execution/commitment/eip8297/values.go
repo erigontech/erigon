@@ -124,16 +124,30 @@ func EncodeStorageValue(value []byte) [ValueLength]byte {
 }
 
 func EncodeLeafValue(treeKey []byte, val *[ValueLength]byte) ([]byte, error) {
-	zone, err := leafValueZone(treeKey)
-	if err != nil {
-		return nil, err
+	if len(treeKey) == 0 {
+		return nil, fmt.Errorf("%w: empty tree key", ErrLeafValue)
+	}
+	zone := treeKey[0]
+	want, known := ZoneKeyLength(zone)
+	if !known || len(treeKey) != want {
+		return nil, fmt.Errorf("%w: tree key %#x has invalid zone or length", ErrLeafValue, treeKey)
 	}
 
 	switch zone {
 	case StorageZone:
-		return encodeLeadingTrimmedValue(val[:], "zero storage value")
+		first := 0
+		for first < ValueLength && val[first] == 0 {
+			first++
+		}
+		if first == ValueLength {
+			return nil, fmt.Errorf("%w: zero storage value", ErrLeafValue)
+		}
+		return append([]byte(nil), val[first:]...), nil
 	case CodeZone:
-		last := len(bytes.TrimRight(val[:], "\x00"))
+		last := ValueLength
+		for last > 0 && val[last-1] == 0 {
+			last--
+		}
 		if last == 0 {
 			return nil, fmt.Errorf("%w: zero code chunk", ErrLeafValue)
 		}
@@ -148,9 +162,18 @@ func EncodeLeafValue(treeKey []byte, val *[ValueLength]byte) ([]byte, error) {
 		if val[0] != 0 || val[1] != 0 || val[2] != 0 || val[3] != 0 {
 			return nil, fmt.Errorf("%w: BASIC_DATA version or reserved bytes are non-zero", ErrLeafValue)
 		}
-		codeSizeLen := len(bytes.TrimLeft(val[BasicDataCodeSizeOffset:BasicDataCodeSizeOffset+4], "\x00"))
-		nonceLen := len(bytes.TrimLeft(val[BasicDataNonceOffset:BasicDataNonceOffset+8], "\x00"))
-		balanceLen := len(bytes.TrimLeft(val[BasicDataBalanceOffset:BasicDataBalanceOffset+16], "\x00"))
+		codeSizeLen := 4
+		for codeSizeLen > 0 && val[BasicDataCodeSizeOffset+4-codeSizeLen] == 0 {
+			codeSizeLen--
+		}
+		nonceLen := 8
+		for nonceLen > 0 && val[BasicDataNonceOffset+8-nonceLen] == 0 {
+			nonceLen--
+		}
+		balanceLen := 16
+		for balanceLen > 0 && val[BasicDataBalanceOffset+16-balanceLen] == 0 {
+			balanceLen--
+		}
 		widths := uint16(codeSizeLen)<<9 | uint16(nonceLen)<<5 | uint16(balanceLen)
 		enc := make([]byte, 0, 2+codeSizeLen+nonceLen+balanceLen)
 		enc = binary.BigEndian.AppendUint16(enc, widths)
@@ -174,7 +197,14 @@ func EncodeLeafValue(treeKey []byte, val *[ValueLength]byte) ([]byte, error) {
 		}
 		return append([]byte(nil), val[3:23]...), nil
 	case subIndex >= HeaderStorageOffset && subIndex < HeaderStorageOffset+HeaderStorageSlots:
-		return encodeLeadingTrimmedValue(val[:], "zero header storage value")
+		first := 0
+		for first < ValueLength && val[first] == 0 {
+			first++
+		}
+		if first == ValueLength {
+			return nil, fmt.Errorf("%w: zero header storage value", ErrLeafValue)
+		}
+		return append([]byte(nil), val[first:]...), nil
 	default:
 		return append([]byte(nil), val[:]...), nil
 	}
@@ -197,14 +227,22 @@ func DecodeLeafValue(treeKey []byte, enc []byte) ([ValueLength]byte, error) {
 
 func decodeLeafValue(treeKey []byte, enc []byte) ([ValueLength]byte, error) {
 	var val [ValueLength]byte
-	zone, err := leafValueZone(treeKey)
-	if err != nil {
-		return val, err
+	if len(treeKey) == 0 {
+		return val, fmt.Errorf("%w: empty tree key", ErrLeafValue)
+	}
+	zone := treeKey[0]
+	want, known := ZoneKeyLength(zone)
+	if !known || len(treeKey) != want {
+		return val, fmt.Errorf("%w: tree key %#x has invalid zone or length", ErrLeafValue, treeKey)
 	}
 
 	switch zone {
 	case StorageZone:
-		return decodeTrimmedValue(enc, "storage value")
+		if len(enc) == 0 || len(enc) > ValueLength || enc[0] == 0 {
+			return val, fmt.Errorf("%w: storage value has invalid length", ErrLeafValue)
+		}
+		copy(val[ValueLength-len(enc):], enc)
+		return val, nil
 	case CodeZone:
 		if len(enc) == 0 || len(enc) > ValueLength || enc[len(enc)-1] == 0 {
 			return val, fmt.Errorf("%w: code chunk has invalid length", ErrLeafValue)
@@ -274,7 +312,11 @@ func decodeLeafValue(treeKey []byte, enc []byte) ([ValueLength]byte, error) {
 		copy(val[3:23], enc)
 		return val, nil
 	case subIndex >= HeaderStorageOffset && subIndex < HeaderStorageOffset+HeaderStorageSlots:
-		return decodeTrimmedValue(enc, "header storage value")
+		if len(enc) == 0 || len(enc) > ValueLength || enc[0] == 0 {
+			return val, fmt.Errorf("%w: header storage value has invalid length", ErrLeafValue)
+		}
+		copy(val[ValueLength-len(enc):], enc)
+		return val, nil
 	default:
 		if len(enc) != ValueLength {
 			return val, fmt.Errorf("%w: reserved account value has length %d", ErrLeafValue, len(enc))
@@ -282,33 +324,4 @@ func decodeLeafValue(treeKey []byte, enc []byte) ([ValueLength]byte, error) {
 		copy(val[:], enc)
 		return val, nil
 	}
-}
-
-func leafValueZone(treeKey []byte) (byte, error) {
-	if len(treeKey) == 0 {
-		return 0, fmt.Errorf("%w: empty tree key", ErrLeafValue)
-	}
-	zone := treeKey[0]
-	want, known := ZoneKeyLength(zone)
-	if !known || len(treeKey) != want {
-		return 0, fmt.Errorf("%w: tree key %#x has invalid zone or length", ErrLeafValue, treeKey)
-	}
-	return zone, nil
-}
-
-func encodeLeadingTrimmedValue(value []byte, zeroMessage string) ([]byte, error) {
-	trimmed := bytes.TrimLeft(value, "\x00")
-	if len(trimmed) == 0 {
-		return nil, fmt.Errorf("%w: %s", ErrLeafValue, zeroMessage)
-	}
-	return append([]byte(nil), trimmed...), nil
-}
-
-func decodeTrimmedValue(enc []byte, name string) ([ValueLength]byte, error) {
-	var value [ValueLength]byte
-	if len(enc) == 0 || len(enc) > ValueLength || enc[0] == 0 {
-		return value, fmt.Errorf("%w: %s has invalid length", ErrLeafValue, name)
-	}
-	copy(value[ValueLength-len(enc):], enc)
-	return value, nil
 }

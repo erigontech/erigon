@@ -480,7 +480,8 @@ func mergeRoundDeltas(deltas []commitment.BranchDelta) []commitment.BranchDelta 
 		}
 		byKey[key] = commitment.BranchDelta{Key: bytes.Clone(delta.Key), Data: bytes.Clone(delta.Data), Prev: bytes.Clone(delta.Prev)}
 	}
-	keys := slices.Sorted(maps.Keys(byKey))
+	keys := slices.AppendSeq(make([]string, 0, len(byKey)), maps.Keys(byKey))
+	slices.Sort(keys)
 	result := make([]commitment.BranchDelta, 0, len(keys))
 	for _, key := range keys {
 		delta := byKey[key]

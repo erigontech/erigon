@@ -83,10 +83,10 @@ func TestTrieRowArenaReusesAllChunksAfterReset(t *testing.T) {
 		_, err := trie.Process(ops)
 		require.NoError(t, err)
 		if chunks == 0 {
-			chunks = len(trie.rowArena.chunks)
+			chunks = len(trie.rowChunks)
 		}
-		if len(trie.rowArena.chunks) != chunks {
-			t.Fatalf("row arena retained %d chunks", len(trie.rowArena.chunks))
+		if len(trie.rowChunks) != chunks {
+			t.Fatalf("row arena retained %d chunks", len(trie.rowChunks))
 		}
 	}
 }
@@ -103,10 +103,10 @@ func TestTrieCellArenaReusesAllChunksAfterReset(t *testing.T) {
 		_, err := trie.Process(ops)
 		require.NoError(t, err)
 		if chunks == 0 {
-			chunks = len(trie.cellArena.chunks)
+			chunks = len(trie.cellChunks)
 		}
-		if len(trie.cellArena.chunks) != chunks {
-			t.Fatalf("cell arena retained %d chunks", len(trie.cellArena.chunks))
+		if len(trie.cellChunks) != chunks {
+			t.Fatalf("cell arena retained %d chunks", len(trie.cellChunks))
 		}
 	}
 }
