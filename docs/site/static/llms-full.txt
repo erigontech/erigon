@@ -5355,9 +5355,9 @@ A call object whose `chainId` is not the node's is rejected with `-32602` (`chai
 
 ### eth_syncing and eth_subscribe("syncing")
 
-`eth_syncing` returns `false` once the node is fewer than 8 blocks behind the highest block it has seen; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). Both report `startingBlock` as the block where the current sync session began.
+`eth_syncing` returns `false` when the current block is within 8 blocks of the highest block seen, in either direction; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). A node more than 8 blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. Both report `startingBlock` as the block where the current sync session began.
 
-`eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then one message per change: the same object with `syncing: true` while syncing, or `false` once synced.
+`eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
 
 ### eth_getProof
 
@@ -8290,7 +8290,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 
 28. **My node has no peers or won't sync. Which ports do I need to open?** Erigon needs several ports reachable (both TCP and UDP where applicable): `30303`/`30304` (execution-layer P2P), `4000` and `4001` (Caplin consensus peering), and `42069` (BitTorrent snapshot download). Keep the RPC port (`8545`) bound to localhost and never expose it publicly. If your node is behind NAT, set `--nat` and `--caplin.nat` to `stun` or `upnp` and forward those ports on your router. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports) and [NAT](https://docs.erigon.tech/fundamentals/nat).
 
-29. **How do I reduce Erigon's memory use or stop it from being OOM-killed?** Erigon and the Go runtime size their memory and CPU use from the resources they can see, so on a shared or memory-constrained host you can make them more conservative. Since 3.7 Erigon sets `GOMEMLIMIT` itself to 80% of the lower of RAM and the container memory limit, unless you set it (`GOMEMLIMIT=off` leaves the heap unbounded); set it explicitly to go lower (e.g. `GOMEMLIMIT=26GiB`), lower `GOGC` (e.g. `GOGC=80`), cap `GOMAXPROCS` (e.g. to half your cores), and reduce `--batchSize` (e.g. `--batchSize=256m`). See [Common Errors and Solutions](https://docs.erigon.tech/help-center/common-errors-and-solutions) and [Performance Tricks](https://docs.erigon.tech/fundamentals/performance-tricks).
+29. **How do I reduce Erigon's memory use or stop it from being OOM-killed?** Erigon and the Go runtime size their memory and CPU use from the resources they can see, so on a shared or memory-constrained host you can make them more conservative. Since 3.7 Erigon sets `GOMEMLIMIT` itself to 80% of the lower of RAM and the container memory limit, unless you set it (`GOMEMLIMIT=off` leaves the heap unbounded); set it explicitly to go lower (e.g. `GOMEMLIMIT=20GiB` on a 32 GB host), lower `GOGC` (e.g. `GOGC=80`), cap `GOMAXPROCS` (e.g. to half your cores), and reduce `--batchSize` (e.g. `--batchSize=256m`). See [Common Errors and Solutions](https://docs.erigon.tech/help-center/common-errors-and-solutions) and [Performance Tricks](https://docs.erigon.tech/fundamentals/performance-tricks).
 
 30. **Where do I report a security vulnerability?** Erigon is covered by the Ethereum Foundation's [Bug Bounty Program](https://ethereum.org/bug-bounty). Report security issues there so they can be handled responsibly — not via public Discord or GitHub issues. For non-security bugs, open a GitHub issue with logs and version info.
 
@@ -8602,7 +8602,7 @@ This section details common error messages and provides clear, actionable steps 
 
   ```bash
   # Export the runtime tunables, then pass --batchSize as an Erigon flag:
-  export GOMEMLIMIT=26GiB               # cap total Go heap (set below your physical/container limit)
+  export GOMEMLIMIT=20GiB               # cap total Go heap (e.g. below the 80% default on a 32 GB host)
   export GOGC=80                        # collect garbage more aggressively
   export GOMAXPROCS=$(( $(nproc) / 2 )) # show Erigon fewer cores → smaller RAM estimates
 

@@ -54,9 +54,9 @@ A call object whose `chainId` is not the node's is rejected with `-32602` (`chai
 
 ### eth\_syncing and eth\_subscribe("syncing")
 
-`eth_syncing` returns `false` once the node is fewer than 8 blocks behind the highest block it has seen; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). Both report `startingBlock` as the block where the current sync session began.
+`eth_syncing` returns `false` when the current block is within 8 blocks of the highest block seen, in either direction; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). A node more than 8 blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. Both report `startingBlock` as the block where the current sync session began.
 
-`eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then one message per change: the same object with `syncing: true` while syncing, or `false` once synced.
+`eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
 
 ### eth\_getProof
 
