@@ -44,11 +44,9 @@ type keccakBucket struct {
 	hash common.Hash
 }
 
-// keccakCacheBuckets stays at 512 KB so it lives in L2: a probe into a larger table misses the CPU
-// caches and TLB, and on inputs that never repeat (CREATE2 preimages) that costs more than it saves.
 var (
 	keccakCacheSeed    = maphash.MakeSeed()
-	keccakCacheBuckets = new([1 << 12]keccakBucket)
+	keccakCacheBuckets = new([1 << 17]keccakBucket)
 )
 
 // Keccak256Hash calc Keccak256. Short inputs are memoized in a direct-mapped table; a bucket
