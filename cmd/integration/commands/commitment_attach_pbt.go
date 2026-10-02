@@ -56,11 +56,7 @@ import (
 )
 
 var (
-	attachPBTFrom                 string
-	attachPBTStepHook             func(string) error
-	validatePBTAttachLeafStampsFn = validatePBTAttachLeafStamps
-	validatePBTAttachGenesisFn    = validatePBTAttachGenesis
-	pbtAttachHexRootFn            = pbtAttachHexRoot
+	attachPBTFrom string
 )
 
 type pbtAttachHooks struct {
@@ -116,12 +112,7 @@ type pbtAttachFile struct {
 }
 
 func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, logger log.Logger) error {
-	return attachPBTWithHooks(ctx, nodePath, publishedPath, chainName, logger, pbtAttachHooks{
-		step:       attachPBTStepHook,
-		leafStamps: validatePBTAttachLeafStampsFn,
-		genesis:    validatePBTAttachGenesisFn,
-		hexRoot:    pbtAttachHexRootFn,
-	})
+	return attachPBTWithHooks(ctx, nodePath, publishedPath, chainName, logger, pbtAttachHooks{})
 }
 
 func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName string, logger log.Logger, hooks pbtAttachHooks) error {
@@ -586,7 +577,7 @@ func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datad
 }
 
 func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) (common.Hash, error) {
-	return validatePBTAttachPublishedPointWithLeafStamps(ctx, dirs, settings, blockNum, txNum, logger, validatePBTAttachLeafStampsFn)
+	return validatePBTAttachPublishedPointWithLeafStamps(ctx, dirs, settings, blockNum, txNum, logger, validatePBTAttachLeafStamps)
 }
 
 func validatePBTAttachPublishedPointWithLeafStamps(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger, leafStamps func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error)) (common.Hash, error) {

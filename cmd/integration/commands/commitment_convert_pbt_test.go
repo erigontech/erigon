@@ -63,6 +63,14 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func convertPBTWithOutputTestHook(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, hook func() error) error {
+	return convertPBTWithOptions(ctx, sourcePath, outputPath, keepHex, chainName, logger, nil, pbtConvertHooks{afterOutput: hook})
+}
+
+func convertPBTWithStandaloneTestHook(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, hook func(datadir.Dirs) error) error {
+	return convertPBTWithOptions(ctx, sourcePath, outputPath, keepHex, chainName, logger, nil, pbtConvertHooks{standalone: hook})
+}
+
 func TestIsCommitmentFileNameAcceptsCommitmentBin(t *testing.T) {
 	require.True(t, isCommitmentFileName("v1.0-commitment-bin.0-1024.kv"), "the converter must exclude commitment-bin files from its source links")
 }
@@ -246,7 +254,6 @@ func TestConvertPBTUsesRequestedKeccakSuite(t *testing.T) {
 }
 
 func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
-	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
@@ -284,7 +291,7 @@ func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
 	require.True(t, hasCommitmentHistory)
 	require.True(t, hasCommitmentAccessor, "commitment history and index accessors must be published")
 	setExecutionProgress(t, source.Chaindata, 1)
-	require.NoError(t, attachPBT(t.Context(), source.DataDir, output, "", log.New()))
+	require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, output, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
 
 	t.Run("published set without commitment history", func(t *testing.T) {
 		source, _ := newPBTConversionSource(t)
@@ -299,7 +306,7 @@ func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
 			}
 		}
 		setExecutionProgress(t, source.Chaindata, 1)
-		require.NoError(t, attachPBT(t.Context(), source.DataDir, output, "", log.New()))
+		require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, output, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
 	})
 }
 
@@ -732,18 +739,17 @@ func TestConvertPBTPostForkHeaderRootMismatch(t *testing.T) {
 func TestConvertPBTFailureRemovesOutput(t *testing.T) {
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
-	previousHook := convertPBTOutputHook
 	t.Cleanup(func() {
 		statecfg.ExperimentalCommitmentV3 = previousV3
 		statecfg.Schema = previousSchema
-		convertPBTOutputHook = previousHook
 	})
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, _ := newPBTConversionSource(t)
 	output := filepath.Join(t.TempDir(), "output")
-	convertPBTOutputHook = func() error { return errors.New("injected conversion failure") }
-	err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
+	err := convertPBTWithOutputTestHook(t.Context(), source.DataDir, output, true, "", log.New(), func() error {
+		return errors.New("injected conversion failure")
+	})
 	require.ErrorContains(t, err, "injected conversion failure")
 	_, statErr := os.Stat(output)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
@@ -752,20 +758,18 @@ func TestConvertPBTFailureRemovesOutput(t *testing.T) {
 func TestConvertPBTVerifiesCorruptedWrittenRows(t *testing.T) {
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
-	previousHook := convertPBTStandaloneHook
 	t.Cleanup(func() {
 		statecfg.ExperimentalCommitmentV3 = previousV3
 		statecfg.Schema = previousSchema
-		convertPBTStandaloneHook = previousHook
 	})
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, _ := newPBTConversionSource(t)
-	convertPBTStandaloneHook = func(dirs datadir.Dirs) error {
+	hook := func(dirs datadir.Dirs) error {
 		return corruptPBTOutputRow(t.Context(), dirs)
 	}
 	output := filepath.Join(t.TempDir(), "output")
-	err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
+	err := convertPBTWithStandaloneTestHook(t.Context(), source.DataDir, output, true, "", log.New(), hook)
 	require.ErrorContains(t, err, "verify written rows")
 }
 
@@ -961,7 +965,6 @@ func TestConvertPBTStandaloneReopenRequiresBothDomains(t *testing.T) {
 	previousSchema := statecfg.Schema
 	previousHash := statecfg.BinCommitmentHash
 	previousSuite := commitment.PBinHashSuiteName()
-	previousHook := convertPBTStandaloneHook
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = previousBin
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
@@ -969,7 +972,6 @@ func TestConvertPBTStandaloneReopenRequiresBothDomains(t *testing.T) {
 		statecfg.Schema = previousSchema
 		statecfg.BinCommitmentHash = previousHash
 		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-		convertPBTStandaloneHook = previousHook
 	})
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
@@ -987,11 +989,11 @@ func TestConvertPBTStandaloneReopenRequiresBothDomains(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			source, _ := newPBTConversionSource(t)
 			output := filepath.Join(t.TempDir(), "output")
-			convertPBTStandaloneHook = func(dirs datadir.Dirs) error {
+			hook := func(dirs datadir.Dirs) error {
 				removePBTOutputDomainFiles(t, dirs.SnapDomain, test.domain)
 				return nil
 			}
-			err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
+			err := convertPBTWithStandaloneTestHook(t.Context(), source.DataDir, output, true, "", log.New(), hook)
 			require.ErrorContains(t, err, "commitment state is missing for one or more domains")
 			_, statErr := os.Stat(output)
 			require.ErrorIs(t, statErr, os.ErrNotExist)

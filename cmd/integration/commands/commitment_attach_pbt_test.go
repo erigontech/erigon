@@ -199,7 +199,6 @@ func TestConfiguredPBTNodeHashUsesPersistedSuite(t *testing.T) {
 }
 
 func TestAttachPBTResetsAndReopensAtPublishedRoot(t *testing.T) {
-	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
@@ -223,7 +222,7 @@ func TestAttachPBTResetsAndReopensAtPublishedRoot(t *testing.T) {
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
 	setExecutionProgress(t, source.Chaindata, 1)
 	corruptPBTBinTable(t, source.Chaindata)
-	require.NoError(t, attachPBT(t.Context(), source.DataDir, published, "", log.New()))
+	require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
 	settings, err := state.ReadErigonDBSettings(datadir.Open(source.DataDir))
 	require.NoError(t, err)
 	require.Equal(t, state.TrieVariantHexBin, settings.TrieVariantName())
@@ -373,14 +372,12 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 }
 
 func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
-	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
 	previousHash := statecfg.BinCommitmentHash
 	previousSuite := commitment.PBinHashSuiteName()
-	previousHook := attachPBTStepHook
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = previousBin
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
@@ -388,7 +385,6 @@ func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
 		statecfg.Schema = previousSchema
 		statecfg.BinCommitmentHash = previousHash
 		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-		attachPBTStepHook = previousHook
 	})
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
@@ -400,19 +396,18 @@ func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
 			published := filepath.Join(t.TempDir(), "published")
 			require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
 			setExecutionProgress(t, source.Chaindata, 1)
-			attachPBTStepHook = func(current string) error {
+			hooks := pbtAttachHooks{genesis: pbtAttachNoGenesis, step: func(current string) error {
 				if current == step {
 					return errors.New("interrupted attach")
 				}
 				return nil
-			}
-			require.ErrorContains(t, attachPBT(t.Context(), source.DataDir, published, "", log.New()), "interrupted attach")
+			}}
+			require.ErrorContains(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), hooks), "interrupted attach")
 			marker, err := state.ReadPBTAttachMarker(datadir.Open(source.DataDir))
 			require.NoError(t, err)
 			require.NotNil(t, marker)
 			require.ErrorContains(t, state.RefusePBTAttachMarker(datadir.Open(source.DataDir)), "rerun attach-pbt")
-			attachPBTStepHook = nil
-			require.NoError(t, attachPBT(t.Context(), source.DataDir, published, "", log.New()))
+			require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
 			marker, err = state.ReadPBTAttachMarker(datadir.Open(source.DataDir))
 			require.NoError(t, err)
 			require.Nil(t, marker)
@@ -421,14 +416,12 @@ func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
 }
 
 func TestAttachPBTRetryAfterPartialSwap(t *testing.T) {
-	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
 	previousHash := statecfg.BinCommitmentHash
 	previousSuite := commitment.PBinHashSuiteName()
-	previousHook := attachPBTStepHook
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = previousBin
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
@@ -436,7 +429,6 @@ func TestAttachPBTRetryAfterPartialSwap(t *testing.T) {
 		statecfg.Schema = previousSchema
 		statecfg.BinCommitmentHash = previousHash
 		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-		attachPBTStepHook = previousHook
 	})
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
@@ -446,13 +438,13 @@ func TestAttachPBTRetryAfterPartialSwap(t *testing.T) {
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
 	setExecutionProgress(t, source.Chaindata, 1)
-	attachPBTStepHook = func(step string) error {
+	hooks := pbtAttachHooks{genesis: pbtAttachNoGenesis, step: func(step string) error {
 		if step == "marker" {
 			return errors.New("interrupted attach")
 		}
 		return nil
-	}
-	require.ErrorContains(t, attachPBT(t.Context(), source.DataDir, published, "", log.New()), "interrupted attach")
+	}}
+	require.ErrorContains(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), hooks), "interrupted attach")
 	files, err := pbtAttachFiles(datadir.Open(source.DataDir))
 	require.NoError(t, err)
 	for _, file := range files {
@@ -461,19 +453,16 @@ func TestAttachPBTRetryAfterPartialSwap(t *testing.T) {
 			break
 		}
 	}
-	attachPBTStepHook = nil
-	require.NoError(t, attachPBT(t.Context(), source.DataDir, published, "", log.New()))
+	require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
 }
 
 func TestAttachPBTRetryAfterPartialSettingsWrite(t *testing.T) {
-	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
 	previousHash := statecfg.BinCommitmentHash
 	previousSuite := commitment.PBinHashSuiteName()
-	previousHook := attachPBTStepHook
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = previousBin
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
@@ -481,7 +470,6 @@ func TestAttachPBTRetryAfterPartialSettingsWrite(t *testing.T) {
 		statecfg.Schema = previousSchema
 		statecfg.BinCommitmentHash = previousHash
 		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-		attachPBTStepHook = previousHook
 	})
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
@@ -491,16 +479,15 @@ func TestAttachPBTRetryAfterPartialSettingsWrite(t *testing.T) {
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
 	setExecutionProgress(t, source.Chaindata, 1)
-	attachPBTStepHook = func(step string) error {
+	hooks := pbtAttachHooks{genesis: pbtAttachNoGenesis, step: func(step string) error {
 		if step == "reset" {
 			return errors.New("interrupted attach")
 		}
 		return nil
-	}
-	require.ErrorContains(t, attachPBT(t.Context(), source.DataDir, published, "", log.New()), "interrupted attach")
+	}}
+	require.ErrorContains(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), hooks), "interrupted attach")
 	require.NoError(t, os.WriteFile(filepath.Join(source.Snap, state.ERIGONDB_SETTINGS_FILE), []byte("trie_variant = \""), 0o644))
-	attachPBTStepHook = nil
-	require.NoError(t, attachPBT(t.Context(), source.DataDir, published, "", log.New()))
+	require.NoError(t, attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}))
 }
 
 func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) {
@@ -510,7 +497,6 @@ func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) 
 	previousSchema := statecfg.Schema
 	previousHash := statecfg.BinCommitmentHash
 	previousSuite := commitment.PBinHashSuiteName()
-	previousHook := attachPBTStepHook
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = previousBin
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
@@ -518,7 +504,6 @@ func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) 
 		statecfg.Schema = previousSchema
 		statecfg.BinCommitmentHash = previousHash
 		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-		attachPBTStepHook = previousHook
 	})
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
@@ -537,7 +522,6 @@ func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) 
 }
 
 func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
-	disablePBTAttachGenesisValidation(t)
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
@@ -574,20 +558,20 @@ func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
 	_, err = validatePBTAttachPublishedPoint(t.Context(), datadir.Open(published), settings, blockNum, txNum, log.New())
 	require.ErrorContains(t, err, "accounts")
 	setExecutionProgress(t, source.Chaindata, 1)
-	err = attachPBT(t.Context(), source.DataDir, published, "", log.New())
+	err = attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis})
 	require.ErrorContains(t, err, "accounts")
 
 	recoverySource, _ := newPBTConversionSource(t)
 	recoveryPublished := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), recoverySource.DataDir, recoveryPublished, true, "", log.New()))
 	setExecutionProgress(t, recoverySource.Chaindata, 1)
-	attachPBTStepHook = func(step string) error {
+	hooks := pbtAttachHooks{genesis: pbtAttachNoGenesis, step: func(step string) error {
 		if step == "marker" {
 			return errors.New("interrupted attach")
 		}
 		return nil
-	}
-	require.ErrorContains(t, attachPBT(t.Context(), recoverySource.DataDir, recoveryPublished, "", log.New()), "interrupted attach")
+	}}
+	require.ErrorContains(t, attachPBTWithHooks(t.Context(), recoverySource.DataDir, recoveryPublished, "", log.New(), hooks), "interrupted attach")
 	recoveryFiles, err := pbtAttachFiles(datadir.Open(recoveryPublished))
 	require.NoError(t, err)
 	for _, file := range recoveryFiles {
@@ -596,8 +580,7 @@ func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
 			break
 		}
 	}
-	attachPBTStepHook = nil
-	require.ErrorContains(t, attachPBT(t.Context(), recoverySource.DataDir, recoveryPublished, "", log.New()), "accounts")
+	require.ErrorContains(t, attachPBTWithHooks(t.Context(), recoverySource.DataDir, recoveryPublished, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis}), "accounts")
 }
 
 func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
@@ -625,20 +608,14 @@ func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
 	renamePBTFilesRange(t, source.Snap, "0-1", "0-2")
 	renamePBTAllFilesRange(t, published, "0-1", "0-2")
 	setExecutionProgress(t, source.Chaindata, 1)
-	validatePBTAttachLeafStampsFn = validatePBTAttachLeafStamps
 	before := snapshotTree(t, source.DataDir)
 	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
 	require.ErrorContains(t, err, "published leaf stamp 15")
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 
-func disablePBTAttachGenesisValidation(t *testing.T) {
-	t.Helper()
-	previous := validatePBTAttachGenesisFn
-	validatePBTAttachGenesisFn = func(context.Context, datadir.Dirs, datadir.Dirs, log.Logger) error {
-		return nil
-	}
-	t.Cleanup(func() { validatePBTAttachGenesisFn = previous })
+func pbtAttachNoGenesis(context.Context, datadir.Dirs, datadir.Dirs, log.Logger) error {
+	return nil
 }
 
 func renamePBTFilesRange(t *testing.T, root, from, to string) {

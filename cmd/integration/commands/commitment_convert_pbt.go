@@ -50,11 +50,14 @@ import (
 )
 
 var (
-	convertPBTKeepHex        bool
-	convertPBTOutputDatadir  string
-	convertPBTOutputHook     func() error
-	convertPBTStandaloneHook func(datadir.Dirs) error
+	convertPBTKeepHex       bool
+	convertPBTOutputDatadir string
 )
+
+type pbtConvertHooks struct {
+	afterOutput func() error
+	standalone  func(datadir.Dirs) error
+}
 
 func init() {
 	withChain(cmdCommitmentConvertPBT)
@@ -84,10 +87,14 @@ type pbinConversionPoint struct {
 }
 
 func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger) (err error) {
-	return convertPBTWithLimits(ctx, sourcePath, outputPath, keepHex, chainName, logger, nil)
+	return convertPBTWithOptions(ctx, sourcePath, outputPath, keepHex, chainName, logger, nil, pbtConvertHooks{})
 }
 
 func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, limits *dbstate.PBinRangeWriterLimits) (err error) {
+	return convertPBTWithOptions(ctx, sourcePath, outputPath, keepHex, chainName, logger, limits, pbtConvertHooks{})
+}
+
+func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, limits *dbstate.PBinRangeWriterLimits, hooks pbtConvertHooks) (err error) {
 	if sourcePath == "" || outputPath == "" {
 		return errors.New("commitment convert-pbt: source and output datadirs are required")
 	}
@@ -148,8 +155,8 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 	if err := os.MkdirAll(outputDirs.Tmp, 0o755); err != nil {
 		return err
 	}
-	if convertPBTOutputHook != nil {
-		if err := convertPBTOutputHook(); err != nil {
+	if hooks.afterOutput != nil {
+		if err := hooks.afterOutput(); err != nil {
 			return err
 		}
 	}
@@ -337,8 +344,8 @@ func convertPBTWithLimits(ctx context.Context, sourcePath, outputPath string, ke
 		finalSettings.ReferencesInCommitmentBranches = new(bool)
 	}
 	targetAgg.Close()
-	if convertPBTStandaloneHook != nil {
-		if err := convertPBTStandaloneHook(outputDirs); err != nil {
+	if hooks.standalone != nil {
+		if err := hooks.standalone(outputDirs); err != nil {
 			return err
 		}
 	}

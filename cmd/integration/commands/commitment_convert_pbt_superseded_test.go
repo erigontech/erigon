@@ -206,9 +206,6 @@ func TestConvertPBTPublishesVisibleFilesWithUnindexedHistoryMerge(t *testing.T) 
 }
 
 func runSupersededConvertAttach(t *testing.T, mergedSteps uint64) {
-	previousHook := attachPBTStepHook
-	attachPBTStepHook = nil
-	t.Cleanup(func() { attachPBTStepHook = previousHook })
 	selectPBTHexCommandSuite(t)
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)

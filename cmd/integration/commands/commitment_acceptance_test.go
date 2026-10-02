@@ -215,19 +215,16 @@ func TestPBTAttachRejectsPublishedRootMismatchWithoutMutation(t *testing.T) {
 	selectPBTCommandSuite(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
-	previousRoot := validatePBTAttachLeafStampsFn
-	validatePBTAttachLeafStampsFn = func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) {
+	hooks := pbtAttachHooks{leafStamps: func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) {
 		return common.Hash{0xaa}, nil
-	}
-	t.Cleanup(func() { validatePBTAttachLeafStampsFn = previousRoot })
+	}}
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
-	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
+	err = attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), hooks)
 	require.ErrorContains(t, err, "published binary rows root")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
 }
 
 func TestPBTAttachRejectsCorruptedPublishedBinaryRowsWithoutMutation(t *testing.T) {
-	disablePBTAttachGenesisValidation(t)
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
 	previousHash := statecfg.BinCommitmentHash
@@ -248,7 +245,7 @@ func TestPBTAttachRejectsCorruptedPublishedBinaryRowsWithoutMutation(t *testing.
 	require.NoError(t, corruptPBTOutputRow(t.Context(), datadir.Open(published)))
 	setExecutionProgress(t, source.Chaindata, 1)
 	before := snapshotTree(t, source.DataDir)
-	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
+	err := attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis})
 	require.ErrorContains(t, err, "published binary rows")
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
@@ -296,16 +293,14 @@ func TestPBTAttachRejectsNodeHexStateMismatchWithoutMutation(t *testing.T) {
 	selectPBTCommandSuite(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.Tester.Dirs.DataDir, published, true, "", log.New()))
-	previousRoot := pbtAttachHexRootFn
-	pbtAttachHexRootFn = func(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) (common.Hash, bool, error) {
+	hooks := pbtAttachHooks{hexRoot: func(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) (common.Hash, bool, error) {
 		if dirs.DataDir == published {
 			return common.Hash{0xaa}, true, nil
 		}
 		return pbtAttachHexRoot(ctx, dirs, settings, blockNum, txNum, logger)
-	}
-	t.Cleanup(func() { pbtAttachHexRootFn = previousRoot })
+	}}
 	before := snapshotTree(t, node.Tester.Dirs.DataDir)
-	err = attachPBT(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New())
+	err = attachPBTWithHooks(t.Context(), node.Tester.Dirs.DataDir, published, "", log.New(), hooks)
 	require.ErrorContains(t, err, "node hex root")
 	require.Equal(t, before, snapshotTree(t, node.Tester.Dirs.DataDir))
 }
