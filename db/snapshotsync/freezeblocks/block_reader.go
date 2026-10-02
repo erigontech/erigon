@@ -792,8 +792,11 @@ func (r *BlockReader) BodyWithRawTransactions(ctx context.Context, tx kv.Getter,
 			txs := make([][]byte, txCount)
 			ok, err := frozenTxns(baseTxnID, txCount, txnSeg, buf, func(i uint32, _, stored []byte) error {
 				txn, err := types.BinaryFromStoredTxn(stored)
+				if err != nil {
+					return err
+				}
 				txs[i] = bytes.Clone(txn)
-				return err
+				return nil
 			})
 			if err != nil || !ok {
 				return nil, err

@@ -1121,7 +1121,7 @@ func TestBodyWithRawTransactionsMatchesDecodedBody(t *testing.T) {
 	}
 }
 
-// A record that is not one whole transaction stays in the database: reading it as a raw body
+// A record whose framing is not one transaction's stays in the database: reading it as a raw body
 // fails, so the malformed bytes never reach a caller that expects a transaction.
 func TestBodyWithRawTransactionsRejectsMalformedRecord(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
