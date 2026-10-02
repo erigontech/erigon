@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -47,9 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var (
-	mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
-)
+var mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
 
 // CommitmentFlushCallback is invoked once per flushed commitment-domain tuple
 // (key, value, step, txNum) by TemporalMemBatch.FlushWithCommitmentCallback.
@@ -290,11 +287,6 @@ type SharedDomains struct {
 	// mem; both reach the transaction during flush, which resets the memo.
 	visibleEnds domainVisibleEndMemo
 
-	// codeStore is the optional two-tier (in-mem + MDBX) codehash-keyed code
-	// cache, reached via StateGetter so an addr-keyed reader can serve a
-	// code-by-hash read with the application's authoritative codehash.
-	codeStore *cache.CodeStore
-
 	// changesetMu serializes the exec loop's install of a block's changeset
 	// accumulator against the calculator's swap of the commitment writer's
 	// diff. Writers other than commitment are never redirected, so DomainPut
@@ -519,16 +511,16 @@ func (sd *SharedDomains) ResetPendingUpdates() {
 // The inner swap mutates the commitment writer's diff, which the exec loop
 // also rewrites via SetChangesetAccumulator — hence changesetMu, taken here
 // unless lockHeld says the caller already holds it.
-func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.TemporalTx) error {
-	return sd.flushPendingUpdates(ctx, tx, false)
+func (sd *SharedDomains) FlushPendingUpdates(tx kv.TemporalTx) error {
+	return sd.flushPendingUpdates(tx, false)
 }
 
 // FlushPendingUpdatesLocked is the variant for callers that already hold
 // changesetMu via LockChangesetAccumulator (the parallel calculator's
 // per-block compute window). The public FlushPendingUpdates above
 // acquires the lock itself.
-func (sd *SharedDomains) FlushPendingUpdatesLocked(ctx context.Context, tx kv.TemporalTx) error {
-	return sd.flushPendingUpdates(ctx, tx, true)
+func (sd *SharedDomains) FlushPendingUpdatesLocked(tx kv.TemporalTx) error {
+	return sd.flushPendingUpdates(tx, true)
 }
 
 // FlushPendingUpdatesWithoutChangeset flushes the pending deferred commitment
@@ -549,7 +541,7 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 	return err
 }
 
-func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.TemporalTx, lockHeld bool) error {
+func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) error {
 	upd := sd.sdCtx.TakePendingUpdate()
 	if upd == nil {
 		return nil
@@ -932,11 +924,11 @@ func (sd *SharedDomains) BlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalT
 // InitBlockOverlay creates (or replaces) the block-level metadata overlay backed by
 // the given base transaction. Writes to the overlay are visible to subsequent reads
 // and are flushed atomically alongside domain state via Flush().
-func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx, tmpDir string) error {
+func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx) error {
 	if old := sd.blockOverlay.Load(); old != nil {
 		old.Close()
 	}
-	overlay, err := membatchwithdb.NewMemoryBatch(tx, tmpDir, sd.logger)
+	overlay, err := membatchwithdb.NewMemoryBatch(tx)
 	if err != nil {
 		return fmt.Errorf("init block overlay: %w", err)
 	}
@@ -992,11 +984,6 @@ func GuardAggregatorForCache(db any, sc *cache.StateCache) {
 		panic(fmt.Sprintf("assert: aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
 	}
 	f.ForbidVisibilityLowering()
-}
-
-// SetCodeStore sets the persistent codehash-keyed code cache.
-func (sd *SharedDomains) SetCodeStore(codeStore *cache.CodeStore) {
-	sd.codeStore = codeStore
 }
 
 // PrintCacheStats logs the state cache hit/miss counters and resets them.
@@ -1064,7 +1051,7 @@ func (sd *SharedDomains) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.
 }
 
 func (sd *SharedDomains) Close() {
-	if sd.sdCtx == nil { //idempotency
+	if sd.sdCtx == nil { // idempotency
 		return
 	}
 
@@ -1115,7 +1102,7 @@ func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 	defer sd.visibleEnds.reset()
 	if sd.sdCtx.HasPendingUpdate() {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
-			if err := sd.FlushPendingUpdates(ctx, ttx); err != nil {
+			if err := sd.FlushPendingUpdates(ttx); err != nil {
 				return err
 			}
 		}
@@ -1206,7 +1193,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		return nil
 	}
 
-	if sd.branchCache == nil && sd.stateCache == nil && sd.codeStore == nil {
+	if sd.branchCache == nil && sd.stateCache == nil {
 		if err := sd.flushMem(ctx, tx); err != nil {
 			return err
 		}
@@ -1250,38 +1237,10 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		opts = append(opts, stash(kv.CommitmentDomain))
 	}
 	if sd.stateCache != nil {
-		opts = append(opts, stash(kv.AccountsDomain), stash(kv.StorageDomain))
-	}
-	// CodeDomain flush stashes state-cache updates and collects code for the
-	// persistent store. The code-store MDBX write is deferred to after flushMem —
-	// an in-callback tx.Put interleaves with the in-progress domain flush and
-	// corrupts it (reorg/unwind wrong root).
-	var codeStoreWrites [][2][]byte
-	if sd.stateCache != nil || sd.codeStore != nil {
-		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-			var codeHash []byte
-			if sd.codeStore != nil && len(v) > 0 {
-				codeHash = crypto.Keccak256(v)
-				codeStoreWrites = append(codeStoreWrites, [2][]byte{codeHash, v})
-			}
-			if sd.stateCache != nil {
-				pendingState = append(pendingState, cache.StateUpdate{
-					Domain:   kv.CodeDomain,
-					Key:      k,
-					Value:    v,
-					CodeHash: codeHash,
-					TxNum:    txNum,
-				})
-			}
-		}))
+		opts = append(opts, stash(kv.AccountsDomain), stash(kv.StorageDomain), stash(kv.CodeDomain))
 	}
 	if err := sd.flushMem(ctx, tx, opts...); err != nil {
 		return err
-	}
-	for _, cw := range codeStoreWrites {
-		if err := sd.codeStore.PutByHash(tx, cw[0], cw[1]); err != nil {
-			return err
-		}
 	}
 	if err := runValidate(); err != nil {
 		return err
@@ -1647,22 +1606,11 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 		return nil, false, errors.New("sd.GetCode: unexpected nil tx")
 	}
 
-	// Fast path: addr → account codeHash → content-addressed bytes, no
-	// per-address CodeDomain read. The codeHash is resolved mem-first, so it
-	// reflects in-block code changes — keying the code store off it (rather than
-	// a stateObject's stale snapshot) is reorg-safe.
 	var codeHash []byte
-	if sd.stateCache != nil || sd.codeStore != nil {
+	if sd.stateCache != nil {
 		if codeHash = sd.codeHashForAddr(tx, view, addr, txNum); len(codeHash) > 0 {
-			if sd.stateCache != nil {
-				if cv, ok := view.GetCodeByHash(codeHash); ok {
-					return cv, true, nil
-				}
-			}
-			if sd.codeStore != nil {
-				if cv, ok := sd.codeStore.GetByHash(tx, codeHash); ok {
-					return cv, true, nil
-				}
+			if cv, ok := view.GetCodeByHash(codeHash); ok {
+				return cv, true, nil
 			}
 		}
 	}
@@ -1822,7 +1770,7 @@ func (sd *SharedDomains) LogMetrics() []any {
 }
 
 func (sd *SharedDomains) DomainLogMetrics() map[kv.Domain][]any {
-	var logMetrics = map[kv.Domain][]any{}
+	logMetrics := map[kv.Domain][]any{}
 
 	sd.metrics.RLock()
 	defer sd.metrics.RUnlock()
@@ -2025,7 +1973,7 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 	// into the CORRECT block's changeset (via the hash-aware lookup in
 	// FlushPendingUpdates). This ensures the branch writes are recorded in
 	// the original block's diffset so they can be properly reverted on unwind.
-	if err := sd.FlushPendingUpdates(ctx, tx); err != nil {
+	if err := sd.FlushPendingUpdates(tx); err != nil {
 		return nil, err
 	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)

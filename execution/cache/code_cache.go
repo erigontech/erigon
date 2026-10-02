@@ -269,7 +269,8 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	// the slot charge already covers.
 	cc.codeSizeByCodeHash = newGrowLRUEntries[codeSizeEntry](
 		uint32(cc.codeSizeCapEntries), 0,
-		func(_ uint64, _ codeSizeEntry) { cc.codeSizeEntries.Add(-1) })
+		func(_ uint64, _ codeSizeEntry) { cc.codeSizeEntries.Add(-1) },
+	)
 	return cc
 }
 
@@ -673,7 +674,8 @@ func (c *CodeCache) PrintStatsAndReset() {
 	codeUsagePct := float64(codeSizeB) / float64(c.codeLayerCapB) * 100
 	codeHashUsagePct := float64(codeHashSizeB) / float64(c.codeLayerCapB) * 100
 
-	log.Debug("CodeCache stats",
+	log.Debug(
+		"CodeCache stats",
 		"addr_hits", addrHits,
 		"addr_misses", addrMisses,
 		"addr_hit_rate", addrHitRate,

@@ -18,6 +18,8 @@ package jsonrpc
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,12 +28,17 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -72,16 +79,16 @@ func TestSendRawTransaction(t *testing.T) {
 		require.NoError(err)
 		require.Equal(expectedValue, jsonTx.Value.Uint64())
 	}
-	//send same txn second time and expect error
+	// send same txn second time and expect error
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
 	require.Error(err)
 	expectedErr := txpoolproto.ImportResult_name[int32(txpoolproto.ImportResult_ALREADY_EXISTS)] + ": " + txpoolcfg.AlreadyKnown.String()
 	require.Equal(expectedErr, err.Error())
 	m.ReceiveWg.Wait()
-	//TODO: make propagation easy to test - now race
-	//time.Sleep(time.Second)
-	//sent := m.SentMessage(0)
-	//require.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
+	// TODO: make propagation easy to test - now race
+	// time.Sleep(time.Second)
+	// sent := m.SentMessage(0)
+	// require.Equal(eth.ToProto[m.MultiClient.Protocol()][eth.NewPooledTransactionHashesMsg], sent.Id)
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {
@@ -115,4 +122,209 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 		require.NoError(err)
 		require.Equal(expectedTxValue, jsonTx.Value.Uint64())
 	}
+}
+
+func TestSendRawTransactionAuthorizationSizeBeforeDecode(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		authorizations int
+		wantErr        error
+	}{
+		{"small", 1, rlp.ErrExpectedString},
+		{"oversized", 5000, txpool.ErrRlpTooBig},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			txn := &types.SetCodeTransaction{
+				DynamicFeeTransaction: types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{To: &common.Address{1}},
+				},
+				Authorizations: make([]types.Authorization, tc.authorizations),
+			}
+			var buf bytes.Buffer
+			require.NoError(t, txn.MarshalBinary(&buf))
+			raw := buf.Bytes()
+			// The corrupted signature field after the authorization list makes decoding fail.
+			// ErrRlpTooBig therefore proves that the size check ran first.
+			raw[len(raw)-1] = 0xc0
+			api := &APIImpl{}
+
+			t.Run("async", func(t *testing.T) {
+				_, err := api.SendRawTransaction(t.Context(), raw)
+				require.ErrorIs(t, err, tc.wantErr)
+			})
+			t.Run("sync", func(t *testing.T) {
+				_, err := api.SendRawTransactionSync(t.Context(), raw, nil)
+				require.ErrorIs(t, err, tc.wantErr)
+			})
+		})
+	}
+}
+
+func TestSendRawTransactionSizeLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		prefix   byte
+		limit    int
+		envelope bool
+	}{
+		{"legacy", 0xc0, 128 * 1024, false},
+		{"setCode", types.SetCodeTxType, 128 * 1024, false},
+		{"blob", types.BlobTxType, 1024 * 1024, false},
+		{"setCodeEnvelope", types.SetCodeTxType, 128 * 1024, true},
+		{"blobEnvelope", types.BlobTxType, 1024 * 1024, true},
+	} {
+		for _, delta := range []int{-1, 0, 1} {
+			t.Run(fmt.Sprintf("%s/%d", tc.name, delta), func(t *testing.T) {
+				raw := make([]byte, tc.limit+delta)
+				raw[0] = tc.prefix
+				if tc.envelope {
+					var err error
+					raw, err = rlp.EncodeToBytes(raw)
+					require.NoError(t, err)
+				}
+				api := &APIImpl{}
+				_, err := api.SendRawTransaction(t.Context(), raw)
+				if delta > 0 {
+					require.ErrorIs(t, err, txpool.ErrRlpTooBig)
+				} else {
+					wantErr := rlp.ErrExpectedList
+					if tc.prefix == 0xc0 {
+						wantErr = rlp.EOL
+					}
+					require.ErrorIs(t, err, wantErr)
+				}
+			})
+		}
+	}
+}
+
+func TestSendRawTransactionMalformedEnvelope(t *testing.T) {
+	pad := make([]byte, 128*1024)
+	for _, tc := range []struct {
+		name string
+		raw  []byte
+	}{
+		{"emptyString", append([]byte{0x80}, pad...)},
+		{"nonCanonicalLength", append([]byte{0xb8}, pad...)},
+		{"overDeclaredLength", append([]byte{0xba, 0x10, 0x00, 0x00}, pad...)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &APIImpl{}
+			_, err := api.SendRawTransaction(t.Context(), tc.raw)
+			require.ErrorIs(t, err, txpool.ErrParseTxn)
+		})
+	}
+}
+
+func TestSendRawTransactionInvalidRLPError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"truncatedList", "0xd4"},
+		{"largeListLength", "0xff63808459682f07825208943d504cb2b11a45e7d1f9646ede40c60d52deec2580802da0e06b96410c954281132f2b403c0d25e0b04dd83f4ac5dffef07eb800c01718b7a07dc8bc872a54a40547c033b78081fd417e64bb96cae12ed5ad50b82f951636dd"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &APIImpl{}
+			_, err := api.SendRawTransaction(t.Context(), hexutil.MustDecodeHex(tc.raw))
+			require.EqualError(t, err, rlp.ErrValueTooLarge.Error())
+		})
+	}
+}
+
+// Pins the fast path: a txn already mined when the subscription is installed is answered from the receipt
+// lookup instead of waiting for the timeout.
+func TestWaitForReceiptOfAlreadyMinedTxn(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	require := require.New(t)
+
+	var txnHash common.Hash
+	chain, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(
+			types.NewTransaction(0, m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(err)
+		b.AddTx(txn)
+		txnHash = txn.Hash()
+	})
+	require.NoError(err)
+	require.NoError(m.InsertChain(chain))
+
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, m.StateCache, m), m.DB, nil, nil)
+
+	receipt, err := api.waitForReceipt(ctx, txnHash, 500*time.Millisecond)
+	require.NoError(err)
+	require.NotNil(receipt)
+	require.Equal(txnHash, receipt.TransactionHash)
+}
+
+// Pins that a txn mined after the initial lookup is found even when the receipts filter never reaches the
+// server, as happens while the un-acked filter update is in flight: Filters without a backend drop it.
+func TestWaitForReceiptOfTxnMinedBeforeFilterIsApplied(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	require := require.New(t)
+
+	var txnHash common.Hash
+	chain, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(
+			types.NewTransaction(0, m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(err)
+		b.AddTx(txn)
+		txnHash = txn.Hash()
+	})
+	require.NoError(err)
+
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, m.StateCache, m), m.DB, nil, nil)
+
+	type result struct {
+		receipt *ethutils.RPCReceipt
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		receipt, err := api.waitForReceipt(ctx, txnHash, 5*time.Second)
+		done <- result{receipt, err}
+	}()
+
+	time.Sleep(200 * time.Millisecond) // let the initial lookup miss
+	require.NoError(m.InsertChain(chain))
+
+	res := <-done
+	require.NoError(res.err)
+	require.NotNil(res.receipt)
+	require.Equal(txnHash, res.receipt.TransactionHash)
+}
+
+// Pins that a failed receipt lookup surfaces as itself instead of being renamed into a sync timeout.
+func TestWaitForReceiptSurfacesLookupError(t *testing.T) {
+	m := execmoduletester.New(t)
+	require := require.New(t)
+
+	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, m.StateCache, m), m.DB, nil, nil)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := api.waitForReceipt(ctx, common.Hash{1}, 500*time.Millisecond)
+	require.ErrorIs(err, context.Canceled)
+}
+
+// Pins that an exhausted timeout budget is still answered with the sync timeout error, not with the
+// context error the lookup fails with.
+func TestWaitForReceiptOfExhaustedTimeout(t *testing.T) {
+	m := execmoduletester.New(t)
+	require := require.New(t)
+
+	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, m.StateCache, m), m.DB, nil, nil)
+
+	_, err := api.waitForReceipt(t.Context(), common.Hash{1}, time.Nanosecond)
+	var timeoutErr *rpc.TxSyncTimeoutError
+	require.ErrorAs(err, &timeoutErr)
 }

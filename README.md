@@ -4,7 +4,7 @@
 [![Blog](https://img.shields.io/badge/blog-up-green)](https://erigon.tech/blog/)
 [![Twitter](https://img.shields.io/twitter/follow/ErigonEth?style=social)](https://x.com/ErigonEth)
 [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?style=flat&logo=discord&logoColor=white)](https://dsc.gg/erigon)
-[![Build status](https://github.com/erigontech/erigon/actions/workflows/ci.yml/badge.svg)](https://github.com/erigontech/erigon/actions/workflows/ci.yml)
+[![Build status](https://github.com/erigontech/erigon/actions/workflows/ci-gate.yml/badge.svg)](https://github.com/erigontech/erigon/actions/workflows/ci-gate.yml)
 
 Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency
 frontier.
