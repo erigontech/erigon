@@ -93,3 +93,33 @@ func TestByteLRUConcurrentSameKeyStaysBounded(t *testing.T) {
 	wg.Wait()
 	require.LessOrEqual(t, b.Len(), 32, "a 1MB cache of 64KB entries holds 16, and must stay near that")
 }
+
+func TestByteLRUAddReplacesLiveKey(t *testing.T) {
+	b := NewByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
+	b.Add(1, []byte("first"))
+	require.True(t, b.Add(1, []byte("second")))
+	v, ok := b.Get(1)
+	require.True(t, ok)
+	require.Equal(t, []byte("second"), v)
+}
+
+// A budgeted layer refunds through onEvict, so its charge must match what otter holds.
+func TestByteLRUBudgetedConcurrentSameKeyAccounting(t *testing.T) {
+	b := newByteLRU(8*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+	value := make([]byte, 64*1024)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for key := range uint64(2000) {
+				b.Add(key, value)
+			}
+		}()
+	}
+	wg.Wait()
+	b.c.CleanUp()
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
+	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
+}
