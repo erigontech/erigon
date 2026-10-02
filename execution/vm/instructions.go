@@ -396,6 +396,7 @@ func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 	return pc, nil, nil
 }
+
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if caller := scope.Contract.Caller(); caller.IsNil() {
 		scope.Stack.pushRef().Clear()
@@ -578,7 +579,7 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 
 // opExtCodeHash returns the code hash of a specified account.
 // There are several cases when the function is called, while we can relay everything
-// to `state.ResolveCodeHash` function to ensure the correctness.
+// to `IntraBlockState.GetCodeHash` to ensure the correctness.
 //
 //	(1) Caller tries to get the code hash of a normal contract account, state
 //
@@ -793,17 +794,10 @@ func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	pos := scope.Stack.pop()
 	if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
 		if usedBitmap {
-			if evm.config.TraceJumpDest {
-				log.Debug("Code Bitmap used for detecting invalid jump",
-					"tx", fmt.Sprintf("0x%x", evm.TxHash),
-					"block_num", evm.Context.BlockNumber,
-				)
-			} else {
-				// This is "cheaper" version because it does not require calculation of txHash for each transaction
-				log.Debug("Code Bitmap used for detecting invalid jump",
-					"block_num", evm.Context.BlockNumber,
-				)
-			}
+			log.Debug(
+				"Code Bitmap used for detecting invalid jump",
+				"block_num", evm.Context.BlockNumber,
+			)
 		}
 		return pc, nil, ErrInvalidJump
 	}
@@ -824,17 +818,10 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if !cond.IsZero() {
 		if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
 			if usedBitmap {
-				if evm.config.TraceJumpDest {
-					log.Warn("Code Bitmap used for detecting invalid jump",
-						"tx", fmt.Sprintf("0x%x", evm.TxHash),
-						"block_num", evm.Context.BlockNumber,
-					)
-				} else {
-					// This is "cheaper" version because it does not require calculation of txHash for each transaction
-					log.Warn("Code Bitmap used for detecting invalid jump",
-						"block_num", evm.Context.BlockNumber,
-					)
-				}
+				log.Warn(
+					"Code Bitmap used for detecting invalid jump",
+					"block_num", evm.Context.BlockNumber,
+				)
 			}
 			return pc, nil, ErrInvalidJump
 		}
@@ -983,8 +970,12 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 		endowment    = *v
 		offset, size = o.Uint64(), sz.Uint64()
 		salt         = scope.Stack.popCopy()
-		input        = scope.Memory.GetCopy(offset, size)
+		input        = scope.create.initCode
 	)
+	scope.create.initCode = nil
+	if !evm.chainRules.IsAmsterdam {
+		input = scope.Memory.GetCopy(offset, size)
+	}
 	return execCreate(pc, evm, scope, endowment, input, &salt)
 }
 
@@ -992,11 +983,24 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
 	codeAndHash := &codeAndHash{code: input}
 	typ := CREATE
-	var address accounts.Address
 	if salt != nil {
 		typ = CREATE2
+	}
+	var address accounts.Address
+	var preparation createPreparation
+	var suberr error
+	switch {
+	case evm.chainRules.IsAmsterdam:
+		address = scope.create.address
+		codeAndHash.hash = scope.create.codeHash
+		preparation = scope.create.preparation
+		suberr = scope.create.err
+		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
+			return pc, nil, suberr
+		}
+	case salt != nil:
 		address = accounts.InternAddress(types.CreateAddress2(scope.Contract.Address().Value(), salt.Bytes32(), codeAndHash.Hash()))
-	} else {
+	default:
 		nonce, err := evm.intraBlockState.GetNonce(scope.Contract.Address())
 		if err != nil {
 			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -1006,20 +1010,8 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	gas := scope.Gas()
 	returnGas := gas
 	var childGasUsed mdgas.MdGasUsage
-	var preparation createPreparation
-	var suberr error
-	if evm.chainRules.IsAmsterdam {
-		preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
-		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
-			return pc, nil, suberr
-		}
-	}
 	forwarded := false
 	if suberr == nil {
-		if preparation.chargeNewAccount && !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallNewAccount) {
-			return pc, nil, ErrOutOfGas
-		}
-		gas = scope.Gas()
 		if evm.chainRules.IsTangerineWhistle {
 			gas.Execution -= gas.Execution / 64
 		}
@@ -1505,6 +1497,12 @@ func makeLog(size int) executionFunc {
 		}
 		stack, ibs := &scope.Stack, evm.IntraBlockState()
 		mStart, mSize := stack.pop2Uint64()
+		if evm.config.NoReceipts && (evm.config.Tracer == nil || evm.config.Tracer.OnLog == nil) {
+			for range size {
+				stack.pop()
+			}
+			return pc, nil, nil
+		}
 		mem := scope.Memory.GetPtr(mStart, mSize)
 		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
 		// This is a non-consensus field, but assigned here because

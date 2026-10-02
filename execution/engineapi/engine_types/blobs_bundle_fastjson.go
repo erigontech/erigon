@@ -17,57 +17,63 @@
 package engine_types
 
 import (
-	"encoding/json"
+	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
-// MarshalFastJSONTo streams the getPayload blobs bundle blob by blob, byte-identical to
-// json.Marshal of the bundle.
-func (b *BlobsBundle) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	writeBlobsBundle(s, b)
-	return nil
-}
-
-func writeBlobsBundle(s *jsonstream.StackStream, b *BlobsBundle) {
-	if b == nil {
-		s.WriteNil()
-		return
-	}
-	s.WriteObjectStart()
-	s.WriteObjectField("commitments")
-	jsonstream.ArrayValue(s, b.Commitments, writeHex)
-	jsonstream.Field(s, "proofs")
-	jsonstream.ArrayValue(s, b.Proofs, writeHex)
-	jsonstream.Field(s, "blobs")
-	jsonstream.ArrayValue(s, b.Blobs, writeHex)
-	s.WriteObjectEnd()
-}
-
 // MarshalFastJSONTo writes the getPayload envelope, byte-identical to json.Marshal(r).
-// executionPayload and blockValue go through json.Marshal before the first write, so their
-// errors leave nothing written; the other fields are streamed.
-func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if r == nil {
 		s.WriteNil()
 		return nil
 	}
-	executionPayload, err := json.Marshal(r.ExecutionPayload)
-	if err != nil {
-		return err
-	}
-	blockValue, err := json.Marshal(r.BlockValue)
-	if err != nil {
-		return err
-	}
 	s.WriteObjectStart()
-	s.WriteObjectField("executionPayload").WriteRawBytes(executionPayload)
-	jsonstream.Field(s, "blockValue").WriteRawBytes(blockValue)
-	jsonstream.Field(s, "blobsBundle")
-	writeBlobsBundle(s, r.BlobsBundle)
-	jsonstream.Field(s, "executionRequests")
-	jsonstream.ArrayValue(s, r.ExecutionRequests, writeHex)
-	jsonstream.Field(s, "shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
+	s.Field("executionPayload")
+	r.ExecutionPayload.writeTo(s)
+	ethjson.Quantity256(s, "blockValue", (*uint256.Int)(r.BlockValue))
+	s.Field("blobsBundle")
+	if err := r.BlobsBundle.MarshalFastJSONTo(s); err != nil {
+		return err
+	}
+	ethjson.Datas(s, "executionRequests", r.ExecutionRequests)
+	s.Field("shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
 	s.WriteObjectEnd()
 	return nil
+}
+
+// writeTo writes the payload in its struct's field order and encoding/json's forms.
+func (p *ExecutionPayload) writeTo(s *jsonstream.Stream) {
+	if p == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	ethjson.Data(s, "parentHash", p.ParentHash[:])
+	ethjson.Data(s, "feeRecipient", p.FeeRecipient[:])
+	ethjson.Data(s, "stateRoot", p.StateRoot[:])
+	ethjson.Data(s, "receiptsRoot", p.ReceiptsRoot[:])
+	ethjson.Data(s, "logsBloom", p.LogsBloom)
+	ethjson.Data(s, "prevRandao", p.PrevRandao[:])
+	ethjson.Quantity(s, "blockNumber", p.BlockNumber)
+	ethjson.Quantity(s, "gasLimit", p.GasLimit)
+	ethjson.Quantity(s, "gasUsed", p.GasUsed)
+	ethjson.Quantity(s, "timestamp", p.Timestamp)
+	ethjson.Data(s, "extraData", p.ExtraData)
+	ethjson.Quantity256(s, "baseFeePerGas", (*uint256.Int)(p.BaseFeePerGas))
+	ethjson.Data(s, "blockHash", p.BlockHash[:])
+	ethjson.Datas(s, "transactions", p.Transactions)
+	s.Field("withdrawals")
+	_ = types.Withdrawals(p.Withdrawals).MarshalFastJSONTo(s)
+	jsonstream.Text(s, "blobGasUsed", p.BlobGasUsed)
+	jsonstream.Text(s, "excessBlobGas", p.ExcessBlobGas)
+	if p.SlotNumber != nil {
+		jsonstream.Text(s, "slotNumber", p.SlotNumber)
+	}
+	if p.BlockAccessList != nil {
+		ethjson.Data(s, "blockAccessList", *p.BlockAccessList)
+	}
+	s.WriteObjectEnd()
 }

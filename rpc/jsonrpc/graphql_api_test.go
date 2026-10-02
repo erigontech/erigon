@@ -123,6 +123,10 @@ func TestGraphQLReceiptFeeCapsMatchRPCTransaction(t *testing.T) {
 			DynamicFeeTransaction: dynamicFee(),
 			MaxFeePerBlobGas:      *uint256.NewInt(50),
 		}},
+		{"blobWrapper", &types.BlobTxWrapper{Tx: types.BlobTx{
+			DynamicFeeTransaction: dynamicFee(),
+			MaxFeePerBlobGas:      *uint256.NewInt(50),
+		}}},
 		{"setCode", &types.SetCodeTransaction{DynamicFeeTransaction: dynamicFee()}},
 		{"accountAbstraction", &types.AccountAbstractionTransaction{
 			NonceKey:      uint256.NewInt(0),
@@ -146,6 +150,7 @@ func TestGraphQLReceiptFeeCapsMatchRPCTransaction(t *testing.T) {
 
 			assert.Equal(t, (*uint256.Int)(want.MaxFeePerGas), got.MaxFeePerGas, "maxFeePerGas")
 			assert.Equal(t, (*uint256.Int)(want.MaxPriorityFeePerGas), got.MaxPriorityFeePerGas, "maxPriorityFeePerGas")
+			assert.Equal(t, want.MaxFeePerBlobGas, got.MaxFeePerBlobGas, "maxFeePerBlobGas")
 		})
 	}
 }
@@ -154,7 +159,7 @@ func TestGraphQLReceiptFeeCapsMatchRPCTransaction(t *testing.T) {
 // fields; returned as a result, the embedder must still encode the way reflection does.
 func TestRPCReceiptEmbeddersKeepTheirFields(t *testing.T) {
 	for name, v := range map[string]interface {
-		MarshalFastJSONTo(*jsonstream.StackStream) error
+		MarshalFastJSONTo(*jsonstream.Stream) error
 	}{
 		"otterscan": ReceiptWithTimestamp{RPCReceipt: &ethutils.RPCReceipt{Logs: types.Logs{}}, Timestamp: 7},
 		"graphql":   &GraphQLReceipt{RPCReceipt: &ethutils.RPCReceipt{Logs: types.Logs{}}, Nonce: 3},

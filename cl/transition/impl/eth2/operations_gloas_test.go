@@ -28,6 +28,27 @@ func TestProcessExecutionPayloadEnvelopeRejectsNilEnvelope(t *testing.T) {
 	}))
 }
 
+func TestApplyParentExecutionPayloadUsesHeaderSlot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := state.New(&cfg)
+	s.SetVersion(clparams.GloasVersion)
+	require.NoError(t, s.SetSlot(65))
+	s.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 63})
+	s.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{Slot: 0, BlockHash: common.Hash{1}})
+	payments := s.GetBuilderPendingPayments()
+	payments.Set(31, &cltypes.BuilderPendingPayment{Withdrawal: &cltypes.BuilderPendingWithdrawal{Amount: 17}})
+	s.SetBuilderPendingPayments(payments)
+
+	machine := &eth2.Impl{}
+	require.NoError(t, machine.ApplyParentExecutionPayload(s, &cltypes.ExecutionRequests{}))
+	require.Equal(t, 1, s.GetBuilderPendingWithdrawals().Len())
+	require.Equal(t, uint64(17), s.GetBuilderPendingWithdrawals().Get(0).Amount)
+	require.Zero(t, s.GetBuilderPendingPayments().Get(31).Withdrawal.Amount)
+	require.True(t, s.GetExecutionPayloadAvailability().GetBitAt(63))
+	require.False(t, s.GetExecutionPayloadAvailability().GetBitAt(0))
+	require.Equal(t, common.Hash{1}, s.GetLatestBlockHash())
+}
+
 func TestProcessProposerSlashingDoesNotClearDifferentProposerPayment(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

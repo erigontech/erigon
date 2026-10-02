@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -130,6 +131,41 @@ func TestSubscriptions(t *testing.T) {
 				}
 			}
 			t.Fatal("timed out")
+		}
+	}
+}
+
+// Every subscribe call of a batch must take effect, though they all add to the notifiers the
+// batch shares.
+func TestBatchSubscriptionsAllNotify(t *testing.T) {
+	logger := log.New()
+	server := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
+	if err := server.RegisterName("nftest", new(notificationTestService)); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	go server.ServeCodec(NewCodec(serverConn), 0)
+	defer server.Stop()
+
+	const subs = 16
+	batch := make([]map[string]any, subs)
+	for i := range batch {
+		batch[i] = map[string]any{"jsonrpc": "2.0", "id": i, "method": "nftest_subscribe", "params": []any{"someSubscription", 1, i}}
+	}
+	if err := json.NewEncoder(clientConn).Encode(batch); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientConn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	in := json.NewDecoder(clientConn)
+	for notified := 0; notified < subs; {
+		var msg json.RawMessage
+		if err := in.Decode(&msg); err != nil {
+			t.Fatalf("%d of %d subscriptions notified: %v", notified, subs, err)
+		}
+		if msg[0] != '[' {
+			notified++
 		}
 	}
 }
@@ -243,7 +279,7 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 
 type streamedPayload struct{}
 
-func (streamedPayload) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (streamedPayload) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	w.WriteHex([]byte{0xab})
 	return nil
 }
@@ -252,7 +288,7 @@ func (streamedPayload) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 // reflection path.
 type valueFastJSON struct{ data []byte }
 
-func (b valueFastJSON) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (b valueFastJSON) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	w.WriteHex(b.data)
 	return nil
 }
@@ -316,10 +352,10 @@ func TestNotificationMatchesMarshalledMessage(t *testing.T) {
 // emptyStreamed writes nothing; a notification still carries a result, as a response does.
 type emptyStreamed struct{}
 
-func (emptyStreamed) MarshalFastJSONTo(*jsonstream.StackStream) error { return nil }
+func (emptyStreamed) MarshalFastJSONTo(*jsonstream.Stream) error { return nil }
 
 func TestNotifyStreamsTheNotification(t *testing.T) {
-	for payload, result := range map[any]string{streamedPayload{}: `"0xab"`, 7: `7`, (*valueFastJSON)(nil): `null`, emptyStreamed{}: `null`} {
+	for payload, result := range map[any]string{streamedPayload{}: `"0xab"`, 7: `7`, (*valueFastJSON)(nil): `null`, emptyStreamed{}: `null`, common.Hash{0xab}: `"0xab00000000000000000000000000000000000000000000000000000000000000"`} {
 		w := &captureWriter{}
 		n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}, activated: true}
 		if err := n.Notify("0x9a", payload); err != nil {
@@ -328,6 +364,21 @@ func TestNotifyStreamsTheNotification(t *testing.T) {
 		if want := string(notificationPrefix("eth", "0x9a")) + result + "}}"; string(w.got) != want {
 			t.Fatalf("%T: notification = %s, want %s", payload, w.got, want)
 		}
+	}
+}
+
+// A pending-tx hash is sent to every subscriber, so it must not go through reflection:
+// only the any box and the envelope's rawResponse box may allocate.
+func TestNotifyHashSkipsReflection(t *testing.T) {
+	n := &RemoteNotifier{h: &handler{conn: discardWriter{}}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}, activated: true}
+	h := common.Hash{0xab}
+	allocs := testing.AllocsPerRun(100, func() {
+		if err := n.Notify("0x9a", h); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !race.Enabled && allocs > 2 { // the race detector allocates inside sync.Pool
+		t.Fatalf("Notify(hash) allocates %.0f times, want at most 2", allocs)
 	}
 }
 

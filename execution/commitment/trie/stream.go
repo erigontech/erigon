@@ -595,7 +595,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 	var hashRefStorage []byte
 	var groups, hasTree, hasHash []uint16 // Separate groups slices for storage items and for accounts
 	var aRoot common.Hash
-	var aEmptyRoot = true
+	aEmptyRoot := true
 	var isAccount bool
 	var fieldSet uint32
 	var itemType, sItemType StreamItem
@@ -663,7 +663,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			itemType = newItemType
 			switch itemType {
 			case AccountStreamItem:
-				var a = aVal
+				a := aVal
 				accData.Balance.Set(&a.Balance)
 				accData.Nonce = a.Nonce
 				accData.Incarnation = a.Incarnation
@@ -779,7 +779,7 @@ func HashWithModifications(
 	trace bool,
 ) (common.Hash, error) {
 	keyCount := len(aKeys) + len(sKeys)
-	var stream = Stream{
+	stream := Stream{
 		keyBytes:  make([]byte, len(aKeys)*(2*length.Hash)+len(sKeys)*(4*length.Hash+2*length.Incarnation)),
 		keySizes:  make([]uint8, keyCount),
 		itemTypes: make([]StreamItem, keyCount),

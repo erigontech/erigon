@@ -113,10 +113,10 @@ func BenchmarkRPCBlockMarshalFastJSONTo(b *testing.B) {
 					rec.Body.Reset()
 					s := jsonstream.Get(rec)
 					s.WriteObjectStart()
-					s.WriteObjectField("jsonrpc")
+					s.Field("jsonrpc")
 					s.WriteString("2.0")
-					rs := jsonstream.NewLazyFieldStream(s, "result", false)
-					if err := rpcBlock.MarshalFastJSONTo(rs.Open()); err != nil {
+					s.Field("result")
+					if err := rpcBlock.MarshalFastJSONTo(s); err != nil {
 						b.Fatal(err)
 					}
 					s.WriteObjectEnd()

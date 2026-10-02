@@ -625,7 +625,6 @@ func TestNewUpdates(t *testing.T) {
 		require.NotNil(t, ut.keys)
 		require.Equal(t, ModeDirect, ut.mode)
 	})
-
 }
 
 func TestUpdates_TouchPlainKey(t *testing.T) {

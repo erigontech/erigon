@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -50,13 +52,20 @@ type StateContext struct {
 	TransactionIndex *int
 }
 
-func validateBundles(bundles []Bundle) error {
-	for _, bundle := range bundles {
-		if len(bundle.Transactions) != 0 {
-			return nil
+func validateBundles(bundles []Bundle, chainID *uint256.Int) error {
+	empty := true
+	for b, bundle := range bundles {
+		for i := range bundle.Transactions {
+			if err := ethapi.CheckChainID(bundle.Transactions[i].ChainID, chainID); err != nil {
+				return fmt.Errorf("bundle %d, transaction %d: %w", b, i, err)
+			}
+			empty = false
 		}
 	}
-	return errors.New("empty bundles")
+	if empty {
+		return errors.New("empty bundles")
+	}
+	return nil
 }
 
 // setupEVMTimeout cancels the EVM registered via the returned store func once timeout
@@ -116,7 +125,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	if err != nil {
 		return nil, err
 	}
-	if err := validateBundles(bundles); err != nil {
+	if err := validateBundles(bundles, chainConfig.ChainID); err != nil {
 		return nil, err
 	}
 
@@ -237,7 +246,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		results := []map[string]any{}
 		for i := range bundle.Transactions {
 			txn := &bundle.Transactions[i]
-			if txn.Gas == nil || *(txn.Gas) == 0 {
+			if txn.Gas == nil || *txn.Gas == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
 			msg, err := txn.ToMessage(api.GasCap, &blockCtx.BaseFee)

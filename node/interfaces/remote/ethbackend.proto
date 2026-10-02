@@ -210,6 +210,7 @@ message SubscribeReceiptsReply {
   uint64 blob_gas_used = 18;
   types.H256 blob_gas_price = 19;
   bool last_in_block = 20; // the last receipt of its block sent on this stream
+  types.H256 effective_gas_price = 21;
 }
 
 message BlockRequest {

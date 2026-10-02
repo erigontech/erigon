@@ -107,6 +107,32 @@ func TestExecute(t *testing.T) {
 	}
 }
 
+func TestLogNotStoredWithoutReceipts(t *testing.T) {
+	t.Parallel()
+	code := []byte{
+		byte(vm.PUSH1), 0x77, // stays below the LOG1 operands
+		byte(vm.PUSH1), 0xff,
+		byte(vm.PUSH1), 32,
+		byte(vm.PUSH1), 0,
+		byte(vm.LOG1),
+		byte(vm.PUSH1), 0,
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 32,
+		byte(vm.PUSH1), 0,
+		byte(vm.RETURN),
+	}
+	for _, tc := range []struct {
+		noReceipts bool
+		logs       int
+	}{{false, 1}, {true, 0}} {
+		statedb := state.New(state.NewNoopReader())
+		ret, _, err := Execute(code, nil, &Config{State: statedb, EVMConfig: vm.Config{NoReceipts: tc.noReceipts}}, t.TempDir())
+		require.NoError(t, err)
+		require.Equal(t, uint64(0x77), new(uint256.Int).SetBytes(ret).Uint64(), "noReceipts=%v", tc.noReceipts)
+		require.Len(t, statedb.GetRawLogs(0), tc.logs, "noReceipts=%v", tc.noReceipts)
+	}
+}
+
 func TestCall(t *testing.T) {
 	t.Parallel()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -310,6 +336,7 @@ type FakeChainHeaderReader struct{}
 func (cr *FakeChainHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	return nil
 }
+
 func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
 	return cr.GetHeaderByHash(common.BigToHash(new(big.Int).SetUint64(number)))
 }
@@ -330,6 +357,7 @@ func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *typ
 		GasLimit:   100000,
 	}
 }
+
 func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return nil
 }
@@ -443,7 +471,6 @@ func TestBlockhash(t *testing.T) {
 // TestEip2929Cases contains various testcases that are used for
 // EIP-2929 about gas repricings
 func TestEip2929Cases(t *testing.T) {
-
 	tmpdir := t.TempDir()
 	id := 1
 	prettyPrint := func(comment string, code []byte) {
@@ -502,13 +529,13 @@ func TestEip2929Cases(t *testing.T) {
 	{ // EXTCODECOPY
 		code := []byte{
 			// extcodecopy( 0xff,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.PUSH1), 0xff, byte(vm.EXTCODECOPY),
 			// extcodecopy( 0xff,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.PUSH1), 0xff, byte(vm.EXTCODECOPY),
 			// extcodecopy( this,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.ADDRESS), byte(vm.EXTCODECOPY),
 
 			byte(vm.STOP),
@@ -519,7 +546,6 @@ func TestEip2929Cases(t *testing.T) {
 
 	{ // SLOAD + SSTORE
 		code := []byte{
-
 			// Add slot `0x1` to access list
 			byte(vm.PUSH1), 0x01, byte(vm.SLOAD), byte(vm.POP), // SLOAD( 0x1) (add to access list)
 			// Write to `0x1` which is already in access list
@@ -883,7 +909,7 @@ func TestOpcodeMaskFiltersDelivery(t *testing.T) {
 				var seen []byte
 				hooks := &tracing.Hooks{OnOpcodeMask: mask}
 				if version == "v2" {
-					hooks.OnOpcodeV2 = func(_ uint64, op byte, _, _ mdgas.MdGas, _ tracing.OpContext, _ []byte, _ int, _ error) {
+					hooks.OnOpcodeV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, _ error) {
 						seen = append(seen, op)
 					}
 				} else {
@@ -924,10 +950,10 @@ func TestOpcodeMaskStillReportsFaults(t *testing.T) {
 			var faults []byte
 			hooks := &tracing.Hooks{OnOpcodeMask: tracing.NewOpcodeMask(byte(vm.SLOAD))}
 			if version == "v2" {
-				hooks.OnOpcodeV2 = func(_ uint64, op byte, _, _ mdgas.MdGas, _ tracing.OpContext, _ []byte, _ int, _ error) {
+				hooks.OnOpcodeV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, _ error) {
 					opcodes = append(opcodes, op)
 				}
-				hooks.OnFaultV2 = func(_ uint64, op byte, _, _ mdgas.MdGas, _ tracing.OpContext, _ int, _ error) {
+				hooks.OnFaultV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ int, _ error) {
 					faults = append(faults, op)
 				}
 			} else {

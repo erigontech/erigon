@@ -110,6 +110,7 @@ func (j *journal) release() {
 	j.Reset()
 	journalPool.Put(j)
 }
+
 func (j *journal) Reset() {
 	clear(j.entries)
 	j.entries = j.entries[:0]
