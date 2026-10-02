@@ -187,7 +187,7 @@ func TestBlockServiceDoesNotIgnoreLateBlockAsFuture(t *testing.T) {
 
 	err := blockService.ProcessMessage(context.Background(), nil, block)
 
-	require.NotContains(t, fmt.Sprint(err), "future slot")
+	require.ErrorIs(t, err, ErrInvalidSignature)
 }
 
 func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
