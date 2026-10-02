@@ -9,7 +9,7 @@ import (
 )
 
 // MarshalFastJSONTo writes the fields ExecutionPayloadBody declares, in that order.
-func (x *ExecutionPayloadBody) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (x *ExecutionPayloadBody) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -23,7 +23,7 @@ func (x *ExecutionPayloadBody) MarshalFastJSONTo(s *jsonstream.StackStream) erro
 }
 
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
-func (x *ExecutionPayloadBody) writeJSONFields(s *jsonstream.StackStream) error {
+func (x *ExecutionPayloadBody) writeJSONFields(s *jsonstream.Stream) error {
 	ethjson.Datas(s, "transactions", x.Transactions)
 	s.Field("withdrawals")
 	if err := x.Withdrawals.MarshalFastJSONTo(s); err != nil {
