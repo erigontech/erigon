@@ -979,8 +979,7 @@ func TestEIP8024_Execution(t *testing.T) {
 				case PUSH1:
 					pc, _, err = opPush1(pc, evm, callContext)
 				case DUP1:
-					dup1 := makeDup(1)
-					pc, _, err = dup1(pc, evm, callContext)
+					pc, _, err = opDup1(pc, evm, callContext)
 				case JUMP:
 					pc, _, err = opJump(pc, evm, callContext)
 				case JUMPDEST:

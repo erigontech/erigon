@@ -849,6 +849,86 @@ func stGas(pc uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %d", GAS, scope.gas)
 }
 
+func opDup1(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(0)
+	return pc, nil, nil
+}
+
+func opDup2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(1)
+	return pc, nil, nil
+}
+
+func opDup3(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(2)
+	return pc, nil, nil
+}
+
+func opDup4(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(3)
+	return pc, nil, nil
+}
+
+func opDup5(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(4)
+	return pc, nil, nil
+}
+
+func opDup6(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(5)
+	return pc, nil, nil
+}
+
+func opDup7(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(6)
+	return pc, nil, nil
+}
+
+func opDup8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(7)
+	return pc, nil, nil
+}
+
+func opDup9(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(8)
+	return pc, nil, nil
+}
+
+func opDup10(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(9)
+	return pc, nil, nil
+}
+
+func opDup11(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(10)
+	return pc, nil, nil
+}
+
+func opDup12(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(11)
+	return pc, nil, nil
+}
+
+func opDup13(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(12)
+	return pc, nil, nil
+}
+
+func opDup14(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(13)
+	return pc, nil, nil
+}
+
+func opDup15(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(14)
+	return pc, nil, nil
+}
+
+func opDup16(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.dup(15)
+	return pc, nil, nil
+}
+
 func opSwap1(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	scope.Stack.swap(1)
 	return pc, nil, nil
@@ -1579,14 +1659,6 @@ func makePushStringer(size uint64, pushByteSize int) stringer {
 }
 
 // make dup instruction function
-func makeDup(size int) executionFunc {
-	depth := size - 1
-	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-		scope.Stack.dup(depth)
-		return pc, nil, nil
-	}
-}
-
 func makeDupStringer(n int) stringer {
 	return func(pc uint64, scope *CallContext) string {
 		return fmt.Sprintf("DUP%d (%d)", n, &scope.Stack.data[scope.Stack.top-n])
