@@ -540,7 +540,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 
 	if rw.background && rw.chainTx == nil {
 		chainTx, err := rw.chainDb.BeginTemporalRo(rw.ctx) //nolint
-
 		if err != nil {
 			return &TxResult{
 				Task:        txTask,
@@ -604,7 +603,8 @@ type WorkerFaults struct {
 
 func NewWorkersPool(ctx context.Context, faults WorkerFaults, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func() error, err error) {
+	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger,
+) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func() error, err error) {
 	// Appended, so a part-way failure leaves clear only the workers actually built.
 	reconWorkers = make([]*Worker, 0, workerCount)
 

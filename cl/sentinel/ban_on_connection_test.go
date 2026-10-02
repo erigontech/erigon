@@ -17,8 +17,9 @@
 package sentinel
 
 import (
+	"bytes"
 	"errors"
-	"sync"
+	"fmt"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/discover"
 )
 
@@ -45,29 +47,28 @@ func (s stubP2P) UDPv5Listener() *discover.UDPv5               { return nil }
 func (s stubP2P) UpdateENRAttSubnets(subnetIndex int, on bool) {}
 func (s stubP2P) UpdateENRSyncNets(subnetIndex int, on bool)   {}
 
-// testPeerPool is shared package-wide because every peers.NewPool starts two TTL-cache cleanup
-// goroutines that the upstream cache offers no way to stop. Sharing is safe because each test
-// creates its own hosts, so no two tests touch the same peer ID, and it carries no host because
-// nothing in this package reaches Pool.Request, the only method that needs one.
-var testPeerPool = sync.OnceValue(func() *peers.Pool { return peers.NewPool(nil) })
-
 func testSentinel(t *testing.T, h host.Host) *Sentinel {
 	t.Helper()
 	return &Sentinel{
-		peers: testPeerPool(),
-		p2p:   stubP2P{host: h},
-		cfg:   &SentinelConfig{P2PConfig: p2p.P2PConfig{MaxPeerCount: 100}},
+		peers:  peers.NewPool(h),
+		p2p:    stubP2P{host: h},
+		cfg:    &SentinelConfig{P2PConfig: p2p.P2PConfig{MaxPeerCount: 100}},
+		logger: log.New(),
 	}
 }
 
 // connectedPair returns a host acting as the local node and a peer connected to it.
 func connectedPair(t *testing.T) (host.Host, host.Host) {
+	return connectedPairWithListenAddr(t, "/ip4/127.0.0.1/tcp/0")
+}
+
+func connectedPairWithListenAddr(t *testing.T, listenAddr string) (host.Host, host.Host) {
 	t.Helper()
 	local, err := libp2p.New(libp2p.NoListenAddrs)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = local.Close() })
 
-	remote, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	remote, err := libp2p.New(libp2p.ListenAddrStrings(listenAddr))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = remote.Close() })
 
@@ -118,6 +119,39 @@ func TestOnConnectionClosesABannedPeer(t *testing.T) {
 	waitDisconnected(t, local, remote.ID())
 }
 
+func TestOnConnectionLogsActualTransport(t *testing.T) {
+	tests := []struct {
+		name       string
+		listenAddr string
+		transport  string
+	}{
+		{name: "TCP", listenAddr: "/ip4/127.0.0.1/tcp/0", transport: "tcp"},
+		{name: "QUIC", listenAddr: "/ip4/127.0.0.1/udp/0/quic-v1", transport: "quic"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			local, remote := connectedPairWithListenAddr(t, tt.listenAddr)
+			s := testSentinel(t, local)
+			s.peers.SetBanStatus(remote.ID(), true)
+			var output bytes.Buffer
+			s.logger = log.New()
+			s.logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+
+			conns := local.Network().ConnsToPeer(remote.ID())
+			require.NotEmpty(t, conns)
+			conn := conns[0]
+			s.onConnection(local.Network(), conn)
+
+			logs := output.String()
+			require.Contains(t, logs, fmt.Sprintf("peer=%s", remote.ID()))
+			require.Contains(t, logs, "direction=Outbound")
+			require.Contains(t, logs, fmt.Sprintf("addr=%s", conn.RemoteMultiaddr()))
+			require.Contains(t, logs, fmt.Sprintf("transport=%s", tt.transport))
+			waitDisconnected(t, local, remote.ID())
+		})
+	}
+}
+
 // Three handshake failures ban the peer, and the ban must then be honoured: the storm this
 // fixes was one peer handshaked repeatedly because its failures were recorded and never read.
 func TestRepeatedHandshakeFailuresStopBeingHandshaked(t *testing.T) {
@@ -140,13 +174,6 @@ func TestRepeatedHandshakeFailuresStopBeingHandshaked(t *testing.T) {
 	require.False(t, s.handleNewConnection(remote.ID(), failing))
 	require.Equal(t, 3, validations, "a banned peer must not be handshaked again")
 	waitDisconnected(t, local, remote.ID())
-}
-
-// Each pool leaves two cleanup goroutines running for the rest of the process, so building one
-// per test makes the count grow with the size of the suite.
-func TestFixtureReusesOnePeerPool(t *testing.T) {
-	local, _ := connectedPair(t)
-	require.Same(t, testSentinel(t, local).peers, testSentinel(t, local).peers)
 }
 
 // A peer that is not banned still reaches its handshake and is kept.

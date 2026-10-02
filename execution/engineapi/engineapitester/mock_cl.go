@@ -350,7 +350,8 @@ type blockBuildingOptions struct {
 }
 
 func RetryEngine[T any](ctx context.Context, retryStatuses []enginetypes.EngineStatus, retryErrors []error,
-	f func() (*T, enginetypes.EngineStatus, error)) (*T, error) {
+	f func() (*T, enginetypes.EngineStatus, error),
+) (*T, error) {
 	operation := func() (*T, error) {
 		res, status, err := f()
 		if err != nil {

@@ -32,7 +32,6 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -67,6 +66,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -77,8 +77,8 @@ func TestEstimateGas(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTestEthAPIWithFilters(t, m)
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 		From: &from,
 		To:   &to,
@@ -191,6 +191,26 @@ func TestEstimateGasEIP2780SubTxGasTransfers(t *testing.T) {
 	}, nil, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, hexutil.Uint64(15_000), distinctGas)
+}
+
+// A caller's gas cap is honoured once some transaction could fit under it,
+// which after EIP-2780 starts at TX_BASE (12000) rather than 21000. A cap of
+// 14000 must therefore bound a 15000-gas transfer instead of being dropped.
+func TestEstimateGasEIP2780HonoursSubTxGasCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	m, bankAddr, _, receiverAddr := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newTestEthAPIWithFilters(t, m)
+
+	gasCap := hexutil.Uint64(14_000)
+	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &receiverAddr,
+		Gas:  &gasCap,
+	}, nil, nil, nil)
+	require.ErrorContains(t, err, "gas required exceeds allowance (14000)")
 }
 
 // gasGuardCode succeeds only while more than 10000 gas remains, so its minimum
@@ -617,6 +637,11 @@ func TestStateCallMethodsRejectPendingTag(t *testing.T) {
 		require.ErrorIs(t, err, errPendingStateNotSupported)
 	})
 
+	t.Run("eth_callMany", func(t *testing.T) {
+		_, err := api.CallMany(ctx, nil, StateContext{BlockNumber: pending}, nil, nil)
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+
 	t.Run("graphql_call", func(t *testing.T) {
 		_, err := graphqlAPI.Call(ctx, rpc.PendingBlockNumber, ethapi.CallArgs{})
 		require.ErrorIs(t, err, errPendingStateNotSupported)
@@ -777,10 +802,10 @@ func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := newEthApiForTest(newBaseApiWithFiltersForTest(nil, stateCache, m), m.DB, nil, nil)
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	_, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -801,7 +826,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	callDataBytes := hexutil.Bytes(callData)
 
 	blockNumberOrHash := rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	_, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &bankAddress,
@@ -812,7 +837,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 }
 
 func TestGetProof(t *testing.T) {
-	var maxGetProofRewindBlockCount = 1   // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
+	maxGetProofRewindBlockCount := 1      // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
 	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
 	cfg := &rpccfg.EthApiConfig{
@@ -1116,7 +1141,7 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
-	require.ErrorIs(t, err, state.PrunedError)
+	require.ErrorIs(t, err, state.ErrPruned)
 	require.Nil(t, proof)
 }
 
@@ -1540,8 +1565,7 @@ func fundedBankGenesis(t testing.TB, cfg *chain.Config) (m *execmoduletester.Exe
 	bankFunds, ok := new(big.Int).SetString("100000000000000000000", 10)
 	require.True(t, ok)
 
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, cfg, copier.Option{DeepCopy: true}))
+	chainConfig := cfg.Copy()
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
@@ -2240,13 +2264,12 @@ func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+	chainConfig := chain.TestChainOsakaConfig.Copy()
 	historyAddr := params.HistoryStorageAddress.Value()
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
-			historyAddr:                 {Balance: big.NewInt(0), Code: []byte{0x00}, Nonce: 1},
+			historyAddr:                 {Balance: big.NewInt(0), Code: sloadStub, Nonce: 1},
 			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
 		},
 	}
@@ -2272,4 +2295,60 @@ func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
 	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, written))
 	require.True(t, (*uint256.Int)(notYetWritten.Value).IsZero(), "slot %d at block %d holds %x, which only block %d writes", bn, bn, (*uint256.Int)(notYetWritten.Value).Bytes32(), bn+1)
 	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, notYetWritten))
+}
+
+// A chainId for another chain makes a call object invalid whatever the state, so every
+// endpoint that takes ethapi.CallArgs rejects it as invalid params instead of running the call.
+func TestCallArgsRejectOtherChainID(t *testing.T) {
+	m, _, bank := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api, debugApi := newCallManyApisForTest(m)
+	ctx := context.Background()
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: latest, TransactionIndex: &txIndex}
+
+	own := ethapi.CallArgs{From: &bank, To: &bank, ChainID: (*hexutil.U256)(uint256.NewInt(1337))}
+	other := own
+	other.ChainID = (*hexutil.U256)(uint256.NewInt(1))
+	bundles := []Bundle{{Transactions: []ethapi.CallArgs{own, other}}}
+
+	_, err := api.Call(ctx, own, &latest, nil, nil)
+	require.NoError(t, err)
+
+	mismatch := "chainId does not match node's (have=1, want=1337)"
+	for name, tc := range map[string]struct {
+		call func() error
+		want string
+	}{
+		"eth_call": {func() error {
+			_, err := api.Call(ctx, other, &latest, nil, nil)
+			return err
+		}, mismatch},
+		"eth_estimateGas": {func() error {
+			_, err := api.EstimateGas(ctx, &other, &latest, nil, nil)
+			return err
+		}, mismatch},
+		"eth_createAccessList": {func() error {
+			_, err := api.CreateAccessList(ctx, other, &latest, nil, nil)
+			return err
+		}, mismatch},
+		"eth_callMany": {func() error {
+			_, err := api.CallMany(ctx, bundles, stateCtx, nil, nil)
+			return err
+		}, "bundle 0, transaction 1: " + mismatch},
+		"debug_traceCall": {func() error {
+			return debugApi.TraceCall(ctx, other, &latest, nil, jsonstream.New(io.Discard))
+		}, mismatch},
+		"debug_traceCallMany": {func() error {
+			return debugApi.TraceCallMany(ctx, bundles, stateCtx, nil, jsonstream.New(io.Discard))
+		}, "bundle 0, transaction 1: " + mismatch},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := tc.call()
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			require.EqualError(t, err, tc.want)
+		})
+	}
 }
