@@ -18,6 +18,7 @@ package cache
 
 import (
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"weak"
@@ -73,4 +74,22 @@ func TestHashByteLRUWeighsAnEntryOnce(t *testing.T) {
 	_, ok := l.Get(common.Hash{1})
 	require.True(t, ok)
 	require.Equal(t, int32(1), calls.Load())
+}
+
+// otter drops a replacement node written before the first write drains.
+func TestByteLRUConcurrentSameKeyStaysBounded(t *testing.T) {
+	b := NewByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
+	value := make([]byte, 64*1024)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for key := range uint64(2000) {
+				b.Add(key, value)
+			}
+		}()
+	}
+	wg.Wait()
+	require.LessOrEqual(t, b.Len(), 32, "a 1MB cache of 64KB entries holds 16, and must stay near that")
 }
