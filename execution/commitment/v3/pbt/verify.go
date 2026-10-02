@@ -235,16 +235,9 @@ func (t *Trie) verifyBuckets() error {
 	return nil
 }
 
-type pbinVerifierReleaseObserver interface {
-	PBinObserveReleasedChild(*rowNode)
-}
-
 func (t *Trie) releaseVerifiedChild(cell *rowCell, child *rowNode) {
 	cell.child = nil
 	child.parent = nil
-	if observer, ok := t.ctx.(pbinVerifierReleaseObserver); ok {
-		observer.PBinObserveReleasedChild(child)
-	}
 }
 
 func (t *Trie) verifyBucketRecordPath(path *eip8297.Bitpath, descriptor bucketDescriptor) error {

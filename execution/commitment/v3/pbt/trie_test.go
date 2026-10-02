@@ -39,13 +39,6 @@ type trieTestContext struct {
 	rejectNilPrev  bool
 	keepTombstones bool
 	readHook       func([]byte)
-	releasedParent bool
-}
-
-func (c *trieTestContext) PBinObserveReleasedChild(child *rowNode) {
-	if child.parent != nil {
-		c.releasedParent = true
-	}
 }
 
 type trieTestWrite struct {
