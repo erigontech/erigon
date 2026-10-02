@@ -28,16 +28,16 @@ type (
 	ExecutionPayloadBodiesV2 []*ExecutionPayloadBodyV2
 )
 
-func (bs ExecutionPayloadBodies) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (bs ExecutionPayloadBodies) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	return writeBodies(s, bs)
 }
 
-func (bs ExecutionPayloadBodiesV2) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (bs ExecutionPayloadBodiesV2) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	return writeBodies(s, bs)
 }
 
 // writeBodies writes a nil list as null and a nil body as null, as encoding/json does.
-func writeBodies[B jsonstream.Marshaler](s *jsonstream.StackStream, bodies []B) error {
+func writeBodies[B jsonstream.Marshaler](s *jsonstream.Stream, bodies []B) error {
 	if bodies == nil {
 		s.WriteNil()
 		return nil

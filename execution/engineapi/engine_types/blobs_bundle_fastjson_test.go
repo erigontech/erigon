@@ -189,7 +189,7 @@ func TestExecutionPayloadBodiesMarshalFastJSONToMatchesReflection(t *testing.T) 
 }
 
 func requireStreamedMatchesReflection(t *testing.T, v interface {
-	MarshalFastJSONTo(*jsonstream.StackStream) error
+	MarshalFastJSONTo(*jsonstream.Stream) error
 },
 ) {
 	t.Helper()
