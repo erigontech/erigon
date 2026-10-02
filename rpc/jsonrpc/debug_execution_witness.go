@@ -1085,7 +1085,6 @@ func (api *DebugAPIImpl) witnessAnchors(ctx context.Context, tx kv.TemporalTx, i
 }
 
 type witnessAvailability struct {
-	settings   *dbstate.ErigonDBSettings
 	domain     kv.Domain
 	parentRoot common.Hash
 	postRoot   common.Hash
@@ -1158,7 +1157,7 @@ func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.Tem
 	if err != nil {
 		return witnessAvailability{}, err
 	}
-	return witnessAvailability{settings: settings, domain: domain, parentRoot: parentRoot, postRoot: postRoot}, nil
+	return witnessAvailability{domain: domain, parentRoot: parentRoot, postRoot: postRoot}, nil
 }
 
 func (api *DebugAPIImpl) witnessCommitmentDomain(trie witnessTrie, variant string) kv.Domain {
@@ -2486,7 +2485,7 @@ type statelessWitnessState interface {
 	state.StateWriter
 }
 
-type pbinSystemCallScoped interface {
+type systemCallScoped interface {
 	setSystemCallScope(bool)
 }
 
@@ -2495,7 +2494,7 @@ type pbinSystemAddressAccessed interface {
 }
 
 func withSystemCallScope(stateless any, call func() error) error {
-	scoped, ok := stateless.(pbinSystemCallScoped)
+	scoped, ok := stateless.(systemCallScoped)
 	if !ok {
 		return call()
 	}

@@ -18,7 +18,8 @@ package pbt
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -71,11 +72,7 @@ func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (
 		}
 		t.rootDirty = true
 	}
-	keys := make([]string, 0, len(changed))
-	for key := range changed {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(changed))
 	for _, key := range keys {
 		result := changed[key]
 		prefix := result.prefix
@@ -570,7 +567,7 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 		if err != nil {
 			return err
 		}
-		setBranchOrLeaf(row, slot, newCell)
+		setBranch(row, slot, newCell)
 		t.markDirty(row)
 		return nil
 	case LeafCell:
@@ -584,18 +581,17 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 			if err != nil {
 				return err
 			}
-			setBranchOrLeaf(row, slot, newCell)
+			setBranch(row, slot, newCell)
 			t.markDirty(row)
 			return nil
 		}
 		old := subtreeCell{path: oldPath, cell: *cell}
 		if d/4 == row.path.BitLen/4 {
-			newSlot := slotAt(&subtree.path, row.path.BitLen)
 			newCell, err := subtreeCellForRow(subtree, row.path)
 			if err != nil {
 				return err
 			}
-			setBranchOrLeaf(row, newSlot, newCell)
+			setBranch(row, slot, newCell)
 			t.markDirty(row)
 			return nil
 		}
@@ -651,11 +647,6 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 	default:
 		return errInsertKey
 	}
-}
-
-func setBranchOrLeaf(row *rowNode, slot int, cell rowCell) {
-	row.cells[slot] = cell
-	row.markCellDirty(slot)
 }
 
 func (t *Trie) emptyRoot() {

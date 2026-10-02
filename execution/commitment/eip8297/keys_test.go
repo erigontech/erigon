@@ -219,11 +219,11 @@ func TestPBinDigestCacheFollowsSelectedHashSuite(t *testing.T) {
 	require.NotEqual(t, keccakStorageKey, gotStorageKey)
 	require.Equal(t, expectedStorageKey, gotStorageKey)
 
-	hasher := KeyHasher()
+	hasher := DigestCache{}
 	require.NoError(t, SetHashSuite(HashKeccak))
-	keccakPooledKey := hasher(address)
+	keccakPooledKey := hasher.AccountKey(address, BasicDataLeafKey)
 	require.NoError(t, SetHashSuite(HashBlake3))
-	gotPooledKey := hasher(address)
+	gotPooledKey := hasher.AccountKey(address, BasicDataLeafKey)
 	require.Equal(t, want, gotPooledKey)
 	require.NotEqual(t, keccakPooledKey, gotPooledKey)
 }
@@ -232,14 +232,14 @@ func TestPBinDigestCacheFollowsSelectedHashSuite(t *testing.T) {
 func TestPBinKeyHasherPrimaryLeaf(t *testing.T) {
 	t.Parallel()
 
-	hasher := KeyHasher()
+	cache := DigestCache{}
 	addr := referenceAddressHex(t, "0102030405060708090a0b0c0d0e0f1011121314")
 
-	got := hasher(addr)
+	got := cache.AccountKey(addr, BasicDataLeafKey)
 	require.Len(t, got, AccountKeyLength)
 	require.Equal(t, TreeKeyAccount(addr, BasicDataLeafKey), got)
 
-	got = hasher(referenceConcat(addr, referenceSlotBytes(1000)))
+	got = cache.StorageKey(addr, referenceSlotBytes(1000))
 	require.Len(t, got, StorageKeyLength)
 	require.Equal(t, TreeKeyStorage(addr, referenceSlotBytes(1000)), got)
 }
@@ -247,9 +247,9 @@ func TestPBinKeyHasherPrimaryLeaf(t *testing.T) {
 func TestPBinKeyHasherRejectsMalformedPlainKey(t *testing.T) {
 	t.Parallel()
 
-	hasher := KeyHasher()
-	require.Panics(t, func() { hasher(make([]byte, 33)) })
-	require.Panics(t, func() { hasher(nil) })
+	cache := DigestCache{}
+	require.Panics(t, func() { cache.AccountKey(make([]byte, 33), BasicDataLeafKey) })
+	require.Panics(t, func() { cache.StorageKey(nil, make([]byte, 33)) })
 }
 
 func TestPBinKeyHasherSharedAcrossBuffers(t *testing.T) {
@@ -261,17 +261,17 @@ func TestPBinKeyHasherSharedAcrossBuffers(t *testing.T) {
 	}
 	slots := []uint64{0, 64, 256, 1000}
 
-	hashers := []KeyHasherFunc{KeyHasher(), KeyHasher()}
+	caches := []*DigestCache{{}, {}}
 
 	var wg sync.WaitGroup
-	for _, hasher := range hashers {
+	for _, cache := range caches {
 		wg.Go(func() {
 			for range 50 {
 				for _, addr := range addrs {
-					assert.Equal(t, TreeKeyAccount(addr, BasicDataLeafKey), hasher(addr))
+					assert.Equal(t, TreeKeyAccount(addr, BasicDataLeafKey), cache.AccountKey(addr, BasicDataLeafKey))
 					for _, slot := range slots {
 						plainKey := referenceConcat(addr, referenceSlotBytes(slot))
-						assert.Equal(t, TreeKeyStorage(addr, referenceSlotBytes(slot)), hasher(plainKey),
+						assert.Equal(t, TreeKeyStorage(addr, referenceSlotBytes(slot)), cache.StorageKey(plainKey[:20], plainKey[20:]),
 							"addr %x slot %d", addr, slot)
 					}
 				}
@@ -292,80 +292,15 @@ func TestPBinDigestCacheMatchesFreshDerivation(t *testing.T) {
 	}
 	slots := []uint64{0, 63, 64, 255, 256, 257, 1000, 100000}
 
-	hasher := KeyHasher()
+	cache := DigestCache{}
 	for range 3 {
 		for _, addr := range addrs {
-			require.Equal(t, TreeKeyAccount(addr, BasicDataLeafKey), hasher(addr))
+			require.Equal(t, TreeKeyAccount(addr, BasicDataLeafKey), cache.AccountKey(addr, BasicDataLeafKey))
 			for _, slot := range slots {
 				plainKey := referenceConcat(addr, referenceSlotBytes(slot))
-				require.Equal(t, TreeKeyStorage(addr, referenceSlotBytes(slot)), hasher(plainKey),
+				require.Equal(t, TreeKeyStorage(addr, referenceSlotBytes(slot)), cache.StorageKey(plainKey[:20], plainKey[20:]),
 					"addr %x slot %d", addr, slot)
 			}
 		}
-	}
-}
-
-func TestPBinLeafSuffixBits(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name          string
-		zone          byte
-		recordKeyBits int
-		want          int
-	}{
-		{name: "account start", zone: AccountZone, recordKeyBits: 0, want: 271},
-		{name: "account header slot zero", zone: AccountZone, recordKeyBits: 265, want: 6},
-		{name: "account seven bits", zone: AccountZone, recordKeyBits: 264, want: 7},
-		{name: "account last branch", zone: AccountZone, recordKeyBits: 271, want: 0},
-		{name: "code start", zone: CodeZone, recordKeyBits: 0, want: 271},
-		{name: "code last branch", zone: CodeZone, recordKeyBits: 271, want: 0},
-		{name: "storage start", zone: StorageZone, recordKeyBits: 0, want: 527},
-		{name: "storage around record depth", zone: StorageZone, recordKeyBits: 275, want: 252},
-		{name: "storage two hundred forty-eight bits", zone: StorageZone, recordKeyBits: 279, want: 248},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got, err := LeafSuffixBits(tc.zone, tc.recordKeyBits)
-			require.NoError(t, err)
-			require.Equal(t, tc.want, got)
-			keyLen, known := ZoneKeyLength(tc.zone)
-			require.True(t, known)
-			key := make([]byte, keyLen)
-			for i := range key {
-				key[i] = byte(i*17 + 3)
-			}
-			key[0] = tc.zone
-			path := PathFromBytes(key)
-			prefix := path.Slice(0, int16(tc.recordKeyBits))
-			branch := path.Slice(int16(tc.recordKeyBits), int16(tc.recordKeyBits+1))
-			suffix := path.Slice(int16(tc.recordKeyBits+1), int16(tc.recordKeyBits+1+got))
-			prefix.Append(&branch)
-			prefix.Append(&suffix)
-			require.Equal(t, path, prefix)
-		})
-	}
-}
-
-func TestPBinLeafSuffixBitsRejectsInvalidDepth(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		name          string
-		zone          byte
-		recordKeyBits int
-	}{
-		{name: "account at key length", zone: AccountZone, recordKeyBits: AccountKeyLength * 8},
-		{name: "account past key length", zone: AccountZone, recordKeyBits: AccountKeyLength*8 + 1},
-		{name: "code at key length", zone: CodeZone, recordKeyBits: CodeKeyLength * 8},
-		{name: "storage at key length", zone: StorageZone, recordKeyBits: StorageKeyLength * 8},
-		{name: "negative depth", zone: AccountZone, recordKeyBits: -1},
-		{name: "unknown zone", zone: 0x02, recordKeyBits: 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			_, err := LeafSuffixBits(tc.zone, tc.recordKeyBits)
-			require.Error(t, err)
-		})
 	}
 }

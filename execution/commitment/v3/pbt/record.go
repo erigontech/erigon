@@ -289,17 +289,8 @@ func encodeExtRoot(k recordKey, record *Record) ([]byte, error) {
 }
 
 func encodeLeafRoot(k recordKey, record *Record) ([]byte, error) {
-	var cell Cell
-	count := 0
-	for slot := range record.Cells {
-		candidate := &record.Cells[slot]
-		if candidate.Kind == EmptyCell {
-			continue
-		}
-		count++
-		cell = *candidate
-	}
-	if count != 1 || cell.Kind != LeafCell {
+	cell, ok := singleLeaf(record)
+	if !ok {
 		return nil, recordError(CellCountError, "leaf root must contain one leaf")
 	}
 	suffix, err := rootLeafSuffix(k, cell.Key)

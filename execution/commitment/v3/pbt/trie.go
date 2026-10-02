@@ -19,7 +19,8 @@ package pbt
 import (
 	"bytes"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -76,10 +77,8 @@ type Trie struct {
 	rows                   map[string]*rowNode
 	dirtyRows              map[string]*rowNode
 	routingRows            []*rowNode
-	rowChunks              []*rowChunk
-	rowChunkIndex          int
-	cellChunks             []*cellChunk
-	cellChunkIndex         int
+	rowArena               arena[rowNode]
+	cellArena              arena[Cell]
 	bucketDirty            map[string][]byte
 	scheduledBucketRecords map[string][]byte
 	deltas                 []commitment.BranchDelta
@@ -91,8 +90,25 @@ type Trie struct {
 	verifiedBucketKeys     map[string]struct{}
 }
 
+func initTrieMaps(t *Trie) {
+	t.rows = make(map[string]*rowNode)
+	t.dirtyRows = make(map[string]*rowNode)
+	t.bucketDirty = make(map[string][]byte)
+	t.mergeCreatedStems = make(map[string]struct{})
+}
+
+func resetMap[K comparable, V any](m *map[K]V) {
+	if *m == nil {
+		*m = make(map[K]V)
+		return
+	}
+	clear(*m)
+}
+
 func NewTrie(ctx commitment.PatriciaContext) *Trie {
-	return &Trie{ctx: ctx, rows: make(map[string]*rowNode), dirtyRows: make(map[string]*rowNode), bucketDirty: make(map[string][]byte), mergeCreatedStems: make(map[string]struct{})}
+	t := &Trie{ctx: ctx}
+	initTrieMaps(t)
+	return t
 }
 
 func (t *Trie) Reset() {
@@ -105,16 +121,14 @@ func newBucketTrie(ctx commitment.PatriciaContext, key []byte) (*Trie, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Trie{
-		ctx:               ctx,
-		rootKey:           bytes.Clone(key),
-		rootPath:          path,
-		bucketMode:        true,
-		rows:              make(map[string]*rowNode),
-		dirtyRows:         make(map[string]*rowNode),
-		bucketDirty:       make(map[string][]byte),
-		mergeCreatedStems: make(map[string]struct{}),
-	}, nil
+	t := &Trie{
+		ctx:        ctx,
+		rootKey:    bytes.Clone(key),
+		rootPath:   path,
+		bucketMode: true,
+	}
+	initTrieMaps(t)
+	return t, nil
 }
 
 func newSubtreeTrie(ctx commitment.PatriciaContext, prefix eip8297.Bitpath, descriptor bucketDescriptor, present bool) (*Trie, error) {
@@ -131,11 +145,8 @@ func newSubtreeTrie(ctx commitment.PatriciaContext, prefix eip8297.Bitpath, desc
 		suppressBucketRecords: true,
 		rootLoaded:            true,
 		root:                  &treeRoot{form: RowRoot},
-		rows:                  make(map[string]*rowNode),
-		dirtyRows:             make(map[string]*rowNode),
-		bucketDirty:           make(map[string][]byte),
-		mergeCreatedStems:     make(map[string]struct{}),
 	}
+	initTrieMaps(t)
 	if !present {
 		return t, nil
 	}
@@ -203,27 +214,12 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.rootDirty = false
 	t.foldedRoot = common.Hash{}
 	t.foldedRootReady = false
-	clear(t.rows)
-	clear(t.dirtyRows)
-	if t.rows == nil {
-		t.rows = make(map[string]*rowNode)
-	}
-	if t.dirtyRows == nil {
-		t.dirtyRows = make(map[string]*rowNode)
-	}
+	resetMap(&t.rows)
+	resetMap(&t.dirtyRows)
 	t.routingRows = t.routingRows[:0]
-	for _, chunk := range t.rowChunks {
-		chunk.used = 0
-	}
-	t.rowChunkIndex = 0
-	for _, chunk := range t.cellChunks {
-		chunk.used = 0
-	}
-	t.cellChunkIndex = 0
-	clear(t.bucketDirty)
-	if t.bucketDirty == nil {
-		t.bucketDirty = make(map[string][]byte)
-	}
+	t.rowArena.reset()
+	t.cellArena.reset()
+	resetMap(&t.bucketDirty)
 	t.scheduledBucketRecords = nil
 	t.deltas = nil
 	t.roundPrev = nil
@@ -260,31 +256,11 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 		return common.Hash{}, err
 	}
 	t.roundPending = true
-	if t.roundPrev == nil {
-		t.roundPrev = make(map[string][]byte)
-	} else {
-		clear(t.roundPrev)
-	}
-	if t.originalLeafSeen == nil {
-		t.originalLeafSeen = make(map[string]struct{})
-	} else {
-		clear(t.originalLeafSeen)
-	}
-	if t.originalLeaves == nil {
-		t.originalLeaves = make(map[string]*Cell)
-	} else {
-		clear(t.originalLeaves)
-	}
-	if t.droppedLeafKeys == nil {
-		t.droppedLeafKeys = make(map[string]struct{})
-	} else {
-		clear(t.droppedLeafKeys)
-	}
-	if t.bucketDirty == nil {
-		t.bucketDirty = make(map[string][]byte)
-	} else {
-		clear(t.bucketDirty)
-	}
+	resetMap(&t.roundPrev)
+	resetMap(&t.originalLeafSeen)
+	resetMap(&t.originalLeaves)
+	resetMap(&t.droppedLeafKeys)
+	resetMap(&t.bucketDirty)
 	t.foldedRoot = common.Hash{}
 	t.foldedRootReady = false
 	if _, err := t.loadRoot(); err != nil {
@@ -469,11 +445,7 @@ func (t *Trie) write() error {
 		}
 		final[key] = data
 	}
-	keys := make([]string, 0, len(final))
-	for key := range final {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(final))
 	for _, key := range keys {
 		data, old := final[key], prev[key]
 		if bytes.Equal(data, old) {

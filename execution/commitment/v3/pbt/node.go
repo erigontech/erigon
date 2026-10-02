@@ -52,18 +52,43 @@ type rowNode struct {
 }
 
 const (
-	rowChunkInitial = 4
-	rowChunkMax     = 64
+	arenaChunkInitial = 4
+	arenaChunkMax     = 64
 )
 
-type rowChunk struct {
-	rows []rowNode
-	used int
+type arenaChunk[T any] struct {
+	values []T
+	used   int
 }
 
-type cellChunk struct {
-	cells []Cell
-	used  int
+type arena[T any] struct {
+	chunks []*arenaChunk[T]
+	index  int
+}
+
+func (a *arena[T]) alloc(value T) *T {
+	if a.index == len(a.chunks) {
+		a.chunks = append(a.chunks, &arenaChunk[T]{values: make([]T, arenaChunkInitial)})
+	}
+	chunk := a.chunks[a.index]
+	if chunk.used == len(chunk.values) {
+		a.index++
+		if a.index == len(a.chunks) {
+			a.chunks = append(a.chunks, &arenaChunk[T]{values: make([]T, min(len(chunk.values)*2, arenaChunkMax))})
+		}
+		chunk = a.chunks[a.index]
+	}
+	valuePtr := &chunk.values[chunk.used]
+	chunk.used++
+	*valuePtr = value
+	return valuePtr
+}
+
+func (a *arena[T]) reset() {
+	for _, chunk := range a.chunks {
+		chunk.used = 0
+	}
+	a.index = 0
 }
 
 type treeRoot struct {
@@ -79,19 +104,9 @@ type treeRoot struct {
 }
 
 func newRow(path eip8297.Bitpath, key, raw []byte) *rowNode {
-	row := new(rowNode)
-	initRow(row, path, key, raw)
-	return row
-}
-
-func initRow(row *rowNode, path eip8297.Bitpath, key, raw []byte) {
 	keyCopy := bytes.Clone(key)
-	initRowOwned(row, path, keyCopy, raw)
-}
-
-func initRowOwned(row *rowNode, path eip8297.Bitpath, key, raw []byte) {
 	rawCopy := bytes.Clone(raw)
-	*row = rowNode{path: path, key: key, name: string(key), raw: rawCopy, prev: rawCopy}
+	return &rowNode{path: path, key: keyCopy, name: string(keyCopy), raw: rawCopy, prev: rawCopy}
 }
 
 func (n *rowNode) record() Record {
@@ -147,25 +162,7 @@ func branchCell(prefix eip8297.Bitpath, left, right common.Hash) rowCell {
 }
 
 func (t *Trie) newCell(cell Cell) *Cell {
-	if t.cellChunkIndex == len(t.cellChunks) {
-		size := rowChunkInitial
-		if len(t.cellChunks) != 0 {
-			size = min(len(t.cellChunks[len(t.cellChunks)-1].cells)*2, rowChunkMax)
-		}
-		t.cellChunks = append(t.cellChunks, &cellChunk{cells: make([]Cell, size)})
-	}
-	chunk := t.cellChunks[t.cellChunkIndex]
-	if chunk.used == len(chunk.cells) {
-		t.cellChunkIndex++
-		if t.cellChunkIndex == len(t.cellChunks) {
-			t.cellChunks = append(t.cellChunks, &cellChunk{cells: make([]Cell, min(len(chunk.cells)*2, rowChunkMax))})
-		}
-		chunk = t.cellChunks[t.cellChunkIndex]
-	}
-	cellCopy := &chunk.cells[chunk.used]
-	chunk.used++
-	*cellCopy = cell
-	return cellCopy
+	return t.cellArena.alloc(cell)
 }
 
 func (t *Trie) leafCell(key []byte, value [eip8297.ValueLength]byte) rowCell {
@@ -185,45 +182,28 @@ func rowKeyForPath(path *eip8297.Bitpath) ([]byte, error) {
 
 func rowFromRecord(path eip8297.Bitpath, key, raw []byte, record *Record) *rowNode {
 	n := newRow(path, key, raw)
+	fillRowCells(n, record)
+	return n
+}
+
+func fillRowCells(n *rowNode, record *Record) {
 	for slot := range n.cells {
 		if record.Cells[slot].Kind != EmptyCell {
 			cell := record.Cells[slot]
 			n.cells[slot] = rowCell{Cell: &cell, Kind: cell.Kind}
 		}
 	}
-	return n
 }
 
 func (t *Trie) newRow(path eip8297.Bitpath, key, raw []byte) *rowNode {
-	if t.rowChunkIndex == len(t.rowChunks) {
-		size := rowChunkInitial
-		if len(t.rowChunks) != 0 {
-			size = min(len(t.rowChunks[len(t.rowChunks)-1].rows)*2, rowChunkMax)
-		}
-		t.rowChunks = append(t.rowChunks, &rowChunk{rows: make([]rowNode, size)})
-	}
-	chunk := t.rowChunks[t.rowChunkIndex]
-	if chunk.used == len(chunk.rows) {
-		t.rowChunkIndex++
-		if t.rowChunkIndex == len(t.rowChunks) {
-			t.rowChunks = append(t.rowChunks, &rowChunk{rows: make([]rowNode, min(len(chunk.rows)*2, rowChunkMax))})
-		}
-		chunk = t.rowChunks[t.rowChunkIndex]
-	}
-	row := &chunk.rows[chunk.used]
-	chunk.used++
-	initRowOwned(row, path, key, raw)
-	return row
+	keyCopy := bytes.Clone(key)
+	rawCopy := bytes.Clone(raw)
+	return t.rowArena.alloc(rowNode{path: path, key: keyCopy, name: string(keyCopy), raw: rawCopy, prev: rawCopy})
 }
 
 func (t *Trie) rowFromRecord(path eip8297.Bitpath, key, raw []byte, record *Record) *rowNode {
 	n := t.newRow(path, key, raw)
-	for slot := range n.cells {
-		if record.Cells[slot].Kind != EmptyCell {
-			cell := record.Cells[slot]
-			n.cells[slot] = rowCell{Cell: &cell, Kind: cell.Kind}
-		}
-	}
+	fillRowCells(n, record)
 	if refs := leafRefsOf(t.ctx, key, raw); refs != nil {
 		n.refs = refs
 		n.refMask = refs.Mask
@@ -246,12 +226,8 @@ func rowFoldResult(n *rowNode) (FoldResult, error) {
 	if err != nil {
 		return FoldResult{}, err
 	}
-	return FoldRow(key, recordPointer(n))
-}
-
-func recordPointer(n *rowNode) *Record {
 	record := n.record()
-	return &record
+	return FoldRow(key, &record)
 }
 
 func rowTopPrefix(n *rowNode, split int16) (eip8297.Bitpath, error) {

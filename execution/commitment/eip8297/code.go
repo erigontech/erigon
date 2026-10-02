@@ -32,35 +32,22 @@ const (
 // chunk boundaries. Padding to a multiple of 31 happens before the scan, which
 // is what makes a PUSH whose data runs off the end count against the padded tail.
 func ChunkifyCode(code []byte) [][ValueLength]byte {
-	var s ChunkScratch
-	return s.Chunkify(code)
-}
-
-type ChunkScratch struct {
-	padded     []byte
-	pushdataAt []byte
-	chunks     [][ValueLength]byte
-}
-
-func (s *ChunkScratch) Chunkify(code []byte) [][ValueLength]byte {
 	if len(code) == 0 {
 		return nil
 	}
+	var paddedScratch []byte
 	padded := code
 	if rem := len(code) % ChunkDataLen; rem != 0 {
-		s.padded = append(s.padded[:0], code...)
+		paddedScratch = append(paddedScratch, code...)
 		for range ChunkDataLen - rem {
-			s.padded = append(s.padded, 0)
+			paddedScratch = append(paddedScratch, 0)
 		}
-		padded = s.padded
+		padded = paddedScratch
 	}
 
 	// pushdataAt[i] is how many bytes from i on are still PUSHDATA. It runs a whole
 	// chunk past the code so a PUSH32 on the last byte has room.
-	if cap(s.pushdataAt) < len(padded)+ValueLength {
-		s.pushdataAt = make([]byte, len(padded)+ValueLength)
-	}
-	pushdataAt := s.pushdataAt[:len(padded)+ValueLength]
+	pushdataAt := make([]byte, len(padded)+ValueLength)
 	clear(pushdataAt)
 	for pos := 0; pos < len(padded); {
 		var pushdata int
@@ -74,13 +61,12 @@ func (s *ChunkScratch) Chunkify(code []byte) [][ValueLength]byte {
 		pos += pushdata
 	}
 
-	chunks := s.chunks[:0]
+	chunks := make([][ValueLength]byte, 0, (len(padded)+ChunkDataLen-1)/ChunkDataLen)
 	for pos := 0; pos < len(padded); pos += ChunkDataLen {
 		var chunk [ValueLength]byte
 		chunk[0] = min(pushdataAt[pos], ChunkDataLen)
 		copy(chunk[1:], padded[pos:pos+ChunkDataLen])
 		chunks = append(chunks, chunk)
 	}
-	s.chunks = chunks
 	return chunks
 }

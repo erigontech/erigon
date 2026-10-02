@@ -19,6 +19,7 @@ package pbt
 import (
 	"bytes"
 	"fmt"
+	"math/bits"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -145,12 +146,7 @@ func (n *rowNode) cachedCellHash(slot int, prefix *eip8297.Bitpath) (common.Hash
 	if n.refs == nil || n.refMask&bit == 0 || n.dirtyCells&bit != 0 {
 		return common.Hash{}, false
 	}
-	index := 0
-	for bit := range slot {
-		if n.refMask&(uint16(1)<<bit) != 0 {
-			index++
-		}
-	}
+	index := bits.OnesCount16(n.refMask & (bit - 1))
 	if prefix != nil && (len(n.refs.Prefixes) <= index || !bytes.Equal(n.refs.Prefixes[index], eip8297.EncodeBitPath(prefix))) {
 		return common.Hash{}, false
 	}

@@ -136,11 +136,6 @@ func (t *Trie) originalLeaf(key []byte) (*Cell, error) {
 	return t.originalLeaves[name], nil
 }
 
-func (t *Trie) rememberOriginalLeaf(key []byte) error {
-	_, err := t.originalLeaf(key)
-	return err
-}
-
 func (t *Trie) lookupLeaf(key []byte) (Cell, bool, error) {
 	path, err := keyPath(key)
 	if err != nil {
@@ -658,12 +653,8 @@ func (t *Trie) remove(key []byte) error {
 		if root.row == nil {
 			return nil
 		}
-		if found, err := t.removeFromRow(root.row, path, key); err != nil {
-			return err
-		} else if !found {
-			return nil
-		}
-		return nil
+		_, err := t.removeFromRow(root.row, path, key)
+		return err
 	case LeafRoot:
 		if !bytes.Equal(root.leaf.Key, key) {
 			return nil
@@ -679,11 +670,8 @@ func (t *Trie) remove(key []byte) error {
 		if err != nil {
 			return err
 		}
-		found, err := t.removeFromRow(row, path, key)
-		if err != nil || !found {
-			return err
-		}
-		return nil
+		_, err = t.removeFromRow(row, path, key)
+		return err
 	default:
 		return fmt.Errorf("unknown root form %d", root.form)
 	}
@@ -715,8 +703,7 @@ func (t *Trie) removeFromRow(row *rowNode, path eip8297.Bitpath, key []byte) (bo
 		if err != nil {
 			return false, err
 		}
-		found, err := t.removeFromRow(child, path, key)
-		return found, err
+		return t.removeFromRow(child, path, key)
 	default:
 		return false, errInsertKey
 	}
@@ -852,7 +839,7 @@ func (t *Trie) dropPrefix(prefix []byte) error {
 		return err
 	}
 	for _, key := range keys {
-		if err := t.rememberOriginalLeaf(key); err != nil {
+		if _, err := t.originalLeaf(key); err != nil {
 			return err
 		}
 		t.droppedLeafKeys[string(key)] = struct{}{}

@@ -34,12 +34,9 @@ func (t *Trie) newVerifier() *Trie {
 		upperOnly:             t.upperOnly,
 		suppressRoot:          t.suppressRoot,
 		suppressBucketRecords: t.suppressBucketRecords,
-		rows:                  make(map[string]*rowNode),
-		dirtyRows:             make(map[string]*rowNode),
-		bucketDirty:           make(map[string][]byte),
-		mergeCreatedStems:     make(map[string]struct{}),
 		verifyOnly:            true,
 	}
+	initTrieMaps(verifier)
 	if t.ownedPrefix != nil {
 		prefix := *t.ownedPrefix
 		verifier.ownedPrefix = &prefix

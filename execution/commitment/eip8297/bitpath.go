@@ -99,16 +99,7 @@ func (p *Bitpath) Slice(from, to int16) Bitpath {
 		panic(fmt.Sprintf("pbin: slice [%d,%d) out of range for %d-bit path", from, to, p.BitLen))
 	}
 	var r Bitpath
-	for src, dst := from, int16(0); dst < to-from; {
-		take := min(int16(64-dst%64), to-from-dst)
-		word := p.wordAt(src)
-		if take < 64 {
-			word &= ^uint64(0) << (64 - uint(take))
-		}
-		r.Words[dst/64] |= word >> uint(dst%64)
-		src += take
-		dst += take
-	}
+	r.appendRange(p, from, to)
 	r.BitLen = to - from
 	r.MaskTail()
 	return r
@@ -128,18 +119,22 @@ func (p *Bitpath) Append(o *Bitpath) {
 	if int(p.BitLen)+int(o.BitLen) > MaxPathBits {
 		panic(fmt.Sprintf("pbin: appending %d bits to %d-bit path overflows", o.BitLen, p.BitLen))
 	}
-	for src, dst := int16(0), p.BitLen; src < o.BitLen; {
-		take := min(int16(64-dst%64), o.BitLen-src)
-		word := o.wordAt(src)
+	p.appendRange(o, 0, o.BitLen)
+	p.BitLen += o.BitLen
+	p.MaskTail()
+}
+
+func (p *Bitpath) appendRange(src *Bitpath, from, to int16) {
+	for srcPos, dstPos := from, p.BitLen; srcPos < to; {
+		take := min(int16(64-dstPos%64), to-srcPos)
+		word := src.wordAt(srcPos)
 		if take < 64 {
 			word &= ^uint64(0) << (64 - uint(take))
 		}
-		p.Words[dst/64] |= word >> uint(dst%64)
-		src += take
-		dst += take
+		p.Words[dstPos/64] |= word >> uint(dstPos%64)
+		srcPos += take
+		dstPos += take
 	}
-	p.BitLen += o.BitLen
-	p.MaskTail()
 }
 
 func (p *Bitpath) wordAt(offset int16) uint64 {

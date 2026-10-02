@@ -18,6 +18,7 @@ package pbt
 
 import (
 	"fmt"
+	"math/bits"
 	"sort"
 	"sync"
 
@@ -82,7 +83,7 @@ func Fold(key []byte, record *Record) (common.Hash, error) {
 		if !k.root {
 			return common.Hash{}, fmt.Errorf("row root must use a root key")
 		}
-		node, err := foldRow(k.path, record)
+		node, err := foldRowWithRefs(k.path, record, nil)
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -225,15 +226,11 @@ func FoldRow(key []byte, record *Record) (FoldResult, error) {
 	if record == nil || record.Form != RowRoot {
 		return FoldResult{}, fmt.Errorf("row fold requires a row record")
 	}
-	node, err := foldRow(k.path, record)
+	node, err := foldRowWithRefs(k.path, record, nil)
 	if err != nil {
 		return FoldResult{}, err
 	}
 	return FoldResult{Split: node.split, Left: node.left, Right: node.right}, nil
-}
-
-func foldRow(path eip8297.Bitpath, record *Record) (foldNode, error) {
-	return foldRowWithRefs(path, record, nil)
 }
 
 func foldRowWithRefs(path eip8297.Bitpath, record *Record, refs *rowNode) (foldNode, error) {
@@ -389,12 +386,7 @@ func singleLeaf(record *Record) (Cell, bool) {
 }
 
 func firstSlotSplit(left, right int, start int16) int16 {
-	for offset := range 4 {
-		if slotBit(left, offset) != slotBit(right, offset) {
-			return start + int16(offset)
-		}
-	}
-	return start + 4
+	return start + int16(min(bits.LeadingZeros8(uint8(left^right)<<4), 4))
 }
 
 func slotBit(slot, offset int) uint64 {

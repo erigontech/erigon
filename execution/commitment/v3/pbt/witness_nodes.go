@@ -179,13 +179,14 @@ func (r *PBinWitnessResolver) recordHash(key []byte, path eip8297.Bitpath, recor
 func pbinRowHash(key []byte, path eip8297.Bitpath, record *Record) (common.Hash, error) {
 	result, err := FoldRow(key, record)
 	if err != nil {
-		if len(occupiedSlots(record)) == 1 {
-			cell := record.Cells[occupiedSlots(record)[0]]
+		slots := occupiedSlots(record)
+		if len(slots) == 1 {
+			cell := record.Cells[slots[0]]
 			switch cell.Kind {
 			case LeafCell:
 				return leafHash(&cell), nil
 			case BranchCell:
-				prefix := rowPrefix(&path, occupiedSlots(record)[0], path.BitLen, path.BitLen+4)
+				prefix := rowPrefix(&path, slots[0], path.BitLen, path.BitLen+4)
 				prefix.Append(&cell.Prefix)
 				return branchHash(&prefix, &cell.Left, &cell.Right), nil
 			}

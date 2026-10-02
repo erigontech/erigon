@@ -82,16 +82,14 @@ func ForEachFeedOp(feed *commitment.PBinFeed, emit func(Op) error) error {
 
 type FeedOpEmitter struct {
 	chunks map[string][eip8297.ValueLength]byte
-	hashes map[common.Hash]struct{}
-	stats  commitment.PBinCodeStats
 }
 
 func NewFeedOpEmitter() *FeedOpEmitter {
-	return &FeedOpEmitter{chunks: make(map[string][eip8297.ValueLength]byte), hashes: make(map[common.Hash]struct{})}
+	return &FeedOpEmitter{chunks: make(map[string][eip8297.ValueLength]byte)}
 }
 
 func NewRebuildFeedOpEmitter() *FeedOpEmitter {
-	return &FeedOpEmitter{hashes: make(map[common.Hash]struct{})}
+	return &FeedOpEmitter{}
 }
 
 func (e *FeedOpEmitter) EmitAccount(account commitment.PBinFeedAccount, emit func(Op) error) error {
@@ -151,13 +149,6 @@ func (e *FeedOpEmitter) EmitAccount(account commitment.PBinFeedAccount, emit fun
 			if err := emit(Op{Key: eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey)}); err != nil {
 				return err
 			}
-			if len(account.Code) != 0 {
-				e.stats.CodeBearingAccounts++
-				if _, ok := e.hashes[account.CodeHash]; !ok {
-					e.hashes[account.CodeHash] = struct{}{}
-					e.stats.UniqueCodeHashes++
-				}
-			}
 			for index, chunk := range eip8297.ChunkifyCode(account.Code) {
 				key := eip8297.TreeKeyCodeChunk(account.CodeHash, index)
 				if e.chunks != nil {
@@ -209,8 +200,6 @@ func (e *FeedOpEmitter) EmitStorageSlot(address []byte, slot commitment.PBinFeed
 	value := eip8297.EncodeStorageValue(slot.Value)
 	return emit(Op{Key: key, Value: value})
 }
-
-func (e *FeedOpEmitter) Stats() commitment.PBinCodeStats { return e.stats }
 
 func (t *Trie) ProcessFeed(feed *commitment.PBinFeed) (common.Hash, error) {
 	ops, err := TranslateFeed(feed)
