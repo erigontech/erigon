@@ -126,21 +126,21 @@ func TestHelperFunctions(t *testing.T) {
 	writeFor(mvh, ap1, AddressPath, accounts.NilKey, Version{0, 0, 0, 2}, valueFor(AddressPath, 0, 2), true)
 	_, res, _ := readFor(mvh, ap1, AddressPath, accounts.NilKey, 0)
 	require.Equal(t, UnknownDep, res.DepIdx())
-	require.Equal(t, -1, res.Incarnation())
+	require.Equal(t, -1, int(res.Incarnation()))
 	require.Equal(t, 2, res.Status())
 
 	writeFor(mvh, ap2, AddressPath, accounts.NilKey, Version{0, 0, 1, 1}, valueFor(AddressPath, 1, 1), true)
 	writeFor(mvh, ap2, AddressPath, accounts.NilKey, Version{0, 0, 1, 2}, valueFor(AddressPath, 1, 2), true)
 	_, res, _ = readFor(mvh, ap2, AddressPath, accounts.NilKey, 1)
 	require.Equal(t, UnknownDep, res.DepIdx())
-	require.Equal(t, -1, res.Incarnation())
+	require.Equal(t, -1, int(res.Incarnation()))
 	require.Equal(t, 2, res.Status())
 
 	writeFor(mvh, ap1, AddressPath, accounts.NilKey, Version{0, 0, 2, 1}, valueFor(AddressPath, 2, 1), true)
 	writeFor(mvh, ap1, AddressPath, accounts.NilKey, Version{0, 0, 2, 2}, valueFor(AddressPath, 2, 2), true)
 	resVal, res, _ := readFor(mvh, ap1, AddressPath, accounts.NilKey, 2)
 	require.Equal(t, 0, res.DepIdx())
-	require.Equal(t, 2, res.Incarnation())
+	require.Equal(t, 2, int(res.Incarnation()))
 	require.Equal(t, valueFor(AddressPath, 0, 2), resVal)
 	require.Equal(t, 0, res.Status())
 }
@@ -163,7 +163,7 @@ func TestFlushMVWrite(t *testing.T) {
 		ws := &WriteSet{}
 		ws.SetAddress(addr, &VersionedWrite[*accounts.Account]{
 			WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: ver},
-			Val:         valueFor(AddressPath, ver.TxIndex, ver.Incarnation).(*accounts.Account),
+			Val:         valueFor(AddressPath, ver.TxIndex, int(ver.Incarnation)).(*accounts.Account),
 		})
 		mvh.FlushVersionedWrites(ws, true, "")
 	}
@@ -177,17 +177,17 @@ func TestFlushMVWrite(t *testing.T) {
 
 	_, res, _ = readFor(mvh, ap1, AddressPath, accounts.NilKey, 0)
 	require.Equal(t, UnknownDep, res.DepIdx())
-	require.Equal(t, -1, res.Incarnation())
+	require.Equal(t, -1, int(res.Incarnation()))
 	require.Equal(t, 2, res.Status())
 
 	_, res, _ = readFor(mvh, ap2, AddressPath, accounts.NilKey, 1)
 	require.Equal(t, UnknownDep, res.DepIdx())
-	require.Equal(t, -1, res.Incarnation())
+	require.Equal(t, -1, int(res.Incarnation()))
 	require.Equal(t, 2, res.Status())
 
 	resVal, res, _ = readFor(mvh, ap1, AddressPath, accounts.NilKey, 2)
 	require.Equal(t, 0, res.DepIdx())
-	require.Equal(t, 2, res.Incarnation())
+	require.Equal(t, 2, int(res.Incarnation()))
 	require.Equal(t, valueFor(AddressPath, 0, 2), resVal)
 	require.Equal(t, 0, res.Status())
 }
@@ -220,13 +220,13 @@ func TestIncompleteWriteReadsAsEstimate(t *testing.T) {
 	writeFor(mvh, ap1, AddressPath, accounts.NilKey, Version{0, 0, 7, 2}, valueFor(AddressPath, 7, 2), false)
 	_, res, _ := readFor(mvh, ap1, AddressPath, accounts.NilKey, 9)
 	require.Equal(t, 7, res.depIdx)
-	require.Equal(t, -1, res.incarnation, "an incomplete write is an estimate dependency")
+	require.Equal(t, -1, int(res.incarnation), "an incomplete write is an estimate dependency")
 
 	// Completing the write at a higher incarnation promotes it to a concrete value.
 	writeFor(mvh, ap1, AddressPath, accounts.NilKey, Version{0, 0, 7, 4}, valueFor(AddressPath, 7, 4), true)
 	resVal, res, _ := readFor(mvh, ap1, AddressPath, accounts.NilKey, 9)
 	require.Equal(t, 7, res.depIdx)
-	require.Equal(t, 4, res.incarnation, "a completed write is a concrete dependency")
+	require.Equal(t, 4, int(res.incarnation), "a completed write is a concrete dependency")
 	require.Equal(t, valueFor(AddressPath, 7, 4), resVal)
 }
 
@@ -253,7 +253,7 @@ func TestMVHashMapBasics(t *testing.T) {
 	// Reads for a higher txn return the entry written by txn 10.
 	resVal, res, _ := readFor(mvh, ap1, AddressPath, accounts.NilKey, 15)
 	require.Equal(t, 10, res.depIdx, "reads for a higher txn return the entry written by txn 10.")
-	require.Equal(t, 1, res.incarnation)
+	require.Equal(t, 1, int(res.incarnation))
 	require.Equal(t, valueFor(AddressPath, 10, 1), resVal)
 
 	// More writes.
@@ -263,17 +263,17 @@ func TestMVHashMapBasics(t *testing.T) {
 	// Verify reads.
 	resVal, res, _ = readFor(mvh, ap1, AddressPath, accounts.NilKey, 15)
 	require.Equal(t, 12, res.depIdx)
-	require.Equal(t, 0, res.incarnation)
+	require.Equal(t, 0, int(res.incarnation))
 	require.Equal(t, valueFor(AddressPath, 12, 0), resVal)
 
 	resVal, res, _ = readFor(mvh, ap1, AddressPath, accounts.NilKey, 11)
 	require.Equal(t, 10, res.depIdx)
-	require.Equal(t, 1, res.incarnation)
+	require.Equal(t, 1, int(res.incarnation))
 	require.Equal(t, valueFor(AddressPath, 10, 1), resVal)
 
 	resVal, res, _ = readFor(mvh, ap1, AddressPath, accounts.NilKey, 10)
 	require.Equal(t, 8, res.depIdx)
-	require.Equal(t, 3, res.incarnation)
+	require.Equal(t, 3, int(res.incarnation))
 	require.Equal(t, valueFor(AddressPath, 8, 3), resVal)
 
 	// Delete the entry written by 10, write to a different ap.
@@ -283,7 +283,7 @@ func TestMVHashMapBasics(t *testing.T) {
 	// Read by txn 11 no longer observes entry from txn 10.
 	resVal, res, _ = readFor(mvh, ap1, AddressPath, accounts.NilKey, 11)
 	require.Equal(t, 8, res.depIdx)
-	require.Equal(t, 3, res.incarnation)
+	require.Equal(t, 3, int(res.incarnation))
 	require.Equal(t, valueFor(AddressPath, 8, 3), resVal)
 
 	// Reads, writes for ap2 and ap3.
@@ -292,12 +292,12 @@ func TestMVHashMapBasics(t *testing.T) {
 
 	resVal, res, _ = readFor(mvh, ap2, AddressPath, accounts.NilKey, 10)
 	require.Equal(t, 5, res.depIdx)
-	require.Equal(t, 0, res.incarnation)
+	require.Equal(t, 0, int(res.incarnation))
 	require.Equal(t, valueFor(AddressPath, 5, 0), resVal)
 
 	resVal, res, _ = readFor(mvh, ap3, AddressPath, accounts.NilKey, 21)
 	require.Equal(t, 20, res.depIdx)
-	require.Equal(t, 4, res.incarnation)
+	require.Equal(t, 4, int(res.incarnation))
 	require.Equal(t, valueFor(AddressPath, 20, 4), resVal)
 
 	// Clear ap1 and ap3.
@@ -318,7 +318,7 @@ func TestMVHashMapBasics(t *testing.T) {
 	// Read entry by txn 10 at ap2.
 	resVal, res, _ = readFor(mvh, ap2, AddressPath, accounts.NilKey, 15)
 	require.Equal(t, 10, res.depIdx)
-	require.Equal(t, 2, res.incarnation)
+	require.Equal(t, 2, int(res.incarnation))
 	require.Equal(t, valueFor(AddressPath, 10, 2), resVal)
 }
 
@@ -436,8 +436,11 @@ func TestWriteTimeSameLocationSameTxnIdx(t *testing.T) {
 	mvh1 := NewVersionMap(nil)
 	ap1 := getAddress(1)
 
-	for i := range 1000000 {
-		writeFor(mvh1, ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, i}, valueFor(AddressPath, i, 1), true)
+	// Incarnation is int16; a tx never re-executes past ~task-count anyway (the
+	// scheduler gives up well before), so this hot-cell throughput loop stays inside
+	// the type's range rather than exercising an impossible incarnation count.
+	for i := range 30000 {
+		writeFor(mvh1, ap1, AddressPath, accounts.NilKey, Version{0, 0, 1, Incarnation(i)}, valueFor(AddressPath, i, 1), true)
 	}
 }
 
@@ -568,7 +571,7 @@ func TestFlushEstimate_ValidTxNotMarkedEstimate(t *testing.T) {
 	require.Equal(t, MVReadResultDone, res.Status(),
 		"valid TX flush should produce Done entries, not Estimate")
 	require.Equal(t, 5, res.DepIdx())
-	require.Equal(t, 1, res.Incarnation())
+	require.Equal(t, 1, int(res.Incarnation()))
 
 	// Simulate: TX 7 is invalid, flushed as Estimate (complete=false).
 	writes2 := newWriteSet(
@@ -606,7 +609,7 @@ func TestMarkWritesComplete_FlagFlipPreservesValue(t *testing.T) {
 	val, res2, _ := readFor(vm, addr, BalancePath, accounts.NilKey, 10)
 	require.Equal(t, MVReadResultDone, res2.Status(), "MarkWritesComplete must advance Estimate to Done")
 	require.Equal(t, 5, res2.DepIdx())
-	require.Equal(t, 1, res2.Incarnation())
+	require.Equal(t, 1, int(res2.Incarnation()))
 	require.Equal(t, *uint256.NewInt(100), val, "the flag flip must not change the value")
 
 	// A missing Estimate cell always fails (structural, not assert-gated).

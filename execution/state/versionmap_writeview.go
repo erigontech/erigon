@@ -153,21 +153,17 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 	}
 }
 
-// StoragesChanged drops the writes whose final value equals what this tx would
-// have read before it ran: they leave the domain value untouched, so passing
-// them on makes commitment refold a leaf that did not change. Only the domain
-// and commitment paths may use it — the access list and the notification
-// accumulator must still see every write.
+// StoragesChanged drops the no-op writes — those the writing tx stamped
+// ValueUnchanged because their value equalled what the tx read, so they leave the
+// domain/commitment leaf untouched. The status is decided at write time from the
+// tx's own (lifecycle-aware) prior read, so there is no baseline to re-derive here
+// and a destruct needs no special case. Only the domain and commitment paths may
+// use it — the access list and notification accumulator must see every write.
 func (v *versionMapWriteView) StoragesChanged() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	return func(yield func(accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]) bool) {
 		out := map[accounts.StorageKey]*VersionedWrite[uint256.Int]{}
 		var scratch []VersionedWrite[uint256.Int]
 		for addr, inner := range v.keys.Storages() {
-			// A destruct wiped the account's storage, so a slot's baseline is zero
-			// rather than the cell predating the destruct, and a write-back of the
-			// pre-destruct value is a real change.
-			lifecycle, _, destroyedAt := v.vm.AccountLifecycleAt(addr, v.txIdx)
-			destructed := lifecycle != LifecycleLive
 			clear(out)
 			if cap(scratch) < len(inner) {
 				scratch = make([]VersionedWrite[uint256.Int], len(inner))
@@ -175,15 +171,12 @@ func (v *versionMapWriteView) StoragesChanged() iter.Seq2[accounts.Address, map[
 			scratch = scratch[:len(inner)]
 			i := 0
 			for key, kw := range inner {
+				if kw.valStatus == ValueUnchanged {
+					continue
+				}
 				val, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
 				if !ok {
 					val = kw.Val
-				}
-				originVal, origin, originOK := v.vm.ReadStorage(addr, key, v.txIdx)
-				if originOK && origin.Status() == MVReadResultDone &&
-					!(destructed && destroyedAt > origin.Version().TxIndex) &&
-					val.Eq(&originVal) {
-					continue
 				}
 				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
 				out[key] = &scratch[i]

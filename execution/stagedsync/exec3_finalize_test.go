@@ -918,7 +918,7 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 	require.NotNil(t, coinbaseWrite, "calcFees should produce a coinbase BalancePath write")
 
 	require.Equal(t, 0, coinbaseWrite.WriteHeader.Version.TxIndex)
-	require.Equal(t, 0, coinbaseWrite.WriteHeader.Version.Incarnation,
+	require.Equal(t, state.Incarnation(0), coinbaseWrite.WriteHeader.Version.Incarnation,
 		"calcFees stamps coinbase write at worker incarnation (no +1 bump under post-#21387 architecture)")
 
 	// Reflect calcFees in the versionMap.
@@ -1017,7 +1017,7 @@ func TestFinalizeTxSimple_BurntFeeWriteStampsWorkerIncarnation(t *testing.T) {
 	require.NotNil(t, burntWrite, "calcFees should produce a burnt contract BalancePath write")
 
 	assert.Equal(t, 0, burntWrite.WriteHeader.Version.TxIndex)
-	assert.Equal(t, 0, burntWrite.WriteHeader.Version.Incarnation,
+	assert.Equal(t, state.Incarnation(0), burntWrite.WriteHeader.Version.Incarnation,
 		"calcFees stamps burnt write at worker incarnation (no +1 bump under post-#21387 architecture)")
 }
 

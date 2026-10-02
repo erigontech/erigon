@@ -193,7 +193,7 @@ type IntraBlockState struct {
 	storageReadCount    int64
 	codeReadDuration    time.Duration
 	codeReadCount       int64
-	version             int
+	version             Incarnation
 	dep                 int
 	stateReadErr        error
 
@@ -1470,7 +1470,7 @@ func (ibs *IntraBlockState) TxIndex() int {
 }
 
 func (ibs *IntraBlockState) Incarnation() int {
-	return ibs.version
+	return int(ibs.version)
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
@@ -1503,7 +1503,8 @@ func (ibs *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 	if set {
 		// Record even when value equals origin: dropping the write entry leaves
 		// the journal nothing to restore when a nested write is reverted.
-		ibs.recordWriteStorage(addr, key, value)
+		prev, _ := stateObject.GetCommittedState(key)
+		ibs.recordWriteStorage(addr, key, value, prev)
 	}
 	return nil
 }
@@ -1534,7 +1535,7 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 	if so, ok := ibs.stateObjects[addr]; ok {
 		so.setState(key, value)
 	}
-	ibs.recordWriteStorage(addr, key, value)
+	ibs.recordWriteStorage(addr, key, value, prev)
 	return nil
 }
 
@@ -2340,7 +2341,7 @@ func (ibs *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 		// so.newlyCreated = false.
 		if ibs.versionMap != nil && so.selfdestructed && so.newlyCreated {
 			for key := range so.dirtyStorage {
-				ibs.recordWriteStorage(addr, key, uint256.Int{})
+				ibs.recordWriteStorage(addr, key, uint256.Int{}, uint256.Int{})
 			}
 		}
 
@@ -2463,7 +2464,7 @@ func (ibs *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 		// storage writes so AsBlockAccessList folds them away.
 		if ibs.versionMap != nil && stateObject.selfdestructed && stateObject.newlyCreated {
 			for key := range stateObject.dirtyStorage {
-				ibs.recordWriteStorage(addr, key, uint256.Int{})
+				ibs.recordWriteStorage(addr, key, uint256.Int{}, uint256.Int{})
 			}
 		}
 	}
@@ -2996,7 +2997,27 @@ func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, val *accou
 	traceWrite(ibs, vw)
 }
 
-func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
+// storageValueStatus classifies a storage write relative to what the tx read (prev),
+// which already reflects a same-tx destruct, so no re-derivation or lifecycle guard is
+// needed. A zero slot is an absent leaf, so presence is prev != 0.
+func storageValueStatus(prev, val uint256.Int) valueStatus {
+	if prev.Eq(&val) {
+		return ValueUnchanged
+	}
+	if prev.IsZero() {
+		return ValueCreated
+	}
+	if val.IsZero() {
+		return ValueDeleted
+	}
+	return ValueChanged
+}
+
+// recordWriteStorage records a storage write, stamping valStatus against the tx's
+// committed origin for the key. prev is the value the tx read for this key; on the
+// first write it is that committed origin and is captured, so a later re-write (an
+// intra-tx oscillation) still classifies against the origin rather than the prior step.
+func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int, prev uint256.Int) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3004,11 +3025,13 @@ func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accoun
 	if vw, ok := ibs.versionedWrites.GetStorage(addr, key); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
+		vw.valStatus = storageValueStatus(vw.orig, val)
 		traceWrite(ibs, vw)
 		return
 	}
 	vw := getVWStorage()
-	vw.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: ibs.Version()}
+	vw.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: ibs.Version(), valStatus: storageValueStatus(prev, val)}
+	vw.orig = prev
 	vw.Val = val
 	ibs.versionedWrites.SetStorage(addr, key, vw)
 	traceWrite(ibs, vw)
@@ -3194,7 +3217,7 @@ func (ibs *IntraBlockState) recordStateReadError(err error) {
 	}
 }
 
-func (ibs *IntraBlockState) SetVersion(inc int) {
+func (ibs *IntraBlockState) SetVersion(inc Incarnation) {
 	ibs.version = inc
 }
 
@@ -3250,15 +3273,24 @@ func (ibs *IntraBlockState) recordAddressOrigin(addr accounts.Address, acc *acco
 	})
 }
 
-// PublishOrigins flushes this tx's collected committed-base origins to the shared versionMap
-// in one batched, write-once pass at flush — the reads that discovered them stayed lock-free,
-// restoring the invariant that a tx never mutates the versionMap mid-execution. Idempotent
-// across txs: origins sit at originIndex with the committed value.
+// PublishOrigins publishes this tx's collected committed-base origins into the versionMap's
+// lock-free origin layer (write-once), so later reads resolve the pre-block base without taking
+// an account's e.mu. The origin is immutable pre-block state, so it lives outside the OCC cells.
 func (ibs *IntraBlockState) PublishOrigins() {
 	if ibs.versionMap == nil || ibs.versionedOrigins.IsEmpty() {
 		return
 	}
-	ibs.versionMap.FlushVersionedWrites(&ibs.versionedOrigins, true, "")
+	ws := &ibs.versionedOrigins
+	ws.forEachAddr(func(addr accounts.Address) {
+		if vw, ok := ws.address[addr]; ok {
+			ibs.versionMap.StoreOriginAccount(addr, vw.Val)
+		}
+		if inner, ok := ws.storage[addr]; ok {
+			for key, vw := range inner {
+				ibs.versionMap.StoreOriginStorage(addr, key, vw.Val)
+			}
+		}
+	})
 }
 
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
