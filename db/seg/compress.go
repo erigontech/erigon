@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/dir"
-	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/etl"
@@ -151,7 +150,7 @@ type Timings struct {
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
 	workers := cfg.Workers
-	dir2.MustExist(tmpDir)
+	dir.MustExist(tmpDir)
 	_, fileName := filepath.Split(outputFile)
 
 	uncompressedPath := filepath.Join(tmpDir, fileName) + ".idt"
@@ -318,13 +317,13 @@ func (c *Compressor) Compress() error {
 	}
 	c.stopWorkers()
 
-	cf, err := dir.CreateTemp(c.outputFile)
-	if err != nil {
-		return err
+	cf, createErr := dir.CreateTemp(c.outputFile)
+	if createErr != nil {
+		return createErr
 	}
+	defer dir.RemoveFile(cf.Name()) //nolint:errcheck
+	defer cf.Close()                //nolint:errcheck
 	tmpFileName := cf.Name()
-	defer dir.RemoveFile(tmpFileName) //nolint:errcheck
-	defer cf.Close()                  //nolint:errcheck
 
 	if c.version == FileCompressionFormatV1 {
 		if _, err := cf.Write([]byte{c.version, byte(c.featureFlagBitmask)}); err != nil {
@@ -365,8 +364,7 @@ func (c *Compressor) Compress() error {
 		if c.lvl < log.LvlTrace {
 			c.logger.Log(c.lvl, fmt.Sprintf("[%s] BuildDict start", c.logPrefix), "workers", c.Workers)
 		}
-		var db *DictionaryBuilder
-		db, err = DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
+		db, err := DictionaryBuilderFromCollectors(c.ctx, c.Cfg, c.logPrefix, c.tmpDir, c.suffixCollectors, c.lvl, c.logger)
 		if err != nil {
 			return err
 		}
@@ -390,8 +388,7 @@ func (c *Compressor) Compress() error {
 		return fmt.Errorf("renaming: %w", err)
 	}
 
-	var outputStat os.FileInfo
-	outputStat, err = os.Stat(c.outputFile)
+	outputStat, err := os.Stat(c.outputFile)
 	if err != nil {
 		return fmt.Errorf("ratio: %w", err)
 	}
@@ -899,7 +896,7 @@ func (f *RawWordsFile) Close() {
 
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()
-	dir2.RemoveFile(f.filePath) //nolint:errcheck
+	dir.RemoveFile(f.filePath) //nolint:errcheck
 }
 
 func (f *RawWordsFile) Append(v []byte) error {

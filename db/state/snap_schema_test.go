@@ -96,7 +96,6 @@ func TestE2SnapSchema(t *testing.T) {
 	require.True(t, p.AccessorIdxFileMetadata().Supported())
 	require.False(t, p.BtIdxFileMetadata().Supported())
 	require.False(t, p.ExistenceFileMetadata().Supported())
-
 }
 
 func TestISSet(t *testing.T) {

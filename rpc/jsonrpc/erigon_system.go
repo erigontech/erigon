@@ -36,15 +36,17 @@ type Forks struct {
 
 // Forks implements erigon_forks. Returns the genesis block hash and a sorted list of all forks block numbers
 func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return Forks{}, err
-	}
-	defer tx.Rollback()
+	chainConfig, genesis, ok := api.tryChainConfigWithGenesis()
+	if !ok {
+		tx, err := api.db.BeginTemporalRo(ctx)
+		if err != nil {
+			return Forks{}, err
+		}
+		defer tx.Rollback()
 
-	chainConfig, genesis, err := api.chainConfigWithGenesis(ctx, tx)
-	if err != nil {
-		return Forks{}, err
+		if chainConfig, genesis, err = api.chainConfigWithGenesis(ctx, tx); err != nil {
+			return Forks{}, err
+		}
 	}
 	heightForks, timeForks := forkid.GatherForks(chainConfig, genesis.Time())
 

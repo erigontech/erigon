@@ -31,9 +31,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-var (
-	_ downloaderproto.DownloaderServer = &GrpcServer{}
-)
+var _ downloaderproto.DownloaderServer = &GrpcServer{}
 
 func NewGrpcServer(d *Downloader) (*GrpcServer, error) {
 	svr := &GrpcServer{

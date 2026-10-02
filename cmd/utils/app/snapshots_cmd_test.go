@@ -119,7 +119,7 @@ func createSchemaFiles(t *testing.T, schema state.SnapNameSchema, from, to int) 
 	t.Helper()
 	rootFrom, rootTo := RootNum(from), RootNum(to)
 	touchFile := func(filepath string) {
-		file, err := os.OpenFile(filepath, os.O_RDONLY|os.O_CREATE, 0644)
+		file, err := os.OpenFile(filepath, os.O_RDONLY|os.O_CREATE, 0o644)
 		if err != nil {
 			panic(err)
 		}
@@ -177,7 +177,7 @@ func Test_DeleteStateSnaps_RemovesTmpFiles(t *testing.T) {
 	}
 
 	touchFile := func(path string) {
-		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
+		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o644)
 		require.NoError(t, err)
 		f.Close()
 	}
@@ -218,7 +218,7 @@ func Test_DeleteStateSnaps_DryRunKeepsTmpFiles(t *testing.T) {
 	}
 
 	touchFile := func(path string) {
-		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
+		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o644)
 		require.NoError(t, err)
 		f.Close()
 	}
@@ -257,9 +257,15 @@ func Test_DeleteLatestStateSnaps_SubsetRemoval(t *testing.T) {
 	// Sub-ranges of 192-224: 192-208, 208-216, 216-220, 220-222, 222-223, 223-224
 	// Tip file: 224-225
 	ranges := [][2]int{
-		{0, 128}, {128, 192},
+		{0, 128},
+		{128, 192},
 		{192, 224},
-		{192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224},
+		{192, 208},
+		{208, 216},
+		{216, 220},
+		{220, 222},
+		{222, 223},
+		{223, 224},
 		{224, 225},
 	}
 	for _, r := range ranges {
@@ -310,9 +316,15 @@ func Test_DeleteStateSnaps_StepRange_SubsetRemoval(t *testing.T) {
 	// 0-128, 128-192, 192-224
 	// Sub-ranges of 192-224: 192-208, 208-216, 216-220, 220-222, 222-223, 223-224
 	ranges := [][2]int{
-		{0, 128}, {128, 192},
+		{0, 128},
+		{128, 192},
 		{192, 224},
-		{192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224},
+		{192, 208},
+		{208, 216},
+		{216, 220},
+		{220, 222},
+		{222, 223},
+		{223, 224},
 	}
 	for _, r := range ranges {
 		createFiles(t, dirs, r[0], r[1], &b)
@@ -378,9 +390,15 @@ func Test_DeleteStateSnaps_StepRange_FromPlus(t *testing.T) {
 	b.domain, b.history, b.ii = state.SnapSchemaFromDomainCfg(dc, dirs, 1)
 
 	ranges := [][2]int{
-		{0, 128}, {128, 192},
+		{0, 128},
+		{128, 192},
 		{192, 224},
-		{192, 208}, {208, 216}, {216, 220}, {220, 222}, {222, 223}, {223, 224},
+		{192, 208},
+		{208, 216},
+		{216, 220},
+		{220, 222},
+		{222, 223},
+		{223, 224},
 	}
 	for _, r := range ranges {
 		createFiles(t, dirs, r[0], r[1], &b)
@@ -412,8 +430,12 @@ func Test_DeleteLatestStateSnaps_NoFalseSubsetRemoval(t *testing.T) {
 	// Create non-overlapping files: 0-64, 64-128, 128-192, 192-193
 	// 0-64 has sub-ranges: 0-32, 32-64
 	ranges := [][2]int{
-		{0, 64}, {0, 32}, {32, 64},
-		{64, 128}, {128, 192}, {192, 193},
+		{0, 64},
+		{0, 32},
+		{32, 64},
+		{64, 128},
+		{128, 192},
+		{192, 193},
 	}
 	for _, r := range ranges {
 		createFiles(t, dirs, r[0], r[1], &b)
@@ -551,7 +573,8 @@ func Test_DeleteLatestStateSnaps_DryRunPreservesSubsetFiles(t *testing.T) {
 	ranges := [][2]int{
 		{0, 128},
 		{128, 256},
-		{128, 192}, {192, 224},
+		{128, 192},
+		{192, 224},
 		{256, 257},
 	}
 	for _, r := range ranges {
@@ -664,7 +687,7 @@ func TestDUWalkSnapshots(t *testing.T) {
 	// Create mock files in various snapshot subdirectories.
 	writeFile := func(dir, name string, size int) {
 		path := filepath.Join(dir, name)
-		require.NoError(t, os.WriteFile(path, make([]byte, size), 0644))
+		require.NoError(t, os.WriteFile(path, make([]byte, size), 0o644))
 	}
 
 	// domain files (state file format: type.from-to)
@@ -1363,9 +1386,9 @@ func TestDUAcceptanceCriteria(t *testing.T) {
 // directory exists. Used by the rm-blocks tests below.
 func touchBlockSnap(t *testing.T, dirs datadir.Dirs, name string) string {
 	t.Helper()
-	require.NoError(t, os.MkdirAll(dirs.Snap, 0755))
+	require.NoError(t, os.MkdirAll(dirs.Snap, 0o755))
 	full := filepath.Join(dirs.Snap, name)
-	f, err := os.OpenFile(full, os.O_RDONLY|os.O_CREATE, 0644)
+	f, err := os.OpenFile(full, os.O_RDONLY|os.O_CREATE, 0o644)
 	require.NoError(t, err)
 	f.Close()
 	return full
@@ -1455,7 +1478,7 @@ func Test_removeAccessorsForRebuild(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 
 	touch := func(path string) {
-		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0644)
+		f, err := os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0o644)
 		require.NoError(t, err)
 		require.NoError(t, f.Close())
 	}

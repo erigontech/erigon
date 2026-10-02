@@ -81,7 +81,6 @@ func fanOut[R any](ctx context.Context, clients []*client, minProtocol sentrypro
 
 		g.Go(func() error {
 			reply, err := call(gctx, client)
-
 			if err != nil {
 				return err
 			}
@@ -121,10 +120,8 @@ func streamFanIn[T protoreflect.ProtoMessage, S interface{ Recv() (T, error) }](
 		defer close(ch)
 
 		for _, client := range clients {
-
 			g.Go(func() error {
 				stream, err := open(gctx, client)
-
 				if err != nil {
 					streamServer.Err(err)
 					return err
@@ -132,7 +129,6 @@ func streamFanIn[T protoreflect.ProtoMessage, S interface{ Recv() (T, error) }](
 
 				for {
 					message, err := stream.Recv()
-
 					if err != nil {
 						if errors.Is(err, io.EOF) {
 							return nil
@@ -149,12 +145,12 @@ func streamFanIn[T protoreflect.ProtoMessage, S interface{ Recv() (T, error) }](
 						return fmt.Errorf("recv: %w", err)
 					}
 
-					streamServer.Send(message)
+					_ = streamServer.Send(message)
 				}
 			})
 		}
 
-		g.Wait()
+		_ = g.Wait()
 	}()
 
 	return &SentryStreamC[T]{Ch: ch, Ctx: ctx}
@@ -164,7 +160,6 @@ func (m *sentryMultiplexer) SetStatus(ctx context.Context, in *sentryproto.Statu
 	err := fanOut(ctx, m.clients, 0, func(gctx context.Context, client *client) (*sentryproto.SetStatusReply, error) {
 		return client.SetStatus(gctx, in, opts...)
 	}, nil)
-
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +205,6 @@ func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, op
 		}
 
 		reply, err := client.HandShake(gctx, &emptypb.Empty{}, grpc.WaitForReady(true))
-
 		if err != nil {
 			return noProtocol, err
 		}
@@ -226,7 +220,6 @@ func (m *sentryMultiplexer) HandShake(ctx context.Context, in *emptypb.Empty, op
 		}
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +242,6 @@ func (m *sentryMultiplexer) SendMessageByMinBlock(ctx context.Context, in *sentr
 		}
 
 		sentPeers, err := client.SendMessageByMinBlock(ctx, cin, opts...)
-
 		if err != nil {
 			return nil, err
 		}
@@ -285,7 +277,6 @@ func (m *sentryMultiplexer) SendMessageById(ctx context.Context, in *sentryproto
 	}
 
 	peerReplies, err := m.peersByClient(ctx, minProtocol, opts...)
-
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +304,6 @@ CLIENTS:
 
 	g.Go(func() error {
 		sentPeers, err := m.clients[clientIndex].SendMessageById(gctx, in, opts...)
-
 		if err != nil {
 			return err
 		}
@@ -342,7 +332,6 @@ func (m *sentryMultiplexer) SendMessageToRandomPeers(ctx context.Context, in *se
 	}
 
 	peerReplies, err := m.peersByClient(ctx, minProtocol, opts...)
-
 	if err != nil {
 		return nil, err
 	}
@@ -383,13 +372,11 @@ func (m *sentryMultiplexer) SendMessageToRandomPeers(ctx context.Context, in *se
 	}
 
 	for _, peer := range peers {
-
 		g.Go(func() error {
 			sentPeers, err := m.clients[peer.clientIndex].SendMessageById(gctx, &sentryproto.SendMessageByIdRequest{
 				PeerId: peer.peerId,
 				Data:   in.Data,
 			}, opts...)
-
 			if err != nil {
 				return err
 			}
@@ -404,7 +391,6 @@ func (m *sentryMultiplexer) SendMessageToRandomPeers(ctx context.Context, in *se
 	}
 
 	err = g.Wait()
-
 	if err != nil {
 		return nil, err
 	}
@@ -420,7 +406,6 @@ func (m *sentryMultiplexer) SendMessageToAll(ctx context.Context, in *sentryprot
 	}
 
 	peerReplies, err := m.peersByClient(ctx, minProtocol, opts...)
-
 	if err != nil {
 		return nil, err
 	}
@@ -449,15 +434,14 @@ func (m *sentryMultiplexer) SendMessageToAll(ctx context.Context, in *sentryprot
 	var allSentMutex sync.RWMutex
 
 	for _, peer := range peers {
-
 		g.Go(func() error {
 			sentPeers, err := m.clients[peer.clientIndex].SendMessageById(gctx, &sentryproto.SendMessageByIdRequest{
 				PeerId: peer.peerId,
 				Data: &sentryproto.OutboundMessageData{
 					Id:   in.Id,
 					Data: in.Data,
-				}}, opts...)
-
+				},
+			}, opts...)
 			if err != nil {
 				return err
 			}
@@ -472,7 +456,6 @@ func (m *sentryMultiplexer) SendMessageToAll(ctx context.Context, in *sentryprot
 	}
 
 	err = g.Wait()
-
 	if err != nil {
 		return nil, err
 	}
@@ -496,7 +479,6 @@ func (m *sentryMultiplexer) peersByClient(ctx context.Context, minProtocol sentr
 		allReplies[clientIndex] = reply
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -508,7 +490,6 @@ func (m *sentryMultiplexer) Peers(ctx context.Context, in *emptypb.Empty, opts .
 	var allPeers []*typesproto.PeerInfo
 
 	allReplies, err := m.peersByClient(ctx, noProtocol, opts...)
-
 	if err != nil {
 		return nil, err
 	}
@@ -529,7 +510,6 @@ func (m *sentryMultiplexer) PeerCount(ctx context.Context, in *sentryproto.PeerC
 		allCount += reply.GetCount()
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -572,7 +552,6 @@ func (m *sentryMultiplexer) AddPeer(ctx context.Context, in *sentryproto.AddPeer
 	success, err := fanOutSuccess(ctx, m.clients, func(gctx context.Context, client *client) (*sentryproto.AddPeerReply, error) {
 		return client.AddPeer(gctx, in, opts...)
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -584,7 +563,6 @@ func (m *sentryMultiplexer) RemovePeer(ctx context.Context, in *sentryproto.Remo
 	success, err := fanOutSuccess(ctx, m.clients, func(gctx context.Context, client *client) (*sentryproto.RemovePeerReply, error) {
 		return client.RemovePeer(gctx, in, opts...)
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -596,7 +574,6 @@ func (m *sentryMultiplexer) AddTrustedPeer(ctx context.Context, in *sentryproto.
 	success, err := fanOutSuccess(ctx, m.clients, func(gctx context.Context, client *client) (*sentryproto.AddPeerReply, error) {
 		return client.AddTrustedPeer(gctx, in, opts...)
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -608,7 +585,6 @@ func (m *sentryMultiplexer) RemoveTrustedPeer(ctx context.Context, in *sentrypro
 	success, err := fanOutSuccess(ctx, m.clients, func(gctx context.Context, client *client) (*sentryproto.RemovePeerReply, error) {
 		return client.RemoveTrustedPeer(gctx, in, opts...)
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -629,7 +605,6 @@ func (m *sentryMultiplexer) NodeInfos(ctx context.Context, opts ...grpc.CallOpti
 		allInfos = append(allInfos, info)
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}

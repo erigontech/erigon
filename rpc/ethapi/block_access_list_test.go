@@ -15,7 +15,7 @@ import (
 func TestMarshalBlockAccessList(t *testing.T) {
 	bal := types.BlockAccessList{
 		{
-			Address: accounts.InternAddress(common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")),
+			Address: common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
 			StorageChanges: []types.SlotChanges{
 				{
 					Slot: accounts.InternKey(common.Hash{}),
@@ -103,7 +103,7 @@ func TestMarshalBlockAccessListEmpty(t *testing.T) {
 func TestMarshalBlockAccessListWithCode(t *testing.T) {
 	bal := types.BlockAccessList{
 		{
-			Address:        accounts.InternAddress(common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")),
+			Address:        common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
 			StorageChanges: nil,
 			StorageReads:   nil,
 			BalanceChanges: nil,

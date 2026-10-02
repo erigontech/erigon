@@ -98,9 +98,9 @@ func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
 	readSlot := accounts.InternKey(common.Hash{31: 4})
 	changedSlot := accounts.InternKey(common.Hash{31: 5})
 	bal := types.BlockAccessList{
-		{Address: readOnlyAddress, StorageReads: []accounts.StorageKey{readSlot}},
-		{Address: accountAddress, BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
-		{Address: storageAddress, StorageChanges: []types.SlotChanges{{
+		{Address: readOnlyAddress.Value(), StorageReads: []accounts.StorageKey{readSlot}},
+		{Address: accountAddress.Value(), BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
+		{Address: storageAddress.Value(), StorageChanges: []types.SlotChanges{{
 			Slot: changedSlot, Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}},
 		}}},
 	}
@@ -126,7 +126,7 @@ func TestWarmBALCommitmentReadsCommitmentDomain(t *testing.T) {
 	tx := new(commitmentRecordingTx)
 	db := &singleTxRoDB{tx: tx}
 	bal := types.BlockAccessList{{
-		Address:        accounts.InternAddress(common.Address{19: 2}),
+		Address:        common.Address{19: 2},
 		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 	}}
 
@@ -146,11 +146,11 @@ func TestWarmBALCommitmentCollectsWorkerFactoryErrors(t *testing.T) {
 	db := &commitmentBeginErrorDB{errs: []error{firstErr, secondErr}}
 	bal := types.BlockAccessList{
 		{
-			Address:        accounts.InternAddress(common.Address{19: 1}),
+			Address:        common.Address{19: 1},
 			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 		},
 		{
-			Address:        accounts.InternAddress(common.Address{19: 2}),
+			Address:        common.Address{19: 2},
 			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(2)}},
 		},
 	}
@@ -221,7 +221,7 @@ func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {
 	}
 	db := &singleTxRoDB{tx: tx}
 	bal := types.BlockAccessList{{
-		Address:        accounts.InternAddress(common.Address{19: 2}),
+		Address:        common.Address{19: 2},
 		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 	}}
 
