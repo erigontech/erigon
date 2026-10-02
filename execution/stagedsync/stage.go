@@ -132,9 +132,11 @@ func (u UnwindReason) Err() error {
 	return nil
 }
 
-var StagedUnwind = UnwindReason{}
-var ExecUnwind = UnwindReason{}
-var ForkChoice = UnwindReason{}
+var (
+	StagedUnwind = UnwindReason{}
+	ExecUnwind   = UnwindReason{}
+	ForkChoice   = UnwindReason{}
+)
 
 func BadBlock(badBlock common.Hash, err error) UnwindReason {
 	if !errors.Is(err, rules.ErrInvalidBlock) {
@@ -189,6 +191,7 @@ func (s *PruneState) LogPrefix() string { return s.state.LogPrefix() + " Prune" 
 func (s *PruneState) Done(db kv.Putter) error {
 	return stages.SaveStagePruneProgress(db, s.ID, s.ForwardProgress)
 }
+
 func (s *PruneState) DoneAt(db kv.Putter, blockNum uint64) error {
 	return stages.SaveStagePruneProgress(db, s.ID, blockNum)
 }

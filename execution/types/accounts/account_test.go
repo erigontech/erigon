@@ -238,6 +238,7 @@ func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *tes
 
 	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
 }
+
 func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
 	t.Parallel()
 	a := Account{
@@ -314,7 +315,6 @@ func TestEmptyIncarnationForEmptyAccount2(t *testing.T) {
 	}
 
 	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-
 }
 
 func TestIncarnationWithNonEmptyAccount(t *testing.T) {
@@ -355,17 +355,14 @@ func TestIncarnationWithNoIncarnation(t *testing.T) {
 	}
 
 	isIncarnationEqual(t, a.Incarnation, decodedAcc.Incarnation)
-
 }
 
 func TestIncarnationWithInvalidEncodedAccount(t *testing.T) {
-
-	var failingSlice = []byte{1, 12}
+	failingSlice := []byte{1, 12}
 
 	if incarnation, err := DecodeIncarnationFromStorage(failingSlice); err == nil {
 		t.Fatal("decoded the incarnation", incarnation, failingSlice)
 	}
-
 }
 
 func isIncarnationEqual(t *testing.T, initialIncarnation uint64, decodedIncarnation uint64) {
@@ -388,13 +385,15 @@ func TestAccProofResultMarshalFastJSONTo(t *testing.T) {
 		"zero":          {},
 		"no storage":    {Address: common.HexToAddress("0x01"), AccountProof: proof(3), Balance: maxU256, Nonce: hexutil.Uint64(^uint64(0))},
 		"empty storage": {AccountProof: []hexutil.Bytes{}, Balance: new(hexutil.U256), StorageProof: []StorProofResult{}},
-		"slots": {AccountProof: proof(8), Balance: (*hexutil.U256)(uint256.NewInt(1 << 40)), CodeHash: common.HexToHash("0xc0de"), StorageHash: common.HexToHash("0x5707"),
+		"slots": {
+			AccountProof: proof(8), Balance: (*hexutil.U256)(uint256.NewInt(1 << 40)), CodeHash: common.HexToHash("0xc0de"), StorageHash: common.HexToHash("0x5707"),
 			StorageProof: []StorProofResult{
 				{Key: "0x01", Value: maxU256, Proof: proof(5)},
 				{Key: `"quoted"`, Value: new(hexutil.U256), Proof: []hexutil.Bytes{}},
 				{Key: "0x03", Value: (*hexutil.U256)(uint256.NewInt(0x10)), Proof: proof(1)},
 				{},
-			}},
+			},
+		},
 		"large": {AccountProof: proof(2 * jsonstream.FlushThreshold / 532), Balance: new(hexutil.U256)},
 	} {
 		t.Run(name, func(t *testing.T) {

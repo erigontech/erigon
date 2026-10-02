@@ -45,7 +45,7 @@ func TestPinBranchResolver_ReturnsAuthoritativeLatest(t *testing.T) {
 	latest := []byte("branch-latest")
 	getter := &fakeTemporalGetter{vals: map[string][]byte{"\x0a\x0b": latest, "\x0d": {}}}
 	resolve := pinBranchResolver(getter)
-	vals, err := resolve([][]byte{[]byte{0x0a, 0x0b}, []byte{0x0c}, []byte{0x0d}})
+	vals, err := resolve([][]byte{{0x0a, 0x0b}, {0x0c}, {0x0d}})
 	require.NoError(t, err)
 	require.Len(t, vals, 3)
 	require.Equal(t, latest, vals[0])
@@ -60,6 +60,6 @@ func TestPinBranchResolver_PropagatesReadErrors(t *testing.T) {
 	readErr := errors.New("read failed")
 	getter := &fakeTemporalGetter{vals: map[string][]byte{"\x0a": []byte("v")}, err: readErr}
 	resolve := pinBranchResolver(getter)
-	_, err := resolve([][]byte{[]byte{0x0a}})
+	_, err := resolve([][]byte{{0x0a}})
 	require.ErrorIs(t, err, readErr)
 }

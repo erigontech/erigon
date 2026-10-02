@@ -59,7 +59,8 @@ type shardedLRU[V any] struct {
 }
 
 func newShardedLRU[V any](startCap, maxCap, shards uint32, onEvict func(uint64, V),
-	fundGrow func(oldCap, newCap uint32) bool, refundGrow func(oldCap, newCap uint32)) *shardedLRU[V] {
+	fundGrow func(oldCap, newCap uint32) bool, refundGrow func(oldCap, newCap uint32),
+) *shardedLRU[V] {
 	shards = max(uint32(math.NextPowerOfTwo(uint64(shards))), 1)
 	s := &shardedLRU[V]{
 		shards:     make([]*freelru.LRU[uint64, V], shards),

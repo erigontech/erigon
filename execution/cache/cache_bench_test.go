@@ -61,16 +61,20 @@ func BenchmarkStateCachePublicationUnderLoad(b *testing.B) {
 					// Seed so readers mostly hit.
 					seed := make([]StateUpdate, keySpace)
 					for i := range seed {
-						seed[i] = StateUpdate{Domain: kv.AccountsDomain, Key: mkKey(i),
-							Value: []byte{byte(i), 0xEE}, TxNum: uint64(i)}
+						seed[i] = StateUpdate{
+							Domain: kv.AccountsDomain, Key: mkKey(i),
+							Value: []byte{byte(i), 0xEE}, TxNum: uint64(i),
+						}
 					}
 					ap.Publish(1, 2, seed)
 					version.Store(2)
 
 					updates := make([]StateUpdate, batch)
 					for i := range updates {
-						updates[i] = StateUpdate{Domain: kv.AccountsDomain, Key: mkKey(i % keySpace),
-							Value: []byte{byte(i), 0xFF}, TxNum: uint64(i)}
+						updates[i] = StateUpdate{
+							Domain: kv.AccountsDomain, Key: mkKey(i % keySpace),
+							Value: []byte{byte(i), 0xFF}, TxNum: uint64(i),
+						}
 					}
 
 					var reads, fillsOffered, fillsLanded atomic.Uint64
@@ -99,7 +103,8 @@ func BenchmarkStateCachePublicationUnderLoad(b *testing.B) {
 										sv = 1 // the version the cache has moved past
 									}
 									v := c.View(FrontierWithStateVersion(
-										FrontierFunc(func(kv.Domain) (uint64, bool) { return uint64(keySpace), true }), sv))
+										FrontierFunc(func(kv.Domain) (uint64, bool) { return uint64(keySpace), true }), sv,
+									))
 
 									if _, ok := v.Get(kv.AccountsDomain, key); !ok {
 										fillsOffered.Add(1)
@@ -188,7 +193,8 @@ func BenchmarkPublishVsViewBindLock(b *testing.B) {
 							var v ReadView
 							if bind == "frontier-RLock" {
 								v = c.View(FrontierWithStateVersion(
-									FrontierFunc(func(kv.Domain) (uint64, bool) { return keySpace, true }), version.Load()))
+									FrontierFunc(func(kv.Domain) (uint64, bool) { return keySpace, true }), version.Load(),
+								))
 							} else {
 								v = c.View(nil)
 							}

@@ -389,7 +389,8 @@ func convertCommitmentFile(
 		effectiveTargetSqueeze = false
 		logger.Info(fmt.Sprintf(
 			"[commitment_convert] %s: step span %d-%d below squeeze threshold; squeeze axis treated as already-target",
-			filepath.Base(file.Fullpath()), stepFrom, stepTo))
+			filepath.Base(file.Fullpath()), stepFrom, stepTo,
+		))
 	}
 	if st.keysV2 == opts.TargetNibblesV2 && st.squeezed == effectiveTargetSqueeze {
 		return 0, 0, 0, errSkip
@@ -499,7 +500,8 @@ func convertCommitmentFile(
 				formatRate(ki, time.Since(fileStart)),
 				common.PrettyCounter(processedKeys+ki),
 				common.PrettyCounter(grandTotalKeys),
-				buildPhase1Prefix(fileIdx, fileTotal, processedKeys+ki, grandTotalKeys)))
+				buildPhase1Prefix(fileIdx, fileTotal, processedKeys+ki, grandTotalKeys),
+			))
 		default:
 		}
 	}
@@ -525,7 +527,8 @@ func convertCommitmentFile(
 		formatRate(ki, elapsed),
 		common.PrettyCounter(processedKeys+ki),
 		common.PrettyCounter(grandTotalKeys),
-		buildPhase1Prefix(fileIdx, fileTotal, processedKeys+ki, grandTotalKeys)))
+		buildPhase1Prefix(fileIdx, fileTotal, processedKeys+ki, grandTotalKeys),
+	))
 
 	return delta, pct, ki, nil
 }
@@ -669,7 +672,8 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		"[commitment_convert] phase 1 complete: converted %d, skipped %d, total %d, keys=%s in %s, sizeDelta=%s",
 		processedFiles, skippedFiles, len(pendingFiles),
 		common.PrettyCounter(processedKeys),
-		time.Since(phaseStart).Round(time.Second), signedByteSizeHR(totalSizeDelta)))
+		time.Since(phaseStart).Round(time.Second), signedByteSizeHR(totalSizeDelta),
+	))
 
 	if processedFiles == 0 && priorCompleteCount == 0 {
 		if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
@@ -734,7 +738,8 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	}
 	logger.Info(fmt.Sprintf(
 		"[commitment_convert] DONE. converted %s. Originals preserved at:\n    %s\nTo restore originals: re-run with --restore",
-		doneSummary, backupDir))
+		doneSummary, backupDir,
+	))
 	return nil
 }
 
@@ -862,7 +867,8 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 					return fmt.Errorf(
 						"[commitment_convert] restore: manifest lists %s but neither backup nor destination exists "+
 							"(rename %s to retry or delete it to abandon)",
-						name, manifestPath)
+						name, manifestPath,
+					)
 				}
 				return fmt.Errorf("[commitment_convert] restore: stat destination %s: %w", dst, dstErr)
 			}
@@ -998,7 +1004,8 @@ func preflightBackupDir(backupDir string) error {
 		return fmt.Errorf(
 			"[commitment_convert] pre-flight: backup dir %s already exists with %d entries; "+
 				"refuse to overwrite a prior conversion's backup (rm -rf %s and retry)",
-			backupDir, len(entries), backupDir)
+			backupDir, len(entries), backupDir,
+		)
 	}
 	return nil
 }
@@ -1163,7 +1170,8 @@ func preflightResume(
 					"[commitment_convert] --continue: non-contiguous shards: "+
 						"rebuildDir has complete shard at steps %d-%d but is missing %d-%d before it",
 					fr.from, fr.to,
-					firstMissingRange.from, firstMissingRange.to)
+					firstMissingRange.from, firstMissingRange.to,
+				)
 			}
 		} else if prefixLen == -1 {
 			prefixLen = i
@@ -1178,7 +1186,8 @@ func preflightResume(
 			return nil, fmt.Errorf(
 				"[commitment_convert] --continue: rebuildDir contains complete shard for steps %d-%d "+
 					"that does not match any current input file; verify the input file set matches the original run",
-				r.from, r.to)
+				r.from, r.to,
+			)
 		}
 	}
 
@@ -1274,7 +1283,8 @@ func convertPhase1(
 		if convErr != nil {
 			return processedFiles, skippedFiles, totalSizeDelta, processedKeys, fmt.Errorf(
 				"[commitment_convert] phase 1 file %s: %w (cleanup: rm -rf %s)",
-				f.Fullpath(), convErr, rebuildDir)
+				f.Fullpath(), convErr, rebuildDir,
+			)
 		}
 		processedKeys += ki
 		processedFiles++
