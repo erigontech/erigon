@@ -82,13 +82,11 @@ func TestByteLRUConcurrentSameKeyStaysBounded(t *testing.T) {
 	value := make([]byte, 64*1024)
 	var wg sync.WaitGroup
 	for range 32 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for key := range uint64(2000) {
 				b.Add(key, value)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	b.c.CleanUp()
@@ -111,13 +109,11 @@ func TestByteLRUBudgetedConcurrentSameKeyAccounting(t *testing.T) {
 	value := make([]byte, 64*1024)
 	var wg sync.WaitGroup
 	for range 32 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for key := range uint64(2000) {
 				b.Add(key, value)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	b.c.CleanUp()
