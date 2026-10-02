@@ -80,6 +80,23 @@ func CheckCallData(data, input *hexutil.Bytes) error {
 	return nil
 }
 
+// ChainIDMismatch returns an error when a call object's chainId names another chain.
+func ChainIDMismatch(have *hexutil.U256, want *uint256.Int) error {
+	if have != nil && !(*uint256.Int)(have).Eq(want) {
+		return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", (*uint256.Int)(have), want)
+	}
+	return nil
+}
+
+// CheckChainID rejects a call object whose chainId names another chain. Such a call is invalid
+// whatever the state, so it is invalid params rather than an execution error.
+func CheckChainID(have *hexutil.U256, want *uint256.Int) error {
+	if err := ChainIDMismatch(have, want); err != nil {
+		return &rpc.InvalidParamsError{Message: err.Error()}
+	}
+	return nil
+}
+
 func (args *CallArgs) FromOrEmpty() accounts.Address {
 	return args.from()
 }
