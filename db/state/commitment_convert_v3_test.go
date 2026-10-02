@@ -18,6 +18,7 @@ package state_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
@@ -26,15 +27,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestConvertCommitmentFiles_V3(t *testing.T) {
@@ -165,4 +172,117 @@ func TestConvertCommitmentFiles_V3BranchNotRewrittenAfterLeafChange(t *testing.T
 	require.Positive(t, dropLeafOnlyRewrites(t, db, agg))
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+}
+
+func storageSlotWithHashPrefix(tb testing.TB, prefix []byte, next *uint64) []byte {
+	tb.Helper()
+	for ; ; *next++ {
+		slot := make([]byte, length.Hash)
+		binary.BigEndian.PutUint64(slot[length.Hash-8:], *next)
+		path := make([]byte, 2*length.Hash)
+		nibbles.Expand(crypto.Keccak256(slot), path)
+		if bytes.HasPrefix(path, prefix) {
+			*next++
+			return slot
+		}
+	}
+}
+
+func TestConvertCommitmentFiles_V3CollapsedStorageBranch(t *testing.T) {
+	for _, keysV2 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("keysV2=%t", keysV2), func(t *testing.T) {
+			testConvertCommitmentFilesV3CollapsedStorageBranch(t, keysV2)
+		})
+	}
+}
+
+func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 bool) {
+	const stepSize, steps = 4, 2
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
+	require.NoError(t, err)
+	defer domains.Close()
+
+	addrs, _ := generateInputData(t, length.Addr, 1, 2)
+	owner := addrs[0]
+	next := uint64(1)
+	live := [][]byte{
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x2}, &next),
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x5}, &next),
+		storageSlotWithHashPrefix(t, []byte{0x3}, &next),
+	}
+	collapsing := [][]byte{
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x7, 0x0}, &next),
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0x7, 0x9}, &next),
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0xe, 0x5}, &next),
+		storageSlotWithHashPrefix(t, []byte{0xe, 0x1, 0xe, 0xa}, &next),
+	}
+	slot := func(s []byte) []byte { return append(bytes.Clone(owner), s...) }
+	put := func(d kv.Domain, k, v []byte, txNum uint64) {
+		prev, _, getErr := domains.GetLatest(d, rwTx, k)
+		require.NoError(t, getErr)
+		require.NoError(t, domains.DomainPut(d, rwTx, k, v, txNum, prev))
+	}
+	del := func(d kv.Domain, k []byte, txNum uint64) {
+		prev, _, getErr := domains.GetLatest(d, rwTx, k)
+		require.NoError(t, getErr)
+		require.NoError(t, domains.DomainDel(d, rwTx, k, txNum, prev))
+	}
+	putAccount := func(addr []byte, txNum uint64) {
+		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
+		put(kv.AccountsDomain, addr, accounts.SerialiseV3(&acc), txNum)
+	}
+	for txNum := range uint64(stepSize * steps) {
+		switch txNum {
+		case 0:
+			for _, a := range addrs {
+				putAccount(a, txNum)
+			}
+			for _, s := range append(slices.Clone(live), collapsing...) {
+				put(kv.StorageDomain, slot(s), []byte{1}, txNum)
+			}
+		case 1:
+			for _, s := range append(slices.Clone(live), collapsing...) {
+				del(kv.StorageDomain, slot(s), txNum)
+			}
+			del(kv.AccountsDomain, owner, txNum)
+		case 2:
+			putAccount(owner, txNum)
+			for _, s := range live {
+				put(kv.StorageDomain, slot(s), []byte{2}, txNum)
+			}
+		default:
+			putAccount(addrs[1], txNum)
+		}
+		_, err = domains.ComputeCommitment(ctx, rwTx, true, txNum, txNum, "", nil)
+		require.NoError(t, err)
+	}
+	require.NoError(t, domains.Flush(ctx, rwTx))
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	collapsed, _, _, _, err := state.AggTx(roTx).DebugGetLatestFromFiles(kv.CommitmentDomain, nibbles.HexToCompact(append(commitment.KeyToHexNibbleHash(owner), 0xe, 0x1)), math.MaxUint64)
+	require.NoError(t, err)
+	roTx.Rollback()
+	require.GreaterOrEqual(t, len(collapsed), 4)
+	require.NotZero(t, binary.BigEndian.Uint16(collapsed[2:4]), "legacy keeps the branch record left over from the deleted incarnation")
+
+	if keysV2 {
+		runOrchestrator(t, db, state.ConvertOpts{TargetNibblesV2: true})
+		require.NoError(t, dir.RemoveAll(filepath.Join(agg.Dirs().Snap, "backup", "domains")))
+	}
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+
+	c, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+	require.NoError(t, err)
+	require.Zero(t, c.Orphans)
 }
