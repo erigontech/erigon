@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -48,8 +49,110 @@ func getGloasEthClockAndConfig(t *testing.T) (eth_clock.EthereumClock, *clparams
 	return clock, cfg
 }
 
+type executionPayloadEnvelopesByRangeTestCase struct {
+	name                string
+	headPayloadStatus   cltypes.PayloadStatus
+	unavailable         bool
+	overflow            bool
+	missingFirstFull    bool
+	missingMiddleFull   bool
+	incompleteBlock     bool
+	incompleteBody      bool
+	emptyRange          bool
+	headIndexMismatch   bool
+	historicalMismatch  bool
+	headAncestorMatches bool
+	requestCount        uint64
+	canonicalBlockCount uint64
+	allPayloadsFull     bool
+	allPayloadsEmpty    bool
+	incompleteBlockAt   uint64
+	startAtGenesis      bool
+	verifyRateLimit     bool
+	wantEnvelopeCount   int
+	wantResponsePrefix  byte
+}
+
 func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
-	ctx := context.Background()
+	for _, tc := range []executionPayloadEnvelopesByRangeTestCase{
+		{name: "empty head payload", headPayloadStatus: cltypes.PayloadStatusEmpty},
+		{name: "full head payload", headPayloadStatus: cltypes.PayloadStatusFull},
+		{name: "pending head payload", headPayloadStatus: cltypes.PayloadStatusPending},
+		{name: "unavailable history", headPayloadStatus: cltypes.PayloadStatusFull, unavailable: true, wantResponsePrefix: ResourceUnavailablePrefix},
+		{name: "overflowing range", headPayloadStatus: cltypes.PayloadStatusFull, overflow: true, wantResponsePrefix: InvalidRequestPrefix},
+		{name: "missing first full envelope", headPayloadStatus: cltypes.PayloadStatusFull, missingFirstFull: true, wantResponsePrefix: ResourceUnavailablePrefix},
+		{name: "missing middle full envelope", headPayloadStatus: cltypes.PayloadStatusFull, missingMiddleFull: true},
+		{name: "incomplete canonical block", headPayloadStatus: cltypes.PayloadStatusFull, incompleteBlock: true, wantResponsePrefix: ResourceUnavailablePrefix},
+		{name: "canonical block with nil body", headPayloadStatus: cltypes.PayloadStatusFull, incompleteBody: true, wantResponsePrefix: ResourceUnavailablePrefix},
+		{name: "empty slot range ignores later incomplete block", headPayloadStatus: cltypes.PayloadStatusFull, incompleteBlock: true, emptyRange: true},
+		{name: "head and canonical index mismatch", headPayloadStatus: cltypes.PayloadStatusFull, headIndexMismatch: true, wantResponsePrefix: ResourceUnavailablePrefix},
+		{
+			name:                "historical range remains available while canonical head catches up",
+			headPayloadStatus:   cltypes.PayloadStatusFull,
+			headIndexMismatch:   true,
+			historicalMismatch:  true,
+			headAncestorMatches: true,
+			requestCount:        3,
+		},
+		{
+			name:               "historical range on stale branch is unavailable",
+			headPayloadStatus:  cltypes.PayloadStatusFull,
+			headIndexMismatch:  true,
+			historicalMismatch: true,
+			requestCount:       3,
+			wantResponsePrefix: ResourceUnavailablePrefix,
+		},
+		{
+			name:                "first full payload at scan limit is returned",
+			headPayloadStatus:   cltypes.PayloadStatusFull,
+			requestCount:        129,
+			canonicalBlockCount: 129,
+			allPayloadsEmpty:    true,
+		},
+		{
+			name:                "response remains capped for a larger request span",
+			headPayloadStatus:   cltypes.PayloadStatusFull,
+			requestCount:        129,
+			canonicalBlockCount: 129,
+			allPayloadsFull:     true,
+			wantEnvelopeCount:   128,
+		},
+		{
+			name:                "exhausted candidate scan is unavailable",
+			headPayloadStatus:   cltypes.PayloadStatusEmpty,
+			requestCount:        130,
+			canonicalBlockCount: 130,
+			allPayloadsEmpty:    true,
+			incompleteBlockAt:   129,
+			wantResponsePrefix:  ResourceUnavailablePrefix,
+		},
+		{
+			name:                "first full payload beyond scan limit is unavailable",
+			headPayloadStatus:   cltypes.PayloadStatusFull,
+			requestCount:        130,
+			canonicalBlockCount: 130,
+			allPayloadsEmpty:    true,
+			wantResponsePrefix:  ResourceUnavailablePrefix,
+		},
+		{
+			name:              "maximum count pays the bounded response cost",
+			headPayloadStatus: cltypes.PayloadStatusFull,
+			requestCount:      ^uint64(0),
+			startAtGenesis:    true,
+			verifyRateLimit:   true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testExecutionPayloadEnvelopesByRangeHandler(t, tc)
+		})
+	}
+}
+
+func testExecutionPayloadEnvelopesByRangeHandler(
+	t *testing.T,
+	tc executionPayloadEnvelopesByRangeTestCase,
+) {
+	ctx := t.Context()
 
 	// Set up two connected libp2p hosts
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
@@ -78,11 +181,14 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 
 	// Use a startSlot near the current slot so blocks fall within the serve range
 	// (the handler enforces minServeEpoch based on the current epoch).
-	startSlot := ethClock.GetCurrentSlot() - 10
-	count := uint64(5)
+	count := tc.canonicalBlockCount
+	if count == 0 {
+		count = 5
+	}
+	startSlot := ethClock.GetCurrentSlot() - count - 5
 
 	// Populate database with blocks (needed for canonical root lookup)
-	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
+	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count-1)
 	require.NoError(t, tx.Commit())
 
 	// Create mock fork choice with envelopes
@@ -91,6 +197,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 	// Create envelopes for each block and store them in mock.
 	// The canonical block root is HashSSZ(header), computed by WriteBeaconBlockHeaderAndIndicies.
 	expEnvelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, count)
+	canonicalRoots := make([]common.Hash, 0, count)
 	for i, block := range expBlocks {
 		if uint64(i) >= count {
 			break
@@ -109,6 +216,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		}
 		blockRoot, err := header.HashSSZ()
 		require.NoError(t, err)
+		canonicalRoots = append(canonicalRoots, blockRoot)
 
 		// Create a properly versioned Eth1Block for GLOAS
 		payload := cltypes.NewEth1Block(clparams.GloasVersion, beaconCfg)
@@ -125,7 +233,65 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		envelope.Message.BuilderIndex = uint64(i)
 
 		fcMock.SetEnvelope(blockRoot, envelope)
-		expEnvelopes = append(expEnvelopes, envelope)
+		if tc.allPayloadsFull || (!tc.allPayloadsEmpty && (i == int(count)-3 || i == int(count)-2)) {
+			expEnvelopes = append(expEnvelopes, envelope)
+		} else if tc.headPayloadStatus == cltypes.PayloadStatusFull {
+			if i == int(count)-1 {
+				expEnvelopes = append(expEnvelopes, envelope)
+			}
+		}
+	}
+	for i, root := range canonicalRoots {
+		block := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+		block.Block.Slot = startSlot + uint64(i)
+		if i > 0 {
+			block.Block.ParentRoot = canonicalRoots[i-1]
+		}
+		block.Block.Body.SignedExecutionPayloadBid.Message.BlockHash = common.Hash{byte(i + 1)}
+		if (tc.allPayloadsFull && i > 0) || (!tc.allPayloadsEmpty && (i == int(count)-2 || i == int(count)-1)) {
+			block.Block.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = common.Hash{byte(i)}
+		}
+		fcMock.Blocks[root] = block
+	}
+	fcMock.HeadVal = canonicalRoots[count-1]
+	fcMock.HeadSlotVal = startSlot + count - 1
+	fcMock.HeadPayloadStatusVal = tc.headPayloadStatus
+	if tc.unavailable {
+		lowestAvailableSlot := startSlot + 1
+		fcMock.LowestAvailableSlotVal = &lowestAvailableSlot
+	}
+	if tc.missingFirstFull {
+		fcMock.DeleteEnvelope(canonicalRoots[2])
+	}
+	if tc.missingMiddleFull {
+		fcMock.DeleteEnvelope(canonicalRoots[3])
+		expEnvelopes = expEnvelopes[:1]
+	}
+	if tc.incompleteBlock {
+		incompleteRoot := canonicalRoots[1]
+		if tc.emptyRange {
+			incompleteRoot = canonicalRoots[0]
+		}
+		fcMock.Blocks[incompleteRoot] = &cltypes.SignedBeaconBlock{}
+	}
+	if tc.incompleteBlockAt != 0 {
+		fcMock.Blocks[canonicalRoots[tc.incompleteBlockAt]] = &cltypes.SignedBeaconBlock{}
+	}
+	if tc.incompleteBody {
+		fcMock.Blocks[canonicalRoots[1]].Block.Body = nil
+	}
+	if tc.headIndexMismatch {
+		fcMock.HeadVal = common.Hash{0xee}
+	}
+	if tc.historicalMismatch {
+		expEnvelopes = expEnvelopes[:1]
+		if tc.headAncestorMatches {
+			ancestorIndex := tc.requestCount
+			fcMock.Ancestors[startSlot+ancestorIndex] = forkchoice.ForkChoiceNode{Root: canonicalRoots[ancestorIndex]}
+		}
+	}
+	if tc.wantEnvelopeCount != 0 {
+		expEnvelopes = expEnvelopes[:tc.wantEnvelopeCount]
 	}
 
 	c := NewConsensusHandlers(
@@ -147,6 +313,21 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		StartSlot: startSlot,
 		Count:     count,
 	}
+	if tc.requestCount != 0 {
+		req.Count = tc.requestCount
+	}
+	if tc.startAtGenesis {
+		req.StartSlot = 0
+	}
+	if tc.overflow {
+		req.StartSlot = ^uint64(0)
+		req.Count = 1
+	}
+	if tc.emptyRange {
+		req.StartSlot = startSlot - 2
+		req.Count = 1
+		expEnvelopes = nil
+	}
 	var reqBuf bytes.Buffer
 	err = ssz_snappy.EncodeAndWrite(&reqBuf, req)
 	require.NoError(t, err)
@@ -157,6 +338,13 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 
 	_, err = stream.Write(reqBuf.Bytes())
 	require.NoError(t, err)
+	if tc.wantResponsePrefix != SuccessfulResponsePrefix {
+		firstByte := make([]byte, 1)
+		_, err = io.ReadFull(stream, firstByte)
+		require.NoError(t, err)
+		require.Equal(t, tc.wantResponsePrefix, firstByte[0])
+		return
+	}
 
 	// Read response chunks
 	sr := snappypool.Reader(stream)
@@ -209,6 +397,16 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 	// Verify stream is exhausted
 	_, err = stream.Read(make([]byte, 1))
 	require.ErrorIs(t, err, io.EOF, "stream should be empty after all envelopes")
+	if tc.verifyRateLimit {
+		stream, err = host1.NewStream(ctx, host.ID(), protocol.ID(communication.ExecutionPayloadEnvelopesByRangeProtocolV1))
+		require.NoError(t, err)
+		_, err = stream.Write(reqBuf.Bytes())
+		require.NoError(t, err)
+		firstByte := make([]byte, 1)
+		_, err = io.ReadFull(stream, firstByte)
+		require.NoError(t, err)
+		require.Equal(t, byte(InvalidRequestPrefix), firstByte[0])
+	}
 }
 
 func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {

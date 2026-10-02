@@ -77,11 +77,11 @@ func (g payloadVoteForkGraph) IsBlockRetained(common.Hash) bool {
 	return g.retained == nil || *g.retained
 }
 
-func (g payloadVoteForkGraph) WithRetainedBlock(_ common.Hash, fn func()) bool {
+func (g payloadVoteForkGraph) WithRetainedBlock(_ common.Hash, fn func(func(common.Hash) bool)) bool {
 	if !g.IsBlockRetained(common.Hash{}) {
 		return false
 	}
-	fn()
+	fn(g.IsBlockRetained)
 	return true
 }
 
@@ -175,6 +175,23 @@ func TestGetPTCFromWindowRejectsSlotOutsideWindow(t *testing.T) {
 
 	_, err := s.GetPTCFromWindow(0)
 	require.Error(t, err)
+}
+
+func TestGetPTCRejectsPreGloasSlot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 2
+	s := state2.New(&cfg)
+	s.SetVersion(clparams.GloasVersion)
+	require.NoError(t, s.SetSlot(cfg.GloasForkEpoch*cfg.SlotsPerEpoch))
+	s.SetPtcWindow(solid.NewUint64VectorOfVectors(int(3*cfg.SlotsPerEpoch), 4))
+
+	_, err := s.GetPTC(cfg.GloasForkEpoch*cfg.SlotsPerEpoch - 1)
+	require.ErrorContains(t, err, "pre-Gloas")
+
+	_, err = s.GetPTC(cfg.GloasForkEpoch * cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	_, err = s.GetPTC((cfg.GloasForkEpoch + 1) * cfg.SlotsPerEpoch)
+	require.NoError(t, err)
 }
 
 func TestPtcBoolToVote(t *testing.T) {
@@ -658,6 +675,18 @@ func TestValidateParentPayloadPathUsesValidationAvailability(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParentPayloadStatusFromBidsRejectsIncompleteBlocks(t *testing.T) {
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(nil, &cltypes.BeaconBlock{}))
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(&cltypes.SignedBeaconBlock{}, &cltypes.BeaconBlock{}))
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion), nil))
+	parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	parent.Block.Body = nil
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(parent, &cltypes.BeaconBlock{}))
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.Body = nil
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion), child.Block))
 }
 
 func TestApplyPayloadValidationResultRecordsRootAvailability(t *testing.T) {

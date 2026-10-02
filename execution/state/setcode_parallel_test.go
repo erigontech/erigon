@@ -59,7 +59,8 @@ func (r *codeReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
 // Because codeHash == original.CodeHash, the optimisation deleted the CodePath
 // write, causing subsequent GetCode reads to return empty code via the versionMap.
 func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
-	delegationCode := []byte{0xef, 0x01, 0x00,
+	delegationCode := []byte{
+		0xef, 0x01, 0x00,
 		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
 		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
 	}
@@ -139,7 +140,8 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 // written=false for the revoke, and left the first SetCode's cell in place —
 // producing wrong code and a receiptHash mismatch.
 func TestSetCodeParallel_NoMaterialize_DelegateThenRevoke(t *testing.T) {
-	delegationCode := []byte{0xef, 0x01, 0x00,
+	delegationCode := []byte{
+		0xef, 0x01, 0x00,
 		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
 		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
 	}

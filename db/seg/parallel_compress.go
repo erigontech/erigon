@@ -275,10 +275,10 @@ func coverWordByPatterns(trace bool, input []byte, mf3 *patricia.ACMatcher, outp
 }
 
 func coverWordsByPatternsWorker(trace bool, inputCh chan []*CompressionWord, outCh chan []*CompressionWord, ac *patricia.AhoCorasick, inputSize, outputSize *atomic.Uint64, posMap *posCounter) {
-	var output = make([]byte, 0, 256)
-	var uncovered = make([]int, 256)
-	var patterns = make([]int, 0, 256)
-	var cells = make([]DynamicCell, 0, 256)
+	output := make([]byte, 0, 256)
+	uncovered := make([]int, 256)
+	patterns := make([]int, 0, 256)
+	cells := make([]DynamicCell, 0, 256)
 	mf3 := patricia.NewACMatcher(ac)
 	var numBuf [binary.MaxVarintLen64]byte
 	// A batch holds consecutive words, so the matcher's prefix-resume survives across the whole batch.
@@ -651,7 +651,7 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if _, err := cw.Write(numBuf[:8]); err != nil {
 		return err
 	}
-	//fmt.Printf("patternsSize = %d\n", patternsSize)
+	// fmt.Printf("patternsSize = %d\n", patternsSize)
 	// Write all the pattens
 	slices.SortFunc(patternList, patternListCmp)
 	for _, p := range patternList {
@@ -1041,7 +1041,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 				k--
 			}
 		}
-		//log.Info("Kasai algorithm finished")
+		// log.Info("Kasai algorithm finished")
 		// Checking LCP array
 
 		if dbg.AssertEnabled {
@@ -1065,9 +1065,9 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 				}
 			}
 		}
-		//logger.Info("LCP array checked")
+		// logger.Info("LCP array checked")
 		// Walk over LCP array and compute the scores of the strings
-		var b = inv
+		b := inv
 		j = 0
 		for i := 0; i < n-1; i++ {
 			// Only when there is a drop in LCP value
@@ -1111,7 +1111,7 @@ func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []uin
 					continue
 				}
 
-				score := uint64(repeats * (l))
+				score := uint64(repeats * l)
 				if score < minPatternScore {
 					prevSkipped = true
 					continue

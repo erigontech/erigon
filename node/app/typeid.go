@@ -22,11 +22,14 @@ import (
 	"sync"
 )
 
-var typeInitFunctions = []func(){}
-var typeInitMutex = sync.Mutex{}
+var (
+	typeInitFunctions = []func(){}
+	typeInitMutex     = sync.Mutex{}
+)
 
 func LocalTypeInit(localIdInitialiser func(govalue any) TypeId,
-	publicIdInitialiser func(domainValue any, id []byte, idVersion Version) (TypeId, error)) {
+	publicIdInitialiser func(domainValue any, id []byte, idVersion Version) (TypeId, error),
+) {
 	typeInitMutex.Lock()
 	if NewLocalTypeId == nil {
 		NewLocalTypeId = localIdInitialiser
@@ -40,12 +43,13 @@ func LocalTypeInit(localIdInitialiser func(govalue any) TypeId,
 
 var NewLocalTypeId func(govalue any) TypeId
 
-var typeIds = map[string]TypeId{}
-var typeIdsMutex = &sync.RWMutex{}
+var (
+	typeIds      = map[string]TypeId{}
+	typeIdsMutex = &sync.RWMutex{}
+)
 
 func MustNewId(domain Domain, id ident, idVersion Version) TypeId {
 	typeid, err := NewTypeId(domain, id, idVersion)
-
 	if err != nil {
 		panic(fmt.Sprintf("Can't create new type id: %s", err))
 	}
@@ -54,9 +58,7 @@ func MustNewId(domain Domain, id ident, idVersion Version) TypeId {
 }
 
 func NewTypeId(domain Domain, id ident, idVersion Version) (TypeId, error) {
-
 	base, err := NewId(domain, id /*idVersion*/)
-
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +146,7 @@ func (m TypeMap) Len() int {
 
 func (m TypeMap) String() string {
 	argTypes := make([]string, m.Len())
-	var i = 0
+	i := 0
 	for argName, argType := range m {
 		argTypes[i] = fmt.Sprintf("%s=%s", argName, argType.String())
 		i++
@@ -204,8 +206,10 @@ var LocalTypeDomain Domain = func() Domain {
 }()
 var Trace = false
 
-var typeids = map[reflect.Type]TypeId{}
-var typeidsMutex = &sync.RWMutex{}
+var (
+	typeids      = map[reflect.Type]TypeId{}
+	typeidsMutex = &sync.RWMutex{}
+)
 
 func TypeIdOf(govalue any) TypeId {
 	var err error
@@ -235,7 +239,6 @@ func TypeIdOf(govalue any) TypeId {
 	if !ok {
 		typeidsMutex.Lock()
 		id, err = newIdFor(gotype)
-
 		if err != nil {
 			typeidsMutex.Unlock()
 			panic(fmt.Sprintf("Can't create type id for:%+v\n", err))
@@ -289,7 +292,6 @@ func (ti *GoTypeId) AssignableTo(typeId TypeId) bool {
 }
 
 func newIdFor(gotype reflect.Type) (TypeId, error) {
-
 	typeName := gotype.Name()
 
 	if pkgPath := gotype.PkgPath(); len(pkgPath) > 0 {
@@ -297,7 +299,6 @@ func newIdFor(gotype reflect.Type) (TypeId, error) {
 	}
 
 	base, err := NewId(LocalTypeDomain, typeName)
-
 	if err != nil {
 		return nil, err
 	}
