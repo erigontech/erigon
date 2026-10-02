@@ -167,7 +167,6 @@ func TestSelfDestructReceive(t *testing.T) {
 	}); err != nil {
 		panic(err)
 	}
-
 }
 
 // Self-destruct then revive by value transfer in one block, read back as a whole
@@ -239,7 +238,8 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 					// A value transfer, not a redeploy: no CREATE writes a nonce or code hash.
 					txn, err = types.SignTx(
 						types.NewTransaction(block.TxNonce(address.Value()), contractAddress, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil),
-						*signer, key)
+						*signer, key,
+					)
 					require.NoError(t, err)
 					block.AddTx(txn)
 				}

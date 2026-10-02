@@ -151,7 +151,8 @@ func TestCountItemsMatchesPrefixWalk(t *testing.T) {
 		return n
 	}
 	for _, val := range []any{
-		[]uint{}, []uint{0, 1, 127, 128, 1 << 20, 1 << 60},
+		[]uint{},
+		[]uint{0, 1, 127, 128, 1 << 20, 1 << 60},
 		[]string{"", "a", string(make([]byte, 55)), string(make([]byte, 56)), string(make([]byte, 70000))},
 		[][]uint{{}, {1}, {2, 3, 4}},
 		[][]byte{nil, {0x7f}, {0x80}, make([]byte, 300)},

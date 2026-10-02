@@ -18,13 +18,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 	"go.uber.org/mock/gomock"
 
-	"errors"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
