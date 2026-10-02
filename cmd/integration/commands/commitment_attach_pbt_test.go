@@ -945,12 +945,18 @@ func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
 	source, _ := newPBTConversionSource(t)
 	published := filepath.Join(t.TempDir(), "published")
 	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
-	renamePBTFilesRange(t, source.Snap, "0-1", "0-2")
-	renamePBTAllFilesRange(t, published, "0-1", "0-2")
 	setExecutionProgress(t, source.Chaindata, 1)
 	before := snapshotTree(t, source.DataDir)
-	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
-	require.ErrorContains(t, err, "stage_exec cannot stop at a mid-block point")
+	leafStamps := func(txNum uint64, forEach func(func(state.PBinLeaf) error) error) (common.Hash, error) {
+		return validatePBTAttachLeafStamps(txNum, func(emit func(state.PBinLeaf) error) error {
+			return forEach(func(leaf state.PBinLeaf) error {
+				leaf.Stamp = txNum + 1
+				return emit(leaf)
+			})
+		})
+	}
+	err := attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis, leafStamps: leafStamps})
+	require.ErrorContains(t, err, "published leaf stamp 8 is after conversion txNum 7")
 	require.Equal(t, before, snapshotTree(t, source.DataDir))
 }
 
