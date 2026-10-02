@@ -2155,7 +2155,7 @@ When you resume with `--continue`, you **must** pass the same `--squeeze` and `-
 
 ### Prerequisite for legacy step sizes (`erigon seg step-rebase`)
 
-Erigon groups state files into *steps*. The compiled default was 1,562,500 transactions through v3.4 and became **390,625** in v3.5 — a quarter of the old size, and still the default. The smaller step was offered as a gain (about 4× smaller `chaindata/`) rather than forced, and the step size is a per-datadir record, so an older datadir can still be at the legacy size whatever version you are running now. Do not infer it from the version that created the datadir — read it. Since v3.6 the release notes require those datadirs to rebase, or to take the `seg reset` path above, before their first normal start on v3.6 or later.
+Erigon groups state files into *steps*. The step size is a per-datadir record in `snapshots/erigondb.toml`, taken from the published snapshot set, and the smaller **390,625**-transaction step (a quarter of the old 1,562,500, giving about 4× smaller `chaindata/`) was offered rather than forced. A fresh sync has received 390,625 since v3.4; the compiled fallback, used only without the downloader, stayed at 1,562,500 through v3.4.4 and became 390,625 in v3.5. A datadir created by Erigon 3.3 or earlier stays at the legacy size until rebased. Do not infer the step size from the version — read the file. Since v3.6 the release notes require those datadirs to rebase, or to take the `seg reset` path above, before their first normal start on v3.6 or later.
 
 Check `step_size` in `snapshots/erigondb.toml`. If it reads `1562500`:
 
