@@ -38,7 +38,6 @@ func TestCacheBtreeOrderAccountStorage2(t *testing.T) {
 	sc.SetAccountWrite(a1[:], &accounts.Account{Incarnation: 2})
 	x, ok := sc.GetAccount(a1[:])
 	fmt.Printf("%+v,%t\n", x.Incarnation, ok)
-
 }
 
 func TestCacheBtreeOrderAccountStorage(t *testing.T) {
@@ -503,7 +502,7 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 	for i := 1; i <= 6; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		var code = []byte{byte(i), 2, 3}
+		code := []byte{byte(i), 2, 3}
 		sc.SetCodeRead(addr[:], 2, code)
 	}
 	if sc.readQueuesLen() != 4 {
@@ -545,7 +544,7 @@ func TestCodeReadWriteAbsentDelete(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		var addr common.Address
 		addr[0] = byte(i)
-		var code = []byte{byte(i), 2, 3}
+		code := []byte{byte(i), 2, 3}
 		sc.SetCodeWrite(addr[:], 1, code)
 	}
 	if sc.WriteCount() != 4 {

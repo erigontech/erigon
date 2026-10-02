@@ -37,6 +37,12 @@ var (
 
 var _ SyncedData = (*SyncedDataManager)(nil)
 
+// copyHookForTest, when non-nil, runs inside publishHeadState's writeLock
+// section immediately before copying the incoming state. Tests use it to
+// pause a writer at a known point and prove other operations do or do not
+// block on it.
+var copyHookForTest func()
+
 type SyncedDataManager struct {
 	enabled bool
 	cfg     *clparams.BeaconChainConfig
@@ -49,6 +55,7 @@ type SyncedDataManager struct {
 
 	accessLock sync.RWMutex // lock used for accessing atomic methods
 	mu         sync.RWMutex
+	writeLock  sync.Mutex // serializes publishHeadState callers; held across the copy so writers cannot overtake each other
 }
 
 type headIdentity struct {
@@ -86,20 +93,40 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) erro
 	if !s.enabled {
 		return nil
 	}
-	blkRoot, err := newState.BlockRoot()
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
+
+	root, err := newState.BlockRoot()
 	if err != nil {
 		return err
 	}
-	return s.OnHeadStateWithBlockRoot(newState, blkRoot)
+	return s.publishHeadStateLocked(newState, common.Hash(root))
 }
 
 // OnHeadStateWithBlockRoot updates the head state with a known block root,
 // avoiding recomputation of BlockRoot() which can produce incorrect results
 // when the state's incremental hashing cache has been dirtied by operations
 // like unrealized justification/finality processing.
-func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) (err error) {
+func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error {
 	if !s.enabled {
-		return
+		return nil
+	}
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
+	return s.publishHeadStateLocked(newState, blockRoot)
+}
+
+// publishHeadStateLocked materializes newState into a standalone copy and
+// swaps it in as the head state, demoting the current head state to
+// previous. Callers must hold writeLock for the duration of whatever work
+// determines blockRoot as well as this call, so a writer cannot be
+// overtaken and overwritten by a writer that started later but finishes
+// resolving its root or copying its state faster; readers only ever wait
+// for the pointer swap below.
+func (s *SyncedDataManager) publishHeadStateLocked(newState *state.CachingBeaconState, blockRoot common.Hash) error {
+	copied, err := s.copyState(newState)
+	if err != nil {
+		return err
 	}
 
 	s.mu.Lock()
@@ -107,17 +134,21 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 	s.accessLock.Lock()
 	defer s.accessLock.Unlock()
 
-	next := s.previousHeadState
-	if next == nil {
-		next = state.New(newState.BeaconConfig())
-	}
-	if err = newState.CopyInto(next); err != nil {
-		s.previousHeadState = nil
-		return err
-	}
-	s.previousHeadState, s.headState = s.headState, next
+	s.previousHeadState = s.headState
+	s.headState = copied
 	s.stateHead.Store(&headIdentity{root: blockRoot, slot: newState.Slot()})
 	return nil
+}
+
+// copyState performs the copy that publishHeadState swaps in. copyHookForTest,
+// when set, runs immediately before it - bundled into the same call so that
+// wherever the copy ends up relative to other locks, the hook's pause point
+// moves with it.
+func (s *SyncedDataManager) copyState(newState *state.CachingBeaconState) (*state.CachingBeaconState, error) {
+	if copyHookForTest != nil {
+		copyHookForTest()
+	}
+	return newState.Copy()
 }
 
 // ViewHeadState allows safe, read-only access to the current head state.
@@ -210,6 +241,9 @@ func (s *SyncedDataManager) CommitteeCount(epoch uint64) uint64 {
 }
 
 func (s *SyncedDataManager) UnsetHeadState() {
+	s.writeLock.Lock()
+	defer s.writeLock.Unlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.accessLock.Lock()

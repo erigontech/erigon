@@ -176,7 +176,9 @@ type gloasBlockCollector interface {
 
 func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forkchoice.ForkChoiceStorage, collector gloasBlockCollector, block *cltypes.BeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate bool) error {
 	err := store.OnExecutionPayload(ctx, envelope, false, validate)
-	if err != nil && !(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope)) {
+	persisted := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) ||
+		(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope))
+	if err != nil && !persisted {
 		logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
 		return err
 	}
@@ -464,15 +466,21 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 }
 
 func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	if !canValidateGloasPayloads(cfg) {
-		return nil
-	}
-	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, env)
-	if err != nil {
-		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+	status := execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated)
+	if canValidateGloasPayloads(cfg) {
+		var err error
+		status, err = validateAnchorPayloadWithEL(ctx, cfg, bid, env)
+		if err != nil {
+			log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+		}
 	}
 	var retained bool
-	status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(anchorRoot, env.Message.Payload.BlockHash, status)
+	status, retained = cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+		anchorRoot,
+		env.Message.Payload.BlockHash,
+		status,
+		env.Message.Payload.GasLimit,
+	)
 	if !retained {
 		return nil
 	}

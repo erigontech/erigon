@@ -117,7 +117,6 @@ func testTemporalTxSD(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 
 func TestEIP2200(t *testing.T) {
 	for i, tt := range eip2200Tests {
-
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			t.Parallel()
 

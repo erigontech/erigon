@@ -107,6 +107,32 @@ func TestExecute(t *testing.T) {
 	}
 }
 
+func TestLogNotStoredWithoutReceipts(t *testing.T) {
+	t.Parallel()
+	code := []byte{
+		byte(vm.PUSH1), 0x77, // stays below the LOG1 operands
+		byte(vm.PUSH1), 0xff,
+		byte(vm.PUSH1), 32,
+		byte(vm.PUSH1), 0,
+		byte(vm.LOG1),
+		byte(vm.PUSH1), 0,
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 32,
+		byte(vm.PUSH1), 0,
+		byte(vm.RETURN),
+	}
+	for _, tc := range []struct {
+		noReceipts bool
+		logs       int
+	}{{false, 1}, {true, 0}} {
+		statedb := state.New(state.NewNoopReader())
+		ret, _, err := Execute(code, nil, &Config{State: statedb, EVMConfig: vm.Config{NoReceipts: tc.noReceipts}}, t.TempDir())
+		require.NoError(t, err)
+		require.Equal(t, uint64(0x77), new(uint256.Int).SetBytes(ret).Uint64(), "noReceipts=%v", tc.noReceipts)
+		require.Len(t, statedb.GetRawLogs(0), tc.logs, "noReceipts=%v", tc.noReceipts)
+	}
+}
+
 func TestCall(t *testing.T) {
 	t.Parallel()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -147,7 +173,6 @@ func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 			Value:    *uint256.NewInt(1),
 			State:    statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
 	require.Equal(t, mdgas.MdGas{Execution: gasLimit}, gasRemaining)
@@ -176,7 +201,6 @@ func TestCreateInsufficientBalancePreservesPreAmsterdamTrace(t *testing.T) {
 			Value:       *uint256.NewInt(1),
 			State:       statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrInsufficientBalance)
 	require.Equal(t, []byte{byte(vm.CREATE)}, entered)
@@ -208,7 +232,6 @@ func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
 			GasLimit:  gasLimit,
 			State:     statedb,
 		},
-		0,
 	)
 	require.ErrorIs(t, err, vm.ErrRuntimeOutOfGas)
 	require.Equal(
@@ -310,6 +333,7 @@ type FakeChainHeaderReader struct{}
 func (cr *FakeChainHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	return nil
 }
+
 func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
 	return cr.GetHeaderByHash(common.BigToHash(new(big.Int).SetUint64(number)))
 }
@@ -330,6 +354,7 @@ func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *typ
 		GasLimit:   100000,
 	}
 }
+
 func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return nil
 }
@@ -443,10 +468,9 @@ func TestBlockhash(t *testing.T) {
 // TestEip2929Cases contains various testcases that are used for
 // EIP-2929 about gas repricings
 func TestEip2929Cases(t *testing.T) {
-
 	tmpdir := t.TempDir()
 	id := 1
-	prettyPrint := func(comment string, code []byte) {
+	prettyPrint := func(code []byte) {
 		instrs := make([]string, 0)
 		it := asm.NewInstructionIterator(code)
 		for it.Next() {
@@ -494,32 +518,28 @@ func TestEip2929Cases(t *testing.T) {
 
 			byte(vm.STOP),
 		}
-		prettyPrint("This checks `EXT`(codehash,codesize,balance) of precompiles, which should be `100`, "+
-			"and later checks the same operations twice against some non-precompiles. "+
-			"Those are cheaper second time they are accessed. Lastly, it checks the `BALANCE` of `origin` and `this`.", code)
+		prettyPrint(code)
 	}
 
 	{ // EXTCODECOPY
 		code := []byte{
 			// extcodecopy( 0xff,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.PUSH1), 0xff, byte(vm.EXTCODECOPY),
 			// extcodecopy( 0xff,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.PUSH1), 0xff, byte(vm.EXTCODECOPY),
 			// extcodecopy( this,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.ADDRESS), byte(vm.EXTCODECOPY),
 
 			byte(vm.STOP),
 		}
-		prettyPrint("This checks `extcodecopy( 0xff,0,0,0,0)` twice, (should be expensive first time), "+
-			"and then does `extcodecopy( this,0,0,0,0)`.", code)
+		prettyPrint(code)
 	}
 
 	{ // SLOAD + SSTORE
 		code := []byte{
-
 			// Add slot `0x1` to access list
 			byte(vm.PUSH1), 0x01, byte(vm.SLOAD), byte(vm.POP), // SLOAD( 0x1) (add to access list)
 			// Write to `0x1` which is already in access list
@@ -533,8 +553,7 @@ func TestEip2929Cases(t *testing.T) {
 			// Read slot in access list (0x1)
 			byte(vm.PUSH1), 0x01, byte(vm.SLOAD), // SLOAD( 0x1)
 		}
-		prettyPrint("This checks `sload( 0x1)` followed by `sstore(loc: 0x01, val:0x11)`, then 'naked' sstore:"+
-			"`sstore(loc: 0x02, val:0x11)` twice, and `sload(0x2)`, `sload(0x1)`. ", code)
+		prettyPrint(code)
 	}
 	{ // Call variants
 		code := []byte{
@@ -550,8 +569,7 @@ func TestEip2929Cases(t *testing.T) {
 			byte(vm.PUSH1), 0x0, byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1),
 			byte(vm.PUSH1), 0xff, byte(vm.PUSH1), 0x0, byte(vm.STATICCALL), byte(vm.POP),
 		}
-		prettyPrint("This calls the `identity`-precompile (cheap), then calls an account (expensive) and `staticcall`s the same"+
-			"account (cheap)", code)
+		prettyPrint(code)
 	}
 }
 
@@ -743,22 +761,16 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 	require.True(t, found, "expected at least one GasChangeCallOpCode event from SSTORE")
 }
 
-// TestSystemCallZeroValueSkipsTransferChecks verifies that a system call
-// (caller = SystemAddress, value = 0) executes successfully without triggering
-// CanTransfer or Transfer balance-change hooks on the caller. It also asserts:
-//   - SYSTEM_ADDRESS was touched and exists after the call (positive check on the
-//     caller-side empty-account creation for Gnosis/AuRa; see PR 5645, Issue 18276).
-//   - SYSTEM_ADDRESS remains an empty account after the call.
-//   - SYSTEM_ADDRESS is absent from the BAL produced by the call's tx IO.
-//   - No balance-change tracer events fire for SYSTEM_ADDRESS as a result of
-//     the zero-value transfer path.
-func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
-	t.Parallel()
+// runZeroValueSystemCall executes a zero-value system call (caller =
+// SystemAddress) to a trivial contract and returns the state, the call-level
+// BAL and the balance-change tracer events seen on SystemAddress.
+func runZeroValueSystemCall(t *testing.T, aura bool) (*state.IntraBlockState, types.BlockAccessList, int) {
+	t.Helper()
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
-	defer statedb.Close()
+	t.Cleanup(statedb.Close)
 
 	systemAddr := params.SystemAddress
 	target := accounts.InternAddress(common.HexToAddress("0xbeef"))
@@ -774,19 +786,11 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 		byte(vm.RETURN),
 	}, tracing.CodeChangeUnspecified))
 
-	// Track balance-change events on SYSTEM_ADDRESS.
-	type balChange struct {
-		addr   accounts.Address
-		oldBal uint256.Int
-		newBal uint256.Int
-		reason tracing.BalanceChangeReason
-	}
-	var balChanges []balChange
-
+	balChanges := 0
 	hooks := &tracing.Hooks{
 		OnBalanceChange: func(addr accounts.Address, prev, newBal uint256.Int, reason tracing.BalanceChangeReason) {
 			if addr == systemAddr {
-				balChanges = append(balChanges, balChange{addr, prev, newBal, reason})
+				balChanges++
 			}
 		},
 	}
@@ -798,9 +802,13 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 		GasLimit:  10_000_000,
 	}
 	setDefaults(cfg)
+	if aura {
+		cfg.ChainConfig.Aura = &chain.AuRaConfig{}
+	}
 
 	vmenv := NewEnv(cfg)
 	rules := vmenv.ChainRules()
+	require.Equal(t, aura, rules.IsAura)
 	statedb.Prepare(rules, systemAddr, cfg.Coinbase, target, vm.ActivePrecompiles(rules), nil)
 
 	ret, _, _, err := vmenv.Call(
@@ -817,29 +825,48 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	require.Equal(t, 32, len(ret))
 	require.Equal(t, byte(0x42), ret[31])
 
-	// Positive check: SYSTEM_ADDRESS must exist (Gnosis/AuRa invariant).
-	exists, err := statedb.Exist(systemAddr)
-	require.NoError(t, err)
-	require.True(t, exists, "SYSTEM_ADDRESS should exist after a zero-value syscall")
-
-	// SYSTEM_ADDRESS must remain empty after the touch.
-	empty, err := statedb.Empty(systemAddr)
-	require.NoError(t, err)
-	require.True(t, empty, "SYSTEM_ADDRESS should remain empty after a zero-value syscall")
-
-	// The call-level BAL must not include SYSTEM_ADDRESS when the syscall only
-	// performs the sender-side touch and no actual account access.
 	var io state.VersionedIO
 	statedb.MergeTxIOInto(&io, statedb.VersionedWrites())
-	bal := io.AsBlockAccessList()
+	return statedb, io.AsBlockAccessList(), balChanges
+}
+
+// TestSystemCallZeroValueSkipsTransferChecks verifies that a system call
+// (caller = SystemAddress, value = 0) does not access its caller: SYSTEM_ADDRESS
+// is neither created nor recorded in the BAL (EIP-7928), and no balance-change
+// hooks fire for it.
+func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
+	t.Parallel()
+
+	statedb, bal, balChanges := runZeroValueSystemCall(t, false)
+
+	exists, err := statedb.Exist(params.SystemAddress)
+	require.NoError(t, err)
+	require.False(t, exists, "a system call must not create SYSTEM_ADDRESS")
+
 	for _, accountChanges := range bal {
-		require.NotEqual(t, systemAddr, accountChanges.Address,
+		require.NotEqual(t, params.SystemAddress.Value(), accountChanges.Address,
 			"SYSTEM_ADDRESS should be absent from the BAL after a zero-value syscall")
 	}
+	require.Zero(t, balChanges, "no balance-change events expected for SYSTEM_ADDRESS on zero-value syscall")
+}
 
-	// No balance-change events should have fired for SYSTEM_ADDRESS
-	// from the zero-value call path.
-	require.Empty(t, balChanges, "no balance-change events expected for SYSTEM_ADDRESS on zero-value syscall, got %v", balChanges)
+// TestSystemCallZeroValueTouchesCallerOnAura verifies the Gnosis/AuRa invariant
+// (PR 5645, Issue 18276): a zero-value system call still touches SYSTEM_ADDRESS
+// so the empty system account exists after the call, without a transfer.
+func TestSystemCallZeroValueTouchesCallerOnAura(t *testing.T) {
+	t.Parallel()
+
+	statedb, _, balChanges := runZeroValueSystemCall(t, true)
+
+	exists, err := statedb.Exist(params.SystemAddress)
+	require.NoError(t, err)
+	require.True(t, exists, "SYSTEM_ADDRESS should exist after a zero-value syscall on AuRa")
+
+	empty, err := statedb.Empty(params.SystemAddress)
+	require.NoError(t, err)
+	require.True(t, empty, "SYSTEM_ADDRESS should remain empty after a zero-value syscall on AuRa")
+
+	require.Zero(t, balChanges, "no balance-change events expected for SYSTEM_ADDRESS on zero-value syscall")
 }
 
 // LOG's BlockNumber comes from the EVM context. Entry points that do not go
@@ -859,4 +886,94 @@ func TestLogBlockNumberFromEVMContext(t *testing.T) {
 	logs := ibs.GetRawLogs(0)
 	require.Len(t, logs, 1)
 	require.Equal(t, hexutil.Uint64(42), logs[0].BlockNumber)
+}
+
+// TestOpcodeMaskFiltersDelivery pins that the interpreter honours a tracer's opcode
+// mask: without this, dropping the check in interpreter.go breaks nothing a test sees.
+func TestOpcodeMaskFiltersDelivery(t *testing.T) {
+	t.Parallel()
+	code := []byte{
+		byte(vm.PUSH1), 0x00,
+		byte(vm.SLOAD),
+		byte(vm.PUSH1), 0x00,
+		byte(vm.PUSH1), 0x00,
+		byte(vm.MSTORE),
+		byte(vm.PUSH1), 0x00,
+		byte(vm.SLOAD),
+		byte(vm.POP),
+		byte(vm.STOP),
+	}
+
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			run := func(mask *tracing.OpcodeMask) []byte {
+				var seen []byte
+				hooks := &tracing.Hooks{OnOpcodeMask: mask}
+				if version == "v2" {
+					hooks.OnOpcodeV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, _ error) {
+						seen = append(seen, op)
+					}
+				} else {
+					hooks.OnOpcode = func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+						seen = append(seen, op)
+					}
+				}
+				cfg := &Config{EVMConfig: vm.Config{Tracer: hooks}}
+				if _, _, err := Execute(code, nil, cfg, t.TempDir()); err != nil {
+					t.Fatal(err)
+				}
+				return seen
+			}
+
+			unmasked := run(nil)
+			require.Equal(t, []byte{
+				byte(vm.PUSH1), byte(vm.SLOAD),
+				byte(vm.PUSH1), byte(vm.PUSH1), byte(vm.MSTORE),
+				byte(vm.PUSH1), byte(vm.SLOAD), byte(vm.POP), byte(vm.STOP),
+			}, unmasked, "a nil mask must deliver every executed opcode, in execution order")
+
+			masked := run(tracing.NewOpcodeMask(byte(vm.SLOAD)))
+			require.Equal(t, []byte{byte(vm.SLOAD), byte(vm.SLOAD)}, masked,
+				"a mask must deliver exactly the opcodes it names, in execution order")
+		})
+	}
+}
+
+// TestOpcodeMaskStillReportsFaults pins that filtering which opcodes a tracer sees
+// does not cost it the fault: an excluded opcode that fails still reaches OnFault.
+func TestOpcodeMaskStillReportsFaults(t *testing.T) {
+	t.Parallel()
+	code := []byte{byte(vm.PUSH1), 0x01, byte(vm.PUSH1), 0x02, byte(vm.ADD), byte(vm.STOP)}
+
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			var opcodes []byte
+			var faults []byte
+			hooks := &tracing.Hooks{OnOpcodeMask: tracing.NewOpcodeMask(byte(vm.SLOAD))}
+			if version == "v2" {
+				hooks.OnOpcodeV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, _ error) {
+					opcodes = append(opcodes, op)
+				}
+				hooks.OnFaultV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ int, _ error) {
+					faults = append(faults, op)
+				}
+			} else {
+				hooks.OnOpcode = func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+					opcodes = append(opcodes, op)
+				}
+				hooks.OnFault = func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ int, _ error) {
+					faults = append(faults, op)
+				}
+			}
+			cfg := &Config{
+				GasLimit:  5, // too little to finish, so an excluded opcode faults
+				EVMConfig: vm.Config{Tracer: hooks},
+			}
+			if _, _, err := Execute(code, nil, cfg, t.TempDir()); err == nil {
+				t.Fatal("expected the run to fail on gas")
+			}
+			require.Empty(t, opcodes, "the mask excludes every opcode this code runs")
+			require.NotEmpty(t, faults, "an excluded opcode that faults must still reach OnFault")
+		})
+	}
 }

@@ -70,7 +70,6 @@ func (n *upnp) ExternalIP() (addr net.IP, err error) {
 		ipString, err = n.client.GetExternalIPAddress()
 		return err
 	})
-
 	if err != nil {
 		return nil, err
 	}

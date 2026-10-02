@@ -223,7 +223,6 @@ func TestEIP2718TransactionSigHash(t *testing.T) {
 
 // This test checks signature operations on access list transactions.
 func TestEIP2930Signer(t *testing.T) {
-
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		keyAddr = crypto.PubkeyToAddress(key.PublicKey)
@@ -331,6 +330,7 @@ func TestEIP2718TransactionEncode(t *testing.T) {
 		assert.False(t, TypedTransactionMarshalledAsRlpString(have))
 	}
 }
+
 func TestEIP1559TransactionEncode(t *testing.T) {
 	t.Parallel()
 	{
@@ -606,8 +606,10 @@ func assertEqualBlobWrapper(orig *BlobTxWrapper, cpy *BlobTxWrapper) error {
 
 const N = 50
 
-var dummyBlobTxs = [N]*BlobTx{}
-var dummyBlobWrapperTxs = [N]*BlobTxWrapper{}
+var (
+	dummyBlobTxs        = [N]*BlobTx{}
+	dummyBlobWrapperTxs = [N]*BlobTxWrapper{}
+)
 
 func randIntInRange(_min, _max int) int {
 	return (rand.Intn(_max-_min) + _min)
@@ -659,22 +661,23 @@ func randData() []byte {
 }
 
 func newRandBlobTx() *BlobTx {
-	stx := &BlobTx{DynamicFeeTransaction: DynamicFeeTransaction{
-		CommonTx: CommonTx{
-			Nonce:    rand.Uint64(),
-			GasLimit: rand.Uint64(),
-			To:       randAddr(),
-			Value:    *uint256.NewInt(rand.Uint64()),
-			Data:     randData(),
-			V:        uint256.Int{},
-			R:        *uint256.NewInt(rand.Uint64()),
-			S:        *uint256.NewInt(rand.Uint64()),
+	stx := &BlobTx{
+		DynamicFeeTransaction: DynamicFeeTransaction{
+			CommonTx: CommonTx{
+				Nonce:    rand.Uint64(),
+				GasLimit: rand.Uint64(),
+				To:       randAddr(),
+				Value:    *uint256.NewInt(rand.Uint64()),
+				Data:     randData(),
+				V:        uint256.Int{},
+				R:        *uint256.NewInt(rand.Uint64()),
+				S:        *uint256.NewInt(rand.Uint64()),
+			},
+			ChainID:    *uint256.NewInt(rand.Uint64()),
+			TipCap:     *uint256.NewInt(rand.Uint64()),
+			FeeCap:     *uint256.NewInt(rand.Uint64()),
+			AccessList: randAccessList(),
 		},
-		ChainID:    *uint256.NewInt(rand.Uint64()),
-		TipCap:     *uint256.NewInt(rand.Uint64()),
-		FeeCap:     *uint256.NewInt(rand.Uint64()),
-		AccessList: randAccessList(),
-	},
 		MaxFeePerBlobGas:    *uint256.NewInt(rand.Uint64()),
 		BlobVersionedHashes: randHashes(randIntInRange(1, 6)),
 	}
@@ -777,7 +780,6 @@ func TestShortUnwrap(t *testing.T) {
 		return
 	}
 	blobTx, err := DecodeTransaction(shortRlp)
-
 	if err != nil {
 		t.Errorf("short rlp decoding failed : %v", err)
 	}
@@ -804,7 +806,6 @@ func TestV1BlobTxnUnwrap(t *testing.T) {
 		return
 	}
 	blobTx, err := DecodeTransaction(shortRlp)
-
 	if err != nil {
 		t.Errorf("short rlp decoding failed : %v", err)
 	}
@@ -1127,4 +1128,35 @@ func TestDecodeAccessListEmptyStaysNil(t *testing.T) {
 	encoded, err := json.Marshal(&al)
 	require.NoError(t, err)
 	require.JSONEq(t, "null", string(encoded))
+}
+
+func TestTransactionHashFromEncoding(t *testing.T) {
+	t.Parallel()
+	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	dynFee := func() DynamicFeeTransaction { // a fresh value each time: the hash cache must not be copied
+		return DynamicFeeTransaction{
+			CommonTx: CommonTx{Nonce: 1, To: &to, GasLimit: 21000, Data: []byte("abc")},
+			ChainID:  u256.Num1,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(2),
+		}
+	}
+	for _, txn := range []Transaction{
+		rightvrsTx,
+		signedEip2718Tx,
+		signedDynFeeTx,
+		&BlobTx{DynamicFeeTransaction: dynFee(), MaxFeePerBlobGas: *uint256.NewInt(3), BlobVersionedHashes: []common.Hash{{0x01}}},
+		&SetCodeTransaction{DynamicFeeTransaction: dynFee(), Authorizations: []Authorization{{ChainID: u256.Num1, Address: to, Nonce: 2}}},
+		&AccountAbstractionTransaction{ChainID: uint256.NewInt(1), NonceKey: uint256.NewInt(0), Nonce: 1, Tip: uint256.NewInt(1), FeeCap: uint256.NewInt(2), BuilderFee: uint256.NewInt(0), GasLimit: 21000},
+	} {
+		var binary bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&binary))
+		wrapped, err := rlp.EncodeToBytes(txn)
+		require.NoError(t, err)
+		for _, enc := range [][]byte{binary.Bytes(), wrapped} {
+			got, err := TransactionHashFromEncoding(enc)
+			require.NoError(t, err)
+			require.Equal(t, txn.Hash(), got, "type %d, encoding %x", txn.Type(), enc[:1])
+		}
+	}
 }
