@@ -111,11 +111,7 @@ func checkCommittedHead(ctx context.Context, db kv.TemporalRoDB, num uint64, has
 		return nil, headWait, err
 	}
 	ok := false
-	defer func() {
-		if !ok {
-			tx.Rollback()
-		}
-	}()
+	defer kv.RollbackUnless(&ok, tx)
 	committedHead, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return nil, headWait, err
@@ -162,11 +158,7 @@ func openRollingPin(ctx context.Context, db kv.TemporalRoDB) (*rollingPin, error
 		return nil, err
 	}
 	ok := false
-	defer func() {
-		if !ok {
-			tx.Rollback()
-		}
-	}()
+	defer kv.RollbackUnless(&ok, tx)
 	num, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return nil, err

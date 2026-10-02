@@ -1209,11 +1209,7 @@ func (ff *Filters) beginPinnedTemporalRo(ctx context.Context, db kv.TemporalRoDB
 		return nil, false, err
 	}
 	ok := false
-	defer func() {
-		if !ok {
-			tx.Rollback()
-		}
-	}()
+	defer kv.RollbackUnless(&ok, tx)
 	if _, current := ff.OverlaySnapshot(); current != seq {
 		if !last {
 			return nil, false, nil

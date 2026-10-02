@@ -47,11 +47,7 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 		return nil, nil, err
 	}
 	ok := false
-	defer func() {
-		if !ok {
-			tx.Rollback()
-		}
-	}()
+	defer kv.RollbackUnless(&ok, tx)
 
 	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
