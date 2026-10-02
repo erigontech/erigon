@@ -527,30 +527,20 @@ jobs:
           tgt_list="$(echo "$tgt_versions" | tr -d '[]"' | tr ',' ' ')"
 
           # The oldest archive the target still carries. `docs-version-bump.yml`
-          # prunes from the tail to hold the archive cap, so a version on the
-          # publishing branch that sorts BELOW this one was dropped on purpose,
-          # not lost. The boundary comes from the target's own inventory rather
-          # than from the cap value: reading the cap out of the other workflow
-          # would make two files parse one policy, and they would drift.
+          # prunes from the tail to hold the archive cap, so a version below
+          # this one was dropped on purpose, not lost.
           tgt_oldest="$(printf '%s\n' $tgt_list | sort -V | head -n1)"
-          # ...and only when the target is holding its own, i.e. it gave up an
-          # old archive because it took on a new one. A target carrying FEWER
-          # archives than the publishing branch has lost some, whatever their
-          # age, and the tail rule alone would wave that through.
-          cur_count="$(echo $cur_list | wc -w)"
+          # ...and only when the target is at the archive cap, i.e. it gave up an
+          # old archive because it took on a new one. A target under the cap
+          # has lost versions that a real bump keeps. Keep in step with the cap
+          # in docs-version-bump.yml.
+          archive_cap=5
           tgt_count="$(echo $tgt_list | wc -w)"
 
-          # ...and only when both inventories can bear a count at all. `wc -w`
-          # counts tokens, not archives: a single repeated entry inflates the
-          # target's total and buys a waiver for a version that nothing
-          # replaced — `["v3.8","v3.7","v3.6","v3.6"]` against a publishing
-          # branch holding v3.8..v3.5 makes the counts equal and drops v3.5
-          # silently. A token that is not a `vX.Y` label cannot be ordered
-          # against `tgt_oldest` either, so it must not weigh on the total that
-          # exempts its neighbours. Both lists are validated here, before the
-          # count is allowed to exempt anything, and a failure withholds the
-          # waiver rather than the run: every absent version falls through to
-          # `missing` and is reported.
+          # ...and only when both inventories are well-formed: `wc -w` counts
+          # tokens, so a repeated entry would inflate the total, and a label
+          # that is not `vX.Y` cannot be ordered. A failure withholds the
+          # waiver, not the run: absent versions fall through to `missing`.
           inventory_ok=1
           for list in "$cur_list" "$tgt_list"; do
             n="$(echo $list | wc -w)"
@@ -572,14 +562,7 @@ jobs:
               *"\"${v}\""*) continue ;;
             esac
             # Strictly older than everything the target kept => pruned by the cap.
-            # Both ends must be a well-formed series first: `sort -V` will order
-            # an entry like `dev` below every `vX.Y`, and waiving a label whose
-            # ordering is meaningless is fail-open in the one gate that exists to
-            # catch a lost version. Anything unrecognised falls through to
-            # missing and stops the cutover.
-            if [ -n "$tgt_oldest" ] && [ "$inventory_ok" -eq 1 ] && [ "$tgt_count" -ge "$cur_count" ] \
-               && printf '%s' "$v" | grep -qE '^v[0-9]+\.[0-9]+$' \
-               && printf '%s' "$tgt_oldest" | grep -qE '^v[0-9]+\.[0-9]+$' \
+            if [ "$inventory_ok" -eq 1 ] && [ "$tgt_count" -ge "$archive_cap" ] \
                && [ "$(printf '%s\n%s\n' "$v" "$tgt_oldest" | sort -V | head -n1)" = "$v" ]; then
               pruned="${pruned} ${v}"
             else
@@ -615,7 +598,7 @@ jobs:
             echo "Versioning it would archive the wrong content and drop those versions from the site."
             echo "Re-cut ${TARGET_BRANCH} from ${CURRENT_BRANCH}, or port docs/site across, then re-run."
             echo "A bump that drops more than one archive at once — say, after the cap in"
-            echo "docs-version-bump.yml is lowered by two — lands here too, and deliberately:"
+            echo "docs-version-bump.yml is lowered — lands here too, and deliberately:"
             echo "retiring several published versions in one step is a decision, not a prune."
             exit 1
           fi
