@@ -122,7 +122,7 @@ type Header struct {
 }
 
 // writeComputedJSON writes the reply's hash, which Header derives rather than stores.
-func (h *Header) writeComputedJSON(s *jsonstream.StackStream) {
+func (h *Header) writeComputedJSON(s *jsonstream.Stream) {
 	hash := h.Hash()
 	ethjson.Data(s, "hash", hash[:])
 }

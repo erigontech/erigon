@@ -41,7 +41,6 @@ type Config struct {
 	Tracer        *tracing.Hooks
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Skips the EIP-1559 and EIP-4844 fee cap checks (needed for 0 price calls)
-	TraceJumpDest bool // Print transaction hashes where jumpdest analysis was useful
 	NoReceipts    bool // Do not calculate receipts
 	ReadOnly      bool // Do no perform any block finalisation
 	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
@@ -81,6 +80,7 @@ type CallContext struct {
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
 	Contract Contract
+	create   createGasPreparation
 	Stack    Stack
 }
 
@@ -148,6 +148,7 @@ func (ctx *CallContext) put() {
 	ctx.cacheGen = 0
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
+	ctx.create = createGasPreparation{}
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	ctx.cachedKeyGen = ^uint64(0)
@@ -379,7 +380,7 @@ func stackBoundsErr(sLen int, operation *operation) error {
 // traceGas picks the figure the dev instruction trace should report: call
 // opcodes forward gas to the callee, so their charged cost is not the
 // interesting number.
-func traceGas(op OpCode, callGas mdgas.MdGas, cost mdgas.MdGas) mdgas.MdGas {
+func traceGas(op OpCode, callGas mdgas.MdGasCost, cost mdgas.MdGasCost) mdgas.MdGasCost {
 	switch op {
 	case CALL, CALLCODE, DELEGATECALL, STATICCALL:
 		return callGas
@@ -410,11 +411,11 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
 		pc   = uint64(0) // program counter
-		cost mdgas.MdGas
+		cost mdgas.MdGasCost
 		// copies used by tracer
 		pcCopy  uint64 // needed for the deferred Tracer
 		oldGas  mdgas.MdGas
-		callGas mdgas.MdGas
+		callGas mdgas.MdGasCost
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 		tracer  = evm.config.Tracer
@@ -485,7 +486,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
 		operation := &jt[op]
-		cost = mdgas.MdGas{Execution: operation.constantGas} // For tracing
+		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
 		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
@@ -520,7 +521,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			evm.callGasTemp = 0
 			// Consume the gas and return an error if not enough gas is available.
 			// cost is explicitly set so that the capture state defer method can get the proper cost
-			var dynamicCost mdgas.MdGas
+			var dynamicCost mdgas.MdGasCost
 			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
 			if err != nil {
 				if !errors.Is(err, ErrOutOfGas) {
@@ -532,7 +533,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				cost = cost.Plus(dynamicCost)
 				callGas = cost
 				callGas.Execution -= evm.CallGasTemp()
-				if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGas{}) {
+				if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGasCost{}) {
 					gasCost := traceGas(op, callGas, cost)
 					fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
 				}
@@ -542,10 +543,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			}
 			callContext.gas -= dynamicCost.Execution
 			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(dynamicCost.State, mdgas.StateGas, nil, tracing.GasChangeIgnored)
+				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
 				if !ok {
 					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 				}
+			} else if dynamicCost.State < 0 {
+				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
 			}
 		}
 

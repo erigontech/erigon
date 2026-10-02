@@ -165,6 +165,20 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 	return ctx, pool, poolDB, coreDB, sender
 }
 
+func TestAddLocalTxnsRejectsTotalGasAboveCap(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.blockGasLimit.Store(2 * math.MaxUint32)
+	txn := newTestTxnSlot(0, 0, 1, 2, uint64(math.MaxUint32)+1)
+	txn.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(txn, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.GasLimitTooHigh}, reasons)
+	pending, baseFee, queued := pool.CountContent()
+	require.Zero(t, pending+baseFee+queued)
+}
+
 func TestAddLocalTxnsRejectsTipAboveFeeCap(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
@@ -391,9 +405,11 @@ func TestGetCachedBlobTxnLockedSkipsTruncatedCachedRow(t *testing.T) {
 	}))
 }
 
-func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+// newAmsterdamPoolWithPendingSelfTransfer returns a pool on an Amsterdam chain
+// holding one pending zero-value self-transfer with the given gas limit, so its
+// intrinsic gas is exactly params.TxBaseEIP2780.
+func newAmsterdamPoolWithPendingSelfTransfer(t *testing.T, ctx context.Context, txnGasLimit uint64) *TxPool {
+	t.Helper()
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	db := mdbxtest.NewTestPoolDB(t)
@@ -435,8 +451,7 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	}
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 
-	const gasLimit = uint64(100_000)
-	slot := newTestTxnSlot(0, 0, 300_000, 300_000, gasLimit)
+	slot := newTestTxnSlot(0, 0, 300_000, 300_000, txnGasLimit)
 	slot.IDHash[0] = 1
 	slot.Rlp = []byte{1}
 	slot.Size = uint32(len(slot.Rlp))
@@ -445,6 +460,16 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	reasons, err := pool.AddLocalTxns(ctx, slots)
 	require.NoError(t, err)
 	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	return pool
+}
+
+func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	const gasLimit = uint64(100_000)
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, gasLimit)
 
 	var selected TxnsRlp
 	_, count, err := pool.best(
@@ -458,6 +483,34 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Zero(t, count)
+}
+
+// TestBestYieldsTxnBelowLegacyMinGasPostAmsterdam pins the EIP-2780 floor in
+// best. With execution gas left between TX_BASE_COST and the legacy 21,000, a
+// zero-value self-transfer is still includable, so the scan must keep going
+// instead of breaking out on the pre-Amsterdam threshold.
+func TestBestYieldsTxnBelowLegacyMinGasPostAmsterdam(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	const gasLimit = uint64(15_000)
+	require.Less(t, gasLimit, params.TxGas)
+	require.GreaterOrEqual(t, gasLimit, params.TxBaseEIP2780)
+
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, ctx, gasLimit)
+
+	var selected TxnsRlp
+	_, count, err := pool.best(
+		ctx,
+		1,
+		&selected,
+		0,
+		mdgas.NewFullMdGas(gasLimit, gasLimit, math.MaxUint64),
+		nil,
+		math.MaxInt,
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, count)
 }
 
 func writeTestSenderState(t *testing.T, ctx context.Context, coreDB kv.TemporalRwDB, logger log.Logger, addr [20]byte, value []byte, txNum uint64) {
@@ -2840,4 +2893,69 @@ func TestBaseFeeRoundTripAnnouncesOnce(t *testing.T) {
 	}
 	drain()
 	require.Equal(t, 1, announced, "a return to pending is not a new pending txn")
+}
+
+func TestFromDBBlobsOutliveReadTx(t *testing.T) {
+	require := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	chainConfig := testforks.Forks["Osaka"]
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	poolDB := mdbxtest.NewTestPoolDB(t)
+	pool, err := New(ctx, make(chan Announcements, 5), poolDB, coreDB, txpoolcfg.DefaultConfig,
+		kvcache.New(kvcache.DefaultCoherentConfig), chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(err)
+
+	sender := common.Address{1}
+	acc := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
+	require.NoError(pool.OnNewBlock(ctx, &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee:  1,
+		BlockGasLimit:        30_000_000,
+		PendingBlobFeePerGas: 1,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(sender),
+				Data:    accounts.SerialiseV3(&acc),
+			}},
+		}},
+	}, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	txnRlp := makeWrappedBlobTxnRlpWithCellProofs(t, chainConfig.ChainID, 2)
+	parseCtx := NewTxnParseContext(*chainConfig.ChainID)
+	parseCtx.WithSender(false)
+	var slot TxnSlot
+	_, err = parseCtx.ParseTransaction(txnRlp, 0, &slot, nil, false, true, nil)
+	require.NoError(err)
+	blobHashes := slot.GetBlobHashes()
+
+	require.NoError(poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(kv.PoolTransaction, slot.IDHash[:], append(sender[:], txnRlp...))
+	}))
+	require.NoError(poolDB.View(ctx, func(poolTx kv.Tx) error {
+		return coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
+			return pool.fromDB(ctx, poolTx, coreTx)
+		})
+	}))
+
+	bundles := pool.GetBlobs(blobHashes)
+	require.Len(bundles, len(blobHashes))
+	require.NotEmpty(bundles[0].Blob)
+	want := bytes.Clone(bundles[0].Blob)
+
+	require.NoError(poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Delete(kv.PoolTransaction, slot.IDHash[:])
+	}))
+	filler := bytes.Repeat([]byte{0xaa}, len(txnRlp)+20)
+	for i := range 16 {
+		require.NoError(poolDB.Update(ctx, func(tx kv.RwTx) error {
+			return tx.Put(kv.PoolTransaction, []byte{byte(i)}, filler)
+		}))
+	}
+
+	bundles = pool.GetBlobs(blobHashes)
+	require.Len(bundles, len(blobHashes))
+	require.Equal(want, bundles[0].Blob, "blob loaded from the pool DB must not change after its read tx ends")
 }

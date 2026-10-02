@@ -20,6 +20,7 @@
 package ethapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // CallArgs represents the arguments for a call.
@@ -54,7 +56,45 @@ type CallArgs struct {
 	AccessList           *types.AccessList         `json:"accessList"`
 	ChainID              *hexutil.U256             `json:"chainId,omitempty"`
 	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
+	Blobs                []hexutil.Bytes           `json:"blobs"`
+	Commitments          []hexutil.Bytes           `json:"commitments"`
+	Proofs               []hexutil.Bytes           `json:"proofs"`
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
+}
+
+// UnmarshalJSON decodes a call object and rejects one whose data and input disagree.
+func (args *CallArgs) UnmarshalJSON(raw []byte) error {
+	type callArgs CallArgs
+	if err := json.Unmarshal(raw, (*callArgs)(args)); err != nil {
+		return err
+	}
+	return CheckCallData(args.Data, args.Input)
+}
+
+// CheckCallData rejects a call object whose data and input are both set and differ, as
+// invalid params. Either one alone, or both with the same value, gives the call data.
+func CheckCallData(data, input *hexutil.Bytes) error {
+	if data != nil && input != nil && !bytes.Equal(*data, *input) {
+		return &rpc.InvalidParamsError{Message: `both "data" and "input" are set and not equal. Please use "input" to pass transaction call data`}
+	}
+	return nil
+}
+
+// ChainIDMismatch returns an error when a call object's chainId names another chain.
+func ChainIDMismatch(have *hexutil.U256, want *uint256.Int) error {
+	if have != nil && !(*uint256.Int)(have).Eq(want) {
+		return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", (*uint256.Int)(have), want)
+	}
+	return nil
+}
+
+// CheckChainID rejects a call object whose chainId names another chain. Such a call is invalid
+// whatever the state, so it is invalid params rather than an execution error.
+func CheckChainID(have *hexutil.U256, want *uint256.Int) error {
+	if err := ChainIDMismatch(have, want); err != nil {
+		return &rpc.InvalidParamsError{Message: err.Error()}
+	}
+	return nil
 }
 
 func (args *CallArgs) FromOrEmpty() accounts.Address {
@@ -555,6 +595,8 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
 type SignTransactionResult struct {
 	Raw hexutil.Bytes   `json:"raw"`
 	Tx  *RPCTransaction `json:"tx"`
+	// Sidecar, when set, adds blobs, commitments and proofs to the tx object.
+	Sidecar *types.BlobTxWrapper `json:"-"`
 }
 
 func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
@@ -590,6 +632,29 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 	for _, k := range []string{"v", "r", "s"} {
 		if v, ok := m[k]; !ok || string(v) == "null" {
 			m[k] = zeroHex
+		}
+	}
+	if sc := r.Sidecar; sc != nil {
+		blobs := make([]hexutil.Bytes, len(sc.Blobs))
+		for i := range sc.Blobs {
+			blobs[i] = sc.Blobs[i][:]
+		}
+		commitments := make([]hexutil.Bytes, len(sc.Commitments))
+		for i := range sc.Commitments {
+			commitments[i] = sc.Commitments[i][:]
+		}
+		proofs := make([]hexutil.Bytes, len(sc.Proofs))
+		for i := range sc.Proofs {
+			proofs[i] = sc.Proofs[i][:]
+		}
+		if m["blobs"], err = json.Marshal(blobs); err != nil {
+			return nil, err
+		}
+		if m["commitments"], err = json.Marshal(commitments); err != nil {
+			return nil, err
+		}
+		if m["proofs"], err = json.Marshal(proofs); err != nil {
+			return nil, err
 		}
 	}
 	stripped, err := json.Marshal(m)

@@ -36,38 +36,64 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func init() {
 	register("callTracer", newCallTracer)
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type callLog -out gen_calllog_fastjson.go
 type callLog struct {
-	Index    hexutil.Uint64 `json:"index"`
-	Address  common.Address `json:"address"`
-	Topics   []common.Hash  `json:"topics"`
-	Data     hexutil.Bytes  `json:"data"`
-	Position hexutil.Uint   `json:"position"`
+	Index    hexutil.Uint64 `json:"index" ethjson:"quantity"`
+	Address  common.Address `json:"address" ethjson:"data"`
+	Topics   []common.Hash  `json:"topics" ethjson:"datalist"`
+	Data     hexutil.Bytes  `json:"data" ethjson:"data"`
+	Position hexutil.Uint   `json:"position" ethjson:"quantity"`
 }
+
+type callLogs []callLog
+
+func (ls callLogs) MarshalFastJSONTo(s *jsonstream.Stream) error { return writeObjects(s, ls) }
+
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type callFrame -out gen_callframe_fastjson.go
 
 type callFrame struct {
 	Type           vm.OpCode       `json:"-"`
-	From           common.Address  `json:"from"`
-	Gas            hexutil.Uint64  `json:"gas"`
-	StateGas       hexutil.Uint64  `json:"stateGasReservoir,omitempty"`
-	GasUsed        hexutil.Uint64  `json:"gasUsed"`                  // root frame: receipt gas after refund and floor; child frame: execution gas.
-	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed,omitempty"` // amsterdam root frame: execution block contribution before refunds, with calldata floor.
-	StateGasUsed   *hexutil.Int64  `json:"stateGasUsed,omitempty"`   // amsterdam root frame: nonnegative block contribution; child frame: signed net state usage.
-	GasRefund      *hexutil.Uint64 `json:"gasRefund,omitempty"`
-	To             *common.Address `json:"to,omitempty"`
-	Input          hexutil.Bytes   `json:"input"`
-	Output         hexutil.Bytes   `json:"output,omitempty"`
-	Error          string          `json:"error,omitempty"`
-	Revertal       string          `json:"revertReason,omitempty"`
-	Calls          []callFrame     `json:"calls,omitempty"`
-	Logs           []callLog       `json:"logs,omitempty"`
-	Value          *hexutil.U256   `json:"value,omitempty"`
-	TypeStr        string          `json:"type"`
+	From           common.Address  `json:"from" ethjson:"data"`
+	Gas            hexutil.Uint64  `json:"gas" ethjson:"quantity"`
+	StateGas       hexutil.Uint64  `json:"stateGasReservoir,omitempty" ethjson:"quantity"`
+	GasUsed        hexutil.Uint64  `json:"gasUsed" ethjson:"quantity"`                  // root frame: receipt gas after refund and floor; child frame: execution gas.
+	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed,omitempty" ethjson:"quantity"` // amsterdam root frame: execution block contribution before refunds, with calldata floor.
+	StateGasUsed   *hexutil.Int64  `json:"stateGasUsed,omitempty" ethjson:"quantity"`   // amsterdam root frame: nonnegative block contribution; child frame: signed net state usage.
+	GasRefund      *hexutil.Uint64 `json:"gasRefund,omitempty" ethjson:"quantity"`
+	To             *common.Address `json:"to,omitempty" ethjson:"data"`
+	Input          hexutil.Bytes   `json:"input" ethjson:"data"`
+	Output         hexutil.Bytes   `json:"output,omitempty" ethjson:"data"`
+	Error          string          `json:"error,omitempty" ethjson:"string"`
+	Revertal       string          `json:"revertReason,omitempty" ethjson:"string"`
+	Calls          callFrames      `json:"calls,omitempty" ethjson:"objects"`
+	Logs           callLogs        `json:"logs,omitempty" ethjson:"objects"`
+	Value          *hexutil.U256   `json:"value,omitempty" ethjson:"quantity"`
+	TypeStr        string          `json:"type" ethjson:"string"`
+}
+
+type callFrames []callFrame
+
+func (fs callFrames) MarshalFastJSONTo(s *jsonstream.Stream) error { return writeObjects(s, fs) }
+
+func writeObjects[E any, P interface {
+	*E
+	jsonstream.Marshaler
+}](s *jsonstream.Stream, items []E) error {
+	s.WriteArrayStart()
+	for i := range items {
+		if err := P(&items[i]).MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	s.WriteArrayEnd()
+	return nil
 }
 
 // setType keeps the opcode and its wire spelling in step.
@@ -144,8 +170,9 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 			OnExitV2:  t.OnExitV2,
 			OnLog:     t.OnLog,
 		},
-		GetResult: t.GetResult,
-		Stop:      t.Stop,
+		GetResult:         t.GetResult,
+		MarshalFastJSONTo: t.MarshalFastJSONTo,
+		Stop:              t.Stop,
 	}, nil
 }
 
@@ -285,16 +312,11 @@ func (t *callTracer) OnLog(log *types.Log) {
 // GetResult returns the json-encoded nested list of call traces, and any
 // error arising from the encoding or forceful termination (via `Stop`).
 func (t *callTracer) GetResult() (json.RawMessage, error) {
-	if len(t.callstack) == 0 && !t.config.IncludePrecompiles {
-		// can happen if top-level is a call to precompile
-		// and includePrecompiles is false
-		// do not return err, just empty result
-		return nil, nil
+	root, err := t.root()
+	if root == nil || err != nil {
+		return nil, err
 	}
-	if len(t.callstack) != 1 {
-		return nil, errors.New("incorrect number of top-level calls")
-	}
-	res, err := json.Marshal(t.callstack[0])
+	res, err := json.Marshal(root)
 	if err != nil {
 		return nil, err
 	}
@@ -302,6 +324,32 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 		return res, *p
 	}
 	return res, nil
+}
+
+func (t *callTracer) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	root, err := t.root()
+	if err != nil {
+		return err
+	}
+	if root == nil {
+		s.WriteNil()
+		return nil
+	}
+	if p := t.reason.Load(); p != nil {
+		return *p
+	}
+	return root.MarshalFastJSONTo(s)
+}
+
+// root is nil without an error when the top-level call went to a precompile and includePrecompiles is false.
+func (t *callTracer) root() (*callFrame, error) {
+	if len(t.callstack) == 0 && !t.config.IncludePrecompiles {
+		return nil, nil
+	}
+	if len(t.callstack) != 1 {
+		return nil, errors.New("incorrect number of top-level calls")
+	}
+	return &t.callstack[0], nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.

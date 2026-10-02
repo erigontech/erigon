@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -372,6 +373,40 @@ func TestCreate2TraceWiring(t *testing.T) {
 	}
 	if !strings.Contains(got, "51966") || !strings.Contains(got, "deadbeef") {
 		t.Fatalf("CREATE2 trace missing salt/input: got %q, want salt 51966 and deadbeef", got)
+	}
+}
+
+func TestCreate2InitCodeAllocations(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	evm.depth = int(params.CallCreateDepth) + 1 // exclude child execution from the allocation count.
+	scope := getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 500_000})
+	defer scope.put()
+	scope.Memory.Resize(64)
+	clear(scope.Memory.Data())
+	allocations := func(memorySize int) float64 {
+		return testing.AllocsPerRun(100, func() {
+			scope.Memory.store = scope.Memory.store[:memorySize]
+			scope.Memory.lastGasCost = 0
+			scope.Stack.Reset()
+			scope.Stack.push(uint256.Int{})
+			scope.Stack.push(*uint256.NewInt(64))
+			scope.Stack.push(uint256.Int{})
+			scope.Stack.push(uint256.Int{})
+			if _, err := gasCreate2Eip3860(evm, scope, scope.Gas(), 64); err != nil {
+				t.Fatal(err)
+			}
+			scope.Memory.Resize(64)
+			if _, _, err := opCreate2(0, evm, scope); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	withoutPadding := allocations(64)
+	withPadding := allocations(32)
+	if withPadding != withoutPadding {
+		t.Fatalf("zero-padding adds initcode allocations: without padding %g, with padding %g", withoutPadding, withPadding)
 	}
 }
 

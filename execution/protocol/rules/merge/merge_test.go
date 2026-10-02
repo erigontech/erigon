@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -286,4 +287,41 @@ func TestInitializeTracesTheRulesTheSystemCallResolves(t *testing.T) {
 				"the traced rules must carry the version the system call's own EVM resolves")
 		})
 	}
+}
+
+func TestInitializeTracesHistoryStorageCall(t *testing.T) {
+	chainConfig := chain.TestChainOsakaConfig.Copy()
+	header := &types.Header{
+		Difficulty: *ProofOfStakeDifficulty,
+		Number:     *uint256.NewInt(1),
+		Time:       1,
+		ParentHash: common.HexToHash("0x1234"),
+	}
+	var intraBlockState state.IntraBlockState
+	var callOrder []string
+	tracer := tracing.Hooks{
+		OnSystemCallStartV2: func(env *tracing.VMContext) {
+			callOrder = append(callOrder, "start")
+			require.NotNil(t, env)
+			require.Same(t, chainConfig, env.ChainConfig)
+			require.Same(t, &intraBlockState, env.IntraBlockState)
+			require.Equal(t, header.Number.Uint64(), env.BlockNumber)
+			require.Equal(t, header.Time, env.Time)
+			require.NotNil(t, env.Rules)
+			require.True(t, env.Rules.IsPrague)
+		},
+		OnSystemCallStart: func() { t.Fatal("legacy hook called when V2 is available") },
+		OnSystemCallEnd:   func() { callOrder = append(callOrder, "end") },
+	}
+	syscall := func(addr accounts.Address, data []byte, ibs *state.IntraBlockState, gotHeader *types.Header, constCall bool) ([]byte, error) {
+		callOrder = append(callOrder, "call")
+		require.Equal(t, params.HistoryStorageAddress, addr)
+		require.Equal(t, header.ParentHash[:], data)
+		require.Same(t, &intraBlockState, ibs)
+		require.Same(t, header, gotHeader)
+		require.False(t, constCall)
+		return nil, errors.New("system call failed")
+	}
+	require.NoError(t, New(nil).Initialize(chainConfig, readerMock{config: chainConfig}, header, &intraBlockState, syscall, log.New(), &tracer))
+	require.Equal(t, []string{"start", "call", "end"}, callOrder)
 }

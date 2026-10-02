@@ -69,34 +69,33 @@ func flushFull(stream *jsoniter.Stream) {
 }
 
 // New builds an unpooled stream. Request paths use Get.
-func New(out io.Writer) Stream {
-	return newStackStream(out, InitialBufferSize)
+func New(out io.Writer) *Stream {
+	return newStream(out, InitialBufferSize)
 }
 
-var streamPool = sync.Pool{New: func() any { return newStackStream(nil, InitialBufferSize) }}
+var streamPool = sync.Pool{New: func() any { return newStream(nil, InitialBufferSize) }}
 
 // Get is New over a pool. Put the stream back once its bytes have left it;
 // skipping Put only costs the recycling.
-func Get(out io.Writer) *StackStream {
-	s := streamPool.Get().(*StackStream)
+func Get(out io.Writer) *Stream {
+	s := streamPool.Get().(*Stream)
 	s.Reset(out)
 	return s
 }
 
 // Put returns a stream to the pool. The caller must hold no view of Buffer()
 // afterwards, and must not write to the stream again.
-func Put(s Stream) {
-	ss, ok := s.(*StackStream)
-	if !ok || cap(ss.stream.Buffer()) > maxPooledBufferSize {
+func Put(s *Stream) {
+	if cap(s.stream.Buffer()) > maxPooledBufferSize {
 		return
 	}
-	ss.Reset(nil) // the writer goes too, so an idle stream pins no connection
-	streamPool.Put(ss)
+	s.Reset(nil) // the writer goes too, so an idle stream pins no connection
+	streamPool.Put(s)
 }
 
 // Marshaler is a value that writes its own JSON.
 type Marshaler interface {
-	MarshalFastJSONTo(*StackStream) error
+	MarshalFastJSONTo(*Stream) error
 }
 
 // Marshal encodes v into a byte slice the caller owns.

@@ -129,7 +129,7 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	defer fv.lock.Unlock()
 	start := time.Now()
 	if fv.sharedDom != nil {
-		if err := fv.sharedDom.FlushPendingUpdates(ctx, tx); err != nil {
+		if err := fv.sharedDom.FlushPendingUpdates(tx); err != nil {
 			return err
 		}
 		sdTxNum, _, err := sd.SeekCommitment(ctx, tx)

@@ -104,9 +104,11 @@ reported. How they appear depends on the method:
 `gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by
 `trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`,
 `trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
-`trace_call` and `trace_callMany` take no such parameter and always enable it
-internally, so everything below applies to them unconditionally. `trace_rawTransaction`
-never enables it: a signed transaction pays for its gas as it would in a block. The gas
+`trace_call`, `trace_callMany` and `trace_rawTransaction` never enable it.
+`trace_call` and `trace_callMany` run each call object with the fees and block
+environment `eth_call` gives it: a call with no gas price runs free and sees `BASEFEE` 0,
+and a priced call is checked and pays for its gas. A signed transaction passed to
+`trace_rawTransaction` pays for its gas as it would in a block. The gas
 is bought before execution, so `BALANCE(ORIGIN)`, or `SELFBALANCE` in a delegated sender,
 reads the balance after that charge; this shows in `trace` and `vmTrace` as well as in
 `stateDiff`.
@@ -181,7 +183,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | `output` | DATA | Return data of the top-level call (`0x` if no data was returned). |
 | `stateDiff` | Object \| null | Set when `"stateDiff"` is requested in the trace types array. Maps each touched account address to an object describing changes to `balance`, `nonce`, `code`, and per-key `storage` entries. `null` if not requested. |
 | `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. Empty array (never `null`) if not requested. See **TraceEntry fields** below. |
-| `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `ex` execution result, and `sub` for nested calls). `null` if not requested. |
+| `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `ex` execution result, and `sub` for nested calls). `ops` holds only operations that executed, so every `pc` lies inside `code`: an undefined opcode or a stack underflow or overflow is omitted, and an operation that halted exceptionally has `ex: null`. `null` if not requested. |
 | `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
 
 ### TraceEntry fields
@@ -191,8 +193,8 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | Field | Type | Description |
 | --- | --- | --- |
 | `action` | Object | The action that initiated this call frame. Shape depends on `type` (see **Action variants**). |
-| `result` | Object \| null | The outcome of the action. `null` if the call frame errored. See **Result variants**. |
-| `error` | String | (Optional) Present when the call frame errored. `"Reverted"` (title-cased) is the only special-cased value; all other errors are the verbatim Go error string, e.g. `"out of gas"`, `"invalid opcode: ..."`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
+| `result` | Object \| null | The outcome of the action. `null` if the call frame failed other than by reverting. See **Result variants**. |
+| `error` | String | (Optional) Present when the call frame failed, with a Parity-style label: `"Reverted"`, `"Out of gas"`, `"Bad instruction"`, `"Bad jump destination"`, `"Stack underflow"`, `"Out of stack"`, `"Mutable Call In Static Context"`, `"Built-in failed"` (a precompile failure), `"Out of bounds"`, `"Invalid code"` (created code starting with `0xEF`), `"Contract address collision"`, `"Nonce overflow"`, `"Insufficient balance for transfer"` or `"Max call depth exceeded"`. A code deposit failure, including code above the EIP-170 size limit, is `"Out of gas"`. Any other failure keeps its Go error text. For `"Reverted"`, `result` holds `gasUsed` and `output`, the revert data, for a `create` frame too; for other errors, `result` is `null`. |
 | `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
 | `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
 | `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors). |
@@ -260,6 +262,8 @@ The `result` object's shape depends on `type`:
 | `gasUsed` | QUANTITY | Gas consumed by the creation. |
 | `code` | DATA | Deployed runtime bytecode of the new contract. |
 | `address` | DATA, 20 BYTES | Address of the newly deployed contract. |
+
+A reverted `create` frame deploys no contract, so its `result` has the `call` shape, `gasUsed` and `output`, with the revert data as `output`. `trace_filter` does not match a failed `create` by the address it would have occupied.
 
 **`type: "suicide"` and `type: "reward"`**
 
@@ -332,16 +336,16 @@ params: [
   [
     [
       {
-        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+        "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+        "to": "0x000000000000000000000000000000000000dead",
         "value": "0x186a0"
       },
       ["trace"]
     ],
     [
       {
-        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+        "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+        "to": "0x000000000000000000000000000000000000dead",
         "value": "0x186a0"
       },
       ["trace"]
@@ -360,7 +364,7 @@ params: [
 Request
 
 ```bash
-curl --data '{"method":"trace_callMany","params":[[[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]],[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+curl --data '{"method":"trace_callMany","params":[[[{"from":"0x28c6c06298d514db089934071355e5743bf21d60","to":"0x000000000000000000000000000000000000dead","value":"0x186a0"},["trace"]],[{"from":"0x28c6c06298d514db089934071355e5743bf21d60","to":"0x000000000000000000000000000000000000dead","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
 
@@ -377,10 +381,10 @@ Response
       "trace": [{
         "action": {
           "callType": "call",
-          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-          "gas": "0x1dcd12f8",
+          "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "gas": "0x2fa9e78",
           "input": "0x",
-          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+          "to": "0x000000000000000000000000000000000000dead",
           "value": "0x186a0"
         },
         "result": {
@@ -399,10 +403,10 @@ Response
       "trace": [{
         "action": {
           "callType": "call",
-          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-          "gas": "0x1dcd12f8",
+          "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "gas": "0x2fa9e78",
           "input": "0x",
-          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+          "to": "0x000000000000000000000000000000000000dead",
           "value": "0x186a0"
         },
         "result": {
@@ -669,6 +673,8 @@ Returns traces matching given filter
    * `mode`: `String` - (optional) Default is `"intersection"`: OR within each address list, AND between the two lists. An omitted, `null`, or empty list imposes no restriction. Set `"union"` to match either populated list and preserve the previous behavior when both lists are set. A `null` mode is the same as an omitted one. Other mode values, including `""`, return `-32602`.
 
    The `'pending'` tag is not supported for either block bound and returns `-32602`: `trace_filter` scans committed trace history, which has no pending block.
+
+   A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. A block hash that names no known block returns an error.
 
 ```js
 params: [{
