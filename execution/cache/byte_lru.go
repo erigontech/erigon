@@ -117,9 +117,8 @@ func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 // it exceeds the whole budget, or the key is already there -- and onEvict
 // never fires for it, so the caller must refund its charge.
 //
-// Replacing a live key is left to Remove+Add: otter loses the replacement node
-// when the same key is written twice before the first write is drained, and
-// then counts its weight forever without ever evicting it.
+// Replacing a live key is left to Remove+Add: otter drops the replacement node
+// when a key is written twice before the first write drains.
 func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {

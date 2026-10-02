@@ -76,11 +76,8 @@ func TestHashByteLRUWeighsAnEntryOnce(t *testing.T) {
 	require.Equal(t, int32(1), calls.Load())
 }
 
-// otter v2.3.0 loses the replacement node when a key is Set again before the
-// first Set's add task is drained: its weight is counted, but it sits in no
-// eviction queue, so the cache grows without bound.
+// otter drops a replacement node written before the first write drains.
 func TestByteLRUConcurrentSameKeyStaysBounded(t *testing.T) {
-	const entryBytes = 64 * 1024
 	b := NewByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
 	var wg sync.WaitGroup
 	for range 32 {
@@ -88,7 +85,7 @@ func TestByteLRUConcurrentSameKeyStaysBounded(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for key := range uint64(2000) {
-				b.Add(key, make([]byte, entryBytes))
+				b.Add(key, make([]byte, 64*1024))
 			}
 		}()
 	}
