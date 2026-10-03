@@ -1615,8 +1615,55 @@ def write_outputs(llms_txt, llms_full_txt):
 # `0_` is not a word boundary, so an anchored pattern matches nothing there.
 _RELEASE_ANCHOR_RE = re.compile(r"erigon[:_/-]v?(\d+\.\d+\.\d+)(?!\.?\d)")
 
+# A version that belongs to the text rather than to the release — `Measured on
+# Erigon 3.6.1` — must read the same after the next release, so it cannot be
+# written `{ERIGON_VERSION}`; but while it equals the release the global mask
+# below would swallow it, and an edit to it would pass as drift. The page
+# declares it instead, as an MDX comment that never reaches the rendered corpus:
+#
+#   {/* llms-pinned-version: Measured on Erigon 3.6.1 */}
+#
+# Every occurrence of a declared phrase is left out of the mask, on every page.
+# The hazard scan skips it only on the page that declares it. Declare the whole phrase, not the bare number: the phrase is
+# matched in the corpus, where `3.6.1` alone is also every expansion of the
+# token.
+_PINNED_VERSION_RE = re.compile(r"\{/\*\s*llms-pinned-version:\s*(.*?)\s*\*/\}")
+_VERSION_RE = re.compile(r"(?<![.\d])\d+\.\d+\.\d+(?!\.?\d)")
 
-def _mask_versions(text):
+
+def _source_files():
+    """Every source file that reaches the corpus, across all sections."""
+    roots = [directory for _, directory, _ in SECTIONS]
+    return sorted(q for root in roots for q in root.rglob("*.md*"))
+
+
+def _pinned_phrases(text):
+    """The historical-version phrases one source declares."""
+    phrases = _PINNED_VERSION_RE.findall(text)
+    for phrase in phrases:
+        if not _VERSION_RE.search(phrase):
+            raise ValueError(
+                f"llms-pinned-version declares no N.N.N version: {phrase!r}")
+    return phrases
+
+
+def _all_pinned_phrases():
+    """Every declared phrase, longest first so a longer one wins a split."""
+    found = {phrase for path in _source_files()
+             for phrase in _pinned_phrases(
+                 path.read_text(encoding="utf-8", errors="replace"))}
+    return sorted(found, key=lambda phrase: (-len(phrase), phrase))
+
+
+def _split_pinned(text, pinned):
+    """`text` split so odd indices are pinned phrases and even ones are not."""
+    if not pinned:
+        return [text]
+    return re.split(
+        "(" + "|".join(map(re.escape, pinned)) + r")(?!\.?\d)", text)
+
+
+def _mask_versions(text, pinned=None):
     """Mask the Erigon release so a new release is drift, not staleness.
 
     The release token expands in places with no `erigon` next to them —
@@ -1628,9 +1675,13 @@ def _mask_versions(text):
     unrelated reason: an edit to a dependency pinned at the same version would
     compare equal and pass as drift. `_literal_release_uses` reports those
     positions and a test fails on them, so the hazard is detected rather than
-    silently tolerated.
+    silently tolerated. A declared historical version is not the release, so
+    its phrases pass through unmasked (`pinned`, default: every declared one).
     """
-    found = _RELEASE_ANCHOR_RE.findall(text)
+    if pinned is None:
+        pinned = _all_pinned_phrases()
+    parts = _split_pinned(text, pinned)
+    found = _RELEASE_ANCHOR_RE.findall("".join(parts[::2]))
     if not found:
         return text
     release = Counter(found).most_common(1)[0][0]
@@ -1641,8 +1692,9 @@ def _mask_versions(text):
     # makes `erigon:v3.6.1` and `erigon:3.6.1` compare equal, so an edit that
     # adds or drops the prefix would pass as release drift and never be
     # regenerated. Only the digits are masked; the prefix is carried through.
-    return re.sub(rf"(?<![.\d])(v?){re.escape(release)}(?!\.?\d)",
-                  r"\1<release>", text)
+    mask = re.compile(rf"(?<![.\d])(v?){re.escape(release)}(?!\.?\d)")
+    return "".join(part if i % 2 else mask.sub(r"\1<release>", part)
+                   for i, part in enumerate(parts))
 
 
 def _literal_release_uses(release):
@@ -1656,14 +1708,21 @@ def _literal_release_uses(release):
     there. Any literal is therefore somebody else's pin. Every section that
     reaches the corpus is scanned, not just docs/: help-center is a sibling
     directory and a pin there would have gone unseen.
+
+    A phrase the same page declares with `llms-pinned-version` is a historical
+    version, not a pin that shadows the release, and is skipped; so is the
+    declaration itself. A declaration on one page exempts nothing on another.
     """
     hits = []
     pattern = re.compile(rf"(?<![.\d]){re.escape(release)}(?!\.?\d)")
-    roots = [directory for _, directory, _ in SECTIONS]
-    for path in sorted(q for root in roots for q in root.rglob("*.md*")):
-        for n, line in enumerate(
-                path.read_text(encoding="utf-8", errors="replace").split("\n"), 1):
-            if pattern.search(line):
+    for path in _source_files():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        pinned = sorted(set(_pinned_phrases(text)),
+                        key=lambda phrase: (-len(phrase), phrase))
+        for n, line in enumerate(text.split("\n"), 1):
+            bare = "".join(_split_pinned(
+                _PINNED_VERSION_RE.sub("", line), pinned)[::2])
+            if pattern.search(bare):
                 hits.append((path, n, line.strip()[:90]))
     return hits
 
