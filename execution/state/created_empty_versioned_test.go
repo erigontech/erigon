@@ -46,7 +46,7 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	_, hasDelete := writes.GetSelfDestruct(addr)
 	require.False(t, hasDelete)
 
-	vm.FlushVersionedWrites(writes, true, "")
+	vm.FlushVersionedWrites(writes, true)
 	next := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(next.Close)
 	next.SetNoMaterialize(true)
@@ -113,7 +113,7 @@ func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {
 	ibs.SetTxContext(1, 0)
 
 	require.NoError(t, ibs.TouchAccount(addr))
-	vm.FlushVersionedWrites(ibs.VersionedWrites(), false, "")
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), false)
 
 	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
 	_, hasAddress := writes.GetAddress(addr)
