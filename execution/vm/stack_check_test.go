@@ -107,6 +107,21 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		JUMPDEST: {opJumpdest, params.JumpdestGas, 0, 0},
 		JUMP:     {opJump, GasMidStep, 1, 0},
 		JUMPI:    {opJumpi, GasSlowStep, 2, 0},
+		SUB:      {opSub, GasFastestStep, 2, 1},
+		MUL:      {opMul, GasFastStep, 2, 1},
+		DIV:      {opDiv, GasFastStep, 2, 1},
+		LT:       {opLt, GasFastestStep, 2, 1},
+		GT:       {opGt, GasFastestStep, 2, 1},
+		EQ:       {opEq, GasFastestStep, 2, 1},
+		AND:      {opAnd, GasFastestStep, 2, 1},
+		ISZERO:   {opIszero, GasFastestStep, 1, 1},
+		DUP4:     {nil, GasFastestStep, 4, 5},
+		DUP5:     {nil, GasFastestStep, 5, 6},
+		DUP6:     {nil, GasFastestStep, 6, 7},
+		DUP7:     {nil, GasFastestStep, 7, 8},
+		DUP8:     {nil, GasFastestStep, 8, 9},
+		SWAP3:    {opSwap3, GasFastestStep, 4, 4},
+		SWAP4:    {opSwap4, GasFastestStep, 5, 5},
 	}
 	tables := []*JumpTable{
 		&frontierInstructionSet, &homesteadInstructionSet, &tangerineWhistleInstructionSet,
@@ -129,13 +144,13 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 				require.Equal(t, reflect.ValueOf(w.execute).Pointer(), reflect.ValueOf(got.execute).Pointer(), "table %d %s execute", i, op)
 			} else {
 				scope := new(CallContext)
-				for v := range uint64(4) {
+				for v := range uint64(8) {
 					scope.Stack.pushRef().SetUint64(v)
 				}
 				_, _, err := got.execute(0, nil, scope)
 				require.NoError(t, err)
-				require.Equal(t, 5, scope.Stack.len(), "table %d %s stack", i, op)
-				require.Equal(t, uint64(4-w.numPop), scope.Stack.peek().Uint64(), "table %d %s top", i, op)
+				require.Equal(t, 9, scope.Stack.len(), "table %d %s stack", i, op)
+				require.Equal(t, uint64(8-w.numPop), scope.Stack.peek().Uint64(), "table %d %s top", i, op)
 			}
 			require.Equal(t, w.gas, got.constantGas, "table %d %s gas", i, op)
 			require.Equal(t, w.numPop, got.numPop, "table %d %s numPop", i, op)
