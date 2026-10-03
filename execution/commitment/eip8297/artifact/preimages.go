@@ -66,9 +66,6 @@ func NewPreimageRecordWriter(dst io.Writer, scratchDir string) (*PreimageRecordW
 	if dst == nil {
 		return nil, ErrPreimages
 	}
-	if scratchDir == "" {
-		scratchDir = os.TempDir()
-	}
 	return &PreimageRecordWriter{dst: dst, scratchDir: scratchDir}, nil
 }
 

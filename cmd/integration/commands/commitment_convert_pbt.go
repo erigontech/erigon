@@ -380,8 +380,12 @@ func readPBinSourcePoint(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	if keepHex && (settings == nil || settings.TrieVariantName() == dbstate.TrieVariantHex) {
 		statecfg.ConfigureCommitmentV3Records(true)
 	}
-	agg, err := openPBTState(ctx, dirs, settings, nil, logger)
+	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
 	if err != nil {
+		return pbinConversionPoint{}, fmt.Errorf("commitment convert-pbt: open source point: %w", err)
+	}
+	if err := agg.OpenFolder(nil); err != nil {
+		agg.Close()
 		return pbinConversionPoint{}, err
 	}
 	defer agg.Close()
@@ -609,29 +613,11 @@ func removePBTStateHistoryIndexFiles(dirs datadir.Dirs) error {
 }
 
 func linkPBinHexFiles(sourceDir, outputDir string) error {
-	entries, err := os.ReadDir(sourceDir)
-	if errors.Is(err, fs.ErrNotExist) {
+	if err := linkPBinDirectory(sourceDir, outputDir, kv.CommitmentDomain.String(), 0, 0, false, true); errors.Is(err, fs.ErrNotExist) {
 		return errors.New("commitment convert-pbt: source hex commitment files are missing")
-	}
-	if err != nil {
+	} else {
 		return err
 	}
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		parsed, _, ok := snaptype.ParseFileName(sourceDir, entry.Name())
-		if !ok || parsed.TypeString != kv.CommitmentDomain.String() {
-			continue
-		}
-		if err := os.Link(filepath.Join(sourceDir, entry.Name()), filepath.Join(outputDir, entry.Name())); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func linkPBinCommitmentFiles(sourceDirs, outputDirs datadir.Dirs, stepSize, endTxNum uint64) error {
@@ -640,27 +626,39 @@ func linkPBinCommitmentFiles(sourceDirs, outputDirs datadir.Dirs, stepSize, endT
 		{sourceDirs.SnapIdx, outputDirs.SnapIdx},
 		{sourceDirs.SnapAccessors, outputDirs.SnapAccessors},
 	} {
-		entries, err := os.ReadDir(roots[0])
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
+		if err := linkPBinDirectory(roots[0], roots[1], kv.CommitmentDomain.String(), stepSize, endTxNum, true, false); err != nil {
 			return err
 		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			parsed, _, ok := snaptype.ParseFileName(roots[0], entry.Name())
-			if !ok || parsed.TypeString != kv.CommitmentDomain.String() || parsed.From*stepSize > endTxNum {
-				continue
-			}
-			if err := os.MkdirAll(roots[1], 0o755); err != nil {
-				return err
-			}
-			if err := os.Link(filepath.Join(roots[0], entry.Name()), filepath.Join(roots[1], entry.Name())); err != nil {
-				return err
-			}
+	}
+	return nil
+}
+
+func linkPBinDirectory(sourceDir, outputDir, typeName string, stepSize, endTxNum uint64, ignoreMissing, createOutput bool) error {
+	entries, err := os.ReadDir(sourceDir)
+	if err != nil {
+		if ignoreMissing && errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if createOutput {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return err
+		}
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		parsed, _, ok := snaptype.ParseFileName(sourceDir, entry.Name())
+		if !ok || parsed.TypeString != typeName || stepSize != 0 && parsed.From*stepSize > endTxNum {
+			continue
+		}
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return err
+		}
+		if err := os.Link(filepath.Join(sourceDir, entry.Name()), filepath.Join(outputDir, entry.Name())); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -721,19 +719,20 @@ func validatePBTFileAccessors(dirs datadir.Dirs, scope, remedy string) error {
 	for _, file := range files {
 		have[pbtAttachFileKind(file)] = struct{}{}
 	}
+	has := func(domain kv.Domain, from, to uint64, ext string) bool {
+		_, ok := have[pbtAttachFileKind(pbtAttachFile{domain: domain, from: from, to: to, path: ext})]
+		return ok
+	}
 	for _, file := range files {
 		ext := filepath.Ext(file.path)
 		var complete bool
 		switch ext {
 		case ".kv":
-			_, hasKvi := have[pbtAttachFileKind(pbtAttachFile{domain: file.domain, from: file.from, to: file.to, path: ".kvi"})]
-			_, hasBT := have[pbtAttachFileKind(pbtAttachFile{domain: file.domain, from: file.from, to: file.to, path: ".bt"})]
-			_, hasKvei := have[pbtAttachFileKind(pbtAttachFile{domain: file.domain, from: file.from, to: file.to, path: ".kvei"})]
-			complete = hasKvi || hasBT && hasKvei
+			complete = has(file.domain, file.from, file.to, ".kvi") || has(file.domain, file.from, file.to, ".bt") && has(file.domain, file.from, file.to, ".kvei")
 		case ".v":
-			_, complete = have[pbtAttachFileKind(pbtAttachFile{domain: file.domain, from: file.from, to: file.to, path: ".vi"})]
+			complete = has(file.domain, file.from, file.to, ".vi")
 		case ".ef":
-			_, complete = have[pbtAttachFileKind(pbtAttachFile{domain: file.domain, from: file.from, to: file.to, path: ".efi"})]
+			complete = has(file.domain, file.from, file.to, ".efi")
 		default:
 			continue
 		}
@@ -762,17 +761,12 @@ func pbtVisibleSnapshotFiles(sourceAgg *dbstate.Aggregator, sourceDirs datadir.D
 		}
 		visibleRanges[pbtSnapshotFileKey(pbtSnapshotFileFamily(rel), parsed.TypeString, parsed.From, parsed.To)] = struct{}{}
 	}
-	addPBTCommitmentVisibleFiles(visibleRanges, sourceDirs)
-	return visibleRanges
-}
-
-func addPBTCommitmentVisibleFiles(visibleRanges map[string]struct{}, dirs datadir.Dirs) {
-	files, err := pbtAttachFiles(dirs)
+	files, err := pbtAttachFiles(sourceDirs)
 	if err != nil {
-		return
+		return visibleRanges
 	}
 	for _, file := range pbtAttachVisibleFiles(files, kv.CommitmentDomain) {
-		rel, err := filepath.Rel(dirs.Snap, file.path)
+		rel, err := filepath.Rel(sourceDirs.Snap, file.path)
 		if err != nil {
 			continue
 		}
@@ -782,6 +776,7 @@ func addPBTCommitmentVisibleFiles(visibleRanges map[string]struct{}, dirs datadi
 		}
 		visibleRanges[pbtSnapshotFileKey(pbtSnapshotFileFamily(rel), parsed.TypeString, parsed.From, parsed.To)] = struct{}{}
 	}
+	return visibleRanges
 }
 
 func pbtSnapshotFileFamily(rel string) string {

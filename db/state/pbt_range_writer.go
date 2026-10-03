@@ -370,7 +370,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return current.FlushFinished(nextKey)
 	}
 	stream := func(emit func(pbt.Op) error) error {
-		progress := newPbinStreamProgress("PBT range writer progress", "range writer", "range writer")
+		progress := newPbinStreamProgress("PBT range writer progress", "", "range writer")
 		streamErr := leaves(func(leaf PBinLeaf) error {
 			progress.leaf(leaf.Key)
 			if len(leaf.Value) != eip8297.ValueLength {

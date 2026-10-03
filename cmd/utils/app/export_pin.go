@@ -41,6 +41,7 @@ import (
 type exportPin struct {
 	Block   uint64
 	TxNum   uint64
+	Header  *types.Header
 	Domain  kv.Domain
 	Variant commitment.TrieVariant
 	Root    common.Hash
@@ -124,7 +125,7 @@ func sharedExportPinWithTxNumReader(ctx context.Context, tx kv.TemporalTx, heade
 	if err := checkRootPin(rootHash, header, blockNum); err != nil {
 		return exportPin{}, err
 	}
-	return exportPin{Block: blockNum, TxNum: txNum, Domain: domain, Variant: commitmentCtx.Trie().Variant(), Root: rootHash}, nil
+	return exportPin{Block: blockNum, TxNum: txNum, Header: header, Domain: domain, Variant: commitmentCtx.Trie().Variant(), Root: rootHash}, nil
 }
 
 func exportCheckpoint(tx kv.TemporalTx, domain kv.Domain) (blockNum, txNum uint64, found bool, err error) {

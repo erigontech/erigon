@@ -47,10 +47,8 @@ func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.H
 	hash := keccak.NewFastKeccak()
 	output := io.MultiWriter(dst, hash)
 	write := func(data []byte) error {
-		if _, err := output.Write(data); err != nil {
-			return err
-		}
-		return nil
+		_, err := output.Write(data)
+		return err
 	}
 	var previous []byte
 	var zone byte
@@ -75,7 +73,7 @@ func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.H
 		if code == nil {
 			return nil
 		}
-		encoded, err := code.encodeCode()
+		encoded, err := encodeGroup(0x03, code.stem, code.entries)
 		if err == nil {
 			err = write(encoded)
 		}
@@ -88,9 +86,6 @@ func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.H
 		}
 		if err := storage.flushGroup(write); err != nil {
 			return err
-		}
-		if storage.groupCount == 0 {
-			return ErrInvalidLeaf
 		}
 		storage = nil
 		return nil
@@ -231,7 +226,7 @@ func (h *headerBuilder) encode() ([]byte, error) {
 			return nil, fmt.Errorf("%w: invalid code reference", ErrInvalidAccount)
 		}
 		kind = 1
-		codeRef = append(bytes.Clone(codeHashValue), encodeInteger(uint64(codeSize))...)
+		codeRef = append(bytes.Clone(codeHashValue), encodeIntegerBytes(basic[eip8297.BasicDataCodeSizeOffset:eip8297.BasicDataCodeSizeOffset+4])...)
 	default:
 		if codeSize != 0 {
 			return nil, fmt.Errorf("%w: missing code hash", ErrInvalidAccount)
@@ -244,15 +239,12 @@ func (h *headerBuilder) encode() ([]byte, error) {
 	encoded = append(encoded, encodeIntegerBytes(balance)...)
 	encoded = append(encoded, codeRef...)
 	slots := make([]byte, 0, len(h.values))
-	for sub, value := range h.values {
+	for sub := range h.values {
 		if sub < eip8297.HeaderStorageOffset {
 			continue
 		}
 		if sub >= eip8297.HeaderStorageOffset+eip8297.HeaderStorageSlots {
 			return nil, fmt.Errorf("%w: header slot %d", ErrInvalidAccount, sub)
-		}
-		if isZero(value) {
-			return nil, fmt.Errorf("%w: zero header slot", ErrInvalidAccount)
 		}
 		slots = append(slots, sub)
 	}
@@ -270,53 +262,28 @@ type groupBuilder struct {
 	entries []GroupEntry
 }
 
-func (g *groupBuilder) encodeCode() ([]byte, error) {
-	return encodeGroup(0x03, g.stem, g.entries)
-}
-
 func encodeGroup(tag byte, stem common.Hash, entries []GroupEntry) ([]byte, error) {
-	if len(entries) == 0 || len(entries) > eip8297.StemSubtreeWidth {
-		return nil, fmt.Errorf("%w: group entry count %d", ErrInvalidLeaf, len(entries))
-	}
 	encoded := append([]byte{tag}, stem[:]...)
 	if tag == 0x05 {
-		if len(entries) != 1 {
-			return nil, fmt.Errorf("%w: single-leaf group has %d entries", ErrInvalidLeaf, len(entries))
-		}
-		if isZero(entries[0].Value) {
-			return nil, fmt.Errorf("%w: zero group value", ErrInvalidLeaf)
-		}
 		encoded = append(encoded, entries[0].Index)
 		return append(encoded, encodeIntegerBytes(entries[0].Value)...), nil
 	}
 	encoded = append(encoded, byte(len(entries)-1))
-	var previous byte
-	for i, entry := range entries {
-		if i != 0 && entry.Index <= previous {
-			return nil, ErrUnsorted
-		}
-		if isZero(entry.Value) {
-			return nil, fmt.Errorf("%w: zero group value", ErrInvalidLeaf)
-		}
+	for _, entry := range entries {
 		encoded = append(encoded, entry.Index)
 		encoded = append(encoded, encodeIntegerBytes(entry.Value)...)
-		previous = entry.Index
 	}
 	return encoded, nil
 }
 
 type storageBuilder struct {
-	address    common.Hash
-	current    *groupBuilder
-	groupCount uint64
+	address common.Hash
+	current *groupBuilder
 }
 
 func (s *storageBuilder) add(stem common.Hash, index byte, value []byte) error {
 	if s.current == nil {
 		s.current = &groupBuilder{stem: stem}
-	}
-	if len(s.current.entries) >= eip8297.StemSubtreeWidth {
-		return ErrInvalidLeaf
 	}
 	s.current.entries = append(s.current.entries, GroupEntry{Index: index, Value: bytes.Clone(value)})
 	return nil
@@ -337,18 +304,8 @@ func (s *storageBuilder) flushGroup(write func([]byte) error) error {
 	if err := write(encoded); err != nil {
 		return err
 	}
-	s.groupCount++
 	s.current = nil
 	return nil
-}
-
-func encodeInteger(value uint64) []byte {
-	if value == 0 {
-		return []byte{0}
-	}
-	var raw [8]byte
-	binary.BigEndian.PutUint64(raw[:], value)
-	return encodeIntegerBytes(raw[:])
 }
 
 func encodeIntegerBytes(value []byte) []byte {

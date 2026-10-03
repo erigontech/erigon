@@ -367,7 +367,7 @@ func importPBTWithHooks(ctx context.Context, dataDir, snapshotPath, chainName st
 			return err
 		}
 	}
-	moved, err := movePBTImportBinFilesWithRename(stageDirs, dirs, move)
+	moved, err := movePBTImportBinFilesWithRename(stagedFiles, stageDirs, dirs, move)
 	if err != nil {
 		if cleanupErr := removePBTImportFiles(moved); cleanupErr != nil {
 			return fmt.Errorf("%w; cleanup failed: %w", err, cleanupErr)
@@ -639,29 +639,19 @@ func validatePBTImportTarget(ctx context.Context, rawDB kv.RoDB, blockReader *fr
 	return chainConfig.ChainName, nil
 }
 
-func movePBTImportBinFilesWithRename(stageDirs, targetDirs datadir.Dirs, move func(string, string) error) ([]string, error) {
+func movePBTImportBinFilesWithRename(names []string, stageDirs, targetDirs datadir.Dirs, move func(string, string) error) ([]string, error) {
 	if move == nil {
 		move = os.Rename
 	}
-	files, err := pbtAttachFiles(stageDirs)
-	if err != nil {
-		return nil, err
-	}
-	moved := make([]string, 0)
+	moved := make([]string, 0, len(names))
 	destinationDirs := make(map[string]struct{})
-	for _, file := range files {
-		if file.domain != kv.CommitmentBinDomain {
-			continue
-		}
-		rel, err := filepath.Rel(stageDirs.Snap, file.path)
-		if err != nil {
-			return moved, err
-		}
-		destination := filepath.Join(targetDirs.Snap, rel)
+	for _, name := range names {
+		source := filepath.Join(stageDirs.Snap, name)
+		destination := filepath.Join(targetDirs.Snap, name)
 		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 			return moved, err
 		}
-		if err := move(file.path, destination); err != nil {
+		if err := move(source, destination); err != nil {
 			return moved, err
 		}
 		moved = append(moved, destination)

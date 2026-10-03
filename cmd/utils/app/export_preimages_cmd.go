@@ -151,13 +151,6 @@ func runExportWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawd
 	if err != nil {
 		return err
 	}
-	header, err := headerAt(pin.Block)
-	if err != nil {
-		return fmt.Errorf("read canonical header for block %d: %w", pin.Block, err)
-	}
-	if err := checkRootPin(pin.Root, header, pin.Block); err != nil {
-		return err
-	}
 	logger.Info("[export-preimages] pin", "block", pin.Block, "txNum", pin.TxNum, "stateRoot", pin.Root.Hex(), "domain", pin.Domain)
 
 	tmpDir, err = prepareScratchDir(tmpDir)
@@ -220,7 +213,7 @@ func runExportWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawd
 	}
 
 	metadata := preimagesMeta{
-		Block: pin.Block, BlockHash: header.Hash().Hex(), StateRoot: pin.Root.Hex(), Order: preimagesOrderKeccak256,
+		Block: pin.Block, BlockHash: pin.Header.Hash().Hex(), StateRoot: pin.Root.Hex(), Order: preimagesOrderKeccak256,
 		Accounts: stats.Accounts, Storage: stats.Slots, PreimageDigest: preimageDigest.Hex(),
 	}
 	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")

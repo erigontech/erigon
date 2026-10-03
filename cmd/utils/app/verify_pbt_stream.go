@@ -60,10 +60,6 @@ func (p *pbtVerifyProgress) add(key []byte) {
 	log.Root().Info("PBT verify progress", "phase", p.phase, "records", p.count, "key_prefix", hex.EncodeToString(prefix))
 }
 
-type pbtVerifyHeaderRecord struct {
-	Header artifact.Header
-}
-
 type pbtVerifyAccountRecord struct {
 	Nonce    uint64
 	Balance  []byte
@@ -132,14 +128,9 @@ func pbtVerifyFlushCollector(collector *etl.Collector, path, phase string) error
 		return err
 	}
 	w := bufio.NewWriterSize(f, 1<<20)
-	loaded := uint64(0)
-	nextProgress := time.Now().Add(30 * time.Second)
+	progress := pbtVerifyProgress{phase: phase, next: time.Now()}
 	err = collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		loaded++
-		if now := time.Now(); !now.Before(nextProgress) {
-			nextProgress = now.Add(30 * time.Second)
-			log.Root().Info("PBT verify progress", "phase", phase, "records", loaded, "key_prefix", hex.EncodeToString(key[:min(len(key), 8)]))
-		}
+		progress.add(key)
 		return pbtVerifyWriteKV(w, key, value)
 	}, etl.TransformArgs{})
 	collector.Close()
@@ -160,16 +151,6 @@ func pbtVerifyEncode(value any) ([]byte, error) {
 
 func pbtVerifyDecode(value []byte, target any) error {
 	return gob.NewDecoder(bytes.NewReader(value)).Decode(target)
-}
-
-func pbtVerifyCodeRequirement(codeSize uint64) []byte {
-	value := make([]byte, 8)
-	binary.BigEndian.PutUint64(value, codeSize)
-	return value
-}
-
-func pbtVerifyReadCodeRequirement(value []byte) uint64 {
-	return binary.BigEndian.Uint64(value)
 }
 
 func pbtVerifyValidateCodeSizes(snapshot io.ReaderAt, snapshotSize int64, maxCodeSize uint64) error {
@@ -214,11 +195,13 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 					return fmt.Errorf("%w: code size %d exceeds --max-code-size=%d", errVerifyPBTConfig, codeSize, maxCodeSize)
 				}
 			}
-			if err := headerEncoder.Encode(pbtVerifyHeaderRecord{Header: header}); err != nil {
+			if err := headerEncoder.Encode(header); err != nil {
 				return err
 			}
 			if header.Kind == 1 {
-				if err := codeRequirements.Collect(header.CodeHash[:], pbtVerifyCodeRequirement(dbstate.PBinIntegerUint64(header.CodeSize))); err != nil {
+				var codeSize [8]byte
+				binary.BigEndian.PutUint64(codeSize[:], dbstate.PBinIntegerUint64(header.CodeSize))
+				if err := codeRequirements.Collect(header.CodeHash[:], codeSize[:]); err != nil {
 					return err
 				}
 			}
@@ -320,7 +303,7 @@ func pbtVerifyGenerateCodeExpected(requirementPath, expectedPath, scratch string
 		if len(codeHash) != length.Hash || len(value) != 8 {
 			return fmt.Errorf("invalid code requirement")
 		}
-		codeSize := pbtVerifyReadCodeRequirement(value)
+		codeSize := binary.BigEndian.Uint64(value)
 		if bytes.Equal(lastHash, codeHash) {
 			if codeSize != lastSize {
 				return fmt.Errorf("code size disagreement for %x", codeHash)
@@ -382,14 +365,10 @@ func pbtVerifyCode(actualPath, requirementPath, scratch string) error {
 		return err
 	}
 	for wantOK || gotOK {
-		if wantOK {
-			codeProgress.add(wantKey)
-		} else {
-			codeProgress.add(gotKey)
-		}
 		if !wantOK {
 			return fmt.Errorf("surplus code group leaf %x", gotKey)
 		}
+		codeProgress.add(wantKey)
 		if !gotOK || bytes.Compare(wantKey, gotKey) < 0 {
 			if err := pbtVerifyCollectCodeRow(codeRows, wantKey, wantValue, nil); err != nil {
 				return err
@@ -470,9 +449,7 @@ func pbtVerifyCheckCodeRows(path string) error {
 			data := value[8:]
 			var full [eip8297.ValueLength]byte
 			copy(full[:], data)
-			var actualChunk [eip8297.ValueLength]byte
-			copy(actualChunk[:], full[:])
-			actualChunks = append(actualChunks, actualChunk)
+			actualChunks = append(actualChunks, full)
 			if codeRead >= codeSize {
 				return fmt.Errorf("code chunks for %x exceed code size", codeHash)
 			}
@@ -580,21 +557,21 @@ func pbtVerifyMPT(leavesPath, slotsPath, addressesPath, headersPath, scratch str
 		return common.Hash{}, err
 	}
 	for {
-		var record pbtVerifyHeaderRecord
+		var record artifact.Header
 		if err := headerDecoder.Decode(&record); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
 			return common.Hash{}, err
 		}
-		for addressOK && bytes.Compare(addressKey, record.Header.AddressHash[:]) < 0 {
+		for addressOK && bytes.Compare(addressKey, record.AddressHash[:]) < 0 {
 			addressKey, addressValue, addressOK, err = addressReader.next()
 			if err != nil {
 				return common.Hash{}, err
 			}
 		}
-		if !addressOK || !bytes.Equal(addressKey, record.Header.AddressHash[:]) || len(addressValue) != length.Addr {
-			return common.Hash{}, fmt.Errorf("missing address preimage for %x", record.Header.AddressHash)
+		if !addressOK || !bytes.Equal(addressKey, record.AddressHash[:]) || len(addressValue) != length.Addr {
+			return common.Hash{}, fmt.Errorf("missing address preimage for %x", record.AddressHash)
 		}
 		var address common.Address
 		copy(address[:], addressValue)
@@ -652,7 +629,7 @@ func pbtVerifyBuildAccountRows(accountsPath, storagePath string, output *etl.Col
 		if len(accountKey) != length.Hash {
 			return fmt.Errorf("invalid account key")
 		}
-		var header pbtVerifyHeaderRecord
+		var header artifact.Header
 		if err := pbtVerifyDecode(accountValue, &header); err != nil {
 			return err
 		}
@@ -664,7 +641,7 @@ func pbtVerifyBuildAccountRows(accountsPath, storagePath string, output *etl.Col
 		if storage.err != nil {
 			return storage.err
 		}
-		account, err := pbtVerifyAccount(header.Header, root)
+		account, err := pbtVerifyAccount(header, root)
 		if err != nil {
 			return err
 		}
@@ -764,9 +741,7 @@ func (it *pbtVerifyMPTIterator) Next() (trie.StreamItem, []byte, *accounts.Accou
 		return trie.NoItem, nil, nil, nil, nil, nil
 	}
 	if len(key) == length.Hash {
-		if it.progress != nil {
-			it.progress.add(key)
-		}
+		it.progress.add(key)
 		var record pbtVerifyAccountRecord
 		if err := pbtVerifyDecode(value, &record); err != nil {
 			it.err = err

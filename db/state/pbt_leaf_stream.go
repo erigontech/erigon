@@ -206,6 +206,10 @@ func (p *pbinStreamProgress) report(message, phase string, key []byte) {
 	if len(prefix) > 8 {
 		prefix = prefix[:8]
 	}
+	if p.accountPhase == "" {
+		log.Root().Info(message, "phase", phase, "leaves", p.leaves, "key_prefix", hex.EncodeToString(prefix))
+		return
+	}
 	log.Root().Info(message, "phase", phase, "accounts", p.accounts, "leaves", p.leaves, "key_prefix", hex.EncodeToString(prefix))
 }
 

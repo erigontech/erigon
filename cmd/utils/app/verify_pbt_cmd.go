@@ -109,14 +109,9 @@ func verifyPBTFilesWithMaxCodeSize(ctx context.Context, dataDir, snapshotPath, p
 		}
 	}()
 
-	dirs := datadir.Open(dataDir)
-	if info, statErr := os.Stat(dirs.DataDir); statErr != nil {
-		if os.IsNotExist(statErr) {
-			return fmt.Errorf("verify-pbt: datadir does not exist: %s", dirs.DataDir)
-		}
-		return statErr
-	} else if !info.IsDir() {
-		return fmt.Errorf("verify-pbt: datadir is not a directory: %s", dirs.DataDir)
+	dirs, err := openExportDirs(dataDir)
+	if err != nil {
+		return fmt.Errorf("verify-pbt: %w", err)
 	}
 	snapshot, err := os.Open(snapshotPath)
 	if err != nil {

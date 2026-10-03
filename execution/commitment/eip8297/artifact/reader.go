@@ -51,7 +51,6 @@ func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamC
 	}
 	recordLimit := size - 33
 	c := artifactCursor{src: src, limit: recordLimit}
-	var headerEnd int64
 	var headers *artifactCursor
 	var previousAddress common.Hash
 	var previousStem common.Hash
@@ -89,8 +88,7 @@ func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamC
 			}
 			if phase == 0 {
 				phase = 1
-				headerEnd = c.offset - 1
-				headers = &artifactCursor{src: src, limit: headerEnd}
+				headers = &artifactCursor{src: src, limit: c.offset - 1}
 			}
 			group, err := readGroupAt(&c, 3)
 			if err != nil {
@@ -108,12 +106,9 @@ func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamC
 			}
 		case 4:
 			if phase == 0 {
-				phase = 2
-				headerEnd = c.offset - 1
-				headers = &artifactCursor{src: src, limit: headerEnd}
-			} else if phase == 1 {
-				phase = 2
+				headers = &artifactCursor{src: src, limit: c.offset - 1}
 			}
+			phase = 2
 			if haveStorage && !storageHasGroups {
 				return meta, fmt.Errorf("%w: invalid storage account", ErrMalformed)
 			}
@@ -125,9 +120,6 @@ func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamC
 			copy(address[:], addressBytes)
 			if meta.StorageCount != 0 && bytes.Compare(address[:], previousStorage[:]) <= 0 {
 				return meta, ErrUnsorted
-			}
-			if headers == nil {
-				return meta, fmt.Errorf("%w: storage has no header", ErrMalformed)
 			}
 			if err := matchStorageHeader(headers, address); err != nil {
 				return meta, fmt.Errorf("%w: storage header: %w", ErrMalformed, err)
@@ -216,34 +208,28 @@ func (c *artifactCursor) bytes(size int) ([]byte, error) {
 	if size < 0 || int64(size) > c.remaining() {
 		return nil, ErrMalformed
 	}
-	if size <= 64<<10 {
-		if c.buffer == nil {
-			c.buffer = make([]byte, 64<<10)
-		}
-		if c.offset < c.start || c.offset+int64(size) > c.end {
-			readSize := int64(len(c.buffer))
-			if remaining := c.limit - c.offset; remaining < readSize {
-				readSize = remaining
-			}
-			n, err := c.src.ReadAt(c.buffer[:readSize], c.offset)
-			if err != nil && !(err == io.EOF && int64(n) == readSize) {
-				return nil, ErrMalformed
-			}
-			c.start = c.offset
-			c.end = c.offset + int64(n)
-		}
-		if c.offset+int64(size) > c.end {
-			return nil, ErrMalformed
-		}
-		data := c.buffer[c.offset-c.start : c.offset-c.start+int64(size)]
-		c.offset += int64(size)
-		return data, nil
-	}
-	data := make([]byte, size)
-	n, err := c.src.ReadAt(data, c.offset)
-	if err != nil && !(err == io.EOF && n == size) {
+	if size > 64<<10 {
 		return nil, ErrMalformed
 	}
+	if c.buffer == nil {
+		c.buffer = make([]byte, 64<<10)
+	}
+	if c.offset < c.start || c.offset+int64(size) > c.end {
+		readSize := int64(len(c.buffer))
+		if remaining := c.limit - c.offset; remaining < readSize {
+			readSize = remaining
+		}
+		n, err := c.src.ReadAt(c.buffer[:readSize], c.offset)
+		if err != nil && !(err == io.EOF && int64(n) == readSize) {
+			return nil, ErrMalformed
+		}
+		c.start = c.offset
+		c.end = c.offset + int64(n)
+	}
+	if c.offset+int64(size) > c.end {
+		return nil, ErrMalformed
+	}
+	data := c.buffer[c.offset-c.start : c.offset-c.start+int64(size)]
 	c.offset += int64(size)
 	return data, nil
 }

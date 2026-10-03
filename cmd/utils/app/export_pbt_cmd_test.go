@@ -234,7 +234,9 @@ func TestRunExportPBTEmptyState(t *testing.T) {
 	require.Zero(t, snapshot.HeaderCount)
 	preimageBytes, err := os.ReadFile(filepath.Join(outDir, pbtPreimagesFileName))
 	require.NoError(t, err)
-	require.NoError(t, artifact.ReadPreimagesStream(bytes.NewReader(preimageBytes), int64(len(preimageBytes)), nil))
+	require.NoError(t, artifact.ReadPreimagesStream(bytes.NewReader(preimageBytes), int64(len(preimageBytes)), func(_ common.Address, slots func(func([32]byte) error) error) error {
+		return slots(func([32]byte) error { return nil })
+	}))
 }
 
 func TestRunExportPBTRealAcceptanceChain(t *testing.T) {

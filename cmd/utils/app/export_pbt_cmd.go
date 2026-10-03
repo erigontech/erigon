@@ -141,13 +141,6 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 	if err != nil {
 		return err
 	}
-	header, err := headerAt(pin.Block)
-	if err != nil {
-		return fmt.Errorf("export-pbt: read header: %w", err)
-	}
-	if err := checkRootPin(pin.Root, header, pin.Block); err != nil {
-		return err
-	}
 	binRoot, found, err := exportPBTBinRootAtPin(ctx, tx, pin, logger)
 	if err != nil {
 		return err
@@ -320,8 +313,8 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 		chainID = chainConfig.ChainID.String()
 	}
 	meta := pbtExportMeta{
-		ChainID: chainID, Block: pin.Block, BlockHash: header.Hash().Hex(), TxNum: pin.TxNum,
-		HashSuite: commitment.PBinHashSuiteName(), StateRoot: header.Root.Hex(), PBTRoot: root.Hex(),
+		ChainID: chainID, Block: pin.Block, BlockHash: pin.Header.Hash().Hex(), TxNum: pin.TxNum,
+		HashSuite: commitment.PBinHashSuiteName(), StateRoot: pin.Header.Root.Hex(), PBTRoot: root.Hex(),
 		HeaderCount: snapshotMeta.HeaderCount, CodeGroupCount: snapshotMeta.CodeGroupCount,
 		StorageCount: snapshotMeta.StorageCount, SnapshotDigest: snapshotDigest.Hex(),
 		PreimageDigest: preimageDigest.Hex(),
