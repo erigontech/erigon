@@ -67,7 +67,6 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		}()
 	}
 
-	anyTrace := dbg.TraceDynamicGas || debug || trace
 	stack := &callContext.Stack
 	jt := evm.jt
 	hasPush0 := jt[PUSH0].numPush == 1
@@ -221,7 +220,7 @@ run:
 				}
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
 			}
-			if true && anyTrace {
+			if true {
 				cost = cost.Plus(dynamicCost)
 				callGas = cost
 				callGas.Execution -= evm.CallGasTemp()

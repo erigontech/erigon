@@ -109,7 +109,6 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 	// parent context.
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
-	anyTrace := dbg.TraceDynamicGas || debug || trace
 	stack := &callContext.Stack
 	jt := evm.jt
 	hasPush0 := jt[PUSH0].numPush == 1
@@ -273,7 +272,7 @@ run:
 				}
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
 			}
-			if runTracing && anyTrace {
+			if runTracing {
 				cost = cost.Plus(dynamicCost)
 				callGas = cost
 				callGas.Execution -= evm.CallGasTemp()
