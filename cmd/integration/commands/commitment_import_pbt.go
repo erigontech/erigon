@@ -113,16 +113,16 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 			if cleanupErr := recoverPBTImportSettings(dirs, settings, nil); cleanupErr != nil {
 				return fmt.Errorf("%w; partial import cleanup failed: %w", markerErr, cleanupErr)
 			}
-			return fmt.Errorf("%w; partial import was removed, rerun import-pbt --snapshot %s", markerErr, snapshotPath)
+			return fmt.Errorf("%w; rerun integration commitment import-pbt --datadir=%s --snapshot=%s", markerErr, dirs.DataDir, snapshotPath)
 		}
-		return fmt.Errorf("%w; remove only %s and commitment-bin files before retrying import-pbt --snapshot %s", markerErr, dbstate.PBTImportMarkerPath(dirs), snapshotPath)
+		return fmt.Errorf("%w; rerun integration commitment import-pbt --datadir=%s --snapshot=%s", markerErr, dirs.DataDir, snapshotPath)
 	}
 	absSnapshotPath, err := filepath.Abs(snapshotPath)
 	if err != nil {
 		return err
 	}
 	if marker != nil && filepath.Clean(marker.SnapshotPath) != filepath.Clean(absSnapshotPath) {
-		return fmt.Errorf("commitment import-pbt is incomplete for %s; rerun import-pbt --snapshot %s", marker.SnapshotPath, marker.SnapshotPath)
+		return fmt.Errorf("commitment import-pbt is incomplete for %s; rerun integration commitment import-pbt --datadir=%s --snapshot=%s", marker.SnapshotPath, dirs.DataDir, marker.SnapshotPath)
 	}
 	if marker != nil && marker.SnapshotHash != meta.SnapshotDigest {
 		return fmt.Errorf("commitment import-pbt: incomplete marker does not match snapshot digest")
@@ -148,7 +148,7 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 				if cleanupErr := recoverPBTImportSettings(dirs, settings, marker); cleanupErr != nil {
 					return fmt.Errorf("%w; partial import cleanup failed: %w", err, cleanupErr)
 				}
-				return fmt.Errorf("%w; partial import was removed, rerun import-pbt --snapshot %s", err, snapshotPath)
+				return fmt.Errorf("%w; rerun integration commitment import-pbt --datadir=%s --snapshot=%s", err, dirs.DataDir, snapshotPath)
 			}
 			return dbstate.RemovePBTImportMarker(dirs)
 		}
@@ -712,11 +712,11 @@ func pbtImportBinFileNames(dirs datadir.Dirs) ([]string, error) {
 
 func validatePBTImportRecoveryFiles(dirs datadir.Dirs, marker *dbstate.PBTImportMarker) error {
 	if marker == nil || len(marker.Files) == 0 {
-		return errors.New("commitment import-pbt: recovery marker has no file list; remove the import marker and commitment-bin files before retrying")
+		return errors.New("commitment import-pbt: recovery marker has no file list; rerun import-pbt")
 	}
 	for _, name := range marker.Files {
 		if _, err := os.Stat(filepath.Join(dirs.Snap, name)); err != nil {
-			return fmt.Errorf("commitment import-pbt: recovery file %s is missing; remove the import marker and commitment-bin files before retrying", name)
+			return fmt.Errorf("commitment import-pbt: recovery file %s is missing; rerun import-pbt", name)
 		}
 	}
 	return nil

@@ -19,7 +19,9 @@ package state
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -127,6 +129,23 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 	verifier, ok := trie.(interface{ Verify() error })
 	if !ok {
 		return common.Hash{}, fmt.Errorf("pbin verification: trie does not support verification")
+	}
+	if progressTrie, ok := trie.(interface{ SetVerifyProgress(func([]byte)) }); ok {
+		var checked uint64
+		nextProgress := time.Now()
+		progressTrie.SetVerifyProgress(func(key []byte) {
+			checked++
+			if checked&1023 != 0 {
+				return
+			}
+			now := time.Now()
+			if now.Before(nextProgress) {
+				return
+			}
+			nextProgress = now.Add(30 * time.Second)
+			log.Root().Info("PBT verification progress", "phase", "pbt verify", "domain", domain.String(), "records", checked, "key_prefix", hex.EncodeToString(key[:min(len(key), 8)]))
+		})
+		defer progressTrie.SetVerifyProgress(nil)
 	}
 	if verifyErr := verifier.Verify(); verifyErr != nil {
 		return common.Hash{}, verifyErr

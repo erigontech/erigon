@@ -35,6 +35,7 @@ func (t *Trie) newVerifier() *Trie {
 		suppressRoot:          t.suppressRoot,
 		suppressBucketRecords: t.suppressBucketRecords,
 		verifyOnly:            true,
+		verifyProgress:        t.verifyProgress,
 	}
 	if t.ownedPrefix != nil {
 		prefix := *t.ownedPrefix
@@ -142,6 +143,9 @@ func (t *Trie) verifyRootRecord() error {
 }
 
 func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
+	if t.verifyProgress != nil {
+		t.verifyProgress(row.key)
+	}
 	record := row.record()
 	data, err := EncodeRecord(row.key, &record)
 	if err != nil {

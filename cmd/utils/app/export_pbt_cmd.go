@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/urfave/cli/v3"
@@ -266,14 +267,23 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 	if err != nil {
 		return err
 	}
-	if err := artifact.JoinAt(snapshotRead, snapshotInfo.Size(), preimageRead, preimageInfo.Size(), eip8297.HashBytes, nil, scratchDir); err != nil {
+	joined := uint64(0)
+	nextJoinProgress := time.Now().Add(30 * time.Second)
+	if err := artifact.JoinAt(snapshotRead, snapshotInfo.Size(), preimageRead, preimageInfo.Size(), eip8297.HashBytes, func(address common.Address, _ [32]byte) error {
+		joined++
+		if now := time.Now(); !now.Before(nextJoinProgress) {
+			nextJoinProgress = now.Add(30 * time.Second)
+			logger.Info("PBT export progress", "phase", "preimage join", "records", joined, "key_prefix", fmt.Sprintf("%x", address[:8]))
+		}
+		return nil
+	}, scratchDir); err != nil {
 		return fmt.Errorf("export-pbt: join preimages: %w", err)
 	}
 	logger.Info("PBT export progress", "phase", "preimage join")
 	if snapshotMeta.SnapshotDigest != snapshotDigest {
 		return fmt.Errorf("export-pbt: snapshot digest changed during read-back")
 	}
-	preimageDigest, err := digestPBTFile(preimageRead)
+	preimageDigest, err := digestPBTFile(preimageRead, logger, "preimage digest")
 	if err != nil {
 		return err
 	}
@@ -339,15 +349,34 @@ func checkExportPBTStreamRoot(root common.Hash, pin exportPin, binRoot common.Ha
 	return nil
 }
 
-func digestPBTFile(file *os.File) (common.Hash, error) {
+func digestPBTFile(file *os.File, logger log.Logger, phase string) (common.Hash, error) {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return common.Hash{}, err
 	}
 	hash := keccak.NewFastKeccak()
-	if _, err := io.Copy(hash, file); err != nil {
+	reader := &pbtDigestProgressReader{reader: file, logger: logger, phase: phase, next: time.Now().Add(30 * time.Second)}
+	if _, err := io.Copy(hash, reader); err != nil {
 		return common.Hash{}, err
 	}
 	return common.BytesToHash(hash.Sum(nil)), nil
+}
+
+type pbtDigestProgressReader struct {
+	reader io.Reader
+	logger log.Logger
+	phase  string
+	read   uint64
+	next   time.Time
+}
+
+func (r *pbtDigestProgressReader) Read(dst []byte) (int, error) {
+	n, err := r.reader.Read(dst)
+	r.read += uint64(n)
+	if now := time.Now(); !now.Before(r.next) {
+		r.next = now.Add(30 * time.Second)
+		r.logger.Info("PBT export progress", "phase", r.phase, "bytes", r.read)
+	}
+	return n, err
 }
 
 func exportPBTBinRootAtPin(ctx context.Context, tx kv.TemporalTx, pin exportPin, logger log.Logger) (common.Hash, bool, error) {

@@ -19,7 +19,9 @@ package commands
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -89,6 +91,14 @@ func TestImportPBTEndToEndWhenFilesReachCheckpoint(t *testing.T) {
 	}
 }
 
+func TestImportPBTUsesDatadirScratch(t *testing.T) {
+	fixture := newPBTImportFixture(t)
+	tmpFile := filepath.Join(t.TempDir(), "tmp-file")
+	require.NoError(t, os.WriteFile(tmpFile, nil, 0o644))
+	t.Setenv("TMPDIR", tmpFile)
+	require.NoError(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New()))
+}
+
 func TestImportPBTRecoveryRejectsMissingMovedFile(t *testing.T) {
 	fixture := newPBTImportFixture(t)
 	hook := func(step string) error {
@@ -107,12 +117,13 @@ func TestImportPBTRecoveryRejectsMissingMovedFile(t *testing.T) {
 	require.NoError(t, dir.RemoveFile(files[0]))
 	err = importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New())
 	require.ErrorContains(t, err, "rerun import-pbt")
+	require.NoError(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New()))
 	settings, err := dbstate.ReadErigonDBSettings(dirs)
 	require.NoError(t, err)
-	require.Equal(t, dbstate.TrieVariantHex, settings.TrieVariantName())
+	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
 	remaining, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment-bin.*.kv"))
 	require.NoError(t, err)
-	require.Empty(t, remaining)
+	require.NotEmpty(t, remaining)
 }
 
 func TestImportPBTRecoveryRejectsCorruptMarker(t *testing.T) {
@@ -129,13 +140,77 @@ func TestImportPBTRecoveryRejectsCorruptMarker(t *testing.T) {
 	dirs := datadir.Open(fixture.dataDir)
 	require.NoError(t, os.WriteFile(dbstate.PBTImportMarkerPath(dirs), []byte("{"), 0o644))
 	err := importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New())
-	require.ErrorContains(t, err, "partial import was removed")
+	require.ErrorContains(t, err, "rerun integration commitment import-pbt")
+	require.NoError(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New()))
 	settings, err := dbstate.ReadErigonDBSettings(dirs)
 	require.NoError(t, err)
-	require.Equal(t, dbstate.TrieVariantHex, settings.TrieVariantName())
+	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
 	remaining, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment-bin.*.kv"))
 	require.NoError(t, err)
-	require.Empty(t, remaining)
+	require.NotEmpty(t, remaining)
+}
+
+func TestImportPBTRecoveryKeepsMarkerWhenFileCleanupFails(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
+	file := filepath.Join(dirs.SnapDomain, "v3.0-commitment-bin.0-1.kv")
+	require.NoError(t, os.WriteFile(file, nil, 0o644))
+	variant := dbstate.TrieVariantHexBin
+	previousVariant := dbstate.TrieVariantHex
+	hash := commitment.PBinHashBlake3
+	marker := &dbstate.PBTImportMarker{
+		SnapshotPath:     "/tmp/snapshot",
+		SnapshotHash:     "digest",
+		Files:            []string{"domain/v3.0-commitment-bin.0-1.kv"},
+		Settings:         &dbstate.ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash},
+		PreviousSettings: &dbstate.ErigonDBSettings{TrieVariant: &previousVariant},
+	}
+	require.NoError(t, dbstate.WritePBTImportMarker(dirs, marker))
+	require.NoError(t, os.Chmod(dirs.SnapDomain, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(dirs.SnapDomain, 0o755) })
+	require.Error(t, recoverPBTImportSettings(dirs, marker.Settings, marker))
+	got, err := dbstate.ReadPBTImportMarker(dirs)
+	require.NoError(t, err)
+	require.Equal(t, marker, got)
+}
+
+func TestImportPBTRecoveryRemedyRunsInFreshProcess(t *testing.T) {
+	fixture := newPBTImportFixture(t)
+	hook := func(step string) error {
+		if step == "settings-written" {
+			panic("interrupt after settings")
+		}
+		return nil
+	}
+	require.Panics(t, func() {
+		_ = importPBTWithHook(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New(), hook)
+	})
+	dirs := datadir.Open(fixture.dataDir)
+	files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment-bin.*.kv"))
+	require.NoError(t, err)
+	require.NotEmpty(t, files)
+	require.NoError(t, dir.RemoveFile(files[0]))
+	err = importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New())
+	require.ErrorContains(t, err, "integration commitment import-pbt --datadir=")
+	command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestImportPBTHelperProcess$", "-test.v")
+	command.Env = append(os.Environ(),
+		"GO_WANT_IMPORT_PBT_HELPER=1",
+		"IMPORT_PBT_DATADIR="+fixture.dataDir,
+		"IMPORT_PBT_SNAPSHOT="+fixture.snapshot,
+	)
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+}
+
+func TestImportPBTHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_IMPORT_PBT_HELPER") != "1" {
+		return
+	}
+	err := importPBT(t.Context(), os.Getenv("IMPORT_PBT_DATADIR"), os.Getenv("IMPORT_PBT_SNAPSHOT"), "", log.New())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
 
 func TestImportPBTHexCheckpointMismatchRefusesProductionPath(t *testing.T) {

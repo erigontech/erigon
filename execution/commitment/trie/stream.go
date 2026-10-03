@@ -80,6 +80,11 @@ type StreamIterator interface {
 	Next() (itemType StreamItem, hex1 []byte, aValue *accounts.Account, hash []byte, value []byte)
 }
 
+// HashStreamIterator supplies sorted account or storage leaves to StreamHashIterator.
+type HashStreamIterator interface {
+	Next() (itemType StreamItem, hex []byte, aValue *accounts.Account, aCode []byte, hash []byte, value []byte)
+}
+
 // Iterator helps iterate over a trie according to a given resolve set
 type Iterator struct {
 	rl           *RetainList
@@ -582,8 +587,16 @@ func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValu
 	}
 }
 
-// StreamHash computes the hash of a stream, as if it was a trie
+// StreamHash computes the hash of a stream, as if it was a trie.
 func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, trace bool) (common.Hash, error) {
+	return streamHash(it, storagePrefixLen, hb, trace)
+}
+
+func StreamHashIterator(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, trace bool) (common.Hash, error) {
+	return streamHash(it, storagePrefixLen, hb, trace)
+}
+
+func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, trace bool) (common.Hash, error) {
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var succStorage bytes.Buffer

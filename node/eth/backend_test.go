@@ -8,8 +8,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/node"
+	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/nodecfg"
 )
 
 func TestRemoveContents(t *testing.T) {
@@ -76,4 +80,21 @@ func TestRefusePBTStartupMarkersChecksBothMarkers(t *testing.T) {
 			require.Error(t, refusePBTStartupMarkers(dirs))
 		})
 	}
+}
+
+func TestEthereumNewRefusesPBTImportMarker(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	variant := state.TrieVariantHexBin
+	hash := "blake3"
+	require.NoError(t, state.WritePBTImportMarker(dirs, &state.PBTImportMarker{
+		SnapshotPath: "/tmp/snapshot",
+		SnapshotHash: "digest",
+		Files:        []string{"domain/v3.0-commitment-bin.0-1.kv"},
+		Settings:     &state.ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash},
+	}))
+	stack, err := node.New(t.Context(), &nodecfg.Config{Dirs: dirs}, log.New())
+	require.NoError(t, err)
+	defer stack.Close()
+	_, err = New(t.Context(), stack, &ethconfig.Config{}, log.New(), nil)
+	require.ErrorContains(t, err, "commitment import-pbt")
 }
