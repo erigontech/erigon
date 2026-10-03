@@ -201,7 +201,7 @@ func TestRemoteAuthorizationRecoveryPreservesQueue(t *testing.T) {
 	require.Contains(t, pool.byHash, string(txn.IDHash[:]))
 	require.NotContains(t, pool.byHash, string(later.IDHash[:]))
 	require.Equal(t, []*TxnSlot{later}, pool.unprocessedRemoteTxns.Txns)
-	require.Equal(t, map[string]int{string(later.IDHash[:]): 0}, pool.unprocessedRemoteByHash)
+	require.Equal(t, map[string]*TxnSlot{string(later.IDHash[:]): later}, pool.unprocessedRemoteByHash)
 	require.Len(t, pool.unprocessedRemotePeers, 1)
 	require.Equal(t, peer, pool.unprocessedRemotePeers[0].peerID)
 	require.True(t, pool.hasUnprocessedRemoteTxns.Load())

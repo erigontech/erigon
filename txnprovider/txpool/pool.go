@@ -123,7 +123,7 @@ type TxPool struct {
 	//   - and as a result reducing lock contention
 	unprocessedRemoteTxns   *TxnSlots
 	unprocessedRemotePeers  []remoteSource                                  // per-slot peer source for KZG-fail kick
-	unprocessedRemoteByHash map[string]int                                  // to reject duplicates
+	unprocessedRemoteByHash map[string]*TxnSlot                             // to reject duplicates
 	byHash                  map[string]*metaTxn                             // txn_hash => txn : only those records not committed to db yet
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
 	pending                 *PendingPool
@@ -248,7 +248,7 @@ func New(
 		chainID:                 *configChainID,
 		chainConfig:             chainConfig,
 		unprocessedRemoteTxns:   &TxnSlots{},
-		unprocessedRemoteByHash: map[string]int{},
+		unprocessedRemoteByHash: map[string]*TxnSlot{},
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
 		feeCalculator:           options.feeCalculator,
@@ -531,9 +531,6 @@ func (p *TxPool) removeProcessedRemoteTxns(n int) {
 	p.unprocessedRemoteTxns.Senders = slices.Delete(p.unprocessedRemoteTxns.Senders, 0, n*length.Addr)
 	p.unprocessedRemoteTxns.IsLocal = slices.Delete(p.unprocessedRemoteTxns.IsLocal, 0, n)
 	p.unprocessedRemotePeers = slices.Delete(p.unprocessedRemotePeers, 0, n)
-	for i, txn := range p.unprocessedRemoteTxns.Txns {
-		p.unprocessedRemoteByHash[string(txn.IDHash[:])] = i
-	}
 	p.hasUnprocessedRemoteTxns.Store(len(p.unprocessedRemoteTxns.Txns) > 0)
 }
 
@@ -601,8 +598,7 @@ func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []b
 		sizes = append(sizes, txn.TxnSlot.Size)
 		hashes = append(hashes, hash...)
 	}
-	for hash, txIdx := range p.unprocessedRemoteByHash {
-		txnSlot := p.unprocessedRemoteTxns.Txns[txIdx]
+	for hash, txnSlot := range p.unprocessedRemoteByHash {
 		types = append(types, txnSlot.TxType())
 		sizes = append(sizes, txnSlot.Size)
 		hashes = append(hashes, hash...)
@@ -648,22 +644,14 @@ func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Has
 	return unknownHashes, err
 }
 
-func (p *TxPool) getUnprocessedTxn(hashS string) (*TxnSlot, bool) {
-	if i, ok := p.unprocessedRemoteByHash[hashS]; ok {
-		return p.unprocessedRemoteTxns.Txns[i], true
-	}
-	return nil, false
-}
-
 func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error) {
-	hashS := string(hash)
-	if mt, ok := p.minedBlobTxnsByHash[hashS]; ok {
+	if mt, ok := p.minedBlobTxnsByHash[string(hash)]; ok {
 		return mt, nil
 	}
-	if txn, ok := p.getUnprocessedTxn(hashS); ok {
+	if txn, ok := p.unprocessedRemoteByHash[string(hash)]; ok {
 		return newMetaTxn(txn, false, 0), nil
 	}
-	if mt, ok := p.byHash[hashS]; ok {
+	if mt, ok := p.byHash[string(hash)]; ok {
 		return mt, nil
 	}
 	v, err := tx.GetOne(kv.PoolTransaction, hash)
@@ -967,7 +955,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		if ok {
 			continue
 		}
-		p.unprocessedRemoteByHash[hashS] = len(p.unprocessedRemoteTxns.Txns)
+		p.unprocessedRemoteByHash[hashS] = txn
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
@@ -1434,8 +1422,6 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		return reasons, goodTxns, err
 	}
 
-	goodCount := 0
-	checkedCount := len(txns.Txns)
 	for i, txn := range txns.Txns {
 		if reasons[i] != txpoolcfg.NotSet {
 			continue
@@ -1450,7 +1436,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 			return reasons, goodTxns, err
 		}
 		if reason == txpoolcfg.Success {
-			goodCount++
+			goodTxns.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
 			// Success here means no DiscardReason yet, so leave it NotSet
 			continue
 		}
@@ -1460,20 +1446,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		reasons[i] = reason
 		// On first KZG-verify failure in a remote batch, drop the rest without re-verifying.
 		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
-			checkedCount = i + 1
 			break
-		}
-	}
-
-	goodTxns.Resize(uint(goodCount))
-
-	j := 0
-	for i := 0; i < checkedCount; i++ {
-		if reasons[i] == txpoolcfg.NotSet {
-			goodTxns.Txns[j] = txns.Txns[i]
-			goodTxns.IsLocal[j] = txns.IsLocal[i]
-			copy(goodTxns.Senders.At(j), txns.Senders.At(i))
-			j++
 		}
 	}
 	return reasons, goodTxns, nil
@@ -1541,8 +1514,6 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 	}
 	defer p.forgetUnusedSenders(senderIDsOf(&newTxns))
 
-	originalTxns := newTxns
-
 	reasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, reasons)
 	if err != nil {
 		return nil, err
@@ -1556,21 +1527,19 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 	if err != nil {
 		return nil, err
 	}
-	// reasons is indexed by originalTxns; addReasons is indexed by goodTxns.
+	// reasons is indexed by newTxns; addReasons is indexed by goodTxns.
 	// Walk reasons and advance j only on slots that survived validation.
 	for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
 		if reasons[i] != txpoolcfg.NotSet {
 			continue
 		}
-		if addReasons[j] != txpoolcfg.NotSet {
-			reasons[i] = addReasons[j]
-		}
+		reasons[i] = addReasons[j]
 		j++
 	}
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
-	reasons = fillDiscardReasons(reasons, originalTxns, p.discardReasonsLRU)
+	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
 	if p.promoted.Len() > 0 {
 		select {
 		case p.newPendingTxns <- p.promoted.Copy():
@@ -1578,7 +1547,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 		}
 	}
 	if fromRemoteQueue {
-		p.removeProcessedRemoteTxns(len(originalTxns.Txns))
+		p.removeProcessedRemoteTxns(len(newTxns.Txns))
 	}
 	return reasons, nil
 }
