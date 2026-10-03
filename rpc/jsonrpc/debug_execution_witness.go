@@ -628,7 +628,6 @@ type ExecutionWitnessResult struct {
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
 	legacyRoot     hexutil.Bytes
-	pbtPostRoot    common.Hash
 }
 
 // MarshalFastJSONTo writes the result field by field, in the order and form encoding/json uses.
@@ -872,10 +871,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 	isBinary := chainConfig.IsBinaryTrie(blockHeader.Time)
-	defaultTrie := witnessTrieMPT
-	if isBinary {
-		defaultTrie = witnessTriePBT
-	}
+	defaultTrie, _ := resolveWitnessTrie(nil, isBinary)
 	request, err := resolveWitnessRequest(mode, trieParam, isBinary)
 	if err != nil {
 		return nil, err
@@ -1206,11 +1202,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	}
 	if binTrie {
 		sdCtx.SetPBinWitnessStateReader(trieReaderFor(hc, tx, commitmentDomain, firstTxNumInBlock))
-	}
-
-	log.Debug("expected parent root", "stateRoot", parentRoot)
-
-	if binTrie {
+		log.Debug("expected parent root", "stateRoot", parentRoot)
 		input, err := buildPBinWitnessInput(accessed.recordingState)
 		if err != nil {
 			return nil, err
@@ -1235,7 +1227,6 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 			result.Keys[index] = hexutil.Bytes(paths[index])
 			result.State[index] = hexutil.Bytes(blobs[index])
 		}
-		result.pbtPostRoot = pbtPostRoot
 		if pbtPostRoot != postRoot {
 			return nil, fmt.Errorf("pbin witness builder post-state root %x differs from block anchor %x", pbtPostRoot, postRoot)
 		}
@@ -1285,14 +1276,12 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	}
 
 	result.State = appendLegacyEmptyStorageNode(result.State, mode)
-	if !binTrie {
-		if len(result.State) > 0 {
-			result.legacyRoot = bytes.Clone(result.State[0])
-		}
-		slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
-			return bytes.Compare(a, b)
-		})
+	if len(result.State) > 0 {
+		result.legacyRoot = bytes.Clone(result.State[0])
 	}
+	slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
+		return bytes.Compare(a, b)
+	})
 
 	return result, nil
 }
@@ -1854,8 +1843,6 @@ func verifyWitnessAgainstBlock(
 	fullEngine rules.Engine,
 	expectedRoot common.Hash,
 ) error {
-	var newStateRoot common.Hash
-	var stateless *witnessStateless
 	newStateRoot, stateless, err := execBlockStatelessly(result, block, chainCfg, fullEngine, expectedRoot)
 	if err != nil {
 		return fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)

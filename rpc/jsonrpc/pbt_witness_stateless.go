@@ -39,38 +39,34 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func pbinExecBlockStatelessly(ctx context.Context, result *ExecutionWitnessResult, block *types.Block, parentRoot common.Hash, chainConfig *chain.Config, engine rules.Engine) (common.Hash, *pbinWitnessStateless, error) {
+func verifyPBinWitnessAgainstBlock(ctx context.Context, result *ExecutionWitnessResult, block *types.Block, parentRoot, expectedRoot common.Hash, chainConfig *chain.Config, engine rules.Engine) error {
+	fail := func(err error) error { return fmt.Errorf("pbin stateless execution: %w", err) }
 	if block.NumberU64() == 0 {
-		return block.Root(), nil, nil
+		if block.Root() != expectedRoot {
+			return fmt.Errorf("pbin state root mismatch after stateless execution: got %x, expected %x", block.Root(), expectedRoot)
+		}
+		return nil
 	}
 	if len(result.State) == 0 && parentRoot != eip8297.EmptyTreeHash {
-		return common.Hash{}, nil, errors.New("empty State field in witness")
+		return fail(errors.New("empty State field in witness"))
 	}
 	stateless, err := newPBinWitnessStateless(result, parentRoot)
 	if err != nil {
-		return common.Hash{}, nil, err
+		return fail(err)
 	}
 	if err := replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
 		err = stateless.resolveErrorOr(err)
-		return common.Hash{}, stateless, err
+		return fail(err)
 	}
 	if err := stateless.resolveErrorOr(nil); err != nil {
-		return common.Hash{}, stateless, err
+		return fail(err)
 	}
 	root, err := stateless.Finalize(ctx)
 	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("pbin post-state root: %w", err)
+		return fail(fmt.Errorf("pbin post-state root: %w", err))
 	}
 	if err := stateless.checkAllNodesConsumed(); err != nil {
-		return common.Hash{}, stateless, err
-	}
-	return root, stateless, nil
-}
-
-func verifyPBinWitnessAgainstBlock(ctx context.Context, result *ExecutionWitnessResult, block *types.Block, parentRoot, expectedRoot common.Hash, chainConfig *chain.Config, engine rules.Engine) error {
-	root, _, err := pbinExecBlockStatelessly(ctx, result, block, parentRoot, chainConfig, engine)
-	if err != nil {
-		return fmt.Errorf("pbin stateless execution: %w", err)
+		return fail(err)
 	}
 	if root != expectedRoot {
 		return fmt.Errorf("pbin state root mismatch after stateless execution: got %x, expected %x", root, expectedRoot)
@@ -120,12 +116,6 @@ func (s *pbinWitnessStateless) resolveErrorOr(err error) error {
 		return s.resolveError
 	}
 	return err
-}
-
-func (s *pbinWitnessStateless) latchPBinCodeError(err error) {
-	if err != nil && s.resolveError == nil {
-		s.resolveError = err
-	}
 }
 
 func (s *pbinWitnessStateless) latchPBinSystemAddressRead() {
@@ -365,7 +355,9 @@ func (s *pbinWitnessStateless) ReadAccountCode(address accounts.Address) ([]byte
 	code, ok := s.codes[codeHash]
 	if !ok {
 		err := fmt.Errorf("pbin witness: missing code for account %x with code hash %x", addr, codeHash)
-		s.latchPBinCodeError(err)
+		if s.resolveError == nil {
+			s.resolveError = err
+		}
 		return nil, err
 	}
 	return bytes.Clone(code), nil
@@ -453,9 +445,6 @@ func (s *pbinWitnessStateless) CreateContract(address accounts.Address) error {
 }
 
 func (s *pbinWitnessStateless) Finalize(ctx context.Context) (common.Hash, error) {
-	if ctx == nil {
-		return common.Hash{}, errors.New("pbin witness: nil context")
-	}
 	if err := ctx.Err(); err != nil {
 		return common.Hash{}, err
 	}

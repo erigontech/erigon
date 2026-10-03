@@ -29,6 +29,11 @@ import (
 
 func TestPBinDriverBuildsEmbeddingInOrder(t *testing.T) {
 	pbinUseBlake3(t)
+	var err error
+	require.NotPanics(t, func() {
+		_, _, err = newPBinEmptyTree().Apply(PBinDriverInput{Storage: []PBinStorageWrite{{Address: make([]byte, 33), Slot: make([]byte, 33), Value: make([]byte, 31)}}})
+	})
+	require.EqualError(t, err, "pbin witness: driver value length 31, want 32")
 	addressA := []byte{8}
 	addressB := []byte{9}
 	addressC := []byte{10}

@@ -72,6 +72,9 @@ func (t *PBinTree) Apply(input PBinDriverInput) (common.Hash, []PBinResolvedNode
 		return bytes.Compare(a.Slot, b.Slot)
 	})
 	for _, write := range storage {
+		if len(write.Value) != eip8297.ValueLength {
+			return common.Hash{}, nil, fmt.Errorf("pbin witness: driver value length %d, want %d", len(write.Value), eip8297.ValueLength)
+		}
 		key := eip8297.TreeKeyStorage(write.Address, write.Slot)
 		if err := t.writeValue(key, write.Value); err != nil {
 			return common.Hash{}, nil, err

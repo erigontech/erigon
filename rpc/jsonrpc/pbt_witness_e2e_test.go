@@ -204,7 +204,6 @@ func TestPBinExecutionWitnessCorpus(t *testing.T) {
 			require.NotNil(t, block)
 			parentRoot := pbtCorpusAnchor(t, m, number-1)
 			postRoot := pbtCorpusAnchor(t, m, number)
-			require.Equal(t, postRoot, result.pbtPostRoot, "builder post-root for block %d", number)
 			require.NoError(t, verifyPBinWitnessAgainstBlock(t.Context(), result, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 			require.NotEmpty(t, result.State)
 			if number == 8 || number == 9 {

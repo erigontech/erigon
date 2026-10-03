@@ -44,6 +44,8 @@ func newTestCalcState() *calcState {
 		accounts:     make(map[accounts.Address]*calcAccountState),
 		storageState: make(map[accounts.Address]*calcStorage),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
+		codeValues:   make(map[accounts.Address][]byte),
+		binFeed:      true,
 	}
 }
 

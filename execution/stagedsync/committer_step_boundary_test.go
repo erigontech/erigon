@@ -184,15 +184,15 @@ func TestHandleMessage_StepBoundaryBinFeedUsesPendingState(t *testing.T) {
 
 	addr := accounts.InternAddress(common.Address{0x43})
 	address := addr.Value()
-	oldAccount := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	oldCode := accounts.NewCode([]byte{0x60, 0x01})
+	oldAccount := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: oldCode.Hash}
 	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, address[:], accounts.SerialiseV3(&oldAccount), 0, nil))
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, address[:], oldCode.Bytes, 0, nil))
 
 	feedSeen := make(chan *commitment.PBinFeed, 1)
 	cc.binFeedObserver = func(feed *commitment.PBinFeed) { feedSeen <- feed }
 	newBalance := *uint256.NewInt(9)
 	newCode := accounts.NewCode([]byte{0x60, 0x02})
-	newAccount := accounts.Account{Nonce: 1, Balance: newBalance, CodeHash: newCode.Hash}
-	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, address[:], accounts.SerialiseV3(&newAccount), 15, nil))
 	writes := newWS().bal(addr, state.Version{}, newBalance).code(addr, state.Version{}, newCode).build()
 	cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: 15, rules: &chain.Rules{}, writes: writes})
 

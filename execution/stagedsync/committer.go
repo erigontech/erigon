@@ -342,6 +342,7 @@ func newCommitmentCalculator(
 	// (written sequentially by this calculator).
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: collectorContext.CommitmentDomain(), txNum: 0}
 	calc := newCalcState(asOfReader, logger, logPrefix)
+	calc.binFeed = hasBinCommitmentContext(doms)
 	if branchPrefetchEnabled && collectorContext.AcceptsFeed() {
 		binDomains := make(map[kv.Domain]bool)
 		for _, domain := range doms.CommitmentDomains() {
@@ -375,6 +376,16 @@ func newCommitmentCalculator(
 		done:                 make(chan struct{}),
 		processedWake:        make(chan struct{}),
 	}, nil
+}
+
+func hasBinCommitmentContext(doms *execctx.SharedDomains) bool {
+	for _, domain := range doms.CommitmentDomains() {
+		ctx := doms.GetCommitmentCtxForDomain(domain)
+		if ctx != nil && ctx.Trie().Variant() == commitment.VariantBinPatriciaTrie {
+			return true
+		}
+	}
+	return false
 }
 
 // onCommitProgress is handed to ComputeCommitment so the trie's counters
@@ -820,6 +831,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, commitmentDomain: commitmentDomain, txNum: req.firstTxNum, prefetched: prefetch}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
+	balState.binFeed = hasBinCommitmentContext(cc.doms)
 	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil, eip8246)
 	if err := balState.LazyLoadErr(); err != nil {
 		return dualCommitmentResult{}, nil, fmt.Errorf("lazy-load: %w", err)
