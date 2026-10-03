@@ -1197,9 +1197,9 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	if sdCtx == nil {
 		return nil, fmt.Errorf("%s commitment domain is unavailable", witnessTrieName(requestedTrie))
 	}
+	log.Debug("expected parent root", "stateRoot", parentRoot)
 	if binTrie {
 		sdCtx.SetPBinWitnessStateReader(trieReaderFor(hc, tx, commitmentDomain, firstTxNumInBlock))
-		log.Debug("expected parent root", "stateRoot", parentRoot)
 		input, err := buildPBinWitnessInput(accessed.recordingState)
 		if err != nil {
 			return nil, err
