@@ -596,6 +596,17 @@ func TestCallArgsUnmarshalMatchesEncodingJSON(t *testing.T) {
 		`{"data":"0x01"`,
 		`[]`,
 		`{"accessList":[{"address":"0x0000000000000000000000000000000000000002","storageKeys":[]}],"data":"0xaa"}`,
+		`{"data":"0x01","Data":"0x02"}`,
+		`{"Data":"0x02","data":"0x01"}`,
+		`{"data":"0x\u0030\u0031"}`,
+		`{"from":"0x94fea3ef90b236f6809a8e412cd11ce99fd45933","to":null,"gas":"0x29040","gasPrice":"0x1","maxFeePerGas":"0x2","maxPriorityFeePerGas":"0x3","maxFeePerBlobGas":"0x4","value":"0x0","nonce":"0x7","chainId":"0x1","input":"0xa9059cbb"}`,
+		`{"gas":"0x1","gas":null}`,
+		`{"gas":16}`,
+		`{"value":"0x"}`,
+		`{"unknown":{"a":[1,2]},"data":"0x01"}`,
+		`{"blobVersionedHashes":["0x0100000000000000000000000000000000000000000000000000000000000000"],"blobs":["0x01"],"commitments":[],"proofs":null}`,
+		`{"authorizationList":[{"chainId":"0x1","address":"0x0000000000000000000000000000000000000003","nonce":"0x0","yParity":"0x0","r":"0x1","s":"0x1"}]}`,
+		`null`,
 	} {
 		var got, want CallArgs
 		gotErr := got.UnmarshalJSON([]byte(in))
