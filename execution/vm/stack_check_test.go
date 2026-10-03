@@ -154,8 +154,8 @@ type fastPathWant struct {
 	memorySize      memorySizeFunc
 }
 
-// TestRunIsGenerated fails when vm_run_gen.go, vm_run_traced_gen.go or
-// fast_path_gen_test.go are stale against execution/vm/vmgen.
+// TestRunIsGenerated fails when vm_run_gen.go or fast_path_gen_test.go are
+// stale against execution/vm/vmgen.
 func TestRunIsGenerated(t *testing.T) {
 	out, err := exec.CommandContext(t.Context(), "go", "run", "./vmgen", "-check").CombinedOutput()
 	require.NoError(t, err, string(out))
