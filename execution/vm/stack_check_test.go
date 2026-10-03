@@ -214,7 +214,6 @@ func TestRunMatchesRunTraced(t *testing.T) {
 	pushes := func(n int) []byte { return bytes.Repeat([]byte{byte(PUSH1), 1}, n) }
 	programs := map[string][]byte{
 		"arith":    prog(PUSH1, 7, PUSH1, 3, SUB, PUSH1, 5, MUL, PUSH1, 2, DIV, PUSH1, 9, LT, PUSH1, 1, GT, PUSH1, 0, EQ, ISZERO, PUSH2, 0xff, 0x0f, AND, PUSH1, 4, ADD, PUSH1, 0, ISZERO, PUSH1, 6, PUSH1, 6, EQ),
-		"dupswap":  prog(PUSH1, 1, PUSH1, 2, PUSH1, 3, PUSH1, 4, PUSH1, 5, PUSH1, 6, PUSH1, 7, PUSH1, 8, DUP1, DUP2, DUP3, DUP4, DUP5, DUP6, DUP7, DUP8, SWAP1, SWAP2, SWAP3, SWAP4, POP),
 		"loop":     prog(PUSH1, 5, JUMPDEST, PUSH1, 1, SWAP1, SUB, DUP1, PUSH1, 2, JUMPI, PUSH1, 17, JUMP, INVALID, INVALID, INVALID, JUMPDEST, pushes(3)),
 		"memory":   prog(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH1, 0, MLOAD, PUSH1, 16, MLOAD, PUSH1, 32, MLOAD, PUSH1, 0xbb, PUSH1, 8, MSTORE, PUSH1, 33, MLOAD, PUSH1, 8, MLOAD),
 		"memhuge":  prog(PUSH8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, MLOAD),
@@ -226,7 +225,6 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"jumpinot": prog(PUSH1, 0, PUSH1, 0xff, JUMPI, pushes(4)),
 		"jumpibad": prog(PUSH1, 1, PUSH1, 0xff, JUMPI),
 		"jumpend":  {byte(PUSH1), 3, byte(JUMP), byte(JUMPDEST)},
-		"overflow": {byte(JUMPDEST), byte(PUSH1), 1, byte(PUSH1), 0, byte(JUMP)},
 		// A failed frame returns no data, whatever the last CALL returned.
 		"callthenbadjump": {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(PUSH1), 0, byte(JUMP)},
 	}

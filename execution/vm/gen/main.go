@@ -135,70 +135,53 @@ func inlineBody(instructions []byte, o fastOp) string {
 			id.Name = rename[id.Name]
 		}
 	}
-	for n := range ast.Preorder(body) {
-		switch n := n.(type) {
-		case *ast.BlockStmt:
-			n.List = inlineReturns(n.List, o)
-		case *ast.CaseClause:
-			n.Body = inlineReturns(n.Body, o)
-		}
-	}
-	var b strings.Builder
-	for _, s := range body.List {
-		var buf bytes.Buffer
-		if err := format.Node(&buf, fset, s); err != nil {
-			log.Fatal(err)
-		}
-		// New nodes carry no positions, so the printer can leave blank lines around them.
-		for l := range strings.Lines(buf.String()) {
-			if strings.TrimSpace(l) != "" {
-				b.WriteString(l)
-			}
-		}
-		b.WriteString("\n")
-	}
-	return b.String()
+	return inlineReturns(text(fset, body), o)
 }
 
-// inlineReturns replaces each `return pc, res, err` in list. A return without
-// an error moves to the next op; one with an error leaves the loop.
-func inlineReturns(list []ast.Stmt, o fastOp) []ast.Stmt {
-	var out []ast.Stmt
-	for _, s := range list {
-		ret, ok := s.(*ast.ReturnStmt)
-		if !ok {
-			out = append(out, s)
-			continue
-		}
-		next, res, err := ret.Results[0], ret.Results[1], ret.Results[2]
-		if id, ok := err.(*ast.Ident); !ok || id.Name != "nil" {
-			out = append(out,
-				&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("res"), ast.NewIdent("err")}, Tok: token.ASSIGN, Rhs: []ast.Expr{res, err}},
-				&ast.BranchStmt{Tok: token.BREAK, Label: ast.NewIdent("run")})
-			continue
-		}
-		if id, ok := res.(*ast.Ident); !ok || id.Name != "nil" {
-			log.Fatalf("%s: a successful return with data cannot stay in the loop", o.name)
-		}
-		if id, ok := next.(*ast.Ident); !ok || id.Name != "pc" {
-			out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("pc")}, Tok: token.ASSIGN, Rhs: []ast.Expr{next}})
-			if o.jump {
-				// A valid destination holds a JUMPDEST: charge it here and step over it.
-				jumpdestGas := &ast.SelectorExpr{X: ast.NewIdent("params"), Sel: ast.NewIdent("JumpdestGas")}
-				out = append(out, &ast.IfStmt{
-					Cond: &ast.BinaryExpr{X: ast.NewIdent("gasLeft"), Op: token.GEQ, Y: jumpdestGas},
-					Body: &ast.BlockStmt{List: []ast.Stmt{
-						&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("gasLeft")}, Tok: token.SUB_ASSIGN, Rhs: []ast.Expr{jumpdestGas}},
-						&ast.IncDecStmt{X: ast.NewIdent("pc"), Tok: token.INC},
-					}},
-				})
-			}
-		}
-		out = append(out,
-			&ast.IncDecStmt{X: ast.NewIdent("pc"), Tok: token.INC},
-			&ast.BranchStmt{Tok: token.CONTINUE, Label: ast.NewIdent("run")})
+// inlineReturns replaces each `return pc, res, err` in the printed body block:
+// a return without an error moves to the next op, one with an error leaves the
+// loop. It returns the block's statements without the braces.
+func inlineReturns(body string, o fastOp) string {
+	const prefix = "package p\nfunc _() "
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", prefix+body, 0)
+	if err != nil {
+		log.Fatal(err)
 	}
-	return out
+	src := func(n ast.Node) string { return body[int(n.Pos())-1-len(prefix) : int(n.End())-1-len(prefix)] }
+	var rets []*ast.ReturnStmt
+	for n := range ast.Preorder(f) {
+		if r, ok := n.(*ast.ReturnStmt); ok {
+			rets = append(rets, r)
+		}
+	}
+	for _, r := range slices.Backward(rets) {
+		next, res, err := src(r.Results[0]), src(r.Results[1]), src(r.Results[2])
+		var step string
+		switch {
+		case err != "nil":
+			step = "res, err = " + res + ", " + err + "\nbreak run"
+		case res != "nil":
+			log.Fatalf("%s: a successful return with data cannot stay in the loop", o.name)
+		case next == "pc":
+			step = "pc++\ncontinue run"
+		case o.jump:
+			// A valid destination holds a JUMPDEST: charge it here and step over it.
+			step = "pc = " + next + "\nif gasLeft >= params.JumpdestGas {\ngasLeft -= params.JumpdestGas\npc++\n}\npc++\ncontinue run"
+		default:
+			step = "pc = " + next + "\npc++\ncontinue run"
+		}
+		body = body[:int(r.Pos())-1-len(prefix)] + step + body[int(r.End())-1-len(prefix):]
+	}
+	return strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(body, "{"), "}"))
+}
+
+func text(fset *token.FileSet, n ast.Node) string {
+	var b bytes.Buffer
+	if err := format.Node(&b, fset, n); err != nil {
+		log.Fatal(err)
+	}
+	return b.String()
 }
 
 func fastCases(instructions []byte, ops []fastOp) string {
@@ -219,7 +202,7 @@ func fastCases(instructions []byte, ops []fastOp) string {
 			cond = append(cond, "callContext.Memory.allocated32(stack.peek())")
 		}
 		cond = append(cond, "gasLeft >= "+o.gas)
-		fmt.Fprintf(&b, "case %s:\nif %s {\ngasLeft -= %s\n%s}\n", o.name, strings.Join(cond, " && "), o.gas, inlineBody(instructions, o))
+		fmt.Fprintf(&b, "case %s:\nif %s {\ngasLeft -= %s\n%s\n}\n", o.name, strings.Join(cond, " && "), o.gas, inlineBody(instructions, o))
 	}
 	return b.String()
 }

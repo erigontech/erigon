@@ -188,6 +188,7 @@ run:
 						res, err = nil, ErrInvalidJump
 						break run
 					}
+
 					pc = pos.Uint64() - 1
 					if gasLeft >= params.JumpdestGas {
 						gasLeft -= params.JumpdestGas
