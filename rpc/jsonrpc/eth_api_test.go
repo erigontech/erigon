@@ -617,7 +617,7 @@ func TestGraphQLBlockDetailsSkipReceiptsWithoutTxs(t *testing.T) {
 // A pooled transaction is priced at its fee cap, and carries no location.
 func TestNewRPCPendingTransactionGasPriceIsFeeCap(t *testing.T) {
 	feeCap := uint256.NewInt(1_000_000_000)
-	txn := types.NewEIP1559Transaction(*uint256.NewInt(1), 1, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, nil, uint256.NewInt(2), feeCap, nil)
+	txn := types.NewEIP1559Transaction(*uint256.NewInt(1), 1, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(2), feeCap, nil)
 
 	result := newRPCPendingTransaction(txn)
 	require.NotNil(t, result.GasPrice)

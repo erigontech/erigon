@@ -738,8 +738,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return emptyWitnessBytes()
 	}
 
-	// The stateless verifier navigates the system address (system-call msg.sender, then its
-	// EIP-161 empty-account cleanup via DeleteSubtree), so its path must be in the witness.
+	// On AuRa the stateless verifier navigates the system address (system-call msg.sender),
+	// so its path must be in the witness.
 	// collectAccessedState drops it per EIP-7928 — a witness-content rule for the
 	// debug_executionWitness format that does not apply to this op-stream witness.
 	accessed.Addresses[common.Address(params.SystemAddress.Value())] = struct{}{}

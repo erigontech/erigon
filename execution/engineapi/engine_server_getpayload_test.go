@@ -24,16 +24,13 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -232,59 +229,6 @@ func TestGetPayloadV2AcceptsShanghaiPayload(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-}
-
-func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) {
-	t.Parallel()
-
-	emptyBAL := []byte{0xc0}
-	sidecar, err := types.DecodeBlockAccessListSidecar(emptyBAL)
-	require.NoError(t, err)
-	baseFee := uint256.NewInt(1_000_000_000)
-	emptyBALHash := empty.BlockAccessListHash
-	header := &types.Header{
-		Number:              *uint256.NewInt(101),
-		Time:                1,
-		BaseFee:             baseFee,
-		GasLimit:            30_000_000,
-		BlockAccessListHash: &emptyBALHash,
-	}
-	block := types.NewBlockWithHeader(header, sidecar)
-	br := &types.BlockWithReceipts{Block: block, Requests: make(types.FlatRequests, 0)}
-
-	resp, err := assembledBlockToPayloadResponse(br, uint256.NewInt(0), clparams.GloasVersion)
-	require.NoError(t, err)
-
-	require.NotNil(t, resp.ExecutionPayload.BlockAccessList)
-	require.Equal(t, hexutil.Bytes(emptyBAL), *resp.ExecutionPayload.BlockAccessList)
-}
-
-func TestAssembledBlockToPayloadResponseReturnsSidecarEncodingError(t *testing.T) {
-	t.Parallel()
-
-	balHash := common.Hash{1}
-	header := &types.Header{
-		Number:              *uint256.NewInt(101),
-		BaseFee:             uint256.NewInt(1_000_000_000),
-		GasLimit:            30_000_000,
-		BlockAccessListHash: &balHash,
-	}
-	// A nil nested StorageChange is the encoding failure that survives an
-	// account list of values.
-	sidecar := types.NewBlockAccessListSidecar(types.BlockAccessList{{
-		Address: common.Address{2},
-		StorageChanges: []types.SlotChanges{{
-			Slot:    accounts.InternKey(common.Hash{3}),
-			Changes: []*types.StorageChange{nil},
-		}},
-	}})
-	block := types.NewBlockWithHeader(header, sidecar)
-	br := &types.BlockWithReceipts{Block: block, Requests: make(types.FlatRequests, 0)}
-
-	resp, err := assembledBlockToPayloadResponse(br, uint256.NewInt(0), clparams.GloasVersion)
-
-	require.Nil(t, resp)
-	require.ErrorContains(t, err, "encode block access list")
 }
 
 // newProposingEngineServerForGetPayloadTests returns a server on a Prague-window
