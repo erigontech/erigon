@@ -1,0 +1,530 @@
+// Copyright 2014 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package vm
+
+//go:generate go run ./gen
+
+import (
+	"errors"
+	"fmt"
+
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
+)
+
+// run is Run's loop. Its tracing code sits behind runTracing, so this copy
+// compiles without it; runTraced in vm_run_traced_gen.go is the same source with
+// runTracing set to true.
+func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, debug, trace bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+	// Don't bother with the execution if there's no code.
+	if len(contract.Code) == 0 {
+		return nil, gas, mdgas.MdGasUsage{}, nil
+	}
+
+	// Reset the previous call's return data. It's unimportant to preserve the old buffer
+	// as every returning call will return new data anyway.
+	evm.returnData = nil
+
+	var (
+		op          OpCode // current opcode
+		callContext = getCallContext(contract, input, gas)
+		// For optimisation reason we're using uint64 as the program counter.
+		// It's theoretically possible to go above 2^64. The YP defines the PC
+		// to be uint256. Practically much less so feasible.
+		pc   = uint64(0) // program counter
+		cost mdgas.MdGasCost
+		// copies used by tracer
+		pcCopy  uint64 // needed for the deferred Tracer
+		oldGas  mdgas.MdGas
+		callGas mdgas.MdGasCost
+		logged  bool   // deferred Tracer should ignore already logged steps
+		res     []byte // result of the opcode execution function
+		tracer  = evm.config.Tracer
+	)
+
+	// Make sure the readOnly is only set if we aren't in readOnly yet.
+	// This makes also sure that the readOnly flag isn't removed for child calls.
+	restoreReadonly := readOnly && !evm.readOnly
+	if restoreReadonly {
+		evm.readOnly = true
+	}
+	// Increment the call depth which is restricted to 1024
+	evm.depth++
+	defer func() {
+		// EIP-8037: snapshot the spilled portion and derive the frame's net
+		// state-gas usage from the reservoir delta before callContext.put()
+		// clears them. A state charge lowers stateGas (or raises stateGasSpill
+		// on spill) and a refill reverses it, so the net used (signed) is
+		// (initialReservoir - stateGas) + stateGasSpill. gasUsed.Execution is
+		// derived uniformly by evm.call/evm.create's defer from the final
+		// gasRemaining (covers precompile/no-code paths and the revert burn).
+		gasUsed.StateSpill = callContext.stateGasSpill
+		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
+		callContext.put()
+		if restoreReadonly {
+			evm.readOnly = false
+		}
+		evm.depth--
+	}()
+
+	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
+	// the stacks before callContext.put() returns them to the pool.
+	if runTracing && debug {
+		defer func() {
+			if err == nil {
+				return
+			}
+			switch {
+			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
+				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
+				tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
+			}
+		}()
+	}
+
+	// The Interpreter main run loop (contextual). This loop runs until either an
+	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
+	// the execution of one of the operations or until the done flag is set by the
+	// parent context.
+
+	// Hoist to locals so the compiler sees them as loop-invariant.
+	stack := &callContext.Stack
+	jt := evm.jt
+	// The fast path keeps gas and the stack height in registers. They are stored
+	// back before the generic path and after the loop, and reloaded after each
+	// generic op.
+	gasLeft, top := callContext.gas, stack.top
+
+run:
+	for {
+		op = contract.GetOp(pc)
+		// The hottest constant-gas opcodes run inline, without the jump table and
+		// its indirect call. A failed check falls through to the generic path,
+		// which reports the error.
+		if !runTracing {
+			switch op {
+			// Cases below are generated by execution/vm/gen from its fastOps table; do not edit them.
+			case PUSH1:
+				if top < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					pc++
+					stack.data[top].SetUint64(uint64(contract.GetOp(pc)))
+					top++
+					pc++
+					continue
+				}
+			case PUSH2:
+				if top < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top].SetUint64(uint64(contract.GetOp(pc+1))<<8 | uint64(contract.GetOp(pc+2)))
+					top++
+					pc += 2
+					pc++
+					continue
+				}
+			case ADD:
+				if top >= 2 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x, y := &stack.data[top-1], &stack.data[top-2]
+					y.Add(x, y)
+					top--
+					pc++
+					continue
+				}
+			case POP:
+				if top >= 1 && gasLeft >= GasQuickStep {
+					gasLeft -= GasQuickStep
+					top--
+					pc++
+					continue
+				}
+			case JUMPDEST:
+				if gasLeft >= params.JumpdestGas {
+					gasLeft -= params.JumpdestGas
+					pc++
+					continue
+				}
+			case JUMP:
+				if top >= 1 && gasLeft >= GasMidStep {
+					gasLeft -= GasMidStep
+					if evm.Cancelled() {
+						err = errStopToken
+						break run
+					}
+					top--
+					pos := &stack.data[top]
+					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
+						err = ErrInvalidJump
+						break run
+					}
+					pc = pos.Uint64() - 1
+					if gasLeft >= params.JumpdestGas {
+						gasLeft -= params.JumpdestGas
+						pc++
+					}
+					pc++
+					continue
+				}
+			case JUMPI:
+				if top >= 2 && gasLeft >= GasSlowStep {
+					gasLeft -= GasSlowStep
+					if evm.Cancelled() {
+						err = errStopToken
+						break run
+					}
+					top -= 2
+					if pos, cond := &stack.data[top+1], &stack.data[top]; !cond.IsZero() {
+						if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
+							err = ErrInvalidJump
+							break run
+						}
+						pc = pos.Uint64() - 1
+						if gasLeft >= params.JumpdestGas {
+							gasLeft -= params.JumpdestGas
+							pc++
+						}
+					}
+					pc++
+					continue
+				}
+			case SUB:
+				if top >= 2 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x, y := &stack.data[top-1], &stack.data[top-2]
+					y.Sub(x, y)
+					top--
+					pc++
+					continue
+				}
+			case MUL:
+				if top >= 2 && gasLeft >= GasFastStep {
+					gasLeft -= GasFastStep
+					x, y := &stack.data[top-1], &stack.data[top-2]
+					y.Mul(x, y)
+					top--
+					pc++
+					continue
+				}
+			case DIV:
+				if top >= 2 && gasLeft >= GasFastStep {
+					gasLeft -= GasFastStep
+					x, y := &stack.data[top-1], &stack.data[top-2]
+					y.Div(x, y)
+					top--
+					pc++
+					continue
+				}
+			case LT:
+				if top >= 2 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x, y := &stack.data[top-1], &stack.data[top-2]
+					if x.Lt(y) {
+						y.SetOne()
+					} else {
+						y.Clear()
+					}
+					top--
+					pc++
+					continue
+				}
+			case GT:
+				if top >= 2 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x, y := &stack.data[top-1], &stack.data[top-2]
+					if x.Gt(y) {
+						y.SetOne()
+					} else {
+						y.Clear()
+					}
+					top--
+					pc++
+					continue
+				}
+			case EQ:
+				if top >= 2 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x, y := &stack.data[top-1], &stack.data[top-2]
+					if x.Eq(y) {
+						y.SetOne()
+					} else {
+						y.Clear()
+					}
+					top--
+					pc++
+					continue
+				}
+			case AND:
+				if top >= 2 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x, y := &stack.data[top-1], &stack.data[top-2]
+					y.And(x, y)
+					top--
+					pc++
+					continue
+				}
+			case ISZERO:
+				if top >= 1 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x := &stack.data[top-1]
+					if x.IsZero() {
+						x.SetOne()
+					} else {
+						x.Clear()
+					}
+					pc++
+					continue
+				}
+			case MLOAD:
+				if top >= 1 && callContext.Memory.allocated32(&stack.data[top-1]) && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x := &stack.data[top-1]
+					x.SetBytes32(callContext.Memory.store[x.Uint64():])
+					pc++
+					continue
+				}
+			case MSTORE:
+				if top >= 2 && callContext.Memory.allocated32(&stack.data[top-1]) && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					top -= 2
+					callContext.Memory.Set32(stack.data[top+1].Uint64(), &stack.data[top])
+					pc++
+					continue
+				}
+			case DUP1:
+				if top >= 1 && top < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top] = stack.data[top-1]
+					top++
+					pc++
+					continue
+				}
+			case DUP2:
+				if top >= 2 && top < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top] = stack.data[top-2]
+					top++
+					pc++
+					continue
+				}
+			case DUP3:
+				if top >= 3 && top < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top] = stack.data[top-3]
+					top++
+					pc++
+					continue
+				}
+			case DUP4:
+				if top >= 4 && top < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top] = stack.data[top-4]
+					top++
+					pc++
+					continue
+				}
+			case DUP5:
+				if top >= 5 && top < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top] = stack.data[top-5]
+					top++
+					pc++
+					continue
+				}
+			case DUP6:
+				if top >= 6 && top < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top] = stack.data[top-6]
+					top++
+					pc++
+					continue
+				}
+			case DUP7:
+				if top >= 7 && top < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top] = stack.data[top-7]
+					top++
+					pc++
+					continue
+				}
+			case DUP8:
+				if top >= 8 && top < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top] = stack.data[top-8]
+					top++
+					pc++
+					continue
+				}
+			case SWAP1:
+				if top >= 2 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top-1], stack.data[top-2] = stack.data[top-2], stack.data[top-1]
+					pc++
+					continue
+				}
+			case SWAP2:
+				if top >= 3 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top-1], stack.data[top-3] = stack.data[top-3], stack.data[top-1]
+					pc++
+					continue
+				}
+			case SWAP3:
+				if top >= 4 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top-1], stack.data[top-4] = stack.data[top-4], stack.data[top-1]
+					pc++
+					continue
+				}
+			case SWAP4:
+				if top >= 5 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					stack.data[top-1], stack.data[top-5] = stack.data[top-5], stack.data[top-1]
+					pc++
+					continue
+				}
+				// End of generated cases.
+			}
+			callContext.gas, stack.top = gasLeft, top
+		}
+		callContext.cacheGen++
+		if runTracing && debug {
+			// Capture pre-execution values for tracing.
+			logged = false
+			pcCopy = pc
+			oldGas = callContext.Gas()
+		}
+		// Get the operation from the jump table and validate the stack to ensure there are
+		// enough stack items available to perform the operation.
+		operation := &jt[op]
+		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
+		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
+		// a stack shallower than numPop wraps negative and fails the compare.
+		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
+		}
+		// for tracing: this gas consumption event is emitted below in the debug section.
+		if callContext.gas < cost.Execution {
+			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+		} else {
+			callContext.gas -= cost.Execution
+		}
+
+		// All ops with a dynamic memory usage also has a dynamic gas cost.
+		var memorySize uint64
+		if operation.dynamicGas != nil {
+			// calculate the new memory size and expand the memory to fit
+			// the operation
+			// Memory check needs to be done prior to evaluating the dynamic gas portion,
+			// to detect calculation overflows
+			if operation.memorySize != nil {
+				memSize, overflow := operation.memorySize(callContext)
+				if overflow {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
+				}
+				// memory is expanded in words of 32 bytes. Gas
+				// is also calculated in words.
+				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
+				}
+			}
+			// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
+			evm.callGasTemp = 0
+			// Consume the gas and return an error if not enough gas is available.
+			// cost is explicitly set so that the capture state defer method can get the proper cost
+			var dynamicCost mdgas.MdGasCost
+			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
+			if err != nil {
+				if !errors.Is(err, ErrOutOfGas) {
+					err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
+				}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
+			}
+			if runTracing {
+				cost = cost.Plus(dynamicCost)
+				callGas = cost
+				callGas.Execution -= evm.CallGasTemp()
+				if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGasCost{}) {
+					gasCost := traceGas(op, callGas, cost)
+					fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
+				}
+			}
+			if callContext.gas < dynamicCost.Execution {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+			}
+			callContext.gas -= dynamicCost.Execution
+			if dynamicCost.State > 0 {
+				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
+				if !ok {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+				}
+			} else if dynamicCost.State < 0 {
+				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+			}
+		}
+
+		// Do gas tracing before memory expansion
+		if runTracing && debug {
+			if tracer.HasGasChangeHook() {
+				tracer.EmitGasChange(oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
+			}
+			if tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)) {
+				tracer.EmitOpcode(pc, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+				logged = true
+			}
+		}
+
+		if memorySize > 0 {
+			callContext.Memory.Resize(memorySize)
+		}
+
+		// TODO - move this to a trace & set in the worker
+
+		if runTracing && trace {
+			var opstr string
+			if operation.string != nil {
+				opstr = operation.string(pc, callContext)
+			} else {
+				opstr = op.String()
+			}
+
+			gasCost := traceGas(op, callGas, cost)
+			fmt.Printf("%d (%d.%d) %5d %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, gasCost.Execution, gasCost.State, opstr)
+		}
+
+		// execute the operation
+		pc, res, err = operation.execute(pc, evm, callContext)
+		gasLeft, top = callContext.gas, stack.top
+		if err != nil {
+			break
+		}
+		pc++
+	}
+	callContext.gas, stack.top = gasLeft, top
+
+	if errors.Is(err, errStopToken) {
+		err = nil // clear stop token error
+	}
+
+	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
+}

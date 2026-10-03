@@ -88,6 +88,12 @@ func (c *Contract) validJumpdest(dest *uint256.Int) bool {
 	return c.analysis.isJumpdest(udest)
 }
 
+// analysedJumpdest is validJumpdest without the lazy analysis, small enough to
+// inline. It reports false while the analysis is missing.
+func (c *Contract) analysedJumpdest(dest *uint256.Int) bool {
+	return c.analysis != nil && dest.IsUint64() && dest.Uint64() < uint64(len(c.Code)) && c.analysis.isJumpdest(dest.Uint64())
+}
+
 // jumpdestAnalysis returns the cached JUMPDEST analysis of the code or computes it.
 func (c *Contract) jumpdestAnalysis() bitvec {
 	var codeHash common.Hash
