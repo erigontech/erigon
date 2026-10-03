@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -406,7 +407,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView)
+	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView, nil)
 	if err != nil {
 		return err
 	}
@@ -534,7 +535,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 	defer p.forgetUnusedSenders(senderIDsOf(p.unprocessedRemoteTxns))
 
-	validateReasons, newTxns, err := p.validateTxns(p.unprocessedRemoteTxns, cacheView)
+	validateReasons, newTxns, err := p.validateTxns(p.unprocessedRemoteTxns, cacheView, p.unprocessedRemotePeers)
 	if err != nil {
 		return err
 	}
@@ -1378,10 +1379,12 @@ func ValidateSerializedTxn(serializedTxn []byte) error {
 
 // validateTxns returns per-slot discard reasons and the txns that passed.
 // For a remote (IsLocal=false) batch, validation short-circuits on the first
-// UnmatchedBlobTxExt: trailing reasons stay NotSet but those txns are not in
-// goodTxns, so callers reading reasons in isolation must also consult goodTxns
-// to distinguish "accepted" from "not validated".
-func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (reasons []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
+// UnmatchedBlobTxExt: trailing txns delivered by the same peer (every trailing
+// remote txn when sources is nil) keep reason NotSet but are not in goodTxns,
+// so callers reading reasons in isolation must also consult goodTxns to
+// distinguish "accepted" from "not validated". sources, when non-nil, is
+// index-aligned with txns.
+func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, sources []remoteSource) (reasons []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
 	// reasons is pre-sized for direct indexing, with the default zero
 	// value DiscardReason of NotSet
 	reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
@@ -1390,9 +1393,25 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (rea
 		return reasons, goodTxns, err
 	}
 
+	skipped := make([]bool, len(txns.Txns))
+	skipAllRemote := false
+	var kzgOffenders [][64]byte
+	isKZGOffender := func(i int) bool {
+		if skipAllRemote {
+			return true
+		}
+		if i >= len(sources) || sources[i].peerID == nil {
+			return false
+		}
+		return slices.Contains(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
+	}
+
 	goodCount := 0
-	checkedCount := len(txns.Txns)
 	for i, txn := range txns.Txns {
+		if !txns.IsLocal[i] && isKZGOffender(i) {
+			skipped[i] = true
+			continue
+		}
 		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache)
 		if err != nil {
 			if reason == txpoolcfg.ErrGetSenderInfo {
@@ -1411,18 +1430,21 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (rea
 			p.punishSpammer(txn.SenderID)
 		}
 		reasons[i] = reason
-		// On first KZG-verify failure in a remote batch, drop the rest without re-verifying.
+		// On a KZG-verify failure in a remote batch, drop the rest from the same peer without re-verifying.
 		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
-			checkedCount = i + 1
-			break
+			if i < len(sources) && sources[i].peerID != nil {
+				kzgOffenders = append(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
+			} else {
+				skipAllRemote = true
+			}
 		}
 	}
 
 	goodTxns.Resize(uint(goodCount))
 
 	j := 0
-	for i := 0; i < checkedCount; i++ {
-		if reasons[i] == txpoolcfg.NotSet {
+	for i := range txns.Txns {
+		if reasons[i] == txpoolcfg.NotSet && !skipped[i] {
 			goodTxns.Txns[j] = txns.Txns[i]
 			goodTxns.IsLocal[j] = txns.IsLocal[i]
 			copy(goodTxns.Senders.At(j), txns.Senders.At(i))
@@ -1488,7 +1510,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 
 	originalTxns := newTxns
 
-	reasons, goodTxns, err := p.validateTxns(&newTxns, cacheView)
+	reasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, nil)
 	if err != nil {
 		return nil, err
 	}

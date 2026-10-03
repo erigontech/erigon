@@ -115,7 +115,7 @@ func TestValidateTxnsBlobKZGShortCircuit(t *testing.T) {
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
-		reasons, goodTxns, err := pool.validateTxns(&slots, cacheView)
+		reasons, goodTxns, err := pool.validateTxns(&slots, cacheView, nil)
 		require.NoError(t, err)
 		return reasons, goodTxns
 	}
@@ -197,4 +197,40 @@ func TestProcessRemoteTxnsKicksKZGOffender(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("PenalizePeer was not called within 5s")
 	}
+}
+
+func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ctrl := gomock.NewController(t)
+
+	attackerPeerID := gointerfaces.ConvertHashToH512([64]byte{0x41})
+	honestPeerID := gointerfaces.ConvertHashToH512([64]byte{0x42})
+
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	sentryServer.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).Return(&emptypb.Empty{}, nil).AnyTimes()
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
+	require.NoError(t, err)
+
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+
+	bad := makeBlobSlot(0x50, true)
+	good := makeBlobSlot(0x51, false)
+	a0, a1 := [20]byte{1}, [20]byte{2}
+
+	var fromAttacker TxnSlots
+	fromAttacker.Append(&bad, a0[:], false)
+	pool.AddRemoteTxns(ctx, fromAttacker, attackerPeerID, sentryClient)
+
+	var fromHonest TxnSlots
+	fromHonest.Append(&good, a1[:], false)
+	pool.AddRemoteTxns(ctx, fromHonest, honestPeerID, sentryClient)
+
+	require.NoError(t, pool.processRemoteTxns(ctx))
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	assert.NotContains(t, pool.byHash, string(bad.IDHash[:]))
+	assert.Contains(t, pool.byHash, string(good.IDHash[:]), "valid txn from another peer must not be dropped")
 }
