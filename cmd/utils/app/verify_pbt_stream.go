@@ -619,7 +619,7 @@ func pbtVerifyAccount(header artifact.Header, root common.Hash, path string) (pb
 	if len(header.CodeSize) > 4 {
 		return pbtVerifyAccountRecord{}, fmt.Errorf("%w: %s: header code size has width %d", errPBTVerifyScratchIO, path, len(header.CodeSize))
 	}
-	if len(header.Balance) > eip8297.BasicDataBalanceOffset {
+	if len(header.Balance) > 16 {
 		return pbtVerifyAccountRecord{}, fmt.Errorf("%w: %s: header balance has width %d", errPBTVerifyScratchIO, path, len(header.Balance))
 	}
 	account := accounts.Account{Nonce: dbstate.PBinIntegerUint64(header.Nonce), Root: root}
@@ -703,6 +703,10 @@ func (it *pbtVerifyMPTIterator) Next() (trie.StreamItem, []byte, *accounts.Accou
 		var record pbtVerifyAccountRecord
 		if err := pbtVerifyDecode(value, &record); err != nil {
 			it.err = fmt.Errorf("%w: %s: %w", errPBTVerifyScratchIO, it.reader.path, err)
+			return trie.NoItem, nil, nil, nil, nil, nil
+		}
+		if len(record.Balance) > 16 {
+			it.err = fmt.Errorf("%w: %s: account balance has width %d", errPBTVerifyScratchIO, it.reader.path, len(record.Balance))
 			return trie.NoItem, nil, nil, nil, nil, nil
 		}
 		account := &accounts.Account{Nonce: record.Nonce, Root: record.Root, CodeHash: accounts.InternCodeHash(record.CodeHash)}

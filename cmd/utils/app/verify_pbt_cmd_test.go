@@ -195,6 +195,22 @@ func TestVerifyPBTAccountRejectsOversizedIntegerFields(t *testing.T) {
 	})
 }
 
+func TestVerifyPBTRejectsOversizedScratchBalance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mpt-account-rows.sorted")
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	w := bufio.NewWriter(f)
+	value, err := pbtVerifyEncode(pbtVerifyAccountRecord{Balance: make([]byte, 17)})
+	require.NoError(t, err)
+	require.NoError(t, pbtVerifyWriteKV(w, bytes.Repeat([]byte{1}, length.Hash), value))
+	require.NoError(t, w.Flush())
+	require.NoError(t, f.Close())
+
+	_, err = pbtVerifyHashMPT(path)
+	require.ErrorIs(t, err, errPBTVerifyScratchIO)
+	require.ErrorContains(t, err, path)
+}
+
 func TestVerifyPBTWrapsMalformedMPTHeadersAsScratchIO(t *testing.T) {
 	scratch := t.TempDir()
 	paths := make([]string, 4)
