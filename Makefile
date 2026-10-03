@@ -638,7 +638,7 @@ jsongen:
 ## evm-interpreter-gen:               regenerate the EVM interpreter loops from vm_run_template.go
 .PHONY: evm-interpreter-gen
 evm-interpreter-gen:
-	go generate -run "go run ./gen" ./execution/vm/
+	go generate -run "go run ./vmgen" ./execution/vm/
 
 ## bindings:                          generate test contracts and core contracts
 bindings:

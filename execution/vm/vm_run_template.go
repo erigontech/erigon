@@ -19,7 +19,7 @@
 
 package vm
 
-//go:generate go run ./gen
+//go:generate go run ./vmgen
 
 import (
 	"errors"
@@ -34,7 +34,7 @@ import (
 // runTracing is set to false in run and to true in runTraced.
 const runTracing = false //nolint:unused // read only by runTemplate
 
-// runTemplate is the source of Run's two loops, which execution/vm/gen writes
+// runTemplate is the source of Run's two loops, which execution/vm/vmgen writes
 // from it: run in vm_run_gen.go, with runTracing false and the fast-path cases,
 // and runTraced in vm_run_traced_gen.go, with runTracing true. Nothing calls it.
 //
@@ -126,7 +126,7 @@ run:
 		// its indirect call. A failed check falls through to the generic path,
 		// which reports the error.
 		if !runTracing {
-			// execution/vm/gen inserts the fastOps switch here.
+			// execution/vm/vmgen inserts the fastOps switch here.
 			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
