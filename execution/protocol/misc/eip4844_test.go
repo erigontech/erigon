@@ -20,9 +20,11 @@
 package misc
 
 import (
+	"math/rand/v2"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFakeExponential(t *testing.T) {
@@ -58,5 +60,18 @@ func TestFakeExponential(t *testing.T) {
 		if tt.want != result.ToBig().Uint64() {
 			t.Errorf("got %v want %v", result, tt.want)
 		}
+	}
+}
+
+func TestFakeExponential64MatchesUint256(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	for range 200_000 {
+		factor := []uint64{0, 1, 2, 1 << 20, rng.Uint64() >> rng.IntN(64)}[rng.IntN(5)]
+		denom := []uint64{1, 3338477, 5007716, 8346193, rng.Uint64() >> rng.IntN(64)}[rng.IntN(5)]
+		excess := rng.Uint64() >> rng.IntN(64)
+		want, wantErr := fakeExponential256(uint256.NewInt(factor), uint256.NewInt(denom), excess)
+		got, gotErr := FakeExponential(uint256.NewInt(factor), uint256.NewInt(denom), excess)
+		require.Equal(t, wantErr, gotErr, "factor=%d denom=%d excess=%d", factor, denom, excess)
+		require.Equal(t, want, got, "factor=%d denom=%d excess=%d", factor, denom, excess)
 	}
 }
