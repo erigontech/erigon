@@ -9,6 +9,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/spf13/afero"
@@ -115,8 +116,14 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 	return firstErr
 }
 
+// WriteStream re-encodes the stored sidecar instead of copying the file, so peers get the canonical encoding even for a
+// sidecar stored in a non-canonical layout, such as an inclusion proof longer than KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH.
 func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
-	return s.stream(w, slot, blockRoot, idx)
+	sidecar, err := s.ReadColumnSidecarByColumnIndex(context.Background(), slot, blockRoot, int64(idx))
+	if err != nil {
+		return err
+	}
+	return ssz_snappy.EncodeAndWrite(w, sidecar)
 }
 
 // GetSavedColumnIndex returns the list of saved column indices for the given slot and block root.
