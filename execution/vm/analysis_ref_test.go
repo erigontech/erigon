@@ -17,28 +17,26 @@
 package vm
 
 import (
+	"bytes"
+	"maps"
 	"math/rand"
 	"testing"
 )
 
-// codeBitmapRef is the straightforward byte-at-a-time reference that the SWAR
-// codeBitmap must match exactly.
+// codeBitmapRef is the straightforward byte-at-a-time reference that all
+// codeBitmap implementations must match exactly.
 func codeBitmapRef(code []byte) bitvec {
-	bits := make(bitvec, (len(code)+32+63)/64)
+	bits := make(bitvec, (len(code)+63)/64)
 	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])
+		if op == JUMPDEST {
+			bits[pc/64] |= 1 << (pc % 64)
+		}
 		pc++
 		if int8(op) < int8(PUSH1) {
 			continue
 		}
-		if op == PUSH1 {
-			bits.set1(pc)
-			pc++
-			continue
-		}
-		numbits := uint64(op - PUSH1 + 1)
-		bits.setN(uint64(1)<<numbits-1, pc)
-		pc += numbits
+		pc += uint64(op - PUSH1 + 1)
 	}
 	return bits
 }
@@ -55,15 +53,23 @@ func equalBitvec(a, b bitvec) bool {
 	return true
 }
 
-// TestCodeBitmapSWAREquivalence fuzzes codeBitmap against the reference across
+func codeBitmapImpls() map[string]func([]byte) bitvec {
+	impls := map[string]func([]byte) bitvec{"generic": codeBitmapGeneric}
+	maps.Copy(impls, simdImpls())
+	return impls
+}
+
+// TestCodeBitmapEquivalence fuzzes the codeBitmap implementations against the reference across
 // jumpdest-heavy, push-dense and fully-random code, plus boundary edge cases.
-func TestCodeBitmapSWAREquivalence(t *testing.T) {
+func TestCodeBitmapEquivalence(t *testing.T) {
+	impls := codeBitmapImpls()
+	impls["dispatched"] = codeBitmap
 	r := rand.New(rand.NewSource(1))
 	gen := func(n, mode int) []byte {
 		c := make([]byte, n)
 		for i := range c {
 			switch mode {
-			case 0: // jumpdest-heavy (the unique-code adversarial shape)
+			case 0: // jumpdest-heavy
 				if r.Intn(20) == 0 {
 					c[i] = byte(0x60 + r.Intn(32))
 				} else {
@@ -83,22 +89,26 @@ func TestCodeBitmapSWAREquivalence(t *testing.T) {
 	}
 	for iter := range 20000 {
 		code := gen(r.Intn(260), iter%3)
-		if !equalBitvec(codeBitmap(code), codeBitmapRef(code)) {
-			t.Fatalf("mismatch (len=%d) code=%x", len(code), code)
+		for name, impl := range impls {
+			if !equalBitvec(impl(code), codeBitmapRef(code)) {
+				t.Fatalf("%s: mismatch (len=%d) code=%x", name, len(code), code)
+			}
 		}
 	}
 	edges := [][]byte{{}, {0x5b}, {0x60}, {0x7f}, {0x00}}
 	for n := range 48 {
 		edges = append(
 			edges,
-			append([]byte{0x7f}, make([]byte, n)...), // PUSH32 + n bytes
-			append([]byte{0x5b, 0x7f}, make([]byte, n)...), // JUMPDEST, PUSH32, ...
-			append(make([]byte, n), 0x7f),                  // trailing PUSH32
+			append([]byte{0x7f}, bytes.Repeat([]byte{0x5b}, n)...),       // PUSH32 + n bytes
+			append([]byte{0x5b, 0x7f}, bytes.Repeat([]byte{0x5b}, n)...), // JUMPDEST, PUSH32, ...
+			append(bytes.Repeat([]byte{0x5b}, n), 0x7f),                  // trailing PUSH32
 		)
 	}
 	for _, code := range edges {
-		if !equalBitvec(codeBitmap(code), codeBitmapRef(code)) {
-			t.Fatalf("edge mismatch code=%x", code)
+		for name, impl := range impls {
+			if !equalBitvec(impl(code), codeBitmapRef(code)) {
+				t.Fatalf("%s: edge mismatch code=%x", name, code)
+			}
 		}
 	}
 }
