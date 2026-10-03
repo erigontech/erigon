@@ -46,7 +46,7 @@ type keccakBucket struct {
 
 var (
 	keccakCacheSeed    = maphash.MakeSeed()
-	keccakCacheBuckets = new([1 << 17]keccakBucket)
+	keccakCacheBuckets = new([1 << 18]keccakBucket)
 )
 
 // Keccak256Hash calc Keccak256. Short inputs are memoized in a direct-mapped table; a bucket
