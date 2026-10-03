@@ -26,23 +26,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type legacyV2BenchmarkCase struct {
+type legacyTrieBenchmarkCase struct {
 	name string
 	opts whaleOpts
 }
 
-func legacyV2BenchmarkCases() []legacyV2BenchmarkCase {
-	return []legacyV2BenchmarkCase{
+func legacyTrieBenchmarkCases() []legacyTrieBenchmarkCase {
+	return []legacyTrieBenchmarkCase{
 		{"100K", bigAccountWhale(100_000)},
 		{"1M", whale1M()},
 	}
 }
 
-func Benchmark_LegacyV2_vs_HexCorpus(b *testing.B) {
-	for _, c := range legacyV2BenchmarkCases() {
+func Benchmark_LegacyTrie_vs_HexCorpus(b *testing.B) {
+	for _, c := range legacyTrieBenchmarkCases() {
 		pk, upds := buildWhaleCorpus(c.opts)
 		b.Run(c.name, func(b *testing.B) {
-			b.Run("LegacyV2", func(b *testing.B) {
+			b.Run("LegacyTrie", func(b *testing.B) {
 				b.ReportAllocs()
 				for b.Loop() {
 					_ = buildLegacyTrie(pk, upds).Hash()
@@ -120,8 +120,8 @@ func Benchmark_LegacyV2_vs_HexCorpus(b *testing.B) {
 	}
 }
 
-func Benchmark_LegacyV2_ResidentMemory(b *testing.B) {
-	for _, c := range legacyV2BenchmarkCases() {
+func Benchmark_LegacyTrie_ResidentMemory(b *testing.B) {
+	for _, c := range legacyTrieBenchmarkCases() {
 		pk, upds := buildWhaleCorpus(c.opts)
 		b.Run(c.name, func(b *testing.B) {
 			var before, after runtime.MemStats
@@ -138,12 +138,12 @@ func Benchmark_LegacyV2_ResidentMemory(b *testing.B) {
 	}
 }
 
-func Benchmark_LegacyV2_vs_HexDelta(b *testing.B) {
-	for _, c := range legacyV2BenchmarkCases() {
+func Benchmark_LegacyTrie_vs_HexDelta(b *testing.B) {
+	for _, c := range legacyTrieBenchmarkCases() {
 		pk, upds := buildWhaleCorpus(c.opts)
 		dk, du := buildDelta(pk, upds, 500, 4242)
 		b.Run(fmt.Sprintf("%s/delta%d", c.name, len(dk)), func(b *testing.B) {
-			b.Run("LegacyV2", func(b *testing.B) {
+			b.Run("LegacyTrie", func(b *testing.B) {
 				tr := buildLegacyTrie(pk, upds)
 				tr.Hash()
 				b.ReportAllocs()

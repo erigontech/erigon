@@ -277,6 +277,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	}()
 	stampWriter := bufio.NewWriter(stampFile)
 	var stampReader *bufio.Reader
+	var stampBytes [8]byte
 	var (
 		overlay *pbinRangeWriterOverlay
 		root    []byte
@@ -301,7 +302,6 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	visit := func(batch []pbt.Op, nextKey []byte, final bool) error {
 		seen = true
 		for _, op := range batch {
-			var stampBytes [8]byte
 			if _, readErr := io.ReadFull(stampReader, stampBytes[:]); readErr != nil {
 				return readErr
 			}

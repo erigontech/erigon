@@ -173,6 +173,26 @@ func TestVerifyPBTAccountRejectsOversizedIntegerFields(t *testing.T) {
 		require.ErrorIs(t, err, errPBTVerifyScratchIO)
 		require.ErrorContains(t, err, path)
 	})
+	t.Run("balance", func(t *testing.T) {
+		var record pbtVerifyAccountRecord
+		var err error
+		require.NotPanics(t, func() {
+			record, err = pbtVerifyAccount(artifact.Header{Balance: make([]byte, 17)}, common.Hash{}, path)
+		})
+		require.Empty(t, record)
+		require.ErrorIs(t, err, errPBTVerifyScratchIO)
+		require.ErrorContains(t, err, path)
+	})
+	t.Run("account kind", func(t *testing.T) {
+		var record pbtVerifyAccountRecord
+		var err error
+		require.NotPanics(t, func() {
+			record, err = pbtVerifyAccount(artifact.Header{Kind: 3}, common.Hash{}, path)
+		})
+		require.Empty(t, record)
+		require.ErrorIs(t, err, errPBTVerifyScratchIO)
+		require.ErrorContains(t, err, path)
+	})
 }
 
 func TestVerifyPBTWrapsMalformedMPTHeadersAsScratchIO(t *testing.T) {

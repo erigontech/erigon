@@ -518,6 +518,8 @@ func TestCommitmentCalculatorBALHexOnlySkipsBinaryFeed(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, result.canonicalRoot)
 	require.Nil(t, result.shadowRoot)
+	require.Contains(t, logs.String(), "msg=\"[commitment] processed\"")
+	require.Contains(t, logs.String(), "keys=3")
 
 	reference, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithHexCommitmentOnly())
 	require.NoError(t, err)
@@ -530,9 +532,6 @@ func TestCommitmentCalculatorBALHexOnlySkipsBinaryFeed(t *testing.T) {
 	want, err := reference.ComputeCommitment(t.Context(), tx, false, 1, 1, "test", nil)
 	require.NoError(t, err)
 	require.Equal(t, want, result.canonicalRoot)
-
-	require.Contains(t, logs.String(), "msg=\"[commitment] processed\"")
-	require.Contains(t, logs.String(), "keys=3")
 }
 
 func TestCommitmentCalculatorBALDualFoldWithCode(t *testing.T) {

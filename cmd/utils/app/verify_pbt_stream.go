@@ -619,6 +619,9 @@ func pbtVerifyAccount(header artifact.Header, root common.Hash, path string) (pb
 	if len(header.CodeSize) > 4 {
 		return pbtVerifyAccountRecord{}, fmt.Errorf("%w: %s: header code size has width %d", errPBTVerifyScratchIO, path, len(header.CodeSize))
 	}
+	if len(header.Balance) > eip8297.BasicDataBalanceOffset {
+		return pbtVerifyAccountRecord{}, fmt.Errorf("%w: %s: header balance has width %d", errPBTVerifyScratchIO, path, len(header.Balance))
+	}
 	account := accounts.Account{Nonce: dbstate.PBinIntegerUint64(header.Nonce), Root: root}
 	account.Balance.SetBytes(header.Balance)
 	switch header.Kind {
@@ -630,7 +633,7 @@ func pbtVerifyAccount(header artifact.Header, root common.Hash, path string) (pb
 		code := append(append([]byte{}, eip8297.DelegationMarker[:]...), header.Target[:]...)
 		account.CodeHash = accounts.InternCodeHash(common.BytesToHash(crypto.Keccak256(code)))
 	default:
-		return pbtVerifyAccountRecord{}, fmt.Errorf("unknown account kind %d", header.Kind)
+		return pbtVerifyAccountRecord{}, fmt.Errorf("%w: %s: unknown account kind %d", errPBTVerifyScratchIO, path, header.Kind)
 	}
 	return pbtVerifyAccountRecord{Nonce: account.Nonce, Balance: account.Balance.Bytes(), Root: account.Root, CodeHash: account.CodeHash.Value()}, nil
 }
