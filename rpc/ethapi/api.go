@@ -133,9 +133,8 @@ func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
 }
 
 var callArgsJSONNames = func() (names []string) {
-	t := reflect.TypeFor[CallArgs]()
-	for i := range t.NumField() {
-		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+	for f := range reflect.TypeFor[CallArgs]().Fields() {
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 		names = append(names, name)
 	}
 	return names
