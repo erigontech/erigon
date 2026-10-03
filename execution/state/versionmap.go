@@ -1617,7 +1617,8 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, inner := range rs.storage {
-		for k, tr := range inner {
+		for i, k := range inner.keys {
+			tr := &inner.vals[i]
 			if !ok(validateRead(vm, txIdx, a, StoragePath, k, tr.Source, tr.Version, tr.Val, liveStorage, eqUint256, absentUint256, nil, checkVersion, traceInvalid, tracePrefix)) {
 				return
 			}
