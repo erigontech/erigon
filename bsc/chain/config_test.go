@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -42,23 +43,40 @@ func TestChapelForkPrecompiles(t *testing.T) {
 	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
 	require.NoError(t, err)
 
-	blsVerify := accounts.InternAddress(common.BytesToAddress([]byte{102}))
-	cometBFT := accounts.InternAddress(common.BytesToAddress([]byte{103}))
+	addr := func(b ...byte) accounts.Address { return accounts.InternAddress(common.BytesToAddress(b)) }
+	blsVerify, cometBFT, doubleSign, secp256k1Recover := addr(102), addr(103), addr(104), addr(105)
+	pointEvaluation, p256Verify := addr(0x0a), addr(0x01, 0x00)
 
 	for _, tc := range []struct {
-		name     string
-		block    uint64
-		bls      bool
-		cometBFT string
+		name       string
+		block      uint64
+		time       uint64
+		bls        bool
+		cometBFT   string
+		doubleSign bool
+		cancun     bool
+		haber      bool
 	}{
-		{"planck", 28196022, false, ""},
-		{"luban", 29613785, true, "CometBFTLightBlockValidate"},
-		{"plato", 29861024, true, "CometBFTLightBlockValidate"},
-		{"hertz", 31103030, true, "CometBFTLightBlockValidateHertz"},
+		{"planck", 28196022, 1679276104, false, "", false, false, false},
+		{"luban", 29613785, 1683534184, true, "CometBFTLightBlockValidate", false, false, false},
+		{"plato", 29861024, 1684276126, true, "CometBFTLightBlockValidate", false, false, false},
+		{"hertz", 31103030, 1688004519, true, "CometBFTLightBlockValidateHertz", false, false, false},
+		{"feynman", 39000000, 1711712272, true, "CometBFTLightBlockValidateHertz", true, false, false},
+		{"cancun", 40000000, 1714713485, true, "CometBFTLightBlockValidateHertz", true, true, false},
+		{"haber", 42000000, 1720719209, true, "CometBFTLightBlockValidateHertz", true, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			blockContext := evmtypes.BlockContext{BlockNumber: tc.block}
+			blockContext := evmtypes.BlockContext{BlockNumber: tc.block, Time: tc.time}
 			set := vm.Precompiles(blockContext.Rules(spec.Config))
+			assert.Equal(t, tc.doubleSign, set[doubleSign] != nil)
+			assert.Equal(t, tc.doubleSign, set[secp256k1Recover] != nil)
+			assert.Equal(t, tc.cancun, set[pointEvaluation] != nil)
+			if tc.haber {
+				require.Contains(t, set, p256Verify)
+				assert.Equal(t, params.P256VerifyGas, set[p256Verify].RequiredGas(nil))
+			} else {
+				assert.NotContains(t, set, p256Verify)
+			}
 			if !tc.bls {
 				require.NotContains(t, set, blsVerify)
 				return

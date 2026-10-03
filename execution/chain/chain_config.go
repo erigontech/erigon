@@ -466,6 +466,14 @@ func (c *Config) IsLuban(num uint64) bool  { return isForked(c.LubanBlock, num) 
 func (c *Config) IsPlato(num uint64) bool  { return isForked(c.PlatoBlock, num) }
 func (c *Config) IsHertz(num uint64) bool  { return isForked(c.HertzBlock, num) }
 
+func (c *Config) IsFeynman(num, time uint64) bool {
+	return c.IsLondon(num) && isForked(c.FeynmanTime, time)
+}
+
+func (c *Config) IsHaber(num, time uint64) bool {
+	return c.IsLondon(num) && isForked(c.HaberTime, time)
+}
+
 func (c *Config) GetBurntContract(num uint64) accounts.Address {
 	if len(c.BurntContract) == 0 {
 		return accounts.NilAddress
@@ -879,7 +887,7 @@ type Rules struct {
 	DisabledEIPs                                      []int
 	IsAura                                            bool
 	IsParlia, IsNano, IsMoran, IsPlanck               bool
-	IsLuban, IsPlato, IsHertz                         bool
+	IsLuban, IsPlato, IsHertz, IsFeynman, IsHaber     bool
 
 	// L2Version is the L2 stack's own upgrade version (e.g. an ArbOS-style
 	// version ladder), resolved per block by the chain's L2Config oracle.
