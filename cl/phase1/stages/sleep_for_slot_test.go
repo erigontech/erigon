@@ -111,7 +111,7 @@ func TestSleepForSlotGloasHeadChangeWakesEarlyAndTransitionsToForkChoice(t *test
 
 	require.NoError(t, err)
 	require.True(t, headChanged)
-	require.Equal(t, sleepForSlotWake{root: forkChoiceHead, slot: 10}, wake)
+	require.Equal(t, forkChoiceHead, wake.root)
 	require.Less(t, time.Since(started), 250*time.Millisecond)
 	require.Equal(t, 1, calls)
 	require.Empty(t, retryMinSlots, "a pending head change is materialized before envelope retries")
@@ -199,7 +199,25 @@ func TestSleepForSlotPreGloasHeadChangeWaitsAndTransitionsToChainTipSync(t *test
 	require.Equal(t, ChainTipSync, sleepForSlotNextStage(t.Context(), headChanged, readySleepForSlotArgs()))
 }
 
-func TestSleepForSlotDoesNotWakeTwiceForSameHeadInSlot(t *testing.T) {
+func TestSleepForSlotRewakesForSameHeadAfterInterval(t *testing.T) {
+	materializedHead := common.Hash{1}
+	forkChoiceHead := common.Hash{2}
+	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(500 * time.Millisecond)}
+
+	// The earlier wake did not materialize the head (ForkChoice failed, or the head moved away and back).
+	_, headChanged, err := waitForNextSlotOrHeadChange(
+		t.Context(), 11, sleepForSlotConfig(10),
+		sleepForSlotForkChoiceFake{head: forkChoiceHead},
+		sleepForSlotSyncedDataFake{head: materializedHead},
+		clock,
+		sleepForSlotWake{root: forkChoiceHead, at: time.Now().Add(-sleepForSlotRewakeInterval)},
+	)
+
+	require.NoError(t, err)
+	require.True(t, headChanged)
+}
+
+func TestSleepForSlotDoesNotWakeTwiceForSameHeadWithinRewakeInterval(t *testing.T) {
 	materializedHead := common.Hash{1}
 	forkChoiceHead := common.Hash{2}
 	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(500 * time.Millisecond)}

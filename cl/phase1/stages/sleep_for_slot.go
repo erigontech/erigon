@@ -45,8 +45,12 @@ type sleepForSlotClock interface {
 
 type sleepForSlotWake struct {
 	root common.Hash
-	slot uint64
+	at   time.Time
 }
+
+// A head that the ForkChoice stage did not materialize (it failed, or the head moved away and back) may wake the
+// stage again after this long; a persistent failure then costs one stage pass per interval, not one per poll.
+const sleepForSlotRewakeInterval = time.Second
 
 func waitForNextSlotOrHeadChange(
 	ctx context.Context,
@@ -96,8 +100,8 @@ func waitForNextSlotOrHeadChange(
 			if err != nil {
 				continue
 			}
-			if head != syncedData.HeadRoot() && (head != lastWake.root || currentSlot != lastWake.slot) {
-				return sleepForSlotWake{root: head, slot: currentSlot}, true, nil
+			if head != syncedData.HeadRoot() && (head != lastWake.root || time.Since(lastWake.at) >= sleepForSlotRewakeInterval) {
+				return sleepForSlotWake{root: head, at: time.Now()}, true, nil
 			}
 			// The head's envelope decides whether the next proposer builds on a full or empty parent.
 			minRetrySlot := headSlot
