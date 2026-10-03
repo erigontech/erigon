@@ -99,6 +99,9 @@ const (
 const (
 	minPayloadPollingWindow     = 100 * time.Millisecond
 	builderHandoffRetryInterval = 500 * time.Millisecond
+	// A published block is normally stored within one block service tick (50 ms) plus OnBlock; the bound only caps
+	// how long a stalled store can delay the block's data columns.
+	publishedBlockStoreWaitBeforeColumns = time.Second
 )
 
 // Polling for the assembled payload stops attestationDeadline/payloadPublicationDivisor before the
@@ -2878,6 +2881,13 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 	}
 
 	if blk.Version() >= clparams.FuluVersion && len(columnsSidecars) > 0 {
+		// A Gloas column carries only the block root, so a peer that receives it before the block requests the block
+		// from us, and penalizes us if we cannot serve it yet.
+		if blk.Version() >= clparams.GloasVersion && job != nil {
+			storeCtx, cancel := context.WithTimeout(ctx, publishedBlockStoreWaitBeforeColumns)
+			_ = job.Wait(storeCtx) // a failed or slow store must not hold back the columns of an already gossiped block
+			cancel()
+		}
 		for _, column := range columnsSidecars {
 			columnSSZ, err := column.EncodeSSZ(nil)
 			if err != nil {
