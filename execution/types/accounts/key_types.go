@@ -18,6 +18,8 @@ package accounts
 
 import (
 	"fmt"
+	"hash/maphash"
+	"sync/atomic"
 	"unique"
 
 	"github.com/erigontech/erigon/common"
@@ -120,8 +122,48 @@ var (
 	NilKey  = StorageKey{}
 )
 
+const (
+	keyBucketLocked = 1 << 0
+	keyBucketAlive  = 1 << 1
+)
+
+// keyBucket uses the keccak memo locking scheme: tag is a pre-filter and a lock.
+type keyBucket struct {
+	tag atomic.Uint64
+	k   common.Hash
+	h   StorageKey
+}
+
+var (
+	keyCacheSeed    = maphash.MakeSeed()
+	keyCacheBuckets = new([1 << 17]keyBucket)
+)
+
+// InternKey memoizes unique.Make in a direct-mapped table; a bucket another goroutine holds is a miss.
+// A key's first sighting records it without its handle: a retained handle pins the unique entry and
+// its runtime specials, which makes every later unique.Make slower when keys never repeat.
 func InternKey(k common.Hash) StorageKey {
-	return StorageKey(unique.Make(k))
+	key := maphash.Comparable(keyCacheSeed, k)
+	b := &keyCacheBuckets[key&(uint64(len(keyCacheBuckets))-1)]
+	tag := (key | keyBucketAlive) &^ keyBucketLocked
+	seen := false
+	if st := b.tag.Load(); st == tag && b.tag.CompareAndSwap(st, st|keyBucketLocked) {
+		seen = b.k == k
+		h := b.h
+		b.tag.Store(st)
+		if seen && h != NilKey {
+			return h
+		}
+	}
+	h := StorageKey(unique.Make(k))
+	if st := b.tag.Load(); st&keyBucketLocked == 0 && b.tag.CompareAndSwap(st, st|keyBucketLocked) {
+		b.k, b.h = k, NilKey
+		if seen {
+			b.h = h
+		}
+		b.tag.Store(tag)
+	}
+	return h
 }
 
 func (k StorageKey) IsNil() bool {
