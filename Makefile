@@ -628,16 +628,16 @@ versions-gen:
 	PATH="$(GOBIN):$(PATH)" go generate -run "bumper" ./db/state/statecfg/
 
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql grpc stringer versions-gen jsongen rungen
+gen: mocks solc abigen gencodec graphql grpc stringer versions-gen jsongen evm-interpreter-gen
 
 ## jsongen:                           regenerate the fast-JSON encoders from struct tags
 .PHONY: jsongen
 jsongen:
 	go generate -run "jsongen" ./...
 
-## rungen:                            regenerate the traced EVM loop from execution/vm/run.go
-.PHONY: rungen
-rungen:
+## evm-interpreter-gen:               regenerate the EVM interpreter fast-path cases and traced loop
+.PHONY: evm-interpreter-gen
+evm-interpreter-gen:
 	go generate -run "go run ./gen" ./execution/vm/
 
 ## bindings:                          generate test contracts and core contracts
