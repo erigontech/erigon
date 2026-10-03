@@ -135,14 +135,6 @@ func ParseBootstrapNodes(values []string) (discoveryNodes, directPeers, unsuppor
 	return discoveryNodes, directPeers, unsupportedPeers, nil
 }
 
-func ConvertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
-	multiAddrs, err := convertToMultiAddrs(node)
-	if err != nil {
-		return nil, err
-	}
-	return multiAddrs[0], nil
-}
-
 func convertToMultiAddrs(node *enode.Node) ([]multiaddr.Multiaddr, error) {
 	pubkey := node.Pubkey()
 	assertedKey, err := ConvertToInterfacePubkey(pubkey)

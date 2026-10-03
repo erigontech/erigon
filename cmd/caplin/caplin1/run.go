@@ -360,7 +360,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	epbsPool := pool.NewEpbsPool()
 	pool := pool.NewOperationsPool(beaconConfig)
-	attestationProducer := attestation_producer.New(ctx, beaconConfig)
+	attestationProducer := attestation_producer.New(beaconConfig)
 
 	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
 	if err := dir.RemoveAll(caplinFcuPath); err != nil {
@@ -497,7 +497,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
-	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
+	blobService := services.NewBlobSidecarService(beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
 	dataColumnSidecarService := services.NewDataColumnSidecarService(ctx, beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
@@ -688,7 +688,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		attestationProducer,
 		peerDas,
 	)
-	sync := stages.ConsensusClStages(ctx, stageCfg)
+	sync := stages.ConsensusClStages()
 
 	logger.Info("[Caplin] starting clstages loop")
 	err = sync.StartWithStage(ctx, "DownloadHistoricalBlocks", logger, stageCfg)

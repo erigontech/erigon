@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/snappypool"
@@ -147,7 +146,6 @@ func setupBlocksByHeadTest(
 		store,
 		indiciesDB,
 		host,
-		peers.NewPool(host),
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,

@@ -106,7 +106,7 @@ func getEthClock(t *testing.T) eth_clock.EthereumClock {
 func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState, reader *antiquarytests.MockBlockReader) {
 	blocks, preState, postState = antiquarytests.GetPhase0Random()
 	db = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	reader = antiquarytests.LoadChain(blocks, postState, db, t)
+	reader = antiquarytests.LoadChain(blocks, db, t)
 
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	noErr(sn.OnHeadState(postState))

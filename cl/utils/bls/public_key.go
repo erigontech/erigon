@@ -14,9 +14,6 @@ const publicKeyLength = 48
 type PublicKey *blst.P1Affine
 
 // NewPublicKey makes new empty Public Key.
-func NewPublicKey() PublicKey {
-	return new(blst.P1Affine)
-}
 
 func CompressPublicKey(p PublicKey) []byte {
 	return (*blst.P1Affine)(p).Compress()

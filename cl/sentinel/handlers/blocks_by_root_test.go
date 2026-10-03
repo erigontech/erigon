@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/snappypool"
@@ -60,7 +59,6 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -73,7 +71,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
 	var blockRoots []common.Hash
-	blockRoots, _, _ = beacon_indicies.ReadBeaconBlockRootsInSlotRange(ctx, tx, startSlot, startSlot+count)
+	blockRoots, _, _ = beacon_indicies.ReadBeaconBlockRootsInSlotRange(tx, startSlot, startSlot+count)
 	require.NoError(t, tx.Commit())
 
 	ethClock := getEthClock(t)
@@ -83,7 +81,6 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,

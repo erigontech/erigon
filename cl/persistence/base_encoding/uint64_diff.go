@@ -250,7 +250,7 @@ func ComputeCompressedSerializedValidatorSetListDiff(w io.Writer, oldVal, newVal
 	return nil
 }
 
-func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, reverse bool) ([]byte, error) {
+func ApplyCompressedSerializedValidatorListDiff(in, out, diff []byte) ([]byte, error) {
 	out = out[:0]
 	if cap(out) < len(in) {
 		out = make([]byte, len(in))
