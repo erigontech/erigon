@@ -984,6 +984,80 @@ func flushCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr
 	return putCell(vm, cells, addr, path, version.TxIndex, version.Incarnation, flag, value, valStatus, getCell)
 }
 
+// cellNoOp reports whether flushing (value, flag, valStatus) at txIdx would leave the cell
+// unchanged — flushCell would take its no-bump branch and the in-place flag/valStatus update
+// would itself be a no-op. Caller holds the entry's read lock. Mirrors flushCell so skipping
+// the flush is behavior-identical to performing it.
+func cellNoOp[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag statusFlag, value T, valStatus valueStatus, eq func(a, b T) bool) bool {
+	if cells == nil {
+		return false
+	}
+	ci, ok := cells.Get(txIdx)
+	if !ok || !eq(ci.Value, value) || ci.valStatus != valStatus {
+		return false
+	}
+	return ci.flag == flag || (ci.flag == FlagDone && flag == FlagEstimate)
+}
+
+// flushAllNoOp reports whether every write this tx made to addr is already present, so the
+// per-tx flush can be skipped without taking the write lock (and thus without parking the
+// concurrent readers on a hot pre-seeded account). A net-zero storage write (ValueUnchanged)
+// is omitted from the BAL and folded away by StoragesChanged, so it is never materialized and
+// counts as already-present. Lifecycle transitions and the putCell-only paths (which never
+// no-bump) force the slow path. Caller holds e's read lock; only used on the BAL fast path.
+func flushAllNoOp(e *AddressEntry, writes *WriteSet, addr accounts.Address, flag statusFlag) bool {
+	if _, ok := writes.selfDestruct[addr]; ok {
+		return false
+	}
+	if _, ok := writes.incarnation[addr]; ok {
+		return false
+	}
+	if _, ok := writes.code[addr]; ok {
+		return false
+	}
+	if _, ok := writes.codeSize[addr]; ok {
+		return false
+	}
+	if _, ok := writes.createContract[addr]; ok {
+		return false
+	}
+	if vw, ok := writes.address[addr]; ok {
+		if !cellNoOp(e.Address, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqAccount) {
+			return false
+		}
+	}
+	if vw, ok := writes.balance[addr]; ok {
+		if !cellNoOp(e.Balance, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqUint256) {
+			return false
+		}
+	}
+	if vw, ok := writes.nonce[addr]; ok {
+		if !cellNoOp(e.Nonce, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqUint64) {
+			return false
+		}
+	}
+	if vw, ok := writes.codeHash[addr]; ok {
+		if !cellNoOp(e.CodeHash, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqCodeHash) {
+			return false
+		}
+	}
+	if inner, ok := writes.storage[addr]; ok {
+		for key, vw := range inner {
+			if vw.valStatus == ValueUnchanged {
+				continue
+			}
+			var cells *btree.Map[int, *WriteCell[uint256.Int]]
+			if e.Storage != nil {
+				cells = e.Storage[key]
+			}
+			if !cellNoOp(cells, vw.Version.TxIndex, flag, vw.Val, vw.valStatus, eqUint256) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // FlushVersionedWrites routes a tx's typed write collections into the version map. Each
 // cell is positioned by the write's (txIndex, incarnation), so the loop order is irrelevant.
 func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string) {
@@ -1000,6 +1074,20 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 			return
 		}
 		seen[addr] = struct{}{}
+		// Check-under-RLock: on a BAL block the cells are pre-seeded, so a tx's writes are
+		// usually already present. Verify that under the read lock and skip the write lock
+		// entirely when nothing changes, so a flush never parks the concurrent readers on a
+		// hot account. Promotes to the write lock below only when a cell actually changes.
+		if vm.HasBAL && !complete {
+			if e := vm.load(addr); e != nil {
+				e.mu.RLock()
+				noop := flushAllNoOp(e, writes, addr, flag)
+				e.mu.RUnlock()
+				if noop {
+					return
+				}
+			}
+		}
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
 		// A lifecycle transition (self-destruct/create/incarnation) on this account this tx
@@ -1041,6 +1129,12 @@ func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, trac
 				e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 			}
 			for key, vw := range inner {
+				// On a BAL block a net-zero write is omitted from the BAL and folded away by
+				// StoragesChanged, so it is never materialized here (nor sealed below). A reader
+				// resolves the floor, which already holds this unchanged value.
+				if vm.HasBAL && vw.valStatus == ValueUnchanged {
+					continue
+				}
 				e.Storage[key] = flushCell(vm, e.Storage[key], addr, StoragePath, vw.Version, flag, vw.Val, vw.valStatus, getCellStorage, eqUint256, complete, hasLifecycle)
 			}
 		}
@@ -1096,6 +1190,11 @@ func (vm *VersionMap) MarkWritesComplete(writes *WriteSet) {
 		}
 		if inner, ok := writes.storage[addr]; ok {
 			for key, vw := range inner {
+				// Net-zero writes are never materialized on a BAL block (see FlushVersionedWrites),
+				// so there is no cell to complete.
+				if vm.HasBAL && vw.valStatus == ValueUnchanged {
+					continue
+				}
 				markCellComplete(e.Storage[key], addr, StoragePath, key, vw.Version.TxIndex, vw.Version.Incarnation, vw.Val)
 			}
 		}
@@ -1156,6 +1255,11 @@ func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, feeEstimate func(acc
 		}
 		if inner, ok := writes.storage[addr]; ok {
 			for key, vw := range inner {
+				// Net-zero writes are never materialized on a BAL block (see FlushVersionedWrites),
+				// so there is no cell to validate.
+				if vm.HasBAL && vw.valStatus == ValueUnchanged {
+					continue
+				}
 				mark(StoragePath, key, vw.Version)
 			}
 		}
