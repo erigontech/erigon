@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -735,39 +736,60 @@ func TestGasRefundWithCalldataFloor(t *testing.T) {
 	}
 }
 
-func TestGasChangeTxFloorWithoutGasCap(t *testing.T) {
+// TestEIP8037IntrinsicGasCapWithoutCheckGas verifies that the EIP-8037 cap on
+// max(intrinsic gas, calldata floor) also applies to messages that skip the gas
+// limit caps (CheckGas false, as in eth_call and eth_estimateGas).
+func TestEIP8037IntrinsicGasCapWithoutCheckGas(t *testing.T) {
+	t.Parallel()
 	const gasLimit = 30_000_000
-	sender := accounts.InternAddress(common.HexToAddress("0x1000"))
-	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Close()
-	require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(gasLimit), tracing.BalanceChangeUnspecified))
-	require.NoError(t, ibs.SetCode(recipient, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
-	var changes []gasChange
-	evm := gasTracingEVM(ibs, chain.AllProtocolChanges, &changes)
-	msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), gasLimit,
-		uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1), bytes.Repeat([]byte{1}, 300_000),
-		nil, false, false, false, false, nil)
-	executor := NewTxnExecutor(evm, msg, NewGasPool(gasLimit, 0))
-	intrinsic, overflow := executor.calcIntrinsicGas(false, nil, nil)
-	require.False(t, overflow)
-	require.Less(t, intrinsic.ExecutionGas, params.MaxTxnGasLimit)
-	require.Greater(t, intrinsic.FloorGasCost, params.MaxTxnGasLimit)
-	require.Less(t, intrinsic.FloorGasCost, uint64(gasLimit))
+	accessList := func(n int) types.AccessList {
+		al := make(types.AccessList, n)
+		for i := range al {
+			al[i].Address = common.BigToAddress(big.NewInt(int64(0xAA000000 + i)))
+		}
+		return al
+	}
+	for _, test := range []struct {
+		name       string
+		data       []byte
+		accessList types.AccessList
+		wantErr    bool
+	}{
+		// EIP-7981: 4,010 addresses take the intrinsic gas to 16,776,800, one more to 16,780,980.
+		{name: "access list at cap", accessList: accessList(4010)},
+		{name: "access list above cap", accessList: accessList(4011), wantErr: true},
+		// EIP-7976: 300,000 calldata bytes take the floor to 19,215,000.
+		{name: "calldata floor above cap", data: bytes.Repeat([]byte{1}, 300_000), wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			sender := accounts.InternAddress(common.HexToAddress("0x1000"))
+			recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(gasLimit), tracing.BalanceChangeUnspecified))
+			msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), gasLimit,
+				uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1), test.data,
+				test.accessList, false, false, false, false, nil)
+			gp := NewGasPool(gasLimit, 0)
+			executor := NewTxnExecutor(newTestEVM(ibs, chain.AllProtocolChanges, gasLimit), msg, gp)
+			intrinsic, overflow := executor.calcIntrinsicGas(false, nil, test.accessList)
+			require.False(t, overflow)
+			require.Equal(t, test.wantErr, max(intrinsic.ExecutionGas, intrinsic.FloorGasCost) > params.MaxTxnGasLimit)
 
-	result, err := executor.Execute(true, false)
-	require.NoError(t, err)
-	require.NoError(t, result.Err)
-	require.Zero(t, result.GasRefund)
-	require.Equal(t, intrinsic.FloorGasCost, result.ReceiptGasUsed)
-	gasLeft := mdgas.MdGas{State: gasLimit - intrinsic.FloorGasCost}
-	require.Contains(t, changes, gasChange{
-		old: executor.gasRemaining, new: gasLeft, reason: tracing.GasChangeTxDataFloor,
-	})
-	require.Equal(t, gasChange{old: gasLeft, reason: tracing.GasChangeTxLeftOverReturned}, changes[len(changes)-1])
-	balance, err := ibs.GetBalance(sender)
-	require.NoError(t, err)
-	require.Equal(t, *uint256.NewInt(gasLeft.Total()), balance)
+			result, err := executor.Execute(true, false)
+			if !test.wantErr {
+				require.NoError(t, err)
+				require.NoError(t, result.Err)
+				return
+			}
+			require.ErrorIs(t, err, ErrIntrinsicGas)
+			require.Equal(t, uint64(gasLimit), gp.Gas())
+			balance, err := ibs.GetBalance(sender)
+			require.NoError(t, err)
+			require.Equal(t, *uint256.NewInt(gasLimit), balance)
+		})
+	}
 }
 
 func TestGasChangeTxReturn(t *testing.T) {
