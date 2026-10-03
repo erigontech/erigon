@@ -21,6 +21,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -75,8 +76,7 @@ func TestBlockStateCacheFlushClearsAcrossBlocks(t *testing.T) {
 	const block1TxNum uint64 = 100
 	domains.SetTxNum(block1TxNum)
 	// Simulate the first read — value is empty (pre-batch slot is zero).
-	// CachedReaderV3 caches this as committed[slot] = nil/empty.
-	cache.PutCommittedStorage(addr, slot, nil)
+	cache.PutCommittedStorage(addr, slot, uint256.Int{})
 	cache.WriteStorage(addr, slot, []byte{0x01}, block1TxNum)
 	require.NoError(t, cache.Flush(domains, tx))
 
@@ -164,13 +164,13 @@ func TestBlockStateCacheFlushPreservesPerTxHistory(t *testing.T) {
 	tx3Acc := accounts.NewAccount()
 	tx3Acc.Balance.SetUint64(1100)
 	tx3Enc := accounts.SerialiseV3(&tx3Acc)
-	cache.WriteAccount(addr, tx3Enc, 3)
+	cache.WriteAccount(addr, &tx3Acc, 3)
 
 	// Tx 5 increments balance to 1300.
 	tx5Acc := accounts.NewAccount()
 	tx5Acc.Balance.SetUint64(1300)
 	tx5Enc := accounts.SerialiseV3(&tx5Acc)
-	cache.WriteAccount(addr, tx5Enc, 5)
+	cache.WriteAccount(addr, &tx5Acc, 5)
 
 	// Block-end Flush.
 	domains.SetTxNum(5)

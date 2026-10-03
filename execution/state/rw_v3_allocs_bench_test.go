@@ -45,7 +45,7 @@ func BenchmarkCachedReaderAccountRead(b *testing.B) {
 
 	b.Run("written", func(b *testing.B) {
 		cache := NewBlockStateCache()
-		cache.WriteAccount(addr, accounts.SerialiseV3(acc), 1)
+		cache.WriteAccount(addr, acc, 1)
 		r := NewCurrentCachedReaderV3(nil, cache)
 		b.ReportAllocs()
 		b.ResetTimer()
