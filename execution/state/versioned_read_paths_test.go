@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -88,34 +87,19 @@ func TestVersionedRead_B_DeletedStateObjectReturnsDefault(t *testing.T) {
 func warmReadIBS(t *testing.T, addr accounts.Address) (*IntraBlockState, *VersionMap) {
 	t.Helper()
 	_, tx, domains := NewTestRwTx(t)
-	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01}
 	acc := accounts.NewAccount()
 	acc.Nonce = 1
 	acc.Incarnation = 1
 	acc.Balance = *uint256.NewInt(1234)
-	acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	addrValue := addr.Value()
 	domains.SetTxNum(10)
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
-	require.NoError(t, domains.DomainPut(kv.CodeDomain, tx, addrValue[:], code, 10, nil))
 
 	mvhm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), mvhm)
 	t.Cleanup(ibs.Close)
 	ibs.SetTxContext(1, 5)
 	return ibs, mvhm
-}
-
-// destructInPriorTx makes a prior tx's selfdestruct visible and drives
-// getStateObject so it parks the deleted resident object.
-func destructInPriorTx(t *testing.T, ibs *IntraBlockState, mvhm *VersionMap, addr accounts.Address) {
-	t.Helper()
-	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
-	so, err := ibs.getStateObject(addr, true)
-	require.NoError(t, err)
-	require.Nil(t, so, "destructed account resolves to no object")
-	parked, ok := ibs.stateObjects[addr]
-	require.True(t, ok && parked.deleted, "getStateObject must park a deleted object")
 }
 
 // B: a deleted stateObject wins over a slot this tx already read. The read-once
@@ -133,7 +117,12 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 99, v.Uint64(), "first read resolves from the version map")
 
-	destructInPriorTx(t, ibs, mvhm, addr)
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, so, "destructed account resolves to no object")
+	parked, ok := ibs.stateObjects[addr]
+	require.True(t, ok && parked.deleted, "getStateObject must park a deleted object")
 
 	v, err = ibs.GetState(addr, key)
 	require.NoError(t, err)
