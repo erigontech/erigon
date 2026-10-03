@@ -176,7 +176,6 @@ func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic s
 }
 
 func (c *columnDataPeers) pickPeerRoundRobin(
-	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], string, uint64, error) {
 	c.peersMutex.Lock()

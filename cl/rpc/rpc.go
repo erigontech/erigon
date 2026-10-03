@@ -150,7 +150,7 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReqWithSnapshot(
 	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
 ) ([]*cltypes.DataColumnSidecar, string, *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], error) {
-	filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(ctx, req)
+	filteredReq, pid, _, err := b.columnDataPeers.pickPeerRoundRobin(req)
 	if err != nil {
 		return nil, pid, nil, err
 	}

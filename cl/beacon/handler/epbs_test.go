@@ -2175,7 +2175,7 @@ func TestGetExecutionPayloadEnvelopeDoesNotFinalizeSameSlotSideBranch(t *testing
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2, Root: common.HexToHash("0xbeef")}
 	fcu.Ancestors[slot] = forkchoice.ForkChoiceNode{Root: common.HexToHash("0xbeef")}
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, common.HexToHash("0xbeef"))
+		return beacon_indicies.MarkRootCanonical(tx, slot, common.HexToHash("0xbeef"))
 	}))
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/execution_payload_envelope/"+root.Hex(), http.NoBody)
 	recorder := httptest.NewRecorder()

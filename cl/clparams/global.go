@@ -28,7 +28,3 @@ func InitGlobalStaticConfig(bcfg *BeaconChainConfig, ccfg *CaplinConfig) {
 func GetBeaconConfig() *BeaconChainConfig {
 	return globalBeaconConfig
 }
-
-func IsDevnet() bool {
-	return globalCaplinConfig.IsDevnet()
-}

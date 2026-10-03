@@ -173,7 +173,6 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		s.blockReader,
 		s.indiciesDB,
 		s.p2p.Host(),
-		s.peers,
 		s.cfg.NetworkConfig,
 		s.p2p.UDPv5Listener().LocalNode(),
 		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks,
@@ -188,10 +187,9 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			peerId := c.RemotePeer()
 			log.Trace("[Sentinel] Peer disconnected", "peer", peerId, "direction", c.Stat().Direction, "addr", c.RemoteMultiaddr())
-			s.peers.RemovePeer(peerId)
 		},
 	})
-	s.subManager = NewGossipManager(s.ctx)
+	s.subManager = NewGossipManager()
 	//s.subManager.Start(s.ctx)
 
 	go s.listenForPeers()

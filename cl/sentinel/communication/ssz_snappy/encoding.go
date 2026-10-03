@@ -18,7 +18,6 @@ package ssz_snappy
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -90,7 +89,7 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	return wr.Flush()
 }
 
-func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, b *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) error {
+func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, ethClock eth_clock.EthereumClock) error {
 	var forkDigest [4]byte
 	// TODO(issues/5884): assert the fork digest matches the expectation for
 	// a specific configuration.
@@ -187,48 +186,4 @@ func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 
 	// The number is too large to represent in a 64-bit value.
 	return 0, n, errors.New("varint overflows a 64-bit integer")
-}
-
-func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) error {
-	objSize := list[0].EncodingSizeSSZ()
-
-	r := bytes.NewReader(data)
-	var forkDigest [4]byte
-
-	if _, err := r.Read(forkDigest[:]); err != nil {
-		return err
-	}
-
-	version, err := ethClock.StateVersionByForkDigest(forkDigest)
-	if err != nil {
-		return err
-	}
-	// Read varint for length of message.
-	encodedLn, bytesCount, err := ReadUvarint(r)
-	if err != nil {
-		return fmt.Errorf("failed to decode listSSZ. Unable to read varint: %w", err)
-	}
-	pos := 4 + bytesCount
-	if len(list) != int(count) {
-		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", objSize, encodedLn)
-	}
-
-	sr := snappypool.Reader(r)
-	defer snappypool.PutReader(sr)
-	for i := 0; i < int(count); i++ {
-		var n int
-		raw := make([]byte, encodedLn)
-		if n, err = sr.Read(raw); err != nil {
-			return fmt.Errorf("readPacket: %w", err)
-		}
-		pos += uint64(n)
-
-		if err := list[i].DecodeSSZ(raw, int(version)); err != nil {
-			return fmt.Errorf("unmarshalling: %w", err)
-		}
-		r.Reset(data[pos:])
-		sr.Reset(r)
-	}
-
-	return nil
 }

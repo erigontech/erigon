@@ -143,7 +143,7 @@ func TestDiffValidators(t *testing.T) {
 	require.NoError(t, err)
 
 	out := b.Bytes()
-	new2, err := ApplyCompressedSerializedValidatorListDiff(old, nil, out, false)
+	new2, err := ApplyCompressedSerializedValidatorListDiff(old, nil, out)
 	require.NoError(t, err)
 
 	require.Equal(t, new, new2)

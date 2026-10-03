@@ -19,7 +19,6 @@ package sentinel
 import (
 	"context"
 	"sync"
-	"time"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -38,9 +37,7 @@ type GossipManager struct {
 const maxIncomingGossipMessages = 1 << 16
 
 // construct a new gossip manager that will handle packets with the given handlerfunc
-func NewGossipManager(
-	ctx context.Context,
-) *GossipManager {
+func NewGossipManager() *GossipManager {
 	g := &GossipManager{
 		ch:            make(chan *GossipMessage, maxIncomingGossipMessages),
 		subscriptions: sync.Map{},
@@ -50,14 +47,6 @@ func NewGossipManager(
 
 func (g *GossipManager) Recv() <-chan *GossipMessage {
 	return g.ch
-}
-
-func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
-	panic("do not call this")
-}
-
-func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err error) {
-	panic("do not call this")
 }
 
 func (g *GossipManager) Close() {
@@ -80,10 +69,6 @@ type GossipSubscription struct {
 	stopCh    chan struct{}
 	closeOnce sync.Once
 	lock      sync.Mutex
-}
-
-func (g *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
-	panic("do not call this")
 }
 
 // calls the cancel func for the subscriber and closes the topic and sub
@@ -115,8 +100,4 @@ type GossipMessage struct {
 	From      peer.ID
 	TopicName string
 	Data      []byte
-}
-
-func (g *GossipSubscription) Publish(data []byte) error {
-	panic("do not call this")
 }
