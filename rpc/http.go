@@ -410,6 +410,9 @@ func validateRequest(r *http.Request) (int, error) {
 		return http.StatusRequestEntityTooLarge, err
 	}
 	// Allow OPTIONS and GET (regardless of content-type)
+	if r.Method == http.MethodGet && fromOtherSite(r) {
+		return http.StatusForbidden, errors.New("cross-site GET requests are not allowed")
+	}
 	if r.Method == http.MethodOptions || r.Method == http.MethodGet {
 		return 0, nil
 	}
@@ -422,6 +425,19 @@ func validateRequest(r *http.Request) (int, error) {
 	// Invalid content-type
 	err := fmt.Errorf("invalid content type, only %s is supported", contentType)
 	return http.StatusUnsupportedMediaType, err
+}
+
+// fromOtherSite reports whether a browser sent r on behalf of another site's page. A GET needs no
+// CORS preflight, so such a page could otherwise call any method through the query.
+func fromOtherSite(r *http.Request) bool {
+	switch r.Header.Get("Sec-Fetch-Site") {
+	case "same-origin", "none":
+		return false
+	case "":
+		return r.Header.Get("Origin") != ""
+	default:
+		return true
+	}
 }
 
 func CheckJwtSecret(w http.ResponseWriter, r *http.Request, jwtSecret []byte) bool {

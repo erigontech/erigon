@@ -17,6 +17,8 @@
 package cli
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/url"
 	"testing"
@@ -24,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -69,4 +72,49 @@ func TestRemoteRulesEngineFinalizeDelegates(t *testing.T) {
 		_, err := e.Finalize(&chain.Config{}, header, nil, nil, nil, nil, nil, nil, false, log.New())
 		require.NoError(t, err)
 	})
+}
+
+func TestRegularRpcServerWebsocketOrigin(t *testing.T) {
+	handshake := func(t *testing.T, corsDomains []string, origin string) int {
+		t.Helper()
+		ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		port := ln.Addr().(*net.TCPAddr).Port
+		cfg := &httpcfg.HttpCfg{
+			Enabled:           true,
+			HttpServerEnabled: true,
+			HttpListenAddress: "127.0.0.1",
+			HttpPort:          port,
+			HttpListener:      ln,
+			HttpCORSDomain:    corsDomains,
+			HttpVirtualHost:   []string{"localhost"},
+			WebsocketEnabled:  true,
+			WebsocketPort:     port,
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- StartRpcServer(ctx, cfg, nil, log.New()) }()
+		defer func() {
+			cancel()
+			<-done
+		}()
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+ln.Addr().String()+"/", nil)
+		require.NoError(t, err)
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Upgrade", "websocket")
+		req.Header.Set("Sec-WebSocket-Version", "13")
+		req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+		req.Header.Set("Origin", origin)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	require.Equal(t, http.StatusForbidden, handshake(t, nil, "https://evil.example"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, nil, "http://localhost:3000"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"https://dapp.example"}, "https://dapp.example"))
+	require.Equal(t, http.StatusForbidden, handshake(t, []string{"https://dapp.example"}, "https://evil.example"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"*"}, "https://evil.example"))
 }
