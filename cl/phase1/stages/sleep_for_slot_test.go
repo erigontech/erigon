@@ -28,15 +28,28 @@ import (
 )
 
 type sleepForSlotForkChoiceFake struct {
-	head  common.Hash
-	calls *int
+	head           common.Hash
+	headSlot       uint64
+	calls          *int
+	retryMinSlots  *[]uint64
+	retryDeadlines *[]time.Time
 }
 
 func (f sleepForSlotForkChoiceFake) GetHead(*state.CachingBeaconState) (common.Hash, uint64, error) {
 	if f.calls != nil {
 		(*f.calls)++
 	}
-	return f.head, 0, nil
+	return f.head, f.headSlot, nil
+}
+
+func (f sleepForSlotForkChoiceFake) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64) {
+	if f.retryMinSlots != nil {
+		*f.retryMinSlots = append(*f.retryMinSlots, minSlot)
+	}
+	if f.retryDeadlines != nil {
+		deadline, _ := ctx.Deadline()
+		*f.retryDeadlines = append(*f.retryDeadlines, deadline)
+	}
 }
 
 type blockingSleepForSlotForkChoiceFake struct {
@@ -49,6 +62,9 @@ func (f blockingSleepForSlotForkChoiceFake) GetHead(*state.CachingBeaconState) (
 	close(f.started)
 	<-f.release
 	return f.head, 0, nil
+}
+
+func (blockingSleepForSlotForkChoiceFake) RetryDataAvailablePendingExecutionPayloadEnvelopes(context.Context, uint64) {
 }
 
 type sleepForSlotSyncedDataFake struct {
@@ -81,12 +97,13 @@ func TestSleepForSlotGloasHeadChangeWakesEarlyAndTransitionsToForkChoice(t *test
 	materializedHead := common.Hash{1}
 	forkChoiceHead := common.Hash{2}
 	calls := 0
+	var retryMinSlots []uint64
 	clock := sleepForSlotClockFake{currentEpoch: 11, currentSlot: 10, nextSlot: time.Now().Add(500 * time.Millisecond)}
 	started := time.Now()
 
 	wake, headChanged, err := waitForNextSlotOrHeadChange(
 		t.Context(), 11, sleepForSlotConfig(10),
-		sleepForSlotForkChoiceFake{head: forkChoiceHead, calls: &calls},
+		sleepForSlotForkChoiceFake{head: forkChoiceHead, calls: &calls, retryMinSlots: &retryMinSlots},
 		sleepForSlotSyncedDataFake{head: materializedHead},
 		clock,
 		sleepForSlotWake{},
@@ -97,6 +114,7 @@ func TestSleepForSlotGloasHeadChangeWakesEarlyAndTransitionsToForkChoice(t *test
 	require.Equal(t, sleepForSlotWake{root: forkChoiceHead, slot: 10}, wake)
 	require.Less(t, time.Since(started), 250*time.Millisecond)
 	require.Equal(t, 1, calls)
+	require.Empty(t, retryMinSlots, "a pending head change is materialized before envelope retries")
 	require.Equal(t, ForkChoice, sleepForSlotNextStage(t.Context(), headChanged, readySleepForSlotArgs()))
 }
 
@@ -122,15 +140,52 @@ func TestSleepForSlotGloasEqualHeadsWaitsAndTransitionsToChainTipSync(t *testing
 	require.Equal(t, ChainTipSync, sleepForSlotNextStage(t.Context(), headChanged, readySleepForSlotArgs()))
 }
 
+func TestSleepForSlotGloasRetriesDataAvailableEnvelopesFromHeadOrPreviousSlot(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		headSlot    uint64
+		wantMinSlot uint64
+	}{
+		{name: "head in current slot", headSlot: 10, wantMinSlot: 9},
+		{name: "head before missed slots", headSlot: 6, wantMinSlot: 6},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			head := common.Hash{1}
+			var retryMinSlots []uint64
+			var retryDeadlines []time.Time
+			clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(150 * time.Millisecond)}
+
+			_, headChanged, err := waitForNextSlotOrHeadChange(
+				t.Context(), 11, sleepForSlotConfig(10),
+				sleepForSlotForkChoiceFake{head: head, headSlot: tt.headSlot, retryMinSlots: &retryMinSlots, retryDeadlines: &retryDeadlines},
+				sleepForSlotSyncedDataFake{head: head},
+				clock,
+				sleepForSlotWake{},
+			)
+
+			require.NoError(t, err)
+			require.False(t, headChanged)
+			require.NotEmpty(t, retryMinSlots)
+			for _, minSlot := range retryMinSlots {
+				require.Equal(t, tt.wantMinSlot, minSlot)
+			}
+			for _, deadline := range retryDeadlines {
+				require.Equal(t, clock.nextSlot, deadline, "envelope retries must not run past the next slot")
+			}
+		})
+	}
+}
+
 func TestSleepForSlotPreGloasHeadChangeWaitsAndTransitionsToChainTipSync(t *testing.T) {
 	wait := 150 * time.Millisecond
 	calls := 0
+	var retryMinSlots []uint64
 	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(wait)}
 	started := time.Now()
 
 	_, headChanged, err := waitForNextSlotOrHeadChange(
 		t.Context(), 11, sleepForSlotConfig(11),
-		sleepForSlotForkChoiceFake{head: common.Hash{2}, calls: &calls},
+		sleepForSlotForkChoiceFake{head: common.Hash{2}, calls: &calls, retryMinSlots: &retryMinSlots},
 		sleepForSlotSyncedDataFake{head: common.Hash{1}},
 		clock,
 		sleepForSlotWake{},
@@ -140,6 +195,7 @@ func TestSleepForSlotPreGloasHeadChangeWaitsAndTransitionsToChainTipSync(t *test
 	require.False(t, headChanged)
 	require.GreaterOrEqual(t, time.Since(started), wait-25*time.Millisecond)
 	require.Zero(t, calls)
+	require.Empty(t, retryMinSlots)
 	require.Equal(t, ChainTipSync, sleepForSlotNextStage(t.Context(), headChanged, readySleepForSlotArgs()))
 }
 

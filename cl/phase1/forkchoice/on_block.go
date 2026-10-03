@@ -731,6 +731,39 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 	}
 }
 
+const (
+	// Bounds how often a polling caller re-reads column storage for one envelope still missing data.
+	missingEnvelopeDataProbeInterval = 250 * time.Millisecond
+	// Bounds how often a polling caller repeats a failed attempt (BLS, EL call, warning) for one envelope.
+	dataAvailableEnvelopeRetryInterval = time.Second
+)
+
+// RetryDataAvailablePendingExecutionPayloadEnvelopes applies queued gossip envelopes for blocks at or after minSlot
+// whose column data has arrived. Otherwise an envelope that arrived before its columns waits for the next chain tip
+// sync, and the next proposer builds on the empty parent. Each envelope's storage is probed and its application
+// attempted at a bounded rate, so this is cheap to poll.
+func (f *ForkChoiceStore) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx context.Context, minSlot uint64) {
+	for _, root := range f.pendingEnvelopes.Keys() {
+		if ctx.Err() != nil {
+			return
+		}
+		block, ok := f.forkGraph.GetBlock(root)
+		if !ok || block == nil || block.Block == nil || block.Block.Slot < minSlot {
+			continue
+		}
+		now := time.Now()
+		if retryAt, ok := f.dataAvailableEnvelopeRetryAt.Get(root); ok && now.Before(retryAt) {
+			continue
+		}
+		if available, err := f.peerDas.IsDataAvailable(block.Block.Slot, root); err != nil || !available {
+			f.dataAvailableEnvelopeRetryAt.Add(root, now.Add(missingEnvelopeDataProbeInterval))
+			continue
+		}
+		f.dataAvailableEnvelopeRetryAt.Add(root, now.Add(dataAvailableEnvelopeRetryInterval))
+		f.processPendingEnvelopeAfterBlock(ctx, root, true)
+	}
+}
+
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {
 	for _, repair := range f.envelopeIndexRepairs.repairs() {
 		if limit <= 0 || ctx.Err() != nil {
