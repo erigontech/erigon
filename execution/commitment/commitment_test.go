@@ -736,7 +736,7 @@ func TestCollectUpdate_HonoursSuppliedPrev(t *testing.T) {
 	beNew := NewBranchEncoder(1024)
 	require.NoError(t, beNew.CollectUpdate(ctxNew, prefix, bm, bm, bm, &cells, nil))
 	require.Len(t, ctxNew.puts, 1)
-	require.Empty(t, ctxNew.puts[0].prev)
+	require.Nil(t, ctxNew.puts[0].prev)
 
 	beSame := NewBranchEncoder(1024)
 	encoded, err := beSame.EncodeBranch(bm, bm, bm, &cells)
@@ -860,7 +860,7 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	require.Nil(t, ut.tree)
 	require.Nil(t, ut.treeIdx)
 	require.Nil(t, ut.etl, "ModeParallel uses the prefix trie, not any ETL collector")
-	require.True(t, ut.IsConcurrentCommitment(), "IsConcurrentCommitment must report true for ModeParallel")
+	require.Equal(t, ModeParallel, ut.Mode(), "collection must stay in ModeParallel")
 	require.Equal(t, uint64(0), ut.Size())
 }
 
@@ -1005,7 +1005,7 @@ func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
 	require.Equal(t, VariantParallelHexPatricia, trie.Variant())
 	require.Equal(t, ModeParallel, upd.Mode())
 	require.NotNil(t, upd.parallel)
-	require.True(t, upd.IsConcurrentCommitment())
+	require.Equal(t, ModeParallel, upd.Mode())
 }
 
 func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
@@ -1228,7 +1228,7 @@ func TestCollectDeferredUpdate_InlineFlushesAtCapacity(t *testing.T) {
 	require.Len(t, be.deferred, 1)
 }
 
-func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
+func TestCollectDeferredUpdate_NewBranchLeavesPrevToTheDomain(t *testing.T) {
 	t.Parallel()
 	row, bm := generateCellRow(t, 4)
 	cells := generateCellEncodeDataRow(t, row, bm)
@@ -1237,8 +1237,7 @@ func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
 	be.setDeferUpdates(true)
 	require.NoError(t, be.CollectDeferredUpdate(&recordingCtx{}, []byte{0x33, 0x44}, bm, bm, bm, &cells, nil))
 	require.Len(t, be.deferred, 1)
-	require.NotNil(t, be.deferred[0].prev, "a new branch must carry an empty prev, or the domain reads the previous value again on apply")
-	require.Empty(t, be.deferred[0].prev)
+	require.Nil(t, be.deferred[0].prev, "a new branch can land on a stale record the trie never read; a nil prev makes the domain record that record as history")
 	be.ClearDeferred()
 }
 

@@ -81,6 +81,7 @@ import (
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/verify"
@@ -737,14 +738,16 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 	defer bti.Close()
 
 	getter := seg.NewReader(rd.MakeGetter(), statecfg.Schema.CommitmentDomain.Compression)
-	c, err := bti.Seek(getter, []byte(stateKey))
-	if err != nil {
-		return false, false, "", err
-	}
-	defer c.Close()
-
-	if bytes.Equal(c.Key(), []byte(stateKey)) {
-		return true, false, "Not Unwindable (*)", nil
+	for _, key := range commitmentdb.CommitmentStateKeys {
+		c, err := bti.Seek(getter, key)
+		if err != nil {
+			return false, false, "", err
+		}
+		found := c != nil && bytes.Equal(c.Key(), key)
+		c.Close()
+		if found {
+			return true, false, "Not Unwindable (*)", nil
+		}
 	}
 	return false, false, "", nil
 }

@@ -70,6 +70,7 @@ import (
 var (
 	branchPrefixFlag string
 	txnumFlag        uint64
+	verifyAsOf       []uint
 )
 
 // visualize command flags
@@ -134,6 +135,11 @@ func init() {
 	withConfig(cmdCommitmentConvert)
 	withConvertFlags(cmdCommitmentConvert)
 	commitmentCmd.AddCommand(cmdCommitmentConvert)
+
+	withChain(cmdCommitmentVerify)
+	withDataDir(cmdCommitmentVerify)
+	cmdCommitmentVerify.Flags().UintSliceVar(&verifyAsOf, "asof", nil, "also fold the records as of these txNums")
+	commitmentCmd.AddCommand(cmdCommitmentVerify)
 
 	// commitment visualize
 	cmdCommitmentVisualize.Flags().StringVar(&visualizeOutputDir, "output", "", "existing directory to store output HTML. By default, same as commitment files")
@@ -264,11 +270,58 @@ func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize ui
 }
 
 // integration commitment rebuild
+var cmdCommitmentVerify = &cobra.Command{
+	Use:   "verify",
+	Short: "Fold the v3 commitment records to the stored state root, at the latest state and at --asof txNums; fails on orphan records",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		if err := commitmentVerify(ctx, logger); err != nil {
+			logger.Error("[commitment verify]", "err", err)
+			os.Exit(1)
+		}
+	},
+}
+
+func commitmentVerify(ctx context.Context, logger log.Logger) error {
+	if !statecfg.ExperimentalCommitmentV3 {
+		return errors.New("verify reads v3 commitment records; run with COMMITMENT_V3=true")
+	}
+	db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.DisableAllDependencies()
+	points := []uint64{math.MaxUint64}
+	for _, txNum := range verifyAsOf {
+		points = append(points, uint64(txNum))
+	}
+	for _, asOf := range points {
+		label := "latest"
+		if asOf != math.MaxUint64 {
+			label = strconv.FormatUint(asOf, 10)
+		}
+		started := time.Now()
+		c, err := dbstate.FoldCommitmentV3(ctx, agg, asOf)
+		if err != nil {
+			return fmt.Errorf("as of %s: %w", label, err)
+		}
+		if c.Orphans != 0 {
+			return fmt.Errorf("as of %s: %d orphan records (block %d, %d records)", label, c.Orphans, c.BlockNum, c.Records)
+		}
+		logger.Info("[commitment verify] ok", "asOf", label, "block", c.BlockNum, "txNum", c.TxNum, "root", hex.EncodeToString(c.Root),
+			"records", common.PrettyCounter(c.Records), "took", time.Since(started).Round(time.Millisecond))
+	}
+	return nil
+}
+
 var cmdCommitmentRebuild = &cobra.Command{
 	Use:   "rebuild",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		skipFilesDBGapCheck = statecfg.ExperimentalCommitmentV3
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -353,7 +406,10 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		}
 	}
 
+	temporalDB := db.(*temporal.DB)
+	agg := temporalDB.Agg().(*dbstate.Aggregator)
 	if !resume {
+		agg.CloseFilesNoReopen()
 		// remove all existing state commitment snapshots
 		// when not rebuilding with history, only delete domain files (preserve existing history/index)
 		if err := app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{
@@ -379,6 +435,11 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		if err := rwTx.Commit(); err != nil {
 			return err
 		}
+		if !withHistory {
+			if err := rawdbreset.ResetExec(ctx, db); err != nil {
+				return err
+			}
+		}
 	} else {
 		rwTx.Rollback()
 	}
@@ -388,8 +449,6 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		return nil
 	}
 
-	temporalDB := db.(*temporal.DB)
-	agg := temporalDB.Agg().(*dbstate.Aggregator)
 	if err = temporalDB.OpenStateSnapshots(ctx); err != nil { // reopen after snapshot file deletions
 		return fmt.Errorf("failed to re-open aggregator: %w", err)
 	}
@@ -506,16 +565,19 @@ Examples:
   integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true
   integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
   integration commitment convert --continue --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
-  integration commitment convert --restore --datadir /path/to/datadir --chain mainnet`,
-	Run: func(cmd *cobra.Command, args []string) {
+  integration commitment convert --restore --datadir /path/to/datadir --chain mainnet
+  integration commitment convert --v3 --datadir /path/to/datadir --chain mainnet`,
+	SilenceUsage: true,
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		if convertRestore && (cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
-			logger.Error("--restore is mutually exclusive with --squeeze/--nibbles.v2")
-			return
+			return errors.New("--restore is mutually exclusive with --squeeze/--nibbles.v2")
+		}
+		if convertV3 && (convertRestore || cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
+			return errors.New("--v3 is mutually exclusive with --restore/--squeeze/--nibbles.v2")
 		}
 		if convertRestore && convertContinue {
-			logger.Error("--continue is mutually exclusive with --restore")
-			return
+			return errors.New("--continue is mutually exclusive with --restore")
 		}
 		if convertRestore {
 			// Restore is a filesystem-only operation. Dispatch before openDB so
@@ -523,18 +585,22 @@ Examples:
 			// MDBX/aggregator/snapshots can't open — which is exactly when
 			// --restore is most needed.
 			dirs := datadir.New(datadirCli)
-			if err := dbstate.RestoreCommitmentFiles(cmd.Context(), dirs, logger); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					logger.Error(err.Error())
-				}
+			return dbstate.RestoreCommitmentFiles(cmd.Context(), dirs, logger)
+		}
+
+		if convertV3 {
+			legacyHistory, err := filepath.Glob(filepath.Join(datadir.New(datadirCli).SnapHistory, "*-commitment.*.v"))
+			if err != nil {
+				return fmt.Errorf("listing commitment history: %w", err)
 			}
-			return
+			if len(legacyHistory) > 0 {
+				statecfg.EnableHistoricalCommitment()
+			}
 		}
 
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
+			return fmt.Errorf("opening DB: %w", err)
 		}
 		defer db.Close()
 
@@ -542,17 +608,18 @@ Examples:
 			TargetSqueeze:   convertSqueeze,
 			TargetNibblesV2: convertNibblesV2,
 			Continue:        convertContinue,
+			TargetV3:        convertV3,
 		}
-		if err := commitmentConvert(db, cmd.Context(), logger, opts); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
+		return commitmentConvert(db, cmd.Context(), logger, opts)
 	},
 }
 
 func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, opts dbstate.ConvertOpts) error {
+	if opts.TargetV3 {
+		if err := rawdbreset.ResetExec(ctx, db); err != nil {
+			return err
+		}
+	}
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	agg.PresetOfflineMerge()
 	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))

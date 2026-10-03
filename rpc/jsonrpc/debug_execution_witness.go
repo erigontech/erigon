@@ -1028,10 +1028,11 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 				continue
 			}
 		}
-		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
+		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), postEnc)
 	}
 	for addr := range a.CodeAddrs {
-		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
+		postEnc, _, _ := post.Read(kv.AccountsDomain, addr[:], stepSize)
+		sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), postEnc)
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
@@ -1045,7 +1046,7 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 					continue
 				}
 			}
-			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
+			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), postEnc)
 		}
 	}
 }
