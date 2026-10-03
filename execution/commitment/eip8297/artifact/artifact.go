@@ -20,11 +20,6 @@ import "github.com/erigontech/erigon/common"
 
 type KVIterator func(func(key, value []byte) error) error
 
-type Slot struct {
-	Index byte
-	Value []byte
-}
-
 type Header struct {
 	AddressHash common.Hash
 	Nonce       []byte
@@ -33,7 +28,7 @@ type Header struct {
 	CodeHash    common.Hash
 	CodeSize    []byte
 	Target      common.Address
-	Slots       []Slot
+	Slots       []GroupEntry
 }
 
 type GroupEntry struct {

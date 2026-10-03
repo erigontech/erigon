@@ -222,7 +222,7 @@ func WritePreimagesStreamWithScratch(dst io.Writer, iterate PreimageStreamIterat
 }
 
 func ReadPreimagesStream(src io.ReaderAt, size int64, yield func(common.Address, func(func([32]byte) error) error) error) error {
-	if src == nil || size < 0 {
+	if src == nil || size < 0 || yield == nil {
 		return ErrPreimages
 	}
 	c := artifactCursor{src: src, limit: size}
@@ -241,41 +241,33 @@ func ReadPreimagesStream(src io.ReaderAt, size int64, yield func(common.Address,
 		if uint64(count) > uint64(c.remaining()/32) {
 			return fmt.Errorf("%w: truncated slots", ErrPreimages)
 		}
-		var recordAddress common.Address
-		copy(recordAddress[:], address)
+		recordAddress := common.Address(address)
 		digest := common.Hash(keccak.Sum256(recordAddress[:]))
 		if index != 0 && bytes.Compare(digest[:], previous[:]) <= 0 {
 			return ErrUnsorted
 		}
 		previous = digest
 		index++
-		if yield != nil {
-			if err := yield(recordAddress, func(slotYield func([32]byte) error) error {
-				var previousSlot common.Hash
-				for i := range count {
-					slotBytes, err := c.bytes(32)
-					if err != nil {
-						return fmt.Errorf("%w: truncated slots", ErrPreimages)
-					}
-					var slot [32]byte
-					copy(slot[:], slotBytes)
-					slotDigest := common.Hash(keccak.Sum256(slot[:]))
-					if i != 0 && bytes.Compare(slotDigest[:], previousSlot[:]) <= 0 {
-						return ErrUnsorted
-					}
-					previousSlot = slotDigest
-					if err := slotYield(slot); err != nil {
-						return err
-					}
+		if err := yield(recordAddress, func(slotYield func([32]byte) error) error {
+			var previousSlot common.Hash
+			for i := range count {
+				slotBytes, err := c.bytes(32)
+				if err != nil {
+					return fmt.Errorf("%w: truncated slots", ErrPreimages)
 				}
-				return nil
-			}); err != nil {
-				return err
+				slot := [32]byte(slotBytes)
+				slotDigest := common.Hash(keccak.Sum256(slot[:]))
+				if i != 0 && bytes.Compare(slotDigest[:], previousSlot[:]) <= 0 {
+					return ErrUnsorted
+				}
+				previousSlot = slotDigest
+				if err := slotYield(slot); err != nil {
+					return err
+				}
 			}
-		} else {
-			if _, err := c.bytes(int(count) * 32); err != nil {
-				return fmt.Errorf("%w: truncated slots", ErrPreimages)
-			}
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -348,16 +340,20 @@ func comparePreimageKeys(preimages io.ReaderAt, preimageSize int64, expected fun
 		if len(key) == 0 || (previous != nil && bytes.Compare(previous, key) >= 0) {
 			return ErrUnsorted
 		}
-		previous = bytes.Clone(key)
-		return writeJoinItem(expectedWriter, joinItem{key: bytes.Clone(key)})
+		if len(key) > 255 {
+			return ErrPreimages
+		}
+		previous = key
+		if err := expectedWriter.WriteByte(byte(len(key))); err != nil {
+			return err
+		}
+		_, err := expectedWriter.Write(key)
+		return err
 	}
 	if err := expected(writeExpected); err != nil {
 		return err
 	}
 	if err := expectedWriter.Flush(); err != nil {
-		return err
-	}
-	if err := expectedFile.Sync(); err != nil {
 		return err
 	}
 	if _, err := expectedFile.Seek(0, io.SeekStart); err != nil {
@@ -418,19 +414,6 @@ type joinItem struct {
 	address common.Address
 	slot    [32]byte
 	hasSlot bool
-}
-
-func writeJoinItem(writer *bufio.Writer, item joinItem) error {
-	if len(item.key) > 255 {
-		return ErrPreimages
-	}
-	if err := writer.WriteByte(byte(len(item.key))); err != nil {
-		return err
-	}
-	if _, err := writer.Write(item.key); err != nil {
-		return err
-	}
-	return nil
 }
 
 func readJoinItem(reader *bufio.Reader) (joinItem, bool, error) {

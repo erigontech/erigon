@@ -326,7 +326,7 @@ func TestDoExportPreimagesUsesFrozenBlockFiles(t *testing.T) {
 	require.NoError(t, cmd.Set("out", outDir))
 	require.NoError(t, cmd.Set("tmpdir", filepath.Join(t.TempDir(), "tmp")))
 	require.NoError(t, doExportPreimages(t.Context(), cmd))
-	require.FileExists(t, filepath.Join(outDir, preimagesFileName))
+	require.FileExists(t, filepath.Join(outDir, pbtPreimagesFileName))
 }
 
 func TestDoExportPBTHexOnlyDefaultsToBlake3(t *testing.T) {

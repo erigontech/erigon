@@ -21,8 +21,6 @@ import (
 	"path/filepath"
 	"time"
 
-	keccak "github.com/erigontech/fastkeccak"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
@@ -35,8 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-var pbtVerifyETLBuffer = etl.BufferOptimalSize
 
 var errPBTVerifyScratchIO = errors.New("verify-pbt: scratch I/O")
 
@@ -53,11 +49,7 @@ func (p *pbtVerifyProgress) add(key []byte) {
 		return
 	}
 	p.next = now.Add(30 * time.Second)
-	prefix := key
-	if len(prefix) > 8 {
-		prefix = prefix[:8]
-	}
-	log.Root().Info("PBT verify progress", "phase", p.phase, "records", p.count, "key_prefix", hex.EncodeToString(prefix))
+	log.Root().Info("PBT verify progress", "phase", p.phase, "records", p.count, "key_prefix", hex.EncodeToString(key[:min(len(key), 8)]))
 }
 
 type pbtVerifyAccountRecord struct {
@@ -113,12 +105,8 @@ func pbtVerifyOpenKV(path string) (*os.File, *pbtVerifyKVReader, error) {
 	return f, &pbtVerifyKVReader{r: bufio.NewReaderSize(f, 1<<20), path: path}, nil
 }
 
-func pbtVerifyTrimValue(value []byte) []byte {
-	return bytes.TrimLeft(bytes.Clone(value), "\x00")
-}
-
 func pbtVerifyNewCollector(name, scratch string) *etl.Collector {
-	return etl.NewCollector(name, scratch, etl.NewSortableBuffer(pbtVerifyETLBuffer), log.Root()).SortAndFlushInBackground(true)
+	return etl.NewCollector(name, scratch, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()).SortAndFlushInBackground(true)
 }
 
 func pbtVerifyFlushCollector(collector *etl.Collector, path, phase string) error {
@@ -128,7 +116,7 @@ func pbtVerifyFlushCollector(collector *etl.Collector, path, phase string) error
 		return err
 	}
 	w := bufio.NewWriterSize(f, 1<<20)
-	progress := pbtVerifyProgress{phase: phase, next: time.Now()}
+	progress := pbtVerifyProgress{phase: phase, next: time.Now().Add(30 * time.Second)}
 	err = collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		progress.add(key)
 		return pbtVerifyWriteKV(w, key, value)
@@ -246,7 +234,7 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 	}
 	codeRequirementsPath := paths[2]
 	codeExpectedPath := filepath.Join(scratch, "code-expected.sorted")
-	if err := pbtVerifyGenerateCodeExpected(codeRequirementsPath, codeExpectedPath, scratch, maxCodeSize); err != nil {
+	if err := pbtVerifyGenerateCodeExpected(codeRequirementsPath, codeExpectedPath, scratch); err != nil {
 		return common.Hash{}, err
 	}
 	if err := pbtVerifyCode(paths[1], codeExpectedPath, scratch); err != nil {
@@ -270,7 +258,7 @@ func pbtVerifyCollectAddresses(src io.ReaderAt, size int64, collector *etl.Colle
 	})
 }
 
-func pbtVerifyGenerateCodeExpected(requirementPath, expectedPath, scratch string, maxCodeSize uint64) error {
+func pbtVerifyGenerateCodeExpected(requirementPath, expectedPath, scratch string) error {
 	requirementsFile, requirementsReader, err := pbtVerifyOpenKV(requirementPath)
 	if err != nil {
 		return err
@@ -303,9 +291,6 @@ func pbtVerifyGenerateCodeExpected(requirementPath, expectedPath, scratch string
 		lastSize = codeSize
 		if codeSize == 0 {
 			return fmt.Errorf("code size is zero for %x", codeHash)
-		}
-		if codeSize > maxCodeSize {
-			return fmt.Errorf("%w: code size %d exceeds --max-code-size=%d for %x", errVerifyPBTConfig, codeSize, maxCodeSize, codeHash)
 		}
 		chunks := (codeSize + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen
 		currentCodeHash := common.BytesToHash(codeHash)
@@ -419,10 +404,6 @@ func pbtVerifyCheckCodeRows(path string) error {
 		codeHash := common.BytesToHash(key[:32])
 		codeSize := binary.BigEndian.Uint64(value[:8])
 		chunks := (codeSize + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen
-		if chunks == 0 {
-			return fmt.Errorf("code size is zero for %x", codeHash)
-		}
-		hasher := keccak.NewFastKeccak()
 		var code []byte
 		actualChunks := make([][eip8297.ValueLength]byte, 0, chunks)
 		var codeRead uint64
@@ -440,9 +421,6 @@ func pbtVerifyCheckCodeRows(path string) error {
 			}
 			written := min(uint64(eip8297.ChunkDataLen), codeSize-codeRead)
 			code = append(code, full[1:1+written]...)
-			if _, err := hasher.Write(full[1 : 1+written]); err != nil {
-				return err
-			}
 			codeRead += written
 			key, value, ok, err = reader.next()
 			if err != nil {
@@ -452,10 +430,7 @@ func pbtVerifyCheckCodeRows(path string) error {
 		if codeRead != codeSize {
 			return fmt.Errorf("code chunks for %x end at %d, want %d", codeHash, codeRead, codeSize)
 		}
-		var got common.Hash
-		if _, err := hasher.Read(got[:]); err != nil {
-			return err
-		}
+		got := crypto.Keccak256Hash(code)
 		if got != codeHash {
 			return fmt.Errorf("code hash mismatch: account %x code %x", codeHash, got)
 		}
@@ -512,7 +487,7 @@ func pbtVerifyMPT(leavesPath, slotsPath, addressesPath, headersPath, scratch str
 		accountKey := crypto.Keccak256(slotValue[:length.Addr])
 		storageKey := crypto.Keccak256(slotValue[length.Addr:])
 		key := append(append(append([]byte{}, accountKey...), make([]byte, length.Incarnation)...), storageKey...)
-		if err := storageRows.Collect(key, pbtVerifyTrimValue(leafValue)); err != nil {
+		if err := storageRows.Collect(key, bytes.TrimLeft(leafValue, "\x00")); err != nil {
 			return common.Hash{}, err
 		}
 		slotKey, slotValue, slotOK, err = slotReader.next()

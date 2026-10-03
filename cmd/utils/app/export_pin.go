@@ -42,6 +42,7 @@ type exportPin struct {
 	Block   uint64
 	TxNum   uint64
 	Header  *types.Header
+	Config  *chain.Config
 	Domain  kv.Domain
 	Variant commitment.TrieVariant
 	Root    common.Hash
@@ -63,15 +64,12 @@ func sharedExportPinWithTxNumReader(ctx context.Context, tx kv.TemporalTx, heade
 	if err != nil {
 		return exportPin{}, err
 	}
-	settings, err := state.ReadErigonDBSettings(tx.Debug().Dirs())
-	if errors.Is(err, os.ErrNotExist) {
-		settings = nil
-	} else if err != nil {
-		return exportPin{}, err
-	}
 	variant := state.TrieVariantHex
-	if settings != nil {
+	settings, err := state.ReadErigonDBSettings(tx.Debug().Dirs())
+	if err == nil {
 		variant = settings.TrieVariantName()
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return exportPin{}, err
 	}
 	domains := state.AggTx(tx).CommitmentDomains()
 	binRegistered := slices.Contains(domains, kv.CommitmentBinDomain)
@@ -125,7 +123,7 @@ func sharedExportPinWithTxNumReader(ctx context.Context, tx kv.TemporalTx, heade
 	if err := checkRootPin(rootHash, header, blockNum); err != nil {
 		return exportPin{}, err
 	}
-	return exportPin{Block: blockNum, TxNum: txNum, Header: header, Domain: domain, Variant: commitmentCtx.Trie().Variant(), Root: rootHash}, nil
+	return exportPin{Block: blockNum, TxNum: txNum, Header: header, Config: chainConfig, Domain: domain, Variant: commitmentCtx.Trie().Variant(), Root: rootHash}, nil
 }
 
 func exportCheckpoint(tx kv.TemporalTx, domain kv.Domain) (blockNum, txNum uint64, found bool, err error) {

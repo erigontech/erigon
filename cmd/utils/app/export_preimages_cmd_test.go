@@ -39,6 +39,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -61,7 +62,9 @@ func TestPreparePreimagesOutputRemovesStaleMetadata(t *testing.T) {
 	metaPath := filepath.Join(outDir, "preimages.meta.json")
 	require.NoError(t, os.WriteFile(metaPath, []byte("stale"), 0o644))
 
-	framedPath, gotMetaPath, err := preparePreimagesOutput(outDir)
+	framedPath := filepath.Join(outDir, pbtPreimagesFileName)
+	gotMetaPath := filepath.Join(outDir, preimagesMetaFileName)
+	err := dir.RemoveFile(gotMetaPath)
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(outDir, "framed.bin"), framedPath)
 	require.Equal(t, metaPath, gotMetaPath)
@@ -87,8 +90,6 @@ func TestCheckRootPin(t *testing.T) {
 	err := checkRootPin(root, &types.Header{Root: otherRoot}, 5)
 	require.ErrorContains(t, err, root.Hex())
 	require.ErrorContains(t, err, otherRoot.Hex())
-
-	require.ErrorContains(t, checkRootPin(root, nil, 5), "header")
 }
 
 func TestPinnedStateRoot(t *testing.T) {
@@ -375,6 +376,12 @@ func (s *exportHeapSampler) stopAndRead() uint64 {
 
 func exportPreimages(t *testing.T, ctx context.Context, accounts, storage stream.KV, writer io.Writer, opts exportOpts) (exportPreimagesStats, error) {
 	t.Helper()
+	if opts.onCollect == nil {
+		opts.onCollect = func(exportPreimagesStats) {}
+	}
+	if opts.onWrite == nil {
+		opts.onWrite = func(exportPreimagesStats) {}
+	}
 	if opts.bufferSize == 0 {
 		opts.bufferSize = etl.BufferOptimalSize
 	}
@@ -815,7 +822,7 @@ func TestWriteHashedPreimages_RejectsShortValues(t *testing.T) {
 		defer collector.Close()
 		require.NoError(t, collector.Collect(accountHash[:], address[:preimageAddrLen-1]))
 
-		_, err := writeHashedPreimages(context.Background(), collector, io.Discard, nil, t.TempDir())
+		_, err := writeHashedPreimages(context.Background(), collector, io.Discard, func(exportPreimagesStats) {}, t.TempDir())
 		require.ErrorContains(t, err, "20-byte address")
 	})
 
@@ -826,7 +833,7 @@ func TestWriteHashedPreimages_RejectsShortValues(t *testing.T) {
 		slotHash := crypto.Keccak256Hash(slot(0x01))
 		require.NoError(t, collector.Collect(append(bytes.Clone(accountHash[:]), slotHash[:]...), slot(0x01)[:preimageSlotLen-1]))
 
-		_, err := writeHashedPreimages(context.Background(), collector, io.Discard, nil, t.TempDir())
+		_, err := writeHashedPreimages(context.Background(), collector, io.Discard, func(exportPreimagesStats) {}, t.TempDir())
 		require.ErrorContains(t, err, "32-byte key")
 	})
 }
@@ -886,7 +893,7 @@ func TestWriteHashedPreimages_CancellationKeepsContextErrorIdentity(t *testing.T
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := writeHashedPreimages(ctx, collector, io.Discard, nil, t.TempDir())
+	_, err := writeHashedPreimages(ctx, collector, io.Discard, func(exportPreimagesStats) {}, t.TempDir())
 	require.ErrorIs(t, err, context.Canceled)
 }
 

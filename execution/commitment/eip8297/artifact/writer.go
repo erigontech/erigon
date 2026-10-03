@@ -51,8 +51,6 @@ func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.H
 		return err
 	}
 	var previous []byte
-	var zone byte
-	var haveZone bool
 	var leafCount uint64
 	nextProgress := time.Now().Add(30 * time.Second)
 	var header *headerBuilder
@@ -73,10 +71,7 @@ func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.H
 		if code == nil {
 			return nil
 		}
-		encoded, err := encodeGroup(0x03, code.stem, code.entries)
-		if err == nil {
-			err = write(encoded)
-		}
+		err := write(encodeGroup(0x03, code.stem, code.entries))
 		code = nil
 		return err
 	}
@@ -104,11 +99,7 @@ func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.H
 		if leafCount&4095 == 0 {
 			if now := time.Now(); !now.Before(nextProgress) {
 				nextProgress = now.Add(30 * time.Second)
-				prefix := key
-				if len(prefix) > 8 {
-					prefix = prefix[:8]
-				}
-				log.Root().Info("PBT snapshot writer progress", "phase", "snapshot writer", "leaves", leafCount, "key_prefix", hex.EncodeToString(prefix))
+				log.Root().Info("PBT snapshot writer progress", "phase", "snapshot writer", "leaves", leafCount, "key_prefix", hex.EncodeToString(key[:min(len(key), 8)]))
 			}
 		}
 		if previous != nil && bytes.Compare(key, previous) <= 0 {
@@ -125,14 +116,10 @@ func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.H
 		if !ok || len(key) != keyLength {
 			return fmt.Errorf("%w: key length %d for zone %#x", ErrInvalidLeaf, len(key), currentZone)
 		}
-		if haveZone && currentZone < zone {
-			return ErrUnsorted
-		}
-		if !haveZone || currentZone != zone {
+		if len(previous) == 0 || currentZone != previous[0] {
 			if err := flushZone(); err != nil {
 				return err
 			}
-			zone, haveZone = currentZone, true
 		}
 		switch currentZone {
 		case eip8297.AccountZone:
@@ -166,11 +153,10 @@ func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.H
 					return err
 				}
 			}
-			if err := storage.add(common.BytesToHash(key[33:65]), key[len(key)-1], value); err != nil {
-				return err
+			if storage.current == nil {
+				storage.current = &groupBuilder{stem: common.BytesToHash(key[33:65])}
 			}
-		default:
-			return ErrInvalidLeaf
+			storage.current.entries = append(storage.current.entries, GroupEntry{Index: key[len(key)-1], Value: bytes.Clone(value)})
 		}
 		previous = bytes.Clone(key)
 		return nil
@@ -185,10 +171,7 @@ func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.H
 	if err != nil {
 		return common.Hash{}, err
 	}
-	if err := write([]byte{0x07}); err != nil {
-		return common.Hash{}, err
-	}
-	if err := write(rootHash[:]); err != nil {
+	if err := write(append([]byte{0x07}, rootHash[:]...)); err != nil {
 		return common.Hash{}, err
 	}
 	return common.BytesToHash(hash.Sum(nil)), nil
@@ -262,31 +245,21 @@ type groupBuilder struct {
 	entries []GroupEntry
 }
 
-func encodeGroup(tag byte, stem common.Hash, entries []GroupEntry) ([]byte, error) {
+func encodeGroup(tag byte, stem common.Hash, entries []GroupEntry) []byte {
 	encoded := append([]byte{tag}, stem[:]...)
-	if tag == 0x05 {
-		encoded = append(encoded, entries[0].Index)
-		return append(encoded, encodeIntegerBytes(entries[0].Value)...), nil
+	if tag != 0x05 {
+		encoded = append(encoded, byte(len(entries)-1))
 	}
-	encoded = append(encoded, byte(len(entries)-1))
 	for _, entry := range entries {
 		encoded = append(encoded, entry.Index)
 		encoded = append(encoded, encodeIntegerBytes(entry.Value)...)
 	}
-	return encoded, nil
+	return encoded
 }
 
 type storageBuilder struct {
 	address common.Hash
 	current *groupBuilder
-}
-
-func (s *storageBuilder) add(stem common.Hash, index byte, value []byte) error {
-	if s.current == nil {
-		s.current = &groupBuilder{stem: stem}
-	}
-	s.current.entries = append(s.current.entries, GroupEntry{Index: index, Value: bytes.Clone(value)})
-	return nil
 }
 
 func (s *storageBuilder) flushGroup(write func([]byte) error) error {
@@ -297,15 +270,9 @@ func (s *storageBuilder) flushGroup(write func([]byte) error) error {
 	if len(s.current.entries) == 1 {
 		tag = 0x05
 	}
-	encoded, err := encodeGroup(tag, s.current.stem, s.current.entries)
-	if err != nil {
-		return err
-	}
-	if err := write(encoded); err != nil {
-		return err
-	}
+	err := write(encodeGroup(tag, s.current.stem, s.current.entries))
 	s.current = nil
-	return nil
+	return err
 }
 
 func encodeIntegerBytes(value []byte) []byte {
@@ -316,10 +283,5 @@ func encodeIntegerBytes(value []byte) []byte {
 }
 
 func isZero(value []byte) bool {
-	for _, b := range value {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
+	return len(bytes.TrimLeft(value, "\x00")) == 0
 }

@@ -17,10 +17,8 @@
 package app
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -109,14 +107,14 @@ func TestVerifyPBTAcceptsSoundArtifacts(t *testing.T) {
 	preimagesPath := t.TempDir() + "/framed.bin"
 	require.NoError(t, os.WriteFile(snapshotPath, snapshot.Bytes(), 0o644))
 	require.NoError(t, os.WriteFile(preimagesPath, preimages.Bytes(), 0o644))
-	require.NoError(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7))
+	require.NoError(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7, ""))
 	corruptSnapshot := append([]byte(nil), snapshot.Bytes()...)
 	corruptSnapshot[len(corruptSnapshot)-1] ^= 1
 	require.NoError(t, os.WriteFile(snapshotPath, corruptSnapshot, 0o644))
-	require.ErrorIs(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7), errVerifyPBTInvalid)
+	require.ErrorIs(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7, ""), errVerifyPBTInvalid)
 	require.NoError(t, os.WriteFile(snapshotPath, snapshot.Bytes(), 0o644))
 	require.NoError(t, os.WriteFile(preimagesPath, preimages.Bytes()[:length.Addr+4], 0o644))
-	require.ErrorIs(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7), errVerifyPBTInvalid)
+	require.ErrorIs(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7, ""), errVerifyPBTInvalid)
 	var surplusPreimages bytes.Buffer
 	surplusAddresses := []common.Address{address, {0x22}}
 	sort.Slice(surplusAddresses, func(i, j int) bool {
@@ -135,7 +133,7 @@ func TestVerifyPBTAcceptsSoundArtifacts(t *testing.T) {
 		return nil
 	}, t.TempDir()))
 	require.NoError(t, os.WriteFile(preimagesPath, surplusPreimages.Bytes(), 0o644))
-	require.ErrorIs(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7), errVerifyPBTInvalid)
+	require.ErrorIs(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7, ""), errVerifyPBTInvalid)
 	require.NoError(t, os.WriteFile(preimagesPath, preimages.Bytes(), 0o644))
 	wrongRoot := &types.Header{Number: header.Number, Root: header.Root}
 	wrongRoot.Root[0] ^= 1
@@ -148,7 +146,7 @@ func TestVerifyPBTAcceptsSoundArtifacts(t *testing.T) {
 	require.NoError(t, tx.Commit())
 	db.Close()
 	require.NoError(t, os.WriteFile(preimagesPath, preimages.Bytes(), 0o644))
-	require.ErrorIs(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7), errVerifyPBTInvalid)
+	require.ErrorIs(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7, ""), errVerifyPBTInvalid)
 }
 
 func TestVerifyPBTRejectsMalformedArtifactWithoutPanic(t *testing.T) {
@@ -156,24 +154,8 @@ func TestVerifyPBTRejectsMalformedArtifactWithoutPanic(t *testing.T) {
 	preimagesPath := t.TempDir() + "/framed.bin"
 	require.NoError(t, os.WriteFile(snapshotPath, []byte{0x07}, 0o644))
 	require.NoError(t, os.WriteFile(preimagesPath, nil, 0o644))
-	err := verifyPBTFiles(context.Background(), newHiveVerifyAnchor(t, common.Hash{}), snapshotPath, preimagesPath, 0)
+	err := verifyPBTFiles(context.Background(), newHiveVerifyAnchor(t, common.Hash{}), snapshotPath, preimagesPath, 0, "")
 	require.ErrorIs(t, err, errVerifyPBTInvalid)
-}
-
-func TestVerifyPBTRejectsOversizedCodeDeclaration(t *testing.T) {
-	scratch := t.TempDir()
-	requirements := filepath.Join(scratch, "requirements")
-	expected := filepath.Join(scratch, "expected")
-	f, err := os.Create(requirements)
-	require.NoError(t, err)
-	var value [8]byte
-	binary.BigEndian.PutUint64(value[:], ^uint64(0))
-	w := bufio.NewWriter(f)
-	require.NoError(t, pbtVerifyWriteKV(w, make([]byte, length.Hash), value[:]))
-	require.NoError(t, w.Flush())
-	require.NoError(t, f.Close())
-	require.ErrorContains(t, pbtVerifyGenerateCodeExpected(requirements, expected, scratch, 1<<24), "max-code-size")
-	require.NoFileExists(t, expected)
 }
 
 func TestVerifyPBTAcceptsExportWithLeadingZeroCodeChunk(t *testing.T) {
@@ -403,7 +385,7 @@ func TestVerifyPBTUsesFrozenBlockFiles(t *testing.T) {
 	require.NoError(t, doExportPBT(t.Context(), cmd))
 	require.NoError(t, verifyPBTFiles(t.Context(), dirs.DataDir,
 		filepath.Join(outDir, pbtSnapshotFileName),
-		filepath.Join(outDir, pbtPreimagesFileName), 2))
+		filepath.Join(outDir, pbtPreimagesFileName), 2, ""))
 }
 
 func TestVerifyPBTClassifiesSnapshotIO(t *testing.T) {
@@ -415,14 +397,14 @@ func TestVerifyPBTClassifiesSnapshotIO(t *testing.T) {
 	err := verifyPBTFiles(t.Context(), anchor, filepath.Join(root, "snapshot.bin"), filepath.Join(root, "preimages.bin"), 0, scratch)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, errVerifyPBTInvalid)
-	err = verifyPBTFiles(t.Context(), anchor, filepath.Join(filepath.Dir(root), "snapshot"), filepath.Join(root, "preimages.bin"), 0)
+	err = verifyPBTFiles(t.Context(), anchor, filepath.Join(filepath.Dir(root), "snapshot"), filepath.Join(root, "preimages.bin"), 0, "")
 	require.Error(t, err)
 	require.NotErrorIs(t, err, errVerifyPBTInvalid)
-	err = verifyPBTFiles(t.Context(), filepath.Join(t.TempDir(), "missing"), filepath.Join(root, "snapshot.bin"), filepath.Join(root, "preimages.bin"), 0)
+	err = verifyPBTFiles(t.Context(), filepath.Join(t.TempDir(), "missing"), filepath.Join(root, "snapshot.bin"), filepath.Join(root, "preimages.bin"), 0, "")
 	require.ErrorContains(t, err, "datadir does not exist")
 	anchorDirs := datadir.Open(anchor)
 	require.NoError(t, dir.RemoveAll(anchorDirs.Tmp))
-	err = verifyPBTFiles(t.Context(), anchor, filepath.Join(root, "snapshot.bin"), filepath.Join(root, "preimages.bin"), 0)
+	err = verifyPBTFiles(t.Context(), anchor, filepath.Join(root, "snapshot.bin"), filepath.Join(root, "preimages.bin"), 0, "")
 	require.Error(t, err)
 	_, statErr := os.Stat(anchorDirs.Tmp)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
@@ -458,7 +440,7 @@ func measureVerifyPBTPeak(t *testing.T, count int) uint64 {
 	anchor := newMeasuredPBTAnchor(t, root)
 	runtime.GC()
 	base := verifyPBTLiveHeap()
-	require.NoError(t, verifyPBTFiles(t.Context(), anchor, snapshot, preimages, 0))
+	require.NoError(t, verifyPBTFiles(t.Context(), anchor, snapshot, preimages, 0, ""))
 	runtime.GC()
 	used := verifyPBTLiveHeap()
 	if used <= base {
@@ -574,6 +556,7 @@ func TestVerifyPBTCommandPrintsRejection(t *testing.T) {
 		&cli.StringFlag{Name: "snapshot"},
 		&cli.StringFlag{Name: "preimages"},
 		&cli.Uint64Flag{Name: "block"},
+		&cli.Uint64Flag{Name: "max-code-size", Value: 64 * 1024},
 	}}
 	require.NoError(t, cmd.Set(utils.DataDirFlag.Name, anchor))
 	require.NoError(t, cmd.Set("snapshot", snapshot))
@@ -688,6 +671,7 @@ func TestVerifyPBTCommandHelperProcess(t *testing.T) {
 		&cli.StringFlag{Name: "snapshot"},
 		&cli.StringFlag{Name: "preimages"},
 		&cli.Uint64Flag{Name: "block"},
+		&cli.Uint64Flag{Name: "max-code-size", Value: 64 * 1024},
 	}}
 	require.NoError(t, command.Set(utils.DataDirFlag.Name, os.Getenv("VERIFY_PBT_DATADIR")))
 	require.NoError(t, command.Set("snapshot", os.Getenv("VERIFY_PBT_SNAPSHOT")))

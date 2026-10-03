@@ -116,8 +116,7 @@ func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamC
 			if err != nil {
 				return meta, fmt.Errorf("%w: storage address: %w", ErrMalformed, err)
 			}
-			var address common.Hash
-			copy(address[:], addressBytes)
+			address := common.Hash(addressBytes)
 			if meta.StorageCount != 0 && bytes.Compare(address[:], previousStorage[:]) <= 0 {
 				return meta, ErrUnsorted
 			}
@@ -215,10 +214,7 @@ func (c *artifactCursor) bytes(size int) ([]byte, error) {
 		c.buffer = make([]byte, 64<<10)
 	}
 	if c.offset < c.start || c.offset+int64(size) > c.end {
-		readSize := int64(len(c.buffer))
-		if remaining := c.limit - c.offset; remaining < readSize {
-			readSize = remaining
-		}
+		readSize := min(int64(len(c.buffer)), c.remaining())
 		n, err := c.src.ReadAt(c.buffer[:readSize], c.offset)
 		if err != nil && !(err == io.EOF && int64(n) == readSize) {
 			return nil, ErrMalformed
@@ -292,7 +288,7 @@ func readHeaderAt(c *artifactCursor, kind byte) (Header, error) {
 	if err != nil || int64(slotCount)*3 > c.remaining() {
 		return Header{}, ErrMalformed
 	}
-	header.Slots = make([]Slot, 0, int(slotCount))
+	header.Slots = make([]GroupEntry, 0, int(slotCount))
 	var previous byte
 	for i := 0; i < int(slotCount); i++ {
 		index, err := c.byte()
@@ -306,7 +302,7 @@ func readHeaderAt(c *artifactCursor, kind byte) (Header, error) {
 		if err != nil || len(value) == 0 {
 			return Header{}, fmt.Errorf("%w: invalid header slot", ErrMalformed)
 		}
-		header.Slots = append(header.Slots, Slot{Index: index, Value: value})
+		header.Slots = append(header.Slots, GroupEntry{Index: index, Value: value})
 		previous = index
 	}
 	return header, nil
@@ -370,9 +366,6 @@ func matchStorageHeader(headers *artifactCursor, address common.Hash) error {
 		tag, err := headers.byte()
 		if err != nil {
 			return err
-		}
-		if tag > 2 {
-			return ErrMalformed
 		}
 		header, err := readHeaderAt(headers, tag)
 		if err != nil {

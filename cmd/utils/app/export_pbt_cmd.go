@@ -19,7 +19,6 @@ package app
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/backup"
@@ -86,6 +86,14 @@ type pbtExportMeta struct {
 }
 
 func doExportPBT(ctx context.Context, cliCtx *cli.Command) error {
+	return withExportTx(ctx, cliCtx, func(_ datadir.Dirs, tx kv.TemporalTx, br *freezeblocks.BlockReader) error {
+		return runExportPBTWithTxNumReader(ctx, tx, br.TxnumReader(), func(blockNum uint64) (*types.Header, error) {
+			return br.HeaderByNumber(ctx, tx, blockNum)
+		}, cliCtx.String("out"), log.Root(), nil)
+	})
+}
+
+func withExportTx(ctx context.Context, cliCtx *cli.Command, fn func(datadir.Dirs, kv.TemporalTx, *freezeblocks.BlockReader) error) error {
 	logger := log.Root()
 	dirs, err := openExportDirs(cliCtx.String(utils.DataDirFlag.Name))
 	if err != nil {
@@ -123,10 +131,7 @@ func doExportPBT(ctx context.Context, cliCtx *cli.Command) error {
 		return err
 	}
 	defer tx.Rollback()
-	br := freezeblocks.NewBlockReader(blockSnaps)
-	return runExportPBTWithTxNumReader(ctx, tx, br.TxnumReader(), func(blockNum uint64) (*types.Header, error) {
-		return br.HeaderByNumber(ctx, tx, blockNum)
-	}, cliCtx.String("out"), logger, nil)
+	return fn(dirs, tx, freezeblocks.NewBlockReader(blockSnaps))
 }
 
 func RunExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger) error {
@@ -134,9 +139,6 @@ func RunExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (
 }
 
 func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
-	if tx == nil || headerAt == nil {
-		return fmt.Errorf("export-pbt: missing input")
-	}
 	pin, err := sharedExportPinWithTxNumReader(ctx, tx, headerAt, txNums, logger)
 	if err != nil {
 		return err
@@ -304,10 +306,7 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 		return err
 	}
 	logger.Info("PBT export progress", "phase", "preimage digest")
-	chainConfig, err := exportChainConfig(tx)
-	if err != nil {
-		return err
-	}
+	chainConfig := pin.Config
 	chainID := "0"
 	if chainConfig.ChainID != nil {
 		chainID = chainConfig.ChainID.String()
@@ -320,11 +319,7 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 		PreimageDigest: preimageDigest.Hex(),
 		Finalized:      rawdb.ReadForkchoiceFinalizedNum(tx) >= pin.Block,
 	}
-	metaBytes, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := writeJSONAtomically(metaPath, ".pbt-snapshot-meta-*.tmp", append(metaBytes, '\n')); err != nil {
+	if err := writeJSONAtomically(metaPath, ".pbt-snapshot-meta-*.tmp", meta); err != nil {
 		return err
 	}
 	completed = true
@@ -332,14 +327,12 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 }
 
 func checkExportPBTStreamRoot(root common.Hash, pin exportPin, binRoot common.Hash, found bool) error {
+	want := binRoot
 	if pin.Variant == commitment.VariantBinPatriciaTrie {
-		if root != pin.Root {
-			return fmt.Errorf("export-pbt: stream root %s differs from bin root %s", root.Hex(), pin.Root.Hex())
-		}
-		return nil
+		want = pin.Root
 	}
-	if found && root != binRoot {
-		return fmt.Errorf("export-pbt: stream root %s differs from bin root %s", root.Hex(), binRoot.Hex())
+	if (pin.Variant == commitment.VariantBinPatriciaTrie || found) && root != want {
+		return fmt.Errorf("export-pbt: stream root %s differs from bin root %s", root.Hex(), want.Hex())
 	}
 	return nil
 }

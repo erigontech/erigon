@@ -71,10 +71,7 @@ func doVerifyPBT(ctx context.Context, cliCtx *cli.Command) error {
 	if cliCtx.String("snapshot") == "" || cliCtx.String("preimages") == "" || !cliCtx.IsSet("block") {
 		return pbtVerifyUsageError(errors.New("verify-pbt: --snapshot, --preimages and --block are required"))
 	}
-	maxCodeSize := uint64(params.MaxCodeSizeAmsterdam)
-	if cliCtx.IsSet("max-code-size") {
-		maxCodeSize = cliCtx.Uint64("max-code-size")
-	}
+	maxCodeSize := cliCtx.Uint64("max-code-size")
 	if maxCodeSize > uint64(^uint32(0)) {
 		return pbtVerifyUsageError(fmt.Errorf("%w: --max-code-size must be at most %d", errVerifyPBTConfig, ^uint32(0)))
 	}
@@ -94,11 +91,11 @@ func pbtVerifyUsageError(err error) error {
 	return cli.Exit(err, 2)
 }
 
-func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath string, block uint64, scratchDirs ...string) (err error) {
-	return verifyPBTFilesWithMaxCodeSize(ctx, dataDir, snapshotPath, preimagesPath, block, uint64(params.MaxCodeSizeAmsterdam), scratchDirs...)
+func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath string, block uint64, scratchDir string) (err error) {
+	return verifyPBTFilesWithMaxCodeSize(ctx, dataDir, snapshotPath, preimagesPath, block, uint64(params.MaxCodeSizeAmsterdam), scratchDir)
 }
 
-func verifyPBTFilesWithMaxCodeSize(ctx context.Context, dataDir, snapshotPath, preimagesPath string, block, maxCodeSize uint64, scratchDirs ...string) (err error) {
+func verifyPBTFilesWithMaxCodeSize(ctx context.Context, dataDir, snapshotPath, preimagesPath string, block, maxCodeSize uint64, scratchDir string) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			if recoveredErr, ok := recovered.(error); ok {
@@ -137,13 +134,13 @@ func verifyPBTFilesWithMaxCodeSize(ctx context.Context, dataDir, snapshotPath, p
 	if !preimageInfo.Mode().IsRegular() {
 		return fmt.Errorf("verify-pbt: preimages are not a regular file: %s", preimagesPath)
 	}
-	headerRoot, err := readPBTHeaderRoot(ctx, dataDir, block)
+	headerRoot, err := readPBTHeaderRoot(ctx, dirs, block)
 	if err != nil {
 		return err
 	}
 	tmpRoot := dirs.Tmp
-	if len(scratchDirs) > 0 && scratchDirs[0] != "" {
-		tmpRoot = scratchDirs[0]
+	if scratchDir != "" {
+		tmpRoot = scratchDir
 		if err := os.MkdirAll(tmpRoot, 0o755); err != nil {
 			return err
 		}
@@ -167,13 +164,10 @@ func verifyPBTFilesWithMaxCodeSize(ctx context.Context, dataDir, snapshotPath, p
 	}()
 	root, err := verifyPBTStreamingState(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), tmp, maxCodeSize)
 	if err != nil {
-		if errors.Is(err, errVerifyPBTConfig) {
+		if errors.Is(err, errVerifyPBTConfig) || pbtVerifyIsIOError(err) {
 			return err
 		}
-		if !pbtVerifyIsIOError(err) {
-			return fmt.Errorf("%w: %w", errVerifyPBTInvalid, err)
-		}
-		return err
+		return fmt.Errorf("%w: %w", errVerifyPBTInvalid, err)
 	}
 	if headerRoot != root {
 		return fmt.Errorf("%w: artifact MPT root %x differs from header root %x", errVerifyPBTInvalid, root, headerRoot)
@@ -187,8 +181,7 @@ func pbtVerifyIsIOError(err error) bool {
 	return errors.As(err, &pathErr) || errors.As(err, &linkErr) || errors.Is(err, errPBTVerifyScratchIO) || errors.Is(err, syscall.EFBIG) || errors.Is(err, syscall.ENOSPC)
 }
 
-func readPBTHeaderRoot(ctx context.Context, dataDir string, block uint64) (common.Hash, error) {
-	dirs := datadir.Open(dataDir)
+func readPBTHeaderRoot(ctx context.Context, dirs datadir.Dirs, block uint64) (common.Hash, error) {
 	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
 		return common.Hash{}, err
@@ -214,11 +207,10 @@ func readPBTHeaderRoot(ctx context.Context, dataDir string, block uint64) (commo
 		return common.Hash{}, err
 	}
 	snapshots := blocksnapshots.NewRoSnapshots(ethconfig.NewSnapCfg(false, true, true, chainName), dirs.Snap, log.Root())
+	defer snapshots.Close()
 	if err := snapshots.OpenFolder(); err != nil {
-		snapshots.Close()
 		return common.Hash{}, err
 	}
-	defer snapshots.Close()
 	view := snapshots.View()
 	defer view.Close()
 	reader := freezeblocks.NewBlockReader(snapshots)

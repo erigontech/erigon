@@ -17,13 +17,19 @@
 package app
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 
 	"github.com/erigontech/erigon/common/dir"
 )
 
-func writeJSONAtomically(path, pattern string, data []byte) error {
+func writeJSONAtomically(path, pattern string, value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
 	tmp, err := os.CreateTemp(filepath.Dir(path), pattern)
 	if err != nil {
 		return err

@@ -613,11 +613,7 @@ func removePBTStateHistoryIndexFiles(dirs datadir.Dirs) error {
 }
 
 func linkPBinHexFiles(sourceDir, outputDir string) error {
-	if err := linkPBinDirectory(sourceDir, outputDir, kv.CommitmentDomain.String(), 0, 0, false, true); errors.Is(err, fs.ErrNotExist) {
-		return errors.New("commitment convert-pbt: source hex commitment files are missing")
-	} else {
-		return err
-	}
+	return linkPBinDirectory(sourceDir, outputDir, kv.CommitmentDomain.String(), 0, 0, false, true, "commitment convert-pbt: source hex commitment files are missing")
 }
 
 func linkPBinCommitmentFiles(sourceDirs, outputDirs datadir.Dirs, stepSize, endTxNum uint64) error {
@@ -626,18 +622,21 @@ func linkPBinCommitmentFiles(sourceDirs, outputDirs datadir.Dirs, stepSize, endT
 		{sourceDirs.SnapIdx, outputDirs.SnapIdx},
 		{sourceDirs.SnapAccessors, outputDirs.SnapAccessors},
 	} {
-		if err := linkPBinDirectory(roots[0], roots[1], kv.CommitmentDomain.String(), stepSize, endTxNum, true, false); err != nil {
+		if err := linkPBinDirectory(roots[0], roots[1], kv.CommitmentDomain.String(), stepSize, endTxNum, true, false, ""); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func linkPBinDirectory(sourceDir, outputDir, typeName string, stepSize, endTxNum uint64, ignoreMissing, createOutput bool) error {
+func linkPBinDirectory(sourceDir, outputDir, typeName string, stepSize, endTxNum uint64, ignoreMissing, createOutput bool, missingSourceMessage string) error {
 	entries, err := os.ReadDir(sourceDir)
 	if err != nil {
 		if ignoreMissing && errors.Is(err, fs.ErrNotExist) {
 			return nil
+		}
+		if missingSourceMessage != "" && errors.Is(err, fs.ErrNotExist) {
+			return errors.New(missingSourceMessage)
 		}
 		return err
 	}
@@ -737,10 +736,11 @@ func validatePBTFileAccessors(dirs datadir.Dirs, scope, remedy string) error {
 			continue
 		}
 		if !complete {
+			message := fmt.Sprintf("commitment convert-pbt: %s %s file %s has no accessor", scope, file.domain, file.path)
 			if remedy != "" {
-				return fmt.Errorf("commitment convert-pbt: %s %s file %s has no accessor; run %s", scope, file.domain, file.path, remedy)
+				message += "; run " + remedy
 			}
-			return fmt.Errorf("commitment convert-pbt: %s %s file %s has no accessor", scope, file.domain, file.path)
+			return errors.New(message)
 		}
 	}
 	return nil
