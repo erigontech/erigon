@@ -37,7 +37,7 @@ import (
 // large a shard's table grows.
 type shardedLRU[V any] struct {
 	shards []*freelru.LRU[uint64, V]
-	mus    []sync.Mutex
+	mus    []sync.RWMutex
 	curCap []uint32
 	mask   uint64
 	maxCap uint32 // per shard
@@ -64,7 +64,7 @@ func newShardedLRU[V any](startCap, maxCap, shards uint32, onEvict func(uint64, 
 	shards = max(uint32(math.NextPowerOfTwo(uint64(shards))), 1)
 	s := &shardedLRU[V]{
 		shards:     make([]*freelru.LRU[uint64, V], shards),
-		mus:        make([]sync.Mutex, shards),
+		mus:        make([]sync.RWMutex, shards),
 		curCap:     make([]uint32, shards),
 		mask:       uint64(shards - 1),
 		maxCap:     max(perShard(maxCap, shards), 1),
@@ -115,9 +115,9 @@ func (s *shardedLRU[V]) Cap() int { return int(s.allocCap.Load()) }
 
 func (s *shardedLRU[V]) Get(h uint64) (v V, ok bool) {
 	i := s.idx(h)
-	s.mus[i].Lock()
-	v, ok = s.shards[i].Get(h)
-	s.mus[i].Unlock()
+	s.mus[i].RLock()
+	v, ok = s.shards[i].Peek(h)
+	s.mus[i].RUnlock()
 	return v, ok
 }
 
