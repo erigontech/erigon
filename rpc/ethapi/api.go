@@ -65,11 +65,12 @@ type CallArgs struct {
 
 var callArgsParsers fastjson.ParserPool
 
+type callArgsFields CallArgs
+
 // UnmarshalJSON decodes a call object and rejects one whose data and input disagree.
 // data and input are hex-decoded straight from the parsed object: encoding/json would
 // scan a large calldata string twice, once to validate and once to decode.
 func (args *CallArgs) UnmarshalJSON(raw []byte) error {
-	type callArgs CallArgs
 	p := callArgsParsers.Get()
 	defer callArgsParsers.Put(p)
 	v, err := p.ParseBytes(raw)
@@ -100,22 +101,20 @@ func (args *CallArgs) UnmarshalJSON(raw []byte) error {
 			return args.unmarshalStd(raw)
 		}
 	}
-	if err := json.Unmarshal(v.MarshalTo(nil), (*callArgs)(args)); err != nil {
+	if err := json.Unmarshal(v.MarshalTo(nil), (*callArgsFields)(args)); err != nil {
 		return err
 	}
-	if found[0] {
-		args.Data = calldata[0]
-	}
-	if found[1] {
-		args.Input = calldata[1]
+	for i, dst := range [2]**hexutil.Bytes{&args.Data, &args.Input} {
+		if found[i] {
+			*dst = calldata[i]
+		}
 	}
 	return CheckCallData(args.Data, args.Input)
 }
 
 // unmarshalStd decodes with encoding/json alone, so malformed input gets its error messages.
 func (args *CallArgs) unmarshalStd(raw []byte) error {
-	type callArgs CallArgs
-	if err := json.Unmarshal(raw, (*callArgs)(args)); err != nil {
+	if err := json.Unmarshal(raw, (*callArgsFields)(args)); err != nil {
 		return err
 	}
 	return CheckCallData(args.Data, args.Input)
