@@ -69,8 +69,8 @@ func fastOps() []fastOp {
 		ops = append(ops, fastOp{name: fmt.Sprintf("DUP%d", n), gas: "GasFastestStep", pop: n, push: n + 1, body: fmt.Sprintf("stack.data[top] = stack.data[top-%d]\ntop++", n)})
 	}
 	for n := 1; n <= 4; n++ {
-		ops = append(ops, fastOp{name: fmt.Sprintf("SWAP%d", n), execute: fmt.Sprintf("opSwap%d", n), gas: "GasFastestStep", pop: n + 1, push: n + 1,
-			body: fmt.Sprintf("stack.data[top-1], stack.data[top-%d] = stack.data[top-%d], stack.data[top-1]", n+1, n+1)})
+		swap := fmt.Sprintf("stack.data[top-1], stack.data[top-%d] = stack.data[top-%d], stack.data[top-1]", n+1, n+1)
+		ops = append(ops, fastOp{name: fmt.Sprintf("SWAP%d", n), execute: fmt.Sprintf("opSwap%d", n), gas: "GasFastestStep", pop: n + 1, push: n + 1, body: swap})
 	}
 	return ops
 }

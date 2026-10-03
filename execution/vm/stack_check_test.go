@@ -158,7 +158,7 @@ type fastPathWant struct {
 // TestRunTracedIsGenerated fails when vm_run.go's fast-path cases, vm_run_traced_gen.go
 // or fast_path_gen_test.go are stale against execution/vm/gen.
 func TestRunTracedIsGenerated(t *testing.T) {
-	cmd := exec.Command("go", "run", "./gen", "-check")
+	cmd := exec.CommandContext(t.Context(), "go", "run", "./gen", "-check")
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
 }
@@ -169,9 +169,9 @@ func TestRunTracedIsGenerated(t *testing.T) {
 func TestRunHasNoJumpTable(t *testing.T) {
 	// The test binary has no symbol table; the package archive keeps it.
 	pkg := filepath.Join(t.TempDir(), "vm.a")
-	out, err := exec.Command("go", "build", "-o", pkg, ".").CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), "go", "build", "-o", pkg, ".").CombinedOutput()
 	require.NoError(t, err, string(out))
-	out, err = exec.Command("go", "tool", "objdump", "-s", `vm\.\(\*EVM\)\.run$`, pkg).Output()
+	out, err = exec.CommandContext(t.Context(), "go", "tool", "objdump", "-s", `vm\.\(\*EVM\)\.run$`, pkg).Output()
 	require.NoError(t, err)
 	require.Contains(t, string(out), "vm_run.go")
 	tableJump := regexp.MustCompile(`(?m)\tJMP (0\(\w+\)\(\w+\*8\)|\(R\d+\))\s`)
