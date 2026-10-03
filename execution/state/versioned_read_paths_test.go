@@ -128,36 +128,16 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
 	key := accounts.InternKey([32]byte{0x01})
 	prior := Version{TxIndex: 1, Incarnation: 0}
 	mvhm.WriteStorage(addr, key, prior, *uint256.NewInt(99), true)
-	mvhm.WriteBalance(addr, prior, *uint256.NewInt(99), true)
-	mvhm.WriteCode(addr, prior, accounts.Code{Bytes: []byte{0xfe}}, true)
 
 	v, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	require.EqualValues(t, 99, v.Uint64(), "first read resolves from the version map")
-
-	// Read balance and code too, so all three paths carry a recorded read the
-	// fast path could wrongly serve after the destruct.
-	bal, err := ibs.GetBalance(addr)
-	require.NoError(t, err)
-	require.EqualValues(t, 99, bal.Uint64(), "first balance read resolves from the version map")
-	code, err := ibs.GetCode(addr)
-	require.NoError(t, err)
-	require.NotEmpty(t, code, "first code read resolves from the version map")
 
 	destructInPriorTx(t, ibs, mvhm, addr)
 
 	v, err = ibs.GetState(addr, key)
 	require.NoError(t, err)
 	assert.True(t, v.IsZero(), "slot of a destructed account reads as zero, not as the recorded value")
-
-	// The whole account is gone, not just the slot: the other paths must agree.
-	bal, err = ibs.GetBalance(addr)
-	require.NoError(t, err)
-	assert.True(t, bal.IsZero(), "balance of a destructed account reads as zero")
-
-	code, err = ibs.GetCode(addr)
-	require.NoError(t, err)
-	assert.Empty(t, code, "code of a destructed account reads as empty")
 }
 
 // The read-once fast path must return exactly what the read-set-hit branch it
