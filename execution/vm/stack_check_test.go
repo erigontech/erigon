@@ -170,7 +170,7 @@ var runTracedSrc []byte
 
 // TestRunTracedIsGenerated fails when run_traced_gen.go is stale against run.go.
 func TestRunTracedIsGenerated(t *testing.T) {
-	cmd := exec.Command("go", "run", "gen_run.go", "-stdout")
+	cmd := exec.Command("go", "run", "./gen", "-stdout")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

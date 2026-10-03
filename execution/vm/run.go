@@ -19,7 +19,7 @@
 
 package vm
 
-//go:generate go run gen_run.go
+//go:generate go run ./gen
 
 import (
 	"errors"

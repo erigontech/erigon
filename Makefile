@@ -638,7 +638,7 @@ jsongen:
 ## rungen:                            regenerate the traced EVM loop from execution/vm/run.go
 .PHONY: rungen
 rungen:
-	go generate -run "gen_run" ./execution/vm/
+	go generate -run "go run ./gen" ./execution/vm/
 
 ## bindings:                          generate test contracts and core contracts
 bindings:
