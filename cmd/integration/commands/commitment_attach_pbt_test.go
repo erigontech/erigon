@@ -23,7 +23,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -429,33 +428,18 @@ func TestPBTAttachFilesAheadOfPointRemedy(t *testing.T) {
 }
 
 func runPBTOfflineCommand(t *testing.T, binary string, args ...string) {
+	runPBTOfflineCommandWithEnv(t, os.Environ(), binary, args...)
+}
+
+func runPBTOfflineCommandWithEnv(t *testing.T, environment []string, binary string, args ...string) {
 	t.Helper()
 	workingDir, err := os.Getwd()
 	require.NoError(t, err)
 	if binary == "integration" && len(args) > 0 && args[0] == "stage_exec" {
-		datadirPath := ""
-		op := ""
-		value := "0"
-		for _, arg := range args[1:] {
-			switch {
-			case strings.HasPrefix(arg, "--datadir="):
-				datadirPath = strings.TrimPrefix(arg, "--datadir=")
-			case arg == "--reset":
-				op = "reset"
-			case strings.HasPrefix(arg, "--unwind="):
-				op = "unwind"
-				value = strings.TrimPrefix(arg, "--unwind=")
-			case strings.HasPrefix(arg, "--block="):
-				op = "block"
-				value = strings.TrimPrefix(arg, "--block=")
-			}
-		}
 		command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestPBTAttachRemedyHelperProcess$")
 		command.Env = append(os.Environ(),
 			"GO_WANT_HELPER_PROCESS=1",
-			"PBT_REMEDY_DATADIR="+datadirPath,
-			"PBT_REMEDY_OP="+op,
-			"PBT_REMEDY_VALUE="+value,
+			"PBT_REMEDY_ARGS="+strings.Join(args[1:], "\x1f"),
 		)
 		output, err := command.CombinedOutput()
 		require.NoError(t, err, "helper for %s: %s", strings.Join(args, " "), output)
@@ -466,7 +450,7 @@ func runPBTOfflineCommand(t *testing.T, binary string, args ...string) {
 		commandPath = filepath.Join(workingDir, "..", "..", "..", "build", "bin", binary)
 	}
 	command := exec.CommandContext(t.Context(), commandPath, args...)
-	command.Env = append(os.Environ(), "ERIGON_COMMITMENT_V3=true")
+	command.Env = environment
 	if filepath.Base(commandPath) == "erigon" {
 		command.Stdin = strings.NewReader("1\n")
 	}
@@ -494,9 +478,6 @@ func printedPBTCommands(message, prefix string) [][]string {
 			}
 			command = append(command, field)
 		}
-		if len(command) > 0 && strings.Contains(command[0], "=") {
-			command = command[1:]
-		}
 		commands = append(commands, command)
 		offset = index + len(prefix)
 	}
@@ -506,11 +487,20 @@ func printedPBTCommands(message, prefix string) [][]string {
 func runPrintedPBTCommand(t *testing.T, erigonBinary string, command []string) {
 	t.Helper()
 	require.NotEmpty(t, command)
+	environment := os.Environ()
+	for len(command) > 0 {
+		if !strings.Contains(command[0], "=") || strings.HasPrefix(command[0], "--") {
+			break
+		}
+		environment = append(environment, command[0])
+		command = command[1:]
+	}
+	require.NotEmpty(t, command)
 	binary := command[0]
 	if binary == "erigon" {
 		binary = erigonBinary
 	}
-	runPBTOfflineCommand(t, binary, command[1:]...)
+	runPBTOfflineCommandWithEnv(t, environment, binary, command[1:]...)
 }
 
 func TestPBTAttachRemedyHelperProcess(t *testing.T) {
@@ -534,22 +524,10 @@ func TestPBTAttachRemedyHelperProcess(t *testing.T) {
 		datadirCli, chaindata, chain = previousDatadir, previousChaindata, previousChain
 		reset, unwind, block = previousReset, previousUnwind, previousBlock
 	})
-	datadirCli = os.Getenv("PBT_REMEDY_DATADIR")
+	args := strings.Split(os.Getenv("PBT_REMEDY_ARGS"), "\x1f")
+	require.NoError(t, cmdStageExec.ParseFlags(args))
 	chaindata = filepath.Join(datadirCli, "chaindata")
 	chain = "pbt-remedy"
-	reset, unwind, block = false, 0, 0
-	switch os.Getenv("PBT_REMEDY_OP") {
-	case "reset":
-		reset = true
-	case "unwind":
-		unwind, err = strconv.ParseUint(os.Getenv("PBT_REMEDY_VALUE"), 10, 64)
-		require.NoError(t, err)
-	case "block":
-		block, err = strconv.ParseUint(os.Getenv("PBT_REMEDY_VALUE"), 10, 64)
-		require.NoError(t, err)
-	default:
-		t.Fatalf("unknown remedy operation")
-	}
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	db, err := openDB(t.Context(), dbCfg(dbcfg.ChainDB, chaindata), true, chain, log.New())

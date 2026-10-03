@@ -326,11 +326,6 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ConfigureCommitmentV3Records(true)
 	statecfg.BinCommitmentHash = meta.HashSuite
-	targetAgg, err := dbstate.NewPBTStateAggregator(stageDirs, finalSettings, logger).Open(ctx)
-	if err != nil {
-		return err
-	}
-	defer targetAgg.Close()
 	if err := os.MkdirAll(dirs.Tmp, 0o755); err != nil {
 		return err
 	}
@@ -344,9 +339,11 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 		return err
 	}
 	defer stageRaw.Close()
-	if err := targetAgg.OpenFolder(stageRaw); err != nil {
+	targetAgg, err := openPBTState(ctx, stageDirs, finalSettings, stageRaw, logger)
+	if err != nil {
 		return err
 	}
+	defer targetAgg.Close()
 	targetDB, err := dbtemporal.New(stageRaw, targetAgg, nil)
 	if err != nil {
 		return err
@@ -442,7 +439,7 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 		if !settingsWritten {
 			removePBTImportFiles(moved)
 			if checkpointWritten {
-				_ = removePBTImportCheckpoint(ctx, dirs, finalSettings, meta.TxNum, common.HexToHash(meta.BlockHash), meta.Block, logger)
+				_ = removePBTImportCheckpoint(ctx, dirs, common.HexToHash(meta.BlockHash), meta.Block)
 			}
 			_ = dbstate.RemovePBTImportMarker(dirs)
 		}
@@ -486,14 +483,11 @@ func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		return err
 	}
 	defer rawDB.Close()
-	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
+	agg, err := openPBTState(ctx, dirs, settings, rawDB, logger)
 	if err != nil {
 		return err
 	}
 	defer agg.Close()
-	if err := agg.OpenFolder(rawDB); err != nil {
-		return err
-	}
 	db, err := dbtemporal.New(rawDB, agg, nil)
 	if err != nil {
 		return err
@@ -510,7 +504,7 @@ func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	return nil
 }
 
-func removePBTImportCheckpoint(ctx context.Context, dirs datadir.Dirs, _ *dbstate.ErigonDBSettings, _ uint64, blockHash common.Hash, blockNum uint64, _ log.Logger) error {
+func removePBTImportCheckpoint(ctx context.Context, dirs datadir.Dirs, blockHash common.Hash, blockNum uint64) error {
 	rawDB, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
 	if err != nil {
 		return err
@@ -536,14 +530,11 @@ func writePBTImportCheckpoint(ctx context.Context, dirs datadir.Dirs, settings *
 		return fmt.Errorf("commitment import-pbt: open target for checkpoint: %w", err)
 	}
 	defer rawDB.Close()
-	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
+	agg, err := openPBTState(ctx, dirs, settings, rawDB, logger)
 	if err != nil {
 		return err
 	}
 	defer agg.Close()
-	if err := agg.OpenFolder(rawDB); err != nil {
-		return err
-	}
 	db, err := dbtemporal.New(rawDB, agg, nil)
 	if err != nil {
 		return err
@@ -622,29 +613,13 @@ func validatePBTImportNoBinFiles(dirs datadir.Dirs) error {
 }
 
 func readPBTImportHexCheckpoint(ctx context.Context, dirs datadir.Dirs, rawDB kv.RwDB, settings *dbstate.ErigonDBSettings, logger log.Logger) (uint64, uint64, error) {
-	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer agg.Close()
-	if err := agg.OpenFolder(rawDB); err != nil {
-		return 0, 0, err
-	}
-	at := agg.BeginFilesRo()
-	defer at.Close()
-	readTx, err := rawDB.BeginRo(ctx)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer readTx.Rollback()
-	value, _, found, err := at.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, readTx, kv.GetLatestOptions{})
+	block, tx, _, found, err := readPBTCommitmentState(ctx, dirs, rawDB, settings, logger)
 	if err != nil {
 		return 0, 0, err
 	}
 	if !found {
 		return 0, 0, errors.New("commitment import-pbt: hex commitment checkpoint is missing from files")
 	}
-	block, tx, _, err := commitment.DecodeCommitmentV3State(value)
 	return block, tx, err
 }
 
@@ -757,23 +732,5 @@ func removePBTImportFiles(files []string) {
 }
 
 func removePBTImportFilesForRecovery(dirs datadir.Dirs) error {
-	files, err := pbtAttachFiles(dirs)
-	if err != nil {
-		return err
-	}
-	directories := make(map[string]struct{})
-	for _, file := range files {
-		if file.domain == kv.CommitmentBinDomain {
-			if err := dir.RemoveFile(file.path); err != nil {
-				return err
-			}
-			directories[filepath.Dir(file.path)] = struct{}{}
-		}
-	}
-	for directory := range directories {
-		if err := dir.FsyncDir(directory); err != nil {
-			return err
-		}
-	}
-	return nil
+	return removePBTFiles(dirs, func(file pbtAttachFile) bool { return file.domain == kv.CommitmentBinDomain })
 }

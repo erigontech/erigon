@@ -234,28 +234,7 @@ func runExportWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawd
 	if err != nil {
 		return err
 	}
-	metaTemp, err := os.CreateTemp(outDir, ".preimages-meta-*.tmp")
-	if err != nil {
-		return err
-	}
-	metaTempName := metaTemp.Name()
-	defer func() {
-		_ = metaTemp.Close()
-		_ = dir.RemoveFile(metaTempName)
-	}()
-	if _, err := metaTemp.Write(append(metadataJSON, '\n')); err != nil {
-		return err
-	}
-	if err := metaTemp.Sync(); err != nil {
-		return err
-	}
-	if err := metaTemp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(metaTempName, metaPath); err != nil {
-		return err
-	}
-	if err := dir.FsyncDir(outDir); err != nil {
+	if err := writeJSONAtomically(metaPath, ".preimages-meta-*.tmp", append(metadataJSON, '\n')); err != nil {
 		return err
 	}
 	completed = true

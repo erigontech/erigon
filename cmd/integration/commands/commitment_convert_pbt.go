@@ -143,7 +143,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if detectedV3 && (sourceSettings == nil || sourceSettings.TrieVariantName() == dbstate.TrieVariantHex) {
 		statecfg.ConfigureCommitmentV3Records(true)
 	}
-	if err := validatePBTSourceAccessors(sourceDirs); err != nil {
+	if err := validatePBTFileAccessors(sourceDirs, "source", fmt.Sprintf("ERIGON_COMMITMENT_V3=true erigon snapshots index --datadir=%s", sourceDirs.DataDir)); err != nil {
 		return err
 	}
 	point, err := readPBinSourcePoint(ctx, sourceDirs, sourceSettings, keepHex, logger)
@@ -237,16 +237,6 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	}
 	targetSettings.TrieVariant = &trieVariant
 	targetSettings.TrieHash = &hashName
-	targetAgg, err := dbstate.NewPBTStateAggregator(outputDirs, targetSettings, logger).Open(ctx)
-	if err != nil {
-		return err
-	}
-	targetAggClosed := false
-	defer func() {
-		if !targetAggClosed {
-			targetAgg.Close()
-		}
-	}()
 	targetChaindata, err := os.MkdirTemp("", "convert-pbt-target-chaindata-")
 	if err != nil {
 		return err
@@ -257,9 +247,16 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return err
 	}
 	defer targetRaw.Close()
-	if err := targetAgg.OpenFolder(targetRaw); err != nil {
+	targetAgg, err := openPBTState(ctx, outputDirs, targetSettings, targetRaw, logger)
+	if err != nil {
 		return err
 	}
+	targetAggClosed := false
+	defer func() {
+		if !targetAggClosed {
+			targetAgg.Close()
+		}
+	}()
 	targetDB, err := dbtemporal.New(targetRaw, targetAgg, nil)
 	if err != nil {
 		return err
@@ -312,7 +309,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if err := removePBTInvisibleFiles(visibleRanges, sourceDirs, outputDirs); err != nil {
 		return err
 	}
-	if err := validatePBTOutputAccessors(outputDirs); err != nil {
+	if err := validatePBTFileAccessors(outputDirs, "published", ""); err != nil {
 		return err
 	}
 	conversionBlock, conversionTx := point.BlockNum, point.TxNum
@@ -383,14 +380,9 @@ func readPBinSourcePoint(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	if keepHex && (settings == nil || settings.TrieVariantName() == dbstate.TrieVariantHex) {
 		statecfg.ConfigureCommitmentV3Records(true)
 	}
-	aggOpts := dbstate.NewPBTStateAggregator(dirs, settings, logger)
-	agg, err := aggOpts.Open(ctx)
+	agg, err := openPBTState(ctx, dirs, settings, nil, logger)
 	if err != nil {
 		return pbinConversionPoint{}, fmt.Errorf("commitment convert-pbt: open source point: %w", err)
-	}
-	if err := agg.OpenFolder(nil); err != nil {
-		agg.Close()
-		return pbinConversionPoint{}, err
 	}
 	defer agg.Close()
 	at := agg.BeginFilesRo()
@@ -484,14 +476,11 @@ func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings 
 	defer func() { _ = dir.RemoveAll(chaindataDir) }()
 	rawDB := mdbx.New(dbcfg.ChainDB, logger).Path(chaindataDir).MustOpen()
 	defer rawDB.Close()
-	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
+	agg, err := openPBTState(ctx, dirs, settings, nil, logger)
 	if err != nil {
 		return err
 	}
 	defer agg.Close()
-	if err := agg.OpenFolder(nil); err != nil {
-		return err
-	}
 	db, err := dbtemporal.New(rawDB, agg, nil)
 	if err != nil {
 		return err
@@ -562,14 +551,11 @@ func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	}); err != nil {
 		return err
 	}
-	agg, err := dbstate.NewPBTStateAggregator(dirs, settings, logger).Open(ctx)
+	agg, err := openPBTState(ctx, dirs, settings, nil, logger)
 	if err != nil {
 		return err
 	}
 	defer agg.Close()
-	if err := agg.OpenFolder(nil); err != nil {
-		return err
-	}
 	db, err := dbtemporal.New(rawDB, agg, nil)
 	if err != nil {
 		return err
@@ -626,25 +612,9 @@ func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, blockReader *freez
 }
 
 func removePBTStateHistoryIndexFiles(dirs datadir.Dirs) error {
-	files, err := pbtAttachFiles(dirs)
-	if err != nil {
-		return err
-	}
-	touched := make(map[string]struct{})
-	for _, file := range files {
-		if pbtAttachStateDomain(file.domain) && !pbtAttachAdoptsFile(file) {
-			if err := dir.RemoveFile(file.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
-			touched[filepath.Dir(file.path)] = struct{}{}
-		}
-	}
-	for directory := range touched {
-		if err := dir.FsyncDir(directory); err != nil {
-			return err
-		}
-	}
-	return nil
+	return removePBTFiles(dirs, func(file pbtAttachFile) bool {
+		return pbtAttachStateDomain(file.domain) && !pbtAttachAdoptsFile(file)
+	})
 }
 
 func linkPBinHexFiles(sourceDir, outputDir string) error {
@@ -750,14 +720,6 @@ func removePBTInvisibleFiles(visibleRanges map[string]struct{}, sourceDirs, outp
 	return nil
 }
 
-func validatePBTSourceAccessors(dirs datadir.Dirs) error {
-	return validatePBTFileAccessors(dirs, "source", fmt.Sprintf("ERIGON_COMMITMENT_V3=true erigon snapshots index --datadir=%s", dirs.DataDir))
-}
-
-func validatePBTOutputAccessors(dirs datadir.Dirs) error {
-	return validatePBTFileAccessors(dirs, "published", "")
-}
-
 func validatePBTFileAccessors(dirs datadir.Dirs, scope, remedy string) error {
 	files, err := pbtAttachFiles(dirs)
 	if err != nil {
@@ -814,45 +776,20 @@ func pbtVisibleSnapshotFiles(sourceAgg *dbstate.Aggregator, sourceDirs datadir.D
 }
 
 func addPBTCommitmentVisibleFiles(visibleRanges map[string]struct{}, dirs datadir.Dirs) {
-	type commitmentFile struct {
-		family, kind, ext string
-		from, to          uint64
+	files, err := pbtAttachFiles(dirs)
+	if err != nil {
+		return
 	}
-	var files []commitmentFile
-	for _, root := range []string{dirs.SnapDomain, dirs.SnapHistory, dirs.SnapIdx, dirs.SnapAccessors} {
-		entries, err := os.ReadDir(root)
+	for _, file := range pbtAttachVisibleFiles(files, kv.CommitmentDomain) {
+		rel, err := filepath.Rel(dirs.Snap, file.path)
 		if err != nil {
 			continue
 		}
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			parsed, _, ok := snaptype.ParseFileName(root, entry.Name())
-			if !ok || parsed.TypeString != kv.CommitmentDomain.String() {
-				continue
-			}
-			rel, err := filepath.Rel(dirs.Snap, filepath.Join(root, entry.Name()))
-			if err != nil {
-				continue
-			}
-			files = append(files, commitmentFile{
-				family: pbtSnapshotFileFamily(rel), kind: parsed.TypeString, ext: filepath.Ext(entry.Name()), from: parsed.From, to: parsed.To,
-			})
+		parsed, _, ok := snaptype.ParseFileName(filepath.Dir(file.path), filepath.Base(file.path))
+		if !ok {
+			continue
 		}
-	}
-	for i, file := range files {
-		covered := false
-		for j, other := range files {
-			if i != j && file.family == other.family && file.kind == other.kind && file.ext == other.ext &&
-				other.from <= file.from && other.to >= file.to && (other.from < file.from || other.to > file.to) {
-				covered = true
-				break
-			}
-		}
-		if !covered {
-			visibleRanges[pbtSnapshotFileKey(file.family, file.kind, file.from, file.to)] = struct{}{}
-		}
+		visibleRanges[pbtSnapshotFileKey(pbtSnapshotFileFamily(rel), parsed.TypeString, parsed.From, parsed.To)] = struct{}{}
 	}
 }
 

@@ -123,6 +123,12 @@ func heapObjects() uint64 {
 	return samples[0].Value.Uint64()
 }
 
+func liveHeap() uint64 {
+	samples := []metrics.Sample{{Name: "/gc/heap/live:bytes"}}
+	metrics.Read(samples)
+	return samples[0].Value.Uint64()
+}
+
 func allocatedBytes(run func() error) (uint64, error) {
 	runtime.GC()
 	samples := []metrics.Sample{{Name: "/gc/heap/allocs:bytes"}}
@@ -794,11 +800,20 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	require.GreaterOrEqual(t, snapshotInfo.Size(), int64(128<<20))
 	require.GreaterOrEqual(t, preimageInfo.Size(), int64(128<<20))
 	readGroups := 0
-	readerAlloc, err := allocatedBytes(func() error {
+	runtime.GC()
+	readerBase := liveHeap()
+	var readerPeak uint64
+	_, err = allocatedBytes(func() error {
 		_, err := ReadSnapshotStreamAt(snapshot, snapshotInfo.Size(), SnapshotStreamCallbacks{
 			Storage: func(_ common.Hash, groups func(func(Group) error) error) error {
 				return groups(func(group Group) error {
 					readGroups += len(group.Entries)
+					if readGroups&((1<<16)-1) == 0 {
+						runtime.GC()
+						if current := liveHeap(); current > readerPeak {
+							readerPeak = current
+						}
+					}
 					return nil
 				})
 			},
@@ -807,7 +822,10 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readGroups)
-	require.Less(t, readerAlloc, uint64(slotCount)*256)
+	if readerPeak < readerBase {
+		readerPeak = readerBase
+	}
+	require.Less(t, readerPeak-readerBase, uint64(1<<20))
 	readSlots := 0
 	preimageAlloc, err := allocatedBytes(func() error {
 		return ReadPreimagesStream(preimages, preimageInfo.Size(), func(_ common.Address, slots func(func([32]byte) error) error) error {
@@ -821,15 +839,28 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	require.Equal(t, slotCount, readSlots)
 	require.Less(t, preimageAlloc, uint64(slotCount)*128)
 	seen := 0
-	alloc, err := allocatedBytes(func() error {
+	runtime.GC()
+	joinBase := liveHeap()
+	var joinPeak uint64
+	_, err = allocatedBytes(func() error {
 		return joinAtWithBuffer(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), eip8297.HashBytes, func(common.Address, [32]byte) error {
 			seen++
+			if seen&((1<<16)-1) == 0 {
+				runtime.GC()
+				if current := liveHeap(); current > joinPeak {
+					joinPeak = current
+				}
+			}
 			return nil
 		}, 1<<20, t.TempDir())
 	})
 	require.NoError(t, err)
 	require.Equal(t, slotCount, seen)
-	require.Less(t, alloc, uint64(slotCount)*1500)
+	require.NotZero(t, joinPeak)
+	if joinPeak < joinBase {
+		joinPeak = joinBase
+	}
+	require.Less(t, joinPeak-joinBase, uint64(32<<20))
 }
 
 func TestPreimageReaderAllocationsStayBounded(t *testing.T) {
