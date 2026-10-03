@@ -1780,9 +1780,6 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			}
 			return txpoolcfg.NotReplaced
 		}
-
-		p.removeFromSubPool(found, "add")
-		p.discardLocked(found, txpoolcfg.ReplacedByHigherTip)
 	}
 
 	// Don't add blob txn to queued if it's less than current pending blob base fee
@@ -1796,7 +1793,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		p.logger.Info("senderID not registered, discarding transaction for safety")
 		return txpoolcfg.InvalidSender
 	}
-	if _, ok := p.auths[AuthAndNonce{senderAddr, mt.TxnSlot.Nonce}]; ok {
+	if owner, ok := p.auths[AuthAndNonce{senderAddr, mt.TxnSlot.Nonce}]; ok && owner != found {
 		return txpoolcfg.ErrAuthorityReserved
 	}
 
@@ -1808,11 +1805,18 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				return txpoolcfg.NonceTooLow
 			}
-			if _, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok {
+			if owner, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok && owner != found {
 				p.logger.Debug("setCodeTxn ", "duplicateAuthority", a.authority, "nonce", a.nonce, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
 				return txpoolcfg.ErrAuthorityReserved
 			}
 		}
+	}
+
+	if found != nil {
+		p.removeFromSubPool(found, "add")
+		p.discardLocked(found, txpoolcfg.ReplacedByHigherTip)
+	}
+	if mt.TxnSlot.TxType() == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
 			p.auths[AuthAndNonce{a.authority, a.nonce}] = mt
 		}

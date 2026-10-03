@@ -2959,3 +2959,56 @@ func TestFromDBBlobsOutliveReadTx(t *testing.T) {
 	require.Len(bundles, len(blobHashes))
 	require.Equal(want, bundles[0].Blob, "blob loaded from the pool DB must not change after its read tx ends")
 }
+
+func TestAddLocalTxnsKeepsOriginalWhenReplacementRejected(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	original := newTestTxnSlot(0, 0, 1, 2, 100_000)
+	original.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(original, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	replacement := newTestSetCodeTxnSlot(0, 0, 10, 20, 100_000)
+	replacement.IDHash[0] = 2
+	replacement.AuthAndNonces = []AuthAndNonce{{authority: sender, nonce: 7}}
+	txns = TxnSlots{}
+	txns.Append(replacement, sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+
+	require.Contains(t, pool.byHash, string(original.IDHash[:]))
+	require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))
+	pending, baseFee, queued := pool.CountContent()
+	require.Equal(t, 1, pending+baseFee+queued)
+}
+
+func TestAddLocalTxnsReplacesSetCodeTxnWithSameAuthorization(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	auth := AuthAndNonce{authority: common.Address{9}, nonce: 3}
+
+	original := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+	original.IDHash[0] = 1
+	original.AuthAndNonces = []AuthAndNonce{auth}
+	var txns TxnSlots
+	txns.Append(original, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	replacement := newTestSetCodeTxnSlot(0, 0, 10, 20, 100_000)
+	replacement.IDHash[0] = 2
+	replacement.AuthAndNonces = []AuthAndNonce{auth}
+	txns = TxnSlots{}
+	txns.Append(replacement, sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	require.NotContains(t, pool.byHash, string(original.IDHash[:]))
+	require.Contains(t, pool.byHash, string(replacement.IDHash[:]))
+	require.Same(t, pool.byHash[string(replacement.IDHash[:])], pool.auths[auth])
+}
