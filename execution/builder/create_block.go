@@ -87,7 +87,7 @@ func StageBuilderCreateBlockCfg(
 // createBlock constructs the block header and selects uncles.
 // TODO:
 // - resubmitAdjustCh - variable is not implemented
-func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, executionAt uint64, cfg BuilderCreateBlockCfg, logger log.Logger) (err error) {
+func createBlock(sd *execctx.SharedDomains, tx kv.TemporalTx, executionAt uint64, cfg BuilderCreateBlockCfg, logger log.Logger) (err error) {
 	const logPrefix = "BuilderCreateBlock"
 
 	current := cfg.builder.BuiltBlock
