@@ -194,6 +194,9 @@ func (g *PagedReader) Size() int           { return g.file.Size() }
 func (g *PagedReader) PageSize() int       { return g.pageSize }
 func (g *PagedReader) HasNextOnPage() bool { return g.pageSize > 1 && g.page.HasNext() }
 
+// DecodedPage returns the zstd-decoded page the reader was last Reset to; the next page read overwrites it.
+func (g *PagedReader) DecodedPage() []byte { return g.page.compressionBuf }
+
 // GetFromPage returns the value for k at the offset the reader was last Reset to. A file written without
 // pages holds one value per offset, so k is not used there. A missing value is nil; an error means the offset
 // is not a page start, because a written page always holds at least one pair.
