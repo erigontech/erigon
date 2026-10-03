@@ -136,3 +136,32 @@ func TestResolvedRefsFlagBindsCommitmentWriteVersion(t *testing.T) {
 		require.Contains(t, commit.kvNewFilePath(0, 1), "v2.2-commitment.0-1.kv")
 	})
 }
+
+// Reclaim stops at the oldest visible set that still has a reader, so the superseded sets behind
+// it stay in the chain. Their files must stay, their cached bytes must not: one long-lived reader
+// would otherwise hold a whole cache budget per set for as long as it lives.
+func TestReclaimClosesCachesOfUnreadSets(t *testing.T) {
+	newSet := func() *aggregatorVisible {
+		v := &aggregatorVisible{}
+		v.d[kv.AccountsDomain] = newDomainVisible(kv.AccountsDomain, nil)
+		return v
+	}
+	pinned, unread, cur := newSet(), newSet(), newSet()
+	pinned.refcnt.Store(1)
+	pinned.next, unread.next = unread, cur
+	for _, v := range []*aggregatorVisible{pinned, unread, cur} {
+		require.True(t, v.d[kv.AccountsDomain].cache.Add(1, domainGetFromFileCacheItem{v: []byte{7}}))
+	}
+
+	a := &Aggregator{oldestVisible: pinned}
+	a.visible.Store(cur)
+	require.Empty(t, a.reclaimRetiredLocked(), "no files leave the chain while the oldest set is pinned")
+
+	cached := func(v *aggregatorVisible) bool {
+		_, ok := v.d[kv.AccountsDomain].cache.Get(1)
+		return ok
+	}
+	require.True(t, cached(pinned), "the set its reader is on keeps what it cached")
+	require.False(t, cached(unread), "a superseded set no one reads does not")
+	require.True(t, cached(cur), "the current set keeps what it cached")
+}
