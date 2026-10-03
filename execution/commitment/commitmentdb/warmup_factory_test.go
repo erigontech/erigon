@@ -18,6 +18,7 @@ package commitmentdb
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -113,6 +114,7 @@ type snapshotTx struct {
 	// goroutines asking one txn for its view is a write race.
 	viewMemo  uint64
 	viewCalls atomic.Int64
+	reads     atomic.Int64
 }
 
 func (t *snapshotTx) ViewID() uint64 {
@@ -130,6 +132,7 @@ type snapshotGetter struct {
 }
 
 func (g *snapshotGetter) GetLatest(kv.Domain, []byte, kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	g.tx.reads.Add(1)
 	g.tx.scratch = append(g.tx.scratch[:0], g.tx.val...)
 	return g.tx.scratch, 0, nil
 }
@@ -143,6 +146,9 @@ type snapshotSD struct {
 func (*snapshotSD) StepSize() uint64 { return 1 }
 func (s *snapshotSD) AsStateGetter(tx kv.TemporalTx, _ execctxapi.StateGetterOptions) execctxapi.StateGetter {
 	s.getters.Add(1)
+	if cloner, ok := tx.(*cloneableSnapshotTx); ok {
+		tx = cloner.snapshotTx
+	}
 	return &snapshotGetter{tx: tx.(*snapshotTx)}
 }
 
@@ -169,6 +175,76 @@ func newSnapshotSdc(t *testing.T) (*SharedDomainsCommitmentContext, *snapshotSD)
 	t.Helper()
 	shared := &snapshotSD{}
 	return &SharedDomainsCommitmentContext{sharedDomains: shared, tmpDir: t.TempDir()}, shared
+}
+
+type cloneableSnapshotTx struct {
+	*snapshotTx
+	clones []*snapshotTx
+	err    error
+}
+
+func (tx *cloneableSnapshotTx) CloneState(context.Context) (kv.TemporalTx, error) {
+	if tx.err != nil {
+		return nil, tx.err
+	}
+	clone := &snapshotTx{viewID: tx.viewID, val: tx.val}
+	tx.clones = append(tx.clones, clone)
+	return clone, nil
+}
+
+// After a newer commit, workers must read the original state independently,
+// without taking turns reading through the caller's transaction.
+func TestConcurrentTrieContextsCloneCallerSnapshot(t *testing.T) {
+	t.Parallel()
+	caller := &cloneableSnapshotTx{snapshotTx: &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}}
+	db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
+	sdc, _ := newSnapshotSdc(t)
+	factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+	defer func() {
+		for _, c := range drain() {
+			c.Close()
+		}
+	}()
+
+	vals, errs := foldConcurrently(t, factory)
+	for i := range vals {
+		require.NoError(t, errs[i])
+		require.Equal(t, []byte("caller-snapshot"), vals[i])
+	}
+	require.Zero(t, caller.reads.Load(), "workers must read through their own transactions")
+	require.Len(t, caller.clones, len(vals))
+	for _, clone := range caller.clones {
+		require.Positive(t, clone.reads.Load())
+	}
+}
+
+func TestConcurrentTrieContextCloneFailure(t *testing.T) {
+	t.Parallel()
+	for _, cloneErr := range []error{context.Canceled, kv.ErrSnapshotCloneUnsupported} {
+		t.Run(cloneErr.Error(), func(t *testing.T) {
+			caller := &cloneableSnapshotTx{
+				snapshotTx: &snapshotTx{viewID: 7, val: []byte("caller-snapshot")},
+				err:        cloneErr,
+			}
+			db := &snapshotDB{viewID: 8, val: []byte("committed-head")}
+			sdc, _ := newSnapshotSdc(t)
+			factory, drain := sdc.concurrentTrieContextFactory(t.Context(), db, nil, caller, 0)
+			trieCtx, cleanup := factory(t.Context())
+			defer func() {
+				cleanup()
+				for _, c := range drain() {
+					c.Close()
+				}
+			}()
+			v, _, err := trieCtx.Branch([]byte("prefix"))
+			if errors.Is(cloneErr, kv.ErrSnapshotCloneUnsupported) {
+				require.NoError(t, err)
+				require.Equal(t, []byte("caller-snapshot"), v)
+			} else {
+				require.ErrorIs(t, err, cloneErr)
+			}
+		})
+	}
 }
 
 // A fold outside the exec-module semaphore can overlap a commit, so a worker
@@ -198,7 +274,7 @@ func TestConcurrentTrieContextReadsCallerSnapshot(t *testing.T) {
 // snapshot, and workers must keep their own read views.
 func TestConcurrentTrieContextKeepsWorkerTxOnSameSnapshot(t *testing.T) {
 	t.Parallel()
-	caller := &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}
+	caller := &cloneableSnapshotTx{snapshotTx: &snapshotTx{viewID: 7, val: []byte("caller-snapshot")}}
 	db := &snapshotDB{viewID: 7, val: []byte("worker-view")}
 	sdc, _ := newSnapshotSdc(t)
 
@@ -214,6 +290,7 @@ func TestConcurrentTrieContextKeepsWorkerTxOnSameSnapshot(t *testing.T) {
 	enc, _, err := trieCtx.Branch([]byte("prefix"))
 	require.NoError(t, err)
 	require.Equal(t, []byte("worker-view"), enc)
+	require.Empty(t, caller.clones, "matching snapshots do not need cloning")
 }
 
 func foldConcurrently(t *testing.T, factory commitment.TrieContextFactory) (vals [][]byte, errs []error) {

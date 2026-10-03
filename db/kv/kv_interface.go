@@ -912,6 +912,8 @@ var ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutil
 // available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
 var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concurrent read transactions")
 
+var ErrSnapshotCloneUnsupported = errors.New("transaction backend does not support snapshot cloning")
+
 // ErrInMemHistoryDisabled is returned by TemporalMemBatch history reads when the batch keeps only
 // the latest value per key, so no historical answer exists in memory. Overlay read views treat it as
 // a miss and fall through to their backing transaction; every other reader error stays fatal.
