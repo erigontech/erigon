@@ -1706,10 +1706,12 @@ func TestGetPayloadBodiesServeBinaryTransactions(t *testing.T) {
 	to := common.Address{1}
 	gasPrice := *uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
 	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
-		commonTx := types.CommonTx{Nonce: b.TxNonce(m.Address), To: &to, GasLimit: params.TxGas, Value: *uint256.NewInt(1)}
-		var txn types.Transaction = &types.LegacyTx{CommonTx: commonTx, GasPrice: gasPrice}
+		commonTx := func() types.CommonTx {
+			return types.CommonTx{Nonce: b.TxNonce(m.Address), To: &to, GasLimit: params.TxGas, Value: *uint256.NewInt(1)}
+		}
+		var txn types.Transaction = &types.LegacyTx{CommonTx: commonTx(), GasPrice: gasPrice}
 		if i == 1 {
-			txn = &types.DynamicFeeTransaction{CommonTx: commonTx, ChainID: *m.ChainConfig.ChainID, TipCap: gasPrice, FeeCap: gasPrice}
+			txn = &types.DynamicFeeTransaction{CommonTx: commonTx(), ChainID: *m.ChainConfig.ChainID, TipCap: gasPrice, FeeCap: gasPrice}
 		}
 		signed, signErr := types.SignTx(txn, *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(t, signErr)
