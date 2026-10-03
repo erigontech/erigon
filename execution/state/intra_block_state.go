@@ -1386,7 +1386,7 @@ func (ibs *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 			// Spurious Dragon (see PR 5645 and Issue 18276).
 			//
 			// The primary syscall path in evm.call() handles this via
-			// TouchAccount directly; this branch is retained as
+			// TouchAccount directly on AuRa; this branch is retained as
 			// defense-in-depth for other callers (AuRa engine,
 			// consensus callbacks).
 			return ibs.TouchAccount(addr)
