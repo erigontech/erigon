@@ -332,27 +332,24 @@ func testTable(ops []fastOp) []byte {
 	return out
 }
 
+// read returns the file with LF line endings: Git checks it out with CRLF on Windows.
+func read(name string) []byte {
+	b, err := os.ReadFile(name)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
+}
+
 func main() {
 	check := len(os.Args) > 1 && os.Args[1] == "-check"
-	traced, err := os.ReadFile("vm_run_traced.go")
-	if err != nil {
-		log.Fatal(err)
-	}
-	instructions, err := os.ReadFile("instructions.go")
-	if err != nil {
-		log.Fatal(err)
-	}
-	opcodes, err := os.ReadFile("opcodes.go")
-	if err != nil {
-		log.Fatal(err)
-	}
 	ops := fastOps()
-	checkNoJumpTable(ops, opcodeValues(opcodes))
+	checkNoJumpTable(ops, opcodeValues(read("opcodes.go")))
 	files := []struct {
 		name string
 		data []byte
 	}{
-		{"vm_run_gen.go", untraced(traced, fastSwitch(instructions, ops))},
+		{"vm_run_gen.go", untraced(read("vm_run_traced.go"), fastSwitch(read("instructions.go"), ops))},
 		{"fast_path_gen_test.go", testTable(ops)},
 	}
 	var stale []string
