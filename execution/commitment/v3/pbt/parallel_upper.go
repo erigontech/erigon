@@ -140,13 +140,7 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 			return phaseBucketResult{}, err
 		}
 	}
-	base := workerContext
-	if base == nil {
-		base = t.phaseBase
-		if base == nil {
-			base = t.ctx
-		}
-	}
+	base := cmp.Or(workerContext, t.phaseBase, t.ctx)
 	local := t.newPhaseContext(base, nil)
 	var subtreeTrie *Trie
 	switch {

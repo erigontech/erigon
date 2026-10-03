@@ -492,19 +492,6 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 			t.markDirty(row)
 			return true, nil
 		}
-		if d/4 == row.path.BitLen/4 {
-			value, skip, err := t.mergeInsertValue(value, merge, nil, key)
-			if err != nil {
-				return false, err
-			}
-			if skip {
-				return false, nil
-			}
-			newSlot := slotAt(&path, row.path.BitLen)
-			t.setLeaf(row, newSlot, key, value)
-			t.markDirty(row)
-			return false, nil
-		}
 		value, skip, err := t.mergeInsertValue(value, merge, nil, key)
 		if err != nil {
 			return false, err

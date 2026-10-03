@@ -204,7 +204,7 @@ func (t *Trie) rowDescriptor(row *rowNode) (eip8297.Bitpath, common.Hash, common
 		default:
 			return eip8297.Bitpath{}, common.Hash{}, common.Hash{}, errInsertKey
 		}
-	case 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16:
+	default:
 		if !row.folded {
 			return eip8297.Bitpath{}, common.Hash{}, common.Hash{}, fmt.Errorf("row %x was not folded", row.key)
 		}
@@ -213,8 +213,6 @@ func (t *Trie) rowDescriptor(row *rowNode) (eip8297.Bitpath, common.Hash, common
 			return eip8297.Bitpath{}, common.Hash{}, common.Hash{}, err
 		}
 		return prefix, row.foldResult.Left, row.foldResult.Right, nil
-	default:
-		return eip8297.Bitpath{}, common.Hash{}, common.Hash{}, errInsertKey
 	}
 }
 
@@ -245,11 +243,7 @@ func foldRowWithRefs(path eip8297.Bitpath, record *Record, refs *rowNode) (foldN
 			return node, nil
 		}
 	}
-	node, err := foldRange(path, record, slots, 0, len(slots), refs)
-	if err != nil {
-		return foldNode{}, err
-	}
-	return node, nil
+	return foldRange(path, record, slots, 0, len(slots), refs)
 }
 
 func foldRange(path eip8297.Bitpath, record *Record, slots []int, from, to int, refs *rowNode) (foldNode, error) {

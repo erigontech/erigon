@@ -142,13 +142,13 @@ func buildPhasePlanWithThreshold(ops []Op, threshold int) (phasePlan, error) {
 	for _, key := range bucketList {
 		bucketKey := string(key)
 		bucket := bucketOps[bucketKey]
+		bucketPath, err := bucketPathForKey(key)
+		if err != nil {
+			return phasePlan{}, err
+		}
 		if threshold > 0 && len(bucket) >= threshold && !hasDrop(bucket) {
 			groups := make(map[string][]Op)
 			prefixes := make(map[string]eip8297.Bitpath)
-			bucketPath, err := bucketPathForKey(key)
-			if err != nil {
-				return phasePlan{}, err
-			}
 			for _, op := range bucket {
 				path, err := keyPath(op.Key)
 				if err != nil {
@@ -172,10 +172,6 @@ func buildPhasePlanWithThreshold(ops []Op, threshold int) (phasePlan, error) {
 			continue
 		}
 		bucketIndex[bucketKey] = len(tasks)
-		bucketPath, err := bucketPathForKey(key)
-		if err != nil {
-			return phasePlan{}, err
-		}
 		tasks = append(tasks, phaseTask{kind: phaseBucket, key: bucketKey, prefix: bucketPath, ops: bucket, resultIndex: len(tasks)})
 	}
 	for _, key := range chainKeys {

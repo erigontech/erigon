@@ -19,6 +19,7 @@ package pbt
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/erigontech/erigon/common"
@@ -35,29 +36,22 @@ func TranslateFeed(feed *commitment.PBinFeed) ([]Op, error) {
 	}); err != nil {
 		return nil, err
 	}
-	seen := make(map[string]struct{}, len(ops))
-	for _, op := range ops {
-		key := op.Key
-		if len(op.Drop) != 0 {
-			key = op.Drop
-		}
-		name := string(key)
-		if _, ok := seen[name]; ok {
-			return nil, fmt.Errorf("pbin: duplicate operation key %x", key)
-		}
-		seen[name] = struct{}{}
-	}
-	sort.SliceStable(ops, func(i, j int) bool {
-		left, right := ops[i].Key, ops[j].Key
-		if len(ops[i].Drop) != 0 {
-			left = ops[i].Drop
-		}
-		if len(ops[j].Drop) != 0 {
-			right = ops[j].Drop
-		}
-		return bytes.Compare(left, right) < 0
+	slices.SortStableFunc(ops, func(left, right Op) int {
+		return bytes.Compare(opKey(left), opKey(right))
 	})
+	for i := 1; i < len(ops); i++ {
+		if bytes.Equal(opKey(ops[i-1]), opKey(ops[i])) {
+			return nil, fmt.Errorf("pbin: duplicate operation key %x", opKey(ops[i]))
+		}
+	}
 	return ops, nil
+}
+
+func opKey(op Op) []byte {
+	if len(op.Drop) != 0 {
+		return op.Drop
+	}
+	return op.Key
 }
 
 func ForEachFeedOp(feed *commitment.PBinFeed, emit func(Op) error) error {

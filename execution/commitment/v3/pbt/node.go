@@ -241,12 +241,8 @@ func rowFoldResult(n *rowNode) (FoldResult, error) {
 	if err != nil {
 		return FoldResult{}, err
 	}
-	return FoldRow(key, recordPointer(n))
-}
-
-func recordPointer(n *rowNode) *Record {
 	record := n.record()
-	return &record
+	return FoldRow(key, &record)
 }
 
 func rowTopPrefix(n *rowNode, split int16) (eip8297.Bitpath, error) {

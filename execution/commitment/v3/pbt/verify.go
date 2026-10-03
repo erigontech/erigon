@@ -198,7 +198,8 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 				return FoldResult{}, err
 			}
 		}
-		t.releaseVerifiedChild(cell, child)
+		cell.child = nil
+		child.parent = nil
 	}
 	return rowFoldResult(row)
 }
@@ -219,11 +220,6 @@ func (t *Trie) verifyBuckets() error {
 		}
 	}
 	return nil
-}
-
-func (t *Trie) releaseVerifiedChild(cell *rowCell, child *rowNode) {
-	cell.child = nil
-	child.parent = nil
 }
 
 func (t *Trie) verifyBucketBranch(bucketPath, branchPath *eip8297.Bitpath, row *rowNode, left, right common.Hash) error {

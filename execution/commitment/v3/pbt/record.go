@@ -255,16 +255,10 @@ func encodeRow(k recordKey, record *Record) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		value, err := eip8297.EncodeLeafValue(cell.Key, &cell.Value)
+		out, err = appendLeaf(out, &suffix, cell.Key, &cell.Value)
 		if err != nil {
-			return nil, recordError(CompactValueError, err.Error())
+			return nil, err
 		}
-		if len(value) > 255 {
-			return nil, recordError(CompactValueError, "compact value exceeds one-byte length")
-		}
-		out = suffix.AppendPackedBits(out)
-		out = append(out, byte(len(value)))
-		out = append(out, value...)
 	}
 	return out, nil
 }
@@ -297,18 +291,21 @@ func encodeLeafRoot(k recordKey, record *Record) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	value, err := eip8297.EncodeLeafValue(cell.Key, &cell.Value)
+	out := []byte{recordFormat | hdrIsLeafRoot}
+	return appendLeaf(out, &suffix, cell.Key, &cell.Value)
+}
+
+func appendLeaf(out []byte, suffix *eip8297.Bitpath, key []byte, value *[eip8297.ValueLength]byte) ([]byte, error) {
+	encoded, err := eip8297.EncodeLeafValue(key, value)
 	if err != nil {
 		return nil, recordError(CompactValueError, err.Error())
 	}
-	if len(value) > 255 {
+	if len(encoded) > 255 {
 		return nil, recordError(CompactValueError, "compact value exceeds one-byte length")
 	}
-	out := []byte{recordFormat | hdrIsLeafRoot}
 	out = suffix.AppendPackedBits(out)
-	out = append(out, byte(len(value)))
-	out = append(out, value...)
-	return out, nil
+	out = append(out, byte(len(encoded)))
+	return append(out, encoded...), nil
 }
 
 func decodeRow(k recordKey, data []byte) (Record, error) {
