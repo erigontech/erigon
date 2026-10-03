@@ -158,7 +158,8 @@ func TestVerifyPBinDomainRejectsCorruptedRow(t *testing.T) {
 	verifyTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer verifyTx.Rollback()
-	require.Error(t, state.VerifyPBinDomain(t.Context(), verifyTx, agg, kv.CommitmentDomain))
+	_, verifyErr := state.VerifyPBinDomainRoot(t.Context(), verifyTx, agg, kv.CommitmentDomain)
+	require.Error(t, verifyErr)
 }
 
 func TestVerifyPBinDomainAcceptsBinOnlyConversion(t *testing.T) {
@@ -187,7 +188,8 @@ func TestVerifyPBinDomainAcceptsBinOnlyConversion(t *testing.T) {
 	verifyTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer verifyTx.Rollback()
-	require.NoError(t, state.VerifyPBinDomain(t.Context(), verifyTx, agg, kv.CommitmentDomain))
+	_, verifyErr := state.VerifyPBinDomainRoot(t.Context(), verifyTx, agg, kv.CommitmentDomain)
+	require.NoError(t, verifyErr)
 }
 
 func selectPBinConvertHash(t *testing.T) {

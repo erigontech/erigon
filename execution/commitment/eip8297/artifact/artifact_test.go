@@ -46,6 +46,28 @@ import (
 
 type PreimageIterator func(func(Preimage) error) error
 
+type Preimage struct {
+	Address common.Address
+	Slots   [][32]byte
+}
+
+type Storage struct {
+	AddressHash common.Hash
+	Groups      []Group
+}
+
+type Snapshot struct {
+	Root           common.Hash
+	Headers        []Header
+	CodeGroups     []Group
+	StorageGroups  []Storage
+	SnapshotDigest common.Hash
+}
+
+func WriteSnapshot(dst io.Writer, root common.Hash, leaves KVIterator) (common.Hash, error) {
+	return WriteSnapshotStream(dst, leaves, func() (common.Hash, error) { return root, nil })
+}
+
 func WritePreimages(dst io.Writer, iterate PreimageIterator) error {
 	if iterate == nil {
 		return ErrPreimages
@@ -160,7 +182,7 @@ func (s *heapSampler) stopAndRead() uint64 {
 func readSnapshot(t *testing.T, data []byte) (Snapshot, error) {
 	t.Helper()
 	var snapshot Snapshot
-	meta, err := ReadSnapshotAt(bytes.NewReader(data), int64(len(data)), SnapshotCallbacks{
+	meta, err := ReadSnapshotStreamAt(bytes.NewReader(data), int64(len(data)), SnapshotStreamCallbacks{
 		Header: func(header Header) error {
 			snapshot.Headers = append(snapshot.Headers, header)
 			return nil
@@ -169,7 +191,14 @@ func readSnapshot(t *testing.T, data []byte) (Snapshot, error) {
 			snapshot.CodeGroups = append(snapshot.CodeGroups, group)
 			return nil
 		},
-		Storage: func(storage Storage) error {
+		Storage: func(address common.Hash, groups func(func(Group) error) error) error {
+			storage := Storage{AddressHash: address}
+			if err := groups(func(group Group) error {
+				storage.Groups = append(storage.Groups, group)
+				return nil
+			}); err != nil {
+				return err
+			}
 			snapshot.StorageGroups = append(snapshot.StorageGroups, storage)
 			return nil
 		},
@@ -185,7 +214,14 @@ func readSnapshot(t *testing.T, data []byte) (Snapshot, error) {
 func readPreimages(t *testing.T, data []byte) ([]Preimage, error) {
 	t.Helper()
 	var records []Preimage
-	err := ReadPreimagesAt(bytes.NewReader(data), int64(len(data)), func(record Preimage) error {
+	err := ReadPreimagesStream(bytes.NewReader(data), int64(len(data)), func(address common.Address, slots func(func([32]byte) error) error) error {
+		record := Preimage{Address: address}
+		if err := slots(func(slot [32]byte) error {
+			record.Slots = append(record.Slots, slot)
+			return nil
+		}); err != nil {
+			return err
+		}
 		records = append(records, record)
 		return nil
 	})
@@ -232,12 +268,12 @@ func TestStreamingReadersUseCallbacks(t *testing.T) {
 	data, err := hex.DecodeString(golden.Bytes)
 	require.NoError(t, err)
 	var headers, groups, storage uint64
-	meta, err := ReadSnapshotAt(bytes.NewReader(data), int64(len(data)), SnapshotCallbacks{
+	meta, err := ReadSnapshotStreamAt(bytes.NewReader(data), int64(len(data)), SnapshotStreamCallbacks{
 		Header: func(Header) error { headers++; return nil },
 		Code:   func(Group) error { groups++; return nil },
-		Storage: func(Storage) error {
+		Storage: func(_ common.Hash, groups func(func(Group) error) error) error {
 			storage++
-			return nil
+			return groups(nil)
 		},
 	})
 	require.NoError(t, err)
@@ -256,7 +292,7 @@ func TestStreamingReadersUseCallbacks(t *testing.T) {
 		return yield(Preimage{Address: common.Address{1}})
 	})))
 	var count int
-	require.NoError(t, ReadPreimagesAt(bytes.NewReader(preimages.Bytes()), int64(preimages.Len()), func(Preimage) error {
+	require.NoError(t, ReadPreimagesStream(bytes.NewReader(preimages.Bytes()), int64(preimages.Len()), func(common.Address, func(func([32]byte) error) error) error {
 		count++
 		return nil
 	}))
@@ -518,7 +554,7 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 	defer reader.Close()
 	runtime.GC()
 	readerSampler := startHeapSampler()
-	_, err = ReadSnapshotAt(reader, info.Size(), SnapshotCallbacks{
+	_, err = ReadSnapshotStreamAt(reader, info.Size(), SnapshotStreamCallbacks{
 		Code: func(Group) error { return nil },
 	})
 	readPeak := readerSampler.stopAndRead()

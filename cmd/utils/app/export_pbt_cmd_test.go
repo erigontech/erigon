@@ -99,7 +99,7 @@ func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
 	require.NotEmpty(t, preimages)
 	snapshotBytes, err := os.ReadFile(filepath.Join(outDir, pbtSnapshotFileName))
 	require.NoError(t, err)
-	snapshotMeta, err := artifact.ReadSnapshotAt(bytes.NewReader(snapshotBytes), int64(len(snapshotBytes)), artifact.SnapshotCallbacks{})
+	snapshotMeta, err := artifact.ReadSnapshotStreamAt(bytes.NewReader(snapshotBytes), int64(len(snapshotBytes)), artifact.SnapshotStreamCallbacks{})
 	require.NoError(t, err)
 	require.NoError(t, artifact.JoinAt(bytes.NewReader(snapshotBytes), int64(len(snapshotBytes)), bytes.NewReader(preimages), int64(len(preimages)), eip8297.HashBytes, nil, t.TempDir()))
 	require.Equal(t, root, snapshotMeta.Root)
@@ -224,13 +224,13 @@ func TestRunExportPBTEmptyState(t *testing.T) {
 	}, outDir, log.New()))
 	snapshotBytes, err := os.ReadFile(filepath.Join(outDir, pbtSnapshotFileName))
 	require.NoError(t, err)
-	snapshot, err := artifact.ReadSnapshotAt(bytes.NewReader(snapshotBytes), int64(len(snapshotBytes)), artifact.SnapshotCallbacks{})
+	snapshot, err := artifact.ReadSnapshotStreamAt(bytes.NewReader(snapshotBytes), int64(len(snapshotBytes)), artifact.SnapshotStreamCallbacks{})
 	require.NoError(t, err)
 	require.Equal(t, eip8297.EmptyTreeHash, snapshot.Root)
 	require.Zero(t, snapshot.HeaderCount)
 	preimageBytes, err := os.ReadFile(filepath.Join(outDir, pbtPreimagesFileName))
 	require.NoError(t, err)
-	require.NoError(t, artifact.ReadPreimagesAt(bytes.NewReader(preimageBytes), int64(len(preimageBytes)), nil))
+	require.NoError(t, artifact.ReadPreimagesStream(bytes.NewReader(preimageBytes), int64(len(preimageBytes)), nil))
 }
 
 func TestRunExportPBTRealAcceptanceChain(t *testing.T) {

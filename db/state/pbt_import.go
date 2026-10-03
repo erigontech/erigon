@@ -17,6 +17,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 
@@ -46,11 +47,11 @@ func ForEachPBinArtifactLeaf(snapshot io.ReaderAt, snapshotSize int64, hashFn ei
 			codeSize := uint64(0)
 			switch header.Kind {
 			case 1:
-				codeSize = integerUint64(header.CodeSize)
+				codeSize = PBinIntegerUint64(header.CodeSize)
 			case 2:
 				codeSize = eip8297.DelegationCodeLength
 			}
-			basic, encodeErr := eip8297.EncodeBasicData(integerUint64(header.Nonce), new(uint256.Int).SetBytes(header.Balance), codeSize)
+			basic, encodeErr := eip8297.EncodeBasicData(PBinIntegerUint64(header.Nonce), new(uint256.Int).SetBytes(header.Balance), codeSize)
 			if encodeErr != nil {
 				return encodeErr
 			}
@@ -118,15 +119,11 @@ func ForEachPBinArtifactLeaf(snapshot io.ReaderAt, snapshotSize int64, hashFn ei
 	return root, nil
 }
 
-func integerUint64(value []byte) uint64 {
+func PBinIntegerUint64(value []byte) uint64 {
 	if len(value) > 8 {
 		return ^uint64(0)
 	}
 	var raw [8]byte
 	copy(raw[8-len(value):], value)
-	var result uint64
-	for _, b := range raw {
-		result = result<<8 | uint64(b)
-	}
-	return result
+	return binary.BigEndian.Uint64(raw[:])
 }

@@ -43,6 +43,23 @@ type PBinConvertOptions struct {
 	RangeWriterLimits *PBinRangeWriterLimits
 }
 
+func PBinRootFromStream(hash eip8297.HashFn, stream func(func(PBinLeaf) error) error) (common.Hash, error) {
+	builder, err := eip8297.NewStreamRootBuilder(hash)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if err := stream(func(leaf PBinLeaf) error { return builder.Add(leaf.Key, leaf.Value) }); err != nil {
+		return common.Hash{}, err
+	}
+	return builder.RootHash()
+}
+
+func PBinStateRoot(at *AggregatorRoTx, tx kv.Tx, filesOnly bool, hash eip8297.HashFn) (common.Hash, error) {
+	return PBinRootFromStream(hash, func(emit func(PBinLeaf) error) error {
+		return ForEachPBinLeaf(at, tx, filesOnly, emit)
+	})
+}
+
 func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, error) {
 	if opts.SourceAggregator == nil || opts.SourceTx == nil || opts.TargetAggregator == nil || opts.TargetTx == nil {
 		return common.Hash{}, fmt.Errorf("pbin conversion: missing database input")
@@ -63,17 +80,18 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 
 	sourceFiles := opts.SourceAggregator.BeginFilesRo()
 	defer sourceFiles.Close()
-	rootBuilder, err := eip8297.NewStreamRootBuilder(opts.Hash)
-	if err != nil {
-		return common.Hash{}, err
-	}
+	var streamRoot common.Hash
+	var streamErr error
 	leaves := func(emit func(PBinLeaf) error) error {
-		return ForEachPBinLeaf(sourceFiles, opts.SourceTx, true, func(leaf PBinLeaf) error {
-			if addErr := rootBuilder.Add(leaf.Key, leaf.Value); addErr != nil {
-				return addErr
-			}
-			return emit(leaf)
+		streamRoot, streamErr = PBinRootFromStream(opts.Hash, func(add func(PBinLeaf) error) error {
+			return ForEachPBinLeaf(sourceFiles, opts.SourceTx, true, func(leaf PBinLeaf) error {
+				if addErr := add(leaf); addErr != nil {
+					return addErr
+				}
+				return emit(leaf)
+			})
 		})
+		return streamErr
 	}
 	var writer *PBinRangeWriter
 	if opts.RangeWriterLimits == nil {
@@ -88,19 +106,10 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	if err != nil {
 		return common.Hash{}, err
 	}
-	streamRoot, err := rootBuilder.RootHash()
-	if err != nil {
-		return common.Hash{}, err
-	}
 	if !bytes.Equal(root[:], streamRoot[:]) {
 		return common.Hash{}, fmt.Errorf("pbin conversion: engine root %x differs from stream root %x", root, streamRoot)
 	}
 	return root, nil
-}
-
-func VerifyPBinDomain(ctx context.Context, tx kv.TemporalTx, aggregator *Aggregator, domain kv.Domain) error {
-	_, err := VerifyPBinDomainRoot(ctx, tx, aggregator, domain)
-	return err
 }
 
 func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Aggregator, domain kv.Domain) (common.Hash, error) {

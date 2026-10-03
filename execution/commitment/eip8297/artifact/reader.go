@@ -38,36 +38,10 @@ type SnapshotMeta struct {
 	SnapshotDigest common.Hash
 }
 
-type SnapshotCallbacks struct {
-	Header  func(Header) error
-	Code    func(Group) error
-	Storage func(Storage) error
-}
-
 type SnapshotStreamCallbacks struct {
 	Header  func(Header) error
 	Code    func(Group) error
 	Storage func(common.Hash, func(func(Group) error) error) error
-}
-
-func ReadSnapshotAt(src io.ReaderAt, size int64, callbacks SnapshotCallbacks) (SnapshotMeta, error) {
-	return ReadSnapshotStreamAt(src, size, SnapshotStreamCallbacks{
-		Header: callbacks.Header,
-		Code:   callbacks.Code,
-		Storage: func(address common.Hash, groups func(func(Group) error) error) error {
-			if callbacks.Storage == nil {
-				return groups(nil)
-			}
-			storage := Storage{AddressHash: address}
-			if err := groups(func(group Group) error {
-				storage.Groups = append(storage.Groups, group)
-				return nil
-			}); err != nil {
-				return err
-			}
-			return callbacks.Storage(storage)
-		},
-	})
 }
 
 func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamCallbacks) (SnapshotMeta, error) {

@@ -45,21 +45,3 @@ type Group struct {
 	StemHash common.Hash
 	Entries  []GroupEntry
 }
-
-type Storage struct {
-	AddressHash common.Hash
-	Groups      []Group
-}
-
-type Snapshot struct {
-	Root           common.Hash
-	Headers        []Header
-	CodeGroups     []Group
-	StorageGroups  []Storage
-	SnapshotDigest common.Hash
-}
-
-type Preimage struct {
-	Address common.Address
-	Slots   [][32]byte
-}

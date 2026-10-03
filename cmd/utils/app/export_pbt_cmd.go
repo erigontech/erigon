@@ -173,19 +173,19 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 		return err
 	}
 	snapshotWriter := bufio.NewWriterSize(snapshotFile, 1<<20)
-	builder, err := eip8297.NewStreamRootBuilder(eip8297.HashBytes)
-	if err != nil {
-		_ = snapshotFile.Close()
-		return err
-	}
+	var root common.Hash
 	snapshotDigest, writeErr := artifact.WriteSnapshotStream(snapshotWriter, func(emit func([]byte, []byte) error) error {
-		return state.ForEachPBinLeaf(state.AggTx(tx), tx, false, func(leaf state.PBinLeaf) error {
-			if err := builder.Add(leaf.Key, leaf.Value); err != nil {
-				return err
-			}
-			return emit(leaf.Key, leaf.Value)
+		var err error
+		root, err = state.PBinRootFromStream(eip8297.HashBytes, func(add func(state.PBinLeaf) error) error {
+			return state.ForEachPBinLeaf(state.AggTx(tx), tx, false, func(leaf state.PBinLeaf) error {
+				if err := add(leaf); err != nil {
+					return err
+				}
+				return emit(leaf.Key, leaf.Value)
+			})
 		})
-	}, builder.RootHash)
+		return err
+	}, func() (common.Hash, error) { return root, nil })
 	if writeErr == nil {
 		writeErr = snapshotWriter.Flush()
 	}
@@ -195,10 +195,6 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 	}
 	if closeErr != nil {
 		return closeErr
-	}
-	root, err := builder.RootHash()
-	if err != nil {
-		return err
 	}
 	if err := checkExportPBTStreamRoot(root, pin, binRoot, found); err != nil {
 		return err

@@ -1339,11 +1339,7 @@ const (
 	pbinRebuildOpCollectorBufferBudget = 64 * datasize.MB
 )
 
-func pbinForEachRebuildOpStreamLookaheadAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, []byte, bool) error, stream func(func(pbt.Op) error) error) error {
-	return pbinForEachRebuildOpStreamLookaheadAfterWithSample(tmpDir, maxOps, maxBytes, afterKey, visit, stream, nil)
-}
-
-func pbinForEachRebuildOpStreamLookaheadAfterWithSample(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, []byte, bool) error, stream func(func(pbt.Op) error) error, sample func(int)) error {
+func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func([]pbt.Op, []byte, bool) error, stream func(func(pbt.Op) error) error) error {
 	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(pbinRebuildOpCollectorBufferBudget), log.Root()).SortAndFlushInBackground(true)
 	defer collector.Close()
 	emit := func(op pbt.Op) error {
@@ -1354,9 +1350,6 @@ func pbinForEachRebuildOpStreamLookaheadAfterWithSample(tmpDir string, maxOps, m
 		}
 		if err := collector.Collect(key, encoded); err != nil {
 			return err
-		}
-		if sample != nil {
-			sample(collector.InMemorySize())
 		}
 		return nil
 	}
@@ -1374,12 +1367,6 @@ func pbinForEachRebuildOpStreamLookaheadAfterWithSample(tmpDir string, maxOps, m
 		return err
 	}
 	sortedPath := sortedFile.Name()
-	closeFile := func() error {
-		if closeErr := sortedFile.Close(); closeErr != nil {
-			return closeErr
-		}
-		return nil
-	}
 	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		if bytes.Equal(previousOpKey, key) {
 			if !bytes.Equal(previousOpValue, value) {
@@ -1391,13 +1378,13 @@ func pbinForEachRebuildOpStreamLookaheadAfterWithSample(tmpDir string, maxOps, m
 		previousOpValue = bytes.Clone(value)
 		return writePBinRebuildOp(sortedFile, value)
 	}, etl.TransformArgs{}); err != nil {
-		_ = closeFile()
+		_ = sortedFile.Close()
 		collector.Close()
 		_ = dir.RemoveFile(sortedPath)
 		return err
 	}
 	collector.Close()
-	if err := closeFile(); err != nil {
+	if err := sortedFile.Close(); err != nil {
 		_ = dir.RemoveFile(sortedPath)
 		return err
 	}
@@ -1423,10 +1410,6 @@ func pbinForEachRebuildOpStreamLookaheadAfterWithSample(tmpDir string, maxOps, m
 		if eof {
 			break
 		}
-		if len(afterKey) != 0 && bytes.Compare(batchOperationKey(op), afterKey) <= 0 {
-			continue
-		}
-		afterKey = nil
 		opBytes := len(op.Key) + len(op.Drop) + len(op.Value)
 		keepMergeGroup := len(batch) > 0 && len(pbt.MergeGroupKey(batch[len(batch)-1])) != 0 && bytes.Equal(pbt.MergeGroupKey(batch[len(batch)-1]), pbt.MergeGroupKey(op))
 		if len(batch) > 0 && (len(batch) >= maxOps || batchBytes+opBytes > maxBytes) && !keepMergeGroup {

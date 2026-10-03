@@ -39,18 +39,11 @@ type PBinLeaf struct {
 }
 
 type pbinLatestCursor struct {
-	iter        pbinLeafIterator
-	key         []byte
-	value       []byte
-	stamp       uint64
-	stampReader func() uint64
-	ok          bool
-}
-
-type pbinLeafIterator interface {
-	HasNext() bool
-	Next() ([]byte, []byte, error)
-	Close()
+	iter  *DomainLatestIterFile
+	key   []byte
+	value []byte
+	stamp uint64
+	ok    bool
 }
 
 func ForEachPBinLeaf(at *AggregatorRoTx, roTx kv.Tx, filesOnly bool, emit func(PBinLeaf) error) error {
@@ -209,26 +202,19 @@ func pbinOpenLatestCursor(at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, file
 	if domainRoTx == nil {
 		return pbinLatestCursor{}, fmt.Errorf("pbin leaf stream: domain %s is unavailable", domain)
 	}
-	var iter pbinLeafIterator
-	var stampReader func() uint64
+	var iter *DomainLatestIterFile
 	var err error
 	if filesOnly {
 		fileIter, fileErr := domainRoTx.DebugRangeLatestFromFiles(nil, nil, kv.Unlim)
 		iter, err = fileIter, fileErr
-		if fileIter != nil {
-			stampReader = fileIter.Stamp
-		}
 	} else {
 		dbIter, dbErr := domainRoTx.DebugRangeLatest(roTx, nil, nil, kv.Unlim)
 		iter, err = dbIter, dbErr
-		if dbIter != nil {
-			stampReader = dbIter.Stamp
-		}
 	}
 	if err != nil {
 		return pbinLatestCursor{}, err
 	}
-	return pbinLatestCursor{iter: iter, stampReader: stampReader}, nil
+	return pbinLatestCursor{iter: iter}, nil
 }
 
 func (c *pbinLatestCursor) close() {
@@ -250,11 +236,7 @@ func (c *pbinLatestCursor) advance() error {
 	}
 	c.key = bytes.Clone(key)
 	c.value = bytes.Clone(value)
-	if c.stampReader != nil {
-		c.stamp = c.stampReader()
-	} else {
-		c.stamp = 0
-	}
+	c.stamp = c.iter.Stamp()
 	c.ok = true
 	return nil
 }
@@ -288,23 +270,10 @@ func pbinSkipAddress(cursor *pbinLatestCursor, address []byte) error {
 }
 
 func pbinCollectOp(collector *etl.Collector, scratch *pbinLeafCollector, op pbt.Op, stamp uint64) error {
-	if len(op.Value) == 0 || pbinAllZero(op.Value[:]) {
+	if op.Value == ([eip8297.ValueLength]byte{}) {
 		return nil
 	}
 	return scratch.collect(collector, op.Key, op.Value[:], stamp)
-}
-
-func pbinAllZero(value []byte) bool {
-	for _, b := range value {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func pbinCollectLeaf(collector *etl.Collector, leaf PBinLeaf) error {
-	return (&pbinLeafCollector{}).collect(collector, leaf.Key, leaf.Value, leaf.Stamp)
 }
 
 type pbinLeafCollector struct {

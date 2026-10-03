@@ -20,11 +20,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -71,7 +69,6 @@ const (
 	// Scratch lives in a directory this command owns, so leftovers from a killed run
 	// can be cleared without touching anyone else's temp files.
 	preimagesScratchDirName = "export-preimages"
-	preimageSpillThreshold  = 1 << 20
 )
 
 var exportPreimagesCommand = cli.Command{
@@ -489,81 +486,26 @@ func writeHashedPreimages(
 	tmpDir string,
 ) (exportPreimagesStats, error) {
 	var stats exportPreimagesStats
-	var recordHeader [preimageAddrLen + preimageCountLen]byte
+	records, err := artifact.NewPreimageRecordWriter(writer, tmpDir)
+	if err != nil {
+		return stats, err
+	}
+	defer records.Close()
 	var accountHash common.Hash
-	slotKeys := make([]byte, 0, preimageSpillThreshold)
-	var slotSpill *os.File
-	var slotSpillName string
-	var slotCount uint64
 	pending := false
-	cleanupSlots := func() {
-		if slotSpill != nil {
-			_ = slotSpill.Close()
-			slotSpill = nil
-		}
-		if slotSpillName != "" {
-			_ = dir.RemoveFile(slotSpillName)
-			slotSpillName = ""
-		}
-	}
-	defer cleanupSlots()
-	appendSlot := func(value []byte) error {
-		if slotSpill == nil && len(slotKeys)+len(value) <= preimageSpillThreshold {
-			slotKeys = append(slotKeys, value...)
-			slotCount++
-			return nil
-		}
-		if slotSpill == nil {
-			var err error
-			slotSpill, err = os.CreateTemp(tmpDir, "pbt-preimage-slots-")
-			if err != nil {
-				return err
-			}
-			slotSpillName = slotSpill.Name()
-			if _, err := slotSpill.Write(slotKeys); err != nil {
-				return err
-			}
-			slotKeys = slotKeys[:0]
-		}
-		if _, err := slotSpill.Write(value); err != nil {
-			return err
-		}
-		slotCount++
-		return nil
-	}
-
-	// slotCount precedes the slots, so a record can only be written once its last
-	// slot has arrived.
 	flushRecord := func() error {
 		if !pending {
 			return nil
 		}
-		if slotCount > math.MaxUint32 {
-			return fmt.Errorf("account %x has %d slots (> uint32)", recordHeader[:preimageAddrLen], slotCount)
-		}
-		binary.BigEndian.PutUint32(recordHeader[preimageAddrLen:], uint32(slotCount))
-		if _, err := writer.Write(recordHeader[:]); err != nil {
+		slotCount, err := records.End()
+		if err != nil {
 			return err
-		}
-		if _, err := writer.Write(slotKeys); err != nil {
-			return err
-		}
-		if slotSpill != nil {
-			if _, err := slotSpill.Seek(0, io.SeekStart); err != nil {
-				return err
-			}
-			if _, err := io.Copy(writer, slotSpill); err != nil {
-				return err
-			}
 		}
 		stats.Accounts++
 		stats.Slots += slotCount
 		if onProgress != nil {
 			onProgress(stats)
 		}
-		cleanupSlots()
-		slotKeys = slotKeys[:0]
-		slotCount = 0
 		pending = false
 		return nil
 	}
@@ -577,10 +519,12 @@ func writeHashedPreimages(
 			if err := flushRecord(); err != nil {
 				return err
 			}
-			copy(recordHeader[:preimageAddrLen], v)
+			var address common.Address
+			copy(address[:], v)
 			accountHash = common.BytesToHash(k)
-			slotKeys = slotKeys[:0]
-			slotCount = 0
+			if err := records.Begin(address); err != nil {
+				return err
+			}
 			pending = true
 			return nil
 		case 2 * length.Hash:
@@ -590,7 +534,7 @@ func writeHashedPreimages(
 			if !pending || !bytes.Equal(k[:length.Hash], accountHash[:]) {
 				return fmt.Errorf("storage slot %x under account hash %x has no matching account", v, k[:length.Hash])
 			}
-			return appendSlot(v)
+			return records.AddSlot(v)
 		default:
 			return fmt.Errorf("collector: unexpected key length %d: %x", len(k), k)
 		}
@@ -605,6 +549,6 @@ func writeHashedPreimages(
 		return stats, err
 	}
 	// flushRecord mutates stats, so it cannot share a return statement with it.
-	err := flushRecord()
+	err = flushRecord()
 	return stats, err
 }

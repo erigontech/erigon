@@ -54,29 +54,138 @@ func WritePreimagesStream(dst io.Writer, iterate PreimageStreamIterator) error {
 	return WritePreimagesStreamWithScratch(dst, iterate, os.TempDir())
 }
 
-func WritePreimagesStreamWithScratch(dst io.Writer, iterate PreimageStreamIterator, scratchDir string) error {
-	if iterate == nil || dst == nil {
-		return ErrPreimages
+type PreimageRecordWriter struct {
+	dst        io.Writer
+	scratchDir string
+	slotFile   *os.File
+	slotWriter *bufio.Writer
+	slotName   string
+	address    common.Address
+	slotBytes  bytes.Buffer
+	count      uint32
+	spilled    bool
+}
+
+func NewPreimageRecordWriter(dst io.Writer, scratchDir string) (*PreimageRecordWriter, error) {
+	if dst == nil {
+		return nil, ErrPreimages
 	}
 	if scratchDir == "" {
 		scratchDir = os.TempDir()
 	}
-	var slotFile *os.File
-	var slotWriter *bufio.Writer
-	var slotName string
-	defer func() {
-		if slotFile != nil {
-			if slotWriter != nil {
-				_ = preimageScratchFileFlush(slotWriter)
-			}
-			_ = slotFile.Close()
-			_ = dir.RemoveFile(slotName)
+	return &PreimageRecordWriter{dst: dst, scratchDir: scratchDir}, nil
+}
+
+func (w *PreimageRecordWriter) Begin(address common.Address) error {
+	if w == nil || w.dst == nil || w.count != 0 || w.slotBytes.Len() != 0 || w.spilled {
+		return ErrPreimages
+	}
+	w.address = address
+	return nil
+}
+
+func (w *PreimageRecordWriter) AddSlot(slot []byte) error {
+	if w == nil || w.dst == nil || len(slot) != 32 || w.count == ^uint32(0) {
+		return ErrPreimages
+	}
+	if !w.spilled && w.slotBytes.Len()+len(slot) <= preimageSlotSpillThreshold {
+		_, err := w.slotBytes.Write(slot)
+		if err == nil {
+			w.count++
 		}
-	}()
+		return err
+	}
+	if w.slotFile == nil {
+		file, err := preimageScratchFileCreate(w.scratchDir, "pbt-preimage-record-")
+		if err != nil {
+			return err
+		}
+		w.slotFile = file
+		w.slotName = file.Name()
+		w.slotWriter = bufio.NewWriterSize(file, 1<<20)
+		if _, err := w.slotWriter.Write(w.slotBytes.Bytes()); err != nil {
+			return err
+		}
+		w.slotBytes.Reset()
+		w.spilled = true
+	}
+	if _, err := w.slotWriter.Write(slot); err != nil {
+		return err
+	}
+	w.count++
+	return nil
+}
+
+func (w *PreimageRecordWriter) End() (uint64, error) {
+	if w == nil || w.dst == nil {
+		return 0, ErrPreimages
+	}
+	var countBytes [4]byte
+	binary.BigEndian.PutUint32(countBytes[:], w.count)
+	if _, err := w.dst.Write(w.address[:]); err != nil {
+		return 0, err
+	}
+	if _, err := w.dst.Write(countBytes[:]); err != nil {
+		return 0, err
+	}
+	if !w.spilled {
+		if _, err := w.dst.Write(w.slotBytes.Bytes()); err != nil {
+			return 0, err
+		}
+	} else {
+		if err := preimageScratchFileFlush(w.slotWriter); err != nil {
+			return 0, err
+		}
+		if _, err := w.slotFile.Seek(0, io.SeekStart); err != nil {
+			return 0, err
+		}
+		if _, err := io.Copy(w.dst, w.slotFile); err != nil {
+			return 0, err
+		}
+		if err := w.slotFile.Truncate(0); err != nil {
+			return 0, err
+		}
+		if _, err := w.slotFile.Seek(0, io.SeekStart); err != nil {
+			return 0, err
+		}
+	}
+	count := uint64(w.count)
+	w.slotBytes.Reset()
+	w.count = 0
+	w.spilled = false
+	return count, nil
+}
+
+func (w *PreimageRecordWriter) Close() error {
+	if w == nil || w.slotFile == nil {
+		return nil
+	}
+	if err := preimageScratchFileFlush(w.slotWriter); err != nil {
+		return err
+	}
+	err := w.slotFile.Close()
+	if removeErr := dir.RemoveFile(w.slotName); err == nil {
+		err = removeErr
+	}
+	w.slotFile = nil
+	w.slotWriter = nil
+	w.slotName = ""
+	return err
+}
+
+func WritePreimagesStreamWithScratch(dst io.Writer, iterate PreimageStreamIterator, scratchDir string) error {
+	if iterate == nil || dst == nil {
+		return ErrPreimages
+	}
+	destination := bufio.NewWriterSize(dst, 1<<20)
+	records, err := NewPreimageRecordWriter(destination, scratchDir)
+	if err != nil {
+		return err
+	}
+	defer records.Close()
 	var previous common.Hash
 	index := 0
 	nextProgress := time.Now().Add(30 * time.Second)
-	destination := bufio.NewWriterSize(dst, 1<<20)
 	writeErr := iterate(func(address common.Address, slots func(func([32]byte) error) error) error {
 		digest := common.Hash(keccak.Sum256(address[:]))
 		if index != 0 && bytes.Compare(digest[:], previous[:]) <= 0 {
@@ -93,94 +202,28 @@ func WritePreimagesStreamWithScratch(dst io.Writer, iterate PreimageStreamIterat
 		if slots == nil {
 			return ErrPreimages
 		}
-		var slotBytes bytes.Buffer
-		var count uint32
 		var previousSlot common.Hash
-		spilled := false
+		if err := records.Begin(address); err != nil {
+			return err
+		}
 		err := slots(func(slot [32]byte) error {
-			if count == ^uint32(0) {
-				return ErrPreimages
-			}
 			slotDigest := common.Hash(keccak.Sum256(slot[:]))
-			if count != 0 && bytes.Compare(slotDigest[:], previousSlot[:]) <= 0 {
+			if previousSlot != (common.Hash{}) && bytes.Compare(slotDigest[:], previousSlot[:]) <= 0 {
 				return ErrUnsorted
 			}
 			previousSlot = slotDigest
-			if !spilled && slotBytes.Len()+len(slot) > preimageSlotSpillThreshold {
-				var createErr error
-				if slotFile == nil {
-					slotFile, createErr = preimageScratchFileCreate(scratchDir, "pbt-preimage-record-")
-					if createErr != nil {
-						return createErr
-					}
-					slotName = slotFile.Name()
-					slotWriter = bufio.NewWriterSize(slotFile, 1<<20)
-				}
-				if _, createErr = slotWriter.Write(slotBytes.Bytes()); createErr != nil {
-					return createErr
-				}
-				slotBytes.Reset()
-				spilled = true
-			}
-			if spilled {
-				_, err := slotWriter.Write(slot[:])
-				count++
-				return err
-			}
-			_, err := slotBytes.Write(slot[:])
-			count++
-			return err
+			return records.AddSlot(slot[:])
 		})
 		if err != nil {
 			return err
 		}
-		var encodedCount [4]byte
-		binary.BigEndian.PutUint32(encodedCount[:], count)
-		if _, err := destination.Write(address[:]); err != nil {
-			return err
-		}
-		if _, err := destination.Write(encodedCount[:]); err != nil {
-			return err
-		}
-		if !spilled {
-			_, err = destination.Write(slotBytes.Bytes())
-			return err
-		}
-		if err := preimageScratchFileFlush(slotWriter); err != nil {
-			return err
-		}
-		if _, err := slotFile.Seek(0, io.SeekStart); err != nil {
-			return err
-		}
-		if _, err := io.Copy(destination, slotFile); err != nil {
-			return err
-		}
-		if err := slotFile.Truncate(0); err != nil {
-			return err
-		}
-		_, err = slotFile.Seek(0, io.SeekStart)
+		_, err = records.End()
 		return err
 	})
 	if writeErr != nil {
 		return writeErr
 	}
 	return destination.Flush()
-}
-
-func ReadPreimagesAt(src io.ReaderAt, size int64, yield func(Preimage) error) error {
-	return ReadPreimagesStream(src, size, func(address common.Address, slots func(func([32]byte) error) error) error {
-		record := Preimage{Address: address}
-		if err := slots(func(slot [32]byte) error {
-			record.Slots = append(record.Slots, slot)
-			return nil
-		}); err != nil {
-			return err
-		}
-		if yield == nil {
-			return nil
-		}
-		return yield(record)
-	})
 }
 
 func ReadPreimagesStream(src io.ReaderAt, size int64, yield func(common.Address, func(func([32]byte) error) error) error) error {
@@ -248,100 +291,39 @@ func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, pre
 }
 
 func joinAtWithBuffer(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64, hashFn eip8297.HashFn, yield func(common.Address, [32]byte) error, bufferSize datasize.ByteSize, tmpDir string) error {
-	if hashFn == nil {
-		hashFn = eip8297.HashBytes
-	}
-	expected, err := os.CreateTemp(tmpDir, "pbt-join-expected-")
-	if err != nil {
-		return err
-	}
-	expectedName := expected.Name()
-	defer func() { _ = expected.Close(); _ = dir.RemoveFile(expectedName) }()
-	expectedWriter := bufio.NewWriterSize(expected, 1<<20)
-	writeExpected := func(key []byte) error { return writeJoinItem(expectedWriter, joinItem{key: bytes.Clone(key)}) }
-	_, err = ReadSnapshotStreamAt(snapshot, snapshotSize, SnapshotStreamCallbacks{
-		Header: func(header Header) error {
-			if err := writeExpected(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.BasicDataLeafKey)); err != nil {
-				return err
-			}
-			for _, slot := range header.Slots {
-				if err := writeExpected(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.HeaderStorageOffset+slot.Index)); err != nil {
+	writeExpected := func(yield func([]byte) error) error {
+		_, err := ReadSnapshotStreamAt(snapshot, snapshotSize, SnapshotStreamCallbacks{
+			Header: func(header Header) error {
+				if err := yield(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.BasicDataLeafKey)); err != nil {
 					return err
 				}
-			}
-			return nil
-		},
-		Storage: func(address common.Hash, groups func(func(Group) error) error) error {
-			return groups(func(group Group) error {
-				position := append(bytes.Clone(address[:]), group.StemHash[:]...)
-				for _, entry := range group.Entries {
-					if err := writeExpected(eip8297.TreeKey(eip8297.StorageZone, position, entry.Index)); err != nil {
+				for _, slot := range header.Slots {
+					if err := yield(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.HeaderStorageOffset+slot.Index)); err != nil {
 						return err
 					}
 				}
 				return nil
-			})
-		},
-	})
-	if err != nil {
+			},
+			Storage: func(address common.Hash, groups func(func(Group) error) error) error {
+				return groups(func(group Group) error {
+					position := append(bytes.Clone(address[:]), group.StemHash[:]...)
+					for _, entry := range group.Entries {
+						if err := yield(eip8297.TreeKey(eip8297.StorageZone, position, entry.Index)); err != nil {
+							return err
+						}
+					}
+					return nil
+				})
+			},
+		})
 		return err
 	}
-	if err := expectedWriter.Flush(); err != nil {
-		return err
-	}
-	if err := expected.Sync(); err != nil {
-		return err
-	}
-	if _, err := expected.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	collector := etl.NewCollector("pbt-join", tmpDir, etl.NewSortableBuffer(bufferSize), log.Root()).SortAndFlushInBackground(true)
-	defer collector.Close()
-	if err := collectJoinItems(preimages, preimageSize, hashFn, collector); err != nil {
-		return err
-	}
-	expectedReader := bufio.NewReaderSize(expected, 1<<20)
-	joined := uint64(0)
-	nextProgress := time.Now().Add(30 * time.Second)
-	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		joined++
-		if now := time.Now(); !now.Before(nextProgress) {
-			nextProgress = now.Add(30 * time.Second)
-			log.Root().Info("PBT preimage join progress", "phase", "preimage join", "records", joined, "key_prefix", hex.EncodeToString(key[:min(len(key), 8)]))
-		}
-		want, wantOK, err := readJoinItem(expectedReader)
-		if err != nil {
-			return err
-		}
-		got, err := decodeJoinItem(key, value)
-		if err != nil {
-			return err
-		}
-		if !wantOK {
-			return fmt.Errorf("%w: surplus key (%s)", ErrPreimages, joinItemLabel(got))
-		}
-		comparison := bytes.Compare(want.key, got.key)
-		if comparison < 0 {
-			return fmt.Errorf("%w: missing key (%s)", ErrPreimages, joinItemLabel(want))
-		}
-		if comparison > 0 {
-			return fmt.Errorf("%w: surplus key (%s)", ErrPreimages, joinItemLabel(got))
-		}
-		if got.hasSlot && yield != nil {
-			return yield(got.address, got.slot)
+	return comparePreimageKeys(preimages, preimageSize, writeExpected, hashFn, bufferSize, tmpDir, func(item joinItem) error {
+		if item.hasSlot && yield != nil {
+			return yield(item.address, item.slot)
 		}
 		return nil
-	}, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	want, ok, err := readJoinItem(expectedReader)
-	if err != nil {
-		return err
-	}
-	if ok {
-		return fmt.Errorf("%w: missing key (%s)", ErrPreimages, joinItemLabel(want))
-	}
-	return nil
+	})
 }
 
 func joinItemLabel(item joinItem) string {
@@ -352,15 +334,12 @@ func joinItemLabel(item joinItem) string {
 }
 
 func CheckPreimageSetAt(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn, scratchDir string) error {
-	return checkPreimageSetAtWithBuffer(preimages, preimageSize, expected, hashFn, etl.BufferOptimalSize, scratchDir)
+	return comparePreimageKeys(preimages, preimageSize, expected, hashFn, etl.BufferOptimalSize, scratchDir, nil)
 }
 
-func checkPreimageSetAtWithBuffer(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn, bufferSize datasize.ByteSize, tmpDir string) error {
+func comparePreimageKeys(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn, bufferSize datasize.ByteSize, tmpDir string, yield func(joinItem) error) error {
 	if expected == nil {
 		return ErrPreimages
-	}
-	if hashFn == nil {
-		hashFn = eip8297.HashBytes
 	}
 	expectedFile, err := os.CreateTemp(tmpDir, "pbt-preimage-expected-")
 	if err != nil {
@@ -368,15 +347,16 @@ func checkPreimageSetAtWithBuffer(preimages io.ReaderAt, preimageSize int64, exp
 	}
 	expectedName := expectedFile.Name()
 	defer func() { _ = expectedFile.Close(); _ = dir.RemoveFile(expectedName) }()
-	expectedWriter := bufio.NewWriterSize(expectedFile, 64<<10)
+	expectedWriter := bufio.NewWriterSize(expectedFile, 1<<20)
 	var previous []byte
-	if err := expected(func(key []byte) error {
+	writeExpected := func(key []byte) error {
 		if len(key) == 0 || (previous != nil && bytes.Compare(previous, key) >= 0) {
 			return ErrUnsorted
 		}
 		previous = bytes.Clone(key)
 		return writeJoinItem(expectedWriter, joinItem{key: bytes.Clone(key)})
-	}); err != nil {
+	}
+	if err := expected(writeExpected); err != nil {
 		return err
 	}
 	if err := expectedWriter.Flush(); err != nil {
@@ -393,7 +373,7 @@ func checkPreimageSetAtWithBuffer(preimages io.ReaderAt, preimageSize int64, exp
 	if err := collectJoinItems(preimages, preimageSize, hashFn, collector); err != nil {
 		return err
 	}
-	expectedReader := bufio.NewReaderSize(expectedFile, 64<<10)
+	expectedReader := bufio.NewReaderSize(expectedFile, 1<<20)
 	checked := uint64(0)
 	nextProgress := time.Now().Add(30 * time.Second)
 	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
@@ -418,6 +398,11 @@ func checkPreimageSetAtWithBuffer(preimages io.ReaderAt, preimageSize int64, exp
 				return fmt.Errorf("%w: missing key (%s)", ErrPreimages, joinItemLabel(want))
 			}
 			return fmt.Errorf("%w: surplus key (%s)", ErrPreimages, joinItemLabel(got))
+		}
+		if yield != nil {
+			if err := yield(got); err != nil {
+				return err
+			}
 		}
 		return nil
 	}, etl.TransformArgs{}); err != nil {
@@ -500,14 +485,13 @@ func readJoinItem(reader *bufio.Reader) (joinItem, bool, error) {
 }
 
 func collectJoinItems(src io.ReaderAt, size int64, hashFn eip8297.HashFn, collector *etl.Collector) error {
+	cache := eip8297.DigestCache{Sum: hashFn}
 	emit := func(address common.Address, slot *[32]byte) error {
-		address32 := eip8297.RightAlign32(address[:])
-		stem := hashFn(address32[:])
 		var item joinItem
 		if slot == nil {
-			item.key = eip8297.TreeKey(eip8297.AccountZone, stem[:], eip8297.BasicDataLeafKey)
+			item.key = cache.AccountKey(address[:], eip8297.BasicDataLeafKey)
 		} else {
-			item.key = treeKeyWithHash(hashFn, address[:], slot[:])
+			item.key = cache.StorageKey(address[:], slot[:])
 			item.address = address
 			item.slot = *slot
 			item.hasSlot = true
@@ -545,22 +529,4 @@ func decodeJoinItem(key, value []byte) (joinItem, error) {
 	copy(item.slot[:], value[1+len(item.address):])
 	item.hasSlot = true
 	return item, nil
-}
-
-func treeKeyWithHash(hashFn eip8297.HashFn, address, slot []byte) []byte {
-	address32 := eip8297.RightAlign32(address)
-	slot32 := eip8297.RightAlign32(slot)
-	stem := hashFn(address32[:])
-	if eip8297.SlotInHeader(&slot32) {
-		return eip8297.TreeKey(eip8297.AccountZone, stem[:], eip8297.HeaderStorageOffset+slot32[31])
-	}
-	groupInput := make([]byte, 0, 64)
-	groupInput = append(groupInput, address32[:]...)
-	groupInput = append(groupInput, 0)
-	groupInput = append(groupInput, slot32[:31]...)
-	group := hashFn(groupInput)
-	position := make([]byte, 0, 64)
-	position = append(position, stem[:]...)
-	position = append(position, group[:]...)
-	return eip8297.TreeKey(eip8297.StorageZone, position, slot32[31])
 }

@@ -17,12 +17,10 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 	"syscall"
 
 	"github.com/urfave/cli/v3"
@@ -156,11 +154,6 @@ func pbtVerifyIsIOError(err error) bool {
 	var pathErr *os.PathError
 	var linkErr *os.LinkError
 	return errors.As(err, &pathErr) || errors.As(err, &linkErr) || errors.Is(err, syscall.EFBIG) || errors.Is(err, syscall.ENOSPC)
-}
-
-func trimPBTValue(value []byte) []byte {
-	value = slices.Clone(value)
-	return bytes.TrimLeft(value, "\x00")
 }
 
 func verifyPBTHeaderRoot(ctx context.Context, dataDir string, block uint64, root common.Hash) error {

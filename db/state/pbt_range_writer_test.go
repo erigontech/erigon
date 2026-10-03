@@ -93,9 +93,9 @@ func TestPBinRangeWriterWithinFilesKeepsUnalignedStateOutsideFiles(t *testing.T)
 	defer domains.Close()
 	writer, err := state.NewPBinRangeWriterWithinFiles(agg, kv.CommitmentBinDomain, 39)
 	require.NoError(t, err)
-	root, err := writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
+	root, err := writer.WriteAtBlock(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
 		return state.ForEachPBinLeaf(at, nil, true, emit)
-	})
+	}, 0)
 	require.NoError(t, err)
 	require.NotEqual(t, eip8297.EmptyTreeHash, root)
 	require.False(t, writer.PBinCommitmentStateInFiles())
@@ -132,12 +132,12 @@ func TestPBinRangeWriterStreamsLeavesIntoBinFiles(t *testing.T) {
 	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 23)
 	require.NoError(t, err)
 	var leaves []state.PBinLeaf
-	root, err := writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
+	root, err := writer.WriteAtBlock(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
 		return state.ForEachPBinLeaf(at, nil, true, func(leaf state.PBinLeaf) error {
 			leaves = append(leaves, leaf)
 			return emit(leaf)
 		})
-	})
+	}, 0)
 	require.NoError(t, err)
 	entries := make([]eip8297.Entry, 0, len(leaves))
 	for _, leaf := range leaves {
@@ -176,9 +176,9 @@ func TestPBinRangeWriterStreamsLeavesIntoBinFilesWithTinyBatches(t *testing.T) {
 	defer domains.Close()
 	writer, err := state.NewPBinRangeWriterWithLimitsForTest(agg, kv.CommitmentBinDomain, 23, 2, 1<<20)
 	require.NoError(t, err)
-	root, err := writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
+	root, err := writer.WriteAtBlock(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
 		return state.ForEachPBinLeaf(at, nil, true, emit)
-	})
+	}, 0)
 	require.NoError(t, err)
 	require.NotEqual(t, eip8297.EmptyTreeHash, root)
 	out := agg.BeginFilesRo()
@@ -227,14 +227,14 @@ func TestPBinRangeWriterWritesEmptyTargetRange(t *testing.T) {
 		{Address: bytes.Repeat([]byte{0x11}, length.Addr), Nonce: 1, Balance: *uint256.NewInt(1), Code: []byte{0x60, 0x01, 0x60, 0x00, 0x52}, Slots: map[string][]byte{string(bytes.Repeat([]byte{0x22}, 32)): {1}}},
 	}})
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
-	_, err = writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
+	_, err = writer.WriteAtBlock(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
 		for _, entry := range entries {
 			if emitErr := emit(state.PBinLeaf{Key: entry.Key, Value: entry.Value}); emitErr != nil {
 				return emitErr
 			}
 		}
 		return nil
-	})
+	}, 0)
 	require.NoError(t, err)
 	out := targetAgg.BeginFilesRo()
 	defer out.Close()
@@ -274,9 +274,9 @@ func TestPBinRangeWriterWritesEmptyStateAtNewestRange(t *testing.T) {
 	defer domains.Close()
 	writer, err := state.NewPBinRangeWriter(agg, kv.CommitmentBinDomain, 23)
 	require.NoError(t, err)
-	root, err := writer.Write(t.Context(), tx, domains, func(func(state.PBinLeaf) error) error {
+	root, err := writer.WriteAtBlock(t.Context(), tx, domains, func(func(state.PBinLeaf) error) error {
 		return nil
-	})
+	}, 0)
 	require.NoError(t, err)
 	require.Equal(t, eip8297.EmptyTreeHash, root)
 	out := agg.BeginFilesRo()
@@ -319,14 +319,14 @@ func TestPBinRangeWriterReleasesFinishedRows(t *testing.T) {
 				}}})...)
 			}
 			sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
-			_, err = writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
+			_, err = writer.WriteAtBlock(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
 				for _, entry := range entries {
 					if emitErr := emit(state.PBinLeaf{Key: entry.Key, Value: entry.Value}); emitErr != nil {
 						return emitErr
 					}
 				}
 				return nil
-			})
+			}, 0)
 			require.NoError(t, err)
 			counts = append(counts, domains.GetMemBatch().(*state.TemporalMemBatch).DomainLen(kv.CommitmentBinDomain))
 			domains.Close()
@@ -369,14 +369,14 @@ func TestPBinRangeWriterStampsRowsByMaximumLeafAndKeepsEmptyRanges(t *testing.T)
 		}
 		leaves = append(leaves, state.PBinLeaf{Key: entry.Key, Value: entry.Value, Stamp: stamp})
 	}
-	root, err := writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
+	root, err := writer.WriteAtBlock(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
 		for _, leaf := range leaves {
 			if emitErr := emit(leaf); emitErr != nil {
 				return emitErr
 			}
 		}
 		return nil
-	})
+	}, 0)
 	require.NoError(t, err)
 	require.Equal(t, eip8297.StateRootWithHash(entries, eip8297.SelectedHash()), root)
 	out := agg.BeginFilesRo()

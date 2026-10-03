@@ -507,6 +507,11 @@ func TestPBTAttachRemedyHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}
+	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+	})
 	fixture, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	fixture.Genesis.Config.ChainName = "test"
@@ -596,6 +601,22 @@ func newPBTAttachRemedyFixture(t *testing.T, stepSize, sourceTx, nodeFileTx uint
 }
 
 func TestPBTAttachPrintedRemediesRunInFreshProcesses(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	previousHash := statecfg.BinCommitmentHash
+	previousSchema := statecfg.Schema
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.ExperimentalParallelCommitment = previousParallel
+		statecfg.BinCommitmentHash = previousHash
+		statecfg.Schema = previousSchema
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
 	erigonBinary := buildPBTTestErigon(t)
 	t.Run("block end", func(t *testing.T) {
 		nodeDirs, published := newPBTAttachRemedyFixture(t, 1, 7, 7)

@@ -26,7 +26,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
+
+func pbinTestOp(key, value []byte) pbt.Op {
+	op := pbt.Op{Key: key}
+	copy(op.Value[:], value)
+	return op
+}
 
 func TestPBinLeafStreamDeduplicatesAndRejectsConflicts(t *testing.T) {
 	collector := etl.NewCollector("pbin-leaf-stream-test", t.TempDir(), etl.NewSortableBuffer(1024), log.Root())
@@ -34,8 +41,8 @@ func TestPBinLeafStreamDeduplicatesAndRejectsConflicts(t *testing.T) {
 	key := eip8297.TreeKeyCodeChunk(common.Hash{1}, 0)
 	value := make([]byte, eip8297.ValueLength)
 	value[eip8297.ValueLength-1] = 1
-	require.NoError(t, pbinCollectLeaf(collector, PBinLeaf{Key: key, Value: value, Stamp: 3}))
-	require.NoError(t, pbinCollectLeaf(collector, PBinLeaf{Key: key, Value: value, Stamp: 7}))
+	require.NoError(t, pbinCollectOp(collector, &pbinLeafCollector{}, pbinTestOp(key, value), 3))
+	require.NoError(t, pbinCollectOp(collector, &pbinLeafCollector{}, pbinTestOp(key, value), 7))
 	var leaves []PBinLeaf
 	require.NoError(t, pbinLoadSortedLeaves(collector, func(leaf PBinLeaf) error {
 		leaves = append(leaves, leaf)
@@ -48,7 +55,7 @@ func TestPBinLeafStreamDeduplicatesAndRejectsConflicts(t *testing.T) {
 	defer conflicting.Close()
 	other := bytes.Clone(value)
 	other[0] = 1
-	require.NoError(t, pbinCollectLeaf(conflicting, PBinLeaf{Key: key, Value: value, Stamp: 1}))
-	require.NoError(t, pbinCollectLeaf(conflicting, PBinLeaf{Key: key, Value: other, Stamp: 2}))
+	require.NoError(t, pbinCollectOp(conflicting, &pbinLeafCollector{}, pbinTestOp(key, value), 1))
+	require.NoError(t, pbinCollectOp(conflicting, &pbinLeafCollector{}, pbinTestOp(key, other), 2))
 	require.Error(t, pbinLoadSortedLeaves(conflicting, func(PBinLeaf) error { return nil }, nil))
 }

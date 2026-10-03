@@ -40,40 +40,19 @@ var (
 	ErrInvalidAccount = errors.New("pbt artifact: invalid account")
 )
 
-type Writer struct{}
-
-type SnapshotRoot func() (common.Hash, error)
-
-type artifactWriter struct {
-	dst  io.Writer
-	hash io.Writer
+func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.Hash, error)) (common.Hash, error) {
+	return writeSnapshotStream(dst, leaves, root)
 }
 
-func NewWriter() *Writer { return &Writer{} }
-
-func WriteSnapshot(dst io.Writer, root common.Hash, leaves KVIterator) (common.Hash, error) {
-	return NewWriter().Write(dst, root, leaves)
-}
-
-func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root SnapshotRoot) (common.Hash, error) {
-	return NewWriter().WriteStream(dst, leaves, root)
-}
-
-func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (common.Hash, error) {
-	return w.WriteStream(dst, leaves, func() (common.Hash, error) { return root, nil })
-}
-
-func (w *Writer) WriteStream(dst io.Writer, leaves KVIterator, root SnapshotRoot) (common.Hash, error) {
+func writeSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.Hash, error)) (common.Hash, error) {
 	if dst == nil || leaves == nil || root == nil {
 		return common.Hash{}, errors.New("pbt artifact: missing writer input")
 	}
 	hash := keccak.NewFastKeccak()
-	output := &artifactWriter{dst: dst, hash: hash}
+	output := io.MultiWriter(dst, hash)
 	write := func(data []byte) error {
-		if n, err := output.Write(data); err != nil {
+		if _, err := output.Write(data); err != nil {
 			return err
-		} else if n != len(data) {
-			return io.ErrShortWrite
 		}
 		return nil
 	}
@@ -107,17 +86,11 @@ func (w *Writer) WriteStream(dst io.Writer, leaves KVIterator, root SnapshotRoot
 		code = nil
 		return err
 	}
-	flushStorageGroup := func() error {
-		if storage == nil {
-			return nil
-		}
-		return storage.flushGroup(write)
-	}
 	flushStorage := func() error {
 		if storage == nil {
 			return nil
 		}
-		if err := flushStorageGroup(); err != nil {
+		if err := storage.flushGroup(write); err != nil {
 			return err
 		}
 		if storage.groupCount == 0 {
@@ -198,7 +171,7 @@ func (w *Writer) WriteStream(dst io.Writer, leaves KVIterator, root SnapshotRoot
 				}
 			}
 			if storage.current != nil && storage.current.stem != common.BytesToHash(key[33:65]) {
-				if err := flushStorageGroup(); err != nil {
+				if err := storage.flushGroup(write); err != nil {
 					return err
 				}
 			}
@@ -228,14 +201,6 @@ func (w *Writer) WriteStream(dst io.Writer, leaves KVIterator, root SnapshotRoot
 		return common.Hash{}, err
 	}
 	return common.BytesToHash(hash.Sum(nil)), nil
-}
-
-func (w *artifactWriter) Write(data []byte) (int, error) {
-	n, err := w.dst.Write(data)
-	if n > 0 {
-		_, _ = w.hash.Write(data[:n])
-	}
-	return n, err
 }
 
 type headerBuilder struct {
@@ -310,15 +275,25 @@ type groupBuilder struct {
 }
 
 func (g *groupBuilder) encodeCode() ([]byte, error) {
-	if len(g.entries) == 0 || len(g.entries) > eip8297.StemSubtreeWidth {
-		return nil, fmt.Errorf("%w: group entry count %d", ErrInvalidLeaf, len(g.entries))
-	}
-	encoded := append([]byte{0x03}, g.stem[:]...)
-	encoded = append(encoded, byte(len(g.entries)-1))
-	return appendGroupEntries(encoded, g.entries)
+	return encodeGroup(0x03, g.stem, g.entries)
 }
 
-func appendGroupEntries(encoded []byte, entries []GroupEntry) ([]byte, error) {
+func encodeGroup(tag byte, stem common.Hash, entries []GroupEntry) ([]byte, error) {
+	if len(entries) == 0 || len(entries) > eip8297.StemSubtreeWidth {
+		return nil, fmt.Errorf("%w: group entry count %d", ErrInvalidLeaf, len(entries))
+	}
+	encoded := append([]byte{tag}, stem[:]...)
+	if tag == 0x05 {
+		if len(entries) != 1 {
+			return nil, fmt.Errorf("%w: single-leaf group has %d entries", ErrInvalidLeaf, len(entries))
+		}
+		if isZero(entries[0].Value) {
+			return nil, fmt.Errorf("%w: zero group value", ErrInvalidLeaf)
+		}
+		encoded = append(encoded, entries[0].Index)
+		return append(encoded, encodeIntegerBytes(entries[0].Value)...), nil
+	}
+	encoded = append(encoded, byte(len(entries)-1))
 	var previous byte
 	for i, entry := range entries {
 		if i != 0 && entry.Index <= previous {
@@ -343,11 +318,6 @@ type storageBuilder struct {
 func (s *storageBuilder) add(stem common.Hash, index byte, value []byte) error {
 	if s.current == nil {
 		s.current = &groupBuilder{stem: stem}
-	} else if s.current.stem != stem {
-		if bytes.Compare(stem[:], s.current.stem[:]) <= 0 {
-			return ErrUnsorted
-		}
-		s.current = &groupBuilder{stem: stem}
 	}
 	if len(s.current.entries) >= eip8297.StemSubtreeWidth {
 		return ErrInvalidLeaf
@@ -360,25 +330,16 @@ func (s *storageBuilder) flushGroup(write func([]byte) error) error {
 	if s.current == nil {
 		return nil
 	}
+	tag := byte(0x06)
 	if len(s.current.entries) == 1 {
-		entry := s.current.entries[0]
-		encoded := append([]byte{0x05}, s.current.stem[:]...)
-		encoded = append(encoded, entry.Index)
-		encoded = append(encoded, encodeIntegerBytes(entry.Value)...)
-		if err := write(encoded); err != nil {
-			return err
-		}
-	} else {
-		encoded := append([]byte{0x06}, s.current.stem[:]...)
-		encoded = append(encoded, byte(len(s.current.entries)-1))
-		var err error
-		encoded, err = appendGroupEntries(encoded, s.current.entries)
-		if err != nil {
-			return err
-		}
-		if err := write(encoded); err != nil {
-			return err
-		}
+		tag = 0x05
+	}
+	encoded, err := encodeGroup(tag, s.current.stem, s.current.entries)
+	if err != nil {
+		return err
+	}
+	if err := write(encoded); err != nil {
+		return err
 	}
 	s.groupCount++
 	s.current = nil

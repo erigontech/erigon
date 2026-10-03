@@ -29,7 +29,7 @@ import (
 
 func pbinRebuildBatches(ops []pbt.Op, tmpDir string, maxOps, maxBytes int) ([][]pbt.Op, error) {
 	var batches [][]pbt.Op
-	err := pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, maxOps, maxBytes, nil, func(batch []pbt.Op, _ []byte, _ bool) error {
+	err := pbinForEachRebuildOpStream(tmpDir, maxOps, maxBytes, func(batch []pbt.Op, _ []byte, _ bool) error {
 		batches = append(batches, append([]pbt.Op(nil), batch...))
 		return nil
 	}, func(emit func(pbt.Op) error) error {
@@ -41,19 +41,6 @@ func pbinRebuildBatches(ops []pbt.Op, tmpDir string, maxOps, maxBytes int) ([][]
 		return nil
 	})
 	return batches, err
-}
-
-func pbinForEachRebuildBatch(ops []pbt.Op, tmpDir string, maxOps, maxBytes int, visit func([]pbt.Op, bool) error) error {
-	return pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, maxOps, maxBytes, nil, func(batch []pbt.Op, _ []byte, final bool) error {
-		return visit(batch, final)
-	}, func(emit func(pbt.Op) error) error {
-		for i := range ops {
-			if err := emit(ops[i]); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
 }
 
 func TestPBinRebuildBatchesFollowTreeKeyOrder(t *testing.T) {
@@ -116,11 +103,6 @@ func TestPBinRebuildBatchStreamPreservesOperations(t *testing.T) {
 	}
 	want, err := pbinRebuildBatches(ops, t.TempDir(), 10, 1<<20)
 	require.NoError(t, err)
-	var got []pbt.Op
-	err = pbinForEachRebuildBatch(ops, t.TempDir(), 10, 1<<20, func(batch []pbt.Op, _ bool) error {
-		got = append(got, batch...)
-		return nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, want[0], got)
+	require.Len(t, want, 1)
+	require.ElementsMatch(t, ops, want[0])
 }

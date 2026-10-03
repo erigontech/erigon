@@ -107,7 +107,7 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.
 			logger.Warn(err.Error())
 			integrityErr = err
 		}
-		err = state.VerifyPBinDomain(ctx, tx, aggTx.Agg(), kv.CommitmentBinDomain)
+		_, err = state.VerifyPBinDomainRoot(ctx, tx, aggTx.Agg(), kv.CommitmentBinDomain)
 		if err != nil {
 			err = fmt.Errorf("%w: binary commitment: %w", ErrIntegrity, err)
 			if failFast {

@@ -98,66 +98,18 @@ type pbinRangeWriterOverlay struct {
 	finished func() error
 }
 
-func newPBinRangeWriterOverlay() *pbinRangeWriterOverlay {
-	return &pbinRangeWriterOverlay{writes: make(map[string]pbinRangeWriterWrite)}
-}
-
-func (o *pbinRangeWriterOverlay) withInner(inner commitment.PatriciaContext) *pbinRangeWriterOverlay {
-	o.inner = inner
-	return o
-}
-
-func (o *pbinRangeWriterOverlay) withRelease(release func([]byte)) *pbinRangeWriterOverlay {
-	o.release = release
-	return o
-}
-
-func (o *pbinRangeWriterOverlay) withWrite(write func([]byte, []byte, []byte) error) *pbinRangeWriterOverlay {
-	o.write = write
-	return o
-}
-
-func (o *pbinRangeWriterOverlay) withFinished(finished func() error) *pbinRangeWriterOverlay {
-	o.finished = finished
-	return o
-}
-
 func (o *pbinRangeWriterOverlay) FlushFinished(nextKey []byte) error {
 	nextPath := eip8297.PathFromBits(nextKey, int16(len(nextKey)*8))
-	keys := make([]string, 0, len(o.writes))
-	for key := range o.writes {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		if bytes.Equal([]byte(key), pbt.GlobalRootKey()) {
-			continue
+	return o.flush(func(key []byte) (bool, error) {
+		if bytes.Equal(key, pbt.GlobalRootKey()) {
+			return true, nil
 		}
-		path, err := eip8297.DecodeBitPath([]byte(key))
+		path, err := eip8297.DecodeBitPath(key)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if path.BitLen <= nextPath.BitLen && eip8297.CommonPrefixBitsAt(&path, 0, &nextPath) == path.BitLen {
-			continue
-		}
-		write := o.writes[key]
-		if o.write != nil {
-			if err := o.write([]byte(key), write.data, write.prev); err != nil {
-				return err
-			}
-		}
-		if err := o.inner.PutBranch([]byte(key), write.data, write.prev); err != nil {
-			return err
-		}
-		if o.release != nil {
-			o.release([]byte(key))
-		}
-		delete(o.writes, key)
-	}
-	if o.finished != nil {
-		return o.finished()
-	}
-	return nil
+		return path.BitLen <= nextPath.BitLen && eip8297.CommonPrefixBitsAt(&path, 0, &nextPath) == path.BitLen, nil
+	})
 }
 
 func (o *pbinRangeWriterOverlay) Branch(prefix []byte) ([]byte, kv.Step, error) {
@@ -187,29 +139,36 @@ func (o *pbinRangeWriterOverlay) Storage(key []byte) (*commitment.Update, error)
 }
 
 func (o *pbinRangeWriterOverlay) Flush() error {
+	return o.flush(nil)
+}
+
+func (o *pbinRangeWriterOverlay) flush(skip func([]byte) (bool, error)) error {
 	keys := make([]string, 0, len(o.writes))
 	for key := range o.writes {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		write := o.writes[key]
-		if o.write != nil {
-			if err := o.write([]byte(key), write.data, write.prev); err != nil {
+		if skip != nil {
+			skipped, err := skip([]byte(key))
+			if err != nil {
 				return err
 			}
+			if skipped {
+				continue
+			}
+		}
+		write := o.writes[key]
+		if err := o.write([]byte(key), write.data, write.prev); err != nil {
+			return err
 		}
 		if err := o.inner.PutBranch([]byte(key), write.data, write.prev); err != nil {
 			return err
 		}
-		if o.release != nil {
-			o.release([]byte(key))
-		}
+		o.release([]byte(key))
+		delete(o.writes, key)
 	}
-	if o.finished != nil {
-		return o.finished()
-	}
-	return nil
+	return o.finished()
 }
 
 func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64) (*PBinRangeWriter, error) {
@@ -326,10 +285,6 @@ func pbinAccountFiles(files kv.VisibleFiles) kv.VisibleFiles {
 	return accountFiles
 }
 
-func (w *PBinRangeWriter) Write(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, leaves func(func(PBinLeaf) error) error) (common.Hash, error) {
-	return w.WriteAtBlock(ctx, tx, domains, leaves, 0)
-}
-
 func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, leaves func(func(PBinLeaf) error) error, blockNum uint64) (common.Hash, error) {
 	if w == nil || w.aggregator == nil {
 		return common.Hash{}, fmt.Errorf("pbin range writer: nil writer")
@@ -393,14 +348,18 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		var computeErr error
 		root, computeErr = domains.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, blockNum, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
 			if overlay == nil {
-				overlay = newPBinRangeWriterOverlay()
+				overlay = &pbinRangeWriterOverlay{writes: make(map[string]pbinRangeWriterWrite)}
 			}
-			current = overlay.withInner(inner).withWrite(onRow).withFinished(func() error {
+			overlay.inner = inner
+			overlay.write = onRow
+			overlay.finished = func() error {
 				tracker.clearClosed()
 				return nil
-			}).withRelease(func(key []byte) {
+			}
+			overlay.release = func(key []byte) {
 				domains.GetMemBatch().(*TemporalMemBatch).ForgetLatest(w.domain, key)
-			})
+			}
+			current = overlay
 			return current
 		})
 		if computeErr != nil {
@@ -412,20 +371,9 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return current.FlushFinished(nextKey)
 	}
 	stream := func(emit func(pbt.Op) error) error {
-		var leavesWritten uint64
-		nextProgress := time.Now().Add(30 * time.Second)
+		progress := pbinStreamProgress{next: time.Now().Add(30 * time.Second)}
 		streamErr := leaves(func(leaf PBinLeaf) error {
-			leavesWritten++
-			if leavesWritten&4095 == 0 {
-				if now := time.Now(); !now.Before(nextProgress) {
-					nextProgress = now.Add(30 * time.Second)
-					prefix := leaf.Key
-					if len(prefix) > 8 {
-						prefix = prefix[:8]
-					}
-					log.Root().Info("PBT range writer progress", "phase", "range writer", "leaves", leavesWritten, "key_prefix", fmt.Sprintf("%x", prefix))
-				}
-			}
+			progress.leaf(leaf.Key)
 			if len(leaf.Value) != eip8297.ValueLength {
 				return fmt.Errorf("pbin range writer: leaf %x has value length %d", leaf.Key, len(leaf.Value))
 			}
@@ -445,7 +393,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		}
 		return streamErr
 	}
-	if streamErr := pbinForEachRebuildOpStreamLookaheadAfterWithSample(w.aggregator.Dirs().Tmp, w.maxOps, w.maxBytes, nil, visit, stream, nil); streamErr != nil {
+	if streamErr := pbinForEachRebuildOpStream(w.aggregator.Dirs().Tmp, w.maxOps, w.maxBytes, visit, stream); streamErr != nil {
 		w.closeRanges()
 		return common.Hash{}, streamErr
 	}
@@ -547,10 +495,7 @@ func (t *pbinRowStampTracker) observe(key []byte, stamp uint64) error {
 	path := eip8297.PathFromBits(key, int16(len(key)*8))
 	if t.havePrev {
 		commonBits := eip8297.CommonPrefixBitsAt(&t.previous, 0, &path)
-		for len(t.open) > 0 && t.open[len(t.open)-1].path.BitLen > commonBits {
-			t.closeBranch(t.open[len(t.open)-1])
-			t.open = t.open[:len(t.open)-1]
-		}
+		t.closeDeeper(commonBits)
 	}
 	for i := range t.open {
 		if path.HasPrefix(&t.open[i].path) && stamp > t.open[i].stamp {
@@ -583,15 +528,16 @@ func (t *pbinRowStampTracker) advance(nextKey []byte) error {
 	}
 	nextPath := eip8297.PathFromBits(nextKey, int16(len(nextKey)*8))
 	commonBits := eip8297.CommonPrefixBitsAt(&t.previous, 0, &nextPath)
-	for len(t.open) > 0 && t.open[len(t.open)-1].path.BitLen > commonBits {
-		t.closeBranch(t.open[len(t.open)-1])
-		t.open = t.open[:len(t.open)-1]
-	}
+	t.closeDeeper(commonBits)
 	return nil
 }
 
 func (t *pbinRowStampTracker) finish() {
-	for len(t.open) > 0 {
+	t.closeDeeper(-1)
+}
+
+func (t *pbinRowStampTracker) closeDeeper(bitLen int16) {
+	for len(t.open) > 0 && (bitLen < 0 || t.open[len(t.open)-1].path.BitLen > bitLen) {
 		t.closeBranch(t.open[len(t.open)-1])
 		t.open = t.open[:len(t.open)-1]
 	}

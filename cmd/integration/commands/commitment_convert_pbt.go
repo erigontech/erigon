@@ -509,18 +509,9 @@ func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings 
 	}
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	builder, err := eip8297.NewStreamRootBuilder(eip8297.HashBytes)
+	gotRoot, err := dbstate.PBinStateRoot(at, nil, true, eip8297.HashBytes)
 	if err != nil {
-		return err
-	}
-	if err := dbstate.ForEachPBinLeaf(at, nil, true, func(leaf dbstate.PBinLeaf) error {
-		return builder.Add(leaf.Key, leaf.Value)
-	}); err != nil {
 		return fmt.Errorf("commitment convert-pbt: standalone output leaves: %w", err)
-	}
-	gotRoot, err := builder.RootHash()
-	if err != nil {
-		return err
 	}
 	if gotRoot != wantRoot {
 		return fmt.Errorf("commitment convert-pbt: standalone output root %x differs from converted root %x", gotRoot, wantRoot)
@@ -566,7 +557,7 @@ func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		return err
 	}
 	defer tx.Rollback()
-	if err := dbstate.VerifyPBinDomain(ctx, tx, agg, domain); err != nil {
+	if _, err := dbstate.VerifyPBinDomainRoot(ctx, tx, agg, domain); err != nil {
 		return fmt.Errorf("commitment convert-pbt: verify written rows: %w", err)
 	}
 	return nil

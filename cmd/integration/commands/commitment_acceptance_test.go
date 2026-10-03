@@ -229,12 +229,18 @@ func TestPBTAttachRejectsPublishedRootMismatchWithoutMutation(t *testing.T) {
 }
 
 func TestPBTAttachRejectsCorruptedPublishedBinaryRowsWithoutMutation(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousParallel := statecfg.ExperimentalParallelCommitment
 	previousSchema := statecfg.Schema
 	previousHash := statecfg.BinCommitmentHash
 	previousSuite := commitment.PBinHashSuiteName()
 	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
 		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.ExperimentalParallelCommitment = previousParallel
 		statecfg.Schema = previousSchema
 		statecfg.BinCommitmentHash = previousHash
 		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))

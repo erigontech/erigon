@@ -408,16 +408,7 @@ func pbtAttachNodePbtRoot(ctx context.Context, dirs datadir.Dirs, settings *dbst
 		return common.Hash{}, err
 	}
 	defer roTx.Rollback()
-	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
-	if err != nil {
-		return common.Hash{}, err
-	}
-	if err := dbstate.ForEachPBinLeaf(at, roTx, false, func(leaf dbstate.PBinLeaf) error {
-		return builder.Add(leaf.Key, leaf.Value)
-	}); err != nil {
-		return common.Hash{}, err
-	}
-	return builder.RootHash()
+	return dbstate.PBinStateRoot(at, roTx, false, eip8297.SelectedHash())
 }
 
 func pbtAttachBlockEnd(ctx context.Context, dirs datadir.Dirs, blockNum, txNum uint64) (common.Hash, common.Hash, bool, bool, uint64, error) {
@@ -731,20 +722,14 @@ func verifyPBTAttachPublishedBin(ctx context.Context, nodeDirs, publishedDirs da
 }
 
 func validatePBTAttachLeafStamps(txNum uint64, forEach func(func(dbstate.PBinLeaf) error) error) (common.Hash, error) {
-	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
-	if err != nil {
-		return common.Hash{}, err
-	}
-	err = forEach(func(leaf dbstate.PBinLeaf) error {
-		if leaf.Stamp > txNum {
-			return fmt.Errorf("commitment attach-pbt: published leaf stamp %d is after conversion txNum %d", leaf.Stamp, txNum)
-		}
-		return builder.Add(leaf.Key, leaf.Value)
+	return dbstate.PBinRootFromStream(eip8297.SelectedHash(), func(emit func(dbstate.PBinLeaf) error) error {
+		return forEach(func(leaf dbstate.PBinLeaf) error {
+			if leaf.Stamp > txNum {
+				return fmt.Errorf("commitment attach-pbt: published leaf stamp %d is after conversion txNum %d", leaf.Stamp, txNum)
+			}
+			return emit(leaf)
+		})
 	})
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return builder.RootHash()
 }
 
 func configuredPBTNodeHash(settings *dbstate.ErigonDBSettings) string {

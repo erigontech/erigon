@@ -498,7 +498,7 @@ func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		return err
 	}
 	defer tx.Rollback()
-	if err := dbstate.VerifyPBinDomain(ctx, tx, agg, kv.CommitmentBinDomain); err != nil {
+	if _, err := dbstate.VerifyPBinDomainRoot(ctx, tx, agg, kv.CommitmentBinDomain); err != nil {
 		return fmt.Errorf("commitment import-pbt: verify written rows: %w", err)
 	}
 	return nil

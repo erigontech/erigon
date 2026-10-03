@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/eip8297/artifact"
@@ -31,7 +32,9 @@ import (
 
 func TestForEachPBinArtifactLeafStreamsEmptyArtifact(t *testing.T) {
 	var snapshot bytes.Buffer
-	_, err := artifact.WriteSnapshot(&snapshot, eip8297.EmptyTreeHash, func(func([]byte, []byte) error) error { return nil })
+	_, err := artifact.WriteSnapshotStream(&snapshot, func(func([]byte, []byte) error) error { return nil }, func() (common.Hash, error) {
+		return eip8297.EmptyTreeHash, nil
+	})
 	require.NoError(t, err)
 	count := 0
 	root, err := state.ForEachPBinArtifactLeaf(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), eip8297.HashBytes, func(state.PBinLeaf) error {
@@ -52,14 +55,14 @@ func TestForEachPBinArtifactLeafKeepsCodeZoneLeaves(t *testing.T) {
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
 	wantRoot := eip8297.StateRootWithHash(entries, eip8297.HashBytes)
 	var snapshot bytes.Buffer
-	_, err := artifact.WriteSnapshot(&snapshot, wantRoot, func(emit func([]byte, []byte) error) error {
+	_, err := artifact.WriteSnapshotStream(&snapshot, func(emit func([]byte, []byte) error) error {
 		for _, entry := range entries {
 			if err := emit(entry.Key, entry.Value); err != nil {
 				return err
 			}
 		}
 		return nil
-	})
+	}, func() (common.Hash, error) { return wantRoot, nil })
 	require.NoError(t, err)
 	var got []state.PBinLeaf
 	root, err := state.ForEachPBinArtifactLeaf(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), eip8297.HashBytes, func(leaf state.PBinLeaf) error {

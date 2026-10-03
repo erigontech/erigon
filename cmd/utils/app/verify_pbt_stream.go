@@ -116,6 +116,10 @@ func pbtVerifyOpenKV(path string) (*os.File, *pbtVerifyKVReader, error) {
 	return f, &pbtVerifyKVReader{r: bufio.NewReaderSize(f, 1<<20)}, nil
 }
 
+func pbtVerifyTrimValue(value []byte) []byte {
+	return bytes.TrimLeft(bytes.Clone(value), "\x00")
+}
+
 func pbtVerifyNewCollector(name, scratch string) *etl.Collector {
 	return etl.NewCollector(name, scratch, etl.NewSortableBuffer(pbtVerifyETLBuffer), log.Root()).SortAndFlushInBackground(true)
 }
@@ -192,16 +196,7 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 				return err
 			}
 			if header.Kind == 1 {
-				if err := codeRequirements.Collect(header.CodeHash[:], pbtVerifyCodeRequirement(common.BytesToUint64(header.CodeSize))); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
-		Code: func(group artifact.Group) error {
-			for _, entry := range group.Entries {
-				key := eip8297.TreeKey(eip8297.CodeZone, group.StemHash[:], entry.Index)
-				if err := codeActual.Collect(key, entry.Value); err != nil {
+				if err := codeRequirements.Collect(header.CodeHash[:], pbtVerifyCodeRequirement(dbstate.PBinIntegerUint64(header.CodeSize))); err != nil {
 					return err
 				}
 			}
@@ -230,7 +225,15 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 	leafProgress := pbtVerifyProgress{phase: "snapshot leaves", next: time.Now()}
 	root, err := dbstate.ForEachPBinArtifactLeaf(snapshot, snapshotSize, pbtVerifyHash, func(leaf dbstate.PBinLeaf) error {
 		leafProgress.add(leaf.Key)
-		return leaves.Collect(leaf.Key, leaf.Value)
+		if err := leaves.Collect(leaf.Key, leaf.Value); err != nil {
+			return err
+		}
+		if leaf.Key[0] == eip8297.CodeZone {
+			if err := codeActual.Collect(leaf.Key, leaf.Value); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return common.Hash{}, common.Hash{}, fmt.Errorf("snapshot leaf stream: %w", err)
@@ -277,12 +280,6 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 		return common.Hash{}, common.Hash{}, err
 	}
 	return meta.Root, mptRoot, nil
-}
-
-func pbtVerifyRightAlign(value []byte) []byte {
-	result := make([]byte, eip8297.ValueLength)
-	copy(result[len(result)-len(value):], value)
-	return result
 }
 
 func pbtVerifyCollectAddresses(src io.ReaderAt, size int64, collector *etl.Collector) error {
@@ -455,44 +452,20 @@ func pbtVerifyCheckCodeRows(path string) error {
 		hasher := keccak.NewFastKeccak()
 		code := make([]byte, 0, min(codeSize, pbtVerifyMaxCodeSize))
 		actualChunks := make([][eip8297.ValueLength]byte, 0, chunks)
-		var pushRemaining int
 		var codeRead uint64
-		var prefix [3]byte
-		prefixLen := 0
 		for ok && bytes.Equal(key[:32], codeHash[:]) {
 			index := binary.BigEndian.Uint64(key[32:])
 			if index >= chunks || index != codeRead/eip8297.ChunkDataLen {
 				return fmt.Errorf("code chunks for %x are out of order", codeHash)
 			}
 			data := value[8:]
-			if len(data) > eip8297.ValueLength {
-				return fmt.Errorf("code chunk %x is too wide", codeHash)
-			}
-			full := data
-			if len(full) != eip8297.ValueLength {
-				full = pbtVerifyRightAlign(full)
-			}
+			var full [eip8297.ValueLength]byte
+			copy(full[:], data)
 			var actualChunk [eip8297.ValueLength]byte
-			copy(actualChunk[:], full)
+			copy(actualChunk[:], full[:])
 			actualChunks = append(actualChunks, actualChunk)
-			if int(full[0]) != min(pushRemaining, eip8297.ChunkDataLen) {
-				return fmt.Errorf("code chunk %x has invalid PUSHDATA count", codeHash)
-			}
-			for _, b := range full[1:] {
-				if codeRead < codeSize && prefixLen < len(prefix) {
-					prefix[prefixLen] = b
-					prefixLen++
-				}
-				if pushRemaining > 0 {
-					pushRemaining--
-				} else if b >= eip8297.Push1 && b <= eip8297.Push32 {
-					pushRemaining = int(b) - eip8297.PushOffset
-				}
-			}
-			for padding := pbtVerifyWrittenBytes(codeRead, codeSize); padding < eip8297.ChunkDataLen; padding++ {
-				if full[1+padding] != 0 {
-					return fmt.Errorf("code chunk %x has non-zero padding", codeHash)
-				}
+			if codeRead >= codeSize {
+				return fmt.Errorf("code chunks for %x exceed code size", codeHash)
 			}
 			written := min(uint64(eip8297.ChunkDataLen), codeSize-codeRead)
 			code = append(code, full[1:1+written]...)
@@ -524,18 +497,11 @@ func pbtVerifyCheckCodeRows(path string) error {
 				return fmt.Errorf("code chunk %x at index %d does not match re-chunked code", codeHash, index)
 			}
 		}
-		if codeSize == eip8297.DelegationCodeLength && prefix == eip8297.DelegationMarker {
+		if codeSize == eip8297.DelegationCodeLength && len(code) >= len(eip8297.DelegationMarker) && bytes.Equal(code[:len(eip8297.DelegationMarker)], eip8297.DelegationMarker[:]) {
 			return fmt.Errorf("kind-1 account %x contains a delegation indicator", codeHash)
 		}
 	}
 	return nil
-}
-
-func pbtVerifyWrittenBytes(codeRead, codeSize uint64) int {
-	if codeRead >= codeSize {
-		return 0
-	}
-	return int(min(uint64(eip8297.ChunkDataLen), codeSize-codeRead))
 }
 
 func pbtVerifyMPT(leavesPath, slotsPath, addressesPath, headersPath, scratch string) (common.Hash, error) {
@@ -575,7 +541,7 @@ func pbtVerifyMPT(leavesPath, slotsPath, addressesPath, headersPath, scratch str
 		accountKey := crypto.Keccak256(slotValue[:length.Addr])
 		storageKey := crypto.Keccak256(slotValue[length.Addr:])
 		key := append(append(append([]byte{}, accountKey...), make([]byte, length.Incarnation)...), storageKey...)
-		if err := storageRows.Collect(key, trimPBTValue(leafValue)); err != nil {
+		if err := storageRows.Collect(key, pbtVerifyTrimValue(leafValue)); err != nil {
 			return common.Hash{}, err
 		}
 		slotKey, slotValue, slotOK, err = slotReader.next()
@@ -712,7 +678,7 @@ func pbtVerifyBuildAccountRows(accountsPath, storagePath string, output *etl.Col
 }
 
 func pbtVerifyAccount(header artifact.Header, root common.Hash) (pbtVerifyAccountRecord, error) {
-	account := accounts.Account{Nonce: common.BytesToUint64(header.Nonce), Root: root}
+	account := accounts.Account{Nonce: dbstate.PBinIntegerUint64(header.Nonce), Root: root}
 	account.Balance.SetBytes(header.Balance)
 	switch header.Kind {
 	case 0:
