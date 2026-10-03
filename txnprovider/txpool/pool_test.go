@@ -117,7 +117,7 @@ func testDelegationCodeHash() accounts.CodeHash {
 	return accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
 }
 
-func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+func newTestPoolWithFundedSender(t testing.TB, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -97,6 +97,7 @@ func TestRemoteAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
 	var slots TxnSlots
 	slots.Append(txn, sender[:], false)
 	pool.AddRemoteTxns(ctx, slots, nil, nil)
+	require.Empty(t, txn.AuthAndNonces, "enqueue must defer authorization recovery to batch processing")
 	require.NoError(t, pool.processRemoteTxns(ctx))
 	require.Contains(t, pool.byHash, string(txn.IDHash[:]))
 	require.True(t, unlocked, "authorization recovery must not hold the pool lock")
@@ -136,7 +137,7 @@ func TestRejectedUnwindKeepsAuthorityReservation(t *testing.T) {
 	}
 	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, TxnSlots{}, TxnSlots{}))
 	require.Same(t, owner, pool.auths[reservation])
-	require.Empty(t, rejected.AuthAndNonces)
+	require.Equal(t, pooled.AuthAndNonces, rejected.AuthAndNonces)
 }
 
 func TestSetCodeAuthorizationChainIDs(t *testing.T) {
@@ -165,5 +166,75 @@ func TestSetCodeAuthorizationChainIDs(t *testing.T) {
 	require.Len(t, pool.auths, len(expected))
 	for _, a := range expected {
 		require.Same(t, pool.byHash[string(txn.IDHash[:])], pool.auths[a])
+	}
+}
+
+func TestRemoteAuthorizationRecoveryPreservesQueue(t *testing.T) {
+	ctx, pool, db, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.started.Store(true)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
+	require.NoError(t, err)
+	txn := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+	txn.IDHash[0] = 1
+	txn.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
+	later := newTestTxnSlot(1, 0, 1, 2, 21_000)
+	later.IDHash[0] = 2
+	peer := PeerID(gointerfaces.ConvertHashToH512([64]byte{2}))
+	dbTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer dbTx.Rollback()
+	txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, onSecond: func() {
+		known, err := pool.IdHashKnown(dbTx, txn.IDHash[:])
+		require.NoError(t, err)
+		require.True(t, known, "a transaction being recovered must remain known")
+		var arrivals TxnSlots
+		arrivals.Append(txn, sender[:], false)
+		arrivals.Append(later, sender[:], false)
+		pool.AddRemoteTxns(ctx, arrivals, peer, nil)
+	}}
+	var slots TxnSlots
+	slots.Append(txn, sender[:], false)
+	pool.AddRemoteTxns(ctx, slots, nil, nil)
+	require.NoError(t, pool.processRemoteTxns(ctx))
+	require.Contains(t, pool.byHash, string(txn.IDHash[:]))
+	require.NotContains(t, pool.byHash, string(later.IDHash[:]))
+	require.Equal(t, []*TxnSlot{later}, pool.unprocessedRemoteTxns.Txns)
+	require.Equal(t, map[string]int{string(later.IDHash[:]): 0}, pool.unprocessedRemoteByHash)
+	require.Len(t, pool.unprocessedRemotePeers, 1)
+	require.Equal(t, peer, pool.unprocessedRemotePeers[0].peerID)
+	require.True(t, pool.hasUnprocessedRemoteTxns.Load())
+	require.NoError(t, pool.processRemoteTxns(ctx))
+	require.Contains(t, pool.byHash, string(later.IDHash[:]))
+	require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+	require.Empty(t, pool.unprocessedRemoteByHash)
+	require.Empty(t, pool.unprocessedRemotePeers)
+	require.False(t, pool.hasUnprocessedRemoteTxns.Load())
+}
+
+func TestAuthorizationRecoveryIsCached(t *testing.T) {
+	pool := &TxPool{chainID: *uint256.NewInt(1)}
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name string
+		auth types.Authorization
+	}{
+		{"valid", auth},
+		{"invalid", types.Authorization{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			txn := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+			txn.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{tc.auth}
+			probe := &authorizationReadProbe{Transaction: txn.Txn, onSecond: func() {
+				t.Error("authorization recovery must not repeat for the same transaction")
+			}}
+			txn.Txn = probe
+			pool.recoverAuthorizations(txn)
+			pool.recoverAuthorizations(txn)
+		})
 	}
 }
