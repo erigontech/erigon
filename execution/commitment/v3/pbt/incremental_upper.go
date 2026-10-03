@@ -18,7 +18,8 @@ package pbt
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -30,7 +31,7 @@ type subtreeCell struct {
 }
 
 func isStoragePath(path *eip8297.Bitpath) bool {
-	return path.BitLen >= 8 && pathByte(path, 0) == eip8297.StorageZone
+	return path.BitLen >= 8 && pathByte(path) == eip8297.StorageZone
 }
 
 func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (common.Hash, error) {
@@ -71,11 +72,8 @@ func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (
 		}
 		t.rootDirty = true
 	}
-	keys := make([]string, 0, len(changed))
-	for key := range changed {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.AppendSeq(make([]string, 0, len(changed)), maps.Keys(changed))
+	slices.Sort(keys)
 	for _, key := range keys {
 		result := changed[key]
 		prefix := result.prefix
@@ -239,7 +237,7 @@ func (t *Trie) replaceSubtreeRow(row *rowNode, prefix *eip8297.Bitpath, result p
 		if !pathHasPrefix(prefix, &full) {
 			return false, nil
 		}
-		childPath, err := rowChildPath(row, slot, cell.Prefix, branchSplit(row, slot, cell))
+		childPath, err := rowChildPath(row, slot, cell.Prefix, branchSplit(row, cell))
 		if err != nil {
 			return false, err
 		}
@@ -314,6 +312,10 @@ func subtreeForDescriptorAt(prefix eip8297.Bitpath, descriptor bucketDescriptor)
 }
 
 func (t *Trie) descriptorAtPrefix(prefix *eip8297.Bitpath) (bucketDescriptor, bool, error) {
+	return t.descriptorAtPrefixMode(prefix, false)
+}
+
+func (t *Trie) descriptorAtPrefixMode(prefix *eip8297.Bitpath, bucket bool) (bucketDescriptor, bool, error) {
 	root, err := t.loadRoot()
 	if err != nil {
 		return bucketDescriptor{}, false, err
@@ -324,12 +326,19 @@ func (t *Trie) descriptorAtPrefix(prefix *eip8297.Bitpath) (bucketDescriptor, bo
 		if err != nil {
 			return bucketDescriptor{}, false, err
 		}
-		if pathHasPrefix(&path, prefix) {
+		if (!bucket || root.leaf.Key[0] == eip8297.StorageZone) && pathHasPrefix(&path, prefix) {
 			return bucketDescriptor{form: LeafRoot, leaf: root.leaf}, true, nil
 		}
 		return bucketDescriptor{}, false, nil
 	case ExtRoot:
 		if pathHasPrefix(&root.self, prefix) {
+			if bucket && root.self.BitLen < prefix.BitLen+4 {
+				row, err := t.extTopRow(root)
+				if err != nil {
+					return bucketDescriptor{}, false, err
+				}
+				return bucketDescriptor{form: RowRoot, row: row}, true, nil
+			}
 			return bucketDescriptor{form: ExtRoot, self: root.self.Slice(prefix.BitLen, root.self.BitLen), left: root.left, right: root.right}, true, nil
 		}
 		if !pathHasPrefix(prefix, &root.self) {
@@ -339,22 +348,25 @@ func (t *Trie) descriptorAtPrefix(prefix *eip8297.Bitpath) (bucketDescriptor, bo
 		if err != nil {
 			return bucketDescriptor{}, false, err
 		}
-		return t.descriptorAtRow(row, prefix)
+		return t.descriptorAtRowMode(row, prefix, bucket)
 	case RowRoot:
 		if root.row == nil {
 			return bucketDescriptor{}, false, nil
 		}
-		return t.descriptorAtRow(root.row, prefix)
+		return t.descriptorAtRowMode(root.row, prefix, bucket)
 	default:
 		return bucketDescriptor{}, false, fmt.Errorf("unknown root form %d", root.form)
 	}
 }
 
-func (t *Trie) descriptorAtRow(row *rowNode, prefix *eip8297.Bitpath) (bucketDescriptor, bool, error) {
+func (t *Trie) descriptorAtRowMode(row *rowNode, prefix *eip8297.Bitpath, bucket bool) (bucketDescriptor, bool, error) {
 	if row.path.BitLen == prefix.BitLen && row.path == *prefix {
 		return bucketDescriptor{form: RowRoot, row: row}, true, nil
 	}
 	if !pathHasPrefix(prefix, &row.path) {
+		return bucketDescriptor{}, false, nil
+	}
+	if bucket && row.path.BitLen+4 > prefix.BitLen {
 		return bucketDescriptor{}, false, nil
 	}
 	slot := slotAt(prefix, row.path.BitLen)
@@ -367,13 +379,20 @@ func (t *Trie) descriptorAtRow(row *rowNode, prefix *eip8297.Bitpath) (bucketDes
 		if err != nil {
 			return bucketDescriptor{}, false, err
 		}
-		if pathHasPrefix(&path, prefix) {
+		if (!bucket || cell.Key[0] == eip8297.StorageZone) && pathHasPrefix(&path, prefix) {
 			return bucketDescriptor{form: LeafRoot, leaf: *cell.Cell}, true, nil
 		}
 		return bucketDescriptor{}, false, nil
 	case BranchCell:
 		full := branchPath(row, slot, cell)
 		if pathHasPrefix(&full, prefix) {
+			if bucket && full.BitLen < prefix.BitLen+4 {
+				child, err := t.loadBranchChild(row, slot)
+				if err != nil {
+					return bucketDescriptor{}, false, err
+				}
+				return bucketDescriptor{form: RowRoot, row: child}, true, nil
+			}
 			return bucketDescriptor{form: ExtRoot, self: full.Slice(prefix.BitLen, full.BitLen), left: cell.Left, right: cell.Right}, true, nil
 		}
 		if !pathHasPrefix(prefix, &full) {
@@ -383,7 +402,7 @@ func (t *Trie) descriptorAtRow(row *rowNode, prefix *eip8297.Bitpath) (bucketDes
 		if err != nil {
 			return bucketDescriptor{}, false, err
 		}
-		return t.descriptorAtRow(child, prefix)
+		return t.descriptorAtRowMode(child, prefix, bucket)
 	default:
 		return bucketDescriptor{}, false, fmt.Errorf("unknown cell form %d", cell.Kind)
 	}
@@ -391,7 +410,6 @@ func (t *Trie) descriptorAtRow(row *rowNode, prefix *eip8297.Bitpath) (bucketDes
 
 func subtreeCellForRow(subtree subtreeCell, rowPath eip8297.Bitpath) (rowCell, error) {
 	cell := subtree.cell
-	cell.child = subtree.cell.child
 	if cell.Kind == BranchCell {
 		start := rowPath.BitLen + 4
 		if subtree.path.BitLen < start {
@@ -549,7 +567,7 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 		if err != nil {
 			return err
 		}
-		setBranchOrLeaf(row, slot, newCell)
+		setBranch(row, slot, newCell)
 		t.markDirty(row)
 		return nil
 	case LeafCell:
@@ -563,45 +581,16 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 			if err != nil {
 				return err
 			}
-			setBranchOrLeaf(row, slot, newCell)
+			setBranch(row, slot, newCell)
 			t.markDirty(row)
 			return nil
 		}
 		old := subtreeCell{path: oldPath, cell: *cell}
-		if d/4 == row.path.BitLen/4 {
-			newSlot := slotAt(&subtree.path, row.path.BitLen)
-			newCell, err := subtreeCellForRow(subtree, row.path)
-			if err != nil {
-				return err
-			}
-			setBranchOrLeaf(row, newSlot, newCell)
-			t.markDirty(row)
-			return nil
-		}
-		childPath := subtree.path.Slice(0, (d/4)*4)
-		child, err := t.subtreeRow(childPath, old, subtree)
-		if err != nil {
-			return err
-		}
-		result, err := rowRoutingResult(child)
-		if err != nil {
-			return err
-		}
-		full, err := rowTopPrefix(child, result.Split)
-		if err != nil {
-			return err
-		}
-		setBranch(row, slot, branchCell(full.Slice(row.path.BitLen+4, result.Split), common.Hash{}, common.Hash{}))
-		row.cell(slot).child = child
-		child.parent = row
-		child.parentSlot = slot
-		t.registerRow(child)
-		t.markDirty(row)
-		return nil
+		return t.insertSubtreeChildRow(row, slot, old, subtree, d)
 	case BranchCell:
 		full := branchPath(row, slot, cell)
 		d := firstDifference(&full, &subtree.path)
-		split := branchSplit(row, slot, cell)
+		split := branchSplit(row, cell)
 		if d >= split || d/4 == split/4 {
 			if t.upperOnly && split >= t.rootRecordPath().BitLen+264 && isStoragePath(&full) {
 				return fmt.Errorf("upper mutation reached bucket split %d", split)
@@ -617,34 +606,28 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 			return nil
 		}
 		old := subtreeCell{path: full, cell: *cell}
-		childPath := subtree.path.Slice(0, (d/4)*4)
-		child, err := t.subtreeRow(childPath, old, subtree)
-		if err != nil {
-			return err
-		}
-		result, err := rowRoutingResult(child)
-		if err != nil {
-			return err
-		}
-		newFull, err := rowTopPrefix(child, result.Split)
-		if err != nil {
-			return err
-		}
-		setBranch(row, slot, branchCell(newFull.Slice(row.path.BitLen+4, result.Split), common.Hash{}, common.Hash{}))
-		row.cell(slot).child = child
-		child.parent = row
-		child.parentSlot = slot
-		t.registerRow(child)
-		t.markDirty(row)
-		return nil
+		return t.insertSubtreeChildRow(row, slot, old, subtree, d)
 	default:
 		return errInsertKey
 	}
 }
 
-func setBranchOrLeaf(row *rowNode, slot int, cell rowCell) {
-	row.cells[slot] = cell
-	row.markCellDirty(slot)
+func (t *Trie) insertSubtreeChildRow(row *rowNode, slot int, old, subtree subtreeCell, split int16) error {
+	childPath := subtree.path.Slice(0, (split/4)*4)
+	child, err := t.subtreeRow(childPath, old, subtree)
+	if err != nil {
+		return err
+	}
+	result, err := rowRoutingResult(child)
+	if err != nil {
+		return err
+	}
+	full, err := rowTopPrefix(child, result.Split)
+	if err != nil {
+		return err
+	}
+	t.attachChildRow(row, slot, child, branchCell(full.Slice(row.path.BitLen+4, result.Split), common.Hash{}, common.Hash{}), nil, 0)
+	return nil
 }
 
 func (t *Trie) emptyRoot() {

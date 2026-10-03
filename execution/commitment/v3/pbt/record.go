@@ -255,16 +255,10 @@ func encodeRow(k recordKey, record *Record) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		value, err := eip8297.EncodeLeafValue(cell.Key, &cell.Value)
+		out, err = appendLeaf(out, &suffix, cell.Key, &cell.Value)
 		if err != nil {
-			return nil, recordError(CompactValueError, err.Error())
+			return nil, err
 		}
-		if len(value) > 255 {
-			return nil, recordError(CompactValueError, "compact value exceeds one-byte length")
-		}
-		out = suffix.AppendPackedBits(out)
-		out = append(out, byte(len(value)))
-		out = append(out, value...)
 	}
 	return out, nil
 }
@@ -289,35 +283,38 @@ func encodeExtRoot(k recordKey, record *Record) ([]byte, error) {
 }
 
 func encodeLeafRoot(k recordKey, record *Record) ([]byte, error) {
-	var cell Cell
-	count := 0
-	for slot := range record.Cells {
-		candidate := &record.Cells[slot]
-		if candidate.Kind == EmptyCell {
-			continue
-		}
-		count++
-		cell = *candidate
-	}
-	if count != 1 || cell.Kind != LeafCell {
+	cell, ok := singleLeaf(record)
+	if !ok {
 		return nil, recordError(CellCountError, "leaf root must contain one leaf")
 	}
 	suffix, err := rootLeafSuffix(k, cell.Key)
 	if err != nil {
 		return nil, err
 	}
-	value, err := eip8297.EncodeLeafValue(cell.Key, &cell.Value)
+	encoded, err := eip8297.EncodeLeafValue(cell.Key, &cell.Value)
 	if err != nil {
 		return nil, recordError(CompactValueError, err.Error())
 	}
-	if len(value) > 255 {
+	if len(encoded) > 255 {
 		return nil, recordError(CompactValueError, "compact value exceeds one-byte length")
 	}
 	out := []byte{recordFormat | hdrIsLeafRoot}
 	out = suffix.AppendPackedBits(out)
-	out = append(out, byte(len(value)))
-	out = append(out, value...)
-	return out, nil
+	out = append(out, byte(len(encoded)))
+	return append(out, encoded...), nil
+}
+
+func appendLeaf(out []byte, suffix *eip8297.Bitpath, key []byte, value *[eip8297.ValueLength]byte) ([]byte, error) {
+	encoded, err := eip8297.EncodeLeafValue(key, value)
+	if err != nil {
+		return nil, recordError(CompactValueError, err.Error())
+	}
+	if len(encoded) > 255 {
+		return nil, recordError(CompactValueError, "compact value exceeds one-byte length")
+	}
+	out = suffix.AppendPackedBits(out)
+	out = append(out, byte(len(encoded)))
+	return append(out, encoded...), nil
 }
 
 func decodeRow(k recordKey, data []byte) (Record, error) {
@@ -540,7 +537,7 @@ func decodeRecordKey(key []byte) (recordKey, error) {
 	if path.BitLen == 0 {
 		return recordKey{}, recordError(KeyError, "ordinary row key cannot be empty")
 	}
-	root := path.BitLen == 264 && pathByte(&path, 0) == eip8297.StorageZone
+	root := path.BitLen == 264 && pathByte(&path) == eip8297.StorageZone
 	if !root {
 		if err := validateRowPath(&path); err != nil {
 			return recordKey{}, err
@@ -565,20 +562,15 @@ func rowLeafSuffix(path eip8297.Bitpath, slot int, key []byte) (eip8297.Bitpath,
 	if !ok || len(key) != keyBytes {
 		return eip8297.Bitpath{}, recordError(ZoneError, "leaf key uses a reserved zone")
 	}
-	for i := range 4 {
-		if full.Bit(path.BitLen+int16(i)) != uint64((slot>>(3-i))&1) {
-			return eip8297.Bitpath{}, recordError(SuffixLengthError, "leaf key does not match the row slot")
-		}
+	if slotAt(&full, path.BitLen) != slot {
+		return eip8297.Bitpath{}, recordError(SuffixLengthError, "leaf key does not match the row slot")
 	}
 	return full.Slice(path.BitLen+4, full.BitLen), nil
 }
 
 func rowLeafKey(path eip8297.Bitpath, slot int, suffix eip8297.Bitpath) ([]byte, error) {
 	full := path
-	var slotPath eip8297.Bitpath
-	for i := range 4 {
-		slotPath.AppendBit(uint64((slot >> (3 - i)) & 1))
-	}
+	slotPath := eip8297.PathFromBits([]byte{byte(slot) << 4}, 4)
 	full.Append(&slotPath)
 	full.Append(&suffix)
 	key := full.AppendPackedBits(nil)
@@ -609,9 +601,9 @@ func rowZone(path *eip8297.Bitpath, slot int) byte {
 		return byte(slot) << 4
 	}
 	if path.BitLen < 8 {
-		return pathNibble(path, 0)<<4 | byte(slot)
+		return byte(slotAt(path, 0))<<4 | byte(slot)
 	}
-	return pathByte(path, 0)
+	return pathByte(path)
 }
 
 func rowKeyLength(path *eip8297.Bitpath, slot int) (int, error) {
@@ -642,13 +634,13 @@ func rowKeyLength(path *eip8297.Bitpath, slot int) (int, error) {
 
 func validateRowPath(path *eip8297.Bitpath) error {
 	if path.BitLen < 8 {
-		zone := pathNibble(path, 0)
+		zone := byte(slotAt(path, 0))
 		if zone != 0 && zone != 0xf {
 			return recordError(ZoneError, "row path uses a reserved zone")
 		}
 		return nil
 	}
-	if _, ok := eip8297.ZoneKeyLength(pathByte(path, 0)); !ok {
+	if _, ok := eip8297.ZoneKeyLength(pathByte(path)); !ok {
 		return recordError(ZoneError, "row path uses a reserved zone")
 	}
 	return nil
@@ -661,10 +653,10 @@ func rootExtensionKeyLength(k recordKey, path *eip8297.Bitpath) (int, error) {
 	if path.BitLen < 4 {
 		return 0, recordError(ZoneError, "root extension does not identify a zone")
 	}
-	zone := pathNibble(path, 0)
+	zone := byte(slotAt(path, 0))
 	if zone == 0 {
 		if path.BitLen >= 8 {
-			zone = pathByte(path, 0)
+			zone = pathByte(path)
 			if zone != eip8297.AccountZone && zone != eip8297.CodeZone {
 				return 0, recordError(ZoneError, "root extension uses a reserved zone")
 			}
@@ -672,7 +664,7 @@ func rootExtensionKeyLength(k recordKey, path *eip8297.Bitpath) (int, error) {
 		return eip8297.AccountKeyLength * 8, nil
 	}
 	if zone == 0xf {
-		if path.BitLen >= 8 && pathByte(path, 0) != eip8297.StorageZone {
+		if path.BitLen >= 8 && pathByte(path) != eip8297.StorageZone {
 			return 0, recordError(ZoneError, "root extension uses a reserved zone")
 		}
 		return eip8297.StorageKeyLength * 8, nil
@@ -724,20 +716,8 @@ func rootSuffixBits(k recordKey, data []byte) (int16, error) {
 	return int16(keyBytes * 8), nil
 }
 
-func pathByte(path *eip8297.Bitpath, byteIndex int) byte {
-	var out byte
-	for i := range 8 {
-		out |= byte(path.Bit(int16(byteIndex*8+i))) << uint(7-i)
-	}
-	return out
-}
-
-func pathNibble(path *eip8297.Bitpath, from int16) byte {
-	var out byte
-	for i := range 4 {
-		out |= byte(path.Bit(from+int16(i))) << uint(3-i)
-	}
-	return out
+func pathByte(path *eip8297.Bitpath) byte {
+	return byte(path.Words[0] >> 56)
 }
 
 func firstByte(key []byte) byte {

@@ -50,24 +50,8 @@ func (t *registeredTrie) SetTraceWriter(io.Writer) {}
 
 func (t *registeredTrie) Variant() commitment.TrieVariant { return commitment.VariantBinPatriciaTrie }
 
-func (t *registeredTrie) EncodeCurrentState(buf []byte) ([]byte, error) {
-	return t.Trie.EncodeCurrentState(buf)
-}
-
-func (t *registeredTrie) SetState(buf []byte) error { return t.Trie.SetState(buf) }
-
-func (t *registeredTrie) Reset() { t.Trie.Reset() }
-
-func (t *registeredTrie) ResetContext(ctx commitment.PatriciaContext) { t.Trie.ResetContext(ctx) }
-
 func (t *registeredTrie) Process(context.Context, *commitment.Updates, string, func(*commitment.CommitProgress), commitment.WarmupConfig) ([]byte, error) {
 	return nil, errors.New("pbin: binary rows require a PBinFeed")
-}
-
-func (t *registeredTrie) Release() { t.Trie.Release() }
-
-func (t *registeredTrie) SetTrieContextFactory(factory commitment.TrieContextFactory) {
-	t.Trie.SetTrieContextFactory(factory)
 }
 
 func (t *registeredTrie) ProcessPBinFeed(ctx context.Context, feed *commitment.PBinFeed, onProgress func(*commitment.CommitProgress)) ([]byte, error) {
@@ -76,14 +60,7 @@ func (t *registeredTrie) ProcessPBinFeed(ctx context.Context, feed *commitment.P
 		return nil, err
 	}
 	t.stats = feedCodeStats(feed)
-	hash, err := t.Trie.ProcessParallelContext(ctx, ops, t.workers)
-	if err != nil {
-		return nil, err
-	}
-	if onProgress != nil {
-		onProgress(&commitment.CommitProgress{KeyIndex: uint64(len(ops)), UpdateCount: uint64(len(ops))})
-	}
-	return append([]byte(nil), hash[:]...), nil
+	return t.ProcessPBinOps(ctx, ops, onProgress)
 }
 
 func (t *registeredTrie) ProcessPBinOps(ctx context.Context, ops []Op, onProgress func(*commitment.CommitProgress)) ([]byte, error) {
@@ -98,7 +75,3 @@ func (t *registeredTrie) ProcessPBinOps(ctx context.Context, ops []Op, onProgres
 }
 
 func (t *registeredTrie) CodeStats() commitment.PBinCodeStats { return t.stats }
-
-func CodeStatsFromFeed(feed *commitment.PBinFeed) commitment.PBinCodeStats {
-	return feedCodeStats(feed)
-}

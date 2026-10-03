@@ -243,6 +243,20 @@ func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.Tempora
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
 }
 
+func (sdc *SharedDomainsCommitmentContext) SetPBinWitnessStateReader(reader StateReader) {
+	sdc.SetStateReader(reader)
+	stepSize := uint64(0)
+	if sdc.sharedDomains != nil {
+		stepSize = sdc.sharedDomains.StepSize()
+	}
+	sdc.patriciaTrie.ResetContext(&TrieContext{
+		commitmentDomain: sdc.CommitmentDomain(),
+		stepSize:         stepSize,
+		stateReader:      reader,
+		readCodeSize:     sdc.variant == commitment.VariantBinPatriciaTrie,
+	})
+}
+
 func (sdc *SharedDomainsCommitmentContext) SetTraceWriter(w io.Writer) {
 	// Wrap once so the main and per-worker TrieContexts share one mutex-guarded
 	// writer: concurrent workers trace branch reads/writes without racing.

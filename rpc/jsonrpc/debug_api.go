@@ -73,7 +73,7 @@ type PrivateDebugAPI interface {
 	GetRawTransaction(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
 	ShadowStateRoot(ctx context.Context, blockHash common.Hash) (*common.Hash, error)
 	MigrationProgress(ctx context.Context) (*MigrationProgress, error)
-	ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error)
+	ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode, trie *string) (*ExecutionWitnessResult, error)
 	ExecutionWitnesses(ctx context.Context, opts *WitnessSubscriptionOpts) (*rpc.Subscription, error)
 	SetHead(ctx context.Context, number hexutil.Uint64) error
 	FreeOSMemory()

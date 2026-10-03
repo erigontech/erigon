@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -170,6 +171,45 @@ func TestHandleMessage_StepBoundaryCheckpointBothCommitmentDomains(t *testing.T)
 	expected.Balance = *uint256.NewInt(15 * 1000)
 	expected.CodeHash = accounts.EmptyCodeHash
 	require.Equal(t, accounts.SerialiseV3(&expected), accountAtEdge)
+}
+
+func TestHandleMessage_StepBoundaryBinFeedUsesPendingState(t *testing.T) {
+	ctx := context.Background()
+	db, tx, doms := dualCalculatorTest(t)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	addr := accounts.InternAddress(common.Address{0x43})
+	address := addr.Value()
+	oldCode := accounts.NewCode([]byte{0x60, 0x01})
+	oldAccount := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: oldCode.Hash}
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, address[:], accounts.SerialiseV3(&oldAccount), 0, nil))
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, address[:], oldCode.Bytes, 0, nil))
+
+	feedSeen := make(chan *commitment.PBinFeed, 1)
+	cc.binFeedObserver = func(feed *commitment.PBinFeed) { feedSeen <- feed }
+	newBalance := *uint256.NewInt(9)
+	newCode := accounts.NewCode([]byte{0x60, 0x02})
+	writes := newWS().bal(addr, state.Version{}, newBalance).code(addr, state.Version{}, newCode).build()
+	cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: 15, rules: &chain.Rules{}, writes: writes})
+
+	var feed *commitment.PBinFeed
+	select {
+	case feed = <-feedSeen:
+	case result := <-out:
+		require.NoError(t, result.err, "step-boundary bin feed must use pending code")
+	case <-time.After(time.Second):
+		require.FailNow(t, "step-boundary bin feed was not built")
+	}
+	require.Len(t, feed.Accounts, 1, "step-boundary bin feed must include the pending account")
+	require.Equal(t, newCode.Bytes, feed.Accounts[0].Code, "step-boundary bin feed must include pending code")
+	want := eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{{Address: address[:], Nonce: 1, Balance: newBalance, Code: newCode.Bytes}}}))
+	got, err := pbt.NewTrie(&calcPBinTrieContext{records: make(map[string][]byte)}).ProcessFeed(feed)
+	require.NoError(t, err)
+	require.Equal(t, want, got, "step-boundary bin root must include pending balance")
 }
 
 // TestHandleMessage_StepBoundaryCheckpointMidBlock pins the parallel-exec

@@ -29,43 +29,18 @@ const (
 
 // ChunkifyCode splits code into the tree's chunk values (eip:"Code"). The
 // PUSHDATA scan runs over the whole code, so residual PUSHDATA carries across
-// chunk boundaries. Padding to a multiple of 31 happens before the scan, which
-// is what makes a PUSH whose data runs off the end count against the padded tail.
+// chunk boundaries.
 func ChunkifyCode(code []byte) [][ValueLength]byte {
-	var s ChunkScratch
-	return s.Chunkify(code)
-}
-
-type ChunkScratch struct {
-	padded     []byte
-	pushdataAt []byte
-	chunks     [][ValueLength]byte
-}
-
-func (s *ChunkScratch) Chunkify(code []byte) [][ValueLength]byte {
 	if len(code) == 0 {
 		return nil
 	}
-	padded := code
-	if rem := len(code) % ChunkDataLen; rem != 0 {
-		s.padded = append(s.padded[:0], code...)
-		for range ChunkDataLen - rem {
-			s.padded = append(s.padded, 0)
-		}
-		padded = s.padded
-	}
-
 	// pushdataAt[i] is how many bytes from i on are still PUSHDATA. It runs a whole
 	// chunk past the code so a PUSH32 on the last byte has room.
-	if cap(s.pushdataAt) < len(padded)+ValueLength {
-		s.pushdataAt = make([]byte, len(padded)+ValueLength)
-	}
-	pushdataAt := s.pushdataAt[:len(padded)+ValueLength]
-	clear(pushdataAt)
-	for pos := 0; pos < len(padded); {
+	pushdataAt := make([]byte, len(code)+ValueLength)
+	for pos := 0; pos < len(code); {
 		var pushdata int
-		if padded[pos] >= Push1 && padded[pos] <= Push32 {
-			pushdata = int(padded[pos]) - PushOffset
+		if code[pos] >= Push1 && code[pos] <= Push32 {
+			pushdata = int(code[pos]) - PushOffset
 		}
 		pos++
 		for x := range pushdata {
@@ -74,13 +49,12 @@ func (s *ChunkScratch) Chunkify(code []byte) [][ValueLength]byte {
 		pos += pushdata
 	}
 
-	chunks := s.chunks[:0]
-	for pos := 0; pos < len(padded); pos += ChunkDataLen {
+	chunks := make([][ValueLength]byte, 0, (len(code)+ChunkDataLen-1)/ChunkDataLen)
+	for pos := 0; pos < len(code); pos += ChunkDataLen {
 		var chunk [ValueLength]byte
 		chunk[0] = min(pushdataAt[pos], ChunkDataLen)
-		copy(chunk[1:], padded[pos:pos+ChunkDataLen])
+		copy(chunk[1:], code[pos:min(pos+ChunkDataLen, len(code))])
 		chunks = append(chunks, chunk)
 	}
-	s.chunks = chunks
 	return chunks
 }

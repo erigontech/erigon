@@ -34,10 +34,6 @@ func (t *Trie) newVerifier() *Trie {
 		upperOnly:             t.upperOnly,
 		suppressRoot:          t.suppressRoot,
 		suppressBucketRecords: t.suppressBucketRecords,
-		rows:                  make(map[string]*rowNode),
-		dirtyRows:             make(map[string]*rowNode),
-		bucketDirty:           make(map[string][]byte),
-		mergeCreatedStems:     make(map[string]struct{}),
 		verifyOnly:            true,
 		verifyProgress:        t.verifyProgress,
 	}
@@ -111,7 +107,7 @@ func (t *Trie) verify() error {
 		if root.self != wantSelf {
 			verifyErr = fmt.Errorf("root extension prefix does not match its top row")
 		}
-		if verifyErr == nil && root.self.BitLen >= 264 && pathByte(&root.self, 0) == eip8297.StorageZone {
+		if verifyErr == nil && root.self.BitLen >= 264 && pathByte(&root.self) == eip8297.StorageZone {
 			bucketPath := root.self.Slice(0, 264)
 			verifyErr = t.verifyBucketBranch(&bucketPath, &root.self, row, root.left, root.right)
 		}
@@ -200,13 +196,14 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 			return FoldResult{}, fmt.Errorf("row %x cell %d does not match its child", row.key, slot)
 		}
 		full := branchPath(row, slot, cell)
-		if row.path.BitLen < 264 && full.BitLen >= 264 && pathByte(&full, 0) == eip8297.StorageZone {
+		if row.path.BitLen < 264 && full.BitLen >= 264 && pathByte(&full) == eip8297.StorageZone {
 			bucketPath := full.Slice(0, 264)
 			if err := t.verifyBucketBranch(&bucketPath, &full, child, cell.Left, cell.Right); err != nil {
 				return FoldResult{}, err
 			}
 		}
-		t.releaseVerifiedChild(cell, child)
+		cell.child = nil
+		child.parent = nil
 	}
 	return rowFoldResult(row)
 }
@@ -227,11 +224,6 @@ func (t *Trie) verifyBuckets() error {
 		}
 	}
 	return nil
-}
-
-func (t *Trie) releaseVerifiedChild(cell *rowCell, child *rowNode) {
-	cell.child = nil
-	child.parent = nil
 }
 
 func (t *Trie) verifyBucketBranch(bucketPath, branchPath *eip8297.Bitpath, row *rowNode, left, right common.Hash) error {

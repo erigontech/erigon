@@ -19,7 +19,8 @@ package pbt
 import (
 	"bytes"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/erigontech/erigon/common"
@@ -306,46 +307,25 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 		var err error
 		switch {
 		case len(op.Drop) != 0:
-			if len(op.Drop) != 33 || (op.Drop[0] != eip8297.AccountZone && op.Drop[0] != eip8297.StorageZone) {
-				err = errInsertKey
-			} else if op.Drop[0] == eip8297.StorageZone {
-				var bucketKey []byte
-				bucketKey, err = bucketKeyForPrefix(op.Drop)
-				if err == nil {
+			if op.Drop[0] == eip8297.StorageZone {
+				if bucketKey, bucketErr := bucketKeyForPrefix(op.Drop); bucketErr == nil {
 					t.touchBucket(bucketKey)
 				}
-			}
-			if err != nil {
-				err = errInsertKey
-				break
 			}
 			err = t.dropPrefix(op.Drop)
 		case op.merge != nil:
 			err = t.applyMerge(op)
-		case op.Value == ([eip8297.ValueLength]byte{}):
-			if len(op.Key) == eip8297.StorageKeyLength && op.Key[0] == eip8297.StorageZone {
-				var bucketKey []byte
-				bucketKey, err = bucketKeyForStorage(op.Key)
-				if err == nil {
-					t.touchBucket(bucketKey)
-				}
-			}
-			if err != nil {
-				break
-			}
-			err = t.remove(op.Key)
 		default:
 			if len(op.Key) == eip8297.StorageKeyLength && op.Key[0] == eip8297.StorageZone {
-				var bucketKey []byte
-				bucketKey, err = bucketKeyForStorage(op.Key)
-				if err == nil {
+				if bucketKey, bucketErr := bucketKeyForStorage(op.Key); bucketErr == nil {
 					t.touchBucket(bucketKey)
 				}
 			}
-			if err != nil {
-				break
+			if op.Value == ([eip8297.ValueLength]byte{}) {
+				err = t.remove(op.Key)
+			} else {
+				err = t.insert(op.Key, op.Value)
 			}
-			err = t.insert(op.Key, op.Value)
 		}
 		if err != nil {
 			return common.Hash{}, err
@@ -409,17 +389,14 @@ func (t *Trie) write() error {
 		}
 		rows[key] = row
 		prev[key] = t.previousRecord([]byte(key), row.prev)
+		if err := t.coreEncode(row.key); err != nil {
+			return err
+		}
 		if row.tombstone {
-			if err := t.coreEncode(row.key); err != nil {
-				return err
-			}
 			final[key] = []byte{}
 			continue
 		}
 		record := row.record()
-		if err := t.coreEncode(row.key); err != nil {
-			return err
-		}
 		data, err := EncodeRecord(row.key, &record)
 		if err != nil {
 			return err
@@ -432,14 +409,14 @@ func (t *Trie) write() error {
 		data := []byte{}
 		if t.root.form != RowRoot || t.root.row != nil {
 			record := t.rootRecord()
-			var err error
 			if err := t.coreEncode(rootKeyBytes); err != nil {
 				return err
 			}
-			data, err = EncodeRecord(rootKeyBytes, &record)
+			encoded, err := EncodeRecord(rootKeyBytes, &record)
 			if err != nil {
 				return err
 			}
+			data = encoded
 		}
 		final[rootKey] = data
 		prev[rootKey] = t.previousRecord(rootKeyBytes, t.root.prev)
@@ -457,28 +434,22 @@ func (t *Trie) write() error {
 			return err
 		}
 		prev[key] = old
+		if err := t.coreEncode(bucketKey); err != nil {
+			return err
+		}
 		if !ok {
-			if err := t.coreEncode(bucketKey); err != nil {
-				return err
-			}
 			final[key] = []byte{}
 			continue
 		}
 		record := descriptor.record()
-		if err := t.coreEncode(bucketKey); err != nil {
-			return err
-		}
 		data, err := EncodeRecord(bucketKey, &record)
 		if err != nil {
 			return err
 		}
 		final[key] = data
 	}
-	keys := make([]string, 0, len(final))
-	for key := range final {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.AppendSeq(make([]string, 0, len(final)), maps.Keys(final))
+	slices.Sort(keys)
 	for _, key := range keys {
 		data, old := final[key], prev[key]
 		if bytes.Equal(data, old) {
@@ -571,10 +542,7 @@ func (t *Trie) touchBucket(key []byte) {
 func validateOps(ops []Op) error {
 	var previous []byte
 	for i, op := range ops {
-		key := op.Key
-		if len(op.Drop) != 0 {
-			key = op.Drop
-		}
+		key := opKey(op)
 		if i != 0 && bytes.Compare(previous, key) >= 0 {
 			return errOperationOrder
 		}

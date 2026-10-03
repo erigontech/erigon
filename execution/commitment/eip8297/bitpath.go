@@ -22,6 +22,11 @@ import (
 	"math/bits"
 )
 
+var (
+	errEmptyBitPath    = errors.New("pbin: empty bit-path key")
+	errNonCanonicalPad = errors.New("pbin: non-canonical padding in bit-path key")
+)
+
 const (
 	// MaxPathBits is the longest EIP-8297 tree key: 66 bytes for a storage leaf.
 	MaxPathBits = 528
@@ -99,16 +104,7 @@ func (p *Bitpath) Slice(from, to int16) Bitpath {
 		panic(fmt.Sprintf("pbin: slice [%d,%d) out of range for %d-bit path", from, to, p.BitLen))
 	}
 	var r Bitpath
-	for src, dst := from, int16(0); dst < to-from; {
-		take := min(int16(64-dst%64), to-from-dst)
-		word := p.wordAt(src)
-		if take < 64 {
-			word &= ^uint64(0) << (64 - uint(take))
-		}
-		r.Words[dst/64] |= word >> uint(dst%64)
-		src += take
-		dst += take
-	}
+	r.appendRange(p, from, to)
 	r.BitLen = to - from
 	r.MaskTail()
 	return r
@@ -128,18 +124,22 @@ func (p *Bitpath) Append(o *Bitpath) {
 	if int(p.BitLen)+int(o.BitLen) > MaxPathBits {
 		panic(fmt.Sprintf("pbin: appending %d bits to %d-bit path overflows", o.BitLen, p.BitLen))
 	}
-	for src, dst := int16(0), p.BitLen; src < o.BitLen; {
-		take := min(int16(64-dst%64), o.BitLen-src)
-		word := o.wordAt(src)
+	p.appendRange(o, 0, o.BitLen)
+	p.BitLen += o.BitLen
+	p.MaskTail()
+}
+
+func (p *Bitpath) appendRange(src *Bitpath, from, to int16) {
+	for srcPos, dstPos := from, p.BitLen; srcPos < to; {
+		take := min(int16(64-dstPos%64), to-srcPos)
+		word := src.wordAt(srcPos)
 		if take < 64 {
 			word &= ^uint64(0) << (64 - uint(take))
 		}
-		p.Words[dst/64] |= word >> uint(dst%64)
-		src += take
-		dst += take
+		p.Words[dstPos/64] |= word >> uint(dstPos%64)
+		srcPos += take
+		dstPos += take
 	}
-	p.BitLen += o.BitLen
-	p.MaskTail()
 }
 
 func (p *Bitpath) wordAt(offset int16) uint64 {
@@ -189,11 +189,6 @@ func (p *Bitpath) AppendPackedBits(dst []byte) []byte {
 	return dst
 }
 
-var (
-	ErrEmptyBitPath    = errors.New("pbin: empty bit-path key")
-	ErrNonCanonicalPad = errors.New("pbin: non-canonical padding in bit-path key")
-)
-
 // AppendBitPath appends the DB key for p: packed bits followed by one byte
 // holding bitLen mod 8. The count is a suffix so that a subtree stays
 // contiguous; a leading length field would scatter its records across the
@@ -212,7 +207,7 @@ func EncodeBitPath(p *Bitpath) []byte {
 func DecodeBitPath(buf []byte) (Bitpath, error) {
 	var p Bitpath
 	if len(buf) == 0 {
-		return p, ErrEmptyBitPath
+		return p, errEmptyBitPath
 	}
 	tailBits, packed := buf[len(buf)-1], buf[:len(buf)-1]
 	if tailBits > 7 {
@@ -229,7 +224,7 @@ func DecodeBitPath(buf []byte) (Bitpath, error) {
 		return p, fmt.Errorf("pbin: bit path of %d bits exceeds %d", bitLen, MaxPathBits)
 	}
 	if used := bitLen % 8; used != 0 && packed[len(packed)-1]&(0xFF>>used) != 0 {
-		return Bitpath{}, ErrNonCanonicalPad
+		return Bitpath{}, errNonCanonicalPad
 	}
 	return PathFromBits(packed, int16(bitLen)), nil
 }

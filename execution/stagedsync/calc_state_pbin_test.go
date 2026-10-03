@@ -99,10 +99,10 @@ func TestCalcStatePBinFeedFlagsResetWithBlock(t *testing.T) {
 	code := accounts.NewCode([]byte{0x60, 0x00})
 	cs := newTestCalcState()
 	cs.ApplyWrites(newWS().selfDestruct(addr, state.Version{}, true).code(addr, state.Version{}, code).build(), false)
-	require.Contains(t, cs.codeKeys, addr)
+	require.Contains(t, cs.codeValues, addr)
 	require.Contains(t, cs.wiped, addr)
 	cs.ResetBlockFlags()
-	require.Empty(t, cs.codeKeys)
+	require.Empty(t, cs.codeValues)
 	require.Empty(t, cs.wiped)
 }
 
@@ -142,6 +142,34 @@ func TestCalcStatePBinFeedUsesFinalAccountAndSlots(t *testing.T) {
 	gotRoot, err := pbt.NewTrie(trieContext).ProcessFeed(feed)
 	require.NoError(t, err)
 	require.Equal(t, eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{wantState}})), gotRoot)
+}
+
+func TestCalcStatePBinFeedUsesPendingValuesBeforeApply(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{0x23})
+	address := addr.Value()
+	oldCode := accounts.NewCode([]byte{0x60, 0x01})
+	newCode := accounts.NewCode([]byte{0x60, 0x02})
+	newBalance := *uint256.NewInt(9)
+	oldAccount := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: oldCode.Hash}
+	key := accounts.InternKey(common.Hash{0x24})
+	keyValue := key.Value()
+	storageKey := append(append([]byte(nil), address[:]...), keyValue[:]...)
+	reader := &calcPBinReader{values: map[string][]byte{
+		calcPBinReaderKey(kv.AccountsDomain, address[:]): accounts.SerialiseV3(&oldAccount),
+		calcPBinReaderKey(kv.CodeDomain, address[:]):     oldCode.Bytes,
+		calcPBinReaderKey(kv.StorageDomain, storageKey):  {1},
+	}}
+	cs := newTestCalcState()
+	cs.reader = reader
+	cs.ApplyWrites(newWS().bal(addr, state.Version{}, newBalance).nonce(addr, state.Version{}, 2).code(addr, state.Version{}, newCode).stor(addr, key, state.Version{}, *uint256.NewInt(42)).build(), false)
+
+	feed, err := cs.BinFeed()
+	require.NoError(t, err)
+	require.Len(t, feed.Accounts, 1)
+	require.Equal(t, uint64(2), feed.Accounts[0].Nonce)
+	require.True(t, feed.Accounts[0].Balance.Eq(&newBalance))
+	require.Equal(t, newCode.Bytes, feed.Accounts[0].Code)
+	require.Equal(t, []byte{42}, feed.Accounts[0].Slots[0].Value)
 }
 
 func TestCalcStatePBinFeedWipedSurvivesRecreate(t *testing.T) {
@@ -287,7 +315,7 @@ func TestCalcStatePBinFeedBALTracksCodeAndEmptyRemoval(t *testing.T) {
 	}, true, false, false)
 	address := accounts.InternAddress(addr)
 	emptyAddress := accounts.InternAddress(emptyAddr)
-	require.Contains(t, cs.codeKeys, address)
+	require.Contains(t, cs.codeValues, address)
 	require.Empty(t, cs.wiped)
 	require.True(t, cs.accounts[emptyAddress].Deleted)
 	require.NotEqual(t, empty.CodeHash, cs.accounts[address].CodeHash)

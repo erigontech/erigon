@@ -32,12 +32,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -192,6 +194,16 @@ func testPBTDualCommitmentFlipAndReorg(t *testing.T, parallel bool) {
 	require.NoError(t, err)
 	require.True(t, progress.Flipped)
 	require.False(t, progress.ShadowStopped)
+
+	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	freezeTx, err := m.DB.BeginTemporalRo(context.Background())
+	require.NoError(t, err)
+	defer freezeTx.Rollback()
+	_, err = stagedsync.FreezeHexCommitment(freezeTx, agg)
+	freezeTx.Rollback()
+	require.ErrorContains(t, err, "is above finalized block")
+	_, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
+	require.False(t, frozen)
 
 	require.NoError(t, m.InsertChain(alternateChain))
 	require.Equal(t, alternateChain.TopBlock.Hash(), currentHead(t, m))

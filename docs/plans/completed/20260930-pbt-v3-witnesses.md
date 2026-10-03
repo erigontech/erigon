@@ -293,6 +293,8 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 
       Mutation-check the `ResetBlockFlags` resolution: an unconditional reset turns the mid-block test red.
 - [x] run the affected packages, `make lint` and `make erigon integration`; commit the merge - must pass before task 2
+- [x] ➕ fix BAL prefetch metadata for binary domains, update the queued-item assertion, and cover storage/code rows
+      through `handleBlockRequest`; mutation-check the new fields
 
 ### Task 2: Guards for hex witnesses on hex+bin datadirs
 
@@ -301,22 +303,22 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `rpc/jsonrpc/pbt_hex_witness_dual_test.go`
 - Modify: `rpc/jsonrpc/eth_call.go`, `rpc/rpchelper/commitment.go` (only if a guard below exposes a gap)
 
-- [ ] extend `witness_v3_parity_test.go` with a hex+bin arm:
+- [x] extend `witness_v3_parity_test.go` with a hex+bin arm:
       - the dual globals and `statecfg.EnableHistoricalCommitment` are set and restored in `t.Cleanup`;
       - the bin domain is active, with a dual genesis as in `execution/tests/pbt_dual_commitment_test.go`;
       - legacy, canonical and `eth_getWitness` output is byte-identical to the hex-only arm for pre-fork blocks.
-- [ ] add `eth_getProof` parity for a pre-fork block on hex+bin
-- [ ] port from `binary-trie`:
+- [x] add `eth_getProof` parity for a pre-fork block on hex+bin
+- [x] port from `binary-trie`:
       - `TestPBinGetWitnessRefusesBin` and `TestPBinHexOnlyCallersStillRefuse` (`pbin_witness_reachable_test.go`);
       - `TestPBinDualPostFlipProofAndWitnessRefuse` and `TestPBinFrozenHexHistoricalWitnessAndProof`
         (`pbin_witness_dual_test.go`).
 
       These cover post-fork and bin-only refusals of `eth_getWitness`/`eth_getProof`, and historical pre-fork reads
       after the fork and after a hex freeze.
-- [ ] add a test for the pruned hex commitment history error
-- [ ] mutation-check each guard: re-inserting the early return, and bypassing the canonical-hex check in `eth_call.go`,
+- [x] add a test for the pruned hex commitment history error
+- [x] mutation-check each guard: re-inserting the early return, and bypassing the canonical-hex check in `eth_call.go`,
       each turn a named assertion red
-- [ ] run tests - must pass before task 3
+- [x] run tests - must pass before task 3
 
 ### Task 3: trie parameter and cache routing
 
@@ -326,16 +328,16 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Modify: `rpc/jsonrpc/witness_cache.go`
 - Create: `rpc/jsonrpc/debug_execution_witness_trie_test.go`
 
-- [ ] add the optional `trie *string` parameter to `ExecutionWitness` in the `DebugAPI` interface and the
+- [x] add the optional `trie *string` parameter to `ExecutionWitness` in the `DebugAPI` interface and the
       implementation; pbt returns a not-yet-served sentinel error until task 11
-- [ ] write the table test for the RPC contract table (defaults on both sides of the fork, explicit values, pbt with
+- [x] write the table test for the RPC contract table (defaults on both sides of the fork, explicit values, pbt with
       `mode`, unknown values); confirm it fails at its first resolution assertion
-- [ ] implement the resolution: default through `IsBinaryTrie(block.Time)`; reject unknown values and `mode` together
+- [x] implement the resolution: default through `IsBinaryTrie(block.Time)`; reject unknown values and `mode` together
       with pbt
-- [ ] route the cache: `serveFromWitnessCache` serves only the default trie; a cache-only node returns a distinct error
+- [x] route the cache: `serveFromWitnessCache` serves only the default trie; a cache-only node returns a distinct error
       for the other
-- [ ] write tests for cache hit and miss by trie and for the cache-only refusal
-- [ ] run tests - must pass before task 4
+- [x] write tests for cache hit and miss by trie and for the cache-only refusal
+- [x] run tests - must pass before task 4
 
 ### Task 4: MPT anchors and availability
 
@@ -343,18 +345,19 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness_trie_test.go`
 
-- [ ] write tests:
+- [x] write tests:
       - mpt for a post-fork block inside the transition window, anchored at shadow roots;
       - for both a hex stop and a hex freeze, the last parent that is served and the first that is refused;
-      - mpt on a bin-only datadir.
+      - mpt on a bin-only datadir;
+      - a missing shadow root and an independently opened rpcdaemon database.
 
       Confirm they fail at the anchor or availability assertion.
-- [ ] replace the `binTrie && !IsBinaryTrie(parent)` special case with the anchor table
-- [ ] implement the availability rules through `Aggregator.IsDomainFrozen`, `ErigonDBSettings.FrozenAt`,
+- [x] replace the `binTrie && !IsBinaryTrie(parent)` special case with the anchor table
+- [x] implement the availability rules through `Aggregator.IsDomainFrozen`, `ErigonDBSettings.FrozenAt`,
       `rawdb.ReadCommitmentDomainStopped`, domain progress and `HistoryStartFrom`, with errors naming the failed
       condition. Expose any getter not reachable from `rpc/` and list its file here
-- [ ] write a test for a standalone rpcdaemon reading the same state
-- [ ] run tests - must pass before task 5
+- [x] write a test for a standalone rpcdaemon reading the same state
+- [x] run tests - must pass before task 5
 
 ### Task 5: Node model blob format and hashing
 
@@ -364,13 +367,13 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `execution/commitment/eip8297/witness/testdata/geth_blobs.json`
 - Create: `execution/commitment/eip8297/witness/testdata/README.md`
 
-- [ ] generate format vectors (not witness fixtures) with a program in a scratch module outside this repository, pinned
+- [x] generate format vectors (not witness fixtures) with a program in a scratch module outside this repository, pinned
       to geth-pbt `origin/pbt` `793dedb`: blobs and hashes of hand-built nodes (leaf; branch with and without prefix;
       groups at position 0 and above; a one-value stem); commit only the JSON and a README naming the ref and how the
       vectors were made
-- [ ] add the codec signatures with stubs; write tests that decode each vector and recompute its hash; confirm they fail
+- [x] add the codec signatures with stubs; write tests that decode each vector and recompute its hash; confirm they fail
       at the hash comparison
-- [ ] implement leaf and branch blobs through `eip8297.LeafPreimage` / `BranchPreimage`, and group record encode and
+- [x] implement leaf and branch blobs through `eip8297.LeafPreimage` / `BranchPreimage`, and group record encode and
       decode. Decoding rejects:
       - k < 2;
       - a length mismatch;
@@ -378,14 +381,14 @@ demand; a cache-only node serves the default trie only and returns a distinct er
       - a position beyond the stem;
       - a stem length outside the allowed set;
       - a stem failing geth's `validateStem` rules
-- [ ] implement the positional group fold and path encoding (empty root path, `AppendBitPrefix` otherwise, ordering by
+- [x] implement the positional group fold and path encoding (empty root path, `AppendBitPrefix` otherwise, ordering by
       encoded bytes)
-- [ ] write tests:
+- [x] write tests:
       - round trips and rejects;
       - group hashes equal the root of an `eip8297` reference tree built from the same leaves with the consumed prefix
         removed;
       - `go list -deps` confirms the package imports no engine package
-- [ ] run tests - must pass before task 6
+- [x] run tests - must pass before task 6
 
 ### Task 6: Node model operations and driver
 
@@ -395,16 +398,16 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `execution/commitment/eip8297/witness/tree_test.go`
 - Create: `execution/commitment/eip8297/witness/driver_test.go`
 
-- [ ] add the tree and driver signatures with stubs. Write a test that a tree built by inserting random leaf sets hashes
+- [x] add the tree and driver signatures with stubs. Write a test that a tree built by inserting random leaf sets hashes
       to the `eip8297` reference root; the sets cover all zones, header and overflow storage, code stems and groups of
       1 to 256 values. Confirm it fails at the root comparison
-- [ ] implement the tree with a `ResolveFunc` (path to blob) that loads nodes lazily, checks each blob against its
+- [x] implement the tree with a `ResolveFunc` (path to blob) that loads nodes lazily, checks each blob against its
       parent's pointer, and records each resolved path once; the root is resolved for a non-empty tree; nodes created
       during the block are never recorded
-- [ ] implement read, insert/update, delete with collapse, account deletion to the cut point, and code chunk writes
-- [ ] implement the driver in the fixed order (reads, storage pass, account updates, account deletions) returning the
+- [x] implement read, insert/update, delete with collapse, account deletion to the cut point, and code chunk writes
+- [x] implement the driver in the fixed order (reads, storage pass, account updates, account deletions) returning the
       post-root and the resolved set
-- [ ] write tests on the post-root:
+- [x] write tests on the post-root:
       - collapse cascades (two deletions under one branch);
       - absent reads;
       - header slots against overflow slots;
@@ -413,10 +416,10 @@ demand; a cache-only node serves the default trie only and returns a distinct er
       - deploys sharing code.
 
       After the driver runs, the root equals the reference root of the post-state leaves.
-- [ ] write tests on the resolved set:
+- [x] write tests on the resolved set:
       - an account deletion with overflow storage resolves only the nodes down to the cut point;
       - a collapse whose survivor was inserted earlier in the same block resolves nothing new
-- [ ] run tests - must pass before task 7
+- [x] run tests - must pass before task 7
 
 ### Task 7: Row resolver from 16-cell rows
 
@@ -424,20 +427,24 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `execution/commitment/v3/pbt/witness_nodes.go`
 - Create: `execution/commitment/v3/pbt/witness_nodes_test.go`
 
-- [ ] add the resolver signature with a stub. Write the rows-against-model oracle:
+- [x] add the resolver signature with a stub. Write the rows-against-model oracle:
       - trees are built by the engine from random leaf sets, covering both storage zones, bucket forms, suffix leaves and
         groups of 1 to 256 values; `recordFuzzSeeds` holds malformed record bodies and is not a source;
       - for every node path of the model built from the same leaves, the row resolver returns the identical blob, and
         the roots are equal.
 
       Confirm it fails at the blob comparison.
-- [ ] implement node resolution at a path: branches through `foldRange`/`foldChild` with prefix rebasing, bucket
+- [x] implement node resolution at a path: branches through `foldRange`/`foldChild` with prefix rebasing, bucket
       descriptors resolved through, groups collected from rows, leaves through `DecodeRecord`, empty positions
-- [ ] write a test that rows are read as of the parent block: after a later block rewrites a row, the resolver still
+- [x] write a test that rows are read as of the parent block: after a later block rewrites a row, the resolver still
       returns the parent-block blob; confirm it fails before the history read exists
-- [ ] read rows through a `PatriciaContext` over bin commitment history as of the parent block
-- [ ] write error tests: missing row, corrupt row, a group whose depth disagrees with its path
-- [ ] run tests - must pass before task 8
+- [x] read rows through a `PatriciaContext` over bin commitment history as of the parent block
+- [x] write error tests: missing row, corrupt row, a group whose depth disagrees with its path
+- [x] run tests - must pass before task 8
+- [x] ➕ rework the resolver to read path-local rows, validate stored pointers, resolve bucket descriptors, reject
+      impossible group probes early, and cover systematic shapes, corruption, and root/bucket read bounds
+- [x] ➕ repair overflow-row routing and terminal-group probes, anchor the global root, reject missing bucket
+      descriptors, and cover overflow shapes, descriptor corruption, and group-root read bounds
 
 ### Task 8: PBT witness builder and dispatch
 
@@ -447,13 +454,13 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `execution/commitment/commitmentdb/pbt_witness.go`
 - Create: `execution/commitment/commitmentdb/pbt_witness_test.go`
 
-- [ ] add `(*Trie).Witness(ctx, input)` with a stub; write a test that the builder's output for a small block equals the
+- [x] add `(*Trie).Witness(ctx, input)` with a stub; write a test that the builder's output for a small block equals the
       node set the model resolves when driven over the same pre-state; confirm it fails at the set comparison
-- [ ] implement `Witness`, running the driver over the row resolver and returning paths and blobs sorted by path plus the
+- [x] implement `Witness`, running the driver over the row resolver and returning paths and blobs sorted by path plus the
       post-root
-- [ ] dispatch to it from `commitmentdb` in `pbt_witness.go`, next to v3's `witnessTrie`, for the bin variant only
-- [ ] write tests for the dispatch on bin-only and hex+bin datadirs and for the refusal on hex-only
-- [ ] run tests - must pass before task 9
+- [x] dispatch to it from `commitmentdb` in `pbt_witness.go`, next to v3's `witnessTrie`, for the bin variant only
+- [x] write tests for the dispatch on bin-only and hex+bin datadirs and for the refusal on hex-only
+- [x] run tests - must pass before task 9
 
 ### Task 9: Recorder provenance and the pbt input adapter
 
@@ -462,25 +469,25 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `rpc/jsonrpc/pbt_witness_input.go`
 - Create: `rpc/jsonrpc/pbt_witness_input_test.go`
 
-- [ ] add the adapter signature with a stub. Write tests:
+- [x] add the adapter signature with a stub. Write tests:
       - a read served by the in-block overlay is not a pre-state load;
       - a read inside a reverted call is;
       - two versions of one address's code both reach the pbt `codes` set.
 
       Confirm they fail at those assertions.
-- [ ] record provenance in `RecordingState` for account and storage reads (pre-state reader or overlay); keep reads in
+- [x] record provenance in `RecordingState` for account and storage reads (pre-state reader or overlay); keep reads in
       reverted calls
-- [ ] build the content-keyed `codes` set in the pbt adapter only:
+- [x] build the content-keyed `codes` set in the pbt adapter only:
       - full code for code-size reads;
       - modified code the block never read is left out;
       - `AccessedCode` and MPT `codes` stay as they are.
-- [ ] implement the rest of the adapter: reads, net writes against pre-block values, account deletions, code deploys,
+- [x] implement the rest of the adapter: reads, net writes against pre-block values, account deletions, code deploys,
       delegation set and clear
-- [ ] write tests:
+- [x] write tests:
       - the adapter over transfers, storage deletes, deploys, self-destruct in the creation transaction and delegation
         changes;
       - MPT output unchanged, through `TestWitnessesMatchHPHUnderCommitmentV3` and the task 2 parity arm
-- [ ] run tests - must pass before task 10
+- [x] run tests - must pass before task 10
 
 ### Task 10: Stateless verifier
 
@@ -488,45 +495,48 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `rpc/jsonrpc/pbt_witness_stateless.go`
 - Create: `rpc/jsonrpc/pbt_witness_stateless_test.go`
 
-- [ ] add the verifier signature with a stub; write tests: a correct witness reproduces the post-root; a witness missing
+- [x] add the verifier signature with a stub; write tests: a correct witness reproduces the post-root; a witness missing
       one needed blob fails; confirm they fail at the root comparison and at the missing-blob error
-- [ ] implement the witness resolver (path to blob from `keys`/`state`, hash-checked) and code lookup from `codes` plus
+- [x] implement the witness resolver (path to blob from `keys`/`state`, hash-checked) and code lookup from `codes` plus
       in-block overlays
-- [ ] port the overlays and account-lifecycle bookkeeping from `binary-trie`'s `rpc/jsonrpc/pbin_witness_stateless.go`:
+- [x] port the overlays and account-lifecycle bookkeeping from `binary-trie`'s `rpc/jsonrpc/pbin_witness_stateless.go`:
       - replay through `replayBlockOverWitness`;
       - suppress the synthetic system-caller touch;
       - wipe storage on a CREATE into an existing account that holds storage, returning an error when its storage proof
         is missing.
-- [ ] compare the post-root with the self-check anchor; a mismatch or a missing blob is an error
-- [ ] port the behaviours of `binary-trie`'s `pbin_witness_stateless_test.go` to the new format:
+- [x] compare the post-root with the self-check anchor; a mismatch or a missing blob is an error
+- [x] port the behaviours of `binary-trie`'s `pbin_witness_stateless_test.go` to the new format:
       - genuine and synthetic system-address access;
       - CREATE over storage;
       - delete and recreate in one block;
       - `TestPBinWitnessStatelessHasStorage`;
       - `TestPBinWitnessStatelessMissingNodeErrors`
-- [ ] run tests - must pass before task 11
+- [x] run tests - must pass before task 11
 
 ### Task 11: Serve trie=pbt
 
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Modify: `rpc/jsonrpc/witness_cache_builder.go`
+- Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness_trie_test.go`
+- Modify: `rpc/jsonrpc/debug_execution_witness_bin_test.go`
+- Modify: `rpc/jsonrpc/witness_cache_builder_test.go`
 
-- [ ] write tests: a pbt witness for a block on a bin-only datadir, for a pre-fork block on hex+bin (shadow anchors),
+- [x] write tests: a pbt witness for a block on a bin-only datadir, for a pre-fork block on hex+bin (shadow anchors),
       and for the first bin block under both tries; confirm they fail on the not-yet-served sentinel
-- [ ] build the pbt path:
+- [x] build the pbt path:
       - bin domain selection and the parent history check;
       - the anchors;
       - the hex environment gate and the empty-access early return bypassed;
       - the root blob always present.
-- [ ] shape the response (parallel `keys`/`state` sorted by path, content-keyed `codes`, RLP `headers`, empty-witness
+- [x] shape the response (parallel `keys`/`state` sorted by path, content-keyed `codes`, RLP `headers`, empty-witness
       form) and run the verifier on every pbt witness before serving it
-- [ ] apply the availability rules to pbt; the eager cache builder builds the default trie (pbt after the fork)
-- [ ] write tests:
+- [x] apply the availability rules to pbt; the eager cache builder builds the default trie (pbt after the fork)
+- [x] write tests:
       - pbt refusals: hex-only datadir, bin shadow not running at the parent, pruned bin history, missing shadow root;
       - cache behaviour after the fork
-- [ ] run tests - must pass before task 12
+- [x] run tests - must pass before task 12
 
 ### Task 12: End-to-end witness coverage
 
@@ -534,46 +544,53 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `rpc/jsonrpc/pbt_witness_e2e_test.go`
 - Create: `rpc/jsonrpc/pbt_witness_wipe_test.go`
 - Create: `rpc/jsonrpc/pbt_witness_dual_test.go`
+- Create: `rpc/jsonrpc/pbt_witness_phases_test.go`
+- Create: `rpc/jsonrpc/pbt_witness_ported_test.go`
 
-- [ ] every block of test chains verifies, and dropping any single blob makes verification fail. The chains cover:
+- [x] every block of test chains verifies, and dropping any single blob makes verification fail. The chains cover:
       transfers to new accounts, storage writes and deletes including cascades, account deletion with storage,
       EIP-161 touch deletion, self-destruct in the creation transaction, deploys with shared code, EIP-7702 delegation
       set and clear, system calls, withdrawals, `BLOCKHASH`, and reverted calls
-- [ ] port the behaviours of `binary-trie`'s witness tests, without pair-node, preimage-key or code-chunk-reader
+- [x] port the behaviours of `binary-trie`'s witness tests, without pair-node, preimage-key or code-chunk-reader
       assumptions:
       - `pbin_witness_e2e_test.go`, `pbin_witness_wipe_test.go`, `pbin_witness_phases_test.go`;
       - `pbin_witness_deploy_test.go` (`TestPBinWitnessConsecutiveDeploys`);
       - `pbin_witness_dual_test.go` (`TestPBinDualExecutionWitness`, `TestPBinHeadCaptureWithoutCommitmentHistory`)
-- [ ] corrupt cases: a blob that does not hash to its pointer, a blob under the wrong path, missing code, group depth
+- [x] corrupt cases: a blob that does not hash to its pointer, a blob under the wrong path, missing code, group depth
       disagreeing with its path, the empty root
-- [ ] dual matrix: bin-only; hex+bin before, at and after activation; canonical and shadow anchors; retained and pruned
+- [x] dual matrix: bin-only; hex+bin before, at and after activation; canonical and shadow anchors; retained and pruned
       history; head capture; blocks that touch no state
-- [ ] run tests - must pass before task 13
+- [x] run tests - must pass before task 13
+- [x] ➕ enforce exact node-set consumption in the verifier, remove builder-only pre-state code-chunk proofs, and cover persisted empty accounts with header and overflow storage
+- [x] ➕ authenticate codeless accounts through their code-hash leaf, compare builder post-roots with block anchors, cover delegation clearing, and delete zero-valued BASIC_DATA leaves
+- [x] ➕ prove overflow-only and header-only accounts, reset storage before net recreation writes, and verify every wipe port
+- [x] ➕ delete zero BASIC_DATA values on every PBT insert path, preserve pending reference updates, and guard builder root refusal
+- [x] ➕ reject header-only accounts without identity leaves and document the scoped system-call exception
 
 ### Task 13: Witness documentation
 
 **Files:**
 - Create: `docs/pbt-witness.md`
 
-- [ ] document the RPC parameters, anchors and availability rules, the blob format (with the geth-pbt ref it was taken
+- [x] document the RPC parameters, anchors and availability rules, the blob format (with the geth-pbt ref it was taken
       from), the node-set rules and the verifier
-- [ ] list where erigon's witness differs from geth-pbt's and why:
+- [x] list where erigon's witness differs from geth-pbt's and why:
       - geth's prefetcher dedups PBT reads by slot, not owner;
       - geth's witness carries a deleted account's whole storage subtree;
       - CREATE into an account that holds storage wipes it in erigon and keeps it in geth.
-- [ ] cite code by name, never by line number
-- [ ] run `make lint` - must pass before task 14
+- [x] cite code by name, never by line number
+- [x] run `make lint` - must pass before task 14
 
 ### Task 14: Verify acceptance criteria
 
 **Files:**
 - none (verification only)
 
-- [ ] every requirement in the Overview is implemented
-- [ ] edge cases in the RPC contract, anchor and availability tables are covered by tests
-- [ ] run the full suites: `go test ./execution/commitment/... ./db/state/... ./execution/stagedsync/... ./rpc/jsonrpc/...`
-- [ ] run `make lint` until clean and `make erigon integration`
-- [ ] mutation-check the key guards; each must turn a named test red when reverted:
+- [x] every requirement in the Overview is implemented
+- [x] edge cases in the RPC contract, anchor and availability tables are covered by tests
+- [x] run the full suites: `go test ./execution/commitment/... ./db/state/... ./execution/stagedsync/... ./rpc/jsonrpc/...`
+- [x] run `make lint` until clean and `make erigon integration`
+- [x] mutation-check the key guards; each must turn a named test red when reverted:
       - the anchor rule;
       - the collapse survivor resolution;
       - the provenance filter;
@@ -585,10 +602,10 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Modify: `docs/pbin-dual-commitment.md`
 - Modify: `CLAUDE.md`
 
-- [ ] replace the refusal statements in `docs/pbin-dual-commitment.md` (witnesses on binary and v3-hex blocks) with the
-      served behaviour, citing code by name
-- [ ] update `CLAUDE.md` with the PBT witness entry points if new conventions were introduced
-- [ ] move this plan to `docs/plans/completed/`
+- [x] replace the refusal statements in `docs/pbin-dual-commitment.md` (witnesses on binary and v3-hex blocks) with the
+  served behaviour, citing code by name
+- [x] update `CLAUDE.md` with the PBT witness entry points if new conventions were introduced
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

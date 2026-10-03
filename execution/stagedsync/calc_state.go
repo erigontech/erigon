@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"slices"
@@ -8,6 +9,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -41,6 +43,59 @@ type calcSlot struct {
 type calcStorage struct {
 	hash  [32]byte
 	slots map[accounts.StorageKey]calcSlot
+}
+
+type calcStateReader struct {
+	state    *calcState
+	fallback commitmentdb.StateReader
+}
+
+func (r *calcStateReader) WithHistory() bool { return r.fallback.WithHistory() }
+
+func (r *calcStateReader) CheckDataAvailable(domain kv.Domain, step kv.Step) error {
+	return r.fallback.CheckDataAvailable(domain, step)
+}
+
+func (r *calcStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	return &calcStateReader{state: r.state, fallback: r.fallback.Clone(tx)}
+}
+
+func (r *calcStateReader) CloneForWorker(ctx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
+	return &calcStateReader{state: r.state, fallback: r.fallback.CloneForWorker(ctx, tx)}
+}
+
+func (r *calcStateReader) Read(domain kv.Domain, key []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	if domain == kv.AccountsDomain && len(key) == length.Addr {
+		addr := accounts.InternAddress(common.BytesToAddress(key))
+		if acc, ok := r.state.accounts[addr]; ok {
+			if acc.Deleted && acc.Incarnation == 0 && acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash {
+				return nil, 0, nil
+			}
+			account := accounts.Account{
+				Nonce:       acc.Nonce,
+				Balance:     acc.Balance,
+				CodeHash:    accounts.InternCodeHash(common.Hash(acc.CodeHash)),
+				Incarnation: acc.Incarnation,
+			}
+			return accounts.SerialiseV3(&account), 0, nil
+		}
+	}
+	if domain == kv.StorageDomain && len(key) == length.Addr+length.Hash {
+		addr := accounts.InternAddress(common.BytesToAddress(key[:length.Addr]))
+		if storage, ok := r.state.storageState[addr]; ok {
+			slot := accounts.InternKey(common.BytesToHash(key[length.Addr:]))
+			if value, ok := storage.slots[slot]; ok {
+				return value.value.Bytes(), 0, nil
+			}
+		}
+	}
+	if domain == kv.CodeDomain && len(key) == length.Addr {
+		addr := accounts.InternAddress(common.BytesToAddress(key))
+		if code, ok := r.state.codeValues[addr]; ok {
+			return code, 0, nil
+		}
+	}
+	return r.fallback.Read(domain, key, stepSize)
 }
 
 // calcDomainReader provides lazy-load reads for calcState using the
@@ -107,7 +162,8 @@ type calcState struct {
 	storageState map[accounts.Address]*calcStorage
 	// storageDirty tracks which slots were modified in the current block
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
-	codeKeys     map[accounts.Address]struct{}
+	codeValues   map[accounts.Address][]byte
+	binFeed      bool
 	wiped        map[accounts.Address]struct{}
 	resetCount   int
 	reader       commitmentdb.StateReader
@@ -147,7 +203,6 @@ func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) 
 		accounts:     make(map[accounts.Address]*calcAccountState),
 		storageState: make(map[accounts.Address]*calcStorage),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
-		codeKeys:     make(map[accounts.Address]struct{}),
 		wiped:        make(map[accounts.Address]struct{}),
 		reader:       reader,
 		domainReader: &calcDomainReader{reader: reader},
@@ -270,10 +325,12 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		}
 	}
 	for addr, vw := range writes.Codes() {
-		if cs.codeKeys == nil {
-			cs.codeKeys = make(map[accounts.Address]struct{})
+		if cs.binFeed {
+			if cs.codeValues == nil {
+				cs.codeValues = make(map[accounts.Address][]byte)
+			}
+			cs.codeValues[addr] = append([]byte(nil), vw.Val.Bytes...)
 		}
-		cs.codeKeys[addr] = struct{}{}
 		acc := cs.ensureAccount(addr, writes)
 		address := addr.Value()
 		cs.prefetch.add(prefetchItem{account: acc.hash, address: address, codeHash: vw.Val.Hash.Value(), codeChunks: (len(vw.Val.Bytes) + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen, codeWritten: true})
@@ -481,14 +538,11 @@ func (cs *calcState) BinFeed() (*commitment.PBinFeed, error) {
 		address := addr.Value()
 		for slot := range dirty {
 			key := slot.Value()
-			plain := make([]byte, len(address)+len(key))
-			copy(plain, address[:])
-			copy(plain[len(address):], key[:])
-			keys[string(plain)] = struct{}{}
+			keys[string(address[:])+string(key[:])] = struct{}{}
 		}
 	}
-	codeKeys := make(map[string]struct{}, len(cs.codeKeys))
-	for addr := range cs.codeKeys {
+	codeKeys := make(map[string]struct{}, len(cs.codeValues))
+	for addr := range cs.codeValues {
 		address := addr.Value()
 		codeKeys[string(address[:])] = struct{}{}
 	}
@@ -497,7 +551,7 @@ func (cs *calcState) BinFeed() (*commitment.PBinFeed, error) {
 		address := addr.Value()
 		wiped[string(address[:])] = struct{}{}
 	}
-	return commitmentdb.BinFeedFromState(keys, codeKeys, wiped, cs.reader)
+	return commitmentdb.BinFeedFromState(keys, codeKeys, wiped, &calcStateReader{state: cs, fallback: cs.reader})
 }
 
 func (cs *calcState) feedUpdate(acc *calcAccountState) *commitment.Update {
@@ -543,6 +597,6 @@ func (cs *calcState) ResetBlockFlags() {
 	for addr := range cs.storageDirty {
 		delete(cs.storageDirty, addr)
 	}
-	clear(cs.codeKeys)
+	clear(cs.codeValues)
 	clear(cs.wiped)
 }

@@ -24,11 +24,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -39,23 +40,18 @@ type chainWitnesses struct {
 	GetWitness []hexutil.Bytes
 }
 
-func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
-	previousAssert, previousSchema, previousV3 := dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() {
-		dbg.AssertEnabled, statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousAssert, previousSchema, previousV3
-	})
-	dbg.AssertEnabled = true
-	statecfg.ExperimentalCommitmentV3 = commitmentV3
-	if commitmentV3 {
-		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+func collectChainWitnesses(t *testing.T, commitmentV3, dual bool) chainWitnesses {
+	configurePBTWitnessGlobals(t, commitmentV3, dual)
+	var m *execmoduletester.ExecModuleTester
+	if dual {
+		m = newPBTWitnessModule(t, true)
+	} else {
+		m, _, _ = rpcdaemontest.CreateTestExecModule(t)
+		require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+			return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+		}))
 	}
-	statecfg.EnableHistoricalCommitment()
-
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
-	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
-	}))
 	var latest uint64
 	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
 		var err error
@@ -71,7 +67,7 @@ func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
 		bn := rpc.BlockNumber(n)
 		at := rpc.BlockNumberOrHash{BlockNumber: &bn}
 		for _, mode := range []string{"legacy", "canonical"} {
-			result, err := debugAPI.ExecutionWitness(ctx, at, &mode)
+			result, err := debugAPI.ExecutionWitness(ctx, at, &mode, nil)
 			require.NoError(t, err, "block %d mode %s", n, mode)
 			encoded, err := json.Marshal(result)
 			require.NoError(t, err)
@@ -84,18 +80,45 @@ func collectChainWitnesses(t *testing.T, commitmentV3 bool) chainWitnesses {
 		witness, err := ethAPI.GetWitness(ctx, at)
 		require.NoError(t, err, "block %d eth_getWitness", n)
 		out.GetWitness = append(out.GetWitness, witness)
+		if dual {
+			assertDualCommitmentState(t, m, n)
+		}
 	}
 	return out
 }
 
+func assertDualCommitmentState(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum uint64) {
+	t.Helper()
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	blockHash, _, err := m.BlockReader.CanonicalHash(t.Context(), tx, blockNum)
+	require.NoError(t, err)
+	shadowRoot, err := rawdb.ReadShadowStateRoot(tx, blockHash, blockNum)
+	require.NoError(t, err)
+	require.Len(t, shadowRoot, 32)
+	require.NotEqual(t, common.Hash{}, common.BytesToHash(shadowRoot))
+	maxTxNum, err := m.BlockReader.TxnumReader().Max(t.Context(), tx, blockNum)
+	require.NoError(t, err)
+	state, ok, err := tx.GetAsOf(kv.CommitmentBinDomain, commitmentdb.KeyCommitmentState, maxTxNum+1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, stateBlockNum := commitmentdb.DecodeTxBlockNums(state)
+	require.Equal(t, blockNum, stateBlockNum)
+}
+
 func TestWitnessesMatchHPHUnderCommitmentV3(t *testing.T) {
-	var hph, v3 chainWitnesses
-	t.Run("hph", func(t *testing.T) { hph = collectChainWitnesses(t, false) })
-	t.Run("v3", func(t *testing.T) { v3 = collectChainWitnesses(t, true) })
+	var hph, v3, dual chainWitnesses
+	t.Run("hph", func(t *testing.T) { hph = collectChainWitnesses(t, false, false) })
+	t.Run("v3", func(t *testing.T) { v3 = collectChainWitnesses(t, true, false) })
+	t.Run("v3 hex+bin", func(t *testing.T) { dual = collectChainWitnesses(t, true, true) })
 	require.NotEmpty(t, hph.Legacy)
 	for n := range hph.Legacy {
 		require.Equal(t, string(hph.Legacy[n]), string(v3.Legacy[n]), "debug_executionWitness legacy, block %d", n+1)
 		require.Equal(t, string(hph.Canonical[n]), string(v3.Canonical[n]), "debug_executionWitness canonical, block %d", n+1)
 		require.Equal(t, hph.GetWitness[n], v3.GetWitness[n], "eth_getWitness, block %d", n+1)
+		require.Equal(t, string(v3.Legacy[n]), string(dual.Legacy[n]), "hex+bin debug_executionWitness legacy, block %d", n+1)
+		require.Equal(t, string(v3.Canonical[n]), string(dual.Canonical[n]), "hex+bin debug_executionWitness canonical, block %d", n+1)
+		require.Equal(t, v3.GetWitness[n], dual.GetWitness[n], "hex+bin eth_getWitness, block %d", n+1)
 	}
 }

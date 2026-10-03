@@ -19,7 +19,6 @@ package eip8297
 import (
 	"encoding/binary"
 	"fmt"
-	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
@@ -57,18 +56,6 @@ func ZoneKeyLength(zone byte) (int, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func LeafSuffixBits(zone byte, recordKeyBits int) (int, error) {
-	keyBytes, known := ZoneKeyLength(zone)
-	if !known {
-		return 0, fmt.Errorf("pbin: zone %#x names no key space", zone)
-	}
-	zoneBits := keyBytes * 8
-	if recordKeyBits < 0 || recordKeyBits >= zoneBits {
-		return 0, fmt.Errorf("pbin: record key depth %d is outside zone %#x key length %d", recordKeyBits, zone, zoneBits)
-	}
-	return zoneBits - recordKeyBits - 1, nil
 }
 
 // RightAlign32 widens a legacy address or storage slot to the spec's Address32 (eip:"Tree embedding").
@@ -119,33 +106,6 @@ func TreeKeyStorage(addr, slot []byte) []byte {
 func TreeKeyCodeChunk(codeHash common.Hash, chunkID int) []byte {
 	var c DigestCache
 	return c.CodeChunkKey(codeHash, chunkID)
-}
-
-// KeyHasher returns a keyHasher deriving the primary leaf's tree key:
-// BASIC_DATA for an account, the slot's own leaf for storage. The CODE_HASH
-// sibling shares the stem and is written by the engine during the same visit, so
-// it needs no key of its own here.
-type KeyHasherFunc func(key []byte) []byte
-
-func KeyHasher() KeyHasherFunc { return KeyHasherWith(nil) }
-
-// KeyHasherWith derives keys under sum, or under the selected suite when sum is nil.
-//
-// The digest cache is pooled rather than captured because Updates.NewEmpty copies
-// the hasher value: a captured cache would be written by two buffers hashing
-// concurrently. Every hit is validated against the address it was built from, so
-// borrowing another goroutine's cache stays correct.
-func KeyHasherWith(sum HashFn) KeyHasherFunc {
-	var pool sync.Pool
-	return func(plainKey []byte) []byte {
-		c, _ := pool.Get().(*DigestCache)
-		if c == nil {
-			c = &DigestCache{Sum: sum}
-		}
-		key := c.TreeKey(plainKey)
-		pool.Put(c)
-		return key
-	}
 }
 
 // DigestCache memoizes the two hash-derived key components: key_hash(addr32)
@@ -258,17 +218,6 @@ func (c *DigestCache) StorageKey(addr, slot []byte) []byte {
 	copy(position[:32], c.stemDigest(&addr32)[:])
 	copy(position[32:], c.groupDigest(&addr32, &slot32)[:])
 	return TreeKey(StorageZone, position[:], slot32[31])
-}
-
-func (c *DigestCache) TreeKey(plainKey []byte) []byte {
-	switch len(plainKey) {
-	case length.Addr:
-		return c.AccountKey(plainKey, BasicDataLeafKey)
-	case length.Addr + length.Hash:
-		return c.StorageKey(plainKey[:length.Addr], plainKey[length.Addr:])
-	default:
-		panic(fmt.Sprintf("pbin: plain key of %d bytes is neither an account nor a storage key", len(plainKey)))
-	}
 }
 
 func SlotInHeader(slot *[32]byte) bool {

@@ -42,7 +42,6 @@ func EncodeOp(op Op) ([]byte, error) {
 	pos += copy(data[pos:], op.Drop)
 	pos += copy(data[pos:], op.Value[:])
 	if op.merge == nil {
-		data[pos] = 0
 		return data, nil
 	}
 	data[pos] = 1

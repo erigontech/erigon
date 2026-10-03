@@ -263,16 +263,72 @@ func TestHandleBlockRequestQueuesBALWrites(t *testing.T) {
 	hash := keccak.Sum256
 	sa, sb := slotA.Value(), slotB.Value()
 	want := []prefetchItem{
-		{account: hash(balanceOnly[:])},
-		{account: hash(storageOnly[:])},
-		{account: hash(storageOnly[:]), slot: hash(sa[:]), storage: true},
-		{account: hash(storageOnly[:]), slot: hash(sb[:]), storage: true},
+		{account: hash(balanceOnly[:]), address: balanceOnly},
+		{account: hash(storageOnly[:]), address: storageOnly},
+		{account: hash(storageOnly[:]), slot: hash(sa[:]), address: storageOnly, plainSlot: sa, storage: true},
+		{account: hash(storageOnly[:]), slot: hash(sb[:]), address: storageOnly, plainSlot: sb, storage: true},
 	}
 	var got []prefetchItem
 	for len(p.work) > 0 {
 		got = append(got, <-p.work)
 	}
 	require.ElementsMatch(t, want, got, "BAL writes queue their account and slot walks; storage-only accounts get the account walk, read-only accounts get nothing")
+}
+
+func TestHandleBlockRequestQueuesBinaryBALKeys(t *testing.T) {
+	previousIgnoreBAL := dbg.IgnoreBAL
+	t.Cleanup(func() { dbg.IgnoreBAL = previousIgnoreBAL })
+	dbg.IgnoreBAL = false
+
+	_, tx, _ := setupStepTest(t)
+	p := &branchPrefetcher{
+		work:    make(chan prefetchItem, 16),
+		seed:    maphash.MakeSeed(),
+		domains: []kv.Domain{kv.CommitmentDomain},
+		bin:     map[kv.Domain]bool{kv.CommitmentDomain: true},
+	}
+	for i := range p.shards {
+		p.shards[i].records = make(map[string]prefetchedRecord)
+	}
+	cc := &commitmentCalculator{
+		state:         &calcState{prefetch: p},
+		pending:       map[uint64]*pendingBlock{},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 100,
+	}
+	address := common.Address{0x46}
+	slot := accounts.InternKey(common.Hash{0x80})
+	code := bytes.Repeat([]byte{0x60}, eip8297.ChunkDataLen+1)
+	cc.handleBlockRequest(context.Background(), &blockRequest{blockNum: 5, bal: types.BlockAccessList{{
+		Address: address,
+		StorageChanges: []types.SlotChanges{{
+			Slot:    slot,
+			Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(1)}},
+		}},
+		CodeChanges: []*types.CodeChange{{Index: 0, Bytecode: code}},
+	}}})
+
+	for len(p.work) > 0 {
+		p.touch(tx, <-p.work)
+	}
+
+	plainSlot := slot.Value()
+	storageKey := eip8297.TreeKeyStorage(address[:], plainSlot[:])
+	storagePath := eip8297.PathFromBits(storageKey, 268)
+	storageRowKey, err := pbt.EncodeRowKey(&storagePath)
+	require.NoError(t, err)
+	_, _, ok := p.getDomain(kv.CommitmentDomain, storageRowKey)
+	require.True(t, ok, "BAL storage write must prefetch its binary storage row")
+
+	codeHash := keccak.Sum256(code)
+	codeKey := eip8297.TreeKeyCodeChunk(common.BytesToHash(codeHash[:]), 0)
+	codePath := eip8297.PathFromBits(codeKey, 268)
+	codeRowKey, err := pbt.EncodeRowKey(&codePath)
+	require.NoError(t, err)
+	_, _, ok = p.getDomain(kv.CommitmentDomain, codeRowKey)
+	require.True(t, ok, "BAL code change must prefetch code chunk zero")
 }
 
 func TestComputeAheadReadsPrefetchedBranches(t *testing.T) {

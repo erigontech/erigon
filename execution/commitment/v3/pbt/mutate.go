@@ -65,15 +65,14 @@ func (t *Trie) applyMerge(op Op) error {
 	case mergeCodeHash:
 		basicKey := bytes.Clone(op.Key)
 		basicKey[len(basicKey)-1] = eip8297.BasicDataLeafKey
-		if _, created := t.mergeCreatedStems[string(basicKey)]; created {
-			return t.insert(op.Key, eip8297.CodeHashValue(merge.codeHash))
-		}
-		original, err := t.originalLeaf(basicKey)
-		if err != nil {
-			return err
-		}
-		if original != nil && !t.droppedLeaf(basicKey) {
-			return nil
+		if _, created := t.mergeCreatedStems[string(basicKey)]; !created {
+			original, err := t.originalLeaf(basicKey)
+			if err != nil {
+				return err
+			}
+			if original != nil && !t.droppedLeaf(basicKey) {
+				return nil
+			}
 		}
 		return t.insert(op.Key, eip8297.CodeHashValue(merge.codeHash))
 	default:
@@ -92,6 +91,23 @@ func (t *Trie) mergeValue(merge *feedMerge, existing *Cell, key []byte) ([eip829
 		return [eip8297.ValueLength]byte{}, fmt.Errorf("%w for %x", errFeedCodeSize, key)
 	}
 	return eip8297.EncodeBasicData(merge.nonce, &merge.balance, codeSize)
+}
+
+func (t *Trie) mergeInsertValue(value [eip8297.ValueLength]byte, merge *feedMerge, existing *Cell, key []byte) ([eip8297.ValueLength]byte, bool, error) {
+	if merge != nil {
+		var err error
+		value, err = t.mergeValue(merge, existing, key)
+		if err != nil {
+			return [eip8297.ValueLength]byte{}, false, err
+		}
+	}
+	if value == ([eip8297.ValueLength]byte{}) {
+		if merge != nil {
+			return value, true, nil
+		}
+		return value, false, errInsertValue
+	}
+	return value, false, nil
 }
 
 func (t *Trie) droppedLeaf(key []byte) bool {
@@ -117,11 +133,6 @@ func (t *Trie) originalLeaf(key []byte) (*Cell, error) {
 		}
 	}
 	return t.originalLeaves[name], nil
-}
-
-func (t *Trie) rememberOriginalLeaf(key []byte) error {
-	_, err := t.originalLeaf(key)
-	return err
 }
 
 func (t *Trie) lookupLeaf(key []byte) (Cell, bool, error) {
@@ -218,11 +229,11 @@ func (t *Trie) lookupRawRow(rowKey []byte, rowPath, path *eip8297.Bitpath, key [
 	case LeafCell:
 		return cell, bytes.Equal(cell.Key, key), nil
 	case BranchCell:
-		full := rawBranchPath(rowPath, slot, &cell)
+		full := branchPathFrom(*rowPath, slot, &cell.Prefix)
 		if !pathHasPrefix(path, &full) {
 			return Cell{}, false, nil
 		}
-		childPath := rawChildPath(rowPath, slot, &cell.Prefix)
+		childPath := full.Slice(0, (full.BitLen/4)*4)
 		childKey, err := EncodeRowKey(&childPath)
 		if err != nil {
 			return Cell{}, false, err
@@ -231,23 +242,6 @@ func (t *Trie) lookupRawRow(rowKey []byte, rowPath, path *eip8297.Bitpath, key [
 	default:
 		return Cell{}, false, errInsertKey
 	}
-}
-
-func rawBranchPath(rowPath *eip8297.Bitpath, slot int, cell *Cell) eip8297.Bitpath {
-	path := *rowPath
-	var slotPath eip8297.Bitpath
-	for i := range 4 {
-		slotPath.AppendBit(uint64((slot >> (3 - i)) & 1))
-	}
-	path.Append(&slotPath)
-	path.Append(&cell.Prefix)
-	return path
-}
-
-func rawChildPath(rowPath *eip8297.Bitpath, slot int, prefix *eip8297.Bitpath) eip8297.Bitpath {
-	path := rawBranchPath(rowPath, slot, &Cell{Prefix: *prefix})
-	window := (path.BitLen / 4) * 4
-	return path.Slice(0, window)
 }
 
 func (t *Trie) lookupRowLeaf(row *rowNode, path *eip8297.Bitpath, key []byte) (Cell, bool, error) {
@@ -293,19 +287,15 @@ func (t *Trie) insertWithMerge(key []byte, value [eip8297.ValueLength]byte, merg
 		return false, err
 	}
 	if root.form == RowRoot && root.row == nil {
-		if mergeOp != nil {
-			value, err = t.mergeValue(mergeOp, nil, key)
-			if err != nil {
-				return false, err
-			}
+		var skip bool
+		value, skip, err = t.mergeInsertValue(value, mergeOp, nil, key)
+		if err != nil {
+			return false, err
 		}
-		if value == ([eip8297.ValueLength]byte{}) {
-			if mergeOp != nil {
-				root.form = RowRoot
-				root.leaf = Cell{}
-				return true, nil
-			}
-			return false, errInsertValue
+		if skip {
+			root.form = RowRoot
+			root.leaf = Cell{}
+			return true, nil
 		}
 		root.form = LeafRoot
 		root.leaf = *t.leafCell(key, value).Cell
@@ -322,36 +312,28 @@ func (t *Trie) insertWithMerge(key []byte, value [eip8297.ValueLength]byte, merg
 		}
 		d := firstDifference(&oldPath, &path)
 		if oldPath.BitLen == path.BitLen && d == oldPath.BitLen {
-			if mergeOp != nil {
-				value, err = t.mergeValue(mergeOp, &root.leaf, key)
-				if err != nil {
-					return false, err
-				}
+			var skip bool
+			value, skip, err = t.mergeInsertValue(value, mergeOp, &root.leaf, key)
+			if err != nil {
+				return false, err
 			}
-			if value == ([eip8297.ValueLength]byte{}) {
-				if mergeOp != nil {
-					root.form = RowRoot
-					root.leaf = Cell{}
-					return true, nil
-				}
-				return false, errInsertValue
+			if skip {
+				root.form = RowRoot
+				root.leaf = Cell{}
+				return true, nil
 			}
 			root.leaf = *t.leafCell(key, value).Cell
 			return true, nil
 		}
-		if mergeOp != nil {
-			value, err = t.mergeValue(mergeOp, nil, key)
-			if err != nil {
-				return false, err
-			}
+		var skip bool
+		value, skip, err = t.mergeInsertValue(value, mergeOp, nil, key)
+		if err != nil {
+			return false, err
 		}
-		if value == ([eip8297.ValueLength]byte{}) {
-			if mergeOp != nil {
-				return false, nil
-			}
-			return false, errInsertValue
+		if skip {
+			return false, nil
 		}
-		return false, t.splitRootLeaf(root, oldPath, root.leaf, path, key, value, d)
+		return false, t.splitRootLeaf(root, oldPath, root.leaf, key, value, d)
 	case ExtRoot:
 		return t.insertExtRoot(root, path, key, value, mergeOp)
 	default:
@@ -359,7 +341,7 @@ func (t *Trie) insertWithMerge(key []byte, value [eip8297.ValueLength]byte, merg
 	}
 }
 
-func (t *Trie) splitRootLeaf(root *treeRoot, oldPath eip8297.Bitpath, old Cell, newPath eip8297.Bitpath, newKey []byte, newValue [eip8297.ValueLength]byte, split int16) error {
+func (t *Trie) splitRootLeaf(root *treeRoot, oldPath eip8297.Bitpath, old Cell, newKey []byte, newValue [eip8297.ValueLength]byte, split int16) error {
 	window := (split / 4) * 4
 	path := oldPath.Slice(0, window)
 	row, err := t.twoLeafRow(path, old.Key, old.Value, newKey, newValue)
@@ -396,18 +378,12 @@ func (t *Trie) insertExtRoot(root *treeRoot, path eip8297.Bitpath, key []byte, v
 		t.markDirty(row)
 		return existing, nil
 	}
-	if merge != nil {
-		var err error
-		value, err = t.mergeValue(merge, nil, key)
-		if err != nil {
-			return false, err
-		}
+	value, skip, err := t.mergeInsertValue(value, merge, nil, key)
+	if err != nil {
+		return false, err
 	}
-	if value == ([eip8297.ValueLength]byte{}) {
-		if merge != nil {
-			return false, nil
-		}
-		return false, errInsertValue
+	if skip {
+		return false, nil
 	}
 	window := (d / 4) * 4
 	oldPath := root.self
@@ -431,7 +407,7 @@ func (t *Trie) insertExtRoot(root *treeRoot, path eip8297.Bitpath, key []byte, v
 		return false, nil
 	}
 	rowPath := path.Slice(0, window)
-	row, err := t.newRowFromBranch(rowPath, key, value, oldPath, root.left, root.right)
+	row, err := t.newRowFromBranch(rowPath, path, key, value, oldPath, root.left, root.right)
 	if err != nil {
 		return false, err
 	}
@@ -480,22 +456,16 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 	if path.BitLen <= row.path.BitLen || eip8297.CommonPrefixBitsAt(&path, 0, &row.path) != row.path.BitLen {
 		return false, errInsertKey
 	}
-	slot := int(path.Bit(row.path.BitLen)*8 + path.Bit(row.path.BitLen+1)*4 + path.Bit(row.path.BitLen+2)*2 + path.Bit(row.path.BitLen+3))
+	slot := slotAt(&path, row.path.BitLen)
 	cell := row.cell(slot)
 	switch cell.Kind {
 	case EmptyCell:
-		if merge != nil {
-			var err error
-			value, err = t.mergeValue(merge, nil, key)
-			if err != nil {
-				return false, err
-			}
+		value, skip, err := t.mergeInsertValue(value, merge, nil, key)
+		if err != nil {
+			return false, err
 		}
-		if value == ([eip8297.ValueLength]byte{}) {
-			if merge != nil {
-				return false, nil
-			}
-			return false, errInsertValue
+		if skip {
+			return false, nil
 		}
 		t.setLeaf(row, slot, key, value)
 		t.markDirty(row)
@@ -507,55 +477,26 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 		}
 		d := firstDifference(&oldPath, &path)
 		if oldPath.BitLen == path.BitLen && d == oldPath.BitLen {
-			if merge != nil {
-				value, err = t.mergeValue(merge, cell.Cell, key)
-				if err != nil {
-					return false, err
-				}
+			value, skip, err := t.mergeInsertValue(value, merge, cell.Cell, key)
+			if err != nil {
+				return false, err
 			}
-			if value == ([eip8297.ValueLength]byte{}) {
-				if merge != nil {
-					row.cells[slot] = rowCell{}
-					row.markCellDirty(slot)
-					t.markDirty(row)
-					return true, nil
-				}
-				return false, errInsertValue
+			if skip {
+				row.cells[slot] = rowCell{}
+				row.markCellDirty(slot)
+				t.markDirty(row)
+				return true, nil
 			}
 			t.setLeaf(row, slot, key, value)
 			t.markDirty(row)
 			return true, nil
 		}
-		if d/4 == row.path.BitLen/4 {
-			if merge != nil {
-				var err error
-				value, err = t.mergeValue(merge, nil, key)
-				if err != nil {
-					return false, err
-				}
-			}
-			if value == ([eip8297.ValueLength]byte{}) {
-				if merge != nil {
-					return false, nil
-				}
-				return false, errInsertValue
-			}
-			newSlot := int(path.Bit(row.path.BitLen)*8 + path.Bit(row.path.BitLen+1)*4 + path.Bit(row.path.BitLen+2)*2 + path.Bit(row.path.BitLen+3))
-			t.setLeaf(row, newSlot, key, value)
-			t.markDirty(row)
+		value, skip, err := t.mergeInsertValue(value, merge, nil, key)
+		if err != nil {
+			return false, err
+		}
+		if skip {
 			return false, nil
-		}
-		if merge != nil {
-			value, err = t.mergeValue(merge, nil, key)
-			if err != nil {
-				return false, err
-			}
-		}
-		if value == ([eip8297.ValueLength]byte{}) {
-			if merge != nil {
-				return false, nil
-			}
-			return false, errInsertValue
 		}
 		window := (d / 4) * 4
 		childPath := path.Slice(0, window)
@@ -568,12 +509,7 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 			return false, err
 		}
 		prefix := path.Slice(row.path.BitLen+4, result.Split)
-		setBranch(row, slot, t.branchCell(prefix, common.Hash{}, common.Hash{}))
-		row.cell(slot).child = child
-		child.parent = row
-		child.parentSlot = slot
-		t.registerRow(child)
-		t.markDirty(row)
+		t.attachChildRow(row, slot, child, t.branchCell(prefix, common.Hash{}, common.Hash{}), nil, 0)
 		return false, nil
 	case BranchCell:
 		return t.insertBranch(row, slot, path, key, value, merge)
@@ -587,7 +523,7 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 	oldChild := cell.child
 	branchPath := branchPath(row, slot, cell)
 	d := firstDifference(&branchPath, &path)
-	split := branchSplit(row, slot, cell)
+	split := branchSplit(row, cell)
 	if d >= split || d/4 == split/4 {
 		child, err := t.loadBranchChild(row, slot)
 		if err != nil {
@@ -600,22 +536,16 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 		t.markDirty(row)
 		return existing, nil
 	}
-	if merge != nil {
-		var err error
-		value, err = t.mergeValue(merge, nil, key)
-		if err != nil {
-			return false, err
-		}
+	value, skip, err := t.mergeInsertValue(value, merge, nil, key)
+	if err != nil {
+		return false, err
 	}
-	if value == ([eip8297.ValueLength]byte{}) {
-		if merge != nil {
-			return false, nil
-		}
-		return false, errInsertValue
+	if skip {
+		return false, nil
 	}
 	window := (d / 4) * 4
 	childPath := path.Slice(0, window)
-	child, err := t.newRowFromBranch(childPath, key, value, branchPath, cell.Left, cell.Right)
+	child, err := t.newRowFromBranch(childPath, path, key, value, branchPath, cell.Left, cell.Right)
 	if err != nil {
 		return false, err
 	}
@@ -628,11 +558,16 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 		return false, err
 	}
 	prefix := full.Slice(row.path.BitLen+4, result.Split)
-	setBranch(row, slot, t.branchCell(prefix, common.Hash{}, common.Hash{}))
+	oldSlot := slotAt(&branchPath, child.path.BitLen)
+	t.attachChildRow(row, slot, child, t.branchCell(prefix, common.Hash{}, common.Hash{}), oldChild, oldSlot)
+	return false, nil
+}
+
+func (t *Trie) attachChildRow(row *rowNode, slot int, child *rowNode, cell rowCell, oldChild *rowNode, oldSlot int) {
+	setBranch(row, slot, cell)
 	row.cell(slot).child = child
 	child.parent = row
 	child.parentSlot = slot
-	oldSlot := slotAt(&branchPath, child.path.BitLen)
 	if oldChild != nil {
 		child.cell(oldSlot).child = oldChild
 		oldChild.parent = child
@@ -640,7 +575,6 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 	}
 	t.registerRow(child)
 	t.markDirty(row)
-	return false, nil
 }
 
 func (t *Trie) refreshRouting() error {
@@ -695,12 +629,8 @@ func (t *Trie) remove(key []byte) error {
 		if root.row == nil {
 			return nil
 		}
-		if found, err := t.removeFromRow(root.row, path, key); err != nil {
-			return err
-		} else if !found {
-			return nil
-		}
-		return nil
+		_, err := t.removeFromRow(root.row, path, key)
+		return err
 	case LeafRoot:
 		if !bytes.Equal(root.leaf.Key, key) {
 			return nil
@@ -716,11 +646,8 @@ func (t *Trie) remove(key []byte) error {
 		if err != nil {
 			return err
 		}
-		found, err := t.removeFromRow(row, path, key)
-		if err != nil || !found {
-			return err
-		}
-		return nil
+		_, err = t.removeFromRow(row, path, key)
+		return err
 	default:
 		return fmt.Errorf("unknown root form %d", root.form)
 	}
@@ -730,7 +657,7 @@ func (t *Trie) removeFromRow(row *rowNode, path eip8297.Bitpath, key []byte) (bo
 	if path.BitLen <= row.path.BitLen || eip8297.CommonPrefixBitsAt(&path, 0, &row.path) != row.path.BitLen {
 		return false, nil
 	}
-	slot := int(keyBit(row.path.BitLen, key))
+	slot := slotAt(&path, row.path.BitLen)
 	cell := row.cell(slot)
 	switch cell.Kind {
 	case EmptyCell:
@@ -752,8 +679,7 @@ func (t *Trie) removeFromRow(row *rowNode, path eip8297.Bitpath, key []byte) (bo
 		if err != nil {
 			return false, err
 		}
-		found, err := t.removeFromRow(child, path, key)
-		return found, err
+		return t.removeFromRow(child, path, key)
 	default:
 		return false, errInsertKey
 	}
@@ -889,7 +815,7 @@ func (t *Trie) dropPrefix(prefix []byte) error {
 		return err
 	}
 	for _, key := range keys {
-		if err := t.rememberOriginalLeaf(key); err != nil {
+		if _, err := t.originalLeaf(key); err != nil {
 			return err
 		}
 		t.droppedLeafKeys[string(key)] = struct{}{}
@@ -949,8 +875,8 @@ func (t *Trie) twoLeafRow(path eip8297.Bitpath, keyA []byte, valueA [eip8297.Val
 	if keyAPath.BitLen <= path.BitLen || keyBPath.BitLen <= path.BitLen || eip8297.CommonPrefixBitsAt(&keyAPath, 0, &path) != path.BitLen || eip8297.CommonPrefixBitsAt(&keyBPath, 0, &path) != path.BitLen {
 		return nil, errInsertKey
 	}
-	a := int(keyAPath.Bit(path.BitLen)*8 + keyAPath.Bit(path.BitLen+1)*4 + keyAPath.Bit(path.BitLen+2)*2 + keyAPath.Bit(path.BitLen+3))
-	b := int(keyBPath.Bit(path.BitLen)*8 + keyBPath.Bit(path.BitLen+1)*4 + keyBPath.Bit(path.BitLen+2)*2 + keyBPath.Bit(path.BitLen+3))
+	a := slotAt(&keyAPath, path.BitLen)
+	b := slotAt(&keyBPath, path.BitLen)
 	if a == b {
 		return nil, errInsertKey
 	}
@@ -961,24 +887,16 @@ func (t *Trie) twoLeafRow(path eip8297.Bitpath, keyA []byte, valueA [eip8297.Val
 	return row, nil
 }
 
-func (t *Trie) newRowFromBranch(path eip8297.Bitpath, key []byte, value [eip8297.ValueLength]byte, oldPath eip8297.Bitpath, left, right common.Hash) (*rowNode, error) {
+func (t *Trie) newRowFromBranch(path, keyPath eip8297.Bitpath, key []byte, value [eip8297.ValueLength]byte, oldPath eip8297.Bitpath, left, right common.Hash) (*rowNode, error) {
 	if oldPath.BitLen < path.BitLen+4 {
 		return nil, errInsertKey
 	}
 	row := t.newRow(path, nil, nil)
-	newSlot := int(keyBit(path.BitLen, key))
-	oldSlot := int(oldPath.Bit(path.BitLen)*8 + oldPath.Bit(path.BitLen+1)*4 + oldPath.Bit(path.BitLen+2)*2 + oldPath.Bit(path.BitLen+3))
+	newSlot := slotAt(&keyPath, path.BitLen)
+	oldSlot := slotAt(&oldPath, path.BitLen)
 	row.cells[newSlot] = t.leafCell(key, value)
 	oldPrefix := oldPath.Slice(path.BitLen+4, oldPath.BitLen)
 	row.cells[oldSlot] = t.branchCell(oldPrefix, left, right)
 	row.markDirty()
 	return row, nil
-}
-
-func keyBit(bit int16, key []byte) uint64 {
-	path, err := keyPath(key)
-	if err != nil || bit >= path.BitLen {
-		return 0
-	}
-	return path.Bit(bit)*8 + path.Bit(bit+1)*4 + path.Bit(bit+2)*2 + path.Bit(bit+3)
 }
