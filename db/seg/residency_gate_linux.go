@@ -105,6 +105,9 @@ func (d *Decompressor) residencyBitmap() *residencyBitmap {
 }
 
 func (d *Decompressor) blockingAsyncRead(fileOffset int64, n int) {
+	if d.cgoPrefault(fileOffset, n) {
+		return
+	}
 	iouring.BlockingRead(int(d.f.Fd()), fileOffset, n)
 }
 
