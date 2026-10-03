@@ -82,21 +82,19 @@ func (args *CallArgs) UnmarshalJSON(raw []byte) error {
 	if err != nil || v.Type() != fastjson.TypeObject {
 		return args.unmarshalStd(raw)
 	}
-	var dec CallArgs
 	ok := true
 	v.GetObject().Visit(func(key []byte, f *fastjson.Value) {
-		ok = ok && dec.setField(key, f)
+		ok = ok && args.setField(key, f)
 	})
 	if !ok {
 		return args.unmarshalStd(raw)
 	}
-	*args = dec
 	return CheckCallData(args.Data, args.Input)
 }
 
 // setField decodes one member as encoding/json would, and reports false where it cannot
-// promise the same result: a key matching a field only case-insensitively, or a value
-// encoding/json would reject (so the caller gets encoding/json's error).
+// promise the same result: a nested field, a key matching a field only case-insensitively,
+// or a value encoding/json would reject (so the caller gets encoding/json's error).
 func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
 	switch string(key) {
 	case "from":
@@ -123,18 +121,6 @@ func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
 		return setText(&args.Input, f)
 	case "chainId":
 		return setText(&args.ChainID, f)
-	case "accessList":
-		return json.Unmarshal(f.MarshalTo(nil), &args.AccessList) == nil
-	case "blobVersionedHashes":
-		return json.Unmarshal(f.MarshalTo(nil), &args.BlobVersionedHashes) == nil
-	case "blobs":
-		return json.Unmarshal(f.MarshalTo(nil), &args.Blobs) == nil
-	case "commitments":
-		return json.Unmarshal(f.MarshalTo(nil), &args.Commitments) == nil
-	case "proofs":
-		return json.Unmarshal(f.MarshalTo(nil), &args.Proofs) == nil
-	case "authorizationList":
-		return json.Unmarshal(f.MarshalTo(nil), &args.AuthorizationList) == nil
 	}
 	for _, name := range callArgsJSONNames {
 		if bytes.EqualFold(key, []byte(name)) {
