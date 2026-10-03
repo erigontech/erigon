@@ -260,6 +260,9 @@ func (v ReadView) NeedsFrontier() bool { return v.c != nil && v.frontier == nil 
 // that predates the deletion must not refill it (mirrors SeedAddrCodeHash).
 func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uint64) {
 	if v.c == nil || v.c.disableFills || v.frontier == nil {
+		if domain == kv.CodeDomain {
+			diagNoFrontier.Add(1)
+		}
 		return
 	}
 	visibleEnd, ok := v.frontier.DomainVisibleEnd(domain)

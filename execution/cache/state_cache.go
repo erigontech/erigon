@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 
@@ -80,6 +81,8 @@ type StateCache struct {
 // Mode for the byte-budget DomainCaches (Account/Storage) is read once from
 // STATE_CACHE_MODE (evict|noop, default evict). CodeCache has its own LRU and
 // is not gated by this knob.
+var diagFillTried, diagRejPub, diagRejEpoch, diagRejCode, diagRejAcct, diagAccepted, diagNoFrontier atomic.Uint64
+
 func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.ByteSize) *StateCache {
 	mode := stateCacheModeFromEnv()
 	sc := &StateCache{}
@@ -90,6 +93,13 @@ func NewStateCache(accountBytes, storageBytes, codeBytes, addrBytes datasize.Byt
 	sc.caches[kv.AccountsDomain] = newDomainCacheBytes(accountBytes, avgAccountPayloadBytes, mode)
 	sc.caches[kv.StorageDomain] = newDomainCacheBytes(storageBytes, avgStoragePayloadBytes, mode)
 	sc.caches[kv.CodeDomain] = NewCodeCache(codeBytes, addrBytes)
+	go func() { // DIAG
+		for range time.Tick(10 * time.Second) {
+			cc := sc.caches[kv.CodeDomain].(*CodeCache)
+			log.Info("[diag] code cache", "addrHits", cc.addrHits.Load(), "addrMisses", cc.addrMisses.Load(), "codeHits", cc.codeHits.Load(), "codeMisses", cc.codeMisses.Load(),
+				"fillTried", diagFillTried.Load(), "rejPublishing", diagRejPub.Load(), "rejEpoch", diagRejEpoch.Load(), "rejCodeEnd", diagRejCode.Load(), "rejAcctEnd", diagRejAcct.Load(), "accepted", diagAccepted.Load(), "noFrontier", diagNoFrontier.Load())
+		}
+	}()
 	// CommitmentDomain deliberately gets no cache: commitment data lives in the
 	// BranchCache, and the nil slot short-circuits every StateCache path for it
 	// (including writes of commitmentdb.KeyCommitmentState).
@@ -305,12 +315,24 @@ func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTx
 	}
 	c.admissionMu.RLock()
 	defer c.admissionMu.RUnlock()
+	diagFillTried.Add(1)
+	switch {
+	case c.publishing:
+		diagRejPub.Add(1)
+	case viewEpoch != c.readViewEpoch.Load():
+		diagRejEpoch.Add(1)
+	case visibleEnd < c.appliedEnd[kv.CodeDomain]:
+		diagRejCode.Add(1)
+	case accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain]:
+		diagRejAcct.Add(1)
+	}
 	if c.publishing ||
 		viewEpoch != c.readViewEpoch.Load() ||
 		visibleEnd < c.appliedEnd[kv.CodeDomain] ||
 		accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
 		return
 	}
+	diagAccepted.Add(1)
 	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readTxNum)
 }
 
