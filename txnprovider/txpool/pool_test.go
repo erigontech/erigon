@@ -117,7 +117,7 @@ func testDelegationCodeHash() accounts.CodeHash {
 	return accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
 }
 
-func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+func newTestPoolWithFundedSender(t testing.TB, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -628,9 +628,69 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 }
 
+func TestSetCodeAuthorizationAdmission(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(key.PublicKey)
+
+	for _, tc := range []struct {
+		name   string
+		gas    uint64
+		feeCap uint64
+		reason txpoolcfg.DiscardReason
+	}{
+		{"gas limit", params.MaxTxnGasLimit + 1, 2, txpoolcfg.GasLimitTooHigh},
+		{"intrinsic gas", 21_000, 2, txpoolcfg.IntrinsicGas},
+		{"insufficient funds", 100_000, common.Ether, txpoolcfg.InsufficientFunds},
+		{"accepted", 100_000, 2, txpoolcfg.Success},
+	} {
+		for _, local := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/local=%t", tc.name, local), func(t *testing.T) {
+				ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+				auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
+				require.NoError(t, err)
+				txn := newTestSetCodeTxnSlot(0, 0, 0, tc.feeCap, tc.gas).Txn.(*types.SetCodeTransaction)
+				txn.ChainID = pool.chainID
+				txn.Authorizations = []types.Authorization{auth, {}}
+				var encoded bytes.Buffer
+				require.NoError(t, txn.MarshalBinary(&encoded))
+				parseCtx := NewTxnParseContext(pool.chainID)
+				parseCtx.WithSender(false)
+				parseCtx.ValidateRLP(ValidateSerializedTxn)
+				var slot TxnSlot
+				_, err = parseCtx.ParseTransaction(encoded.Bytes(), 0, &slot, nil, false, false, nil)
+				require.NoError(t, err)
+
+				var txns TxnSlots
+				txns.Append(&slot, sender[:], local)
+				if local {
+					reasons, err := pool.AddLocalTxns(ctx, txns)
+					require.NoError(t, err)
+					require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
+				} else {
+					pool.started.Store(true)
+					pool.AddRemoteTxns(ctx, txns, nil, nil)
+					require.NoError(t, pool.processRemoteTxns(ctx))
+				}
+				if tc.reason == txpoolcfg.Success {
+					require.Equal(t, []AuthAndNonce{{authority, 0}}, slot.AuthAndNonces)
+					require.Contains(t, pool.auths, AuthAndNonce{authority, 0})
+				} else {
+					require.Empty(t, slot.AuthAndNonces)
+					require.Empty(t, pool.auths)
+				}
+			})
+		}
+	}
+}
+
 func TestMultipleAuthorizations(t *testing.T) {
-	addrA := common.HexToAddress("0xa")
-	addrB := common.HexToAddress("0xb")
+	keyA, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	keyB, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	addrA := crypto.PubkeyToAddress(keyA.PublicKey)
+	addrB := crypto.PubkeyToAddress(keyB.PublicKey)
 	cases := []struct {
 		title          string
 		sender         common.Address
@@ -813,7 +873,13 @@ func TestMultipleAuthorizations(t *testing.T) {
 			var txnSlot1 *TxnSlot
 			if c.authority != nil {
 				txnSlot1 = newTestSetCodeTxnSlot(c.senderNonce, 0, c.tipcap, c.feecap, 100000)
-				txnSlot1.AuthAndNonces = []AuthAndNonce{{*c.authority, c.authNonce}}
+				key := keyA
+				if *c.authority == addrB {
+					key = keyB
+				}
+				auth, err := types.SignAuthorization(key, pool.chainID, common.Address{1}, c.authNonce)
+				require.NoError(t, err)
+				txnSlot1.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
 			} else {
 				txnSlot1 = newTestTxnSlot(c.senderNonce, 0, c.tipcap, c.feecap, 100000)
 			}
@@ -1402,7 +1468,6 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	require.NoError(t, err)
 
 	txn := newTestSetCodeTxnSlot(0, 0, 0, 21000, 500000)
-	txn.AuthAndNonces = []AuthAndNonce{{nonce: 0, authority: common.Address{}}}
 
 	txns := TxnSlots{
 		Txns:    append([]*TxnSlot{}, txn),
