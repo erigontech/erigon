@@ -17,8 +17,14 @@
 package eip8297
 
 import (
+	"errors"
 	"fmt"
 	"math/bits"
+)
+
+var (
+	errEmptyBitPath    = errors.New("pbin: empty bit-path key")
+	errNonCanonicalPad = errors.New("pbin: non-canonical padding in bit-path key")
 )
 
 const (
@@ -201,7 +207,7 @@ func EncodeBitPath(p *Bitpath) []byte {
 func DecodeBitPath(buf []byte) (Bitpath, error) {
 	var p Bitpath
 	if len(buf) == 0 {
-		return p, fmt.Errorf("pbin: empty bit-path key")
+		return p, errEmptyBitPath
 	}
 	tailBits, packed := buf[len(buf)-1], buf[:len(buf)-1]
 	if tailBits > 7 {
@@ -218,7 +224,7 @@ func DecodeBitPath(buf []byte) (Bitpath, error) {
 		return p, fmt.Errorf("pbin: bit path of %d bits exceeds %d", bitLen, MaxPathBits)
 	}
 	if used := bitLen % 8; used != 0 && packed[len(packed)-1]&(0xFF>>used) != 0 {
-		return Bitpath{}, fmt.Errorf("pbin: non-canonical padding in bit-path key")
+		return Bitpath{}, errNonCanonicalPad
 	}
 	return PathFromBits(packed, int16(bitLen)), nil
 }

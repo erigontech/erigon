@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // ValueLength is the one leaf value size EIP-8297 admits (eip:"Tree structure").
@@ -44,6 +45,11 @@ var (
 	ErrBalanceOverflow  = errors.New("pbin: balance does not fit the 16-byte BASIC_DATA field")
 	ErrCodeSizeOverflow = errors.New("pbin: code size does not fit the 4-byte BASIC_DATA field")
 	ErrLeafValue        = errors.New("pbin: invalid leaf value")
+
+	errZeroStorageValue         = fmt.Errorf("%w: zero storage value", ErrLeafValue)
+	errZeroHeaderStorageValue   = fmt.Errorf("%w: zero header storage value", ErrLeafValue)
+	errStorageValueLength       = fmt.Errorf("%w: storage value has invalid length", ErrLeafValue)
+	errHeaderStorageValueLength = fmt.Errorf("%w: header storage value has invalid length", ErrLeafValue)
 )
 
 // EncodeBasicData packs code_size, nonce and balance big-endian into the
@@ -114,7 +120,12 @@ func EncodeDelegation(code []byte) [ValueLength]byte {
 }
 
 func EncodeStorageValue(value []byte) [ValueLength]byte {
-	return RightAlign32(value)
+	if len(value) > length.Hash {
+		panic(fmt.Sprintf("pbin: storage value of %d bytes exceeds %d", len(value), length.Hash))
+	}
+	var v [ValueLength]byte
+	copy(v[ValueLength-len(value):], value)
+	return v
 }
 
 var basicDataFields = [...]struct{ off, width int }{
@@ -125,7 +136,11 @@ var basicDataFields = [...]struct{ off, width int }{
 
 var basicDataWidthShifts = [...]uint{9, 5, 0}
 
-var basicDataFieldNames = [...]string{"code size", "nonce", "balance"}
+var basicDataFieldMinimalErrors = [...]error{
+	fmt.Errorf("%w: BASIC_DATA code size is not minimal", ErrLeafValue),
+	fmt.Errorf("%w: BASIC_DATA nonce is not minimal", ErrLeafValue),
+	fmt.Errorf("%w: BASIC_DATA balance is not minimal", ErrLeafValue),
+}
 
 func leafValueKey(treeKey []byte) (byte, byte, error) {
 	if len(treeKey) == 0 {
@@ -139,18 +154,18 @@ func leafValueKey(treeKey []byte) (byte, byte, error) {
 	return zone, treeKey[len(treeKey)-1], nil
 }
 
-func encodeTrimmedValue(val *[ValueLength]byte, name string) ([]byte, error) {
+func encodeTrimmedValue(val *[ValueLength]byte, zeroErr error) ([]byte, error) {
 	trimmed := bytes.TrimLeft(val[:], "\x00")
 	if len(trimmed) == 0 {
-		return nil, fmt.Errorf("%w: zero %s value", ErrLeafValue, name)
+		return nil, zeroErr
 	}
 	return append([]byte(nil), trimmed...), nil
 }
 
-func decodeTrimmedValue(enc []byte, name string) ([ValueLength]byte, error) {
+func decodeTrimmedValue(enc []byte, lengthErr error) ([ValueLength]byte, error) {
 	var val [ValueLength]byte
 	if len(enc) == 0 || len(enc) > ValueLength || enc[0] == 0 {
-		return val, fmt.Errorf("%w: %s value has invalid length", ErrLeafValue, name)
+		return val, lengthErr
 	}
 	copy(val[ValueLength-len(enc):], enc)
 	return val, nil
@@ -164,7 +179,7 @@ func EncodeLeafValue(treeKey []byte, val *[ValueLength]byte) ([]byte, error) {
 
 	switch zone {
 	case StorageZone:
-		return encodeTrimmedValue(val, "storage")
+		return encodeTrimmedValue(val, errZeroStorageValue)
 	case CodeZone:
 		last := len(bytes.TrimRight(val[:], "\x00"))
 		if last == 0 {
@@ -213,7 +228,7 @@ func EncodeLeafValue(treeKey []byte, val *[ValueLength]byte) ([]byte, error) {
 		}
 		return append([]byte(nil), val[3:23]...), nil
 	case subIndex >= HeaderStorageOffset && subIndex < HeaderStorageOffset+HeaderStorageSlots:
-		return encodeTrimmedValue(val, "header storage")
+		return encodeTrimmedValue(val, errZeroHeaderStorageValue)
 	default:
 		return append([]byte(nil), val[:]...), nil
 	}
@@ -228,7 +243,7 @@ func DecodeLeafValue(treeKey []byte, enc []byte) ([ValueLength]byte, error) {
 
 	switch zone {
 	case StorageZone:
-		return decodeTrimmedValue(enc, "storage")
+		return decodeTrimmedValue(enc, errStorageValueLength)
 	case CodeZone:
 		if len(enc) == 0 || len(enc) > ValueLength || enc[len(enc)-1] == 0 {
 			return val, fmt.Errorf("%w: code chunk has invalid length", ErrLeafValue)
@@ -267,7 +282,7 @@ func DecodeLeafValue(treeKey []byte, enc []byte) ([ValueLength]byte, error) {
 			fieldLen := fieldLens[i]
 			if fieldLen > 0 {
 				if enc[pos] == 0 {
-					return val, fmt.Errorf("%w: BASIC_DATA %s is not minimal", ErrLeafValue, basicDataFieldNames[i])
+					return val, basicDataFieldMinimalErrors[i]
 				}
 				copy(val[field.off+field.width-fieldLen:field.off+field.width], enc[pos:pos+fieldLen])
 				pos += fieldLen
@@ -295,7 +310,7 @@ func DecodeLeafValue(treeKey []byte, enc []byte) ([ValueLength]byte, error) {
 		copy(val[3:23], enc)
 		return val, nil
 	case subIndex >= HeaderStorageOffset && subIndex < HeaderStorageOffset+HeaderStorageSlots:
-		return decodeTrimmedValue(enc, "header storage")
+		return decodeTrimmedValue(enc, errHeaderStorageValueLength)
 	default:
 		if len(enc) != ValueLength {
 			return val, fmt.Errorf("%w: reserved account value has length %d", ErrLeafValue, len(enc))
