@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -192,13 +193,8 @@ func (t *PBinTree) Resolved() []PBinResolvedNode {
 	if t == nil || len(t.resolved) == 0 {
 		return nil
 	}
-	paths := make([]string, 0, len(t.resolved))
-	for path := range t.resolved {
-		paths = append(paths, path)
-	}
-	slices.SortFunc(paths, func(a, b string) int { return bytes.Compare([]byte(a), []byte(b)) })
-	result := make([]PBinResolvedNode, 0, len(paths))
-	for _, path := range paths {
+	result := make([]PBinResolvedNode, 0, len(t.resolved))
+	for _, path := range slices.Sorted(maps.Keys(t.resolved)) {
 		node := t.resolved[path]
 		result = append(result, PBinResolvedNode{Path: slices.Clone(node.Path), Blob: slices.Clone(node.Blob)})
 	}
@@ -342,19 +338,8 @@ func (t *PBinTree) deleteChild(ref *pbinChild, walk, keyPath eip8297.Bitpath) (*
 	if err != nil || !changed {
 		return ref, changed, err
 	}
-	if edge == 0 && branch.left == nil {
-		collapsed, err := t.collapse(branch.right, walk, &branch.prefix, 1)
-		if err != nil {
-			return nil, false, err
-		}
-		return collapsed, true, nil
-	}
-	if edge == 1 && branch.right == nil {
-		collapsed, err := t.collapse(branch.left, walk, &branch.prefix, 0)
-		if err != nil {
-			return nil, false, err
-		}
-		return collapsed, true, nil
+	if branch.left == nil || branch.right == nil {
+		return t.collapseMissingChild(branch.left, branch.right, walk, &branch.prefix)
 	}
 	return ref, true, nil
 }
@@ -427,15 +412,23 @@ func (t *PBinTree) deletePrefix(ref *pbinChild, walk, target eip8297.Bitpath) (*
 	if err != nil {
 		return nil, err
 	}
-	if edge == 0 && branch.left == nil {
-		collapsed, err := t.collapse(branch.right, walk, &branch.prefix, 1)
-		return collapsed, err
-	}
-	if edge == 1 && branch.right == nil {
-		collapsed, err := t.collapse(branch.left, walk, &branch.prefix, 0)
+	if branch.left == nil || branch.right == nil {
+		collapsed, _, err := t.collapseMissingChild(branch.left, branch.right, walk, &branch.prefix)
 		return collapsed, err
 	}
 	return ref, nil
+}
+
+func (t *PBinTree) collapseMissingChild(left, right *pbinChild, walk eip8297.Bitpath, prefix *eip8297.Bitpath) (*pbinChild, bool, error) {
+	if left != nil && right != nil {
+		return nil, false, nil
+	}
+	survivor, edge := left, uint64(0)
+	if left == nil {
+		survivor, edge = right, 1
+	}
+	collapsed, err := t.collapse(survivor, walk, prefix, edge)
+	return collapsed, true, err
 }
 
 func pbinNodeFromDecoded(decoded PBinDecodedBlob, walk eip8297.Bitpath) (*pbinNode, error) {
@@ -554,21 +547,15 @@ func pbinSplitBranch(node *pbinNode, keyPath eip8297.Bitpath, matched, start int
 
 func pbinRebaseNode(node *pbinNode, walk eip8297.Bitpath, extra *eip8297.Bitpath) *pbinNode {
 	if node.group != nil {
-		return &pbinNode{walk: walk, created: true, group: &PBinGroup{Position: uint16(walk.BitLen), Stem: slices.Clone(node.group.Stem), Subs: slices.Clone(node.group.Subs), Values: pbinCloneValues(node.group.Values)}}
+		group := *node.group
+		group.Position = uint16(walk.BitLen)
+		return &pbinNode{walk: walk, created: true, group: &group}
 	}
 	prefix := node.branch.prefix
 	if extra != nil {
 		prefix = pbinAppend(*extra, &prefix)
 	}
 	return &pbinNode{walk: walk, created: true, branch: &pbinBranch{prefix: prefix, left: node.branch.left, right: node.branch.right}}
-}
-
-func pbinCloneValues(values [][]byte) [][]byte {
-	result := make([][]byte, len(values))
-	for i := range values {
-		result[i] = slices.Clone(values[i])
-	}
-	return result
 }
 
 func pbinChildWalk(walk eip8297.Bitpath, prefix *eip8297.Bitpath, edge uint64) eip8297.Bitpath {

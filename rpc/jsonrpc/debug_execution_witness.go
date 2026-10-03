@@ -158,21 +158,19 @@ func (s *RecordingState) tracing(addr common.Address) bool {
 	return ok
 }
 
-func (s *RecordingState) recordAccountRead(addr common.Address, source recordingReadSource) {
+func (s *RecordingState) readSource() recordingReadSource {
 	if s.systemCallScope {
-		source |= recordingReadSystemCall
-	} else {
-		source |= recordingReadUser
+		return recordingReadSystemCall
 	}
-	s.accountReadSources[addr] |= source
+	return recordingReadUser
+}
+
+func (s *RecordingState) recordAccountRead(addr common.Address, source recordingReadSource) {
+	s.accountReadSources[addr] |= source | s.readSource()
 }
 
 func (s *RecordingState) recordStorageRead(addr common.Address, key common.Hash, source recordingReadSource) {
-	if s.systemCallScope {
-		source |= recordingReadSystemCall
-	} else {
-		source |= recordingReadUser
-	}
+	source |= s.readSource()
 	if s.storageReadSources[addr] == nil {
 		s.storageReadSources[addr] = make(map[common.Hash]recordingReadSource)
 	}
@@ -788,13 +786,9 @@ func (api *BaseAPI) buildAccessedState(
 	}
 	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		var result []byte
-		err := withSystemCallScope(recordingState, func() error {
-			var err error
-			result, err = protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
-			return err
+		return withSystemCallScopeResult(recordingState, func() ([]byte, error) {
+			return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
 		})
-		return result, err
 	}
 	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize block: %w", err)
@@ -833,13 +827,9 @@ func (api *BaseAPI) buildAccessedState(
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		var result []byte
-		err := withSystemCallScope(recordingState, func() error {
-			var err error
-			result, err = protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
-			return err
+		return withSystemCallScopeResult(recordingState, func() ([]byte, error) {
+			return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
 		})
-		return result, err
 	}
 
 	// Collect logs accumulated during transaction execution into a synthetic receipt
@@ -881,11 +871,12 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, err
 	}
-	defaultTrie, err := resolveWitnessTrie(nil, chainConfig.IsBinaryTrie(blockHeader.Time))
-	if err != nil {
-		return nil, err
+	isBinary := chainConfig.IsBinaryTrie(blockHeader.Time)
+	defaultTrie := witnessTrieMPT
+	if isBinary {
+		defaultTrie = witnessTriePBT
 	}
-	request, err := resolveWitnessRequest(mode, trieParam, chainConfig.IsBinaryTrie(blockHeader.Time))
+	request, err := resolveWitnessRequest(mode, trieParam, isBinary)
 	if err != nil {
 		return nil, err
 	}
@@ -1100,7 +1091,10 @@ func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.Tem
 	if settings != nil {
 		variant = settings.TrieVariantName()
 	}
-	domain := api.witnessCommitmentDomain(trie, variant)
+	domain := kv.CommitmentBinDomain
+	if trie == witnessTrieMPT || variant == dbstate.TrieVariantBin {
+		domain = kv.CommitmentDomain
+	}
 	if (trie == witnessTrieMPT && variant == dbstate.TrieVariantBin) || (trie == witnessTriePBT && variant == dbstate.TrieVariantHex) {
 		return witnessAvailability{}, fmt.Errorf("%s commitment domain is missing from datadir", trieName)
 	}
@@ -1109,9 +1103,6 @@ func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.Tem
 		return witnessAvailability{}, fmt.Errorf("%s commitment domain is unavailable", trieName)
 	}
 	hasDomain := slices.Contains(provider.CommitmentDomains(), domain)
-	if trie == witnessTriePBT && variant == dbstate.TrieVariantBin {
-		hasDomain = slices.Contains(provider.CommitmentDomains(), kv.CommitmentDomain)
-	}
 	if !hasDomain {
 		return witnessAvailability{}, fmt.Errorf("%s commitment domain is missing from datadir", trieName)
 	}
@@ -1158,13 +1149,6 @@ func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.Tem
 		return witnessAvailability{}, err
 	}
 	return witnessAvailability{domain: domain, parentRoot: parentRoot, postRoot: postRoot}, nil
-}
-
-func (api *DebugAPIImpl) witnessCommitmentDomain(trie witnessTrie, variant string) kv.Domain {
-	if trie == witnessTrieMPT || variant == dbstate.TrieVariantBin {
-		return kv.CommitmentDomain
-	}
-	return kv.CommitmentBinDomain
 }
 
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block
@@ -1335,18 +1319,13 @@ func appendLegacyEmptyStorageNode(nodes []hexutil.Bytes, mode witnessMode) []hex
 // trie generation. WitnessKeys holds the standalone preimages (20B addresses, 32B
 // slots) that go into result.Keys.
 type accessedState struct {
-	WitnessKeys []hexutil.Bytes
-	Addresses   map[common.Address]struct{}
-	Storage     map[common.Address]map[common.Hash]struct{}
-	CodeAddrs   map[common.Address]struct{}
-	SortedCodes []hexutil.Bytes
-	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
-	Deleted     map[common.Address]struct{}
-	// ModifiedCode is the code the block writes, per address. The binary trie
-	// commits code, so a witness for it has to cover the chunk keys these imply.
-	ModifiedCode   map[common.Address][]byte
-	Created        map[common.Address]struct{}
-	DeletedInBlock map[common.Address]struct{}
+	WitnessKeys    []hexutil.Bytes
+	Addresses      map[common.Address]struct{}
+	Storage        map[common.Address]map[common.Hash]struct{}
+	CodeAddrs      map[common.Address]struct{}
+	SortedCodes    []hexutil.Bytes
+	CodeReads      map[common.Hash]witnesstypes.CodeWithHash
+	Deleted        map[common.Address]struct{}
 	recordingState *RecordingState
 }
 
@@ -1412,30 +1391,19 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 // verifier re-derives in-block-created code by replaying the transactions.
 func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	out := &accessedState{
-		Addresses:    make(map[common.Address]struct{}),
-		Storage:      make(map[common.Address]map[common.Hash]struct{}),
-		CodeAddrs:    make(map[common.Address]struct{}),
-		SortedCodes:  []hexutil.Bytes{},
-		WitnessKeys:  []hexutil.Bytes{},
-		CodeReads:    make(map[common.Hash]witnesstypes.CodeWithHash),
-		ModifiedCode: make(map[common.Address][]byte),
-		Deleted:      make(map[common.Address]struct{}),
-		Created:      make(map[common.Address]struct{}, len(rs.CreatedContracts)),
-
-		DeletedInBlock: make(map[common.Address]struct{}, len(rs.DeletedInBlock)),
+		Addresses:      make(map[common.Address]struct{}),
+		Storage:        make(map[common.Address]map[common.Hash]struct{}),
+		CodeAddrs:      make(map[common.Address]struct{}),
+		SortedCodes:    []hexutil.Bytes{},
+		WitnessKeys:    []hexutil.Bytes{},
+		CodeReads:      make(map[common.Hash]witnesstypes.CodeWithHash),
+		Deleted:        make(map[common.Address]struct{}),
 		recordingState: rs,
 	}
 
 	for addr := range rs.DeletedAccounts {
 		out.Deleted[addr] = struct{}{}
 	}
-	for addr := range rs.CreatedContracts {
-		out.Created[addr] = struct{}{}
-	}
-	for addr := range rs.DeletedInBlock {
-		out.DeletedInBlock[addr] = struct{}{}
-	}
-
 	readAddresses, readStorageKeys := rs.GetAccessedKeys()
 	writeAddresses, writeStorageKeys := rs.GetModifiedKeys()
 
@@ -1573,9 +1541,8 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	for addr := range preCode {
 		out.CodeAddrs[addr] = struct{}{}
 	}
-	for addr, code := range modCode {
+	for addr := range modCode {
 		out.CodeAddrs[addr] = struct{}{}
-		out.ModifiedCode[addr] = code
 	}
 
 	return out
@@ -1887,16 +1854,9 @@ func verifyWitnessAgainstBlock(
 	fullEngine rules.Engine,
 	expectedRoot common.Hash,
 ) error {
-	var (
-		newStateRoot common.Hash
-		usedAddrs    map[common.Address]struct{}
-		usedSlots    map[common.Hash]struct{}
-	)
+	var newStateRoot common.Hash
 	var stateless *witnessStateless
 	newStateRoot, stateless, err := execBlockStatelessly(result, block, chainCfg, fullEngine, expectedRoot)
-	if stateless != nil {
-		usedAddrs, usedSlots = stateless.usedTrieAddrs, stateless.usedTrieSlots
-	}
 	if err != nil {
 		return fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
 	}
@@ -1905,8 +1865,8 @@ func verifyWitnessAgainstBlock(
 		return fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
 	}
 
-	if usedAddrs != nil || usedSlots != nil {
-		if err := checkWitnessKeysComplete(usedAddrs, usedSlots, result.Keys); err != nil {
+	if stateless != nil {
+		if err := checkWitnessKeysComplete(stateless.usedTrieAddrs, stateless.usedTrieSlots, result.Keys); err != nil {
 			return fmt.Errorf("[debug_executionWitness] %w", err)
 		}
 	}
@@ -2489,10 +2449,6 @@ type systemCallScoped interface {
 	setSystemCallScope(bool)
 }
 
-type pbinSystemAddressAccessed interface {
-	latchPBinSystemAddressRead()
-}
-
 func withSystemCallScope(stateless any, call func() error) error {
 	scoped, ok := stateless.(systemCallScoped)
 	if !ok {
@@ -2501,6 +2457,16 @@ func withSystemCallScope(stateless any, call func() error) error {
 	scoped.setSystemCallScope(true)
 	defer scoped.setSystemCallScope(false)
 	return call()
+}
+
+func withSystemCallScopeResult[T any](stateless any, call func() (T, error)) (T, error) {
+	var result T
+	err := withSystemCallScope(stateless, func() error {
+		var err error
+		result, err = call()
+		return err
+	})
+	return result, err
 }
 
 // replayBlockOverWitness drives the block through the EVM against a witness-backed
@@ -2522,13 +2488,9 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 
 	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		var result []byte
-		err := withSystemCallScope(stateless, func() error {
-			var err error
-			result, err = protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
-			return err
+		return withSystemCallScopeResult(stateless, func() ([]byte, error) {
+			return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
 		})
-		return result, err
 	}
 	if err := engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return fmt.Errorf("verification: failed to initialize block: %w", err)
@@ -2554,7 +2516,7 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 
 		// Apply the message - gasBailout must be false to properly deduct gas from sender
 		result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
-		if accessed, ok := stateless.(pbinSystemAddressAccessed); ok && ibs.AccessedAddr(params.SystemAddress) {
+		if accessed, ok := stateless.(*pbinWitnessStateless); ok && ibs.AccessedAddr(params.SystemAddress) {
 			accessed.latchPBinSystemAddressRead()
 		}
 		if err != nil {
@@ -2573,13 +2535,9 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		var result []byte
-		err := withSystemCallScope(stateless, func() error {
-			var err error
-			result, err = protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
-			return err
+		return withSystemCallScopeResult(stateless, func() ([]byte, error) {
+			return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
 		})
-		return result, err
 	}
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.
