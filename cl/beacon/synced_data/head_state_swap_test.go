@@ -173,44 +173,66 @@ func TestOnHeadStateWithBlockRootSerializesConcurrentWriters(t *testing.T) {
 	}))
 }
 
-// TestOnHeadStateSerializesAgainstOnHeadStateWithBlockRoot verifies that
-// OnHeadState's own BlockRoot() resolution is covered by writeLock like the
-// rest of a publish: a concurrent OnHeadStateWithBlockRoot call - the entry
-// point every real caller uses - must not be able to publish and then be
-// overwritten once OnHeadState's slower root resolution finishes.
-//
-// slowRoot is sized so BlockRoot() alone takes tens of milliseconds
-// (calibrated). It is launched first and confirmed started before the
-// second writer launches, with a head start well inside that window, so a
-// correct implementation deterministically serializes them regardless of
-// scheduling.
+type blockingHashVector struct {
+	solid.HashVectorSSZ
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (v *blockingHashVector) HashSSZ() ([32]byte, error) {
+	close(v.started)
+	<-v.release
+	return v.HashVectorSSZ.HashSSZ()
+}
+
+// Root resolution must hold writeLock so a known-root update cannot publish
+// first and then be overwritten when the earlier root resolution finishes.
 func TestOnHeadStateSerializesAgainstOnHeadStateWithBlockRoot(t *testing.T) {
 	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
-	require.NoError(t, manager.OnHeadStateWithBlockRoot(bigValidatorState(t, 1), common.Hash{0x00}))
 
-	slowRoot := bigValidatorState(t, 100_000)
-	require.NoError(t, slowRoot.SetSlot(100))
-	fast := bigValidatorState(t, 1)
-	require.NoError(t, fast.SetSlot(200))
+	first := bigValidatorState(t, 1)
+	require.NoError(t, first.SetSlot(100))
+	second := bigValidatorState(t, 1)
+	require.NoError(t, second.SetSlot(200))
 
-	slowStarted := make(chan struct{})
-	slowDone := make(chan error, 1)
-	go func() {
-		close(slowStarted)
-		slowDone <- manager.OnHeadState(slowRoot)
-	}()
-	<-slowStarted
-	time.Sleep(10 * time.Millisecond)
+	rootStarted := make(chan struct{})
+	releaseRoot := make(chan struct{})
+	// BlockRoot hashes this vector. Pausing its HashSSZ call keeps root resolution
+	// in progress while we check the lock, regardless of state size or scheduling.
+	first.SetBlockRoots(&blockingHashVector{
+		HashVectorSSZ: first.BlockRoots(),
+		started:       rootStarted,
+		release:       releaseRoot,
+	})
+	resumeRoot := sync.OnceFunc(func() { close(releaseRoot) })
+	var writers sync.WaitGroup
+	// An assertion failure must release the paused hash before joining the writers.
+	t.Cleanup(func() {
+		resumeRoot()
+		writers.Wait()
+	})
 
-	fastDone := make(chan error, 1)
-	go func() { fastDone <- manager.OnHeadStateWithBlockRoot(fast, common.Hash{0xbb}) }()
+	var firstErr, secondErr error
+	writers.Go(func() { firstErr = manager.OnHeadState(first) })
+	<-rootStarted
+	// The second writer has not started, so only OnHeadState can own writeLock.
+	if manager.writeLock.TryLock() {
+		manager.writeLock.Unlock()
+		t.Fatal("OnHeadState must hold writeLock while resolving BlockRoot")
+	}
 
-	require.NoError(t, <-slowDone)
-	require.NoError(t, <-fastDone)
+	writers.Go(func() { secondErr = manager.OnHeadStateWithBlockRoot(second, common.Hash{0xbb}) })
+	resumeRoot()
+	writers.Wait()
+	require.NoError(t, firstErr)
+	require.NoError(t, secondErr)
 
 	require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		require.Equal(t, uint64(200), headState.Slot(),
-			"OnHeadState must hold writeLock across BlockRoot() resolution, not just the copy, or a concurrent writer can be overwritten once the slower root resolution finishes")
+		require.Equal(t, uint64(200), headState.Slot())
+		return nil
+	}))
+	require.NoError(t, manager.ViewPreviousHeadState(func(headState *state.CachingBeaconState) error {
+		require.Equal(t, uint64(100), headState.Slot())
 		return nil
 	}))
 }
