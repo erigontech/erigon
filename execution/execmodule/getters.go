@@ -58,37 +58,45 @@ var errNotFound = errors.New("notfound")
 // getters never share MDBX internal state.
 // The caller must call the returned cleanup function when done.
 func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(), error) {
-	e.lock.RLock()
-	sd := e.currentContext
-	// Fall back to published SD while an FCU commits.
-	if sd == nil && e.publishedSD != nil {
-		sd = e.publishedSD()
+	if view, cleanup, err := e.beginOverlayView(ctx); cleanup != nil || err != nil {
+		return view, cleanup, err
 	}
-	if sd != nil {
-		if overlay := sd.BlockOverlay(); overlay != nil {
-			// Open a fresh RO tx while still holding the read lock so that
-			// the overlay cannot be closed between our check and the
-			// NewReadView call (TOCTOU avoidance).
-			roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
-			if err != nil {
-				e.lock.RUnlock()
-				return nil, nil, err
-			}
-			ok := false
-			defer kv.RollbackUnless(&ok, roTx)
-			view := overlay.NewReadView(roTx)
-			e.lock.RUnlock()
-			ok = true
-			return view, func() { roTx.Rollback() }, nil
-		}
-	}
-	e.lock.RUnlock()
 
 	tx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, nil, err
 	}
 	return tx, func() { tx.Rollback() }, nil
+}
+
+// beginOverlayView returns a nil cleanup when no overlay is active.
+func (e *ExecModule) beginOverlayView(ctx context.Context) (kv.TemporalTx, func(), error) {
+	e.lock.RLock()
+	defer e.lock.RUnlock()
+	sd := e.currentContext
+	// Fall back to published SD while an FCU commits.
+	if sd == nil && e.publishedSD != nil {
+		sd = e.publishedSD()
+	}
+	if sd == nil {
+		return nil, nil, nil
+	}
+	overlay := sd.BlockOverlay()
+	if overlay == nil {
+		return nil, nil, nil
+	}
+	// Open a fresh RO tx while still holding the read lock so that
+	// the overlay cannot be closed between our check and the
+	// NewReadView call (TOCTOU avoidance).
+	roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, nil, err
+	}
+	ok := false
+	defer kv.RollbackUnless(&ok, roTx)
+	view := overlay.NewReadView(roTx)
+	ok = true
+	return view, func() { roTx.Rollback() }, nil
 }
 
 // resolveSegment converts optional (blockHash, blockNumber) to a concrete
