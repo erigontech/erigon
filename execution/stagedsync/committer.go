@@ -178,7 +178,6 @@ type commitmentCalculator struct {
 	// BAL-driven root for the shadow-mode cross-check.
 	computedAhead     map[uint64]bool
 	balRoots          map[uint64][]byte
-	binFeedHook       func()
 	binFeedObserver   func(*commitment.PBinFeed)
 	shadowStopped     map[kv.Domain]bool
 	onDualArmComplete func(kv.Domain)
@@ -1037,9 +1036,6 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	var binFeed *commitment.PBinFeed
 	if _, _, ok := cc.dualCommitmentContexts(); ok || sdCtx.Trie().Variant() == commitment.VariantBinPatriciaTrie {
 		var feedErr error
-		if cc.binFeedHook != nil {
-			cc.binFeedHook()
-		}
 		binFeed, feedErr = cc.state.BinFeed()
 		if feedErr != nil {
 			cc.publish(ctx, commitmentResult{

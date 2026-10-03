@@ -187,34 +187,26 @@ func TestHandleMessage_StepBoundaryBinFeedUsesPendingState(t *testing.T) {
 	oldAccount := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
 	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, address[:], accounts.SerialiseV3(&oldAccount), 0, nil))
 
-	entered := make(chan struct{})
-	release := make(chan struct{})
 	feedSeen := make(chan *commitment.PBinFeed, 1)
-	cc.binFeedHook = func() {
-		close(entered)
-		<-release
-	}
 	cc.binFeedObserver = func(feed *commitment.PBinFeed) { feedSeen <- feed }
 	newBalance := *uint256.NewInt(9)
-	writes := newWS().bal(addr, state.Version{}, newBalance).build()
-	done := make(chan struct{})
-	go func() {
-		cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: 15, rules: &chain.Rules{}, writes: writes})
-		close(done)
-	}()
-	<-entered
-	close(release)
-	<-done
+	newCode := accounts.NewCode([]byte{0x60, 0x02})
+	newAccount := accounts.Account{Nonce: 1, Balance: newBalance, CodeHash: newCode.Hash}
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, address[:], accounts.SerialiseV3(&newAccount), 15, nil))
+	writes := newWS().bal(addr, state.Version{}, newBalance).code(addr, state.Version{}, newCode).build()
+	cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: 15, rules: &chain.Rules{}, writes: writes})
 
-	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, address[:], accounts.SerialiseV3(&accounts.Account{Nonce: 1, Balance: newBalance, CodeHash: accounts.EmptyCodeHash}), 15, nil))
 	var feed *commitment.PBinFeed
 	select {
 	case feed = <-feedSeen:
+	case result := <-out:
+		require.NoError(t, result.err, "step-boundary bin feed must use pending code")
 	case <-time.After(time.Second):
 		require.FailNow(t, "step-boundary bin feed was not built")
 	}
 	require.Len(t, feed.Accounts, 1, "step-boundary bin feed must include the pending account")
-	want := eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{{Address: address[:], Nonce: 1, Balance: newBalance}}}))
+	require.Equal(t, newCode.Bytes, feed.Accounts[0].Code, "step-boundary bin feed must include pending code")
+	want := eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{{Address: address[:], Nonce: 1, Balance: newBalance, Code: newCode.Bytes}}}))
 	got, err := pbt.NewTrie(&calcPBinTrieContext{records: make(map[string][]byte)}).ProcessFeed(feed)
 	require.NoError(t, err)
 	require.Equal(t, want, got, "step-boundary bin root must include pending balance")

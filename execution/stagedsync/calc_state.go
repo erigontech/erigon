@@ -340,7 +340,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			cs.codeValues = make(map[accounts.Address][]byte)
 		}
 		cs.codeKeys[addr] = struct{}{}
-		cs.codeValues[addr] = append([]byte(nil), vw.Val.Bytes...)
+		cs.codeValues[addr] = vw.Val.Bytes
 		acc := cs.ensureAccount(addr, writes)
 		address := addr.Value()
 		cs.prefetch.add(prefetchItem{account: acc.hash, address: address, codeHash: vw.Val.Hash.Value(), codeChunks: (len(vw.Val.Bytes) + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen, codeWritten: true})
