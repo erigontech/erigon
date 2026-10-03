@@ -122,7 +122,6 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	if err != nil {
 		return nil, err
 	}
-	gater.SetHost(host)
 	tcpPort := hostTCPPort(host)
 	if tcpPort == 0 {
 		host.Close()
