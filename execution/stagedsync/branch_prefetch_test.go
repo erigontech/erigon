@@ -164,3 +164,13 @@ func TestRaiseGCPercentRestores(t *testing.T) {
 	raiseGCPercent()()
 	require.Equal(t, -1, debug.SetGCPercent(-1))
 }
+
+func TestRaiseGCPercentOverlappingComputesRestore(t *testing.T) {
+	prev := debug.SetGCPercent(150)
+	defer debug.SetGCPercent(prev)
+	first, second := raiseGCPercent(), raiseGCPercent()
+	first()
+	require.Equal(t, computeGCPercent, debug.SetGCPercent(computeGCPercent), "a compute still running keeps the raised percent")
+	second()
+	require.Equal(t, 150, debug.SetGCPercent(150), "the last compute to finish restores the percent the first one saw")
+}

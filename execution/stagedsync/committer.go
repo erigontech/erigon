@@ -919,13 +919,30 @@ func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
 
 const computeGCPercent = 400
 
+var gcRaise struct {
+	sync.Mutex
+	computes int
+	prev     int
+}
+
 func raiseGCPercent() (restore func()) {
-	prev := debug.SetGCPercent(computeGCPercent)
-	if prev < 0 || prev > computeGCPercent {
-		debug.SetGCPercent(prev)
-		return func() {}
+	gcRaise.Lock()
+	defer gcRaise.Unlock()
+	if gcRaise.computes == 0 {
+		gcRaise.prev = debug.SetGCPercent(computeGCPercent)
+		if gcRaise.prev < 0 || gcRaise.prev > computeGCPercent {
+			debug.SetGCPercent(gcRaise.prev)
+		}
 	}
-	return func() { debug.SetGCPercent(prev) }
+	gcRaise.computes++
+	return func() {
+		gcRaise.Lock()
+		defer gcRaise.Unlock()
+		gcRaise.computes--
+		if gcRaise.computes == 0 {
+			debug.SetGCPercent(gcRaise.prev)
+		}
+	}
 }
 
 // compute is the shared prologue/compute/footer for every calculator commitment
@@ -940,8 +957,10 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 	cc.state.prefetch.pause()
 	defer cc.state.prefetch.resume()
-	defer raiseGCPercent()()
 	sdCtx := cc.doms.GetCommitmentContext()
+	if sdCtx.AcceptsFeed() {
+		defer raiseGCPercent()()
+	}
 	if sdCtx.AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0 {
 		cc.state.FlushToFeed(&cc.feed)
 		sdCtx.SetFeed(&cc.feed)
