@@ -141,10 +141,11 @@ jobs:
         env:
           RUNNER_WS: ${{ runner.workspace }}
         run: |
+          source .github/workflows/scripts/rpc_version.env
           rm -rf "$RUNNER_WS/rpc-tests"
-          git -c advice.detachedHead=false clone --depth 1 --branch v2.4.0 https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
+          git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
           cd "$RUNNER_WS/rpc-tests"
-          make rpc_perf
+          make rpc_perf rpc_pattern_gen
 
       - name: Set up job-scoped build temp dir
         if: matrix.client == 'erigon'
@@ -269,6 +270,17 @@ jobs:
             exit 1
           fi
 
+      - name: Generate the eth_call latest pattern
+        if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
+        env:
+          RUNNER_WS: ${{ runner.workspace }}
+        run: |
+          # A latest pattern decays as the chain moves on, so it is generated from the node right before the run.
+          # 400000 requests cover the 20000:20 step without repeating any request.
+          "$RUNNER_WS/rpc-tests/build/bin/rpc_pattern_gen" eth_call --url http://localhost:8545 \
+            --counts 400000 --block-tag latest --verify --keep ok --fees drop \
+            --out "$RUNNER_WS/rpc-tests/perf/pattern/$CHAIN/stress_test_eth_call_gen_latest.tar"
+
       - name: Run RPC Performance Tests
         id: test_step
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
@@ -302,9 +314,10 @@ jobs:
             pattern=$4
             sequence=$5
             client=$6
+            label=${7:-$method} # names the results; set it to run the same method with another pattern
             
             result_dir=$workspace/rpc-tests/perf/reports/$network
-            result_file=$client-$method-result.json            
+            result_file=$client-$label-result.json            
                     
             # clean temporary area
             cd $workspace/rpc-tests/perf
@@ -348,9 +361,9 @@ jobs:
               echo "Execute Latency Percentile HDR Analysis"
               cd $result_dir
               python3 $ERIGON_QA_PATH/test_system/qa-tests/rpc-tests/perf_hdr_analysis.py \
-                --test_name $client-$method \
+                --test_name $client-$label \
                 --input_file ./$result_file \
-                --output_file ./$client-$method-latency_hdr_analysis.pdf
+                --output_file ./$client-$label-latency_hdr_analysis.pdf
               perf_hdr_status=$?
               if [ $perf_hdr_status -ne 0 ]; then
                 echo "::warning::perf_hdr_analysis.py failed with exit code $perf_hdr_status"
@@ -382,7 +395,7 @@ jobs:
               --repo $client \
               --branch $branch_name \
               --commit $commit_hash \
-              --test_name rpc-performance-test-$client${{ (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}-$method \
+              --test_name rpc-performance-test-$client${{ (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'parallel' && '-parallel') || (matrix.client == 'erigon' && github.event.inputs.exec_mode == 'serial' && '-serial') || '' }}-$label \
               --chain $CHAIN \
               --runner "$RUNNER_NAME" \
               --db_version $db_version \
@@ -404,6 +417,7 @@ jobs:
 
           # Launch the RPC performance test runner
           run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_gen_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT eth_call_latest
           run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_15M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           run_perf "$RUNNER_WS" $CHAIN eth_getBalance stress_test_eth_getBalance_15M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           run_perf "$RUNNER_WS" $CHAIN eth_getBlockByHash stress_test_eth_getBlockByHash_14M 1:1,100:30,1000:20,2500:20 $CLIENT
