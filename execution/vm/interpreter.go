@@ -575,56 +575,56 @@ run:
 			case SUB:
 				if sLen >= 2 && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
-					opSub(pc, evm, callContext)
+					_, _, _ = opSub(pc, evm, callContext)
 					pc++
 					continue
 				}
 			case MUL:
 				if sLen >= 2 && gas >= GasFastStep {
 					callContext.gas = gas - GasFastStep
-					opMul(pc, evm, callContext)
+					_, _, _ = opMul(pc, evm, callContext)
 					pc++
 					continue
 				}
 			case DIV:
 				if sLen >= 2 && gas >= GasFastStep {
 					callContext.gas = gas - GasFastStep
-					opDiv(pc, evm, callContext)
+					_, _, _ = opDiv(pc, evm, callContext)
 					pc++
 					continue
 				}
 			case LT:
 				if sLen >= 2 && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
-					opLt(pc, evm, callContext)
+					_, _, _ = opLt(pc, evm, callContext)
 					pc++
 					continue
 				}
 			case GT:
 				if sLen >= 2 && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
-					opGt(pc, evm, callContext)
+					_, _, _ = opGt(pc, evm, callContext)
 					pc++
 					continue
 				}
 			case EQ:
 				if sLen >= 2 && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
-					opEq(pc, evm, callContext)
+					_, _, _ = opEq(pc, evm, callContext)
 					pc++
 					continue
 				}
 			case AND:
 				if sLen >= 2 && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
-					opAnd(pc, evm, callContext)
+					_, _, _ = opAnd(pc, evm, callContext)
 					pc++
 					continue
 				}
 			case ISZERO:
 				if sLen >= 1 && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
-					opIszero(pc, evm, callContext)
+					_, _, _ = opIszero(pc, evm, callContext)
 					pc++
 					continue
 				}
