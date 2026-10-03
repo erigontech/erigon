@@ -334,26 +334,12 @@ type publishOverlayOnSecondProbeTx struct {
 	publish func()
 }
 
-func (tx *publishOverlayOnSecondProbeTx) BlockFilesRoTx() *blocksnapshots.View {
-	if p, ok := tx.Tx.(membatchwithdb.HasBlockFilesRoTx); ok {
-		return p.BlockFilesRoTx()
-	}
-	return nil
-}
-
 func (tx *publishOverlayOnSecondProbeTx) OverlayView() (*membatchwithdb.MemoryMutation, bool) {
 	tx.probes++
 	if tx.probes == 2 {
 		tx.publish()
 	}
 	return nil, false
-}
-
-func (r hideHeaderBlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNumber uint64) (*types.Block, []common.Address, error) {
-	if blockNumber == r.blockNumber {
-		return nil, nil, nil
-	}
-	return r.FullBlockReader.BlockWithSenders(ctx, tx, hash, blockNumber)
 }
 
 func (r hideHeaderBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNumber uint64) (*types.Header, error) {
