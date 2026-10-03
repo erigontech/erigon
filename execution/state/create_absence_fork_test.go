@@ -150,7 +150,7 @@ func TestBALAbsenceRemainsValidAfterEmptyDestruct(t *testing.T) {
 	require.True(t, empty)
 	require.True(t, ibs.consumedAddressAbsence(addr))
 
-	vm.FlushVersionedWrites(writes, true, "")
+	vm.FlushVersionedWrites(writes, true)
 	require.True(t, vm.destroyedAndUnrevived(addr, 1))
 
 	require.NotPanics(t, func() {
