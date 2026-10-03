@@ -84,6 +84,55 @@ func TestEIP8246_PreservedSD_WithEarlierAccountRecord(t *testing.T) {
 	require.Equal(t, account.Balance, bal)
 }
 
+func TestEIP8246_PreservedSD_KeepsEarlierBalanceCell(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246B2"))
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(7)
+	balanceVersion := Version{TxIndex: 0}
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, balanceVersion, &account, true)
+	vm.WriteBalance(addr, balanceVersion, account.Balance, true)
+
+	writer := NewWithVersionMap(&minimalStateReader{}, vm)
+	t.Cleanup(writer.Close)
+	writer.SetTxContext(1, 1)
+	writer.SetVersion(0)
+	writer.eip8246 = true
+	destroyed, err := writer.Selfdestruct(addr, true)
+	require.NoError(t, err)
+	require.True(t, destroyed)
+	writes := writer.FinalizedWrites(&chain.Rules{IsAmsterdam: true})
+	_, hasBalance := writes.GetBalance(addr)
+	require.False(t, hasBalance)
+	vm.FlushVersionedWrites(writes, true, "")
+
+	reconstructed := accounts.NewAccount()
+	vm.applySubFieldWrites(addr, 2, &reconstructed)
+	require.Equal(t, account.Balance, reconstructed.Balance)
+
+	reader := NewWithVersionMap(&minimalStateReader{}, vm)
+	t.Cleanup(reader.Close)
+	reader.SetTxContext(1, 2)
+	reader.eip8246 = true
+	balance, err := reader.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, reconstructed.Balance, balance)
+
+	reads := reader.VersionedReads()
+	balanceRead, ok := reads.GetBalance(addr)
+	require.True(t, ok)
+	require.Equal(t, account.Balance, balanceRead.Val)
+	require.Equal(t, balanceVersion, balanceRead.Version)
+	destructRead, ok := reads.GetSelfDestruct(addr)
+	require.True(t, ok)
+	require.True(t, destructRead.Val)
+	require.Equal(t, Version{TxIndex: 1}, destructRead.Version)
+	io := NewVersionedIO(3)
+	io.RecordReads(Version{TxIndex: 2}, reads)
+	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+}
+
 // The block assembler runs every tx on one shared IBS (no per-tx Reset).
 // After a balance-preserving SELFDESTRUCT is finalized, a later tx's CREATE2 at
 // the same address must carry the preserved balance — i.e. FinalizeTx must not
