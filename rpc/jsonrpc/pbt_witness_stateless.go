@@ -39,40 +39,34 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func pbinExecBlockStatelessly(ctx context.Context, result *ExecutionWitnessResult, block *types.Block, parentRoot common.Hash, chainConfig *chain.Config, engine rules.Engine) (common.Hash, *pbinWitnessStateless, error) {
+func verifyPBinWitnessAgainstBlock(ctx context.Context, result *ExecutionWitnessResult, block *types.Block, parentRoot, expectedRoot common.Hash, chainConfig *chain.Config, engine rules.Engine) error {
+	fail := func(err error) error { return fmt.Errorf("pbin stateless execution: %w", err) }
 	if block.NumberU64() == 0 {
-		return block.Root(), nil, nil
+		if block.Root() != expectedRoot {
+			return fmt.Errorf("pbin state root mismatch after stateless execution: got %x, expected %x", block.Root(), expectedRoot)
+		}
+		return nil
 	}
 	if len(result.State) == 0 && parentRoot != eip8297.EmptyTreeHash {
-		return common.Hash{}, nil, errors.New("empty State field in witness")
+		return fail(errors.New("empty State field in witness"))
 	}
 	stateless, err := newPBinWitnessStateless(result, parentRoot)
 	if err != nil {
-		return common.Hash{}, nil, err
+		return fail(err)
 	}
 	if err := replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
-		if stateless.resolveError != nil {
-			return common.Hash{}, stateless, stateless.resolveError
-		}
-		return common.Hash{}, stateless, err
+		err = stateless.resolveErrorOr(err)
+		return fail(err)
 	}
-	if stateless.resolveError != nil {
-		return common.Hash{}, stateless, stateless.resolveError
+	if err := stateless.resolveErrorOr(nil); err != nil {
+		return fail(err)
 	}
 	root, err := stateless.Finalize(ctx)
 	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("pbin post-state root: %w", err)
+		return fail(fmt.Errorf("pbin post-state root: %w", err))
 	}
 	if err := stateless.checkAllNodesConsumed(); err != nil {
-		return common.Hash{}, stateless, err
-	}
-	return root, stateless, nil
-}
-
-func verifyPBinWitnessAgainstBlock(ctx context.Context, result *ExecutionWitnessResult, block *types.Block, parentRoot, expectedRoot common.Hash, chainConfig *chain.Config, engine rules.Engine) error {
-	root, _, err := pbinExecBlockStatelessly(ctx, result, block, parentRoot, chainConfig, engine)
-	if err != nil {
-		return fmt.Errorf("pbin stateless execution: %w", err)
+		return fail(err)
 	}
 	if root != expectedRoot {
 		return fmt.Errorf("pbin state root mismatch after stateless execution: got %x, expected %x", root, expectedRoot)
@@ -117,10 +111,11 @@ func (s *pbinWitnessStateless) latchPBinResolveError(err error) {
 	}
 }
 
-func (s *pbinWitnessStateless) latchPBinCodeError(err error) {
-	if err != nil && s.resolveError == nil {
-		s.resolveError = err
+func (s *pbinWitnessStateless) resolveErrorOr(err error) error {
+	if s.resolveError != nil {
+		return s.resolveError
 	}
+	return err
 }
 
 func (s *pbinWitnessStateless) latchPBinSystemAddressRead() {
@@ -257,9 +252,6 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 		}
 		return nil, nil
 	}
-	if len(value) != eip8297.ValueLength {
-		return nil, fmt.Errorf("pbin witness: basic data for %x has length %d", addr, len(value))
-	}
 	account := &accounts.Account{Root: empty.RootHash}
 	account.Nonce = binary.BigEndian.Uint64(value[eip8297.BasicDataNonceOffset:])
 	account.Balance.SetBytes(value[eip8297.BasicDataBalanceOffset : eip8297.BasicDataBalanceOffset+16])
@@ -293,9 +285,6 @@ func (s *pbinWitnessStateless) readCodeHash(addr common.Address) (common.Hash, b
 	if !present {
 		return common.Hash{}, false, nil
 	}
-	if len(value) != eip8297.ValueLength {
-		return common.Hash{}, false, fmt.Errorf("pbin witness: code hash for %x has length %d", addr, len(value))
-	}
 	return common.BytesToHash(value), true, nil
 }
 
@@ -307,7 +296,7 @@ func (s *pbinWitnessStateless) readDelegation(addr common.Address) ([]byte, bool
 	if !present {
 		return nil, false, nil
 	}
-	if len(value) != eip8297.ValueLength || !eip8297.IsDelegation(value[:eip8297.DelegationCodeLength]) {
+	if !eip8297.IsDelegation(value[:eip8297.DelegationCodeLength]) {
 		return nil, false, fmt.Errorf("pbin witness: invalid delegation leaf for %x", addr)
 	}
 	return bytes.Clone(value[:eip8297.DelegationCodeLength]), true, nil
@@ -335,9 +324,6 @@ func (s *pbinWitnessStateless) ReadAccountStorage(address accounts.Address, key 
 	}
 	if !present {
 		return uint256.Int{}, false, nil
-	}
-	if len(value) != eip8297.ValueLength {
-		return uint256.Int{}, false, fmt.Errorf("pbin witness: storage value for %x/%x has length %d", addr, slot, len(value))
 	}
 	var result uint256.Int
 	result.SetBytes(value)
@@ -369,7 +355,9 @@ func (s *pbinWitnessStateless) ReadAccountCode(address accounts.Address) ([]byte
 	code, ok := s.codes[codeHash]
 	if !ok {
 		err := fmt.Errorf("pbin witness: missing code for account %x with code hash %x", addr, codeHash)
-		s.latchPBinCodeError(err)
+		if s.resolveError == nil {
+			s.resolveError = err
+		}
 		return nil, err
 	}
 	return bytes.Clone(code), nil
@@ -402,19 +390,15 @@ func (s *pbinWitnessStateless) DeleteAccount(address accounts.Address, _ *accoun
 			return err
 		}
 	}
-	if !s.preStateAccounts[addr] {
-		delete(s.accountUpdates, addr)
-		delete(s.codeUpdates, addr)
-		delete(s.storageWrites, addr)
-		return nil
-	}
-	if err := s.tree.DeleteAccount(addr[:]); err != nil {
-		return err
+	if s.preStateAccounts[addr] {
+		if err := s.tree.DeleteAccount(addr[:]); err != nil {
+			return err
+		}
+		s.deleted[addr] = struct{}{}
 	}
 	delete(s.accountUpdates, addr)
 	delete(s.codeUpdates, addr)
 	delete(s.storageWrites, addr)
-	s.deleted[addr] = struct{}{}
 	return nil
 }
 
@@ -461,9 +445,6 @@ func (s *pbinWitnessStateless) CreateContract(address accounts.Address) error {
 }
 
 func (s *pbinWitnessStateless) Finalize(ctx context.Context) (common.Hash, error) {
-	if ctx == nil {
-		return common.Hash{}, errors.New("pbin witness: nil context")
-	}
 	if err := ctx.Err(); err != nil {
 		return common.Hash{}, err
 	}
@@ -520,9 +501,6 @@ func (s *pbinWitnessStateless) codeSize(addr common.Address) (uint64, error) {
 	}
 	if !present {
 		return 0, fmt.Errorf("pbin witness: missing basic data for account %x", addr)
-	}
-	if len(value) != eip8297.ValueLength {
-		return 0, fmt.Errorf("pbin witness: basic data for %x has length %d", addr, len(value))
 	}
 	return uint64(binary.BigEndian.Uint32(value[eip8297.BasicDataCodeSizeOffset:])), nil
 }

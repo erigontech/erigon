@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297/witness"
 )
 
@@ -30,9 +29,6 @@ type pbinWitnessTrie interface {
 }
 
 func (sdc *SharedDomainsCommitmentContext) PBinWitness(ctx context.Context, expectedRoot common.Hash, input witness.PBinDriverInput) ([][]byte, [][]byte, common.Hash, error) {
-	if sdc.variant != commitment.VariantBinPatriciaTrie {
-		return nil, nil, common.Hash{}, fmt.Errorf("commitment trie %s cannot build PBT witnesses", sdc.variant)
-	}
 	wt, ok := sdc.patriciaTrie.(pbinWitnessTrie)
 	if !ok {
 		return nil, nil, common.Hash{}, fmt.Errorf("commitment trie %s cannot build PBT witnesses", sdc.variant)

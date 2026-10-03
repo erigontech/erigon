@@ -19,6 +19,7 @@ package witness
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"slices"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -75,11 +76,7 @@ func (t *PBinTree) Apply(input PBinDriverInput) (common.Hash, []PBinResolvedNode
 			return common.Hash{}, nil, fmt.Errorf("pbin witness: driver value length %d, want %d", len(write.Value), eip8297.ValueLength)
 		}
 		key := eip8297.TreeKeyStorage(write.Address, write.Slot)
-		if bytes.Equal(write.Value, make([]byte, eip8297.ValueLength)) {
-			if err := t.Delete(key); err != nil {
-				return common.Hash{}, nil, err
-			}
-		} else if err := t.Put(key, write.Value); err != nil {
+		if err := t.writeValue(key, write.Value); err != nil {
 			return common.Hash{}, nil, err
 		}
 	}
@@ -99,12 +96,7 @@ func (t *PBinTree) Apply(input PBinDriverInput) (common.Hash, []PBinResolvedNode
 }
 
 func (t *PBinTree) applyAccountUpdate(account PBinAccountUpdate) error {
-	values := make([]byte, 0, len(account.Values))
-	for sub := range account.Values {
-		values = append(values, sub)
-	}
-	slices.Sort(values)
-	for _, sub := range values {
+	for _, sub := range slices.Sorted(maps.Keys(account.Values)) {
 		value := account.Values[sub]
 		key := eip8297.TreeKeyAccount(account.Address, sub)
 		if value == nil {
@@ -113,16 +105,7 @@ func (t *PBinTree) applyAccountUpdate(account PBinAccountUpdate) error {
 			}
 			continue
 		}
-		if len(value) != eip8297.ValueLength {
-			return fmt.Errorf("pbin witness: driver value length %d, want %d", len(value), eip8297.ValueLength)
-		}
-		if bytes.Equal(value, make([]byte, eip8297.ValueLength)) {
-			if err := t.Delete(key); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := t.Put(key, value); err != nil {
+		if err := t.writeValue(key, value); err != nil {
 			return err
 		}
 	}
@@ -155,4 +138,15 @@ func (t *PBinTree) applyAccountUpdate(account PBinAccountUpdate) error {
 		}
 	}
 	return nil
+}
+
+func (t *PBinTree) writeValue(key, value []byte) error {
+	if len(value) != eip8297.ValueLength {
+		return fmt.Errorf("pbin witness: driver value length %d, want %d", len(value), eip8297.ValueLength)
+	}
+	var zero [eip8297.ValueLength]byte
+	if bytes.Equal(value, zero[:]) {
+		return t.Delete(key)
+	}
+	return t.Put(key, value)
 }

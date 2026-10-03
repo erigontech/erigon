@@ -66,9 +66,8 @@ func (r *calcStateReader) CloneForWorker(ctx context.Context, tx kv.TemporalTx) 
 
 func (r *calcStateReader) Read(domain kv.Domain, key []byte, stepSize uint64) ([]byte, kv.Step, error) {
 	if domain == kv.AccountsDomain && len(key) == length.Addr {
-		var raw common.Address
-		copy(raw[:], key)
-		if acc, ok := r.state.accounts[accounts.InternAddress(raw)]; ok {
+		addr := accounts.InternAddress(common.BytesToAddress(key))
+		if acc, ok := r.state.accounts[addr]; ok {
 			if acc.Deleted && acc.Incarnation == 0 && acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash {
 				return nil, 0, nil
 			}
@@ -82,22 +81,17 @@ func (r *calcStateReader) Read(domain kv.Domain, key []byte, stepSize uint64) ([
 		}
 	}
 	if domain == kv.StorageDomain && len(key) == length.Addr+length.Hash {
-		var raw common.Address
-		copy(raw[:], key[:length.Addr])
-		addr := accounts.InternAddress(raw)
+		addr := accounts.InternAddress(common.BytesToAddress(key[:length.Addr]))
 		if storage, ok := r.state.storageState[addr]; ok {
-			var rawSlot common.Hash
-			copy(rawSlot[:], key[length.Addr:])
-			slot := accounts.InternKey(rawSlot)
+			slot := accounts.InternKey(common.BytesToHash(key[length.Addr:]))
 			if value, ok := storage.slots[slot]; ok {
 				return value.value.Bytes(), 0, nil
 			}
 		}
 	}
 	if domain == kv.CodeDomain && len(key) == length.Addr {
-		var raw common.Address
-		copy(raw[:], key)
-		if code, ok := r.state.codeValues[accounts.InternAddress(raw)]; ok {
+		addr := accounts.InternAddress(common.BytesToAddress(key))
+		if code, ok := r.state.codeValues[addr]; ok {
 			return code, 0, nil
 		}
 	}
@@ -168,8 +162,8 @@ type calcState struct {
 	storageState map[accounts.Address]*calcStorage
 	// storageDirty tracks which slots were modified in the current block
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
-	codeKeys     map[accounts.Address]struct{}
 	codeValues   map[accounts.Address][]byte
+	binFeed      bool
 	wiped        map[accounts.Address]struct{}
 	resetCount   int
 	reader       commitmentdb.StateReader
@@ -209,8 +203,6 @@ func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) 
 		accounts:     make(map[accounts.Address]*calcAccountState),
 		storageState: make(map[accounts.Address]*calcStorage),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
-		codeKeys:     make(map[accounts.Address]struct{}),
-		codeValues:   make(map[accounts.Address][]byte),
 		wiped:        make(map[accounts.Address]struct{}),
 		reader:       reader,
 		domainReader: &calcDomainReader{reader: reader},
@@ -333,14 +325,12 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		}
 	}
 	for addr, vw := range writes.Codes() {
-		if cs.codeKeys == nil {
-			cs.codeKeys = make(map[accounts.Address]struct{})
+		if cs.binFeed {
+			if cs.codeValues == nil {
+				cs.codeValues = make(map[accounts.Address][]byte)
+			}
+			cs.codeValues[addr] = append([]byte(nil), vw.Val.Bytes...)
 		}
-		if cs.codeValues == nil {
-			cs.codeValues = make(map[accounts.Address][]byte)
-		}
-		cs.codeKeys[addr] = struct{}{}
-		cs.codeValues[addr] = append([]byte(nil), vw.Val.Bytes...)
 		acc := cs.ensureAccount(addr, writes)
 		address := addr.Value()
 		cs.prefetch.add(prefetchItem{account: acc.hash, address: address, codeHash: vw.Val.Hash.Value(), codeChunks: (len(vw.Val.Bytes) + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen, codeWritten: true})
@@ -548,14 +538,11 @@ func (cs *calcState) BinFeed() (*commitment.PBinFeed, error) {
 		address := addr.Value()
 		for slot := range dirty {
 			key := slot.Value()
-			plain := make([]byte, len(address)+len(key))
-			copy(plain, address[:])
-			copy(plain[len(address):], key[:])
-			keys[string(plain)] = struct{}{}
+			keys[string(address[:])+string(key[:])] = struct{}{}
 		}
 	}
-	codeKeys := make(map[string]struct{}, len(cs.codeKeys))
-	for addr := range cs.codeKeys {
+	codeKeys := make(map[string]struct{}, len(cs.codeValues))
+	for addr := range cs.codeValues {
 		address := addr.Value()
 		codeKeys[string(address[:])] = struct{}{}
 	}
@@ -610,7 +597,6 @@ func (cs *calcState) ResetBlockFlags() {
 	for addr := range cs.storageDirty {
 		delete(cs.storageDirty, addr)
 	}
-	clear(cs.codeKeys)
 	clear(cs.codeValues)
 	clear(cs.wiped)
 }

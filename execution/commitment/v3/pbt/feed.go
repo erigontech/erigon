@@ -19,7 +19,7 @@ package pbt
 import (
 	"bytes"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
@@ -29,55 +29,34 @@ import (
 
 func TranslateFeed(feed *commitment.PBinFeed) ([]Op, error) {
 	var ops []Op
-	if err := ForEachFeedOp(feed, func(op Op) error {
-		ops = append(ops, op)
-		return nil
-	}); err != nil {
-		return nil, err
+	if feed == nil {
+		return nil, fmt.Errorf("pbin: nil feed")
 	}
-	seen := make(map[string]struct{}, len(ops))
-	for _, op := range ops {
-		key := op.Key
-		if len(op.Drop) != 0 {
-			key = op.Drop
+	emitter := NewFeedOpEmitter()
+	for i := range feed.Accounts {
+		if err := emitter.EmitAccount(feed.Accounts[i], func(op Op) error {
+			ops = append(ops, op)
+			return nil
+		}); err != nil {
+			return nil, err
 		}
-		name := string(key)
-		if _, ok := seen[name]; ok {
-			return nil, fmt.Errorf("pbin: duplicate operation key %x", key)
-		}
-		seen[name] = struct{}{}
 	}
-	sort.SliceStable(ops, func(i, j int) bool {
-		left, right := ops[i].Key, ops[j].Key
-		if len(ops[i].Drop) != 0 {
-			left = ops[i].Drop
-		}
-		if len(ops[j].Drop) != 0 {
-			right = ops[j].Drop
-		}
-		return bytes.Compare(left, right) < 0
+	slices.SortStableFunc(ops, func(left, right Op) int {
+		return bytes.Compare(opKey(left), opKey(right))
 	})
+	for i := 1; i < len(ops); i++ {
+		if bytes.Equal(opKey(ops[i-1]), opKey(ops[i])) {
+			return nil, fmt.Errorf("pbin: duplicate operation key %x", opKey(ops[i]))
+		}
+	}
 	return ops, nil
 }
 
-func ForEachFeedOp(feed *commitment.PBinFeed, emit func(Op) error) error {
-	if feed == nil {
-		return fmt.Errorf("pbin: nil feed")
+func opKey(op Op) []byte {
+	if len(op.Drop) != 0 {
+		return op.Drop
 	}
-	if emit == nil {
-		return fmt.Errorf("pbin: nil operation emitter")
-	}
-	accounts := append([]commitment.PBinFeedAccount(nil), feed.Accounts...)
-	sort.SliceStable(accounts, func(i, j int) bool {
-		return bytes.Compare(accounts[i].Address, accounts[j].Address) < 0
-	})
-	emitter := NewFeedOpEmitter()
-	for i := range accounts {
-		if err := emitter.EmitAccount(accounts[i], emit); err != nil {
-			return err
-		}
-	}
-	return nil
+	return op.Key
 }
 
 type FeedOpEmitter struct {
@@ -128,11 +107,7 @@ func (e *FeedOpEmitter) EmitAccount(account commitment.PBinFeedAccount, emit fun
 		if err != nil {
 			return err
 		}
-		if basic == ([eip8297.ValueLength]byte{}) {
-			if err := emit(Op{Key: basicKey}); err != nil {
-				return err
-			}
-		} else if err := emit(Op{Key: basicKey, Value: basic}); err != nil {
+		if err := emit(Op{Key: basicKey, Value: basic}); err != nil {
 			return err
 		}
 		if eip8297.IsDelegation(account.Code) {

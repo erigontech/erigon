@@ -54,8 +54,7 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 	}
 	systemAddress := common.Address(params.SystemAddress.Value())
 	if rs.pbtSystemAddrTouchedInTx && rs.accountReadSources[systemAddress]&recordingReadSystemCall != 0 {
-		address := params.SystemAddress.Value()
-		key := eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey)
+		key := eip8297.TreeKeyAccount(systemAddress[:], eip8297.BasicDataLeafKey)
 		readKeys[string(key)] = key
 	}
 	for address, code := range rs.PreStateCode {
@@ -133,7 +132,7 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 			}
 		}
 		if code, modified := rs.ModifiedCode[address]; modified {
-			oldCode, err := (pbinAccountCodeReader{inner: rs.inner, account: original}).ReadAccountCode(accounts.InternAddress(address))
+			oldCode, err := pbinReadAccountCode(rs.inner, original, accounts.InternAddress(address))
 			if err != nil || !bytes.Equal(oldCode, code) {
 				if eip8297.IsDelegation(code) {
 					update.Delegation = append([]byte{}, code...)
@@ -167,40 +166,27 @@ func pbinReadNeedsProof(address common.Address, source recordingReadSource) bool
 	return source&recordingReadSystemCall != 0 && address != systemAddress
 }
 
-type pbinAccountCodeReader struct {
-	inner   state.StateReader
-	account *accounts.Account
-}
-
-func (r pbinAccountCodeReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
-	if r.account != nil && r.account.IsEmptyCodeHash() {
+func pbinReadAccountCode(inner state.StateReader, account *accounts.Account, address accounts.Address) ([]byte, error) {
+	if account != nil && account.IsEmptyCodeHash() {
 		return nil, nil
 	}
-	return r.inner.ReadAccountCode(address)
-}
-
-func (r pbinAccountCodeReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
-	if r.account != nil && r.account.IsEmptyCodeHash() {
-		return 0, nil
-	}
-	return r.inner.ReadAccountCodeSize(address)
+	return inner.ReadAccountCode(address)
 }
 
 func pbinAccountBasicValue(rs *RecordingState, address common.Address, account *accounts.Account, original bool) ([]byte, error) {
-	codeReader := pbinAccountCodeReader{inner: rs.inner, account: account}
 	codeSize := uint64(0)
 	if !original {
 		if code, changed := rs.ModifiedCode[address]; changed {
 			codeSize = uint64(len(code))
-		} else {
-			size, err := codeReader.ReadAccountCodeSize(accounts.InternAddress(address))
+		} else if !account.IsEmptyCodeHash() {
+			code, err := rs.inner.ReadAccountCode(accounts.InternAddress(address))
 			if err != nil {
 				return nil, err
 			}
-			codeSize = uint64(size)
+			codeSize = uint64(len(code))
 		}
 	} else {
-		code, err := codeReader.ReadAccountCode(accounts.InternAddress(address))
+		code, err := pbinReadAccountCode(rs.inner, account, accounts.InternAddress(address))
 		if err != nil {
 			return nil, err
 		}

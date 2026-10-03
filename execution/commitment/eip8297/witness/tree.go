@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -44,10 +45,9 @@ type pbinBranch struct {
 }
 
 type pbinNode struct {
-	walk    eip8297.Bitpath
-	created bool
-	branch  *pbinBranch
-	group   *PBinGroup
+	walk   eip8297.Bitpath
+	branch *pbinBranch
+	group  *PBinGroup
 }
 
 type PBinTree struct {
@@ -192,13 +192,8 @@ func (t *PBinTree) Resolved() []PBinResolvedNode {
 	if t == nil || len(t.resolved) == 0 {
 		return nil
 	}
-	paths := make([]string, 0, len(t.resolved))
-	for path := range t.resolved {
-		paths = append(paths, path)
-	}
-	slices.SortFunc(paths, func(a, b string) int { return bytes.Compare([]byte(a), []byte(b)) })
-	result := make([]PBinResolvedNode, 0, len(paths))
-	for _, path := range paths {
+	result := make([]PBinResolvedNode, 0, len(t.resolved))
+	for _, path := range slices.Sorted(maps.Keys(t.resolved)) {
 		node := t.resolved[path]
 		result = append(result, PBinResolvedNode{Path: slices.Clone(node.Path), Blob: slices.Clone(node.Blob)})
 	}
@@ -342,35 +337,11 @@ func (t *PBinTree) deleteChild(ref *pbinChild, walk, keyPath eip8297.Bitpath) (*
 	if err != nil || !changed {
 		return ref, changed, err
 	}
-	if edge == 0 && branch.left == nil {
-		collapsed, err := t.collapse(branch.right, walk, &branch.prefix, 1)
-		if err != nil {
-			return nil, false, err
-		}
-		return collapsed, true, nil
-	}
-	if edge == 1 && branch.right == nil {
-		collapsed, err := t.collapse(branch.left, walk, &branch.prefix, 0)
-		if err != nil {
-			return nil, false, err
-		}
-		return collapsed, true, nil
+	if branch.left == nil || branch.right == nil {
+		collapsed, err := t.collapseMissingChild(branch.left, branch.right, walk, &branch.prefix)
+		return collapsed, true, err
 	}
 	return ref, true, nil
-}
-
-func (t *PBinTree) collapse(survivor *pbinChild, parentWalk eip8297.Bitpath, parentPrefix *eip8297.Bitpath, edge uint64) (*pbinChild, error) {
-	if survivor == nil {
-		return nil, nil
-	}
-	survivorWalk := pbinChildWalk(parentWalk, parentPrefix, edge)
-	node, err := t.resolveChild(survivor, survivorWalk)
-	if err != nil {
-		return nil, err
-	}
-	extra := *parentPrefix
-	extra.AppendBit(edge)
-	return &pbinChild{node: pbinRebaseNode(node, parentWalk, &extra)}, nil
 }
 
 func (t *PBinTree) deletePrefix(ref *pbinChild, walk, target eip8297.Bitpath) (*pbinChild, error) {
@@ -391,11 +362,6 @@ func (t *PBinTree) deletePrefix(ref *pbinChild, walk, target eip8297.Bitpath) (*
 		return nil, err
 	}
 	if node.group != nil {
-		firstKey := append(slices.Clone(node.group.Stem), node.group.Subs[0])
-		firstPath := eip8297.PathFromBytes(firstKey)
-		if target.BitLen <= int16(len(node.group.Stem)*8) && firstPath.HasPrefix(&target) {
-			return nil, nil
-		}
 		for i := range slices.Backward(node.group.Subs) {
 			key := append(slices.Clone(node.group.Stem), node.group.Subs[i])
 			path := eip8297.PathFromBytes(key)
@@ -427,22 +393,34 @@ func (t *PBinTree) deletePrefix(ref *pbinChild, walk, target eip8297.Bitpath) (*
 	if err != nil {
 		return nil, err
 	}
-	if edge == 0 && branch.left == nil {
-		collapsed, err := t.collapse(branch.right, walk, &branch.prefix, 1)
-		return collapsed, err
-	}
-	if edge == 1 && branch.right == nil {
-		collapsed, err := t.collapse(branch.left, walk, &branch.prefix, 0)
-		return collapsed, err
+	if branch.left == nil || branch.right == nil {
+		return t.collapseMissingChild(branch.left, branch.right, walk, &branch.prefix)
 	}
 	return ref, nil
+}
+
+func (t *PBinTree) collapseMissingChild(left, right *pbinChild, walk eip8297.Bitpath, prefix *eip8297.Bitpath) (*pbinChild, error) {
+	survivor, edge := left, uint64(0)
+	if left == nil {
+		survivor, edge = right, 1
+	}
+	if survivor == nil {
+		return nil, nil
+	}
+	survivorWalk := pbinChildWalk(walk, prefix, edge)
+	node, err := t.resolveChild(survivor, survivorWalk)
+	if err != nil {
+		return nil, err
+	}
+	extra := *prefix
+	extra.AppendBit(edge)
+	return &pbinChild{node: pbinRebaseNode(node, walk, &extra)}, nil
 }
 
 func pbinNodeFromDecoded(decoded PBinDecodedBlob, walk eip8297.Bitpath) (*pbinNode, error) {
 	switch {
 	case decoded.Leaf != nil:
-		key := decoded.Leaf.Key
-		return &pbinNode{walk: walk, group: &PBinGroup{Position: uint16(walk.BitLen), Stem: slices.Clone(key[:len(key)-1]), Subs: []byte{key[len(key)-1]}, Values: [][]byte{slices.Clone(decoded.Leaf.Value)}}}, nil
+		return pbinLeafChild(walk, decoded.Leaf.Key, decoded.Leaf.Value).node, nil
 	case decoded.Group != nil:
 		if decoded.Group.Position != uint16(walk.BitLen) {
 			return nil, fmt.Errorf("pbin witness: group position %d does not match path length %d", decoded.Group.Position, walk.BitLen)
@@ -456,7 +434,7 @@ func pbinNodeFromDecoded(decoded PBinDecodedBlob, walk eip8297.Bitpath) (*pbinNo
 }
 
 func pbinLeafChild(walk eip8297.Bitpath, key, value []byte) *pbinChild {
-	return &pbinChild{node: &pbinNode{walk: walk, created: true, group: &PBinGroup{Position: uint16(walk.BitLen), Stem: slices.Clone(key[:len(key)-1]), Subs: []byte{key[len(key)-1]}, Values: [][]byte{slices.Clone(value)}}}}
+	return &pbinChild{node: &pbinNode{walk: walk, group: &PBinGroup{Position: uint16(walk.BitLen), Stem: slices.Clone(key[:len(key)-1]), Subs: []byte{key[len(key)-1]}, Values: [][]byte{slices.Clone(value)}}}}
 }
 
 func pbinRefHash(ref *pbinChild) common.Hash {
@@ -507,7 +485,7 @@ func pbinGroupDelete(group *PBinGroup, sub byte) bool {
 }
 
 func pbinBranchChild(walk, prefix eip8297.Bitpath, left, right *pbinChild) *pbinChild {
-	return &pbinChild{node: &pbinNode{walk: walk, created: true, branch: &pbinBranch{prefix: prefix, left: left, right: right}}}
+	return &pbinChild{node: &pbinNode{walk: walk, branch: &pbinBranch{prefix: prefix, left: left, right: right}}}
 }
 
 func pbinSplitGroup(node *pbinNode, keyPath eip8297.Bitpath, key, value []byte) *pbinChild {
@@ -539,7 +517,7 @@ func pbinSplitBranch(node *pbinNode, keyPath eip8297.Bitpath, matched, start int
 	newEdge := keyPath.Bit(start + matched)
 	existingWalk := pbinChildWalk(node.walk, &commonPrefix, existingEdge)
 	suffix := oldPrefix.Slice(matched+1, oldPrefix.BitLen)
-	existingNode := &pbinNode{walk: existingWalk, created: true, branch: &pbinBranch{prefix: suffix, left: node.branch.left, right: node.branch.right}}
+	existingNode := &pbinNode{walk: existingWalk, branch: &pbinBranch{prefix: suffix, left: node.branch.left, right: node.branch.right}}
 	newChild := pbinLeafChild(pbinChildWalk(node.walk, &commonPrefix, newEdge), key, value)
 	var left, right *pbinChild
 	if existingEdge == 0 {
@@ -554,21 +532,15 @@ func pbinSplitBranch(node *pbinNode, keyPath eip8297.Bitpath, matched, start int
 
 func pbinRebaseNode(node *pbinNode, walk eip8297.Bitpath, extra *eip8297.Bitpath) *pbinNode {
 	if node.group != nil {
-		return &pbinNode{walk: walk, created: true, group: &PBinGroup{Position: uint16(walk.BitLen), Stem: slices.Clone(node.group.Stem), Subs: slices.Clone(node.group.Subs), Values: pbinCloneValues(node.group.Values)}}
+		group := *node.group
+		group.Position = uint16(walk.BitLen)
+		return &pbinNode{walk: walk, group: &group}
 	}
 	prefix := node.branch.prefix
 	if extra != nil {
 		prefix = pbinAppend(*extra, &prefix)
 	}
-	return &pbinNode{walk: walk, created: true, branch: &pbinBranch{prefix: prefix, left: node.branch.left, right: node.branch.right}}
-}
-
-func pbinCloneValues(values [][]byte) [][]byte {
-	result := make([][]byte, len(values))
-	for i := range values {
-		result[i] = slices.Clone(values[i])
-	}
-	return result
+	return &pbinNode{walk: walk, branch: &pbinBranch{prefix: prefix, left: node.branch.left, right: node.branch.right}}
 }
 
 func pbinChildWalk(walk eip8297.Bitpath, prefix *eip8297.Bitpath, edge uint64) eip8297.Bitpath {

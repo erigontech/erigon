@@ -99,10 +99,10 @@ func TestCalcStatePBinFeedFlagsResetWithBlock(t *testing.T) {
 	code := accounts.NewCode([]byte{0x60, 0x00})
 	cs := newTestCalcState()
 	cs.ApplyWrites(newWS().selfDestruct(addr, state.Version{}, true).code(addr, state.Version{}, code).build(), false)
-	require.Contains(t, cs.codeKeys, addr)
+	require.Contains(t, cs.codeValues, addr)
 	require.Contains(t, cs.wiped, addr)
 	cs.ResetBlockFlags()
-	require.Empty(t, cs.codeKeys)
+	require.Empty(t, cs.codeValues)
 	require.Empty(t, cs.wiped)
 }
 
@@ -150,12 +150,12 @@ func TestCalcStatePBinFeedUsesPendingValuesBeforeApply(t *testing.T) {
 	oldCode := accounts.NewCode([]byte{0x60, 0x01})
 	newCode := accounts.NewCode([]byte{0x60, 0x02})
 	newBalance := *uint256.NewInt(9)
-	appliedAccount := accounts.Account{Nonce: 2, Balance: newBalance, CodeHash: newCode.Hash}
+	oldAccount := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: oldCode.Hash}
 	key := accounts.InternKey(common.Hash{0x24})
 	keyValue := key.Value()
 	storageKey := append(append([]byte(nil), address[:]...), keyValue[:]...)
 	reader := &calcPBinReader{values: map[string][]byte{
-		calcPBinReaderKey(kv.AccountsDomain, address[:]): accounts.SerialiseV3(&appliedAccount),
+		calcPBinReaderKey(kv.AccountsDomain, address[:]): accounts.SerialiseV3(&oldAccount),
 		calcPBinReaderKey(kv.CodeDomain, address[:]):     oldCode.Bytes,
 		calcPBinReaderKey(kv.StorageDomain, storageKey):  {1},
 	}}
@@ -315,7 +315,7 @@ func TestCalcStatePBinFeedBALTracksCodeAndEmptyRemoval(t *testing.T) {
 	}, true, false, false)
 	address := accounts.InternAddress(addr)
 	emptyAddress := accounts.InternAddress(emptyAddr)
-	require.Contains(t, cs.codeKeys, address)
+	require.Contains(t, cs.codeValues, address)
 	require.Empty(t, cs.wiped)
 	require.True(t, cs.accounts[emptyAddress].Deleted)
 	require.NotEqual(t, empty.CodeHash, cs.accounts[address].CodeHash)

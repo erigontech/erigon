@@ -18,6 +18,7 @@ package pbt
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -139,13 +140,7 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 			return phaseBucketResult{}, err
 		}
 	}
-	base := workerContext
-	if base == nil {
-		base = t.phaseBase
-		if base == nil {
-			base = t.ctx
-		}
-	}
+	base := cmp.Or(workerContext, t.phaseBase, t.ctx)
 	local := t.newPhaseContext(base, nil)
 	var subtreeTrie *Trie
 	switch {
@@ -231,7 +226,7 @@ func opInSubtree(op Op, prefix *eip8297.Bitpath) error {
 	return nil
 }
 
-func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phasePlan, ops []Op) (common.Hash, error) {
+func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phasePlan) (common.Hash, error) {
 	base := t.ctx
 	t.phaseReadMu = &sync.Mutex{}
 	defer func() { t.phaseReadMu = nil }()
@@ -267,25 +262,14 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 		var result phaseBucketResult
 		var err error
 		switch task.kind {
-		case phaseBucketSubtask:
-			result, err = t.runSubtreeTask(workerCtx, workerContext, task)
-			if err != nil {
-				return err
-			}
-		case phaseBucket:
-			if len(task.dependencies) == 0 {
+		case phaseBucketSubtask, phaseBucket:
+			if task.kind == phaseBucketSubtask || len(task.dependencies) == 0 {
 				result, err = t.runSubtreeTask(workerCtx, workerContext, task)
 			} else {
 				result, err = t.runBucketJoin(workerCtx, workerContext, task, results, ready)
 			}
-			if err != nil {
-				return err
-			}
 		case phaseChain:
 			result, err = t.runChainTask(workerCtx, workerContext, task, results, ready)
-			if err != nil {
-				return err
-			}
 		case phaseJoin:
 			changed := make(map[string]phaseBucketResult)
 			for index := range results {
@@ -309,12 +293,13 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 				}
 			}
 			t.coreTask = &task
-			var err error
 			finalRoot, err = t.processUpperOps(nil, changed)
 			t.coreTask = nil
-			return err
 		default:
 			return fmt.Errorf("unknown phase task %d", task.kind)
+		}
+		if err != nil {
+			return err
 		}
 		results[task.resultIndex] = result
 		ready[task.resultIndex] = true
@@ -335,10 +320,7 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 
 //nolint:gocritic
 func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
-	base := workerContext
-	if base == nil {
-		base = t.phaseBase
-	}
+	base := cmp.Or(workerContext, t.phaseBase)
 	local := t.newPhaseContext(base, nil)
 	bucketTrie, err := newBucketTrie(local, []byte(task.key))
 	if err != nil {
@@ -365,9 +347,7 @@ func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment
 	if _, err := bucketTrie.processUpperOps(nil, changed); err != nil {
 		return phaseBucketResult{}, err
 	}
-	bucketDeltas := bucketTrie.TakeDeltas()
-	childDeltas = append(childDeltas, bucketDeltas...)
-	deltas := childDeltas
+	deltas := append(childDeltas, bucketTrie.TakeDeltas()...)
 	descriptor, present, err := bucketTrie.descriptorFromRoot()
 	descriptor, present, err = descriptorWithFallback(descriptor, present, err, deltas, task.fallbackSeen, task.fallback, task.fallbackOK)
 	if err != nil {
@@ -378,10 +358,7 @@ func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment
 
 //nolint:gocritic
 func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
-	base := workerContext
-	if base == nil {
-		base = t.phaseBase
-	}
+	base := cmp.Or(workerContext, t.phaseBase)
 	local := t.newPhaseContext(base, &task.prefix)
 	chainTrie, err := newSubtreeTrie(local, task.prefix, task.initial.descriptor, task.initial.present)
 	if err != nil {

@@ -272,10 +272,6 @@ func (r *PBinWitnessResolver) resolveExt(base eip8297.Bitpath, record *Record, n
 
 func (r *PBinWitnessResolver) resolveRow(base eip8297.Bitpath, record *Record, node, target eip8297.Bitpath, expected *common.Hash) ([]byte, bool, error) {
 	path := base
-	key, err := rowKeyForPath(&path)
-	if err != nil {
-		return nil, false, err
-	}
 	slots := occupiedSlots(record)
 	if len(slots) == 0 {
 		return nil, false, nil
@@ -284,7 +280,7 @@ func (r *PBinWitnessResolver) resolveRow(base eip8297.Bitpath, record *Record, n
 	if err != nil {
 		return nil, false, err
 	}
-	return r.resolveRange(path, key, record, slots, from, to, node, node, target, expected)
+	return r.resolveRange(path, record, slots, from, to, node, node, target, expected)
 }
 
 func pbinRowRange(path, node eip8297.Bitpath, slots []int) (int, int, error) {
@@ -318,7 +314,7 @@ func pbinSlotMatches(slot int, path *eip8297.Bitpath, start int16, count int) bo
 	return true
 }
 
-func (r *PBinWitnessResolver) resolveRange(path eip8297.Bitpath, key []byte, record *Record, slots []int, from, to int, node, wanted, target eip8297.Bitpath, expected *common.Hash) ([]byte, bool, error) {
+func (r *PBinWitnessResolver) resolveRange(path eip8297.Bitpath, record *Record, slots []int, from, to int, node, wanted, target eip8297.Bitpath, expected *common.Hash) ([]byte, bool, error) {
 	if from == to {
 		if expected != nil && *expected != (common.Hash{}) {
 			return nil, false, fmt.Errorf("pbin witness: authenticated child at %x is empty", node)
@@ -329,12 +325,12 @@ func (r *PBinWitnessResolver) resolveRange(path eip8297.Bitpath, key []byte, rec
 	if node.BitLen == 0 {
 		parentSplit = 0
 	}
-	folded, err := foldRange(path, record, slots, from, to, parentSplit, nil)
+	folded, err := foldRange(path, record, slots, from, to, nil)
 	if err != nil {
 		if to-from != 1 {
 			return nil, false, err
 		}
-		return r.resolveSingle(path, key, record, slots[from], node, wanted, target, expected)
+		return r.resolveSingle(path, record, slots[from], node, wanted, target, expected)
 	}
 	prefix := rowPrefix(&path, slots[from], parentSplit+1, folded.split)
 	blob, err := witness.PBinEncodeBranch(&prefix, &folded.left, &folded.right)
@@ -344,7 +340,7 @@ func (r *PBinWitnessResolver) resolveRange(path eip8297.Bitpath, key []byte, rec
 	if err := pbinCheckPointer(blob, expected); err != nil {
 		return nil, false, err
 	}
-	group, ok, err := r.tryGroupRange(path, key, record, slots, from, to, node, blob)
+	group, ok, err := r.tryGroupRange(path, record, slots, from, to, node, blob)
 	if err != nil {
 		return nil, false, err
 	}
@@ -382,12 +378,12 @@ func (r *PBinWitnessResolver) resolveRange(path eip8297.Bitpath, key []byte, rec
 		return nil, false, nil
 	}
 	if childTo-childFrom > 1 {
-		return r.resolveRange(path, key, record, slots, childFrom, childTo, child, wanted, target, &childHash)
+		return r.resolveRange(path, record, slots, childFrom, childTo, child, wanted, target, &childHash)
 	}
-	return r.resolveSingle(path, key, record, slots[childFrom], child, wanted, target, &childHash)
+	return r.resolveSingle(path, record, slots[childFrom], child, wanted, target, &childHash)
 }
 
-func (r *PBinWitnessResolver) resolveSingle(path eip8297.Bitpath, key []byte, record *Record, slot int, node, wanted, target eip8297.Bitpath, expected *common.Hash) ([]byte, bool, error) {
+func (r *PBinWitnessResolver) resolveSingle(path eip8297.Bitpath, record *Record, slot int, node, wanted, target eip8297.Bitpath, expected *common.Hash) ([]byte, bool, error) {
 	cell := &record.Cells[slot]
 	parentSplit := witnessParentSplit(path, node)
 	prefix := rowPrefix(&path, slot, parentSplit+1, path.BitLen+4)
@@ -462,7 +458,7 @@ func (r *PBinWitnessResolver) resolveChildAt(rowPath, node, target eip8297.Bitpa
 }
 
 func (r *PBinWitnessResolver) readChildRecord(rowPath, node eip8297.Bitpath, expected *common.Hash) (pbinResolverRecord, error) {
-	if rowPath.BitLen >= 264 && pathByte(&rowPath, 0) == eip8297.StorageZone {
+	if rowPath.BitLen >= 264 && pathByte(&rowPath) == eip8297.StorageZone {
 		bucketPath := rowPath.Slice(0, 264)
 		bucketKey, err := EncodeRowKey(&bucketPath)
 		if err != nil {
@@ -541,15 +537,11 @@ func pbinGroupPathCandidate(path *eip8297.Bitpath) bool {
 	if path.BitLen < 8 {
 		return false
 	}
-	keyLen, ok := eip8297.ZoneKeyLength(pathByte(path, 0))
+	keyLen, ok := eip8297.ZoneKeyLength(pathByte(path))
 	return ok && path.BitLen >= int16(keyLen*8-8)
 }
 
 func (r *PBinWitnessResolver) tryGroupFromRecord(base eip8297.Bitpath, record *Record, node eip8297.Bitpath, branch []byte) ([]byte, bool, error) {
-	key, err := rowKeyForPath(&base)
-	if err != nil {
-		return nil, false, err
-	}
 	switch record.Form {
 	case RowRoot:
 		slots := occupiedSlots(record)
@@ -557,7 +549,7 @@ func (r *PBinWitnessResolver) tryGroupFromRecord(base eip8297.Bitpath, record *R
 		if err != nil {
 			return nil, false, err
 		}
-		return r.tryGroupRange(base, key, record, slots, from, to, node, branch)
+		return r.tryGroupRange(base, record, slots, from, to, node, branch)
 	case ExtRoot:
 		return r.tryGroupExt(base, record, node, branch)
 	default:
@@ -565,7 +557,7 @@ func (r *PBinWitnessResolver) tryGroupFromRecord(base eip8297.Bitpath, record *R
 	}
 }
 
-func (r *PBinWitnessResolver) tryGroupRange(path eip8297.Bitpath, key []byte, record *Record, slots []int, from, to int, node eip8297.Bitpath, branch []byte) ([]byte, bool, error) {
+func (r *PBinWitnessResolver) tryGroupRange(path eip8297.Bitpath, record *Record, slots []int, from, to int, node eip8297.Bitpath, branch []byte) ([]byte, bool, error) {
 	if to-from < 2 {
 		return nil, false, nil
 	}
@@ -586,7 +578,7 @@ func (r *PBinWitnessResolver) tryGroupRange(path eip8297.Bitpath, key []byte, re
 	stem := first[:len(first)-1]
 	values := make(map[byte][]byte)
 	complete := true
-	if err := r.collectRange(path, key, record, slots, from, to, node, stem, values, nil, &complete); err != nil {
+	if err := r.collectRange(path, record, slots, from, to, node, stem, values, nil, &complete); err != nil {
 		return nil, false, err
 	}
 	return r.encodeGroup(stem, values, complete, node, branch)
@@ -601,7 +593,7 @@ func (r *PBinWitnessResolver) tryGroupExt(base eip8297.Bitpath, record *Record, 
 	if !pbinGroupPathCandidate(&absolute) {
 		return nil, false, nil
 	}
-	first, err := r.firstKeyExt(base, record, node)
+	first, err := r.firstKeyExt(base, record)
 	if err != nil {
 		return nil, false, err
 	}
@@ -611,7 +603,7 @@ func (r *PBinWitnessResolver) tryGroupExt(base eip8297.Bitpath, record *Record, 
 	stem := first[:len(first)-1]
 	values := make(map[byte][]byte)
 	complete := true
-	if err := r.collectExt(base, record, node, stem, values, nil, &complete); err != nil {
+	if err := r.collectExt(base, record, node, stem, values, &complete); err != nil {
 		return nil, false, err
 	}
 	return r.encodeGroup(stem, values, complete, node, branch)
@@ -681,10 +673,7 @@ func (r *PBinWitnessResolver) encodeGroup(stem []byte, values map[byte][]byte, c
 
 func (r *PBinWitnessResolver) firstKeyRange(path eip8297.Bitpath, record *Record, slots []int, from, to int, node eip8297.Bitpath) ([]byte, error) {
 	if to-from > 1 {
-		folded, err := foldRange(path, record, slots, from, to, node.BitLen-1, nil)
-		if node.BitLen == path.BitLen {
-			folded, err = foldRange(path, record, slots, from, to, path.BitLen, nil)
-		}
+		folded, err := foldRange(path, record, slots, from, to, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -739,7 +728,7 @@ func (r *PBinWitnessResolver) firstKeyRecord(base eip8297.Bitpath, record *Recor
 		}
 		return cell.Key, nil
 	case ExtRoot:
-		return r.firstKeyExt(base, record, node)
+		return r.firstKeyExt(base, record)
 	case RowRoot:
 		slots := occupiedSlots(record)
 		from, to, err := pbinRowRange(base, node, slots)
@@ -752,7 +741,7 @@ func (r *PBinWitnessResolver) firstKeyRecord(base eip8297.Bitpath, record *Recor
 	}
 }
 
-func (r *PBinWitnessResolver) firstKeyExt(base eip8297.Bitpath, record *Record, node eip8297.Bitpath) ([]byte, error) {
+func (r *PBinWitnessResolver) firstKeyExt(base eip8297.Bitpath, record *Record) ([]byte, error) {
 	absolute := base
 	absolute.Append(&record.SelfExt)
 	child := absolute
@@ -762,13 +751,13 @@ func (r *PBinWitnessResolver) firstKeyExt(base eip8297.Bitpath, record *Record, 
 	return r.firstKeyChildAt(window, child)
 }
 
-func (r *PBinWitnessResolver) collectRange(path eip8297.Bitpath, key []byte, record *Record, slots []int, from, to int, node eip8297.Bitpath, stem []byte, values map[byte][]byte, expected *common.Hash, complete *bool) error {
+func (r *PBinWitnessResolver) collectRange(path eip8297.Bitpath, record *Record, slots []int, from, to int, node eip8297.Bitpath, stem []byte, values map[byte][]byte, expected *common.Hash, complete *bool) error {
 	if from == to {
 		return nil
 	}
 	parentSplit := witnessParentSplit(path, node)
 	if to-from > 1 {
-		folded, err := foldRange(path, record, slots, from, to, parentSplit, nil)
+		folded, err := foldRange(path, record, slots, from, to, nil)
 		if err != nil {
 			return err
 		}
@@ -785,17 +774,17 @@ func (r *PBinWitnessResolver) collectRange(path eip8297.Bitpath, key []byte, rec
 			middle++
 		}
 		if edgePath.HasPrefix(&stemPath) {
-			if err := r.collectRange(path, key, record, slots, from, middle, appendPathBit(edgePath, 0), stem, values, &folded.left, complete); err != nil {
+			if err := r.collectRange(path, record, slots, from, middle, appendPathBit(edgePath, 0), stem, values, &folded.left, complete); err != nil {
 				return err
 			}
-			return r.collectRange(path, key, record, slots, middle, to, appendPathBit(edgePath, 1), stem, values, &folded.right, complete)
+			return r.collectRange(path, record, slots, middle, to, appendPathBit(edgePath, 1), stem, values, &folded.right, complete)
 		}
 		edge := stemPath.Bit(edgePath.BitLen)
 		*complete = false
 		if edge == 0 {
-			return r.collectRange(path, key, record, slots, from, middle, appendPathBit(edgePath, 0), stem, values, &folded.left, complete)
+			return r.collectRange(path, record, slots, from, middle, appendPathBit(edgePath, 0), stem, values, &folded.left, complete)
 		}
-		return r.collectRange(path, key, record, slots, middle, to, appendPathBit(edgePath, 1), stem, values, &folded.right, complete)
+		return r.collectRange(path, record, slots, middle, to, appendPathBit(edgePath, 1), stem, values, &folded.right, complete)
 	}
 	cell := &record.Cells[slots[from]]
 	if cell.Kind == LeafCell {
@@ -871,24 +860,20 @@ func (r *PBinWitnessResolver) collectRecord(base eip8297.Bitpath, record *Record
 		}
 		return nil
 	case ExtRoot:
-		return r.collectExt(base, record, node, stem, values, expected, complete)
+		return r.collectExt(base, record, node, stem, values, complete)
 	case RowRoot:
 		slots := occupiedSlots(record)
 		from, to, err := pbinRowRange(base, node, slots)
 		if err != nil {
 			return err
 		}
-		key, err := rowKeyForPath(&base)
-		if err != nil {
-			return err
-		}
-		return r.collectRange(base, key, record, slots, from, to, node, stem, values, expected, complete)
+		return r.collectRange(base, record, slots, from, to, node, stem, values, expected, complete)
 	default:
 		return fmt.Errorf("pbin witness: unknown record form %d", record.Form)
 	}
 }
 
-func (r *PBinWitnessResolver) collectExt(base eip8297.Bitpath, record *Record, node eip8297.Bitpath, stem []byte, values map[byte][]byte, expected *common.Hash, complete *bool) error {
+func (r *PBinWitnessResolver) collectExt(base eip8297.Bitpath, record *Record, node eip8297.Bitpath, stem []byte, values map[byte][]byte, complete *bool) error {
 	absolute := base
 	absolute.Append(&record.SelfExt)
 	stemPath := eip8297.PathFromBits(stem, int16(len(stem)*8))

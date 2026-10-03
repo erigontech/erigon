@@ -31,7 +31,7 @@ type subtreeCell struct {
 }
 
 func isStoragePath(path *eip8297.Bitpath) bool {
-	return path.BitLen >= 8 && pathByte(path, 0) == eip8297.StorageZone
+	return path.BitLen >= 8 && pathByte(path) == eip8297.StorageZone
 }
 
 func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (common.Hash, error) {
@@ -410,7 +410,6 @@ func (t *Trie) descriptorAtRowMode(row *rowNode, prefix *eip8297.Bitpath, bucket
 
 func subtreeCellForRow(subtree subtreeCell, rowPath eip8297.Bitpath) (rowCell, error) {
 	cell := subtree.cell
-	cell.child = subtree.cell.child
 	if cell.Kind == BranchCell {
 		start := rowPath.BitLen + 4
 		if subtree.path.BitLen < start {
@@ -587,30 +586,7 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 			return nil
 		}
 		old := subtreeCell{path: oldPath, cell: *cell}
-		if d/4 == row.path.BitLen/4 {
-			newCell, err := subtreeCellForRow(subtree, row.path)
-			if err != nil {
-				return err
-			}
-			setBranch(row, slot, newCell)
-			t.markDirty(row)
-			return nil
-		}
-		childPath := subtree.path.Slice(0, (d/4)*4)
-		child, err := t.subtreeRow(childPath, old, subtree)
-		if err != nil {
-			return err
-		}
-		result, err := rowRoutingResult(child)
-		if err != nil {
-			return err
-		}
-		full, err := rowTopPrefix(child, result.Split)
-		if err != nil {
-			return err
-		}
-		t.attachChildRow(row, slot, child, branchCell(full.Slice(row.path.BitLen+4, result.Split), common.Hash{}, common.Hash{}), nil, 0)
-		return nil
+		return t.insertSubtreeChildRow(row, slot, old, subtree, d)
 	case BranchCell:
 		full := branchPath(row, slot, cell)
 		d := firstDifference(&full, &subtree.path)
@@ -630,24 +606,28 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 			return nil
 		}
 		old := subtreeCell{path: full, cell: *cell}
-		childPath := subtree.path.Slice(0, (d/4)*4)
-		child, err := t.subtreeRow(childPath, old, subtree)
-		if err != nil {
-			return err
-		}
-		result, err := rowRoutingResult(child)
-		if err != nil {
-			return err
-		}
-		newFull, err := rowTopPrefix(child, result.Split)
-		if err != nil {
-			return err
-		}
-		t.attachChildRow(row, slot, child, branchCell(newFull.Slice(row.path.BitLen+4, result.Split), common.Hash{}, common.Hash{}), nil, 0)
-		return nil
+		return t.insertSubtreeChildRow(row, slot, old, subtree, d)
 	default:
 		return errInsertKey
 	}
+}
+
+func (t *Trie) insertSubtreeChildRow(row *rowNode, slot int, old, subtree subtreeCell, split int16) error {
+	childPath := subtree.path.Slice(0, (split/4)*4)
+	child, err := t.subtreeRow(childPath, old, subtree)
+	if err != nil {
+		return err
+	}
+	result, err := rowRoutingResult(child)
+	if err != nil {
+		return err
+	}
+	full, err := rowTopPrefix(child, result.Split)
+	if err != nil {
+		return err
+	}
+	t.attachChildRow(row, slot, child, branchCell(full.Slice(row.path.BitLen+4, result.Split), common.Hash{}, common.Hash{}), nil, 0)
+	return nil
 }
 
 func (t *Trie) emptyRoot() {
