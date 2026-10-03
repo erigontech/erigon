@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -533,8 +534,7 @@ func TestPBTAttachRemedyHelperProcess(t *testing.T) {
 	require.NoError(t, cmdStageExec.ParseFlags(args))
 	chaindata = filepath.Join(datadirCli, "chaindata")
 	chain = "pbt-remedy"
-	statecfg.ExperimentalCommitmentV3 = true
-	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	cmdStageExec.PreRun(cmdStageExec, nil)
 	db, err := openDB(t.Context(), dbCfg(dbcfg.ChainDB, chaindata), true, chain, log.New())
 	require.NoError(t, err)
 	defer db.Close()
@@ -659,6 +659,24 @@ func TestPBTAttachPrintedRemediesRunInFreshProcesses(t *testing.T) {
 			require.NoError(t, attachPBT(t.Context(), nodeDirs.DataDir, published, "test", log.New()))
 		})
 	}
+}
+
+func TestPBTAttachRejectsNodeBehindConversionTxNum(t *testing.T) {
+	selectPBTCommandSuite(t)
+	source, _ := newPBTConversionSource(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	rawDB := dbCfg(dbcfg.ChainDB, source.Chaindata).MustOpen()
+	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := rawdbv3.TxNums.Truncate(tx, 1); err != nil {
+			return err
+		}
+		return rawdbv3.TxNums.Append(tx, 1, 6)
+	}))
+	rawDB.Close()
+	setExecutionProgress(t, source.Chaindata, 1)
+	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
+	require.ErrorContains(t, err, "node is behind conversion txNum")
 }
 
 func buildPBTTestErigon(t *testing.T) string {
@@ -894,7 +912,7 @@ func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
 	blockNum, txNum, ok, err := settings.ConversionPoint()
 	require.NoError(t, err)
 	require.True(t, ok)
-	_, err = validatePBTAttachPublishedPoint(t.Context(), datadir.Open(published), settings, blockNum, txNum, log.New())
+	_, err = validatePBTAttachPublishedPointWithLeafStamps(t.Context(), datadir.Open(published), settings, blockNum, txNum, log.New(), validatePBTAttachLeafStamps)
 	require.ErrorContains(t, err, "accounts")
 	setExecutionProgress(t, source.Chaindata, 1)
 	err = attachPBTWithHooks(t.Context(), source.DataDir, published, "", log.New(), pbtAttachHooks{genesis: pbtAttachNoGenesis})

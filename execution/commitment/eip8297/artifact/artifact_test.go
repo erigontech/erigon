@@ -68,11 +68,11 @@ func WriteSnapshot(dst io.Writer, root common.Hash, leaves KVIterator) (common.H
 	return WriteSnapshotStream(dst, leaves, func() (common.Hash, error) { return root, nil })
 }
 
-func WritePreimages(dst io.Writer, iterate PreimageIterator) error {
+func writePreimages(t *testing.T, dst io.Writer, iterate PreimageIterator) error {
 	if iterate == nil {
 		return ErrPreimages
 	}
-	return WritePreimagesStream(dst, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+	return WritePreimagesStreamWithScratch(dst, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
 		return iterate(func(record Preimage) error {
 			return yield(record.Address, func(slotYield func([32]byte) error) error {
 				for _, slot := range record.Slots {
@@ -83,7 +83,7 @@ func WritePreimages(dst io.Writer, iterate PreimageIterator) error {
 				return nil
 			})
 		})
-	})
+	}, t.TempDir())
 }
 
 func preimageSliceIterator(records []Preimage) PreimageIterator {
@@ -288,7 +288,7 @@ func TestStreamingReadersUseCallbacks(t *testing.T) {
 	require.NoError(t, JoinAt(bytes.NewReader(empty.Bytes()), int64(empty.Len()), bytes.NewReader(nil), 0, eip8297.HashBytes, nil, t.TempDir()))
 
 	var preimages bytes.Buffer
-	require.NoError(t, WritePreimages(&preimages, PreimageIterator(func(yield func(Preimage) error) error {
+	require.NoError(t, writePreimages(t, &preimages, PreimageIterator(func(yield func(Preimage) error) error {
 		return yield(Preimage{Address: common.Address{1}})
 	})))
 	var count int
@@ -603,7 +603,7 @@ func TestPreimageReaderRejectsUnsortedDuplicateAndTruncatedRecords(t *testing.T)
 	addressA := common.Address{1}
 	records := []Preimage{{Address: addressA}}
 	var encoded bytes.Buffer
-	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator(records)))
+	require.NoError(t, writePreimages(t, &encoded, preimageSliceIterator(records)))
 	_, err := readPreimages(t, append(encoded.Bytes(), 1))
 	require.Error(t, err, "a trailing byte must not be accepted as a preimage record")
 	duplicate := append(bytes.Clone(encoded.Bytes()), encoded.Bytes()...)
@@ -616,7 +616,7 @@ func TestPreimageReaderRejectsUnsortedDuplicateAndTruncatedRecords(t *testing.T)
 		return bytes.Compare(left[:], right[:]) < 0
 	})
 	encoded.Reset()
-	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator(addressRecords)))
+	require.NoError(t, writePreimages(t, &encoded, preimageSliceIterator(addressRecords)))
 	unsortedAddresses := bytes.Clone(encoded.Bytes())
 	firstAddress := bytes.Clone(unsortedAddresses[:20])
 	copy(unsortedAddresses[:20], unsortedAddresses[24:44])
@@ -631,7 +631,7 @@ func TestPreimageReaderRejectsUnsortedDuplicateAndTruncatedRecords(t *testing.T)
 	})
 	records = []Preimage{{Address: addressA, Slots: slots}}
 	encoded.Reset()
-	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator(records)))
+	require.NoError(t, writePreimages(t, &encoded, preimageSliceIterator(records)))
 	unsortedSlots := bytes.Clone(encoded.Bytes())
 	firstSlot := bytes.Clone(unsortedSlots[24:56])
 	copy(unsortedSlots[24:56], unsortedSlots[56:88])
@@ -688,14 +688,14 @@ func TestPreimageJoinMergesTreeKeysAcrossAddressOrders(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-	require.NoError(t, WritePreimages(&preimages, preimageSliceIterator(records)))
+	require.NoError(t, writePreimages(t, &preimages, preimageSliceIterator(records)))
 	require.NoError(t, JoinAt(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), bytes.NewReader(preimages.Bytes()), int64(preimages.Len()), eip8297.HashBytes, nil, t.TempDir()))
 
 	testJoinError := func(name string, mutate func([]Preimage) []Preimage, want string) {
 		t.Run(name, func(t *testing.T) {
 			mutated := mutate(append([]Preimage(nil), records...))
 			var encoded bytes.Buffer
-			require.NoError(t, WritePreimages(&encoded, preimageSliceIterator(mutated)))
+			require.NoError(t, writePreimages(t, &encoded, preimageSliceIterator(mutated)))
 			err := JoinAt(bytes.NewReader(snapshot.Bytes()), int64(snapshot.Len()), bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), eip8297.HashBytes, nil, t.TempDir())
 			require.ErrorContains(t, err, want)
 		})
@@ -751,7 +751,7 @@ func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
 	expected := [][]byte{headerKey, headerSlotKey, overflowKey}
 	record := Preimage{Address: address, Slots: [][32]byte{headerSlot, overflowSlot}}
 	var encoded bytes.Buffer
-	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator([]Preimage{record})))
+	require.NoError(t, writePreimages(t, &encoded, preimageSliceIterator([]Preimage{record})))
 	yieldExpected := func(yield func([]byte) error) error {
 		for _, key := range expected {
 			if err := yield(key); err != nil {
@@ -783,7 +783,7 @@ func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
 		return bytes.Compare(left[:], right[:]) < 0
 	})
 	encoded.Reset()
-	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator([]Preimage{{Address: address, Slots: extraSlots}})))
+	require.NoError(t, writePreimages(t, &encoded, preimageSliceIterator([]Preimage{{Address: address, Slots: extraSlots}})))
 	require.ErrorContains(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), yieldExpected, eip8297.HashBytes, t.TempDir()), "surplus key")
 }
 
@@ -826,7 +826,7 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	require.NoError(t, err)
 	preimageFile, err := os.CreateTemp(t.TempDir(), "large-preimages-")
 	require.NoError(t, err)
-	err = WritePreimagesStream(preimageFile, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+	err = WritePreimagesStreamWithScratch(preimageFile, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
 		return yield(address, func(slotYield func([32]byte) error) error {
 			return preimageCollector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 				var slot [32]byte
@@ -834,7 +834,7 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 				return slotYield(slot)
 			}, etl.TransformArgs{})
 		})
-	})
+	}, t.TempDir())
 	require.NoError(t, err)
 	require.NoError(t, preimageFile.Close())
 	defer func() { _ = dir.RemoveFile(preimageFile.Name()) }()
@@ -873,17 +873,27 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	}
 	require.Less(t, readerPeak-readerBase, uint64(1<<20))
 	readSlots := 0
-	preimageAlloc, err := allocatedBytes(func() error {
-		return ReadPreimagesStream(preimages, preimageInfo.Size(), func(_ common.Address, slots func(func([32]byte) error) error) error {
-			return slots(func([32]byte) error {
-				readSlots++
-				return nil
-			})
+	runtime.GC()
+	preimageBase := liveHeap()
+	var preimagePeak uint64
+	err = ReadPreimagesStream(preimages, preimageInfo.Size(), func(_ common.Address, slots func(func([32]byte) error) error) error {
+		return slots(func([32]byte) error {
+			readSlots++
+			if readSlots&((1<<16)-1) == 0 {
+				runtime.GC()
+				if current := liveHeap(); current > preimagePeak {
+					preimagePeak = current
+				}
+			}
+			return nil
 		})
 	})
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readSlots)
-	require.Less(t, preimageAlloc, uint64(slotCount)*128)
+	if preimagePeak < preimageBase {
+		preimagePeak = preimageBase
+	}
+	require.Less(t, preimagePeak-preimageBase, uint64(1<<20))
 	seen := 0
 	runtime.GC()
 	joinBase := liveHeap()
@@ -922,7 +932,7 @@ func TestPreimageReaderAllocationsStayBounded(t *testing.T) {
 		return bytes.Compare(left[:], right[:]) < 0
 	})
 	var encoded bytes.Buffer
-	require.NoError(t, WritePreimages(&encoded, preimageSliceIterator(records)))
+	require.NoError(t, writePreimages(t, &encoded, preimageSliceIterator(records)))
 	allocations := testing.AllocsPerRun(3, func() {
 		err := ReadPreimagesStream(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), func(common.Address, func(func([32]byte) error) error) error {
 			return nil
@@ -999,6 +1009,71 @@ func TestWritePreimagesStreamWithScratchReusesScratchAcrossAccounts(t *testing.T
 	entries, err := os.ReadDir(scratchDir)
 	require.NoError(t, err)
 	require.Empty(t, entries)
+}
+
+func TestWritePreimagesStreamWithScratchPreservesConsecutiveSpills(t *testing.T) {
+	const largeSlotCount = preimageSlotSpillThreshold/32 + 1
+	largeSlots := make([][32]byte, largeSlotCount)
+	for i := range largeSlots {
+		binary.BigEndian.PutUint64(largeSlots[i][24:], uint64(i))
+	}
+	sort.Slice(largeSlots, func(i, j int) bool {
+		left := keccak.Sum256(largeSlots[i][:])
+		right := keccak.Sum256(largeSlots[j][:])
+		return bytes.Compare(left[:], right[:]) < 0
+	})
+
+	tests := []struct {
+		name   string
+		counts []int
+	}{
+		{name: "two large", counts: []int{largeSlotCount, largeSlotCount}},
+		{name: "large small large", counts: []int{largeSlotCount, 1, largeSlotCount}},
+		{name: "three large", counts: []int{largeSlotCount, largeSlotCount, largeSlotCount}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			records := make([]Preimage, len(tt.counts))
+			for i, count := range tt.counts {
+				records[i].Address[19] = byte(i + 1)
+				records[i].Slots = largeSlots[:count]
+			}
+			sort.Slice(records, func(i, j int) bool {
+				left := keccak.Sum256(records[i].Address[:])
+				right := keccak.Sum256(records[j].Address[:])
+				return bytes.Compare(left[:], right[:]) < 0
+			})
+			var encoded bytes.Buffer
+			require.NoError(t, WritePreimagesStreamWithScratch(&encoded, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+				return preimageSliceIterator(records)(func(record Preimage) error {
+					return yield(record.Address, func(slotYield func([32]byte) error) error {
+						for _, slot := range record.Slots {
+							if err := slotYield(slot); err != nil {
+								return err
+							}
+						}
+						return nil
+					})
+				})
+			}, t.TempDir()))
+
+			index := 0
+			require.NoError(t, ReadPreimagesStream(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), func(address common.Address, slots func(func([32]byte) error) error) error {
+				record := records[index]
+				index++
+				require.Equal(t, record.Address, address)
+				slotIndex := 0
+				require.NoError(t, slots(func(slot [32]byte) error {
+					require.Equal(t, record.Slots[slotIndex], slot)
+					slotIndex++
+					return nil
+				}))
+				require.Equal(t, len(record.Slots), slotIndex)
+				return nil
+			}))
+			require.Equal(t, len(records), index)
+		})
+	}
 }
 
 func TestWritePreimagesStreamUnderThresholdDoesNotTouchScratchDirectory(t *testing.T) {

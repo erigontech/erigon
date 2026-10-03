@@ -46,10 +46,6 @@ type exportPin struct {
 	Root    common.Hash
 }
 
-func sharedExportPin(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), logger log.Logger) (exportPin, error) {
-	return sharedExportPinWithTxNumReader(ctx, tx, headerAt, rawdbv3.TxNums, logger)
-}
-
 func sharedExportPinWithTxNumReader(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), txNums rawdbv3.TxNumsReader, logger log.Logger) (exportPin, error) {
 	head, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {

@@ -62,14 +62,6 @@ type pbtAttachHooks struct {
 	hexRoot    func(context.Context, datadir.Dirs, *dbstate.ErigonDBSettings, uint64, uint64, log.Logger) (common.Hash, bool, error)
 }
 
-func defaultPBTAttachHooks() pbtAttachHooks {
-	return pbtAttachHooks{
-		leafStamps: validatePBTAttachLeafStamps,
-		genesis:    validatePBTAttachGenesis,
-		hexRoot:    pbtAttachHexRoot,
-	}
-}
-
 func init() {
 	withChain(cmdCommitmentAttachPBT)
 	withDataDir(cmdCommitmentAttachPBT)
@@ -112,15 +104,14 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 }
 
 func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName string, logger log.Logger, hooks pbtAttachHooks) error {
-	defaults := defaultPBTAttachHooks()
 	if hooks.leafStamps == nil {
-		hooks.leafStamps = defaults.leafStamps
+		hooks.leafStamps = validatePBTAttachLeafStamps
 	}
 	if hooks.genesis == nil {
-		hooks.genesis = defaults.genesis
+		hooks.genesis = validatePBTAttachGenesis
 	}
 	if hooks.hexRoot == nil {
-		hooks.hexRoot = defaults.hexRoot
+		hooks.hexRoot = pbtAttachHexRoot
 	}
 	if nodePath == "" || publishedPath == "" {
 		return errors.New("commitment attach-pbt: node and published datadirs are required")
@@ -603,10 +594,6 @@ func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datad
 		return fmt.Errorf("commitment attach-pbt: genesis hash %s differs from node genesis %s", genesis.Hash(), nodeGenesis)
 	}
 	return nil
-}
-
-func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger) (common.Hash, error) {
-	return validatePBTAttachPublishedPointWithLeafStamps(ctx, dirs, settings, blockNum, txNum, logger, validatePBTAttachLeafStamps)
 }
 
 func validatePBTAttachPublishedPointWithLeafStamps(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, blockNum, txNum uint64, logger log.Logger, leafStamps func(uint64, func(func(dbstate.PBinLeaf) error) error) (common.Hash, error)) (common.Hash, error) {

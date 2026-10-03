@@ -202,19 +202,6 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 			}
 			return nil
 		},
-		Storage: func(address common.Hash, groups func(func(artifact.Group) error) error) error {
-			return groups(func(group artifact.Group) error {
-				position := append(append([]byte{}, address[:]...), group.StemHash[:]...)
-				for _, entry := range group.Entries {
-					key := eip8297.TreeKey(eip8297.StorageZone, position, entry.Index)
-					_, err := eip8297.DecodeLeafValue(key, entry.Value)
-					if err != nil {
-						return err
-					}
-				}
-				return nil
-			})
-		},
 	})
 	if err != nil {
 		return common.Hash{}, common.Hash{}, fmt.Errorf("snapshot records: %w", err)

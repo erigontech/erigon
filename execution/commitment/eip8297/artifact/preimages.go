@@ -50,10 +50,6 @@ var (
 
 type PreimageStreamIterator func(func(common.Address, func(func([32]byte) error) error) error) error
 
-func WritePreimagesStream(dst io.Writer, iterate PreimageStreamIterator) error {
-	return WritePreimagesStreamWithScratch(dst, iterate, os.TempDir())
-}
-
 type PreimageRecordWriter struct {
 	dst        io.Writer
 	scratchDir string
@@ -103,6 +99,8 @@ func (w *PreimageRecordWriter) AddSlot(slot []byte) error {
 		w.slotFile = file
 		w.slotName = file.Name()
 		w.slotWriter = bufio.NewWriterSize(file, 1<<20)
+	}
+	if !w.spilled {
 		if _, err := w.slotWriter.Write(w.slotBytes.Bytes()); err != nil {
 			return err
 		}
@@ -318,7 +316,7 @@ func joinAtWithBuffer(snapshot io.ReaderAt, snapshotSize int64, preimages io.Rea
 		})
 		return err
 	}
-	return comparePreimageKeys(preimages, preimageSize, writeExpected, hashFn, bufferSize, tmpDir, func(item joinItem) error {
+	return comparePreimageKeys(preimages, preimageSize, writeExpected, hashFn, bufferSize, tmpDir, "PBT preimage join progress", "preimage join", func(item joinItem) error {
 		if item.hasSlot && yield != nil {
 			return yield(item.address, item.slot)
 		}
@@ -334,10 +332,10 @@ func joinItemLabel(item joinItem) string {
 }
 
 func CheckPreimageSetAt(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn, scratchDir string) error {
-	return comparePreimageKeys(preimages, preimageSize, expected, hashFn, etl.BufferOptimalSize, scratchDir, nil)
+	return comparePreimageKeys(preimages, preimageSize, expected, hashFn, etl.BufferOptimalSize, scratchDir, "PBT preimage check progress", "preimage check", nil)
 }
 
-func comparePreimageKeys(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn, bufferSize datasize.ByteSize, tmpDir string, yield func(joinItem) error) error {
+func comparePreimageKeys(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn, bufferSize datasize.ByteSize, tmpDir, progressMessage, progressPhase string, yield func(joinItem) error) error {
 	if expected == nil {
 		return ErrPreimages
 	}
@@ -380,7 +378,7 @@ func comparePreimageKeys(preimages io.ReaderAt, preimageSize int64, expected fun
 		checked++
 		if now := time.Now(); !now.Before(nextProgress) {
 			nextProgress = now.Add(30 * time.Second)
-			log.Root().Info("PBT preimage check progress", "phase", "preimage check", "records", checked, "key_prefix", hex.EncodeToString(key[:min(len(key), 8)]))
+			log.Root().Info(progressMessage, "phase", progressPhase, "records", checked, "key_prefix", hex.EncodeToString(key[:min(len(key), 8)]))
 		}
 		want, wantOK, err := readJoinItem(expectedReader)
 		if err != nil {
@@ -435,20 +433,6 @@ func writeJoinItem(writer *bufio.Writer, item joinItem) error {
 	if _, err := writer.Write(item.key); err != nil {
 		return err
 	}
-	flags := byte(0)
-	if item.hasSlot {
-		flags = 1
-	}
-	if err := writer.WriteByte(flags); err != nil {
-		return err
-	}
-	if item.hasSlot {
-		if _, err := writer.Write(item.address[:]); err != nil {
-			return err
-		}
-		_, err := writer.Write(item.slot[:])
-		return err
-	}
 	return nil
 }
 
@@ -464,24 +448,7 @@ func readJoinItem(reader *bufio.Reader) (joinItem, bool, error) {
 	if _, err := io.ReadFull(reader, key); err != nil {
 		return joinItem{}, false, err
 	}
-	flags, err := reader.ReadByte()
-	if err != nil {
-		return joinItem{}, false, err
-	}
-	item := joinItem{key: key}
-	if flags > 1 {
-		return joinItem{}, false, ErrPreimages
-	}
-	if flags == 1 {
-		if _, err := io.ReadFull(reader, item.address[:]); err != nil {
-			return joinItem{}, false, err
-		}
-		if _, err := io.ReadFull(reader, item.slot[:]); err != nil {
-			return joinItem{}, false, err
-		}
-		item.hasSlot = true
-	}
-	return item, true, nil
+	return joinItem{key: key}, true, nil
 }
 
 func collectJoinItems(src io.ReaderAt, size int64, hashFn eip8297.HashFn, collector *etl.Collector) error {

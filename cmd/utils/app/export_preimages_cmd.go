@@ -146,10 +146,6 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	return runExportWithTxNumReader(ctx, tx, br.TxnumReader(), headerAt, outDir, tmpDir, logger)
 }
 
-func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir, tmpDir string, logger log.Logger) error {
-	return runExportWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, tmpDir, logger)
-}
-
 func runExportWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, headerAt func(uint64) (*types.Header, error), outDir, tmpDir string, logger log.Logger) error {
 	pin, err := sharedExportPinWithTxNumReader(ctx, tx, headerAt, txNums, logger)
 	if err != nil {

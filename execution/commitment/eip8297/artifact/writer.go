@@ -41,10 +41,6 @@ var (
 )
 
 func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.Hash, error)) (common.Hash, error) {
-	return writeSnapshotStream(dst, leaves, root)
-}
-
-func writeSnapshotStream(dst io.Writer, leaves KVIterator, root func() (common.Hash, error)) (common.Hash, error) {
 	if dst == nil || leaves == nil || root == nil {
 		return common.Hash{}, errors.New("pbt artifact: missing writer input")
 	}

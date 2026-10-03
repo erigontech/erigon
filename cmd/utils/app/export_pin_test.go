@@ -82,9 +82,9 @@ func TestSharedExportPinRejectsMissingBlockMapping(t *testing.T) {
 	readTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer readTx.Rollback()
-	_, err = sharedExportPin(t.Context(), readTx, func(uint64) (*types.Header, error) {
+	_, err = sharedExportPinWithTxNumReader(t.Context(), readTx, func(uint64) (*types.Header, error) {
 		return &types.Header{Root: root}, nil
-	}, log.New())
+	}, rawdbv3.TxNums, log.New())
 	require.ErrorContains(t, err, "has no txNum mapping")
 }
 
@@ -108,10 +108,10 @@ func TestSharedExportPinUsesTheMappedCheckpoint(t *testing.T) {
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	pin, err := sharedExportPin(t.Context(), tx, func(block uint64) (*types.Header, error) {
+	pin, err := sharedExportPinWithTxNumReader(t.Context(), tx, func(block uint64) (*types.Header, error) {
 		require.Equal(t, uint64(7), block)
 		return &types.Header{Root: root}, nil
-	}, log.New())
+	}, rawdbv3.TxNums, log.New())
 	require.NoError(t, err)
 	require.Equal(t, uint64(7), pin.Block)
 	require.Equal(t, uint64(1), pin.TxNum)
@@ -153,10 +153,10 @@ func TestSharedExportPinKeepsV3HexForDualBeforeFork(t *testing.T) {
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	pin, err := sharedExportPin(t.Context(), tx, func(block uint64) (*types.Header, error) {
+	pin, err := sharedExportPinWithTxNumReader(t.Context(), tx, func(block uint64) (*types.Header, error) {
 		require.Equal(t, uint64(7), block)
 		return &types.Header{Root: root}, nil
-	}, log.New())
+	}, rawdbv3.TxNums, log.New())
 	require.NoError(t, err)
 	require.Equal(t, kv.CommitmentDomain, pin.Domain)
 	require.Equal(t, commitment.VariantCommitmentV3, pin.Variant)
@@ -191,10 +191,10 @@ func TestSharedExportPinUsesBinAfterFork(t *testing.T) {
 			tx, err := db.BeginTemporalRo(t.Context())
 			require.NoError(t, err)
 			defer tx.Rollback()
-			pin, err := sharedExportPin(t.Context(), tx, func(block uint64) (*types.Header, error) {
+			pin, err := sharedExportPinWithTxNumReader(t.Context(), tx, func(block uint64) (*types.Header, error) {
 				require.Equal(t, uint64(7), block)
 				return &types.Header{Time: 10, Root: root}, nil
-			}, log.New())
+			}, rawdbv3.TxNums, log.New())
 			require.NoError(t, err)
 			wantDomain := kv.CommitmentBinDomain
 			if variant == state.TrieVariantBin {

@@ -112,9 +112,9 @@ func TestPinnedStateRoot(t *testing.T) {
 			require.NoError(t, err)
 			defer roTx.Rollback()
 
-			pin, err := sharedExportPin(t.Context(), roTx, func(uint64) (*types.Header, error) {
+			pin, err := sharedExportPinWithTxNumReader(t.Context(), roTx, func(uint64) (*types.Header, error) {
 				return &types.Header{Root: want}, nil
-			}, log.New())
+			}, rawdbv3.TxNums, log.New())
 			require.NoError(t, err)
 			require.Equal(t, want, pin.Root)
 		})
@@ -127,9 +127,9 @@ func TestPinnedStateRoot(t *testing.T) {
 		require.NoError(t, err)
 		defer roTx.Rollback()
 
-		pin, err := sharedExportPin(t.Context(), roTx, func(uint64) (*types.Header, error) {
+		pin, err := sharedExportPinWithTxNumReader(t.Context(), roTx, func(uint64) (*types.Header, error) {
 			return &types.Header{Root: empty.RootHash}, nil
-		}, log.New())
+		}, rawdbv3.TxNums, log.New())
 		require.NoError(t, err)
 		require.Equal(t, empty.RootHash, pin.Root)
 	})
@@ -207,7 +207,7 @@ func TestRunExportRefusesBeforeOutput(t *testing.T) {
 				return &types.Header{Root: common.HexToHash("0x02")}, nil
 			}
 
-			err = runExport(ctx, roTx, headerAt, outDir, tmpDir, log.New())
+			err = runExportWithTxNumReader(ctx, roTx, rawdbv3.TxNums, headerAt, outDir, tmpDir, log.New())
 			require.Error(t, err)
 			if testCase.existing {
 				require.Equal(t, before, snapshotFiles(t, outDir))
@@ -250,7 +250,7 @@ func TestRunExportWritesExecutionPin(t *testing.T) {
 		return map[uint64]*types.Header{7: {Root: root}}[block], nil
 	}
 
-	require.NoError(t, runExport(ctx, roTx, headerAt, outDir, tmpDir, log.New()))
+	require.NoError(t, runExportWithTxNumReader(ctx, roTx, rawdbv3.TxNums, headerAt, outDir, tmpDir, log.New()))
 	metadataJSON, err := os.ReadFile(filepath.Join(outDir, preimagesMetaFileName))
 	require.NoError(t, err)
 	var metadata preimagesMeta
@@ -272,7 +272,7 @@ func TestRunExportWrapsHeaderLookupError(t *testing.T) {
 
 	lookupErr := errors.New("header lookup failed")
 	headerAt := func(uint64) (*types.Header, error) { return nil, lookupErr }
-	err = runExport(t.Context(), roTx, headerAt, t.TempDir(), t.TempDir(), log.New())
+	err = runExportWithTxNumReader(t.Context(), roTx, rawdbv3.TxNums, headerAt, t.TempDir(), t.TempDir(), log.New())
 	require.ErrorIs(t, err, lookupErr)
 	require.ErrorContains(t, err, "block 10")
 }
@@ -606,6 +606,77 @@ func (g *generatedStorageKV) Next() ([]byte, []byte, error) {
 }
 
 func (g *generatedStorageKV) Close() {}
+
+type generatedStorageKVMulti struct {
+	addresses [][preimageAddrLen]byte
+	key       [preimageAddrLen + preimageSlotLen]byte
+	count     uint64
+	next      uint64
+}
+
+func (g *generatedStorageKVMulti) HasNext() bool {
+	return g.next < uint64(len(g.addresses))*g.count
+}
+
+func (g *generatedStorageKVMulti) Next() ([]byte, []byte, error) {
+	account := g.next / g.count
+	slot := g.next % g.count
+	copy(g.key[:preimageAddrLen], g.addresses[account][:])
+	binary.BigEndian.PutUint64(g.key[len(g.key)-8:], slot)
+	g.next++
+	return g.key[:], []byte{1}, nil
+}
+
+func (g *generatedStorageKVMulti) Close() {}
+
+func TestWriteHashedPreimagesSpillsConsecutiveLargeAccounts(t *testing.T) {
+	const slots = (1<<20)/32 + 1
+	addresses := [][preimageAddrLen]byte{}
+	accounts := make([]kvPair, 2)
+	for i := range accounts {
+		address := addr(byte(0xaa + i))
+		var addressArray [preimageAddrLen]byte
+		copy(addressArray[:], address)
+		addresses = append(addresses, addressArray)
+		accounts[i] = kvPair{address, []byte{1}}
+	}
+	output, err := os.CreateTemp(t.TempDir(), "preimages-")
+	require.NoError(t, err)
+	defer output.Close()
+	stats, err := exportPreimages(t, context.Background(), &sliceKV{pairs: accounts}, &generatedStorageKVMulti{addresses: addresses, count: slots}, output, exportOpts{
+		bufferSize: 64 * datasize.KB,
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(len(accounts)*slots), stats.Slots)
+	require.Equal(t, uint64(len(accounts)), stats.Accounts)
+	require.NoError(t, output.Sync())
+	info, err := output.Stat()
+	require.NoError(t, err)
+	input, err := os.Open(output.Name())
+	require.NoError(t, err)
+	defer input.Close()
+	seen := 0
+	err = artifact.ReadPreimagesStream(input, info.Size(), func(address common.Address, slotsYield func(func([32]byte) error) error) error {
+		var known bool
+		for _, account := range accounts {
+			if bytes.Equal(account.key, address[:]) {
+				known = true
+				break
+			}
+		}
+		require.True(t, known)
+		count := 0
+		require.NoError(t, slotsYield(func(slot [32]byte) error {
+			count++
+			return nil
+		}))
+		require.Equal(t, slots, count)
+		seen++
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, len(accounts), seen)
+}
 
 func TestWriteHashedPreimagesSpillsLargeAccount(t *testing.T) {
 	const slots = 4_300_000

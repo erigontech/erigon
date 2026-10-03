@@ -25,7 +25,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
@@ -371,7 +370,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return current.FlushFinished(nextKey)
 	}
 	stream := func(emit func(pbt.Op) error) error {
-		progress := pbinStreamProgress{next: time.Now().Add(30 * time.Second)}
+		progress := newPbinStreamProgress("PBT range writer progress", "range writer", "range writer")
 		streamErr := leaves(func(leaf PBinLeaf) error {
 			progress.leaf(leaf.Key)
 			if len(leaf.Value) != eip8297.ValueLength {

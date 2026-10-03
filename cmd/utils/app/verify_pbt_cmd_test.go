@@ -85,9 +85,9 @@ func TestVerifyPBTAcceptsSoundArtifacts(t *testing.T) {
 	}, func() (common.Hash, error) { return root, nil })
 	require.NoError(t, err)
 	var preimages bytes.Buffer
-	require.NoError(t, artifact.WritePreimagesStream(&preimages, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+	require.NoError(t, artifact.WritePreimagesStreamWithScratch(&preimages, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
 		return yield(address, func(slotYield func([32]byte) error) error { return slotYield(slot) })
-	}))
+	}, t.TempDir()))
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithOpenExisting())
 	tx, err := db.BeginTemporalRw(context.Background())
@@ -123,7 +123,7 @@ func TestVerifyPBTAcceptsSoundArtifacts(t *testing.T) {
 	sort.Slice(surplusAddresses, func(i, j int) bool {
 		return bytes.Compare(crypto.Keccak256(surplusAddresses[i][:]), crypto.Keccak256(surplusAddresses[j][:])) < 0
 	})
-	require.NoError(t, artifact.WritePreimagesStream(&surplusPreimages, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+	require.NoError(t, artifact.WritePreimagesStreamWithScratch(&surplusPreimages, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
 		for _, surplusAddress := range surplusAddresses {
 			slotYield := func(_ func([32]byte) error) error { return nil }
 			if surplusAddress == address {
@@ -134,7 +134,7 @@ func TestVerifyPBTAcceptsSoundArtifacts(t *testing.T) {
 			}
 		}
 		return nil
-	}))
+	}, t.TempDir()))
 	require.NoError(t, os.WriteFile(preimagesPath, surplusPreimages.Bytes(), 0o644))
 	require.ErrorIs(t, verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7), errVerifyPBTInvalid)
 	require.NoError(t, os.WriteFile(preimagesPath, preimages.Bytes(), 0o644))
@@ -424,14 +424,14 @@ func buildMeasuredPBT(t *testing.T, count int) (string, string, common.Hash) {
 		return bytes.Compare(crypto.Keccak256(addresses[i][:]), crypto.Keccak256(addresses[j][:])) < 0
 	})
 	var preimages bytes.Buffer
-	require.NoError(t, artifact.WritePreimagesStream(&preimages, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+	require.NoError(t, artifact.WritePreimagesStreamWithScratch(&preimages, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
 		for _, address := range addresses {
 			if err := yield(address, func(yieldSlot func([32]byte) error) error { return yieldSlot([32]byte{31: 1}) }); err != nil {
 				return err
 			}
 		}
 		return nil
-	}))
+	}, t.TempDir()))
 	snapshotPath := filepath.Join(t.TempDir(), "snapshot.bin")
 	preimagesPath := filepath.Join(t.TempDir(), "preimages.bin")
 	require.NoError(t, os.WriteFile(snapshotPath, snapshot.Bytes(), 0o644))

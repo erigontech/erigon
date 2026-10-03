@@ -40,6 +40,8 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -210,89 +212,16 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 			closeBlockReader()
 		}
 	}()
-	readTx, err := rawDB.BeginRo(ctx)
+	targetChainName, err := validatePBTImportTarget(ctx, rawDB, blockReader, blockView, meta, chainName, dataDir)
 	if err != nil {
 		return err
 	}
-	defer readTx.Rollback()
-	readerTx := pbtBlockFilesTx{Tx: readTx, view: blockView}
-	header, err := blockReader.HeaderByHash(ctx, readerTx, common.HexToHash(meta.BlockHash))
-	if err != nil {
-		readTx.Rollback()
-		return err
-	}
-	if header == nil {
-		readTx.Rollback()
-		return fmt.Errorf("commitment import-pbt: block %s is not local or canonical", meta.BlockHash)
-	}
-	if header.Number.Uint64() != meta.Block {
-		readTx.Rollback()
-		return fmt.Errorf("commitment import-pbt: snapshot block %d has header number %d", meta.Block, header.Number.Uint64())
-	}
-	canonical, found, err := blockReader.CanonicalHash(ctx, readerTx, meta.Block)
-	if err != nil {
-		readTx.Rollback()
-		return err
-	}
-	if !found || canonical != header.Hash() {
-		readTx.Rollback()
-		return fmt.Errorf("commitment import-pbt: block %d is not canonical with hash %s", meta.Block, meta.BlockHash)
-	}
-	genesisHash, err := rawdb.ReadCanonicalHash(readTx, 0)
-	if err != nil {
-		readTx.Rollback()
-		return err
-	}
-	chainConfig, err := rawdb.ReadChainConfig(readTx, genesisHash)
-	if err != nil {
-		readTx.Rollback()
-		return err
-	}
-	if chainConfig == nil {
-		readTx.Rollback()
-		return errors.New("commitment import-pbt: chain config is missing")
-	}
-	if chainName != "" && chainConfig.ChainName != chainName {
-		readTx.Rollback()
-		return fmt.Errorf("commitment import-pbt: chain %q does not match target chain %q", chainName, chainConfig.ChainName)
-	}
-	if chainConfig.ChainID == nil || chainConfig.ChainID.String() != meta.ChainID {
-		readTx.Rollback()
-		return fmt.Errorf("commitment import-pbt: chain id %q does not match target", meta.ChainID)
-	}
-	progress, err := stages.GetStageProgress(readTx, stages.Execution)
-	if err != nil {
-		readTx.Rollback()
-		return err
-	}
-	if progress != meta.Block {
-		readTx.Rollback()
-		return pbtImportProgressError(progress, meta, dataDir, chainConfig.ChainName)
-	}
-	lastTx, found, err := blockReader.TxnumReader().MaxExact(ctx, readerTx, meta.Block)
-	if err != nil {
-		readTx.Rollback()
-		return err
-	}
-	if !found {
-		readTx.Rollback()
-		return fmt.Errorf("commitment import-pbt: block %d has no txNum mapping", meta.Block)
-	}
-	if lastTx != meta.TxNum {
-		readTx.Rollback()
-		return fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", meta.Block, meta.TxNum, meta.Block, lastTx, dataDir, meta.Block+1, chainConfig.ChainName, dataDir, chainConfig.ChainName, meta.HashSuite)
-	}
-	if common.HexToHash(meta.StateRoot) != header.Root {
-		readTx.Rollback()
-		return fmt.Errorf("commitment import-pbt: snapshot stateRoot %s differs from header root %s", meta.StateRoot, header.Root)
-	}
-	readTx.Rollback()
 	hexBlock, hexTx, err := readPBTImportHexCheckpoint(ctx, dirs, rawDB, settings, logger)
 	if err != nil {
 		return err
 	}
 	if hexBlock != meta.Block || hexTx != meta.TxNum {
-		return fmt.Errorf("commitment import-pbt: hex commitment checkpoint is (%d, %d), want (%d, %d) at block %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", hexBlock, hexTx, meta.Block, meta.TxNum, meta.Block, dataDir, meta.Block+1, chainConfig.ChainName, dataDir, chainConfig.ChainName, meta.HashSuite)
+		return fmt.Errorf("commitment import-pbt: hex commitment checkpoint is (%d, %d), want (%d, %d) at block %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", hexBlock, hexTx, meta.Block, meta.TxNum, meta.Block, dataDir, meta.Block+1, targetChainName, dataDir, targetChainName, meta.HashSuite)
 	}
 	closeBlockReader()
 	closeBlockReader = nil
@@ -640,6 +569,70 @@ func readPBTImportHexCheckpoint(ctx context.Context, dirs datadir.Dirs, rawDB kv
 
 func pbtImportProgressError(progress uint64, meta pbtImportMeta, dataDir, chainName string) error {
 	return fmt.Errorf("commitment import-pbt: target is at block %d, snapshot is at block %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", progress, meta.Block, dataDir, progress, chainName, dataDir, chainName, meta.HashSuite)
+}
+
+func validatePBTImportTarget(ctx context.Context, rawDB kv.RoDB, blockReader *freezeblocks.BlockReader, blockView *blocksnapshots.View, meta pbtImportMeta, chainName, dataDir string) (string, error) {
+	readTx, err := rawDB.BeginRo(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer readTx.Rollback()
+	readerTx := pbtBlockFilesTx{Tx: readTx, view: blockView}
+	header, err := blockReader.HeaderByHash(ctx, readerTx, common.HexToHash(meta.BlockHash))
+	if err != nil {
+		return "", err
+	}
+	if header == nil {
+		return "", fmt.Errorf("commitment import-pbt: block %s is not local or canonical", meta.BlockHash)
+	}
+	if header.Number.Uint64() != meta.Block {
+		return "", fmt.Errorf("commitment import-pbt: snapshot block %d has header number %d", meta.Block, header.Number.Uint64())
+	}
+	canonical, found, err := blockReader.CanonicalHash(ctx, readerTx, meta.Block)
+	if err != nil {
+		return "", err
+	}
+	if !found || canonical != header.Hash() {
+		return "", fmt.Errorf("commitment import-pbt: block %d is not canonical with hash %s", meta.Block, meta.BlockHash)
+	}
+	genesisHash, err := rawdb.ReadCanonicalHash(readTx, 0)
+	if err != nil {
+		return "", err
+	}
+	chainConfig, err := rawdb.ReadChainConfig(readTx, genesisHash)
+	if err != nil {
+		return "", err
+	}
+	if chainConfig == nil {
+		return "", errors.New("commitment import-pbt: chain config is missing")
+	}
+	if chainName != "" && chainConfig.ChainName != chainName {
+		return "", fmt.Errorf("commitment import-pbt: chain %q does not match target chain %q", chainName, chainConfig.ChainName)
+	}
+	if chainConfig.ChainID == nil || chainConfig.ChainID.String() != meta.ChainID {
+		return "", fmt.Errorf("commitment import-pbt: chain id %q does not match target", meta.ChainID)
+	}
+	progress, err := stages.GetStageProgress(readTx, stages.Execution)
+	if err != nil {
+		return "", err
+	}
+	if progress != meta.Block {
+		return "", pbtImportProgressError(progress, meta, dataDir, chainConfig.ChainName)
+	}
+	lastTx, found, err := blockReader.TxnumReader().MaxExact(ctx, readerTx, meta.Block)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", fmt.Errorf("commitment import-pbt: block %d has no txNum mapping", meta.Block)
+	}
+	if lastTx != meta.TxNum {
+		return "", fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", meta.Block, meta.TxNum, meta.Block, lastTx, dataDir, meta.Block+1, chainConfig.ChainName, dataDir, chainConfig.ChainName, meta.HashSuite)
+	}
+	if common.HexToHash(meta.StateRoot) != header.Root {
+		return "", fmt.Errorf("commitment import-pbt: snapshot stateRoot %s differs from header root %s", meta.StateRoot, header.Root)
+	}
+	return chainConfig.ChainName, nil
 }
 
 func movePBTImportBinFiles(stageDirs, targetDirs datadir.Dirs) ([]string, error) {

@@ -88,7 +88,7 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 	defer collector.Close()
 	emitter := pbt.NewRebuildFeedOpEmitter()
 	leafCollector := pbinLeafCollector{}
-	progress := pbinStreamProgress{next: time.Now().Add(30 * time.Second)}
+	progress := newPbinStreamProgress("PBT leaf stream progress", "leaf collection", "leaf load")
 	for accountsCursor.ok || codeCursor.ok || storageCursor.ok {
 		address, err := pbinNextAddress(accountsCursor, codeCursor, storageCursor)
 		if err != nil {
@@ -163,9 +163,21 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 }
 
 type pbinStreamProgress struct {
-	next     time.Time
-	accounts uint64
-	leaves   uint64
+	next         time.Time
+	accounts     uint64
+	leaves       uint64
+	message      string
+	accountPhase string
+	leafPhase    string
+}
+
+func newPbinStreamProgress(message, accountPhase, leafPhase string) pbinStreamProgress {
+	return pbinStreamProgress{
+		next:         time.Now().Add(30 * time.Second),
+		message:      message,
+		accountPhase: accountPhase,
+		leafPhase:    leafPhase,
+	}
 }
 
 func (p *pbinStreamProgress) account(key []byte) {
@@ -173,7 +185,7 @@ func (p *pbinStreamProgress) account(key []byte) {
 	if p.accounts&4095 != 0 {
 		return
 	}
-	p.report("leaf collection", key)
+	p.report(p.message, p.accountPhase, key)
 }
 
 func (p *pbinStreamProgress) leaf(key []byte) {
@@ -181,10 +193,10 @@ func (p *pbinStreamProgress) leaf(key []byte) {
 	if p.leaves&4095 != 0 {
 		return
 	}
-	p.report("leaf load", key)
+	p.report(p.message, p.leafPhase, key)
 }
 
-func (p *pbinStreamProgress) report(phase string, key []byte) {
+func (p *pbinStreamProgress) report(message, phase string, key []byte) {
 	now := time.Now()
 	if now.Before(p.next) {
 		return
@@ -194,7 +206,7 @@ func (p *pbinStreamProgress) report(phase string, key []byte) {
 	if len(prefix) > 8 {
 		prefix = prefix[:8]
 	}
-	log.Root().Info("PBT leaf stream progress", "phase", phase, "accounts", p.accounts, "leaves", p.leaves, "key_prefix", hex.EncodeToString(prefix))
+	log.Root().Info(message, "phase", phase, "accounts", p.accounts, "leaves", p.leaves, "key_prefix", hex.EncodeToString(prefix))
 }
 
 func pbinOpenLatestCursor(at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, filesOnly bool) (pbinLatestCursor, error) {

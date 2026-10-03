@@ -382,7 +382,7 @@ func readPBinSourcePoint(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	}
 	agg, err := openPBTState(ctx, dirs, settings, nil, logger)
 	if err != nil {
-		return pbinConversionPoint{}, fmt.Errorf("commitment convert-pbt: open source point: %w", err)
+		return pbinConversionPoint{}, err
 	}
 	defer agg.Close()
 	at := agg.BeginFilesRo()
