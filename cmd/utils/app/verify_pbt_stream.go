@@ -38,7 +38,7 @@ import (
 
 var pbtVerifyETLBuffer = etl.BufferOptimalSize
 
-const pbtVerifyMaxCodeSize = 24 * 1024
+const pbtVerifyMaxCodeSize = (1 << 24) - 1
 
 type pbtVerifyProgress struct {
 	phase string
@@ -730,6 +730,9 @@ func pbtVerifyHashMPT(path string) (common.Hash, error) {
 	if err != nil {
 		return common.Hash{}, err
 	}
+	if iterator.err != nil {
+		return common.Hash{}, iterator.err
+	}
 	if root == (common.Hash{}) {
 		return common.Hash{}, fmt.Errorf("empty MPT root")
 	}
@@ -739,11 +742,16 @@ func pbtVerifyHashMPT(path string) (common.Hash, error) {
 type pbtVerifyMPTIterator struct {
 	reader   *pbtVerifyKVReader
 	progress *pbtVerifyProgress
+	err      error
 }
 
 func (it *pbtVerifyMPTIterator) Next() (trie.StreamItem, []byte, *accounts.Account, []byte, []byte, []byte) {
 	key, value, ok, err := it.reader.next()
-	if err != nil || !ok {
+	if err != nil {
+		it.err = err
+		return trie.NoItem, nil, nil, nil, nil, nil
+	}
+	if !ok {
 		return trie.NoItem, nil, nil, nil, nil, nil
 	}
 	if len(key) == length.Hash {
@@ -751,7 +759,8 @@ func (it *pbtVerifyMPTIterator) Next() (trie.StreamItem, []byte, *accounts.Accou
 			it.progress.add(key)
 		}
 		var record pbtVerifyAccountRecord
-		if pbtVerifyDecode(value, &record) != nil {
+		if err := pbtVerifyDecode(value, &record); err != nil {
+			it.err = err
 			return trie.NoItem, nil, nil, nil, nil, nil
 		}
 		account := &accounts.Account{Nonce: record.Nonce, Root: record.Root, CodeHash: accounts.InternCodeHash(record.CodeHash)}

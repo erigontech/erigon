@@ -86,7 +86,11 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, chainName string, log
 	return importPBTWithHook(ctx, dataDir, snapshotPath, chainName, logger, nil)
 }
 
-func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName string, logger log.Logger, swapHook func(string) error) error {
+func pbtImportRerunCommand(dataDir, chainName, snapshotPath string) string {
+	return fmt.Sprintf("integration commitment import-pbt --datadir=%s --chain=%s --snapshot=%s", dataDir, chainName, snapshotPath)
+}
+
+func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName string, logger log.Logger, swapHook func(string) error) (retErr error) {
 	if dataDir == "" || snapshotPath == "" {
 		return errors.New("commitment import-pbt: datadir and snapshot are required")
 	}
@@ -113,16 +117,19 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 			if cleanupErr := recoverPBTImportSettings(dirs, settings, nil); cleanupErr != nil {
 				return fmt.Errorf("%w; partial import cleanup failed: %w", markerErr, cleanupErr)
 			}
-			return fmt.Errorf("%w; rerun integration commitment import-pbt --datadir=%s --snapshot=%s", markerErr, dirs.DataDir, snapshotPath)
+			return fmt.Errorf("%w; rerun %s", markerErr, pbtImportRerunCommand(dirs.DataDir, chainName, snapshotPath))
 		}
-		return fmt.Errorf("%w; rerun integration commitment import-pbt --datadir=%s --snapshot=%s", markerErr, dirs.DataDir, snapshotPath)
+		if removeErr := dbstate.RemovePBTImportMarker(dirs); removeErr != nil {
+			return fmt.Errorf("%w; remove corrupt import marker: %w", markerErr, removeErr)
+		}
+		return fmt.Errorf("%w; rerun %s", markerErr, pbtImportRerunCommand(dirs.DataDir, chainName, snapshotPath))
 	}
 	absSnapshotPath, err := filepath.Abs(snapshotPath)
 	if err != nil {
 		return err
 	}
 	if marker != nil && filepath.Clean(marker.SnapshotPath) != filepath.Clean(absSnapshotPath) {
-		return fmt.Errorf("commitment import-pbt is incomplete for %s; rerun integration commitment import-pbt --datadir=%s --snapshot=%s", marker.SnapshotPath, dirs.DataDir, marker.SnapshotPath)
+		return fmt.Errorf("commitment import-pbt is incomplete for %s; rerun %s", marker.SnapshotPath, pbtImportRerunCommand(dirs.DataDir, chainName, marker.SnapshotPath))
 	}
 	if marker != nil && marker.SnapshotHash != meta.SnapshotDigest {
 		return fmt.Errorf("commitment import-pbt: incomplete marker does not match snapshot digest")
@@ -148,7 +155,7 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 				if cleanupErr := recoverPBTImportSettings(dirs, settings, marker); cleanupErr != nil {
 					return fmt.Errorf("%w; partial import cleanup failed: %w", err, cleanupErr)
 				}
-				return fmt.Errorf("%w; rerun integration commitment import-pbt --datadir=%s --snapshot=%s", err, dirs.DataDir, snapshotPath)
+				return fmt.Errorf("%w; rerun %s", err, pbtImportRerunCommand(dirs.DataDir, chainName, snapshotPath))
 			}
 			return dbstate.RemovePBTImportMarker(dirs)
 		}
@@ -426,8 +433,12 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 	}
 	moved, err := movePBTImportBinFiles(stageDirs, dirs)
 	if err != nil {
-		removePBTImportFiles(moved)
-		_ = dbstate.RemovePBTImportMarker(dirs)
+		if cleanupErr := removePBTImportFiles(moved); cleanupErr != nil {
+			return fmt.Errorf("%w; cleanup failed: %w", err, cleanupErr)
+		}
+		if markerErr := dbstate.RemovePBTImportMarker(dirs); markerErr != nil {
+			return fmt.Errorf("%w; remove marker: %w", err, markerErr)
+		}
 		return err
 	}
 	settingsWritten := false
@@ -437,11 +448,15 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 			panic(recovered)
 		}
 		if !settingsWritten {
-			removePBTImportFiles(moved)
+			cleanupErr := removePBTImportFiles(moved)
 			if checkpointWritten {
 				_ = removePBTImportCheckpoint(ctx, dirs, common.HexToHash(meta.BlockHash), meta.Block)
 			}
-			_ = dbstate.RemovePBTImportMarker(dirs)
+			if cleanupErr == nil {
+				_ = dbstate.RemovePBTImportMarker(dirs)
+			} else {
+				retErr = fmt.Errorf("%w; cleanup failed: %w", retErr, cleanupErr)
+			}
 		}
 	}()
 	if swapHook != nil {
@@ -720,15 +735,20 @@ func recoverPBTImportSettings(dirs datadir.Dirs, current *dbstate.ErigonDBSettin
 	return dbstate.RemovePBTImportMarker(dirs)
 }
 
-func removePBTImportFiles(files []string) {
+func removePBTImportFiles(files []string) error {
 	directories := make(map[string]struct{})
 	for _, file := range files {
-		_ = dir.RemoveFile(file)
+		if err := dir.RemoveFile(file); err != nil {
+			return err
+		}
 		directories[filepath.Dir(file)] = struct{}{}
 	}
 	for directory := range directories {
-		_ = dir.FsyncDir(directory)
+		if err := dir.FsyncDir(directory); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func removePBTImportFilesForRecovery(dirs datadir.Dirs) error {

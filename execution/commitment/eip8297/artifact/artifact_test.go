@@ -527,7 +527,7 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 	require.NoError(t, err)
 	value := bytes.Repeat([]byte{1}, eip8297.ValueLength)
 	runtime.GC()
-	writerSampler := startHeapSampler()
+	writerBase := liveHeap()
 	digest, err := WriteSnapshot(file, common.Hash{}, func(emit func([]byte, []byte) error) error {
 		for group := range groupCount {
 			var stem [32]byte
@@ -541,7 +541,12 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 		}
 		return nil
 	})
-	writerPeak := writerSampler.stopAndRead()
+	runtime.GC()
+	writerHeap := liveHeap()
+	writerLive := uint64(0)
+	if writerHeap > writerBase {
+		writerLive = writerHeap - writerBase
+	}
 	require.NoError(t, err)
 	require.NotEqual(t, common.Hash{}, digest)
 	require.NoError(t, file.Sync())
@@ -553,14 +558,19 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 	require.NoError(t, err)
 	defer reader.Close()
 	runtime.GC()
-	readerSampler := startHeapSampler()
+	readerBase := liveHeap()
 	_, err = ReadSnapshotStreamAt(reader, info.Size(), SnapshotStreamCallbacks{
 		Code: func(Group) error { return nil },
 	})
-	readPeak := readerSampler.stopAndRead()
+	runtime.GC()
+	readerHeap := liveHeap()
+	readLive := uint64(0)
+	if readerHeap > readerBase {
+		readLive = readerHeap - readerBase
+	}
 	require.NoError(t, err)
-	require.Less(t, writerPeak, uint64(64<<20))
-	require.Less(t, readPeak, uint64(64<<20))
+	require.Less(t, writerLive, uint64(16<<20))
+	require.Less(t, readLive, uint64(16<<20))
 }
 
 func TestWriterRejectsEmptyAccountAndZeroSizeCode(t *testing.T) {

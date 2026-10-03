@@ -89,9 +89,14 @@ func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	outDir := filepath.Join(t.TempDir(), "export")
+	var logs bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
 	require.NoError(t, runExportPBT(t.Context(), tx, func(uint64) (*types.Header, error) {
 		return &types.Header{Root: root, Time: 10}, nil
-	}, outDir, log.New()))
+	}, outDir, logger))
+	require.Contains(t, logs.String(), `phase="snapshot readback" records=1`)
+	require.Contains(t, logs.String(), "records=1")
 	_, err = os.Stat(filepath.Join(outDir, pbtSnapshotFileName))
 	require.NoError(t, err, "the export must write the PBT snapshot")
 	preimages, err := os.ReadFile(filepath.Join(outDir, pbtPreimagesFileName))

@@ -77,7 +77,7 @@ func TestRefusePBTStartupMarkersChecksBothMarkers(t *testing.T) {
 				hash := "blake3"
 				require.NoError(t, state.WritePBTImportMarker(dirs, &state.PBTImportMarker{SnapshotPath: "/tmp/snapshot", SnapshotHash: "digest", Files: []string{"domain/v3.0-commitment-bin.0-1.kv"}, Settings: &state.ErigonDBSettings{TrieVariant: &variant, TrieHash: &hash}}))
 			}
-			require.Error(t, refusePBTStartupMarkers(dirs))
+			require.Error(t, refusePBTStartupMarkers(dirs, "mainnet"))
 		})
 	}
 }

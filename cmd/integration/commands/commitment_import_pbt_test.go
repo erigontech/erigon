@@ -128,6 +128,7 @@ func TestImportPBTRecoveryRejectsMissingMovedFile(t *testing.T) {
 
 func TestImportPBTRecoveryRejectsCorruptMarker(t *testing.T) {
 	fixture := newPBTImportFixture(t)
+	setPBTImportChainName(t, fixture.dataDir, "mainnet")
 	hook := func(step string) error {
 		if step == "settings-written" {
 			panic("interrupt after settings")
@@ -139,15 +140,25 @@ func TestImportPBTRecoveryRejectsCorruptMarker(t *testing.T) {
 	})
 	dirs := datadir.Open(fixture.dataDir)
 	require.NoError(t, os.WriteFile(dbstate.PBTImportMarkerPath(dirs), []byte("{"), 0o644))
-	err := importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New())
-	require.ErrorContains(t, err, "rerun integration commitment import-pbt")
-	require.NoError(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New()))
-	settings, err := dbstate.ReadErigonDBSettings(dirs)
-	require.NoError(t, err)
-	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
-	remaining, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment-bin.*.kv"))
-	require.NoError(t, err)
-	require.NotEmpty(t, remaining)
+	command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestImportPBTCommandHelperProcess$", "-test.v")
+	command.Env = append(os.Environ(),
+		"GO_WANT_IMPORT_PBT_COMMAND_HELPER=1",
+		"IMPORT_PBT_DATADIR="+fixture.dataDir,
+		"IMPORT_PBT_SNAPSHOT="+fixture.snapshot,
+	)
+	output, err := command.CombinedOutput()
+	require.Error(t, err)
+	require.Contains(t, string(output), "--chain=mainnet")
+	_, err = os.Stat(dbstate.PBTImportMarkerPath(dirs))
+	require.ErrorIs(t, err, os.ErrNotExist)
+	command = exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestImportPBTCommandHelperProcess$", "-test.v")
+	command.Env = append(os.Environ(),
+		"GO_WANT_IMPORT_PBT_COMMAND_HELPER=1",
+		"IMPORT_PBT_DATADIR="+fixture.dataDir,
+		"IMPORT_PBT_SNAPSHOT="+fixture.snapshot,
+	)
+	output, err = command.CombinedOutput()
+	require.NoError(t, err, "%s", output)
 }
 
 func TestImportPBTRecoveryKeepsMarkerWhenFileCleanupFails(t *testing.T) {
@@ -172,6 +183,45 @@ func TestImportPBTRecoveryKeepsMarkerWhenFileCleanupFails(t *testing.T) {
 	got, err := dbstate.ReadPBTImportMarker(dirs)
 	require.NoError(t, err)
 	require.Equal(t, marker, got)
+}
+
+func TestImportPBTMainFlowKeepsMarkerWhenFileCleanupFails(t *testing.T) {
+	fixture := newPBTImportFixture(t)
+	dirs := datadir.Open(fixture.dataDir)
+	hook := func(step string) error {
+		if step != "files-moved" {
+			return nil
+		}
+		files, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment-bin.*.kv"))
+		require.NoError(t, err)
+		require.NotEmpty(t, files)
+		require.NoError(t, dir.RemoveFile(files[0]))
+		require.NoError(t, os.Mkdir(files[0], 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(files[0], "keep"), nil, 0o644))
+		return errors.New("injected files-moved failure")
+	}
+	require.Error(t, importPBTWithHook(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New(), hook))
+	_, err := os.Stat(dbstate.PBTImportMarkerPath(dirs))
+	require.NoError(t, err)
+}
+
+func setPBTImportChainName(t *testing.T, dataDir, chainName string) {
+	t.Helper()
+	dirs := datadir.Open(dataDir)
+	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
+	defer db.Close()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		config, err := rawdb.ReadChainConfig(tx, genesisHash)
+		if err != nil {
+			return err
+		}
+		config.ChainName = chainName
+		return rawdb.WriteChainConfig(tx, genesisHash, config)
+	}))
 }
 
 func TestImportPBTRecoveryRemedyRunsInFreshProcess(t *testing.T) {
@@ -208,6 +258,23 @@ func TestImportPBTHelperProcess(t *testing.T) {
 	}
 	err := importPBT(t.Context(), os.Getenv("IMPORT_PBT_DATADIR"), os.Getenv("IMPORT_PBT_SNAPSHOT"), "", log.New())
 	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func TestImportPBTCommandHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_IMPORT_PBT_COMMAND_HELPER") != "1" {
+		return
+	}
+	root := RootCommand()
+	root.SetArgs([]string{
+		"commitment", "import-pbt",
+		"--datadir", os.Getenv("IMPORT_PBT_DATADIR"),
+		"--chain", "mainnet",
+		"--snapshot", os.Getenv("IMPORT_PBT_SNAPSHOT"),
+	})
+	if err := root.ExecuteContext(t.Context()); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

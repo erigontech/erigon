@@ -250,7 +250,34 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 	if err != nil {
 		return err
 	}
-	snapshotMeta, err := artifact.ReadSnapshotStreamAt(snapshotRead, snapshotInfo.Size(), artifact.SnapshotStreamCallbacks{})
+	readbackRecords := uint64(0)
+	nextReadbackProgress := time.Time{}
+	reportReadback := func(key []byte) {
+		readbackRecords++
+		now := time.Now()
+		if now.Before(nextReadbackProgress) {
+			return
+		}
+		nextReadbackProgress = now.Add(30 * time.Second)
+		logger.Info("PBT export progress", "phase", "snapshot readback", "records", readbackRecords, "key_prefix", fmt.Sprintf("%x", key[:min(len(key), 8)]))
+	}
+	snapshotMeta, err := artifact.ReadSnapshotStreamAt(snapshotRead, snapshotInfo.Size(), artifact.SnapshotStreamCallbacks{
+		Header: func(header artifact.Header) error {
+			reportReadback(header.AddressHash[:])
+			return nil
+		},
+		Code: func(group artifact.Group) error {
+			reportReadback(group.StemHash[:])
+			return nil
+		},
+		Storage: func(address common.Hash, groups func(func(artifact.Group) error) error) error {
+			reportReadback(address[:])
+			return groups(func(group artifact.Group) error {
+				reportReadback(group.StemHash[:])
+				return nil
+			})
+		},
+	})
 	if err != nil {
 		return fmt.Errorf("export-pbt: read back snapshot: %w", err)
 	}

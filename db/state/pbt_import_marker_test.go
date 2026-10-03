@@ -17,6 +17,8 @@
 package state
 
 import (
+	"errors"
+	"io"
 	"os"
 	"testing"
 
@@ -34,11 +36,11 @@ func TestPBTImportMarkerRoundTripAndInvalidStartupRefusal(t *testing.T) {
 	got, err := ReadPBTImportMarker(dirs)
 	require.NoError(t, err)
 	require.Equal(t, marker, got)
-	require.ErrorContains(t, RefusePBTImportMarker(dirs), "integration commitment import-pbt --datadir="+dirs.DataDir+" --snapshot=/tmp/snapshot")
+	require.ErrorContains(t, RefusePBTImportMarker(dirs, "mainnet"), "integration commitment import-pbt --datadir="+dirs.DataDir+" --chain=mainnet --snapshot=/tmp/snapshot")
 	require.NoError(t, RemovePBTImportMarker(dirs))
 	require.NoError(t, os.WriteFile(PBTImportMarkerPath(dirs), []byte("{"), 0o644))
-	err = RefusePBTImportMarker(dirs)
-	require.ErrorContains(t, err, "integration commitment import-pbt --datadir="+dirs.DataDir+" --snapshot=<snapshot>")
+	err = RefusePBTImportMarker(dirs, "mainnet")
+	require.ErrorContains(t, err, "integration commitment import-pbt --datadir="+dirs.DataDir+" --chain=mainnet --snapshot=<snapshot>")
 	require.NotContains(t, err.Error(), "marker is invalid")
 	require.NotContains(t, err.Error(), "restore the previous")
 }
@@ -56,8 +58,8 @@ func TestPBTImportMarkerRecoveryNamesCleanupRemedy(t *testing.T) {
 		PreviousSettings: &ErigonDBSettings{TrieVariant: &previousVariant},
 	}
 	require.NoError(t, WritePBTImportMarker(dirs, marker))
-	require.ErrorContains(t, RefusePBTImportMarker(dirs), "integration commitment import-pbt --datadir="+dirs.DataDir+" --snapshot=/tmp/snapshot")
-	require.NotContains(t, RefusePBTImportMarker(dirs).Error(), "incomplete for")
+	require.ErrorContains(t, RefusePBTImportMarker(dirs, "mainnet"), "integration commitment import-pbt --datadir="+dirs.DataDir+" --chain=mainnet --snapshot=/tmp/snapshot")
+	require.NotContains(t, RefusePBTImportMarker(dirs, "mainnet").Error(), "incomplete for")
 }
 
 func TestPBTImportMarkerAtomicReplacementIgnoresTargetMode(t *testing.T) {
@@ -72,4 +74,22 @@ func TestPBTImportMarkerAtomicReplacementIgnoresTargetMode(t *testing.T) {
 	got, err := ReadPBTImportMarker(dirs)
 	require.NoError(t, err)
 	require.Equal(t, newMarker, got)
+}
+
+func TestPBTMarkerWriteFailureKeepsOldMarker(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	path := PBTImportMarkerPath(dirs)
+	old := []byte(`{"snapshot_path":"old"}`)
+	require.NoError(t, os.WriteFile(path, old, 0o644))
+	err := writePBTMarkerData(path, []byte(`{"snapshot_path":"new"}`), func(dst io.Writer, data []byte) error {
+		_, err := dst.Write(data[:1])
+		if err != nil {
+			return err
+		}
+		return errors.New("injected marker write failure")
+	})
+	require.Error(t, err)
+	got, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, old, got)
 }

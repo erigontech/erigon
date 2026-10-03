@@ -29,8 +29,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/metrics"
 	"sort"
-	"sync/atomic"
+	"syscall"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -156,9 +157,7 @@ func TestVerifyPBTRejectsMalformedArtifactWithoutPanic(t *testing.T) {
 	preimagesPath := t.TempDir() + "/framed.bin"
 	require.NoError(t, os.WriteFile(snapshotPath, []byte{0x07}, 0o644))
 	require.NoError(t, os.WriteFile(preimagesPath, nil, 0o644))
-	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.MkdirAll(dirs.Tmp, 0o755))
-	err := verifyPBTFiles(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 0)
+	err := verifyPBTFiles(context.Background(), newHiveVerifyAnchor(t, common.Hash{}), snapshotPath, preimagesPath, 0)
 	require.ErrorIs(t, err, errVerifyPBTInvalid)
 }
 
@@ -184,6 +183,10 @@ func TestVerifyPBTAcceptsExportWithLeadingZeroCodeChunk(t *testing.T) {
 func TestVerifyPBTAcceptsExportWithShortFinalCodeChunk(t *testing.T) {
 	code := append(bytes.Repeat([]byte{0x5b}, 31), 0, 0x5b, 0x5b)
 	verifyPBTRealExportWithSharedCode(t, code)
+}
+
+func TestVerifyPBTAcceptsPostAmsterdamCodeSize(t *testing.T) {
+	verifyPBTRealExportWithSharedCode(t, bytes.Repeat([]byte{0x5b}, 24*1024+1))
 }
 
 func verifyPBTRealExportWithSharedCode(t *testing.T, code []byte) {
@@ -350,49 +353,37 @@ func TestVerifyPBTClassifiesSnapshotIO(t *testing.T) {
 
 func TestMeasureVerifyPBTStreamingMemory(t *testing.T) {
 	peaks := make([]uint64, 0, 2)
-	for _, count := range []int{1000, 5000} {
+	for _, count := range []int{1000, 10000} {
 		peak := measureVerifyPBTPeak(t, count)
 		peaks = append(peaks, peak)
-		t.Logf("accounts=%d peak_heap_stack=%d", count, peak)
+		t.Logf("accounts=%d live_heap_delta=%d", count, peak)
 	}
-	require.Less(t, peaks[1], peaks[0]*2, "streaming verifier memory must not scale with account count")
+	delta := uint64(0)
+	if peaks[1] > peaks[0] {
+		delta = peaks[1] - peaks[0]
+	}
+	require.Less(t, delta, uint64(16<<20), "streaming verifier retained heap must have a constant margin")
 }
 
 func measureVerifyPBTPeak(t *testing.T, count int) uint64 {
 	t.Helper()
 	snapshot, preimages, root := buildMeasuredPBT(t, count)
 	anchor := newMeasuredPBTAnchor(t, root)
-	var peak atomic.Uint64
-	done := make(chan struct{})
-	go func() {
-		var stats runtime.MemStats
-		for {
-			select {
-			case <-done:
-				return
-			default:
-			}
-			runtime.ReadMemStats(&stats)
-			used := stats.HeapInuse + stats.StackInuse
-			for {
-				old := peak.Load()
-				if used <= old || peak.CompareAndSwap(old, used) {
-					break
-				}
-			}
-		}
-	}()
-	stop := func() {
-		select {
-		case <-done:
-		default:
-			close(done)
-		}
-	}
-	t.Cleanup(stop)
+	runtime.GC()
+	base := verifyPBTLiveHeap()
 	require.NoError(t, verifyPBTFiles(t.Context(), anchor, snapshot, preimages, 0))
-	stop()
-	return peak.Load()
+	runtime.GC()
+	used := verifyPBTLiveHeap()
+	if used <= base {
+		return 0
+	}
+	return used - base
+}
+
+func verifyPBTLiveHeap() uint64 {
+	samples := []metrics.Sample{{Name: "/gc/heap/live:bytes"}}
+	metrics.Read(samples)
+	return samples[0].Value.Uint64()
 }
 
 func buildMeasuredPBT(t *testing.T, count int) (string, string, common.Hash) {
@@ -535,6 +526,22 @@ func TestVerifyPBTCommandPrintsRejectionInFreshProcess(t *testing.T) {
 	require.Contains(t, string(output), "verify-pbt: artifact rejected")
 }
 
+func TestVerifyPBTClassifiesMidstreamScratchIO(t *testing.T) {
+	manifest := readHivePBTManifest(t)
+	anchor := newHiveVerifyAnchor(t, common.HexToHash(manifest.Genesis.StateRoot))
+	root := filepath.Join("testdata", "hive-pbt-fixtures", "valid")
+	command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestVerifyPBTScratchIOHelperProcess$", "-test.v")
+	command.Env = append(os.Environ(),
+		"GO_WANT_VERIFY_PBT_IO_HELPER=1",
+		"VERIFY_PBT_DATADIR="+anchor,
+		"VERIFY_PBT_SNAPSHOT="+filepath.Join(root, "snapshot.bin"),
+		"VERIFY_PBT_PREIMAGES="+filepath.Join(root, "preimages.bin"),
+		"VERIFY_PBT_TMPDIR="+filepath.Join(t.TempDir(), "scratch"),
+	)
+	output, err := command.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+}
+
 func TestVerifyPBTCommandHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_VERIFY_PBT_HELPER") != "1" {
 		return
@@ -558,6 +565,24 @@ func TestVerifyPBTCommandHelperProcess(t *testing.T) {
 	}
 	fmt.Fprintln(os.Stderr, err)
 	os.Exit(2)
+}
+
+func TestVerifyPBTScratchIOHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_VERIFY_PBT_IO_HELPER") != "1" {
+		return
+	}
+	limit := &syscall.Rlimit{Cur: 4096, Max: 4096}
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, limit); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	err := verifyPBTFiles(t.Context(), os.Getenv("VERIFY_PBT_DATADIR"), os.Getenv("VERIFY_PBT_SNAPSHOT"), os.Getenv("VERIFY_PBT_PREIMAGES"), 0, os.Getenv("VERIFY_PBT_TMPDIR"))
+	if err == nil || errors.Is(err, errVerifyPBTInvalid) {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	fmt.Fprintln(os.Stderr, err)
+	os.Exit(0)
 }
 
 func newHiveVerifyAnchor(t *testing.T, root common.Hash) string {

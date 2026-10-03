@@ -64,13 +64,13 @@ func RemovePBTImportMarker(dirs datadir.Dirs) error {
 	return removePBTMarker(PBTImportMarkerPath(dirs))
 }
 
-func RefusePBTImportMarker(dirs datadir.Dirs) error {
+func RefusePBTImportMarker(dirs datadir.Dirs, chainName string) error {
 	marker, err := ReadPBTImportMarker(dirs)
 	if err != nil {
-		return fmt.Errorf("integration commitment import-pbt --datadir=%s --snapshot=<snapshot>: %w", dirs.DataDir, err)
+		return fmt.Errorf("integration commitment import-pbt --datadir=%s --chain=%s --snapshot=<snapshot>: %w", dirs.DataDir, chainName, err)
 	}
 	if marker == nil {
 		return nil
 	}
-	return fmt.Errorf("integration commitment import-pbt --datadir=%s --snapshot=%s", dirs.DataDir, marker.SnapshotPath)
+	return fmt.Errorf("integration commitment import-pbt --datadir=%s --chain=%s --snapshot=%s", dirs.DataDir, chainName, marker.SnapshotPath)
 }

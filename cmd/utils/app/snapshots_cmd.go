@@ -111,6 +111,7 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 // This needs to run *after* subcommand arguments are parsed, in case they alter root flags like data dir.
 func commonBeforeSnapshotCommand(ctx context.Context, cliCtx *cli.Command) (context.Context, error) {
 	if cliCtx.Name == "verify-pbt" {
+		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 		return ctx, nil
 	}
 	go mem.LogMemStats(ctx, log.New())

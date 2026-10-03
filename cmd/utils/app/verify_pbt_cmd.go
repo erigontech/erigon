@@ -47,6 +47,10 @@ var verifyPBTCommand = cli.Command{
 	Name:   "verify-pbt",
 	Usage:  "Verify a BLAKE3 PBT snapshot and preimages against the canonical MPT state",
 	Action: doVerifyPBT,
+	OnUsageError: func(_ context.Context, _ *cli.Command, err error, _ bool) error {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		return cli.Exit("", 2)
+	},
 	Flags: joinFlags([]cli.Flag{
 		&utils.DataDirFlag,
 		&cli.StringFlag{Name: "snapshot", Usage: "PBT snapshot artifact", Required: true},
@@ -137,6 +141,10 @@ func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath st
 			err = removeErr
 		}
 	}()
+	headerRoot, err := readPBTHeaderRoot(ctx, dataDir, block)
+	if err != nil {
+		return err
+	}
 	_, root, err := verifyPBTStreamingState(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), tmp)
 	if err != nil {
 		if !pbtVerifyIsIOError(err) {
@@ -144,8 +152,8 @@ func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath st
 		}
 		return err
 	}
-	if err := verifyPBTHeaderRoot(ctx, dataDir, block, root); err != nil {
-		return err
+	if headerRoot != root {
+		return fmt.Errorf("%w: artifact MPT root %x differs from header root %x", errVerifyPBTInvalid, root, headerRoot)
 	}
 	return nil
 }
@@ -156,11 +164,11 @@ func pbtVerifyIsIOError(err error) bool {
 	return errors.As(err, &pathErr) || errors.As(err, &linkErr) || errors.Is(err, syscall.EFBIG) || errors.Is(err, syscall.ENOSPC)
 }
 
-func verifyPBTHeaderRoot(ctx context.Context, dataDir string, block uint64, root common.Hash) error {
+func readPBTHeaderRoot(ctx context.Context, dataDir string, block uint64) (common.Hash, error) {
 	dirs := datadir.Open(dataDir)
 	db, err := backup.OpenExisting(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	defer db.Close()
 	var chainName string
@@ -180,12 +188,12 @@ func verifyPBTHeaderRoot(ctx context.Context, dataDir string, block uint64, root
 		return nil
 	})
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	snapshots := blocksnapshots.NewRoSnapshots(ethconfig.NewSnapCfg(false, true, true, chainName), dirs.Snap, log.Root())
 	if err := snapshots.OpenFolder(); err != nil {
 		snapshots.Close()
-		return err
+		return common.Hash{}, err
 	}
 	defer snapshots.Close()
 	view := snapshots.View()
@@ -205,15 +213,12 @@ func verifyPBTHeaderRoot(ctx context.Context, dataDir string, block uint64, root
 		return err
 	})
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	if header == nil {
-		return fmt.Errorf("verify-pbt: block %d header is missing", block)
+		return common.Hash{}, fmt.Errorf("verify-pbt: block %d header is missing", block)
 	}
-	if header.Root != root {
-		return fmt.Errorf("%w: artifact MPT root %x differs from header root %x", errVerifyPBTInvalid, root, header.Root)
-	}
-	return nil
+	return header.Root, nil
 }
 
 type pbtVerifyBlockFilesTx struct {
