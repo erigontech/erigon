@@ -794,7 +794,12 @@ func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
 
 func TestCheckPreimageSetAtAcceptsReusedExpectedKey(t *testing.T) {
 	address := common.Address{1}
-	record := Preimage{Address: address, Slots: [][32]byte{{1}}}
+	record := Preimage{Address: address, Slots: [][32]byte{{1}, {2}}}
+	sort.Slice(record.Slots, func(i, j int) bool {
+		left := keccak.Sum256(record.Slots[i][:])
+		right := keccak.Sum256(record.Slots[j][:])
+		return bytes.Compare(left[:], right[:]) < 0
+	})
 	var encoded bytes.Buffer
 	require.NoError(t, writePreimages(t, &encoded, preimageSliceIterator([]Preimage{record})))
 	address32 := eip8297.RightAlign32(address[:])
@@ -802,8 +807,10 @@ func TestCheckPreimageSetAtAcceptsReusedExpectedKey(t *testing.T) {
 	expected := [][]byte{
 		eip8297.TreeKey(eip8297.AccountZone, stem[:], eip8297.BasicDataLeafKey),
 		eip8297.TreeKeyStorage(address[:], record.Slots[0][:]),
+		eip8297.TreeKeyStorage(address[:], record.Slots[1][:]),
 	}
-	reused := make([]byte, 0, len(expected[0])+len(expected[1]))
+	sort.Slice(expected, func(i, j int) bool { return bytes.Compare(expected[i], expected[j]) < 0 })
+	reused := make([]byte, 0, len(expected[0])+len(expected[1])+len(expected[2]))
 	yieldExpected := func(yield func([]byte) error) error {
 		for _, key := range expected {
 			reused = append(reused[:0], key...)

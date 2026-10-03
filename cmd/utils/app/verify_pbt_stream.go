@@ -590,7 +590,7 @@ func pbtVerifyBuildAccountRows(accountsPath, storagePath string, output *etl.Col
 		if storage.err != nil {
 			return storage.err
 		}
-		account, err := pbtVerifyAccount(header, root)
+		account, err := pbtVerifyAccount(header, root, accountsPath)
 		if err != nil {
 			return err
 		}
@@ -612,7 +612,13 @@ func pbtVerifyBuildAccountRows(accountsPath, storagePath string, output *etl.Col
 	return nil
 }
 
-func pbtVerifyAccount(header artifact.Header, root common.Hash) (pbtVerifyAccountRecord, error) {
+func pbtVerifyAccount(header artifact.Header, root common.Hash, path string) (pbtVerifyAccountRecord, error) {
+	if len(header.Nonce) > 8 {
+		return pbtVerifyAccountRecord{}, fmt.Errorf("%w: %s: header nonce has width %d", errPBTVerifyScratchIO, path, len(header.Nonce))
+	}
+	if len(header.CodeSize) > 4 {
+		return pbtVerifyAccountRecord{}, fmt.Errorf("%w: %s: header code size has width %d", errPBTVerifyScratchIO, path, len(header.CodeSize))
+	}
 	account := accounts.Account{Nonce: dbstate.PBinIntegerUint64(header.Nonce), Root: root}
 	account.Balance.SetBytes(header.Balance)
 	switch header.Kind {

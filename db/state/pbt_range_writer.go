@@ -342,12 +342,12 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	}
 	stream := func(emit func(pbt.Op) error) error {
 		progress := newPbinStreamProgress("PBT range writer progress", "", "range writer")
+		var stampBytes [8]byte
 		streamErr := leaves(func(leaf PBinLeaf) error {
 			progress.leaf(leaf.Key)
 			if len(leaf.Value) != eip8297.ValueLength {
 				return fmt.Errorf("pbin range writer: leaf %x has value length %d", leaf.Key, len(leaf.Value))
 			}
-			var stampBytes [8]byte
 			binary.BigEndian.PutUint64(stampBytes[:], leaf.Stamp)
 			if _, writeErr := stampWriter.Write(stampBytes[:]); writeErr != nil {
 				return writeErr

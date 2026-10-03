@@ -151,6 +151,30 @@ func TestVerifyPBTAcceptsSoundArtifacts(t *testing.T) {
 	require.ErrorIs(t, verifyPBTFilesWithMaxCodeSize(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7, params.MaxCodeSizeAmsterdam, ""), errVerifyPBTInvalid)
 }
 
+func TestVerifyPBTAccountRejectsOversizedIntegerFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mpt-accounts.sorted")
+	t.Run("nonce", func(t *testing.T) {
+		var record pbtVerifyAccountRecord
+		var err error
+		require.NotPanics(t, func() {
+			record, err = pbtVerifyAccount(artifact.Header{Nonce: make([]byte, 9)}, common.Hash{}, path)
+		})
+		require.Empty(t, record)
+		require.ErrorIs(t, err, errPBTVerifyScratchIO)
+		require.ErrorContains(t, err, path)
+	})
+	t.Run("code size", func(t *testing.T) {
+		var record pbtVerifyAccountRecord
+		var err error
+		require.NotPanics(t, func() {
+			record, err = pbtVerifyAccount(artifact.Header{CodeSize: make([]byte, 5)}, common.Hash{}, path)
+		})
+		require.Empty(t, record)
+		require.ErrorIs(t, err, errPBTVerifyScratchIO)
+		require.ErrorContains(t, err, path)
+	})
+}
+
 func TestVerifyPBTWrapsMalformedMPTHeadersAsScratchIO(t *testing.T) {
 	scratch := t.TempDir()
 	paths := make([]string, 4)

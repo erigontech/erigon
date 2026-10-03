@@ -831,11 +831,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, commitmentDomain: commitmentDomain, txNum: req.firstTxNum, prefetched: prefetch}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
-	if _, _, dual := cc.dualCommitmentContexts(); dual {
-		balState.binFeed = true
-	} else if context := cc.doms.GetCommitmentContext(); context != nil {
-		balState.binFeed = context.Trie().Variant() == commitment.VariantBinPatriciaTrie
-	}
+	balState.binFeed = hasBinCommitmentContext(cc.doms)
 	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil, eip8246)
 	if err := balState.LazyLoadErr(); err != nil {
 		return dualCommitmentResult{}, nil, fmt.Errorf("lazy-load: %w", err)

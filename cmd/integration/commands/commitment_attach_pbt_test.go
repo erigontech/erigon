@@ -412,6 +412,24 @@ func TestPBTAttachPointRemedies(t *testing.T) {
 	dev := pbtAttachNodePointError("/node", "dev", 10, 20, 10, 5, 13, true)
 	require.Error(t, dev)
 	require.NotContains(t, dev.Error(), "stage_exec")
+	require.ErrorContains(t, dev, "cannot be loaded by integration")
+	emptyChain := pbtAttachNodePointError("/node", "", 10, 20, 10, 5, 13, true)
+	require.Error(t, emptyChain)
+	require.NotContains(t, emptyChain.Error(), "stage_exec")
+	require.ErrorContains(t, emptyChain, "cannot be loaded by integration")
+
+	for name, err := range map[string]error{
+		"behind":      pbtAttachNodePointError("/node", "dev", 4, 10, 4, 5, 13, true),
+		"mid-block":   pbtAttachNodePointError("/node", "dev", 10, 20, 10, 5, 13, false),
+		"at-point":    pbtAttachNodePointError("/node", "dev", 10, 13, 5, 5, 13, true),
+		"files-ahead": pbtAttachFilesAheadError("/node", "dev", 3, 8, 10, 2, 17),
+	} {
+		t.Run(name, func(t *testing.T) {
+			require.Error(t, err)
+			require.NotContains(t, err.Error(), "stage_exec")
+			require.ErrorContains(t, err, "cannot be loaded by integration")
+		})
+	}
 }
 
 func TestPBTAttachFilesAheadOfPointRemedy(t *testing.T) {

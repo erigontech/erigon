@@ -539,10 +539,8 @@ func pbtAttachNodePointError(dataDir, chainName string, nodeBlock, nodeTx, execu
 }
 
 func pbtAttachStageExecReset(dataDir, chainName string) (string, bool) {
-	if chainName != "" {
-		if _, err := chainspec.ChainSpecByName(chainName); err != nil {
-			return "", false
-		}
+	if _, err := chainspec.ChainSpecByName(chainName); err != nil {
+		return "", false
 	}
 	return fmt.Sprintf("integration stage_exec --datadir=%s --reset --chain=%s --experimental.commitment-v3", dataDir, chainName), true
 }
