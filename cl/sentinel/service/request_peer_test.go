@@ -111,3 +111,39 @@ func receivePeerRequestTestValue[T any](t *testing.T, values <-chan T) T {
 		return zero
 	}
 }
+
+// A requester must not have more than MAX_CONCURRENT_REQUESTS open streams with one peer for one protocol; Lighthouse
+// rejects the extra streams and bans a peer that keeps opening them.
+func TestPeerRequestLimitsConcurrentStreamsPerPeerAndProtocol(t *testing.T) {
+	release := make(chan struct{})
+	reached := make(chan string, 8)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		handler: http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			reached <- request.Header.Get("REQRESP-PEER-ID") + " " + request.Header.Get("REQRESP-TOPIC")
+			<-release
+		}),
+	}}
+	request := func(pid, topic string) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := server.requestPeer(t.Context(), peer.ID(pid), &sentinelproto.RequestData{Topic: topic, Data: []byte("request")})
+			done <- err
+		}()
+		return done
+	}
+
+	first, second := request("a", "columns"), request("a", "columns")
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+
+	require.ErrorIs(t, receivePeerRequestTestValue(t, request("a", "columns")), ErrPeerBusy)
+	otherPeer, otherTopic := request("b", "columns"), request("a", "blocks")
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+
+	close(release)
+	for _, done := range []<-chan error{first, second, otherPeer, otherTopic} {
+		require.NotErrorIs(t, receivePeerRequestTestValue(t, done), ErrPeerBusy)
+	}
+	require.NotErrorIs(t, receivePeerRequestTestValue(t, request("a", "columns")), ErrPeerBusy, "finished streams free their slots")
+}

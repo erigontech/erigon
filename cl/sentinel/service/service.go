@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/libp2p/go-libp2p/core/peer"
 
@@ -39,6 +40,19 @@ import (
 
 const gracePeerCount = 32
 
+// maxConcurrentRequests is the consensus spec's MAX_CONCURRENT_REQUESTS: a requester must not have more open streams
+// with one peer for one protocol, and peers penalize the extra streams (Lighthouse bans a peer that keeps opening them).
+const maxConcurrentRequests = 2
+
+// ErrPeerBusy reports that a request was not sent because the peer already has maxConcurrentRequests open streams
+// for the protocol. It is not the peer's fault.
+var ErrPeerBusy = errors.New("peer already has the maximum number of concurrent requests for this protocol")
+
+type peerStream struct {
+	pid   peer.ID
+	topic string
+}
+
 var _ sentinelproto.SentinelServer = (*SentinelServer)(nil)
 
 type SentinelServer struct {
@@ -48,7 +62,31 @@ type SentinelServer struct {
 	sentinel           *sentinel.Sentinel
 	peerRequestBackend peerRequestBackend
 
+	openStreamsMu sync.Mutex
+	openStreams   map[peerStream]int
+
 	logger log.Logger
+}
+
+func (s *SentinelServer) claimStream(key peerStream) bool {
+	s.openStreamsMu.Lock()
+	defer s.openStreamsMu.Unlock()
+	if s.openStreams[key] >= maxConcurrentRequests {
+		return false
+	}
+	if s.openStreams == nil {
+		s.openStreams = make(map[peerStream]int)
+	}
+	s.openStreams[key]++
+	return true
+}
+
+func (s *SentinelServer) releaseStream(key peerStream) {
+	s.openStreamsMu.Lock()
+	defer s.openStreamsMu.Unlock()
+	if s.openStreams[key]--; s.openStreams[key] <= 0 {
+		delete(s.openStreams, key)
+	}
 }
 
 type peerRequestBackend interface {
@@ -111,6 +149,12 @@ func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, s
 }
 
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
+	stream := peerStream{pid: pid, topic: req.Topic}
+	if !s.claimStream(stream) {
+		return nil, ErrPeerBusy
+	}
+	defer s.releaseStream(stream)
+
 	// prepare the http request
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", bytes.NewBuffer(req.Data))
 	if err != nil {
