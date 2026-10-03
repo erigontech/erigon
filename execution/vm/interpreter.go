@@ -484,6 +484,13 @@ run:
 		if !anyTrace {
 			sLen, gas := stack.len(), callContext.gas
 			switch op {
+			case PUSH0:
+				if jt[PUSH0].numPush == 1 && sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					stack.pushRef().Clear()
+					pc++
+					continue
+				}
 			case PUSH1:
 				if sLen < stackLimit && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
