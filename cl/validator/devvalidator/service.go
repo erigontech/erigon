@@ -7,6 +7,7 @@ package devvalidator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -188,7 +189,7 @@ func (s *Service) resolveIndices(ctx context.Context) error {
 
 	s.logger.Info("[dev-validator] resolved validator indices", "resolved", resolved, "total", len(s.keys))
 	if resolved == 0 {
-		return fmt.Errorf("no validators found in beacon state matching our keys")
+		return errors.New("no validators found in beacon state matching our keys")
 	}
 	return nil
 }
@@ -337,7 +338,7 @@ func (s *Service) proposeBlock(ctx context.Context, slot uint64, key *ValidatorK
 	}
 
 	if block.Block.Body == nil {
-		return fmt.Errorf("block template body is missing")
+		return errors.New("block template body is missing")
 	}
 
 	// Ensure execution payload sub-fields are initialized (the JSON response
@@ -466,24 +467,24 @@ func (s *Service) expireEnvelopeSubmission(root common.Hash, deadline time.Time)
 
 func (s *Service) signExecutionPayloadEnvelope(block *cltypes.BeaconBlock, data json.RawMessage, key *ValidatorKey) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if block.Body.SignedExecutionPayloadBid == nil || block.Body.SignedExecutionPayloadBid.Message == nil {
-		return nil, fmt.Errorf("block template execution payload bid is missing")
+		return nil, errors.New("block template execution payload bid is missing")
 	}
 	bid := block.Body.SignedExecutionPayloadBid.Message
 	if bid.BuilderIndex != clparams.BuilderIndexSelfBuild {
 		if len(data) != 0 {
-			return nil, fmt.Errorf("external builder template includes an unsigned execution payload envelope")
+			return nil, errors.New("external builder template includes an unsigned execution payload envelope")
 		}
 		return nil, nil
 	}
 	if len(data) == 0 {
-		return nil, fmt.Errorf("self-build template execution payload envelope is missing")
+		return nil, errors.New("self-build template execution payload envelope is missing")
 	}
 	envelope := cltypes.NewExecutionPayloadEnvelope(s.cfg)
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return nil, fmt.Errorf("parse execution payload envelope: %w", err)
 	}
 	if envelope == nil || envelope.Payload == nil || envelope.ExecutionRequests == nil {
-		return nil, fmt.Errorf("execution payload envelope is incomplete")
+		return nil, errors.New("execution payload envelope is incomplete")
 	}
 	if withdrawals := envelope.Payload.Withdrawals; withdrawals != nil {
 		for i := 0; i < withdrawals.Len(); i++ {
@@ -499,14 +500,14 @@ func (s *Service) signExecutionPayloadEnvelope(block *cltypes.BeaconBlock, data 
 	if envelope.BeaconBlockRoot != blockRoot || envelope.ParentBeaconBlockRoot != block.ParentRoot ||
 		envelope.BuilderIndex != bid.BuilderIndex || envelope.Payload.BlockHash != bid.BlockHash ||
 		envelope.Payload.SlotNumber != block.Slot {
-		return nil, fmt.Errorf("execution payload envelope does not match block template")
+		return nil, errors.New("execution payload envelope does not match block template")
 	}
 	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
 	if err != nil {
 		return nil, fmt.Errorf("hash execution requests: %w", err)
 	}
 	if requestsRoot != bid.ExecutionRequestsRoot {
-		return nil, fmt.Errorf("execution requests do not match block template")
+		return nil, errors.New("execution requests do not match block template")
 	}
 	epoch := block.Slot / s.cfg.SlotsPerEpoch
 	signature, err := signObject(key, envelope, s.cfg.DomainBeaconBuilder, epoch, s.cfg, s.genesisValidatorsRoot)
