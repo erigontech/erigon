@@ -181,9 +181,10 @@ func testSentinelBlocksByRange(t *testing.T) {
 	noErr(err)
 	defer stream.Close()
 
+	// The range must cover every block the test expects back: the test chain has gaps between blocks.
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: blocks[0].Block.Slot,
-		Count:     6,
+		Count:     blocks[len(blocks)-1].Block.Slot - blocks[0].Block.Slot + 1,
 	}
 	noErr(ssz_snappy.EncodeAndWrite(stream, req))
 
