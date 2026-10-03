@@ -584,18 +584,19 @@ run:
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		operation := &jt[op]
-		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
+		if anyTrace {
+			cost = mdgas.MdGasCost{Execution: operation.constantGas}
+		}
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
 		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
-		if callContext.gas < cost.Execution {
+		if callContext.gas < operation.constantGas {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-		} else {
-			callContext.gas -= cost.Execution
 		}
+		callContext.gas -= operation.constantGas
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
 		var memorySize uint64
