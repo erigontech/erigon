@@ -41,13 +41,13 @@ func TestPBinLeafStreamDeduplicatesAndRejectsConflicts(t *testing.T) {
 	key := eip8297.TreeKeyCodeChunk(common.Hash{1}, 0)
 	value := make([]byte, eip8297.ValueLength)
 	value[eip8297.ValueLength-1] = 1
-	require.NoError(t, pbinCollectOp(collector, &pbinLeafCollector{}, pbinTestOp(key, value), 3))
-	require.NoError(t, pbinCollectOp(collector, &pbinLeafCollector{}, pbinTestOp(key, value), 7))
+	require.NoError(t, pbinCollectOp(collector, new([8 + eip8297.ValueLength]byte), pbinTestOp(key, value), 3))
+	require.NoError(t, pbinCollectOp(collector, new([8 + eip8297.ValueLength]byte), pbinTestOp(key, value), 7))
 	var leaves []PBinLeaf
 	require.NoError(t, pbinLoadSortedLeaves(collector, func(leaf PBinLeaf) error {
 		leaves = append(leaves, leaf)
 		return nil
-	}, nil))
+	}, &pbinStreamProgress{}))
 	require.Len(t, leaves, 1)
 	require.EqualValues(t, 7, leaves[0].Stamp)
 
@@ -55,7 +55,7 @@ func TestPBinLeafStreamDeduplicatesAndRejectsConflicts(t *testing.T) {
 	defer conflicting.Close()
 	other := bytes.Clone(value)
 	other[0] = 1
-	require.NoError(t, pbinCollectOp(conflicting, &pbinLeafCollector{}, pbinTestOp(key, value), 1))
-	require.NoError(t, pbinCollectOp(conflicting, &pbinLeafCollector{}, pbinTestOp(key, other), 2))
-	require.Error(t, pbinLoadSortedLeaves(conflicting, func(PBinLeaf) error { return nil }, nil))
+	require.NoError(t, pbinCollectOp(conflicting, new([8 + eip8297.ValueLength]byte), pbinTestOp(key, value), 1))
+	require.NoError(t, pbinCollectOp(conflicting, new([8 + eip8297.ValueLength]byte), pbinTestOp(key, other), 2))
+	require.Error(t, pbinLoadSortedLeaves(conflicting, func(PBinLeaf) error { return nil }, &pbinStreamProgress{}))
 }

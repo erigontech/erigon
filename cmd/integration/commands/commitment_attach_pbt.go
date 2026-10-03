@@ -207,40 +207,44 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	} else if err := validatePBTAttachPublishedFiles(publishedDirs, publishedSettings.StepSize, txNum); err != nil {
 		return err
 	}
-	var blockHash, headerRoot common.Hash
-	var blockEnd, afterFork bool
-	var maxTxNum uint64
-	var nodeHexRoot common.Hash
-	var nodeBlock, nodeTx uint64
-	var executionProgress uint64
+	nodePoint := struct {
+		block    uint64
+		tx       uint64
+		hexRoot  common.Hash
+		progress uint64
+	}{}
 	if marker == nil {
-		var root common.Hash
-		nodeBlock, nodeTx, root, err = pbtAttachNodeHexState(ctx, nodeDirs, nodeSettings, nodeV3, logger)
+		nodeBlock, nodeTx, nodeHexRoot, err := pbtAttachNodeHexState(ctx, nodeDirs, nodeSettings, nodeV3, logger)
 		if err != nil {
 			return err
 		}
-		executionProgress, err = pbtAttachExecutionProgress(ctx, nodeDirs)
+		executionProgress, err := pbtAttachExecutionProgress(ctx, nodeDirs)
 		if err != nil {
 			return err
 		}
+		nodePoint = struct {
+			block    uint64
+			tx       uint64
+			hexRoot  common.Hash
+			progress uint64
+		}{nodeBlock, nodeTx, nodeHexRoot, executionProgress}
 		if nodeBlock != blockNum || nodeTx != txNum {
-			_, _, blockEnd, _, _, err = pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
+			_, _, blockEnd, _, _, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
 			if err != nil {
 				blockEnd = true
 			}
 			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, executionProgress, blockNum, txNum, blockEnd)
 		}
-		nodeHexRoot = root
 	}
-	blockHash, headerRoot, blockEnd, afterFork, maxTxNum, err = pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
+	blockHash, headerRoot, blockEnd, afterFork, maxTxNum, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
 	if err != nil {
 		return err
 	}
 	if marker == nil {
-		if executionProgress > blockNum {
-			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, executionProgress, blockNum, txNum, blockEnd)
+		if nodePoint.progress > blockNum {
+			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodePoint.block, nodePoint.tx, nodePoint.progress, blockNum, txNum, blockEnd)
 		}
-		if executionProgress == blockNum && maxTxNum < txNum {
+		if nodePoint.progress == blockNum && maxTxNum < txNum {
 			return fmt.Errorf("commitment attach-pbt: node is behind conversion txNum %d", txNum)
 		}
 	}
@@ -261,8 +265,8 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		if !publishedHexFound {
 			return fmt.Errorf("commitment attach-pbt: published hex root is missing at (%d, %d)", blockNum, txNum)
 		}
-		if nodeHexRoot != publishedHexRoot {
-			return fmt.Errorf("commitment attach-pbt: node hex root %s differs from published root %s at (%d, %d)", nodeHexRoot, publishedHexRoot, blockNum, txNum)
+		if nodePoint.hexRoot != publishedHexRoot {
+			return fmt.Errorf("commitment attach-pbt: node hex root %s differs from published root %s at (%d, %d)", nodePoint.hexRoot, publishedHexRoot, blockNum, txNum)
 		}
 		if blockEnd {
 			wantHeaderRoot := publishedHexRoot
@@ -306,11 +310,8 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 			return fmt.Errorf("commitment attach-pbt: marker conversion point does not match published point (%d, %d)", blockNum, txNum)
 		}
 		finalSettings = marker.Settings
-	}
-	if marker == nil {
-		if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, Settings: finalSettings}); err != nil {
-			return err
-		}
+	} else if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, Settings: finalSettings}); err != nil {
+		return err
 	}
 	if err := runPBTAttachStepHook(hooks.step, "marker"); err != nil {
 		return err
@@ -683,24 +684,9 @@ func verifyPBTAttachPublishedBin(ctx context.Context, nodeDirs, publishedDirs da
 	}
 	defer rawDB.Close()
 	configurePBTSourceVariant(settings)
-	agg, err := openPBTState(ctx, publishedDirs, settings, rawDB, logger)
+	root, err := verifyPBTRows(ctx, rawDB, rawDB, publishedDirs, settings, kv.CommitmentBinDomain, "commitment attach-pbt: verify published binary rows", logger)
 	if err != nil {
 		return err
-	}
-	defer agg.Close()
-	db, err := dbtemporal.New(rawDB, agg, nil)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	root, err := dbstate.VerifyPBinDomainRoot(ctx, tx, agg, kv.CommitmentBinDomain)
-	if err != nil {
-		return fmt.Errorf("commitment attach-pbt: verify published binary rows: %w", err)
 	}
 	if root != wantRoot {
 		return fmt.Errorf("commitment attach-pbt: published binary rows root %s differs from published state root %s", root, wantRoot)
@@ -783,8 +769,8 @@ func validatePBTAttachPublishedFiles(publishedDirs datadir.Dirs, stepSize, endTx
 		}
 	}
 	ranges := pbtAttachRanges(publishedFiles, stepSize, endTxNum)
-	if err := validatePBTAttachPublishedRanges(ranges, endTxNum); err != nil {
-		return err
+	if !slices.Equal(ranges[kv.CommitmentDomain], ranges[kv.CommitmentBinDomain]) {
+		return fmt.Errorf("commitment attach-pbt: published commitment-bin ranges do not match commitment ranges")
 	}
 	return validatePBTAttachFrontier(publishedFiles, stepSize, endTxNum)
 }
@@ -812,10 +798,7 @@ func validatePBTAttachFileKinds(nodeFiles, publishedFiles []pbtAttachFile, stepS
 		}
 	}
 	for _, file := range nodeFiles {
-		if file.from*stepSize > endTxNum || !pbtAttachAdoptsFile(file) {
-			continue
-		}
-		if file.domain == kv.CommitmentDomain || file.domain == kv.CommitmentBinDomain {
+		if file.from*stepSize > endTxNum || !pbtAttachAdoptsFile(file) || file.domain == kv.CommitmentDomain || file.domain == kv.CommitmentBinDomain {
 			continue
 		}
 		if _, ok := published[pbtAttachFileKind(file)]; !ok {
@@ -842,11 +825,11 @@ func validatePBTAttachHistoryFrontier(nodeFiles []pbtAttachFile, stepSize, endTx
 		latestHistory := make(map[string]*pbtAttachFile)
 		for i := range nodeFiles {
 			file := &nodeFiles[i]
-			if file.domain != domain || file.from*stepSize > endTxNum || pbtAttachAdoptsFile(*file) {
+			if file.domain != domain || file.from*stepSize > endTxNum {
 				continue
 			}
 			ext := filepath.Ext(file.path)
-			if !pbtAttachHistoryExtension(ext) {
+			if !slices.Contains([]string{".v", ".vi", ".ef", ".efi"}, ext) {
 				continue
 			}
 			if latestHistory[ext] == nil || file.to > latestHistory[ext].to {
@@ -860,10 +843,6 @@ func validatePBTAttachHistoryFrontier(nodeFiles []pbtAttachFile, stepSize, endTx
 		}
 	}
 	return nil
-}
-
-func pbtAttachHistoryExtension(ext string) bool {
-	return ext == ".v" || ext == ".vi" || ext == ".ef" || ext == ".efi"
 }
 
 func pbtAttachAdoptsFile(file pbtAttachFile) bool {
@@ -889,18 +868,6 @@ func pbtAttachFileKind(file pbtAttachFile) string {
 	return fmt.Sprintf("%s:%d:%d:%s", file.domain, file.from, file.to, filepath.Ext(file.path))
 }
 
-func validatePBTAttachPublishedRanges(ranges map[kv.Domain][]string, endTxNum uint64) error {
-	if !slices.Equal(ranges[kv.CommitmentDomain], ranges[kv.CommitmentBinDomain]) {
-		return fmt.Errorf("commitment attach-pbt: published commitment-bin ranges do not match commitment ranges")
-	}
-	for _, domain := range pbtAttachDomains {
-		if len(ranges[domain]) == 0 {
-			return fmt.Errorf("commitment attach-pbt: published files are missing domain %s through txNum %d", domain, endTxNum)
-		}
-	}
-	return nil
-}
-
 func pbtAttachRanges(files []pbtAttachFile, stepSize, endTxNum uint64) map[kv.Domain][]string {
 	ranges := make(map[kv.Domain][]string, len(pbtAttachDomains))
 	for _, file := range files {
@@ -916,7 +883,7 @@ func pbtAttachRanges(files []pbtAttachFile, stepSize, endTxNum uint64) map[kv.Do
 }
 
 func pbtAttachFiles(dirs datadir.Dirs) ([]pbtAttachFile, error) {
-	return pbtSnapshotFiles(dirs, pbtAttachDomain)
+	return pbtSnapshotFiles(dirs, func(domain kv.Domain) bool { return slices.Contains(pbtAttachDomains, domain) })
 }
 
 func pbtSnapshotFiles(dirs datadir.Dirs, include func(kv.Domain) bool) ([]pbtAttachFile, error) {
@@ -954,15 +921,12 @@ func pbtSnapshotFiles(dirs datadir.Dirs, include func(kv.Domain) bool) ([]pbtAtt
 	return files, nil
 }
 
-func pbtAttachVisibleFiles(files []pbtAttachFile, domainFilter ...kv.Domain) []pbtAttachFile {
+func pbtAttachVisibleFiles(files []pbtAttachFile) []pbtAttachFile {
 	visible := make([]pbtAttachFile, 0, len(files))
 	for i, file := range files {
-		if len(domainFilter) > 0 && file.domain != domainFilter[0] {
-			continue
-		}
 		hidden := false
 		for j, other := range files {
-			if i == j || (len(domainFilter) > 0 && other.domain != domainFilter[0]) || file.domain != other.domain || filepath.Ext(file.path) != filepath.Ext(other.path) {
+			if i == j || file.domain != other.domain || filepath.Ext(file.path) != filepath.Ext(other.path) {
 				continue
 			}
 			if other.from <= file.from && other.to >= file.to && (other.from < file.from || other.to > file.to) {
@@ -975,10 +939,6 @@ func pbtAttachVisibleFiles(files []pbtAttachFile, domainFilter ...kv.Domain) []p
 		}
 	}
 	return visible
-}
-
-func pbtAttachDomain(domain kv.Domain) bool {
-	return slices.Contains(pbtAttachDomains, domain)
 }
 
 func pbtAttachExecutionProgress(ctx context.Context, dirs datadir.Dirs) (uint64, error) {
@@ -1202,10 +1162,6 @@ func resetPBTExecution(ctx context.Context, dirs datadir.Dirs, settings *dbstate
 		rawDB.Close()
 		return err
 	}
-	if err := rawdbreset.ResetExec(ctx, db); err != nil {
-		db.Close()
-		return err
-	}
-	db.Close()
-	return nil
+	defer db.Close()
+	return rawdbreset.ResetExec(ctx, db)
 }

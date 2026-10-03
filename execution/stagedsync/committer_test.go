@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
@@ -465,6 +466,59 @@ func TestCommitmentCalculatorDualFold(t *testing.T) {
 
 func TestCommitmentCalculatorBALComputeAheadDualFold(t *testing.T) {
 	testCommitmentCalculatorBALDualFold(t, nil, false)
+}
+
+func TestCommitmentCalculatorBALHexOnlySkipsBinaryFeed(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousDual := statecfg.ExperimentalHexBinCommitment
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousDual
+		statecfg.ExperimentalParallelCommitment = previousParallel
+		statecfg.ExperimentalCommitmentV3 = previousV3
+	})
+	statecfg.ExperimentalBinCommitment = false
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.ExperimentalParallelCommitment = false
+	statecfg.ExperimentalCommitmentV3 = false
+	db, tx, doms := setupStepTest(t)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(roTx.Rollback)
+	cc := &commitmentCalculator{
+		doms:        doms,
+		db:          db,
+		roTx:        roTx,
+		chainConfig: &chain.Config{},
+		updates:     commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash),
+		logger:      log.New(),
+	}
+	t.Cleanup(cc.updates.Close)
+	key := common.Address{2}
+	result, _, err := cc.computeRootFromBAL(t.Context(), &blockRequest{
+		blockNum:   1,
+		blockHash:  common.Hash{2},
+		firstTxNum: 1,
+		lastTxNum:  1,
+		bal: types.BlockAccessList{{
+			Address:      key,
+			NonceChanges: []*types.NonceChange{{Index: 0, Value: 2}},
+		}},
+	}, math.MaxUint32, false, false, commitTarget{blockNum: 1, blockHash: common.Hash{2}, lastTxNum: 1})
+	require.NoError(t, err)
+	require.NotEmpty(t, result.canonicalRoot)
+	require.Nil(t, result.shadowRoot)
+
+	reference, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithHexCommitmentOnly())
+	require.NoError(t, err)
+	t.Cleanup(reference.Close)
+	account := accounts.Account{Nonce: 2, CodeHash: accounts.InternCodeHash(empty.CodeHash)}
+	require.NoError(t, reference.DomainPut(kv.AccountsDomain, tx, key[:], accounts.SerialiseV3(&account), 1, nil))
+	want, err := reference.ComputeCommitment(t.Context(), tx, false, 1, 1, "test", nil)
+	require.NoError(t, err)
+	require.Equal(t, want, result.canonicalRoot)
 }
 
 func TestCommitmentCalculatorBALDualFoldWithCode(t *testing.T) {

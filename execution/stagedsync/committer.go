@@ -863,9 +863,13 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 		balState.FlushToFeed(&cc.feed)
 		hexFeed = &cc.feed
 	}
-	binFeed, err := balState.BinFeed()
-	if err != nil {
-		return dualCommitmentResult{}, nil, err
+	var binFeed *commitment.PBinFeed
+	if balState.binFeed {
+		var err error
+		binFeed, err = balState.BinFeed()
+		if err != nil {
+			return dualCommitmentResult{}, nil, err
+		}
 	}
 	return cc.computeRootFromUpdatesResult(ctx, t, balUpdates, reader, hexFeed, binFeed)
 }
@@ -1202,7 +1206,6 @@ type dualFoldResult struct {
 }
 
 func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Context, t commitTarget, hexUpdates *commitment.Updates, reader *asOfStateReader, hexCtx, binCtx *commitmentdb.SharedDomainsCommitmentContext, hexFeed *commitment.Feed, binFeed *commitment.PBinFeed) (dualCommitmentResult, error) {
-	cc.setCanonicalCommitmentDomain(t.blockTime)
 	hexTx, binTx, pin, err := cc.beginCommitmentWorkerTxs(ctx)
 	if err != nil {
 		return dualCommitmentResult{}, err
@@ -1233,8 +1236,12 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 
 	canonicalDomain := cc.canonicalCommitmentDomain(t.blockTime)
 	shadowDomain := otherCommitmentDomain(canonicalDomain)
+	var shadowArm *commitmentFoldArm
 	if canonicalDomain == kv.CommitmentBinDomain {
 		cc.stopHexShadowAtWindow(ctx, t)
+		shadowArm = &hexArm
+	} else {
+		shadowArm = &binArm
 	}
 	if cc.ShadowDomainStopped(canonicalDomain) {
 		return dualCommitmentResult{}, fmt.Errorf("commitment domain %s is stopped", canonicalDomain)
@@ -1270,10 +1277,6 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 	}
 	wg.Wait()
 
-	shadowArm := &binArm
-	if shadowDomain == kv.CommitmentDomain {
-		shadowArm = &hexArm
-	}
 	return cc.finishDualFolds(canonicalDomain, shadowDomain, folds, shadowArm)
 }
 

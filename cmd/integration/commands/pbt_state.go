@@ -18,10 +18,13 @@ package commands
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
 )
 
@@ -35,4 +38,27 @@ func openPBTState(ctx context.Context, dirs datadir.Dirs, settings *dbstate.Erig
 		return nil, err
 	}
 	return agg, nil
+}
+
+func verifyPBTRows(ctx context.Context, rawDB, folderDB kv.RwDB, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, domain kv.Domain, what string, logger log.Logger) (common.Hash, error) {
+	agg, err := openPBTState(ctx, dirs, settings, folderDB, logger)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer agg.Close()
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	defer tx.Rollback()
+	root, err := dbstate.VerifyPBinDomainRoot(ctx, tx, agg, domain)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("%s: %w", what, err)
+	}
+	return root, nil
 }

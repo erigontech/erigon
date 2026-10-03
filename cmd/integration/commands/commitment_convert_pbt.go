@@ -17,7 +17,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -226,17 +225,19 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = keepHex
 	statecfg.ConfigureCommitmentV3Records(keepHex)
+	trieVariant := dbstate.TrieVariantBin
+	targetDomain := kv.CommitmentDomain
+	if keepHex {
+		trieVariant = dbstate.TrieVariantHexBin
+		targetDomain = kv.CommitmentBinDomain
+	}
 	targetSettings := &dbstate.ErigonDBSettings{
 		StepSize:                       sourceAgg.StepSize(),
 		StepsInFrozenFile:              sourceAgg.StepsInFrozenFile(),
 		ReferencesInCommitmentBranches: new(bool),
+		TrieVariant:                    &trieVariant,
+		TrieHash:                       &hashName,
 	}
-	trieVariant := dbstate.TrieVariantBin
-	if keepHex {
-		trieVariant = dbstate.TrieVariantHexBin
-	}
-	targetSettings.TrieVariant = &trieVariant
-	targetSettings.TrieHash = &hashName
 	targetChaindata, err := os.MkdirTemp("", "convert-pbt-target-chaindata-")
 	if err != nil {
 		return err
@@ -251,12 +252,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if err != nil {
 		return err
 	}
-	targetAggClosed := false
-	defer func() {
-		if !targetAggClosed {
-			targetAgg.Close()
-		}
-	}()
+	defer targetAgg.Close()
 	targetDB, err := dbtemporal.New(targetRaw, targetAgg, nil)
 	if err != nil {
 		return err
@@ -267,10 +263,6 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return err
 	}
 	defer targetTx.Rollback()
-	targetDomain := kv.CommitmentDomain
-	if keepHex {
-		targetDomain = kv.CommitmentBinDomain
-	}
 	root, err := dbstate.ConvertPBin(ctx, dbstate.PBinConvertOptions{
 		SourceAggregator:  sourceAgg,
 		SourceTx:          sourceTx,
@@ -287,8 +279,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		return err
 	}
 	targetAgg.Close()
-	targetAggClosed = true
-	if blockEnd && afterFork && !bytes.Equal(root[:], header.Root[:]) {
+	if blockEnd && afterFork && root != header.Root {
 		return fmt.Errorf("commitment convert-pbt: root %x differs from header root %x", root, header.Root)
 	}
 	visibleRanges := pbtVisibleSnapshotFiles(sourceAgg, sourceDirs)
@@ -322,10 +313,6 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 		ConversionBlockNum:             &conversionBlock,
 		ConversionTxNum:                &conversionTx,
 	}
-	if !keepHex {
-		finalSettings.ReferencesInCommitmentBranches = new(bool)
-	}
-	targetAgg.Close()
 	if hooks.standalone != nil {
 		if err := hooks.standalone(outputDirs); err != nil {
 			return err
@@ -546,23 +533,9 @@ func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 	}); err != nil {
 		return err
 	}
-	agg, err := openPBTState(ctx, dirs, settings, nil, logger)
+	_, err = verifyPBTRows(ctx, rawDB, nil, dirs, settings, domain, "commitment convert-pbt: verify written rows", logger)
 	if err != nil {
 		return err
-	}
-	defer agg.Close()
-	db, err := dbtemporal.New(rawDB, agg, nil)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := dbstate.VerifyPBinDomainRoot(ctx, tx, agg, domain); err != nil {
-		return fmt.Errorf("commitment convert-pbt: verify written rows: %w", err)
 	}
 	return nil
 }
@@ -748,33 +721,28 @@ func validatePBTFileAccessors(dirs datadir.Dirs, scope, remedy string) error {
 
 func pbtVisibleSnapshotFiles(sourceAgg *dbstate.Aggregator, sourceDirs datadir.Dirs) map[string]struct{} {
 	visibleRanges := make(map[string]struct{})
+	add := func(snapDir, path string) {
+		rel, err := filepath.Rel(snapDir, path)
+		if err != nil {
+			return
+		}
+		parsed, _, ok := snaptype.ParseFileName(filepath.Dir(path), filepath.Base(path))
+		if !ok {
+			return
+		}
+		visibleRanges[pbtSnapshotFileKey(pbtSnapshotFileFamily(rel), parsed.TypeString, parsed.From, parsed.To)] = struct{}{}
+	}
 	at := sourceAgg.BeginFilesRo()
 	defer at.Close()
 	for _, file := range at.AllFiles() {
-		rel, err := filepath.Rel(sourceAgg.Dirs().Snap, file.Fullpath())
-		if err != nil {
-			continue
-		}
-		parsed, _, ok := snaptype.ParseFileName(filepath.Dir(file.Fullpath()), filepath.Base(file.Fullpath()))
-		if !ok {
-			continue
-		}
-		visibleRanges[pbtSnapshotFileKey(pbtSnapshotFileFamily(rel), parsed.TypeString, parsed.From, parsed.To)] = struct{}{}
+		add(sourceAgg.Dirs().Snap, file.Fullpath())
 	}
-	files, err := pbtAttachFiles(sourceDirs)
+	files, err := pbtSnapshotFiles(sourceDirs, func(domain kv.Domain) bool { return domain == kv.CommitmentDomain })
 	if err != nil {
 		return visibleRanges
 	}
-	for _, file := range pbtAttachVisibleFiles(files, kv.CommitmentDomain) {
-		rel, err := filepath.Rel(sourceDirs.Snap, file.path)
-		if err != nil {
-			continue
-		}
-		parsed, _, ok := snaptype.ParseFileName(filepath.Dir(file.path), filepath.Base(file.path))
-		if !ok {
-			continue
-		}
-		visibleRanges[pbtSnapshotFileKey(pbtSnapshotFileFamily(rel), parsed.TypeString, parsed.From, parsed.To)] = struct{}{}
+	for _, file := range pbtAttachVisibleFiles(files) {
+		add(sourceDirs.Snap, file.path)
 	}
 	return visibleRanges
 }

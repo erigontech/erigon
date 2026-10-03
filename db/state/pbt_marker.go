@@ -25,10 +25,7 @@ func readPBTMarker(path string, value any) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := json.Unmarshal(data, value); err != nil {
-		return true, err
-	}
-	return true, nil
+	return true, json.Unmarshal(data, value)
 }
 
 func writePBTMarker(path string, value any) error {
@@ -36,10 +33,6 @@ func writePBTMarker(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	return writePBTMarkerData(path, data)
-}
-
-func writePBTMarkerData(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
 	if err != nil {
 		return err

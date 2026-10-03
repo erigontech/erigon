@@ -439,23 +439,8 @@ func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		return err
 	}
 	defer rawDB.Close()
-	agg, err := openPBTState(ctx, dirs, settings, rawDB, logger)
-	if err != nil {
+	if _, err := verifyPBTRows(ctx, rawDB, rawDB, dirs, settings, kv.CommitmentBinDomain, "commitment import-pbt: verify written rows", logger); err != nil {
 		return err
-	}
-	defer agg.Close()
-	db, err := dbtemporal.New(rawDB, agg, nil)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := dbstate.VerifyPBinDomainRoot(ctx, tx, agg, kv.CommitmentBinDomain); err != nil {
-		return fmt.Errorf("commitment import-pbt: verify written rows: %w", err)
 	}
 	return nil
 }
@@ -665,9 +650,6 @@ func movePBTImportBinFilesWithRename(names []string, stageDirs, targetDirs datad
 		moved = append(moved, destination)
 		destinationDirs[filepath.Dir(destination)] = struct{}{}
 	}
-	if len(moved) == 0 {
-		return moved, errors.New("commitment import-pbt: staged binary commitment files are missing")
-	}
 	for destinationDir := range destinationDirs {
 		if err := dir.FsyncDir(destinationDir); err != nil {
 			return moved, err
@@ -699,7 +681,7 @@ func pbtImportBinFileNames(dirs datadir.Dirs) ([]string, error) {
 }
 
 func validatePBTImportRecoveryFiles(dirs datadir.Dirs, marker *dbstate.PBTImportMarker) error {
-	if marker == nil || len(marker.Files) == 0 {
+	if len(marker.Files) == 0 {
 		return errors.New("commitment import-pbt: recovery marker has no file list; rerun import-pbt")
 	}
 	for _, name := range marker.Files {

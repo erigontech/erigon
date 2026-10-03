@@ -58,8 +58,6 @@ type PBinRangeWriterLimits struct {
 	NoRangePastFrontier bool
 }
 
-type pbinRangeWriterLimits = PBinRangeWriterLimits
-
 const (
 	pbinRangeWriterMaxOps   = 100_000
 	pbinRangeWriterMaxBytes = 64 << 20
@@ -163,14 +161,14 @@ func (o *pbinRangeWriterOverlay) flush(skip func([]byte) (bool, error)) error {
 }
 
 func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64) (*PBinRangeWriter, error) {
-	return newPBinRangeWriter(aggregator, domain, endTxNum, pbinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes})
+	return newPBinRangeWriter(aggregator, domain, endTxNum, PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes})
 }
 
 func NewPBinRangeWriterWithinFiles(aggregator *Aggregator, domain kv.Domain, endTxNum uint64) (*PBinRangeWriter, error) {
-	return newPBinRangeWriter(aggregator, domain, endTxNum, pbinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes, NoRangePastFrontier: true})
+	return newPBinRangeWriter(aggregator, domain, endTxNum, PBinRangeWriterLimits{MaxOps: pbinRangeWriterMaxOps, MaxBytes: pbinRangeWriterMaxBytes, NoRangePastFrontier: true})
 }
 
-func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64, limits pbinRangeWriterLimits) (*PBinRangeWriter, error) {
+func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint64, limits PBinRangeWriterLimits) (*PBinRangeWriter, error) {
 	if aggregator == nil {
 		return nil, fmt.Errorf("pbin range writer: nil aggregator")
 	}
@@ -206,17 +204,11 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 		endTxNum = files.EndRootNum() - 1
 	}
 	ranges := make([]pbinRange, 0, len(files))
-	seenRanges := make(map[[2]uint64]struct{}, len(files))
 	for _, file := range files {
 		start, end := file.StartRootNum(), file.EndRootNum()
 		if start > endTxNum {
 			break
 		}
-		key := [2]uint64{start, end}
-		if _, ok := seenRanges[key]; ok {
-			continue
-		}
-		seenRanges[key] = struct{}{}
 		ranges = append(ranges, pbinRange{
 			start:     start,
 			end:       end,
@@ -226,8 +218,7 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 	if len(ranges) == 0 {
 		return nil, fmt.Errorf("pbin range writer: no account range contains %d", endTxNum)
 	}
-	leafStamp := ranges[len(ranges)-1].end - 1
-	leafStamp = min(leafStamp, endTxNum)
+	leafStamp := min(ranges[len(ranges)-1].end-1, endTxNum)
 	stateInFiles := !limits.NoRangePastFrontier || endTxNum < ranges[len(ranges)-1].end
 	if ranges[len(ranges)-1].end <= endTxNum && !limits.NoRangePastFrontier {
 		if endTxNum == ^uint64(0) {
@@ -393,9 +384,6 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		}
 	}
 	w.state = bytes.Clone(state)
-	if len(state) == 0 {
-		return common.Hash{}, fmt.Errorf("pbin range writer: commitment state is missing")
-	}
 	if err := w.buildFiles(ctx, state); err != nil {
 		return common.Hash{}, err
 	}

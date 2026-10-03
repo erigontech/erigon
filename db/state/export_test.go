@@ -26,5 +26,5 @@ func NewPBinRangeWriterWithLimitsForTest(aggregator *Aggregator, domain kv.Domai
 	if maxOps <= 0 || maxBytes <= 0 {
 		return nil, errors.New("pbin range writer: invalid batch limits")
 	}
-	return newPBinRangeWriter(aggregator, domain, endTxNum, pbinRangeWriterLimits{MaxOps: maxOps, MaxBytes: maxBytes})
+	return newPBinRangeWriter(aggregator, domain, endTxNum, PBinRangeWriterLimits{MaxOps: maxOps, MaxBytes: maxBytes})
 }

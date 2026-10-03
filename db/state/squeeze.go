@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -1362,6 +1363,11 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		return err
 	}
 	sortedPath := sortedFile.Name()
+	defer func() {
+		_ = sortedFile.Close()
+		_ = dir.RemoveFile(sortedPath)
+	}()
+	sortedWriter := bufio.NewWriter(sortedFile)
 	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		if bytes.Equal(previousOpKey, key) {
 			if !bytes.Equal(previousOpValue, value) {
@@ -1371,18 +1377,23 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		}
 		previousOpKey = bytes.Clone(key)
 		previousOpValue = bytes.Clone(value)
-		return writePBinRebuildOp(sortedFile, value)
+		var lengthBuf [4]byte
+		binary.BigEndian.PutUint32(lengthBuf[:], uint32(len(value)))
+		if _, err := sortedWriter.Write(lengthBuf[:]); err != nil {
+			return err
+		}
+		_, err := sortedWriter.Write(value)
+		return err
 	}, etl.TransformArgs{}); err != nil {
-		_ = sortedFile.Close()
-		_ = dir.RemoveFile(sortedPath)
+		return err
+	}
+	if err := sortedWriter.Flush(); err != nil {
 		return err
 	}
 	collector.Close()
 	if err := sortedFile.Close(); err != nil {
-		_ = dir.RemoveFile(sortedPath)
 		return err
 	}
-	defer func() { _ = dir.RemoveFile(sortedPath) }()
 	if maxOps <= 0 {
 		maxOps = int(^uint(0) >> 1)
 	}
@@ -1391,11 +1402,12 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 	}
 	batch := make([]pbt.Op, 0, min(maxOps, 1024))
 	batchBytes := 0
-	reader, err := os.Open(sortedPath)
+	readerFile, err := os.Open(sortedPath)
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
+	defer readerFile.Close()
+	reader := bufio.NewReader(readerFile)
 	for {
 		op, eof, err := readPBinRebuildOp(reader)
 		if err != nil {
@@ -1431,32 +1443,14 @@ func batchOperationKey(op pbt.Op) []byte {
 	return op.Key
 }
 
-func writePBinRebuildOp(w io.Writer, encoded []byte) error {
-	var lengthBuf [4]byte
-	if uint64(len(encoded)) > math.MaxUint32 {
-		return fmt.Errorf("commitment rebuild: pbin operation is too large")
-	}
-	binary.BigEndian.PutUint32(lengthBuf[:], uint32(len(encoded)))
-	if _, err := w.Write(lengthBuf[:]); err != nil {
-		return err
-	}
-	_, err := w.Write(encoded)
-	return err
-}
-
 func readPBinRebuildOp(r io.Reader) (pbt.Op, bool, error) {
 	var lengthBuf [4]byte
-	n, err := io.ReadFull(r, lengthBuf[:])
-	if errors.Is(err, io.EOF) && n == 0 {
+	if _, err := io.ReadFull(r, lengthBuf[:]); errors.Is(err, io.EOF) {
 		return pbt.Op{}, true, nil
-	}
-	if err != nil {
+	} else if err != nil {
 		return pbt.Op{}, false, err
 	}
 	length := binary.BigEndian.Uint32(lengthBuf[:])
-	if length == 0 {
-		return pbt.Op{}, false, fmt.Errorf("commitment rebuild: empty pbin operation")
-	}
 	encoded := make([]byte, length)
 	if _, err := io.ReadFull(r, encoded); err != nil {
 		return pbt.Op{}, false, err

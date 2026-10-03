@@ -19,7 +19,7 @@ package commitmentdb
 import (
 	"bytes"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
@@ -36,16 +36,15 @@ func BinFeedFromState(keys, codeKeys, wiped map[string]struct{}, reader StateRea
 	addresses := make(map[string]struct{}, len(keys)+len(codeKeys)+len(wiped))
 	slots := make(map[string][][]byte)
 	for key := range keys {
-		raw := []byte(key)
-		switch len(raw) {
+		switch len(key) {
 		case length.Addr:
 			addresses[key] = struct{}{}
 		case length.Addr + length.Hash:
-			address := string(raw[:length.Addr])
+			address := key[:length.Addr]
 			addresses[address] = struct{}{}
-			slots[address] = append(slots[address], bytes.Clone(raw[length.Addr:]))
+			slots[address] = append(slots[address], []byte(key[length.Addr:]))
 		default:
-			return nil, fmt.Errorf("pbin: plain key has length %d", len(raw))
+			return nil, fmt.Errorf("pbin: plain key has length %d", len(key))
 		}
 	}
 	for key := range codeKeys {
@@ -64,22 +63,19 @@ func BinFeedFromState(keys, codeKeys, wiped map[string]struct{}, reader StateRea
 	for address := range addresses {
 		ordered = append(ordered, address)
 	}
-	sort.Slice(ordered, func(i, j int) bool { return bytes.Compare([]byte(ordered[i]), []byte(ordered[j])) < 0 })
+	slices.Sort(ordered)
 	feed := &commitment.PBinFeed{Accounts: make([]commitment.PBinFeedAccount, 0, len(ordered))}
 	for _, address := range ordered {
 		rawAddress := []byte(address)
-		account, err := BinFeedAccountFromState(rawAddress, slots[address], hasKey(codeKeys, address), hasKey(wiped, address), reader)
+		_, codeWritten := codeKeys[address]
+		_, isWiped := wiped[address]
+		account, err := BinFeedAccountFromState(rawAddress, slots[address], codeWritten, isWiped, reader)
 		if err != nil {
 			return nil, err
 		}
 		feed.Accounts = append(feed.Accounts, account)
 	}
 	return feed, nil
-}
-
-func hasKey(keys map[string]struct{}, key string) bool {
-	_, ok := keys[key]
-	return ok
 }
 
 func BinFeedAccountFromState(address []byte, slotKeys [][]byte, codeWritten, wiped bool, reader StateReader) (commitment.PBinFeedAccount, error) {
@@ -110,7 +106,7 @@ func BinFeedAccountFromState(address []byte, slotKeys [][]byte, codeWritten, wip
 		account.Code = bytes.Clone(code)
 	}
 	account.Slots = make([]commitment.PBinFeedSlot, 0, len(slotKeys))
-	sort.Slice(slotKeys, func(i, j int) bool { return bytes.Compare(slotKeys[i], slotKeys[j]) < 0 })
+	slices.SortFunc(slotKeys, bytes.Compare)
 	for _, slot := range slotKeys {
 		if len(slot) != length.Hash {
 			return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: slot key has length %d, want %d", len(slot), length.Hash)

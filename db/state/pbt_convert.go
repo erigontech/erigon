@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -71,7 +70,6 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		return common.Hash{}, fmt.Errorf("pbin conversion: nil hash function")
 	}
 	cfg := pbinConversionTrieConfig()
-	cfg.EnableTrieWarmup = false
 	domains, err := execctx.NewSharedDomains(ctx, opts.TargetTx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomainOnly(opts.TargetDomain), execctx.WithoutCommitmentSeek())
 	if err != nil {
 		return common.Hash{}, err
@@ -97,7 +95,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	if opts.RangeWriterLimits == nil {
 		writer, err = NewPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum)
 	} else {
-		writer, err = newPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum, pbinRangeWriterLimits(*opts.RangeWriterLimits))
+		writer, err = newPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum, PBinRangeWriterLimits(*opts.RangeWriterLimits))
 	}
 	if err != nil {
 		return common.Hash{}, err
@@ -106,7 +104,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	if err != nil {
 		return common.Hash{}, err
 	}
-	if !bytes.Equal(root[:], streamRoot[:]) {
+	if root != streamRoot {
 		return common.Hash{}, fmt.Errorf("pbin conversion: engine root %x differs from stream root %x", root, streamRoot)
 	}
 	return root, nil
@@ -117,7 +115,6 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 		return common.Hash{}, fmt.Errorf("pbin verification: missing database input")
 	}
 	cfg := pbinConversionTrieConfig()
-	cfg.EnableTrieWarmup = false
 	at := aggregator.BeginFilesRo()
 	defer at.Close()
 	if len(at.Files(domain)) == 0 {
@@ -171,5 +168,6 @@ func VerifyPBinDomainRoot(ctx context.Context, tx kv.TemporalTx, aggregator *Agg
 func pbinConversionTrieConfig() commitment.TrieConfig {
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
+	cfg.EnableTrieWarmup = false
 	return cfg
 }
