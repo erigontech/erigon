@@ -693,6 +693,7 @@ func newBellatrixValidationContextFixture(t *testing.T) (*blockService, *mock_se
 	require.NoError(t, err)
 	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
 	service, _, _, fcu := setupBlockService(t, ctrl)
+	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
 	return service.(*blockService), fcu, blocks[1], parentState
 }
 
@@ -722,11 +723,12 @@ func TestBlockValidationContextAdvancesCopiedParentStateAcrossEpoch(t *testing.T
 	require.NoError(t, transition.DefaultMachine.ProcessSlots(expected, nextEpochSlot))
 	expectedProposer, err := expected.GetBeaconProposerIndexForSlot(nextEpochSlot)
 	require.NoError(t, err)
-	var copies atomic.Int32
+	var stateFetches, copies atomic.Int32
 	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 		if root != child.Block.ParentRoot {
 			return nil, fmt.Errorf("unexpected parent state request: root=%x", root)
 		}
+		stateFetches.Add(1)
 		if !alwaysCopy {
 			return parentState, nil
 		}
@@ -739,6 +741,7 @@ func TestBlockValidationContextAdvancesCopiedParentStateAcrossEpoch(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, expectedProposer, validationContext.expectedProposer)
 	require.Equal(t, int32(1), copies.Load())
+	require.Equal(t, int32(1), stateFetches.Load(), "a non-head parent state is rebuilt on every fetch")
 	require.Equal(t, parentSlot, parentState.Slot())
 }
 
