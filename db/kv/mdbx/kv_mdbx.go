@@ -558,6 +558,7 @@ type MdbxKV struct {
 	txSize   uint64
 	closed   atomic.Bool
 	path     string
+	dataMap  atomic.Pointer[dataMapping]
 
 	syncerStop chan struct{}
 	syncerDone chan struct{} // nil when no background flush runs; closed when it has returned
@@ -2502,3 +2503,5 @@ func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, wal
 func (tx *MdbxTx) CHandle() unsafe.Pointer {
 	return tx.tx.CHandle()
 }
+
+func (tx *MdbxTx) WarmValue(v []byte) { tx.db.WarmValue(v) }
