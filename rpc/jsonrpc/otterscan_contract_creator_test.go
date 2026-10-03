@@ -17,12 +17,18 @@
 package jsonrpc
 
 import (
+	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 func TestGetContractCreator(t *testing.T) {
@@ -51,4 +57,31 @@ func TestGetContractCreator(t *testing.T) {
 		require.NoError(err)
 		require.Nil(results)
 	})
+}
+
+func TestGetContractCreatorGenesisAlloc(t *testing.T) {
+	contract := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc: types.GenesisAlloc{
+				testAddr: {Balance: big.NewInt(1_000_000_000_000)},
+				contract: {Balance: big.NewInt(7), Code: []byte{0x00}},
+			},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	c, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), contract, uint256.NewInt(1), 100_000, uint256.NewInt(1), nil), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
+	creator, err := api.GetContractCreator(m.Ctx, contract)
+	require.NoError(t, err)
+	require.Nil(t, creator)
 }
