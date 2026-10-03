@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +54,26 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestPBTAcceptanceChainTxCountsHeaderRoots(t *testing.T) {
+	counts := [][]int{{2}, {0}, {1, 1, 1, 1, 1, 1, 2, 0, 1, 1, 1, 1, 1, 1}}
+	for _, dual := range []bool{false, true} {
+		for _, txCounts := range counts {
+			name := fmt.Sprintf("dual=%t-counts=%v", dual, txCounts)
+			t.Run(name, func(t *testing.T) {
+				if dual {
+					selectPBTCommandSuite(t)
+				} else {
+					selectPBTBinaryCommandSuite(t)
+				}
+				fixture, err := execmoduletester.NewPBTAcceptanceChainWithTxCounts(t, true, dual, 1, 1, txCounts)
+				require.NoError(t, err)
+				require.NoError(t, fixture.Tester.InsertChain(fixture.Chain))
+				fixture.Tester.Close()
+			})
+		}
+	}
+}
 
 func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 	selectPBTHexCommandSuite(t)

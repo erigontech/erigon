@@ -224,12 +224,18 @@ func newPBTAcceptanceChain(tb testing.TB, binary bool, dual bool, sharedCode []b
 		for i, block := range pack.Blocks {
 			alloc := copyGenesisAlloc(baseAlloc)
 			for j := 0; j <= i; j++ {
+				count := 1
+				if txCounts != nil {
+					count = txCounts[j]
+				}
 				senderAccount := copyGenesisAccount(alloc[sender])
-				senderAccount.Nonce++
+				senderAccount.Nonce += uint64(count)
 				alloc[sender] = senderAccount
-				contractAccount := copyGenesisAccount(alloc[contract])
-				contractAccount.Storage[common.Hash{}] = common.BigToHash(big.NewInt(int64(j + 1)))
-				alloc[contract] = contractAccount
+				if count > 0 {
+					contractAccount := copyGenesisAccount(alloc[contract])
+					contractAccount.Storage[common.Hash{}] = common.BigToHash(big.NewInt(int64(j + count)))
+					alloc[contract] = contractAccount
+				}
 			}
 			exit := config.GetBuilderExitContract().Value()
 			account := alloc[exit]

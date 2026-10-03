@@ -343,7 +343,7 @@ func comparePreimageKeys(preimages io.ReaderAt, preimageSize int64, expected fun
 		if len(key) > 255 {
 			return ErrPreimages
 		}
-		previous = key
+		previous = append(previous[:0], key...)
 		if err := expectedWriter.WriteByte(byte(len(key))); err != nil {
 			return err
 		}

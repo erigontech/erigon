@@ -91,10 +91,6 @@ func pbtVerifyUsageError(err error) error {
 	return cli.Exit(err, 2)
 }
 
-func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath string, block uint64, scratchDir string) (err error) {
-	return verifyPBTFilesWithMaxCodeSize(ctx, dataDir, snapshotPath, preimagesPath, block, uint64(params.MaxCodeSizeAmsterdam), scratchDir)
-}
-
 func verifyPBTFilesWithMaxCodeSize(ctx context.Context, dataDir, snapshotPath, preimagesPath string, block, maxCodeSize uint64, scratchDir string) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {

@@ -792,6 +792,30 @@ func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
 	require.ErrorContains(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), yieldExpected, eip8297.HashBytes, t.TempDir()), "surplus key")
 }
 
+func TestCheckPreimageSetAtAcceptsReusedExpectedKey(t *testing.T) {
+	address := common.Address{1}
+	record := Preimage{Address: address, Slots: [][32]byte{{1}}}
+	var encoded bytes.Buffer
+	require.NoError(t, writePreimages(t, &encoded, preimageSliceIterator([]Preimage{record})))
+	address32 := eip8297.RightAlign32(address[:])
+	stem := eip8297.HashBytes(address32[:])
+	expected := [][]byte{
+		eip8297.TreeKey(eip8297.AccountZone, stem[:], eip8297.BasicDataLeafKey),
+		eip8297.TreeKeyStorage(address[:], record.Slots[0][:]),
+	}
+	reused := make([]byte, 0, len(expected[0]))
+	yieldExpected := func(yield func([]byte) error) error {
+		for _, key := range expected {
+			reused = append(reused[:0], key...)
+			if err := yield(reused); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	require.NoError(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), yieldExpected, eip8297.HashBytes, t.TempDir()))
+}
+
 func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	const slotCount = 4_300_000
 	address := common.Address{1}

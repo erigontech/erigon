@@ -39,7 +39,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -60,16 +59,18 @@ import (
 func TestPreparePreimagesOutputRemovesStaleMetadata(t *testing.T) {
 	outDir := t.TempDir()
 	metaPath := filepath.Join(outDir, "preimages.meta.json")
-	require.NoError(t, os.WriteFile(metaPath, []byte("stale"), 0o644))
-
-	framedPath := filepath.Join(outDir, pbtPreimagesFileName)
-	gotMetaPath := filepath.Join(outDir, preimagesMetaFileName)
-	err := dir.RemoveFile(gotMetaPath)
+	require.NoError(t, os.Mkdir(metaPath, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(metaPath, "stale"), []byte("stale"), 0o644))
+	require.NoError(t, os.Mkdir(filepath.Join(outDir, pbtPreimagesFileName), 0o755))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	root := seedState(t, db, 0, [][]byte{addr(0xaa)}, nil)
+	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, filepath.Join(outDir, "framed.bin"), framedPath)
-	require.Equal(t, metaPath, gotMetaPath)
-	_, err = os.Stat(metaPath)
-	require.ErrorIs(t, err, os.ErrNotExist)
+	defer roTx.Rollback()
+	err = runExportWithTxNumReader(t.Context(), roTx, rawdbv3.TxNums, func(uint64) (*types.Header, error) {
+		return &types.Header{Root: root}, nil
+	}, outDir, t.TempDir(), log.New())
+	require.ErrorContains(t, err, "remove stale metadata")
 }
 
 func TestOpenExportDirsDoesNotCreateMissingDatadir(t *testing.T) {

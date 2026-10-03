@@ -97,6 +97,13 @@ func TestImportPBTAllowsDevChainWithEmptyStoredChainName(t *testing.T) {
 	require.NoError(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "dev", log.New()))
 }
 
+func TestPBTImportUnknownChainOmitsStageExecRemedy(t *testing.T) {
+	err := pbtImportProgressError(4, pbtImportMeta{Block: 3}, "/node", "dev")
+	require.Error(t, err)
+	require.NotContains(t, err.Error(), "stage_exec")
+	require.Contains(t, err.Error(), "cannot be loaded by integration")
+}
+
 func TestImportPBTUsesDatadirScratch(t *testing.T) {
 	fixture := newPBTImportFixture(t)
 	tmpFile := filepath.Join(t.TempDir(), "tmp-file")

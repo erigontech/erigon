@@ -46,6 +46,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -236,7 +237,7 @@ func importPBTWithHooks(ctx context.Context, dataDir, snapshotPath, chainName st
 		return err
 	}
 	if hexBlock != meta.Block || hexTx != meta.TxNum {
-		return fmt.Errorf("commitment import-pbt: hex commitment checkpoint is (%d, %d), want (%d, %d) at block %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", hexBlock, hexTx, meta.Block, meta.TxNum, meta.Block, dataDir, meta.Block+1, targetChainName, dataDir, targetChainName, meta.HashSuite)
+		return fmt.Errorf("commitment import-pbt: hex commitment checkpoint is (%d, %d), want (%d, %d) at block %d; %s", hexBlock, hexTx, meta.Block, meta.TxNum, meta.Block, pbtImportExportRemedy(dataDir, meta.Block+1, targetChainName, meta.HashSuite))
 	}
 	closeBlockReader()
 	closeBlockReader = nil
@@ -565,7 +566,14 @@ func readPBTImportHexCheckpoint(ctx context.Context, dirs datadir.Dirs, rawDB kv
 }
 
 func pbtImportProgressError(progress uint64, meta pbtImportMeta, dataDir, chainName string) error {
-	return fmt.Errorf("commitment import-pbt: target is at block %d, snapshot is at block %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", progress, meta.Block, dataDir, progress, chainName, dataDir, chainName, meta.HashSuite)
+	return fmt.Errorf("commitment import-pbt: target is at block %d, snapshot is at block %d; %s", progress, meta.Block, pbtImportExportRemedy(dataDir, progress, chainName, meta.HashSuite))
+}
+
+func pbtImportExportRemedy(dataDir string, block uint64, chainName, hashSuite string) string {
+	if _, err := chainspec.ChainSpecByName(chainName); err != nil {
+		return fmt.Sprintf("target chain %q cannot be loaded by integration", chainName)
+	}
+	return fmt.Sprintf("run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", dataDir, block, chainName, dataDir, chainName, hashSuite)
 }
 
 func validatePBTImportTarget(ctx context.Context, rawDB kv.RoDB, blockReader *freezeblocks.BlockReader, blockView *blocksnapshots.View, meta pbtImportMeta, chainName, dataDir string) (string, error) {
@@ -624,7 +632,7 @@ func validatePBTImportTarget(ctx context.Context, rawDB kv.RoDB, blockReader *fr
 		return "", fmt.Errorf("commitment import-pbt: block %d has no txNum mapping", meta.Block)
 	}
 	if lastTx != meta.TxNum {
-		return "", fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", meta.Block, meta.TxNum, meta.Block, lastTx, dataDir, meta.Block+1, cmp.Or(chainConfig.ChainName, chainName), dataDir, cmp.Or(chainConfig.ChainName, chainName), meta.HashSuite)
+		return "", fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; %s", meta.Block, meta.TxNum, meta.Block, lastTx, pbtImportExportRemedy(dataDir, meta.Block+1, cmp.Or(chainConfig.ChainName, chainName), meta.HashSuite))
 	}
 	if common.HexToHash(meta.StateRoot) != header.Root {
 		return "", fmt.Errorf("commitment import-pbt: snapshot stateRoot %s differs from header root %s", meta.StateRoot, header.Root)

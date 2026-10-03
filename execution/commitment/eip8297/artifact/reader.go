@@ -204,10 +204,7 @@ type artifactCursor struct {
 func (c *artifactCursor) remaining() int64 { return c.limit - c.offset }
 
 func (c *artifactCursor) bytes(size int) ([]byte, error) {
-	if size < 0 || int64(size) > c.remaining() {
-		return nil, ErrMalformed
-	}
-	if size > 64<<10 {
+	if size < 0 || int64(size) > c.remaining() || size > 64<<10 {
 		return nil, ErrMalformed
 	}
 	if c.buffer == nil {
