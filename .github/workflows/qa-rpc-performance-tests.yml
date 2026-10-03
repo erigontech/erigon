@@ -416,8 +416,11 @@ jobs:
           }
 
           # Launch the RPC performance test runner
-          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          # latest: pattern generated from the node right before the run
           run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_gen_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT eth_call_latest
+
+          # historical: static patterns on fixed blocks
+          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_001_14M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           run_perf "$RUNNER_WS" $CHAIN eth_getLogs stress_test_eth_getLogs_15M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           run_perf "$RUNNER_WS" $CHAIN eth_getBalance stress_test_eth_getBalance_15M 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           run_perf "$RUNNER_WS" $CHAIN eth_getBlockByHash stress_test_eth_getBlockByHash_14M 1:1,100:30,1000:20,2500:20 $CLIENT
