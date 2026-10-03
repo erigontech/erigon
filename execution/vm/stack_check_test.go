@@ -102,7 +102,6 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	t.Parallel()
 	// DUPs are makeDup closures, whose code pointers differ by inlining site,
 	// so they are checked by behaviour instead of by function identity.
-	fast := fastPathOps
 	tables := []*JumpTable{
 		&frontierInstructionSet, &homesteadInstructionSet, &tangerineWhistleInstructionSet,
 		&spuriousDragonInstructionSet, &byzantiumInstructionSet, &constantinopleInstructionSet,
@@ -118,7 +117,7 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		}
 	}
 	for i, jt := range tables {
-		for op, w := range fast {
+		for op, w := range fastPathOps {
 			got := &jt[op]
 			if w.execute != nil {
 				require.Equal(t, reflect.ValueOf(w.execute).Pointer(), reflect.ValueOf(got.execute).Pointer(), "table %d %s execute", i, op)
@@ -158,8 +157,7 @@ type fastPathWant struct {
 // TestRunTracedIsGenerated fails when vm_run.go's fast-path cases, vm_run_traced_gen.go
 // or fast_path_gen_test.go are stale against execution/vm/gen.
 func TestRunTracedIsGenerated(t *testing.T) {
-	cmd := exec.CommandContext(t.Context(), "go", "run", "./gen", "-check")
-	out, err := cmd.CombinedOutput()
+	out, err := exec.CommandContext(t.Context(), "go", "run", "./gen", "-check").CombinedOutput()
 	require.NoError(t, err, string(out))
 }
 
@@ -229,6 +227,8 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"jumpibad": prog(PUSH1, 1, PUSH1, 0xff, JUMPI),
 		"jumpend":  {byte(PUSH1), 3, byte(JUMP), byte(JUMPDEST)},
 		"overflow": {byte(JUMPDEST), byte(PUSH1), 1, byte(PUSH1), 0, byte(JUMP)},
+		// A failed frame returns no data, whatever the last CALL returned.
+		"callthenbadjump": {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(PUSH1), 0, byte(JUMP)},
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {

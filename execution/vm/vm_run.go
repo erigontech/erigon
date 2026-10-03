@@ -169,13 +169,13 @@ run:
 				if top >= 1 && gasLeft >= GasMidStep {
 					gasLeft -= GasMidStep
 					if evm.Cancelled() {
-						err = errStopToken
+						res, err = nil, errStopToken
 						break run
 					}
 					top--
 					pos := &stack.data[top]
 					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
-						err = ErrInvalidJump
+						res, err = nil, ErrInvalidJump
 						break run
 					}
 					pc = pos.Uint64() - 1
@@ -190,13 +190,13 @@ run:
 				if top >= 2 && gasLeft >= GasSlowStep {
 					gasLeft -= GasSlowStep
 					if evm.Cancelled() {
-						err = errStopToken
+						res, err = nil, errStopToken
 						break run
 					}
 					top -= 2
 					if pos, cond := &stack.data[top+1], &stack.data[top]; !cond.IsZero() {
 						if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
-							err = ErrInvalidJump
+							res, err = nil, ErrInvalidJump
 							break run
 						}
 						pc = pos.Uint64() - 1

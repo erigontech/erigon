@@ -32,8 +32,8 @@ type fastOp struct {
 }
 
 const (
-	cancelled   = "if evm.Cancelled() {\nerr = errStopToken\nbreak run\n}\n"
-	invalidJump = "if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {\nerr = ErrInvalidJump\nbreak run\n}\n"
+	cancelled   = "if evm.Cancelled() {\nres, err = nil, errStopToken\nbreak run\n}\n"
+	invalidJump = "if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {\nres, err = nil, ErrInvalidJump\nbreak run\n}\n"
 	// A valid destination holds a JUMPDEST, so the jump charges it and steps over it.
 	landOnJumpdest = "pc = pos.Uint64() - 1\nif gasLeft >= params.JumpdestGas {\ngasLeft -= params.JumpdestGas\npc++\n}"
 )
