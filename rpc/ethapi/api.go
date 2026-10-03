@@ -21,6 +21,7 @@ package ethapi
 
 import (
 	"bytes"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,48 +69,104 @@ var callArgsParsers fastjson.ParserPool
 type callArgsFields CallArgs
 
 // UnmarshalJSON decodes a call object and rejects one whose data and input disagree.
-// data and input are hex-decoded straight from the parsed object: encoding/json would
-// scan a large calldata string twice, once to validate and once to decode.
+// Fields are decoded straight from one fastjson parse: encoding/json would scan a large
+// calldata string twice, once to validate and once to decode.
 func (args *CallArgs) UnmarshalJSON(raw []byte) error {
+	// fastjson unescapes strings, while the hexutil types reject escaped text.
+	if bytes.IndexByte(raw, '\\') >= 0 {
+		return args.unmarshalStd(raw)
+	}
 	p := callArgsParsers.Get()
 	defer callArgsParsers.Put(p)
 	v, err := p.ParseBytes(raw)
 	if err != nil || v.Type() != fastjson.TypeObject {
 		return args.unmarshalStd(raw)
 	}
-	o := v.GetObject()
-	var calldata [2]*hexutil.Bytes
-	var found [2]bool
-	for i, key := range [2]string{"data", "input"} {
-		f := o.Get(key)
-		if f == nil {
-			continue
-		}
-		found[i] = true
-		if f.Type() != fastjson.TypeNull {
-			s, err := f.StringBytes()
-			if err != nil {
-				return args.unmarshalStd(raw)
-			}
-			calldata[i] = new(hexutil.Bytes)
-			if err := calldata[i].UnmarshalText(s); err != nil {
-				return args.unmarshalStd(raw)
-			}
-		}
-		o.Del(key)
-		if o.Get(key) != nil { // duplicate key: encoding/json keeps the last one
-			return args.unmarshalStd(raw)
-		}
+	var dec CallArgs
+	ok := true
+	v.GetObject().Visit(func(key []byte, f *fastjson.Value) {
+		ok = ok && dec.setField(key, f)
+	})
+	if !ok {
+		return args.unmarshalStd(raw)
 	}
-	if err := json.Unmarshal(v.MarshalTo(nil), (*callArgsFields)(args)); err != nil {
-		return err
-	}
-	for i, dst := range [2]**hexutil.Bytes{&args.Data, &args.Input} {
-		if found[i] {
-			*dst = calldata[i]
-		}
-	}
+	*args = dec
 	return CheckCallData(args.Data, args.Input)
+}
+
+// setField decodes one member as encoding/json would, and reports false where it cannot
+// promise the same result: a key matching a field only case-insensitively, or a value
+// encoding/json would reject (so the caller gets encoding/json's error).
+func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
+	switch string(key) {
+	case "from":
+		return setText(&args.From, f)
+	case "to":
+		return setText(&args.To, f)
+	case "gas":
+		return setText(&args.Gas, f)
+	case "gasPrice":
+		return setText(&args.GasPrice, f)
+	case "maxPriorityFeePerGas":
+		return setText(&args.MaxPriorityFeePerGas, f)
+	case "maxFeePerGas":
+		return setText(&args.MaxFeePerGas, f)
+	case "maxFeePerBlobGas":
+		return setText(&args.MaxFeePerBlobGas, f)
+	case "value":
+		return setText(&args.Value, f)
+	case "nonce":
+		return setText(&args.Nonce, f)
+	case "data":
+		return setText(&args.Data, f)
+	case "input":
+		return setText(&args.Input, f)
+	case "chainId":
+		return setText(&args.ChainID, f)
+	case "accessList":
+		return json.Unmarshal(f.MarshalTo(nil), &args.AccessList) == nil
+	case "blobVersionedHashes":
+		return json.Unmarshal(f.MarshalTo(nil), &args.BlobVersionedHashes) == nil
+	case "blobs":
+		return json.Unmarshal(f.MarshalTo(nil), &args.Blobs) == nil
+	case "commitments":
+		return json.Unmarshal(f.MarshalTo(nil), &args.Commitments) == nil
+	case "proofs":
+		return json.Unmarshal(f.MarshalTo(nil), &args.Proofs) == nil
+	case "authorizationList":
+		return json.Unmarshal(f.MarshalTo(nil), &args.AuthorizationList) == nil
+	}
+	for _, name := range callArgsJSONNames {
+		if bytes.EqualFold(key, []byte(name)) {
+			return false
+		}
+	}
+	return true // encoding/json ignores unknown members
+}
+
+var callArgsJSONNames = []string{"from", "to", "gas", "gasPrice", "maxPriorityFeePerGas", "maxFeePerGas",
+	"maxFeePerBlobGas", "value", "nonce", "data", "input", "accessList", "chainId", "blobVersionedHashes",
+	"blobs", "commitments", "proofs", "authorizationList"}
+
+// setText decodes a JSON string member through T's UnmarshalText; null clears the field.
+func setText[T any, PT interface {
+	*T
+	encoding.TextUnmarshaler
+}](dst **T, f *fastjson.Value) bool {
+	if f.Type() == fastjson.TypeNull {
+		*dst = nil
+		return true
+	}
+	s, err := f.StringBytes()
+	if err != nil {
+		return false
+	}
+	v := PT(new(T))
+	if v.UnmarshalText(s) != nil {
+		return false
+	}
+	*dst = (*T)(v)
+	return true
 }
 
 // unmarshalStd decodes with encoding/json alone, so malformed input gets its error messages.
