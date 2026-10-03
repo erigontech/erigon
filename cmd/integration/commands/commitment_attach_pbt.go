@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -511,25 +512,49 @@ func readPBTCommitmentState(ctx context.Context, dirs datadir.Dirs, rawDB kv.RwD
 }
 
 func pbtAttachNodePointError(dataDir, chainName string, nodeBlock, nodeTx, executionProgress, blockNum, txNum uint64, blockEnd bool) error {
-	reset := fmt.Sprintf("integration stage_exec --datadir=%s --reset --chain=%s --experimental.commitment-v3", dataDir, chainName)
+	reset, canRun := pbtAttachStageExecReset(dataDir, chainName)
 	if executionProgress < blockNum || nodeBlock < blockNum || (nodeBlock == blockNum && nodeTx < txNum) {
+		if !canRun {
+			return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, behind conversion point block %d txNum %d; target chain %q cannot be loaded by integration", nodeBlock, nodeTx, executionProgress, blockNum, txNum, chainName)
+		}
 		return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, behind conversion point block %d txNum %d; run %s", nodeBlock, nodeTx, executionProgress, blockNum, txNum, reset)
 	}
 	if !blockEnd {
+		if !canRun {
+			return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, conversion point is mid-block %d txNum %d; target chain %q cannot be loaded by integration", nodeBlock, nodeTx, executionProgress, blockNum, txNum, chainName)
+		}
 		return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, conversion point is mid-block %d txNum %d; run %s", nodeBlock, nodeTx, executionProgress, blockNum, txNum, reset)
 	}
 	if executionProgress <= blockNum {
+		if !canRun {
+			return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, conversion point is block %d txNum %d; target chain %q cannot be loaded by integration", nodeBlock, nodeTx, executionProgress, blockNum, txNum, chainName)
+		}
 		return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, conversion point is block %d txNum %d; run %s", nodeBlock, nodeTx, executionProgress, blockNum, txNum, reset)
 	}
 	unwind := executionProgress - blockNum
+	if !canRun {
+		return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, conversion point is block %d txNum %d; target chain %q cannot be loaded by integration", nodeBlock, nodeTx, executionProgress, blockNum, txNum, chainName)
+	}
 	return fmt.Errorf("commitment attach-pbt: node checkpoint is block %d txNum %d and execution progress is block %d, conversion point is block %d txNum %d; run %s when the node files end at the point, or run integration stage_exec --datadir=%s --unwind=%d --chain=%s --experimental.commitment-v3 followed by integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3", nodeBlock, nodeTx, executionProgress, blockNum, txNum, reset, dataDir, unwind, chainName, dataDir, blockNum, chainName)
+}
+
+func pbtAttachStageExecReset(dataDir, chainName string) (string, bool) {
+	if chainName != "" {
+		if _, err := chainspec.ChainSpecByName(chainName); err != nil {
+			return "", false
+		}
+	}
+	return fmt.Sprintf("integration stage_exec --datadir=%s --reset --chain=%s --experimental.commitment-v3", dataDir, chainName), true
 }
 
 func pbtAttachFilesAheadError(dataDir, chainName string, firstStep, stepSize, executionProgress, blockNum, txNum uint64) error {
 	if firstStep*stepSize <= txNum {
 		return fmt.Errorf("commitment attach-pbt: node file range starting at step %d spans conversion txNum %d; stage_exec cannot stop at a mid-block point, so no printed command can reach it", firstStep, txNum)
 	}
-	reset := fmt.Sprintf("integration stage_exec --datadir=%s --reset --chain=%s --experimental.commitment-v3", dataDir, chainName)
+	reset, canRun := pbtAttachStageExecReset(dataDir, chainName)
+	if !canRun {
+		return fmt.Errorf("commitment attach-pbt: node files extend past conversion point block %d txNum %d; target chain %q cannot be loaded by integration", blockNum, txNum, chainName)
+	}
 	return fmt.Errorf("commitment attach-pbt: node files extend past conversion point block %d txNum %d; remove state from step %d onward with erigon snapshots rm-state --datadir=%s --chain=%s --step=%d+ --experimental.commitment-v3, then run %s (execution progress is block %d)", blockNum, txNum, firstStep, dataDir, chainName, firstStep, reset, executionProgress)
 }
 
@@ -755,6 +780,11 @@ func validatePBTAttachPublishedFiles(publishedDirs datadir.Dirs, stepSize, endTx
 	ranges := pbtAttachRanges(publishedFiles, stepSize, endTxNum)
 	if !slices.Equal(ranges[kv.CommitmentDomain], ranges[kv.CommitmentBinDomain]) {
 		return fmt.Errorf("commitment attach-pbt: published commitment-bin ranges do not match commitment ranges")
+	}
+	for _, domain := range pbtAttachDomains {
+		if len(ranges[domain]) == 0 {
+			return fmt.Errorf("commitment attach-pbt: published files are missing domain %s through txNum %d", domain, endTxNum)
+		}
 	}
 	return validatePBTAttachFrontier(publishedFiles, stepSize, endTxNum)
 }

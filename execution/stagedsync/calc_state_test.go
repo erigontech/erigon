@@ -640,33 +640,9 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 		"both pre-loaded slots must emit DeleteUpdate after the cascade")
 }
 
-// mockStorageEnum returns a fixed persisted-slot set per address.
-type mockStorageEnum struct {
-	slots map[accounts.Address][]accounts.StorageKey
-}
-
-func (m *mockStorageEnum) EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error {
-	for _, k := range m.slots[addr] {
-		if err := fn(k); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// TestSDOfPreExistingContract_DropsSubtreeViaAccountDelete pins that a
-// self-destruct emits no per-slot deletes for untouched on-disk storage: the
-// account DeleteUpdate collapses the subtree, so the injected enumerator must
-// not be consulted.
 func TestSDOfPreExistingContract_DropsSubtreeViaAccountDelete(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x40, 0x55, 0xca, 0xe5})
-	untouched1 := accounts.InternKey(common.Hash{0x11})
-	untouched2 := accounts.InternKey(common.Hash{0x22})
-
 	cs := newTestCalcState()
-	cs.storageEnum = &mockStorageEnum{slots: map[accounts.Address][]accounts.StorageKey{
-		addr: {untouched1, untouched2},
-	}}
 
 	cs.ApplyWrites(newWS().
 		inc(addr, state.Version{}, uint64(3)).

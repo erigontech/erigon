@@ -98,10 +98,17 @@ func TestImportPBTAllowsDevChainWithEmptyStoredChainName(t *testing.T) {
 }
 
 func TestPBTImportUnknownChainOmitsStageExecRemedy(t *testing.T) {
-	err := pbtImportProgressError(4, pbtImportMeta{Block: 3}, "/node", "dev")
-	require.Error(t, err)
-	require.NotContains(t, err.Error(), "stage_exec")
-	require.Contains(t, err.Error(), "cannot be loaded by integration")
+	t.Run("dev", func(t *testing.T) {
+		err := pbtImportProgressError(4, pbtImportMeta{Block: 3}, "/node", "dev")
+		require.Error(t, err)
+		require.NotContains(t, err.Error(), "stage_exec")
+		require.Contains(t, err.Error(), "cannot be loaded by integration")
+	})
+	t.Run("mainnet", func(t *testing.T) {
+		err := pbtImportProgressError(4, pbtImportMeta{Block: 3}, "/node", "mainnet")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "stage_exec --datadir=/node --block=4 --chain=mainnet")
+	})
 }
 
 func TestImportPBTUsesDatadirScratch(t *testing.T) {

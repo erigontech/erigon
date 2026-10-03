@@ -831,7 +831,11 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	reader := &asOfStateReader{sd: cc.doms, roTx: cc.roTx, commitmentDomain: commitmentDomain, txNum: req.firstTxNum, prefetched: prefetch}
 	balState := newCalcState(reader, cc.logger, cc.logPrefix)
-	balState.binFeed = hasBinCommitmentContext(cc.doms)
+	if _, _, dual := cc.dualCommitmentContexts(); dual {
+		balState.binFeed = true
+	} else if context := cc.doms.GetCommitmentContext(); context != nil {
+		balState.binFeed = context.Trie().Variant() == commitment.VariantBinPatriciaTrie
+	}
 	balState.LoadFromBALUpTo(req.bal, maxTxIndex, emptyRemoval, cc.chainConfig.Aura != nil, eip8246)
 	if err := balState.LazyLoadErr(); err != nil {
 		return dualCommitmentResult{}, nil, fmt.Errorf("lazy-load: %w", err)
@@ -1326,7 +1330,7 @@ func shouldStopHexShadow(activationBlock, maxReorgDepth, blockNum uint64) bool {
 }
 
 func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t commitTarget) {
-	if cc.chainConfig == nil || !cc.chainConfig.IsBinaryTrie(t.blockTime) || cc.ShadowDomainStopped(kv.CommitmentDomain) {
+	if cc.ShadowDomainStopped(kv.CommitmentDomain) {
 		return
 	}
 	if !cc.hasActivationBlock {
@@ -1406,11 +1410,7 @@ func (cc *commitmentCalculator) ShadowDomainStopped(domain kv.Domain) bool {
 func recordStoppedCommitmentDomains(tx kv.TemporalRwTx, local map[kv.Domain]bool) error {
 	stopped, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool })
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
-		isStopped := local != nil && local[domain]
-		if !isStopped && ok {
-			isStopped = stopped.CommitmentDomainStopped(domain)
-		}
-		if !isStopped {
+		if !local[domain] && (!ok || !stopped.CommitmentDomainStopped(domain)) {
 			continue
 		}
 		if err := rawdb.WriteCommitmentDomainStopped(tx, domain); err != nil {

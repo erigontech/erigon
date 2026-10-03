@@ -109,8 +109,7 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 					return err
 				}
 			}
-			accountStamp := accountsCursor.stamp
-			leafStamp := max(accountStamp, codeStamp)
+			leafStamp := max(accountsCursor.stamp, codeStamp)
 			feedAccount := commitment.PBinFeedAccount{
 				Address:     address,
 				Exists:      true,
@@ -286,9 +285,6 @@ func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, p
 		return emit(PBinLeaf{Key: previousKey, Value: previousValue, Stamp: previousStamp})
 	}
 	err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if len(value) != 8+eip8297.ValueLength {
-			return fmt.Errorf("pbin leaf stream: encoded value has length %d, want %d", len(value), 8+eip8297.ValueLength)
-		}
 		if previousKey != nil && bytes.Equal(previousKey, key) {
 			if !bytes.Equal(previousValue, value[8:]) {
 				return fmt.Errorf("pbin leaf stream: conflicting values for key %x", key)

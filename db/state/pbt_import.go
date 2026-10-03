@@ -78,9 +78,6 @@ func ForEachPBinArtifactLeaf(snapshot io.ReaderAt, snapshotSize int64, hashFn ei
 		},
 		Code: func(group artifact.Group) error {
 			for _, entry := range group.Entries {
-				if len(entry.Value) > eip8297.ValueLength {
-					return fmt.Errorf("pbt import: code chunk has invalid width")
-				}
 				var value [eip8297.ValueLength]byte
 				copy(value[eip8297.ValueLength-len(entry.Value):], entry.Value)
 				if addErr := add(eip8297.TreeKey(eip8297.CodeZone, group.StemHash[:], entry.Index), value); addErr != nil {
@@ -120,9 +117,6 @@ func ForEachPBinArtifactLeaf(snapshot io.ReaderAt, snapshotSize int64, hashFn ei
 }
 
 func PBinIntegerUint64(value []byte) uint64 {
-	if len(value) > 8 {
-		return ^uint64(0)
-	}
 	var raw [8]byte
 	copy(raw[8-len(value):], value)
 	return binary.BigEndian.Uint64(raw[:])

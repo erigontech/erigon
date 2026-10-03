@@ -350,7 +350,7 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 7)
 		require.NoError(t, dir.RemoveFile(filepath.Join(published.SnapDomain, "v1.0-accounts.0-1.kv")))
 		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
-		require.ErrorContains(t, err, "accounts")
+		require.EqualError(t, err, "commitment attach-pbt: published files are missing domain accounts through txNum 7")
 	})
 	t.Run("conversion point", func(t *testing.T) {
 		node, published := newPBTAttachFileTrees(t, true)
@@ -409,6 +409,9 @@ func TestPBTAttachPointRemedies(t *testing.T) {
 	behind := pbtAttachNodePointError("/node", "hoodi", 4, 10, 4, 5, 13, true)
 	require.ErrorContains(t, behind, "behind conversion point")
 	require.NotContains(t, behind.Error(), "--unwind=")
+	dev := pbtAttachNodePointError("/node", "dev", 10, 20, 10, 5, 13, true)
+	require.Error(t, dev)
+	require.NotContains(t, dev.Error(), "stage_exec")
 }
 
 func TestPBTAttachFilesAheadOfPointRemedy(t *testing.T) {

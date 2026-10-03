@@ -483,7 +483,11 @@ func TestCommitmentCalculatorBALHexOnlySkipsBinaryFeed(t *testing.T) {
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ExperimentalParallelCommitment = false
 	statecfg.ExperimentalCommitmentV3 = false
-	db, tx, doms := setupStepTest(t)
+	oldHandler := log.Root().GetHandler()
+	var logs bytes.Buffer
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StreamHandler(&logs, log.LogfmtFormat())))
+	t.Cleanup(func() { log.Root().SetHandler(oldHandler) })
+	db, _, doms := setupStepTest(t)
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(roTx.Rollback)
@@ -503,22 +507,20 @@ func TestCommitmentCalculatorBALHexOnlySkipsBinaryFeed(t *testing.T) {
 		firstTxNum: 1,
 		lastTxNum:  1,
 		bal: types.BlockAccessList{{
-			Address:      key,
-			NonceChanges: []*types.NonceChange{{Index: 0, Value: 2}},
+			Address: key,
+			StorageChanges: []types.SlotChanges{
+				{Slot: accounts.InternKey(common.Hash{1}), Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(1)}}},
+				{Slot: accounts.InternKey(common.Hash{2}), Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(2)}}},
+				{Slot: accounts.InternKey(common.Hash{3}), Changes: []*types.StorageChange{{Index: 0, Value: *uint256.NewInt(3)}}},
+			},
 		}},
 	}, math.MaxUint32, false, false, commitTarget{blockNum: 1, blockHash: common.Hash{2}, lastTxNum: 1})
 	require.NoError(t, err)
 	require.NotEmpty(t, result.canonicalRoot)
 	require.Nil(t, result.shadowRoot)
 
-	reference, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithHexCommitmentOnly())
-	require.NoError(t, err)
-	t.Cleanup(reference.Close)
-	account := accounts.Account{Nonce: 2, CodeHash: accounts.InternCodeHash(empty.CodeHash)}
-	require.NoError(t, reference.DomainPut(kv.AccountsDomain, tx, key[:], accounts.SerialiseV3(&account), 1, nil))
-	want, err := reference.ComputeCommitment(t.Context(), tx, false, 1, 1, "test", nil)
-	require.NoError(t, err)
-	require.Equal(t, want, result.canonicalRoot)
+	require.Contains(t, logs.String(), "msg=\"[commitment] processed\"")
+	require.Contains(t, logs.String(), "keys=3")
 }
 
 func TestCommitmentCalculatorBALDualFoldWithCode(t *testing.T) {

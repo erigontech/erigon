@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -78,7 +79,6 @@ type pbinRowStampTracker struct {
 	open     []pbinStampBranch
 	closed   map[string]uint64
 	previous eip8297.Bitpath
-	havePrev bool
 	maximum  uint64
 }
 
@@ -275,6 +275,8 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		_ = stampFile.Close()
 		_ = dir.RemoveFile(stampFile.Name())
 	}()
+	stampWriter := bufio.NewWriter(stampFile)
+	var stampReader *bufio.Reader
 	var (
 		overlay *pbinRangeWriterOverlay
 		root    []byte
@@ -300,7 +302,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		seen = true
 		for _, op := range batch {
 			var stampBytes [8]byte
-			if _, readErr := io.ReadFull(stampFile, stampBytes[:]); readErr != nil {
+			if _, readErr := io.ReadFull(stampReader, stampBytes[:]); readErr != nil {
 				return readErr
 			}
 			stamp := binary.BigEndian.Uint64(stampBytes[:])
@@ -314,31 +316,29 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			return advanceErr
 		}
 		domains.GetCommitmentCtx().SetPBinOps(batch)
-		var current *pbinRangeWriterOverlay
 		var computeErr error
 		root, computeErr = domains.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, blockNum, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
-			if overlay == nil {
-				overlay = &pbinRangeWriterOverlay{writes: make(map[string]pbinRangeWriterWrite)}
-			}
 			overlay.PatriciaContext = inner
-			overlay.write = onRow
-			overlay.finished = func() error {
-				clear(tracker.closed)
-				return nil
-			}
-			overlay.release = func(key []byte) {
-				domains.GetMemBatch().(*TemporalMemBatch).ForgetLatest(w.domain, key)
-			}
-			current = overlay
-			return current
+			return overlay
 		})
 		if computeErr != nil {
 			return computeErr
 		}
 		if final {
-			return current.Flush()
+			return overlay.Flush()
 		}
-		return current.FlushFinished(nextKey)
+		return overlay.FlushFinished(nextKey)
+	}
+	overlay = &pbinRangeWriterOverlay{
+		writes: make(map[string]pbinRangeWriterWrite),
+		write:  onRow,
+		finished: func() error {
+			clear(tracker.closed)
+			return nil
+		},
+		release: func(key []byte) {
+			domains.GetMemBatch().(*TemporalMemBatch).ForgetLatest(w.domain, key)
+		},
 	}
 	stream := func(emit func(pbt.Op) error) error {
 		progress := newPbinStreamProgress("PBT range writer progress", "", "range writer")
@@ -349,7 +349,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			}
 			var stampBytes [8]byte
 			binary.BigEndian.PutUint64(stampBytes[:], leaf.Stamp)
-			if _, writeErr := stampFile.Write(stampBytes[:]); writeErr != nil {
+			if _, writeErr := stampWriter.Write(stampBytes[:]); writeErr != nil {
 				return writeErr
 			}
 			var value [eip8297.ValueLength]byte
@@ -357,8 +357,13 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			return emit(pbt.Op{Key: bytes.Clone(leaf.Key), Value: value})
 		})
 		if streamErr == nil {
-			if streamErr = stampFile.Sync(); streamErr == nil {
-				_, streamErr = stampFile.Seek(0, io.SeekStart)
+			if streamErr = stampWriter.Flush(); streamErr == nil {
+				streamErr = stampFile.Sync()
+			}
+			if streamErr == nil {
+				if _, streamErr = stampFile.Seek(0, io.SeekStart); streamErr == nil {
+					stampReader = bufio.NewReader(stampFile)
+				}
 			}
 		}
 		return streamErr
@@ -454,14 +459,10 @@ func (t *pbinRowStampTracker) observe(key []byte, stamp uint64) error {
 		return fmt.Errorf("pbin range writer: empty leaf key")
 	}
 	path := eip8297.PathFromBits(key, int16(len(key)*8))
-	if t.havePrev {
-		commonBits := eip8297.CommonPrefixBitsAt(&t.previous, 0, &path)
-		t.closeDeeper(commonBits)
-	}
+	commonBits := eip8297.CommonPrefixBitsAt(&t.previous, 0, &path)
+	t.closeDeeper(commonBits)
 	for i := range t.open {
-		if path.HasPrefix(&t.open[i].path) && stamp > t.open[i].stamp {
-			t.open[i].stamp = stamp
-		}
+		t.open[i].stamp = max(t.open[i].stamp, stamp)
 	}
 	start := int16(4)
 	if len(t.open) > 0 {
@@ -472,20 +473,14 @@ func (t *pbinRowStampTracker) observe(key []byte, stamp uint64) error {
 		prefix.Truncate(bitLen)
 		t.open = append(t.open, pbinStampBranch{path: prefix, stamp: stamp})
 	}
-	if stamp > t.maximum {
-		t.maximum = stamp
-	}
+	t.maximum = max(t.maximum, stamp)
 	t.previous = path
-	t.havePrev = true
 	return nil
 }
 
 func (t *pbinRowStampTracker) advance(nextKey []byte) error {
 	if len(nextKey) == 0 {
 		return fmt.Errorf("pbin range writer: missing lookahead key")
-	}
-	if !t.havePrev {
-		return nil
 	}
 	nextPath := eip8297.PathFromBits(nextKey, int16(len(nextKey)*8))
 	commonBits := eip8297.CommonPrefixBitsAt(&t.previous, 0, &nextPath)
@@ -502,9 +497,7 @@ func (t *pbinRowStampTracker) closeDeeper(bitLen int16) {
 
 func (t *pbinRowStampTracker) closeBranch(branch pbinStampBranch) {
 	key := string(eip8297.EncodeBitPath(&branch.path))
-	if old, ok := t.closed[key]; !ok || branch.stamp > old {
-		t.closed[key] = branch.stamp
-	}
+	t.closed[key] = max(t.closed[key], branch.stamp)
 }
 
 func (t *pbinRowStampTracker) stamp(key []byte) (uint64, error) {

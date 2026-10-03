@@ -151,6 +151,18 @@ func TestVerifyPBTAcceptsSoundArtifacts(t *testing.T) {
 	require.ErrorIs(t, verifyPBTFilesWithMaxCodeSize(context.Background(), dirs.DataDir, snapshotPath, preimagesPath, 7, params.MaxCodeSizeAmsterdam, ""), errVerifyPBTInvalid)
 }
 
+func TestVerifyPBTWrapsMalformedMPTHeadersAsScratchIO(t *testing.T) {
+	scratch := t.TempDir()
+	paths := make([]string, 4)
+	for i := range paths {
+		paths[i] = filepath.Join(scratch, fmt.Sprintf("input-%d", i))
+		require.NoError(t, os.WriteFile(paths[i], nil, 0o644))
+	}
+	require.NoError(t, os.WriteFile(paths[3], []byte{0xff}, 0o644))
+	_, err := pbtVerifyMPT(paths[0], paths[1], paths[2], paths[3], scratch)
+	require.ErrorIs(t, err, errPBTVerifyScratchIO)
+}
+
 func TestVerifyPBTRejectsMalformedArtifactWithoutPanic(t *testing.T) {
 	snapshotPath := t.TempDir() + "/pbt-snapshot.bin"
 	preimagesPath := t.TempDir() + "/framed.bin"

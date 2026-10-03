@@ -95,7 +95,7 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	if opts.RangeWriterLimits == nil {
 		writer, err = NewPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum)
 	} else {
-		writer, err = newPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum, PBinRangeWriterLimits(*opts.RangeWriterLimits))
+		writer, err = newPBinRangeWriter(opts.TargetAggregator, opts.TargetDomain, opts.EndTxNum, *opts.RangeWriterLimits)
 	}
 	if err != nil {
 		return common.Hash{}, err

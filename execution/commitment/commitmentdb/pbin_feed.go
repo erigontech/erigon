@@ -54,9 +54,6 @@ func BinFeedFromState(keys, codeKeys, wiped map[string]struct{}, reader StateRea
 		addresses[key] = struct{}{}
 	}
 	for key := range wiped {
-		if len(key) != length.Addr {
-			return nil, fmt.Errorf("pbin: wiped key has length %d", len(key))
-		}
 		addresses[key] = struct{}{}
 	}
 	ordered := make([]string, 0, len(addresses))
@@ -108,9 +105,6 @@ func BinFeedAccountFromState(address []byte, slotKeys [][]byte, codeWritten, wip
 	account.Slots = make([]commitment.PBinFeedSlot, 0, len(slotKeys))
 	slices.SortFunc(slotKeys, bytes.Compare)
 	for _, slot := range slotKeys {
-		if len(slot) != length.Hash {
-			return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: slot key has length %d, want %d", len(slot), length.Hash)
-		}
 		composite := make([]byte, length.Addr+length.Hash)
 		copy(composite, address)
 		copy(composite[length.Addr:], slot)

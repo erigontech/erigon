@@ -3,7 +3,6 @@ package stagedsync
 import (
 	"context"
 	"fmt"
-	"math"
 	"slices"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -145,11 +144,6 @@ type accountBaselineReader interface {
 	ReadAccountData(addr accounts.Address) (*accounts.Account, error)
 }
 
-// storageEnumerator lists every persisted storage slot under an address.
-type storageEnumerator interface {
-	EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error
-}
-
 // calcState is the commitment calculator's local state accumulator.
 // It maintains the current state for every account/storage key that has been
 // touched. On first touch, values are lazy-loaded from the domain via the
@@ -170,11 +164,6 @@ type calcState struct {
 
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader accountBaselineReader
-
-	// storageEnum is a test injection point; production leaves it nil. The
-	// self-destruct path no longer reads it — the account delete collapses the
-	// subtree — so it exists only to assert that in tests.
-	storageEnum storageEnumerator
 
 	// lazyLoadErr captures the first error encountered during ensureAccount /
 	// ensureStorage. Sticky — never cleared — so the calculator can fail the
@@ -408,18 +397,7 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 	}
 }
 
-// LoadFromBAL populates calcState from an EIP-7928 Block Access List rather
-// than the per-tx VersionedWrites stream: it takes each field's block-end value
-// and feeds the existing ApplyWrites. The BAL carries no deletion marker, so an
-// account whose block-end state is empty (EIP-161) must be reconstructed as a
-// delete here: after the field changes and lazy-loaded pre-block fields are
-// merged, a touched all-zero account is marked Deleted so FlushToUpdates removes
-// its leaf instead of writing a zero-valued one. Storage reads are ignored.
-func (cs *calcState) LoadFromBAL(blockAccessList types.BlockAccessList, emptyRemoval bool, isAura bool, eip8246 bool) {
-	cs.LoadFromBALUpTo(blockAccessList, math.MaxUint32, emptyRemoval, isAura, eip8246)
-}
-
-// LoadFromBALUpTo is LoadFromBAL restricted to changes at tx index ≤ maxTxIndex,
+// LoadFromBALUpTo populates calcState from changes at tx index ≤ maxTxIndex,
 // i.e. the state as of that point within the block. Used to fold a block up to a
 // mid-block step boundary (checkpoint) from the same per-tx BAL, then fold the
 // remainder — the BAL carries every change's tx index, so no re-execution is
@@ -523,9 +501,6 @@ func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
 }
 
 func (cs *calcState) BinFeed() (*commitment.PBinFeed, error) {
-	if cs.reader == nil {
-		return nil, fmt.Errorf("pbin: calc state has no state reader")
-	}
 	keys := make(map[string]struct{}, len(cs.dirtyAccounts)+len(cs.storageDirty))
 	for _, addr := range cs.dirtyAccounts {
 		address := addr.Value()

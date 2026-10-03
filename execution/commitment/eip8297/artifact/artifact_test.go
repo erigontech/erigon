@@ -803,7 +803,7 @@ func TestCheckPreimageSetAtAcceptsReusedExpectedKey(t *testing.T) {
 		eip8297.TreeKey(eip8297.AccountZone, stem[:], eip8297.BasicDataLeafKey),
 		eip8297.TreeKeyStorage(address[:], record.Slots[0][:]),
 	}
-	reused := make([]byte, 0, len(expected[0]))
+	reused := make([]byte, 0, len(expected[0])+len(expected[1]))
 	yieldExpected := func(yield func([]byte) error) error {
 		for _, key := range expected {
 			reused = append(reused[:0], key...)

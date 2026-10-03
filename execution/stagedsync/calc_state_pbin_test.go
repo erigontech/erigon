@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -230,7 +231,7 @@ func TestLoadFromBALPBinFeedGenesisAccountFirstTransactionKeepsStorage(t *testin
 	require.Len(t, bal[0].NonceChanges, 1)
 	cs := newTestCalcState()
 	cs.domainReader = &preBlockReader{addr: addr, acc: &accounts.Account{Nonce: 0, Balance: *uint256.NewInt(7), Incarnation: 1}}
-	cs.LoadFromBAL(bal, true, false, false)
+	cs.LoadFromBALUpTo(bal, math.MaxUint32, true, false, false)
 	require.NotContains(t, cs.wiped, addr)
 }
 
@@ -241,7 +242,7 @@ func TestLoadFromBALPBinFeedLegacyContractFirstCreateKeepsStorage(t *testing.T) 
 	bal := io.AsBlockAccessList()
 	cs := newTestCalcState()
 	cs.domainReader = &preBlockReader{addr: addr, acc: &accounts.Account{Nonce: 0, Balance: *uint256.NewInt(7), Incarnation: 1}}
-	cs.LoadFromBAL(bal, true, false, false)
+	cs.LoadFromBALUpTo(bal, math.MaxUint32, true, false, false)
 	require.NotContains(t, cs.wiped, addr)
 }
 
@@ -309,10 +310,10 @@ func TestCalcStatePBinFeedBALTracksCodeAndEmptyRemoval(t *testing.T) {
 	emptyAddr := common.Address{6}
 	code := []byte{0x60, 0x00}
 	cs := newTestCalcState()
-	cs.LoadFromBAL(types.BlockAccessList{
+	cs.LoadFromBALUpTo(types.BlockAccessList{
 		{Address: addr, CodeChanges: []*types.CodeChange{{Index: 0, Bytecode: code}}},
 		{Address: emptyAddr, BalanceChanges: []*types.BalanceChange{{Index: 0, Value: uint256.Int{}}}},
-	}, true, false, false)
+	}, math.MaxUint32, true, false, false)
 	address := accounts.InternAddress(addr)
 	emptyAddress := accounts.InternAddress(emptyAddr)
 	require.Contains(t, cs.codeValues, address)
@@ -408,7 +409,7 @@ func TestPBinFeedSourcesMatchReferenceAcrossBlocks(t *testing.T) {
 			changes.NonceChanges = []*types.NonceChange{{Value: value.nonce}}
 			changes.CodeChanges = []*types.CodeChange{{Bytecode: value.code}}
 		}
-		cs.LoadFromBAL(types.BlockAccessList{changes}, true, false, false)
+		cs.LoadFromBALUpTo(types.BlockAccessList{changes}, math.MaxUint32, true, false, false)
 		feed, err := cs.BinFeed()
 		require.NoError(t, err)
 		return feed

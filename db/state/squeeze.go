@@ -1368,6 +1368,7 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		_ = dir.RemoveFile(sortedPath)
 	}()
 	sortedWriter := bufio.NewWriter(sortedFile)
+	var lengthBuf [4]byte
 	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		if bytes.Equal(previousOpKey, key) {
 			if !bytes.Equal(previousOpValue, value) {
@@ -1377,7 +1378,6 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		}
 		previousOpKey = bytes.Clone(key)
 		previousOpValue = bytes.Clone(value)
-		var lengthBuf [4]byte
 		binary.BigEndian.PutUint32(lengthBuf[:], uint32(len(value)))
 		if _, err := sortedWriter.Write(lengthBuf[:]); err != nil {
 			return err
@@ -1456,10 +1456,7 @@ func readPBinRebuildOp(r io.Reader) (pbt.Op, bool, error) {
 		return pbt.Op{}, false, err
 	}
 	op, err := pbt.DecodeOp(encoded)
-	if err != nil {
-		return pbt.Op{}, false, err
-	}
-	return op, false, nil
+	return op, false, err
 }
 
 func domainFiles(dirs datadir.Dirs, domain kv.Domain) []string {
