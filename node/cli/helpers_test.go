@@ -27,6 +27,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
+	cmdutils "github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
@@ -50,7 +52,7 @@ func buildHttpCfg(t *testing.T, args []string) nodecfg.Config {
 	return result
 }
 
-func TestDefaultFlagsIncludeEmbeddedBuilderTimingFlags(t *testing.T) {
+func TestDefaultFlagsIncludeEmbeddedBuilderFlags(t *testing.T) {
 	for _, name := range []string{"builder.bid-delay", "builder.shadow-value-curve"} {
 		found := false
 		for _, flag := range DefaultFlags {
@@ -61,6 +63,30 @@ func TestDefaultFlagsIncludeEmbeddedBuilderTimingFlags(t *testing.T) {
 		}
 		require.True(t, found, "%s is not registered", name)
 	}
+
+	defaults := epbscfg.DefaultConfig()
+	for _, test := range []struct {
+		flag cli.Flag
+		want any
+	}{
+		{flag: &cmdutils.EpbsBuilderMaxBidMarginFlag, want: defaults.MaxBidMargin},
+		{flag: &cmdutils.EpbsBuilderBidPublishLeadFlag, want: defaults.BidPublishLead},
+		{flag: &cmdutils.EpbsBuilderCollateralWarningGweiFlag, want: defaults.CollateralWarningGwei},
+	} {
+		require.Contains(t, DefaultFlags, test.flag, "%s is not registered", test.flag.Names()[0])
+		switch flag := test.flag.(type) {
+		case *cli.Float64Flag:
+			require.Equal(t, test.want, flag.Value)
+		case *cli.DurationFlag:
+			require.Equal(t, test.want, flag.Value)
+		case *cli.Uint64Flag:
+			require.Equal(t, test.want, flag.Value)
+		default:
+			t.Fatalf("unexpected flag type %T", flag)
+		}
+	}
+	require.Contains(t, cmdutils.EpbsBuilderBidPublishLeadFlag.Usage, "0 disables the hold")
+	require.Contains(t, cmdutils.EpbsBuilderBidPublishLeadFlag.Usage, "must be 0 with --builder.shadow-value-curve")
 }
 
 // TestOnUsageErrorHandler verifies that the custom OnUsageError handler

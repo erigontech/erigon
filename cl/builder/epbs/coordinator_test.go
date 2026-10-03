@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/pool"
 	clutils "github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -92,11 +93,29 @@ type discardCoordinatorPublisher struct{}
 
 func (discardCoordinatorPublisher) Publish(context.Context, string, []byte) error { return nil }
 
+type coordinatorHighestBidReader struct {
+	key    pool.HighestBidKey
+	bid    *cltypes.SignedExecutionPayloadBid
+	ok     bool
+	onRead func()
+}
+
+func (r *coordinatorHighestBidReader) GetHighestBid(key pool.HighestBidKey) (*cltypes.SignedExecutionPayloadBid, bool) {
+	r.key = key
+	if r.onRead != nil {
+		r.onRead()
+	}
+	return r.bid, r.ok
+}
+
 type admissionWindowAssembler struct {
 	payload               *eladapter.AssembledPayload
+	getErr                error
+	getCalls              int
 	getStarted            chan struct{}
 	invalidated           chan *builder.Parameters
 	getBeforeInvalidation bool
+	onGet                 func()
 }
 
 func (a *admissionWindowAssembler) AssemblePayload(context.Context, *builder.Parameters) (uint64, error) {
@@ -104,9 +123,15 @@ func (a *admissionWindowAssembler) AssemblePayload(context.Context, *builder.Par
 }
 
 func (a *admissionWindowAssembler) GetPayload(context.Context, uint64) (*eladapter.AssembledPayload, error) {
+	a.getCalls++
 	a.getBeforeInvalidation = len(a.invalidated) == 0
-	close(a.getStarted)
-	return a.payload, nil
+	if a.onGet != nil {
+		a.onGet()
+	}
+	if a.getStarted != nil && a.getCalls == 1 {
+		close(a.getStarted)
+	}
+	return a.payload, a.getErr
 }
 
 func (a *admissionWindowAssembler) InvalidatePayloadContext(parameters *builder.Parameters) {
@@ -195,6 +220,20 @@ func TestCoordinatorLogsTelemetryOnlyForPublishedBids(t *testing.T) {
 		new(coordinatorPublisher),
 		1,
 	)
+	targetTime := time.Unix(100, 0)
+	currentTime := targetTime.Add(-time.Second)
+	succeeded.bidPublishLead = 400 * time.Millisecond
+	succeeded.slotTime = func(uint64) time.Time { return targetTime }
+	succeeded.now = func() time.Time { return currentTime }
+	succeeded.wait = func(_ context.Context, wait time.Duration) error {
+		currentTime = currentTime.Add(wait)
+		return nil
+	}
+	succeeded.maxBidMargin = 1
+	succeeded.highestBids = &coordinatorHighestBidReader{
+		bid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{Value: 1, BuilderIndex: input.BuilderIndex + 1}},
+		ok:  true,
+	}
 	_, err = succeeded.RunSlot(t.Context(), input)
 	require.NoError(t, err)
 	output := logs.String()
@@ -205,11 +244,14 @@ func TestCoordinatorLogsTelemetryOnlyForPublishedBids(t *testing.T) {
 	require.Contains(t, output, "blockHash="+fmt.Sprint(assembled.Eth1Block.BlockHash))
 	require.Contains(t, output, "blockValueWei=2000000000")
 	require.Contains(t, output, "bidValueGwei=2")
+	require.Contains(t, output, "highestSeenBidGwei=1")
+	require.NotContains(t, output, "maxBidGwei")
 	require.Contains(t, output, "availableBidValueGwei="+fmt.Sprint(input.AvailableBidValueGwei))
 	require.Contains(t, output, "txs=2")
 	require.Contains(t, output, "gasUsed=456789")
 	require.Contains(t, output, "blobs=0")
 	require.Contains(t, output, "assembly=")
+	require.Contains(t, output, "bidHold=600ms")
 	require.Contains(t, output, "privateOrderflowWindow=0s")
 }
 
@@ -513,7 +555,7 @@ func TestCoordinatorPrivateOrderflowWindowPrecedesPayloadFinalization(t *testing
 	coordinator.privateOrderflowWindow = time.Second
 	waitStarted := make(chan struct{})
 	release := make(chan struct{})
-	coordinator.waitForPrivateOrderflow = func(ctx context.Context, _ time.Duration) error {
+	coordinator.wait = func(ctx context.Context, _ time.Duration) error {
 		close(waitStarted)
 		select {
 		case <-ctx.Done():
@@ -541,6 +583,660 @@ func TestCoordinatorPrivateOrderflowWindowPrecedesPayloadFinalization(t *testing
 	require.False(t, assembler.getBeforeInvalidation)
 	require.Equal(t, input.Slot, *invalidated.SlotNumber)
 	require.Equal(t, input.ParentBlockHash, invalidated.ParentHash)
+}
+
+func TestCoordinatorHoldsUntilPublishLeadBeforeGetPayload(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		privateWindow time.Duration
+		wantWaits     []time.Duration
+	}{
+		{name: "zero private window", wantWaits: []time.Duration{1600 * time.Millisecond}},
+		{name: "publish lead is later", privateWindow: 500 * time.Millisecond, wantWaits: []time.Duration{500 * time.Millisecond, 1100 * time.Millisecond}},
+		{name: "private window is later", privateWindow: 2 * time.Second, wantWaits: []time.Duration{2 * time.Second}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := gloasCoordinatorConfig()
+			input := validCoordinatorSlotInput(config)
+			assembler := &admissionWindowAssembler{
+				payload:     validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000)),
+				getStarted:  make(chan struct{}),
+				invalidated: make(chan *builder.Parameters, 1),
+			}
+			coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1}, assembler, new(coordinatorPublisher), 1)
+			targetTime := time.Unix(100, 0)
+			coordinator.privateOrderflowWindow = test.privateWindow
+			coordinator.bidPublishLead = 400 * time.Millisecond
+			coordinator.slotTime = func(slot uint64) time.Time {
+				require.Equal(t, input.Slot, slot)
+				return targetTime
+			}
+			currentTime := targetTime.Add(-2 * time.Second)
+			coordinator.now = func() time.Time { return currentTime }
+			waits := make([]time.Duration, 0, len(test.wantWaits))
+			var invalidated *builder.Parameters
+			coordinator.wait = func(_ context.Context, wait time.Duration) error {
+				select {
+				case <-assembler.getStarted:
+					t.Fatal("GetPayload called before the hold completed")
+				default:
+				}
+				shouldBeInvalidated := test.privateWindow == 0 || len(waits) > 0
+				select {
+				case invalidated = <-assembler.invalidated:
+					require.True(t, shouldBeInvalidated, "private-orderflow context invalidated before its window closed")
+					assembler.invalidated <- invalidated
+				default:
+					require.False(t, shouldBeInvalidated, "private-orderflow context remained valid during the publish-lead hold")
+				}
+				waits = append(waits, wait)
+				currentTime = currentTime.Add(wait)
+				return nil
+			}
+
+			_, err := coordinator.RunSlot(t.Context(), input)
+			require.NoError(t, err)
+			<-assembler.getStarted
+			if invalidated == nil {
+				invalidated = <-assembler.invalidated
+			}
+			require.Equal(t, input.Slot, *invalidated.SlotNumber)
+			require.Equal(t, test.wantWaits, waits)
+		})
+	}
+}
+
+func TestCoordinatorChecksFreshnessDuringPublishLeadHold(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		staleAtWait    int
+		freshnessDelay time.Duration
+		wantWaits      []time.Duration
+		wantGetTime    time.Time
+	}{
+		{
+			name:           "fresh",
+			freshnessDelay: 120 * time.Millisecond,
+			wantWaits:      []time.Duration{500 * time.Millisecond, 500 * time.Millisecond, 240 * time.Millisecond},
+			wantGetTime:    time.Unix(100, 0).Add(-400 * time.Millisecond),
+		},
+		{
+			name:        "turns stale",
+			staleAtWait: 1,
+			wantWaits:   []time.Duration{500 * time.Millisecond},
+			wantGetTime: time.Unix(100, 0).Add(-1500 * time.Millisecond),
+		},
+		{
+			name:        "turns stale in final wait",
+			staleAtWait: 4,
+			wantWaits:   []time.Duration{500 * time.Millisecond, 500 * time.Millisecond, 500 * time.Millisecond, 100 * time.Millisecond},
+			wantGetTime: time.Unix(100, 0).Add(-400 * time.Millisecond),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := gloasCoordinatorConfig()
+			input := validCoordinatorSlotInput(config)
+			targetTime := time.Unix(100, 0)
+			currentTime := targetTime.Add(-2 * time.Second)
+			var getStartedAt time.Time
+			assembler := &admissionWindowAssembler{
+				payload:     validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000)),
+				getStarted:  make(chan struct{}),
+				invalidated: make(chan *builder.Parameters, 1),
+				onGet:       func() { getStartedAt = currentTime },
+			}
+			coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1}, assembler, new(coordinatorPublisher), 1)
+			coordinator.bidPublishLead = 400 * time.Millisecond
+			coordinator.retryInterval = 500 * time.Millisecond
+			coordinator.slotTime = func(uint64) time.Time { return targetTime }
+			coordinator.now = func() time.Time { return currentTime }
+			freshness := &countingSlotInputFreshness{
+				err: ErrSlotInputStale,
+				onCall: func(call int) {
+					if call >= 3 {
+						currentTime = currentTime.Add(test.freshnessDelay)
+					}
+				},
+			}
+			var waits []time.Duration
+			coordinator.wait = func(_ context.Context, wait time.Duration) error {
+				waits = append(waits, wait)
+				currentTime = currentTime.Add(wait)
+				if test.staleAtWait == len(waits) {
+					freshness.stale = true
+				}
+				return nil
+			}
+			live := NewLiveCoordinator(coordinator, &staticSlotInputResolver{input: input}, freshness)
+
+			bid, err := live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
+			require.Equal(t, test.wantWaits, waits)
+			if test.staleAtWait > 0 {
+				require.Nil(t, bid)
+				require.ErrorIs(t, err, ErrSlotInputStale)
+				select {
+				case <-assembler.getStarted:
+				case <-time.After(time.Second):
+					t.Fatal("GetPayload was not called after stale input ended the hold")
+				}
+				require.Equal(t, test.wantGetTime, getStartedAt)
+				auction, admitErr := coordinator.admitAuction(input)
+				require.NoError(t, admitErr)
+				coordinator.releaseAuction(auction)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, bid)
+			<-assembler.getStarted
+			require.Equal(t, test.wantGetTime, getStartedAt)
+		})
+	}
+}
+
+func TestCoordinatorRetriesAtPublishTimeAfterTransientStaleHold(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	targetTime := time.Unix(100, 0)
+	currentTime := targetTime.Add(-2 * time.Second)
+	var getStartedAt []time.Time
+	assembler := &admissionWindowAssembler{
+		payload:     validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000)),
+		invalidated: make(chan *builder.Parameters, 2),
+		onGet:       func() { getStartedAt = append(getStartedAt, currentTime) },
+	}
+	publisher := new(coordinatorPublisher)
+	coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1}, assembler, publisher, 1)
+	coordinator.bidPublishLead = 400 * time.Millisecond
+	coordinator.retryInterval = 500 * time.Millisecond
+	coordinator.slotTime = func(uint64) time.Time { return targetTime }
+	coordinator.now = func() time.Time { return currentTime }
+	var waits []time.Duration
+	coordinator.wait = func(_ context.Context, wait time.Duration) error {
+		waits = append(waits, wait)
+		currentTime = currentTime.Add(wait)
+		return nil
+	}
+	freshness := &countingSlotInputFreshness{failAt: 4, err: ErrSlotInputStale}
+	live := NewLiveCoordinator(coordinator, &staticSlotInputResolver{input: input}, freshness)
+
+	bid, err := live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
+	require.Nil(t, bid)
+	require.ErrorIs(t, err, ErrSlotInputStale)
+	require.Zero(t, publisher.calls)
+	require.Equal(t, []time.Time{targetTime.Add(-1500 * time.Millisecond)}, getStartedAt)
+
+	bid, err = live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
+	require.NoError(t, err)
+	require.NotNil(t, bid)
+	require.Equal(t, 1, publisher.calls)
+	require.Equal(t, []time.Time{targetTime.Add(-1500 * time.Millisecond), targetTime.Add(-400 * time.Millisecond)}, getStartedAt)
+	require.Equal(t, []time.Duration{500 * time.Millisecond, 500 * time.Millisecond, 500 * time.Millisecond, 100 * time.Millisecond}, waits)
+}
+
+func TestCoordinatorStopsPayloadAfterStaleBeforeFirstPublishWait(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		getErr     error
+		nilPayload bool
+	}{
+		{name: "payload available"},
+		{name: "payload unavailable", nilPayload: true},
+		{name: "execution busy", getErr: eladapter.ErrExecutionBusy},
+		{name: "payload error", getErr: errors.New("get payload failed")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := gloasCoordinatorConfig()
+			input := validCoordinatorSlotInput(config)
+			targetTime := time.Unix(100, 0)
+			currentTime := targetTime.Add(-2 * time.Second)
+			payload := validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000))
+			if test.nilPayload {
+				payload = nil
+			}
+			assembler := &admissionWindowAssembler{
+				payload:     payload,
+				getErr:      test.getErr,
+				invalidated: make(chan *builder.Parameters, 1),
+			}
+			publisher := new(coordinatorPublisher)
+			coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1}, assembler, publisher, 1)
+			coordinator.bidPublishLead = 400 * time.Millisecond
+			coordinator.retryInterval = 500 * time.Millisecond
+			coordinator.slotTime = func(uint64) time.Time { return targetTime }
+			coordinator.now = func() time.Time { return currentTime }
+			coordinator.wait = func(context.Context, time.Duration) error {
+				t.Fatal("wait called after the input was stale")
+				return nil
+			}
+			freshness := &countingSlotInputFreshness{failAt: 3, err: ErrSlotInputStale}
+			live := NewLiveCoordinator(coordinator, &staticSlotInputResolver{input: input}, freshness)
+
+			bid, err := live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
+			require.Nil(t, bid)
+			require.ErrorIs(t, err, ErrSlotInputStale)
+			require.Equal(t, 1, assembler.getCalls)
+			require.Zero(t, publisher.calls)
+		})
+	}
+}
+
+func TestCoordinatorDoesNotCheckHoldFreshnessAfterPublishDeadline(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	targetTime := time.Unix(100, 0)
+	currentTime := targetTime.Add(-2 * time.Second)
+	freshness := new(countingSlotInputFreshness)
+	var freshnessCallsAtGet int
+	assembler := &admissionWindowAssembler{
+		payload:     validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000)),
+		invalidated: make(chan *builder.Parameters, 1),
+		onGet:       func() { freshnessCallsAtGet = freshness.calls },
+	}
+	coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1}, assembler, new(coordinatorPublisher), 1)
+	coordinator.bidPublishLead = 400 * time.Millisecond
+	coordinator.retryInterval = 500 * time.Millisecond
+	coordinator.slotTime = func(uint64) time.Time { return targetTime }
+	coordinator.now = func() time.Time { return currentTime }
+	coordinator.wait = func(context.Context, time.Duration) error {
+		currentTime = targetTime
+		return nil
+	}
+	live := NewLiveCoordinator(coordinator, &staticSlotInputResolver{input: input}, freshness)
+
+	bid, err := live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
+	require.NoError(t, err)
+	require.NotNil(t, bid)
+	require.Equal(t, 3, freshnessCallsAtGet)
+	require.Equal(t, targetTime, currentTime)
+}
+
+func TestCoordinatorDoesNotHoldPastTargetTime(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		now  time.Time
+	}{
+		{name: "exactly at publish time", now: time.Unix(100, 0).Add(-400 * time.Millisecond)},
+		{name: "past target time", now: time.Unix(100, 0).Add(time.Millisecond)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := gloasCoordinatorConfig()
+			input := validCoordinatorSlotInput(config)
+			targetTime := time.Unix(100, 0)
+			coordinator := NewCoordinator(
+				&config,
+				new(coordinatorSigner),
+				FixedMarginStrategy{Margin: 1},
+				&coordinatorAssembler{payload: validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000))},
+				new(coordinatorPublisher),
+				1,
+			)
+			coordinator.bidPublishLead = 400 * time.Millisecond
+			coordinator.slotTime = func(uint64) time.Time { return targetTime }
+			coordinator.now = func() time.Time { return test.now }
+			coordinator.wait = func(context.Context, time.Duration) error {
+				t.Fatal("wait called at or after the publish time")
+				return nil
+			}
+
+			_, err := coordinator.RunSlot(t.Context(), input)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestCoordinatorCancelsDuringPublishLeadHold(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembler := &admissionWindowAssembler{
+		payload:     validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000)),
+		getStarted:  make(chan struct{}),
+		invalidated: make(chan *builder.Parameters, 1),
+	}
+	coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1}, assembler, new(coordinatorPublisher), 1)
+	targetTime := time.Unix(100, 0)
+	coordinator.bidPublishLead = 400 * time.Millisecond
+	coordinator.slotTime = func(uint64) time.Time { return targetTime }
+	coordinator.now = func() time.Time { return targetTime.Add(-time.Second) }
+	ctx, cancel := context.WithCancel(t.Context())
+	coordinator.wait = func(ctx context.Context, _ time.Duration) error {
+		select {
+		case <-assembler.invalidated:
+		default:
+			t.Fatal("private-orderflow context remained valid during the publish-lead hold")
+		}
+		cancel()
+		return ctx.Err()
+	}
+
+	_, err := coordinator.RunSlot(ctx, input)
+	require.ErrorIs(t, err, context.Canceled)
+	select {
+	case <-assembler.getStarted:
+		t.Fatal("GetPayload called after the publish-lead hold was cancelled")
+	default:
+	}
+	auction, err := coordinator.admitAuction(input)
+	require.NoError(t, err)
+	coordinator.releaseAuction(auction)
+}
+
+func TestCoordinatorCancelsDuringPrivateOrderflowWindow(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembler := &admissionWindowAssembler{
+		payload:     validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000)),
+		getStarted:  make(chan struct{}),
+		invalidated: make(chan *builder.Parameters, 1),
+	}
+	coordinator := NewCoordinator(&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1}, assembler, new(coordinatorPublisher), 1)
+	coordinator.privateOrderflowWindow = time.Second
+	ctx, cancel := context.WithCancel(t.Context())
+	coordinator.wait = func(ctx context.Context, _ time.Duration) error {
+		select {
+		case <-assembler.invalidated:
+			t.Fatal("private-orderflow context invalidated before its window closed")
+		default:
+		}
+		cancel()
+		return ctx.Err()
+	}
+
+	_, err := coordinator.RunSlot(ctx, input)
+	require.ErrorIs(t, err, context.Canceled)
+	invalidated := <-assembler.invalidated
+	require.Equal(t, input.Slot, *invalidated.SlotNumber)
+	select {
+	case <-assembler.invalidated:
+		t.Fatal("private-orderflow context invalidated more than once")
+	default:
+	}
+	select {
+	case <-assembler.getStarted:
+		t.Fatal("GetPayload called after the private-orderflow window was cancelled")
+	default:
+	}
+	auction, err := coordinator.admitAuction(input)
+	require.NoError(t, err)
+	coordinator.releaseAuction(auction)
+}
+
+func TestCoordinatorReadsHighestBidAfterPublishLeadHold(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	reader := &coordinatorHighestBidReader{
+		bid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{Value: 90, BuilderIndex: input.BuilderIndex + 1}},
+		ok:  true,
+	}
+	coordinator := NewCoordinator(
+		&config,
+		new(coordinatorSigner),
+		FixedMarginStrategy{Margin: 0.85},
+		&coordinatorAssembler{payload: validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000))},
+		new(coordinatorPublisher),
+		1,
+	)
+	targetTime := time.Unix(100, 0)
+	coordinator.bidPublishLead = 400 * time.Millisecond
+	coordinator.slotTime = func(uint64) time.Time { return targetTime }
+	coordinator.now = func() time.Time { return targetTime.Add(-time.Second) }
+	coordinator.maxBidMargin = 0.97
+	coordinator.highestBids = reader
+	coordinator.wait = func(context.Context, time.Duration) error {
+		reader.bid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+			Value: 95, BuilderIndex: input.BuilderIndex + 1,
+		}}
+		return nil
+	}
+
+	bid, err := coordinator.RunSlot(t.Context(), input)
+	require.NoError(t, err)
+	require.Equal(t, uint64(96), bid.Message.Value)
+}
+
+func TestCoordinatorBidsAboveHighestSeenBid(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	reader := &coordinatorHighestBidReader{
+		bid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{Value: 90, BuilderIndex: input.BuilderIndex + 1}},
+		ok:  true,
+	}
+	coordinator := NewCoordinator(
+		&config,
+		new(coordinatorSigner),
+		FixedMarginStrategy{Margin: 0.85},
+		&coordinatorAssembler{payload: validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000))},
+		new(coordinatorPublisher),
+		1,
+	)
+	coordinator.maxBidMargin = 0.97
+	coordinator.highestBids = reader
+
+	bid, err := coordinator.RunSlot(t.Context(), input)
+	require.NoError(t, err)
+	require.Equal(t, uint64(91), bid.Message.Value)
+	require.Equal(t, pool.HighestBidKey{Slot: input.Slot, ParentBlockHash: input.ParentBlockHash, ParentBlockRoot: input.ParentBlockRoot}, reader.key)
+}
+
+func TestCoordinatorReturnsStaleInsteadOfOutbid(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	freshness := &countingSlotInputFreshness{err: ErrSlotInputStale}
+	reader := &coordinatorHighestBidReader{
+		bid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{Value: 97, BuilderIndex: input.BuilderIndex + 1}},
+		ok:  true,
+		onRead: func() {
+			freshness.stale = true
+		},
+	}
+	publisher := new(coordinatorPublisher)
+	coordinator := NewCoordinator(
+		&config,
+		new(coordinatorSigner),
+		FixedMarginStrategy{Margin: 0.85},
+		&coordinatorAssembler{payload: validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000))},
+		publisher,
+		1,
+	)
+	coordinator.maxBidMargin = 0.97
+	coordinator.highestBids = reader
+	live := NewLiveCoordinator(coordinator, &staticSlotInputResolver{input: input}, freshness)
+
+	bid, err := live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
+	require.Nil(t, bid)
+	require.ErrorIs(t, err, ErrSlotInputStale)
+	require.NotErrorIs(t, err, ErrBidOutbid)
+	require.Zero(t, publisher.calls)
+}
+
+func TestCoordinatorReturnsStaleInsteadOfInsufficientCollateral(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	input.AvailableBidValueGwei = 80
+	freshness := &countingSlotInputFreshness{err: ErrSlotInputStale}
+	reader := &coordinatorHighestBidReader{
+		bid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{Value: 80, BuilderIndex: input.BuilderIndex + 1}},
+		ok:  true,
+		onRead: func() {
+			freshness.stale = true
+		},
+	}
+	publisher := new(coordinatorPublisher)
+	coordinator := NewCoordinator(
+		&config,
+		new(coordinatorSigner),
+		FixedMarginStrategy{Margin: 0.85},
+		&coordinatorAssembler{payload: validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000))},
+		publisher,
+		1,
+	)
+	coordinator.maxBidMargin = 0.97
+	coordinator.highestBids = reader
+	live := NewLiveCoordinator(coordinator, &staticSlotInputResolver{input: input}, freshness)
+
+	bid, err := live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
+	require.Nil(t, bid)
+	require.ErrorIs(t, err, ErrSlotInputStale)
+	require.NotErrorIs(t, err, ErrBidOutbid)
+	require.Zero(t, publisher.calls)
+}
+
+func TestCoordinatorAppliesCollateralCapToCompetitiveBid(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		available      uint64
+		wantBid        uint64
+		wantErr        error
+		wantReservable uint64
+	}{
+		{name: "collateral between best and base", available: 83, wantBid: 83},
+		{name: "collateral equal to best", available: 80, wantErr: ErrBidOutbid, wantReservable: 80},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := log.Root().GetHandler()
+			log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+			t.Cleanup(func() { log.Root().SetHandler(previous) })
+			config := gloasCoordinatorConfig()
+			input := validCoordinatorSlotInput(config)
+			input.AvailableBidValueGwei = test.available
+			publisher := new(coordinatorPublisher)
+			coordinator := NewCoordinator(
+				&config,
+				new(coordinatorSigner),
+				FixedMarginStrategy{Margin: 0.85},
+				&coordinatorAssembler{payload: validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000))},
+				publisher,
+				1,
+			)
+			coordinator.maxBidMargin = 0.97
+			coordinator.highestBids = &coordinatorHighestBidReader{
+				bid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{Value: 80, BuilderIndex: input.BuilderIndex + 1}},
+				ok:  true,
+			}
+
+			bid, err := coordinator.RunSlot(t.Context(), input)
+			if test.wantErr != nil {
+				require.Nil(t, bid)
+				require.ErrorIs(t, err, test.wantErr)
+				require.ErrorContains(t, err, bidSkipInsufficientCollateral)
+				require.Zero(t, publisher.calls)
+				require.Contains(t, logs.String(), "reservableBidGwei="+fmt.Sprint(test.wantReservable))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.wantBid, bid.Message.Value)
+			require.Equal(t, 1, publisher.calls)
+		})
+	}
+}
+
+func TestCoordinatorClassifiesRefusedReservation(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		withCompetitor bool
+		wantOutbid     bool
+	}{
+		{name: "without competitor"},
+		{name: "with competitor", withCompetitor: true, wantOutbid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			previous := log.Root().GetHandler()
+			log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+			t.Cleanup(func() { log.Root().SetHandler(previous) })
+			config := gloasCoordinatorConfig()
+			input := validCoordinatorSlotInput(config)
+			input.AvailableBidValueGwei = 80
+			publisher := new(coordinatorPublisher)
+			coordinator := NewCoordinator(
+				&config,
+				new(coordinatorSigner),
+				FixedMarginStrategy{Margin: 0.85},
+				&coordinatorAssembler{payload: validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000))},
+				publisher,
+				2,
+			)
+			other := input
+			other.ParentBlockRoot[0] ^= 0xff
+			auction, err := coordinator.admitAuction(other)
+			require.NoError(t, err)
+			reserved, ok, err := coordinator.reserveBid(auction, input.AvailableBidValueGwei, input.AvailableBidValueGwei)
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Equal(t, input.AvailableBidValueGwei, reserved)
+			t.Cleanup(func() { coordinator.releaseAuction(auction) })
+			if test.withCompetitor {
+				coordinator.maxBidMargin = 0.97
+				coordinator.highestBids = &coordinatorHighestBidReader{
+					bid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+						Value: 70, BuilderIndex: input.BuilderIndex + 1,
+					}},
+					ok: true,
+				}
+			}
+
+			bid, err := coordinator.RunSlot(t.Context(), input)
+			require.Nil(t, bid)
+			require.Zero(t, publisher.calls)
+			if test.wantOutbid {
+				require.ErrorIs(t, err, ErrBidOutbid)
+				require.ErrorContains(t, err, bidSkipInsufficientCollateral)
+				require.Contains(t, logs.String(), "reservableBidGwei=0")
+				return
+			}
+			require.NoError(t, err)
+			require.NotContains(t, logs.String(), "Embedded builder bid skipped")
+		})
+	}
+}
+
+func TestCoordinatorSkipsOutbidAuction(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Root().GetHandler()
+	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	t.Cleanup(func() { log.Root().SetHandler(previous) })
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000))
+	publisher := new(coordinatorPublisher)
+	store, err := OpenPendingPayloadStore(filepath.Join(t.TempDir(), "pending"), &config, 1)
+	require.NoError(t, err)
+	coordinator := NewCoordinator(
+		&config,
+		new(coordinatorSigner),
+		FixedMarginStrategy{Margin: 0.85},
+		&coordinatorAssembler{payload: assembled},
+		publisher,
+		1,
+	)
+	coordinator.pendingStore = store
+	coordinator.maxBidMargin = 0.97
+	coordinator.highestBids = &coordinatorHighestBidReader{
+		bid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{Value: 97, BuilderIndex: input.BuilderIndex + 1}},
+		ok:  true,
+	}
+
+	bid, err := coordinator.RunSlot(t.Context(), input)
+	require.Nil(t, bid)
+	require.ErrorIs(t, err, ErrBidOutbid)
+	require.Zero(t, publisher.calls)
+	require.Contains(t, logs.String(), "Embedded builder bid skipped")
+	require.Contains(t, logs.String(), "blockValueWei=100000000000")
+	require.Contains(t, logs.String(), "maxBidGwei=97")
+	require.Contains(t, logs.String(), "availableBidValueGwei=2000")
+	require.NotContains(t, logs.String(), "reservableBidGwei")
+	require.Contains(t, logs.String(), "highestSeenBidGwei=97")
+	require.Contains(t, logs.String(), "highestSeenBuilderIndex=4")
+	require.Contains(t, logs.String(), "reason=above_max_bid")
+	coordinator.mu.Lock()
+	require.Empty(t, coordinator.retained)
+	coordinator.mu.Unlock()
+	loaded, loadErr := store.Load(input.Slot)
+	require.NoError(t, loadErr)
+	require.Empty(t, loaded)
+	auction, admitErr := coordinator.admitAuction(input)
+	require.NoError(t, admitErr)
+	coordinator.releaseAuction(auction)
 }
 
 func TestCoordinatorReportsMeasuredZeroValuePayload(t *testing.T) {
@@ -1250,6 +1946,32 @@ func TestCoordinatorRejectsMalformedExecutionRequests(t *testing.T) {
 	require.ErrorContains(t, err, "unknown execution request type")
 	require.Zero(t, publisher.calls)
 	require.Zero(t, measured)
+}
+
+func TestCoordinatorRejectsMalformedExecutionRequestsBeforeCollateralReservation(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	input.AvailableBidValueGwei = 2
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
+	assembled.RequestsBundle.Requests = [][]byte{{0xff, 1}}
+	publisher := new(coordinatorPublisher)
+	coordinator := NewCoordinator(
+		&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payload: assembled}, publisher, 2,
+	)
+	other := input
+	other.ParentBlockRoot[0] ^= 0xff
+	auction, err := coordinator.admitAuction(other)
+	require.NoError(t, err)
+	reserved, ok, err := coordinator.reserveBid(auction, input.AvailableBidValueGwei, input.AvailableBidValueGwei)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, input.AvailableBidValueGwei, reserved)
+	t.Cleanup(func() { coordinator.releaseAuction(auction) })
+
+	_, err = coordinator.RunSlot(t.Context(), input)
+	require.ErrorContains(t, err, "unknown execution request type")
+	require.Zero(t, publisher.calls)
 }
 
 func TestCoordinatorRejectsTypedNilDependency(t *testing.T) {

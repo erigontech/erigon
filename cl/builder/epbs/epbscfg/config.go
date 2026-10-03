@@ -14,7 +14,10 @@ type Config struct {
 	Enabled                bool
 	KeyPath                string
 	BidMargin              float64
+	MaxBidMargin           float64
 	BidDelay               time.Duration
+	BidPublishLead         time.Duration
+	CollateralWarningGwei  uint64
 	PrivateOrderflowWindow time.Duration
 	ShadowValueCurve       bool
 	MaxPending             int
@@ -24,8 +27,11 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		BidMargin:     0.85,
-		MaxRetained:   16,
-		RetryInterval: 250 * time.Millisecond,
+		BidMargin:             0.85,
+		MaxBidMargin:          0.97,
+		BidPublishLead:        400 * time.Millisecond,
+		CollateralWarningGwei: 20_000_000_000,
+		MaxRetained:           16,
+		RetryInterval:         250 * time.Millisecond,
 	}
 }

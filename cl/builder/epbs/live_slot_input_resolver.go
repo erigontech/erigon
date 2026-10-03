@@ -28,8 +28,9 @@ import (
 )
 
 var (
-	ErrSlotInputUnavailable = errors.New("slot input unavailable")
-	ErrSlotInputStale       = errors.New("slot input stale")
+	ErrSlotInputUnavailable       = errors.New("slot input unavailable")
+	ErrSlotInputStale             = errors.New("slot input stale")
+	ErrBuilderCollateralExhausted = errors.New("builder has no available collateral")
 )
 
 type LiveSlotClock interface {
@@ -435,7 +436,7 @@ func (r *LiveSlotInputResolver) resolveBuilder(headState *state.CachingBeaconSta
 	}
 	reserved := r.beaconCfg.MinDepositAmount + pending
 	if builder.Balance <= reserved {
-		return 0, nil, 0, fmt.Errorf("%w: builder has no available collateral", ErrSlotInputUnavailable)
+		return 0, nil, 0, fmt.Errorf("%w: %w", ErrSlotInputUnavailable, ErrBuilderCollateralExhausted)
 	}
 	return uint64(match), builder, builder.Balance - reserved, nil
 }

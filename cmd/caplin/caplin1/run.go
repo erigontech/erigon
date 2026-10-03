@@ -560,6 +560,7 @@ func runCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			BidProcessor:     executionPayloadBidService,
 			PayloadProcessor: executionPayloadService,
 			AcceptedBlocks:   forkChoice,
+			HighestBids:      epbsPool,
 			Events:           emitters,
 			Status:           builderStatus,
 		})

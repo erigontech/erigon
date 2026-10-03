@@ -775,6 +775,51 @@ func TestValidatedPreferencesRunnerObservesTrackedOutcome(t *testing.T) {
 	stopTestPreferencesRunner(t, cancel, done)
 }
 
+func TestValidatedPreferencesRunnerDoesNotRetryOutbid(t *testing.T) {
+	clock := &manualRunnerClock{slot: 11}
+	root := common.HexToHash("0x11")
+	call := runnerCall{slot: 11, root: root}
+	coordinator := &recordingPreferencesCoordinator{
+		outcomes: map[runnerCall][]runnerOutcome{call: {{err: ErrBidOutbid}}},
+		started:  make(chan runnerCall, 2),
+	}
+	runner, ticker, cancel, done := startTestPreferencesRunner(t, coordinator, clock, 1)
+	outcomes := make(chan error, 1)
+	runner.observeOutcome = func(_ uint64, err error) { outcomes <- err }
+
+	runner.SubmitValidatedPreferences(runnerPreferences(call.slot, call.root))
+	select {
+	case started := <-coordinator.started:
+		require.Equal(t, call, started)
+	case <-time.After(time.Second):
+		t.Fatal("outbid preference attempt did not start")
+	}
+	select {
+	case err := <-outcomes:
+		require.ErrorIs(t, err, ErrBidOutbid)
+	case <-time.After(time.Second):
+		t.Fatal("outbid outcome was not observed")
+	}
+	waitForRunnerIdle(t, runner)
+	for range 3 {
+		ticker.tick()
+	}
+	select {
+	case <-coordinator.started:
+		t.Fatal("outbid preference was retried")
+	case <-time.After(50 * time.Millisecond):
+	}
+	select {
+	case err := <-outcomes:
+		t.Fatalf("outbid preference produced a second outcome: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	calls, _ := coordinator.snapshot()
+	require.Len(t, calls, 1)
+
+	stopTestPreferencesRunner(t, cancel, done)
+}
+
 func TestValidatedPreferencesRunnerDoesNotObserveExpiredStoppingOrCanceledFailure(t *testing.T) {
 	for _, test := range []struct {
 		name        string
@@ -946,7 +991,7 @@ func TestValidatedPreferencesRunnerUnattemptedCandidatePrecedesRetry(t *testing.
 	}
 }
 
-func TestValidatedPreferencesRunnerCurrentSlotRetryPrecedesNextSlotFirstAttempts(t *testing.T) {
+func TestValidatedPreferencesRunnerNextSlotFirstAttemptsPrecedeCurrentSlotRetry(t *testing.T) {
 	clock := &manualRunnerClock{slot: 10}
 	currentRoot := common.HexToHash("0xff")
 	currentCall := runnerCall{slot: 10, root: currentRoot}
@@ -965,7 +1010,37 @@ func TestValidatedPreferencesRunnerCurrentSlotRetryPrecedesNextSlotFirstAttempts
 	runner.SubmitValidatedPreferences(runnerPreferences(nextCallB.slot, nextCallB.root))
 	ticker.tick()
 	calls := waitForRunnerCalls(t, coordinator, 2)
-	require.Equal(t, currentCall, calls[1])
+	require.Equal(t, nextCallA, calls[1])
+	waitForRunnerIdle(t, runner)
+	ticker.tick()
+	calls = waitForRunnerCalls(t, coordinator, 3)
+	require.Equal(t, nextCallB, calls[2])
+	waitForRunnerIdle(t, runner)
+	ticker.tick()
+	calls = waitForRunnerCalls(t, coordinator, 4)
+	require.Equal(t, currentCall, calls[3])
+	stopTestPreferencesRunner(t, cancel, done)
+}
+
+func TestValidatedPreferencesRunnerNextSlotFirstAttemptPrecedesUnattemptedCurrentSlot(t *testing.T) {
+	clock := &manualRunnerClock{slot: 10}
+	currentCall := runnerCall{slot: 10, root: common.HexToHash("0x01")}
+	nextCall := runnerCall{slot: 11, root: common.HexToHash("0x02")}
+	coordinator := &recordingPreferencesCoordinator{outcomes: map[runnerCall][]runnerOutcome{
+		currentCall: {{bid: new(cltypes.SignedExecutionPayloadBid)}},
+		nextCall:    {{bid: new(cltypes.SignedExecutionPayloadBid)}},
+	}}
+	ticker := &manualRunnerTicker{ticks: make(chan time.Time, 1)}
+	runner, err := newValidatedPreferencesRunner(coordinator, clock, 2, time.Second, func(time.Duration) runnerTicker { return ticker })
+	require.NoError(t, err)
+	runner.SubmitValidatedPreferences(runnerPreferences(currentCall.slot, currentCall.root))
+	runner.SubmitValidatedPreferences(runnerPreferences(nextCall.slot, nextCall.root))
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+
+	calls := waitForRunnerCalls(t, coordinator, 1)
+	require.Equal(t, nextCall, calls[0])
 	stopTestPreferencesRunner(t, cancel, done)
 }
 

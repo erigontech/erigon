@@ -38,6 +38,7 @@ type RuntimeDependencies struct {
 	BidProcessor     BidProcessor
 	PayloadProcessor PayloadProcessor
 	AcceptedBlocks   AcceptedBlockReader
+	HighestBids      HighestBidReader
 	Events           *beaconevents.EventEmitter
 	Status           *executionbuilder.EmbeddedBuilderStatus
 }
@@ -62,7 +63,7 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 	cfg = resolvedCfg
 	if isNilDependency(deps.Clock) || isNilDependency(deps.Head) || isNilDependency(deps.Forkchoice) ||
 		isNilDependency(deps.Assembler) || isNilDependency(deps.Publisher) || isNilDependency(deps.ColumnStorage) || isNilDependency(deps.BidProcessor) ||
-		isNilDependency(deps.PayloadProcessor) || isNilDependency(deps.AcceptedBlocks) || deps.Events == nil {
+		isNilDependency(deps.PayloadProcessor) || isNilDependency(deps.AcceptedBlocks) || isNilDependency(deps.HighestBids) || deps.Events == nil {
 		return nil, errors.New("epbs/runtime: missing dependency")
 	}
 	bidPublisher := newValidatedBidPublisher(deps.BidProcessor, deps.Publisher, cfg.RetryInterval)
@@ -83,9 +84,15 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 		return nil, fmt.Errorf("%w: recover: %w", ErrPendingPayloadStore, err)
 	}
 	coordinator.privateOrderflowWindow = cfg.PrivateOrderflowWindow
+	coordinator.bidPublishLead = cfg.BidPublishLead
+	coordinator.retryInterval = cfg.RetryInterval
+	coordinator.slotTime = deps.Clock.GetSlotTime
+	coordinator.maxBidMargin = cfg.MaxBidMargin
+	coordinator.highestBids = deps.HighestBids
 	coordinator.status = deps.Status
 	resolver := NewLiveSlotInputResolver(deps.BeaconConfig, signer, deps.Clock, deps.Head, deps.Forkchoice)
 	live := NewLiveCoordinator(coordinator, resolver, resolver)
+	live.collateralWarningGwei = cfg.CollateralWarningGwei
 	runner, err := newValidatedPreferencesRunnerWithTiming(
 		live,
 		deps.Clock,
@@ -145,6 +152,8 @@ func builderAttemptOutcome(err error) string {
 	switch {
 	case errors.Is(err, ErrSlotInputStale):
 		return executionbuilder.BuilderOutcomeStaleInput
+	case errors.Is(err, ErrBuilderCollateralExhausted):
+		return executionbuilder.BuilderOutcomeCollateralExhausted
 	case errors.Is(err, ErrSlotInputUnavailable):
 		return executionbuilder.BuilderOutcomeInputUnavailable
 	case errors.Is(err, eladapter.ErrExecutionBusy):
@@ -153,6 +162,8 @@ func builderAttemptOutcome(err error) string {
 		return executionbuilder.BuilderOutcomePayloadNotReady
 	case errors.Is(err, ErrAuctionAlreadyTracked):
 		return executionbuilder.BuilderOutcomeAlreadyTracked
+	case errors.Is(err, ErrBidOutbid):
+		return executionbuilder.BuilderOutcomeOutbid
 	case errors.Is(err, errLocalBidNotAccepted):
 		return executionbuilder.BuilderOutcomeBidRejected
 	case errors.Is(err, errValidatedPreferencesAttemptNoBid):
@@ -176,6 +187,9 @@ func prepareRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainCon
 	}
 	if math.IsNaN(cfg.BidMargin) || math.IsInf(cfg.BidMargin, 0) || cfg.BidMargin < 0 || cfg.BidMargin > 1 {
 		return cfg, nil, errors.New("epbs/runtime: bid margin must be between zero and one")
+	}
+	if math.IsNaN(cfg.MaxBidMargin) || math.IsInf(cfg.MaxBidMargin, 0) || cfg.MaxBidMargin < cfg.BidMargin || cfg.MaxBidMargin > 1 {
+		return cfg, nil, errors.New("epbs/runtime: maximum bid margin must be between the bid margin and one")
 	}
 	if cfg.MaxPending < 0 || cfg.MaxRetained <= 0 {
 		return cfg, nil, errors.New("epbs/runtime: capacities must not be negative and retained capacity must be positive")
@@ -201,6 +215,15 @@ func prepareRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainCon
 	slotDuration := time.Duration(beaconCfg.SecondsPerSlot) * time.Second
 	if cfg.BidDelay < 0 || cfg.BidDelay >= slotDuration {
 		return cfg, nil, errors.New("epbs/runtime: bid delay must be within the preceding slot")
+	}
+	if cfg.BidPublishLead < 0 {
+		return cfg, nil, errors.New("epbs/runtime: bid publish lead must not be negative")
+	}
+	if cfg.BidDelay >= slotDuration-cfg.BidPublishLead {
+		return cfg, nil, errors.New("epbs/runtime: first bid attempt must precede the bid publish time")
+	}
+	if cfg.ShadowValueCurve && cfg.BidPublishLead > 0 {
+		return cfg, nil, errors.New("epbs/runtime: shadow value curve requires a zero bid publish lead")
 	}
 	if cfg.PrivateOrderflowWindow < 0 || cfg.PrivateOrderflowWindow >= slotDuration {
 		return cfg, nil, errors.New("epbs/runtime: private orderflow window must be within the preceding slot")

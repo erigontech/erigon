@@ -29,26 +29,29 @@ const (
 	BuilderStoppedRuntimeError         = "runtime_error"
 	BuilderStoppedNode                 = "node_stopping"
 
-	BuilderOutcomePublished        = "published"
-	BuilderOutcomeStaleInput       = "stale_input"
-	BuilderOutcomeInputUnavailable = "input_unavailable"
-	BuilderOutcomeExecutionBusy    = "execution_busy"
-	BuilderOutcomePayloadNotReady  = "payload_not_ready"
-	BuilderOutcomeAlreadyTracked   = "already_tracked"
-	BuilderOutcomeBidRejected      = "bid_rejected"
-	BuilderOutcomeNoBid            = "no_bid"
-	BuilderOutcomeFailed           = "failed"
+	BuilderOutcomePublished           = "published"
+	BuilderOutcomeStaleInput          = "stale_input"
+	BuilderOutcomeInputUnavailable    = "input_unavailable"
+	BuilderOutcomeExecutionBusy       = "execution_busy"
+	BuilderOutcomePayloadNotReady     = "payload_not_ready"
+	BuilderOutcomeAlreadyTracked      = "already_tracked"
+	BuilderOutcomeBidRejected         = "bid_rejected"
+	BuilderOutcomeNoBid               = "no_bid"
+	BuilderOutcomeOutbid              = "outbid"
+	BuilderOutcomeCollateralExhausted = "collateral_exhausted"
+	BuilderOutcomeFailed              = "failed"
 )
 
 type EmbeddedBuilderStatusSnapshot struct {
-	Enabled          bool
-	Phase            string
-	Reason           string
-	LastAttemptSlot  uint64
-	LastBidSlot      uint64
-	LastBidValueGwei uint64
-	LastOutcomeSlot  uint64
-	LastOutcome      string
+	Enabled                 bool
+	Phase                   string
+	Reason                  string
+	LastAttemptSlot         uint64
+	LastBidSlot             uint64
+	LastBidValueGwei        uint64
+	LastOutcomeSlot         uint64
+	LastOutcome             string
+	AvailableCollateralGwei uint64
 }
 
 type EmbeddedBuilderStatus struct {
@@ -137,4 +140,13 @@ func (s *EmbeddedBuilderStatus) RecordOutcome(slot uint64, outcome string) {
 		s.snapshot.LastOutcomeSlot = slot
 		s.snapshot.LastOutcome = outcome
 	}
+}
+
+func (s *EmbeddedBuilderStatus) RecordAvailableCollateral(valueGwei uint64) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.snapshot.AvailableCollateralGwei = valueGwei
 }

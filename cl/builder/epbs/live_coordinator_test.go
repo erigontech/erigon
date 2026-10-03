@@ -9,8 +9,10 @@
 package epbs
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -19,8 +21,106 @@ import (
 	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 )
+
+func TestCollateralWarningOncePerCrossing(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Root().GetHandler()
+	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	t.Cleanup(func() { log.Root().SetHandler(previous) })
+	status := builder.NewEmbeddedBuilderStatus(true)
+	live := &LiveCoordinator{coordinator: &Coordinator{status: status}, collateralWarningGwei: 100}
+
+	live.observeCollateral(39, 100)
+	require.Zero(t, bytes.Count(logs.Bytes(), []byte("Embedded builder collateral low")))
+	live.observeCollateral(40, 90)
+	live.observeCollateral(41, 80)
+	live.observeCollateral(42, 100)
+	live.observeCollateral(43, 70)
+	live.observeCollateral(44, 101)
+	live.observeCollateral(45, 99)
+	disabledStatus := builder.NewEmbeddedBuilderStatus(true)
+	disabled := &LiveCoordinator{coordinator: &Coordinator{status: disabledStatus}}
+	warningsBeforeDisabled := bytes.Count(logs.Bytes(), []byte("Embedded builder collateral low"))
+	disabled.observeCollateral(46, 1)
+	require.Equal(t, uint64(1), disabledStatus.Snapshot().AvailableCollateralGwei)
+	disabled.observeCollateral(47, 0)
+	require.Equal(t, warningsBeforeDisabled, bytes.Count(logs.Bytes(), []byte("Embedded builder collateral low")))
+
+	require.Equal(t, 2, bytes.Count(logs.Bytes(), []byte("Embedded builder collateral low")))
+	require.Contains(t, logs.String(), "availableCollateralGwei=90")
+	require.NotContains(t, logs.String(), "warningThresholdGwei")
+	require.NotContains(t, logs.String(), "builderIndex")
+	require.Zero(t, disabledStatus.Snapshot().AvailableCollateralGwei)
+}
+
+func TestLiveCoordinatorHandlersObserveResolvedCollateral(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Root().GetHandler()
+	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	t.Cleanup(func() { log.Root().SetHandler(previous) })
+
+	for _, handler := range []struct {
+		name   string
+		invoke func(*LiveCoordinator, SlotInput) error
+	}{
+		{
+			name: "handle",
+			invoke: func(live *LiveCoordinator, input SlotInput) error {
+				_, err := live.HandleValidatedPreferences(t.Context(), input.ValidatedPreferences)
+				return err
+			},
+		},
+		{
+			name: "measure",
+			invoke: func(live *LiveCoordinator, input SlotInput) error {
+				_, err := live.MeasureValidatedPreferences(t.Context(), input.ValidatedPreferences, PayloadParentIdentity{
+					Slot: input.Slot, ParentBlockRoot: input.ParentBlockRoot, ParentBlockHash: input.ParentBlockHash,
+				})
+				return err
+			},
+		},
+	} {
+		for _, test := range []struct {
+			name           string
+			available      uint64
+			resolveErr     error
+			wantCollateral uint64
+			wantWarnings   int
+			calls          int
+		}{
+			{name: "available", available: 123, wantCollateral: 123, calls: 1},
+			{name: "exhausted", resolveErr: fmt.Errorf("resolve: %w", ErrBuilderCollateralExhausted), wantWarnings: 1, calls: 2},
+			{name: "unrelated error", resolveErr: errors.New("unavailable"), wantCollateral: 777, calls: 1},
+		} {
+			t.Run(handler.name+"/"+test.name, func(t *testing.T) {
+				logs.Reset()
+				config := gloasCoordinatorConfig()
+				input := validCoordinatorSlotInput(config)
+				input.BuilderActive = false
+				input.AvailableBidValueGwei = test.available
+				status := builder.NewEmbeddedBuilderStatus(true)
+				status.RecordAvailableCollateral(777)
+				coordinator := NewCoordinator(
+					&config, new(coordinatorSigner), FixedMarginStrategy{Margin: 1},
+					new(coordinatorAssembler), new(coordinatorPublisher), 1,
+				)
+				coordinator.status = status
+				live := NewLiveCoordinator(coordinator, &staticSlotInputResolver{input: input, err: test.resolveErr}, new(countingSlotInputFreshness))
+				live.collateralWarningGwei = 100
+
+				for range test.calls {
+					_ = handler.invoke(live, input)
+				}
+
+				require.Equal(t, test.wantCollateral, status.Snapshot().AvailableCollateralGwei)
+				require.Equal(t, test.wantWarnings, bytes.Count(logs.Bytes(), []byte("Embedded builder collateral low")))
+			})
+		}
+	}
+}
 
 type staticSlotInputResolver struct {
 	input SlotInput

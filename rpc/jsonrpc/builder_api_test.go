@@ -228,7 +228,13 @@ func TestBuilderStatusReportsDisabledReasonWithoutPrivateDependencies(t *testing
 	var fields map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(raw, &fields))
 	require.JSONEq(t, `"0x0"`, string(fields["lastOutcomeSlot"]))
+	require.JSONEq(t, `"0x0"`, string(fields["availableCollateralGwei"]))
 	require.NotContains(t, fields, "lastOutcome")
+
+	status.RecordAvailableCollateral(20_000_000_000)
+	require.NoError(t, client.CallContext(t.Context(), &raw, "builder_status"))
+	require.NoError(t, json.Unmarshal(raw, &fields))
+	require.JSONEq(t, `"0x4a817c800"`, string(fields["availableCollateralGwei"]))
 }
 
 type recordingPrivateBundleSubmitter struct {

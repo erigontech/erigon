@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
+	"github.com/erigontech/erigon/cl/pool"
 	clutils "github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -51,6 +52,7 @@ var (
 	ErrAuctionAlreadyTracked   = errors.New("auction already tracked")
 	ErrSlotExpired             = errors.New("slot expired")
 	ErrPayloadParentChanged    = errors.New("payload parent changed")
+	ErrBidOutbid               = errors.New("bid outbid")
 )
 
 type PayloadAssembler interface {
@@ -70,6 +72,10 @@ type payloadContextInvalidator interface {
 
 type GossipPublisher interface {
 	Publish(context.Context, string, []byte) error
+}
+
+type HighestBidReader interface {
+	GetHighestBid(pool.HighestBidKey) (*cltypes.SignedExecutionPayloadBid, bool)
 }
 
 type SlotInput struct {
@@ -142,17 +148,23 @@ type PayloadMeasurement struct {
 }
 
 type Coordinator struct {
-	beaconCfg               *clparams.BeaconChainConfig
-	signer                  Signer
-	strategy                BidStrategy
-	assembler               PayloadAssembler
-	publisher               GossipPublisher
-	pendingStore            *PendingPayloadStore
-	maxRetained             int
-	privateOrderflowWindow  time.Duration
-	waitForPrivateOrderflow func(context.Context, time.Duration) error
-	onPayloadMeasured       func(*cltypes.SignedProposerPreferences, PayloadParentIdentity, PayloadMeasurement)
-	status                  *builder.EmbeddedBuilderStatus
+	beaconCfg              *clparams.BeaconChainConfig
+	signer                 Signer
+	strategy               BidStrategy
+	assembler              PayloadAssembler
+	publisher              GossipPublisher
+	pendingStore           *PendingPayloadStore
+	maxRetained            int
+	privateOrderflowWindow time.Duration
+	bidPublishLead         time.Duration
+	retryInterval          time.Duration
+	wait                   func(context.Context, time.Duration) error
+	now                    func() time.Time
+	slotTime               func(uint64) time.Time
+	maxBidMargin           float64
+	highestBids            HighestBidReader
+	onPayloadMeasured      func(*cltypes.SignedProposerPreferences, PayloadParentIdentity, PayloadMeasurement)
+	status                 *builder.EmbeddedBuilderStatus
 
 	mu        sync.Mutex
 	slotFloor uint64
@@ -198,12 +210,13 @@ func NewCoordinator(
 	return &Coordinator{
 		beaconCfg: beaconCfg, signer: signer, strategy: strategy, assembler: assembler,
 		publisher: publisher, maxRetained: maxRetained,
-		waitForPrivateOrderflow: waitForPrivateOrderflow,
-		auctions:                make(map[auctionKey]*auctionEntry), retained: make(map[PayloadIdentity]*retainedPayloadEntry),
+		wait:     waitForDuration,
+		now:      time.Now,
+		auctions: make(map[auctionKey]*auctionEntry), retained: make(map[PayloadIdentity]*retainedPayloadEntry),
 	}
 }
 
-func waitForPrivateOrderflow(ctx context.Context, window time.Duration) error {
+func waitForDuration(ctx context.Context, window time.Duration) error {
 	timer := time.NewTimer(window)
 	defer timer.Stop()
 	select {
@@ -332,7 +345,7 @@ func (c *Coordinator) runSlotGuarded(
 		return nil, err
 	}
 	if c.privateOrderflowWindow > 0 {
-		if err := c.waitForPrivateOrderflow(ctx, c.privateOrderflowWindow); err != nil {
+		if err := c.wait(ctx, c.privateOrderflowWindow); err != nil {
 			return nil, err
 		}
 	}
@@ -340,6 +353,16 @@ func (c *Coordinator) runSlotGuarded(
 		invalidator.InvalidatePayloadContext(parameters)
 	}
 	buildContextInvalidated = true
+	var bidHold time.Duration
+	if wait := c.bidPublishHoldDuration(input.Slot); wait > 0 {
+		bidHold, err = c.waitForBidPublish(ctx, input, freshness, wait)
+		if err != nil {
+			if ctx.Err() == nil {
+				_, _ = c.assembler.GetPayload(ctx, payloadID)
+			}
+			return nil, err
+		}
+	}
 	assembled, err := c.assembler.GetPayload(ctx, payloadID)
 	if err != nil {
 		return nil, fmt.Errorf("epbs/coordinator: get payload: %w", err)
@@ -404,10 +427,56 @@ func (c *Coordinator) runSlotGuarded(
 			}
 		}
 	}
-	bidValue, ok, err := c.reserveBid(auction, candidateBidValue, input.AvailableBidValueGwei)
-	if err != nil || !ok {
+	var highest *cltypes.SignedExecutionPayloadBid
+	if !isNilDependency(c.highestBids) {
+		key := pool.HighestBidKey{Slot: input.Slot, ParentBlockHash: input.ParentBlockHash, ParentBlockRoot: input.ParentBlockRoot}
+		highest, _ = c.highestBids.GetHighestBid(key)
+	}
+	decision, err := competitiveBid(candidateBidValue, assembled.BlockValue, c.maxBidMargin, highest, input.BuilderIndex)
+	if err != nil {
 		return nil, err
 	}
+	var reservableBidGwei uint64
+	if decision.reason == "" {
+		reserved, reservedOK, reserveErr := c.reserveBid(auction, decision.bid, input.AvailableBidValueGwei)
+		if reserveErr != nil {
+			return nil, reserveErr
+		}
+		reservableBidGwei = reserved
+		switch {
+		case decision.hasCompetitor && (!reservedOK || reserved <= decision.highestSeen):
+			decision.bid = 0
+			decision.reason = bidSkipInsufficientCollateral
+		case !reservedOK:
+			return nil, nil
+		default:
+			decision.bid = reserved
+		}
+	}
+	if decision.reason != "" {
+		if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
+			return nil, err
+		}
+		fields := []any{
+			"slot", input.Slot,
+			"parentBlockRoot", input.ParentBlockRoot,
+			"parentBlockHash", input.ParentBlockHash,
+			"blockValueWei", assembled.BlockValue,
+			"maxBidGwei", decision.maxBid,
+			"availableBidValueGwei", input.AvailableBidValueGwei,
+		}
+		if decision.reason == bidSkipInsufficientCollateral {
+			fields = append(fields, "reservableBidGwei", reservableBidGwei)
+		}
+		fields = append(fields,
+			"highestSeenBidGwei", decision.highestSeen,
+			"highestSeenBuilderIndex", decision.highestBuilderIndex,
+			"reason", decision.reason,
+		)
+		log.Info("Embedded builder bid skipped", fields...)
+		return nil, fmt.Errorf("%w: %s", ErrBidOutbid, decision.reason)
+	}
+	bidValue := decision.bid
 
 	payload := assembled.Eth1Block
 	bid := &cltypes.ExecutionPayloadBid{
@@ -505,14 +574,56 @@ func (c *Coordinator) runSlotGuarded(
 		"blockHash", payload.BlockHash,
 		"blockValueWei", assembled.BlockValue,
 		"bidValueGwei", bidValue,
+		"highestSeenBidGwei", decision.highestSeen,
 		"availableBidValueGwei", input.AvailableBidValueGwei,
 		"txs", len(payload.Transactions.UnderlyngReference()),
 		"gasUsed", payload.GasUsed,
 		"blobs", commitments.Len(),
 		"assembly", assemblyElapsed,
+		"bidHold", bidHold,
 		"privateOrderflowWindow", c.privateOrderflowWindow,
 	)
 	return signedBid, nil
+}
+
+func (c *Coordinator) bidPublishHoldDuration(slot uint64) time.Duration {
+	if c.bidPublishLead <= 0 {
+		return 0
+	}
+	return c.slotTime(slot).Add(-c.bidPublishLead).Sub(c.now())
+}
+
+func (c *Coordinator) waitForBidPublish(
+	ctx context.Context,
+	input SlotInput,
+	freshness SlotInputFreshness,
+	wait time.Duration,
+) (time.Duration, error) {
+	started := c.now()
+	deadline := started.Add(wait)
+	for {
+		remaining := deadline.Sub(c.now())
+		if remaining <= 0 {
+			return c.now().Sub(started), nil
+		}
+		if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
+			return 0, err
+		}
+		remaining = deadline.Sub(c.now())
+		if remaining <= 0 {
+			return c.now().Sub(started), nil
+		}
+		step := remaining
+		if c.retryInterval > 0 {
+			step = min(step, c.retryInterval)
+		}
+		if err := c.wait(ctx, step); err != nil {
+			return 0, err
+		}
+		if step == remaining {
+			return c.now().Sub(started), nil
+		}
+	}
 }
 
 func validateSlotInputFreshness(ctx context.Context, input SlotInput, freshness SlotInputFreshness) error {
@@ -835,9 +946,20 @@ func (c *Coordinator) strategyBidValue(slot uint64, blockValue *big.Int) (uint64
 	if amount.Sign() < 0 || amount.Cmp(blockValue) > 0 {
 		return 0, false, errors.New("epbs/coordinator: strategy returned an invalid bid")
 	}
+	value, ok, err := bidValueGwei(amount)
+	if err != nil {
+		return 0, false, fmt.Errorf("epbs/coordinator: %w", err)
+	}
+	return value, ok, nil
+}
+
+func bidValueGwei(amount *big.Int) (uint64, bool, error) {
+	if amount == nil {
+		return 0, false, nil
+	}
 	gwei := new(big.Int).Quo(new(big.Int).Set(amount), big.NewInt(weiPerGwei))
 	if !gwei.IsUint64() {
-		return 0, false, errors.New("epbs/coordinator: bid exceeds uint64 gwei")
+		return 0, false, errors.New("bid exceeds uint64 gwei")
 	}
 	value := gwei.Uint64()
 	if value == 0 {

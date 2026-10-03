@@ -45,6 +45,16 @@ func TestEmbeddedBuilderStatusReportsConfigurationSeparatelyFromPhase(t *testing
 	require.Equal(t, BuilderDisabledPendingPayloadStore, snapshot.Reason)
 }
 
+func TestEmbeddedBuilderStatusRecordsAvailableCollateral(t *testing.T) {
+	status := NewEmbeddedBuilderStatus(true)
+	status.RecordAvailableCollateral(123)
+	status.RecordAvailableCollateral(999)
+
+	require.Equal(t, uint64(999), status.Snapshot().AvailableCollateralGwei)
+	status.RecordAvailableCollateral(0)
+	require.Zero(t, status.Snapshot().AvailableCollateralGwei)
+}
+
 func TestEmbeddedBuilderStatusPreservesPublishedOutcomeAtSameSlot(t *testing.T) {
 	status := NewEmbeddedBuilderStatus(true)
 	status.RecordOutcome(42, BuilderOutcomeExecutionBusy)

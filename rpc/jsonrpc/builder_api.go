@@ -42,15 +42,16 @@ type BuilderStatusAPI interface {
 }
 
 type BuilderStatus struct {
-	Enabled          bool                          `json:"enabled"`
-	Phase            string                        `json:"phase"`
-	Reason           string                        `json:"reason,omitempty"`
-	LastAttemptSlot  hexutil.Uint64                `json:"lastAttemptSlot"`
-	LastBidSlot      hexutil.Uint64                `json:"lastBidSlot"`
-	LastBidValueGwei hexutil.Uint64                `json:"lastBidValueGwei"`
-	LastOutcomeSlot  hexutil.Uint64                `json:"lastOutcomeSlot"`
-	LastOutcome      string                        `json:"lastOutcome,omitempty"`
-	PrivateOrderflow BuilderPrivateOrderflowStatus `json:"privateOrderflow"`
+	Enabled                 bool                          `json:"enabled"`
+	Phase                   string                        `json:"phase"`
+	Reason                  string                        `json:"reason,omitempty"`
+	LastAttemptSlot         hexutil.Uint64                `json:"lastAttemptSlot"`
+	LastBidSlot             hexutil.Uint64                `json:"lastBidSlot"`
+	LastBidValueGwei        hexutil.Uint64                `json:"lastBidValueGwei"`
+	LastOutcomeSlot         hexutil.Uint64                `json:"lastOutcomeSlot"`
+	LastOutcome             string                        `json:"lastOutcome,omitempty"`
+	AvailableCollateralGwei hexutil.Uint64                `json:"availableCollateralGwei"`
+	PrivateOrderflow        BuilderPrivateOrderflowStatus `json:"privateOrderflow"`
 }
 
 type BuilderPrivateOrderflowStatus struct {
@@ -164,7 +165,8 @@ func (api *BuilderAPIImpl) Status() BuilderStatus {
 		Enabled: runtime.Enabled, Phase: runtime.Phase, Reason: runtime.Reason,
 		LastAttemptSlot: hexutil.Uint64(runtime.LastAttemptSlot), LastBidSlot: hexutil.Uint64(runtime.LastBidSlot),
 		LastBidValueGwei: hexutil.Uint64(runtime.LastBidValueGwei), LastOutcomeSlot: hexutil.Uint64(runtime.LastOutcomeSlot),
-		LastOutcome: runtime.LastOutcome,
+		LastOutcome:             runtime.LastOutcome,
+		AvailableCollateralGwei: hexutil.Uint64(runtime.AvailableCollateralGwei),
 	}
 	if api.contexts == nil || api.pool == nil {
 		return result

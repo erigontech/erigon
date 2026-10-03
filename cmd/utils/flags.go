@@ -280,13 +280,28 @@ var (
 	}
 	EpbsBuilderBidMarginFlag = cli.Float64Flag{
 		Name:  "builder.bid-margin",
-		Usage: "Fraction of block value offered by the embedded builder",
+		Usage: "Fraction of block value offered by the embedded builder; must not exceed --builder.max-bid-margin",
 		Value: epbscfg.DefaultConfig().BidMargin,
+	}
+	EpbsBuilderMaxBidMarginFlag = cli.Float64Flag{
+		Name:  "builder.max-bid-margin",
+		Usage: "Maximum fraction of block value offered by the embedded builder",
+		Value: epbscfg.DefaultConfig().MaxBidMargin,
 	}
 	EpbsBuilderBidDelayFlag = cli.DurationFlag{
 		Name:  "builder.bid-delay",
 		Usage: "Delay after the preceding slot starts before the embedded builder begins its first build attempt",
 		Value: epbscfg.DefaultConfig().BidDelay,
+	}
+	EpbsBuilderBidPublishLeadFlag = cli.DurationFlag{
+		Name:  "builder.bid-publish-lead",
+		Usage: "How long before the target slot the payload is finalized (0 disables the hold; must be 0 with --builder.shadow-value-curve)",
+		Value: epbscfg.DefaultConfig().BidPublishLead,
+	}
+	EpbsBuilderCollateralWarningGweiFlag = cli.Uint64Flag{
+		Name:  "builder.collateral-warning-gwei",
+		Usage: "Warn when embedded builder collateral drops below this amount in Gwei (0 to disable)",
+		Value: epbscfg.DefaultConfig().CollateralWarningGwei,
 	}
 	EpbsBuilderPrivateOrderflowWindowFlag = cli.DurationFlag{
 		Name:  "builder.private-orderflow-window",
@@ -1895,7 +1910,10 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.EpbsBuilder.Enabled = ctx.Bool(EpbsBuilderFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.KeyPath = ctx.String(EpbsBuilderKeyFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.BidMargin = ctx.Float64(EpbsBuilderBidMarginFlag.Name)
+	cfg.CaplinConfig.EpbsBuilder.MaxBidMargin = ctx.Float64(EpbsBuilderMaxBidMarginFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.BidDelay = ctx.Duration(EpbsBuilderBidDelayFlag.Name)
+	cfg.CaplinConfig.EpbsBuilder.BidPublishLead = ctx.Duration(EpbsBuilderBidPublishLeadFlag.Name)
+	cfg.CaplinConfig.EpbsBuilder.CollateralWarningGwei = ctx.Uint64(EpbsBuilderCollateralWarningGweiFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.PrivateOrderflowWindow = ctx.Duration(EpbsBuilderPrivateOrderflowWindowFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.ShadowValueCurve = ctx.Bool(EpbsBuilderShadowValueCurveFlag.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)

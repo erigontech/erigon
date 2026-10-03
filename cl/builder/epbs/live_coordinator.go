@@ -12,8 +12,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type SlotInputResolver interface {
@@ -25,9 +27,11 @@ type SlotInputFreshness interface {
 }
 
 type LiveCoordinator struct {
-	coordinator *Coordinator
-	resolver    SlotInputResolver
-	freshness   SlotInputFreshness
+	coordinator             *Coordinator
+	resolver                SlotInputResolver
+	freshness               SlotInputFreshness
+	collateralWarningGwei   uint64
+	collateralWarningActive atomic.Bool
 }
 
 func NewLiveCoordinator(coordinator *Coordinator, resolver SlotInputResolver, freshness SlotInputFreshness) *LiveCoordinator {
@@ -55,6 +59,7 @@ func (c *LiveCoordinator) HandleValidatedPreferences(
 		return nil, errors.New("epbs/live coordinator: missing validated proposer preferences")
 	}
 	input, err := c.resolver.Resolve(ctx, preferences)
+	c.observeResolvedCollateral(preferences.Message.ProposalSlot, input, err)
 	if err != nil {
 		return nil, fmt.Errorf("epbs/live coordinator: resolve slot input: %w", err)
 	}
@@ -79,6 +84,7 @@ func (c *LiveCoordinator) MeasureValidatedPreferences(
 		return PayloadMeasurement{}, errors.New("epbs/live coordinator: missing validated proposer preferences")
 	}
 	input, err := c.resolver.Resolve(ctx, preferences)
+	c.observeResolvedCollateral(preferences.Message.ProposalSlot, input, err)
 	if err != nil {
 		return PayloadMeasurement{}, fmt.Errorf("epbs/live coordinator: resolve slot input: %w", err)
 	}
@@ -89,4 +95,27 @@ func (c *LiveCoordinator) MeasureValidatedPreferences(
 		return PayloadMeasurement{}, err
 	}
 	return c.coordinator.measurePayloadGuarded(ctx, input, c.freshness)
+}
+
+func (c *LiveCoordinator) observeResolvedCollateral(slot uint64, input SlotInput, err error) {
+	if err == nil {
+		c.observeCollateral(slot, input.AvailableBidValueGwei)
+		return
+	}
+	if errors.Is(err, ErrBuilderCollateralExhausted) {
+		c.observeCollateral(slot, 0)
+	}
+}
+
+func (c *LiveCoordinator) observeCollateral(slot, available uint64) {
+	c.coordinator.status.RecordAvailableCollateral(available)
+	switch {
+	case available > c.collateralWarningGwei:
+		c.collateralWarningActive.Store(false)
+	case available < c.collateralWarningGwei && c.collateralWarningActive.CompareAndSwap(false, true):
+		log.Warn("Embedded builder collateral low",
+			"slot", slot,
+			"availableCollateralGwei", available,
+		)
+	}
 }

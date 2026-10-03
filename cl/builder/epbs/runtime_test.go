@@ -210,6 +210,7 @@ func TestRuntimePublishesBidForValidatedPreferences(t *testing.T) {
 	}
 	publisher := &runtimePublisher{published: make(chan string, 1)}
 	runtimeCfg := epbscfg.DefaultConfig()
+	runtimeCfg.BidPublishLead = 0
 	runtimeCfg.Enabled = true
 	runtimeCfg.KeyPath = keyPath
 	status := executionbuilder.NewEmbeddedBuilderStatus(true)
@@ -225,6 +226,7 @@ func TestRuntimePublishesBidForValidatedPreferences(t *testing.T) {
 		BidProcessor:     &runtimeBidProcessor{},
 		PayloadProcessor: &runtimePayloadProcessor{},
 		AcceptedBlocks:   &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)},
+		HighestBids:      new(coordinatorHighestBidReader),
 		Events:           beaconevents.NewEventEmitter(),
 		Status:           status,
 	}
@@ -293,6 +295,7 @@ func TestRuntimeProcessesBidLocallyBeforeRetryingIdenticalPublication(t *testing
 	processor := &runtimeBidProcessor{processed: make(chan []byte, 1)}
 	publisher := &retryingRuntimePublisher{processed: processor.processed, published: make(chan []byte, 2)}
 	runtimeCfg := epbscfg.DefaultConfig()
+	runtimeCfg.BidPublishLead = 0
 	runtimeCfg.Enabled = true
 	runtimeCfg.KeyPath = keyPath
 	runtimeCfg.RetryInterval = minValidatedPreferencesRetryInterval
@@ -308,6 +311,7 @@ func TestRuntimeProcessesBidLocallyBeforeRetryingIdenticalPublication(t *testing
 		BidProcessor:     processor,
 		PayloadProcessor: &runtimePayloadProcessor{},
 		AcceptedBlocks:   &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)},
+		HighestBids:      new(coordinatorHighestBidReader),
 		Events:           beaconevents.NewEventEmitter(),
 	})
 	require.NoError(t, err)
@@ -390,6 +394,7 @@ func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipV
 	acceptedBlocks := &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)}
 	emitters := beaconevents.NewEventEmitter()
 	runtimeCfg := epbscfg.DefaultConfig()
+	runtimeCfg.BidPublishLead = 0
 	runtimeCfg.Enabled = true
 	runtimeCfg.KeyPath = keyPath
 	runtimeCfg.RetryInterval = minValidatedPreferencesRetryInterval
@@ -405,6 +410,7 @@ func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipV
 		BidProcessor:     &runtimeBidProcessor{},
 		PayloadProcessor: payloadProcessor,
 		AcceptedBlocks:   acceptedBlocks,
+		HighestBids:      new(coordinatorHighestBidReader),
 		Events:           emitters,
 	}
 	runtime, err := NewRuntime(runtimeCfg, deps)
@@ -558,10 +564,12 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 	valid := epbscfg.DefaultConfig()
 	valid.Enabled = true
 	valid.KeyPath = keyPath
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	deps := RuntimeDependencies{
 		PendingDirectory: filepath.Join(t.TempDir(), "pending"),
 		BeaconConfig:     &cfg,
-		Clock:            eth_clock.NewMockEthereumClock(gomock.NewController(t)),
+		Clock:            clock,
 		Head:             new(resolverHeadSource),
 		Forkchoice:       new(resolverForkchoice),
 		Assembler:        new(coordinatorAssembler),
@@ -570,101 +578,159 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 		BidProcessor:     &runtimeBidProcessor{},
 		PayloadProcessor: &runtimePayloadProcessor{},
 		AcceptedBlocks:   &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)},
+		HighestBids:      new(coordinatorHighestBidReader),
 		Events:           beaconevents.NewEventEmitter(),
 	}
+	validDeps := deps
+	validDeps.PendingDirectory = filepath.Join(t.TempDir(), "valid-pending")
+	runtime, err := NewRuntime(valid, validDeps)
+	require.NoError(t, err)
+	require.NotNil(t, runtime)
 
 	for _, test := range []struct {
-		name   string
-		mutate func(*epbscfg.Config, *RuntimeDependencies)
+		name      string
+		mutate    func(*epbscfg.Config, *RuntimeDependencies)
+		wantError string
 	}{
-		{name: "missing key", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.KeyPath = "" }},
-		{name: "invalid margin", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.BidMargin = math.NaN() }},
-		{name: "missing dependency", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) { deps.Publisher = nil }},
-		{name: "missing column storage", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) { deps.ColumnStorage = nil }},
+		{name: "missing key", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.KeyPath = "" }, wantError: "builder key path is required"},
+		{name: "invalid margin", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.BidMargin = math.NaN() }, wantError: "bid margin must be between zero and one"},
+		{name: "maximum below bid margin", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxBidMargin = cfg.BidMargin - 0.01 }, wantError: "maximum bid margin must be between the bid margin and one"},
+		{name: "maximum above one", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxBidMargin = 1.01 }, wantError: "maximum bid margin must be between the bid margin and one"},
+		{name: "maximum is NaN", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxBidMargin = math.NaN() }, wantError: "maximum bid margin must be between the bid margin and one"},
+		{name: "maximum is positive infinity", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxBidMargin = math.Inf(1) }, wantError: "maximum bid margin must be between the bid margin and one"},
+		{name: "maximum is negative infinity", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxBidMargin = math.Inf(-1) }, wantError: "maximum bid margin must be between the bid margin and one"},
+		{name: "missing dependency", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) { deps.Publisher = nil }, wantError: "missing dependency"},
+		{name: "missing column storage", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) { deps.ColumnStorage = nil }, wantError: "missing dependency"},
+		{name: "missing highest bids", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) { deps.HighestBids = nil }, wantError: "missing dependency"},
 		{name: "gloas unavailable", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) {
 			copy := *deps.BeaconConfig
 			copy.GloasForkEpoch = copy.FarFutureEpoch
 			deps.BeaconConfig = &copy
-		}},
+		}, wantError: "Gloas is not configured"},
 		{name: "zero slots per epoch", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) {
 			copy := *deps.BeaconConfig
 			copy.SlotsPerEpoch = 0
 			deps.BeaconConfig = &copy
-		}},
+		}, wantError: "slots per epoch must be positive"},
 		{name: "payload deadline outside slot", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) {
 			copy := *deps.BeaconConfig
 			copy.PayloadDueBps = clparams.BpsFactor + 1
 			deps.BeaconConfig = &copy
-		}},
+		}, wantError: "payload deadline must be within the slot"},
 		{name: "slot duration overflows time", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) {
 			copy := *deps.BeaconConfig
 			copy.SecondsPerSlot = uint64(math.MaxInt64/int64(time.Second)) + 1
 			deps.BeaconConfig = &copy
-		}},
+		}, wantError: "slot duration is outside the supported range"},
 		{name: "zero slot duration", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) {
 			copy := *deps.BeaconConfig
 			copy.SecondsPerSlot = 0
 			deps.BeaconConfig = &copy
-		}},
+		}, wantError: "slot duration is outside the supported range"},
 		{name: "zero data columns", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) {
 			copy := *deps.BeaconConfig
 			copy.NumberOfColumns = 0
 			deps.BeaconConfig = &copy
-		}},
+		}, wantError: "data column and subnet counts must be positive"},
 		{name: "zero data column subnets", mutate: func(_ *epbscfg.Config, deps *RuntimeDependencies) {
 			copy := *deps.BeaconConfig
 			copy.DataColumnSidecarSubnetCount = 0
 			deps.BeaconConfig = &copy
-		}},
-		{name: "negative pending capacity", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxPending = -1 }},
+		}, wantError: "data column and subnet counts must be positive"},
+		{name: "negative pending capacity", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxPending = -1 }, wantError: "capacities must not be negative and retained capacity must be positive"},
 		{name: "pending capacity shorter than one epoch", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
 			cfg.MaxPending = int(deps.BeaconConfig.SlotsPerEpoch) - 1
-		}},
-		{name: "zero retained capacity", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxRetained = 0 }},
+		}, wantError: "pending capacity must cover one epoch"},
+		{name: "zero retained capacity", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.MaxRetained = 0 }, wantError: "capacities must not be negative and retained capacity must be positive"},
 		{name: "retry cadence too short", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
 			cfg.RetryInterval = minValidatedPreferencesRetryInterval - time.Nanosecond
-		}},
+		}, wantError: "retry interval is too short"},
 		{name: "negative bid delay", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
 			cfg.BidDelay = -time.Nanosecond
-		}},
+		}, wantError: "bid delay must be within the preceding slot"},
+		{name: "negative publish lead", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) { cfg.BidPublishLead = -time.Nanosecond }, wantError: "bid publish lead must not be negative"},
+		{name: "publish lead reaches slot duration", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			cfg.BidPublishLead = time.Duration(deps.BeaconConfig.SecondsPerSlot) * time.Second
+		}, wantError: "first bid attempt must precede the bid publish time"},
+		{name: "first attempt reaches publish time", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - cfg.BidPublishLead
+		}, wantError: "first bid attempt must precede the bid publish time"},
+		{name: "first attempt passes publish time", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - cfg.BidPublishLead + time.Nanosecond
+		}, wantError: "first bid attempt must precede the bid publish time"},
 		{name: "negative private orderflow window", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
 			cfg.PrivateOrderflowWindow = -time.Nanosecond
-		}},
+		}, wantError: "private orderflow window must be within the preceding slot"},
 		{name: "bid delay reaches target slot", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
 			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot) * time.Second
-		}},
+		}, wantError: "bid delay must be within the preceding slot"},
 		{name: "bid delay leaves no retry cadence", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			cfg.BidPublishLead = 0
 			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - cfg.RetryInterval
-		}},
+		}, wantError: "bid delay, private orderflow window, and retry cadence must fit within the preceding slot"},
 		{name: "bid delay exceeds retry cadence boundary", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
+			cfg.BidPublishLead = 0
 			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - cfg.RetryInterval + time.Nanosecond
-		}},
+		}, wantError: "bid delay, private orderflow window, and retry cadence must fit within the preceding slot"},
 		{name: "private orderflow window exceeds bid budget", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
 			cfg.PrivateOrderflowWindow = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - cfg.BidDelay - cfg.RetryInterval + time.Nanosecond
-		}},
+		}, wantError: "bid delay, private orderflow window, and retry cadence must fit within the preceding slot"},
 		{name: "bid timing sum overflows", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
 			copy := *deps.BeaconConfig
 			copy.SecondsPerSlot = uint64(math.MaxInt64 / int64(time.Second))
 			deps.BeaconConfig = &copy
 			cfg.BidDelay = 6_000_000_000_000_000_000
 			cfg.PrivateOrderflowWindow = 6_000_000_000_000_000_000
-		}},
+		}, wantError: "bid delay, private orderflow window, and retry cadence must fit within the preceding slot"},
+		{name: "shadow curve with publish lead", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
+			cfg.ShadowValueCurve = true
+			cfg.BidDelay = time.Second
+		}, wantError: "shadow value curve requires a zero bid publish lead"},
 		{name: "shadow curve without bid delay", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
 			cfg.ShadowValueCurve = true
+			cfg.BidPublishLead = 0
 			cfg.BidDelay = 0
-		}},
+		}, wantError: "shadow value curve must fit within the preceding slot"},
 		{name: "shadow curve reaches target slot", mutate: func(cfg *epbscfg.Config, deps *RuntimeDependencies) {
 			cfg.ShadowValueCurve = true
+			cfg.BidPublishLead = 0
 			cfg.BidDelay = time.Duration(deps.BeaconConfig.SecondsPerSlot)*time.Second - 4*time.Second - cfg.RetryInterval + time.Nanosecond
-		}},
+		}, wantError: "shadow value curve must fit within the preceding slot"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			testCfg := valid
 			testDeps := deps
 			test.mutate(&testCfg, &testDeps)
+			testDeps.PendingDirectory = filepath.Join(t.TempDir(), "pending")
 			runtime, err := NewRuntime(testCfg, testDeps)
-			require.Error(t, err)
+			require.ErrorContains(t, err, test.wantError)
 			require.Nil(t, runtime)
+		})
+	}
+}
+
+func TestRuntimeAcceptsMaximumBidMarginBoundaries(t *testing.T) {
+	beaconCfg := gloasCoordinatorConfig()
+	keyPath := filepath.Join(t.TempDir(), "builder.key")
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(keyPath, privateKey.Bytes(), 0o600))
+	valid := epbscfg.DefaultConfig()
+	valid.Enabled = true
+	valid.KeyPath = keyPath
+
+	for _, test := range []struct {
+		name         string
+		maxBidMargin float64
+	}{
+		{name: "equal to bid margin", maxBidMargin: valid.BidMargin},
+		{name: "equal to one", maxBidMargin: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := valid
+			cfg.MaxBidMargin = test.maxBidMargin
+			_, _, err := prepareRuntimeConfig(cfg, &beaconCfg)
+			require.NoError(t, err)
 		})
 	}
 }
@@ -676,6 +742,7 @@ func TestRuntimeAcceptsBidDelayBeforeRetryCadenceBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(keyPath, privateKey.Bytes(), 0o600))
 	cfg := epbscfg.DefaultConfig()
+	cfg.BidPublishLead = 0
 	cfg.Enabled = true
 	cfg.KeyPath = keyPath
 	cfg.BidDelay = time.Duration(beaconCfg.SecondsPerSlot)*time.Second - cfg.RetryInterval - time.Nanosecond
@@ -712,9 +779,11 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	runtimeCfg.BidDelay = 1200 * time.Millisecond
 	runtimeCfg.PrivateOrderflowWindow = 350 * time.Millisecond
 	runtimeCfg.ShadowValueCurve = true
+	runtimeCfg.BidPublishLead = 0
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	status := executionbuilder.NewEmbeddedBuilderStatus(true)
+	highestBids := new(coordinatorHighestBidReader)
 	deps := RuntimeDependencies{
 		PendingDirectory: filepath.Join(t.TempDir(), "pending"),
 		BeaconConfig:     &cfg,
@@ -727,6 +796,7 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 		BidProcessor:     &runtimeBidProcessor{},
 		PayloadProcessor: &runtimePayloadProcessor{},
 		AcceptedBlocks:   &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)},
+		HighestBids:      highestBids,
 		Events:           beaconevents.NewEventEmitter(),
 		Status:           status,
 	}
@@ -738,8 +808,31 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	require.Equal(t, int(cfg.SlotsPerEpoch), runtime.runner.maxPending)
 	require.Equal(t, runtimeCfg.BidDelay, runtime.runner.bidDelay)
 	require.Equal(t, runtimeCfg.PrivateOrderflowWindow, runtime.coordinator.privateOrderflowWindow)
+	require.Equal(t, runtimeCfg.BidPublishLead, runtime.coordinator.bidPublishLead)
+	require.Equal(t, runtimeCfg.MaxBidMargin, runtime.coordinator.maxBidMargin)
+	require.Equal(t, highestBids, runtime.coordinator.highestBids)
+	live, ok := runtime.runner.coordinator.(*LiveCoordinator)
+	require.True(t, ok)
+	require.Same(t, status, live.coordinator.status)
+	require.Equal(t, runtimeCfg.CollateralWarningGwei, live.collateralWarningGwei)
+	require.NotNil(t, runtime.coordinator.slotTime)
 	require.NotNil(t, runtime.shadow)
 	require.Equal(t, []time.Duration{3200 * time.Millisecond, 5200 * time.Millisecond}, runtime.shadow.delays)
+
+	nonShadowCfg := runtimeCfg
+	nonShadowCfg.ShadowValueCurve = false
+	nonShadowCfg.BidPublishLead = 450 * time.Millisecond
+	nonShadowCfg.RetryInterval = 250 * time.Millisecond
+	deps.PendingDirectory = filepath.Join(t.TempDir(), "non-shadow-pending")
+	nonShadowRuntime, err := NewRuntime(nonShadowCfg, deps)
+	require.NoError(t, err)
+	require.Equal(t, nonShadowCfg.BidPublishLead, nonShadowRuntime.coordinator.bidPublishLead)
+	require.Equal(t, nonShadowCfg.RetryInterval, nonShadowRuntime.coordinator.retryInterval)
+	require.Equal(t, nonShadowCfg.MaxBidMargin, nonShadowRuntime.coordinator.maxBidMargin)
+	require.Equal(t, highestBids, nonShadowRuntime.coordinator.highestBids)
+	wantSlotTime := time.Unix(123, 0)
+	clock.EXPECT().GetSlotTime(uint64(17)).Return(wantSlotTime)
+	require.Equal(t, wantSlotTime, nonShadowRuntime.coordinator.slotTime(17))
 
 	blockedPath := filepath.Join(t.TempDir(), "not-a-directory")
 	require.NoError(t, os.WriteFile(blockedPath, nil, 0o600))
@@ -759,6 +852,8 @@ func TestBuilderAttemptOutcomeClassifiesKnownFailures(t *testing.T) {
 		{name: "execution busy", err: errors.Join(errors.New("assemble"), eladapter.ErrExecutionBusy), want: executionbuilder.BuilderOutcomeExecutionBusy},
 		{name: "payload not ready", err: ErrPayloadNotReady, want: executionbuilder.BuilderOutcomePayloadNotReady},
 		{name: "already tracked", err: ErrAuctionAlreadyTracked, want: executionbuilder.BuilderOutcomeAlreadyTracked},
+		{name: "collateral exhausted", err: errors.Join(ErrSlotInputUnavailable, ErrBuilderCollateralExhausted), want: executionbuilder.BuilderOutcomeCollateralExhausted},
+		{name: "outbid", err: ErrBidOutbid, want: executionbuilder.BuilderOutcomeOutbid},
 		{name: "bid rejected", err: errLocalBidNotAccepted, want: executionbuilder.BuilderOutcomeBidRejected},
 		{name: "no bid", err: errValidatedPreferencesAttemptNoBid, want: executionbuilder.BuilderOutcomeNoBid},
 		{name: "unknown", err: errors.New("unknown"), want: executionbuilder.BuilderOutcomeFailed},

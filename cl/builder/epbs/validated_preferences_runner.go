@@ -347,8 +347,9 @@ func (r *ValidatedPreferencesRunner) startNext(ctx context.Context, currentSlot 
 func (r *ValidatedPreferencesRunner) nextEligibleLocked(currentSlot uint64, now time.Time) (preferencesKey, pendingPreferences, bool) {
 	var earliestSlot uint64
 	foundSlot := false
+	foundFuture := false
 	for key := range r.pending {
-		if !slotEligible(currentSlot, key.slot) || (foundSlot && key.slot >= earliestSlot) {
+		if !slotEligible(currentSlot, key.slot) {
 			continue
 		}
 		precedingSlot := key.slot
@@ -358,8 +359,13 @@ func (r *ValidatedPreferencesRunner) nextEligibleLocked(currentSlot uint64, now 
 		if r.bidDelay > 0 && now.Before(r.slotTime(precedingSlot).Add(r.bidDelay)) {
 			continue
 		}
+		future := key.slot > currentSlot
+		if foundSlot && (foundFuture && !future || foundFuture == future && key.slot >= earliestSlot) {
+			continue
+		}
 		earliestSlot = key.slot
 		foundSlot = true
+		foundFuture = future
 	}
 	if !foundSlot {
 		return preferencesKey{}, pendingPreferences{}, false
@@ -413,13 +419,13 @@ func (r *ValidatedPreferencesRunner) finish(result preferencesAttemptResult) {
 		r.mu.Unlock()
 		return
 	}
-	tracked := errors.Is(result.err, ErrAuctionAlreadyTracked)
+	terminal := errors.Is(result.err, ErrAuctionAlreadyTracked) || errors.Is(result.err, ErrBidOutbid)
 	if result.bid != nil && result.err == nil {
 		r.mu.Unlock()
 		return
 	}
 	observeOutcome := r.observeOutcome
-	if tracked {
+	if terminal {
 		r.mu.Unlock()
 		if !result.canceled && observeOutcome != nil {
 			observeOutcome(result.key.slot, result.err)

@@ -90,12 +90,14 @@ func TestLiveSlotInputResolverRejectsExhaustedOrOverflowingCollateral(t *testing
 		amounts     []uint64
 		balance     func(clparams.BeaconChainConfig) uint64
 		errorSubstr string
+		errorIs     []error
 	}{
 		{
 			name:        "exact reserved collateral",
 			amounts:     []uint64{25},
 			balance:     func(cfg clparams.BeaconChainConfig) uint64 { return cfg.MinDepositAmount + 25 },
 			errorSubstr: "no available collateral",
+			errorIs:     []error{ErrSlotInputUnavailable, ErrBuilderCollateralExhausted},
 		},
 		{
 			name:        "pending liability overflow",
@@ -126,8 +128,39 @@ func TestLiveSlotInputResolverRejectsExhaustedOrOverflowingCollateral(t *testing
 
 			_, err := resolver.Resolve(t.Context(), preferences)
 			require.ErrorContains(t, err, tt.errorSubstr)
+			for _, target := range tt.errorIs {
+				require.ErrorIs(t, err, target)
+			}
 		})
 	}
+}
+
+func TestLiveSlotInputResolverReportsCollateralExhaustedAfterFullParent(t *testing.T) {
+	cfg, headState, preferences, headRoot, _, _ := liveResolverFixture(t)
+	headState.GetBuilders().Get(0).Balance = cfg.MinDepositAmount + 25
+	parentBid := headState.GetLatestExecutionPayloadBid()
+	parentBid.Slot = cfg.SlotsPerEpoch
+	parentBid.Value = 25
+	envelope := liveResolverEnvelope(t, &cfg, headState, headRoot)
+	parentHash := parentBid.BlockHash
+	resolver := matrixResolver(t, &cfg, headState, headRoot, preferences.Message.ProposalSlot, &resolverForkchoice{
+		headNode:    forkchoice.ForkChoiceNode{Root: headRoot, PayloadStatus: cltypes.PayloadStatusFull},
+		envelope:    envelope,
+		hasEnvelope: true,
+		buildOnFull: true,
+		verifiedRoots: map[common.Hash]bool{
+			headRoot: true,
+		},
+		gasLimits: map[common.Hash]uint64{parentHash: 30_000_000},
+		recentStatuses: map[common.Hash]execution_client.PayloadStatus{
+			parentHash: execution_client.PayloadStatusValidated,
+		},
+	})
+
+	_, err := resolver.Resolve(t.Context(), preferences)
+	require.ErrorContains(t, err, "builder invalid after full parent")
+	require.ErrorIs(t, err, ErrSlotInputUnavailable)
+	require.ErrorIs(t, err, ErrBuilderCollateralExhausted)
 }
 
 func matrixResolver(
