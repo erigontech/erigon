@@ -33,7 +33,7 @@ import (
 )
 
 // run is Run's loop. Its tracing code sits behind runTracing, so this copy
-// compiles without it; runTraced in run_traced_gen.go is the same source with
+// compiles without it; runTraced in vm_run_traced_gen.go is the same source with
 // runTracing set to true.
 func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, debug, trace bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	// Don't bother with the execution if there's no code.

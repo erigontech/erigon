@@ -127,14 +127,14 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	}
 }
 
-// fastPathWant is one fastPathOps entry, generated with the fast-path cases in run.go.
+// fastPathWant is one fastPathOps entry, generated with the fast-path cases in vm_run.go.
 type fastPathWant struct {
 	execute         executionFunc
 	gas             uint64
 	numPop, numPush int
 }
 
-// TestRunTracedIsGenerated fails when run.go's fast-path cases, run_traced_gen.go
+// TestRunTracedIsGenerated fails when vm_run.go's fast-path cases, vm_run_traced_gen.go
 // or fast_path_gen_test.go are stale against execution/vm/gen.
 func TestRunTracedIsGenerated(t *testing.T) {
 	cmd := exec.Command("go", "run", "./gen", "-check")
