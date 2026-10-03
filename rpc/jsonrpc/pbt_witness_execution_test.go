@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-func pbtPortBlock(t *testing.T, m *execmoduletester.ExecModuleTester, number uint64) *types.Block {
+func pbtWitnessTestBlock(t *testing.T, m *execmoduletester.ExecModuleTester, number uint64) *types.Block {
 	t.Helper()
 	var block *types.Block
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
@@ -48,13 +48,13 @@ func pbtPortBlock(t *testing.T, m *execmoduletester.ExecModuleTester, number uin
 	return block
 }
 
-func pbtPortWitness(t *testing.T, api *DebugAPIImpl, m *execmoduletester.ExecModuleTester, number uint64) *ExecutionWitnessResult {
+func pbtExecutionWitnessAt(t *testing.T, api *DebugAPIImpl, m *execmoduletester.ExecModuleTester, number uint64) *ExecutionWitnessResult {
 	t.Helper()
 	trie := "pbt"
 	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), nil, &trie)
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	block := pbtPortBlock(t, m, number)
+	block := pbtWitnessTestBlock(t, m, number)
 	var parentRoot, postRoot common.Hash
 	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
 		var err error
@@ -90,7 +90,7 @@ func requirePbtBlockReceipts(t *testing.T, m *execmoduletester.ExecModuleTester,
 	tx, err := m.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	receipts, err := rawdb.ReadReceiptsCacheV2(tx, pbtPortBlock(t, m, number), m.BlockReader.TxnumReader())
+	receipts, err := rawdb.ReadReceiptsCacheV2(tx, pbtWitnessTestBlock(t, m, number), m.BlockReader.TxnumReader())
 	require.NoError(t, err)
 	for index, receipt := range receipts {
 		require.EqualValues(t, types.ReceiptStatusSuccessful, receipt.Status, "transaction %d in block %d failed", index, number)
@@ -122,7 +122,7 @@ func TestPBinExecutionWitnessEndToEnd(t *testing.T) {
 	})
 	repairPBinPreForkShadows(t, m, 1000)
 	for number := uint64(1); number <= 7; number++ {
-		result := pbtPortWitness(t, api, m, number)
+		result := pbtExecutionWitnessAt(t, api, m, number)
 		requirePbtBlockReceipts(t, m, number)
 		if number == 7 {
 			require.Empty(t, result.Codes)
@@ -167,7 +167,7 @@ func TestPBinWitnessConsecutiveDeploys(t *testing.T) {
 	repairPBinPreForkShadows(t, m, 1000)
 	witnesses := make([]*ExecutionWitnessResult, 0, 3)
 	for number := uint64(1); number <= 3; number++ {
-		result := pbtPortWitness(t, api, m, number)
+		result := pbtExecutionWitnessAt(t, api, m, number)
 		witnesses = append(witnesses, result)
 		require.NotEmpty(t, result.State)
 		requirePbtBlockReceipts(t, m, number)
@@ -195,7 +195,7 @@ func TestPBinExecutionWitnessEmptyBlock(t *testing.T) {
 	accessed, _, err := api.buildAccessedState(t.Context(), tx, info.Block, m.ChainConfig, m.Engine, info.FirstTxNumInBlock, witnessModeLegacy)
 	require.NoError(t, err)
 	require.True(t, accessed.isEmpty())
-	result := pbtPortWitness(t, api, m, 2)
+	result := pbtExecutionWitnessAt(t, api, m, 2)
 	require.NotNil(t, result)
 	require.Empty(t, result.Codes)
 }
@@ -210,6 +210,6 @@ func TestPBinExecutionWitnessFreshAccountAndContract(t *testing.T) {
 	})
 	repairPBinPreForkShadows(t, m, 1000)
 	for number := uint64(1); number <= 2; number++ {
-		require.NotEmpty(t, pbtPortWitness(t, api, m, number).State)
+		require.NotEmpty(t, pbtExecutionWitnessAt(t, api, m, number).State)
 	}
 }

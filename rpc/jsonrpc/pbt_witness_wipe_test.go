@@ -41,7 +41,7 @@ import (
 func TestPBinExecutionWitnessWipePort(t *testing.T) {
 	api, m := pbtCorpusChain(t)
 	for _, number := range []uint64{5, 9, 10} {
-		result := pbtPortWitness(t, api, m, number)
+		result := pbtExecutionWitnessAt(t, api, m, number)
 		require.NotEmpty(t, result.State, "block %d has no witness state", number)
 	}
 }
@@ -76,7 +76,7 @@ func TestPBinExecutionWitnessCreateOverStorage(t *testing.T) {
 					txs = append(txs, &types.LegacyTx{CommonTx: types.CommonTx{To: &victim, GasLimit: 100_000, Data: pbtCorpusStoreCalldata(slot.key, value)}})
 				}
 				pbtWipeBlock(t, m, bankKey, txs)
-				result := pbtPortWitness(t, newDebugApiForTest(m), m, 1)
+				result := pbtExecutionWitnessAt(t, newDebugApiForTest(m), m, 1)
 				require.NotEmpty(t, result.State)
 				pbtWipeStateAfterBlock(t, m, func(st *state.IntraBlockState) {
 					code, err := st.GetCode(accounts.InternAddress(victim))
@@ -103,7 +103,7 @@ func TestPBinExecutionWitnessDeleteOverStorage(t *testing.T) {
 					txs = append(txs, &types.LegacyTx{CommonTx: types.CommonTx{To: &victim, GasLimit: 21_000, Value: *uint256.NewInt(refund)}})
 				}
 				pbtWipeBlock(t, m, bankKey, txs)
-				result := pbtPortWitness(t, newDebugApiForTest(m), m, 1)
+				result := pbtExecutionWitnessAt(t, newDebugApiForTest(m), m, 1)
 				require.NotEmpty(t, result.State)
 				pbtWipeStateAfterBlock(t, m, func(st *state.IntraBlockState) {
 					exists, err := st.Exist(accounts.InternAddress(victim))
@@ -144,7 +144,7 @@ func TestPBinExecutionWitnessRecreateInBlock(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), value.Uint64())
 	})
-	result := pbtPortWitness(t, newDebugApiForTest(m), m, 1)
+	result := pbtExecutionWitnessAt(t, newDebugApiForTest(m), m, 1)
 	require.NotEmpty(t, result.State)
 }
 

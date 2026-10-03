@@ -258,7 +258,7 @@ func TestPBinExecutionWitnessCancunSystemContracts(t *testing.T) {
 	for number := uint64(1); number <= 3; number++ {
 		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), nil, &pbt)
 		require.NoError(t, err)
-		block := pbtPortBlock(t, m, number)
+		block := pbtWitnessTestBlock(t, m, number)
 		parentRoot, postRoot := pbtDualAnchors(t, m, number, witnessTriePBT)
 		require.NoError(t, verifyPBinWitnessAgainstBlock(t.Context(), result, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 		for index := range result.Keys {
@@ -288,7 +288,7 @@ func TestPBinExecutionWitnessUserSystemAddressRead(t *testing.T) {
 	runtime := append([]byte{0x73}, system[:]...)
 	runtime = append(runtime, 0x31, 0x60, 0x00, 0x55, 0x00)
 	api, m, caller := pbtSystemAddressFixture(t, runtime)
-	result := pbtPortWitness(t, api, m, 2)
+	result := pbtExecutionWitnessAt(t, api, m, 2)
 	require.NotEmpty(t, result.State)
 	stateAfter := pbtStateAfterBlock(t, m, 2)
 	value, err := stateAfter.GetState(accounts.InternAddress(caller), accounts.InternKey(common.Hash{}))
@@ -319,8 +319,8 @@ func TestPBinExecutionWitnessUserSystemAddressLogProof(t *testing.T) {
 	runtime := append([]byte{0x73}, system[:]...)
 	runtime = append(runtime, 0x31, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xa0, 0x00)
 	api, m, _ := pbtSystemAddressFixture(t, runtime)
-	result := pbtPortWitness(t, api, m, 2)
-	block := pbtPortBlock(t, m, 2)
+	result := pbtExecutionWitnessAt(t, api, m, 2)
+	block := pbtWitnessTestBlock(t, m, 2)
 	parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
 	target := []byte{0x00, 0x10, 0x00, 0x4b}
 	index := slices.IndexFunc(result.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, target) })
@@ -343,8 +343,8 @@ func TestPBinExecutionWitnessUserSystemAddressCodeSizeProof(t *testing.T) {
 	runtime := append([]byte{0x73}, system[:]...)
 	runtime = append(runtime, 0x3b, 0x50, 0x00)
 	api, m, _ := pbtSystemAddressFixture(t, runtime)
-	result := pbtPortWitness(t, api, m, 2)
-	block := pbtPortBlock(t, m, 2)
+	result := pbtExecutionWitnessAt(t, api, m, 2)
+	block := pbtWitnessTestBlock(t, m, 2)
 	parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
 	target := []byte{0x00, 0x10, 0x00, 0x4b}
 	index := slices.IndexFunc(result.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, target) })
@@ -365,8 +365,8 @@ func TestPBinExecutionWitnessRejectsMissingSystemCodeDuringSystemCall(t *testing
 	api, m := pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 1, nil, func(int, *blockgen.BlockGen, func(common.Address, *uint256.Int, []byte), func(*uint256.Int, []byte), func(types.Transaction), func(common.Address, *uint256.Int, []byte)) {
 	}, alloc)
 	repairPBinPreForkShadows(t, m, 1000)
-	result := pbtPortWitness(t, api, m, 1)
-	block := pbtPortBlock(t, m, 1)
+	result := pbtExecutionWitnessAt(t, api, m, 1)
+	block := pbtWitnessTestBlock(t, m, 1)
 	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
 	index := slices.IndexFunc(result.Codes, func(code hexutil.Bytes) bool { return bytes.Equal(code, systemCode) })
 	require.NotEqual(t, -1, index)
@@ -395,8 +395,8 @@ func TestPBinExecutionWitnessDelegationToSystemAddressProof(t *testing.T) {
 	mpt, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(2)), nil, &mptName)
 	require.NoError(t, err)
 	require.False(t, slices.ContainsFunc(mpt.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, system[:]) }), "MPT must retain v3 system-address access tracking")
-	result := pbtPortWitness(t, api, m, 2)
-	block := pbtPortBlock(t, m, 2)
+	result := pbtExecutionWitnessAt(t, api, m, 2)
+	block := pbtWitnessTestBlock(t, m, 2)
 	parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
 	target := []byte{0x00, 0x10, 0x00, 0x4b}
 	index := slices.IndexFunc(result.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, target) })
@@ -463,8 +463,8 @@ func TestPBinExecutionWitnessRevertedDelegationToSystemAddressProof(t *testing.T
 				}
 			}, alloc)
 			repairPBinPreForkShadows(t, m, 1000)
-			result := pbtPortWitness(t, api, m, 2)
-			block := pbtPortBlock(t, m, 2)
+			result := pbtExecutionWitnessAt(t, api, m, 2)
+			block := pbtWitnessTestBlock(t, m, 2)
 			parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
 			index := slices.IndexFunc(result.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, headerPath) })
 			require.NotEqual(t, -1, index, "a reverted delegation to SYSTEM_ADDRESS must retain its proof")
@@ -479,8 +479,8 @@ func TestPBinExecutionWitnessRejectsBlobGasMismatch(t *testing.T) {
 	runtime := append([]byte{0x73}, system[:]...)
 	runtime = append(runtime, 0x31, 0x60, 0x00, 0x55, 0x00)
 	api, m, _ := pbtSystemAddressFixture(t, runtime)
-	result := pbtPortWitness(t, api, m, 2)
-	block := pbtPortBlock(t, m, 2)
+	result := pbtExecutionWitnessAt(t, api, m, 2)
+	block := pbtWitnessTestBlock(t, m, 2)
 	parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
 	require.NotNil(t, block.Header().BlobGasUsed)
 	header := types.CopyHeader(block.HeaderNoCopy())
@@ -516,7 +516,7 @@ func TestPBinExecutionWitnessDesignatorLoadDoesNotRequireDelegationTargetProof(t
 				api, m = pbinWitnessFixtureWithGeneratorNAllocNoSystemCalls(t, 1000, 1, generator, alloc)
 			}
 			repairPBinPreForkShadows(t, m, 1000)
-			result := pbtPortWitness(t, api, m, 1)
+			result := pbtExecutionWitnessAt(t, api, m, 1)
 			cache := new(eip8297.DigestCache)
 			stem := cache.AccountHeaderStem(system[:])
 			for index := range result.State {
@@ -550,8 +550,8 @@ func TestPBinExecutionWitnessRejectsMissingCodeForOutOfGasCall(t *testing.T) {
 	}
 	api, m := pbinWitnessFixtureWithGeneratorNAllocNoSystemCalls(t, 1000, 1, generator, alloc)
 	repairPBinPreForkShadows(t, m, 1000)
-	result := pbtPortWitness(t, api, m, 1)
-	block := pbtPortBlock(t, m, 1)
+	result := pbtExecutionWitnessAt(t, api, m, 1)
+	block := pbtWitnessTestBlock(t, m, 1)
 	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
 	index := slices.IndexFunc(result.Codes, func(code hexutil.Bytes) bool { return bytes.Equal(code, calleeCode) })
 	require.NotEqual(t, -1, index)
@@ -586,8 +586,8 @@ func TestPBinExecutionWitnessCreate2SelfDestructRecreate(t *testing.T) {
 	}
 	api, m := pbinWitnessFixtureWithGeneratorNAllocNoSystemCalls(t, 1000, 1, generator, alloc)
 	repairPBinPreForkShadows(t, m, 1000)
-	result := pbtPortWitness(t, api, m, 1)
-	block := pbtPortBlock(t, m, 1)
+	result := pbtExecutionWitnessAt(t, api, m, 1)
+	block := pbtWitnessTestBlock(t, m, 1)
 	require.Len(t, block.Transactions(), 6)
 	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
 	for index := range result.Keys {
@@ -616,8 +616,8 @@ func TestPBinWitnessPreByzantiumGates(t *testing.T) {
 	runtime := append([]byte{0x73}, system[:]...)
 	runtime = append(runtime, 0x31, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xa0, 0x00)
 	api, m, _ := pbtSystemAddressFixture(t, runtime)
-	result := pbtPortWitness(t, api, m, 2)
-	block := pbtPortBlock(t, m, 2)
+	result := pbtExecutionWitnessAt(t, api, m, 2)
+	block := pbtWitnessTestBlock(t, m, 2)
 	parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
 	pre := m.ChainConfig.Copy()
 	pre.ByzantiumBlock = common.NewUint64(10)
@@ -655,7 +655,7 @@ func TestPBinExecutionWitnessProvesOverflowOnlyAccountCodeHashRead(t *testing.T)
 		}
 	}, alloc)
 	repairPBinPreForkShadows(t, m, 1000)
-	result := pbtPortWitness(t, api, m, 1)
+	result := pbtExecutionWitnessAt(t, api, m, 1)
 	cache := new(eip8297.DigestCache)
 	headerStem := cache.AccountHeaderStem(victim[:])
 	stripped := pbtCorpusClone(result)
@@ -672,7 +672,7 @@ func TestPBinExecutionWitnessProvesOverflowOnlyAccountCodeHashRead(t *testing.T)
 		}
 	}
 	require.True(t, removed)
-	block := pbtPortBlock(t, m, 1)
+	block := pbtWitnessTestBlock(t, m, 1)
 	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
 	require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), stripped, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 }
@@ -700,7 +700,7 @@ func TestPBinExecutionWitnessDeletesPersistedEmptyStorageAccount(t *testing.T) {
 	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
 	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(1), nil, &pbt)
 	require.NoError(t, err)
-	block := pbtPortBlock(t, m, 1)
+	block := pbtWitnessTestBlock(t, m, 1)
 	require.NoError(t, verifyPBinWitnessAgainstBlock(t.Context(), result, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 
 	tx, err := m.DB.BeginTemporalRo(t.Context())

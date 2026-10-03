@@ -99,7 +99,7 @@ func TestPBinDualExecutionWitness(t *testing.T) {
 						result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), nil, &requested)
 						require.NoError(t, err)
 						parentRoot, postRoot := pbtDualAnchors(t, m, number, trie)
-						block := pbtPortBlock(t, m, number)
+						block := pbtWitnessTestBlock(t, m, number)
 						if trie == witnessTriePBT {
 							require.NoError(t, verifyPBinWitnessAgainstBlock(t.Context(), result, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 						} else {
