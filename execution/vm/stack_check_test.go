@@ -22,7 +22,9 @@ import (
 	"maps"
 	"math/rand/v2"
 	"os/exec"
+	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"testing"
 
@@ -159,6 +161,21 @@ func TestRunTracedIsGenerated(t *testing.T) {
 	cmd := exec.Command("go", "run", "./gen", "-check")
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
+}
+
+// TestRunHasNoJumpTable fails when Go compiles run's opcode switch to a jump
+// table, which it does once the cases are dense enough. The indirect jump made
+// the fast path slower than the compare tree.
+func TestRunHasNoJumpTable(t *testing.T) {
+	// The test binary has no symbol table; the package archive keeps it.
+	pkg := filepath.Join(t.TempDir(), "vm.a")
+	out, err := exec.Command("go", "build", "-o", pkg, ".").CombinedOutput()
+	require.NoError(t, err, string(out))
+	out, err = exec.Command("go", "tool", "objdump", "-s", `vm\.\(\*EVM\)\.run$`, pkg).Output()
+	require.NoError(t, err)
+	require.Contains(t, string(out), "vm_run.go")
+	tableJump := regexp.MustCompile(`(?m)\tJMP (0\(\w+\)\(\w+\*8\)|\(R\d+\))\s`)
+	require.Empty(t, tableJump.FindString(string(out)), "run dispatches through a jump table")
 }
 
 // TestRunMatchesRunTraced runs each program through run and through runTraced,
