@@ -1004,7 +1004,7 @@ echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 
 or by exporting it in your shell. Forward the `30303`, `42069`, `4000`, `4001` and `4002` ports on your router as well, otherwise peers still cannot reach you.
 
-If you can't publish an extra UDP port — for example a managed Kubernetes ingress that only forwards TCP — drop the `4002:4002/udp` line above and add `--caplin.quic.disable` to the `command` block instead. Caplin then falls back to TCP-only peering.
+If only the QUIC port (`4002/udp`) cannot be published, drop the `4002:4002/udp` line above and add `--caplin.quic.disable` to the `command` block instead. Caplin then falls back to TCP-only peering. This does not help if `4000/udp` cannot be published either: Caplin needs that port for discovery whether or not QUIC is enabled.
 
 :::warning
 ⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
@@ -1220,7 +1220,7 @@ echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 
 or by exporting it in your shell. Forward the `30303`, `42069`, `4000`, `4001` and `4002` ports on your router as well, otherwise peers still cannot reach you.
 
-If you can't publish an extra UDP port — for example a managed Kubernetes ingress that only forwards TCP — drop the `4002:4002/udp` line above and add `--caplin.quic.disable` to the `command` block instead. Caplin then falls back to TCP-only peering.
+If only the QUIC port (`4002/udp`) cannot be published, drop the `4002:4002/udp` line above and add `--caplin.quic.disable` to the `command` block instead. Caplin then falls back to TCP-only peering. This does not help if `4000/udp` cannot be published either: Caplin needs that port for discovery whether or not QUIC is enabled.
 
 :::warning
 ⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
