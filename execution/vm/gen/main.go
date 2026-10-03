@@ -18,8 +18,9 @@ import (
 )
 
 // fastOp is one opcode the untraced loop runs without the jump table. Every
-// entry must charge only constant gas and must not fail once its stack and gas
-// checks pass; TestFastPathMatchesJumpTables pins it against all forks.
+// entry must charge only constant gas, must not fail once its stack and gas
+// checks pass, and must not use the CallContext intern cache: the fast path
+// skips cacheGen++. TestFastPathMatchesJumpTables pins it against all forks.
 type fastOp struct {
 	name      string
 	execute   string // jump-table execute func; "" for the makeDup closures
@@ -51,11 +52,38 @@ func fastOps() []fastOp {
 		call("EQ", "opEq", "GasFastestStep", 2),
 		call("AND", "opAnd", "GasFastestStep", 2),
 		call("ISZERO", "opIszero", "GasFastestStep", 1),
+		call("SDIV", "opSdiv", "GasFastStep", 2),
+		call("MOD", "opMod", "GasFastStep", 2),
+		call("SMOD", "opSmod", "GasFastStep", 2),
+		call("ADDMOD", "opAddmod", "GasMidStep", 3),
+		call("MULMOD", "opMulmod", "GasMidStep", 3),
+		call("SIGNEXTEND", "opSignExtend", "GasFastStep", 2),
+		call("SLT", "opSlt", "GasFastestStep", 2),
+		call("SGT", "opSgt", "GasFastestStep", 2),
+		call("OR", "opOr", "GasFastestStep", 2),
+		call("XOR", "opXor", "GasFastestStep", 2),
+		call("NOT", "opNot", "GasFastestStep", 1),
+		call("BYTE", "opByte", "GasFastestStep", 2),
+		call("CALLDATALOAD", "opCallDataLoad", "GasFastestStep", 1),
+		call("ADDRESS", "opAddress", "GasQuickStep", 0),
+		call("ORIGIN", "opOrigin", "GasQuickStep", 0),
+		call("CALLER", "opCaller", "GasQuickStep", 0),
+		call("CALLVALUE", "opCallValue", "GasQuickStep", 0),
+		call("CALLDATASIZE", "opCallDataSize", "GasQuickStep", 0),
+		call("CODESIZE", "opCodeSize", "GasQuickStep", 0),
+		call("GASPRICE", "opGasprice", "GasQuickStep", 0),
+		call("COINBASE", "opCoinbase", "GasQuickStep", 0),
+		call("TIMESTAMP", "opTimestamp", "GasQuickStep", 0),
+		call("NUMBER", "opNumber", "GasQuickStep", 0),
+		call("GASLIMIT", "opGasLimit", "GasQuickStep", 0),
+		call("PC", "opPc", "GasQuickStep", 0),
+		call("MSIZE", "opMsize", "GasQuickStep", 0),
+		call("GAS", "opGas", "GasQuickStep", 0),
 	}
-	for n := 1; n <= 8; n++ {
+	for n := 1; n <= 16; n++ {
 		ops = append(ops, fastOp{fmt.Sprintf("DUP%d", n), "", "GasFastestStep", n, n + 1, fmt.Sprintf("stack.dup(%d)", n-1)})
 	}
-	for n := 1; n <= 4; n++ {
+	for n := 1; n <= 16; n++ {
 		ops = append(ops, fastOp{fmt.Sprintf("SWAP%d", n), fmt.Sprintf("opSwap%d", n), "GasFastestStep", n + 1, n + 1, fmt.Sprintf("stack.swap(%d)", n)})
 	}
 	return ops

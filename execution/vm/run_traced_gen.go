@@ -187,6 +187,195 @@ run:
 					pc++
 					continue
 				}
+			case SDIV:
+				if sLen >= 2 && gas >= GasFastStep {
+					callContext.gas = gas - GasFastStep
+					_, _, _ = opSdiv(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case MOD:
+				if sLen >= 2 && gas >= GasFastStep {
+					callContext.gas = gas - GasFastStep
+					_, _, _ = opMod(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case SMOD:
+				if sLen >= 2 && gas >= GasFastStep {
+					callContext.gas = gas - GasFastStep
+					_, _, _ = opSmod(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case ADDMOD:
+				if sLen >= 3 && gas >= GasMidStep {
+					callContext.gas = gas - GasMidStep
+					_, _, _ = opAddmod(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case MULMOD:
+				if sLen >= 3 && gas >= GasMidStep {
+					callContext.gas = gas - GasMidStep
+					_, _, _ = opMulmod(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case SIGNEXTEND:
+				if sLen >= 2 && gas >= GasFastStep {
+					callContext.gas = gas - GasFastStep
+					_, _, _ = opSignExtend(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case SLT:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opSlt(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case SGT:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opSgt(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case OR:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opOr(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case XOR:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opXor(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case NOT:
+				if sLen >= 1 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opNot(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case BYTE:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opByte(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case CALLDATALOAD:
+				if sLen >= 1 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opCallDataLoad(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case ADDRESS:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opAddress(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case ORIGIN:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opOrigin(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case CALLER:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opCaller(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case CALLVALUE:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opCallValue(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case CALLDATASIZE:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opCallDataSize(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case CODESIZE:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opCodeSize(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case GASPRICE:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opGasprice(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case COINBASE:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opCoinbase(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case TIMESTAMP:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opTimestamp(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case NUMBER:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opNumber(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case GASLIMIT:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opGasLimit(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case PC:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opPc(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case MSIZE:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opMsize(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case GAS:
+				if sLen < stackLimit && gas >= GasQuickStep {
+					callContext.gas = gas - GasQuickStep
+					_, _, _ = opGas(pc, evm, callContext)
+					pc++
+					continue
+				}
 			case DUP1:
 				if sLen >= 1 && sLen < stackLimit && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
@@ -243,6 +432,62 @@ run:
 					pc++
 					continue
 				}
+			case DUP9:
+				if sLen >= 9 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(8)
+					pc++
+					continue
+				}
+			case DUP10:
+				if sLen >= 10 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(9)
+					pc++
+					continue
+				}
+			case DUP11:
+				if sLen >= 11 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(10)
+					pc++
+					continue
+				}
+			case DUP12:
+				if sLen >= 12 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(11)
+					pc++
+					continue
+				}
+			case DUP13:
+				if sLen >= 13 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(12)
+					pc++
+					continue
+				}
+			case DUP14:
+				if sLen >= 14 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(13)
+					pc++
+					continue
+				}
+			case DUP15:
+				if sLen >= 15 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(14)
+					pc++
+					continue
+				}
+			case DUP16:
+				if sLen >= 16 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(15)
+					pc++
+					continue
+				}
 			case SWAP1:
 				if sLen >= 2 && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
@@ -268,6 +513,90 @@ run:
 				if sLen >= 5 && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
 					stack.swap(4)
+					pc++
+					continue
+				}
+			case SWAP5:
+				if sLen >= 6 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(5)
+					pc++
+					continue
+				}
+			case SWAP6:
+				if sLen >= 7 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(6)
+					pc++
+					continue
+				}
+			case SWAP7:
+				if sLen >= 8 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(7)
+					pc++
+					continue
+				}
+			case SWAP8:
+				if sLen >= 9 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(8)
+					pc++
+					continue
+				}
+			case SWAP9:
+				if sLen >= 10 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(9)
+					pc++
+					continue
+				}
+			case SWAP10:
+				if sLen >= 11 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(10)
+					pc++
+					continue
+				}
+			case SWAP11:
+				if sLen >= 12 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(11)
+					pc++
+					continue
+				}
+			case SWAP12:
+				if sLen >= 13 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(12)
+					pc++
+					continue
+				}
+			case SWAP13:
+				if sLen >= 14 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(13)
+					pc++
+					continue
+				}
+			case SWAP14:
+				if sLen >= 15 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(14)
+					pc++
+					continue
+				}
+			case SWAP15:
+				if sLen >= 16 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(15)
+					pc++
+					continue
+				}
+			case SWAP16:
+				if sLen >= 17 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(16)
 					pc++
 					continue
 				}
