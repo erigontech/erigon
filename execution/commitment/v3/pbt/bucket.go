@@ -66,7 +66,7 @@ func bucketPathForKey(key []byte) (eip8297.Bitpath, error) {
 	if err != nil {
 		return eip8297.Bitpath{}, err
 	}
-	if path.BitLen != 264 || pathByte(&path, 0) != eip8297.StorageZone {
+	if path.BitLen != 264 || pathByte(&path) != eip8297.StorageZone {
 		return eip8297.Bitpath{}, errInsertKey
 	}
 	return path, nil

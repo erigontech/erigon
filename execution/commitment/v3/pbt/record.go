@@ -531,7 +531,7 @@ func decodeRecordKey(key []byte) (recordKey, error) {
 	if path.BitLen == 0 {
 		return recordKey{}, recordError(KeyError, "ordinary row key cannot be empty")
 	}
-	root := path.BitLen == 264 && pathByte(&path, 0) == eip8297.StorageZone
+	root := path.BitLen == 264 && pathByte(&path) == eip8297.StorageZone
 	if !root {
 		if err := validateRowPath(&path); err != nil {
 			return recordKey{}, err
@@ -597,7 +597,7 @@ func rowZone(path *eip8297.Bitpath, slot int) byte {
 	if path.BitLen < 8 {
 		return byte(slotAt(path, 0))<<4 | byte(slot)
 	}
-	return pathByte(path, 0)
+	return pathByte(path)
 }
 
 func rowKeyLength(path *eip8297.Bitpath, slot int) (int, error) {
@@ -634,7 +634,7 @@ func validateRowPath(path *eip8297.Bitpath) error {
 		}
 		return nil
 	}
-	if _, ok := eip8297.ZoneKeyLength(pathByte(path, 0)); !ok {
+	if _, ok := eip8297.ZoneKeyLength(pathByte(path)); !ok {
 		return recordError(ZoneError, "row path uses a reserved zone")
 	}
 	return nil
@@ -650,7 +650,7 @@ func rootExtensionKeyLength(k recordKey, path *eip8297.Bitpath) (int, error) {
 	zone := byte(slotAt(path, 0))
 	if zone == 0 {
 		if path.BitLen >= 8 {
-			zone = pathByte(path, 0)
+			zone = pathByte(path)
 			if zone != eip8297.AccountZone && zone != eip8297.CodeZone {
 				return 0, recordError(ZoneError, "root extension uses a reserved zone")
 			}
@@ -658,7 +658,7 @@ func rootExtensionKeyLength(k recordKey, path *eip8297.Bitpath) (int, error) {
 		return eip8297.AccountKeyLength * 8, nil
 	}
 	if zone == 0xf {
-		if path.BitLen >= 8 && pathByte(path, 0) != eip8297.StorageZone {
+		if path.BitLen >= 8 && pathByte(path) != eip8297.StorageZone {
 			return 0, recordError(ZoneError, "root extension uses a reserved zone")
 		}
 		return eip8297.StorageKeyLength * 8, nil
@@ -710,12 +710,8 @@ func rootSuffixBits(k recordKey, data []byte) (int16, error) {
 	return int16(keyBytes * 8), nil
 }
 
-func pathByte(path *eip8297.Bitpath, byteIndex int) byte {
-	var out byte
-	for i := range 8 {
-		out |= byte(path.Bit(int16(byteIndex*8+i))) << uint(7-i)
-	}
-	return out
+func pathByte(path *eip8297.Bitpath) byte {
+	return byte(path.Words[0] >> 56)
 }
 
 func firstByte(key []byte) byte {

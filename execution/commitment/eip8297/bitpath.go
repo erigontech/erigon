@@ -17,7 +17,6 @@
 package eip8297
 
 import (
-	"errors"
 	"fmt"
 	"math/bits"
 )
@@ -184,11 +183,6 @@ func (p *Bitpath) AppendPackedBits(dst []byte) []byte {
 	return dst
 }
 
-var (
-	ErrEmptyBitPath    = errors.New("pbin: empty bit-path key")
-	ErrNonCanonicalPad = errors.New("pbin: non-canonical padding in bit-path key")
-)
-
 // AppendBitPath appends the DB key for p: packed bits followed by one byte
 // holding bitLen mod 8. The count is a suffix so that a subtree stays
 // contiguous; a leading length field would scatter its records across the
@@ -207,7 +201,7 @@ func EncodeBitPath(p *Bitpath) []byte {
 func DecodeBitPath(buf []byte) (Bitpath, error) {
 	var p Bitpath
 	if len(buf) == 0 {
-		return p, ErrEmptyBitPath
+		return p, fmt.Errorf("pbin: empty bit-path key")
 	}
 	tailBits, packed := buf[len(buf)-1], buf[:len(buf)-1]
 	if tailBits > 7 {
@@ -224,7 +218,7 @@ func DecodeBitPath(buf []byte) (Bitpath, error) {
 		return p, fmt.Errorf("pbin: bit path of %d bits exceeds %d", bitLen, MaxPathBits)
 	}
 	if used := bitLen % 8; used != 0 && packed[len(packed)-1]&(0xFF>>used) != 0 {
-		return Bitpath{}, ErrNonCanonicalPad
+		return Bitpath{}, fmt.Errorf("pbin: non-canonical padding in bit-path key")
 	}
 	return PathFromBits(packed, int16(bitLen)), nil
 }

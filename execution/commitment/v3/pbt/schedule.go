@@ -126,11 +126,8 @@ func buildPhasePlanWithThreshold(ops []Op, threshold int) (phasePlan, error) {
 	for key := range chains {
 		chainKeys = append(chainKeys, key)
 	}
-	sort.Slice(chainKeys, func(i, j int) bool {
-		if chainKeys[i][0] != chainKeys[j][0] {
-			return chainKeys[i][0] < chainKeys[j][0]
-		}
-		return chainKeys[i][1] < chainKeys[j][1]
+	slices.SortFunc(chainKeys, func(a, b [2]byte) int {
+		return bytes.Compare(a[:], b[:])
 	})
 	chainIndexes := make([]int, 0, len(chainKeys))
 	for _, key := range chainKeys {
@@ -294,7 +291,7 @@ func (t *Trie) processParallelContext(ctx context.Context, ops []Op, workers, th
 	if err != nil {
 		return common.Hash{}, err
 	}
-	hash, err := t.processParallelPhaseA(ctx, workers, plan, ops)
+	hash, err := t.processParallelPhaseA(ctx, workers, plan)
 	if err == nil {
 		t.roundPending = true
 	}

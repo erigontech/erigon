@@ -106,7 +106,7 @@ func (t *Trie) verify() error {
 		if root.self != wantSelf {
 			verifyErr = fmt.Errorf("root extension prefix does not match its top row")
 		}
-		if verifyErr == nil && root.self.BitLen >= 264 && pathByte(&root.self, 0) == eip8297.StorageZone {
+		if verifyErr == nil && root.self.BitLen >= 264 && pathByte(&root.self) == eip8297.StorageZone {
 			bucketPath := root.self.Slice(0, 264)
 			verifyErr = t.verifyBucketBranch(&bucketPath, &root.self, row, root.left, root.right)
 		}
@@ -192,7 +192,7 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 			return FoldResult{}, fmt.Errorf("row %x cell %d does not match its child", row.key, slot)
 		}
 		full := branchPath(row, slot, cell)
-		if row.path.BitLen < 264 && full.BitLen >= 264 && pathByte(&full, 0) == eip8297.StorageZone {
+		if row.path.BitLen < 264 && full.BitLen >= 264 && pathByte(&full) == eip8297.StorageZone {
 			bucketPath := full.Slice(0, 264)
 			if err := t.verifyBucketBranch(&bucketPath, &full, child, cell.Left, cell.Right); err != nil {
 				return FoldResult{}, err

@@ -31,7 +31,7 @@ type subtreeCell struct {
 }
 
 func isStoragePath(path *eip8297.Bitpath) bool {
-	return path.BitLen >= 8 && pathByte(path, 0) == eip8297.StorageZone
+	return path.BitLen >= 8 && pathByte(path) == eip8297.StorageZone
 }
 
 func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (common.Hash, error) {
@@ -410,7 +410,6 @@ func (t *Trie) descriptorAtRowMode(row *rowNode, prefix *eip8297.Bitpath, bucket
 
 func subtreeCellForRow(subtree subtreeCell, rowPath eip8297.Bitpath) (rowCell, error) {
 	cell := subtree.cell
-	cell.child = subtree.cell.child
 	if cell.Kind == BranchCell {
 		start := rowPath.BitLen + 4
 		if subtree.path.BitLen < start {

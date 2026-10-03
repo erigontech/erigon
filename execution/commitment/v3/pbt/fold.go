@@ -245,14 +245,14 @@ func foldRowWithRefs(path eip8297.Bitpath, record *Record, refs *rowNode) (foldN
 			return node, nil
 		}
 	}
-	node, err := foldRange(path, record, slots, 0, len(slots), path.BitLen, refs)
+	node, err := foldRange(path, record, slots, 0, len(slots), refs)
 	if err != nil {
 		return foldNode{}, err
 	}
 	return node, nil
 }
 
-func foldRange(path eip8297.Bitpath, record *Record, slots []int, from, to int, parentSplit int16, refs *rowNode) (foldNode, error) {
+func foldRange(path eip8297.Bitpath, record *Record, slots []int, from, to int, refs *rowNode) (foldNode, error) {
 	split := firstSlotSplit(slots[from], slots[to-1], path.BitLen)
 	middle := from
 	for middle < to && slotBit(slots[middle], int(split-path.BitLen)) == 0 {
@@ -281,7 +281,7 @@ func foldChild(path eip8297.Bitpath, record *Record, slots []int, from, to int, 
 				return node.hash, nil
 			}
 		}
-		node, err := foldRange(path, record, slots, from, to, parentSplit, refs)
+		node, err := foldRange(path, record, slots, from, to, refs)
 		if err != nil {
 			return common.Hash{}, err
 		}

@@ -318,18 +318,6 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 			err = t.dropPrefix(op.Drop)
 		case op.merge != nil:
 			err = t.applyMerge(op)
-		case op.Value == ([eip8297.ValueLength]byte{}):
-			if len(op.Key) == eip8297.StorageKeyLength && op.Key[0] == eip8297.StorageZone {
-				var bucketKey []byte
-				bucketKey, err = bucketKeyForStorage(op.Key)
-				if err == nil {
-					t.touchBucket(bucketKey)
-				}
-			}
-			if err != nil {
-				break
-			}
-			err = t.remove(op.Key)
 		default:
 			if len(op.Key) == eip8297.StorageKeyLength && op.Key[0] == eip8297.StorageZone {
 				var bucketKey []byte
@@ -341,7 +329,11 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 			if err != nil {
 				break
 			}
-			err = t.insert(op.Key, op.Value)
+			if op.Value == ([eip8297.ValueLength]byte{}) {
+				err = t.remove(op.Key)
+			} else {
+				err = t.insert(op.Key, op.Value)
+			}
 		}
 		if err != nil {
 			return common.Hash{}, err

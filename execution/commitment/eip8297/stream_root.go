@@ -61,7 +61,7 @@ func (b *StreamRootBuilder) Add(key, value []byte) error {
 	if len(value) != ValueLength {
 		return b.fail(fmt.Errorf("eip8297: value of %d bytes, want %d", len(value), ValueLength))
 	}
-	if isZeroStreamRootValue(value) {
+	if [ValueLength]byte(value) == [ValueLength]byte{} {
 		return b.fail(errors.New("eip8297: zero values are not stored"))
 	}
 	if b.hasLeaf && bytes.Compare(key, b.prevKey) <= 0 {
@@ -148,15 +148,6 @@ func (b *StreamRootBuilder) hashBranch(prefix []byte, left, right common.Hash) c
 	preimage = append(preimage, left[:]...)
 	preimage = append(preimage, right[:]...)
 	return common.Hash(b.sum(preimage))
-}
-
-func isZeroStreamRootValue(value []byte) bool {
-	for _, b := range value {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 func streamRootCommonPrefix(a, b []byte) int {
