@@ -127,7 +127,7 @@ type ReadSet struct {
 	code                  map[accounts.Address]VersionedRead[accounts.Code]
 	codeHash              map[accounts.Address]VersionedRead[accounts.CodeHash]
 	codeSize              map[accounts.Address]VersionedRead[int]
-	storage               map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
+	storage               map[accounts.Address]*storageReads
 
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
@@ -190,16 +190,43 @@ func (s *ReadSet) SetCodeSize(addr accounts.Address, tr VersionedRead[int]) {
 	readSetPut(&s.codeSize, addr, tr)
 }
 
+// storageReads keeps one address's slot reads in a slice and maps each key to
+// its index: probing returns 4 bytes instead of copying the whole read, and
+// growth appends to the slice instead of rehashing wide map values.
+type storageReads struct {
+	idx  map[accounts.StorageKey]int32
+	keys []accounts.StorageKey
+	vals []VersionedRead[uint256.Int]
+}
+
+func (r *storageReads) get(key accounts.StorageKey) (*VersionedRead[uint256.Int], bool) {
+	i, ok := r.idx[key]
+	if !ok {
+		return nil, false
+	}
+	return &r.vals[i], true
+}
+
+func (r *storageReads) set(key accounts.StorageKey, tr VersionedRead[uint256.Int]) {
+	if i, ok := r.idx[key]; ok {
+		r.vals[i] = tr
+		return
+	}
+	r.idx[key] = int32(len(r.vals))
+	r.keys = append(r.keys, key)
+	r.vals = append(r.vals, tr)
+}
+
 func (s *ReadSet) SetStorage(addr accounts.Address, key accounts.StorageKey, tr VersionedRead[uint256.Int]) {
 	if s.storage == nil {
-		s.storage = make(map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int])
+		s.storage = make(map[accounts.Address]*storageReads)
 	}
 	inner := s.storage[addr]
 	if inner == nil {
-		inner = make(map[accounts.StorageKey]VersionedRead[uint256.Int])
+		inner = &storageReads{idx: make(map[accounts.StorageKey]int32)}
 		s.storage[addr] = inner
 	}
-	inner[key] = tr
+	inner.set(key, tr)
 }
 
 func (s *ReadSet) GetAddress(addr accounts.Address) (VersionedRead[AccountView], bool) {
@@ -252,8 +279,11 @@ func (s *ReadSet) GetStorage(addr accounts.Address, key accounts.StorageKey) (Ve
 	if inner == nil {
 		return VersionedRead[uint256.Int]{}, false
 	}
-	tr, ok := inner[key]
-	return tr, ok
+	tr, ok := inner.get(key)
+	if !ok {
+		return VersionedRead[uint256.Int]{}, false
+	}
+	return *tr, true
 }
 
 // getHeader probes the read set for path and returns the type-agnostic
@@ -294,8 +324,11 @@ func (s *ReadSet) getHeader(addr accounts.Address, path AccountPath, key account
 		if inner == nil {
 			return ReadHeader{}, false
 		}
-		tr, ok := inner[key]
-		return tr.ReadHeader, ok
+		tr, ok := inner.get(key)
+		if !ok {
+			return ReadHeader{}, false
+		}
+		return tr.ReadHeader, true
 	}
 	return ReadHeader{}, false
 }
@@ -354,9 +387,8 @@ func (s *ReadSet) ScanAddr(addr accounts.Address, fn func(path AccountPath, key 
 		scanAddrPath(s.codeHash, addr, CodeHashPath, fn) +
 		scanAddrPath(s.codeSize, addr, CodeSizePath, fn)
 	if inner, ok := s.storage[addr]; ok {
-		for k, tr := range inner {
-			fn(StoragePath, k, &tr.ReadHeader)
-			inner[k] = tr
+		for i := range inner.vals {
+			fn(StoragePath, inner.keys[i], &inner.vals[i].ReadHeader)
 			n++
 		}
 	}
@@ -417,7 +449,7 @@ func (s ReadSet) Len() int {
 		len(s.selfDestruct) + len(s.createContract) +
 		len(s.code) + len(s.codeHash) + len(s.codeSize)
 	for _, inner := range s.storage {
-		n += len(inner)
+		n += len(inner.vals)
 	}
 	return n
 }
@@ -457,8 +489,8 @@ func (s *ReadSet) mergeFrom(src ReadSet) {
 		readSetPut(&s.codeSize, a, tr)
 	}
 	for a, inner := range src.storage {
-		for k, tr := range inner {
-			s.SetStorage(a, k, tr)
+		for i, k := range inner.keys {
+			s.SetStorage(a, k, inner.vals[i])
 		}
 	}
 	if len(src.access) > 0 {
@@ -514,7 +546,8 @@ func (s ReadSet) TraceReads(prefix string) {
 		fmt.Println(prefix, "RD", traceReadStr(addr, CodeSizePath, accounts.NilKey, tr.ReadHeader, valueString(CodeSizePath, tr.Val)))
 	}
 	for addr, inner := range s.storage {
-		for key, tr := range inner {
+		for i, key := range inner.keys {
+			tr := inner.vals[i]
 			fmt.Println(prefix, "RD", traceReadStr(addr, StoragePath, key, tr.ReadHeader, valueString(StoragePath, tr.Val)))
 		}
 	}
@@ -555,8 +588,8 @@ func (s ReadSet) eachHeader(yield func(ReadHeader) bool) {
 		return
 	}
 	for _, inner := range s.storage {
-		for _, tr := range inner {
-			if !yield(tr.ReadHeader) {
+		for i := range inner.vals {
+			if !yield(inner.vals[i].ReadHeader) {
 				return
 			}
 		}
@@ -2441,7 +2474,8 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			if addr.IsNil() {
 				continue
 			}
-			for key, tr := range inner {
+			for i, key := range inner.keys {
+				tr := &inner.vals[i]
 				if tr.internal {
 					continue
 				}
