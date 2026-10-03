@@ -111,23 +111,6 @@ jobs:
       CLIENT: ${{ matrix.client }}
 
     steps:
-      - name: Set reference data dir based on branch
-        run: |
-          # For pull_request events base_ref is the target branch name; for push/dispatch parse from ref.
-          BRANCH="$GITHUB_BASE_REF"
-          if [ -z "$BRANCH" ]; then
-            BRANCH="$GITHUB_REF"
-            BRANCH="${BRANCH#refs/heads/}"
-          fi
-          if [[ "$BRANCH" == release/* ]]; then
-            VERSION="${BRANCH#release/}"
-            ERIGON_REFERENCE_DIR="/opt/erigon-versions/reference-version-${VERSION}"
-          else
-            ERIGON_REFERENCE_DIR="/opt/erigon-versions/reference-version"
-          fi
-          echo "ERIGON_REFERENCE_DIR=${ERIGON_REFERENCE_DIR}" >> $GITHUB_ENV
-          echo "ERIGON_REFERENCE_DATA_DIR=${ERIGON_REFERENCE_DIR}/datadir" >> $GITHUB_ENV
-
       - name: Checkout Erigon repository
         if: matrix.client == 'erigon'
         uses: actions/checkout@v7
@@ -135,6 +118,13 @@ jobs:
           persist-credentials: false
           fetch-depth: "0"
           filter: blob:none
+
+      - name: Check QA reference data
+        if: matrix.client == 'erigon'
+        run: |
+          python3 .github/workflows/scripts/check_qa_reference.py \
+            --branch "${GITHUB_BASE_REF:-${GITHUB_REF#refs/heads/}}" \
+            --chain "$CHAIN" --github-env "$GITHUB_ENV"
 
       - name: Checkout RPC Tests Repository
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
@@ -173,6 +163,7 @@ jobs:
         working-directory: ${{ github.workspace }}
 
       - name: Pause the Erigon instance dedicated to db maintenance
+        id: pause_production
         if: matrix.client == 'erigon'
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
@@ -460,7 +451,7 @@ jobs:
           fi
 
       - name: Resume the Erigon instance dedicated to db maintenance
-        if: always() && matrix.client == 'erigon'
+        if: always() && matrix.client == 'erigon' && steps.pause_production.outcome == 'success'
         run: |
           python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
