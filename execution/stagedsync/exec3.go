@@ -523,6 +523,9 @@ func (te *txExecutor) logWrongTrieRoot(msg string) {
 		return
 	}
 	te.logger.Error(msg)
+	if dbg.BadBlockHalt {
+		os.Exit(1)
+	}
 }
 
 func (te *txExecutor) readState() *state.StateV3Buffered {
