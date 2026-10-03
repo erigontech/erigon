@@ -816,6 +816,19 @@ func (db *MdbxKV) Close() {
 }
 
 func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
+	return db.beginRo(ctx, nil)
+}
+
+// Clone opens an independent read transaction on the same snapshot. The source
+// must remain open and unused until Clone returns.
+func (tx *MdbxTx) Clone(ctx context.Context) (kv.Tx, error) {
+	if !tx.readOnly || tx.tx == nil {
+		return nil, errors.New("clone requires an open read-only transaction")
+	}
+	return tx.db.beginRo(ctx, tx.tx)
+}
+
+func (db *MdbxKV) beginRo(ctx context.Context, source *mdbx.Txn) (txn kv.Tx, err error) {
 	// don't try to acquire if the context is already done
 	select {
 	case <-ctx.Done():
@@ -848,7 +861,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		}
 	}()
 
-	tx, err := db.beginRoTxn()
+	tx, err := db.beginRoTxn(source)
 	if err != nil {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
@@ -864,14 +877,23 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	return mt, nil
 }
 
-func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
+func (db *MdbxKV) beginRoTxn(source *mdbx.Txn) (*mdbx.Txn, error) {
 	select {
 	case tx := <-db.roTxPool:
-		if err := tx.Renew(); err == nil {
+		var err error
+		if source != nil {
+			err = source.CloneInto(tx)
+		} else {
+			err = tx.Renew()
+		}
+		if err == nil {
 			return tx, nil
 		}
 		tx.Abort()
 	default:
+	}
+	if source != nil {
+		return source.Clone()
 	}
 	return db.env.BeginTxn(nil, mdbx.Readonly)
 }

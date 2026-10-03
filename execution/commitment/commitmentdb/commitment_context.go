@@ -785,6 +785,9 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 	// same transaction; only the worker's own view is per-worker.
 	sharedSource := sdc.stateReader != nil && !sdc.stateReader.BindsWorkerTx()
 	caller := resolveCallerView(tx)
+	cloner, _ := kv.UnderlyingTx(tx).(interface {
+		CloneState(context.Context) (kv.TemporalTx, error)
+	})
 
 	// Workers that cannot read on their own view fall back to this one reader
 	// over the caller's tx, taken in turns. It is built here and not in the
@@ -811,6 +814,17 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(foldCtx 
 			roTx, err = beginWorkerRo(ctx, db, pin) //nolint:gocritic
 			if err != nil {
 				return &errorTrieContext{err: err}, func() {}
+			}
+			if cloner != nil && sdc.stateReader == nil && !caller.writer && caller.mayDrift(roTx) {
+				// Release the fresh view's reader slot before acquiring one for the clone.
+				roTx.Rollback()
+				// Cloning must not overlap other uses of the source transaction.
+				pinnedMu.Lock()
+				roTx, err = cloner.CloneState(ctx)
+				pinnedMu.Unlock()
+				if err != nil && !errors.Is(err, kv.ErrSnapshotCloneUnsupported) {
+					return &errorTrieContext{err: err}, func() {}
+				}
 			}
 		}
 

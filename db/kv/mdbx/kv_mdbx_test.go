@@ -32,6 +32,7 @@ import (
 	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -1145,6 +1146,97 @@ func TestBeginRoRenewedTxnSeesLatestCommit(t *testing.T) {
 	require.Equal(t, u64tob(1), get())
 	put(2)
 	require.Equal(t, u64tob(2), get(), "a read txn renewed from the pool must start on the latest commit")
+}
+
+func TestCloneReadsSourceSnapshot(t *testing.T) {
+	db := BaseCaseDB(t)
+	put := func(v uint64) {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			return tx.Put(kv.Sequence, []byte("k"), u64tob(v))
+		}))
+	}
+	put(1)
+	source, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer source.Rollback()
+	put(2)
+
+	for range 2 {
+		func() {
+			worker, err := source.(*mdbx.MdbxTx).Clone(t.Context())
+			require.NoError(t, err)
+			defer worker.Rollback()
+			require.Equal(t, source.ViewID(), worker.ViewID())
+			c, err := worker.Cursor(kv.Sequence)
+			require.NoError(t, err)
+			defer c.Close()
+			_, v, err := c.SeekExact([]byte("k"))
+			require.NoError(t, err)
+			require.Equal(t, u64tob(1), v)
+			c.Close()
+			worker.Rollback()
+		}()
+	}
+	worker, err := source.(*mdbx.MdbxTx).Clone(t.Context())
+	require.NoError(t, err)
+	defer worker.Rollback()
+	source.Rollback()
+	put(3)
+	v, err := worker.GetOne(kv.Sequence, []byte("k"))
+	require.NoError(t, err)
+	require.Equal(t, u64tob(1), v, "a clone keeps its snapshot after the source closes")
+}
+
+func TestCloneRejectsWriteAndClosedTransactions(t *testing.T) {
+	db := BaseCaseDB(t)
+	writer, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer writer.Rollback()
+	for _, dirty := range []bool{false, true} {
+		if dirty {
+			require.NoError(t, writer.Put(kv.Sequence, []byte("k"), u64tob(1)))
+		}
+		clone, err := writer.(*mdbx.MdbxTx).Clone(t.Context())
+		require.Error(t, err)
+		require.Nil(t, clone)
+	}
+	require.NoError(t, writer.Commit())
+
+	source, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer source.Rollback()
+	source.Rollback()
+	clone, err := source.(*mdbx.MdbxTx).Clone(t.Context())
+	require.Error(t, err)
+	require.Nil(t, clone)
+}
+
+func TestCloneReadTxLimitAndCancellation(t *testing.T) {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).
+		RoTxsLimiter(semaphore.NewWeighted(2)).MustOpen()
+	defer db.Close()
+	source, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer source.Rollback()
+	cloner := source.(*mdbx.MdbxTx)
+	worker, err := cloner.Clone(t.Context())
+	require.NoError(t, err)
+	defer worker.Rollback()
+
+	_, err = cloner.Clone(kv.WithNonBlockingAcquire(t.Context()))
+	require.ErrorIs(t, err, kv.ErrReadTxLimitExceeded)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = cloner.Clone(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+
+	worker.Rollback()
+	worker.Rollback()
+	worker, err = cloner.Clone(kv.WithNonBlockingAcquire(t.Context()))
+	require.NoError(t, err, "rollback must release the clone's reader slot")
+	defer worker.Rollback()
+	_, err = db.BeginRo(kv.WithNonBlockingAcquire(t.Context()))
+	require.ErrorIs(t, err, kv.ErrReadTxLimitExceeded, "rollback must release the slot only once")
 }
 
 func TestBeginRoRenewsPooledTxn(t *testing.T) {

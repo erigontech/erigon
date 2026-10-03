@@ -125,6 +125,31 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	return tx, nil
 }
 
+// CloneState opens an independent reader on the same database and state-file
+// snapshots, without block-file reads. The source must stay open and unused
+// until CloneState returns.
+func (tx *Tx) CloneState(ctx context.Context) (kv.TemporalTx, error) {
+	if tx.Tx == nil {
+		return nil, errors.New("cannot clone a closed transaction")
+	}
+	cloner, ok := tx.Tx.(interface {
+		Clone(context.Context) (kv.Tx, error)
+	})
+	if !ok {
+		return nil, kv.ErrSnapshotCloneUnsupported
+	}
+	kvTx, err := cloner.Clone(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	pin := tx.aggtx.Pin()
+	defer pin.Close()
+	cloned := &Tx{Tx: kvTx}
+	cloned.db, cloned.ctx = tx.db, ctx
+	cloned.aggtx = pin.BeginFilesRo()
+	return cloned, nil
+}
+
 // temporalFilesPin implements kv.TemporalFilesPin: it holds a consistent
 // aggregator file snapshot and opens read txns bound to it.
 type temporalFilesPin struct {
