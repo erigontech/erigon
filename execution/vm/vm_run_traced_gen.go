@@ -70,64 +70,75 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 	stack := &callContext.Stack
 	jt := evm.jt
 
-	gasLeft, top := callContext.gas, stack.top
+	gasLeft := callContext.gas
 
 run:
 	for {
 		op = contract.GetOp(pc)
 
 		if !true {
+			sLen := stack.len()
 			switch op {
 
 			case PUSH1:
-				if top < stackLimit && gasLeft >= GasFastestStep {
+				if sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
+					codeLen := uint64(len(callContext.Contract.Code))
 					pc++
-					stack.data[top].SetUint64(uint64(contract.GetOp(pc)))
-					top++
+					if pc < codeLen {
+						callContext.Stack.pushRef().SetUint64(uint64(callContext.Contract.Code[pc]))
+					} else {
+						callContext.Stack.pushRef().Clear()
+					}
 					pc++
-					continue
+					continue run
 				}
 			case PUSH2:
-				if top < stackLimit && gasLeft >= GasFastestStep {
+				if sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top].SetUint64(uint64(contract.GetOp(pc+1))<<8 | uint64(contract.GetOp(pc+2)))
-					top++
+					codeLen := uint64(len(callContext.Contract.Code))
+					integer := callContext.Stack.pushRef()
+					switch {
+					case pc+2 < codeLen:
+						integer.SetBytes2(callContext.Contract.Code[pc+1 : pc+3])
+					case pc+1 < codeLen:
+						integer.SetUint64(uint64(callContext.Contract.Code[pc+1]) << 8)
+					default:
+						integer.Clear()
+					}
 					pc += 2
 					pc++
-					continue
+					continue run
 				}
 			case ADD:
-				if top >= 2 && gasLeft >= GasFastestStep {
+				if sLen >= 2 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					x, y := &stack.data[top-1], &stack.data[top-2]
+					x, y := callContext.Stack.pop1Peek1()
 					y.Add(x, y)
-					top--
 					pc++
-					continue
+					continue run
 				}
 			case POP:
-				if top >= 1 && gasLeft >= GasQuickStep {
+				if sLen >= 1 && gasLeft >= GasQuickStep {
 					gasLeft -= GasQuickStep
-					top--
+					callContext.Stack.drop()
 					pc++
-					continue
+					continue run
 				}
 			case JUMPDEST:
 				if gasLeft >= params.JumpdestGas {
 					gasLeft -= params.JumpdestGas
 					pc++
-					continue
+					continue run
 				}
 			case JUMP:
-				if top >= 1 && gasLeft >= GasMidStep {
+				if sLen >= 1 && gasLeft >= GasMidStep {
 					gasLeft -= GasMidStep
 					if evm.Cancelled() {
 						res, err = nil, errStopToken
 						break run
 					}
-					top--
-					pos := &stack.data[top]
+					pos := callContext.Stack.pop()
 					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
 						res, err = nil, ErrInvalidJump
 						break run
@@ -138,228 +149,216 @@ run:
 						pc++
 					}
 					pc++
-					continue
+					continue run
 				}
 			case JUMPI:
-				if top >= 2 && gasLeft >= GasSlowStep {
+				if sLen >= 2 && gasLeft >= GasSlowStep {
 					gasLeft -= GasSlowStep
 					if evm.Cancelled() {
 						res, err = nil, errStopToken
 						break run
 					}
-					top -= 2
-					if pos, cond := &stack.data[top+1], &stack.data[top]; !cond.IsZero() {
-						if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
-							res, err = nil, ErrInvalidJump
-							break run
-						}
-						pc = pos.Uint64() - 1
-						if gasLeft >= params.JumpdestGas {
-							gasLeft -= params.JumpdestGas
-							pc++
-						}
+					pos, cond := callContext.Stack.pop2()
+					if cond.IsZero() {
+						pc++
+						continue run
+					}
+					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
+						res, err = nil, ErrInvalidJump
+						break run
+					}
+					pc = pos.Uint64() - 1
+					if gasLeft >= params.JumpdestGas {
+						gasLeft -= params.JumpdestGas
+						pc++
 					}
 					pc++
-					continue
+					continue run
 				}
 			case SUB:
-				if top >= 2 && gasLeft >= GasFastestStep {
+				if sLen >= 2 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					x, y := &stack.data[top-1], &stack.data[top-2]
+					x, y := callContext.Stack.pop1Peek1()
 					y.Sub(x, y)
-					top--
 					pc++
-					continue
+					continue run
 				}
 			case MUL:
-				if top >= 2 && gasLeft >= GasFastStep {
+				if sLen >= 2 && gasLeft >= GasFastStep {
 					gasLeft -= GasFastStep
-					x, y := &stack.data[top-1], &stack.data[top-2]
+					x, y := callContext.Stack.pop1Peek1()
 					y.Mul(x, y)
-					top--
 					pc++
-					continue
+					continue run
 				}
 			case DIV:
-				if top >= 2 && gasLeft >= GasFastStep {
+				if sLen >= 2 && gasLeft >= GasFastStep {
 					gasLeft -= GasFastStep
-					x, y := &stack.data[top-1], &stack.data[top-2]
+					x, y := callContext.Stack.pop1Peek1()
 					y.Div(x, y)
-					top--
 					pc++
-					continue
+					continue run
 				}
 			case LT:
-				if top >= 2 && gasLeft >= GasFastestStep {
+				if sLen >= 2 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					x, y := &stack.data[top-1], &stack.data[top-2]
+					x, y := callContext.Stack.pop1Peek1()
 					if x.Lt(y) {
 						y.SetOne()
 					} else {
 						y.Clear()
 					}
-					top--
 					pc++
-					continue
+					continue run
 				}
 			case GT:
-				if top >= 2 && gasLeft >= GasFastestStep {
+				if sLen >= 2 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					x, y := &stack.data[top-1], &stack.data[top-2]
+					x, y := callContext.Stack.pop1Peek1()
 					if x.Gt(y) {
 						y.SetOne()
 					} else {
 						y.Clear()
 					}
-					top--
 					pc++
-					continue
+					continue run
 				}
 			case EQ:
-				if top >= 2 && gasLeft >= GasFastestStep {
+				if sLen >= 2 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					x, y := &stack.data[top-1], &stack.data[top-2]
+					x, y := callContext.Stack.pop1Peek1()
 					if x.Eq(y) {
 						y.SetOne()
 					} else {
 						y.Clear()
 					}
-					top--
 					pc++
-					continue
+					continue run
 				}
 			case AND:
-				if top >= 2 && gasLeft >= GasFastestStep {
+				if sLen >= 2 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					x, y := &stack.data[top-1], &stack.data[top-2]
+					x, y := callContext.Stack.pop1Peek1()
 					y.And(x, y)
-					top--
 					pc++
-					continue
+					continue run
 				}
 			case ISZERO:
-				if top >= 1 && gasLeft >= GasFastestStep {
+				if sLen >= 1 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					x := &stack.data[top-1]
+					x := callContext.Stack.peek()
 					if x.IsZero() {
 						x.SetOne()
 					} else {
 						x.Clear()
 					}
 					pc++
-					continue
+					continue run
 				}
 			case MLOAD:
-				if top >= 1 && callContext.Memory.allocated32(&stack.data[top-1]) && gasLeft >= GasFastestStep {
+				if sLen >= 1 && callContext.Memory.allocated32(stack.peek()) && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					x := &stack.data[top-1]
-					x.SetBytes32(callContext.Memory.store[x.Uint64():])
+					v := callContext.Stack.peek()
+					offset := v.Uint64()
+					v.SetBytes32(callContext.Memory.GetPtr(offset, 32))
 					pc++
-					continue
+					continue run
 				}
 			case MSTORE:
-				if top >= 2 && callContext.Memory.allocated32(&stack.data[top-1]) && gasLeft >= GasFastestStep {
+				if sLen >= 2 && callContext.Memory.allocated32(stack.peek()) && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					top -= 2
-					callContext.Memory.Set32(stack.data[top+1].Uint64(), &stack.data[top])
+					mStart, val := callContext.Stack.pop2()
+					callContext.Memory.Set32(mStart.Uint64(), val)
 					pc++
-					continue
+					continue run
 				}
 			case DUP1:
-				if top >= 1 && top < stackLimit && gasLeft >= GasFastestStep {
+				if sLen >= 1 && sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top] = stack.data[top-1]
-					top++
+					callContext.Stack.dup(0)
 					pc++
-					continue
+					continue run
 				}
 			case DUP2:
-				if top >= 2 && top < stackLimit && gasLeft >= GasFastestStep {
+				if sLen >= 2 && sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top] = stack.data[top-2]
-					top++
+					callContext.Stack.dup(1)
 					pc++
-					continue
+					continue run
 				}
 			case DUP3:
-				if top >= 3 && top < stackLimit && gasLeft >= GasFastestStep {
+				if sLen >= 3 && sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top] = stack.data[top-3]
-					top++
+					callContext.Stack.dup(2)
 					pc++
-					continue
+					continue run
 				}
 			case DUP4:
-				if top >= 4 && top < stackLimit && gasLeft >= GasFastestStep {
+				if sLen >= 4 && sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top] = stack.data[top-4]
-					top++
+					callContext.Stack.dup(3)
 					pc++
-					continue
+					continue run
 				}
 			case DUP5:
-				if top >= 5 && top < stackLimit && gasLeft >= GasFastestStep {
+				if sLen >= 5 && sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top] = stack.data[top-5]
-					top++
+					callContext.Stack.dup(4)
 					pc++
-					continue
+					continue run
 				}
 			case DUP6:
-				if top >= 6 && top < stackLimit && gasLeft >= GasFastestStep {
+				if sLen >= 6 && sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top] = stack.data[top-6]
-					top++
+					callContext.Stack.dup(5)
 					pc++
-					continue
+					continue run
 				}
 			case DUP7:
-				if top >= 7 && top < stackLimit && gasLeft >= GasFastestStep {
+				if sLen >= 7 && sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top] = stack.data[top-7]
-					top++
+					callContext.Stack.dup(6)
 					pc++
-					continue
+					continue run
 				}
 			case DUP8:
-				if top >= 8 && top < stackLimit && gasLeft >= GasFastestStep {
+				if sLen >= 8 && sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top] = stack.data[top-8]
-					top++
+					callContext.Stack.dup(7)
 					pc++
-					continue
+					continue run
 				}
 			case SWAP1:
-				if top >= 2 && gasLeft >= GasFastestStep {
+				if sLen >= 2 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top-1], stack.data[top-2] = stack.data[top-2], stack.data[top-1]
+					callContext.Stack.swap(1)
 					pc++
-					continue
+					continue run
 				}
 			case SWAP2:
-				if top >= 3 && gasLeft >= GasFastestStep {
+				if sLen >= 3 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top-1], stack.data[top-3] = stack.data[top-3], stack.data[top-1]
+					callContext.Stack.swap(2)
 					pc++
-					continue
+					continue run
 				}
 			case SWAP3:
-				if top >= 4 && gasLeft >= GasFastestStep {
+				if sLen >= 4 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top-1], stack.data[top-4] = stack.data[top-4], stack.data[top-1]
+					callContext.Stack.swap(3)
 					pc++
-					continue
+					continue run
 				}
 			case SWAP4:
-				if top >= 5 && gasLeft >= GasFastestStep {
+				if sLen >= 5 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
-					stack.data[top-1], stack.data[top-5] = stack.data[top-5], stack.data[top-1]
+					callContext.Stack.swap(4)
 					pc++
-					continue
+					continue run
 				}
 
 			}
-			callContext.gas, stack.top = gasLeft, top
+			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
 		if true && debug {
@@ -456,13 +455,13 @@ run:
 		}
 
 		pc, res, err = operation.execute(pc, evm, callContext)
-		gasLeft, top = callContext.gas, stack.top
+		gasLeft = callContext.gas
 		if err != nil {
 			break
 		}
 		pc++
 	}
-	callContext.gas, stack.top = gasLeft, top
+	callContext.gas = gasLeft
 
 	if errors.Is(err, errStopToken) {
 		err = nil

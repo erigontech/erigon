@@ -1,5 +1,6 @@
-// gen writes the interpreter's generated code from vm_run.go and the fastOps table:
-// the fast-path cases inside vm_run.go, vm_run_traced_gen.go (func run renamed to
+// gen writes the interpreter's generated code from vm_run.go, instructions.go and
+// the fastOps table: the fast-path cases inside vm_run.go, whose bodies are the
+// ops' execute funcs inlined, vm_run_traced_gen.go (func run renamed to
 // runTraced, with runTracing set to true) and fast_path_gen_test.go.
 // With -check it reports stale files instead of writing them.
 package main
@@ -15,62 +16,51 @@ import (
 	"log"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 )
 
 // fastOp is one opcode the untraced loop runs inline, without the jump table.
 // Every entry must charge only constant gas and must not fail once its checks
 // pass. TestFastPathMatchesJumpTables pins the constants against all forks, and
-// TestRunMatchesRunTraced pins the bodies against the jump-table ops.
+// TestRunMatchesRunTraced pins the inlined bodies against the jump-table ops.
 type fastOp struct {
 	name       string
-	execute    string // jump-table execute func; "" for the makeDup closures
+	execute    string // jump-table execute func, inlined as the case body; "" for the makeDup closures
 	gas        string
 	pop, push  int
 	memorySize string // set for memory ops, which take the fast path only when memory need not grow
-	body       string // works on the register copies gasLeft and top
+	jump       bool   // a taken jump also charges the JUMPDEST it lands on and steps over it
 }
 
-const (
-	cancelled   = "if evm.Cancelled() {\nres, err = nil, errStopToken\nbreak run\n}\n"
-	invalidJump = "if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {\nres, err = nil, ErrInvalidJump\nbreak run\n}\n"
-	// A valid destination holds a JUMPDEST, so the jump charges it and steps over it.
-	landOnJumpdest = "pc = pos.Uint64() - 1\nif gasLeft >= params.JumpdestGas {\ngasLeft -= params.JumpdestGas\npc++\n}"
-)
-
 func fastOps() []fastOp {
-	binary := func(name, fn, gas, expr string) fastOp {
-		return fastOp{name: name, execute: fn, gas: gas, pop: 2, push: 1, body: "x, y := &stack.data[top-1], &stack.data[top-2]\n" + expr + "\ntop--"}
-	}
-	compare := func(name, fn, method string) fastOp {
-		return binary(name, fn, "GasFastestStep", "if x."+method+"(y) {\ny.SetOne()\n} else {\ny.Clear()\n}")
+	op := func(name, execute, gas string, pop, push int) fastOp {
+		return fastOp{name: name, execute: execute, gas: gas, pop: pop, push: push}
 	}
 	ops := []fastOp{
-		// GetOp returns STOP, which is 0, past the end of the code: the zero padding a truncated PUSH reads.
-		{name: "PUSH1", execute: "opPush1", gas: "GasFastestStep", push: 1, body: "pc++\nstack.data[top].SetUint64(uint64(contract.GetOp(pc)))\ntop++"},
-		{name: "PUSH2", execute: "opPush2", gas: "GasFastestStep", push: 1, body: "stack.data[top].SetUint64(uint64(contract.GetOp(pc+1))<<8 | uint64(contract.GetOp(pc+2)))\ntop++\npc += 2"},
-		binary("ADD", "opAdd", "GasFastestStep", "y.Add(x, y)"),
-		{name: "POP", execute: "opPop", gas: "GasQuickStep", pop: 1, body: "top--"},
-		{name: "JUMPDEST", execute: "opJumpdest", gas: "params.JumpdestGas"},
-		{name: "JUMP", execute: "opJump", gas: "GasMidStep", pop: 1, body: cancelled + "top--\npos := &stack.data[top]\n" + invalidJump + landOnJumpdest},
-		{name: "JUMPI", execute: "opJumpi", gas: "GasSlowStep", pop: 2, body: cancelled + "top -= 2\nif pos, cond := &stack.data[top+1], &stack.data[top]; !cond.IsZero() {\n" + invalidJump + landOnJumpdest + "\n}"},
-		binary("SUB", "opSub", "GasFastestStep", "y.Sub(x, y)"),
-		binary("MUL", "opMul", "GasFastStep", "y.Mul(x, y)"),
-		binary("DIV", "opDiv", "GasFastStep", "y.Div(x, y)"),
-		compare("LT", "opLt", "Lt"),
-		compare("GT", "opGt", "Gt"),
-		compare("EQ", "opEq", "Eq"),
-		binary("AND", "opAnd", "GasFastestStep", "y.And(x, y)"),
-		{name: "ISZERO", execute: "opIszero", gas: "GasFastestStep", pop: 1, push: 1, body: "x := &stack.data[top-1]\nif x.IsZero() {\nx.SetOne()\n} else {\nx.Clear()\n}"},
-		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad", body: "x := &stack.data[top-1]\nx.SetBytes32(callContext.Memory.store[x.Uint64():])"},
-		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore", body: "top -= 2\ncallContext.Memory.Set32(stack.data[top+1].Uint64(), &stack.data[top])"},
+		op("PUSH1", "opPush1", "GasFastestStep", 0, 1),
+		op("PUSH2", "opPush2", "GasFastestStep", 0, 1),
+		op("ADD", "opAdd", "GasFastestStep", 2, 1),
+		op("POP", "opPop", "GasQuickStep", 1, 0),
+		op("JUMPDEST", "opJumpdest", "params.JumpdestGas", 0, 0),
+		{name: "JUMP", execute: "opJump", gas: "GasMidStep", pop: 1, jump: true},
+		{name: "JUMPI", execute: "opJumpi", gas: "GasSlowStep", pop: 2, jump: true},
+		op("SUB", "opSub", "GasFastestStep", 2, 1),
+		op("MUL", "opMul", "GasFastStep", 2, 1),
+		op("DIV", "opDiv", "GasFastStep", 2, 1),
+		op("LT", "opLt", "GasFastestStep", 2, 1),
+		op("GT", "opGt", "GasFastestStep", 2, 1),
+		op("EQ", "opEq", "GasFastestStep", 2, 1),
+		op("AND", "opAnd", "GasFastestStep", 2, 1),
+		op("ISZERO", "opIszero", "GasFastestStep", 1, 1),
+		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad"},
+		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore"},
 	}
 	for n := 1; n <= 8; n++ {
-		ops = append(ops, fastOp{name: fmt.Sprintf("DUP%d", n), gas: "GasFastestStep", pop: n, push: n + 1, body: fmt.Sprintf("stack.data[top] = stack.data[top-%d]\ntop++", n)})
+		ops = append(ops, op(fmt.Sprintf("DUP%d", n), "", "GasFastestStep", n, n+1))
 	}
 	for n := 1; n <= 4; n++ {
-		swap := fmt.Sprintf("stack.data[top-1], stack.data[top-%d] = stack.data[top-%d], stack.data[top-1]", n+1, n+1)
-		ops = append(ops, fastOp{name: fmt.Sprintf("SWAP%d", n), execute: fmt.Sprintf("opSwap%d", n), gas: "GasFastestStep", pop: n + 1, push: n + 1, body: swap})
+		ops = append(ops, op(fmt.Sprintf("SWAP%d", n), fmt.Sprintf("opSwap%d", n), "GasFastestStep", n+1, n+1))
 	}
 	return ops
 }
@@ -80,41 +70,168 @@ const (
 	endCases   = "// End of generated cases.\n"
 )
 
-func fastCases(ops []fastOp) string {
+// runLocals are run's variables an inlined body may use or the inliner writes.
+var runLocals = []string{"pc", "evm", "callContext", "res", "err", "gasLeft", "sLen", "stack", "contract", "op"}
+
+// inlineBody returns o's execute func body as statements of run's loop: its
+// parameters renamed to run's pc, evm and callContext, and each return turned
+// into a step to the next op or a break out of the loop.
+func inlineBody(instructions []byte, o fastOp) string {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "instructions.go", instructions, parser.SkipObjectResolution)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var typ *ast.FuncType
+	var body *ast.BlockStmt
+	rename := map[string]string{}
+	for _, d := range f.Decls {
+		fn, ok := d.(*ast.FuncDecl)
+		switch {
+		case !ok:
+		case fn.Name.Name == o.execute:
+			typ, body = fn.Type, fn.Body
+		case o.execute == "" && fn.Name.Name == "makeDup":
+			// The DUP closure reads depth, which makeDup derives from the DUP number.
+			n, _ := strconv.Atoi(strings.TrimPrefix(o.name, "DUP"))
+			rename["depth"] = strconv.Itoa(n - 1)
+			for n := range ast.Preorder(fn.Body) {
+				if lit, ok := n.(*ast.FuncLit); ok {
+					typ, body = lit.Type, lit.Body
+				}
+			}
+		}
+	}
+	if body == nil {
+		log.Fatalf("%s: execute func %q not found in instructions.go", o.name, o.execute)
+	}
+	i := 0
+	for _, field := range typ.Params.List {
+		for _, name := range field.Names {
+			rename[name.Name] = runLocals[i]
+			i++
+		}
+	}
+	fields := map[*ast.Ident]bool{}
+	for n := range ast.Preorder(body) {
+		switch n := n.(type) {
+		case *ast.FuncLit:
+			log.Fatalf("%s: a closure in the body would take the inlined returns", o.name)
+		case *ast.SelectorExpr:
+			fields[n.Sel] = true
+			if x, ok := n.X.(*ast.Ident); ok && rename[x.Name] == "callContext" && n.Sel.Name == "gas" {
+				log.Fatalf("%s: the body reads gas, which run keeps in gasLeft", o.name)
+			}
+		case *ast.AssignStmt:
+			for _, l := range n.Lhs {
+				if id, ok := l.(*ast.Ident); ok && n.Tok == token.DEFINE && slices.Contains(runLocals, id.Name) {
+					log.Fatalf("%s: the body declares %s, which shadows run's", o.name, id.Name)
+				}
+			}
+		}
+	}
+	for n := range ast.Preorder(body) {
+		if id, ok := n.(*ast.Ident); ok && !fields[id] && rename[id.Name] != "" {
+			id.Name = rename[id.Name]
+		}
+	}
+	for n := range ast.Preorder(body) {
+		switch n := n.(type) {
+		case *ast.BlockStmt:
+			n.List = inlineReturns(n.List, o)
+		case *ast.CaseClause:
+			n.Body = inlineReturns(n.Body, o)
+		}
+	}
+	var b strings.Builder
+	for _, s := range body.List {
+		var buf bytes.Buffer
+		if err := format.Node(&buf, fset, s); err != nil {
+			log.Fatal(err)
+		}
+		// New nodes carry no positions, so the printer can leave blank lines around them.
+		for l := range strings.Lines(buf.String()) {
+			if strings.TrimSpace(l) != "" {
+				b.WriteString(l)
+			}
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// inlineReturns replaces each `return pc, res, err` in list. A return without
+// an error moves to the next op; one with an error leaves the loop.
+func inlineReturns(list []ast.Stmt, o fastOp) []ast.Stmt {
+	var out []ast.Stmt
+	for _, s := range list {
+		ret, ok := s.(*ast.ReturnStmt)
+		if !ok {
+			out = append(out, s)
+			continue
+		}
+		next, res, err := ret.Results[0], ret.Results[1], ret.Results[2]
+		if id, ok := err.(*ast.Ident); !ok || id.Name != "nil" {
+			out = append(out,
+				&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("res"), ast.NewIdent("err")}, Tok: token.ASSIGN, Rhs: []ast.Expr{res, err}},
+				&ast.BranchStmt{Tok: token.BREAK, Label: ast.NewIdent("run")})
+			continue
+		}
+		if id, ok := res.(*ast.Ident); !ok || id.Name != "nil" {
+			log.Fatalf("%s: a successful return with data cannot stay in the loop", o.name)
+		}
+		if id, ok := next.(*ast.Ident); !ok || id.Name != "pc" {
+			out = append(out, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("pc")}, Tok: token.ASSIGN, Rhs: []ast.Expr{next}})
+			if o.jump {
+				// A valid destination holds a JUMPDEST: charge it here and step over it.
+				jumpdestGas := &ast.SelectorExpr{X: ast.NewIdent("params"), Sel: ast.NewIdent("JumpdestGas")}
+				out = append(out, &ast.IfStmt{
+					Cond: &ast.BinaryExpr{X: ast.NewIdent("gasLeft"), Op: token.GEQ, Y: jumpdestGas},
+					Body: &ast.BlockStmt{List: []ast.Stmt{
+						&ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent("gasLeft")}, Tok: token.SUB_ASSIGN, Rhs: []ast.Expr{jumpdestGas}},
+						&ast.IncDecStmt{X: ast.NewIdent("pc"), Tok: token.INC},
+					}},
+				})
+			}
+		}
+		out = append(out,
+			&ast.IncDecStmt{X: ast.NewIdent("pc"), Tok: token.INC},
+			&ast.BranchStmt{Tok: token.CONTINUE, Label: ast.NewIdent("run")})
+	}
+	return out
+}
+
+func fastCases(instructions []byte, ops []fastOp) string {
 	var b strings.Builder
 	for _, o := range ops {
 		var cond []string
 		if o.pop > 0 {
-			cond = append(cond, fmt.Sprintf("top >= %d", o.pop))
+			cond = append(cond, fmt.Sprintf("sLen >= %d", o.pop))
 		}
 		switch o.push - o.pop {
 		case 1:
-			cond = append(cond, "top < stackLimit")
+			cond = append(cond, "sLen < stackLimit")
 		case 0, -1, -2:
 		default:
 			log.Fatalf("%s: stack growth %d needs its own bound", o.name, o.push-o.pop)
 		}
 		if o.memorySize != "" {
-			cond = append(cond, "callContext.Memory.allocated32(&stack.data[top-1])")
+			cond = append(cond, "callContext.Memory.allocated32(stack.peek())")
 		}
 		cond = append(cond, "gasLeft >= "+o.gas)
-		fmt.Fprintf(&b, "case %s:\nif %s {\ngasLeft -= %s\n", o.name, strings.Join(cond, " && "), o.gas)
-		if o.body != "" {
-			b.WriteString(o.body + "\n")
-		}
-		b.WriteString("pc++\ncontinue\n}\n")
+		fmt.Fprintf(&b, "case %s:\nif %s {\ngasLeft -= %s\n%s}\n", o.name, strings.Join(cond, " && "), o.gas, inlineBody(instructions, o))
 	}
 	return b.String()
 }
 
-func withFastCases(src []byte, ops []fastOp) []byte {
+func withFastCases(src, instructions []byte, ops []fastOp) []byte {
 	s := string(src)
 	i := strings.Index(s, beginCases)
 	j := strings.Index(s, endCases)
 	if i < 0 || j < i {
 		log.Fatal("vm_run.go: generated-cases markers not found")
 	}
-	out, err := format.Source([]byte(s[:i+len(beginCases)] + fastCases(ops) + s[j:]))
+	out, err := format.Source([]byte(s[:i+len(beginCases)] + fastCases(instructions, ops) + s[j:]))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -174,8 +291,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	instructions, err := os.ReadFile("instructions.go")
+	if err != nil {
+		log.Fatal(err)
+	}
 	ops := fastOps()
-	run := withFastCases(src, ops)
+	run := withFastCases(src, instructions, ops)
 	files := []struct {
 		name string
 		data []byte
