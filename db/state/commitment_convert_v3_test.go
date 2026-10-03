@@ -150,6 +150,7 @@ func dropLeafOnlyRewrites(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregato
 	require.NoError(t, comp.Compress())
 	comp.Close()
 	from, to := commitmentFileRange(t, newest)
+	agg.CloseFilesNoReopen()
 	accessors, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, fmt.Sprintf("*-commitment.%d-%d.*", from, to)))
 	require.NoError(t, err)
 	for _, p := range accessors {

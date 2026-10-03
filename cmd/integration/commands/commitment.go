@@ -406,7 +406,10 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		}
 	}
 
+	temporalDB := db.(*temporal.DB)
+	agg := temporalDB.Agg().(*dbstate.Aggregator)
 	if !resume {
+		agg.CloseFilesNoReopen()
 		// remove all existing state commitment snapshots
 		// when not rebuilding with history, only delete domain files (preserve existing history/index)
 		if err := app.DeleteStateSnapshots(app.DeleteStateSnapshotsArgs{
@@ -446,8 +449,6 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		return nil
 	}
 
-	temporalDB := db.(*temporal.DB)
-	agg := temporalDB.Agg().(*dbstate.Aggregator)
 	if err = temporalDB.OpenStateSnapshots(ctx); err != nil { // reopen after snapshot file deletions
 		return fmt.Errorf("failed to re-open aggregator: %w", err)
 	}
