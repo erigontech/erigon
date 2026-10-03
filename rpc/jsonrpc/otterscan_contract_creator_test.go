@@ -17,12 +17,20 @@
 package jsonrpc
 
 import (
+	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc"
 )
 
 func TestGetContractCreator(t *testing.T) {
@@ -51,4 +59,52 @@ func TestGetContractCreator(t *testing.T) {
 		require.NoError(err)
 		require.Nil(results)
 	})
+}
+
+func TestGetContractCreatorDelegatedEOA(t *testing.T) {
+	senderKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	authorityKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(senderKey.PublicKey)
+	authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+	delegate := common.HexToAddress("0x000000000000000000000000000000000000cafe")
+
+	pragueConfig := chain.TestChainOsakaConfig.Copy()
+	pragueConfig.OsakaTime = nil
+	auth, err := types.SignAuthorization(authorityKey, *pragueConfig.ChainID, delegate, 0)
+	require.NoError(t, err)
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: pragueConfig,
+			Alloc:  types.GenesisAlloc{sender: {Balance: big.NewInt(1_000_000_000_000_000_000)}},
+		}),
+		execmoduletester.WithKey(senderKey),
+	)
+	signer := types.LatestSignerForChainID(pragueConfig.ChainID)
+	c, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
+		to := common.HexToAddress("0x000000000000000000000000000000000000beef")
+		txn, err := types.SignTx(&types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: b.TxNonce(sender), GasLimit: 500_000, To: &to},
+				ChainID:  *pragueConfig.ChainID,
+				TipCap:   *uint256.NewInt(1_000_000_000),
+				FeeCap:   *uint256.NewInt(10_000_000_000),
+			},
+			Authorizations: []types.Authorization{auth},
+		}, *signer, senderKey)
+		require.NoError(t, err)
+		b.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
+	hasCode, err := api.HasCode(m.Ctx, authority, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.True(t, hasCode, "authorization must have been applied")
+
+	creator, err := api.GetContractCreator(m.Ctx, authority)
+	require.NoError(t, err)
+	require.Nil(t, creator)
 }
