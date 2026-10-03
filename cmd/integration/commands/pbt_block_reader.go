@@ -66,10 +66,3 @@ type pbtBlockFilesTx struct {
 }
 
 func (tx pbtBlockFilesTx) BlockFilesRoTx() *blocksnapshots.View { return tx.view }
-
-type pbtTemporalBlockFilesTx struct {
-	kv.TemporalTx
-	view *blocksnapshots.View
-}
-
-func (tx pbtTemporalBlockFilesTx) BlockFilesRoTx() *blocksnapshots.View { return tx.view }

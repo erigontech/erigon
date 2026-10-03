@@ -94,11 +94,7 @@ func pbtVerifyUsageError(err error) error {
 func verifyPBTFilesWithMaxCodeSize(ctx context.Context, dataDir, snapshotPath, preimagesPath string, block, maxCodeSize uint64, scratchDir string) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			if recoveredErr, ok := recovered.(error); ok {
-				err = fmt.Errorf("%w: malformed input: %w", errVerifyPBTInvalid, recoveredErr)
-			} else {
-				err = fmt.Errorf("%w: malformed input: %v", errVerifyPBTInvalid, recovered)
-			}
+			err = fmt.Errorf("%w: malformed input: %v", errVerifyPBTInvalid, recovered)
 		}
 	}()
 

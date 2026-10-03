@@ -245,30 +245,20 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 	if err != nil {
 		return err
 	}
-	readbackRecords := uint64(0)
-	nextReadbackProgress := time.Time{}
-	reportReadback := func(key []byte) {
-		readbackRecords++
-		now := time.Now()
-		if now.Before(nextReadbackProgress) {
-			return
-		}
-		nextReadbackProgress = now.Add(30 * time.Second)
-		logger.Info("PBT export progress", "phase", "snapshot readback", "records", readbackRecords, "key_prefix", fmt.Sprintf("%x", key[:min(len(key), 8)]))
-	}
+	readbackProgress := pbtVerifyProgress{logger: logger, msg: "PBT export progress", phase: "snapshot readback"}
 	snapshotMeta, err := artifact.ReadSnapshotStreamAt(snapshotRead, snapshotInfo.Size(), artifact.SnapshotStreamCallbacks{
 		Header: func(header artifact.Header) error {
-			reportReadback(header.AddressHash[:])
+			readbackProgress.add(header.AddressHash[:])
 			return nil
 		},
 		Code: func(group artifact.Group) error {
-			reportReadback(group.StemHash[:])
+			readbackProgress.add(group.StemHash[:])
 			return nil
 		},
 		Storage: func(address common.Hash, groups func(func(artifact.Group) error) error) error {
-			reportReadback(address[:])
+			readbackProgress.add(address[:])
 			return groups(func(group artifact.Group) error {
-				reportReadback(group.StemHash[:])
+				readbackProgress.add(group.StemHash[:])
 				return nil
 			})
 		},
@@ -285,14 +275,9 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 	if err != nil {
 		return err
 	}
-	joined := uint64(0)
-	nextJoinProgress := time.Now().Add(30 * time.Second)
+	joinProgress := pbtVerifyProgress{logger: logger, msg: "PBT export progress", phase: "preimage join", next: time.Now().Add(30 * time.Second)}
 	if err := artifact.JoinAt(snapshotRead, snapshotInfo.Size(), preimageRead, preimageInfo.Size(), eip8297.HashBytes, func(address common.Address, _ [32]byte) error {
-		joined++
-		if now := time.Now(); !now.Before(nextJoinProgress) {
-			nextJoinProgress = now.Add(30 * time.Second)
-			logger.Info("PBT export progress", "phase", "preimage join", "records", joined, "key_prefix", fmt.Sprintf("%x", address[:8]))
-		}
+		joinProgress.add(address[:])
 		return nil
 	}, scratchDir); err != nil {
 		return fmt.Errorf("export-pbt: join preimages: %w", err)

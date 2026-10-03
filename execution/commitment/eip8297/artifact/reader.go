@@ -55,8 +55,7 @@ func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamC
 	var previousAddress common.Hash
 	var previousStem common.Hash
 	var previousStorage common.Hash
-	var haveStorage bool
-	var storageHasGroups bool
+	storageHasGroups := true
 	phase := byte(0)
 	for c.offset < c.limit {
 		tag, err := c.byte()
@@ -109,10 +108,10 @@ func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamC
 				headers = &artifactCursor{src: src, limit: c.offset - 1}
 			}
 			phase = 2
-			if haveStorage && !storageHasGroups {
+			if !storageHasGroups {
 				return meta, fmt.Errorf("%w: invalid storage account", ErrMalformed)
 			}
-			addressBytes, err := c.bytesCopy(32)
+			addressBytes, err := c.bytes(32)
 			if err != nil {
 				return meta, fmt.Errorf("%w: storage address: %w", ErrMalformed, err)
 			}
@@ -124,7 +123,6 @@ func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamC
 				return meta, fmt.Errorf("%w: storage header: %w", ErrMalformed, err)
 			}
 			previousStorage = address
-			haveStorage = true
 			storageHasGroups = false
 			meta.StorageCount++
 			groups := func(yield func(Group) error) error {
@@ -171,7 +169,7 @@ func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamC
 			return meta, fmt.Errorf("%w: unknown tag %#x", ErrMalformed, tag)
 		}
 	}
-	if haveStorage && !storageHasGroups {
+	if !storageHasGroups {
 		return meta, fmt.Errorf("%w: invalid storage account", ErrMalformed)
 	}
 	trailer := artifactCursor{src: src, offset: recordLimit, limit: size}
@@ -179,11 +177,11 @@ func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamC
 	if err != nil || end != 0x07 {
 		return meta, fmt.Errorf("%w: missing end tag", ErrMalformed)
 	}
-	root, err := trailer.bytesCopy(32)
-	if err != nil || trailer.offset != size {
+	root, err := trailer.bytes(32)
+	if err != nil {
 		return meta, fmt.Errorf("%w: invalid root trailer", ErrMalformed)
 	}
-	copy(meta.Root[:], root)
+	meta.Root = common.Hash(root)
 	hash := keccak.NewFastKeccak()
 	if _, err := io.Copy(hash, io.NewSectionReader(src, 0, size)); err != nil {
 		return meta, err
@@ -227,14 +225,6 @@ func (c *artifactCursor) bytes(size int) ([]byte, error) {
 	return data, nil
 }
 
-func (c *artifactCursor) bytesCopy(size int) ([]byte, error) {
-	data, err := c.bytes(size)
-	if err != nil {
-		return nil, err
-	}
-	return bytes.Clone(data), nil
-}
-
 func (c *artifactCursor) byte() (byte, error) {
 	data, err := c.bytes(1)
 	if err != nil {
@@ -245,11 +235,11 @@ func (c *artifactCursor) byte() (byte, error) {
 
 func readHeaderAt(c *artifactCursor, kind byte) (Header, error) {
 	var header Header
-	address, err := c.bytesCopy(32)
+	address, err := c.bytes(32)
 	if err != nil {
 		return header, err
 	}
-	copy(header.AddressHash[:], address)
+	header.AddressHash = common.Hash(address)
 	header.Kind = kind
 	if header.Nonce, err = readIntegerAt(c, 8); err != nil {
 		return Header{}, err
@@ -263,21 +253,21 @@ func readHeaderAt(c *artifactCursor, kind byte) (Header, error) {
 			return Header{}, ErrInvalidAccount
 		}
 	case 1:
-		codeHash, err := c.bytesCopy(32)
+		codeHash, err := c.bytes(32)
 		if err != nil {
 			return Header{}, err
 		}
-		copy(header.CodeHash[:], codeHash)
+		header.CodeHash = common.Hash(codeHash)
 		header.CodeSize, err = readIntegerAt(c, 4)
 		if err != nil || len(header.CodeSize) == 0 {
 			return Header{}, fmt.Errorf("%w: invalid code size", ErrInvalidAccount)
 		}
 	case 2:
-		target, err := c.bytesCopy(20)
+		target, err := c.bytes(20)
 		if err != nil {
 			return Header{}, err
 		}
-		copy(header.Target[:], target)
+		header.Target = common.Address(target)
 	default:
 		return Header{}, fmt.Errorf("%w: unknown account kind %d", ErrMalformed, kind)
 	}
@@ -307,11 +297,11 @@ func readHeaderAt(c *artifactCursor, kind byte) (Header, error) {
 
 func readGroupAt(c *artifactCursor, tag byte) (Group, error) {
 	var group Group
-	stem, err := c.bytesCopy(32)
+	stem, err := c.bytes(32)
 	if err != nil {
 		return group, err
 	}
-	copy(group.StemHash[:], stem)
+	group.StemHash = common.Hash(stem)
 	entries := 1
 	if tag != 5 {
 		count, err := c.byte()
@@ -348,10 +338,11 @@ func readIntegerAt(c *artifactCursor, width int) ([]byte, error) {
 	if err != nil || int(length) > width {
 		return nil, ErrMalformed
 	}
-	value, err := c.bytesCopy(int(length))
+	value, err := c.bytes(int(length))
 	if err != nil {
 		return nil, err
 	}
+	value = bytes.Clone(value)
 	if len(value) != 0 && value[0] == 0 {
 		return nil, fmt.Errorf("%w: leading zero", ErrMalformed)
 	}

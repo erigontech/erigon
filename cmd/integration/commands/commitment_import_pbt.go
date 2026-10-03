@@ -213,12 +213,7 @@ func importPBTWithHooks(ctx context.Context, dataDir, snapshotPath, chainName st
 	if err != nil {
 		return fmt.Errorf("commitment import-pbt: open target read-only: %w", err)
 	}
-	rawDBOpen := true
-	defer func() {
-		if rawDBOpen {
-			rawDB.Close()
-		}
-	}()
+	defer rawDB.Close()
 	blockReader, blockView, closeBlockReader, err := openPBTBlockReader(ctx, dirs, rawDB, logger)
 	if err != nil {
 		return err
@@ -242,7 +237,6 @@ func importPBTWithHooks(ctx context.Context, dataDir, snapshotPath, chainName st
 	closeBlockReader()
 	closeBlockReader = nil
 	rawDB.Close()
-	rawDBOpen = false
 
 	stageRoot, err := os.MkdirTemp(filepath.Dir(dirs.DataDir), ".import-pbt-")
 	if err != nil {
@@ -440,10 +434,8 @@ func verifyPBTImportRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		return err
 	}
 	defer rawDB.Close()
-	if _, err := verifyPBTRows(ctx, rawDB, rawDB, dirs, settings, kv.CommitmentBinDomain, "commitment import-pbt: verify written rows", logger); err != nil {
-		return err
-	}
-	return nil
+	_, err = verifyPBTRows(ctx, rawDB, rawDB, dirs, settings, kv.CommitmentBinDomain, "commitment import-pbt: verify written rows", logger)
+	return err
 }
 
 func removePBTImportCheckpoint(ctx context.Context, dirs datadir.Dirs, blockHash common.Hash, blockNum uint64) error {
@@ -658,10 +650,8 @@ func movePBTImportBinFilesWithRename(names []string, stageDirs, targetDirs datad
 		moved = append(moved, destination)
 		destinationDirs[filepath.Dir(destination)] = struct{}{}
 	}
-	for destinationDir := range destinationDirs {
-		if err := dir.FsyncDir(destinationDir); err != nil {
-			return moved, err
-		}
+	if err := fsyncPBTDirs(destinationDirs); err != nil {
+		return moved, err
 	}
 	return moved, nil
 }
@@ -731,10 +721,8 @@ func removePBTImportFiles(files []string) error {
 		}
 		directories[filepath.Dir(file)] = struct{}{}
 	}
-	for directory := range directories {
-		if err := dir.FsyncDir(directory); err != nil {
-			return err
-		}
+	if err := fsyncPBTDirs(directories); err != nil {
+		return err
 	}
 	return nil
 }

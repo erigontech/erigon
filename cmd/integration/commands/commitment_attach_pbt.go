@@ -104,6 +104,9 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 }
 
 func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName string, logger log.Logger, hooks pbtAttachHooks) error {
+	if hooks.step == nil {
+		hooks.step = func(string) error { return nil }
+	}
 	if hooks.leafStamps == nil {
 		hooks.leafStamps = validatePBTAttachLeafStamps
 	}
@@ -207,33 +210,23 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	} else if err := validatePBTAttachPublishedFiles(publishedDirs, publishedSettings.StepSize, txNum); err != nil {
 		return err
 	}
-	nodePoint := struct {
-		block    uint64
-		tx       uint64
-		hexRoot  common.Hash
-		progress uint64
-	}{}
+	var nodeBlock, nodeTx, nodeProgress uint64
+	var nodeHexRoot common.Hash
 	if marker == nil {
-		nodeBlock, nodeTx, nodeHexRoot, err := pbtAttachNodeHexState(ctx, nodeDirs, nodeSettings, nodeV3, logger)
+		nodeBlock, nodeTx, nodeHexRoot, err = pbtAttachNodeHexState(ctx, nodeDirs, nodeSettings, nodeV3, logger)
 		if err != nil {
 			return err
 		}
-		executionProgress, err := pbtAttachExecutionProgress(ctx, nodeDirs)
+		nodeProgress, err = pbtAttachExecutionProgress(ctx, nodeDirs)
 		if err != nil {
 			return err
 		}
-		nodePoint = struct {
-			block    uint64
-			tx       uint64
-			hexRoot  common.Hash
-			progress uint64
-		}{nodeBlock, nodeTx, nodeHexRoot, executionProgress}
 		if nodeBlock != blockNum || nodeTx != txNum {
 			_, _, blockEnd, _, _, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
 			if err != nil {
 				blockEnd = true
 			}
-			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, executionProgress, blockNum, txNum, blockEnd)
+			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, nodeProgress, blockNum, txNum, blockEnd)
 		}
 	}
 	blockHash, headerRoot, blockEnd, afterFork, maxTxNum, err := pbtAttachBlockEnd(ctx, nodeDirs, blockNum, txNum)
@@ -241,10 +234,10 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		return err
 	}
 	if marker == nil {
-		if nodePoint.progress > blockNum {
-			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodePoint.block, nodePoint.tx, nodePoint.progress, blockNum, txNum, blockEnd)
+		if nodeProgress > blockNum {
+			return pbtAttachNodePointError(nodeDirs.DataDir, chainName, nodeBlock, nodeTx, nodeProgress, blockNum, txNum, blockEnd)
 		}
-		if nodePoint.progress == blockNum && maxTxNum < txNum {
+		if nodeProgress == blockNum && maxTxNum < txNum {
 			return fmt.Errorf("commitment attach-pbt: node is behind conversion txNum %d", txNum)
 		}
 	}
@@ -265,8 +258,8 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 		if !publishedHexFound {
 			return fmt.Errorf("commitment attach-pbt: published hex root is missing at (%d, %d)", blockNum, txNum)
 		}
-		if nodePoint.hexRoot != publishedHexRoot {
-			return fmt.Errorf("commitment attach-pbt: node hex root %s differs from published root %s at (%d, %d)", nodePoint.hexRoot, publishedHexRoot, blockNum, txNum)
+		if nodeHexRoot != publishedHexRoot {
+			return fmt.Errorf("commitment attach-pbt: node hex root %s differs from published root %s at (%d, %d)", nodeHexRoot, publishedHexRoot, blockNum, txNum)
 		}
 		if blockEnd {
 			wantHeaderRoot := publishedHexRoot
@@ -313,19 +306,19 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	} else if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, Settings: finalSettings}); err != nil {
 		return err
 	}
-	if err := runPBTAttachStepHook(hooks.step, "marker"); err != nil {
+	if err := hooks.step("marker"); err != nil {
 		return err
 	}
 	if err := adoptPBTFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
 		return err
 	}
-	if err := runPBTAttachStepHook(hooks.step, "swap"); err != nil {
+	if err := hooks.step("swap"); err != nil {
 		return err
 	}
 	if err := resetPBTExecution(ctx, nodeDirs, publishedSettings, logger); err != nil {
 		return err
 	}
-	if err := runPBTAttachStepHook(hooks.step, "reset"); err != nil {
+	if err := hooks.step("reset"); err != nil {
 		return err
 	}
 	if blockEnd {
@@ -354,17 +347,10 @@ func attachPBTWithHooks(ctx context.Context, nodePath, publishedPath, chainName 
 	if err := dbstate.WriteErigonDBSettings(nodeDirs, finalSettings); err != nil {
 		return err
 	}
-	if err := runPBTAttachStepHook(hooks.step, "settings"); err != nil {
+	if err := hooks.step("settings"); err != nil {
 		return err
 	}
 	return dbstate.RemovePBTAttachMarker(nodeDirs)
-}
-
-func runPBTAttachStepHook(hook func(string) error, step string) error {
-	if hook == nil {
-		return nil
-	}
-	return hook(step)
 }
 
 func configurePBTNodeVariant(settings *dbstate.ErigonDBSettings, v3 bool) {
@@ -554,15 +540,13 @@ func validatePBTAttachGenesis(ctx context.Context, nodeDirs, publishedDirs datad
 	}
 	defer nodeDB.Close()
 	var nodeGenesis common.Hash
+	var chainName string
 	if err := nodeDB.View(ctx, func(tx kv.Tx) error {
 		var err error
 		nodeGenesis, err = rawdb.ReadCanonicalHash(tx, 0)
-		return err
-	}); err != nil {
-		return err
-	}
-	var chainName string
-	if err := nodeDB.View(ctx, func(tx kv.Tx) error {
+		if err != nil {
+			return err
+		}
 		config, err := rawdb.ReadChainConfig(tx, nodeGenesis)
 		if err != nil {
 			return err
@@ -1015,10 +999,8 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 		}
 		touched[filepath.Dir(dst)] = struct{}{}
 	}
-	for directory := range touched {
-		if err := dir.FsyncDir(directory); err != nil {
-			return err
-		}
+	if err := fsyncPBTDirs(touched); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1076,7 +1058,14 @@ func removePBTFiles(dirs datadir.Dirs, match func(pbtAttachFile) bool) error {
 		}
 		touched[filepath.Dir(file.path)] = struct{}{}
 	}
-	for directory := range touched {
+	if err := fsyncPBTDirs(touched); err != nil {
+		return err
+	}
+	return nil
+}
+
+func fsyncPBTDirs(dirs map[string]struct{}) error {
+	for directory := range dirs {
 		if err := dir.FsyncDir(directory); err != nil {
 			return err
 		}

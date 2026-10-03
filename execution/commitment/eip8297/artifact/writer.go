@@ -184,7 +184,7 @@ type headerBuilder struct {
 
 func (h *headerBuilder) encode() ([]byte, error) {
 	basic, ok := h.values[eip8297.BasicDataLeafKey]
-	if !ok || len(basic) != eip8297.ValueLength {
+	if !ok {
 		return nil, fmt.Errorf("%w: missing BASIC_DATA", ErrInvalidAccount)
 	}
 	codeSize := binary.BigEndian.Uint32(basic[eip8297.BasicDataCodeSizeOffset:])
@@ -199,13 +199,13 @@ func (h *headerBuilder) encode() ([]byte, error) {
 	var codeRef []byte
 	switch {
 	case hasDelegation:
-		if hasCodeHash || len(delegation) != eip8297.ValueLength || !bytes.Equal(delegation[:3], eip8297.DelegationMarker[:]) || codeSize != eip8297.DelegationCodeLength {
+		if hasCodeHash || !bytes.Equal(delegation[:3], eip8297.DelegationMarker[:]) || codeSize != eip8297.DelegationCodeLength {
 			return nil, fmt.Errorf("%w: invalid delegation", ErrInvalidAccount)
 		}
 		kind = 2
 		codeRef = bytes.Clone(delegation[3:23])
 	case hasCodeHash && !bytes.Equal(codeHashValue, empty.CodeHash[:]):
-		if len(codeHashValue) != eip8297.ValueLength || codeSize == 0 {
+		if codeSize == 0 {
 			return nil, fmt.Errorf("%w: invalid code reference", ErrInvalidAccount)
 		}
 		kind = 1

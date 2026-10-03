@@ -92,9 +92,6 @@ func sharedExportPinWithTxNumReader(ctx context.Context, tx kv.TemporalTx, heade
 	}
 	defer domainsView.Close()
 	commitmentCtx := domainsView.GetCommitmentCtxForDomain(domain)
-	if commitmentCtx == nil {
-		return exportPin{}, fmt.Errorf("export pin domain %s is not registered", domain)
-	}
 	txNum, blockNum, err := commitmentCtx.SeekCommitment(ctx, tx)
 	if err != nil {
 		return exportPin{}, err

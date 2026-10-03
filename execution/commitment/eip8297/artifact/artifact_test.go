@@ -971,6 +971,15 @@ func TestPreimageReaderAllocationsStayBounded(t *testing.T) {
 	require.Less(t, allocations, float64(recordCount)*2, "the reader must reuse its cursor buffer")
 }
 
+func TestReadPreimagesShortRecordsReportTheSameError(t *testing.T) {
+	for _, size := range []int{21, 23} {
+		err := ReadPreimagesStream(bytes.NewReader(make([]byte, size)), int64(size), func(common.Address, func(func([32]byte) error) error) error {
+			return nil
+		})
+		require.EqualError(t, err, "pbt artifact: invalid preimages: truncated record")
+	}
+}
+
 func TestWritePreimagesStreamWithScratchReusesScratchAcrossAccounts(t *testing.T) {
 	previousCreate := preimageScratchFileCreate
 	previousFlush := preimageScratchFileFlush

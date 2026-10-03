@@ -205,7 +205,7 @@ func convertPBTWithOptions(ctx context.Context, sourcePath, outputPath string, k
 	if err := requirePBinSourceEnd(sourceAgg, point.TxNum); err != nil {
 		return err
 	}
-	header, blockEnd, afterFork, err := readPBinForkPoint(ctx, pbtTemporalBlockFilesTx{TemporalTx: sourceTx, view: blockView}, blockReader, point)
+	header, blockEnd, afterFork, err := readPBinForkPoint(ctx, pbtBlockFilesTx{Tx: sourceTx, view: blockView}, blockReader, point)
 	if err != nil {
 		return err
 	}
@@ -534,10 +534,7 @@ func verifyPBTOutputRows(ctx context.Context, dirs datadir.Dirs, settings *dbsta
 		return err
 	}
 	_, err = verifyPBTRows(ctx, rawDB, nil, dirs, settings, domain, "commitment convert-pbt: verify written rows", logger)
-	if err != nil {
-		return err
-	}
-	return nil
+	return err
 }
 
 func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
@@ -551,7 +548,7 @@ func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
 	})
 }
 
-func readPBinForkPoint(ctx context.Context, tx kv.TemporalTx, blockReader *freezeblocks.BlockReader, point pbinConversionPoint) (header *types.Header, blockEnd, afterFork bool, err error) {
+func readPBinForkPoint(ctx context.Context, tx kv.Tx, blockReader *freezeblocks.BlockReader, point pbinConversionPoint) (header *types.Header, blockEnd, afterFork bool, err error) {
 	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
 		return nil, false, false, err
@@ -586,7 +583,7 @@ func removePBTStateHistoryIndexFiles(dirs datadir.Dirs) error {
 }
 
 func linkPBinHexFiles(sourceDir, outputDir string) error {
-	return linkPBinDirectory(sourceDir, outputDir, kv.CommitmentDomain.String(), 0, 0, false, true, "commitment convert-pbt: source hex commitment files are missing")
+	return linkPBinDirectory(sourceDir, outputDir, 0, 0, "commitment convert-pbt: source hex commitment files are missing")
 }
 
 func linkPBinCommitmentFiles(sourceDirs, outputDirs datadir.Dirs, stepSize, endTxNum uint64) error {
@@ -595,17 +592,17 @@ func linkPBinCommitmentFiles(sourceDirs, outputDirs datadir.Dirs, stepSize, endT
 		{sourceDirs.SnapIdx, outputDirs.SnapIdx},
 		{sourceDirs.SnapAccessors, outputDirs.SnapAccessors},
 	} {
-		if err := linkPBinDirectory(roots[0], roots[1], kv.CommitmentDomain.String(), stepSize, endTxNum, true, false, ""); err != nil {
+		if err := linkPBinDirectory(roots[0], roots[1], stepSize, endTxNum, ""); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func linkPBinDirectory(sourceDir, outputDir, typeName string, stepSize, endTxNum uint64, ignoreMissing, createOutput bool, missingSourceMessage string) error {
+func linkPBinDirectory(sourceDir, outputDir string, stepSize, endTxNum uint64, missingSourceMessage string) error {
 	entries, err := os.ReadDir(sourceDir)
 	if err != nil {
-		if ignoreMissing && errors.Is(err, fs.ErrNotExist) {
+		if missingSourceMessage == "" && errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		if missingSourceMessage != "" && errors.Is(err, fs.ErrNotExist) {
@@ -613,21 +610,13 @@ func linkPBinDirectory(sourceDir, outputDir, typeName string, stepSize, endTxNum
 		}
 		return err
 	}
-	if createOutput {
-		if err := os.MkdirAll(outputDir, 0o755); err != nil {
-			return err
-		}
-	}
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		parsed, _, ok := snaptype.ParseFileName(sourceDir, entry.Name())
-		if !ok || parsed.TypeString != typeName || stepSize != 0 && parsed.From*stepSize > endTxNum {
+		if !ok || parsed.TypeString != kv.CommitmentDomain.String() || stepSize != 0 && parsed.From*stepSize > endTxNum {
 			continue
-		}
-		if err := os.MkdirAll(outputDir, 0o755); err != nil {
-			return err
 		}
 		if err := os.Link(filepath.Join(sourceDir, entry.Name()), filepath.Join(outputDir, entry.Name())); err != nil {
 			return err
