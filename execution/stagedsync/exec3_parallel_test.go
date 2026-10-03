@@ -68,6 +68,7 @@ type testExecTask struct {
 	writeMap     *state.WriteSet
 	sender       accounts.Address
 	nonce        int
+	strictNonce  bool
 	dependencies []int
 }
 
@@ -227,7 +228,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 			// extra recorded read) and abort on a nonce mismatch.
 			if i == 0 {
 				if vm := ibs.VersionMap(); vm != nil {
-					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
+					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); (ok && int(nonce) != t.nonce) || (!ok && t.strictNonce && t.nonce != 0) {
 						return &exec.TxResult{Err: protocol.ErrExecAbortError{
 							DependencyTxIndex: -1,
 							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce),
@@ -279,6 +280,13 @@ func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.ReadSet {
 
 func (t *testExecTask) Sender() accounts.Address {
 	return t.sender
+}
+
+func (t *testExecTask) TxSender() (accounts.Address, error) {
+	if t.strictNonce {
+		return t.sender, nil
+	}
+	return t.TxTask.TxSender()
 }
 
 func (t *testExecTask) Hash() common.Hash {
@@ -1947,4 +1955,30 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 
 	assert.Equal(t, syscalls, indexes.adds[kv.LogAddrIdx])
 	assert.Equal(t, syscalls, indexes.adds[kv.LogTopicIdx])
+}
+
+func TestSameSenderSuccessorWaitsForPredecessorValidation(t *testing.T) {
+	slow := accounts.InternAddress(common.HexToAddress("0x5101"))
+	sender := accounts.InternAddress(common.HexToAddress("0x5e4d"))
+	task := func(txIdx int, from accounts.Address, nonce int, d time.Duration) exec.Task {
+		ops := []Op{
+			{opType: readType, key: opkey{addr: from, path: state.NoncePath}, val: nonce},
+			{opType: writeType, key: opkey{addr: from, path: state.NoncePath}, val: nonce + 1},
+			{opType: otherType, duration: d},
+		}
+		task := NewTestExecTask(txIdx, ops, from, nonce)
+		task.strictNonce = true
+		return task
+	}
+	tasks := []exec.Task{
+		task(0, slow, 0, 50*time.Millisecond),
+		task(1, sender, 0, time.Millisecond),
+		task(2, sender, 1, time.Millisecond),
+	}
+	runParallel(t, tasks, func(pe *parallelExecutor) error {
+		if aborts := pe.abortCount.Load(); aborts != 0 {
+			return fmt.Errorf("same-sender successor re-executed: abortCount=%d execCount=%d", aborts, pe.execCount.Load())
+		}
+		return nil
+	}, false, logger(true))
 }
