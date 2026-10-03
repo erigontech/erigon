@@ -528,6 +528,7 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 	value := bytes.Repeat([]byte{1}, eip8297.ValueLength)
 	runtime.GC()
 	writerBase := liveHeap()
+	var writerPeak uint64
 	digest, err := WriteSnapshot(file, common.Hash{}, func(emit func([]byte, []byte) error) error {
 		for group := range groupCount {
 			var stem [32]byte
@@ -538,15 +539,19 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 					return err
 				}
 			}
+			if group&255 == 255 {
+				runtime.GC()
+				if current := liveHeap(); current > writerPeak {
+					writerPeak = current
+				}
+			}
 		}
 		return nil
 	})
-	runtime.GC()
-	writerHeap := liveHeap()
-	writerLive := uint64(0)
-	if writerHeap > writerBase {
-		writerLive = writerHeap - writerBase
+	if writerPeak < writerBase {
+		writerPeak = writerBase
 	}
+	writerLive := writerPeak - writerBase
 	require.NoError(t, err)
 	require.NotEqual(t, common.Hash{}, digest)
 	require.NoError(t, file.Sync())

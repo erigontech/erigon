@@ -91,6 +91,12 @@ func TestImportPBTEndToEndWhenFilesReachCheckpoint(t *testing.T) {
 	}
 }
 
+func TestImportPBTAllowsDevChainWithEmptyStoredChainName(t *testing.T) {
+	fixture := newPBTImportFixture(t)
+	setPBTImportChainName(t, fixture.dataDir, "")
+	require.NoError(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "dev", log.New()))
+}
+
 func TestImportPBTUsesDatadirScratch(t *testing.T) {
 	fixture := newPBTImportFixture(t)
 	tmpFile := filepath.Join(t.TempDir(), "tmp-file")
@@ -161,6 +167,63 @@ func TestImportPBTRecoveryRejectsCorruptMarker(t *testing.T) {
 	require.NoError(t, err, "%s", output)
 }
 
+func TestImportPBTRecoveryRemovesMovedFilesFromCorruptMarker(t *testing.T) {
+	fixture := newPBTImportFixture(t)
+	setPBTImportChainName(t, fixture.dataDir, "mainnet")
+	hook := func(step string) error {
+		if step == "files-moved" {
+			panic("interrupt after files")
+		}
+		return nil
+	}
+	require.Panics(t, func() {
+		_ = importPBTWithHook(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New(), hook)
+	})
+	dirs := datadir.Open(fixture.dataDir)
+	binFiles := make([]string, 0)
+	require.NoError(t, filepath.WalkDir(dirs.Snap, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && strings.Contains(entry.Name(), "commitment-bin") {
+			binFiles = append(binFiles, path)
+		}
+		return nil
+	}))
+	require.NotEmpty(t, binFiles)
+	require.NoError(t, os.WriteFile(dbstate.PBTImportMarkerPath(dirs), []byte("{"), 0o644))
+	command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestImportPBTCommandHelperProcess$", "-test.v")
+	command.Env = append(os.Environ(),
+		"GO_WANT_IMPORT_PBT_COMMAND_HELPER=1",
+		"IMPORT_PBT_DATADIR="+fixture.dataDir,
+		"IMPORT_PBT_SNAPSHOT="+fixture.snapshot,
+	)
+	var output []byte
+	_, err := command.CombinedOutput()
+	require.Error(t, err)
+	remaining := make([]string, 0)
+	require.NoError(t, filepath.WalkDir(dirs.Snap, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() && strings.Contains(entry.Name(), "commitment-bin") {
+			remaining = append(remaining, path)
+		}
+		return nil
+	}))
+	require.Empty(t, remaining)
+	_, err = os.Stat(dbstate.PBTImportMarkerPath(dirs))
+	require.ErrorIs(t, err, os.ErrNotExist)
+	command = exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestImportPBTCommandHelperProcess$", "-test.v")
+	command.Env = append(os.Environ(),
+		"GO_WANT_IMPORT_PBT_COMMAND_HELPER=1",
+		"IMPORT_PBT_DATADIR="+fixture.dataDir,
+		"IMPORT_PBT_SNAPSHOT="+fixture.snapshot,
+	)
+	output, err = command.CombinedOutput()
+	require.NoError(t, err, "%s", output)
+}
+
 func TestImportPBTRecoveryKeepsMarkerWhenFileCleanupFails(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))
@@ -202,6 +265,23 @@ func TestImportPBTMainFlowKeepsMarkerWhenFileCleanupFails(t *testing.T) {
 	}
 	require.Error(t, importPBTWithHook(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New(), hook))
 	_, err := os.Stat(dbstate.PBTImportMarkerPath(dirs))
+	require.NoError(t, err)
+}
+
+func TestImportPBTMainFlowKeepsMarkerWhenMoveFails(t *testing.T) {
+	fixture := newPBTImportFixture(t)
+	moveCount := 0
+	move := func(source, destination string) error {
+		moveCount++
+		if moveCount == 2 {
+			return errors.New("injected move failure")
+		}
+		return os.Rename(source, destination)
+	}
+	err := importPBTWithHooks(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New(), nil, move)
+	require.ErrorContains(t, err, "injected move failure")
+	require.GreaterOrEqual(t, moveCount, 2)
+	_, err = os.Stat(dbstate.PBTImportMarkerPath(datadir.Open(fixture.dataDir)))
 	require.NoError(t, err)
 }
 

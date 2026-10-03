@@ -38,7 +38,7 @@ import (
 
 var pbtVerifyETLBuffer = etl.BufferOptimalSize
 
-const pbtVerifyMaxCodeSize = (1 << 24) - 1
+var errPBTVerifyScratchIO = errors.New("verify-pbt: scratch I/O")
 
 type pbtVerifyProgress struct {
 	phase string
@@ -72,7 +72,8 @@ type pbtVerifyAccountRecord struct {
 }
 
 type pbtVerifyKVReader struct {
-	r *bufio.Reader
+	r    *bufio.Reader
+	path string
 }
 
 func (r *pbtVerifyKVReader) next() ([]byte, []byte, bool, error) {
@@ -81,15 +82,15 @@ func (r *pbtVerifyKVReader) next() ([]byte, []byte, bool, error) {
 		if err == io.EOF {
 			return nil, nil, false, nil
 		}
-		return nil, nil, false, err
+		return nil, nil, false, fmt.Errorf("%w: %s: %w", errPBTVerifyScratchIO, r.path, err)
 	}
 	key := make([]byte, binary.BigEndian.Uint32(lengths[:4]))
 	value := make([]byte, binary.BigEndian.Uint32(lengths[4:]))
 	if _, err := io.ReadFull(r.r, key); err != nil {
-		return nil, nil, false, err
+		return nil, nil, false, fmt.Errorf("%w: %s: %w", errPBTVerifyScratchIO, r.path, err)
 	}
 	if _, err := io.ReadFull(r.r, value); err != nil {
-		return nil, nil, false, err
+		return nil, nil, false, fmt.Errorf("%w: %s: %w", errPBTVerifyScratchIO, r.path, err)
 	}
 	return key, value, true, nil
 }
@@ -113,7 +114,7 @@ func pbtVerifyOpenKV(path string) (*os.File, *pbtVerifyKVReader, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return f, &pbtVerifyKVReader{r: bufio.NewReaderSize(f, 1<<20)}, nil
+	return f, &pbtVerifyKVReader{r: bufio.NewReaderSize(f, 1<<20), path: path}, nil
 }
 
 func pbtVerifyTrimValue(value []byte) []byte {
@@ -171,7 +172,22 @@ func pbtVerifyReadCodeRequirement(value []byte) uint64 {
 	return binary.BigEndian.Uint64(value)
 }
 
-func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64, scratch string) (common.Hash, common.Hash, error) {
+func pbtVerifyValidateCodeSizes(snapshot io.ReaderAt, snapshotSize int64, maxCodeSize uint64) error {
+	_, err := artifact.ReadSnapshotStreamAt(snapshot, snapshotSize, artifact.SnapshotStreamCallbacks{
+		Header: func(header artifact.Header) error {
+			if header.Kind == 1 {
+				codeSize := dbstate.PBinIntegerUint64(header.CodeSize)
+				if codeSize > maxCodeSize {
+					return fmt.Errorf("%w: code size %d exceeds --max-code-size=%d", errVerifyPBTConfig, codeSize, maxCodeSize)
+				}
+			}
+			return nil
+		},
+	})
+	return err
+}
+
+func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64, scratch string, maxCodeSize uint64) (common.Hash, common.Hash, error) {
 	headers, err := os.Create(filepath.Join(scratch, "headers.bin"))
 	if err != nil {
 		return common.Hash{}, common.Hash{}, fmt.Errorf("read snapshot: %w", err)
@@ -192,6 +208,12 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 	cache := eip8297.DigestCache{Sum: pbtVerifyHash}
 	meta, err := artifact.ReadSnapshotStreamAt(snapshot, snapshotSize, artifact.SnapshotStreamCallbacks{
 		Header: func(header artifact.Header) error {
+			if header.Kind == 1 {
+				codeSize := dbstate.PBinIntegerUint64(header.CodeSize)
+				if codeSize > maxCodeSize {
+					return fmt.Errorf("%w: code size %d exceeds --max-code-size=%d", errVerifyPBTConfig, codeSize, maxCodeSize)
+				}
+			}
 			if err := headerEncoder.Encode(pbtVerifyHeaderRecord{Header: header}); err != nil {
 				return err
 			}
@@ -256,7 +278,7 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 	}
 	codeRequirementsPath := paths[2]
 	codeExpectedPath := filepath.Join(scratch, "code-expected.sorted")
-	if err := pbtVerifyGenerateCodeExpected(codeRequirementsPath, codeExpectedPath, scratch); err != nil {
+	if err := pbtVerifyGenerateCodeExpected(codeRequirementsPath, codeExpectedPath, scratch, maxCodeSize); err != nil {
 		return common.Hash{}, common.Hash{}, err
 	}
 	if err := pbtVerifyCode(paths[1], codeExpectedPath, scratch); err != nil {
@@ -280,7 +302,7 @@ func pbtVerifyCollectAddresses(src io.ReaderAt, size int64, collector *etl.Colle
 	})
 }
 
-func pbtVerifyGenerateCodeExpected(requirementPath, expectedPath, scratch string) error {
+func pbtVerifyGenerateCodeExpected(requirementPath, expectedPath, scratch string, maxCodeSize uint64) error {
 	requirementsFile, requirementsReader, err := pbtVerifyOpenKV(requirementPath)
 	if err != nil {
 		return err
@@ -314,8 +336,8 @@ func pbtVerifyGenerateCodeExpected(requirementPath, expectedPath, scratch string
 		if codeSize == 0 {
 			return fmt.Errorf("code size is zero for %x", codeHash)
 		}
-		if codeSize > pbtVerifyMaxCodeSize {
-			return fmt.Errorf("code size %d exceeds the EIP maximum for %x", codeSize, codeHash)
+		if codeSize > maxCodeSize {
+			return fmt.Errorf("%w: code size %d exceeds --max-code-size=%d for %x", errVerifyPBTConfig, codeSize, maxCodeSize, codeHash)
 		}
 		chunks := (codeSize + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen
 		currentCodeHash := common.BytesToHash(codeHash)
@@ -437,7 +459,7 @@ func pbtVerifyCheckCodeRows(path string) error {
 			return fmt.Errorf("code size is zero for %x", codeHash)
 		}
 		hasher := keccak.NewFastKeccak()
-		code := make([]byte, 0, min(codeSize, pbtVerifyMaxCodeSize))
+		var code []byte
 		actualChunks := make([][eip8297.ValueLength]byte, 0, chunks)
 		var codeRead uint64
 		for ok && bytes.Equal(key[:32], codeHash[:]) {

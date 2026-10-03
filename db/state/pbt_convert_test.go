@@ -18,6 +18,7 @@ package state_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"sort"
 	"testing"
 
@@ -192,6 +193,41 @@ func TestVerifyPBinDomainAcceptsBinOnlyConversion(t *testing.T) {
 	require.NoError(t, verifyErr)
 }
 
+func TestVerifyPBinDomainReportsProgress(t *testing.T) {
+	selectPBinBinOnlyHash(t)
+	db, agg := temporal.Open(t, 8)
+	writePBinConvertStateN(t, db, 1024)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	sourceTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer sourceTx.Rollback()
+	targetTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer targetTx.Rollback()
+	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
+		SourceAggregator: agg,
+		SourceTx:         sourceTx,
+		TargetAggregator: agg,
+		TargetTx:         targetTx,
+		TargetDomain:     kv.CommitmentDomain,
+		EndTxNum:         7,
+		Hash:             eip8297.HashBytes,
+	})
+	require.NoError(t, err)
+	targetTx.Rollback()
+	verifyTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer verifyTx.Rollback()
+	previousHandler := log.Root().GetHandler()
+	var logs bytes.Buffer
+	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
+	_, err = state.VerifyPBinDomainRoot(t.Context(), verifyTx, agg, kv.CommitmentDomain)
+	require.NoError(t, err)
+	require.Contains(t, logs.String(), "PBT verification progress")
+}
+
 func selectPBinConvertHash(t *testing.T) {
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
@@ -233,6 +269,10 @@ func selectPBinBinOnlyHash(t *testing.T) {
 }
 
 func writePBinConvertState(t *testing.T, db kv.TemporalRwDB) {
+	writePBinConvertStateN(t, db, 2)
+}
+
+func writePBinConvertStateN(t *testing.T, db kv.TemporalRwDB, count int) {
 	t.Helper()
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
@@ -243,14 +283,16 @@ func writePBinConvertState(t *testing.T, db kv.TemporalRwDB) {
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	defer domains.Close()
-	for i := byte(1); i <= 2; i++ {
-		address := bytes.Repeat([]byte{i}, length.Addr)
+	for i := 1; i <= count; i++ {
+		address := make([]byte, length.Addr)
+		binary.BigEndian.PutUint64(address[length.Addr-8:], uint64(i))
 		account := accounts.Account{Nonce: uint64(i), Balance: *uint256.NewInt(uint64(i)), CodeHash: accounts.EmptyCodeHash}
 		previous, _, err := domains.GetLatest(kv.AccountsDomain, tx, address)
 		require.NoError(t, err)
-		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address, accounts.SerialiseV3(&account), uint64(i), previous))
-		slot := append(bytes.Clone(address), bytes.Repeat([]byte{i}, 32)...)
-		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{i}, uint64(i), nil))
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address, accounts.SerialiseV3(&account), 1, previous))
+		slot := append(bytes.Clone(address), make([]byte, 32)...)
+		binary.BigEndian.PutUint64(slot[length.Addr+24:], uint64(i))
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{byte(i)}, 1, nil))
 	}
 	require.NoError(t, domains.Flush(t.Context(), tx))
 	require.NoError(t, tx.Commit())

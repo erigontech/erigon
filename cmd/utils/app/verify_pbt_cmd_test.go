@@ -173,7 +173,7 @@ func TestVerifyPBTRejectsOversizedCodeDeclaration(t *testing.T) {
 	require.NoError(t, pbtVerifyWriteKV(w, make([]byte, length.Hash), value[:]))
 	require.NoError(t, w.Flush())
 	require.NoError(t, f.Close())
-	require.ErrorContains(t, pbtVerifyGenerateCodeExpected(requirements, expected, scratch), "EIP maximum")
+	require.ErrorContains(t, pbtVerifyGenerateCodeExpected(requirements, expected, scratch, 1<<24), "max-code-size")
 }
 
 func TestVerifyPBTAcceptsExportWithLeadingZeroCodeChunk(t *testing.T) {
@@ -187,6 +187,75 @@ func TestVerifyPBTAcceptsExportWithShortFinalCodeChunk(t *testing.T) {
 
 func TestVerifyPBTAcceptsPostAmsterdamCodeSize(t *testing.T) {
 	verifyPBTRealExportWithSharedCode(t, bytes.Repeat([]byte{0x5b}, 24*1024+1))
+}
+
+func TestVerifyPBTAcceptsCodeSizeConfiguredAboveDefault(t *testing.T) {
+	selectPBTExportSuite(t)
+	code := bytes.Repeat([]byte{0x5b}, 65_537)
+	fixture, err := execmoduletester.NewPBTAcceptanceChainWithSharedCode(t, false, true, code)
+	require.NoError(t, err)
+	require.NoError(t, fixture.Tester.InsertChain(fixture.Chain))
+	dirs := fixture.Tester.Dirs
+	tx, err := fixture.Tester.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	outDir := filepath.Join(t.TempDir(), "export")
+	require.NoError(t, runExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
+		if block == 0 {
+			return fixture.Tester.Genesis.HeaderNoCopy(), nil
+		}
+		return fixture.Chain.Headers[block-1], nil
+	}, outDir, log.New()))
+	tx.Rollback()
+	fixture.Tester.Close()
+	snapshot := filepath.Join(outDir, pbtSnapshotFileName)
+	preimages := filepath.Join(outDir, pbtPreimagesFileName)
+	defaultErr, stderr := runVerifyPBTTestCommandAtBlock(t, dirs.DataDir, snapshot, preimages, 4)
+	var defaultExit cli.ExitCoder
+	require.ErrorAs(t, defaultErr, &defaultExit)
+	require.Equal(t, 2, defaultExit.ExitCode())
+	require.Contains(t, stderr, "--max-code-size")
+	maxCodeSize := uint64(65_537)
+	configuredErr, _ := runVerifyPBTTestCommandAtBlockWithMax(t, dirs.DataDir, snapshot, preimages, 4, maxCodeSize)
+	require.NoError(t, configuredErr)
+}
+
+func TestVerifyPBTRejectsCodeSizeAboveConfiguredLimitBeforeScratch(t *testing.T) {
+	address := common.Address{1}
+	address32 := eip8297.RightAlign32(address[:])
+	addressHash := common.Hash(blake3.Sum256(address32[:]))
+	basic, err := eip8297.EncodeBasicData(1, uint256.NewInt(0), 65_537)
+	require.NoError(t, err)
+	codeHash := common.Hash{2}
+	codeHashValue := eip8297.CodeHashValue(codeHash)
+	entries := []eip8297.Entry{
+		{Key: eip8297.TreeKey(eip8297.AccountZone, addressHash[:], eip8297.BasicDataLeafKey), Value: basic[:]},
+		{Key: eip8297.TreeKey(eip8297.AccountZone, addressHash[:], eip8297.CodeHashLeafKey), Value: codeHashValue[:]},
+	}
+	root := eip8297.StateRootWithHash(entries, pbtVerifyHash)
+	var snapshot bytes.Buffer
+	_, err = artifact.WriteSnapshotStream(&snapshot, func(yield func([]byte, []byte) error) error {
+		for _, entry := range entries {
+			if err := yield(entry.Key, entry.Value); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, func() (common.Hash, error) { return root, nil })
+	require.NoError(t, err)
+	var preimages bytes.Buffer
+	require.NoError(t, artifact.WritePreimagesStreamWithScratch(&preimages, func(yield func(common.Address, func(func([32]byte) error) error) error) error {
+		return yield(address, func(func([32]byte) error) error { return nil })
+	}, t.TempDir()))
+	anchor := newHiveVerifyAnchor(t, common.Hash{})
+	snapshotPath := filepath.Join(t.TempDir(), "snapshot.bin")
+	preimagesPath := filepath.Join(t.TempDir(), "preimages.bin")
+	require.NoError(t, os.WriteFile(snapshotPath, snapshot.Bytes(), 0o644))
+	require.NoError(t, os.WriteFile(preimagesPath, preimages.Bytes(), 0o644))
+	scratch := filepath.Join(t.TempDir(), "scratch-file")
+	require.NoError(t, os.WriteFile(scratch, nil, 0o644))
+	err = verifyPBTFilesWithMaxCodeSize(t.Context(), anchor, snapshotPath, preimagesPath, 0, 64*1024, scratch)
+	require.ErrorIs(t, err, errVerifyPBTConfig)
 }
 
 func verifyPBTRealExportWithSharedCode(t *testing.T, code []byte) {
@@ -281,17 +350,25 @@ func runVerifyPBTTestCommand(t *testing.T, anchor, snapshot, preimages string) (
 }
 
 func runVerifyPBTTestCommandAtBlock(t *testing.T, anchor, snapshot, preimages string, block uint64) (error, string) {
+	return runVerifyPBTTestCommandAtBlockWithMax(t, anchor, snapshot, preimages, block, 0)
+}
+
+func runVerifyPBTTestCommandAtBlockWithMax(t *testing.T, anchor, snapshot, preimages string, block, maxCodeSize uint64) (error, string) {
 	t.Helper()
 	cmd := &cli.Command{Flags: []cli.Flag{
 		&cli.StringFlag{Name: utils.DataDirFlag.Name},
 		&cli.StringFlag{Name: "snapshot"},
 		&cli.StringFlag{Name: "preimages"},
 		&cli.Uint64Flag{Name: "block"},
+		&cli.Uint64Flag{Name: "max-code-size", Value: 64 * 1024},
 	}}
 	require.NoError(t, cmd.Set(utils.DataDirFlag.Name, anchor))
 	require.NoError(t, cmd.Set("snapshot", snapshot))
 	require.NoError(t, cmd.Set("preimages", preimages))
 	require.NoError(t, cmd.Set("block", fmt.Sprint(block)))
+	if maxCodeSize != 0 {
+		require.NoError(t, cmd.Set("max-code-size", fmt.Sprint(maxCodeSize)))
+	}
 	oldStderr := os.Stderr
 	r, w, err := os.Pipe()
 	require.NoError(t, err)
@@ -351,9 +428,19 @@ func TestVerifyPBTClassifiesSnapshotIO(t *testing.T) {
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
+func TestVerifyPBTScratchRowDecodeIsIO(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "row")
+	require.NoError(t, os.WriteFile(path, []byte{0, 0, 0, 8}, 0o644))
+	file, reader, err := pbtVerifyOpenKV(path)
+	require.NoError(t, err)
+	defer file.Close()
+	_, _, _, err = reader.next()
+	require.ErrorIs(t, err, errPBTVerifyScratchIO)
+}
+
 func TestMeasureVerifyPBTStreamingMemory(t *testing.T) {
 	peaks := make([]uint64, 0, 2)
-	for _, count := range []int{1000, 10000} {
+	for _, count := range []int{1000, 100000} {
 		peak := measureVerifyPBTPeak(t, count)
 		peaks = append(peaks, peak)
 		t.Logf("accounts=%d live_heap_delta=%d", count, peak)
@@ -526,20 +613,62 @@ func TestVerifyPBTCommandPrintsRejectionInFreshProcess(t *testing.T) {
 	require.Contains(t, string(output), "verify-pbt: artifact rejected")
 }
 
+func TestVerifyPBTUsageErrorsExitTwoInFreshProcess(t *testing.T) {
+	for _, testCase := range []string{"missing-snapshot", "missing-preimages", "missing-block", "positional"} {
+		t.Run(testCase, func(t *testing.T) {
+			command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestVerifyPBTUsageHelperProcess$", "-test.v")
+			command.Env = append(os.Environ(), "GO_WANT_VERIFY_PBT_USAGE_HELPER=1", "VERIFY_PBT_USAGE_CASE="+testCase)
+			output, err := command.CombinedOutput()
+			var exitErr *exec.ExitError
+			require.ErrorAs(t, err, &exitErr)
+			require.Equal(t, 2, exitErr.ExitCode())
+			require.NotEmpty(t, output)
+		})
+	}
+}
+
+func TestVerifyPBTUsageHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_VERIFY_PBT_USAGE_HELPER") != "1" {
+		return
+	}
+	var args []string
+	switch os.Getenv("VERIFY_PBT_USAGE_CASE") {
+	case "missing-snapshot":
+		args = []string{"--preimages=preimages", "--block=0"}
+	case "missing-preimages":
+		args = []string{"--snapshot=snapshot", "--block=0"}
+	case "missing-block":
+		args = []string{"--snapshot=snapshot", "--preimages=preimages"}
+	case "positional":
+		args = []string{"--snapshot=snapshot", "--preimages=preimages", "--block=0", "extra"}
+	default:
+		os.Exit(3)
+	}
+	if err := verifyPBTCommand.Run(t.Context(), args); err != nil {
+		if exitErr, ok := errors.AsType[cli.ExitCoder](err); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(3)
+	}
+	os.Exit(0)
+}
+
 func TestVerifyPBTClassifiesMidstreamScratchIO(t *testing.T) {
-	manifest := readHivePBTManifest(t)
-	anchor := newHiveVerifyAnchor(t, common.HexToHash(manifest.Genesis.StateRoot))
-	root := filepath.Join("testdata", "hive-pbt-fixtures", "valid")
+	snapshot, preimages, root := buildMeasuredPBT(t, 10_000)
+	anchor := newMeasuredPBTAnchor(t, root)
+	scratch := filepath.Join(t.TempDir(), "scratch")
 	command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestVerifyPBTScratchIOHelperProcess$", "-test.v")
 	command.Env = append(os.Environ(),
 		"GO_WANT_VERIFY_PBT_IO_HELPER=1",
 		"VERIFY_PBT_DATADIR="+anchor,
-		"VERIFY_PBT_SNAPSHOT="+filepath.Join(root, "snapshot.bin"),
-		"VERIFY_PBT_PREIMAGES="+filepath.Join(root, "preimages.bin"),
-		"VERIFY_PBT_TMPDIR="+filepath.Join(t.TempDir(), "scratch"),
+		"VERIFY_PBT_SNAPSHOT="+snapshot,
+		"VERIFY_PBT_PREIMAGES="+preimages,
+		"VERIFY_PBT_TMPDIR="+scratch,
 	)
 	output, err := command.CombinedOutput()
 	require.NoError(t, err, "%s", output)
+	require.Contains(t, string(output), scratch)
 }
 
 func TestVerifyPBTCommandHelperProcess(t *testing.T) {
@@ -571,7 +700,7 @@ func TestVerifyPBTScratchIOHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_VERIFY_PBT_IO_HELPER") != "1" {
 		return
 	}
-	limit := &syscall.Rlimit{Cur: 4096, Max: 4096}
+	limit := &syscall.Rlimit{Cur: 2 << 20, Max: 2 << 20}
 	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, limit); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)

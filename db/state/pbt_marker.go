@@ -11,7 +11,6 @@ package state
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -37,10 +36,10 @@ func writePBTMarker(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	return writePBTMarkerData(path, data, nil)
+	return writePBTMarkerData(path, data)
 }
 
-func writePBTMarkerData(path string, data []byte, write func(io.Writer, []byte) error) error {
+func writePBTMarkerData(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
 	if err != nil {
 		return err
@@ -53,13 +52,7 @@ func writePBTMarkerData(path string, data []byte, write func(io.Writer, []byte) 
 	if err := tmp.Chmod(0o644); err != nil {
 		return err
 	}
-	if write == nil {
-		write = func(dst io.Writer, data []byte) error {
-			_, err := dst.Write(data)
-			return err
-		}
-	}
-	if err := write(tmp, data); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		return err
 	}
 	if err := tmp.Sync(); err != nil {

@@ -93,6 +93,10 @@ func pbtImportRerunCommand(dataDir, chainName, snapshotPath string) string {
 }
 
 func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName string, logger log.Logger, swapHook func(string) error) (retErr error) {
+	return importPBTWithHooks(ctx, dataDir, snapshotPath, chainName, logger, swapHook, nil)
+}
+
+func importPBTWithHooks(ctx context.Context, dataDir, snapshotPath, chainName string, logger log.Logger, swapHook func(string) error, move func(string, string) error) (retErr error) {
 	if dataDir == "" || snapshotPath == "" {
 		return errors.New("commitment import-pbt: datadir and snapshot are required")
 	}
@@ -120,6 +124,9 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 				return fmt.Errorf("%w; partial import cleanup failed: %w", markerErr, cleanupErr)
 			}
 			return fmt.Errorf("%w; rerun %s", markerErr, pbtImportRerunCommand(dirs.DataDir, chainName, snapshotPath))
+		}
+		if cleanupErr := removePBTImportFilesForRecovery(dirs); cleanupErr != nil {
+			return fmt.Errorf("%w; partial import cleanup failed: %w", markerErr, cleanupErr)
 		}
 		if removeErr := dbstate.RemovePBTImportMarker(dirs); removeErr != nil {
 			return fmt.Errorf("%w; remove corrupt import marker: %w", markerErr, removeErr)
@@ -360,13 +367,10 @@ func importPBTWithHook(ctx context.Context, dataDir, snapshotPath, chainName str
 			return err
 		}
 	}
-	moved, err := movePBTImportBinFiles(stageDirs, dirs)
+	moved, err := movePBTImportBinFilesWithRename(stageDirs, dirs, move)
 	if err != nil {
 		if cleanupErr := removePBTImportFiles(moved); cleanupErr != nil {
 			return fmt.Errorf("%w; cleanup failed: %w", err, cleanupErr)
-		}
-		if markerErr := dbstate.RemovePBTImportMarker(dirs); markerErr != nil {
-			return fmt.Errorf("%w; remove marker: %w", err, markerErr)
 		}
 		return err
 	}
@@ -606,7 +610,7 @@ func validatePBTImportTarget(ctx context.Context, rawDB kv.RoDB, blockReader *fr
 	if chainConfig == nil {
 		return "", errors.New("commitment import-pbt: chain config is missing")
 	}
-	if chainName != "" && chainConfig.ChainName != chainName {
+	if chainName != "" && chainConfig.ChainName != "" && chainConfig.ChainName != chainName {
 		return "", fmt.Errorf("commitment import-pbt: chain %q does not match target chain %q", chainName, chainConfig.ChainName)
 	}
 	if chainConfig.ChainID == nil || chainConfig.ChainID.String() != meta.ChainID {
@@ -635,7 +639,10 @@ func validatePBTImportTarget(ctx context.Context, rawDB kv.RoDB, blockReader *fr
 	return chainConfig.ChainName, nil
 }
 
-func movePBTImportBinFiles(stageDirs, targetDirs datadir.Dirs) ([]string, error) {
+func movePBTImportBinFilesWithRename(stageDirs, targetDirs datadir.Dirs, move func(string, string) error) ([]string, error) {
+	if move == nil {
+		move = os.Rename
+	}
 	files, err := pbtAttachFiles(stageDirs)
 	if err != nil {
 		return nil, err
@@ -654,7 +661,7 @@ func movePBTImportBinFiles(stageDirs, targetDirs datadir.Dirs) ([]string, error)
 		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 			return moved, err
 		}
-		if err := os.Rename(file.path, destination); err != nil {
+		if err := move(file.path, destination); err != nil {
 			return moved, err
 		}
 		moved = append(moved, destination)

@@ -37,11 +37,14 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var errVerifyPBTInvalid = errors.New("verify-pbt: artifact rejected")
+
+var errVerifyPBTConfig = errors.New("verify-pbt: invalid configuration")
 
 var verifyPBTCommand = cli.Command{
 	Name:   "verify-pbt",
@@ -53,15 +56,29 @@ var verifyPBTCommand = cli.Command{
 	},
 	Flags: joinFlags([]cli.Flag{
 		&utils.DataDirFlag,
-		&cli.StringFlag{Name: "snapshot", Usage: "PBT snapshot artifact", Required: true},
-		&cli.StringFlag{Name: "preimages", Usage: "PBT preimages artifact", Required: true},
+		&cli.StringFlag{Name: "snapshot", Usage: "PBT snapshot artifact"},
+		&cli.StringFlag{Name: "preimages", Usage: "PBT preimages artifact"},
 		&cli.StringFlag{Name: "tmpdir", Usage: "scratch directory"},
-		&cli.Uint64Flag{Name: "block", Usage: "canonical anchor block", Required: true},
+		&cli.Uint64Flag{Name: "block", Usage: "canonical anchor block"},
+		&cli.Uint64Flag{Name: "max-code-size", Value: params.MaxCodeSizeAmsterdam, Usage: "maximum accepted code size in bytes"},
 	}),
 }
 
 func doVerifyPBT(ctx context.Context, cliCtx *cli.Command) error {
-	err := verifyPBTFiles(ctx, cliCtx.String(utils.DataDirFlag.Name), cliCtx.String("snapshot"), cliCtx.String("preimages"), cliCtx.Uint64("block"), cliCtx.String("tmpdir"))
+	if args := cliCtx.Args(); args != nil && args.Len() != 0 {
+		return pbtVerifyUsageError(fmt.Errorf("verify-pbt: unexpected positional arguments: %s", cliCtx.Args().Slice()))
+	}
+	if cliCtx.String("snapshot") == "" || cliCtx.String("preimages") == "" || !cliCtx.IsSet("block") {
+		return pbtVerifyUsageError(errors.New("verify-pbt: --snapshot, --preimages and --block are required"))
+	}
+	maxCodeSize := uint64(params.MaxCodeSizeAmsterdam)
+	if cliCtx.IsSet("max-code-size") {
+		maxCodeSize = cliCtx.Uint64("max-code-size")
+	}
+	if maxCodeSize > uint64(^uint32(0)) {
+		return pbtVerifyUsageError(fmt.Errorf("%w: --max-code-size must be at most %d", errVerifyPBTConfig, ^uint32(0)))
+	}
+	err := verifyPBTFilesWithMaxCodeSize(ctx, cliCtx.String(utils.DataDirFlag.Name), cliCtx.String("snapshot"), cliCtx.String("preimages"), cliCtx.Uint64("block"), maxCodeSize, cliCtx.String("tmpdir"))
 	if err == nil {
 		return nil
 	}
@@ -72,7 +89,16 @@ func doVerifyPBT(ctx context.Context, cliCtx *cli.Command) error {
 	return cli.Exit(err, 2)
 }
 
+func pbtVerifyUsageError(err error) error {
+	_, _ = fmt.Fprintln(os.Stderr, err)
+	return cli.Exit(err, 2)
+}
+
 func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath string, block uint64, scratchDirs ...string) (err error) {
+	return verifyPBTFilesWithMaxCodeSize(ctx, dataDir, snapshotPath, preimagesPath, block, uint64(params.MaxCodeSizeAmsterdam), scratchDirs...)
+}
+
+func verifyPBTFilesWithMaxCodeSize(ctx context.Context, dataDir, snapshotPath, preimagesPath string, block, maxCodeSize uint64, scratchDirs ...string) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			if recoveredErr, ok := recovered.(error); ok {
@@ -116,7 +142,16 @@ func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath st
 	if !preimageInfo.Mode().IsRegular() {
 		return fmt.Errorf("verify-pbt: preimages are not a regular file: %s", preimagesPath)
 	}
-
+	if err := pbtVerifyValidateCodeSizes(snapshot, snapshotInfo.Size(), maxCodeSize); err != nil {
+		if errors.Is(err, errVerifyPBTConfig) || pbtVerifyIsIOError(err) {
+			return err
+		}
+		return fmt.Errorf("%w: snapshot records: %w", errVerifyPBTInvalid, err)
+	}
+	headerRoot, err := readPBTHeaderRoot(ctx, dataDir, block)
+	if err != nil {
+		return err
+	}
 	tmpRoot := dirs.Tmp
 	if len(scratchDirs) > 0 && scratchDirs[0] != "" {
 		tmpRoot = scratchDirs[0]
@@ -141,12 +176,11 @@ func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath st
 			err = removeErr
 		}
 	}()
-	headerRoot, err := readPBTHeaderRoot(ctx, dataDir, block)
+	_, root, err := verifyPBTStreamingState(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), tmp, maxCodeSize)
 	if err != nil {
-		return err
-	}
-	_, root, err := verifyPBTStreamingState(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), tmp)
-	if err != nil {
+		if errors.Is(err, errVerifyPBTConfig) {
+			return err
+		}
 		if !pbtVerifyIsIOError(err) {
 			return fmt.Errorf("%w: %w", errVerifyPBTInvalid, err)
 		}
@@ -161,7 +195,7 @@ func verifyPBTFiles(ctx context.Context, dataDir, snapshotPath, preimagesPath st
 func pbtVerifyIsIOError(err error) bool {
 	var pathErr *os.PathError
 	var linkErr *os.LinkError
-	return errors.As(err, &pathErr) || errors.As(err, &linkErr) || errors.Is(err, syscall.EFBIG) || errors.Is(err, syscall.ENOSPC)
+	return errors.As(err, &pathErr) || errors.As(err, &linkErr) || errors.Is(err, errPBTVerifyScratchIO) || errors.Is(err, syscall.EFBIG) || errors.Is(err, syscall.ENOSPC)
 }
 
 func readPBTHeaderRoot(ctx context.Context, dataDir string, block uint64) (common.Hash, error) {

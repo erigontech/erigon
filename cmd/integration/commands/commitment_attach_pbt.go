@@ -758,9 +758,6 @@ func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endT
 		return err
 	}
 	for _, domain := range pbtAttachDomains {
-		if (domain == kv.CommitmentDomain || domain == kv.CommitmentBinDomain) && len(publishedRanges[domain]) == 0 {
-			return fmt.Errorf("commitment attach-pbt: published files are missing domain %s", domain)
-		}
 		if domain == kv.CommitmentBinDomain && len(nodeRanges[domain]) == 0 {
 			continue
 		}
