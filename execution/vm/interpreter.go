@@ -392,6 +392,10 @@ func traceGas(op OpCode, callGas mdgas.MdGasCost, cost mdgas.MdGasCost) mdgas.Md
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+	// Don't bother with the execution if there's no code.
+	if len(contract.Code) == 0 {
+		return nil, gas, mdgas.MdGasUsage{}, nil
+	}
 	tracer := evm.config.Tracer
 	debug := tracer != nil && (tracer.HasOpcodeHook() || tracer.HasGasChangeHook() || tracer.HasFaultHook())
 	trace := dbg.TraceInstructions && evm.intraBlockState.Trace()

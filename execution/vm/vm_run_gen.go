@@ -15,11 +15,6 @@ import (
 
 // run is runTraced without the tracing code and with the fast path.
 func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, debug, trace bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
-	// Don't bother with the execution if there's no code.
-	if len(contract.Code) == 0 {
-		return nil, gas, mdgas.MdGasUsage{}, nil
-	}
-
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	evm.returnData = nil

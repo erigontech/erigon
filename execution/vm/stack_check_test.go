@@ -31,6 +31,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
@@ -146,7 +147,7 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	}
 }
 
-// fastPathWant is one fastPathOps entry, generated with the fast-path cases in vm_run.go.
+// fastPathWant is one fastPathOps entry, generated with the fast-path switch in vm_run_gen.go.
 type fastPathWant struct {
 	execute         executionFunc
 	gas             uint64
@@ -174,6 +175,20 @@ func TestRunHasNoJumpTable(t *testing.T) {
 	require.Contains(t, string(out), "vm_run_gen.go")
 	tableJump := regexp.MustCompile(`(?m)\tJMP (0\(\w+\)\(\w+\*8\)|\(R\d+\))\s`)
 	require.Empty(t, tableJump.FindString(string(out)), "run dispatches through a jump table")
+}
+
+// TestRunEmptyCodeReturnsBeforeTraceChoice pins that Run returns for empty code
+// before it asks the state whether to trace instructions, so an EVM without a
+// state still runs empty code.
+func TestRunEmptyCodeReturnsBeforeTraceChoice(t *testing.T) {
+	defer func(v bool) { dbg.TraceInstructions = v }(dbg.TraceInstructions)
+	dbg.TraceInstructions = true
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	gas := mdgas.MdGas{Execution: 100}
+	ret, left, _, err := evm.Run(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), gas, nil, false)
+	require.NoError(t, err)
+	require.Nil(t, ret)
+	require.Equal(t, gas, left)
 }
 
 // TestRunMatchesRunTraced runs each program through run and through runTraced,
