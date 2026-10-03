@@ -53,6 +53,7 @@ var (
 	ErrSlotExpired             = errors.New("slot expired")
 	ErrPayloadParentChanged    = errors.New("payload parent changed")
 	ErrBidOutbid               = errors.New("bid outbid")
+	ErrBidBelowMinProfit       = errors.New("bid below minimum profit")
 )
 
 type PayloadAssembler interface {
@@ -162,6 +163,7 @@ type Coordinator struct {
 	now                    func() time.Time
 	slotTime               func(uint64) time.Time
 	maxBidMargin           float64
+	minProfitGwei          uint64
 	highestBids            HighestBidReader
 	onPayloadMeasured      func(*cltypes.SignedProposerPreferences, PayloadParentIdentity, PayloadMeasurement)
 	status                 *builder.EmbeddedBuilderStatus
@@ -432,7 +434,7 @@ func (c *Coordinator) runSlotGuarded(
 		key := pool.HighestBidKey{Slot: input.Slot, ParentBlockHash: input.ParentBlockHash, ParentBlockRoot: input.ParentBlockRoot}
 		highest, _ = c.highestBids.GetHighestBid(key)
 	}
-	decision, err := competitiveBid(candidateBidValue, assembled.BlockValue, c.maxBidMargin, highest, input.BuilderIndex)
+	decision, err := competitiveBid(candidateBidValue, assembled.BlockValue, c.maxBidMargin, c.minProfitGwei, highest, input.BuilderIndex)
 	if err != nil {
 		return nil, err
 	}
@@ -474,6 +476,9 @@ func (c *Coordinator) runSlotGuarded(
 			"reason", decision.reason,
 		)
 		log.Info("Embedded builder bid skipped", fields...)
+		if decision.reason == bidSkipBelowMinProfit {
+			return nil, ErrBidBelowMinProfit
+		}
 		return nil, fmt.Errorf("%w: %s", ErrBidOutbid, decision.reason)
 	}
 	bidValue := decision.bid

@@ -53,7 +53,7 @@ func buildHttpCfg(t *testing.T, args []string) nodecfg.Config {
 }
 
 func TestDefaultFlagsIncludeEmbeddedBuilderFlags(t *testing.T) {
-	for _, name := range []string{"builder.bid-delay", "builder.shadow-value-curve"} {
+	for _, name := range []string{"builder.bid-delay", "builder.min-profit-gwei", "builder.shadow-value-curve"} {
 		found := false
 		for _, flag := range DefaultFlags {
 			if slices.Contains(flag.Names(), name) {
@@ -69,7 +69,9 @@ func TestDefaultFlagsIncludeEmbeddedBuilderFlags(t *testing.T) {
 		flag cli.Flag
 		want any
 	}{
+		{flag: &cmdutils.EpbsBuilderBidMarginFlag, want: 0.95},
 		{flag: &cmdutils.EpbsBuilderMaxBidMarginFlag, want: defaults.MaxBidMargin},
+		{flag: &cmdutils.EpbsBuilderMinProfitGweiFlag, want: uint64(0)},
 		{flag: &cmdutils.EpbsBuilderBidPublishLeadFlag, want: defaults.BidPublishLead},
 		{flag: &cmdutils.EpbsBuilderCollateralWarningGweiFlag, want: defaults.CollateralWarningGwei},
 	} {
@@ -87,6 +89,8 @@ func TestDefaultFlagsIncludeEmbeddedBuilderFlags(t *testing.T) {
 	}
 	require.Contains(t, cmdutils.EpbsBuilderBidPublishLeadFlag.Usage, "0 disables the hold")
 	require.Contains(t, cmdutils.EpbsBuilderBidPublishLeadFlag.Usage, "must be 0 with --builder.shadow-value-curve")
+	require.Contains(t, cmdutils.EpbsBuilderBidDelayFlag.Usage, "0 derives")
+	require.Contains(t, cmdutils.EpbsBuilderBidDelayFlag.Usage, "slot length and --builder.bid-publish-lead")
 }
 
 // TestOnUsageErrorHandler verifies that the custom OnUsageError handler

@@ -419,7 +419,7 @@ func (r *ValidatedPreferencesRunner) finish(result preferencesAttemptResult) {
 		r.mu.Unlock()
 		return
 	}
-	terminal := errors.Is(result.err, ErrAuctionAlreadyTracked) || errors.Is(result.err, ErrBidOutbid)
+	terminal := errors.Is(result.err, ErrAuctionAlreadyTracked) || errors.Is(result.err, ErrBidOutbid) || errors.Is(result.err, ErrBidBelowMinProfit)
 	if result.bid != nil && result.err == nil {
 		r.mu.Unlock()
 		return

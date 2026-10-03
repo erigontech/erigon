@@ -31,14 +31,6 @@ func TestFixedMarginStrategyRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
-func TestFixedMarginStrategyEnforcesProfitFloor(t *testing.T) {
-	strategy := FixedMarginStrategy{Margin: 0.85, MinProfit: big.NewInt(16)}
-	require.Nil(t, strategy.Decide(1, big.NewInt(100)))
-
-	strategy.MinProfit.SetInt64(15)
-	require.Equal(t, big.NewInt(85), strategy.Decide(1, big.NewInt(100)))
-}
-
 func TestFixedMarginStrategyHandlesLargeValuesExactly(t *testing.T) {
 	value := new(big.Int).Exp(big.NewInt(10), big.NewInt(19), nil)
 	strategy := FixedMarginStrategy{Margin: 0.85}

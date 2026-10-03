@@ -288,9 +288,14 @@ var (
 		Usage: "Maximum fraction of block value offered by the embedded builder",
 		Value: epbscfg.DefaultConfig().MaxBidMargin,
 	}
+	EpbsBuilderMinProfitGweiFlag = cli.Uint64Flag{
+		Name:  "builder.min-profit-gwei",
+		Usage: "Minimum block value retained by the embedded builder in Gwei (0 to disable)",
+		Value: epbscfg.DefaultConfig().MinProfitGwei,
+	}
 	EpbsBuilderBidDelayFlag = cli.DurationFlag{
 		Name:  "builder.bid-delay",
-		Usage: "Delay after the preceding slot starts before the embedded builder begins its first build attempt",
+		Usage: "Delay after the preceding slot starts before the embedded builder begins its first build attempt (0 derives it from the slot length and --builder.bid-publish-lead)",
 		Value: epbscfg.DefaultConfig().BidDelay,
 	}
 	EpbsBuilderBidPublishLeadFlag = cli.DurationFlag{
@@ -1911,6 +1916,7 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.EpbsBuilder.KeyPath = ctx.String(EpbsBuilderKeyFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.BidMargin = ctx.Float64(EpbsBuilderBidMarginFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.MaxBidMargin = ctx.Float64(EpbsBuilderMaxBidMarginFlag.Name)
+	cfg.CaplinConfig.EpbsBuilder.MinProfitGwei = ctx.Uint64(EpbsBuilderMinProfitGweiFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.BidDelay = ctx.Duration(EpbsBuilderBidDelayFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.BidPublishLead = ctx.Duration(EpbsBuilderBidPublishLeadFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.CollateralWarningGwei = ctx.Uint64(EpbsBuilderCollateralWarningGweiFlag.Name)

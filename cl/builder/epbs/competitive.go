@@ -17,6 +17,7 @@ import (
 
 const (
 	bidSkipAboveMax               = "above_max_bid"
+	bidSkipBelowMinProfit         = "below_min_profit"
 	bidSkipInsufficientCollateral = "insufficient_collateral"
 )
 
@@ -33,6 +34,7 @@ func competitiveBid(
 	base uint64,
 	blockValue *big.Int,
 	maxBidMargin float64,
+	minProfitGwei uint64,
 	highest *cltypes.SignedExecutionPayloadBid,
 	builderIndex uint64,
 ) (competitiveBidDecision, error) {
@@ -42,17 +44,34 @@ func competitiveBid(
 		decision.highestBuilderIndex = highest.Message.BuilderIndex
 		decision.hasCompetitor = highest.Message.BuilderIndex != builderIndex
 	}
-	if !decision.hasCompetitor {
+	if !decision.hasCompetitor && minProfitGwei == 0 {
 		return decision, nil
 	}
 	maxBid, _, err := bidValueGwei(FixedMarginStrategy{Margin: maxBidMargin}.Decide(0, blockValue))
 	if err != nil {
 		return decision, fmt.Errorf("epbs/coordinator: maximum %w", err)
 	}
+	skipReason := bidSkipAboveMax
+	if minProfitGwei > 0 {
+		profitCapGwei := new(big.Int).Quo(new(big.Int).Set(blockValue), big.NewInt(weiPerGwei))
+		minProfit := new(big.Int).SetUint64(minProfitGwei)
+		if profitCapGwei.Cmp(minProfit) < 0 {
+			profitCapGwei.SetUint64(0)
+		} else {
+			profitCapGwei.Sub(profitCapGwei, minProfit)
+		}
+		if profitCapGwei.Cmp(new(big.Int).SetUint64(maxBid)) < 0 {
+			maxBid = profitCapGwei.Uint64()
+			skipReason = bidSkipBelowMinProfit
+		}
+	}
 	decision.maxBid = maxBid
-	if base > maxBid || decision.highestSeen >= maxBid {
+	if base > maxBid || decision.hasCompetitor && decision.highestSeen >= maxBid {
 		decision.bid = 0
-		decision.reason = bidSkipAboveMax
+		decision.reason = skipReason
+		return decision, nil
+	}
+	if !decision.hasCompetitor {
 		return decision, nil
 	}
 	decision.bid = max(base, decision.highestSeen+1)

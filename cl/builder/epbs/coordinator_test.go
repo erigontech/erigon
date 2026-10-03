@@ -1239,6 +1239,28 @@ func TestCoordinatorSkipsOutbidAuction(t *testing.T) {
 	coordinator.releaseAuction(auction)
 }
 
+func TestCoordinatorSkipsBidBelowMinimumProfit(t *testing.T) {
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	publisher := new(coordinatorPublisher)
+	coordinator := NewCoordinator(
+		&config,
+		new(coordinatorSigner),
+		FixedMarginStrategy{Margin: 0.85},
+		&coordinatorAssembler{payload: validCoordinatorPayload(&config, input, big.NewInt(100_000_000_000))},
+		publisher,
+		1,
+	)
+	coordinator.maxBidMargin = 0.97
+	coordinator.minProfitGwei = 16
+
+	bid, err := coordinator.RunSlot(t.Context(), input)
+
+	require.Nil(t, bid)
+	require.ErrorIs(t, err, ErrBidBelowMinProfit)
+	require.Zero(t, publisher.calls)
+}
+
 func TestCoordinatorReportsMeasuredZeroValuePayload(t *testing.T) {
 	config := gloasCoordinatorConfig()
 	input := validCoordinatorSlotInput(config)

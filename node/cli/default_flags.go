@@ -195,6 +195,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.EpbsBuilderKeyFlag,
 	&utils.EpbsBuilderBidMarginFlag,
 	&utils.EpbsBuilderMaxBidMarginFlag,
+	&utils.EpbsBuilderMinProfitGweiFlag,
 	&utils.EpbsBuilderBidDelayFlag,
 	&utils.EpbsBuilderBidPublishLeadFlag,
 	&utils.EpbsBuilderCollateralWarningGweiFlag,

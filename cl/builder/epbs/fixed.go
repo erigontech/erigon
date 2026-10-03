@@ -7,10 +7,9 @@ import (
 
 const marginPrecision = 1_000_000_000
 
-// FixedMarginStrategy bids a fixed fraction of the block value subject to a profit floor.
+// FixedMarginStrategy bids a fixed fraction of the block value.
 type FixedMarginStrategy struct {
-	Margin    float64
-	MinProfit *big.Int
+	Margin float64
 }
 
 func (s FixedMarginStrategy) Decide(_ uint64, blockValue *big.Int) *big.Int {
@@ -24,8 +23,5 @@ func (s FixedMarginStrategy) Decide(_ uint64, blockValue *big.Int) *big.Int {
 	scaledMargin := big.NewInt(int64(math.Floor(s.Margin * marginPrecision)))
 	bid := new(big.Int).Mul(blockValue, scaledMargin)
 	bid.Div(bid, big.NewInt(marginPrecision))
-	if s.MinProfit != nil && new(big.Int).Sub(blockValue, bid).Cmp(s.MinProfit) < 0 {
-		return nil
-	}
 	return bid
 }

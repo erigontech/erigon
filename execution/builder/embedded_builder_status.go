@@ -38,6 +38,7 @@ const (
 	BuilderOutcomeBidRejected         = "bid_rejected"
 	BuilderOutcomeNoBid               = "no_bid"
 	BuilderOutcomeOutbid              = "outbid"
+	BuilderOutcomeBelowMinProfit      = "below_min_profit"
 	BuilderOutcomeCollateralExhausted = "collateral_exhausted"
 	BuilderOutcomeFailed              = "failed"
 )

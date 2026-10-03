@@ -776,48 +776,58 @@ func TestValidatedPreferencesRunnerObservesTrackedOutcome(t *testing.T) {
 }
 
 func TestValidatedPreferencesRunnerDoesNotRetryOutbid(t *testing.T) {
-	clock := &manualRunnerClock{slot: 11}
-	root := common.HexToHash("0x11")
-	call := runnerCall{slot: 11, root: root}
-	coordinator := &recordingPreferencesCoordinator{
-		outcomes: map[runnerCall][]runnerOutcome{call: {{err: ErrBidOutbid}}},
-		started:  make(chan runnerCall, 2),
-	}
-	runner, ticker, cancel, done := startTestPreferencesRunner(t, coordinator, clock, 1)
-	outcomes := make(chan error, 1)
-	runner.observeOutcome = func(_ uint64, err error) { outcomes <- err }
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{name: "outbid", err: ErrBidOutbid},
+		{name: "below minimum profit", err: ErrBidBelowMinProfit},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			clock := &manualRunnerClock{slot: 11}
+			root := common.HexToHash("0x11")
+			call := runnerCall{slot: 11, root: root}
+			coordinator := &recordingPreferencesCoordinator{
+				outcomes: map[runnerCall][]runnerOutcome{call: {{err: test.err}}},
+				started:  make(chan runnerCall, 2),
+			}
+			runner, ticker, cancel, done := startTestPreferencesRunner(t, coordinator, clock, 1)
+			outcomes := make(chan error, 1)
+			runner.observeOutcome = func(_ uint64, err error) { outcomes <- err }
 
-	runner.SubmitValidatedPreferences(runnerPreferences(call.slot, call.root))
-	select {
-	case started := <-coordinator.started:
-		require.Equal(t, call, started)
-	case <-time.After(time.Second):
-		t.Fatal("outbid preference attempt did not start")
-	}
-	select {
-	case err := <-outcomes:
-		require.ErrorIs(t, err, ErrBidOutbid)
-	case <-time.After(time.Second):
-		t.Fatal("outbid outcome was not observed")
-	}
-	waitForRunnerIdle(t, runner)
-	for range 3 {
-		ticker.tick()
-	}
-	select {
-	case <-coordinator.started:
-		t.Fatal("outbid preference was retried")
-	case <-time.After(50 * time.Millisecond):
-	}
-	select {
-	case err := <-outcomes:
-		t.Fatalf("outbid preference produced a second outcome: %v", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	calls, _ := coordinator.snapshot()
-	require.Len(t, calls, 1)
+			runner.SubmitValidatedPreferences(runnerPreferences(call.slot, call.root))
+			select {
+			case started := <-coordinator.started:
+				require.Equal(t, call, started)
+			case <-time.After(time.Second):
+				t.Fatal("preference attempt did not start")
+			}
+			select {
+			case err := <-outcomes:
+				require.ErrorIs(t, err, test.err)
+			case <-time.After(time.Second):
+				t.Fatal("outcome was not observed")
+			}
+			waitForRunnerIdle(t, runner)
+			for range 3 {
+				ticker.tick()
+			}
+			select {
+			case <-coordinator.started:
+				t.Fatal("preference was retried")
+			case <-time.After(50 * time.Millisecond):
+			}
+			select {
+			case err := <-outcomes:
+				t.Fatalf("preference produced a second outcome: %v", err)
+			case <-time.After(50 * time.Millisecond):
+			}
+			calls, _ := coordinator.snapshot()
+			require.Len(t, calls, 1)
 
-	stopTestPreferencesRunner(t, cancel, done)
+			stopTestPreferencesRunner(t, cancel, done)
+		})
+	}
 }
 
 func TestValidatedPreferencesRunnerDoesNotObserveExpiredStoppingOrCanceledFailure(t *testing.T) {

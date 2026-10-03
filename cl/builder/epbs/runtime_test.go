@@ -184,6 +184,7 @@ func TestRuntimePublishesBidForValidatedPreferences(t *testing.T) {
 
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(preferences.Message.ProposalSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(preferences.Message.ProposalSlot - 1).Return(time.Now().Add(-10 * time.Second)).AnyTimes()
 	clock.EXPECT().GenesisValidatorsRoot().Return(headState.GenesisValidatorsRoot()).AnyTimes()
 	head := &resolverHeadSource{state: headState, root: headRoot, identitySlot: headState.Slot()}
 	fc := &resolverForkchoice{
@@ -273,6 +274,7 @@ func TestRuntimeProcessesBidLocallyBeforeRetryingIdenticalPublication(t *testing
 
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(preferences.Message.ProposalSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(preferences.Message.ProposalSlot - 1).Return(time.Now().Add(-10 * time.Second)).AnyTimes()
 	clock.EXPECT().GenesisValidatorsRoot().Return(headState.GenesisValidatorsRoot()).AnyTimes()
 	head := &resolverHeadSource{state: headState, root: headRoot, identitySlot: headState.Slot()}
 	fc := &resolverForkchoice{
@@ -361,6 +363,7 @@ func testRuntimeRevealsRetainedPayloadSelectedByBlockEvent(t *testing.T, gossipV
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(preferences.Message.ProposalSlot).AnyTimes()
 	clock.EXPECT().GenesisValidatorsRoot().Return(headState.GenesisValidatorsRoot()).AnyTimes()
+	clock.EXPECT().GetSlotTime(preferences.Message.ProposalSlot - 1).Return(time.Now().Add(-10 * time.Second)).AnyTimes()
 	clock.EXPECT().GetSlotTime(preferences.Message.ProposalSlot).Return(time.Now().Add(time.Minute)).AnyTimes()
 	head := &resolverHeadSource{state: headState, root: headRoot, identitySlot: headState.Slot()}
 	fc := &resolverForkchoice{
@@ -686,7 +689,7 @@ func TestRuntimeRejectsInvalidStartupConfiguration(t *testing.T) {
 			cfg.ShadowValueCurve = true
 			cfg.BidDelay = time.Second
 		}, wantError: "shadow value curve requires a zero bid publish lead"},
-		{name: "shadow curve without bid delay", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
+		{name: "shadow curve with derived bid delay", mutate: func(cfg *epbscfg.Config, _ *RuntimeDependencies) {
 			cfg.ShadowValueCurve = true
 			cfg.BidPublishLead = 0
 			cfg.BidDelay = 0
@@ -735,6 +738,47 @@ func TestRuntimeAcceptsMaximumBidMarginBoundaries(t *testing.T) {
 	}
 }
 
+func TestPrepareRuntimeConfigDerivesBidDelay(t *testing.T) {
+	beaconCfg := gloasCoordinatorConfig()
+	beaconCfg.SecondsPerSlot = 12
+	maxSlotSeconds := uint64(math.MaxInt64 / int64(time.Second))
+	keyPath := filepath.Join(t.TempDir(), "builder.key")
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(keyPath, privateKey.Bytes(), 0o600))
+
+	for _, test := range []struct {
+		name        string
+		slotSeconds uint64
+		bidDelay    time.Duration
+		publishLead time.Duration
+		want        time.Duration
+	}{
+		{name: "default lead", publishLead: 400 * time.Millisecond, want: 8600 * time.Millisecond},
+		{name: "shorter lead", publishLead: 200 * time.Millisecond, want: 8800 * time.Millisecond},
+		{name: "zero lead", want: 9 * time.Second},
+		{name: "lead reaches three quarters", publishLead: 9 * time.Second},
+		{name: "explicit delay", bidDelay: 8500 * time.Millisecond, publishLead: 400 * time.Millisecond, want: 8500 * time.Millisecond},
+		{name: "maximum slot duration", slotSeconds: maxSlotSeconds, publishLead: 400 * time.Millisecond, want: time.Duration(maxSlotSeconds)*time.Second/4*3 - 400*time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testBeaconCfg := beaconCfg
+			if test.slotSeconds != 0 {
+				testBeaconCfg.SecondsPerSlot = test.slotSeconds
+			}
+			cfg := epbscfg.DefaultConfig()
+			cfg.Enabled = true
+			cfg.KeyPath = keyPath
+			cfg.BidDelay = test.bidDelay
+			cfg.BidPublishLead = test.publishLead
+
+			resolved, _, err := prepareRuntimeConfig(cfg, &testBeaconCfg)
+			require.NoError(t, err)
+			require.Equal(t, test.want, resolved.BidDelay)
+		})
+	}
+}
+
 func TestRuntimeAcceptsBidDelayBeforeRetryCadenceBoundary(t *testing.T) {
 	beaconCfg := gloasCoordinatorConfig()
 	keyPath := filepath.Join(t.TempDir(), "builder.key")
@@ -760,6 +804,7 @@ func TestRuntimeAcceptsLongRetryWithoutTimedOffsets(t *testing.T) {
 	cfg := epbscfg.DefaultConfig()
 	cfg.Enabled = true
 	cfg.KeyPath = keyPath
+	cfg.BidPublishLead = 9 * time.Second
 	cfg.RetryInterval = time.Duration(beaconCfg.SecondsPerSlot) * time.Second
 
 	_, _, err = prepareRuntimeConfig(cfg, &beaconCfg)
@@ -777,6 +822,7 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	runtimeCfg.Enabled = true
 	runtimeCfg.KeyPath = keyPath
 	runtimeCfg.BidDelay = 1200 * time.Millisecond
+	runtimeCfg.MinProfitGwei = 16
 	runtimeCfg.PrivateOrderflowWindow = 350 * time.Millisecond
 	runtimeCfg.ShadowValueCurve = true
 	runtimeCfg.BidPublishLead = 0
@@ -810,6 +856,7 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	require.Equal(t, runtimeCfg.PrivateOrderflowWindow, runtime.coordinator.privateOrderflowWindow)
 	require.Equal(t, runtimeCfg.BidPublishLead, runtime.coordinator.bidPublishLead)
 	require.Equal(t, runtimeCfg.MaxBidMargin, runtime.coordinator.maxBidMargin)
+	require.Equal(t, runtimeCfg.MinProfitGwei, runtime.coordinator.minProfitGwei)
 	require.Equal(t, highestBids, runtime.coordinator.highestBids)
 	live, ok := runtime.runner.coordinator.(*LiveCoordinator)
 	require.True(t, ok)
@@ -821,11 +868,13 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 
 	nonShadowCfg := runtimeCfg
 	nonShadowCfg.ShadowValueCurve = false
+	nonShadowCfg.BidDelay = 0
 	nonShadowCfg.BidPublishLead = 450 * time.Millisecond
 	nonShadowCfg.RetryInterval = 250 * time.Millisecond
 	deps.PendingDirectory = filepath.Join(t.TempDir(), "non-shadow-pending")
 	nonShadowRuntime, err := NewRuntime(nonShadowCfg, deps)
 	require.NoError(t, err)
+	require.Equal(t, 8550*time.Millisecond, nonShadowRuntime.runner.bidDelay)
 	require.Equal(t, nonShadowCfg.BidPublishLead, nonShadowRuntime.coordinator.bidPublishLead)
 	require.Equal(t, nonShadowCfg.RetryInterval, nonShadowRuntime.coordinator.retryInterval)
 	require.Equal(t, nonShadowCfg.MaxBidMargin, nonShadowRuntime.coordinator.maxBidMargin)
@@ -854,6 +903,7 @@ func TestBuilderAttemptOutcomeClassifiesKnownFailures(t *testing.T) {
 		{name: "already tracked", err: ErrAuctionAlreadyTracked, want: executionbuilder.BuilderOutcomeAlreadyTracked},
 		{name: "collateral exhausted", err: errors.Join(ErrSlotInputUnavailable, ErrBuilderCollateralExhausted), want: executionbuilder.BuilderOutcomeCollateralExhausted},
 		{name: "outbid", err: ErrBidOutbid, want: executionbuilder.BuilderOutcomeOutbid},
+		{name: "below min profit", err: ErrBidBelowMinProfit, want: executionbuilder.BuilderOutcomeBelowMinProfit},
 		{name: "bid rejected", err: errLocalBidNotAccepted, want: executionbuilder.BuilderOutcomeBidRejected},
 		{name: "no bid", err: errValidatedPreferencesAttemptNoBid, want: executionbuilder.BuilderOutcomeNoBid},
 		{name: "unknown", err: errors.New("unknown"), want: executionbuilder.BuilderOutcomeFailed},

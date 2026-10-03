@@ -15,6 +15,7 @@ type Config struct {
 	KeyPath                string
 	BidMargin              float64
 	MaxBidMargin           float64
+	MinProfitGwei          uint64
 	BidDelay               time.Duration
 	BidPublishLead         time.Duration
 	CollateralWarningGwei  uint64
@@ -27,7 +28,7 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		BidMargin:             0.85,
+		BidMargin:             0.95,
 		MaxBidMargin:          0.97,
 		BidPublishLead:        400 * time.Millisecond,
 		CollateralWarningGwei: 20_000_000_000,

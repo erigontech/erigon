@@ -88,6 +88,7 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 	coordinator.retryInterval = cfg.RetryInterval
 	coordinator.slotTime = deps.Clock.GetSlotTime
 	coordinator.maxBidMargin = cfg.MaxBidMargin
+	coordinator.minProfitGwei = cfg.MinProfitGwei
 	coordinator.highestBids = deps.HighestBids
 	coordinator.status = deps.Status
 	resolver := NewLiveSlotInputResolver(deps.BeaconConfig, signer, deps.Clock, deps.Head, deps.Forkchoice)
@@ -164,6 +165,8 @@ func builderAttemptOutcome(err error) string {
 		return executionbuilder.BuilderOutcomeAlreadyTracked
 	case errors.Is(err, ErrBidOutbid):
 		return executionbuilder.BuilderOutcomeOutbid
+	case errors.Is(err, ErrBidBelowMinProfit):
+		return executionbuilder.BuilderOutcomeBelowMinProfit
 	case errors.Is(err, errLocalBidNotAccepted):
 		return executionbuilder.BuilderOutcomeBidRejected
 	case errors.Is(err, errValidatedPreferencesAttemptNoBid):
@@ -213,11 +216,14 @@ func prepareRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainCon
 		return cfg, nil, errors.New("epbs/runtime: slot duration is outside the supported range")
 	}
 	slotDuration := time.Duration(beaconCfg.SecondsPerSlot) * time.Second
-	if cfg.BidDelay < 0 || cfg.BidDelay >= slotDuration {
-		return cfg, nil, errors.New("epbs/runtime: bid delay must be within the preceding slot")
-	}
 	if cfg.BidPublishLead < 0 {
 		return cfg, nil, errors.New("epbs/runtime: bid publish lead must not be negative")
+	}
+	if cfg.BidDelay == 0 {
+		cfg.BidDelay = max(0, slotDuration/4*3-cfg.BidPublishLead)
+	}
+	if cfg.BidDelay < 0 || cfg.BidDelay >= slotDuration {
+		return cfg, nil, errors.New("epbs/runtime: bid delay must be within the preceding slot")
 	}
 	if cfg.BidDelay >= slotDuration-cfg.BidPublishLead {
 		return cfg, nil, errors.New("epbs/runtime: first bid attempt must precede the bid publish time")
@@ -239,7 +245,7 @@ func prepareRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainCon
 	}
 	if cfg.ShadowValueCurve {
 		const shadowOffset = 4 * time.Second
-		if cfg.BidDelay <= 0 || slotDuration <= shadowOffset || cfg.RetryInterval >= slotDuration-shadowOffset ||
+		if slotDuration <= shadowOffset || cfg.RetryInterval >= slotDuration-shadowOffset ||
 			cfg.BidDelay >= slotDuration-shadowOffset-cfg.RetryInterval {
 			return cfg, nil, errors.New("epbs/runtime: shadow value curve must fit within the preceding slot")
 		}

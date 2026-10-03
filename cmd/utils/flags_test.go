@@ -335,6 +335,7 @@ func TestEmbeddedBuilderFlagsReachCaplinConfig(t *testing.T) {
 	key := EpbsBuilderKeyFlag
 	margin := EpbsBuilderBidMarginFlag
 	maxMargin := EpbsBuilderMaxBidMarginFlag
+	minProfit := EpbsBuilderMinProfitGweiFlag
 	delay := EpbsBuilderBidDelayFlag
 	publishLead := EpbsBuilderBidPublishLeadFlag
 	collateralWarning := EpbsBuilderCollateralWarningGweiFlag
@@ -347,6 +348,7 @@ func TestEmbeddedBuilderFlagsReachCaplinConfig(t *testing.T) {
 			&key,
 			&margin,
 			&maxMargin,
+			&minProfit,
 			&delay,
 			&publishLead,
 			&collateralWarning,
@@ -360,7 +362,7 @@ func TestEmbeddedBuilderFlagsReachCaplinConfig(t *testing.T) {
 	}
 	require.NoError(t, app.Run(context.Background(), []string{
 		"erigon", "--builder", "--builder.key=/secure/builder.key", "--builder.bid-margin=0.9", "--builder.bid-delay=1.2s",
-		"--builder.max-bid-margin=0.98",
+		"--builder.max-bid-margin=0.98", "--builder.min-profit-gwei=16",
 		"--builder.bid-publish-lead=450ms", "--builder.collateral-warning-gwei=21000000000",
 		"--builder.private-orderflow-window=350ms", "--builder.shadow-value-curve",
 	}))
@@ -368,6 +370,7 @@ func TestEmbeddedBuilderFlagsReachCaplinConfig(t *testing.T) {
 	require.Equal(t, "/secure/builder.key", cfg.CaplinConfig.EpbsBuilder.KeyPath)
 	require.Equal(t, 0.9, cfg.CaplinConfig.EpbsBuilder.BidMargin)
 	require.Equal(t, 0.98, cfg.CaplinConfig.EpbsBuilder.MaxBidMargin)
+	require.Equal(t, uint64(16), cfg.CaplinConfig.EpbsBuilder.MinProfitGwei)
 	require.Equal(t, 1200*time.Millisecond, cfg.CaplinConfig.EpbsBuilder.BidDelay)
 	require.Equal(t, 450*time.Millisecond, cfg.CaplinConfig.EpbsBuilder.BidPublishLead)
 	require.Equal(t, uint64(21_000_000_000), cfg.CaplinConfig.EpbsBuilder.CollateralWarningGwei)
