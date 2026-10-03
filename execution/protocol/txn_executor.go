@@ -362,14 +362,16 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			if gas > params.MaxTxnTotalGasLimit {
 				return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
 			}
-			// EIP-8037: TX_MAX_GAS_LIMIT applies to the execution gas dimension only.
-			if requiredIntrinsicGas > params.MaxTxnGasLimit {
-				return upfrontTxnFees{}, fmt.Errorf("%w: execution gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
-					ErrIntrinsicGas, requiredIntrinsicGas, params.MaxTxnGasLimit)
-			}
 		} else if gas > params.MaxTxnGasLimit {
 			return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
 		}
+	}
+	// EIP-8037: TX_MAX_GAS_LIMIT applies to the execution gas dimension only. Unlike the
+	// gas limit caps above, it doesn't depend on the gas a call is given, so it also
+	// applies to calls that skip them (eth_call, eth_estimateGas, ...).
+	if rules.IsAmsterdam && requiredIntrinsicGas > params.MaxTxnGasLimit {
+		return upfrontTxnFees{}, fmt.Errorf("%w: execution gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
+			ErrIntrinsicGas, requiredIntrinsicGas, params.MaxTxnGasLimit)
 	}
 
 	// Match geth's EIP-7702 prerequisite precedence: after fee caps, before
