@@ -19,7 +19,7 @@
 
 package vm
 
-//go:generate go test -run ^TestRunTracedIsGenerated$ . -args -update-run-traced
+//go:generate go run gen_run.go
 
 import (
 	"errors"
@@ -111,7 +111,6 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 	// Hoist to locals so the compiler sees them as loop-invariant.
 	stack := &callContext.Stack
 	jt := evm.jt
-	hasPush0 := jt[PUSH0].numPush == 1
 
 run:
 	for {
@@ -122,13 +121,6 @@ run:
 		if !runTracing {
 			sLen, gas := stack.len(), callContext.gas
 			switch op {
-			case PUSH0:
-				if hasPush0 && sLen < stackLimit && gas >= GasQuickStep {
-					callContext.gas = gas - GasQuickStep
-					stack.pushRef().Clear()
-					pc++
-					continue
-				}
 			case PUSH1:
 				if sLen < stackLimit && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
@@ -214,6 +206,111 @@ run:
 					if pc, res, err = opJumpi(pc, evm, callContext); err != nil {
 						break run
 					}
+					pc++
+					continue
+				}
+			case SUB:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opSub(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case MUL:
+				if sLen >= 2 && gas >= GasFastStep {
+					callContext.gas = gas - GasFastStep
+					_, _, _ = opMul(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case DIV:
+				if sLen >= 2 && gas >= GasFastStep {
+					callContext.gas = gas - GasFastStep
+					_, _, _ = opDiv(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case LT:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opLt(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case GT:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opGt(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case EQ:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opEq(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case AND:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opAnd(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case ISZERO:
+				if sLen >= 1 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					_, _, _ = opIszero(pc, evm, callContext)
+					pc++
+					continue
+				}
+			case DUP4:
+				if sLen >= 4 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(3)
+					pc++
+					continue
+				}
+			case DUP5:
+				if sLen >= 5 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(4)
+					pc++
+					continue
+				}
+			case DUP6:
+				if sLen >= 6 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(5)
+					pc++
+					continue
+				}
+			case DUP7:
+				if sLen >= 7 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(6)
+					pc++
+					continue
+				}
+			case DUP8:
+				if sLen >= 8 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(7)
+					pc++
+					continue
+				}
+			case SWAP3:
+				if sLen >= 4 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(3)
+					pc++
+					continue
+				}
+			case SWAP4:
+				if sLen >= 5 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(4)
 					pc++
 					continue
 				}

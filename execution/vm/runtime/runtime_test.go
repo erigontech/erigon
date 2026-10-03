@@ -1006,11 +1006,22 @@ func TestFastPathMatchesGenericPath(t *testing.T) {
 		"invalid JUMP":     {byte(vm.PUSH1), 3, byte(vm.JUMP), byte(vm.STOP)},
 		"invalid JUMPI":    {byte(vm.PUSH1), 1, byte(vm.PUSH1), 5, byte(vm.JUMPI), byte(vm.STOP)},
 		"overflow PUSH1":   fill(1024, byte(vm.PUSH1), 0),
-		"overflow PUSH0":   fill(1024, byte(vm.PUSH0)),
-		"PUSH0 ADD":        {byte(vm.PUSH0), byte(vm.PUSH1), 5, byte(vm.ADD), byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH0), byte(vm.RETURN)},
 		"overflow PUSH2":   fill(1024, byte(vm.PUSH2), 0, 0),
 		"overflow DUP1":    fill(1024, byte(vm.DUP1)),
 		"full stack SWAP2": fill(1024, byte(vm.SWAP2), byte(vm.ADD), byte(vm.POP)),
+		"mix2": {
+			byte(vm.PUSH1), 7, byte(vm.PUSH1), 3, byte(vm.PUSH1), 9, byte(vm.PUSH1), 2,
+			byte(vm.PUSH1), 5, byte(vm.PUSH1), 1, byte(vm.PUSH1), 8, byte(vm.PUSH1), 4,
+			byte(vm.DUP8), byte(vm.DUP7), byte(vm.DUP6), byte(vm.DUP5), byte(vm.DUP4),
+			byte(vm.SWAP3), byte(vm.SWAP4), byte(vm.SUB), byte(vm.MUL), byte(vm.DIV),
+			byte(vm.LT), byte(vm.GT), byte(vm.EQ), byte(vm.AND), byte(vm.ISZERO),
+			byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0, byte(vm.RETURN),
+		},
+		"underflow DUP8":   fill(7, byte(vm.DUP8)),
+		"underflow SWAP4":  fill(4, byte(vm.SWAP4)),
+		"underflow DIV":    {byte(vm.PUSH1), 1, byte(vm.DIV)},
+		"underflow ISZERO": {byte(vm.ISZERO)},
+		"overflow DUP4":    fill(1024, byte(vm.DUP4)),
 	}
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
@@ -1023,14 +1034,12 @@ func TestFastPathMatchesGenericPath(t *testing.T) {
 		address := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(0x1000 + i))))
 		require.NoError(t, ibs.SetCode(address, code, tracing.CodeChangeUnspecified))
 		maxGas := uint64(3*len(code) + 20)
-		for _, cc := range []*chain.Config{nil, chain.TestChainBerlinConfig} {
-			for gas := uint64(0); gas <= maxGas; gas++ {
-				fastRet, fastLeft, fastErr := Call(address, nil, &Config{State: ibs, GasLimit: gas, ChainConfig: cc})
-				ret, left, err := Call(address, nil, &Config{State: ibs, GasLimit: gas, ChainConfig: cc, EVMConfig: vm.Config{Tracer: hooks}})
-				require.Equal(t, fmt.Sprint(err), fmt.Sprint(fastErr), "%s gas %d", name, gas)
-				require.Equal(t, left, fastLeft, "%s gas %d", name, gas)
-				require.Equal(t, ret, fastRet, "%s gas %d", name, gas)
-			}
+		for gas := uint64(0); gas <= maxGas; gas++ {
+			fastRet, fastLeft, fastErr := Call(address, nil, &Config{State: ibs, GasLimit: gas})
+			ret, left, err := Call(address, nil, &Config{State: ibs, GasLimit: gas, EVMConfig: vm.Config{Tracer: hooks}})
+			require.Equal(t, fmt.Sprint(err), fmt.Sprint(fastErr), "%s gas %d", name, gas)
+			require.Equal(t, left, fastLeft, "%s gas %d", name, gas)
+			require.Equal(t, ret, fastRet, "%s gas %d", name, gas)
 		}
 	}
 }
