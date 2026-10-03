@@ -17,11 +17,23 @@
 package vm
 
 import (
+	"bytes"
+	"fmt"
+	"maps"
+	"math/rand/v2"
 	"os/exec"
 	"reflect"
+	"slices"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // TestStackBoundsCheckEquivalence proves the interpreter's single unsigned
@@ -121,8 +133,14 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 			require.Equal(t, w.gas, got.constantGas, "table %d %s gas", i, op)
 			require.Equal(t, w.numPop, got.numPop, "table %d %s numPop", i, op)
 			require.Equal(t, w.numPush, got.numPush, "table %d %s numPush", i, op)
-			require.Nil(t, got.dynamicGas, "table %d %s dynamicGas", i, op)
-			require.Nil(t, got.memorySize, "table %d %s memorySize", i, op)
+			if w.memorySize == nil {
+				require.Nil(t, got.dynamicGas, "table %d %s dynamicGas", i, op)
+				require.Nil(t, got.memorySize, "table %d %s memorySize", i, op)
+				continue
+			}
+			// Memory that need not grow costs no dynamic gas.
+			require.Equal(t, reflect.ValueOf(pureMemoryGascost).Pointer(), reflect.ValueOf(got.dynamicGas).Pointer(), "table %d %s dynamicGas", i, op)
+			require.Equal(t, reflect.ValueOf(w.memorySize).Pointer(), reflect.ValueOf(got.memorySize).Pointer(), "table %d %s memorySize", i, op)
 		}
 	}
 }
@@ -132,6 +150,7 @@ type fastPathWant struct {
 	execute         executionFunc
 	gas             uint64
 	numPop, numPush int
+	memorySize      memorySizeFunc
 }
 
 // TestRunTracedIsGenerated fails when vm_run.go's fast-path cases, vm_run_traced_gen.go
@@ -140,4 +159,98 @@ func TestRunTracedIsGenerated(t *testing.T) {
 	cmd := exec.Command("go", "run", "./gen", "-check")
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
+}
+
+// TestRunMatchesRunTraced runs each program through run and through runTraced,
+// which has no fast path, at every gas budget up to the program's full cost, so
+// every fast-path body must match its jump-table op in result, gas and error.
+// Programs end by returning their top four stack items. A failing op's gas is
+// not in the measured cost, so the full budget is always run as well.
+func TestRunMatchesRunTraced(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	runOnce := func(code []byte, gas uint64, traced bool) (string, uint64) {
+		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+		c.Code = code
+		f := evm.run
+		if traced {
+			f = evm.runTraced
+		}
+		ret, left, used, err := f(*c, mdgas.MdGas{Execution: gas}, nil, false, false, false)
+		return fmt.Sprintf("ret=%x left=%d used=%+v err=%v", ret, left.Execution, used, err), gas - left.Execution
+	}
+	prog := func(parts ...any) []byte {
+		var b []byte
+		for _, p := range parts {
+			switch p := p.(type) {
+			case OpCode:
+				b = append(b, byte(p))
+			case int:
+				b = append(b, byte(p))
+			case []byte:
+				b = append(b, p...)
+			}
+		}
+		return append(b, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 32, byte(MSTORE), byte(PUSH1), 64, byte(MSTORE),
+			byte(PUSH1), 96, byte(MSTORE), byte(PUSH1), 128, byte(PUSH1), 0, byte(RETURN))
+	}
+	pushes := func(n int) []byte { return bytes.Repeat([]byte{byte(PUSH1), 1}, n) }
+	programs := map[string][]byte{
+		"arith":    prog(PUSH1, 7, PUSH1, 3, SUB, PUSH1, 5, MUL, PUSH1, 2, DIV, PUSH1, 9, LT, PUSH1, 1, GT, PUSH1, 0, EQ, ISZERO, PUSH2, 0xff, 0x0f, AND, PUSH1, 4, ADD, PUSH1, 0, ISZERO, PUSH1, 6, PUSH1, 6, EQ),
+		"dupswap":  prog(PUSH1, 1, PUSH1, 2, PUSH1, 3, PUSH1, 4, PUSH1, 5, PUSH1, 6, PUSH1, 7, PUSH1, 8, DUP1, DUP2, DUP3, DUP4, DUP5, DUP6, DUP7, DUP8, SWAP1, SWAP2, SWAP3, SWAP4, POP),
+		"loop":     prog(PUSH1, 5, JUMPDEST, PUSH1, 1, SWAP1, SUB, DUP1, PUSH1, 2, JUMPI, PUSH1, 17, JUMP, INVALID, INVALID, INVALID, JUMPDEST, pushes(3)),
+		"memory":   prog(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH1, 0, MLOAD, PUSH1, 16, MLOAD, PUSH1, 32, MLOAD, PUSH1, 0xbb, PUSH1, 8, MSTORE, PUSH1, 33, MLOAD, PUSH1, 8, MLOAD),
+		"memhuge":  prog(PUSH8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, MLOAD),
+		"memover":  prog(PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 1, SWAP1, MSTORE),
+		"push1end": {byte(PUSH1)},
+		"push2end": {byte(PUSH1), 1, byte(PUSH2), 0x12},
+		"badjump":  prog(PUSH1, 0, JUMP),
+		"jumpdata": prog(PUSH2, 0x5b, 0x00, PUSH1, 1, JUMP),
+		"jumpinot": prog(PUSH1, 0, PUSH1, 0xff, JUMPI, pushes(4)),
+		"jumpibad": prog(PUSH1, 1, PUSH1, 0xff, JUMPI),
+		"jumpend":  {byte(PUSH1), 3, byte(JUMP), byte(JUMPDEST)},
+		"overflow": {byte(JUMPDEST), byte(PUSH1), 1, byte(PUSH1), 0, byte(JUMP)},
+	}
+	for op, w := range fastPathOps {
+		if w.numPop > 0 {
+			programs["under"+op.String()] = prog(pushes(w.numPop-1), op)
+		}
+		if w.numPush > w.numPop {
+			programs["over"+op.String()] = prog(pushes(stackLimit), op)
+		}
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	// GAS, MSIZE and the generic stack ops see whether the fast path stored its registers back.
+	alphabet := append(slices.Sorted(maps.Keys(fastPathOps)), GAS, MSIZE, NOT, OR)
+	for i := range 300 {
+		b := pushes(8)
+		for range 40 {
+			switch rng.IntN(6) {
+			case 0, 1:
+				b = append(b, byte(PUSH1), byte(rng.IntN(120)))
+			case 2:
+				b = append(b, byte(PUSH2), byte(rng.IntN(2)), byte(rng.IntN(256)))
+			default:
+				b = append(b, byte(alphabet[rng.IntN(len(alphabet))]))
+			}
+		}
+		programs[fmt.Sprintf("random%d", i)] = prog(b)
+	}
+	for name, code := range programs {
+		const plenty = 1_000_000
+		_, cost := runOnce(code, plenty, true)
+		budgets := []uint64{plenty, cost / 2, cost - 1, cost, cost + 1}
+		if cost < 2000 {
+			for gas := range cost + 2 {
+				budgets = append(budgets, gas)
+			}
+		}
+		for _, gas := range budgets {
+			want, _ := runOnce(code, gas, true)
+			got, _ := runOnce(code, gas, false)
+			require.Equal(t, want, got, "%s at gas %d", name, gas)
+		}
+	}
 }

@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -17,46 +18,59 @@ import (
 	"strings"
 )
 
-// fastOp is one opcode the untraced loop runs without the jump table. Every
-// entry must charge only constant gas and must not fail once its stack and gas
-// checks pass; TestFastPathMatchesJumpTables pins it against all forks.
+// fastOp is one opcode the untraced loop runs inline, without the jump table.
+// Every entry must charge only constant gas and must not fail once its checks
+// pass. TestFastPathMatchesJumpTables pins the constants against all forks, and
+// TestRunMatchesRunTraced pins the bodies against the jump-table ops.
 type fastOp struct {
-	name      string
-	execute   string // jump-table execute func; "" for the makeDup closures
-	gas       string
-	pop, push int
-	body      string
+	name       string
+	execute    string // jump-table execute func; "" for the makeDup closures
+	gas        string
+	pop, push  int
+	memorySize string // set for memory ops, which take the fast path only when memory need not grow
+	body       string // works on the register copies gasLeft and top
 }
 
+const (
+	cancelled   = "if evm.Cancelled() {\nerr = errStopToken\nbreak run\n}\n"
+	invalidJump = "if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {\nerr = ErrInvalidJump\nbreak run\n}\n"
+	// A valid destination holds a JUMPDEST, so the jump charges it and steps over it.
+	landOnJumpdest = "pc = pos.Uint64() - 1\nif gasLeft >= params.JumpdestGas {\ngasLeft -= params.JumpdestGas\npc++\n}"
+)
+
 func fastOps() []fastOp {
-	call := func(name, fn, gas string, pop int) fastOp {
-		return fastOp{name, fn, gas, pop, 1, "_, _, _ = " + fn + "(pc, evm, callContext)"}
+	binary := func(name, fn, gas, expr string) fastOp {
+		return fastOp{name: name, execute: fn, gas: gas, pop: 2, push: 1, body: "x, y := &stack.data[top-1], &stack.data[top-2]\n" + expr + "\ntop--"}
 	}
-	jump := func(name, fn, gas string, pop int) fastOp {
-		return fastOp{name, fn, gas, pop, 0, "if pc, res, err = " + fn + "(pc, evm, callContext); err != nil {\nbreak run\n}"}
+	compare := func(name, fn, method string) fastOp {
+		return binary(name, fn, "GasFastestStep", "if x."+method+"(y) {\ny.SetOne()\n} else {\ny.Clear()\n}")
 	}
 	ops := []fastOp{
-		{"PUSH1", "opPush1", "GasFastestStep", 0, 1, "pc, _, _ = opPush1(pc, evm, callContext)"},
-		{"PUSH2", "opPush2", "GasFastestStep", 0, 1, "pc, _, _ = opPush2(pc, evm, callContext)"},
-		{"ADD", "opAdd", "GasFastestStep", 2, 1, "x, y := stack.pop1Peek1()\ny.Add(x, y)"},
-		{"POP", "opPop", "GasQuickStep", 1, 0, "stack.drop()"},
-		{"JUMPDEST", "opJumpdest", "params.JumpdestGas", 0, 0, ""},
-		jump("JUMP", "opJump", "GasMidStep", 1),
-		jump("JUMPI", "opJumpi", "GasSlowStep", 2),
-		call("SUB", "opSub", "GasFastestStep", 2),
-		call("MUL", "opMul", "GasFastStep", 2),
-		call("DIV", "opDiv", "GasFastStep", 2),
-		call("LT", "opLt", "GasFastestStep", 2),
-		call("GT", "opGt", "GasFastestStep", 2),
-		call("EQ", "opEq", "GasFastestStep", 2),
-		call("AND", "opAnd", "GasFastestStep", 2),
-		call("ISZERO", "opIszero", "GasFastestStep", 1),
+		// GetOp returns STOP, which is 0, past the end of the code: the zero padding a truncated PUSH reads.
+		{name: "PUSH1", execute: "opPush1", gas: "GasFastestStep", push: 1, body: "pc++\nstack.data[top].SetUint64(uint64(contract.GetOp(pc)))\ntop++"},
+		{name: "PUSH2", execute: "opPush2", gas: "GasFastestStep", push: 1, body: "stack.data[top].SetUint64(uint64(contract.GetOp(pc+1))<<8 | uint64(contract.GetOp(pc+2)))\ntop++\npc += 2"},
+		binary("ADD", "opAdd", "GasFastestStep", "y.Add(x, y)"),
+		{name: "POP", execute: "opPop", gas: "GasQuickStep", pop: 1, body: "top--"},
+		{name: "JUMPDEST", execute: "opJumpdest", gas: "params.JumpdestGas"},
+		{name: "JUMP", execute: "opJump", gas: "GasMidStep", pop: 1, body: cancelled + "top--\npos := &stack.data[top]\n" + invalidJump + landOnJumpdest},
+		{name: "JUMPI", execute: "opJumpi", gas: "GasSlowStep", pop: 2, body: cancelled + "top -= 2\nif pos, cond := &stack.data[top+1], &stack.data[top]; !cond.IsZero() {\n" + invalidJump + landOnJumpdest + "\n}"},
+		binary("SUB", "opSub", "GasFastestStep", "y.Sub(x, y)"),
+		binary("MUL", "opMul", "GasFastStep", "y.Mul(x, y)"),
+		binary("DIV", "opDiv", "GasFastStep", "y.Div(x, y)"),
+		compare("LT", "opLt", "Lt"),
+		compare("GT", "opGt", "Gt"),
+		compare("EQ", "opEq", "Eq"),
+		binary("AND", "opAnd", "GasFastestStep", "y.And(x, y)"),
+		{name: "ISZERO", execute: "opIszero", gas: "GasFastestStep", pop: 1, push: 1, body: "x := &stack.data[top-1]\nif x.IsZero() {\nx.SetOne()\n} else {\nx.Clear()\n}"},
+		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad", body: "x := &stack.data[top-1]\nx.SetBytes32(callContext.Memory.store[x.Uint64():])"},
+		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore", body: "top -= 2\ncallContext.Memory.Set32(stack.data[top+1].Uint64(), &stack.data[top])"},
 	}
 	for n := 1; n <= 8; n++ {
-		ops = append(ops, fastOp{fmt.Sprintf("DUP%d", n), "", "GasFastestStep", n, n + 1, fmt.Sprintf("stack.dup(%d)", n-1)})
+		ops = append(ops, fastOp{name: fmt.Sprintf("DUP%d", n), gas: "GasFastestStep", pop: n, push: n + 1, body: fmt.Sprintf("stack.data[top] = stack.data[top-%d]\ntop++", n)})
 	}
 	for n := 1; n <= 4; n++ {
-		ops = append(ops, fastOp{fmt.Sprintf("SWAP%d", n), fmt.Sprintf("opSwap%d", n), "GasFastestStep", n + 1, n + 1, fmt.Sprintf("stack.swap(%d)", n)})
+		ops = append(ops, fastOp{name: fmt.Sprintf("SWAP%d", n), execute: fmt.Sprintf("opSwap%d", n), gas: "GasFastestStep", pop: n + 1, push: n + 1,
+			body: fmt.Sprintf("stack.data[top-1], stack.data[top-%d] = stack.data[top-%d], stack.data[top-1]", n+1, n+1)})
 	}
 	return ops
 }
@@ -71,17 +85,20 @@ func fastCases(ops []fastOp) string {
 	for _, o := range ops {
 		var cond []string
 		if o.pop > 0 {
-			cond = append(cond, fmt.Sprintf("sLen >= %d", o.pop))
+			cond = append(cond, fmt.Sprintf("top >= %d", o.pop))
 		}
 		switch o.push - o.pop {
 		case 1:
-			cond = append(cond, "sLen < stackLimit")
+			cond = append(cond, "top < stackLimit")
 		case 0, -1, -2:
 		default:
 			log.Fatalf("%s: stack growth %d needs its own bound", o.name, o.push-o.pop)
 		}
-		cond = append(cond, "gas >= "+o.gas)
-		fmt.Fprintf(&b, "case %s:\nif %s {\ncallContext.gas = gas - %s\n", o.name, strings.Join(cond, " && "), o.gas)
+		if o.memorySize != "" {
+			cond = append(cond, "callContext.Memory.allocated32(&stack.data[top-1])")
+		}
+		cond = append(cond, "gasLeft >= "+o.gas)
+		fmt.Fprintf(&b, "case %s:\nif %s {\ngasLeft -= %s\n", o.name, strings.Join(cond, " && "), o.gas)
 		if o.body != "" {
 			b.WriteString(o.body + "\n")
 		}
@@ -140,11 +157,8 @@ func testTable(ops []fastOp) []byte {
 	b.WriteString("import \"github.com/erigontech/erigon/execution/protocol/params\"\n\n")
 	b.WriteString("var fastPathOps = map[OpCode]fastPathWant{\n")
 	for _, o := range ops {
-		execute := o.execute
-		if execute == "" {
-			execute = "nil"
-		}
-		fmt.Fprintf(&b, "%s: {%s, %s, %d, %d},\n", o.name, execute, o.gas, o.pop, o.push)
+		execute, memorySize := cmp.Or(o.execute, "nil"), cmp.Or(o.memorySize, "nil")
+		fmt.Fprintf(&b, "%s: {%s, %s, %d, %d, %s},\n", o.name, execute, o.gas, o.pop, o.push, memorySize)
 	}
 	b.WriteString("}\n")
 	out, err := format.Source([]byte(b.String()))
