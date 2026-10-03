@@ -193,7 +193,7 @@ func EncodeLeafValue(treeKey []byte, val *[ValueLength]byte) ([]byte, error) {
 
 	switch {
 	case subIndex == BasicDataLeafKey:
-		if val[0] != 0 || val[1] != 0 || val[2] != 0 || val[3] != 0 {
+		if [4]byte(val[:4]) != [4]byte{} {
 			return nil, fmt.Errorf("%w: BASIC_DATA version or reserved bytes are non-zero", ErrLeafValue)
 		}
 		var fieldLens [len(basicDataFields)]int
@@ -218,13 +218,11 @@ func EncodeLeafValue(treeKey []byte, val *[ValueLength]byte) ([]byte, error) {
 		}
 		return append([]byte(nil), val[:]...), nil
 	case subIndex == DelegationLeafKey:
-		if val[0] != DelegationMarker[0] || val[1] != DelegationMarker[1] || val[2] != DelegationMarker[2] {
+		if [3]byte(val[:3]) != DelegationMarker {
 			return nil, fmt.Errorf("%w: DELEGATION marker is invalid", ErrLeafValue)
 		}
-		for _, b := range val[23:] {
-			if b != 0 {
-				return nil, fmt.Errorf("%w: DELEGATION trailing bytes are non-zero", ErrLeafValue)
-			}
+		if [9]byte(val[23:]) != [9]byte{} {
+			return nil, fmt.Errorf("%w: DELEGATION trailing bytes are non-zero", ErrLeafValue)
 		}
 		return append([]byte(nil), val[3:23]...), nil
 	case subIndex >= HeaderStorageOffset && subIndex < HeaderStorageOffset+HeaderStorageSlots:

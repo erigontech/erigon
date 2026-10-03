@@ -135,8 +135,6 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 // address via an opcode, so it is kept in the witness even without a state change.
 func (s *RecordingState) MarkSystemAddrTouchedInTx() { s.systemAddrTouchedInTx = true }
 
-func (s *RecordingState) markPBinSystemAddrTouchedInTx() { s.pbtSystemAddrTouchedInTx = true }
-
 func (s *RecordingState) setSystemCallScope(active bool) { s.systemCallScope = active }
 
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
@@ -564,7 +562,7 @@ func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
 
 func (s *RecordingState) OnDelegationTarget(address accounts.Address) {
 	if !s.systemCallScope && isPBinSystemAddress(address.Value()) {
-		s.markPBinSystemAddrTouchedInTx()
+		s.pbtSystemAddrTouchedInTx = true
 	}
 }
 
@@ -814,7 +812,7 @@ func (api *BaseAPI) buildAccessedState(
 		// witness; the per-tx access set captures this even on state-cache hits.
 		if ibs.AccessedAddr(params.SystemAddress) {
 			recordingState.MarkSystemAddrTouchedInTx()
-			recordingState.markPBinSystemAddrTouchedInTx()
+			recordingState.pbtSystemAddrTouchedInTx = true
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
@@ -1098,8 +1096,7 @@ func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.Tem
 	if !ok {
 		return witnessAvailability{}, fmt.Errorf("%s commitment domain is unavailable", trieName)
 	}
-	hasDomain := slices.Contains(provider.CommitmentDomains(), domain)
-	if !hasDomain {
+	if !slices.Contains(provider.CommitmentDomains(), domain) {
 		return witnessAvailability{}, fmt.Errorf("%s commitment domain is missing from datadir", trieName)
 	}
 

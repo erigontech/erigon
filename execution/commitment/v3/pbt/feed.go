@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
-	"sort"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
@@ -30,11 +29,17 @@ import (
 
 func TranslateFeed(feed *commitment.PBinFeed) ([]Op, error) {
 	var ops []Op
-	if err := ForEachFeedOp(feed, func(op Op) error {
-		ops = append(ops, op)
-		return nil
-	}); err != nil {
-		return nil, err
+	if feed == nil {
+		return nil, fmt.Errorf("pbin: nil feed")
+	}
+	emitter := NewFeedOpEmitter()
+	for i := range feed.Accounts {
+		if err := emitter.EmitAccount(feed.Accounts[i], func(op Op) error {
+			ops = append(ops, op)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
 	}
 	slices.SortStableFunc(ops, func(left, right Op) int {
 		return bytes.Compare(opKey(left), opKey(right))
@@ -52,26 +57,6 @@ func opKey(op Op) []byte {
 		return op.Drop
 	}
 	return op.Key
-}
-
-func ForEachFeedOp(feed *commitment.PBinFeed, emit func(Op) error) error {
-	if feed == nil {
-		return fmt.Errorf("pbin: nil feed")
-	}
-	if emit == nil {
-		return fmt.Errorf("pbin: nil operation emitter")
-	}
-	accounts := append([]commitment.PBinFeedAccount(nil), feed.Accounts...)
-	sort.SliceStable(accounts, func(i, j int) bool {
-		return bytes.Compare(accounts[i].Address, accounts[j].Address) < 0
-	})
-	emitter := NewFeedOpEmitter()
-	for i := range accounts {
-		if err := emitter.EmitAccount(accounts[i], emit); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 type FeedOpEmitter struct {

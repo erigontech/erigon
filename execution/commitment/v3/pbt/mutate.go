@@ -65,15 +65,14 @@ func (t *Trie) applyMerge(op Op) error {
 	case mergeCodeHash:
 		basicKey := bytes.Clone(op.Key)
 		basicKey[len(basicKey)-1] = eip8297.BasicDataLeafKey
-		if _, created := t.mergeCreatedStems[string(basicKey)]; created {
-			return t.insert(op.Key, eip8297.CodeHashValue(merge.codeHash))
-		}
-		original, err := t.originalLeaf(basicKey)
-		if err != nil {
-			return err
-		}
-		if original != nil && !t.droppedLeaf(basicKey) {
-			return nil
+		if _, created := t.mergeCreatedStems[string(basicKey)]; !created {
+			original, err := t.originalLeaf(basicKey)
+			if err != nil {
+				return err
+			}
+			if original != nil && !t.droppedLeaf(basicKey) {
+				return nil
+			}
 		}
 		return t.insert(op.Key, eip8297.CodeHashValue(merge.codeHash))
 	default:

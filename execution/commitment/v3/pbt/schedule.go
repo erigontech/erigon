@@ -227,7 +227,6 @@ func runPhasePlanWithFactory(ctx context.Context, workers int, plan phasePlan, f
 	g, gctx := errgroup.WithContext(ctx)
 	for range workers {
 		g.Go(func() error {
-			workerCtx := gctx
 			var workerContext commitment.PatriciaContext
 			var cleanup func()
 			if factory != nil {
@@ -251,7 +250,7 @@ func runPhasePlanWithFactory(ctx context.Context, workers int, plan phasePlan, f
 						return gctx.Err()
 					}
 				}
-				if err := run(workerCtx, workerContext, plan.tasks[i]); err != nil {
+				if err := run(gctx, workerContext, plan.tasks[i]); err != nil {
 					return err
 				}
 				close(done[i])

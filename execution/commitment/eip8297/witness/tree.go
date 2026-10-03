@@ -344,20 +344,6 @@ func (t *PBinTree) deleteChild(ref *pbinChild, walk, keyPath eip8297.Bitpath) (*
 	return ref, true, nil
 }
 
-func (t *PBinTree) collapse(survivor *pbinChild, parentWalk eip8297.Bitpath, parentPrefix *eip8297.Bitpath, edge uint64) (*pbinChild, error) {
-	if survivor == nil {
-		return nil, nil
-	}
-	survivorWalk := pbinChildWalk(parentWalk, parentPrefix, edge)
-	node, err := t.resolveChild(survivor, survivorWalk)
-	if err != nil {
-		return nil, err
-	}
-	extra := *parentPrefix
-	extra.AppendBit(edge)
-	return &pbinChild{node: pbinRebaseNode(node, parentWalk, &extra)}, nil
-}
-
 func (t *PBinTree) deletePrefix(ref *pbinChild, walk, target eip8297.Bitpath) (*pbinChild, error) {
 	if ref == nil {
 		return nil, nil
@@ -408,8 +394,7 @@ func (t *PBinTree) deletePrefix(ref *pbinChild, walk, target eip8297.Bitpath) (*
 		return nil, err
 	}
 	if branch.left == nil || branch.right == nil {
-		collapsed, err := t.collapseMissingChild(branch.left, branch.right, walk, &branch.prefix)
-		return collapsed, err
+		return t.collapseMissingChild(branch.left, branch.right, walk, &branch.prefix)
 	}
 	return ref, nil
 }
@@ -419,14 +404,23 @@ func (t *PBinTree) collapseMissingChild(left, right *pbinChild, walk eip8297.Bit
 	if left == nil {
 		survivor, edge = right, 1
 	}
-	return t.collapse(survivor, walk, prefix, edge)
+	if survivor == nil {
+		return nil, nil
+	}
+	survivorWalk := pbinChildWalk(walk, prefix, edge)
+	node, err := t.resolveChild(survivor, survivorWalk)
+	if err != nil {
+		return nil, err
+	}
+	extra := *prefix
+	extra.AppendBit(edge)
+	return &pbinChild{node: pbinRebaseNode(node, walk, &extra)}, nil
 }
 
 func pbinNodeFromDecoded(decoded PBinDecodedBlob, walk eip8297.Bitpath) (*pbinNode, error) {
 	switch {
 	case decoded.Leaf != nil:
-		key := decoded.Leaf.Key
-		return &pbinNode{walk: walk, group: &PBinGroup{Position: uint16(walk.BitLen), Stem: slices.Clone(key[:len(key)-1]), Subs: []byte{key[len(key)-1]}, Values: [][]byte{slices.Clone(decoded.Leaf.Value)}}}, nil
+		return pbinLeafChild(walk, decoded.Leaf.Key, decoded.Leaf.Value).node, nil
 	case decoded.Group != nil:
 		if decoded.Group.Position != uint16(walk.BitLen) {
 			return nil, fmt.Errorf("pbin witness: group position %d does not match path length %d", decoded.Group.Position, walk.BitLen)

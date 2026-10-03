@@ -66,9 +66,8 @@ func (r *calcStateReader) CloneForWorker(ctx context.Context, tx kv.TemporalTx) 
 
 func (r *calcStateReader) Read(domain kv.Domain, key []byte, stepSize uint64) ([]byte, kv.Step, error) {
 	if domain == kv.AccountsDomain && len(key) == length.Addr {
-		var raw common.Address
-		copy(raw[:], key)
-		if acc, ok := r.state.accounts[accounts.InternAddress(raw)]; ok {
+		addr := accounts.InternAddress(common.BytesToAddress(key))
+		if acc, ok := r.state.accounts[addr]; ok {
 			if acc.Deleted && acc.Incarnation == 0 && acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash {
 				return nil, 0, nil
 			}
@@ -82,22 +81,17 @@ func (r *calcStateReader) Read(domain kv.Domain, key []byte, stepSize uint64) ([
 		}
 	}
 	if domain == kv.StorageDomain && len(key) == length.Addr+length.Hash {
-		var raw common.Address
-		copy(raw[:], key[:length.Addr])
-		addr := accounts.InternAddress(raw)
+		addr := accounts.InternAddress(common.BytesToAddress(key[:length.Addr]))
 		if storage, ok := r.state.storageState[addr]; ok {
-			var rawSlot common.Hash
-			copy(rawSlot[:], key[length.Addr:])
-			slot := accounts.InternKey(rawSlot)
+			slot := accounts.InternKey(common.BytesToHash(key[length.Addr:]))
 			if value, ok := storage.slots[slot]; ok {
 				return value.value.Bytes(), 0, nil
 			}
 		}
 	}
 	if domain == kv.CodeDomain && len(key) == length.Addr {
-		var raw common.Address
-		copy(raw[:], key)
-		if code, ok := r.state.codeValues[accounts.InternAddress(raw)]; ok {
+		addr := accounts.InternAddress(common.BytesToAddress(key))
+		if code, ok := r.state.codeValues[addr]; ok {
 			return code, 0, nil
 		}
 	}
@@ -544,10 +538,7 @@ func (cs *calcState) BinFeed() (*commitment.PBinFeed, error) {
 		address := addr.Value()
 		for slot := range dirty {
 			key := slot.Value()
-			plain := make([]byte, len(address)+len(key))
-			copy(plain, address[:])
-			copy(plain[len(address):], key[:])
-			keys[string(plain)] = struct{}{}
+			keys[string(address[:])+string(key[:])] = struct{}{}
 		}
 	}
 	codeKeys := make(map[string]struct{}, len(cs.codeValues))
