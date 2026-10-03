@@ -25,6 +25,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/holiman/uint256"
 	"github.com/valyala/fastjson"
@@ -93,7 +95,7 @@ func (args *CallArgs) UnmarshalJSON(raw []byte) error {
 }
 
 // setField decodes one member as encoding/json would, and reports false where it cannot
-// promise the same result: a nested field, a key matching a field only case-insensitively,
+// promise the same result: a field without a case here, a key matching a field only case-insensitively,
 // or a value encoding/json would reject (so the caller gets encoding/json's error).
 func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
 	switch string(key) {
@@ -130,9 +132,14 @@ func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
 	return true // encoding/json ignores unknown members
 }
 
-var callArgsJSONNames = []string{"from", "to", "gas", "gasPrice", "maxPriorityFeePerGas", "maxFeePerGas",
-	"maxFeePerBlobGas", "value", "nonce", "data", "input", "accessList", "chainId", "blobVersionedHashes",
-	"blobs", "commitments", "proofs", "authorizationList"}
+var callArgsJSONNames = func() (names []string) {
+	t := reflect.TypeFor[CallArgs]()
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		names = append(names, name)
+	}
+	return names
+}()
 
 // setText decodes a JSON string member through T's UnmarshalText; null clears the field.
 func setText[T any, PT interface {
