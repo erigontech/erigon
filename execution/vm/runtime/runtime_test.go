@@ -1011,6 +1011,19 @@ func TestFastPathMatchesGenericPath(t *testing.T) {
 		"overflow PUSH2":   fill(1024, byte(vm.PUSH2), 0, 0),
 		"overflow DUP1":    fill(1024, byte(vm.DUP1)),
 		"full stack SWAP2": fill(1024, byte(vm.SWAP2), byte(vm.ADD), byte(vm.POP)),
+		"mix2": {
+			byte(vm.PUSH1), 7, byte(vm.PUSH1), 3, byte(vm.PUSH1), 9, byte(vm.PUSH1), 2,
+			byte(vm.PUSH1), 5, byte(vm.PUSH1), 1, byte(vm.PUSH1), 8, byte(vm.PUSH1), 4,
+			byte(vm.DUP8), byte(vm.DUP7), byte(vm.DUP6), byte(vm.DUP5), byte(vm.DUP4),
+			byte(vm.SWAP3), byte(vm.SWAP4), byte(vm.SUB), byte(vm.MUL), byte(vm.DIV),
+			byte(vm.LT), byte(vm.GT), byte(vm.EQ), byte(vm.AND), byte(vm.ISZERO),
+			byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0, byte(vm.RETURN),
+		},
+		"underflow DUP8":   fill(7, byte(vm.DUP8)),
+		"underflow SWAP4":  fill(4, byte(vm.SWAP4)),
+		"underflow DIV":    {byte(vm.PUSH1), 1, byte(vm.DIV)},
+		"underflow ISZERO": {byte(vm.ISZERO)},
+		"overflow DUP4":    fill(1024, byte(vm.DUP4)),
 	}
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
