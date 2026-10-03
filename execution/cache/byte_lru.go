@@ -114,8 +114,9 @@ func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 
 // Add reports that the value could be offered, not that it is resident: a
 // W-TinyLFU rejection also returns true. False means it was not taken -- too
-// big for the whole budget, or a concurrent writer took the key -- and onEvict
-// never fires for it, so the caller must refund its charge.
+// big for the whole budget, or the key is already there -- and onEvict never
+// fires for it, so the caller must refund its charge. Replacing a live key is
+// left to Remove+Add.
 func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {
@@ -125,14 +126,9 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 		b.grow(w)
 	}
 	b.resident.Add(w)
-	_, added := b.c.SetIfAbsent(key, value)
-	if !added {
-		// Replace by delete and insert: otter v2.3.0 loses a node Set over a key
-		// whose first write has not drained, and counts its weight forever.
-		b.c.Invalidate(key)
-		_, added = b.c.SetIfAbsent(key, value)
-	}
-	if !added {
+	// Never Set over a live key: otter loses a node Set before the key's first
+	// write drains, and counts its weight forever. https://github.com/maypok86/otter/pull/189
+	if _, added := b.c.SetIfAbsent(key, value); !added {
 		b.resident.Add(-w)
 		return false
 	}
