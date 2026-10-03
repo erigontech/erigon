@@ -263,9 +263,6 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 }
 
 func (cs *calcState) markWiped(addr accounts.Address) {
-	if cs.wiped == nil {
-		cs.wiped = make(map[accounts.Address]struct{})
-	}
 	cs.wiped[addr] = struct{}{}
 	cs.deleteStorageSubtree(addr)
 }

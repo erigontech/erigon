@@ -153,25 +153,10 @@ func pbtVerifyDecode(value []byte, target any) error {
 	return gob.NewDecoder(bytes.NewReader(value)).Decode(target)
 }
 
-func pbtVerifyValidateCodeSizes(snapshot io.ReaderAt, snapshotSize int64, maxCodeSize uint64) error {
-	_, err := artifact.ReadSnapshotStreamAt(snapshot, snapshotSize, artifact.SnapshotStreamCallbacks{
-		Header: func(header artifact.Header) error {
-			if header.Kind == 1 {
-				codeSize := dbstate.PBinIntegerUint64(header.CodeSize)
-				if codeSize > maxCodeSize {
-					return fmt.Errorf("%w: code size %d exceeds --max-code-size=%d", errVerifyPBTConfig, codeSize, maxCodeSize)
-				}
-			}
-			return nil
-		},
-	})
-	return err
-}
-
-func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64, scratch string, maxCodeSize uint64) (common.Hash, common.Hash, error) {
+func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64, scratch string, maxCodeSize uint64) (common.Hash, error) {
 	headers, err := os.Create(filepath.Join(scratch, "headers.bin"))
 	if err != nil {
-		return common.Hash{}, common.Hash{}, fmt.Errorf("read snapshot: %w", err)
+		return common.Hash{}, fmt.Errorf("read snapshot: %w", err)
 	}
 	defer headers.Close()
 	headerEncoder := gob.NewEncoder(headers)
@@ -209,10 +194,10 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 		},
 	})
 	if err != nil {
-		return common.Hash{}, common.Hash{}, fmt.Errorf("snapshot records: %w", err)
+		return common.Hash{}, fmt.Errorf("snapshot records: %w", err)
 	}
 	if err := headers.Sync(); err != nil {
-		return common.Hash{}, common.Hash{}, err
+		return common.Hash{}, err
 	}
 	leafProgress := pbtVerifyProgress{phase: "snapshot leaves", next: time.Now()}
 	root, err := dbstate.ForEachPBinArtifactLeaf(snapshot, snapshotSize, pbtVerifyHash, func(leaf dbstate.PBinLeaf) error {
@@ -228,20 +213,20 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 		return nil
 	})
 	if err != nil {
-		return common.Hash{}, common.Hash{}, fmt.Errorf("snapshot leaf stream: %w", err)
+		return common.Hash{}, fmt.Errorf("snapshot leaf stream: %w", err)
 	}
 	if root != meta.Root {
-		return common.Hash{}, common.Hash{}, fmt.Errorf("pbt root %x differs from trailer %x", root, meta.Root)
+		return common.Hash{}, fmt.Errorf("pbt root %x differs from trailer %x", root, meta.Root)
 	}
 	if err := pbtVerifyCollectAddresses(preimages, preimageSize, addresses); err != nil {
-		return common.Hash{}, common.Hash{}, fmt.Errorf("preimage records: %w", err)
+		return common.Hash{}, fmt.Errorf("preimage records: %w", err)
 	}
 	joinProgress := pbtVerifyProgress{phase: "preimage join", next: time.Now()}
 	if err := artifact.JoinAt(snapshot, snapshotSize, preimages, preimageSize, pbtVerifyHash, func(address common.Address, slot [32]byte) error {
 		joinProgress.add(address[:])
 		return joinedSlots.Collect(cache.StorageKey(address[:], slot[:]), append(append([]byte{}, address[:]...), slot[:]...))
 	}, scratch); err != nil {
-		return common.Hash{}, common.Hash{}, fmt.Errorf("join preimages: %w", err)
+		return common.Hash{}, fmt.Errorf("join preimages: %w", err)
 	}
 	paths := make([]string, 5)
 	for i, pair := range []struct {
@@ -256,22 +241,22 @@ func verifyPBTStreamingState(snapshot io.ReaderAt, snapshotSize int64, preimages
 	} {
 		paths[i] = filepath.Join(scratch, pair.name+".sorted")
 		if err := pbtVerifyFlushCollector(pair.collector, paths[i], "verify "+pair.name); err != nil {
-			return common.Hash{}, common.Hash{}, err
+			return common.Hash{}, err
 		}
 	}
 	codeRequirementsPath := paths[2]
 	codeExpectedPath := filepath.Join(scratch, "code-expected.sorted")
 	if err := pbtVerifyGenerateCodeExpected(codeRequirementsPath, codeExpectedPath, scratch, maxCodeSize); err != nil {
-		return common.Hash{}, common.Hash{}, err
+		return common.Hash{}, err
 	}
 	if err := pbtVerifyCode(paths[1], codeExpectedPath, scratch); err != nil {
-		return common.Hash{}, common.Hash{}, err
+		return common.Hash{}, err
 	}
 	mptRoot, err := pbtVerifyMPT(paths[0], paths[4], paths[3], headers.Name(), scratch)
 	if err != nil {
-		return common.Hash{}, common.Hash{}, err
+		return common.Hash{}, err
 	}
-	return meta.Root, mptRoot, nil
+	return mptRoot, nil
 }
 
 func pbtVerifyCollectAddresses(src io.ReaderAt, size int64, collector *etl.Collector) error {
@@ -562,7 +547,7 @@ func pbtVerifyMPT(leavesPath, slotsPath, addressesPath, headersPath, scratch str
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return common.Hash{}, err
+			return common.Hash{}, fmt.Errorf("%w: %s: %w", errPBTVerifyScratchIO, headersPath, err)
 		}
 		for addressOK && bytes.Compare(addressKey, record.AddressHash[:]) < 0 {
 			addressKey, addressValue, addressOK, err = addressReader.next()
@@ -631,7 +616,7 @@ func pbtVerifyBuildAccountRows(accountsPath, storagePath string, output *etl.Col
 		}
 		var header artifact.Header
 		if err := pbtVerifyDecode(accountValue, &header); err != nil {
-			return err
+			return fmt.Errorf("%w: %s: %w", errPBTVerifyScratchIO, accountsPath, err)
 		}
 		storage.prefix = accountKey
 		root, err := trie.StreamHashIterator(storage, 40, trie.NewHashBuilder(false), false)
@@ -744,7 +729,7 @@ func (it *pbtVerifyMPTIterator) Next() (trie.StreamItem, []byte, *accounts.Accou
 		it.progress.add(key)
 		var record pbtVerifyAccountRecord
 		if err := pbtVerifyDecode(value, &record); err != nil {
-			it.err = err
+			it.err = fmt.Errorf("%w: %s: %w", errPBTVerifyScratchIO, it.reader.path, err)
 			return trie.NoItem, nil, nil, nil, nil, nil
 		}
 		account := &accounts.Account{Nonce: record.Nonce, Root: record.Root, CodeHash: accounts.InternCodeHash(record.CodeHash)}

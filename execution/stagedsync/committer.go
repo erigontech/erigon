@@ -886,18 +886,24 @@ func (cc *commitmentCalculator) computeRootFromUpdatesResult(ctx context.Context
 	if cc.domainFrozenAfter(sdCtx.CommitmentDomain(), t.lastTxNum) {
 		return dualCommitmentResult{}, nil, fmt.Errorf("commitment domain %s is frozen", sdCtx.CommitmentDomain())
 	}
-	sdCtx.SetUpdates(updates)
+	root, flushOwn, err := cc.computeSingleDomain(ctx, t, sdCtx, updates, reader, binFeed)
+	return dualCommitmentResult{canonicalRoot: root}, flushOwn, err
+}
+
+func (cc *commitmentCalculator) computeSingleDomain(ctx context.Context, t commitTarget, sdCtx *commitmentdb.SharedDomainsCommitmentContext, updates *commitment.Updates, reader *asOfStateReader, binFeed *commitment.PBinFeed) ([]byte, func() error, error) {
+	if updates != nil {
+		sdCtx.SetUpdates(updates)
+	}
 	if binFeed != nil {
 		sdCtx.SetPBinFeed(binFeed)
 	}
 	reader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(reader)
 	if !cc.ownsChangeset(t.blockNum) {
-		root, flushOwn, err := cc.computeIsolated(ctx, t, sdCtx, cc.roTx, nil, nil)
-		return dualCommitmentResult{canonicalRoot: root}, flushOwn, err
+		return cc.computeIsolated(ctx, t, sdCtx, cc.roTx, nil, nil)
 	}
 	root, err := cc.computeWithBlockAccumulator(ctx, t, sdCtx, cc.roTx, nil, nil)
-	return dualCommitmentResult{canonicalRoot: root}, nil, err
+	return root, nil, err
 }
 
 // shadowCrossCheck recomputes block N the incremental way and asserts the
@@ -912,20 +918,11 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, target com
 	}
 	cc.state.FlushToUpdates(cc.updates)
 	cc.asOfReader.txNum = target.lastTxNum + 1
-	var binFeed *commitment.PBinFeed
 	sdCtx := cc.doms.GetCommitmentContext()
-	if _, _, ok := cc.dualCommitmentContexts(); ok || sdCtx.Trie().Variant() == commitment.VariantBinPatriciaTrie {
-		var err error
-		binFeed, err = cc.state.BinFeed()
-		if err != nil {
-			cc.fail(ctx, target, fmt.Errorf("shadow incremental bin feed: %w", err))
-			return
-		}
-	}
-	var hexFeed *commitment.Feed
-	if hexCtx, _, ok := cc.dualCommitmentContexts(); ok && hexCtx.AcceptsFeed() {
-		cc.state.FlushToFeed(&cc.feed)
-		hexFeed = &cc.feed
+	hexFeed, binFeed, feedErr := cc.feedsForState(sdCtx, false)
+	if feedErr != nil {
+		cc.fail(ctx, target, fmt.Errorf("shadow incremental bin feed: %w", feedErr))
+		return
 	}
 	result, flushOwn, err := cc.computeRootFromUpdatesResult(ctx, target, cc.handOffUpdates(), cc.asOfReader, hexFeed, binFeed)
 	if err != nil {
@@ -1045,25 +1042,13 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	defer raiseGCPercent()()
 	sdCtx := cc.doms.GetCommitmentContext()
 	cc.asOfReader.txNum = t.lastTxNum + 1
-	var binFeed *commitment.PBinFeed
-	if _, _, ok := cc.dualCommitmentContexts(); ok || sdCtx.Trie().Variant() == commitment.VariantBinPatriciaTrie {
-		var feedErr error
-		binFeed, feedErr = cc.state.BinFeed()
-		if feedErr != nil {
-			cc.publish(ctx, commitmentResult{
-				blockNum: t.blockNum, txNum: t.lastTxNum,
-				err: fmt.Errorf("commitmentCalculator: %sbin feed failed: %w", m.label, feedErr),
-			})
-			return
-		}
-		if cc.binFeedObserver != nil {
-			cc.binFeedObserver(binFeed)
-		}
-	}
-	var hexFeed *commitment.Feed
-	if hexCtx, _, ok := cc.dualCommitmentContexts(); ok && hexCtx.AcceptsFeed() {
-		cc.state.FlushToFeed(&cc.feed)
-		hexFeed = &cc.feed
+	hexFeed, binFeed, feedErr := cc.feedsForState(sdCtx, true)
+	if feedErr != nil {
+		cc.publish(ctx, commitmentResult{
+			blockNum: t.blockNum, txNum: t.lastTxNum,
+			err: fmt.Errorf("commitmentCalculator: %sbin feed failed: %w", m.label, feedErr),
+		})
+		return
 	}
 	feedMode := false
 	if hexFeed == nil && sdCtx.AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0 {
@@ -1089,7 +1074,6 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		result, err = cc.computeDualFromUpdatesWithRole(ctx, t, cc.handOffUpdates(), cc.asOfReader, hexCtx, binCtx, hexFeed, binFeed)
 		rh, shadowRoot = result.canonicalRoot, result.shadowRoot
 	} else {
-		sdCtx := cc.doms.GetCommitmentContext()
 		if cc.domainFrozenAfter(sdCtx.CommitmentDomain(), t.lastTxNum) {
 			cc.publish(ctx, commitmentResult{
 				blockNum: t.blockNum, txNum: t.lastTxNum,
@@ -1097,19 +1081,11 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			})
 			return
 		}
+		var updates *commitment.Updates
 		if !feedMode {
-			sdCtx.SetUpdates(cc.handOffUpdates())
+			updates = cc.handOffUpdates()
 		}
-		if binFeed != nil {
-			sdCtx.SetPBinFeed(binFeed)
-		}
-		cc.asOfReader.txNum = t.lastTxNum + 1
-		sdCtx.SetStateReader(cc.asOfReader)
-		if !cc.ownsChangeset(t.blockNum) {
-			rh, flushOwn, err = cc.computeIsolated(ctx, t, sdCtx, cc.roTx, nil, nil)
-		} else {
-			rh, err = cc.computeWithBlockAccumulator(ctx, t, sdCtx, cc.roTx, nil, nil)
-		}
+		rh, flushOwn, err = cc.computeSingleDomain(ctx, t, sdCtx, updates, cc.asOfReader, binFeed)
 	}
 	if err != nil {
 		cc.publish(ctx, commitmentResult{
@@ -1169,6 +1145,26 @@ func (cc *commitmentCalculator) dualCommitmentContexts() (*commitmentdb.SharedDo
 	hexCtx := cc.doms.GetCommitmentCtxForDomain(kv.CommitmentDomain)
 	binCtx := cc.doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain)
 	return hexCtx, binCtx, hexCtx != nil && binCtx != nil
+}
+
+func (cc *commitmentCalculator) feedsForState(sdCtx *commitmentdb.SharedDomainsCommitmentContext, observeBin bool) (*commitment.Feed, *commitment.PBinFeed, error) {
+	var binFeed *commitment.PBinFeed
+	if _, _, ok := cc.dualCommitmentContexts(); ok || sdCtx.Trie().Variant() == commitment.VariantBinPatriciaTrie {
+		var err error
+		binFeed, err = cc.state.BinFeed()
+		if err != nil {
+			return nil, nil, err
+		}
+		if observeBin && cc.binFeedObserver != nil {
+			cc.binFeedObserver(binFeed)
+		}
+	}
+	var hexFeed *commitment.Feed
+	if hexCtx, _, ok := cc.dualCommitmentContexts(); ok && hexCtx.AcceptsFeed() {
+		cc.state.FlushToFeed(&cc.feed)
+		hexFeed = &cc.feed
+	}
+	return hexFeed, binFeed, nil
 }
 
 func (cc *commitmentCalculator) beginCommitmentWorkerTxs(ctx context.Context) (kv.TemporalTx, kv.TemporalTx, kv.TemporalFilesPin, error) {
@@ -1331,28 +1327,17 @@ func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t com
 		return
 	}
 	if !cc.hasActivationBlock {
-		switch {
-		case cc.hasActivationFromTargets:
+		if cc.hasActivationFromTargets {
 			cc.activationBlock = cc.activationFromTargets
 			cc.hasActivationBlock = true
-		default:
-			if cc.blockReader == nil {
-				return
-			}
+		} else if cc.blockReader != nil && (!cc.hasFirstBlock || cc.firstBlockNum != 0) {
 			searchBlock := t.blockNum
-			canSearch := true
 			if cc.hasFirstBlock {
-				if cc.firstBlockNum == 0 {
-					canSearch = false
-				} else {
-					searchBlock = cc.firstBlockNum - 1
-				}
+				searchBlock = cc.firstBlockNum - 1
 			}
-			if !cc.hasActivationBlock && canSearch {
-				if activationBlock, found, err := binaryTrieActivationBlockWithHead(ctx, cc.roTx, cc.blockReader, cc.chainConfig, searchBlock, &types.Header{Time: t.blockTime}); err == nil && found {
-					cc.activationBlock = activationBlock
-					cc.hasActivationBlock = true
-				}
+			if activationBlock, found, err := binaryTrieActivationBlockWithHead(ctx, cc.roTx, cc.blockReader, cc.chainConfig, searchBlock, &types.Header{Time: t.blockTime}); err == nil && found {
+				cc.activationBlock = activationBlock
+				cc.hasActivationBlock = true
 			}
 		}
 	}
@@ -1417,9 +1402,6 @@ func (cc *commitmentCalculator) ShadowDomainStopped(domain kv.Domain) bool {
 
 func recordStoppedCommitmentDomains(tx kv.TemporalRwTx, local map[kv.Domain]bool) error {
 	stopped, ok := tx.AggTx().(interface{ CommitmentDomainStopped(kv.Domain) bool })
-	if !ok && local == nil {
-		return nil
-	}
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 		isStopped := local != nil && local[domain]
 		if !isStopped && ok {

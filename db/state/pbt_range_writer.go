@@ -90,7 +90,7 @@ type pbinRangeWriterWrite struct {
 }
 
 type pbinRangeWriterOverlay struct {
-	inner    commitment.PatriciaContext
+	commitment.PatriciaContext
 	writes   map[string]pbinRangeWriterWrite
 	release  func([]byte)
 	write    func([]byte, []byte, []byte) error
@@ -115,7 +115,7 @@ func (o *pbinRangeWriterOverlay) Branch(prefix []byte) ([]byte, kv.Step, error) 
 	if write, ok := o.writes[string(prefix)]; ok {
 		return bytes.Clone(write.data), 0, nil
 	}
-	return o.inner.Branch(prefix)
+	return o.PatriciaContext.Branch(prefix)
 }
 
 func (o *pbinRangeWriterOverlay) PutBranch(prefix, data, prevData []byte) error {
@@ -127,14 +127,6 @@ func (o *pbinRangeWriterOverlay) PutBranch(prefix, data, prevData []byte) error 
 	write.data = bytes.Clone(data)
 	o.writes[key] = write
 	return nil
-}
-
-func (o *pbinRangeWriterOverlay) Account(key []byte) (*commitment.Update, error) {
-	return o.inner.Account(key)
-}
-
-func (o *pbinRangeWriterOverlay) Storage(key []byte) (*commitment.Update, error) {
-	return o.inner.Storage(key)
 }
 
 func (o *pbinRangeWriterOverlay) Flush() error {
@@ -161,7 +153,7 @@ func (o *pbinRangeWriterOverlay) flush(skip func([]byte) (bool, error)) error {
 		if err := o.write([]byte(key), write.data, write.prev); err != nil {
 			return err
 		}
-		if err := o.inner.PutBranch([]byte(key), write.data, write.prev); err != nil {
+		if err := o.PatriciaContext.PutBranch([]byte(key), write.data, write.prev); err != nil {
 			return err
 		}
 		o.release([]byte(key))
@@ -232,9 +224,6 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 		})
 	}
 	if len(ranges) == 0 {
-		for i := range ranges {
-			ranges[i].collector.Close()
-		}
 		return nil, fmt.Errorf("pbin range writer: no account range contains %d", endTxNum)
 	}
 	leafStamp := ranges[len(ranges)-1].end - 1
@@ -242,9 +231,6 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 	stateInFiles := !limits.NoRangePastFrontier || endTxNum < ranges[len(ranges)-1].end
 	if ranges[len(ranges)-1].end <= endTxNum && !limits.NoRangePastFrontier {
 		if endTxNum == ^uint64(0) {
-			for i := range ranges {
-				ranges[i].collector.Close()
-			}
 			return nil, fmt.Errorf("pbin range writer: end txNum is too large")
 		}
 		ranges = append(ranges, pbinRange{
@@ -257,21 +243,15 @@ func newPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 }
 
 func (w *PBinRangeWriter) PBinLeafStamp() uint64 {
-	if w == nil {
-		return 0
-	}
 	return w.leafStamp
 }
 
 func (w *PBinRangeWriter) PBinCommitmentState() []byte {
-	if w == nil {
-		return nil
-	}
 	return bytes.Clone(w.state)
 }
 
 func (w *PBinRangeWriter) PBinCommitmentStateInFiles() bool {
-	return w != nil && w.stateInFiles
+	return w.stateInFiles
 }
 
 func pbinAccountFiles(files kv.VisibleFiles) kv.VisibleFiles {
@@ -294,10 +274,10 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	if domains.GetCommitmentCtx().CommitmentDomain() != w.domain {
 		return common.Hash{}, fmt.Errorf("pbin range writer: shared domains use %s, want %s", domains.GetCommitmentCtx().CommitmentDomain(), w.domain)
 	}
+	defer w.closeRanges()
 	tracker := &pbinRowStampTracker{closed: make(map[string]uint64)}
 	stampFile, err := os.CreateTemp(w.aggregator.Dirs().Tmp, "pbin-range-stamps-")
 	if err != nil {
-		w.closeRanges()
 		return common.Hash{}, err
 	}
 	defer func() {
@@ -338,7 +318,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			}
 		}
 		if final {
-			tracker.finish()
+			tracker.closeDeeper(-1)
 		} else if advanceErr := tracker.advance(nextKey); advanceErr != nil {
 			return advanceErr
 		}
@@ -349,10 +329,10 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 			if overlay == nil {
 				overlay = &pbinRangeWriterOverlay{writes: make(map[string]pbinRangeWriterWrite)}
 			}
-			overlay.inner = inner
+			overlay.PatriciaContext = inner
 			overlay.write = onRow
 			overlay.finished = func() error {
-				tracker.clearClosed()
+				clear(tracker.closed)
 				return nil
 			}
 			overlay.release = func(key []byte) {
@@ -393,7 +373,6 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		return streamErr
 	}
 	if streamErr := pbinForEachRebuildOpStream(w.aggregator.Dirs().Tmp, w.maxOps, w.maxBytes, visit, stream); streamErr != nil {
-		w.closeRanges()
 		return common.Hash{}, streamErr
 	}
 	if !seen {
@@ -402,27 +381,22 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 	if len(state) == 0 {
 		trie, ok := domains.GetCommitmentCtx().Trie().(commitment.StatefulTrie)
 		if !ok {
-			w.closeRanges()
 			return common.Hash{}, fmt.Errorf("pbin range writer: trie does not support state encoding")
 		}
 		trieState, encodeErr := trie.EncodeCurrentState(nil)
 		if encodeErr != nil {
-			w.closeRanges()
 			return common.Hash{}, encodeErr
 		}
 		state, err = commitmentdb.NewCommitmentState(w.endTxNum, blockNum, trieState).Encode()
 		if err != nil {
-			w.closeRanges()
 			return common.Hash{}, err
 		}
 	}
 	w.state = bytes.Clone(state)
 	if len(state) == 0 {
-		w.closeRanges()
 		return common.Hash{}, fmt.Errorf("pbin range writer: commitment state is missing")
 	}
 	if err := w.buildFiles(ctx, state); err != nil {
-		w.closeRanges()
 		return common.Hash{}, err
 	}
 	return common.BytesToHash(root), nil
@@ -531,10 +505,6 @@ func (t *pbinRowStampTracker) advance(nextKey []byte) error {
 	return nil
 }
 
-func (t *pbinRowStampTracker) finish() {
-	t.closeDeeper(-1)
-}
-
 func (t *pbinRowStampTracker) closeDeeper(bitLen int16) {
 	for len(t.open) > 0 && (bitLen < 0 || t.open[len(t.open)-1].path.BitLen > bitLen) {
 		t.closeBranch(t.open[len(t.open)-1])
@@ -547,10 +517,6 @@ func (t *pbinRowStampTracker) closeBranch(branch pbinStampBranch) {
 	if old, ok := t.closed[key]; !ok || branch.stamp > old {
 		t.closed[key] = branch.stamp
 	}
-}
-
-func (t *pbinRowStampTracker) clearClosed() {
-	clear(t.closed)
 }
 
 func (t *pbinRowStampTracker) stamp(key []byte) (uint64, error) {

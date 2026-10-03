@@ -1348,22 +1348,17 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		if err != nil {
 			return err
 		}
-		if err := collector.Collect(key, encoded); err != nil {
-			return err
-		}
-		return nil
+		return collector.Collect(key, encoded)
 	}
 	if err := stream(emit); err != nil {
 		return err
 	}
 	if err := collector.Flush(); err != nil {
-		collector.Close()
 		return err
 	}
 	var previousOpKey, previousOpValue []byte
 	sortedFile, err := os.CreateTemp(tmpDir, "pbin-ops-*.bin")
 	if err != nil {
-		collector.Close()
 		return err
 	}
 	sortedPath := sortedFile.Name()
@@ -1379,7 +1374,6 @@ func pbinForEachRebuildOpStream(tmpDir string, maxOps, maxBytes int, visit func(
 		return writePBinRebuildOp(sortedFile, value)
 	}, etl.TransformArgs{}); err != nil {
 		_ = sortedFile.Close()
-		collector.Close()
 		_ = dir.RemoveFile(sortedPath)
 		return err
 	}

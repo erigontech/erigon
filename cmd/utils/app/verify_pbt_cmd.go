@@ -137,12 +137,6 @@ func verifyPBTFilesWithMaxCodeSize(ctx context.Context, dataDir, snapshotPath, p
 	if !preimageInfo.Mode().IsRegular() {
 		return fmt.Errorf("verify-pbt: preimages are not a regular file: %s", preimagesPath)
 	}
-	if err := pbtVerifyValidateCodeSizes(snapshot, snapshotInfo.Size(), maxCodeSize); err != nil {
-		if errors.Is(err, errVerifyPBTConfig) || pbtVerifyIsIOError(err) {
-			return err
-		}
-		return fmt.Errorf("%w: snapshot records: %w", errVerifyPBTInvalid, err)
-	}
 	headerRoot, err := readPBTHeaderRoot(ctx, dataDir, block)
 	if err != nil {
 		return err
@@ -171,7 +165,7 @@ func verifyPBTFilesWithMaxCodeSize(ctx context.Context, dataDir, snapshotPath, p
 			err = removeErr
 		}
 	}()
-	_, root, err := verifyPBTStreamingState(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), tmp, maxCodeSize)
+	root, err := verifyPBTStreamingState(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), tmp, maxCodeSize)
 	if err != nil {
 		if errors.Is(err, errVerifyPBTConfig) {
 			return err

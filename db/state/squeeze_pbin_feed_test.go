@@ -69,11 +69,11 @@ func pbinRebuildFeedStream(keys *etl.Collector, reader commitmentdb.StateReader,
 			}
 		}
 		if len(key) == length.Addr+length.Hash && accountExists {
-			slot, err := commitmentdb.BinFeedStorageSlotFromState(address, key[length.Addr:], reader)
+			account, err := commitmentdb.BinFeedAccountFromState(address, [][]byte{key[length.Addr:]}, false, false, reader)
 			if err != nil {
 				return err
 			}
-			if err := emitter.EmitStorageSlot(address, slot, emit); err != nil {
+			if err := emitter.EmitStorageSlot(address, account.Slots[0], emit); err != nil {
 				return err
 			}
 		}

@@ -224,6 +224,31 @@ func TestImportPBTRecoveryRemovesMovedFilesFromCorruptMarker(t *testing.T) {
 	require.NoError(t, err, "%s", output)
 }
 
+func TestImportPBTRecoveryKeepsFilesWhenSettingsAreUnreadable(t *testing.T) {
+	fixture := newPBTImportFixture(t)
+	require.NoError(t, importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New()))
+	dirs := datadir.Open(fixture.dataDir)
+	markerPath := dbstate.PBTImportMarkerPath(dirs)
+	require.NoError(t, os.WriteFile(markerPath, []byte("{"), 0o644))
+	settingsPath := filepath.Join(dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
+	backupPath := settingsPath + ".backup"
+	require.NoError(t, os.Rename(settingsPath, backupPath))
+	require.NoError(t, os.Mkdir(settingsPath, 0o755))
+	t.Cleanup(func() {
+		_ = dir.RemoveAll(settingsPath)
+		_ = os.Rename(backupPath, settingsPath)
+	})
+	before := snapshotTree(t, fixture.dataDir)
+	err := importPBT(t.Context(), fixture.dataDir, fixture.snapshot, "", log.New())
+	require.Error(t, err)
+	require.Equal(t, before, snapshotTree(t, fixture.dataDir))
+	_, err = os.Stat(markerPath)
+	require.NoError(t, err)
+	binFiles, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment-bin.*"))
+	require.NoError(t, err)
+	require.Len(t, binFiles, 16)
+}
+
 func TestImportPBTRecoveryKeepsMarkerWhenFileCleanupFails(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.MkdirAll(dirs.SnapDomain, 0o755))

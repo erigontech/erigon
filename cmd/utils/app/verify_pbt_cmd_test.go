@@ -31,7 +31,6 @@ import (
 	"runtime"
 	"runtime/metrics"
 	"sort"
-	"syscall"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -174,6 +173,7 @@ func TestVerifyPBTRejectsOversizedCodeDeclaration(t *testing.T) {
 	require.NoError(t, w.Flush())
 	require.NoError(t, f.Close())
 	require.ErrorContains(t, pbtVerifyGenerateCodeExpected(requirements, expected, scratch, 1<<24), "max-code-size")
+	require.NoFileExists(t, expected)
 }
 
 func TestVerifyPBTAcceptsExportWithLeadingZeroCodeChunk(t *testing.T) {
@@ -220,7 +220,7 @@ func TestVerifyPBTAcceptsCodeSizeConfiguredAboveDefault(t *testing.T) {
 	require.NoError(t, configuredErr)
 }
 
-func TestVerifyPBTRejectsCodeSizeAboveConfiguredLimitBeforeScratch(t *testing.T) {
+func TestVerifyPBTRejectsCodeSizeAboveConfiguredLimitBeforeExpansion(t *testing.T) {
 	address := common.Address{1}
 	address32 := eip8297.RightAlign32(address[:])
 	addressHash := common.Hash(blake3.Sum256(address32[:]))
@@ -252,10 +252,10 @@ func TestVerifyPBTRejectsCodeSizeAboveConfiguredLimitBeforeScratch(t *testing.T)
 	preimagesPath := filepath.Join(t.TempDir(), "preimages.bin")
 	require.NoError(t, os.WriteFile(snapshotPath, snapshot.Bytes(), 0o644))
 	require.NoError(t, os.WriteFile(preimagesPath, preimages.Bytes(), 0o644))
-	scratch := filepath.Join(t.TempDir(), "scratch-file")
-	require.NoError(t, os.WriteFile(scratch, nil, 0o644))
+	scratch := t.TempDir()
 	err = verifyPBTFilesWithMaxCodeSize(t.Context(), anchor, snapshotPath, preimagesPath, 0, 64*1024, scratch)
 	require.ErrorIs(t, err, errVerifyPBTConfig)
+	require.NoFileExists(t, filepath.Join(scratch, "code-expected.sorted"))
 }
 
 func verifyPBTRealExportWithSharedCode(t *testing.T, code []byte) {
@@ -614,15 +614,23 @@ func TestVerifyPBTCommandPrintsRejectionInFreshProcess(t *testing.T) {
 }
 
 func TestVerifyPBTUsageErrorsExitTwoInFreshProcess(t *testing.T) {
-	for _, testCase := range []string{"missing-snapshot", "missing-preimages", "missing-block", "positional"} {
-		t.Run(testCase, func(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		stderr string
+	}{
+		{name: "missing-snapshot", stderr: "--snapshot, --preimages and --block are required"},
+		{name: "missing-preimages", stderr: "--snapshot, --preimages and --block are required"},
+		{name: "missing-block", stderr: "--snapshot, --preimages and --block are required"},
+		{name: "positional", stderr: "unexpected positional arguments"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
 			command := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestVerifyPBTUsageHelperProcess$", "-test.v")
-			command.Env = append(os.Environ(), "GO_WANT_VERIFY_PBT_USAGE_HELPER=1", "VERIFY_PBT_USAGE_CASE="+testCase)
+			command.Env = append(os.Environ(), "GO_WANT_VERIFY_PBT_USAGE_HELPER=1", "VERIFY_PBT_USAGE_CASE="+testCase.name)
 			output, err := command.CombinedOutput()
 			var exitErr *exec.ExitError
 			require.ErrorAs(t, err, &exitErr)
 			require.Equal(t, 2, exitErr.ExitCode())
-			require.NotEmpty(t, output)
+			require.Contains(t, string(output), testCase.stderr)
 		})
 	}
 }
@@ -644,7 +652,7 @@ func TestVerifyPBTUsageHelperProcess(t *testing.T) {
 	default:
 		os.Exit(3)
 	}
-	if err := verifyPBTCommand.Run(t.Context(), args); err != nil {
+	if err := verifyPBTCommand.Run(t.Context(), append([]string{"verify-pbt"}, args...)); err != nil {
 		if exitErr, ok := errors.AsType[cli.ExitCoder](err); ok {
 			os.Exit(exitErr.ExitCode())
 		}
@@ -694,24 +702,6 @@ func TestVerifyPBTCommandHelperProcess(t *testing.T) {
 	}
 	fmt.Fprintln(os.Stderr, err)
 	os.Exit(2)
-}
-
-func TestVerifyPBTScratchIOHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_VERIFY_PBT_IO_HELPER") != "1" {
-		return
-	}
-	limit := &syscall.Rlimit{Cur: 2 << 20, Max: 2 << 20}
-	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, limit); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	err := verifyPBTFiles(t.Context(), os.Getenv("VERIFY_PBT_DATADIR"), os.Getenv("VERIFY_PBT_SNAPSHOT"), os.Getenv("VERIFY_PBT_PREIMAGES"), 0, os.Getenv("VERIFY_PBT_TMPDIR"))
-	if err == nil || errors.Is(err, errVerifyPBTInvalid) {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	fmt.Fprintln(os.Stderr, err)
-	os.Exit(0)
 }
 
 func newHiveVerifyAnchor(t *testing.T, root common.Hash) string {

@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297/witness"
@@ -34,15 +35,7 @@ type pbinWitnessDispatchTrie struct {
 	called  bool
 }
 
-type pbinWitnessDispatchNoWitnessTrie struct {
-	commitment.Trie
-	variant commitment.TrieVariant
-	called  bool
-}
-
 func (t *pbinWitnessDispatchTrie) Variant() commitment.TrieVariant { return t.variant }
-
-func (t *pbinWitnessDispatchNoWitnessTrie) Variant() commitment.TrieVariant { return t.variant }
 
 func (t *pbinWitnessDispatchTrie) Witness(context.Context, common.Hash, witness.PBinDriverInput) ([][]byte, [][]byte, common.Hash, error) {
 	t.called = true
@@ -71,9 +64,8 @@ func TestPBinWitnessDispatchesBinaryDomains(t *testing.T) {
 }
 
 func TestPBinWitnessDispatchRefusesHex(t *testing.T) {
-	trie := &pbinWitnessDispatchNoWitnessTrie{variant: commitment.VariantCommitmentV3}
+	trie := commitment.NewHexPatriciaHashed(length.Addr, nil, commitment.DefaultTrieConfig())
 	sdc := &SharedDomainsCommitmentContext{commitmentDomain: kv.CommitmentDomain, variant: commitment.VariantCommitmentV3, patriciaTrie: trie}
 	_, _, _, err := sdc.PBinWitness(context.Background(), common.Hash{}, witness.PBinDriverInput{})
 	require.ErrorContains(t, err, "cannot build PBT witnesses")
-	require.False(t, trie.called)
 }

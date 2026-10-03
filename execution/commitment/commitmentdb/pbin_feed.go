@@ -83,12 +83,6 @@ func hasKey(keys map[string]struct{}, key string) bool {
 }
 
 func BinFeedAccountFromState(address []byte, slotKeys [][]byte, codeWritten, wiped bool, reader StateReader) (commitment.PBinFeedAccount, error) {
-	if reader == nil {
-		return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: nil state reader")
-	}
-	if len(address) != length.Addr {
-		return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: address has length %d, want %d", len(address), length.Addr)
-	}
 	encoded, _, err := reader.Read(kv.AccountsDomain, address, 1)
 	if err != nil {
 		return commitment.PBinFeedAccount{}, err
@@ -131,24 +125,4 @@ func BinFeedAccountFromState(address []byte, slotKeys [][]byte, codeWritten, wip
 		account.Slots = append(account.Slots, commitment.PBinFeedSlot{Key: bytes.Clone(slot), Value: bytes.Clone(value)})
 	}
 	return account, nil
-}
-
-func BinFeedStorageSlotFromState(address, slot []byte, reader StateReader) (commitment.PBinFeedSlot, error) {
-	if reader == nil {
-		return commitment.PBinFeedSlot{}, fmt.Errorf("pbin: nil state reader")
-	}
-	if len(address) != length.Addr {
-		return commitment.PBinFeedSlot{}, fmt.Errorf("pbin: address has length %d, want %d", len(address), length.Addr)
-	}
-	if len(slot) != length.Hash {
-		return commitment.PBinFeedSlot{}, fmt.Errorf("pbin: slot key has length %d, want %d", len(slot), length.Hash)
-	}
-	composite := make([]byte, length.Addr+length.Hash)
-	copy(composite, address)
-	copy(composite[length.Addr:], slot)
-	value, _, err := reader.Read(kv.StorageDomain, composite, 1)
-	if err != nil {
-		return commitment.PBinFeedSlot{}, err
-	}
-	return commitment.PBinFeedSlot{Key: bytes.Clone(slot), Value: bytes.Clone(value)}, nil
 }

@@ -149,8 +149,10 @@ func pbinForEachLeaf(at *AggregatorRoTx, accountsCursor, codeCursor, storageCurs
 			continue
 		}
 		if storageCursor.ok && bytes.Equal(storageCursor.key[:len(address)], address) {
-			if err := pbinSkipAddress(&storageCursor, address); err != nil {
-				return err
+			for storageCursor.ok && bytes.Equal(storageCursor.key[:len(address)], address) {
+				if err := storageCursor.advance(); err != nil {
+					return err
+				}
 			}
 		}
 		if codeCursor.ok && bytes.Equal(codeCursor.key, address) {
@@ -202,10 +204,7 @@ func (p *pbinStreamProgress) report(message, phase string, key []byte) {
 		return
 	}
 	p.next = now.Add(30 * time.Second)
-	prefix := key
-	if len(prefix) > 8 {
-		prefix = prefix[:8]
-	}
+	prefix := key[:min(len(key), 8)]
 	if p.accountPhase == "" {
 		log.Root().Info(message, "phase", phase, "leaves", p.leaves, "key_prefix", hex.EncodeToString(prefix))
 		return
@@ -221,11 +220,9 @@ func pbinOpenLatestCursor(at *AggregatorRoTx, roTx kv.Tx, domain kv.Domain, file
 	var iter *DomainLatestIterFile
 	var err error
 	if filesOnly {
-		fileIter, fileErr := domainRoTx.DebugRangeLatestFromFiles(nil, nil, kv.Unlim)
-		iter, err = fileIter, fileErr
+		iter, err = domainRoTx.DebugRangeLatestFromFiles(nil, nil, kv.Unlim)
 	} else {
-		dbIter, dbErr := domainRoTx.DebugRangeLatest(roTx, nil, nil, kv.Unlim)
-		iter, err = dbIter, dbErr
+		iter, err = domainRoTx.DebugRangeLatest(roTx, nil, nil, kv.Unlim)
 	}
 	if err != nil {
 		return pbinLatestCursor{}, err
@@ -276,45 +273,20 @@ func pbinNextAddress(cursors ...pbinLatestCursor) ([]byte, error) {
 
 const pbinAddressLength = 20
 
-func pbinSkipAddress(cursor *pbinLatestCursor, address []byte) error {
-	for cursor.ok && bytes.Equal(cursor.key[:len(address)], address) {
-		if err := cursor.advance(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func pbinCollectOp(collector *etl.Collector, scratch *pbinLeafCollector, op pbt.Op, stamp uint64) error {
 	if op.Value == ([eip8297.ValueLength]byte{}) {
 		return nil
 	}
-	return scratch.collect(collector, op.Key, op.Value[:], stamp)
+	binary.BigEndian.PutUint64(scratch.value[:], stamp)
+	copy(scratch.value[8:], op.Value[:])
+	return collector.Collect(op.Key, scratch.value[:])
 }
 
 type pbinLeafCollector struct {
 	value [8 + eip8297.ValueLength]byte
 }
 
-func (c *pbinLeafCollector) collect(collector *etl.Collector, key, value []byte, stamp uint64) error {
-	if collector == nil {
-		return fmt.Errorf("pbin leaf stream: nil collector")
-	}
-	if len(value) != eip8297.ValueLength {
-		return fmt.Errorf("pbin leaf stream: value has length %d, want %d", len(value), eip8297.ValueLength)
-	}
-	binary.BigEndian.PutUint64(c.value[:], stamp)
-	copy(c.value[8:], value)
-	return collector.Collect(key, c.value[:])
-}
-
 func pbinLoadSortedLeaves(collector *etl.Collector, emit func(PBinLeaf) error, progress *pbinStreamProgress) error {
-	if collector == nil {
-		return fmt.Errorf("pbin leaf stream: nil collector")
-	}
-	if emit == nil {
-		return fmt.Errorf("pbin leaf stream: nil emitter")
-	}
 	var previousKey, previousValue []byte
 	var previousStamp uint64
 	flush := func() error {

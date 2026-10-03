@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -119,11 +120,18 @@ func importPBTWithHooks(ctx context.Context, dataDir, snapshotPath, chainName st
 	}
 	marker, markerErr := dbstate.ReadPBTImportMarker(dirs)
 	if markerErr != nil {
-		if settings, settingsErr := dbstate.ReadErigonDBSettings(dirs); settingsErr == nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
+		settings, settingsErr := dbstate.ReadErigonDBSettings(dirs)
+		if settingsErr != nil {
+			return fmt.Errorf("%w; target settings are unreadable: %w", markerErr, settingsErr)
+		}
+		if settings.TrieVariantName() == dbstate.TrieVariantHexBin {
 			if cleanupErr := recoverPBTImportSettings(dirs, settings, nil); cleanupErr != nil {
 				return fmt.Errorf("%w; partial import cleanup failed: %w", markerErr, cleanupErr)
 			}
 			return fmt.Errorf("%w; rerun %s", markerErr, pbtImportRerunCommand(dirs.DataDir, chainName, snapshotPath))
+		}
+		if settings.TrieVariantName() != dbstate.TrieVariantHex {
+			return fmt.Errorf("%w; target settings are %s", markerErr, settings.TrieVariantName())
 		}
 		if cleanupErr := removePBTImportFilesForRecovery(dirs); cleanupErr != nil {
 			return fmt.Errorf("%w; partial import cleanup failed: %w", markerErr, cleanupErr)
@@ -621,7 +629,7 @@ func validatePBTImportTarget(ctx context.Context, rawDB kv.RoDB, blockReader *fr
 		return "", err
 	}
 	if progress != meta.Block {
-		return "", pbtImportProgressError(progress, meta, dataDir, chainConfig.ChainName)
+		return "", pbtImportProgressError(progress, meta, dataDir, cmp.Or(chainConfig.ChainName, chainName))
 	}
 	lastTx, found, err := blockReader.TxnumReader().MaxExact(ctx, readerTx, meta.Block)
 	if err != nil {
@@ -631,12 +639,12 @@ func validatePBTImportTarget(ctx context.Context, rawDB kv.RoDB, blockReader *fr
 		return "", fmt.Errorf("commitment import-pbt: block %d has no txNum mapping", meta.Block)
 	}
 	if lastTx != meta.TxNum {
-		return "", fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", meta.Block, meta.TxNum, meta.Block, lastTx, dataDir, meta.Block+1, chainConfig.ChainName, dataDir, chainConfig.ChainName, meta.HashSuite)
+		return "", fmt.Errorf("commitment import-pbt: snapshot checkpoint (%d, %d) is not the block end; target block %d ends at txNum %d; run integration stage_exec --datadir=%s --block=%d --chain=%s --experimental.commitment-v3, then erigon snapshots export-pbt --datadir=%s --chain=%s --out=<export-dir> --experimental.bin-commitment.hash=%s", meta.Block, meta.TxNum, meta.Block, lastTx, dataDir, meta.Block+1, cmp.Or(chainConfig.ChainName, chainName), dataDir, cmp.Or(chainConfig.ChainName, chainName), meta.HashSuite)
 	}
 	if common.HexToHash(meta.StateRoot) != header.Root {
 		return "", fmt.Errorf("commitment import-pbt: snapshot stateRoot %s differs from header root %s", meta.StateRoot, header.Root)
 	}
-	return chainConfig.ChainName, nil
+	return cmp.Or(chainConfig.ChainName, chainName), nil
 }
 
 func movePBTImportBinFilesWithRename(names []string, stageDirs, targetDirs datadir.Dirs, move func(string, string) error) ([]string, error) {
