@@ -116,6 +116,9 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	if err != nil {
 		return nil, err
 	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
+		return nil, err
+	}
 	engine := api.engine()
 
 	if args.Gas == nil || uint64(*args.Gas) == 0 {
@@ -187,6 +190,9 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
+		return 0, err
+	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
 		return 0, err
 	}
 	engine := api.engine()
@@ -732,8 +738,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return emptyWitnessBytes()
 	}
 
-	// The stateless verifier navigates the system address (system-call msg.sender, then its
-	// EIP-161 empty-account cleanup via DeleteSubtree), so its path must be in the witness.
+	// On AuRa the stateless verifier navigates the system address (system-call msg.sender),
+	// so its path must be in the witness.
 	// collectAccessedState drops it per EIP-7928 — a witness-content rule for the
 	// debug_executionWitness format that does not apply to this op-stream witness.
 	accessed.Addresses[common.Address(params.SystemAddress.Value())] = struct{}{}
@@ -954,6 +960,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
+		return nil, err
+	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
 		return nil, err
 	}
 	engine := api.engine()

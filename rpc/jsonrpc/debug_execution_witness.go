@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -978,7 +979,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// canonical omits it. Added after stateless verification, which rejects the bare node.
 	if mode == witnessModeLegacy {
 		for _, node := range result.State {
-			if bytes.Contains(node, trie.EmptyRoot[:]) {
+			if bytes.Contains(node, empty.RootHash[:]) {
 				result.State = append(result.State, hexutil.Bytes{0x80})
 				break
 			}
@@ -1920,7 +1921,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 	// Handle created contracts - clear their storage subtries
 	for addr := range s.created {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
-			account.Root = trie.EmptyRoot
+			account.Root = empty.RootHash
 		}
 		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
@@ -2011,7 +2012,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			continue
 		}
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
-			account.Root = trie.EmptyRoot
+			account.Root = empty.RootHash
 		}
 		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
