@@ -21,18 +21,19 @@ package state
 // allocations it saves. 2048 slots is 574 KB. Past the cap the caller
 // allocates, which is what every object did before the arena.
 const (
+	arenaFirstSlab  = 8
 	arenaSlabSize   = 64
-	arenaMaxSlabs   = 32
-	arenaMaxObjects = arenaSlabSize * arenaMaxSlabs
+	arenaMaxObjects = 2048
 )
 
 // stateObjectArena is a slab allocator for stateObjects that are never cached
 // and so die with the transaction that created them. Slabs are append-only, so
 // a pointer stays valid until reset.
 type stateObjectArena struct {
-	slabs []*[arenaSlabSize]stateObject
+	slabs [][]stateObject
 	slab  int
 	idx   int
+	total int
 }
 
 func (a *stateObjectArena) alloc() *stateObject {
@@ -45,7 +46,7 @@ func (a *stateObjectArena) alloc() *stateObject {
 	// slot identity, and release() must not hand a live slot to the shared pool.
 	*so = stateObject{arena: true}
 	a.idx++
-	if a.idx == arenaSlabSize {
+	if a.idx == len(a.slabs[a.slab]) {
 		a.slab++
 		a.idx = 0
 	}
@@ -56,10 +57,13 @@ func (a *stateObjectArena) alloc() *stateObject {
 func (a *stateObjectArena) empty() bool { return a.slab == 0 && a.idx == 0 }
 
 func (a *stateObjectArena) grow() bool {
-	if len(a.slabs) == arenaMaxSlabs {
+	// Most calls touch a few accounts: start small, double up to arenaSlabSize.
+	n := min(max(arenaFirstSlab, a.total), arenaSlabSize)
+	if a.total+n > arenaMaxObjects {
 		return false
 	}
-	a.slabs = append(a.slabs, new([arenaSlabSize]stateObject))
+	a.slabs = append(a.slabs, make([]stateObject, n))
+	a.total += n
 	return true
 }
 
@@ -69,7 +73,7 @@ func (a *stateObjectArena) grow() bool {
 // does not depend on this pass.
 func (a *stateObjectArena) reset() {
 	for s := 0; s <= a.slab && s < len(a.slabs); s++ {
-		used := a.slabs[s][:]
+		used := a.slabs[s]
 		if s == a.slab {
 			used = used[:a.idx]
 		}
@@ -79,5 +83,5 @@ func (a *stateObjectArena) reset() {
 }
 
 func (a *stateObjectArena) release() {
-	a.slabs, a.slab, a.idx = nil, 0, 0
+	a.slabs, a.slab, a.idx, a.total = nil, 0, 0, 0
 }
