@@ -169,6 +169,27 @@ func TestBlockServiceIgnoreSlot(t *testing.T) {
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
 }
 
+// TestBlockServiceDoesNotIgnoreLateBlockAsFuture proves the future-slot check compares against the
+// wall-clock slot, not the head: a block for a slot that has already passed, arriving while the
+// head is still behind it, is not from the future.
+func TestBlockServiceDoesNotIgnoreLateBlockAsFuture(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(block.Block.Slot).Return(false).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.ErrorIs(t, err, ErrInvalidSignature)
+}
+
 func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
