@@ -17,16 +17,11 @@
 package vm
 
 import (
-	"bytes"
-	_ "embed"
-	"go/format"
 	"os/exec"
 	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 // TestStackBoundsCheckEquivalence proves the interpreter's single unsigned
@@ -93,40 +88,7 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	t.Parallel()
 	// DUPs are makeDup closures, whose code pointers differ by inlining site,
 	// so they are checked by behaviour instead of by function identity.
-	type want struct {
-		execute         executionFunc
-		gas             uint64
-		numPop, numPush int
-	}
-	fast := map[OpCode]want{
-		PUSH1:    {opPush1, GasFastestStep, 0, 1},
-		PUSH2:    {opPush2, GasFastestStep, 0, 1},
-		DUP1:     {nil, GasFastestStep, 1, 2},
-		DUP2:     {nil, GasFastestStep, 2, 3},
-		DUP3:     {nil, GasFastestStep, 3, 4},
-		SWAP1:    {opSwap1, GasFastestStep, 2, 2},
-		SWAP2:    {opSwap2, GasFastestStep, 3, 3},
-		ADD:      {opAdd, GasFastestStep, 2, 1},
-		POP:      {opPop, GasQuickStep, 1, 0},
-		JUMPDEST: {opJumpdest, params.JumpdestGas, 0, 0},
-		JUMP:     {opJump, GasMidStep, 1, 0},
-		JUMPI:    {opJumpi, GasSlowStep, 2, 0},
-		SUB:      {opSub, GasFastestStep, 2, 1},
-		MUL:      {opMul, GasFastStep, 2, 1},
-		DIV:      {opDiv, GasFastStep, 2, 1},
-		LT:       {opLt, GasFastestStep, 2, 1},
-		GT:       {opGt, GasFastestStep, 2, 1},
-		EQ:       {opEq, GasFastestStep, 2, 1},
-		AND:      {opAnd, GasFastestStep, 2, 1},
-		ISZERO:   {opIszero, GasFastestStep, 1, 1},
-		DUP4:     {nil, GasFastestStep, 4, 5},
-		DUP5:     {nil, GasFastestStep, 5, 6},
-		DUP6:     {nil, GasFastestStep, 6, 7},
-		DUP7:     {nil, GasFastestStep, 7, 8},
-		DUP8:     {nil, GasFastestStep, 8, 9},
-		SWAP3:    {opSwap3, GasFastestStep, 4, 4},
-		SWAP4:    {opSwap4, GasFastestStep, 5, 5},
-	}
+	fast := fastPathOps
 	tables := []*JumpTable{
 		&frontierInstructionSet, &homesteadInstructionSet, &tangerineWhistleInstructionSet,
 		&spuriousDragonInstructionSet, &byzantiumInstructionSet, &constantinopleInstructionSet,
@@ -148,13 +110,13 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 				require.Equal(t, reflect.ValueOf(w.execute).Pointer(), reflect.ValueOf(got.execute).Pointer(), "table %d %s execute", i, op)
 			} else {
 				scope := new(CallContext)
-				for v := range uint64(8) {
+				for v := range uint64(16) {
 					scope.Stack.pushRef().SetUint64(v)
 				}
 				_, _, err := got.execute(0, nil, scope)
 				require.NoError(t, err)
-				require.Equal(t, 9, scope.Stack.len(), "table %d %s stack", i, op)
-				require.Equal(t, uint64(8-w.numPop), scope.Stack.peek().Uint64(), "table %d %s top", i, op)
+				require.Equal(t, 17, scope.Stack.len(), "table %d %s stack", i, op)
+				require.Equal(t, uint64(16-w.numPop), scope.Stack.peek().Uint64(), "table %d %s top", i, op)
 			}
 			require.Equal(t, w.gas, got.constantGas, "table %d %s gas", i, op)
 			require.Equal(t, w.numPop, got.numPop, "table %d %s numPop", i, op)
@@ -165,20 +127,17 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 	}
 }
 
-//go:embed run_traced_gen.go
-var runTracedSrc []byte
+// fastPathWant is one fastPathOps entry, generated with the fast-path cases in run.go.
+type fastPathWant struct {
+	execute         executionFunc
+	gas             uint64
+	numPop, numPush int
+}
 
-// TestRunTracedIsGenerated fails when run_traced_gen.go is stale against run.go.
+// TestRunTracedIsGenerated fails when run.go's fast-path cases, run_traced_gen.go
+// or fast_path_gen_test.go are stale against execution/vm/gen.
 func TestRunTracedIsGenerated(t *testing.T) {
-	cmd := exec.Command("go", "run", "./gen", "-stdout")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	require.NoError(t, err, stderr.String())
-	// Format both with this toolchain: gofmt output varies across Go versions.
-	want, err := format.Source(out)
-	require.NoError(t, err)
-	got, err := format.Source(runTracedSrc)
-	require.NoError(t, err)
-	require.Equal(t, string(want), string(got), "run.go changed: run go generate ./execution/vm")
+	cmd := exec.Command("go", "run", "./gen", "-check")
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, string(out))
 }

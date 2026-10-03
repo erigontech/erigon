@@ -77,6 +77,7 @@ run:
 		if !true {
 			sLen, gas := stack.len(), callContext.gas
 			switch op {
+
 			case PUSH1:
 				if sLen < stackLimit && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
@@ -88,41 +89,6 @@ run:
 				if sLen < stackLimit && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
 					pc, _, _ = opPush2(pc, evm, callContext)
-					pc++
-					continue
-				}
-			case DUP1:
-				if sLen >= 1 && sLen < stackLimit && gas >= GasFastestStep {
-					callContext.gas = gas - GasFastestStep
-					stack.dup(0)
-					pc++
-					continue
-				}
-			case DUP2:
-				if sLen >= 2 && sLen < stackLimit && gas >= GasFastestStep {
-					callContext.gas = gas - GasFastestStep
-					stack.dup(1)
-					pc++
-					continue
-				}
-			case DUP3:
-				if sLen >= 3 && sLen < stackLimit && gas >= GasFastestStep {
-					callContext.gas = gas - GasFastestStep
-					stack.dup(2)
-					pc++
-					continue
-				}
-			case SWAP1:
-				if sLen >= 2 && gas >= GasFastestStep {
-					callContext.gas = gas - GasFastestStep
-					stack.swap(1)
-					pc++
-					continue
-				}
-			case SWAP2:
-				if sLen >= 3 && gas >= GasFastestStep {
-					callContext.gas = gas - GasFastestStep
-					stack.swap(2)
 					pc++
 					continue
 				}
@@ -221,6 +187,27 @@ run:
 					pc++
 					continue
 				}
+			case DUP1:
+				if sLen >= 1 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(0)
+					pc++
+					continue
+				}
+			case DUP2:
+				if sLen >= 2 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(1)
+					pc++
+					continue
+				}
+			case DUP3:
+				if sLen >= 3 && sLen < stackLimit && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.dup(2)
+					pc++
+					continue
+				}
 			case DUP4:
 				if sLen >= 4 && sLen < stackLimit && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
@@ -256,6 +243,20 @@ run:
 					pc++
 					continue
 				}
+			case SWAP1:
+				if sLen >= 2 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(1)
+					pc++
+					continue
+				}
+			case SWAP2:
+				if sLen >= 3 && gas >= GasFastestStep {
+					callContext.gas = gas - GasFastestStep
+					stack.swap(2)
+					pc++
+					continue
+				}
 			case SWAP3:
 				if sLen >= 4 && gas >= GasFastestStep {
 					callContext.gas = gas - GasFastestStep
@@ -270,6 +271,7 @@ run:
 					pc++
 					continue
 				}
+
 			}
 		}
 		callContext.cacheGen++
