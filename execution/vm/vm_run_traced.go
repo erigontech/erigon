@@ -113,6 +113,12 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 
 run:
 	for {
+		// Past the end of the code is STOP. Exiting here, out of line, spares
+		// every op a taken jump in GetOp.
+		if !runTracing && pc >= uint64(len(contract.Code)) {
+			res, err = nil, errStopToken
+			break run
+		}
 		op = contract.GetOp(pc)
 		// The hottest constant-gas opcodes run inline, without the jump table and
 		// its indirect call. A failed check falls through to the generic path,
