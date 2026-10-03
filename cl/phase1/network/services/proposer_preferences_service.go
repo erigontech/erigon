@@ -16,7 +16,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -276,9 +275,7 @@ func (s *proposerPreferencesService) validateProposerPreferencesWithState(msg *c
 		return fmt.Errorf("validator index %d not found: %w", validatorIndex, err)
 	}
 	pk := val.PublicKey()
-	// The dependent state can predate the fork that the proposal epoch belongs to, so its fork field is not used.
-	forkVersion := s.beaconCfg.GetForkVersionByVersion(s.beaconCfg.GetCurrentStateVersion(proposalEpoch))
-	domain, err := fork.ComputeDomain(s.beaconCfg.DomainProposerPreferences[:], utils.Uint32ToBytes4(forkVersion), depState.GenesisValidatorsRoot())
+	domain, err := fork.ComputeDomainAtEpoch(s.beaconCfg, s.beaconCfg.DomainProposerPreferences, proposalEpoch, depState.GenesisValidatorsRoot())
 	if err != nil {
 		return fmt.Errorf("failed to get domain: %w", err)
 	}

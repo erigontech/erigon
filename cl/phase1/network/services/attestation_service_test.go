@@ -32,8 +32,11 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	mockCommittee "github.com/erigontech/erigon/cl/validator/committee_subscription/mock_services"
 	"github.com/erigontech/erigon/common"
@@ -409,6 +412,53 @@ func (t *attestationTestSuite) TestAttestationProcessMessageAllowsNextEpochWhenC
 	time.Sleep(time.Millisecond * 60)
 
 	t.Require().NoError(err)
+}
+
+// The head state can still carry the previous fork when the attestation targets the first epoch of a new one.
+func (t *attestationTestSuite) TestAttestationSignatureDomainUsesTargetEpochForkVersion() {
+	t.beaconConfig.DenebForkVersion = 0x04000099 // the fork scheduled for mockEpoch under this config
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
+		return 8
+	}
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+		return 1
+	}
+	t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).Times(1)
+	t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).Times(1)
+	var gotDomain []byte
+	computeSigningRoot = func(_ ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+		gotDomain = domain
+		return [32]byte{}, nil
+	}
+	blsVerifyMultipleSignatures = func(signatures [][]byte, signRoots [][]byte, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+	t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+		att.Data.BeaconBlockRoot: {},
+	}
+	finalizedCheckpoint := solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
+	t.mockForkChoice.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+		mockEpoch * mockSlotsPerEpoch:                 {Root: att.Data.Target.Root},
+		finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
+	}
+	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
+	t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(nil).Times(1)
+
+	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		Attestation:      att,
+		ImmediateProcess: true,
+	})
+	time.Sleep(time.Millisecond * 60)
+	t.Require().NoError(err)
+
+	var genesisValidatorsRoot common.Hash
+	t.Require().NoError(t.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		genesisValidatorsRoot = headState.GenesisValidatorsRoot()
+		return nil
+	}))
+	want, err := fork.ComputeDomain(t.beaconConfig.DomainBeaconAttester[:], utils.Uint32ToBytes4(0x04000099), genesisValidatorsRoot)
+	t.Require().NoError(err)
+	t.Require().Equal(want, gotDomain)
 }
 
 // The per-validator seen slot must be claimed only once the signature has been
