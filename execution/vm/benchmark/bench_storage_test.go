@@ -74,9 +74,9 @@ func BenchmarkSLOADWarm(b *testing.B) {
 	}
 }
 
-// BenchmarkSLOADCommitted reads storage from the DB as eth_call does: every
-// iteration is a fresh tx that reads each slot once from the state reader and
-// then repeatedly from the in-tx caches.
+// BenchmarkSLOADCommitted reads storage from the DB as a noMaterialize eth_call
+// does: every iteration is a fresh tx that reads each slot once from the state
+// reader and then repeatedly from the in-tx caches.
 func BenchmarkSLOADCommitted(b *testing.B) {
 	const n, rounds = 50, 8
 	p := program.New()
@@ -91,29 +91,23 @@ func BenchmarkSLOADCommitted(b *testing.B) {
 	}
 	code := p.Op(vm.STOP).Bytes()
 
-	for _, noMaterialize := range []bool{false, true} {
-		b.Run(fmt.Sprintf("noMaterialize=%t", noMaterialize), func(b *testing.B) {
-			b.ReportAllocs()
-			vmenv := newCommittedBenchEnv(b, 10_000_000, func(statedb *state.IntraBlockState) {
-				deployContract(b, statedb, addrContract, code)
-				setStorage(b, statedb, addrContract, slots)
-			})
-			statedb := vmenv.IntraBlockState()
-			v, err := statedb.GetState(addrContract, accounts.InternKey(uint256.NewInt(1).Bytes32()))
-			require.NoError(b, err)
-			require.EqualValues(b, 0xDEAD, v.Uint64(), "storage must come from the DB")
-			versionMap := state.NewVersionMap(nil)
-			for b.Loop() {
-				statedb.Reset()
-				if noMaterialize {
-					statedb.SetVersionMap(versionMap)
-					statedb.SetNoMaterialize(true)
-				}
-				if _, _, err := prepareAndCall(vmenv, addrContract, nil); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
+	b.ReportAllocs()
+	vmenv := newCommittedBenchEnv(b, 10_000_000, func(statedb *state.IntraBlockState) {
+		deployContract(b, statedb, addrContract, code)
+		setStorage(b, statedb, addrContract, slots)
+	})
+	statedb := vmenv.IntraBlockState()
+	v, err := statedb.GetState(addrContract, accounts.InternKey(uint256.NewInt(1).Bytes32()))
+	require.NoError(b, err)
+	require.EqualValues(b, 0xDEAD, v.Uint64(), "storage must come from the DB")
+	versionMap := state.NewVersionMap(nil)
+	for b.Loop() {
+		statedb.Reset()
+		statedb.SetVersionMap(versionMap)
+		statedb.SetNoMaterialize(true)
+		if _, _, err := prepareAndCall(vmenv, addrContract, nil); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
