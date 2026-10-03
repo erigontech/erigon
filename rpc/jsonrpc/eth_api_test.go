@@ -801,3 +801,27 @@ func TestTraceCallManyExcludesNextBlockSystemCall(t *testing.T) {
 		require.Equal(t, common.Hash{}, outputs[2], "slot %d is written by block %d", bn, bn+1)
 	})
 }
+
+func TestHeaderByHashAndNumberCachesBlock(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newBaseApiForTest(m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	var block *types.Block
+	for n := uint64(1); block == nil; n++ {
+		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, n)
+		require.NoError(t, err)
+		require.NotNil(t, b)
+		if b.Transactions().Len() > 0 {
+			block = b
+		}
+	}
+
+	header, err := api.headerByHashAndNumber(m.Ctx, tx, block.Hash(), block.NumberU64())
+	require.NoError(t, err)
+	require.Equal(t, block.Hash(), header.Hash())
+	_, cached := api.blocksLRU.Get(block.Hash())
+	require.True(t, cached)
+}

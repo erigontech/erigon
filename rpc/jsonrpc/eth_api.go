@@ -369,16 +369,16 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 	return block, nil
 }
 
-func (api *BaseAPI) headerByHashAndNumber(ctx context.Context, tx kv.Getter, hash common.Hash, number uint64) (*types.Header, error) {
+func (api *BaseAPI) headerByHashAndNumber(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Header, error) {
 	if api.blocksLRU != nil {
-		if block, ok := api.blocksLRU.Get(hash); ok && block != nil {
+		if block, err := api.blockWithSenders(ctx, tx, hash, number); err == nil && block != nil {
 			return block.HeaderNoCopy(), nil
 		}
 	}
 	return api._blockReader.Header(ctx, tx, hash, number)
 }
 
-func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, number uint64) (*types.Header, error) {
+func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*types.Header, error) {
 	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, number)
 	if err != nil {
 		return nil, err
