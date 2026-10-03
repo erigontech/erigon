@@ -400,6 +400,3 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	}
 	return evm.run(contract, gas, input, readOnly, false, false)
 }
-
-// runTracing is false in run and true in runTraced.
-const runTracing = false

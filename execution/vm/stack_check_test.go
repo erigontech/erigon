@@ -154,9 +154,9 @@ type fastPathWant struct {
 	memorySize      memorySizeFunc
 }
 
-// TestRunTracedIsGenerated fails when vm_run.go's fast-path cases, vm_run_traced_gen.go
-// or fast_path_gen_test.go are stale against execution/vm/gen.
-func TestRunTracedIsGenerated(t *testing.T) {
+// TestRunIsGenerated fails when vm_run_gen.go, vm_run_traced_gen.go or
+// fast_path_gen_test.go are stale against execution/vm/gen.
+func TestRunIsGenerated(t *testing.T) {
 	out, err := exec.CommandContext(t.Context(), "go", "run", "./gen", "-check").CombinedOutput()
 	require.NoError(t, err, string(out))
 }
@@ -171,7 +171,7 @@ func TestRunHasNoJumpTable(t *testing.T) {
 	require.NoError(t, err, string(out))
 	out, err = exec.CommandContext(t.Context(), "go", "tool", "objdump", "-s", `vm\.\(\*EVM\)\.run$`, pkg).Output()
 	require.NoError(t, err)
-	require.Contains(t, string(out), "vm_run.go")
+	require.Contains(t, string(out), "vm_run_gen.go")
 	tableJump := regexp.MustCompile(`(?m)\tJMP (0\(\w+\)\(\w+\*8\)|\(R\d+\))\s`)
 	require.Empty(t, tableJump.FindString(string(out)), "run dispatches through a jump table")
 }

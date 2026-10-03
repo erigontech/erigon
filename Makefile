@@ -635,7 +635,7 @@ gen: mocks solc abigen gencodec graphql grpc stringer versions-gen jsongen evm-i
 jsongen:
 	go generate -run "jsongen" ./...
 
-## evm-interpreter-gen:               regenerate the EVM interpreter fast-path cases and traced loop
+## evm-interpreter-gen:               regenerate the EVM interpreter loops from vm_run_template.go
 .PHONY: evm-interpreter-gen
 evm-interpreter-gen:
 	go generate -run "go run ./gen" ./execution/vm/
