@@ -341,6 +341,10 @@ func (back *RemoteBackend) BodyWithTransactions(ctx context.Context, tx kv.Gette
 	return back.blockReader.BodyWithTransactions(ctx, tx, hash, blockNum)
 }
 
+func (back *RemoteBackend) BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.RawBody, error) {
+	return back.blockReader.BodyWithRawTransactions(ctx, tx, hash, blockNum)
+}
+
 func (back *RemoteBackend) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error) {
 	return back.blockReader.BodyRlp(ctx, tx, hash, blockNum)
 }
