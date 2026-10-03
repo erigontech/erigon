@@ -87,3 +87,8 @@ func TestIsSlotCurrentSlotWithMaximumClockDisparityAtGenesis(t *testing.T) {
 	require.True(t, clockAt(genesis.Add(-maximumClockDisparity)).IsSlotCurrentSlotWithMaximumClockDisparity(0))
 	require.False(t, clockAt(genesis.Add(-maximumClockDisparity-time.Millisecond)).IsSlotCurrentSlotWithMaximumClockDisparity(0))
 }
+
+func TestGetCurrentEpochUsesClockTime(t *testing.T) {
+	require.Equal(t, uint64(0), clockAt(testSlotStart(0).Add(-time.Hour)).GetCurrentEpoch())
+	require.Equal(t, uint64(testSlot/32), clockAt(testSlotStart(testSlot)).GetCurrentEpoch())
+}

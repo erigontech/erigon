@@ -158,11 +158,6 @@ func (t *ethereumClockImpl) GetSlotByTime(time time.Time) uint64 {
 }
 
 func (t *ethereumClockImpl) GetCurrentEpoch() uint64 {
-	now := uint64(time.Now().Unix())
-	if now < t.genesisTime {
-		return 0
-	}
-
 	return t.GetCurrentSlot() / t.beaconCfg.SlotsPerEpoch
 }
 
@@ -186,10 +181,6 @@ func (t *ethereumClockImpl) ForkId() ([]byte, error) {
 	}
 
 	currentEpoch := t.GetCurrentEpoch()
-
-	if time.Now().Unix() < int64(t.genesisTime) {
-		currentEpoch = 0
-	}
 
 	// A fork parked at FAR_FUTURE_EPOCH is not scheduled, so it must not become
 	// next_fork_version: the spec wants the current version when nothing follows.
