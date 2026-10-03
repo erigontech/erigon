@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/golang/snappy"
 	"github.com/spf13/afero"
@@ -1905,4 +1906,24 @@ func writeEnvelopeTestFile(t *testing.T, fs afero.Fs, root common.Hash, version 
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 	require.NoError(t, afero.WriteFile(fs, getEnvelopeFilename(root), compressed.Bytes(), 0o644))
+}
+
+func TestPreviousHeadFastPathUsesAuthoritativePriorRoot(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	graph := &forkGraphDisk{syncedData: manager}
+
+	first := state.New(&clparams.MainnetBeaconConfig)
+	recomputedRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	first.SetPreviousStateRoot(common.Hash{0xaa, 0xbb, 0xcc})
+	firstRoot, err := first.BlockRoot()
+	require.NoError(t, err)
+	require.NotEqual(t, recomputedRoot, firstRoot, "fixture must make previousStateRoot authoritative, not recomputable")
+
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(first, firstRoot))
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(state.New(&clparams.MainnetBeaconConfig), common.Hash{0x02}))
+
+	_, ok, err := graph.useCachedStateIfPossible(firstRoot, nil)
+	require.NoError(t, err)
+	require.True(t, ok, "previous-head fast path must resolve the authoritative prior root")
 }
