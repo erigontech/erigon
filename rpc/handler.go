@@ -293,15 +293,32 @@ func (h *handler) sendBatchAnswers(ctx context.Context, answers [][]byte) {
 	}
 }
 
-// answerBuffered serves a call for a transport that has no stream to write
-// through: the whole response is built in a pooled stream and sent in one piece.
-// It owns the stream, so the pool gets it back on any exit.
+// answerBuffered serves a call for a transport that has no stream to write through. A
+// transport that frames messages streams a large response; any other gets the whole response
+// built in a pooled stream and sent in one piece, and the pool gets it back on any exit.
 func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
+	if wc, ok := h.conn.(*websocketCodec); ok {
+		h.answerStreamed(cp, msg, wc)
+		return
+	}
 	stream := jsonstream.Get(nil)
 	defer jsonstream.Put(stream)
 
 	h.answerInto(cp, msg, stream)
 	if err := h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer())); err != nil {
+		h.logger.Debug("Failed to write RPC response", "err", err)
+	}
+}
+
+// answerStreamed serves a call for a transport that frames messages: a large response goes out
+// in pieces as it is encoded, instead of being held whole.
+func (h *handler) answerStreamed(cp *callProc, msg *jsonrpcMessage, wc *websocketCodec) {
+	w := wc.messageWriter(cp.ctx)
+	stream := jsonstream.Get(w)
+	defer jsonstream.Put(stream)
+
+	h.answerInto(cp, msg, stream)
+	if err := w.finish(stream.Buffer(), stream.Err()); err != nil {
 		h.logger.Debug("Failed to write RPC response", "err", err)
 	}
 }
