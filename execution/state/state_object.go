@@ -26,7 +26,6 @@ import (
 	"maps"
 	"math/big"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -38,10 +37,6 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
-
-var stateObjectPool = sync.Pool{
-	New: func() any { return newHeapObject() },
-}
 
 func newHeapObject() *stateObject {
 	return &stateObject{}
@@ -144,11 +139,9 @@ func (so *stateObject) reset() {
 
 // release resets the object and pools it, unless the arena owns the slot.
 func (so *stateObject) release() {
-	so.reset()
 	if so.arena {
-		return
+		so.reset()
 	}
-	stateObjectPool.Put(so)
 }
 
 // EncodeRLP implements rlp.Encoder.

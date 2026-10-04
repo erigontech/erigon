@@ -408,7 +408,7 @@ func (ibs *IntraBlockState) allocStateObject() *stateObject {
 		}
 		return newHeapObject()
 	}
-	return stateObjectPool.Get().(*stateObject)
+	return newHeapObject()
 }
 
 func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *journal) {
