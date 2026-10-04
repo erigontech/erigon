@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -73,8 +74,6 @@ const txMaxBroadcastSize = 4 * 1024
 //
 //go:generate mockgen -typed=true -destination=./pool_mock.go -package=txpool . Pool
 type Pool interface {
-	ValidateSerializedTxn(serializedTxn []byte) error
-
 	// Handle 3 main events - new remote txns from p2p, new local txns from RPC, new blocks from execution layer
 	AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
@@ -800,7 +799,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	isEIP3860 := p.isShanghai()
 	isEIP7623 := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
-	isEIP8038Revised := p.isEIP8038Revised()
+	minTxGas := mdgas.MinTxGas(isAmsterdam)
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -814,7 +813,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 
 	for ; count < n && i < len(best.ms); i++ {
 		// if we wouldn't have enough gas for a standard transaction then quit out early
-		if availableGas.Execution < params.TxGas {
+		if availableGas.Execution < minTxGas {
 			break
 		}
 		if availableRlpSpace <= 0 {
@@ -883,7 +882,6 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
 			IsEIP2780:          isAmsterdam,
-			IsEIP8038Revised:   isEIP8038Revised,
 			IsAATxn:            isAATxn,
 		})
 		intrinsicGas := intrinsicGasResult.ExecutionGas
@@ -1087,7 +1085,6 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP7976:          isAmsterdam,
 		IsEIP7981:          isAmsterdam,
 		IsEIP2780:          isAmsterdam,
-		IsEIP8038Revised:   p.isEIP8038Revised(),
 		IsAATxn:            isAATxn,
 	})
 	gas := intrinsicGasResult.ExecutionGas
@@ -1109,6 +1106,9 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas > txn.gas idHash=%x gas=%d, txn.gas=%d", txn.IDHash, gas, txn.GetGas()))
 		}
 		return txpoolcfg.IntrinsicGas, nil
+	}
+	if txn.GetGas() > params.MaxTxnTotalGasLimit {
+		return txpoolcfg.GasLimitTooHigh, nil
 	}
 	if txn.GetGas() > p.blockGasLimit.Load() {
 		if txn.Traced {
@@ -1326,19 +1326,13 @@ func (p *TxPool) isAmsterdam() bool {
 	return isTimeBasedForkActivated(&p.isPostAmsterdam, p.amsterdamTime)
 }
 
-// isEIP8038Revised must agree with evmtypes.BlockContext.Rules: a pool charging the
-// other EIP-8038 schedule rejects transactions its own executor would accept.
-func (p *TxPool) isEIP8038Revised() bool {
-	return p.chainConfig.EIP8038Revised || p.chainConfig.IsBinaryTrieScheduled()
-}
-
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
 	now := time.Now().Unix()
 	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
 }
 
-// Check that the serialized txn should not exceed a certain max size
-func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
+// ValidateSerializedTxn checks that the serialized transaction does not exceed the size limit for its type.
+func ValidateSerializedTxn(serializedTxn []byte) error {
 	const (
 		// txnSlotSize is used to calculate how many data slots a single transaction
 		// takes up based on its size. The slots are used as DoS protection, ensuring
@@ -1355,9 +1349,22 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		// Should be enough for a transaction with 6 blobs
 		blobTxnMaxSize = 1024 * 1024
 	)
-	txnType, err := PeekTransactionType(serializedTxn)
+	if len(serializedTxn) <= txnMaxSize {
+		return nil
+	}
+	dataPos, dataLen, legacy, err := rlp.Prefix(serializedTxn, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrParseTxn, err)
+	}
+	txnType := LegacyTxnType
+	if !legacy {
+		if dataLen == 0 {
+			return fmt.Errorf("%w: empty transaction", ErrParseTxn)
+		}
+		txnType = serializedTxn[dataPos]
+		if dataPos > 0 {
+			serializedTxn = serializedTxn[dataPos : dataPos+dataLen]
+		}
 	}
 	maxSize := txnMaxSize
 	if txnType == BlobTxnType {
@@ -2712,7 +2719,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 		if err != nil {
 			return err
 		}
-		addr, txnRlp := *(*[20]byte)(v[:20]), v[20:]
+		addr, txnRlp := *(*[20]byte)(v[:20]), bytes.Clone(v[20:])
 		txn := &TxnSlot{}
 
 		// TODO(eip-4844) ensure wrappedWithBlobs when transactions are saved to the DB

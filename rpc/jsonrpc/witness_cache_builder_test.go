@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -526,10 +527,19 @@ func TestBuildAndCacheJoinsRunningBuild(t *testing.T) {
 	running := mkResult()
 	registerFinishedBuild(api.witnessCache, hash, running)
 
+	samplesBefore := buildDurationSamples(t)
 	require.True(t, api.buildAndCache(ctx, blockNum, hash))
 	cached, ok := api.witnessCache.Get(hash)
 	require.True(t, ok)
 	require.Same(t, running, cached, "the builder must cache the running build's result, not build again")
+	require.Equal(t, samplesBefore+1, buildDurationSamples(t), "a joined build must still record its duration")
+}
+
+func buildDurationSamples(t *testing.T) uint64 {
+	t.Helper()
+	var m dto.Metric
+	require.NoError(t, witnessCacheBuildDuration.Write(&m))
+	return m.GetHistogram().GetSampleCount()
 }
 
 func TestWitnessCacheBuildsDefaultPBT(t *testing.T) {
@@ -580,11 +590,13 @@ func TestBuildAndCacheHeadCaptureJoinsRunningBuild(t *testing.T) {
 	running := mkResult()
 	registerFinishedBuild(api.witnessCache, hash, running)
 
+	samplesBefore := buildDurationSamples(t)
 	next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
 	defer next.close()
 	cached, ok := api.witnessCache.Get(hash)
 	require.True(t, ok)
 	require.Same(t, running, cached, "the head-capture builder must cache the running build's result, not build again")
+	require.Equal(t, samplesBefore+1, buildDurationSamples(t), "a joined build must still record its duration")
 }
 
 // insertHeadCaptureChain enables historical commitment, builds a module with no inserted
@@ -815,4 +827,25 @@ func TestRecoverWitnessBuildContainsPanic(t *testing.T) {
 		defer recoverWitnessBuild(42)
 		panic("simulated build pipeline panic")
 	})
+}
+
+type panicGetTx struct {
+	kv.TemporalTx
+	rolledBack bool
+}
+
+func (tx *panicGetTx) GetOne(string, []byte) ([]byte, error) { panic("boom") }
+func (tx *panicGetTx) Rollback()                             { tx.rolledBack = true }
+
+type panicGetDB struct {
+	kv.TemporalRoDB
+	tx *panicGetTx
+}
+
+func (db panicGetDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) { return db.tx, nil }
+
+func TestWaitCommittedHeadPanicRollsBack(t *testing.T) {
+	tx := &panicGetTx{}
+	require.Panics(t, func() { _, _, _ = waitCommittedHead(context.Background(), panicGetDB{tx: tx}, 1, common.Hash{}) })
+	require.True(t, tx.rolledBack)
 }

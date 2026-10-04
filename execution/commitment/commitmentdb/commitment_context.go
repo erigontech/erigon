@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -447,6 +448,31 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	}
 }
 
+func (sdc *SharedDomainsCommitmentContext) TouchKeyFromState(tx kv.TemporalTx, plainKey []byte) error {
+	d := kv.AccountsDomain
+	switch len(plainKey) {
+	case length.Addr:
+	case length.Addr + length.Hash:
+		d = kv.StorageDomain
+	default:
+		return fmt.Errorf("touch key from state: unexpected key length %d (%x)", len(plainKey), plainKey)
+	}
+	if sdc.updates.Mode() != commitment.ModeCollect {
+		sdc.TouchKey(d, string(plainKey), nil)
+		return nil
+	}
+	reader := sdc.stateReader
+	if reader == nil {
+		reader = NewLatestStateReader(tx, sdc.sharedDomains, LatestStateReaderOptions{})
+	}
+	val, _, err := reader.Read(d, plainKey, sdc.sharedDomains.StepSize())
+	if err != nil {
+		return err
+	}
+	sdc.TouchKey(d, string(plainKey), val)
+	return nil
+}
+
 // TouchHashedKey touches a hashed key which can be anywhere from 1 to 128 nibbles
 // This can be used to generate witnesses for intermediate trie nodes
 func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
@@ -676,7 +702,19 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		// bound to this tx even on the path that touches nothing.
 		sdc.trieContext(tx, blockNum, txNum, ctx, nil, nil)
 		rootHash, err = sdc.patriciaTrie.RootHash()
-		return rootHash, err
+		if err != nil {
+			return nil, err
+		}
+		if saveState {
+			commitMetrics := kvmetrics.NewDomainMetrics()
+			defer sdc.sharedDomains.MergeMetrics(kvmetrics.SourceCommitment, commitMetrics)
+			readCtx := kvmetrics.ContextWithMetrics(ctx, commitMetrics)
+			trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx, putter, stateReader)
+			if err := sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum); err != nil {
+				return nil, err
+			}
+		}
+		return rootHash, nil
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated

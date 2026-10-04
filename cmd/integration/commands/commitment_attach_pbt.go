@@ -849,7 +849,7 @@ func validatePBTAttachHistoryFrontier(nodeFiles []pbtAttachFile, stepSize, endTx
 			}
 		}
 		for _, file := range latestHistory {
-			if file.to*stepSize <= endTxNum {
+			if file.to*stepSize < endTxNum {
 				return fmt.Errorf("commitment attach-pbt: node history file %s ends at txNum %d before conversion txNum %d", file.path, file.to*stepSize, endTxNum)
 			}
 		}

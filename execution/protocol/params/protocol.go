@@ -32,6 +32,7 @@ const (
 	MaxBlockGasLimit     uint64 = 0x7fffffffffffffff // Maximum the block gas limit may ever be.
 	MaxTxnGasLimit       uint64 = 16_777_216         // See EIP-7825: Transaction Gas Limit Cap.
 	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
+	MaxTxnTotalGasLimit  uint64 = 4_294_967_295      // See EIP-8037: TX_MAX_TOTAL_GAS_LIMIT.
 
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
 	CallValueTransferGas  uint64 = 9000  // Paid for CALL when the value transfer is non-zero.
@@ -202,8 +203,7 @@ const (
 	P256VerifyGasEIP7951 uint64 = 6900
 
 	// EIP-2935: Historical block hashes in state
-	BlockHashHistoryServeWindow uint64 = 8191
-	BlockHashOldWindow          uint64 = 256
+	BlockHashOldWindow uint64 = 256
 
 	// EIP-7702: Set EOA account code
 	SetCodeMagicPrefix  = byte(0x05)
@@ -247,21 +247,6 @@ const (
 	ExecutionPerAuthBaseCostEIP8038 = 101*TxDataNonZeroGasEIP2028 + EcrecoverGas + ColdAccountAccessCostEIP8038 + 2*WarmStorageReadCostEIP2929
 	// PER_AUTH execution intrinsic = ACCOUNT_WRITE + EXECUTION_PER_AUTH_BASE_COST = 16816
 	PerAuthExecutionCostEIP8038 = AccountWriteCostEIP8038 + ExecutionPerAuthBaseCostEIP8038
-
-	// Revised EIP-8038 schedule, selected by Rules.EIP8038Revised. The constants
-	// above stay on the values the pinned spec-test corpora were generated against,
-	// so only a chain config that opts in charges the revised ones. COLD_ACCOUNT_ACCESS,
-	// STORAGE_WRITE and EXTCODE warm access are unchanged by the revision and have no
-	// counterpart here. Both ACCESS_LIST costs subtract WARM_ACCESS, which the pinned
-	// corpora predate.
-	ColdStorageAccessCostEIP8038Revised      = uint64(2100)                                                                  // COLD_STORAGE_ACCESS
-	AccountWriteCostEIP8038Revised           = uint64(9000)                                                                  // ACCOUNT_WRITE
-	CallValueTransferGasEIP8038Revised       = AccountWriteCostEIP8038Revised + CallStipend                                  // CALL_VALUE = 11300
-	CreateAccessEIP8038Revised               = AccountWriteCostEIP8038Revised + ColdAccountAccessCostEIP8038                 // CREATE_ACCESS = 12000
-	SstoreClearsScheduleRefundEIP8038Revised = (StorageWriteCostEIP8038 + ColdStorageAccessCostEIP8038Revised) * 4800 / 5000 // REFUND_STORAGE_CLEAR = 11616
-	TxAccessListAddressGasEIP8038Revised     = ColdAccountAccessCostEIP8038 - WarmStorageReadCostEIP2929                     // ACCESS_LIST_ADDRESS_COST = 2900
-	TxAccessListStorageKeyGasEIP8038Revised  = ColdStorageAccessCostEIP8038Revised - WarmStorageReadCostEIP2929              // ACCESS_LIST_STORAGE_KEY_COST = 2000
-	PerAuthExecutionCostEIP8038Revised       = AccountWriteCostEIP8038Revised + ExecutionPerAuthBaseCostEIP8038
 
 	// EIP-2780: Reduce intrinsic transaction gas (resource-based decomposition).
 	// COLD_ACCOUNT_ACCESS and CREATE_ACCESS take their values from EIP-8038.

@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	statelru "github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -211,6 +210,8 @@ type ForkChoiceStore struct {
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
 	// (skip BLS) from gossip origin (full verification) without inspecting envelope contents.
 	pendingLocalSelfBuildEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+	parentBuilderExitsOnce         sync.Once
+	parentBuilderExits             *lru.Cache[common.Hash, []solid.BuilderExitRequest]
 
 	// [New in Gloas:EIP7732] Execution blocks whose CL state transition succeeded but
 	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
@@ -264,7 +265,7 @@ type childrens struct {
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
 func NewForkChoiceStore(
 	ethClock eth_clock.EthereumClock,
-	anchorState *state2.CachingBeaconState,
+	anchorState *state.CachingBeaconState,
 	engine execution_client.ExecutionEngine,
 	operationsPool pool.OperationsPool,
 	forkGraph fork_graph.ForkGraph,
@@ -283,7 +284,7 @@ func NewForkChoiceStore(
 
 	anchorCheckpoint := solid.Checkpoint{
 		Root:  anchorRoot,
-		Epoch: state2.Epoch(anchorState.BeaconState),
+		Epoch: state.Epoch(anchorState.BeaconState),
 	}
 
 	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](65536)
@@ -484,14 +485,8 @@ func NewForkChoiceStore(
 	f.highestSeenRoot.Store(common.Hash(anchorRoot))
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
 
-	// [New in Gloas:EIP7732] Initialize payload timeliness and data availability votes
-	// Anchor block votes are initialized to all true (prior payloads/blobs were available)
 	var anchorTimelinessVotes [clparams.PtcSize]int8
 	var anchorDataAvailabilityVotes [clparams.PtcSize]int8
-	for i := range anchorTimelinessVotes {
-		anchorTimelinessVotes[i] = 1
-		anchorDataAvailabilityVotes[i] = 1
-	}
 	f.payloadTimelinessVote.Store(common.Hash(anchorRoot), anchorTimelinessVotes)
 	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
 
@@ -521,6 +516,43 @@ func (f *ForkChoiceStore) GetRecentExecutionPayloadStatusByRoot(blockRoot common
 		return execution_client.PayloadStatusInvalidated, true
 	}
 	return f.payloadStatusAuthority(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetCachedParentBuilderExitRequests(blockRoot common.Hash) ([]solid.BuilderExitRequest, bool) {
+	f.initParentBuilderExitRequests()
+	requests, ok := f.parentBuilderExits.Get(blockRoot)
+	return slices.Clone(requests), ok
+}
+
+func (f *ForkChoiceStore) cacheParentBuilderExitRequests(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
+		return
+	}
+	exits := envelope.Message.ExecutionRequests.BuilderExits
+	count := 0
+	if exits != nil {
+		count = exits.Len()
+	}
+	requests := make([]solid.BuilderExitRequest, count)
+	for i := range count {
+		request := exits.Get(i)
+		if request == nil {
+			return
+		}
+		requests[i] = *request
+	}
+	f.initParentBuilderExitRequests()
+	f.parentBuilderExits.Add(blockRoot, requests)
+}
+
+func (f *ForkChoiceStore) initParentBuilderExitRequests() {
+	f.parentBuilderExitsOnce.Do(func() {
+		var err error
+		f.parentBuilderExits, err = lru.New[common.Hash, []solid.BuilderExitRequest](checkpointsPerCache)
+		if err != nil {
+			panic(err)
+		}
+	})
 }
 
 // GetExecutionPayloadGasLimit returns the gas_limit of a recently validated execution payload.
@@ -698,13 +730,13 @@ func (f *ForkChoiceStore) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
 	return f.anchorExecutionPayloadBuilderIndex, f.anchorHasExecutionPayloadBid
 }
 
-func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.forkGraph.GetState(blockRoot, alwaysCopy)
 }
 
-func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state2.CachingBeaconState) error) error {
+func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	blockState, err := f.forkGraph.GetState(blockRoot, false)
@@ -957,26 +989,49 @@ func (f *ForkChoiceStore) MarkPayloadStatus(blockRoot common.Hash, executionBloc
 }
 
 type retainedBlockGuard interface {
-	WithRetainedBlock(common.Hash, func()) bool
+	WithRetainedBlock(common.Hash, func(func(common.Hash) bool)) bool
 	IsBlockRetained(common.Hash) bool
 }
 
-func (f *ForkChoiceStore) MarkPayloadStatusIfRetained(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) (execution_client.PayloadStatus, bool) {
+func (f *ForkChoiceStore) MarkPayloadStatusAndGasLimitIfRetained(
+	blockRoot common.Hash,
+	executionBlockHash common.Hash,
+	status execution_client.PayloadStatus,
+	gasLimit uint64,
+) (execution_client.PayloadStatus, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, status)
+	return f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, status, &gasLimit)
 }
 
-func (f *ForkChoiceStore) markPayloadStatusIfRetainedLocked(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) (execution_client.PayloadStatus, bool) {
+func (f *ForkChoiceStore) markPayloadStatusIfRetainedLocked(
+	blockRoot common.Hash,
+	executionBlockHash common.Hash,
+	status execution_client.PayloadStatus,
+	gasLimit *uint64,
+) (execution_client.PayloadStatus, bool) {
 	guard, ok := f.forkGraph.(retainedBlockGuard)
 	if !ok {
-		return f.markPayloadStatusLocked(blockRoot, executionBlockHash, status), true
+		effective := f.markPayloadStatusLocked(blockRoot, executionBlockHash, status)
+		if gasLimit != nil {
+			f.cacheExecutionPayloadGasLimit(executionBlockHash, *gasLimit)
+		}
+		return effective, true
 	}
 	effective := status
-	retained := guard.WithRetainedBlock(blockRoot, func() {
-		effective = f.markPayloadStatusRetainedLocked(blockRoot, executionBlockHash, status)
+	retained := guard.WithRetainedBlock(blockRoot, func(isRetained func(common.Hash) bool) {
+		effective = f.markPayloadStatus(blockRoot, executionBlockHash, status, isRetained)
+		if gasLimit != nil {
+			f.cacheExecutionPayloadGasLimit(executionBlockHash, *gasLimit)
+		}
 	})
 	return effective, retained
+}
+
+func (f *ForkChoiceStore) cacheExecutionPayloadGasLimit(executionBlockHash common.Hash, gasLimit uint64) {
+	if f.executionPayloadGasLimit != nil {
+		f.executionPayloadGasLimit.Add(executionBlockHash, gasLimit)
+	}
 }
 
 func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlockHash common.Hash) {
@@ -984,14 +1039,15 @@ func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlo
 }
 
 func (f *ForkChoiceStore) markPayloadStatusLocked(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) execution_client.PayloadStatus {
-	return f.markPayloadStatus(blockRoot, executionBlockHash, status, false)
+	return f.markPayloadStatus(blockRoot, executionBlockHash, status, nil)
 }
 
-func (f *ForkChoiceStore) markPayloadStatusRetainedLocked(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) execution_client.PayloadStatus {
-	return f.markPayloadStatus(blockRoot, executionBlockHash, status, true)
-}
-
-func (f *ForkChoiceStore) markPayloadStatus(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus, retained bool) execution_client.PayloadStatus {
+func (f *ForkChoiceStore) markPayloadStatus(
+	blockRoot common.Hash,
+	executionBlockHash common.Hash,
+	status execution_client.PayloadStatus,
+	isRetained func(common.Hash) bool,
+) execution_client.PayloadStatus {
 	f.trackExecutionPayloadRootLocked(blockRoot, executionBlockHash)
 	effective := status
 	if f.invalidatedExecutionPayloads != nil {
@@ -1004,7 +1060,7 @@ func (f *ForkChoiceStore) markPayloadStatus(blockRoot common.Hash, executionBloc
 			effective = execution_client.PayloadStatusInvalidated
 		}
 	}
-	current, known := f.payloadStatusAuthorityWithRetention(blockRoot, retained)
+	current, known := f.payloadStatusAuthorityWithRetention(blockRoot, isRetained != nil)
 	if known {
 		switch current {
 		case execution_client.PayloadStatusInvalidated:
@@ -1041,8 +1097,12 @@ func (f *ForkChoiceStore) markPayloadStatus(blockRoot common.Hash, executionBloc
 					f.forkGraph.MarkHeaderAsInvalid(root)
 				}
 			}
-			if guard, ok := f.forkGraph.(retainedBlockGuard); ok {
-				guard.WithRetainedBlock(root, invalidate)
+			if isRetained != nil {
+				if isRetained(root) {
+					invalidate()
+				}
+			} else if guard, ok := f.forkGraph.(retainedBlockGuard); ok {
+				guard.WithRetainedBlock(root, func(func(common.Hash) bool) { invalidate() })
 			} else {
 				invalidate()
 			}
@@ -1378,7 +1438,7 @@ func (f *ForkChoiceStore) RequeuePendingELPayload(p PendingELPayload) {
 		return
 	}
 	if guard, guarded := f.forkGraph.(retainedBlockGuard); guarded {
-		guard.WithRetainedBlock(root, func() { f.addPendingELPayload(p.Block, p.Envelope) })
+		guard.WithRetainedBlock(root, func(func(common.Hash) bool) { f.addPendingELPayload(p.Block, p.Envelope) })
 		return
 	}
 	f.addPendingELPayload(p.Block, p.Envelope)

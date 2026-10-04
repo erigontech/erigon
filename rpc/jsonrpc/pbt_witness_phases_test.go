@@ -21,12 +21,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/commitment/trie"
 )
 
 func TestWitnessAppendsEmptyStorageNode(t *testing.T) {
-	accountLeaf := hexutil.Bytes(append([]byte{0xf8, 0x44}, trie.EmptyRoot[:]...))
+	accountLeaf := hexutil.Bytes(append([]byte{0xf8, 0x44}, empty.RootHash[:]...))
 	nodes := []hexutil.Bytes{accountLeaf}
 	want := append(append([]hexutil.Bytes{}, nodes...), hexutil.Bytes{0x80})
 	require.Equal(t, want, appendLegacyEmptyStorageNode(nodes, witnessModeLegacy))

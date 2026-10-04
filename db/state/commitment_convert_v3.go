@@ -19,18 +19,22 @@ package state
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"path/filepath"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -40,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
@@ -222,11 +227,12 @@ func convertCommitmentFileV3(
 			vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: lastStep - 1}
 			conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
 			prevs := wat.d[kv.CommitmentDomain]
+			reach := &legacyReach{dt: prevs, maxStep: lastStep - 1, keysV2: st.keysV2}
 			for batch := range in {
 				res := convertedBatchPool.Get().(*convertedBatch)
 				res.buf, res.ents = res.buf[:0], res.ents[:0]
 				for _, p := range batch.pairs {
-					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, prevs, conv, res.emit); convErr != nil {
+					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, prevs, conv, reach, res.emit); convErr != nil {
 						return convErr
 					}
 				}
@@ -388,7 +394,7 @@ func readOwned(reader *seg.Reader, batch *kvBatch, compressed bool) []byte {
 	return batch.buf[start:]
 }
 
-func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs *DomainRoTx, conv *v3.LegacyConverter, emit v3.LegacyEmitFunc) error {
+func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs *DomainRoTx, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
 	if commitment.IsCommitmentStateKey(k) {
 		if !bytes.Equal(k, commitment.KeyCommitmentState) {
 			return fmt.Errorf("unexpected state key %x in a legacy file", k)
@@ -399,6 +405,11 @@ func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs 
 		}
 		return emit(commitment.KeyCommitmentV3State, state, v3.LegacyDirect)
 	}
+	if len(v) >= 4 && binary.BigEndian.Uint16(v[2:4]) != 0 {
+		if live, err := reach.reachable(k, v); err != nil || !live {
+			return err
+		}
+	}
 	var prev []byte
 	if incremental {
 		var err error
@@ -407,6 +418,94 @@ func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs 
 		}
 	}
 	return conv.Convert(k, v, prev, emit)
+}
+
+type legacyReach struct {
+	dt      *DomainRoTx
+	maxStep kv.Step
+	keysV2  bool
+	path    []byte
+	chain   []legacyReachNode
+	hashed  [64]byte
+}
+
+type legacyReachNode struct {
+	depth int
+	value []byte
+}
+
+func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
+	path, err := decodeLegacyPrefix(legacyKey, r.keysV2)
+	if err != nil || len(path) == 0 {
+		return err == nil, err
+	}
+	common := 0
+	for common < len(path) && common < len(r.path) && path[common] == r.path[common] {
+		common++
+	}
+	keep := 0
+	for keep < len(r.chain) && r.chain[keep].depth <= common {
+		keep++
+	}
+	r.chain = r.chain[:keep]
+	r.path = append(r.path[:0], path...)
+	if len(r.chain) == 0 {
+		root, _, _, _, err := r.dt.getLatestFromFiles(encodeLegacyPrefix(nil, r.keysV2), nil, r.maxStep)
+		if err != nil {
+			return false, err
+		}
+		r.chain = append(r.chain, legacyReachNode{0, bytes.Clone(root)})
+	}
+	for {
+		n := r.chain[len(r.chain)-1]
+		if n.depth == len(path) {
+			return true, nil
+		}
+		next, ok, err := r.childDepth(n.value, path, n.depth)
+		if err != nil || !ok || next > len(path) {
+			return false, err
+		}
+		if next == len(path) {
+			r.chain = append(r.chain, legacyReachNode{next, bytes.Clone(value)})
+			return true, nil
+		}
+		child, _, _, _, err := r.dt.getLatestFromFiles(encodeLegacyPrefix(path[:next], r.keysV2), nil, r.maxStep)
+		if err != nil || len(child) < 4 || binary.BigEndian.Uint16(child[2:4]) == 0 {
+			return false, err
+		}
+		r.chain = append(r.chain, legacyReachNode{next, bytes.Clone(child)})
+	}
+}
+
+func (r *legacyReach) childDepth(branch, path []byte, depth int) (next int, ok bool, err error) {
+	if len(branch) < 4 {
+		return 0, false, nil
+	}
+	nib := int(path[depth])
+	err = commitment.BranchData(branch).ForEachCell(func(i int, cell commitment.BranchCell) error {
+		if i != nib {
+			return nil
+		}
+		ext, from := cell.Extension, depth+1
+		switch {
+		case len(cell.AccountAddr) != 0:
+			if len(path) < 64 || len(cell.StorageAddr) != 0 || len(cell.Hash) != length.Hash {
+				return nil
+			}
+			h := keccak.Sum256(cell.AccountAddr)
+			nibbles.Expand(h[:], r.hashed[:])
+			if !bytes.Equal(r.hashed[:], path[:64]) {
+				return nil
+			}
+			from = 64
+		case len(cell.StorageAddr) != 0 || len(cell.Hash) != length.Hash:
+			return nil
+		}
+		end := min(from+len(ext), len(path))
+		next, ok = from+len(ext), bytes.Equal(ext[:end-from], path[from:end])
+		return nil
+	})
+	return next, ok, err
 }
 
 type legacyFileValues struct {
@@ -453,51 +552,54 @@ func (b *hashedBatch) expect(key, hash []byte) error {
 var hashedBatchPool = sync.Pool{New: func() any { return &hashedBatch{} }}
 
 func verifyCommitmentV3Files(ctx context.Context, a *Aggregator, logger log.Logger) error {
-	at := a.BeginFilesRo()
-	defer at.Close()
 	started := time.Now()
-	it, err := at.d[kv.CommitmentDomain].DebugRangeLatestFromFiles(nil, nil, -1)
+	c, err := FoldCommitmentV3(ctx, a, math.MaxUint64)
 	if err != nil {
 		return err
 	}
-	defer it.Close()
-	f, err := foldCommitmentV3Records(ctx, it)
-	if err != nil {
-		return err
-	}
-	blockNum, txNum, err := f.checkState()
-	if err != nil {
-		return err
-	}
-	logger.Info("[commitment_convert] v3 records verified", "root", fmt.Sprintf("%x", f.root), "block", blockNum, "txNum", txNum,
-		"records", common.PrettyCounter(f.records), "orphans", common.PrettyCounter(f.orphans), "took", time.Since(started).Round(time.Millisecond))
+	logger.Info("[commitment_convert] v3 records verified", "root", fmt.Sprintf("%x", c.Root), "block", c.BlockNum, "txNum", c.TxNum,
+		"records", common.PrettyCounter(c.Records), "orphans", common.PrettyCounter(c.Orphans), "took", time.Since(started).Round(time.Millisecond))
 	return nil
 }
 
 func DebugCommitmentV3RootAsOf(ctx context.Context, a *Aggregator, txNum uint64) ([]byte, error) {
+	c, err := FoldCommitmentV3(ctx, a, txNum)
+	return c.Root, err
+}
+
+type CommitmentV3Check struct {
+	Root                              []byte
+	BlockNum, TxNum, Records, Orphans uint64
+}
+
+func FoldCommitmentV3(ctx context.Context, a *Aggregator, asOfTxNum uint64) (CommitmentV3Check, error) {
 	at := a.BeginFilesRo()
 	defer at.Close()
 	dt := at.d[kv.CommitmentDomain]
-	hist := &HistoryRangeAsOfFiles{hc: dt.ht, startTxNum: txNum, limit: kv.Unlim, orderAscend: order.Asc, ctx: ctx, logger: dt.ht.h.logger}
-	if err := hist.init(dt.ht.iit.files); err != nil {
-		hist.Close()
-		return nil, err
-	}
 	latest, err := dt.DebugRangeLatestFromFiles(nil, nil, -1)
 	if err != nil {
-		hist.Close()
-		return nil, err
+		return CommitmentV3Check{}, err
 	}
-	it := stream.UnionKV(hist, latest, -1)
+	var it stream.KV = latest
+	if asOfTxNum != math.MaxUint64 {
+		hist := &HistoryRangeAsOfFiles{hc: dt.ht, startTxNum: asOfTxNum, limit: kv.Unlim, orderAscend: order.Asc, ctx: ctx, logger: dt.ht.h.logger}
+		if err = hist.init(dt.ht.iit.files); err != nil {
+			hist.Close()
+			latest.Close()
+			return CommitmentV3Check{}, err
+		}
+		it = stream.UnionKV(hist, latest, -1)
+	}
 	defer it.Close()
 	f, err := foldCommitmentV3Records(ctx, it)
 	if err != nil {
-		return nil, err
+		return CommitmentV3Check{}, err
 	}
-	if _, _, err := f.checkState(); err != nil {
-		return nil, err
+	blockNum, txNum, err := f.checkState()
+	if err != nil {
+		return CommitmentV3Check{}, err
 	}
-	return f.root[:], nil
+	return CommitmentV3Check{Root: f.root[:], BlockNum: blockNum, TxNum: txNum, Records: f.records, Orphans: f.orphans}, nil
 }
 
 type commitmentV3Fold struct {

@@ -56,7 +56,9 @@ func openTestTrie(ctx context.Context, spec runner.RunSpec) (commitment.Trie, er
 	tr := &Trie{scheduleWorkers: spec.Workers}
 	reader, _ := spec.Memory.Open(ctx)
 	tr.ResetContext(reader)
-	tr.SetTrieContextFactory(spec.Memory.Open)
+	if !spec.NoContextFactory {
+		tr.SetTrieContextFactory(spec.Memory.Open)
+	}
 	return tr, nil
 }
 
@@ -253,6 +255,17 @@ func liveStorageRecords(records map[string][]byte) map[string][]byte {
 		}
 	}
 	return records
+}
+
+func requireLiveRecords(t *testing.T, want, got map[string][]byte, label string) {
+	t.Helper()
+	want, got = liveStorageRecords(want), liveStorageRecords(got)
+	for key, value := range got {
+		wantValue, ok := want[key]
+		require.True(t, ok, "%s: record %x is not in a trie rebuilt from the same state (%d records, rebuilt %d)", label, key, len(got), len(want))
+		require.Equal(t, wantValue, value, "%s: record %x differs from the rebuilt trie's", label, key)
+	}
+	require.Len(t, got, len(want), "%s: record count", label)
 }
 
 func testUpdates(t *testing.T, mode commitment.Mode, ops []commitmenttest.Op) *commitment.Updates {

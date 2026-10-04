@@ -282,8 +282,8 @@ func runSupersededConvertAttach(t *testing.T, mergedSteps uint64) {
 	}))
 	require.Equal(t, dualAtConversion, attachedAtConversion)
 	assertPBTAttachHistory(t, reopened, dual.Tester, conversionTx)
-	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
-	require.NoError(t, agg.RemoveOverlapsAfterMerge(t.Context()))
+	require.NoError(t, agg.RemoveOverlapsAfterMerge())
+	require.NoError(t, agg.RemoveOverlapsAfterMerge())
 	reopened.Close()
 }
 

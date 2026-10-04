@@ -3118,7 +3118,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
+		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid))
 		be.versionMap.SetTrace(false)
 
 		if valid {
@@ -3213,7 +3213,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// finalizations see the full post-tx state (execution
 					// + fees) when reading via the version map fallback
 					// chain.
-					be.versionMap.FlushVersionedWrites(merged, true, "")
+					be.versionMap.FlushVersionedWrites(merged, true)
 				}
 
 				{
@@ -3488,7 +3488,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				writes := ibs.FinalizedWrites(lastResult.Rules())
 				if !writes.IsEmpty() {
 					be.blockIO.RecordWrites(finalVersion, writes)
-					be.versionMap.FlushVersionedWrites(writes, true, "")
+					be.versionMap.FlushVersionedWrites(writes, true)
 				}
 
 				// Commit finalize writes from the versionMap write-set, the

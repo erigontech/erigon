@@ -445,7 +445,7 @@ func TestSharedDomainsDropsStoppedCommitmentPendingWrites(t *testing.T) {
 			if withoutChangeset {
 				err = sd.FlushPendingUpdatesWithoutChangeset(tx)
 			} else {
-				err = sd.FlushPendingUpdates(t.Context(), tx)
+				err = sd.FlushPendingUpdates(tx)
 			}
 			require.NoError(t, err)
 			require.False(t, sd.GetCommitmentCtx().HasPendingUpdate())

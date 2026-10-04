@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonrpc/contracts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -624,7 +625,7 @@ func TestGraphQLBlockDetailsSkipReceiptsWithoutTxs(t *testing.T) {
 // A pooled transaction is priced at its fee cap, and carries no location.
 func TestNewRPCPendingTransactionGasPriceIsFeeCap(t *testing.T) {
 	feeCap := uint256.NewInt(1_000_000_000)
-	txn := types.NewEIP1559Transaction(*uint256.NewInt(1), 1, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, nil, uint256.NewInt(2), feeCap, nil)
+	txn := types.NewEIP1559Transaction(*uint256.NewInt(1), 1, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(2), feeCap, nil)
 
 	result := newRPCPendingTransaction(txn)
 	require.NotNil(t, result.GasPrice)
@@ -639,7 +640,7 @@ func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
-			historyAddr:                 {Balance: big.NewInt(0), Code: []byte{0x00}, Nonce: 1},
+			historyAddr:                 {Balance: big.NewInt(0), Code: sloadStub, Nonce: 1},
 			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
 		},
 	}))
@@ -675,7 +676,7 @@ func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
 
 // sloadStub returns the storage slot named by the call data, so a call can read the slot the
 // EIP-2935 system call writes.
-var sloadStub = []byte{0x5f, 0x35, 0x54, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
+var sloadStub = common.Hex2Bytes(contracts.HistoryStorageStubBinRuntime)
 
 func TestTraceCallExcludesNextBlockSystemCall(t *testing.T) {
 	statecfg.EnableHistoricalCommitment()

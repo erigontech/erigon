@@ -36,7 +36,7 @@ func TestDomainLatestIterFileStamp(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	domainTx := d.beginForTests()
-	writer := domainTx.NewWriter()
+	writer := domainTx.NewWriter(db)
 
 	fileKey := []byte("file")
 	dbKey := []byte("db__")

@@ -195,21 +195,10 @@ last devnet run logged 29 forced reorgs in 9h. The inner `DeserializeDiffSet` al
 detection — the versioning stops one level too high.
 
 **Gas schedule.** `NewRules` (`execution/vm/evmtypes/rules.go`) sets
-`EIP8038Revised: c.EIP8038Revised || c.IsBinaryTrie(bc.Time)` — **time**-gated. geth ties the revised
-8038 schedule to Amsterdam unconditionally (`params/protocol_params.go`, `core/vm/eips.go`) and its
-`BinaryTrieTime` touches gas nowhere. With `binaryTrieTime == genesis` the two agree from block 0, which
-is why the devnet passes today. Move `binaryTrieTime` past genesis and erigon charges the corpus-pinned
-schedule across the whole `amsterdamTime` → `binaryTrieTime` window while geth charges revised:
-divergence **opens at Amsterdam and closes at the flip**, covering exactly the shadow window the devnet
-exercises. It reaches `execution/vm/gas_table.go`, `execution/vm/eips.go`, `execution/vm/interpreter.go`,
-`TxPool.isEIP8038Revised` (`txnprovider/txpool/pool.go`) and the shutter pool.
-
-Fix is config-level: `c.EIP8038Revised || c.BinaryTrieTime != nil`, matching geth's `IsPBT`
-(`params/config.go`). It also removes the EIP-8347 §Backwards-Compatibility violation of bundling a
-repricing into a commitment-only fork. geth additionally gates `IsBinaryTrie` on `IsLondon`; that is
-**not** mirrored here — London is unconditionally active on any devnet this targets, so the gate is
-inert and would force a block-number parameter through every caller, including the header-only call
-sites this plan adds.
+The revised 8038 schedule is now selected by the Amsterdam fork (`params/protocol_params.go`,
+`execution/vm/evmtypes/rules.go`), while `BinaryTrieTime` affects only commitment selection. This
+keeps the gas schedule independent of the commitment fork and matches the protocol schedule used by
+the execution and transaction-pool paths.
 
 **Fold data flow.**
 
@@ -265,18 +254,16 @@ different states and correctly report different roots.
 - Modify: `execution/chain/binary_trie_test.go`
 - Modify: `txnprovider/txpool/pool_test.go`
 
-- [x] change `NewRules` to `EIP8038Revised: c.EIP8038Revised || c.BinaryTrieTime != nil`
+- [x] select the revised 8038 schedule from the Amsterdam fork
 - [x] add a `Config` predicate for "this chain schedules the PBT at all" and use it at the three call
       sites rather than repeating the nil check
-- [x] change `TxPool.isEIP8038Revised` and the shutter pool's equivalent to the same config-level
-      predicate, dropping the `isPostBinaryTrie` time latch
+- [x] remove the separate transaction-pool and shutter-pool revised-schedule latch
 - [x] leave `Config.IsBinaryTrie` one-argument — do **not** add geth's London gate (see Technical
       Details); update the `BinaryTrieTime` doc comment, which no longer implies "genesis only"
 - [x] write tests: a config with `binaryTrieTime` after `amsterdamTime` charges the revised schedule at
       a block *before* `binaryTrieTime`, and at one after; a config with no `binaryTrieTime` charges the
       corpus-pinned schedule at both
-- [x] write tests: the txpool and the executor agree on `IsEIP8038Revised` at a pre-flip and a post-flip
-      block time (the invariant `TxPool.isEIP8038Revised` documents)
+- [x] write tests that the transaction pool and executor use the Amsterdam schedule together
 - [x] run `make test-short` — must pass before task 2
 
 ### Task 2: Version the diffset domain framing

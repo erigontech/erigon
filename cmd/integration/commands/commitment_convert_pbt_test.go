@@ -944,7 +944,7 @@ func TestConvertPBTRemovesFilesStartingAfterConversionPoint(t *testing.T) {
 	node, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	require.NoError(t, node.Tester.InsertChain(node.Chain))
-	buildPBTAcceptanceFilesAt(t, node, 7)
+	buildPBTAcceptanceFilesAt(t, node, 8)
 	resetPBTAcceptanceExecution(t, node)
 	node.Tester.Close()
 
@@ -1072,7 +1072,7 @@ func TestConvertPBTUsesStateFilesWhenCommitmentFilesLag(t *testing.T) {
 	_, txNum, ok, err := settings.ConversionPoint()
 	require.NoError(t, err)
 	require.True(t, ok)
-	require.Equal(t, uint64(4), txNum)
+	require.Equal(t, uint64(5), txNum)
 }
 
 func TestConvertPBTRefusesCommitmentFileWithoutAccessor(t *testing.T) {

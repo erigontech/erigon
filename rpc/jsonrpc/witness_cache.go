@@ -21,6 +21,7 @@ import (
 	"errors"
 	"math"
 	"sync"
+	"time"
 	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -75,10 +76,11 @@ type witnessResultCache struct {
 }
 
 type witnessBuild struct {
-	done      chan struct{}
-	result    *ExecutionWitnessResult
-	err       error
-	abandoned bool
+	done   chan struct{}
+	result *ExecutionWitnessResult
+	took   time.Duration
+	err    error
+	stored bool
 }
 
 var errWitnessBuildPanicked = errors.New("witness build panicked")
@@ -130,38 +132,44 @@ func (c *witnessResultCache) store(num uint64, hash common.Hash, r *ExecutionWit
 	c.feed.publish(witnessPush{num: num, hash: hash, result: r})
 }
 
-func (c *witnessResultCache) buildOnce(ctx context.Context, hash common.Hash, build func() (*ExecutionWitnessResult, error)) (*ExecutionWitnessResult, error) {
-	for {
-		c.mu.Lock()
-		b, running := c.building[hash]
-		if !running {
-			b = &witnessBuild{done: make(chan struct{}), err: errWitnessBuildPanicked}
-			c.building[hash] = b
-		}
-		c.mu.Unlock()
-		if !running {
-			return c.lead(ctx, hash, b, build)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-b.done:
-		}
-		if !b.abandoned {
-			return b.result, b.err
-		}
+type witnessStoreFunc func(r *ExecutionWitnessResult, took time.Duration)
+
+func (c *witnessResultCache) buildOnce(ctx context.Context, hash common.Hash, build func(context.Context) (*ExecutionWitnessResult, error), store witnessStoreFunc) (*ExecutionWitnessResult, error) {
+	c.mu.Lock()
+	b, running := c.building[hash]
+	if !running {
+		b = &witnessBuild{done: make(chan struct{}), err: errWitnessBuildPanicked}
+		c.building[hash] = b
 	}
+	c.mu.Unlock()
+	if !running {
+		return c.lead(ctx, hash, b, build, store)
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-b.done:
+	}
+	if b.err == nil && store != nil && !b.stored {
+		store(b.result, b.took)
+	}
+	return b.result, b.err
 }
 
-func (c *witnessResultCache) lead(ctx context.Context, hash common.Hash, b *witnessBuild, build func() (*ExecutionWitnessResult, error)) (*ExecutionWitnessResult, error) {
+func (c *witnessResultCache) lead(ctx context.Context, hash common.Hash, b *witnessBuild, build func(context.Context) (*ExecutionWitnessResult, error), store witnessStoreFunc) (*ExecutionWitnessResult, error) {
 	defer func() {
 		c.mu.Lock()
 		delete(c.building, hash)
 		c.mu.Unlock()
 		close(b.done)
 	}()
-	b.result, b.err = build()
-	b.abandoned = b.err != nil && ctx.Err() != nil
+	start := time.Now()
+	b.result, b.err = build(context.WithoutCancel(ctx))
+	b.took = time.Since(start)
+	if b.err == nil && store != nil {
+		store(b.result, b.took)
+		b.stored = true
+	}
 	return b.result, b.err
 }
 
@@ -170,7 +178,7 @@ func (c *witnessResultCache) awaitBuild(ctx context.Context, hash common.Hash) (
 	b, running := c.building[hash]
 	c.mu.Unlock()
 	if !running {
-		return nil, false
+		return c.Get(hash)
 	}
 	select {
 	case <-ctx.Done():

@@ -587,9 +587,6 @@ func (be *BranchEncoder) CollectUpdate(
 	if be.deferUpdates {
 		return be.CollectDeferredUpdate(ctx, prefix, bitmap, touchMap, afterMap, cells, prev)
 	}
-	if prev == nil {
-		prev = []byte{}
-	}
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
 		return err
@@ -614,7 +611,6 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-// prev is the record stored at prefix, empty when the branch is new; see CollectUpdate.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -631,9 +627,6 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 			return err
 		}
 		be.ClearDeferred()
-	}
-	if prev == nil {
-		prev = []byte{}
 	}
 
 	raw, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)

@@ -281,7 +281,7 @@ func TestPBinPrunePreservesCommitmentWithoutSnapshots(t *testing.T) {
 			db, agg := pbinDualAggregator(t)
 			agg.SetCanonicalCommitmentDomain(kv.CommitmentBinDomain)
 			before := agg.BeginFilesRo()
-			writer := before.d[kv.CommitmentDomain].NewWriter()
+			writer := before.d[kv.CommitmentDomain].NewWriter(db)
 			defer writer.Close()
 			values := map[string][]byte{string(commitment.KeyCommitmentState): {1, 2, 3}, "branch": {4, 5, 6}}
 			require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {

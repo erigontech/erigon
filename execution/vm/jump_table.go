@@ -28,9 +28,9 @@ import (
 
 type (
 	executionFunc    func(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error)
-	gasFunc          func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error)
-	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGas, bool, error)
-	statefulGasFunc  func(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGas, error)
+	gasFunc          func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error)
+	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGasCost, bool, error)
+	statefulGasFunc  func(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error)
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
 	memorySizeFunc func(*CallContext) (size uint64, overflow bool)
 	stringer       func(pc uint64, callContext *CallContext) string
@@ -69,7 +69,6 @@ var (
 	pragueInstructionSet           = newPragueInstructionSet()
 	osakaInstructionSet            = newOsakaInstructionSet()
 	amsterdamInstructionSet        = newAmsterdamInstructionSet()
-	amsterdamEIP8038RevisedSet     = newAmsterdamEIP8038RevisedInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -109,13 +108,6 @@ func newAmsterdamInstructionSet() JumpTable {
 	enable7843(&instructionSet) // EIP-7843 (SLOTNUM)
 	enable8037(&instructionSet) // EIP-8037 (State Creation Gas Cost Increase)
 	enable8038(&instructionSet) // EIP-8038 (State-access gas cost update)
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-func newAmsterdamEIP8038RevisedInstructionSet() JumpTable {
-	instructionSet := newAmsterdamInstructionSet()
-	enable8038Revised(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

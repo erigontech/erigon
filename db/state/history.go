@@ -256,7 +256,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	for i := 0; iiReader.HasNext(); i++ {
 		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
 		valBuf, _ = iiReader.Next(valBuf[:0])
-		cnt += multiencseq.Count(efBaseTxNum, valBuf)
+		cnt += multiencseq.Count(valBuf)
 		if i%1024 == 0 {
 			select {
 			case <-ctx.Done():
@@ -459,8 +459,8 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	return nil
 }
 
-func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
-	return ht.newWriter(ht.h.dirs.Tmp, !ht.h.Enabled)
+func (ht *HistoryRoTx) NewWriter(db kv.RoDB) *historyBufferedWriter {
+	return ht.newWriter(db, ht.h.dirs.Tmp, !ht.h.Enabled)
 }
 
 type historyBufferedWriter struct {
@@ -481,7 +481,7 @@ type historyBufferedWriter struct {
 }
 
 func (w *historyBufferedWriter) close() {
-	if w == nil { // allow dobule-close
+	if w == nil {
 		return
 	}
 	w.ii.close()
@@ -490,14 +490,14 @@ func (w *historyBufferedWriter) close() {
 	}
 }
 
-func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWriter {
+func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *historyBufferedWriter {
 	w := &historyBufferedWriter{
 		discard: discard,
 
 		largeValues:      ht.h.HistoryLargeValues,
 		historyValsTable: ht.h.ValuesTable,
 
-		ii: ht.iit.newWriter(tmpdir, discard),
+		ii: ht.iit.newWriter(db, tmpdir, discard),
 	}
 	return w
 }
@@ -753,6 +753,78 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		historyPath:   historyPath,
 		historyComp:   historyWriter,
 	}, nil
+}
+
+func (h *History) collateETL(ctx context.Context, step kv.Step, vals *etl.Collector) (coll HistoryCollation, err error) {
+	if h.SnapshotsDisabled {
+		return HistoryCollation{}, nil
+	}
+	if h.HistoryLargeValues {
+		return HistoryCollation{}, fmt.Errorf("%s: collate history from ETL supports only DupSort history", h.FilenameBase)
+	}
+	defer func() {
+		if err != nil {
+			coll.Close()
+		}
+	}()
+	coll.historyPath, coll.efHistoryPath = h.vNewFilePath(step, step+1), h.efNewFilePath(step, step+1)
+	coll.efBaseTxNum = uint64(step) * h.stepSize
+	histComp, err := seg.NewCompressor(ctx, "collate hist "+h.FilenameBase, coll.historyPath, h.dirs.Tmp, h.CompressorCfg.WithValuesOnCompressedPage(0), log.LvlTrace, h.logger)
+	if err != nil {
+		return coll, fmt.Errorf("create %s history compressor: %w", h.FilenameBase, err)
+	}
+	coll.historyComp = h.dataWriter(ctx, histComp)
+	efComp, err := seg.NewCompressor(ctx, "collate idx "+h.FilenameBase, coll.efHistoryPath, h.dirs.Tmp, h.CompressorCfg, log.LvlTrace, h.logger)
+	if err != nil {
+		return coll, fmt.Errorf("create %s ef history compressor: %w", h.FilenameBase, err)
+	}
+	coll.efHistoryComp = h.InvertedIndex.dataWriter(efComp, true)
+
+	var (
+		key, histKey, ef []byte
+		txNums           []uint64
+		seq              multiencseq.SequenceBuilder
+	)
+	finishKey := func() error {
+		if len(txNums) == 0 {
+			return nil
+		}
+		seq.Reset(coll.efBaseTxNum, uint64(len(txNums)), txNums[len(txNums)-1])
+		for _, txNum := range txNums {
+			seq.AddOffset(txNum)
+		}
+		seq.Build()
+		ef = seq.AppendBytes(ef[:0])
+		if _, err := coll.efHistoryComp.Write(key); err != nil {
+			return err
+		}
+		_, err := coll.efHistoryComp.Write(ef)
+		return err
+	}
+	err = vals.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		txNum := binary.BigEndian.Uint64(v)
+		if !bytes.Equal(k, key) || len(txNums) == 0 {
+			if err := finishKey(); err != nil {
+				return err
+			}
+			key, txNums = append(key[:0], k...), txNums[:0]
+		} else if last := txNums[len(txNums)-1]; txNum <= last {
+			return fmt.Errorf("%s history of %x: txNum %d after %d", h.FilenameBase, k, txNum, last)
+		}
+		txNums = append(txNums, txNum)
+		histKey = historyKey(txNum, key, histKey)
+		return coll.historyComp.Add(histKey, v[8:])
+	}, etl.TransformArgs{Quit: ctx.Done()})
+	if err != nil {
+		return coll, err
+	}
+	if err := finishKey(); err != nil {
+		return coll, err
+	}
+	if err := coll.historyComp.Flush(); err != nil {
+		return coll, err
+	}
+	return coll, nil
 }
 
 type HistoryFiles struct {

@@ -827,7 +827,6 @@ func New(
 		),
 		backend.notifications.Events,
 		&vm.Config{},
-		tmpdir,
 		txnProvider,
 		backend.sealCancel,
 		latestBlockBuiltStore,

@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
@@ -629,7 +630,7 @@ type ExecutionWitnessResult struct {
 }
 
 // MarshalFastJSONTo writes the result field by field, in the order and form encoding/json uses.
-func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if m == nil {
 		s.WriteNil()
 		return nil
@@ -651,7 +652,7 @@ func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) er
 	return nil
 }
 
-func writeHexElem(s *jsonstream.StackStream, b *hexutil.Bytes) { s.WriteHex(*b) }
+func writeHexElem(s *jsonstream.Stream, b *hexutil.Bytes) { s.WriteHex(*b) }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
 	if header, ok := m.headerByNumber[blockNum]; ok {
@@ -909,13 +910,13 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	build := func() (*ExecutionWitnessResult, error) {
+	build := func(ctx context.Context) (*ExecutionWitnessResult, error) {
 		return api.buildWitnessResult(ctx, tx, nil, info, request.mode, request.trie)
 	}
 	if api.witnessCache == nil || request.mode != witnessModeLegacy || request.trie != defaultTrie {
-		return build()
+		return build(ctx)
 	}
-	return api.witnessCache.buildOnce(ctx, info.Block.Hash(), build)
+	return api.witnessCache.buildOnce(ctx, info.Block.Hash(), build, nil)
 }
 
 // serveFromWitnessCache returns a cached legacy-mode witness when the eager cache
@@ -957,7 +958,10 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	}
 	result, ok := api.witnessCache.Get(hash)
 	if !ok && api.witnessCache.CacheOnly() {
-		result, ok = api.witnessCache.awaitBuild(ctx, hash)
+		if result, ok = api.witnessCache.awaitBuild(ctx, hash); ok {
+			witnessCacheAwaitCounter.Inc()
+			return result, true, false
+		}
 	}
 	if ok {
 		witnessCacheHitCounter.Inc()
@@ -1292,7 +1296,7 @@ func appendLegacyEmptyStorageNode(nodes []hexutil.Bytes, mode witnessMode) []hex
 		return nodes
 	}
 	for _, node := range nodes {
-		if bytes.Contains(node, trie.EmptyRoot[:]) {
+		if bytes.Contains(node, empty.RootHash[:]) {
 			return append(nodes, hexutil.Bytes{0x80})
 		}
 	}
@@ -1595,7 +1599,7 @@ func detectCollapseSiblings(
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
-		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w\n", err)
+		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w", err)
 	}
 
 	if common.Hash(computedRootHash) != expectedBlockRoot {
@@ -2284,7 +2288,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 	// Handle created contracts - clear their storage subtries
 	for addr := range s.created {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
-			account.Root = trie.EmptyRoot
+			account.Root = empty.RootHash
 		}
 		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])
@@ -2312,7 +2316,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
 			// fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addr[:8], codeHashValue[:8], len(code))
 			if err := s.t.UpdateAccountCode(addrHash[:], code); err != nil {
-				return common.Hash{}, fmt.Errorf("failed to update account code for addr %x: %w\n", addr, err)
+				return common.Hash{}, fmt.Errorf("failed to update account code for addr %x: %w", addr, err)
 			}
 		}
 	}
@@ -2375,7 +2379,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			continue
 		}
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
-			account.Root = trie.EmptyRoot
+			account.Root = empty.RootHash
 		}
 		addrHash := crypto.Keccak256Hash(addr[:])
 		s.t.DeleteSubtree(addrHash[:])

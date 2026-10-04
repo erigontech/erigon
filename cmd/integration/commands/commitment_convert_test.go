@@ -25,6 +25,6 @@ import (
 func TestCommitmentConvertReturnsErrors(t *testing.T) {
 	t.Cleanup(func() { convertRestore, convertContinue = false, false })
 	root := RootCommand()
-	root.SetArgs([]string{"commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--restore", "--continue"})
+	root.SetArgs([]string{"--log.dir.disable", "commitment", "convert", "--datadir", t.TempDir(), "--chain", "mainnet", "--restore", "--continue"})
 	require.ErrorContains(t, root.ExecuteContext(t.Context()), "--continue is mutually exclusive with --restore")
 }

@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -128,11 +129,11 @@ func TestExecutionWitnessNonDefaultTrieDoesNotJoinBuild(t *testing.T) {
 	buildResultErr := make(chan error, 1)
 	go func() {
 		defer close(buildDone)
-		_, err := cache.buildOnce(t.Context(), hash, func() (*ExecutionWitnessResult, error) {
+		_, err := cache.buildOnce(t.Context(), hash, func(context.Context) (*ExecutionWitnessResult, error) {
 			close(started)
 			<-release
 			return nil, buildErr
-		})
+		}, nil)
 		buildResultErr <- err
 	}()
 	<-started

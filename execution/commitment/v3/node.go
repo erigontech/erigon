@@ -40,6 +40,7 @@ type node struct {
 	record Record
 	layout layout
 	refs   *commitment.LeafRefs
+	dead   []*node
 	plane  byte
 	loaded bool
 

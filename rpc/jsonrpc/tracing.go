@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -60,16 +61,16 @@ func rejectPending(blockNrOrHash rpc.BlockNumberOrHash) error {
 }
 
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
-func (api *DebugAPIImpl) TraceBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+func (api *DebugAPIImpl) TraceBlockByNumber(ctx context.Context, blockNum rpc.BlockNumber, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error {
 	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), config, stream)
 }
 
 // TraceBlockByHash implements debug_traceBlockByHash. Returns Geth style block traces.
-func (api *DebugAPIImpl) TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+func (api *DebugAPIImpl) TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error {
 	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithHash(hash, true), config, stream)
 }
 
-func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error {
 	if err := rejectPending(blockNrOrHash); err != nil {
 		return err
 	}
@@ -146,14 +147,12 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 	txns := block.Transactions()
 
-	var gasUsed uint64
-	inner := jsonstream.NewLazyFieldStream(stream, "result", true)
+	var gasUsed protocol.GasUsed
 	for txnIndex, txn := range txns {
 		txnHash := txn.Hash()
 
 		stream.WriteObjectStart()
-		stream.Field("txHash")
-		stream.WriteHex(txnHash[:])
+		ethjson.Data(stream, "txHash", txnHash[:])
 		select {
 		default:
 		case <-ctx.Done():
@@ -161,33 +160,26 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		}
 		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
 
-		inner.ResetField()
-
-		{
+		// A transaction's error is answered inside its own object; the block trace goes on.
+		_ = rpc.WriteFieldOrError(stream, "result", func(s *jsonstream.Stream) error {
 			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
 			if asMessageErr != nil {
-				err = fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
-			} else {
-				txCtx := evmtypes.TxContext{
-					TxHash:     txnHash,
-					Origin:     msg.From(),
-					GasPrice:   *msg.GasPrice(),
-					BlobHashes: msg.BlobHashes(),
-				}
-
-				var _gasUsed uint64
-				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, inner, api.evmCallTimeout, precompiles)
-				gasUsed += _gasUsed
+				return fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
 			}
-		}
-		if err == nil {
-			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
-		}
-
-		if err != nil {
-			inner.CloseIfOpen()
-			rpc.HandleError(err, stream)
-		}
+			txCtx := evmtypes.TxContext{
+				TxHash:     txnHash,
+				Origin:     msg.From(),
+				GasPrice:   *msg.GasPrice(),
+				BlobHashes: msg.BlobHashes(),
+			}
+			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, s, api.evmCallTimeout, precompiles)
+			gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
+			gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
+			if traceErr != nil {
+				return traceErr
+			}
+			return ibs.FinalizeTx(rules, state.NewNoopWriter())
+		})
 
 		stream.WriteObjectEnd()
 
@@ -202,8 +194,9 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			refunds = false
 		}
 
-		if refunds && block.GasUsed() != gasUsed {
-			panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), gasUsed, blockNumber))
+		blockGasUsed := gasUsed.BlockGasUsed()
+		if refunds && block.GasUsed() != blockGasUsed {
+			panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), blockGasUsed, blockNumber))
 		}
 	}
 
@@ -212,7 +205,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 }
 
 // TraceTransaction implements debug_traceTransaction. Returns Geth style transaction traces.
-func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error {
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -301,7 +294,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 }
 
 // TraceCall implements debug_traceCall. Returns Geth style call traces.
-func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, requestedBlock *rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, requestedBlock *rpc.BlockNumberOrHash, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error {
 	blockNrOrHash := blockOrLatest(requestedBlock)
 	if err := rejectPending(blockNrOrHash); err != nil {
 		return err
@@ -315,6 +308,9 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
 		return fmt.Errorf("read chain config: %w", err)
+	}
+	if err := ethapi.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
+		return err
 	}
 	engine := api.engine()
 
@@ -392,7 +388,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 }
 
 // TraceCall implements debug_traceCallMany. Returns Geth style call traces.
-func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream *jsonstream.Stream) error {
 	if err := requireBlockSelector(simulateContext.BlockNumber); err != nil {
 		return err
 	}
@@ -421,7 +417,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	if err != nil {
 		return err
 	}
-	if err := validateBundles(bundles); err != nil {
+	if err := validateBundles(bundles, chainConfig.ChainID); err != nil {
 		return err
 	}
 

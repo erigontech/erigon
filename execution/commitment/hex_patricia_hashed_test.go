@@ -197,7 +197,7 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 		trieBatch := NewHexPatriciaHashed(keyLen, stateBatch, DefaultTrieConfig())
 
 		if sortHashedKeys {
-			plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
+			plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 		}
 
 		if trace {
@@ -227,7 +227,7 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, DefaultTrieConfig())
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch, DefaultTrieConfig())
 
-	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	rSeq := processSeq(t, stateSeq, trieSequential, plainKeys, updates)
 	rBatch := processBatch(t, stateBatch, trieBatch, plainKeys, updates)
@@ -248,7 +248,7 @@ func Test_HexPatriciaHashed_DeferredBranchUpdates(t *testing.T) {
 	deferredCfg.DeferBranchUpdates = true
 	trieDeferred := NewHexPatriciaHashed(length.Addr, stateDeferred, deferredCfg)
 
-	plainKeys, updates = sortUpdatesByHashIncrease(t, trieNormal, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	err := stateNormal.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
@@ -821,7 +821,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentation_AfterStateRestor
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, DefaultTrieConfig())
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch, DefaultTrieConfig())
 
-	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	var rSeq, rBatch []byte
 	{
@@ -914,7 +914,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 	sequential := NewHexPatriciaHashed(length.Addr, stateSeq, DefaultTrieConfig())
 	batch := NewHexPatriciaHashed(length.Addr, stateBatch, DefaultTrieConfig())
 
-	plainKeys, updates = sortUpdatesByHashIncrease(t, sequential, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	somewhere := 6
 	somewhereRoot := make([]byte, 0)
@@ -1340,7 +1340,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 		Build()
 
 	trieOne := NewHexPatriciaHashed(length.Addr, msOne, DefaultTrieConfig())
-	plainKeys, updates = sortUpdatesByHashIncrease(t, trieOne, plainKeys, updates)
+	plainKeys, updates = sortUpdatesByHashIncrease(t, plainKeys, updates)
 
 	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo, DefaultTrieConfig())
 
@@ -1422,7 +1422,7 @@ func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefixNibbles []byt
 	return plainKeys, hashedKeys
 }
 
-func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
+func sortUpdatesByHashIncrease(t *testing.T, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
 	t.Helper()
 
 	ku := make([]*KeyUpdate, len(plainKeys))
@@ -1604,6 +1604,51 @@ func TestModeUpdatePreservesAccountAcrossStorageFold(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, expected, actual)
+}
+
+func TestCarriedAccountUpdateSurvivesStorageDeletion(t *testing.T) {
+	t.Parallel()
+	const addr = "6bcd941e6621fb7ec22c0dff03d7d6cc9b5921d8"
+	const codeHash = "5ea78a5e3cec82b66117982ea93e22a8e0018a9a8adac0ef093ca1aca0e78466"
+	const slot1 = "0000000000000000000000000000000000000000000000000000000000000000"
+	const slot2 = "0000000000000000000000000000000000000000000000000000000000000001"
+	finalKeys, finalUpdates := NewUpdateBuilder().
+		Balance(addr, 99).Nonce(addr, 1).CodeHash(addr, codeHash).Build()
+	want, _ := sequentialRoot(t, finalKeys, finalUpdates)
+	for _, slots := range [][]string{{slot1}, {slot1, slot2}} {
+		initialBuilder := NewUpdateBuilder().Balance(addr, 100).Nonce(addr, 1).CodeHash(addr, codeHash)
+		changedBuilder := NewUpdateBuilder().Balance(addr, 99).Nonce(addr, 1).CodeHash(addr, codeHash)
+		for _, slot := range slots {
+			initialBuilder.Storage(addr, slot, "01")
+			changedBuilder.DeleteStorage(addr, slot)
+		}
+		initialKeys, initialUpdates := initialBuilder.Build()
+		changedKeys, changedUpdates := changedBuilder.Build()
+		for _, mode := range []Mode{ModeUpdate, ModeParallel} {
+			t.Run(fmt.Sprintf("%d_slots/%s", len(slots), mode), func(t *testing.T) {
+				ms := NewMockState(t)
+				ms.SetConcurrentCommitment(true)
+				var trie Trie
+				if mode == ModeParallel {
+					trie = newParTrie(t, ms, 2)
+				} else {
+					trie = newSeqTrie(t, ms)
+				}
+				defer trie.Release()
+				require.NoError(t, ms.applyPlainUpdates(initialKeys, initialUpdates))
+				initial := WrapKeyUpdates(t, mode, KeyToHexNibbleHash, initialKeys, initialUpdates)
+				defer initial.Close()
+				processRoot(t, trie, initial)
+				changed := NewUpdates(mode, t.TempDir(), KeyToHexNibbleHash)
+				defer changed.Close()
+				for i, key := range changedKeys {
+					changed.TouchPlainKeyDirect(string(key), &changedUpdates[i])
+				}
+				got := processRoot(t, trie, changed)
+				require.Equal(t, want, got)
+			})
+		}
+	}
 }
 
 func TestSetTraceWriter_NilWriterSafe(t *testing.T) {

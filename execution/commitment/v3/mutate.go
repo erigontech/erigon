@@ -90,6 +90,7 @@ func remove(n *node, path []byte) (removalState, error) {
 }
 
 func applyRemoval(n *node, nib int, state removalState) bool {
+	old := n.child(nib)
 	switch state.kind {
 	case removalEmpty:
 		n.clear(nib)
@@ -102,6 +103,9 @@ func applyRemoval(n *node, nib int, state removalState) bool {
 		n.setChild(nib, state.node)
 	default:
 		return false
+	}
+	if old != nil && n.child(nib) != old {
+		n.dead = append(n.dead, old)
 	}
 	return true
 }

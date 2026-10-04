@@ -391,7 +391,7 @@ func (tx *tx) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 }
 
 func (tx *tx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) (int, error) {
-	return tx.aggtx.Retire(ctx, cutoffs)
+	return tx.aggtx.Retire(cutoffs)
 }
 
 func (tx *tx) Rollback() {
@@ -485,14 +485,16 @@ func (tx *Tx) Debug() kv.TemporalDebugTx {
 }
 
 func (tx *RwTx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
-	return state.NewTemporalMemBatch(tx, ioMetrics)
+	return state.NewTemporalMemBatch(tx, tx.db.RwDB, ioMetrics)
 }
 
 func (tx *Tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
-	return state.NewTemporalMemBatch(tx, ioMetrics)
+	return state.NewTemporalMemBatch(tx, tx.db.RwDB, ioMetrics)
 }
 
-func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
+// ST1016 is reported here, not on AsyncClone: staticcheck aggregates the
+// finding for the whole RwTx type at one representative method.
+func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error { //nolint:staticcheck
 	tx.tx.mu.RLock()
 	applyTx := tx.RwTx
 	tx.tx.mu.RUnlock()
@@ -532,6 +534,9 @@ type asyncClone struct {
 // this is needed to create a clone that can be passed
 // to external go rooutines - they are intended as slaves
 // so should never commit or rollback the master transaction
+//
+// The receiver stays "rwtx", not "tx" like RwTx's other methods: renaming it
+// would make the embedded tx{} composite literal below ambiguous with the receiver.
 func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 	return &asyncClone{
 		RwTx{

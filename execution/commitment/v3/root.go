@@ -75,11 +75,13 @@ func splitRootExtension(n *node, path, value []byte, common int) error {
 		return ErrRootShape
 	}
 	if common == 0 {
+		branch.dead = n.dead
 		*n = *branch
 		return nil
 	}
 	root := fork(oldPath[:common])
 	root.plane = n.plane
+	root.dead = n.dead
 	root.setChild(int(oldPath[0]), branch)
 	*n = *root
 	return nil
@@ -106,6 +108,7 @@ func insertLeafRoot(n *node, path, value []byte) error {
 	branch.setLeaf(int(oldPath[common]), packPath(oldPath[common+1:], packScratch[:0]), oldValue)
 	root := fork(oldPath[:common])
 	root.plane = n.plane
+	root.dead = n.dead
 	root.setChild(int(oldPath[0]), branch)
 	*n = *root
 	return nil
@@ -120,6 +123,7 @@ func removeRoot(n *node, path []byte) error {
 		if err != nil || state.kind == removalKeep {
 			return err
 		}
+		n.dead = append(n.dead, child)
 		n.clear(bits.TrailingZeros16(n.childMask))
 		n.path = nil
 		switch state.kind {

@@ -31,7 +31,7 @@ import (
 )
 
 func buildLegacyTrie(pk [][]byte, upds []Update) *trie.Trie {
-	tr := trie.New(trie.EmptyRoot)
+	tr := trie.New(empty.RootHash)
 	for i, k := range pk {
 		if len(k) != length.Addr {
 			continue
@@ -45,7 +45,7 @@ func buildLegacyTrie(pk [][]byte, upds []Update) *trie.Trie {
 		acc.Nonce = u.Nonce
 		acc.Balance = u.Balance
 		acc.CodeHash = accounts.InternCodeHash(codeHash)
-		acc.Root = trie.EmptyRoot
+		acc.Root = empty.RootHash
 		h := keccak.Sum256(k)
 		tr.UpdateAccount(h[:], &acc)
 	}

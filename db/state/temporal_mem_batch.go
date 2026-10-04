@@ -98,7 +98,7 @@ type TemporalMemBatch struct {
 	metrics *kvmetrics.DomainMetrics
 }
 
-func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
+func NewTemporalMemBatch(tx kv.TemporalTx, db kv.RoDB, ioMetrics any) *TemporalMemBatch {
 	sd := &TemporalMemBatch{
 		storage:           btree2.NewMap[string, []dataWithTxNum](128),
 		metrics:           ioMetrics.(*kvmetrics.DomainMetrics),
@@ -110,7 +110,7 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 	sd.iiWriters = make([]*InvertedIndexBufferedWriter, len(aggTx.iis))
 
 	for id, ii := range aggTx.iis {
-		sd.iiWriters[id] = ii.NewWriter()
+		sd.iiWriters[id] = ii.NewWriter(db)
 	}
 
 	for id, d := range aggTx.d {
@@ -118,7 +118,7 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 			continue
 		}
 		sd.domains[id] = map[string][]dataWithTxNum{}
-		sd.domainWriters[id] = d.NewWriter()
+		sd.domainWriters[id] = d.NewWriter(db)
 	}
 
 	return sd
@@ -741,7 +741,7 @@ func (sd *TemporalMemBatch) Close() {
 func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	other, ok := o.(*TemporalMemBatch)
 	if !ok {
-		return fmt.Errorf("Can't merge %T into *TemporalMemBatch", o)
+		return fmt.Errorf("can't merge %T into *TemporalMemBatch", o)
 	}
 
 	for domain, otherEntries := range other.domains {

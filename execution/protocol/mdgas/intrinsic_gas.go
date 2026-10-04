@@ -41,7 +41,6 @@ type IntrinsicGasCalcArgs struct {
 	IsEIP7981          bool
 	IsEIP2780          bool
 	IsAATxn            bool
-	IsEIP8038Revised   bool
 }
 
 type IntrinsicGasCalcResult struct {
@@ -80,9 +79,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		result.ExecutionGas = params.TxBaseEIP2780
 		if args.IsContractCreation {
 			createAccess := params.CreateAccessEIP2780
-			if args.IsEIP8038Revised {
-				createAccess = params.CreateAccessEIP8038Revised
-			}
 			result.ExecutionGas += createAccess
 		} else if !args.IsSelfTransfer {
 			result.ExecutionGas += params.ColdAccountAccessEIP2780
@@ -147,10 +143,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		if args.IsEIP2780 {
 			addressGas = params.TxAccessListAddressGasEIP8038
 			storageKeyGas = params.TxAccessListStorageKeyGasEIP8038
-			if args.IsEIP8038Revised {
-				addressGas = params.TxAccessListAddressGasEIP8038Revised
-				storageKeyGas = params.TxAccessListStorageKeyGasEIP8038Revised
-			}
 		} else {
 			addressGas = params.TxAccessListAddressGas
 			storageKeyGas = params.TxAccessListStorageKeyGas
@@ -275,8 +267,6 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	var perAuthCost uint64
 	if args.IsEIP2780 {
 		switch {
-		case args.IsAATxn && args.IsEIP8038Revised:
-			perAuthCost = params.PerAuthExecutionCostEIP8038Revised
 		case args.IsAATxn:
 			perAuthCost = params.PerAuthExecutionCostEIP8038
 		default:
@@ -295,6 +285,15 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	}
 
 	return result, false
+}
+
+// MinTxGas is the least intrinsic gas of any non-AA transaction: the cost of a
+// zero-value self-transfer.
+func MinTxGas(isEIP2780 bool) uint64 {
+	if isEIP2780 {
+		return params.TxBaseEIP2780
+	}
+	return params.TxGas
 }
 
 // toWordSize returns the ceiled word size required for memory expansion.

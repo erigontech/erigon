@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 
@@ -202,19 +203,11 @@ func TestAdHocTracesRejectNonCanonicalBlockHash(t *testing.T) {
 
 func TestTraceFilterRejectsNonCanonicalBlockHash(t *testing.T) {
 	base, m, _ := newOverlayAheadTestAPI(t)
-	sideHeader := writeNonCanonicalTestBlock(t, m)
-	selector := rpc.BlockNumberOrHashWithHash(sideHeader.Hash(), false)
+	sideHash := writeNonCanonicalTestBlock(t, m).Hash()
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	t.Run("fromBlock", func(t *testing.T) {
-		err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &selector}, nil, nil, jsonstream.New(io.Discard))
-		require.ErrorContains(t, err, "is not currently canonical")
-	})
-
-	t.Run("toBlock", func(t *testing.T) {
-		err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &selector}, nil, nil, jsonstream.New(io.Discard))
-		require.ErrorContains(t, err, "is not currently canonical")
-	})
+	err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &sideHash}, nil, nil, jsonstream.New(io.Discard))
+	requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", sideHash))
 }
 
 func TestTraceBlockUsesCommittedBlockBody(t *testing.T) {

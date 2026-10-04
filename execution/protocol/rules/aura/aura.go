@@ -576,17 +576,6 @@ func (c *AuRa) VerifyUncles(chain rules.ChainReader, header *types.Header, uncle
 	//return nil
 }
 
-// VerifySeal implements rules.Engine, checking whether the signature contained
-// in the header satisfies the consensus protocol requirements.
-func (c *AuRa) VerifySeal(chain rules.ChainHeaderReader, header *types.Header) error {
-	return nil
-	//snap, err := c.Snapshot(chain, header.Number.Uint64(), header.Hash(), nil)
-	//if err != nil {
-	//	return err
-	//}
-	//return c.verifySeal(chain, header, snap)
-}
-
 // Prepare implements rules.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
 func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
@@ -893,15 +882,6 @@ func (c *AuRa) FinalizeAndAssemble(config *chain.Config, header *types.Header, s
 	return types.NewBlockForAsembling(header, txs, uncles, receipts, withdrawals, nil), nil, nil
 }
 
-// SignerFn hashes and signs the data to be signed by a backing account.
-type SignerFn func(signer common.Address, mimeType string, message []byte) ([]byte, error)
-
-// Authorize injects a private key into the rules engine to mint new blocks with.
-func (c *AuRa) Authorize(signer common.Address, signFn SignerFn) {
-	c.signerMutex.Lock()
-	defer c.signerMutex.Unlock() //nolint:gocritic // empty stub requires defer to prevent badLock
-}
-
 func (c *AuRa) GenesisEpochData(header *types.Header, caller rules.SystemCall) ([]byte, error) {
 	setProof, err := c.cfg.Validators.genesisEpochData(header, caller)
 	if err != nil {
@@ -1168,7 +1148,7 @@ func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*type
 		reward = c.cfg.BlockReward[i]
 	}
 	if !found {
-		return nil, errors.New("Current block's reward is not found; this indicates a chain config error")
+		return nil, errors.New("current block's reward is not found; this indicates a chain config error")
 	}
 
 	r := rules.Reward{Beneficiary: accounts.InternAddress(header.Coinbase), Kind: rules.RewardAuthor, Amount: *reward.amount}
@@ -1213,7 +1193,7 @@ func (c *AuRa) ValidateBlockPostExecution(chainConfig *chain.Config, header *typ
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger,
 ) error {
-	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+	return rules.DefaultBlockPostValidation(header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 /*

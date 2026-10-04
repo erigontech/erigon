@@ -408,13 +408,12 @@ func (s *simulator) sanitizeCall(
 		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit))
 	}
 
+	if err := ethapi.ChainIDMismatch(args.ChainID, s.chainConfig.ChainID); err != nil {
+		return err
+	}
 	if args.ChainID == nil {
 		// Copy the chain ID to avoid aliasing the live chainConfig pointer.
 		args.ChainID = (*hexutil.U256)(new(uint256.Int).Set(s.chainConfig.ChainID))
-	} else {
-		if have := (*uint256.Int)(args.ChainID); !have.Eq(s.chainConfig.ChainID) {
-			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, s.chainConfig.ChainID)
-		}
 	}
 	if baseFee == nil {
 		// If there's no base fee, then it must be a non-1559 execution
@@ -693,11 +692,11 @@ func (s *simulator) newStateReaderForBlock(
 	}
 
 	if minTxNum < state.StateHistoryStartTxNum(tx) {
-		return nil, 0, 0, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
+		return nil, 0, 0, fmt.Errorf("%w: min tx: %d", state.ErrPruned, minTxNum)
 	}
 	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 	if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-		return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.PrunedError, commitmentStartingTxNum, minTxNum)
+		return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.ErrPruned, commitmentStartingTxNum, minTxNum)
 	}
 
 	if len(ancestors) > 0 {

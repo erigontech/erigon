@@ -328,8 +328,10 @@ func newCommitmentCalculator(
 	if err != nil {
 		return nil, fmt.Errorf("commitmentCalculator: open roTx: %w", err)
 	}
-	// roTx lives for the calculator's lifetime — rolled back in Stop(), not
-	// deferred here. Safe across collate/prune cycles because the calculator
+	ok := false
+	defer kv.RollbackUnless(&ok, roTx)
+	// roTx lives for the calculator's lifetime — rolled back in Stop().
+	// Safe across collate/prune cycles because the calculator
 	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
 	// stageloop's rwTx.Commit(), and CollateAndPrune only fires
 	// between batches via FCU. So this roTx never spans a prune — by the
@@ -353,6 +355,7 @@ func newCommitmentCalculator(
 		asOfReader.prefetched = calc.prefetch
 	}
 
+	ok = true
 	return &commitmentCalculator{
 		doms:                 doms,
 		db:                   db,
@@ -1021,13 +1024,30 @@ func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
 
 const computeGCPercent = 400
 
+var gcRaise struct {
+	sync.Mutex
+	computes int
+	prev     int
+}
+
 func raiseGCPercent() (restore func()) {
-	prev := debug.SetGCPercent(computeGCPercent)
-	if prev < 0 || prev > computeGCPercent {
-		debug.SetGCPercent(prev)
-		return func() {}
+	gcRaise.Lock()
+	defer gcRaise.Unlock()
+	if gcRaise.computes == 0 {
+		gcRaise.prev = debug.SetGCPercent(computeGCPercent)
+		if gcRaise.prev < 0 || gcRaise.prev > computeGCPercent {
+			debug.SetGCPercent(gcRaise.prev)
+		}
 	}
-	return func() { debug.SetGCPercent(prev) }
+	gcRaise.computes++
+	return func() {
+		gcRaise.Lock()
+		defer gcRaise.Unlock()
+		gcRaise.computes--
+		if gcRaise.computes == 0 {
+			debug.SetGCPercent(gcRaise.prev)
+		}
+	}
 }
 
 // compute is the shared prologue/compute/footer for every calculator commitment
@@ -1043,7 +1063,6 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 	cc.state.prefetch.pause()
 	defer cc.state.prefetch.resume()
-	defer raiseGCPercent()()
 	sdCtx := cc.doms.GetCommitmentContext()
 	cc.asOfReader.txNum = t.lastTxNum + 1
 	hexFeed, binFeed, feedErr := cc.feedsForState(sdCtx, true)
@@ -1055,6 +1074,9 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		return
 	}
 	feedMode := false
+	if sdCtx.AcceptsFeed() {
+		defer raiseGCPercent()()
+	}
 	if hexFeed == nil && sdCtx.AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0 {
 		cc.state.FlushToFeed(&cc.feed)
 		sdCtx.SetFeed(&cc.feed)
@@ -1458,7 +1480,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 			cc.doms.LockChangesetAccumulator()
 			defer cc.doms.UnlockChangesetAccumulator()
 			defer cc.doms.SwapCommitmentDiffLocked(sdc.CommitmentDomain(), nil)()
-			return cc.doms.FlushPendingUpdatesLocked(ctx, roTx)
+			return cc.doms.FlushPendingUpdatesLocked(roTx)
 		}(); err != nil {
 			return nil, nil, err
 		}
@@ -1580,7 +1602,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		}
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
-		return cc.doms.FlushPendingUpdatesLocked(ctx, roTx)
+		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
 	}(); err != nil {
 		return nil, err
 	}

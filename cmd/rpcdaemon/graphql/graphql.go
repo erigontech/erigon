@@ -32,6 +32,8 @@ import (
 
 const (
 	urlPath = "/graphql"
+
+	maxRequestBodySize = 32 * 1024 * 1024
 )
 
 func CreateHandler(api []rpc.API) http.Handler {
@@ -51,7 +53,18 @@ func CreateHandler(api []rpc.API) http.Handler {
 	resolver.GraphQLAPI = graphqlAPI
 
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{Resolvers: &resolver}))
-	return statusFixMiddleware(srv)
+	return bodyLimitMiddleware(statusFixMiddleware(srv))
+}
+
+func bodyLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > maxRequestBodySize {
+			http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // statusFixMiddleware adjusts HTTP status codes to match the GraphQL test expectations:

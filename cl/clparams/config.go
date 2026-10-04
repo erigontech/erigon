@@ -490,6 +490,11 @@ type BlobParameters struct {
 	MaxBlobsPerBlock uint64 `yaml:"MAX_BLOBS_PER_BLOCK" json:"MAX_BLOBS_PER_BLOCK,string"`
 }
 
+type GasLimitScheduleEntry struct {
+	Epoch    uint64 `yaml:"EPOCH" json:"EPOCH,string"`
+	GasLimit uint64 `yaml:"GAS_LIMIT" json:"GAS_LIMIT,string"`
+}
+
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
 type BeaconChainConfig struct {
 	// Constants (non-configurable)
@@ -741,6 +746,9 @@ type BeaconChainConfig struct {
 
 	// EIP7892 - Blob Schedule
 	BlobSchedule []BlobParameters `yaml:"BLOB_SCHEDULE" spec:"true" json:"BLOB_SCHEDULE"` // Schedule of blob limits per epoch
+
+	GasLimitSchedule []GasLimitScheduleEntry `yaml:"GAS_LIMIT_SCHEDULE" spec:"true" json:"GAS_LIMIT_SCHEDULE"`
+
 	// Fulu
 	ValidatorCustodyRequirement      uint64 `yaml:"VALIDATOR_CUSTODY_REQUIREMENT" spec:"true" json:"VALIDATOR_CUSTODY_REQUIREMENT,string"`               // ValidatorCustodyRequirement defines the custody requirement for validators.
 	BalancePerAdditionalCustodyGroup uint64 `yaml:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP" spec:"true" json:"BALANCE_PER_ADDITIONAL_CUSTODY_GROUP,string"` // BalancePerAdditionalCustodyGroup defines the balance required per additional custody group.
@@ -773,6 +781,18 @@ func (b *BeaconChainConfig) GetBlobParameters(epoch uint64) BlobParameters {
 		Epoch:            b.ElectraForkEpoch,
 		MaxBlobsPerBlock: b.MaxBlobsPerBlockElectra,
 	}
+}
+
+func (b *BeaconChainConfig) GetScheduledGasLimit(epoch uint64) (uint64, bool) {
+	if epoch < b.GloasForkEpoch {
+		return 0, false
+	}
+	for _, entry := range slices.Backward(b.GasLimitSchedule) {
+		if epoch >= entry.Epoch {
+			return entry.GasLimit, true
+		}
+	}
+	return 0, false
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -880,6 +900,9 @@ func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
 	// sort blob schedule by epoch in ascending order
 	slices.SortFunc(b.BlobSchedule, func(a, b BlobParameters) int {
+		return cmp.Compare(a.Epoch, b.Epoch)
+	})
+	slices.SortFunc(b.GasLimitSchedule, func(a, b GasLimitScheduleEntry) int {
 		return cmp.Compare(a.Epoch, b.Epoch)
 	})
 }
@@ -1157,13 +1180,14 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 		{412672, 15},
 		{419072, 21},
 	},
+	GasLimitSchedule: []GasLimitScheduleEntry{},
 
 	// Gloas
 	ChurnLimitQuotientGloas:              1 << 15,
 	ConsolidationChurnLimitQuotient:      1 << 16,
 	MaxPerEpochActivationChurnLimitGloas: 256_000_000_000,
 	BuilderWithdrawalPrefix:              0xB0,
-	PayloadDueBps:                        7500,
+	PayloadDueBps:                        5000,
 	PtcSize:                              512,
 	MaxPayloadAttestations:               4,
 	BuilderRegistryLimit:                 1 << 40,
@@ -1200,6 +1224,9 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	// setup beacon chain config
 	if err := yaml.Unmarshal(b, &beaconCfg); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
+	if beaconCfg.GasLimitSchedule == nil {
+		beaconCfg.GasLimitSchedule = []GasLimitScheduleEntry{}
 	}
 
 	// Forks absent from a custom config are unscheduled (far-future), as in other
@@ -1315,6 +1342,9 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.BlobSchedule = []BlobParameters{
 		{274176, 15},
 		{275712, 21},
+	}
+	cfg.GasLimitSchedule = []GasLimitScheduleEntry{
+		{Epoch: 353024, GasLimit: 200_000_000},
 	}
 
 	cfg.InitializeForkSchedule()

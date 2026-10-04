@@ -329,8 +329,8 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.stepSize
 }
 
-func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter {
-	return dt.newWriter(dt.d.dirs.Tmp, !dt.d.Enabled)
+func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {
+	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.d.Enabled)
 }
 
 // openList - main method to open list of files.
@@ -476,7 +476,7 @@ func (w *DomainBufferedWriter) DeleteWithPrevDiff(k []byte, txNum uint64, prev [
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
 func (w *DomainBufferedWriter) Diff() *kv.DomainDiff        { return w.diff }
 
-func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
+func (dt *DomainRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.HistoryDisabled
 
 	w := &DomainBufferedWriter{
@@ -484,7 +484,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
 		name:      dt.d.Name,
-		h:         dt.ht.newWriter(tmpdir, discardHistory),
+		h:         dt.ht.newWriter(db, tmpdir, discardHistory),
 	}
 	return w
 }
@@ -507,7 +507,7 @@ type DomainBufferedWriter struct {
 }
 
 func (w *DomainBufferedWriter) Close() {
-	if w == nil { // allow dobule-close
+	if w == nil {
 		return
 	}
 	w.h.close()
@@ -825,7 +825,9 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 		fromTxNum = uint64(stepFrom-1) * d.stepSize
 	}
 
-	err = wal.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	var lastK, lastV []byte
+	var hasLast bool
+	write := func(k, v []byte) error {
 		if d.LargeValues {
 			bareKey := k[:len(k)-8]
 			val := v
@@ -858,7 +860,22 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 			}
 		}
 		return nil
+	}
+	err = wal.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if hasLast && !bytes.Equal(k, lastK) {
+			if err := write(lastK, lastV); err != nil {
+				return err
+			}
+		}
+		lastK, lastV, hasLast = append(lastK[:0], k...), append(lastV[:0], v...), true
+		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
+	if err == nil && hasLast {
+		err = write(lastK, lastV)
+	}
+	if err != nil {
+		return Collation{}, err
+	}
 
 	closeCollation = false
 	coll.valuesCount = coll.valuesComp.Count() / 2
@@ -2155,7 +2172,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
 	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, dt.stepSize,
-		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
+		logEvery, dt.d.logger, nil, valsCursor, prg, mode)
 	if err != nil {
 		return stat, err
 	}

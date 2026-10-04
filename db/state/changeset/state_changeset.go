@@ -43,10 +43,10 @@ const (
 	legacyDomainCount    = 6
 )
 
-func (s *StateChangeSet) Copy() *StateChangeSet {
-	res := *s
-	for i := range s.Diffs {
-		res.Diffs[i] = *s.Diffs[i].Copy()
+func (d *StateChangeSet) Copy() *StateChangeSet {
+	res := *d
+	for i := range d.Diffs {
+		res.Diffs[i] = *d.Diffs[i].Copy()
 	}
 	return &res
 }

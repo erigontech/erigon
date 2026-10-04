@@ -262,10 +262,7 @@ func TestStorageTransitions(t *testing.T) {
 			} else {
 				fresh := runner.NewMemory(runner.ContextSpec{})
 				require.Equal(t, storageRound(t, fresh, addr, state.Ops()), root)
-				got := liveStorageRecords(ctx.Records())
-				for key, value := range liveStorageRecords(fresh.Records()) {
-					require.Equal(t, value, got[key], "record %x must match the fresh trie's", key)
-				}
+				requireLiveRecords(t, fresh.Records(), ctx.Records(), tc.name)
 			}
 		})
 	}

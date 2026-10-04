@@ -20,11 +20,16 @@
 package ethapi
 
 import (
+	"bytes"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -36,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // CallArgs represents the arguments for a call.
@@ -54,7 +60,139 @@ type CallArgs struct {
 	AccessList           *types.AccessList         `json:"accessList"`
 	ChainID              *hexutil.U256             `json:"chainId,omitempty"`
 	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
+	Blobs                []hexutil.Bytes           `json:"blobs"`
+	Commitments          []hexutil.Bytes           `json:"commitments"`
+	Proofs               []hexutil.Bytes           `json:"proofs"`
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
+}
+
+var callArgsParsers fastjson.ParserPool
+
+type callArgs CallArgs
+
+// UnmarshalJSON decodes a call object and rejects one whose data and input disagree.
+// Fields are decoded straight from one fastjson parse: encoding/json would scan a large
+// calldata string twice, once to validate and once to decode.
+func (args *CallArgs) UnmarshalJSON(raw []byte) error {
+	// fastjson unescapes strings, while the hexutil types reject escaped text.
+	if bytes.IndexByte(raw, '\\') >= 0 {
+		return args.unmarshalStd(raw)
+	}
+	p := callArgsParsers.Get()
+	defer callArgsParsers.Put(p)
+	v, err := p.ParseBytes(raw)
+	if err != nil || v.Type() != fastjson.TypeObject {
+		return args.unmarshalStd(raw)
+	}
+	ok := true
+	v.GetObject().Visit(func(key []byte, f *fastjson.Value) {
+		ok = ok && args.setField(key, f)
+	})
+	if !ok {
+		return args.unmarshalStd(raw)
+	}
+	return CheckCallData(args.Data, args.Input)
+}
+
+// setField decodes one member as encoding/json would, and reports false where it cannot
+// promise the same result: a field without a case here, a key matching a field only case-insensitively,
+// or a value encoding/json would reject (so the caller gets encoding/json's error).
+func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
+	switch string(key) {
+	case "from":
+		return setText(&args.From, f)
+	case "to":
+		return setText(&args.To, f)
+	case "gas":
+		return setText(&args.Gas, f)
+	case "gasPrice":
+		return setText(&args.GasPrice, f)
+	case "maxPriorityFeePerGas":
+		return setText(&args.MaxPriorityFeePerGas, f)
+	case "maxFeePerGas":
+		return setText(&args.MaxFeePerGas, f)
+	case "maxFeePerBlobGas":
+		return setText(&args.MaxFeePerBlobGas, f)
+	case "value":
+		return setText(&args.Value, f)
+	case "nonce":
+		return setText(&args.Nonce, f)
+	case "data":
+		return setText(&args.Data, f)
+	case "input":
+		return setText(&args.Input, f)
+	case "chainId":
+		return setText(&args.ChainID, f)
+	}
+	for _, name := range callArgsJSONNames {
+		if bytes.EqualFold(key, []byte(name)) {
+			return false
+		}
+	}
+	return true // encoding/json ignores unknown members
+}
+
+var callArgsJSONNames = func() (names []string) {
+	for f := range reflect.TypeFor[CallArgs]().Fields() {
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		names = append(names, name)
+	}
+	return names
+}()
+
+// setText decodes a JSON string member through T's UnmarshalText; null clears the field.
+func setText[T any, PT interface {
+	*T
+	encoding.TextUnmarshaler
+}](dst **T, f *fastjson.Value) bool {
+	if f.Type() == fastjson.TypeNull {
+		*dst = nil
+		return true
+	}
+	s, err := f.StringBytes()
+	if err != nil {
+		return false
+	}
+	v := PT(new(T))
+	if v.UnmarshalText(s) != nil {
+		return false
+	}
+	*dst = (*T)(v)
+	return true
+}
+
+// unmarshalStd decodes with encoding/json alone, so malformed input gets its error messages.
+func (args *CallArgs) unmarshalStd(raw []byte) error {
+	if err := json.Unmarshal(raw, (*callArgs)(args)); err != nil {
+		return err
+	}
+	return CheckCallData(args.Data, args.Input)
+}
+
+// CheckCallData rejects a call object whose data and input are both set and differ, as
+// invalid params. Either one alone, or both with the same value, gives the call data.
+func CheckCallData(data, input *hexutil.Bytes) error {
+	if data != nil && input != nil && !bytes.Equal(*data, *input) {
+		return &rpc.InvalidParamsError{Message: `both "data" and "input" are set and not equal. Please use "input" to pass transaction call data`}
+	}
+	return nil
+}
+
+// ChainIDMismatch returns an error when a call object's chainId names another chain.
+func ChainIDMismatch(have *hexutil.U256, want *uint256.Int) error {
+	if have != nil && !(*uint256.Int)(have).Eq(want) {
+		return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", (*uint256.Int)(have), want)
+	}
+	return nil
+}
+
+// CheckChainID rejects a call object whose chainId names another chain. Such a call is invalid
+// whatever the state, so it is invalid params rather than an execution error.
+func CheckChainID(have *hexutil.U256, want *uint256.Int) error {
+	if err := ChainIDMismatch(have, want); err != nil {
+		return &rpc.InvalidParamsError{Message: err.Error()}
+	}
+	return nil
 }
 
 func (args *CallArgs) FromOrEmpty() accounts.Address {
@@ -555,6 +693,8 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
 type SignTransactionResult struct {
 	Raw hexutil.Bytes   `json:"raw"`
 	Tx  *RPCTransaction `json:"tx"`
+	// Sidecar, when set, adds blobs, commitments and proofs to the tx object.
+	Sidecar *types.BlobTxWrapper `json:"-"`
 }
 
 func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
@@ -590,6 +730,29 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 	for _, k := range []string{"v", "r", "s"} {
 		if v, ok := m[k]; !ok || string(v) == "null" {
 			m[k] = zeroHex
+		}
+	}
+	if sc := r.Sidecar; sc != nil {
+		blobs := make([]hexutil.Bytes, len(sc.Blobs))
+		for i := range sc.Blobs {
+			blobs[i] = sc.Blobs[i][:]
+		}
+		commitments := make([]hexutil.Bytes, len(sc.Commitments))
+		for i := range sc.Commitments {
+			commitments[i] = sc.Commitments[i][:]
+		}
+		proofs := make([]hexutil.Bytes, len(sc.Proofs))
+		for i := range sc.Proofs {
+			proofs[i] = sc.Proofs[i][:]
+		}
+		if m["blobs"], err = json.Marshal(blobs); err != nil {
+			return nil, err
+		}
+		if m["commitments"], err = json.Marshal(commitments); err != nil {
+			return nil, err
+		}
+		if m["proofs"], err = json.Marshal(proofs); err != nil {
+			return nil, err
 		}
 	}
 	stripped, err := json.Marshal(m)
