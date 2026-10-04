@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -77,6 +78,40 @@ func TestVersionedRead_B_DeletedStateObjectReturnsDefault(t *testing.T) {
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.True(t, bal.IsZero(), "balance after selfdestruct is zero")
+}
+
+// A dirty address serves the recorded read of a field it has not written, as a
+// clean one does: a later estimate in the version map is left to validation.
+func TestVersionedRead_B_DirtyAddressServesRecordedRead(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress([20]byte{0xb4})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.Balance = *uint256.NewInt(1234)
+	addrValue := addr.Value()
+	domains.SetTxNum(10)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	nonce, err := ibs.GetNonce(addr)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, nonce)
+	require.NoError(t, ibs.SetBalance(addr, *uint256.NewInt(77), 0))
+	require.False(t, ibs.warmReadable(addr), "the balance write makes the address dirty")
+
+	mvhm.WriteNonce(addr, Version{TxIndex: 2}, 9, false)
+	nonce, err = ibs.GetNonce(addr)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, nonce)
+
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.EqualValues(t, 77, balance.Uint64(), "an own write still wins")
 }
 
 // ------------------------------------------------------------------
@@ -636,11 +671,10 @@ func TestVersionedRead_F_MVReadResultDependencyPanics(t *testing.T) {
 	_, _ = ibs.GetBalance(addr)
 }
 
-// writeSet hit at MVReadResultDone, but readSet has a stale version
-// → panic ErrDependency (a write was based on a stale read). The current
-// tx wrote, but the readSet for the same path holds a version older than
-// the versionMap's Done entry.
-func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
+// An own write over a stale recorded read: the repeat read serves the own write
+// without re-probing the version map, and commit-time validation catches the
+// stale read (a write was based on it).
+func TestVersionedRead_D1_WriteSetHitWithStaleReadSetCaughtAtCommit(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
@@ -653,26 +687,29 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 	// versionMap Done at tx 3 — higher than the readSet's stale tx-1 entry.
 	mvhm.WriteBalance(addr, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
 
-	// Seed a current-tx writeSet entry (intra-tx write) so the writeSet
-	// branch fires.
 	err := ibs.SetBalance(addr, *uint256.NewInt(77), 0)
 	require.NoError(t, err)
 
 	// Seed a stale readSet entry at a lower version AFTER the write:
 	// seeding it first would already panic inside SetBalance's account
-	// refresh, before the writeSet-hit branch under test is reached.
+	// refresh.
 	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
 	})
-	defer func() {
-		r := recover()
-		require.NotNil(t, r, "must panic when writeSet hit conflicts with stale readSet at versionMap Done")
-		err, ok := r.(error)
-		require.True(t, ok)
-		assert.ErrorIs(t, err, ErrDependency)
-	}()
-	_, _ = ibs.GetBalance(addr)
+	got, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	assert.EqualValues(t, 77, got.Uint64(), "the own write wins")
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	valid := mvhm.ValidateVersion(5, &io, func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}, true, false, false, "")
+	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the stale read")
 }
 
 // The nil≡empty arm of readValueUnchanged carries the same gates as

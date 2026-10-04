@@ -947,13 +947,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 // extraction of *accounts.Account.  Used internally by versionedReadCore
 // to resolve sibling-account reads without taking a typed callback.
 func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetAddress(addr); ok && warmSource(tr.Source) {
-			if tr.Val != nil {
-				return tr.Val.Account(), tr.Source, tr.Version, nil
-			}
-			return nil, tr.Source, tr.Version, nil
+	if !s.warmReadable(addr) {
+		if vw, ok := s.versionedWrites.address[addr]; ok {
+			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
 		}
+	}
+	if tr, ok := s.versionedReads.GetAddress(addr); ok && warmSource(tr.Source) {
+		if tr.Val != nil {
+			return tr.Val.Account(), tr.Source, tr.Version, nil
+		}
+		return nil, tr.Source, tr.Version, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, AddressPath, accounts.NilKey, false, true, &r)
@@ -1061,13 +1064,26 @@ func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
 	return !dirty
 }
 
+// warmField serves a repeat read of an account field without the version-map
+// probe: this tx's own write on a dirty address, else the recorded read.
+func warmField[T any](s *IntraBlockState, addr accounts.Address, writes map[accounts.Address]*VersionedWrite[T], reads map[accounts.Address]VersionedRead[T]) (T, ReadSource, Version, bool) {
+	if !s.warmReadable(addr) {
+		if vw, ok := writes[addr]; ok {
+			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, true
+		}
+	}
+	if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
+		return tr.Val, tr.Source, tr.Version, true
+	}
+	var zero T
+	return zero, UnknownSource, UnknownVersion, false
+}
+
 // readBalance returns the address's balance using the version-aware
 // read pipeline.  Inlines the storage-read fallback.
 func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetBalance(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.balance, s.versionedReads.balance); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, false, &r)
@@ -1111,10 +1127,8 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 // miss and does not perform a storage fallback.  When the core signals
 // recordVR, records the read with currentBalance as the typed default.
 func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance uint256.Int) (uint256.Int, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetBalance(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.balance, s.versionedReads.balance); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, true, &r)
@@ -1152,10 +1166,8 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 
 // readNonce returns the nonce using the version-aware read pipeline.
 func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.nonce, s.versionedReads.nonce); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, false, &r)
@@ -1196,10 +1208,8 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 }
 
 func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64) (uint64, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.nonce, s.versionedReads.nonce); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, true, &r)
@@ -1457,10 +1467,8 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 
 // readCodeHash returns the contract code hash.
 func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCodeHash(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.codeHash, s.versionedReads.codeHash); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, false, false, &r)
@@ -1504,10 +1512,8 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash,
 
 // refreshCodeHash is the in-memory-only variant for CodeHashPath.
 func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash accounts.CodeHash) (accounts.CodeHash, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCodeHash(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.codeHash, s.versionedReads.codeHash); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, false, true, &r)
