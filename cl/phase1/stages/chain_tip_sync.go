@@ -1366,6 +1366,10 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
 			}
 		}
+		// Recheck persisted envelopes every cycle because payload verification state is not durable.
+		verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
+		verifyUnverifiedGloasPayloads(verifyCtx, cfg)
+		cancelVerify()
 	}
 
 	if args.seenSlot >= args.targetSlot {
@@ -1384,11 +1388,6 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				waitForClaimedSelectedHeadEnvelope(ctx, cfg, cfg.forkChoice, func(requestCtx context.Context, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
 					return network.RequestEnvelopesFrantically(requestCtx, cfg.rpc, roots)
 				}, headRoot, 2*time.Second, canValidateGloasPayloads(cfg))
-			}
-			if canValidateGloasPayloads(cfg) {
-				verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
-				verifyUnverifiedGloasPayloads(verifyCtx, cfg)
-				cancelVerify()
 			}
 		}
 		return nil

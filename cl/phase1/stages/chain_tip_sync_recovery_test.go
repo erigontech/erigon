@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -29,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
@@ -69,6 +71,7 @@ type chainTipBatchForkGraph struct {
 	parentState *state2.CachingBeaconState
 	envelopes   map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	added       map[common.Hash]int
+	insertOnAdd bool
 }
 
 type chainTipBatchEnvelopeSentinel struct {
@@ -92,6 +95,10 @@ func (g *chainTipBatchForkGraph) AddChainSegment(block *cltypes.SignedBeaconBloc
 		return nil, fork_graph.InvalidBlock, err
 	}
 	g.added[common.Hash(root)]++
+	if g.insertOnAdd {
+		g.parents[common.Hash(root)] = block
+		return g.parentState, fork_graph.Success, nil
+	}
 	return nil, fork_graph.PreValidated, nil
 }
 
@@ -117,6 +124,13 @@ func (g *chainTipBatchForkGraph) GetState(root common.Hash, alwaysCopy bool) (*s
 		return g.parentState, nil
 	}
 	return g.ForkGraph.GetState(root, alwaysCopy)
+}
+
+func (g *chainTipBatchForkGraph) GetCurrentJustifiedCheckpoint(root common.Hash) (solid.Checkpoint, bool) {
+	if _, ok := g.parents[root]; ok {
+		return g.parentState.CurrentJustifiedCheckpoint(), true
+	}
+	return g.ForkGraph.GetCurrentJustifiedCheckpoint(root)
 }
 
 func (g *chainTipBatchForkGraph) HasEnvelope(root common.Hash) bool {
@@ -173,6 +187,10 @@ func (s *storedParentPayloadTestStore) RequeuePendingELPayload(payload forkchoic
 }
 
 func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.PayloadStatus) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *testExecutionEngine) {
+	return newChainTipBatchFixtureWithRecordedStatus(t, replayStatus, true)
+}
+
+func newChainTipBatchFixtureWithRecordedStatus(t *testing.T, replayStatus execution_client.PayloadStatus, recordStatus bool) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *testExecutionEngine) {
 	t.Helper()
 
 	beaconCfg, anchorState, parentBid, envelope, _ := validAnchorEnvelopeFixture(t, 0)
@@ -190,6 +208,14 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 	parentState, err := anchorState.Copy()
 	require.NoError(t, err)
 	require.NoError(t, parentState.SetSlot(envelope.Message.Payload.SlotNumber))
+	if !recordStatus {
+		parentState.SetCurrentEpochParticipation(solid.NewParticipationBitList(parentState.ValidatorLength(), int(beaconCfg.ValidatorRegistryLimit)))
+		parentState.SetPreviousEpochParticipation(solid.NewParticipationBitList(parentState.ValidatorLength(), int(beaconCfg.ValidatorRegistryLimit)))
+		anchorCheckpoint := solid.Checkpoint{Epoch: anchorState.Slot() / beaconCfg.SlotsPerEpoch, Root: anchorRoot}
+		parentState.SetPreviousJustifiedCheckpoint(anchorCheckpoint)
+		parentState.SetCurrentJustifiedCheckpoint(anchorCheckpoint)
+		parentState.SetFinalizedCheckpoint(anchorCheckpoint)
+	}
 	parentBid.ParentBlockRoot = anchorRoot
 	envelope.Message.ParentBeaconBlockRoot = anchorRoot
 	envelope.Message.Payload.Time = state2.ComputeTimestampAtSlot(parentState, parentState.Slot())
@@ -247,10 +273,12 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 	)
 	require.NoError(t, err)
 	store.OnTick((parent.Block.Slot + 1) * beaconCfg.SecondsPerSlot)
-	store.MarkPayloadStatus(parentRoot, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusNone)
-	status, found := store.GetRecentExecutionPayloadStatusByRoot(parentRoot)
-	require.True(t, found)
-	require.EqualValues(t, execution_client.PayloadStatusNone, status)
+	if recordStatus {
+		store.MarkPayloadStatus(parentRoot, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusNone)
+		status, found := store.GetRecentExecutionPayloadStatusByRoot(parentRoot)
+		require.True(t, found)
+		require.EqualValues(t, execution_client.PayloadStatusNone, status)
+	}
 
 	fullChild := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
 	fullChild.Block.Slot = parent.Block.Slot + 1
@@ -269,6 +297,30 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 		gloasPayloadValidator: engine,
 	}
 	return stageCfg, graph, parentRoot, fullChild, emptyChild, engine
+}
+
+func TestChainTipSyncVerifiesStoredGloasPayloadWhileBehind(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+
+	selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, headRoot, selectedRoot)
+	require.True(t, cfg.forkChoice.HasEnvelope(headRoot))
+	_, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	require.False(t, found)
+
+	targetSlot := headBlock.Block.Slot + 1
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	err = chainTipSync(ctx, log.Root(), cfg, Args{seenSlot: targetSlot - 1, targetSlot: targetSlot})
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
 }
 
 func newChainTipBatchEnvelopeRPC(t *testing.T, cfg *clparams.BeaconChainConfig, envelope *cltypes.SignedExecutionPayloadEnvelope) (*rpc.BeaconRpcP2P, *chainTipBatchEnvelopeSentinel) {
