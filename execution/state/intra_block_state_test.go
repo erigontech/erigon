@@ -1236,4 +1236,11 @@ func TestGetStateFollowsEveryChange(t *testing.T) {
 
 	require.NoError(t, ibs.SetStorage(addr, Storage{}))
 	require.Equal(t, uint64(0), get(k1), "a storage override")
+
+	// Reset drops the state the reads came from; the reader has no such slot.
+	set(k2, 21)
+	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, NewNoopWriter()))
+	require.Equal(t, uint64(21), get(k2))
+	ibs.Reset()
+	require.Equal(t, uint64(0), get(k2), "a reset")
 }
