@@ -746,7 +746,7 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		}
 
 		if gasOK {
-			if err := evm.intraBlockState.SetCode(address, ret, tracing.CodeChangeContractCreation); err != nil {
+			if err := evm.intraBlockState.SetDeployedCode(address, ret, tracing.CodeChangeContractCreation); err != nil {
 				return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 			}
 			// EIP-8037: post-Run code-deposit state charge counts toward this

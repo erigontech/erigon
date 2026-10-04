@@ -21,6 +21,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -226,6 +227,8 @@ type IntraBlockState struct {
 	isAura bool
 
 	revisions revisions
+
+	deployedCode accounts.Code // last code stored by SetDeployedCode
 }
 
 type sdProbeEntry struct {
@@ -1524,6 +1527,23 @@ func printCode(c []byte) (int, string) {
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason tracing.CodeChangeReason) error {
+	return ibs.SetCodeTyped(addr, accounts.NewCode(code), reason)
+}
+
+// SetDeployedCode is SetCode for the code a CREATE returned. Factories deploy
+// the same bytes many times, so the last code is reused instead of re-hashed.
+func (ibs *IntraBlockState) SetDeployedCode(addr accounts.Address, ret []byte, reason tracing.CodeChangeReason) error {
+	code := ibs.deployedCode
+	if len(ret) == 0 || !bytes.Equal(ret, code.Bytes) {
+		code = accounts.NewCode(ret)
+		ibs.deployedCode = code
+	}
+	return ibs.SetCodeTyped(addr, code, reason)
+}
+
+// SetCodeTyped is SetCode for a caller that already holds the hashed code.
+func (ibs *IntraBlockState) SetCodeTyped(addr accounts.Address, canonical accounts.Code, reason tracing.CodeChangeReason) error {
+	code := canonical.Bytes
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 		lenc, cs := printCode(code)
 		fmt.Printf("%d (%d.%d) SetCode %x, %d: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, lenc, cs)
@@ -1533,7 +1553,6 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	if err != nil {
 		return err
 	}
-	canonical := accounts.NewCode(code)
 	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
 	origHash := stateObject.original.CodeHash
