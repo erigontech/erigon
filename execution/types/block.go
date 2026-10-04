@@ -1444,8 +1444,8 @@ func rlpFromBinaryTxn(binaryTxn []byte) []byte {
 
 // BinaryFromStoredTxn is the inverse of rlpFromBinaryTxn: it returns the binary (canonical
 // EIP-2718) encoding of a stored transaction, a subslice of stored, without decoding its fields.
-// The record's RLP shape is checked, so a stored value that is not one whole transaction is
-// rejected here rather than served as a transaction.
+// Only the framing is checked, never a field's content, so this is weaker than DecodeTransaction:
+// a record with the right envelope and field count but a non-canonical field is returned as it is.
 func BinaryFromStoredTxn(stored []byte) ([]byte, error) {
 	binary := stored
 	if TypedTransactionMarshalledAsRlpString(stored) {
@@ -1479,9 +1479,10 @@ var txnFieldCount = map[byte]int{
 	AccountAbstractionTxType: 19,
 }
 
-// checkTxnShape reports whether binary is one whole transaction of a type this code knows: the
-// right number of well-formed RLP fields, and nothing after them. A type it does not know is
-// decoded instead, so a new transaction type is served only once it is understood.
+// checkTxnShape reports whether binary is framed as one transaction of a type this code knows: the
+// right number of well-formed RLP fields, and nothing after them. The fields are not read, so their
+// contents are not checked. A type it does not know is decoded instead, so a new transaction type is
+// served only once it is understood.
 func checkTxnShape(binary []byte) error {
 	if len(binary) == 0 {
 		return errors.New("stored txn: empty")

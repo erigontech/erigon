@@ -1164,26 +1164,32 @@ func TestTransactionHashFromEncoding(t *testing.T) {
 	}
 }
 
-// A stored record that is not one whole transaction is rejected, not handed out as one.
+// A stored record whose framing is not one transaction's is rejected, not handed out as one.
 func TestBinaryFromStoredTxnRejectsMalformed(t *testing.T) {
 	wrap := func(b []byte) []byte {
 		out := make([]byte, rlp.StringLen(b))
 		rlp.EncodeStringToBuf(b, out)
 		return out
 	}
-	var legacy bytes.Buffer
-	require.NoError(t, rightvrsTx.MarshalBinary(&legacy))
-	legacyBinary := legacy.Bytes()
+	binaryOf := func(txn Transaction) []byte {
+		var buf bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&buf))
+		return bytes.Clone(buf.Bytes())
+	}
+	legacyBinary, typedBinary := binaryOf(rightvrsTx), binaryOf(signedDynFeeTx)
+	// The trailing-byte cases must be a valid encoding plus one byte: anything shorter
+	// is already rejected on the field count, leaving the trailing checks untested.
+	withTrailing := func(b []byte) []byte { return append(bytes.Clone(b), 0x80) }
 
 	for name, stored := range map[string][]byte{
 		"empty":                  {},
 		"legacy empty list":      {0xc0},
 		"legacy not a list":      {0x01, 0x02},
-		"legacy trailing bytes":  append([]byte{0xc1, 0x80}, 0xff),
+		"legacy trailing bytes":  withTrailing(legacyBinary),
 		"typed empty list":       wrap([]byte{0x02, 0xc0}),
 		"typed without fields":   wrap([]byte{0x02}),
-		"typed trailing bytes":   wrap(append([]byte{0x02, 0xc1, 0x80}, 0xff)),
-		"wrapped trailing bytes": append(wrap([]byte{0x02, 0xc1, 0x80}), 0xff),
+		"typed trailing bytes":   wrap(withTrailing(typedBinary)),
+		"wrapped trailing bytes": withTrailing(wrap(typedBinary)),
 		"wrapped empty":          {0x80},
 		"legacy one field":       {0xc1, 0x80},
 		"typed one field":        {0x02, 0xc1, 0x80},
