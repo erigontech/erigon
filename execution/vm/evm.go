@@ -976,12 +976,13 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 	}
 }
 
-func (evm *EVM) traceIO(caller accounts.Address) bool {
-	return dbg.TraceTransactionIO && !dbg.TraceInstructions && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle()))
+func (evm *EVM) traceIO(typ OpCode, caller accounts.Address) bool {
+	isCreate := typ == CREATE || typ == CREATE2
+	return dbg.TraceTransactionIO && (isCreate || !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle()))
 }
 
 func (evm *EVM) captureBegin(depth int, typ OpCode, from accounts.Address, to accounts.Address, precompile bool, input []byte, startGas mdgas.MdGas, value uint256.Int, code []byte) {
-	if evm.traceIO(from) {
+	if evm.traceIO(typ, from) {
 		version := evm.intraBlockState.Version()
 		fmt.Printf("%d (%d.%d) %s: %x %x\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, to, input)
 	}
@@ -991,7 +992,7 @@ func (evm *EVM) captureBegin(depth int, typ OpCode, from accounts.Address, to ac
 }
 
 func (evm *EVM) captureEnd(depth int, typ OpCode, from accounts.Address, to accounts.Address, leftOverGas mdgas.MdGas, gasUsed mdgas.MdGasUsage, ret []byte, err error) {
-	if evm.traceIO(from) {
+	if evm.traceIO(typ, from) {
 		version := evm.intraBlockState.Version()
 		fmt.Printf("%d (%d.%d) RETURN (%s): %x: %x, %d, %v\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, to, ret, leftOverGas, err)
 	}
