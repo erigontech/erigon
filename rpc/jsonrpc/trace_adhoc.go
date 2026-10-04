@@ -838,7 +838,10 @@ func (ot *OeTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.Md
 	if ot.r.VmTrace == nil || ot.lastVmOp == nil || errors.Is(err, vm.ErrExecutionReverted) {
 		return
 	}
-	if rejectedBeforeExecution(err) {
+	// Stack bounds are checked before the opcode hook, so an undefined opcode is the only fault
+	// here for an operation that did not execute.
+	var invalid *vm.ErrInvalidOpCode
+	if errors.As(err, &invalid) && invalid.Undefined() {
 		vmTrace := ot.r.VmTrace
 		if len(ot.vmOpStack) > 0 {
 			vmTrace = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
