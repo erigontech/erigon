@@ -193,7 +193,7 @@ type BaseAPI struct {
 var BlockCacheBytes = dbg.EnvDataSize("RPC_BLOCK_CACHE", 512*datasize.MB)
 
 // HeaderCacheBytes bounds the decoded headers the RPC layer keeps for header-only lookups. A
-// header costs ~1KB of heap, so this holds ~1000 of them.
+// mainnet header weighs ~1.4KB in headerHeapSize, so this holds ~750 of them.
 var HeaderCacheBytes = dbg.EnvDataSize("RPC_HEADER_CACHE", 1*datasize.MB)
 
 // blockHeapSize approximates a decoded block's heap: its encoding plus the header and one
