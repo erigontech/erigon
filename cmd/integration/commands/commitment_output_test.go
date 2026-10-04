@@ -127,10 +127,7 @@ func domainFileNames(t *testing.T, snapDomain string) []string {
 }
 
 func TestResolveCommitmentRebuildTargetUsesProcessFlags(t *testing.T) {
-	oldBin, oldParallel, oldV3 := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3 = oldBin, oldParallel, oldV3
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = false
 	for _, test := range []struct {
 		name     string

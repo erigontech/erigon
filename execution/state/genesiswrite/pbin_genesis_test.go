@@ -38,18 +38,12 @@ import (
 	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func withBinCommitment(t *testing.T, on bool) {
 	t.Helper()
-	orig := statecfg.ExperimentalBinCommitment
-	origParallel := statecfg.ExperimentalParallelCommitment
-	origHash := statecfg.BinCommitmentHash
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = orig
-		statecfg.ExperimentalParallelCommitment = origParallel
-		statecfg.BinCommitmentHash = origHash
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = on
 	// erigondb.toml resolution refuses the combination: the bin trie is
 	// sequential-only, regardless of a process-wide parallel default. Clearing it
@@ -65,13 +59,7 @@ func withBinCommitment(t *testing.T, on bool) {
 func withCommitmentVariant(t *testing.T, bin, hexBin bool) {
 	t.Helper()
 	withBinCommitment(t, bin)
-	origHexBin, origHash, origSuite := statecfg.ExperimentalHexBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
-	origV3, origSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalHexBinCommitment, statecfg.BinCommitmentHash = origHexBin, origHash
-		statecfg.ExperimentalCommitmentV3, statecfg.Schema = origV3, origSchema
-		require.NoError(t, commitment.SetPBinHashSuite(origSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalHexBinCommitment, statecfg.BinCommitmentHash = hexBin, ""
 	statecfg.ExperimentalCommitmentV3 = hexBin
 	if hexBin {

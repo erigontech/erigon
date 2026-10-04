@@ -33,13 +33,15 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/rpc"
 )
 
 func TestMPTWitnessPreByzantiumKeepsReceiptPostState(t *testing.T) {
-	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	commitmentflags.Restore(t)
+	previousAssert := dbg.AssertEnabled
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
+	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	from := crypto.PubkeyToAddress(key.PublicKey)

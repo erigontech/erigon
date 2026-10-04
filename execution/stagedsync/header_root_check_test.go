@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 // The header state-root check must be on by default and skippable only through
@@ -34,10 +35,9 @@ func TestHeaderRootCheckDefaultOnAndTogglable(t *testing.T) {
 
 	require.True(t, dbg.CheckHeaderStateRoot, "header root check must default to enabled")
 
-	origBin := statecfg.ExperimentalBinCommitment
+	commitmentflags.Restore(t)
 	origCheck := dbg.CheckHeaderStateRoot
 	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = origBin
 		dbg.CheckHeaderStateRoot = origCheck
 	})
 

@@ -26,12 +26,12 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func withBinCommitment(t *testing.T, on bool) {
 	t.Helper()
-	orig := statecfg.ExperimentalBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalBinCommitment = orig })
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = on
 }
 

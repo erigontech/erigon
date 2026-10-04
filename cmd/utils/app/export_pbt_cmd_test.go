@@ -375,14 +375,13 @@ func TestConfigurePBTExportHashDefaultsForPreimages(t *testing.T) {
 }
 
 func TestConfigurePBTExportHashRejectsDatadirMismatch(t *testing.T) {
-	previousHashFlag := utils.ExperimentalBinCommitmentHashFlag
-	t.Cleanup(func() { utils.ExperimentalBinCommitmentHashFlag = previousHashFlag })
 	dirs := datadir.New(t.TempDir())
 	variant, hash := state.TrieVariantHexBin, commitment.PBinHashBlake3
 	refs := false
 	require.NoError(t, state.WriteErigonDBSettings(dirs, &state.ErigonDBSettings{StepSize: 8, StepsInFrozenFile: 1, ReferencesInCommitmentBranches: &refs, TrieVariant: &variant, TrieHash: &hash}))
-	cmd := &cli.Command{Flags: []cli.Flag{&utils.ExperimentalBinCommitmentHashFlag}}
-	require.NoError(t, cmd.Set(utils.ExperimentalBinCommitmentHashFlag.Name, commitment.PBinHashKeccak))
+	hashFlag := &cli.StringFlag{Name: utils.ExperimentalBinCommitmentHashFlag.Name}
+	cmd := &cli.Command{Flags: []cli.Flag{hashFlag}}
+	require.NoError(t, cmd.Set(hashFlag.Name, commitment.PBinHashKeccak))
 	_, err := configurePBTExportHash(dirs, cmd)
 	require.ErrorContains(t, err, "differs from datadir trie_hash")
 }

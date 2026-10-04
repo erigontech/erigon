@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestDebugShadowStateRoot(t *testing.T) {
@@ -51,11 +52,7 @@ func TestDebugShadowStateRoot(t *testing.T) {
 }
 
 func TestDebugMigrationProgress(t *testing.T) {
-	originalV3, originalSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = originalV3
-		statecfg.Schema = originalSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)

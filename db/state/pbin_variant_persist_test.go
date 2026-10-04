@@ -30,24 +30,13 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 // Mutates process-wide statecfg flags, so no test in this file may run in parallel.
 func pbinWithVariantFlags(t *testing.T, bin, parallel bool) {
 	t.Helper()
-	origBin := statecfg.ExperimentalBinCommitment
-	origPar := statecfg.ExperimentalParallelCommitment
-	origHexBin := statecfg.ExperimentalHexBinCommitment
-	origHash, origSuite := statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = origBin
-		statecfg.ExperimentalParallelCommitment = origPar
-		statecfg.ExperimentalHexBinCommitment = origHexBin
-		statecfg.BinCommitmentHash = origHash
-		// A datadir resolve binds the process suite through reconcileTrieVariant; leaving it
-		// bound makes every later test in this binary read this test's hash.
-		require.NoError(t, commitment.SetPBinHashSuite(origSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = bin
 	statecfg.ExperimentalParallelCommitment = parallel
 }
@@ -127,11 +116,7 @@ func TestPBinVariantBinDatadirRefusesParallel(t *testing.T) {
 
 func TestPBinVariantHexBinAllowsParallelForHexArm(t *testing.T) {
 	pbinWithVariantFlags(t, false, true)
-	originalV3, originalSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = originalV3
-		statecfg.Schema = originalSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	dirs := datadir.New(t.TempDir())

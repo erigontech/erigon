@@ -37,21 +37,14 @@ import (
 // Mutates a process-global flag, so no test using it may run in parallel.
 func withBinCommitmentFlag(t *testing.T, on bool) {
 	t.Helper()
-	orig := statecfg.ExperimentalBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalBinCommitment = orig })
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = on
 }
 
 func withDualCommitmentFlags(t *testing.T) {
 	t.Helper()
-	withBinCommitmentFlag(t, true)
-	orig := statecfg.ExperimentalHexBinCommitment
-	origV3, origSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalHexBinCommitment = orig
-		statecfg.ExperimentalCommitmentV3 = origV3
-		statecfg.Schema = origSchema
-	})
+	commitmentflags.Restore(t)
+	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)

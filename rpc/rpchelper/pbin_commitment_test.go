@@ -46,12 +46,12 @@ import (
 // aggregator, so it cannot serve a bin datadir.
 func TestPBinCommitmentReplayRefusesBin(t *testing.T) {
 	// No t.Parallel: mutates process-global statecfg flags.
-	commitmentflags.Restore(t)
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	// erigondb.toml resolution refuses the combination: the bin trie is
 	// sequential-only, regardless of a process-wide parallel default.

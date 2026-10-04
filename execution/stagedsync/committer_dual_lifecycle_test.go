@@ -37,21 +37,14 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
 
 func dualCalculatorTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Helper()
-	bin, dual, parallel := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalParallelCommitment
-	v3, schema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	hash, suite := statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalParallelCommitment = bin, dual, parallel
-		statecfg.ExperimentalCommitmentV3, statecfg.Schema = v3, schema
-		statecfg.BinCommitmentHash = hash
-		require.NoError(t, commitment.SetPBinHashSuite(suite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalParallelCommitment = true, true, false
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
