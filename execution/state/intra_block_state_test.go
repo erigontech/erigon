@@ -1209,14 +1209,17 @@ func TestGetStateFollowsEveryChange(t *testing.T) {
 	set(k1, 2)
 	require.Equal(t, uint64(2), get(k1), "a write")
 
-	// A revert and a different write leave the journal as long as when the cache was filled.
+	// A revert, then another change, leave the journal as long as when the cache was filled.
 	snap := ibs.PushSnapshot()
 	set(k1, 3)
 	require.Equal(t, uint64(3), get(k1))
+	filled := ibs.journal.length()
 	ibs.RevertToSnapshot(snap, nil)
 	ibs.PopSnapshot(snap)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	require.Equal(t, filled, ibs.journal.length())
+	require.Equal(t, uint64(2), get(k1), "a revert")
 	set(k1, 4)
-	require.Equal(t, uint64(4), get(k1), "a revert, then a write")
 
 	set(k2, 20)
 	set(k3, 30)
@@ -1224,6 +1227,7 @@ func TestGetStateFollowsEveryChange(t *testing.T) {
 		require.Equal(t, []uint64{4, 20, 30}, []uint64{get(k1), get(k2), get(k3)}, "more slots than the cache holds")
 	}
 
+	require.Equal(t, uint64(4), get(k1))
 	require.NoError(t, ibs.SetStorage(addr, Storage{}))
 	require.Equal(t, uint64(0), get(k1), "a storage override")
 }
