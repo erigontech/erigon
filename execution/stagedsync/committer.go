@@ -302,8 +302,10 @@ func newCommitmentCalculator(
 	if err != nil {
 		return nil, fmt.Errorf("commitmentCalculator: open roTx: %w", err)
 	}
-	// roTx lives for the calculator's lifetime — rolled back in Stop(), not
-	// deferred here. Safe across collate/prune cycles because the calculator
+	ok := false
+	defer kv.RollbackUnless(&ok, roTx)
+	// roTx lives for the calculator's lifetime — rolled back in Stop().
+	// Safe across collate/prune cycles because the calculator
 	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
 	// stageloop's rwTx.Commit(), and CollateAndPrune only fires
 	// between batches via FCU. So this roTx never spans a prune — by the
@@ -316,6 +318,7 @@ func newCommitmentCalculator(
 	// (written sequentially by this calculator).
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
 
+	ok = true
 	return &commitmentCalculator{
 		doms:                 doms,
 		db:                   db,
