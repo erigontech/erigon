@@ -27,7 +27,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -354,16 +353,15 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	var (
 		snapshot      int
 		snapshotTaken bool
-		traceIO       bool
-		traceTx       int
-		traceInc      int
 	)
 
-	if (dbg.TraceTransactionIO && !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
-		version := evm.intraBlockState.Version()
-		fmt.Printf("%d (%d.%d) %s: %x %x\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, input)
-		traceTx, traceInc, traceIO = version.TxIndex, version.Incarnation, true
-	}
+	//if (dbg.TraceTransactionIO && !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
+	//	version := evm.intraBlockState.Version()
+	//	fmt.Printf("%d (%d.%d) %s: %x %x\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, input)
+	//	defer func() {
+	//		fmt.Printf("%d (%d.%d) RETURN (%s): %x: %x, %d, %v\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, ret, gasRemaining, err)
+	//	}()
+	//}
 
 	gasTracing := evm.Config().Tracer != nil
 	// One defer, so the compiler can open-code it despite the many returns.
@@ -374,9 +372,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if gasTracing {
 			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
-		}
-		if traceIO {
-			fmt.Printf("%d (%d.%d) RETURN (%s): %x: %x, %d, %v\n", evm.intraBlockState.BlockNumber(), traceTx, traceInc, typ, addr, ret, gasRemaining, err)
 		}
 	}()
 
@@ -636,7 +631,17 @@ func (evm *EVM) createPrepared(caller accounts.Address, codeAndHash *codeAndHash
 func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, preparation *createPreparation) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	gasRemaining = gas
 
-	traceIO := dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle()))
+	//if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
+	//	defer func() {
+	//		version := evm.intraBlockState.Version()
+	//		if err != nil {
+	//			fmt.Printf("%d (%d.%d) Create Contract: %x, err=%s\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, createAddress, err)
+	//		} else {
+	//			fmt.Printf("%d (%d.%d) Create Contract: %x, gas=%d\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, createAddress, gasRemaining)
+	//		}
+	//	}()
+	//}
+
 	depth := evm.depth
 	inputTotal := gas.Total()
 	gasTracing := evm.Config().Tracer != nil
@@ -652,14 +657,6 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if gasTracing {
 			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
-		}
-		if traceIO {
-			version := evm.intraBlockState.Version()
-			if err != nil {
-				fmt.Printf("%d (%d.%d) Create Contract: %x, err=%s\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, createAddress, err)
-			} else {
-				fmt.Printf("%d (%d.%d) Create Contract: %x, gas=%d\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, createAddress, gasRemaining)
-			}
 		}
 	}()
 
