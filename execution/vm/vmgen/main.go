@@ -15,7 +15,7 @@
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 // vmgen writes run in vm_run_gen.go from runTraced in interpreter.go: the
-// same loop with runTracing false and the fast-path switch, whose cases inline
+// same loop with anyTrace false and the fast-path switch, whose cases inline
 // the fastOps' execute funcs from instructions.go. It also writes
 // fast_path_gen_test.go. With -check it reports stale files instead of writing them.
 package main
@@ -224,7 +224,7 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 	return b.String()
 }
 
-// untraced returns runTraced as run in a file of its own, with runTracing set
+// untraced returns runTraced as run in a file of its own, with anyTrace set
 // to false and fast in place of the switchHere comment.
 func untraced(traced []byte, fast string) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
@@ -259,7 +259,7 @@ func untraced(traced []byte, fast string) []byte {
 		case *ast.FuncDecl:
 			d.Doc, d.Name.Name = nil, "run"
 			for n := range ast.Preorder(d) {
-				if id, ok := n.(*ast.Ident); ok && id.Name == "runTracing" {
+				if id, ok := n.(*ast.Ident); ok && id.Name == "anyTrace" {
 					id.Name = "false"
 				}
 			}
