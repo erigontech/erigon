@@ -2,6 +2,7 @@ participants:
   - cl_type: caplin
     cl_image: test/erigon:current
     cl_log_level: "debug"
+    cl_extra_params: ["--sentinel.quic.port=4002"]
     el_type: erigon
     el_image: test/erigon:current
     el_log_level: "debug"
