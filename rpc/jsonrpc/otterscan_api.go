@@ -61,12 +61,12 @@ type ReceiptWithTimestamp struct {
 }
 
 // MarshalFastJSONTo shadows the promoted RPCReceipt method, which would drop Timestamp.
-func (r ReceiptWithTimestamp) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (r ReceiptWithTimestamp) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	return writeReflected(s, r)
 }
 
 // writeReflected writes v with encoding/json.
-func writeReflected(s *jsonstream.StackStream, v any) error {
+func writeReflected(s *jsonstream.Stream, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err

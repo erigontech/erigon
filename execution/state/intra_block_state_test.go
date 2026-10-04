@@ -518,7 +518,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, states[1].SetState(addr, key, val))
 	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	// Tx1 read
 	v, err = states[1].GetState(addr, key)
@@ -556,7 +556,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	v, err = states[3].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
-	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
+	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true)
 
 	// Tx4 read
 	v, err = states[4].GetState(addr, key)
@@ -597,7 +597,7 @@ func TestVersionMapRevert(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, states[0].SetState(addr, key, val))
 	require.NoError(t, states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
 
 	// Tx1 perform some ops and then revert
 	snapshot := states[1].PushSnapshot()
@@ -623,7 +623,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 	require.NoError(t, states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	// Tx2 check the state and balance
 	v, err = states[2].GetState(addr, key)
@@ -667,14 +667,14 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	v, err = states[0].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
 
 	// Tx1 write
 	_, err = states[1].GetOrNewStateObject(addr)
 	require.NoError(t, err)
 	require.NoError(t, states[1].SetState(addr, key, val))
 	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	// Tx2 read
 	v, err = states[2].GetState(addr, key)
@@ -747,7 +747,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, states[0].SetState(addr, key, val1))
 	require.NoError(t, states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
 
 	// Tx1 write
 	require.NoError(t, states[1].SetState(addr, key, val2))
@@ -756,7 +756,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	assert.Equal(t, val2, v)
 	assert.Equal(t, balance2, b)
@@ -837,17 +837,17 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Tx0 write
 	_, err := states[0].GetOrNewStateObject(addr)
 	require.NoError(t, err)
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
 
 	// Tx2 write
 	require.NoError(t, states[2].SetState(addr, key2, val2))
-	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true, "")
+	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true)
 
 	// Tx1 write
 	tx1Snapshot := states[1].PushSnapshot()
 	require.NoError(t, states[1].SetState(addr, key1, val1))
 	require.NoError(t, states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	// Tx1 read
 	v, err := states[1].GetState(addr, key1)
@@ -912,7 +912,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Tx1 revert
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
 	states[1].PopSnapshot(tx1Snapshot)
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 	// map deletes necessary here as they happen in scheduler not ibs
 	states[1].versionMap.Delete(addr, StoragePath, key1, 1, true)
 	states[1].versionMap.Delete(addr, StoragePath, key2, 1, true)
@@ -1037,7 +1037,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	_, err = states[0].GetOrNewStateObject(addr3)
 	require.NoError(t, err)
 	require.NoError(t, states[0].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
+	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true)
 
 	_, err = sSingleProcess.GetOrNewStateObject(addr1)
 	require.NoError(t, err)
@@ -1055,7 +1055,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	require.NoError(t, states[1].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
 	require.NoError(t, states[1].SetNonce(addr1, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true)
 
 	require.NoError(t, sSingleProcess.SetState(addr1, key2, val2))
 	require.NoError(t, sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
@@ -1069,7 +1069,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	require.NoError(t, states[2].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
 	require.NoError(t, states[2].SetNonce(addr1, 2, tracing.NonceChangeUnspecified))
 	require.NoError(t, states[2].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true, "")
+	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true)
 
 	require.NoError(t, sSingleProcess.SetState(addr1, key1, val2))
 	require.NoError(t, sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
@@ -1088,7 +1088,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	require.True(t, destructed)
 	require.NoError(t, states[3].SetCode(addr1, code, tracing.CodeChangeUnspecified))
 	require.NoError(t, states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
+	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true)
 
 	destructed, err = sSingleProcess.Selfdestruct(addr2, false)
 	require.NoError(t, err)

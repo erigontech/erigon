@@ -197,7 +197,7 @@ func (r *queryResolver) Blocks(ctx context.Context, from uint64, to *uint64) ([]
 	}
 
 	const maxBlocks = 25
-	if toBlockNumber-fromBlockNumber+1 > maxBlocks {
+	if toBlockNumber-fromBlockNumber >= maxBlocks {
 		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
 	}
 

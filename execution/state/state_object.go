@@ -382,9 +382,6 @@ func (so *stateObject) setBalance(amount uint256.Int) {
 	so.data.Balance = amount
 }
 
-// Return the gas back to the origin. Used by the Virtual machine or Closures
-func (so *stateObject) ReturnGas(gas *big.Int) {}
-
 func (so *stateObject) setIncarnation(incarnation uint64) {
 	so.data.SetIncarnation(incarnation)
 }

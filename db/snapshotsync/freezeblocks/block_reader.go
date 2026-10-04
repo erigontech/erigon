@@ -513,7 +513,7 @@ func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, bool, error) {
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
 
 func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
-	return ForEachHeader(ctx, r.sn, walker)
+	return ForEachHeader(r.sn, walker)
 }
 
 // HasBlockFilesRoTx is a tx (e.g. a temporal tx) that can carry a block-files
@@ -1366,7 +1366,7 @@ func (r *BlockReader) txnRlpByIdxInBlock(ctx context.Context, tx kv.Getter, bloc
 	}
 
 	// if block has no transactions, or requested txNum out of non-system transactions length
-	if b.TxCount == 2 || txIdxInBlock == -1 || txIdxInBlock >= int(b.TxCount-2) {
+	if b.TxCount == 2 || txIdxInBlock < 0 || txIdxInBlock >= int(b.TxCount-2) {
 		return nil, nil, nil
 	}
 
