@@ -1754,14 +1754,6 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelopeByBlockRoot(w http
 	if slot/a.beaconChainCfg.SlotsPerEpoch < a.beaconChainCfg.GloasForkEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("execution payload envelopes not available before GLOAS fork"))
 	}
-	headRoot, _, err := a.forkchoiceStore.GetHead(nil)
-	if err != nil {
-		return nil, err
-	}
-	if headRoot != root {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
-			fmt.Errorf("no execution payload envelope found for slot %d and block root %s", slot, root))
-	}
 	key := selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: root}
 	envelope, ok := a.selfBuildEnvelopes.Get(key)
 	if !ok {
@@ -1781,6 +1773,17 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelopeByBlockRoot(w http
 	}
 	if !ok || envelope == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no execution payload envelope found for slot %d and block root %s", slot, root))
+	}
+	headRoot, _, err := a.forkchoiceStore.GetHead(nil)
+	if err != nil {
+		return nil, err
+	}
+	// Fork choice can still prefer the parent of a self-built block the validator client just published. The head root
+	// is still the block the envelope was built on, so serving it does not cross a re-org away from that block.
+	importing := envelope.BuilderIndex == clparams.BuilderIndexSelfBuild && headRoot == envelope.ParentBeaconBlockRoot
+	if headRoot != root && !importing {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			fmt.Errorf("no execution payload envelope found for slot %d and block root %s", slot, root))
 	}
 	return newBeaconResponse(envelope).WithVersion(clparams.GloasVersion), nil
 }

@@ -3806,7 +3806,21 @@ func TestGetValidatorExecutionPayloadEnvelopeByBlockRoot(t *testing.T) {
 	otherRoot := common.HexToHash("0x5678")
 	otherEnvelope := cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)
 	otherEnvelope.BeaconBlockRoot = otherRoot
+	otherEnvelope.ParentBeaconBlockRoot = root
+	otherEnvelope.BuilderIndex = 7
 	handler.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: otherRoot}, otherEnvelope)
+	selfBuildRoot := common.HexToHash("0x4321")
+	selfBuildEnvelope := cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)
+	selfBuildEnvelope.BeaconBlockRoot = selfBuildRoot
+	selfBuildEnvelope.ParentBeaconBlockRoot = root
+	selfBuildEnvelope.BuilderIndex = clparams.BuilderIndexSelfBuild
+	handler.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: selfBuildRoot}, selfBuildEnvelope)
+	staleSelfBuildRoot := common.HexToHash("0x8765")
+	staleSelfBuildEnvelope := cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)
+	staleSelfBuildEnvelope.BeaconBlockRoot = staleSelfBuildRoot
+	staleSelfBuildEnvelope.ParentBeaconBlockRoot = common.HexToHash("0x2222")
+	staleSelfBuildEnvelope.BuilderIndex = clparams.BuilderIndexSelfBuild
+	handler.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: staleSelfBuildRoot}, staleSelfBuildEnvelope)
 
 	tests := []struct {
 		name string
@@ -3815,7 +3829,9 @@ func TestGetValidatorExecutionPayloadEnvelopeByBlockRoot(t *testing.T) {
 		want int
 	}{
 		{name: "matching current slot and root", slot: slot, root: root, want: http.StatusOK},
-		{name: "same slot alternate root", slot: slot, root: otherRoot, want: http.StatusNotFound},
+		{name: "same slot builder child of the head", slot: slot, root: otherRoot, want: http.StatusNotFound},
+		{name: "self-built child of the head", slot: slot, root: selfBuildRoot, want: http.StatusOK},
+		{name: "self-built root off the head", slot: slot, root: staleSelfBuildRoot, want: http.StatusNotFound},
 		{name: "wrong root", slot: slot, root: common.HexToHash("0x9999"), want: http.StatusNotFound},
 		{name: "old slot", slot: slot - 1, root: root, want: http.StatusNotFound},
 	}
