@@ -82,6 +82,47 @@ func TestLocalAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
 	require.True(t, known, "late rejections must be remembered before the next parse")
 }
 
+func TestAuthorizationRecoveryRevalidatesBalance(t *testing.T) {
+	ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
+	require.NoError(t, err)
+	txn := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+	txn.IDHash[0] = 1
+	txn.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
+	txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, onSecond: func() {
+		// Apply the balance change after prechecks and before admission resumes.
+		account := accounts.Account{CodeHash: accounts.EmptyCodeHash}
+		encoded := accounts.SerialiseV3(&account)
+		writeTestSenderState(t, ctx, coreDB, pool.logger, sender, encoded, 1)
+		change := &remoteproto.StateChangeBatch{
+			StateVersionId:      1,
+			PendingBlockBaseFee: 1,
+			BlockGasLimit:       1_000_000,
+			ChangeBatch: []*remoteproto.StateChange{{
+				BlockHeight: 1,
+				BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
+				Changes: []*remoteproto.AccountChange{{
+					Action:  remoteproto.Action_UPSERT,
+					Address: gointerfaces.ConvertAddressToH160(sender),
+					Data:    encoded,
+				}},
+			}},
+		}
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}}
+	var slots TxnSlots
+	slots.Append(txn, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, slots)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.InsufficientFunds}, reasons)
+	require.Equal(t, []AuthAndNonce{{crypto.PubkeyToAddress(key.PublicKey), 0}}, txn.AuthAndNonces,
+		"the transaction must pass prechecks and complete recovery")
+	require.Empty(t, pool.byHash)
+	require.Empty(t, pool.auths)
+}
+
 func TestRemoteAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	pool.started.Store(true)
