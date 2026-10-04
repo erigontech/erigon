@@ -136,6 +136,14 @@ jobs:
           fetch-depth: "0"
           filter: blob:none
 
+      - name: Checkout the rpc-tests version file
+        if: matrix.client != 'erigon' && needs.setup.outputs.run_geth == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts/rpc_version.env
+          sparse-checkout-cone-mode: false
+
       - name: Checkout RPC Tests Repository
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         env:
@@ -284,6 +292,46 @@ jobs:
           ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/mixed.profile" --url http://localhost:8545 \
             --counts 400000 --block-tag latest --verify --keep ok --fees drop --max-blocks 3000 \
             --out "perf/pattern/$CHAIN/stress_test_mixed_gen_latest.tar"
+
+      - name: Restart RpcDaemon to drop the caches filled by the generation
+        if: matrix.client == 'erigon'
+        working-directory: ${{ github.workspace }}/build/bin
+        env:
+          EXEC_MODE: ${{ github.event.inputs.exec_mode }}
+        run: |
+          # The generation runs every pattern request on rpcdaemon, so a fresh process starts the tests with empty
+          # in-memory caches. The OS page cache still holds the block and state pages the generation read; dropping
+          # it (sync; echo 3 > /proc/sys/vm/drop_caches) needs root on the runner.
+          kill "$RPC_DAEMON_PID"
+          for i in {1..30}; do
+            kill -0 "$RPC_DAEMON_PID" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$RPC_DAEMON_PID" 2>/dev/null; then
+            echo "::error::RpcDaemon did not stop after the pattern generation"
+            exit 1
+          fi
+
+          if [ "$EXEC_MODE" = "parallel" ]; then
+            export ERIGON_EXEC3_PARALLEL=true
+          elif [ "$EXEC_MODE" = "serial" ]; then
+            export ERIGON_EXEC3_PARALLEL=false
+          else
+            unset ERIGON_EXEC3_PARALLEL
+          fi
+          ./rpcdaemon --datadir $ERIGON_REFERENCE_DATA_DIR --http.api admin,debug,eth,parity,erigon,trace,web3,txpool,ots,net >> erigon.log 2>&1 &
+          RPC_DAEMON_PID=$!
+          echo "RPC_DAEMON_PID=$RPC_DAEMON_PID" >> $GITHUB_ENV
+
+          for i in {1..30}; do
+            nc -z localhost 8545 && break
+            sleep 2
+          done
+          if ! kill -0 "$RPC_DAEMON_PID" 2>/dev/null || ! nc -z localhost 8545; then
+            echo "::error::RpcDaemon failed to restart after the pattern generation"
+            exit 1
+          fi
+          echo "RpcDaemon restarted (PID=$RPC_DAEMON_PID)"
 
       - name: Run RPC Performance Tests
         id: test_step
