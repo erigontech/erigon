@@ -243,16 +243,33 @@ func (tx *countingLatestTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetL
 	return tx.TemporalTx.GetLatest(domain, key, opts)
 }
 
-func TestCachedTemporalTxStateGetterServesRepeatReadFromCache(t *testing.T) {
+// committedCacheState commits one account, so a read tx has a frontier above
+// zero, through a SharedDomains bound to the returned cache.
+func committedCacheState(t *testing.T) (kv.TemporalRwDB, *cache.StateCache) {
+	t.Helper()
 	db := newTestDb(t, 16)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(stateCache)
+	sd.SetTxNum(5)
+	committed := make([]byte, 20)
+	committed[0] = 0xcc
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, committed, encAccount(1), 5, nil))
+	require.NoError(t, sd.Commit(t.Context(), rwTx))
+	return db, stateCache
+}
+
+func TestCachedTemporalTxStateGetterServesRepeatReadFromCache(t *testing.T) {
+	db, stateCache := committedCacheState(t)
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	stateVersion, err := rawdb.GetStateVersion(roTx)
-	require.NoError(t, err)
-	stateCache := newSmallStateCache()
-	defer stateCache.Close()
-	stateCache.Applier().Initialize(stateVersion)
 
 	tx := &countingLatestTx{TemporalTx: roTx}
 	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
@@ -265,6 +282,51 @@ func TestCachedTemporalTxStateGetterServesRepeatReadFromCache(t *testing.T) {
 	second, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, first, second)
+	require.Equal(t, 1, tx.reads)
+}
+
+// A value published after the getter was bound is newer than its tx.
+func TestCachedTemporalTxStateGetterLaterPublicationReadsTx(t *testing.T) {
+	db, stateCache := committedCacheState(t)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	stateVersion, err := rawdb.GetStateVersion(roTx)
+	require.NoError(t, err)
+	end, ok := roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+	require.True(t, ok)
+
+	tx := &countingLatestTx{TemporalTx: roTx}
+	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
+	key := make([]byte, 20)
+	stateCache.Applier().Publish(stateVersion, stateVersion+1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte{1}, TxNum: end}})
+
+	v, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, v)
+	require.Equal(t, 1, tx.reads)
+}
+
+// After an unwind, the cache can hold another fork's values at txNums the tx can see.
+func TestCachedTemporalTxStateGetterUnwindReadsTx(t *testing.T) {
+	db, stateCache := committedCacheState(t)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	stateVersion, err := rawdb.GetStateVersion(roTx)
+	require.NoError(t, err)
+	end, ok := roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+	require.True(t, ok)
+
+	tx := &countingLatestTx{TemporalTx: roTx}
+	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
+	key := make([]byte, 20)
+	stateCache.Applier().Unwind(0)
+	stateCache.Applier().Publish(stateVersion, stateVersion+1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte{2}, TxNum: end - 1}})
+
+	v, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, v)
 	require.Equal(t, 1, tx.reads)
 }
 

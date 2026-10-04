@@ -115,7 +115,7 @@ func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetL
 	if g.stateCache == nil || opts.MaxStep() != kv.NoStepBound {
 		return g.TemporalTx.GetLatest(name, k, opts)
 	}
-	if v, txNum, ok := g.view.GetWithTxNum(name, k); ok {
+	if v, txNum, ok := g.view.GetVisible(name, k); ok {
 		return v, kv.Step(txNum / g.stepSize), nil
 	}
 	v, step, err := g.TemporalTx.GetLatest(name, k, opts)
@@ -131,7 +131,7 @@ func (g *TemporalTxStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, er
 }
 
 func (g *TemporalTxStateGetter) GetCodeSize(addr []byte, _ uint64) (int, bool, error) {
-	if code, ok := g.view.Get(kv.CodeDomain, addr); ok {
+	if code, _, ok := g.view.GetVisible(kv.CodeDomain, addr); ok {
 		return len(code), len(code) > 0, nil
 	}
 	size, found, err := g.GetLatestValSize(kv.CodeDomain, addr)

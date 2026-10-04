@@ -178,6 +178,24 @@ func (v ReadView) GetWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64, bo
 	return v.c.getWithTxNum(domain, key)
 }
 
+// GetVisible is GetWithTxNum limited to the bound view's own state: a value
+// written at or above its frontier, or any value once an unwind revoked the
+// view, is a miss.
+func (v ReadView) GetVisible(domain kv.Domain, key []byte) ([]byte, uint64, bool) {
+	if v.c == nil || v.frontier == nil || v.readViewEpoch != v.c.readViewEpoch.Load() {
+		return nil, 0, false
+	}
+	end, ok := v.frontier.DomainVisibleEnd(domain)
+	if !ok {
+		return nil, 0, false
+	}
+	val, txNum, hit := v.c.getWithTxNum(domain, key)
+	if !hit || txNum >= end {
+		return nil, 0, false
+	}
+	return val, txNum, true
+}
+
 // GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
 // bypassing the addr-keyed CodeDomain lookup. Returns (nil, false) on miss.
 func (v ReadView) GetCodeByHash(codeHash []byte) ([]byte, bool) {
