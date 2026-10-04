@@ -21,8 +21,8 @@ package state
 // allocations it saves. 2048 slots is 574 KB. Past the cap the caller
 // allocates, which is what every object did before the arena.
 const (
-	arenaSlabSize   = 64
-	arenaMaxSlabs   = 32
+	arenaSlabSize   = 32
+	arenaMaxSlabs   = 64
 	arenaMaxObjects = arenaSlabSize * arenaMaxSlabs
 )
 
