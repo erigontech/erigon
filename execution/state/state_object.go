@@ -247,9 +247,10 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	var commited bool
 	var source ReadSource
 
+	stamp, cacheable := so.db.ReadStamp()
 	hit := false
-	if so.db.versionMap == nil {
-		prev, commited, hit = so.db.slots.get(so.db.journal, so.address, key)
+	if cacheable {
+		prev, hit = so.db.slots.get(stamp, so.address, key)
 		source = StorageRead
 	}
 	if !hit {
@@ -258,8 +259,8 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 		if err != nil {
 			return false, err
 		}
-		if so.db.versionMap == nil {
-			so.db.slots.put(so.db.journal, so.address, key, prev, commited)
+		if cacheable {
+			so.db.slots.put(stamp, so.address, key, prev)
 		}
 	}
 

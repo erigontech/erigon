@@ -761,10 +761,8 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	i := -1
-	if scope.slots.memoGen == scope.cacheGen {
-		i = scope.slots.memo
-	} else {
+	i := scope.slots.memo
+	if scope.slots.memoGen != scope.cacheGen {
 		i = scope.lookupSlot(evm)
 	}
 	if i >= 0 {

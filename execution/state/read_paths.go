@@ -1768,42 +1768,40 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 }
 
 // slotCache holds SetState's last two reads of the previous value on the serial path: an
-// SSTORE already read the slot to price it. They stay valid while the journal does: every
-// state change adds an entry, and reverts, resets and the unjournalled changes move its epoch.
+// SSTORE already read the slot to price it. Entries are valid while the read stamp is.
 type slotCache struct {
-	journalLen int
-	epoch      uint64
-	next       int
-	ok         [2]bool
-	clean      [2]bool
-	addr       [2]accounts.Address
-	key        [2]accounts.StorageKey
-	val        [2]uint256.Int
+	stamp ReadStamp
+	next  int
+	ok    [2]bool
+	addr  [2]accounts.Address
+	key   [2]accounts.StorageKey
+	val   [2]uint256.Int
 }
 
-func (c *slotCache) get(j *journal, addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, bool) {
-	if c.journalLen != len(j.entries) || c.epoch != j.epoch {
-		return uint256.Int{}, false, false
+func (c *slotCache) get(stamp ReadStamp, addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
+	if c.stamp != stamp {
+		return uint256.Int{}, false
 	}
 	for i := range c.ok {
 		if c.ok[i] && c.addr[i] == addr && c.key[i] == key {
-			return c.val[i], c.clean[i], true
+			return c.val[i], true
 		}
 	}
-	return uint256.Int{}, false, false
+	return uint256.Int{}, false
 }
 
-func (c *slotCache) put(j *journal, addr accounts.Address, key accounts.StorageKey, v uint256.Int, clean bool) {
-	if c.journalLen != len(j.entries) || c.epoch != j.epoch {
+func (c *slotCache) put(stamp ReadStamp, addr accounts.Address, key accounts.StorageKey, v uint256.Int) {
+	if c.stamp != stamp {
 		c.ok = [2]bool{}
-		c.journalLen, c.epoch = len(j.entries), j.epoch
+		c.stamp = stamp
 	}
 	i := c.next
 	c.next ^= 1
-	c.ok[i], c.clean[i], c.addr[i], c.key[i], c.val[i] = true, clean, addr, key, v
+	c.ok[i], c.addr[i], c.key[i], c.val[i] = true, addr, key, v
 }
 
-// ReadStamp identifies the state a serial-path read sees; any state change gives a new one.
+// ReadStamp identifies the state a serial-path read sees: every state change adds a journal
+// entry, and reverts, resets and the unjournalled changes move its epoch.
 type ReadStamp struct {
 	journalLen int
 	epoch      uint64
