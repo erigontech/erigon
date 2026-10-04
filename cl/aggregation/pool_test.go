@@ -329,6 +329,35 @@ func (t *PoolTestSuite) TestAddAttestation() {
 	}
 }
 
+func (t *PoolTestSuite) TestAggregatesReturnsEveryCommitteeAggregate() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	committeeAttestation := func(committee int, bits byte, sig byte) *solid.Attestation {
+		cBits := solid.NewBitVector(64)
+		t.Require().NoError(cBits.SetBitAt(committee, true))
+		return &solid.Attestation{
+			AggregationBits: solid.BitlistFromBytes([]byte{bits}, 2048*64),
+			Data:            attData1,
+			Signature:       [96]byte{sig},
+			CommitteeBits:   cBits,
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+	t.Require().NoError(pool.AddAttestation(committeeAttestation(10, 0b00001001, 'a')))
+	t.Require().NoError(pool.AddAttestation(committeeAttestation(10, 0b00001100, 'b')))
+	t.Require().NoError(pool.AddAttestation(committeeAttestation(11, 0b00000011, 'c')))
+
+	committees := map[int]byte{}
+	for _, att := range pool.Aggregates() {
+		indices := att.CommitteeBits.GetOnIndices()
+		t.Require().Len(indices, 1)
+		committees[indices[0]] = att.AggregationBits.Bytes()[0]
+	}
+	t.Equal(map[int]byte{10: 0b00001101, 11: 0b00000011}, committees)
+}
+
 func TestPool(t *testing.T) {
 	suite.Run(t, new(PoolTestSuite))
 }

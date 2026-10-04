@@ -3136,11 +3136,21 @@ type attestationCandidate struct {
 	rewards     []attesterFlagReward
 }
 
+// blockInclusionAttestations returns the gossip aggregates together with the aggregates
+// built locally from attestations received on subscribed subnets.
+func (a *ApiHandler) blockInclusionAttestations() []*solid.Attestation {
+	attestations := a.operationsPool.AttestationsPool.Raw()
+	if a.aggregatePool != nil {
+		attestations = append(attestations, a.aggregatePool.Aggregates()...)
+	}
+	return attestations
+}
+
 func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) (map[common.Hash][]*solid.Attestation, error) {
 	pool := map[common.Hash]map[uint64][]*solid.Attestation{} // map root -> committee -> att candidates
 	// step 1: Group attestations by data root and committee index for merging
 	// so after this step, pool[dataRoot][committeeIndex] will contain all the attestation candidates for that data root and committee index
-	for _, candidate := range a.operationsPool.AttestationsPool.Raw() {
+	for _, candidate := range a.blockInclusionAttestations() {
 		if err := eth2.IsAttestationApplicable(s, candidate); err != nil {
 			continue // attestation not applicable skip
 		}
