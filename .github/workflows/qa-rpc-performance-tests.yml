@@ -284,13 +284,13 @@ jobs:
           RUNNER_WS: ${{ runner.workspace }}
         run: |
           # A latest pattern decays as the chain moves on, so it is generated from the node right before the run.
-          # 400000 requests cover the 20000:20 step.
+          # Each count covers the largest step of its test: 20000:20 for eth_call, 5000:20 for mixed.
           cd "$RUNNER_WS/rpc-tests"
           ./build/bin/rpc_pattern_gen eth_call --url http://localhost:8545 \
             --counts 400000 --block-tag latest --verify --keep ok --fees drop \
             --out "perf/pattern/$CHAIN/stress_test_eth_call_gen_latest.tar"
           ./build/bin/rpc_pattern_gen --profile "perf/pattern/$CHAIN/config/mixed.profile" --url http://localhost:8545 \
-            --counts 400000 --block-tag latest --verify --keep ok --fees drop --max-blocks 3000 \
+            --counts 100000 --block-tag latest --verify --keep ok --fees drop --max-blocks 3000 \
             --out "perf/pattern/$CHAIN/stress_test_mixed_gen_latest.tar"
 
       - name: Restart RpcDaemon to drop the caches filled by the generation
