@@ -34,9 +34,9 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 type pbinStubSharedDomains struct{ sharedCache bool }
@@ -101,12 +101,8 @@ func TestPBinBranchCacheTrunkSlotCollision(t *testing.T) {
 func pbinNewTestDb(tb testing.TB) kv.TemporalRwDB {
 	tb.Helper()
 	pbinTestConfigMu.Lock()
-	previousBin := statecfg.ExperimentalBinCommitment
-	statecfg.ExperimentalBinCommitment = true
-	defer func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		pbinTestConfigMu.Unlock()
-	}()
+	commitmentflags.Restore(tb)
+	defer pbinTestConfigMu.Unlock()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
 	db := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()

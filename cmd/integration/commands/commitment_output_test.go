@@ -31,6 +31,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 const (
@@ -83,12 +84,7 @@ func hexTarget(t *testing.T) dbstate.RebuildTarget {
 
 func withBinCommitmentProcess(t *testing.T, hash string) {
 	t.Helper()
-	oldBin, oldHash, oldParallel := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, statecfg.ExperimentalParallelCommitment
-	oldSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, statecfg.ExperimentalParallelCommitment = oldBin, oldHash, oldParallel
-		require.NoError(t, commitment.SetPBinHashSuite(oldSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.BinCommitmentHash = hash
 	statecfg.ExperimentalParallelCommitment = false

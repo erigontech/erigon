@@ -1322,20 +1322,7 @@ func removePBTOutputDomainFiles(t *testing.T, snapDomain, domain string) {
 
 func readPBTBinRoot(t *testing.T, output, rawPath string) common.Hash {
 	t.Helper()
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	defer func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	}()
+	commitmentflags.Restore(t)
 	dirs := datadir.Open(output)
 	settings, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)

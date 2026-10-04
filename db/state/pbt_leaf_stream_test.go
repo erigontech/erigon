@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 const pbinLeafStreamStepSize = uint64(8)
@@ -190,12 +191,7 @@ func TestForEachPBinLeafCombinesStamps(t *testing.T) {
 }
 
 func selectPBinLeafStreamHash(t *testing.T) {
-	previous := eip8297.HashSuiteName()
-	previousPBin := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		require.NoError(t, eip8297.SetHashSuite(previous))
-		require.NoError(t, commitment.SetPBinHashSuite(previousPBin))
-	})
+	commitmentflags.Restore(t)
 	require.NoError(t, eip8297.SetHashSuite(eip8297.HashBlake3))
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 }

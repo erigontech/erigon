@@ -456,11 +456,7 @@ func pbinRangeWriterRows(t *testing.T, at *state.AggregatorRoTx) map[string][]by
 }
 
 func selectPBinRangeWriterHash(t *testing.T) {
-	previousEIP := eip8297.HashSuiteName()
 	commitmentflags.Restore(t)
-	t.Cleanup(func() {
-		require.NoError(t, eip8297.SetHashSuite(previousEIP))
-	})
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	statecfg.ExperimentalHexBinCommitment = true
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))

@@ -375,6 +375,8 @@ func TestConfigurePBTExportHashDefaultsForPreimages(t *testing.T) {
 }
 
 func TestConfigurePBTExportHashRejectsDatadirMismatch(t *testing.T) {
+	previousHashFlag := utils.ExperimentalBinCommitmentHashFlag
+	t.Cleanup(func() { utils.ExperimentalBinCommitmentHashFlag = previousHashFlag })
 	dirs := datadir.New(t.TempDir())
 	variant, hash := state.TrieVariantHexBin, commitment.PBinHashBlake3
 	refs := false

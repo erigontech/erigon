@@ -33,15 +33,11 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestOpenFolderRejectsLegacyPBinStateFormats(t *testing.T) {
-	oldBin := statecfg.ExperimentalBinCommitment
-	oldSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = oldBin
-		statecfg.Schema = oldSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 
@@ -68,12 +64,7 @@ func TestOpenFolderRejectsLegacyPBinStateFormats(t *testing.T) {
 }
 
 func TestOpenFolderAcceptsCurrentPBinState(t *testing.T) {
-	oldBin := statecfg.ExperimentalBinCommitment
-	oldSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = oldBin
-		statecfg.Schema = oldSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 
@@ -85,12 +76,7 @@ func TestOpenFolderAcceptsCurrentPBinState(t *testing.T) {
 }
 
 func TestOpenFolderRejectsTruncatedCurrentPBinState(t *testing.T) {
-	oldBin := statecfg.ExperimentalBinCommitment
-	oldSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = oldBin
-		statecfg.Schema = oldSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 
@@ -106,12 +92,7 @@ func TestOpenFolderRejectsTruncatedCurrentPBinState(t *testing.T) {
 }
 
 func TestOpenFolderAcceptsFreshPBinDatadir(t *testing.T) {
-	oldBin := statecfg.ExperimentalBinCommitment
-	oldSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = oldBin
-		statecfg.Schema = oldSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 
@@ -120,12 +101,7 @@ func TestOpenFolderAcceptsFreshPBinDatadir(t *testing.T) {
 }
 
 func TestOpenFolderRejectsLegacyPBinStateInFiles(t *testing.T) {
-	oldBin := statecfg.ExperimentalBinCommitment
-	oldSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = oldBin
-		statecfg.Schema = oldSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 
@@ -155,16 +131,7 @@ func TestOpenFolderRejectsLegacyPBinStateInFiles(t *testing.T) {
 }
 
 func TestOpenFolderRejectsLegacyPBinStateInDualDomain(t *testing.T) {
-	oldBin := statecfg.ExperimentalBinCommitment
-	oldHexBin := statecfg.ExperimentalHexBinCommitment
-	oldV3 := statecfg.ExperimentalCommitmentV3
-	oldSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = oldBin
-		statecfg.ExperimentalHexBinCommitment = oldHexBin
-		statecfg.ExperimentalCommitmentV3 = oldV3
-		statecfg.Schema = oldSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true

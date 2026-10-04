@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 type pbtConformance struct {
@@ -105,8 +106,7 @@ func loadPBTSpecVectors(t *testing.T) *pbtSpecVectors {
 }
 
 func TestPBinConformancePBTState(t *testing.T) {
-	previous := eip8297.HashSuiteName()
-	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previous)) })
+	commitmentflags.Restore(t)
 	require.NoError(t, eip8297.SetHashSuite(eip8297.HashBlake3))
 	for _, vector := range loadPBTConformance(t).PBTState {
 		t.Run(vector.Name, func(t *testing.T) {
@@ -143,8 +143,7 @@ func TestPBinConformancePBTState(t *testing.T) {
 }
 
 func TestPBinEngineMatchesSpecTrieRoots(t *testing.T) {
-	previous := eip8297.HashSuiteName()
-	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previous)) })
+	commitmentflags.Restore(t)
 	require.NoError(t, eip8297.SetHashSuite(eip8297.HashBlake3))
 	for _, vector := range loadPBTSpecVectors(t).TrieVectors {
 		t.Run(vector.Name, func(t *testing.T) {
@@ -172,8 +171,7 @@ func TestPBinEngineMatchesSpecTrieRoots(t *testing.T) {
 }
 
 func TestPBinEngineMatchesSpecSequenceRoots(t *testing.T) {
-	previous := eip8297.HashSuiteName()
-	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previous)) })
+	commitmentflags.Restore(t)
 	require.NoError(t, eip8297.SetHashSuite(eip8297.HashBlake3))
 	for _, vector := range loadPBTSpecVectors(t).SequenceVectors {
 		t.Run(fmt.Sprintf("seed-%d", vector.Seed), func(t *testing.T) {

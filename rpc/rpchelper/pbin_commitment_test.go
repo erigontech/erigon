@@ -39,23 +39,19 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 // Commitment replay recomputes roots with the hex trie over its own temporary
 // aggregator, so it cannot serve a bin datadir.
 func TestPBinCommitmentReplayRefusesBin(t *testing.T) {
 	// No t.Parallel: mutates process-global statecfg flags.
+	commitmentflags.Restore(t)
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	orig := statecfg.ExperimentalBinCommitment
-	origParallel := statecfg.ExperimentalParallelCommitment
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = orig
-		statecfg.ExperimentalParallelCommitment = origParallel
-	})
 	statecfg.ExperimentalBinCommitment = true
 	// erigondb.toml resolution refuses the combination: the bin trie is
 	// sequential-only, regardless of a process-wide parallel default.
@@ -69,16 +65,7 @@ func TestPBinCommitmentReplayRefusesBin(t *testing.T) {
 }
 
 func TestPBinDualCommitmentReplayGenesis(t *testing.T) {
-	originalBin, originalDual := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment
-	originalV3, originalSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	originalParallel, originalHash := statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash
-	originalSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = originalBin, originalDual
-		statecfg.ExperimentalCommitmentV3, statecfg.Schema = originalV3, originalSchema
-		statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash = originalParallel, originalHash
-		require.NoError(t, commitment.SetPBinHashSuite(originalSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = true, true
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)

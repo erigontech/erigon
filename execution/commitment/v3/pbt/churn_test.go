@@ -28,11 +28,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestTrieRandomizedChurn(t *testing.T) {
-	previous := eip8297.HashSuiteName()
-	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previous)) })
+	commitmentflags.Restore(t)
 	seeds := []int64{0x6a09e667f3bcc909, 0x3c6ef372fe94f82b}
 	for _, suite := range []string{eip8297.HashKeccak, eip8297.HashBlake3} {
 		require.NoError(t, eip8297.SetHashSuite(suite))

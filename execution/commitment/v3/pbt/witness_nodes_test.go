@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/eip8297/witness"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 type pbinOracleNode struct {
@@ -587,8 +588,7 @@ func pbinCorruptLeaf(t *testing.T, ctx *trieTestContext, key []byte, suffix byte
 }
 
 func pbinUseBlake3(t *testing.T) {
-	previous := eip8297.HashSuiteName()
-	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previous)) })
+	commitmentflags.Restore(t)
 	require.NoError(t, eip8297.SetHashSuite(eip8297.HashBlake3))
 }
 

@@ -140,18 +140,7 @@ func TestPBinHexOnlyCommitmentDemotesParallel(t *testing.T) {
 }
 
 func TestSharedDomainsHexOnlyUsesConfiguredV3(t *testing.T) {
-	originalV3 := statecfg.ExperimentalCommitmentV3
-	originalParallel := statecfg.ExperimentalParallelCommitment
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	originalSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = originalV3
-		statecfg.ExperimentalParallelCommitment = originalParallel
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-		statecfg.Schema = originalSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.ExperimentalParallelCommitment = false
 	statecfg.ExperimentalBinCommitment = false
@@ -196,18 +185,7 @@ func TestSharedDomainsDualRejectsExplicitHPH(t *testing.T) {
 }
 
 func TestSharedDomainsV3SeekRestoresCommittedPosition(t *testing.T) {
-	originalV3 := statecfg.ExperimentalCommitmentV3
-	originalParallel := statecfg.ExperimentalParallelCommitment
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	originalSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = originalV3
-		statecfg.ExperimentalParallelCommitment = originalParallel
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-		statecfg.Schema = originalSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.ExperimentalParallelCommitment = false
 	statecfg.ExperimentalBinCommitment = false
@@ -243,17 +221,6 @@ func TestSharedDomainsV3SeekRestoresCommittedPosition(t *testing.T) {
 }
 
 func TestSharedDomainsBuildsContextsForEachCommitmentMode(t *testing.T) {
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	originalV3 := statecfg.ExperimentalCommitmentV3
-	originalSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-		statecfg.ExperimentalCommitmentV3 = originalV3
-		statecfg.Schema = originalSchema
-	})
-
 	for _, tc := range []struct {
 		name     string
 		bin      bool
@@ -280,7 +247,7 @@ func TestSharedDomainsBuildsContextsForEachCommitmentMode(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			statecfg.Schema = originalSchema
+			commitmentflags.Restore(t)
 			statecfg.ExperimentalBinCommitment = tc.bin
 			statecfg.ExperimentalHexBinCommitment = tc.hexBin
 			statecfg.ExperimentalCommitmentV3 = tc.hexBin
@@ -309,16 +276,7 @@ func TestSharedDomainsBuildsContextsForEachCommitmentMode(t *testing.T) {
 }
 
 func TestSharedDomainsDualDefaultUsesV3HexArm(t *testing.T) {
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	originalV3 := statecfg.ExperimentalCommitmentV3
-	originalSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-		statecfg.ExperimentalCommitmentV3 = originalV3
-		statecfg.Schema = originalSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
@@ -339,11 +297,9 @@ func TestSharedDomainsDualDefaultUsesV3HexArm(t *testing.T) {
 
 func TestHexBinDatadirWithoutV3FlagUsesV3HexArm(t *testing.T) {
 	commitmentflags.Restore(t)
-	originalSchema := statecfg.Schema
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = false
-	statecfg.Schema = originalSchema
 
 	settings, err := dbstate.ResolveErigonDBSettings(datadir.New(t.TempDir()), log.New(), true)
 	require.NoError(t, err)
@@ -451,21 +407,11 @@ func TestSharedDomainsDropsStoppedCommitmentPendingWrites(t *testing.T) {
 }
 
 func TestSharedDomainsRestoresAfterShadowStopsAdvancing(t *testing.T) {
-	originalBin, originalHexBin := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment
-	originalParallel := statecfg.ExperimentalParallelCommitment
-	originalV3, originalSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	originalHash, originalSuite := statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = true, true
 	statecfg.ExperimentalParallelCommitment = false
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = originalBin, originalHexBin
-		statecfg.ExperimentalParallelCommitment = originalParallel
-		statecfg.ExperimentalCommitmentV3, statecfg.Schema = originalV3, originalSchema
-		statecfg.BinCommitmentHash = originalHash
-		require.NoError(t, commitment.SetPBinHashSuite(originalSuite))
-	})
 
 	for _, mode := range []string{"frozen", "stopped"} {
 		t.Run(mode, func(t *testing.T) {

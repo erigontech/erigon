@@ -32,6 +32,7 @@ import (
 	"lukechampine.com/blake3"
 
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestFoldLeafRoot(t *testing.T) {
@@ -147,8 +148,7 @@ func TestFoldBucketRootForms(t *testing.T) {
 }
 
 func TestFoldVectorsThroughStaticBuilder(t *testing.T) {
-	previous := eip8297.HashSuiteName()
-	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previous)) })
+	commitmentflags.Restore(t)
 	require.NoError(t, eip8297.SetHashSuite(eip8297.HashBlake3))
 	raw, err := os.ReadFile("../../testdata/binary_trie_vectors.json")
 	require.NoError(t, err)
@@ -224,8 +224,7 @@ func TestFoldEveryGeneratedRowMatchesReference(t *testing.T) {
 }
 
 func TestFoldPropertyMatchesReference(t *testing.T) {
-	previous := eip8297.HashSuiteName()
-	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previous)) })
+	commitmentflags.Restore(t)
 	seeds := []int64{1, 17, 0x8297, 0xDEADBEEF}
 	randomSeed := time.Now().UnixNano()
 	seeds = append(seeds, randomSeed)
