@@ -1807,9 +1807,10 @@ type ReadStamp struct {
 	epoch      uint64
 }
 
-// ReadStamp is ok only on the serial path: a versioned read must reach the read set.
+// ReadStamp is ok unless reads are traced. On the versioned path a repeated read returns
+// the value the first read recorded in the read set, so a cached value stays consistent.
 func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
-	if ibs == nil || ibs.versionMap != nil || dbg.TraceTransactionIO {
+	if ibs == nil || dbg.TraceTransactionIO {
 		return ReadStamp{}, false
 	}
 	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch}, true

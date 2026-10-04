@@ -248,6 +248,7 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	var source ReadSource
 
 	stamp, cacheable := so.db.ReadStamp()
+	cacheable = cacheable && so.db.versionMap == nil // the versioned revert needs the committed flag
 	hit := false
 	if cacheable {
 		prev, hit = so.db.slots.get(stamp, so.address, key)
