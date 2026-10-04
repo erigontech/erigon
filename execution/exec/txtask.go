@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -753,36 +752,12 @@ func (txTask *TxTask) executeSystemTx(engine rules.Engine, evm *vm.EVM, ibs *sta
 		result.Err = err
 		return result
 	}
-	from := msg.From()
-
-	if err = engine.(rules.SystemTxEngine).ApplySystemTx(txTask.Tx(), ibs, txTask.Header); err != nil {
-		result.Err = err
-		return result
-	}
-
-	nonce, err := ibs.GetNonce(from)
+	execResult, err := protocol.ApplySystemTransaction(engine.(rules.SystemTxEngine), evm, ibs, txTask.Header, txTask.Tx(), msg)
 	if err != nil {
 		result.Err = err
 		return result
 	}
-	if err = ibs.SetNonce(from, nonce+1, tracing.NonceChangeEoACall); err != nil {
-		result.Err = err
-		return result
-	}
-
-	rules := txTask.Rules()
-	if rules.IsCancun {
-		ibs.Prepare(rules, from, evm.Context.Coinbase, msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
-	}
-
-	_, _, gasUsed, callErr := evm.Call(from, msg.To(), msg.Data(), mdgas.MdGas{Execution: msg.Gas()}, *msg.Value(), false)
-	if callErr != nil {
-		// A reverted system tx is a consensus violation: reject the block.
-		result.Err = callErr
-		return result
-	}
-	result.ExecutionResult.ReceiptGasUsed = gasUsed.Total()
-	result.ExecutionResult.BlockExecutionGasUsed = gasUsed.Total()
+	result.ExecutionResult = *execResult
 
 	if !ibs.IsVersioned() {
 		ibs.SoftFinalise()
