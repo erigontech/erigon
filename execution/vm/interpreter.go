@@ -410,11 +410,11 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	return evm.run(contract, gas, input, readOnly, false, false)
 }
 
-// runTracing is true here; execution/vm/vmgen sets it to false in run.
-const runTracing = true
+// anyTrace is true here; execution/vm/vmgen sets it to false in run.
+const anyTrace = true
 
 // runTraced is Run's loop with the tracing code. execution/vm/vmgen generates
-// run in vm_run_gen.go from it, with runTracing false and the fast-path switch.
+// run in vm_run_gen.go from it, with anyTrace false and the fast-path switch.
 func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, readOnly, debug, trace bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
@@ -464,7 +464,7 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 
 	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
 	// the stacks before callContext.put() returns them to the pool.
-	if runTracing && debug {
+	if anyTrace && debug {
 		defer func() {
 			if err == nil {
 				return
@@ -494,7 +494,7 @@ run:
 	for {
 		// Past the end of the code is STOP. Exiting here, out of line, spares
 		// every op a taken jump in GetOp.
-		if !runTracing && pc >= uint64(len(contract.Code)) {
+		if !anyTrace && pc >= uint64(len(contract.Code)) {
 			res, err = nil, errStopToken
 			break run
 		}
@@ -502,12 +502,12 @@ run:
 		// The hottest constant-gas opcodes run inline, without the jump table and
 		// its indirect call. A failed check falls through to the generic path,
 		// which reports the error.
-		if !runTracing {
+		if !anyTrace {
 			// execution/vm/vmgen inserts the fastOps switch here.
 			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
-		if runTracing && debug {
+		if anyTrace && debug {
 			// Capture pre-execution values for tracing.
 			logged = false
 			pcCopy = pc
@@ -559,7 +559,7 @@ run:
 				}
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
 			}
-			if runTracing {
+			if anyTrace {
 				cost = cost.Plus(dynamicCost)
 				callGas = cost
 				callGas.Execution -= evm.CallGasTemp()
@@ -583,7 +583,7 @@ run:
 		}
 
 		// Do gas tracing before memory expansion
-		if runTracing && debug {
+		if anyTrace && debug {
 			if tracer.HasGasChangeHook() {
 				tracer.EmitGasChange(oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
 			}
@@ -599,7 +599,7 @@ run:
 
 		// TODO - move this to a trace & set in the worker
 
-		if runTracing && trace {
+		if anyTrace && trace {
 			var opstr string
 			if operation.string != nil {
 				opstr = operation.string(pc, callContext)
