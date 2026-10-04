@@ -37,18 +37,16 @@ type (
 )
 
 type operation struct {
-	// execute is the operation function
-	execute     executionFunc
-	constantGas uint64
-	dynamicGas  gasFunc
+	// numPop tells how many stack items are required
+	numPop  uint16 // δ in the Yellow Paper
+	numPush uint16 // α in the Yellow Paper
 	// maxStack specifies the max length the stack can have for this operation
 	// to not overflow the stack.
-	maxStack int
-
-	// numPop tells how many stack items are required
-	numPop  int // δ in the Yellow Paper
-	numPush int // α in the Yellow Paper
-
+	maxStack    uint16
+	constantGas uint64
+	// execute is the operation function
+	execute    executionFunc
+	dynamicGas gasFunc
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
 	string     stringer
@@ -78,7 +76,7 @@ var (
 // of those a dependent load off a separately-allocated struct.
 type JumpTable [256]operation
 
-func (op *operation) NumPush() int { return op.numPush }
+func (op *operation) NumPush() int { return int(op.numPush) }
 
 // UsesMemory reports whether the operation reads or writes memory.
 func (op *operation) UsesMemory() bool { return op.memorySize != nil }
@@ -98,7 +96,7 @@ func validateAndFillMaxStack(jt *JumpTable) {
 		if op.memorySize != nil && op.dynamicGas == nil {
 			panic(fmt.Sprintf("op %v has dynamic memory but not dynamic gas", OpCode(i).String()))
 		}
-		op.maxStack = maxStack(op.numPop, op.numPush)
+		op.maxStack = uint16(maxStack(int(op.numPop), int(op.numPush)))
 	}
 }
 

@@ -393,7 +393,7 @@ run:
 		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
-		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+		if sLen := stack.len(); uint(sLen-int(operation.numPop)) > uint(int(operation.maxStack)-int(operation.numPop)) {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.

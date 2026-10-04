@@ -48,15 +48,15 @@ func TestStackBoundsCheckEquivalence(t *testing.T) {
 	t.Parallel()
 	for numPop := 0; numPop <= 20; numPop++ {
 		for numPush := 0; numPush <= 20; numPush++ {
-			op := &operation{numPop: numPop, maxStack: maxStack(numPop, numPush)}
+			op := &operation{numPop: uint16(numPop), maxStack: uint16(maxStack(numPop, numPush))}
 			for sLen := -2; sLen <= 1200; sLen++ {
 				var want error
-				if sLen < op.numPop {
-					want = &ErrStackUnderflow{stackLen: sLen, required: op.numPop}
-				} else if sLen > op.maxStack {
-					want = &ErrStackOverflow{stackLen: sLen, limit: op.maxStack}
+				if sLen < numPop {
+					want = &ErrStackUnderflow{stackLen: sLen, required: numPop}
+				} else if sLen > int(op.maxStack) {
+					want = &ErrStackOverflow{stackLen: sLen, limit: int(op.maxStack)}
 				}
-				fired := uint(sLen-op.numPop) > uint(op.maxStack-op.numPop)
+				fired := uint(sLen-int(op.numPop)) > uint(int(op.maxStack)-int(op.numPop))
 				require.Equal(t, want != nil, fired,
 					"numPop=%d maxStack=%d sLen=%d", op.numPop, op.maxStack, sLen)
 				if fired {

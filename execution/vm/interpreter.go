@@ -373,10 +373,10 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 
 // stackBoundsErr reconstructs which bound the failed range check violated.
 func stackBoundsErr(sLen int, operation *operation) error {
-	if sLen < operation.numPop {
-		return &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
+	if sLen < int(operation.numPop) {
+		return &ErrStackUnderflow{stackLen: sLen, required: int(operation.numPop)}
 	}
-	return &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
+	return &ErrStackOverflow{stackLen: sLen, limit: int(operation.maxStack)}
 }
 
 // traceGas picks the figure the dev instruction trace should report: call
@@ -519,7 +519,7 @@ run:
 		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
-		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+		if sLen := stack.len(); uint(sLen-int(operation.numPop)) > uint(int(operation.maxStack)-int(operation.numPop)) {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
