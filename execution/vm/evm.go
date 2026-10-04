@@ -74,7 +74,8 @@ type EVM struct {
 	// evm.
 	config Config
 	// abort is used to abort the EVM calling operations
-	abort atomic.Bool
+	abort    atomic.Bool
+	readOnly bool // Whether to throw on stateful modifications
 	// callGasTemp holds the gas available for the current call. This is needed because the
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
@@ -83,9 +84,8 @@ type EVM struct {
 	// replaced wholesale by SetPrecompiles for state-override RPC calls.
 	precompiles PrecompiledContracts
 
-	readOnly   bool   // Whether to throw on stateful modifications
-	returnData []byte // Last CALL's return data for subsequent reuse
-	returnBuf  []byte // RETURN/REVERT data of the last frame that returned, see returnCopy
+	returnData []byte  // Last CALL's return data for subsequent reuse
+	returnBuf  *[]byte // RETURN/REVERT data of the last frame that returned, see returnCopy
 
 	// Pointers before counters: interleaving them adds a word of padding.
 	internCache *storageKeyCache
@@ -879,6 +879,9 @@ func (evm *EVM) returnCopy(data []byte) []byte {
 	if len(data) == 0 {
 		return nil
 	}
-	evm.returnBuf = append(evm.returnBuf[:0], data...)
-	return evm.returnBuf
+	if evm.returnBuf == nil {
+		evm.returnBuf = new([]byte)
+	}
+	*evm.returnBuf = append((*evm.returnBuf)[:0], data...)
+	return *evm.returnBuf
 }
