@@ -92,10 +92,13 @@ type CallContext struct {
 type frameSlots struct {
 	stamp state.ReadStamp
 	next  int
-	ok    [2]bool
-	key   [2]accounts.StorageKey
-	word  [2]uint256.Int
-	val   [2]uint256.Int
+	// The gas function's lookup, for the op that follows it; valid while memoGen == cacheGen.
+	memoGen uint64
+	memo    int
+	ok      [2]bool
+	key     [2]accounts.StorageKey
+	word    [2]uint256.Int
+	val     [2]uint256.Int
 }
 
 // get returns the entry for word, or -1.
@@ -109,6 +112,21 @@ func (f *frameSlots) get(stamp state.ReadStamp, word *uint256.Int) int {
 		}
 	}
 	return -1
+}
+
+// lookupSlot is get for the gas function: it records the result for the op, and a hit's
+// interned key for peekStorageKey.
+func (ctx *CallContext) lookupSlot(evm *EVM) int {
+	stamp, ok := evm.IntraBlockState().ReadStamp()
+	if !ok {
+		return -1
+	}
+	i := ctx.slots.get(stamp, ctx.Stack.peek())
+	ctx.slots.memo, ctx.slots.memoGen = i, ctx.cacheGen
+	if i >= 0 {
+		ctx.cachedKey, ctx.cachedKeyGen = ctx.slots.key[i], ctx.cacheGen
+	}
+	return i
 }
 
 func (f *frameSlots) put(stamp state.ReadStamp, word uint256.Int, key accounts.StorageKey, v uint256.Int) {
@@ -187,6 +205,7 @@ func (ctx *CallContext) put() {
 	ctx.newAccountCharged = false
 	ctx.create = createGasPreparation{}
 	ctx.slots.ok = [2]bool{} // the next frame may have another storage address
+	ctx.slots.memoGen = ^uint64(0)
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	ctx.cachedKeyGen = ^uint64(0)
