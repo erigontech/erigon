@@ -2719,7 +2719,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 		if err != nil {
 			return err
 		}
-		addr, txnRlp := *(*[20]byte)(v[:20]), v[20:]
+		addr, txnRlp := *(*[20]byte)(v[:20]), bytes.Clone(v[20:])
 		txn := &TxnSlot{}
 
 		// TODO(eip-4844) ensure wrappedWithBlobs when transactions are saved to the DB

@@ -407,18 +407,6 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 	return tx, nil
 }
 
-// checkChainID rejects a call object whose chainId names another chain. Such a call is invalid
-// whatever the state, so it is invalid params rather than an execution error.
-func (args *TraceCallParam) checkChainID(chainID *uint256.Int) error {
-	if args.ChainID == nil {
-		return nil
-	}
-	if have := (*uint256.Int)(args.ChainID); !have.Eq(chainID) {
-		return &rpc.InvalidParamsError{Message: fmt.Sprintf("chainId does not match node's (have=%v, want=%v)", have, chainID)}
-	}
-	return nil
-}
-
 func (ot *OeTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
@@ -1243,7 +1231,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-	if err := args.checkChainID(chainConfig.ChainID); err != nil {
+	if err := ethapi.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
 		return nil, err
 	}
 	engine := api.engine()
@@ -1468,7 +1456,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 	for i := range callParams {
-		if err := callParams[i].checkChainID(chainConfig.ChainID); err != nil {
+		if err := ethapi.CheckChainID(callParams[i].ChainID, chainConfig.ChainID); err != nil {
 			return nil, fmt.Errorf("call %d: %w", i, err)
 		}
 	}

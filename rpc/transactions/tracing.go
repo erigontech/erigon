@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -120,7 +121,7 @@ func TraceTx(
 	ibs *state.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
-	stream jsonstream.Stream,
+	stream *jsonstream.Stream,
 	callTimeout time.Duration,
 	precompiles vm.PrecompiledContracts,
 ) (txnGasUsage mdgas.TxnGasUsage, err error) {
@@ -158,7 +159,7 @@ func AssembleTracer(
 	blockNumber *uint256.Int,
 	blockHash common.Hash,
 	txnIndex int,
-	stream jsonstream.Stream,
+	stream *jsonstream.Stream,
 	callTimeout time.Duration,
 ) (*tracers.Tracer, bool, context.CancelFunc, error) {
 	// Assemble the structured logger or the JavaScript tracer
@@ -210,7 +211,7 @@ func ExecuteTraceTx(
 	ibs *state.IntraBlockState,
 	config *tracersConfig.TraceConfig,
 	chainConfig *chain.Config,
-	stream jsonstream.Stream,
+	stream *jsonstream.Stream,
 	tracer *tracers.Tracer,
 	streaming bool,
 	precompiles vm.PrecompiledContracts,
@@ -254,8 +255,7 @@ func ExecuteTraceTx(
 		if len(result.Revert()) > 0 {
 			ret = result.Revert()
 		}
-		stream.Field("returnValue")
-		stream.WriteHex(ret)
+		ethjson.Data(stream, "returnValue", ret)
 		stream.WriteObjectEnd()
 	} else {
 		if err := writeTracerResult(tracer, stream); err != nil {
@@ -269,7 +269,7 @@ func ExecuteTraceTx(
 	return nil
 }
 
-func writeTracerResult(tracer *tracers.Tracer, stream jsonstream.Stream) error {
+func writeTracerResult(tracer *tracers.Tracer, stream *jsonstream.Stream) error {
 	if tracer.MarshalFastJSONTo != nil {
 		return tracer.MarshalFastJSONTo(stream)
 	}

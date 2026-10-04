@@ -167,7 +167,7 @@ func TestDomain_IteratePrefix_PrefersFilesOverDB(t *testing.T) {
 	defer tx.Rollback()
 
 	dt := d.beginForTests()
-	writer := dt.NewWriter()
+	writer := dt.NewWriter(db)
 
 	require.NoError(writer.PutWithPrev(key[:], v0[:], 1, nil))
 	require.NoError(writer.Flush(ctx, tx))
@@ -263,7 +263,7 @@ func TestDomainLatestIterFile_PrefersFilesOverDB(t *testing.T) {
 	defer tx.Rollback()
 
 	dt := d.beginForTests()
-	writer := dt.NewWriter()
+	writer := dt.NewWriter(db)
 
 	require.NoError(writer.PutWithPrev(key[:], v0[:], 1, nil))
 	require.NoError(writer.Flush(ctx, tx))
@@ -367,7 +367,7 @@ func TestDomainLatestIterFile_PrefersFilesOverDB_LargeValues(t *testing.T) {
 	defer tx.Rollback()
 
 	dt := d.beginForTests()
-	writer := dt.NewWriter()
+	writer := dt.NewWriter(db)
 
 	require.NoError(writer.PutWithPrev(key[:], v0[:], 1, nil))
 	require.NoError(writer.Flush(ctx, tx))

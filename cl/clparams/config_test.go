@@ -70,6 +70,51 @@ func TestCustomConfigUsesConfiguredBlockRequestWindow(t *testing.T) {
 	require.Equal(t, uint64(12_345), beaconCfg.MinEpochsForBlockRequests())
 }
 
+func TestCustomConfigGasLimitSchedule(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte(`GLOAS_FORK_EPOCH: 10
+GAS_LIMIT_SCHEDULE:
+  - EPOCH: 20
+    GAS_LIMIT: 200000000
+  - EPOCH: 12
+    GAS_LIMIT: 100000000
+`), 0o644))
+	config, _, err := CustomConfig(configPath)
+	require.NoError(t, err)
+
+	for _, test := range []struct {
+		epoch    uint64
+		gasLimit uint64
+		active   bool
+	}{
+		{epoch: 9},
+		{epoch: 10},
+		{epoch: 11},
+		{epoch: 12, gasLimit: 100_000_000, active: true},
+		{epoch: 19, gasLimit: 100_000_000, active: true},
+		{epoch: 20, gasLimit: 200_000_000, active: true},
+		{epoch: 21, gasLimit: 200_000_000, active: true},
+	} {
+		gasLimit, active := config.GetScheduledGasLimit(test.epoch)
+		require.Equal(t, test.active, active, "epoch %d", test.epoch)
+		require.Equal(t, test.gasLimit, gasLimit, "epoch %d", test.epoch)
+	}
+}
+
+func TestScheduledGasLimitIsInactiveBeforeGloas(t *testing.T) {
+	config := BeaconChainConfig{
+		GloasForkEpoch: 10,
+		GasLimitSchedule: []GasLimitScheduleEntry{
+			{Epoch: 9, GasLimit: 60_000_000},
+		},
+	}
+
+	gasLimit, active := config.GetScheduledGasLimit(9)
+
+	require.False(t, active)
+	require.Zero(t, gasLimit)
+}
+
 func TestBlobSidecarServeRangeStartSlotUsesEpochBoundary(t *testing.T) {
 	cfg := BeaconChainConfig{
 		SlotsPerEpoch:                    32,
