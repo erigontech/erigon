@@ -2883,7 +2883,7 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	// Reset transient storage at the beginning of transaction execution
 	clear(ibs.transientStorage)
 	ibs.versionedReads.access = nil
-	ibs.recordAccess = true
+	ibs.recordAccess = rules.IsAmsterdam
 
 	// EIP-7928 records the EIP-3651 coinbase access even without a priority fee.
 	if rules.IsShanghai {
