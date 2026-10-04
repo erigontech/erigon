@@ -2156,8 +2156,7 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	if !ibs.noMaterialize {
 		ibs.setStateObject(addr, newobj)
 	}
-	data := newobj.data
-	ibs.recordWriteAddress(addr, &data)
+	ibs.recordWriteAddress(addr, &newobj.data)
 	// Write CodeHashPath so that any stale versionedReads cache entry
 	// (e.g. from the pre-creation GetCodeHash check in EVM create()) is
 	// invalidated.  newObject normalises the zero-value CodeHash to
@@ -3142,11 +3141,14 @@ func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) 
 	traceWrite(ibs, vw)
 }
 
-func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, val *accounts.Account) {
+func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *accounts.Account) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
 	}
+	// A copy, made only here: the caller's account keeps changing.
+	val := new(accounts.Account)
+	*val = *account
 	if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
