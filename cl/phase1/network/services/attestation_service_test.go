@@ -465,7 +465,7 @@ func (t *attestationTestSuite) TestAttestationSeenOnlyAfterSignatureVerification
 		ImmediateProcess: true,
 	})
 	t.Require().ErrorIs(err, ErrIgnore)
-	t.Require().Contains(err.Error(), "already seen")
+	t.Require().ErrorIs(err, ErrAttestationAlreadySeen)
 }
 
 func (t *attestationTestSuite) TestAttestationProcessMessageRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt() {

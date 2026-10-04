@@ -19,9 +19,11 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1009,4 +1011,72 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 		SubcommitteeIndex: 0,
 		AggregationBits:   aggrBits,
 	}, out.Data)
+}
+
+// A pool submission the node's own validation ignores must not be published: the gossip layer accepts self-published
+// messages without validating them again, so peers would receive (and penalize the node for) what it just ignored.
+// Only an attestation already seen counts as submitted; any other ignored one is reported as a failure.
+func TestPoolAttestationsSkipsPublishForIgnoredAttestation(t *testing.T) {
+	data, err := json.Marshal(&solid.AttestationData{})
+	require.NoError(t, err)
+	single, err := json.Marshal([]*solid.SingleAttestation{{Data: &solid.AttestationData{}}})
+	require.NoError(t, err)
+	requests := []struct {
+		name    string
+		path    string
+		version string
+		body    string
+	}{
+		{
+			name: "v1",
+			path: "/eth/v1/beacon/pool/attestations",
+			body: fmt.Sprintf(`[{"aggregation_bits":"0x01","data":%s,"signature":"0x%s"}]`, data, strings.Repeat("00", 96)),
+		},
+		{
+			name:    "v2",
+			path:    "/eth/v2/beacon/pool/attestations",
+			version: "electra",
+			body:    string(single),
+		},
+	}
+	outcomes := []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{name: "already seen", err: fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationAlreadySeen), status: http.StatusOK},
+		{name: "stale head", err: fmt.Errorf("head epoch 0 too far from attestation epoch 2: %w", services.ErrIgnore), status: http.StatusBadRequest},
+	}
+	for _, tt := range requests {
+		for _, outcome := range outcomes {
+			t.Run(tt.name+" "+outcome.name, func(t *testing.T) {
+				_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				require.NoError(t, sd.OnHeadState(s))
+				netCfg := clparams.NetworkConfigs[chainspec.MainnetChainID]
+				handler.netConfig = &netCfg
+
+				ctrl := gomock.NewController(t)
+				attestationService := services_mock.NewMockAttestationService(ctrl)
+				attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(outcome.err).Times(1)
+				handler.attestationService = attestationService
+				mockGossip := gossip_mock.NewMockGossip(ctrl)
+				mockGossip.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+				handler.gossipManager = mockGossip
+
+				server := httptest.NewServer(handler.mux)
+				defer server.Close()
+
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+tt.path, strings.NewReader(tt.body))
+				require.NoError(t, err)
+				req.Header.Set("Content-Type", "application/json")
+				if tt.version != "" {
+					req.Header.Set("Eth-Consensus-Version", tt.version)
+				}
+				resp, err := server.Client().Do(req)
+				require.NoError(t, err)
+				defer resp.Body.Close()
+				require.Equal(t, outcome.status, resp.StatusCode)
+			})
+		}
+	}
 }

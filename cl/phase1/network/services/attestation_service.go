@@ -291,7 +291,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
-			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+			return fmt.Errorf("%w: %w", ErrIgnore, ErrAttestationAlreadySeen)
 		}
 
 		// [REJECT] The signature of attestation is valid.

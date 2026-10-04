@@ -167,7 +167,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 
-		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
+		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); errors.Is(err, services.ErrAttestationAlreadySeen) {
+			continue
+		} else if err != nil {
 			log.Warn("[Beacon REST] failed to process attestation in attestation service", "err", err)
 			failures = append(failures, poolingFailure{
 				Index:   i,
@@ -244,8 +246,9 @@ func (a *ApiHandler) PostEthV2BeaconPoolAttestations(w http.ResponseWriter, r *h
 			return
 		}
 
-		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); errors.Is(err, services.ErrIgnore) {
-			log.Debug("[Beacon REST] ignored attestation in attestation service", "err", err, "slot", slot, "committeeIndex", cIndex)
+		// Already validated for this validator and target epoch: not published again. Any other ignore was not accepted.
+		if err := a.attestationService.ProcessMessage(r.Context(), &subnet, attestationWithGossipData); errors.Is(err, services.ErrAttestationAlreadySeen) {
+			continue
 		} else if err != nil {
 			log.Warn("[Beacon REST] failed to process attestation in attestation service", "err", err)
 			failures = append(failures, poolingFailure{
