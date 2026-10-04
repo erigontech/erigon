@@ -1183,10 +1183,11 @@ func TestPropagatesBalanceIncGetStateObjectError(t *testing.T) {
 	}
 }
 
-// GetState serves repeat reads from a small cache: every way a slot can change must show
-// in the next read.
-func TestGetStateFollowsEveryChange(t *testing.T) {
-	ibs := New(NewNoopReader())
+// SetState reads the previous value through a small cache. A stale entry that matches the new
+// value would drop the write, so every way a slot can change must show in the next SetState.
+func TestSetStateCacheFollowsEveryChange(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	ibs := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer ibs.Close()
 	addr := accounts.InternAddress(common.HexToAddress("0x01"))
 	k1 := accounts.InternKey(common.HexToHash("0x01"))
@@ -1205,42 +1206,39 @@ func TestGetStateFollowsEveryChange(t *testing.T) {
 	}
 
 	set(k1, 1)
-	require.Equal(t, uint64(1), get(k1))
+	set(k1, 1) // a no-op SetState caches the value it read
 	set(k1, 2)
-	require.Equal(t, uint64(2), get(k1), "a write")
+	set(k1, 1)
+	require.Equal(t, uint64(1), get(k1), "a write")
 
 	// A revert, then another change, leave the journal as long as when the cache was filled.
 	snap := ibs.PushSnapshot()
 	set(k1, 3)
-	require.Equal(t, uint64(3), get(k1))
+	set(k1, 3)
 	filled := ibs.journal.length()
 	ibs.RevertToSnapshot(snap, nil)
 	ibs.PopSnapshot(snap)
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 	require.Equal(t, filled, ibs.journal.length())
-	require.Equal(t, uint64(2), get(k1), "a revert")
-	set(k1, 4)
+	set(k1, 3)
+	require.Equal(t, uint64(3), get(k1), "a revert")
 
 	set(k2, 20)
 	set(k3, 30)
-	for range 2 {
-		require.Equal(t, []uint64{4, 20, 30}, []uint64{get(k1), get(k2), get(k3)}, "more slots than the cache holds")
+	for _, k := range []accounts.StorageKey{k1, k2, k3, k1, k2, k3} {
+		set(k, get(k))
 	}
-
-	// A slot read while the journal is empty, then changed and the journal reset to empty.
-	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, NewNoopWriter()))
-	require.Equal(t, uint64(4), get(k1))
-	set(k1, 5)
-	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, NewNoopWriter()))
-	require.Equal(t, uint64(5), get(k1), "a finalized tx")
-
-	require.NoError(t, ibs.SetStorage(addr, Storage{}))
-	require.Equal(t, uint64(0), get(k1), "a storage override")
-
-	// Reset drops the state the reads came from; the reader has no such slot.
+	set(k1, 4)
 	set(k2, 21)
+	set(k3, 31)
+	require.Equal(t, []uint64{4, 21, 31}, []uint64{get(k1), get(k2), get(k3)}, "more slots than the cache holds")
+
+	// Reset drops what the cache read; the database still has the committed value.
+	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
+	set(k1, 9)
 	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, NewNoopWriter()))
-	require.Equal(t, uint64(21), get(k2))
+	set(k1, 9)
 	ibs.Reset()
-	require.Equal(t, uint64(0), get(k2), "a reset")
+	set(k1, 9)
+	require.Equal(t, uint64(9), get(k1), "a reset")
 }

@@ -214,7 +214,7 @@ type IntraBlockState struct {
 	// via FinalizeTx→so.data.
 	noMaterialize bool
 
-	slots slotCache // last storage reads of the serial path
+	slots slotCache // SetState's last previous-value reads on the serial path
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -1704,7 +1704,6 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
-	ibs.journal.epoch++ // the override replaces the whole storage outside the journal
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
 		return err

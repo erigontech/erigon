@@ -1549,11 +1549,6 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
-	if s.versionMap == nil {
-		if v, clean, ok := s.slots.get(s.journal, addr, key); ok {
-			return v, StorageRead, UnknownVersion, clean, nil
-		}
-	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {
@@ -1598,7 +1593,6 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		if err != nil {
 			return uint256.Int{}, StorageRead, UnknownVersion, false, err
 		}
-		s.slots.put(s.journal, addr, key, v, clean)
 		return v, StorageRead, UnknownVersion, clean, nil
 	case outcomeReturnZero, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, false, nil
@@ -1773,9 +1767,9 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 	}
 }
 
-// slotCache holds the last two storage reads of the serial path, as gevm keeps its last
-// slots. They stay valid while the journal does: every state change adds an entry, and
-// reverts, resets and the unjournalled changes move its epoch.
+// slotCache holds SetState's last two reads of the previous value on the serial path: an
+// SSTORE already read the slot to price it. They stay valid while the journal does: every
+// state change adds an entry, and reverts, resets and the unjournalled changes move its epoch.
 type slotCache struct {
 	journalLen int
 	epoch      uint64
