@@ -351,20 +351,32 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	depth := evm.depth
 	gasRemaining = gas
 	inputTotal := gas.Total()
+	var (
+		snapshot      int
+		snapshotTaken bool
+		traceIO       bool
+		traceTx       int
+		traceInc      int
+	)
 
 	if (dbg.TraceTransactionIO && !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
 		version := evm.intraBlockState.Version()
 		fmt.Printf("%d (%d.%d) %s: %x %x\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, input)
-		defer func() {
-			fmt.Printf("%d (%d.%d) RETURN (%s): %x: %x, %d, %v\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, ret, gasRemaining, err)
-		}()
+		traceTx, traceInc, traceIO = version.TxIndex, version.Incarnation, true
 	}
 
 	gasTracing := evm.Config().Tracer != nil
+	// One defer, so the compiler can open-code it despite the many returns.
 	defer func() {
+		if snapshotTaken {
+			evm.intraBlockState.PopSnapshot(snapshot)
+		}
 		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if gasTracing {
 			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
+		}
+		if traceIO {
+			fmt.Printf("%d (%d.%d) RETURN (%s): %x: %x, %d, %v\n", evm.intraBlockState.BlockNumber(), traceTx, traceInc, typ, addr, ret, gasRemaining, err)
 		}
 	}()
 
@@ -382,14 +394,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	if gasTracing {
 		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code.Bytes)
 	}
-	ret, gasRemaining, gasUsed, err = evm.callFrame(typ, caller, callerAddress, addr, input, gas, value, bailout, p, isPrecompile, code, depth)
-	return ret, gasRemaining, gasUsed, err
-}
 
-// callFrame is the body of call after its defers are set up. Few returns in call let the compiler
-// open-code those defers instead of registering them with the runtime on every CALL.
-func (evm *EVM) callFrame(typ OpCode, caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, gas mdgas.MdGas, value uint256.Int, bailout bool, p PrecompiledContract, isPrecompile bool, code accounts.Code, depth int) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
-	gasRemaining = gas
 	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
 	evm.intraBlockState.MarkAddressAccess(addr, false)
 
@@ -416,8 +421,8 @@ func (evm *EVM) callFrame(typ OpCode, caller accounts.Address, callerAddress acc
 		}
 	}
 
-	snapshot := evm.intraBlockState.PushSnapshot()
-	defer evm.intraBlockState.PopSnapshot(snapshot)
+	snapshot = evm.intraBlockState.PushSnapshot()
+	snapshotTaken = true
 
 	if typ == CALL {
 		exist, err := evm.intraBlockState.Exist(addr)
@@ -631,38 +636,37 @@ func (evm *EVM) createPrepared(caller accounts.Address, codeAndHash *codeAndHash
 func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, preparation *createPreparation) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	gasRemaining = gas
 
-	if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
-		defer func() {
+	traceIO := dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle()))
+	depth := evm.depth
+	inputTotal := gas.Total()
+	gasTracing := evm.Config().Tracer != nil
+	var (
+		snapshot      int
+		snapshotTaken bool
+	)
+	// One defer, so the compiler can open-code it despite the many returns.
+	defer func() {
+		if snapshotTaken {
+			evm.intraBlockState.PopSnapshot(snapshot)
+		}
+		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
+		if gasTracing {
+			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
+		}
+		if traceIO {
 			version := evm.intraBlockState.Version()
 			if err != nil {
 				fmt.Printf("%d (%d.%d) Create Contract: %x, err=%s\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, createAddress, err)
 			} else {
 				fmt.Printf("%d (%d.%d) Create Contract: %x, gas=%d\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, createAddress, gasRemaining)
 			}
-		}()
-	}
-
-	depth := evm.depth
-	inputTotal := gas.Total()
-	gasTracing := evm.Config().Tracer != nil
-	defer func() {
-		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
-		if gasTracing {
-			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
 		}
 	}()
 
 	if gasTracing {
 		evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, gas, value, nil)
 	}
-	ret, createAddress, gasRemaining, gasUsed, err = evm.createFrame(caller, codeAndHash, gas, value, address, incrementNonce, bailout, preparation, depth)
-	return ret, createAddress, gasRemaining, gasUsed, err
-}
 
-// createFrame is the body of createWithPreparation after its defers are set up, split out for the
-// same reason as callFrame.
-func (evm *EVM) createFrame(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, incrementNonce bool, bailout bool, preparation *createPreparation, depth int) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
-	gasRemaining = gas
 	if preparation == nil {
 		var prepared createPreparation
 		prepared, err = evm.prepareCreate(caller, address, value, incrementNonce, bailout, false)
@@ -697,8 +701,8 @@ func (evm *EVM) createFrame(caller accounts.Address, codeAndHash *codeAndHash, g
 		return nil, accounts.NilAddress, gasRemaining, mdgas.MdGasUsage{}, err
 	}
 	// Create a new account on the state
-	snapshot := evm.intraBlockState.PushSnapshot()
-	defer evm.intraBlockState.PopSnapshot(snapshot)
+	snapshot = evm.intraBlockState.PushSnapshot()
+	snapshotTaken = true
 
 	if err := evm.intraBlockState.CreateAccount(address, true); err != nil {
 		return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
