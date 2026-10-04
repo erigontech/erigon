@@ -288,31 +288,7 @@ func writeErigonDBSettings(path string, s *ErigonDBSettings) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() {
-		_ = tmp.Close()
-		_ = dir.RemoveFile(tmpName)
-	}()
-	if err := tmp.Chmod(0o644); err != nil {
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	return dir.FsyncDir(filepath.Dir(path))
+	return dir.WriteFileAtomic(path, data, 0o644)
 }
 
 // ResolveErigonDBSettings determines the active ErigonDB settings:

@@ -755,7 +755,7 @@ func TestPBinWitnessCorruptCases(t *testing.T) {
 	withBinCommitmentDatadir(t)
 	f := newPBinStatelessFixture(t)
 	t.Run("blob hash", func(t *testing.T) {
-		result := cloneExecutionWitnessResult(f.result)
+		result := pbtCorpusClone(f.result)
 		index := -1
 		for i, path := range result.Keys {
 			if len(path) == 0 {
@@ -773,7 +773,7 @@ func TestPBinWitnessCorruptCases(t *testing.T) {
 		require.ErrorContains(t, err, "hashes to")
 	})
 	t.Run("wrong path", func(t *testing.T) {
-		result := cloneExecutionWitnessResult(f.result)
+		result := pbtCorpusClone(f.result)
 		index := pbinStatelessNonRootIndex(result)
 		result.Keys[index] = hexutil.Bytes{0xff}
 		stateless, err := newPBinWitnessStateless(result, f.root)
@@ -821,7 +821,7 @@ func TestPBinWitnessCorruptCases(t *testing.T) {
 		require.NotEqual(t, root, badRoot)
 	})
 	t.Run("empty root", func(t *testing.T) {
-		result := cloneExecutionWitnessResult(f.result)
+		result := pbtCorpusClone(f.result)
 		rootIndex := -1
 		for index, path := range result.Keys {
 			if len(path) == 0 {

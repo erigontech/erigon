@@ -19,6 +19,7 @@ package app
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -304,7 +305,12 @@ func runExportPBTWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums r
 		PreimageDigest: preimageDigest.Hex(),
 		Finalized:      rawdb.ReadForkchoiceFinalizedNum(tx) >= pin.Block,
 	}
-	if err := writeJSONAtomically(metaPath, ".pbt-snapshot-meta-*.tmp", meta); err != nil {
+	metaBytes, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	metaBytes = append(metaBytes, '\n')
+	if err := dir.WriteFileAtomic(metaPath, metaBytes, 0o644); err != nil {
 		return err
 	}
 	completed = true

@@ -40,6 +40,7 @@ import (
 	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func TestBranchPrefetchRejectsChangedRecordBytes(t *testing.T) {
@@ -71,7 +72,7 @@ func TestBranchPrefetchBudgetChargesCompleteLeafRefs(t *testing.T) {
 	var key []byte
 	var data []byte
 	var refs *commitment.LeafRefs
-	for rawKey, rawData := range ctx.records {
+	for rawKey, rawData := range ctx.Records {
 		candidate := pbt.ComputeLeafRefs([]byte(rawKey), rawData)
 		if candidate != nil && len(candidate.PBinInternal) != 0 {
 			key, data, refs = []byte(rawKey), rawData, candidate
@@ -105,9 +106,9 @@ func TestBranchPrefetchFoldRejectsStaleRecordRefs(t *testing.T) {
 	cachedTrie := pbt.NewTrie(cached)
 	_, err := plainTrie.Process(ops)
 	require.NoError(t, err)
-	cached.records = cloneBranchPrefetchRecords(plain.records)
+	cached.Records = cloneBranchPrefetchRecords(plain.Records)
 	p := newTestBranchPrefetcher()
-	for key, data := range cached.records {
+	for key, data := range cached.Records {
 		p.putDomain(kv.CommitmentDomain, []byte(key), data, 1)
 	}
 	cached.prefetcher = p
@@ -122,7 +123,7 @@ func TestBranchPrefetchFoldRejectsStaleRecordRefs(t *testing.T) {
 	cachedRoot, err := cachedTrie.Process([]pbt.Op{update})
 	require.NoError(t, err)
 	require.Equal(t, plainRoot, cachedRoot)
-	require.Equal(t, plain.records, cached.records)
+	require.Equal(t, plain.Records, cached.Records)
 }
 
 func newTestBranchPrefetcher() *branchPrefetcher {
@@ -134,28 +135,12 @@ func newTestBranchPrefetcher() *branchPrefetcher {
 }
 
 type branchPrefetchTrieContext struct {
-	records    map[string][]byte
+	commitmenttest.MapBranchStore
 	prefetcher *branchPrefetcher
 }
 
 func newBranchPrefetchTrieContext() *branchPrefetchTrieContext {
-	return &branchPrefetchTrieContext{records: make(map[string][]byte)}
-}
-
-func (c *branchPrefetchTrieContext) Branch(key []byte) ([]byte, kv.Step, error) {
-	return bytes.Clone(c.records[string(key)]), 0, nil
-}
-
-func (c *branchPrefetchTrieContext) PutBranch(key, data, prev []byte) error {
-	if !bytes.Equal(c.records[string(key)], prev) {
-		return fmt.Errorf("previous record mismatch for %x", key)
-	}
-	if len(data) == 0 {
-		delete(c.records, string(key))
-	} else {
-		c.records[string(key)] = bytes.Clone(data)
-	}
-	return nil
+	return &branchPrefetchTrieContext{MapBranchStore: commitmenttest.NewMapBranchStore()}
 }
 
 func (c *branchPrefetchTrieContext) Account([]byte) (*commitment.Update, error) {

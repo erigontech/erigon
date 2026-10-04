@@ -14,42 +14,35 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package app
+package commitmenttest
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
+	"bytes"
+	"fmt"
 
-	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/db/kv"
 )
 
-func writeJSONAtomically(path, pattern string, value any) error {
-	data, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return err
+type MapBranchStore struct {
+	Records map[string][]byte
+}
+
+func NewMapBranchStore() MapBranchStore {
+	return MapBranchStore{Records: make(map[string][]byte)}
+}
+
+func (c *MapBranchStore) Branch(key []byte) ([]byte, kv.Step, error) {
+	return bytes.Clone(c.Records[string(key)]), 0, nil
+}
+
+func (c *MapBranchStore) PutBranch(key, data, prev []byte) error {
+	if !bytes.Equal(c.Records[string(key)], prev) {
+		return fmt.Errorf("previous record mismatch for %x", key)
 	}
-	data = append(data, '\n')
-	tmp, err := os.CreateTemp(filepath.Dir(path), pattern)
-	if err != nil {
-		return err
+	if len(data) == 0 {
+		delete(c.Records, string(key))
+	} else {
+		c.Records[string(key)] = bytes.Clone(data)
 	}
-	tmpName := tmp.Name()
-	defer func() {
-		_ = tmp.Close()
-		_ = dir.RemoveFile(tmpName)
-	}()
-	if _, err := tmp.Write(data); err != nil {
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	return dir.FsyncDir(filepath.Dir(path))
+	return nil
 }

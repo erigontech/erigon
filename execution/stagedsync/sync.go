@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -155,7 +156,7 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 				return err
 			}
 			if !ok {
-				if err := checkUnwindConversionBlock(ttx.Debug().Dirs(), unwindPoint); err != nil {
+				if err := checkUnwindConversionPoint(ttx.Debug().Dirs(), unwindPoint, dbstate.ConversionFloorBlock); err != nil {
 					return err
 				}
 				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)

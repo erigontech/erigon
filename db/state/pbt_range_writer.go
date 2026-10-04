@@ -317,7 +317,7 @@ func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, do
 		}
 		domains.GetCommitmentCtx().SetPBinOps(batch)
 		var computeErr error
-		root, computeErr = domains.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, blockNum, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
+		root, computeErr = domains.GetCommitmentCtx().ComputeCommitmentWithDiff(ctx, tx, final, blockNum, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
 			overlay.PatriciaContext = inner
 			return overlay
 		})

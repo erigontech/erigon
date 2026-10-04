@@ -155,24 +155,14 @@ func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
-func checkUnwindConversionPoint(dirs datadir.Dirs, txNum uint64) error {
-	blockNum, conversionTxNum, ok, err := state.ReadErigonDBConversionPoint(dirs)
-	if err != nil {
-		return err
-	}
-	if ok && txNum <= conversionTxNum {
-		return fmt.Errorf("%w: %w", ErrTooDeepUnwind, state.NewConversionFloorError(blockNum, conversionTxNum, txNum, state.ConversionFloorTx))
-	}
-	return nil
-}
-
-func checkUnwindConversionBlock(dirs datadir.Dirs, blockNum uint64) error {
+func checkUnwindConversionPoint(dirs datadir.Dirs, requested uint64, kind state.ConversionFloorKind) error {
 	conversionBlock, conversionTxNum, ok, err := state.ReadErigonDBConversionPoint(dirs)
 	if err != nil {
 		return err
 	}
-	if ok && blockNum < conversionBlock {
-		return fmt.Errorf("%w: %w", ErrTooDeepUnwind, state.NewConversionFloorError(conversionBlock, conversionTxNum, blockNum, state.ConversionFloorBlock))
+	tooDeep := ok && ((kind == state.ConversionFloorTx && requested <= conversionTxNum) || (kind == state.ConversionFloorBlock && requested < conversionBlock))
+	if tooDeep {
+		return fmt.Errorf("%w: %w", ErrTooDeepUnwind, state.NewConversionFloorError(conversionBlock, conversionTxNum, requested, kind))
 	}
 	return nil
 }
@@ -590,7 +580,7 @@ func unwindDomsToBlock(ctx context.Context, rwTx kv.TemporalRwTx, br dbservices.
 	if err != nil {
 		return 0, err
 	}
-	if err := checkUnwindConversionPoint(rwTx.Debug().Dirs(), txNum); err != nil {
+	if err := checkUnwindConversionPoint(rwTx.Debug().Dirs(), txNum, state.ConversionFloorTx); err != nil {
 		return 0, err
 	}
 	doms.Unwind(txNum, changeset) // drops [txNum, ∞)
@@ -625,7 +615,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 	if !ok {
-		if err := checkUnwindConversionBlock(rwTx.Debug().Dirs(), u.UnwindPoint); err != nil {
+		if err := checkUnwindConversionPoint(rwTx.Debug().Dirs(), u.UnwindPoint, state.ConversionFloorBlock); err != nil {
 			return err
 		}
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)

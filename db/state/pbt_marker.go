@@ -33,31 +33,7 @@ func writePBTMarker(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		_ = tmp.Close()
-		_ = dir.RemoveFile(tmpPath)
-	}()
-	if err := tmp.Chmod(0o644); err != nil {
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return err
-	}
-	return dir.FsyncDir(filepath.Dir(path))
+	return dir.WriteFileAtomic(path, data, 0o644)
 }
 
 func removePBTMarker(path string) error {

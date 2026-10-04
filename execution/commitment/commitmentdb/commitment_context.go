@@ -633,11 +633,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 // ComputeCommitmentWithDiff is ComputeCommitment, but this call's own
 // commitment-domain writes route directly into diff instead of through
 // whatever SetChangesetAccumulator installed. diff may be nil.
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithDiff(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), diff *kv.DomainDiff) (rootHash []byte, err error) {
-	return sdc.computeCommitment(ctx, tx, saveState, blockNum, txNum, logPrefix, onProgress, sdc.sharedDomains.AsPutDelWithDiff(tx, diff, sdc.CommitmentDomain()), nil, nil)
-}
-
-func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithDiffAndReader(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), diff *kv.DomainDiff, stateReader StateReader, decorate func(commitment.PatriciaContext) commitment.PatriciaContext) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithDiff(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), diff *kv.DomainDiff, stateReader StateReader, decorate func(commitment.PatriciaContext) commitment.PatriciaContext) (rootHash []byte, err error) {
 	return sdc.computeCommitment(ctx, tx, saveState, blockNum, txNum, logPrefix, onProgress, sdc.sharedDomains.AsPutDelWithDiff(tx, diff, sdc.CommitmentDomain()), stateReader, decorate)
 }
 

@@ -456,7 +456,7 @@ func TestCommitmentCalculatorDualFold(t *testing.T) {
 	singleRoTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(singleRoTx.Rollback)
-	singleRoot, err := single.GetCommitmentContext().ComputeCommitmentWithDiffAndReader(t.Context(), singleRoTx, false, 1, 1, "test", nil, nil, &asOfStateReader{sd: single, roTx: singleRoTx, commitmentDomain: kv.CommitmentDomain}, nil)
+	singleRoot, err := single.GetCommitmentContext().ComputeCommitmentWithDiff(t.Context(), singleRoTx, false, 1, 1, "test", nil, nil, &asOfStateReader{sd: single, roTx: singleRoTx, commitmentDomain: kv.CommitmentDomain}, nil)
 	require.NoError(t, err)
 	require.Equal(t, singleRoot, dual.canonicalRoot, "the hex arm must match the single-arm root")
 	stateBlob, _, ok := doms.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)

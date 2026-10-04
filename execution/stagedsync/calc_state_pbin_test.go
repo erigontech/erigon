@@ -17,7 +17,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -37,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 type calcPBinReader struct {
@@ -68,23 +68,7 @@ func calcFeedState(account commitment.PBinFeedAccount) eip8297.State {
 }
 
 type calcPBinTrieContext struct {
-	records map[string][]byte
-}
-
-func (c *calcPBinTrieContext) Branch(key []byte) ([]byte, kv.Step, error) {
-	return bytes.Clone(c.records[string(key)]), 0, nil
-}
-
-func (c *calcPBinTrieContext) PutBranch(key, data, prev []byte) error {
-	if !bytes.Equal(c.records[string(key)], prev) {
-		return fmt.Errorf("previous record mismatch for %x", key)
-	}
-	if len(data) == 0 {
-		delete(c.records, string(key))
-	} else {
-		c.records[string(key)] = bytes.Clone(data)
-	}
-	return nil
+	commitmenttest.MapBranchStore
 }
 
 func (*calcPBinTrieContext) Account([]byte) (*commitment.Update, error) {
@@ -139,7 +123,7 @@ func TestCalcStatePBinFeedUsesFinalAccountAndSlots(t *testing.T) {
 		eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{wantState}})),
 		eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{calcFeedState(got)}})),
 	)
-	trieContext := &calcPBinTrieContext{records: make(map[string][]byte)}
+	trieContext := &calcPBinTrieContext{MapBranchStore: commitmenttest.NewMapBranchStore()}
 	gotRoot, err := pbt.NewTrie(trieContext).ProcessFeed(feed)
 	require.NoError(t, err)
 	require.Equal(t, eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{wantState}})), gotRoot)
@@ -190,7 +174,7 @@ func TestCalcStatePBinFeedCreateOverStorageWipesStorage(t *testing.T) {
 		key := common.Hash{31: byte(i)}
 		initial.Slots = append(initial.Slots, commitment.PBinFeedSlot{Key: key[:], Value: []byte{1}})
 	}
-	ctx := &calcPBinTrieContext{records: make(map[string][]byte)}
+	ctx := &calcPBinTrieContext{MapBranchStore: commitmenttest.NewMapBranchStore()}
 	trie := pbt.NewTrie(ctx)
 	_, err := trie.ProcessFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{initial}})
 	require.NoError(t, err)
@@ -276,14 +260,14 @@ func TestPBinFeedSourcesMatchGeneratedCreateOverStorage(t *testing.T) {
 	require.NoError(t, err)
 
 	process := func(feed *commitment.PBinFeed) (common.Hash, map[string][]byte) {
-		ctx := &calcPBinTrieContext{records: make(map[string][]byte)}
+		ctx := &calcPBinTrieContext{MapBranchStore: commitmenttest.NewMapBranchStore()}
 		trie := pbt.NewTrie(ctx)
 		_, err := trie.ProcessFeed(initial)
 		require.NoError(t, err)
 		root, err := trie.ProcessFeed(feed)
 		require.NoError(t, err)
 		require.NoError(t, pbt.NewTrie(ctx).Verify())
-		return root, ctx.records
+		return root, ctx.Records
 	}
 
 	calcRoot, calcRecords := process(calcFeed)
@@ -434,7 +418,7 @@ func TestPBinFeedSourcesMatchReferenceAcrossBlocks(t *testing.T) {
 	}
 
 	process := func(feeds []*commitment.PBinFeed) (common.Hash, map[string][]byte) {
-		ctx := &calcPBinTrieContext{records: make(map[string][]byte)}
+		ctx := &calcPBinTrieContext{MapBranchStore: commitmenttest.NewMapBranchStore()}
 		trie := pbt.NewTrie(ctx)
 		var root common.Hash
 		for _, feed := range feeds {
@@ -443,7 +427,7 @@ func TestPBinFeedSourcesMatchReferenceAcrossBlocks(t *testing.T) {
 			require.NoError(t, err)
 		}
 		require.NoError(t, pbt.NewTrie(ctx).Verify())
-		return root, ctx.records
+		return root, ctx.Records
 	}
 
 	calcFeeds := make([]*commitment.PBinFeed, 0, len(values))

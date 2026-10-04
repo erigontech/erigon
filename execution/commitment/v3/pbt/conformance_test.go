@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"sort"
 	"strings"
@@ -90,10 +89,7 @@ func pbtConformanceHex(t *testing.T, value string) []byte {
 
 func pbtConformanceSlot(t *testing.T, value string) []byte {
 	t.Helper()
-	number, ok := new(big.Int).SetString(value, 10)
-	require.True(t, ok)
-	var slot [32]byte
-	number.FillBytes(slot[:])
+	slot := uint256.MustFromDecimal(value).Bytes32()
 	return slot[:]
 }
 

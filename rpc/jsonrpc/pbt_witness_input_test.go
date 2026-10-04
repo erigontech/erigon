@@ -28,13 +28,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	pbtengine "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func TestPBinWitnessInputExcludesOverlayReads(t *testing.T) {
@@ -218,7 +218,7 @@ func TestPBinWitnessInputNewAccountMatchesEngineRoot(t *testing.T) {
 		{Key: eip8297.TreeKeyAccount(sender[:], eip8297.CodeHashLeafKey), Value: emptyCodeHash[:]},
 	}
 	preContext := newPBinWitnessInputContext()
-	preRoot, err := pbtengine.NewTrie(preContext).Process(pbinWitnessInputEntriesToOps(entries))
+	preRoot, err := pbtengine.NewTrie(preContext).Process(pbinStatelessEntriesToOps(entries))
 	require.NoError(t, err)
 
 	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{sender: {Balance: *balance, CodeHash: accounts.EmptyCodeHash}}}
@@ -234,7 +234,7 @@ func TestPBinWitnessInputNewAccountMatchesEngineRoot(t *testing.T) {
 	require.NoError(t, err)
 
 	postContext := newPBinWitnessInputContext()
-	postContext.records = clonePBinWitnessInputRecords(preContext.records)
+	postContext.Records = clonePBinWitnessInputRecords(preContext.Records)
 	postBasic, err := eip8297.EncodeBasicData(0, &newAccount.Balance, 0)
 	require.NoError(t, err)
 	postOps := []pbtengine.Op{{Key: eip8297.TreeKeyAccount(receiver[:], eip8297.BasicDataLeafKey), Value: postBasic}, {Key: eip8297.TreeKeyAccount(receiver[:], eip8297.CodeHashLeafKey), Value: emptyCodeHash}}
@@ -272,13 +272,13 @@ func TestPBinWitnessInputIgnoresStaleDelegationCode(t *testing.T) {
 		{Key: eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), Value: preBasic[:]},
 		{Key: eip8297.TreeKeyAccount(address[:], eip8297.CodeHashLeafKey), Value: emptyCodeHash[:]},
 	}
-	preRoot, err := pbtengine.NewTrie(preContext).Process(pbinWitnessInputEntriesToOps(preEntries))
+	preRoot, err := pbtengine.NewTrie(preContext).Process(pbinStatelessEntriesToOps(preEntries))
 	require.NoError(t, err)
 	_, _, witnessRoot, err := pbtengine.NewTrie(preContext).Witness(context.Background(), preRoot, input.PBinDriverInput)
 	require.NoError(t, err)
 
 	postContext := newPBinWitnessInputContext()
-	postContext.records = clonePBinWitnessInputRecords(preContext.records)
+	postContext.Records = clonePBinWitnessInputRecords(preContext.Records)
 	postRoot, err := pbtengine.NewTrie(postContext).Process([]pbtengine.Op{
 		{Key: eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), Value: basic},
 	})
@@ -323,28 +323,11 @@ func TestPBinWitnessInputCodelessAccountFromEmptyStateIncludesCodeHash(t *testin
 }
 
 type pbinWitnessInputContext struct {
-	records map[string][]byte
+	commitmenttest.MapBranchStore
 }
 
 func newPBinWitnessInputContext() *pbinWitnessInputContext {
-	return &pbinWitnessInputContext{records: make(map[string][]byte)}
-}
-
-func (c *pbinWitnessInputContext) Branch(key []byte) ([]byte, kv.Step, error) {
-	return bytes.Clone(c.records[string(key)]), 0, nil
-}
-
-func (c *pbinWitnessInputContext) PutBranch(key, data, prev []byte) error {
-	old := c.records[string(key)]
-	if !bytes.Equal(old, prev) {
-		return fmt.Errorf("pbin witness input: previous record mismatch for %x", key)
-	}
-	if len(data) == 0 {
-		delete(c.records, string(key))
-	} else {
-		c.records[string(key)] = bytes.Clone(data)
-	}
-	return nil
+	return &pbinWitnessInputContext{MapBranchStore: commitmenttest.NewMapBranchStore()}
 }
 
 func (*pbinWitnessInputContext) Account([]byte) (*commitment.Update, error) {
@@ -353,16 +336,6 @@ func (*pbinWitnessInputContext) Account([]byte) (*commitment.Update, error) {
 
 func (*pbinWitnessInputContext) Storage([]byte) (*commitment.Update, error) {
 	return nil, fmt.Errorf("unexpected storage read")
-}
-
-func pbinWitnessInputEntriesToOps(entries []eip8297.Entry) []pbtengine.Op {
-	ops := make([]pbtengine.Op, len(entries))
-	for i, entry := range entries {
-		var value [eip8297.ValueLength]byte
-		copy(value[:], entry.Value)
-		ops[i] = pbtengine.Op{Key: entry.Key, Value: value}
-	}
-	return ops
 }
 
 func clonePBinWitnessInputRecords(records map[string][]byte) map[string][]byte {

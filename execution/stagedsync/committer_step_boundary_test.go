@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func nonceBalanceWrites(addr accounts.Address, nonce uint64, bal uint256.Int) *state.WriteSet {
@@ -207,7 +208,7 @@ func TestHandleMessage_StepBoundaryBinFeedUsesPendingState(t *testing.T) {
 	require.Len(t, feed.Accounts, 1, "step-boundary bin feed must include the pending account")
 	require.Equal(t, newCode.Bytes, feed.Accounts[0].Code, "step-boundary bin feed must include pending code")
 	want := eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{{Address: address[:], Nonce: 1, Balance: newBalance, Code: newCode.Bytes}}}))
-	got, err := pbt.NewTrie(&calcPBinTrieContext{records: make(map[string][]byte)}).ProcessFeed(feed)
+	got, err := pbt.NewTrie(&calcPBinTrieContext{MapBranchStore: commitmenttest.NewMapBranchStore()}).ProcessFeed(feed)
 	require.NoError(t, err)
 	require.Equal(t, want, got, "step-boundary bin root must include pending balance")
 }

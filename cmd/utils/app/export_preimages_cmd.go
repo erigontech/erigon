@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -172,7 +173,12 @@ func runExportWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawd
 		Block: pin.Block, BlockHash: pin.Header.Hash().Hex(), StateRoot: pin.Root.Hex(), Order: preimagesOrderKeccak256,
 		Accounts: stats.Accounts, Storage: stats.Slots, PreimageDigest: preimageDigest.Hex(),
 	}
-	if err := writeJSONAtomically(metaPath, ".preimages-meta-*.tmp", metadata); err != nil {
+	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	metadataJSON = append(metadataJSON, '\n')
+	if err := dir.WriteFileAtomic(metaPath, metadataJSON, 0o644); err != nil {
 		return err
 	}
 	completed = true

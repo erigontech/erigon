@@ -1486,7 +1486,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 		}
 	}
 
-	rh, err := sdc.ComputeCommitmentWithDiffAndReader(ctx, roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, nil, reader, decorate)
+	rh, err := sdc.ComputeCommitmentWithDiff(ctx, roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, nil, reader, decorate)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1629,7 +1629,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	} else if live != nil {
 		diff = &live.Diffs[commitmentDomain]
 	}
-	return sdc.ComputeCommitmentWithDiffAndReader(ctx, roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, diff, reader, decorate)
+	return sdc.ComputeCommitmentWithDiff(ctx, roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, diff, reader, decorate)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via

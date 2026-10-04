@@ -256,7 +256,7 @@ func TestVerifyPBTAcceptsCodeSizeConfiguredAboveDefault(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	outDir := filepath.Join(t.TempDir(), "export")
-	require.NoError(t, runExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
+	require.NoError(t, RunExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
 		if block == 0 {
 			return fixture.Tester.Genesis.HeaderNoCopy(), nil
 		}
@@ -325,7 +325,7 @@ func verifyPBTRealExportWithSharedCode(t *testing.T, code []byte) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	outDir := filepath.Join(t.TempDir(), "export")
-	require.NoError(t, runExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
+	require.NoError(t, RunExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
 		if block == 0 {
 			return fixture.Tester.Genesis.HeaderNoCopy(), nil
 		}

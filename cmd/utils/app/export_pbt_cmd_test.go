@@ -58,10 +58,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func runExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger) error {
-	return runExportPBTWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, nil)
-}
-
 func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
 	return runExportPBTWithTxNumReader(ctx, tx, rawdbv3.TxNums, headerAt, outDir, logger, beforeReadback)
 }
@@ -92,7 +88,7 @@ func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
 	var logs bytes.Buffer
 	logger := log.New()
 	logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
-	require.NoError(t, runExportPBT(t.Context(), tx, func(uint64) (*types.Header, error) {
+	require.NoError(t, RunExportPBT(t.Context(), tx, func(uint64) (*types.Header, error) {
 		return &types.Header{Root: root, Time: 10}, nil
 	}, outDir, logger))
 	require.Contains(t, logs.String(), `phase="snapshot readback" records=1`)
@@ -109,6 +105,9 @@ func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
 	require.Equal(t, root, snapshotMeta.Root)
 	metaBytes, err := os.ReadFile(filepath.Join(outDir, pbtMetaFileName))
 	require.NoError(t, err)
+	metaInfo, err := os.Stat(filepath.Join(outDir, pbtMetaFileName))
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o644), metaInfo.Mode().Perm())
 	var meta pbtExportMeta
 	require.NoError(t, json.Unmarshal(metaBytes, &meta))
 	require.Equal(t, root.Hex(), meta.PBTRoot)
@@ -158,7 +157,7 @@ func TestRunExportPBTRefusesChangedBinRecord(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, found)
 	require.NotEqual(t, root, binRoot)
-	err = runExportPBT(t.Context(), roTx, func(uint64) (*types.Header, error) {
+	err = RunExportPBT(t.Context(), roTx, func(uint64) (*types.Header, error) {
 		return &types.Header{Root: binRoot, Time: 10}, nil
 	}, filepath.Join(t.TempDir(), "export"), log.New())
 	require.Error(t, err, "a changed bin record must refuse export")
@@ -173,7 +172,7 @@ func TestExportPBTBinOnlyRootCrossCheck(t *testing.T) {
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	err = runExportPBT(t.Context(), tx, func(uint64) (*types.Header, error) {
+	err = RunExportPBT(t.Context(), tx, func(uint64) (*types.Header, error) {
 		return &types.Header{Root: storedRoot, Time: 10}, nil
 	}, filepath.Join(t.TempDir(), "export"), log.New())
 	require.Error(t, err, "a nonzero stored bin root with an empty latest state must refuse export")
@@ -202,7 +201,7 @@ func TestRunExportPBTDigestsAreStable(t *testing.T) {
 	paths := make([]string, 2)
 	for i := range paths {
 		paths[i] = filepath.Join(t.TempDir(), "export")
-		require.NoError(t, runExportPBT(t.Context(), tx, func(uint64) (*types.Header, error) {
+		require.NoError(t, RunExportPBT(t.Context(), tx, func(uint64) (*types.Header, error) {
 			return &types.Header{Root: root, Time: 10}, nil
 		}, paths[i], log.New()))
 	}
@@ -223,7 +222,7 @@ func TestRunExportPBTEmptyState(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	outDir := filepath.Join(t.TempDir(), "export")
-	require.NoError(t, runExportPBT(t.Context(), tx, func(uint64) (*types.Header, error) {
+	require.NoError(t, RunExportPBT(t.Context(), tx, func(uint64) (*types.Header, error) {
 		return &types.Header{Root: root, Time: 10}, nil
 	}, outDir, log.New()))
 	snapshotBytes, err := os.ReadFile(filepath.Join(outDir, pbtSnapshotFileName))
@@ -248,7 +247,7 @@ func TestRunExportPBTRealAcceptanceChain(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	outDir := filepath.Join(t.TempDir(), "export")
-	require.NoError(t, runExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
+	require.NoError(t, RunExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
 		if block == 0 {
 			return fixture.Tester.Genesis.HeaderNoCopy(), nil
 		}
@@ -269,7 +268,7 @@ func TestRunExportPBTUsesStoppedExecutionStage(t *testing.T) {
 	fullTx, err := full.Tester.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer fullTx.Rollback()
-	require.NoError(t, runExportPBT(t.Context(), fullTx, func(n uint64) (*types.Header, error) {
+	require.NoError(t, RunExportPBT(t.Context(), fullTx, func(n uint64) (*types.Header, error) {
 		return full.Chain.Headers[n-1], nil
 	}, fullDir, log.New()))
 
@@ -280,7 +279,7 @@ func TestRunExportPBTUsesStoppedExecutionStage(t *testing.T) {
 	partialTx, err := partial.Tester.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer partialTx.Rollback()
-	require.NoError(t, runExportPBT(t.Context(), partialTx, func(n uint64) (*types.Header, error) {
+	require.NoError(t, RunExportPBT(t.Context(), partialTx, func(n uint64) (*types.Header, error) {
 		return partial.Chain.Headers[n-1], nil
 	}, partialDir, log.New()))
 	fullMeta, err := os.ReadFile(filepath.Join(fullDir, pbtMetaFileName))

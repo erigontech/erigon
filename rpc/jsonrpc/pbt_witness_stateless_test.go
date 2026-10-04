@@ -140,7 +140,7 @@ func TestPBinWitnessStatelessReplaysWrites(t *testing.T) {
 	require.NoError(t, err)
 
 	post := newPBinWitnessInputContext()
-	post.records = clonePBinWitnessInputRecords(f.context.records)
+	post.Records = clonePBinWitnessInputRecords(f.context.Records)
 	basic, err := eip8297.EncodeBasicData(1, uint256.NewInt(17), 0)
 	require.NoError(t, err)
 	ops := []pbtengine.Op{
@@ -159,7 +159,7 @@ func TestPBinWitnessStatelessReplaysWithdrawal(t *testing.T) {
 		eip8297.TreeKeyAccount(f.address[:], eip8297.CodeHashLeafKey),
 	)
 	post := newPBinWitnessInputContext()
-	post.records = clonePBinWitnessInputRecords(f.context.records)
+	post.Records = clonePBinWitnessInputRecords(f.context.Records)
 	balance := uint256.NewInt(7 + 3*common.GWei)
 	basic, err := eip8297.EncodeBasicData(1, balance, 0)
 	require.NoError(t, err)
@@ -181,7 +181,7 @@ func TestPBinWitnessStatelessRejectsUnconsumedNode(t *testing.T) {
 	result.Keys = append(result.Keys, hexutil.Bytes{0xff})
 	result.State = append(result.State, hexutil.Bytes{0x01})
 	post := newPBinWitnessInputContext()
-	post.records = clonePBinWitnessInputRecords(f.context.records)
+	post.Records = clonePBinWitnessInputRecords(f.context.Records)
 	balance := uint256.NewInt(7 + 3*common.GWei)
 	basic, err := eip8297.EncodeBasicData(1, balance, 0)
 	require.NoError(t, err)
@@ -215,7 +215,7 @@ func TestPBinWitnessStatelessWithdrawalUsesBasicCodeSize(t *testing.T) {
 	postBasic, err := eip8297.EncodeBasicData(1, uint256.NewInt(7+3*common.GWei), uint64(len(code)))
 	require.NoError(t, err)
 	postContext := newPBinWitnessInputContext()
-	postContext.records = clonePBinWitnessInputRecords(ctx.records)
+	postContext.Records = clonePBinWitnessInputRecords(ctx.Records)
 	postRoot, err := pbtengine.NewTrie(postContext).Process([]pbtengine.Op{{Key: entries[0].Key, Value: postBasic}})
 	require.NoError(t, err)
 	block := types.NewBlock(&types.Header{Root: postRoot, Number: *uint256.NewInt(1), Difficulty: uint256.Int{}, GasLimit: 30_000_000, Time: 1, BaseFee: uint256.NewInt(7)}, nil, nil, nil, []*types.Withdrawal{{Index: 0, Validator: 0, Address: address, Amount: 3}}, nil)
@@ -278,7 +278,7 @@ func TestPBinWitnessStatelessClearsDelegationToEmptyCodeHash(t *testing.T) {
 	got, err := stateless.Finalize(context.Background())
 	require.NoError(t, err)
 	post := newPBinWitnessInputContext()
-	post.records = clonePBinWitnessInputRecords(ctx.records)
+	post.Records = clonePBinWitnessInputRecords(ctx.Records)
 	emptyCodeHash := eip8297.CodeHashValue(common.Hash{})
 	cache := new(eip8297.DigestCache)
 	want, err := pbtengine.NewTrie(post).Process([]pbtengine.Op{
@@ -313,7 +313,7 @@ func pbinStatelessChainConfig() *chain.Config {
 func TestPBinWitnessStatelessMissingBlobErrors(t *testing.T) {
 	f := newPBinStatelessFixture(t)
 	index := pbinStatelessNonRootIndex(f.result)
-	trimmed := cloneExecutionWitnessResult(f.result)
+	trimmed := pbtCorpusClone(f.result)
 	trimmed.Keys = append(trimmed.Keys[:index], trimmed.Keys[index+1:]...)
 	trimmed.State = append(trimmed.State[:index], trimmed.State[index+1:]...)
 	stateless, err := newPBinWitnessStateless(trimmed, f.root)
@@ -326,7 +326,7 @@ func TestPBinWitnessStatelessMissingBlobErrors(t *testing.T) {
 func TestPBinWitnessStatelessTamperedBlobErrors(t *testing.T) {
 	f := newPBinStatelessFixture(t)
 	index := pbinStatelessNonRootIndex(f.result)
-	tampered := cloneExecutionWitnessResult(f.result)
+	tampered := pbtCorpusClone(f.result)
 	tampered.State[index] = append(hexutil.Bytes(nil), tampered.State[index]...)
 	tampered.State[index][len(tampered.State[index])-1] ^= 1
 	stateless, err := newPBinWitnessStateless(tampered, f.root)
@@ -349,13 +349,13 @@ func TestPBinWitnessStatelessTamperedSystemBlobErrors(t *testing.T) {
 	f := newPBinStatelessFixture(t)
 	system := common.Address(params.SystemAddress.Value())
 	result, root := pbinSystemAddressWitness(t, f, system)
-	tampered := cloneExecutionWitnessResult(result)
+	tampered := pbtCorpusClone(result)
 	found := false
 	for index, path := range tampered.Keys {
 		if len(path) == 0 {
 			continue
 		}
-		candidate := cloneExecutionWitnessResult(result)
+		candidate := pbtCorpusClone(result)
 		candidate.State[index] = append(hexutil.Bytes(nil), candidate.State[index]...)
 		candidate.State[index][len(candidate.State[index])-1] ^= 1
 		stateless, err := newPBinWitnessStateless(candidate, root)
@@ -428,7 +428,7 @@ func TestPBinWitnessStatelessSystemContractsNeedProof(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, code)
 		for index := range result.Keys {
-			trimmed := cloneExecutionWitnessResult(result)
+			trimmed := pbtCorpusClone(result)
 			trimmed.Keys = append(trimmed.Keys[:index], trimmed.Keys[index+1:]...)
 			trimmed.State = append(trimmed.State[:index], trimmed.State[index+1:]...)
 			stateless, err = newPBinWitnessStateless(trimmed, root)
@@ -570,7 +570,7 @@ func TestPBinWitnessStatelessCreateOverStorageWipesStorage(t *testing.T) {
 	require.NoError(t, err)
 
 	post := newPBinWitnessInputContext()
-	post.records = clonePBinWitnessInputRecords(f.context.records)
+	post.Records = clonePBinWitnessInputRecords(f.context.Records)
 	cache := new(eip8297.DigestCache)
 	headerDrop := pbtengine.Drop(cache.AccountHeaderStem(f.address[:]))
 	storageDrop := pbtengine.Drop(cache.AccountStoragePrefix(f.address[:]))
@@ -592,7 +592,7 @@ func TestPBinWitnessStatelessDeleteAndRecreate(t *testing.T) {
 	require.NoError(t, err)
 
 	post := newPBinWitnessInputContext()
-	post.records = clonePBinWitnessInputRecords(f.context.records)
+	post.Records = clonePBinWitnessInputRecords(f.context.Records)
 	cache := new(eip8297.DigestCache)
 	ops := []pbtengine.Op{pbtengine.Drop(cache.AccountHeaderStem(f.address[:])), {Key: eip8297.TreeKeyAccount(f.address[:], eip8297.BasicDataLeafKey), Value: pbinStatelessAccountBasic(2)}, {Key: eip8297.TreeKeyAccount(f.address[:], eip8297.CodeHashLeafKey), Value: eip8297.CodeHashValue(common.Hash{})}, pbtengine.Drop(cache.AccountStoragePrefix(f.address[:]))}
 	want, err := pbtengine.NewTrie(post).Process(ops)
@@ -615,18 +615,6 @@ func pbinStatelessNonRootIndex(result *ExecutionWitnessResult) int {
 		}
 	}
 	panic("witness has no non-root node")
-}
-
-func cloneExecutionWitnessResult(result *ExecutionWitnessResult) *ExecutionWitnessResult {
-	clone := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(result.Keys)), State: make([]hexutil.Bytes, len(result.State)), Codes: make([]hexutil.Bytes, len(result.Codes))}
-	for i := range result.Keys {
-		clone.Keys[i] = append(hexutil.Bytes(nil), result.Keys[i]...)
-		clone.State[i] = append(hexutil.Bytes(nil), result.State[i]...)
-	}
-	for i := range result.Codes {
-		clone.Codes[i] = append(hexutil.Bytes(nil), result.Codes[i]...)
-	}
-	return clone
 }
 
 func pbinSystemAddressWitness(t *testing.T, f *pbinStatelessFixture, system common.Address) (*ExecutionWitnessResult, common.Hash) {

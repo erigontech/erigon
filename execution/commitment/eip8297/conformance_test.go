@@ -20,7 +20,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"os"
 	"slices"
 	"strconv"
@@ -176,10 +175,7 @@ func unhex(t *testing.T, value string) []byte {
 
 func slotBytes(t *testing.T, decimal string) []byte {
 	t.Helper()
-	number, ok := new(big.Int).SetString(decimal, 10)
-	require.True(t, ok, decimal)
-	var slot [32]byte
-	number.FillBytes(slot[:])
+	slot := uint256.MustFromDecimal(decimal).Bytes32()
 	return slot[:]
 }
 
