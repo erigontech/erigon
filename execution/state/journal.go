@@ -237,7 +237,11 @@ func (j *journal) fakeStorageChange(account accounts.Address, key accounts.Stora
 }
 
 func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash accounts.CodeHash, wasCommitted bool) {
-	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: &journalExtra{prevcode: prevcode, prevhash: prevhash}})
+	var extra *journalExtra // nil means the previous code was accounts.EmptyCode
+	if len(prevcode) != 0 || prevhash != accounts.EmptyCodeHash {
+		extra = &journalExtra{prevcode: prevcode, prevhash: prevhash}
+	}
+	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: extra})
 	j.dirties[account]++
 }
 
@@ -421,8 +425,10 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindCode:
-		prevcode := je.extra.prevcode
-		prevhash := je.extra.prevhash
+		prevcode, prevhash := []byte(nil), accounts.EmptyCodeHash
+		if je.extra != nil {
+			prevcode, prevhash = je.extra.prevcode, je.extra.prevhash
+		}
 		if so, ok := s.stateObjects[je.account]; ok {
 			so.setCode(accounts.Code{Hash: prevhash, Bytes: prevcode})
 		} else if s.versionMap == nil {

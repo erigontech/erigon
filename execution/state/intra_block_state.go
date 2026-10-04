@@ -21,6 +21,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -226,6 +227,8 @@ type IntraBlockState struct {
 	isAura bool
 
 	revisions revisions
+
+	lastCode accounts.Code // last code stored by SetCode
 }
 
 type sdProbeEntry struct {
@@ -1533,7 +1536,12 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	if err != nil {
 		return err
 	}
-	canonical := accounts.NewCode(code)
+	// Factories deploy the same bytes many times: reuse the last hash instead of re-hashing.
+	canonical := ibs.lastCode
+	if len(code) == 0 || !bytes.Equal(code, canonical.Bytes) {
+		canonical = accounts.NewCode(code)
+		ibs.lastCode = canonical
+	}
 	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
 	origHash := stateObject.original.CodeHash
