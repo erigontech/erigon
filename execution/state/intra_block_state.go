@@ -149,8 +149,7 @@ type IntraBlockState struct {
 	stateObjects      map[accounts.Address]*stateObject // used only if `noMaterialize == false`
 	stateObjectsDirty map[accounts.Address]struct{}
 
-	nilAccounts  map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
-	deployedCode accounts.Code                 // last code stored by SetDeployedCode
+	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
 
 	// The refund counter, also used by state transitioning.
 	refund uint64
@@ -228,6 +227,8 @@ type IntraBlockState struct {
 	isAura bool
 
 	revisions revisions
+
+	deployedCode accounts.Code // last code stored by SetDeployedCode
 }
 
 type sdProbeEntry struct {
