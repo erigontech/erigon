@@ -117,7 +117,7 @@ func testDelegationCodeHash() accounts.CodeHash {
 	return accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
 }
 
-func newTestPoolWithFundedSender(t testing.TB, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
 	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -685,12 +685,8 @@ func TestSetCodeAuthorizationAdmission(t *testing.T) {
 }
 
 func TestMultipleAuthorizations(t *testing.T) {
-	keyA, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	keyB, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	addrA := crypto.PubkeyToAddress(keyA.PublicKey)
-	addrB := crypto.PubkeyToAddress(keyB.PublicKey)
+	addrA := common.HexToAddress("0xa")
+	addrB := common.HexToAddress("0xb")
 	cases := []struct {
 		title          string
 		sender         common.Address
@@ -873,13 +869,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 			var txnSlot1 *TxnSlot
 			if c.authority != nil {
 				txnSlot1 = newTestSetCodeTxnSlot(c.senderNonce, 0, c.tipcap, c.feecap, 100000)
-				key := keyA
-				if *c.authority == addrB {
-					key = keyB
-				}
-				auth, err := types.SignAuthorization(key, pool.chainID, common.Address{1}, c.authNonce)
-				require.NoError(t, err)
-				txnSlot1.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
+				txnSlot1.AuthAndNonces = []AuthAndNonce{{*c.authority, c.authNonce}}
 			} else {
 				txnSlot1 = newTestTxnSlot(c.senderNonce, 0, c.tipcap, c.feecap, 100000)
 			}
