@@ -132,29 +132,10 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	return nil
 }
 
+// AggregateAttestation adds a verified attestation to the aggregation pool, which serves
+// both local aggregators and block production.
 func (c *CommitteeSubscribeMgmt) AggregateAttestation(att *solid.Attestation) error {
-	var (
-		committeeIndex = att.Data.CommitteeIndex
-		slot           = att.Data.Slot
-		clVersion      = c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
-	)
-	if clVersion.AfterOrEqual(clparams.ElectraVersion) {
-		index, err := att.GetCommitteeIndexFromBits()
-		if err != nil {
-			return err
-		}
-		committeeIndex = index
-	}
-
-	c.validatorSubsMutex.RLock()
-	defer c.validatorSubsMutex.RUnlock()
-	if sub, ok := c.validatorSubs[committeeIndex]; ok && sub.aggregate {
-		// aggregate attestation
-		if err := c.aggregationPool.AddAttestation(att); err != nil {
-			return err
-		}
-	}
-	return nil
+	return c.aggregationPool.AddAttestation(att)
 }
 
 func (c *CommitteeSubscribeMgmt) NeedToAggregate(att *solid.Attestation) bool {
