@@ -20,11 +20,11 @@
 package vm
 
 import (
-	"github.com/c2h5oh/datasize"
+	"encoding/binary"
+	"sync/atomic"
+
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -63,8 +63,15 @@ type Contract struct {
 	selfBalanceCached bool
 }
 
-// around 64MB cache in the worst case.
-var jumpDestCache = cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) }, cache.ModeEvictLRU)
+// jumpDestTable caches JUMPDEST analyses by code hash, direct-mapped: a hit is
+// one atomic load and writes nothing shared, so frames running the same code on
+// many goroutines do not contend.
+var jumpDestTable [1 << 14]atomic.Pointer[jumpDestEntry]
+
+type jumpDestEntry struct {
+	hash     accounts.CodeHash
+	analysis bitvec
+}
 
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {
@@ -90,25 +97,16 @@ func (c *Contract) validJumpdest(dest *uint256.Int) bool {
 
 // jumpdestAnalysis returns the cached JUMPDEST analysis of the code or computes it.
 func (c *Contract) jumpdestAnalysis() bitvec {
-	var codeHash common.Hash
-	isCodeHashZero := c.CodeHash.IsZero()
-	if !isCodeHashZero {
-		codeHash = c.CodeHash.Value()
+	if c.CodeHash.IsZero() {
+		return codeBitmap(c.Code)
 	}
-
-	if !isCodeHashZero {
-		if analysis, ok := jumpDestCache.Get(codeHash[:]); ok {
-			return analysis
-		}
+	h := c.CodeHash.Value()
+	slot := &jumpDestTable[binary.LittleEndian.Uint64(h[:8])&uint64(len(jumpDestTable)-1)]
+	if e := slot.Load(); e != nil && e.hash == c.CodeHash {
+		return e.analysis
 	}
-
 	analysis := codeBitmap(c.Code)
-
-	if !isCodeHashZero {
-		// content-addressed by codeHash and never unwound, so txNum is irrelevant
-		jumpDestCache.Put(codeHash[:], analysis, 0)
-	}
-
+	slot.Store(&jumpDestEntry{hash: c.CodeHash, analysis: analysis})
 	return analysis
 }
 
