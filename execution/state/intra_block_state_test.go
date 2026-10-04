@@ -1227,7 +1227,13 @@ func TestGetStateFollowsEveryChange(t *testing.T) {
 		require.Equal(t, []uint64{4, 20, 30}, []uint64{get(k1), get(k2), get(k3)}, "more slots than the cache holds")
 	}
 
+	// A slot read while the journal is empty, then changed and the journal reset to empty.
+	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, NewNoopWriter()))
 	require.Equal(t, uint64(4), get(k1))
+	set(k1, 5)
+	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, NewNoopWriter()))
+	require.Equal(t, uint64(5), get(k1), "a finalized tx")
+
 	require.NoError(t, ibs.SetStorage(addr, Storage{}))
 	require.Equal(t, uint64(0), get(k1), "a storage override")
 }
