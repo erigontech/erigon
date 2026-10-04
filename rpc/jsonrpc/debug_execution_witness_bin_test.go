@@ -188,7 +188,7 @@ func pbinWitnessFixtureWithGeneratorNConfig(t *testing.T, activation uint64, blo
 				case params.BeaconRootsAddress.Value():
 					code = pbinBeaconRootsCode
 				case params.HistoryStorageAddress.Value():
-					code = []byte{0}
+					code = sloadStub
 				}
 			}
 			require.NotEmpty(t, code)

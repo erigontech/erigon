@@ -779,6 +779,7 @@ var cmdCommitmentRebuild = &cobra.Command{
 
 func runCommitmentRebuild(cmd *cobra.Command, args []string, logger log.Logger, ctx context.Context) error {
 	_ = args
+	skipFilesDBGapCheck = statecfg.ExperimentalCommitmentV3
 	sourceDirs := datadir.Open(datadirCli)
 	target, err := resolveCommitmentRebuildTarget()
 	if err != nil {

@@ -91,6 +91,28 @@ func TestCommitmentRebuildRunResetOnExecutedHexBinDatadir(t *testing.T) {
 	require.Equal(t, fixture.state, state)
 }
 
+func TestCommitmentRebuildEnablesFilesGapSkipForV3(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	rawDB.Close()
+	previousDatadir, previousChaindata := datadirCli, chaindata
+	previousV3, previousSkip := statecfg.ExperimentalCommitmentV3, skipFilesDBGapCheck
+	t.Cleanup(func() {
+		datadirCli, chaindata = previousDatadir, previousChaindata
+		statecfg.ExperimentalCommitmentV3, skipFilesDBGapCheck = previousV3, previousSkip
+	})
+	datadirCli = dirs.DataDir
+	chaindata = dirs.Chaindata
+	statecfg.ExperimentalCommitmentV3 = true
+	skipFilesDBGapCheck = false
+
+	cmd := &cobra.Command{Use: "rebuild"}
+	cmd.SetContext(t.Context())
+	err := runCommitmentRebuild(cmd, nil, log.New(), cmd.Context())
+	require.Error(t, err)
+	require.True(t, skipFilesDBGapCheck)
+}
+
 func setExecutionProgress(t *testing.T, rawPath string, progress uint64) {
 	t.Helper()
 	db := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()

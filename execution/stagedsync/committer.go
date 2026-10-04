@@ -1602,7 +1602,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		}
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
-		return cc.doms.FlushPendingUpdatesLocked(cc.roTx)
+		return cc.doms.FlushPendingUpdatesLocked(roTx)
 	}(); err != nil {
 		return nil, err
 	}

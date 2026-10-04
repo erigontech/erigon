@@ -18,7 +18,6 @@ package trie
 
 import (
 	"bytes"
-	"os"
 
 	"github.com/holiman/uint256"
 
@@ -34,18 +33,13 @@ const (
 	NoItem StreamItem = iota
 	AccountStreamItem
 	StorageStreamItem
-	AHashStreamItem
-	SHashStreamItem
-	CutoffStreamItem
 )
 
 const (
-	AccountFieldNonceOnly     uint32 = 0x01
-	AccountFieldBalanceOnly   uint32 = 0x02
-	AccountFieldStorageOnly   uint32 = 0x04
-	AccountFieldCodeOnly      uint32 = 0x08
-	AccountFieldSSizeOnly     uint32 = 0x10
-	AccountFieldSetNotAccount uint32 = 0x00
+	AccountFieldNonceOnly   uint32 = 0x01
+	AccountFieldBalanceOnly uint32 = 0x02
+	AccountFieldStorageOnly uint32 = 0x04
+	AccountFieldCodeOnly    uint32 = 0x08
 )
 
 type GenStructStepAccountData struct {
@@ -71,8 +65,6 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 	var succStorage bytes.Buffer
 	var currStorage bytes.Buffer
 	var value bytes.Buffer
-	var hashBuf common.Hash
-	var hashBufStorage common.Hash
 	var hashRef []byte
 	var hashRefStorage []byte
 	var groups, hasTree, hasHash []uint16
@@ -104,8 +96,8 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 	}
 
 	retain := func(_ []byte) bool { return trace }
-	for newItemType, hex, aVal, aCode, hash, val := it.Next(); newItemType != NoItem; newItemType, hex, aVal, aCode, hash, val = it.Next() {
-		if newItemType == AccountStreamItem || newItemType == AHashStreamItem {
+	for newItemType, hex, aVal, aCode, _, val := it.Next(); newItemType != NoItem; newItemType, hex, aVal, aCode, _, val = it.Next() {
+		if newItemType == AccountStreamItem {
 			if succStorage.Len() > 0 {
 				currStorage.Reset()
 				currStorage.Write(succStorage.Bytes())
@@ -142,8 +134,7 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 				}
 			}
 			itemType = newItemType
-			switch itemType {
-			case AccountStreamItem:
+			if itemType == AccountStreamItem {
 				a := aVal
 				accData.Balance.Set(&a.Balance)
 				accData.Nonce = a.Nonce
@@ -170,9 +161,6 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 					}
 				}
 				hashRef = nil
-			case AHashStreamItem:
-				copy(hashBuf[:], hash)
-				hashRef = hashBuf[:]
 			}
 		} else {
 			currStorage.Reset()
@@ -191,14 +179,10 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 				}
 			}
 			sItemType = newItemType
-			switch sItemType {
-			case StorageStreamItem:
+			if sItemType == StorageStreamItem {
 				value.Reset()
 				value.Write(val)
 				hashRefStorage = nil
-			case SHashStreamItem:
-				copy(hashBufStorage[:], hash)
-				hashRefStorage = hashBufStorage[:]
 			}
 		}
 	}
@@ -231,12 +215,6 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 		_, _, _, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil, makeData(fieldSet, hashRef), groups, hasTree, hasHash, trace)
 		if err != nil {
 			return common.Hash{}, err
-		}
-	}
-	if trace {
-		f, err := os.Create("root.txt")
-		if err == nil {
-			defer f.Close()
 		}
 	}
 	if hb.hasRoot() {

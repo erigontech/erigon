@@ -2504,9 +2504,6 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 
 		// Apply the message - gasBailout must be false to properly deduct gas from sender
 		result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
-		if accessed, ok := stateless.(*pbinWitnessStateless); ok && ibs.AccessedAddr(params.SystemAddress) {
-			accessed.latchPBinSystemAddressRead()
-		}
 		if err != nil {
 			return fmt.Errorf("[statelessExec] failed to apply tx %d: %w", txIndex, err)
 		}

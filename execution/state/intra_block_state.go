@@ -828,22 +828,6 @@ func (ibs *IntraBlockState) GetCodeHash(addr accounts.Address) (accounts.CodeHas
 	return hash, err
 }
 
-func (ibs *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
-	// eip-7702
-	dd, ok, err := ibs.GetDelegatedDesignation(addr)
-
-	if ok {
-		ibs.callDelegationAccessHook(dd)
-		return ibs.GetCodeHash(dd)
-	}
-
-	if err != nil {
-		return accounts.NilCodeHash, err
-	}
-
-	return ibs.GetCodeHash(addr)
-}
-
 // ResolveCode returns the code a call to addr executes, following an EIP-7702 delegation. The
 // code hash comes from the same read as the code.
 func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, error) {

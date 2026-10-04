@@ -283,6 +283,22 @@ func TestPBinExecutionWitnessCancunSystemContracts(t *testing.T) {
 	}
 }
 
+func TestPBinWitnessCorpusIncludesHistoryStorageSlots(t *testing.T) {
+	_, m := pbtCorpusChain(t)
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	address := params.HistoryStorageAddress.Value()
+	for slot := range 11 {
+		slotKey := common.BigToHash(new(big.Int).SetUint64(uint64(slot)))
+		key := append(append([]byte(nil), address[:]...), slotKey[:]...)
+		value, _, err := tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Equal(t, rawdb.ReadHeaderByNumber(tx, uint64(slot)).Hash(), common.BytesToHash(value), "history storage slot %d", slot)
+	}
+}
+
 func TestPBinExecutionWitnessUserSystemAddressRead(t *testing.T) {
 	system := params.SystemAddress.Value()
 	runtime := append([]byte{0x73}, system[:]...)
