@@ -13,10 +13,10 @@ tasks:
     title: "Read the Glamsterdam fork epoch"
 
   - name: check_consensus_slot_range
-    title: "Wait until after the Glamsterdam fork"
+    title: "Wait for the Glamsterdam fork"
     timeout: 3m
     configVars:
-      minEpochNumber: ".tasks.specs.outputs.specs.GLOAS_FORK_EPOCH | tonumber + 1"
+      minEpochNumber: ".tasks.specs.outputs.specs.GLOAS_FORK_EPOCH | tonumber"
 
   - name: check_consensus_block_proposals
     title: "Wait for three new Caplin blocks with execution payloads"

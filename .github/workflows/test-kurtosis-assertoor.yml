@@ -646,6 +646,7 @@ jobs:
         if: env.UNCACHED_IMAGES != ''
         run: |
           for image in ${UNCACHED_IMAGES}; do
+            if docker image inspect "$image" >/dev/null 2>&1; then continue; fi
             for n in 1 2 3; do
               if docker pull "$image"; then continue 2; fi
               echo "docker pull $image failed (attempt $n of 3)"

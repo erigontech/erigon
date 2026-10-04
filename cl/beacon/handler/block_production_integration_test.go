@@ -110,6 +110,7 @@ func TestCaplinBlockProductionIntegration(t *testing.T) {
 			payloadHeader := cltypes.NewEth1Header(clparams.ElectraVersion)
 			payloadHeader.BlockHash = parent.Hash()
 			payloadHeader.BlockNumber = parent.NumberU64()
+			payloadHeader.GasLimit = parent.GasLimit()
 			payloadHeader.Time = parent.Time()
 			postState.SetLatestExecutionPayloadHeader(payloadHeader)
 			if tc.version.AfterOrEqual(clparams.FuluVersion) {
