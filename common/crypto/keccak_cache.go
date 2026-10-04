@@ -24,6 +24,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 )
 
 // keccakCacheMaxInput keeps a bucket at 128 bytes: tag 8 + length 1 + input 87 + hash 32.
@@ -52,7 +53,10 @@ var (
 // Keccak256Hash calc Keccak256. Short inputs are memoized in a direct-mapped table; a bucket
 // another goroutine holds is treated as a miss, so a lookup never waits.
 func Keccak256Hash(data []byte) common.Hash {
-	if len(data) == 0 || len(data) > keccakCacheMaxInput {
+	if len(data) == 0 {
+		return empty.CodeHash
+	}
+	if len(data) > keccakCacheMaxInput {
 		return keccak.Sum256(data)
 	}
 	key := maphash.Bytes(keccakCacheSeed, data)
