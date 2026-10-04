@@ -649,13 +649,18 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		committeeIndex = &zero
 	}
 
-	if ok {
-		// Set committee_index from the request parameter. The cached attestation data
-		// has CommitteeIndex=0 (shared across all committees for the same slot), but
-		// the VC expects it to match the requested committee_index.
+	// The cached attestation data has CommitteeIndex=0 (shared across all committees for the same slot), but the VC
+	// expects it to match the requested committee_index. In Gloas the field signals payload presence instead.
+	setIndex := func() {
 		if committeeIndex != nil {
 			attestationData.CommitteeIndex = *committeeIndex
 		}
+		if clversion.AfterOrEqual(clparams.GloasVersion) {
+			attestationData.CommitteeIndex = a.gloasAttestationIndex(*slot, attestationData.BeaconBlockRoot)
+		}
+	}
+	if ok {
+		setIndex()
 		return newBeaconResponse(attestationData), nil
 	}
 
@@ -680,11 +685,30 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		return nil, err
 	}
 
-	// Set committee_index from the request parameter for pre-Electra versions.
-	if committeeIndex != nil {
-		attestationData.CommitteeIndex = *committeeIndex
-	}
+	setIndex()
 	return newBeaconResponse(attestationData), nil
+}
+
+// gloasAttestationIndex returns attestation_data.index for Gloas: 0 when the attested block is from the attestation
+// slot, otherwise 1 if the head's chain has the block FULL and 0 if not.
+func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash) uint64 {
+	header, ok := a.forkchoiceStore.GetHeader(root)
+	if !ok || header.Slot == slot {
+		return 0
+	}
+	node, _, err := a.forkchoiceStore.GetHeadNode()
+	if err != nil {
+		return 0
+	}
+	// Attestation data is cached per slot, so the served root can be an ancestor of the head; take the payload status
+	// the head's chain gives it.
+	if node.Root != root {
+		node = a.forkchoiceStore.Ancestor(node.Root, header.Slot)
+	}
+	if node.Root != root || node.PayloadStatus != cltypes.PayloadStatusFull {
+		return 0
+	}
+	return 1
 }
 
 func (a *ApiHandler) GetEthV3ValidatorBlock(

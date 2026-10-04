@@ -4723,3 +4723,64 @@ func TestProcessProducedBlockConfiguredBidPreservesSelfBuildFallback(t *testing.
 		})
 	}
 }
+
+type cachedAttestationDataProducer struct {
+	data solid.AttestationData
+}
+
+func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
+	return p.data, nil
+}
+
+func (p cachedAttestationDataProducer) CachedAttestationData(uint64) (solid.AttestationData, bool, error) {
+	return p.data, true, nil
+}
+
+// In Gloas, attestation_data.index signals whether the attested block's payload is in the canonical chain: always 0
+// for a block of the attestation slot, otherwise 1 if the head's chain has the block FULL and 0 if EMPTY.
+func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
+	const attestationSlot = uint64(10)
+	root := common.HexToHash("0xabcd")
+	for _, tt := range []struct {
+		name      string
+		blockSlot uint64
+		status    cltypes.PayloadStatus
+		childHead bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
+		wantIndex string
+	}{
+		{name: "older FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, wantIndex: "1"},
+		{name: "older EMPTY head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, wantIndex: "0"},
+		{name: "block of the attestation slot", blockSlot: attestationSlot, status: cltypes.PayloadStatusFull, wantIndex: "0"},
+		{name: "FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, childHead: true, wantIndex: "1"},
+		{name: "EMPTY in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, childHead: true, wantIndex: "0"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			cfg := handler.beaconChainCfg
+			cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch, cfg.DenebForkEpoch, cfg.ElectraForkEpoch, cfg.FuluForkEpoch, cfg.GloasForkEpoch = 0, 0, 0, 0, 0, 0, 0
+			cfg.InitializeForkSchedule()
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
+			handler.ethClock = clock
+			handler.attestationProducer = cachedAttestationDataProducer{data: solid.AttestationData{Slot: attestationSlot, BeaconBlockRoot: root}}
+			fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: tt.blockSlot}
+			fcu.HeadVal = root
+			fcu.HeadSlotVal = tt.blockSlot
+			fcu.HeadPayloadStatusVal = tt.status
+			if tt.childHead {
+				fcu.HeadVal = common.HexToHash("0xbeef")
+				fcu.HeadSlotVal = tt.blockSlot + 1
+				fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{tt.blockSlot: {Root: root, PayloadStatus: tt.status}}
+			}
+
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+				fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), `"index":"`+tt.wantIndex+`"`)
+		})
+	}
+}
