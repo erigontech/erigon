@@ -1205,7 +1205,7 @@ func TestRevertSetCodeOnCodelessAccount(t *testing.T) {
 	require.Equal(t, accounts.EmptyCodeHash, codeHash)
 }
 
-func TestSetDeployedCodeHashesEachDistinctCode(t *testing.T) {
+func TestSetCodeHashesEachDistinctCode(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(NewNoopReader())
@@ -1213,7 +1213,7 @@ func TestSetDeployedCodeHashesEachDistinctCode(t *testing.T) {
 	codeB := []byte{0x60, 0x02, 0x60, 0x00, 0xf3}
 	for i, code := range [][]byte{codeA, codeA, codeB, codeA} {
 		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
-		require.NoError(t, ibs.SetDeployedCode(addr, code, tracing.CodeChangeContractCreation))
+		require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeContractCreation))
 
 		got, err := ibs.GetCode(addr)
 		require.NoError(t, err)
