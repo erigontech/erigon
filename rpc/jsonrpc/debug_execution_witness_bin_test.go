@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/commitment"
 	pbtengine "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -188,7 +189,7 @@ func pbinWitnessFixtureWithGeneratorNConfig(t *testing.T, activation uint64, blo
 				case params.BeaconRootsAddress.Value():
 					code = pbinBeaconRootsCode
 				case params.HistoryStorageAddress.Value():
-					code = sloadStub
+					code = chainspec.DeveloperGenesisBlock().Alloc[params.HistoryStorageAddress.Value()].Code
 				}
 			}
 			require.NotEmpty(t, code)

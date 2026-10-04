@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	eipWitness "github.com/erigontech/erigon/execution/commitment/eip8297/witness"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -463,8 +462,4 @@ func (s *pbinWitnessStateless) codeSize(addr common.Address) (uint64, error) {
 		return 0, fmt.Errorf("pbin witness: missing basic data for account %x", addr)
 	}
 	return uint64(binary.BigEndian.Uint32(value[eip8297.BasicDataCodeSizeOffset:])), nil
-}
-
-func isPBinSystemAddress(addr common.Address) bool {
-	return addr == common.Address(params.SystemAddress.Value())
 }

@@ -74,16 +74,10 @@ parent pointer, and checks the root against the pre-state anchor. `replayBlockOv
 that tree, the supplied code blobs, and the in-block overlays. It applies the block's writes through the same PBT
 driver and compares the resulting root with the post-state anchor.
 
-The verifier suppresses the missing-node error only for the synthetic system-call touch of `SYSTEM_ADDRESS`. The scope
-covers system calls from `Initialize`, its `FinalizeTx`, `Finalize`, and `CommitBlock`, but resolver errors are latched
-throughout those scopes except for that synthetic touch. A system contract whose own code reads state from
-`SYSTEM_ADDRESS` is not supported: the read counts as the synthetic touch, so its proof is neither required nor
-supplied. The canonical EIP-4788, EIP-2935, EIP-7002, and EIP-7251 contracts never read it. A user transaction access
-to `SYSTEM_ADDRESS` is retained when
-the per-transaction access set records it, or when `ResolveCode` or `ResolveCodeHash` follows a delegation designator
-to it. Loading a designator with `EXTCODE*` does not follow it, and an access-list entry alone is not enough.
-Both cases need the basic-data proof when the system call has already warmed the account. Genuine reads of system
-contracts need their proofs. PBT replay also compares the receipt root after
+System-call reads are recorded like other pre-state reads, including reads of `SYSTEM_ADDRESS`. A user transaction
+access to `SYSTEM_ADDRESS` is retained when the per-transaction access set records it. Loading a delegation designator
+with `EXTCODE*` does not follow it, and an access-list entry alone is not enough. Both cases need the basic-data proof
+when the account has been read. Genuine reads of system contracts need their proofs. PBT replay also compares the receipt root after
 Byzantium, gas used, and blob gas used with the block header. Contract creation over an
 existing account with storage wipes that storage; creation of a previously absent account does not walk an unproved
 storage subtree. An account without `BASIC_DATA` is considered present only after its code-hash or delegation leaf is

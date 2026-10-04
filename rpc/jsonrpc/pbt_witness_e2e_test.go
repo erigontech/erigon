@@ -283,6 +283,23 @@ func TestPBinExecutionWitnessCancunSystemContracts(t *testing.T) {
 	}
 }
 
+func TestPBinExecutionWitnessSystemCallReadsSystemAddress(t *testing.T) {
+	system := params.SystemAddress.Value()
+	beaconCode := append([]byte{0x73}, system[:]...)
+	beaconCode = append(beaconCode, 0x31, 0x50, 0x00)
+	alloc := types.GenesisAlloc{
+		system:                            {Balance: big.NewInt(5)},
+		params.BeaconRootsAddress.Value(): {Nonce: 1, Code: beaconCode},
+	}
+	api, m := pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 1, nil, func(int, *blockgen.BlockGen, func(common.Address, *uint256.Int, []byte), func(*uint256.Int, []byte), func(types.Transaction), func(common.Address, *uint256.Int, []byte)) {
+	}, alloc)
+	repairPBinPreForkShadows(t, m, 1000)
+	pbt := "pbt"
+	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(1)), nil, &pbt)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.State)
+}
+
 func TestPBinWitnessCorpusIncludesHistoryStorageSlots(t *testing.T) {
 	_, m := pbtCorpusChain(t)
 	tx, err := m.DB.BeginTemporalRo(t.Context())

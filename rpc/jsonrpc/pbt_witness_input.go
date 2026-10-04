@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	eipWitness "github.com/erigontech/erigon/execution/commitment/eip8297/witness"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -39,23 +38,18 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 	result := pbinWitnessInput{}
 	readKeys := make(map[string][]byte)
 	for address, source := range rs.accountReadSources {
-		if pbinReadNeedsProof(address, source) {
+		if pbinReadNeedsProof(source) {
 			key := eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey)
 			readKeys[string(key)] = key
 		}
 	}
 	for address, keys := range rs.storageReadSources {
 		for slot, source := range keys {
-			if pbinReadNeedsProof(address, source) {
+			if pbinReadNeedsProof(source) {
 				key := eip8297.TreeKeyStorage(address[:], slot[:])
 				readKeys[string(key)] = key
 			}
 		}
-	}
-	systemAddress := common.Address(params.SystemAddress.Value())
-	if rs.pbtSystemAddrTouchedInTx && rs.accountReadSources[systemAddress]&recordingReadSystemCall != 0 {
-		key := eip8297.TreeKeyAccount(systemAddress[:], eip8297.BasicDataLeafKey)
-		readKeys[string(key)] = key
 	}
 	for address, code := range rs.PreStateCode {
 		if eip8297.IsDelegation(code) {
@@ -155,15 +149,8 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 	return result, nil
 }
 
-func pbinReadNeedsProof(address common.Address, source recordingReadSource) bool {
-	if source&recordingReadPreState == 0 {
-		return false
-	}
-	if source&recordingReadUser != 0 {
-		return true
-	}
-	systemAddress := common.Address(params.SystemAddress.Value())
-	return source&recordingReadSystemCall != 0 && address != systemAddress
+func pbinReadNeedsProof(source recordingReadSource) bool {
+	return source&recordingReadPreState != 0
 }
 
 func pbinReadAccountCode(inner state.StateReader, account *accounts.Account, address accounts.Address) ([]byte, error) {

@@ -64,12 +64,11 @@ func TestPBinWitnessInputExcludesOverlayReads(t *testing.T) {
 	require.NotContains(t, got.Reads, wantKey, "overlay read must not become a pre-state load")
 }
 
-func TestPBinWitnessInputExcludesSyntheticSystemReads(t *testing.T) {
+func TestPBinWitnessInputKeepsSystemAddressSystemCallReads(t *testing.T) {
 	address := params.SystemAddress.Value()
 	slot := common.HexToHash("0x80")
 	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Nonce: 1}}}
 	rs := NewRecordingState(inner)
-	rs.systemCallScope = true
 	_, err := rs.ReadAccountData(accounts.InternAddress(address))
 	require.NoError(t, err)
 	_, _, err = rs.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(slot))
@@ -77,7 +76,8 @@ func TestPBinWitnessInputExcludesSyntheticSystemReads(t *testing.T) {
 
 	got, err := buildPBinWitnessInput(rs)
 	require.NoError(t, err)
-	require.Empty(t, got.Reads, "synthetic system reads must not enter the pbt input")
+	require.Contains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey))
+	require.Contains(t, got.Reads, eip8297.TreeKeyStorage(address[:], slot[:]))
 }
 
 func TestPBinWitnessInputKeepsSystemContractReads(t *testing.T) {
@@ -85,7 +85,6 @@ func TestPBinWitnessInputKeepsSystemContractReads(t *testing.T) {
 	slot := common.HexToHash("0x80")
 	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Nonce: 1}}}
 	rs := NewRecordingState(inner)
-	rs.systemCallScope = true
 	_, err := rs.ReadAccountData(accounts.InternAddress(address))
 	require.NoError(t, err)
 	_, _, err = rs.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(slot))
@@ -97,15 +96,12 @@ func TestPBinWitnessInputKeepsSystemContractReads(t *testing.T) {
 	require.Contains(t, got.Reads, eip8297.TreeKeyStorage(address[:], slot[:]), "system contract storage reads must enter the pbt input")
 }
 
-func TestPBinWitnessInputKeepsUserSystemAddressReads(t *testing.T) {
+func TestPBinWitnessInputKeepsSystemAddressReads(t *testing.T) {
 	address := params.SystemAddress.Value()
 	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Balance: *uint256.NewInt(5)}}}
 	rs := NewRecordingState(inner)
-	rs.systemCallScope = true
 	_, err := rs.ReadAccountData(accounts.InternAddress(address))
 	require.NoError(t, err)
-	rs.systemCallScope = false
-	rs.pbtSystemAddrTouchedInTx = true
 
 	got, err := buildPBinWitnessInput(rs)
 	require.NoError(t, err)
@@ -116,27 +112,24 @@ func TestPBinWitnessInputExcludesUnlatchedSystemAddressReads(t *testing.T) {
 	address := params.SystemAddress.Value()
 	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Balance: *uint256.NewInt(5)}}}
 	rs := NewRecordingState(inner)
-	rs.pbtSystemAddrTouchedInTx = true
 
 	got, err := buildPBinWitnessInput(rs)
 	require.NoError(t, err)
 	require.NotContains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), "an unlatchable system-address read must not enter the pbt input")
 }
 
-func TestPBinWitnessInputExcludesDesignatorOnlySystemTarget(t *testing.T) {
+func TestPBinWitnessInputKeepsSystemAddressReadWithDesignator(t *testing.T) {
 	address := params.SystemAddress.Value()
 	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Balance: *uint256.NewInt(5)}}}
 	rs := NewRecordingState(inner)
-	rs.systemCallScope = true
 	_, err := rs.ReadAccountData(accounts.InternAddress(address))
 	require.NoError(t, err)
-	rs.systemCallScope = false
 	designator := append([]byte{0xef, 0x01, 0x00}, address[:]...)
 	rs.OnCodeAccess(accounts.InternAddress(common.Address{1}), designator)
 
 	got, err := buildPBinWitnessInput(rs)
 	require.NoError(t, err)
-	require.NotContains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), "a designator load without delegation must not enter the pbt input")
+	require.Contains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey))
 }
 
 func TestPBinWitnessInputKeepsRevertedCallReads(t *testing.T) {

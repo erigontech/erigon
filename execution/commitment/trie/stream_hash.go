@@ -65,15 +65,12 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 	var succStorage bytes.Buffer
 	var currStorage bytes.Buffer
 	var value bytes.Buffer
-	var hashRef []byte
-	var hashRefStorage []byte
 	var groups, hasTree, hasHash []uint16
 	var aRoot common.Hash
 	aEmptyRoot := true
 	var isAccount bool
 	var fieldSet uint32
 	var itemType, sItemType StreamItem
-	var hashData GenStructStepHashData
 	var leafData GenStructStepLeafData
 	var accData GenStructStepAccountData
 
@@ -81,18 +78,13 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 	curr.Reset()
 	currStorage.Reset()
 
-	makeData := func(fieldSet uint32, hashRef []byte) GenStructStepData {
-		switch {
-		case hashRef != nil:
-			copy(hashData.Hash[:], hashRef)
-			return &hashData
-		case !isAccount:
+	makeData := func(fieldSet uint32) GenStructStepData {
+		if !isAccount {
 			leafData.Value = rlp.RlpSerializableBytes(value.Bytes())
 			return &leafData
-		default:
-			accData.FieldSet = fieldSet
-			return &accData
 		}
+		accData.FieldSet = fieldSet
+		return &accData
 	}
 
 	retain := func(_ []byte) bool { return trace }
@@ -105,7 +97,7 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 				if currStorage.Len() > 0 {
 					isAccount = false
 					var err error
-					groups, hasTree, hasHash, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil, makeData(0, hashRefStorage), groups, hasTree, hasHash, trace)
+					groups, hasTree, hasHash, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil, makeData(0), groups, hasTree, hasHash, trace)
 					if err != nil {
 						return common.Hash{}, err
 					}
@@ -128,7 +120,7 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 			if curr.Len() > 0 {
 				isAccount = true
 				var err error
-				groups, hasTree, hasHash, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil, makeData(fieldSet, hashRef), groups, hasTree, hasHash, trace)
+				groups, hasTree, hasHash, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil, makeData(fieldSet), groups, hasTree, hasHash, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -160,7 +152,6 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 						return common.Hash{}, err
 					}
 				}
-				hashRef = nil
 			}
 		} else {
 			currStorage.Reset()
@@ -173,7 +164,7 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 			if currStorage.Len() > 0 {
 				isAccount = false
 				var err error
-				groups, hasTree, hasHash, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil, makeData(0, hashRefStorage), groups, hasTree, hasHash, trace)
+				groups, hasTree, hasHash, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil, makeData(0), groups, hasTree, hasHash, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -182,7 +173,6 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 			if sItemType == StorageStreamItem {
 				value.Reset()
 				value.Write(val)
-				hashRefStorage = nil
 			}
 		}
 	}
@@ -193,7 +183,7 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 		if currStorage.Len() > 0 {
 			isAccount = false
 			var err error
-			_, _, _, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil, makeData(0, hashRefStorage), groups, hasTree, hasHash, trace)
+			_, _, _, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil, makeData(0), groups, hasTree, hasHash, trace)
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -212,7 +202,7 @@ func streamHash(it HashStreamIterator, storagePrefixLen int, hb *HashBuilder, tr
 	if curr.Len() > 0 {
 		isAccount = true
 		var err error
-		_, _, _, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil, makeData(fieldSet, hashRef), groups, hasTree, hasHash, trace)
+		_, _, _, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil, makeData(fieldSet), groups, hasTree, hasHash, trace)
 		if err != nil {
 			return common.Hash{}, err
 		}

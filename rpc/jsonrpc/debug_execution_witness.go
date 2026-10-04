@@ -47,8 +47,6 @@ type recordingReadSource uint8
 const (
 	recordingReadPreState recordingReadSource = 1 << iota
 	recordingReadOverlay
-	recordingReadSystemCall
-	recordingReadUser
 )
 
 // RecordingState combines a StateReader and StateWriter with an in-memory overlay.
@@ -99,9 +97,7 @@ type RecordingState struct {
 	// The system address is touched as msg.sender on every block's system calls;
 	// that alone is not a witness access. A real opcode access during a user tx
 	// (seen via the per-tx access set) sets this so it is kept (EIP-7928).
-	systemAddrTouchedInTx    bool
-	pbtSystemAddrTouchedInTx bool
-	systemCallScope          bool
+	systemAddrTouchedInTx bool
 }
 
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
@@ -136,8 +132,6 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 // address via an opcode, so it is kept in the witness even without a state change.
 func (s *RecordingState) MarkSystemAddrTouchedInTx() { s.systemAddrTouchedInTx = true }
 
-func (s *RecordingState) setSystemCallScope(active bool) { s.systemCallScope = active }
-
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
 	if len(addrs) == 0 {
 		return
@@ -157,19 +151,11 @@ func (s *RecordingState) tracing(addr common.Address) bool {
 	return ok
 }
 
-func (s *RecordingState) readSource() recordingReadSource {
-	if s.systemCallScope {
-		return recordingReadSystemCall
-	}
-	return recordingReadUser
-}
-
 func (s *RecordingState) recordAccountRead(addr common.Address, source recordingReadSource) {
-	s.accountReadSources[addr] |= source | s.readSource()
+	s.accountReadSources[addr] |= source
 }
 
 func (s *RecordingState) recordStorageRead(addr common.Address, key common.Hash, source recordingReadSource) {
-	source |= s.readSource()
 	if s.storageReadSources[addr] == nil {
 		s.storageReadSources[addr] = make(map[common.Hash]recordingReadSource)
 	}
@@ -561,12 +547,6 @@ func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
 	}
 }
 
-func (s *RecordingState) OnDelegationTarget(address accounts.Address) {
-	if !s.systemCallScope && isPBinSystemAddress(address.Value()) {
-		s.pbtSystemAddrTouchedInTx = true
-	}
-}
-
 // GetAccessedCode returns all code seen during execution (overlay + inner reads)
 func (s *RecordingState) GetAccessedCode() map[common.Address][]byte {
 	result := make(map[common.Address][]byte, len(s.AccessedCode))
@@ -784,14 +764,12 @@ func (api *BaseAPI) buildAccessedState(
 	}
 	chainReader := consensuschain.NewReader(chainConfig, tx, api._blockReader, log.Root())
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return withSystemCallScopeResult(recordingState, func() ([]byte, error) {
-			return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
-		})
+		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, fullEngine, constCall, vm.Config{})
 	}
 	if err = fullEngine.Initialize(chainConfig, chainReader, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize block: %w", err)
 	}
-	if err = withSystemCallScope(recordingState, func() error { return ibs.FinalizeTx(blockRules, recordingState) }); err != nil {
+	if err = ibs.FinalizeTx(blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to finalize engine.Initialize tx: %w", err)
 	}
 
@@ -813,7 +791,6 @@ func (api *BaseAPI) buildAccessedState(
 		// witness; the per-tx access set captures this even on state-cache hits.
 		if ibs.AccessedAddr(params.SystemAddress) {
 			recordingState.MarkSystemAddrTouchedInTx()
-			recordingState.pbtSystemAddrTouchedInTx = true
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
@@ -825,9 +802,7 @@ func (api *BaseAPI) buildAccessedState(
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return withSystemCallScopeResult(recordingState, func() ([]byte, error) {
-			return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
-		})
+		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, fullEngine, false /* constCall */, vm.Config{})
 	}
 
 	// Collect logs accumulated during transaction execution into a synthetic receipt
@@ -841,7 +816,7 @@ func (api *BaseAPI) buildAccessedState(
 		return nil, nil, fmt.Errorf("failed to finalize block: %w", err)
 	}
 
-	if err = withSystemCallScope(recordingState, func() error { return ibs.CommitBlock(blockRules, recordingState) }); err != nil {
+	if err = ibs.CommitBlock(blockRules, recordingState); err != nil {
 		return nil, nil, fmt.Errorf("failed to commit block: %w", err)
 	}
 
@@ -2433,30 +2408,6 @@ type statelessWitnessState interface {
 	state.StateWriter
 }
 
-type systemCallScoped interface {
-	setSystemCallScope(bool)
-}
-
-func withSystemCallScope(stateless any, call func() error) error {
-	scoped, ok := stateless.(systemCallScoped)
-	if !ok {
-		return call()
-	}
-	scoped.setSystemCallScope(true)
-	defer scoped.setSystemCallScope(false)
-	return call()
-}
-
-func withSystemCallScopeResult[T any](stateless any, call func() (T, error)) (T, error) {
-	var result T
-	err := withSystemCallScope(stateless, func() error {
-		var err error
-		result, err = call()
-		return err
-	})
-	return result, err
-}
-
 // replayBlockOverWitness drives the block through the EVM against a witness-backed
 // reader/writer. It stops short of the post-state root, which each variant computes
 // its own way.
@@ -2476,14 +2427,12 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 
 	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return withSystemCallScopeResult(stateless, func() ([]byte, error) {
-			return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
-		})
+		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
 	}
 	if err := engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return fmt.Errorf("verification: failed to initialize block: %w", err)
 	}
-	if err := withSystemCallScope(stateless, func() error { return ibs.FinalizeTx(blockRules, stateless) }); err != nil {
+	if err := ibs.FinalizeTx(blockRules, stateless); err != nil {
 		return fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
 	}
 
@@ -2520,9 +2469,7 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return withSystemCallScopeResult(stateless, func() ([]byte, error) {
-			return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
-		})
+		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
 	}
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.
@@ -2536,7 +2483,7 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 		return fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	if err := withSystemCallScope(stateless, func() error { return ibs.CommitBlock(blockRules, stateless) }); err != nil {
+	if err := ibs.CommitBlock(blockRules, stateless); err != nil {
 		return fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
 	}
 	if _, ok := stateless.(*pbinWitnessStateless); ok {
