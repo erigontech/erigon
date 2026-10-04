@@ -192,12 +192,17 @@ type BaseAPI struct {
 // heap, so this holds ~1600 of them, about 5 hours of chain.
 var BlockCacheBytes = dbg.EnvDataSize("RPC_BLOCK_CACHE", 512*datasize.MB)
 
+// HeaderCacheBytes bounds the decoded headers the RPC layer keeps for header-only lookups. A
+// header costs ~1KB of heap, so this holds ~1000 of them.
+var HeaderCacheBytes = dbg.EnvDataSize("RPC_HEADER_CACHE", 1*datasize.MB)
+
 // blockHeapSize approximates a decoded block's heap: its encoding plus the header and one
 // transaction struct per transaction, which hold inline integers and hash and sender caches.
 func blockHeapSize(b *types.Block) int64 {
 	return int64(b.EncodingSize()) + int64(unsafe.Sizeof(types.Header{})) + int64(len(b.Transactions()))*int64(unsafe.Sizeof(types.DynamicFeeTransaction{}))
 }
 
+// headerHeapSize approximates a decoded header's heap: its encoding plus the struct.
 func headerHeapSize(h *types.Header) int64 {
 	return int64(h.EncodingSize()) + int64(unsafe.Sizeof(types.Header{}))
 }
@@ -207,6 +212,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		conf = &rpccfg.BaseApiConfig{}
 	}
 	blocksLRU := cache.NewHashByteLRU(BlockCacheBytes, blockHeapSize)
+	headersLRU := cache.NewHashByteLRU(HeaderCacheBytes, headerHeapSize)
 
 	evmCallTimeout := conf.EvmCallTimeout
 	if evmCallTimeout == 0 {
@@ -217,7 +223,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		filters:           f,
 		stateCache:        stateCache,
 		blocksLRU:         blocksLRU,
-		headersLRU:        cache.NewHashByteLRU(1*datasize.MB, headerHeapSize),
+		headersLRU:        headersLRU,
 		_blockReader:      blockReader,
 		_txnReader:        blockReader,
 		_txNumReader:      blockReader.TxnumReader(),
@@ -383,15 +389,21 @@ func (api *BaseAPI) headerByHashAndNumber(ctx context.Context, tx kv.Getter, has
 		}
 	}
 	if api.headersLRU != nil {
-		if header, ok := api.headersLRU.Get(hash); ok {
+		if header, ok := api.headersLRU.Get(hash); ok && header != nil {
 			return header, nil
 		}
 	}
 	header, err := api._blockReader.Header(ctx, tx, hash, number)
-	if err == nil && header != nil && api.headersLRU != nil {
+	if err != nil {
+		return nil, err
+	}
+	if header == nil { // don't save nil's to cache
+		return nil, nil
+	}
+	if api.headersLRU != nil {
 		api.headersLRU.Add(hash, header)
 	}
-	return header, err
+	return header, nil
 }
 
 func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, number uint64) (*types.Header, error) {
