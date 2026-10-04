@@ -57,8 +57,7 @@ func TestValidatePBTAttachFilesRequiresBothCommitmentDomains(t *testing.T) {
 }
 
 func TestValidatePBTAttachLeafStampsRejectsAfterConversion(t *testing.T) {
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previousSuite)) })
+	commitmentflags.Restore(t)
 	require.NoError(t, eip8297.SetHashSuite(commitment.PBinHashBlake3))
 	value := make([]byte, 32)
 	value[31] = 1
@@ -356,6 +355,7 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		require.ErrorContains(t, err, "commitment")
 	})
 	t.Run("node behind", func(t *testing.T) {
+		commitmentflags.Restore(t)
 		node, published := newPBTAttachFileTrees(t, true)
 		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 7)
 		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 7)

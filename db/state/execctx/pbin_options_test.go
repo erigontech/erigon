@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 // Mutates a process-global flag, so no test using it may run in parallel.
@@ -337,16 +338,8 @@ func TestSharedDomainsDualDefaultUsesV3HexArm(t *testing.T) {
 }
 
 func TestHexBinDatadirWithoutV3FlagUsesV3HexArm(t *testing.T) {
-	originalBin := statecfg.ExperimentalBinCommitment
-	originalHexBin := statecfg.ExperimentalHexBinCommitment
-	originalV3 := statecfg.ExperimentalCommitmentV3
+	commitmentflags.Restore(t)
 	originalSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = originalBin
-		statecfg.ExperimentalHexBinCommitment = originalHexBin
-		statecfg.ExperimentalCommitmentV3 = originalV3
-		statecfg.Schema = originalSchema
-	})
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = false
