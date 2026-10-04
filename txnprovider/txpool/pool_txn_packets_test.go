@@ -353,3 +353,83 @@ func TestTransactionsPacket(t *testing.T) {
 		})
 	}
 }
+
+func TestTransactionPacketCountLimit(t *testing.T) {
+	legacy := hexutil.MustDecodeHex("c98080808080801b0101")
+	txns := make([][]byte, maxTransactionsPerPacket+1)
+	for i := range txns {
+		txns[i] = legacy
+		if i%2 != 0 {
+			txns[i] = tpEncodeTests[0].txns[0]
+		}
+	}
+	tests := []struct {
+		name        string
+		count       int
+		known       bool
+		invalidTail bool
+	}{
+		{name: "empty"},
+		{name: "at limit", count: maxTransactionsPerPacket},
+		{name: "at limit known", count: maxTransactionsPerPacket, known: true},
+		{name: "over limit", count: maxTransactionsPerPacket + 1},
+		{name: "over limit known", count: maxTransactionsPerPacket + 1, known: true},
+		{name: "invalid past limit", count: maxTransactionsPerPacket + 1, invalidTail: true},
+	}
+	for _, pooled := range []bool{false, true} {
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("pooled=%t/%s", pooled, tt.name), func(t *testing.T) {
+				ctx := NewTxnParseContext(*uint256.NewInt(5)).ChainIDRequired()
+				decoded, checked := 0, 0
+				ctx.ValidateRLP(func(txn []byte) error {
+					decoded++
+					return ValidateSerializedTxn(txn)
+				})
+				validateHash := func([]byte) error {
+					checked++
+					if tt.known {
+						return ErrRejected
+					}
+					return nil
+				}
+				var slots TxnSlots
+				var payload []byte
+				var pos int
+				var err error
+				if pooled {
+					payload = EncodePooledTransactions66(txns[:tt.count], 1, nil)
+					if tt.invalidTail {
+						payload[len(payload)-len(legacy)] = 0xff
+					}
+					var requestID uint64
+					requestID, pos, err = ParsePooledTransactions66(payload, 0, ctx, &slots, validateHash)
+					require.Equal(t, uint64(1), requestID)
+				} else {
+					payload = EncodeTransactions(txns[:tt.count], nil)
+					if tt.invalidTail {
+						payload[len(payload)-len(legacy)] = 0xff
+					}
+					pos, err = ParseTransactions(payload, 0, ctx, &slots, validateHash)
+				}
+				if tt.count > maxTransactionsPerPacket {
+					require.ErrorIs(t, err, ErrParseTxn)
+					require.ErrorContains(t, err, "too many transactions")
+					require.Zero(t, decoded)
+					require.Zero(t, checked)
+					require.Equal(t, TxnSlots{}, slots)
+					return
+				}
+				require.NoError(t, err)
+				require.Equal(t, len(payload), pos)
+				require.Equal(t, tt.count, decoded)
+				require.Equal(t, tt.count, checked)
+				expected := tt.count
+				if tt.known {
+					expected = 0
+				}
+				require.Len(t, slots.Txns, expected)
+				require.NoError(t, slots.Valid())
+			})
+		}
+	}
+}
