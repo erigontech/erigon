@@ -42,6 +42,7 @@ type Config struct {
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Skips the EIP-1559 and EIP-4844 fee cap checks (needed for 0 price calls)
 	NoReceipts    bool // Do not calculate receipts
+	NoBAL         bool // Do not record the accesses an EIP-7928 block access list needs
 	ReadOnly      bool // Do no perform any block finalisation
 	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
