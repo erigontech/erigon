@@ -1809,7 +1809,7 @@ type ReadStamp struct {
 
 // ReadStamp is ok only on the serial path: a versioned read must reach the read set.
 func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
-	if ibs.versionMap != nil || dbg.TraceTransactionIO {
+	if ibs == nil || ibs.versionMap != nil || dbg.TraceTransactionIO {
 		return ReadStamp{}, false
 	}
 	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch}, true

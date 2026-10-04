@@ -90,6 +90,7 @@ type CallContext struct {
 // the frame's storage address is fixed. A read under the current stamp also means the slot
 // is warm, because warming it is journalled and so changed the stamp before the read.
 type frameSlots struct {
+	on    bool // the state is on the serial path; fixed for the frame
 	stamp state.ReadStamp
 	next  int
 	// The gas function's lookup, for the op that follows it; valid while memoGen == cacheGen.
@@ -114,13 +115,10 @@ func (f *frameSlots) get(stamp state.ReadStamp, word *uint256.Int) int {
 	return -1
 }
 
-// lookupSlot is get for the gas function: it records the result for the op, and a hit's
-// interned key for peekStorageKey.
+// lookupSlot is get for the gas function, called only when slots.on: it records the result
+// for the op, and a hit's interned key for peekStorageKey.
 func (ctx *CallContext) lookupSlot(evm *EVM) int {
-	stamp, ok := evm.IntraBlockState().ReadStamp()
-	if !ok {
-		return -1
-	}
+	stamp, _ := evm.IntraBlockState().ReadStamp()
 	i := ctx.slots.get(stamp, ctx.Stack.peek())
 	ctx.slots.memo, ctx.slots.memoGen = i, ctx.cacheGen
 	if i >= 0 {
@@ -464,6 +462,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	var (
 		op          OpCode // current opcode
 		callContext = getCallContext(contract, input, gas)
+		_, slotsOn  = evm.intraBlockState.ReadStamp()
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
@@ -479,6 +478,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		debug   = tracer != nil && (tracer.HasOpcodeHook() || tracer.HasGasChangeHook() || tracer.HasFaultHook())
 		trace   = dbg.TraceInstructions && evm.intraBlockState.Trace()
 	)
+	callContext.slots.on = slotsOn
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
