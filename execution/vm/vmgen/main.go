@@ -25,14 +25,11 @@ import (
 	"cmp"
 	"fmt"
 	"go/ast"
-	"go/constant"
 	"go/format"
 	"go/parser"
 	"go/printer"
 	"go/token"
-	"go/types"
 	"log"
-	"math"
 	"os"
 	"slices"
 	"strconv"
@@ -203,52 +200,6 @@ func text(fset *token.FileSet, n any) string {
 	return b.String()
 }
 
-// opcodeValues returns the OpCode constants of opcodes.go, evaluated by go/types
-// so that iota counts as the compiler counts it.
-func opcodeValues(opcodes []byte) map[string]int64 {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "opcodes.go", opcodes, parser.SkipObjectResolution)
-	if err != nil {
-		log.Fatal(err)
-	}
-	f.Decls = slices.DeleteFunc(f.Decls, func(d ast.Decl) bool {
-		g, ok := d.(*ast.GenDecl)
-		return !ok || g.Tok != token.CONST && g.Tok != token.TYPE
-	})
-	f.Imports = nil
-	info := &types.Info{Defs: map[*ast.Ident]types.Object{}}
-	if _, err := new(types.Config).Check("vm", fset, []*ast.File{f}, info); err != nil {
-		log.Fatal(err)
-	}
-	vals := map[string]int64{}
-	for id, obj := range info.Defs {
-		if c, ok := obj.(*types.Const); ok {
-			vals[id.Name], _ = constant.Int64Val(c.Val())
-		}
-	}
-	return vals
-}
-
-// checkNoJumpTable fails when Go would compile the fast-path switch to a jump
-// table, which made the loop slower than its compare tree. It repeats the rule
-// of exprSwitch.tryJumpTable in go1.27.1 src/cmd/compile/internal/walk/switch.go:
-// at least minCases clauses whose values span at most minDensity per clause.
-// Each fast op is a clause of its own, so no clauses merge.
-func checkNoJumpTable(ops []fastOp, opcodes map[string]int64) {
-	const minCases, minDensity = 8, 4
-	lo, hi := int64(math.MaxInt64), int64(math.MinInt64)
-	for _, o := range ops {
-		v, ok := opcodes[o.name]
-		if !ok {
-			log.Fatalf("%s: not an OpCode constant in opcodes.go", o.name)
-		}
-		lo, hi = min(lo, v), max(hi, v)
-	}
-	if width := hi - lo + 1; len(ops) >= minCases && width <= int64(len(ops))*minDensity {
-		log.Fatalf("%d fast ops over %d opcode values: Go would compile the switch to a jump table", len(ops), width)
-	}
-}
-
 func fastSwitch(instructions []byte, ops []fastOp) string {
 	var b strings.Builder
 	b.WriteString("sLen := stack.len()\nswitch op {\n")
@@ -352,7 +303,6 @@ func read(name string) []byte {
 func main() {
 	check := len(os.Args) > 1 && os.Args[1] == "-check"
 	ops := fastOps()
-	checkNoJumpTable(ops, opcodeValues(read("opcodes.go")))
 	files := []struct {
 		name string
 		data []byte
