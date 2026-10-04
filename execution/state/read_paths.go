@@ -1555,6 +1555,11 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
+	if s.versionMap != nil && !s.warmReadable(addr) {
+		if vw, ok := s.versionedWrites.GetStorage(addr, key); ok {
+			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
+		}
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {

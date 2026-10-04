@@ -712,6 +712,41 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetCaughtAtCommit(t *testing.T
 	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the stale read")
 }
 
+// D1 for storage: a repeat SLOAD of a slot this tx wrote serves the own write,
+// and commit-time validation catches the stale read behind it.
+func TestVersionedRead_D1_StorageWriteSetHitWithStaleReadSetCaughtAtCommit(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xd2})
+	key := accounts.InternKey([32]byte{0x01})
+	mvhm.WriteStorage(addr, key, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
+
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(77)))
+	ibs.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
+		Val:        *uint256.NewInt(99),
+	})
+	got, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	assert.EqualValues(t, 77, got.Uint64(), "the own write wins")
+
+	var io VersionedIO
+	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
+	valid := mvhm.ValidateVersion(5, &io, func(rv, wv Version) VersionValidity {
+		if rv == wv {
+			return VersionValid
+		}
+		return VersionInvalid
+	}, true, false, false, "")
+	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the stale read")
+}
+
 // The nil≡empty arm of readValueUnchanged carries the same gates as
 // validation's dead-equivalence: no equivalence pre-EIP-161, and none for
 // AuRa's retained SystemAddress.
