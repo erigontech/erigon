@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func storageSlotsSharingFirstNibble(tb testing.TB) [][]byte {
@@ -63,8 +62,9 @@ func storageSlotsSharingFirstNibble(tb testing.TB) [][]byte {
 
 func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps int) (kv.TemporalRwDB, *state.Aggregator, map[uint64][]byte) {
 	t.Helper()
-	commitmentflags.Restore(t)
+	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	db, agg := testDbAndAggregatorv3(t, stepSize)
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
@@ -137,8 +137,9 @@ func storageSlotPairs(tb testing.TB) [2][2][]byte {
 }
 
 func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
-	commitmentflags.Restore(t)
+	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	const stepSize, steps = 4, 2
 	db, agg, rwTx, domains := convertTestDomains(t, stepSize)

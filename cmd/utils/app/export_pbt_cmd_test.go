@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -97,7 +98,9 @@ func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
 	require.NoError(t, err)
 	metaInfo, err := os.Stat(filepath.Join(outDir, pbtMetaFileName))
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o644), metaInfo.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0o644), metaInfo.Mode().Perm())
+	}
 	var meta pbtExportMeta
 	require.NoError(t, json.Unmarshal(metaBytes, &meta))
 	require.Equal(t, root.Hex(), meta.PBTRoot)

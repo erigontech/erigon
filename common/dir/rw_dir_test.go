@@ -19,6 +19,7 @@ package dir
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -75,7 +76,9 @@ func TestWriteFileAtomic(t *testing.T) {
 	require.Equal(t, []byte("new"), data)
 	info, err := os.Stat(path)
 	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		require.Equal(t, os.FileMode(0o644), info.Mode().Perm())
+	}
 	entries, err := os.ReadDir(dirPath)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)

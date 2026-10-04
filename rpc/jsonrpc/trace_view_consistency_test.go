@@ -45,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -269,8 +268,9 @@ func TestSimulateV1RejectsNonCanonicalBlockHash(t *testing.T) {
 }
 
 func TestSimulateV1IgnoresNewerSharedBranchCache(t *testing.T) {
-	commitmentflags.Restore(t)
+	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, _, _, _ := chainWithDeployedContract(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
@@ -472,8 +472,9 @@ func TestDebugTraceTransactionUsesUncachedCommittedState(t *testing.T) {
 }
 
 func TestGetWitnessUsesCommittedBlockBody(t *testing.T) {
-	commitmentflags.Restore(t)
+	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	base, m, _ := newOverlayAheadTestAPI(t)
 	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {

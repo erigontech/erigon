@@ -257,7 +257,9 @@ func TestRunExportWritesExecutionPin(t *testing.T) {
 	require.NoError(t, err)
 	metadataInfo, err := os.Stat(filepath.Join(outDir, preimagesMetaFileName))
 	require.NoError(t, err)
-	require.Equal(t, fs.FileMode(0o644), metadataInfo.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		require.Equal(t, fs.FileMode(0o644), metadataInfo.Mode().Perm())
+	}
 	var metadata preimagesMeta
 	require.NoError(t, json.Unmarshal(metadataJSON, &metadata))
 	require.Equal(t, uint64(7), metadata.Block)

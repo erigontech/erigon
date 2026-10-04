@@ -60,7 +60,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -1611,9 +1610,10 @@ func TestExecutionWitness(t *testing.T) {
 	previousAssert := dbg.AssertEnabled
 	dbg.AssertEnabled = true // stateless verification of every witness runs only under assert
 	// Enable historical commitment schema so the test aggregator maintains per-block history.
-	commitmentflags.Restore(t)
+	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
 		dbg.AssertEnabled = previousAssert
 	})
 
@@ -1737,8 +1737,11 @@ func TestExecutionWitness(t *testing.T) {
 // cached (num, hash) returns the stored pointer, while canonical requests, empty-cache
 // misses, and the nil-cache path all fall through to the unchanged on-demand build.
 func TestExecutionWitnessCacheServe(t *testing.T) {
-	commitmentflags.Restore(t)
+	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
