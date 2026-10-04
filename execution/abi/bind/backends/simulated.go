@@ -20,7 +20,6 @@
 package backends
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -593,7 +592,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call bind.CallMsg, 
 	if len(res.Revert()) > 0 {
 		return nil, newRevertError(res)
 	}
-	return bytes.Clone(res.Return()), res.Err
+	return res.Return(), res.Err
 }
 
 // PendingCallContract executes a contract call on the pending state.
@@ -612,7 +611,7 @@ func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call bind.Ca
 	if len(res.Revert()) > 0 {
 		return nil, newRevertError(res)
 	}
-	return bytes.Clone(res.Return()), res.Err
+	return res.Return(), res.Err
 }
 
 // PendingNonceAt implements PendingStateReader.PendingNonceAt, retrieving

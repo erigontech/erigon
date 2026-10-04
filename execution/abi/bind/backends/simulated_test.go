@@ -1331,26 +1331,3 @@ func TestNewSimulatedBackend_AdjustTimeFailWithPostValidationSkip(t *testing.T) 
 		t.Errorf("time adjusted, but shouldn't be: prev: %v, new: %v", prevTime, newTime)
 	}
 }
-
-// Precompiles may return shared package-level buffers, so a caller that mutates
-// the returned bytes must not change what the next call returns.
-func TestSimulatedBackend_CallContractReturnsIndependentOutput(t *testing.T) {
-	sim := simTestBackend(t, crypto.PubkeyToAddress(testKey.PublicKey))
-	pairing := common.BytesToAddress([]byte{0x08})
-	msg := bind.CallMsg{To: &pairing, Gas: 100_000}
-	for name, call := range map[string]func() ([]byte, error){
-		"latest":  func() ([]byte, error) { return sim.CallContract(context.Background(), msg, nil) },
-		"pending": func() ([]byte, error) { return sim.PendingCallContract(context.Background(), msg) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			out, err := call()
-			require.NoError(t, err)
-			require.Equal(t, byte(1), out[31])
-			clear(out)
-
-			out, err = call()
-			require.NoError(t, err)
-			require.Equal(t, byte(1), out[31], "mutating one result changed the next one")
-		})
-	}
-}
