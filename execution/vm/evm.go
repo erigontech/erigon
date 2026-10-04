@@ -382,7 +382,14 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	if gasTracing {
 		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code.Bytes)
 	}
+	ret, gasRemaining, gasUsed, err = evm.callFrame(typ, caller, callerAddress, addr, input, gas, value, bailout, p, isPrecompile, code, depth)
+	return ret, gasRemaining, gasUsed, err
+}
 
+// callFrame is the body of call after its defers are set up. Few returns in call let the compiler
+// open-code those defers instead of registering them with the runtime on every CALL.
+func (evm *EVM) callFrame(typ OpCode, caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, gas mdgas.MdGas, value uint256.Int, bailout bool, p PrecompiledContract, isPrecompile bool, code accounts.Code, depth int) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+	gasRemaining = gas
 	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
 	evm.intraBlockState.MarkAddressAccess(addr, false)
 
