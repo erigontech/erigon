@@ -28,19 +28,15 @@ func mainnetLikeCandidates(layers int) []attestationCandidate {
 	const committees, committeeSize = 64, 425
 	candidates := make([]attestationCandidate, 0, layers)
 	for layer := range layers {
-		candidate := attestationCandidate{attestation: &solid.Attestation{Data: &solid.AttestationData{Slot: uint64(layer)}}}
+		candidate := attestationCandidate{attestation: &solid.Attestation{Data: &solid.AttestationData{Slot: uint64(layer)}}, currentEpoch: true}
 		for c := range committees {
 			for i := range committeeSize {
 				if (i+layer*37)%(layer+2) == 0 && layer > 0 {
 					continue
 				}
-				v := uint64(2_000_000 + c*committeeSize + i)
-				for flag, weight := range []uint64{14, 26, 14} {
-					candidate.rewards = append(candidate.rewards, attesterFlagReward{
-						attesterFlag: attesterFlag{validatorIndex: v, flagIndex: uint8(flag), currentEpoch: true},
-						numerator:    weight * 1_000_000,
-					})
-				}
+				candidate.attesters = append(candidate.attesters, uint64(2_000_000+c*committeeSize+i))
+				candidate.baseRewards = append(candidate.baseRewards, 1_000_000)
+				candidate.newFlags = append(candidate.newFlags, 0b111)
 			}
 		}
 		candidates = append(candidates, candidate)
@@ -50,8 +46,9 @@ func mainnetLikeCandidates(layers int) []attestationCandidate {
 
 func BenchmarkSelectAttestations(b *testing.B) {
 	candidates := mainnetLikeCandidates(32)
+	weights := []uint64{14, 26, 14}
 	b.ResetTimer()
 	for b.Loop() {
-		selectAttestations(candidates, 1, 8)
+		selectAttestations(candidates, weights, 1, 8)
 	}
 }

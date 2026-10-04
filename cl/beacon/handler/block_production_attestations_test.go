@@ -24,21 +24,17 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
-func flagRewards(flagIndex uint8, numerator uint64, validators ...uint64) []attesterFlagReward {
-	rewards := make([]attesterFlagReward, 0, len(validators))
-	for _, v := range validators {
-		rewards = append(rewards, attesterFlagReward{
-			attesterFlag: attesterFlag{validatorIndex: v, flagIndex: flagIndex, currentEpoch: true},
-			numerator:    numerator,
-		})
-	}
-	return rewards
-}
+var testParticipationWeights = []uint64{14, 26, 14}
 
-func newTestCandidate(slot uint64, rewards ...[]attesterFlagReward) attestationCandidate {
-	candidate := attestationCandidate{attestation: &solid.Attestation{Data: &solid.AttestationData{Slot: slot}}}
-	for _, r := range rewards {
-		candidate.rewards = append(candidate.rewards, r...)
+func newTestCandidate(slot uint64, currentEpoch bool, flags uint8, validators ...uint64) attestationCandidate {
+	candidate := attestationCandidate{
+		attestation:  &solid.Attestation{Data: &solid.AttestationData{Slot: slot}},
+		currentEpoch: currentEpoch,
+	}
+	for _, v := range validators {
+		candidate.attesters = append(candidate.attesters, v)
+		candidate.baseRewards = append(candidate.baseRewards, 1)
+		candidate.newFlags = append(candidate.newFlags, flags)
 	}
 	return candidate
 }
@@ -51,31 +47,45 @@ func selectedSlots(atts []*solid.Attestation) []uint64 {
 	return slots
 }
 
-func TestSelectAttestationsSkipsVotesAlreadyCovered(t *testing.T) {
-	wide := newTestCandidate(1, flagRewards(0, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9))
-	overlapping := newTestCandidate(2, flagRewards(0, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8))
-	disjoint := newTestCandidate(3, flagRewards(0, 10, 10, 11))
+const (
+	sourceFlag = 1 << 0
+	allFlags   = 0b111
+)
 
-	selected := selectAttestations([]attestationCandidate{wide, overlapping, disjoint}, 1, 2)
+func TestSelectAttestationsSkipsVotesAlreadyCovered(t *testing.T) {
+	wide := newTestCandidate(1, true, sourceFlag, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+	overlapping := newTestCandidate(2, true, sourceFlag, 0, 1, 2, 3, 4, 5, 6, 7, 8)
+	disjoint := newTestCandidate(3, true, sourceFlag, 10, 11)
+
+	selected := selectAttestations([]attestationCandidate{wide, overlapping, disjoint}, testParticipationWeights, 1, 2)
 
 	require.Equal(t, []uint64{1, 3}, selectedSlots(selected))
 }
 
 func TestSelectAttestationsDropsCandidatesWithoutNewReward(t *testing.T) {
-	wide := newTestCandidate(1, flagRewards(0, 10, 0, 1, 2, 3))
-	subset := newTestCandidate(2, flagRewards(0, 10, 0, 1))
+	wide := newTestCandidate(1, true, sourceFlag, 0, 1, 2, 3)
+	subset := newTestCandidate(2, true, sourceFlag, 0, 1)
 
-	selected := selectAttestations([]attestationCandidate{wide, subset}, 1, 8)
+	selected := selectAttestations([]attestationCandidate{wide, subset}, testParticipationWeights, 1, 8)
 
 	require.Equal(t, []uint64{1}, selectedSlots(selected))
 }
 
 func TestSelectAttestationsCountsNewFlagsOfCoveredValidators(t *testing.T) {
-	sourceAndTarget := newTestCandidate(1, flagRewards(0, 14, 0, 1, 2), flagRewards(1, 26, 0, 1, 2))
-	headOnlySameValidators := newTestCandidate(2, flagRewards(0, 14, 0, 1, 2), flagRewards(1, 26, 0, 1, 2), flagRewards(2, 14, 0, 1, 2))
-	otherValidators := newTestCandidate(3, flagRewards(0, 14, 7))
+	sourceAndTarget := newTestCandidate(1, true, 0b011, 0, 1, 2)
+	allFlagsSameValidators := newTestCandidate(2, true, allFlags, 0, 1, 2)
+	otherValidators := newTestCandidate(3, true, sourceFlag, 7)
 
-	selected := selectAttestations([]attestationCandidate{sourceAndTarget, headOnlySameValidators, otherValidators}, 1, 2)
+	selected := selectAttestations([]attestationCandidate{sourceAndTarget, allFlagsSameValidators, otherValidators}, testParticipationWeights, 1, 2)
 
 	require.Equal(t, []uint64{2, 3}, selectedSlots(selected))
+}
+
+func TestSelectAttestationsTracksEpochsSeparately(t *testing.T) {
+	previousEpoch := newTestCandidate(1, false, allFlags, 0, 1)
+	currentEpoch := newTestCandidate(2, true, allFlags, 0, 1)
+
+	selected := selectAttestations([]attestationCandidate{previousEpoch, currentEpoch}, testParticipationWeights, 1, 8)
+
+	require.ElementsMatch(t, []uint64{1, 2}, selectedSlots(selected))
 }
