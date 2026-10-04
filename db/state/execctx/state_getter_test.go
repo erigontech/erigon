@@ -26,8 +26,10 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -246,8 +248,11 @@ func TestCachedTemporalTxStateGetterServesRepeatReadFromCache(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
+	stateVersion, err := rawdb.GetStateVersion(roTx)
+	require.NoError(t, err)
 	stateCache := newSmallStateCache()
 	defer stateCache.Close()
+	stateCache.Applier().Initialize(stateVersion)
 
 	tx := &countingLatestTx{TemporalTx: roTx}
 	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
@@ -260,6 +265,27 @@ func TestCachedTemporalTxStateGetterServesRepeatReadFromCache(t *testing.T) {
 	second, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, first, second)
+	require.Equal(t, 1, tx.reads)
+}
+
+// The cache holds a newer durable state version's values, which are not this tx's state.
+func TestCachedTemporalTxStateGetterStaleStateVersionReadsTx(t *testing.T) {
+	db := newTestDb(t, 16)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	stateVersion, err := rawdb.GetStateVersion(roTx)
+	require.NoError(t, err)
+	stateCache := newSmallStateCache()
+	defer stateCache.Close()
+	key := make([]byte, 20)
+	stateCache.Applier().Initialize(stateVersion)
+	stateCache.Applier().Publish(stateVersion, stateVersion+1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte{1}, TxNum: 1}})
+
+	tx := &countingLatestTx{TemporalTx: roTx}
+	v, _, err := execctx.NewCachedTemporalTxStateGetter(tx, stateCache).GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, v)
 	require.Equal(t, 1, tx.reads)
 }
 
