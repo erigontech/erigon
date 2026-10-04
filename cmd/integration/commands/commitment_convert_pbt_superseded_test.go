@@ -39,6 +39,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func supersededSnapshotFiles(t *testing.T, dirs datadir.Dirs) []string {
@@ -142,9 +143,8 @@ func TestConvertPBTHandlesMixedSupersededFiles(t *testing.T) { runSupersededConv
 
 func TestConvertPBTPublishesVisibleFilesWithUnindexedHistoryMerge(t *testing.T) {
 	selectPBTHexCommandSuite(t)
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 2)))

@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestExportPinDomainMatrix(t *testing.T) {
@@ -120,20 +121,7 @@ func TestSharedExportPinUsesTheMappedCheckpoint(t *testing.T) {
 }
 
 func TestSharedExportPinKeepsV3HexForDualBeforeFork(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
@@ -165,20 +153,7 @@ func TestSharedExportPinKeepsV3HexForDualBeforeFork(t *testing.T) {
 func TestSharedExportPinUsesBinAfterFork(t *testing.T) {
 	for _, variant := range []string{state.TrieVariantBin, state.TrieVariantHexBin} {
 		t.Run(variant, func(t *testing.T) {
-			previousBin := statecfg.ExperimentalBinCommitment
-			previousHexBin := statecfg.ExperimentalHexBinCommitment
-			previousV3 := statecfg.ExperimentalCommitmentV3
-			previousSchema := statecfg.Schema
-			previousHash := statecfg.BinCommitmentHash
-			previousSuite := commitment.PBinHashSuiteName()
-			t.Cleanup(func() {
-				statecfg.ExperimentalBinCommitment = previousBin
-				statecfg.ExperimentalHexBinCommitment = previousHexBin
-				statecfg.ExperimentalCommitmentV3 = previousV3
-				statecfg.Schema = previousSchema
-				statecfg.BinCommitmentHash = previousHash
-				require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-			})
+			commitmentflags.Restore(t)
 			statecfg.ExperimentalBinCommitment = true
 			statecfg.ExperimentalHexBinCommitment = variant == state.TrieVariantHexBin
 			statecfg.ExperimentalCommitmentV3 = variant == state.TrieVariantHexBin

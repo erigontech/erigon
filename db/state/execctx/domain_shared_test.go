@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
 
@@ -1951,9 +1952,8 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 }
 
 func TestCommitmentGetAsOfBeforeKeyCreation(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	ctx := t.Context()
 	db := newTestDb(t, 1000)

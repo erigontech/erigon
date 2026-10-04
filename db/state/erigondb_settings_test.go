@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestRefsInCommitmentBranchesAccessor(t *testing.T) {
@@ -115,11 +116,7 @@ func TestResolveErigonDBStepSizeReadsExistingSettings(t *testing.T) {
 }
 
 func TestEnableCommitmentV3FromFiles(t *testing.T) {
-	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-	})
+	commitmentflags.Restore(t)
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, "v3.0-commitment.0-1.kv"), nil, 0o644))
 	detected, err := EnableCommitmentV3FromFiles(dirs)
@@ -160,11 +157,7 @@ func TestEnableCommitmentV3FromFilesRefusesStraddledCommitmentData(t *testing.T)
 }
 
 func TestEnableCommitmentV3FromFilesIgnoresSupersededLegacyCommitmentData(t *testing.T) {
-	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-	})
+	commitmentflags.Restore(t)
 	dirs := datadir.New(t.TempDir())
 	for _, name := range []string{"v2.0-commitment.0-1.kv", "v2.0-commitment.1-2.kv", "v3.0-commitment.0-2.kv"} {
 		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), nil, 0o644))
@@ -175,13 +168,7 @@ func TestEnableCommitmentV3FromFilesIgnoresSupersededLegacyCommitmentData(t *tes
 }
 
 func TestEnableCommitmentV3FromFilesIgnoresBinDatadir(t *testing.T) {
-	previousBin, previousHexBin, previousV3, previousSchema := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-	})
+	commitmentflags.Restore(t)
 	dirs := datadir.New(t.TempDir())
 	variant := TrieVariantBin
 	require.NoError(t, WriteErigonDBSettings(dirs, &ErigonDBSettings{TrieVariant: &variant}))

@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
 
@@ -226,18 +227,7 @@ func corruptPBinIntegrityRow(t *testing.T, fixture pbinIntegrityFixture, root bo
 }
 
 func selectPBinIntegritySuite(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true

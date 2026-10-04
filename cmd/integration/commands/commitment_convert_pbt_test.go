@@ -61,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func convertPBTWithOutputTestHook(ctx context.Context, sourcePath, outputPath string, keepHex bool, chainName string, logger log.Logger, hook func() error) error {
@@ -76,20 +77,7 @@ func TestIsCommitmentFileNameAcceptsCommitmentBin(t *testing.T) {
 }
 
 func TestPBTRealChainTxNumConvention(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
@@ -168,21 +156,10 @@ func TestPBTRealChainTxNumConvention(t *testing.T) {
 }
 
 func TestConvertPBTHexSourceKeepHex(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
+	commitmentflags.Restore(t)
 	previousDatadir := datadirCli
 	previousChaindata := chaindata
 	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
 		datadirCli = previousDatadir
 		chaindata = previousChaindata
 	})
@@ -226,20 +203,7 @@ func TestConvertPBTHexSourceKeepHex(t *testing.T) {
 }
 
 func TestConvertPBTUsesRequestedKeccakSuite(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.InitSchemas()
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
@@ -254,20 +218,7 @@ func TestConvertPBTUsesRequestedKeccakSuite(t *testing.T) {
 }
 
 func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.InitSchemas()
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
@@ -311,14 +262,7 @@ func TestConvertPBTKeepsCommitmentHistoryForAttach(t *testing.T) {
 }
 
 func TestConvertPBTSourceWithoutBinaryTables(t *testing.T) {
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
@@ -488,20 +432,7 @@ func TestConvertPBTCases(t *testing.T) {
 }
 
 func TestConvertPBTOutputPassesCommitmentIntegrity(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
@@ -531,20 +462,7 @@ func TestConvertPBTOutputPassesCommitmentIntegrity(t *testing.T) {
 }
 
 func TestConvertPBTHexMultiRangeOutputPassesCommitmentIntegrity(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
@@ -570,21 +488,10 @@ func TestConvertPBTHexMultiRangeOutputPassesCommitmentIntegrity(t *testing.T) {
 }
 
 func TestConvertPBTEmptyStateHasZeroRoot(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
+	commitmentflags.Restore(t)
 	previousDatadir := datadirCli
 	previousChaindata := chaindata
 	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
 		datadirCli = previousDatadir
 		chaindata = previousChaindata
 	})
@@ -598,20 +505,7 @@ func TestConvertPBTEmptyStateHasZeroRoot(t *testing.T) {
 }
 
 func TestConvertPBTPrunedSourceOpens(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
@@ -660,21 +554,10 @@ func TestConvertPBTHexBinSourceConfiguresVariantBeforeOpening(t *testing.T) {
 }
 
 func TestConvertPBTHexBinSourceWithOrdinaryHexFlags(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
+	commitmentflags.Restore(t)
 	previousDatadir := datadirCli
 	previousChaindata := chaindata
 	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
 		datadirCli = previousDatadir
 		chaindata = previousChaindata
 	})
@@ -756,12 +639,7 @@ func TestConvertPBTPostForkHeaderRootMismatch(t *testing.T) {
 }
 
 func TestConvertPBTFailureRemovesOutput(t *testing.T) {
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, _ := newPBTConversionSource(t)
@@ -775,12 +653,7 @@ func TestConvertPBTFailureRemovesOutput(t *testing.T) {
 }
 
 func TestConvertPBTVerifiesCorruptedWrittenRows(t *testing.T) {
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, _ := newPBTConversionSource(t)
@@ -978,20 +851,7 @@ func TestConvertPBTRemovesFilesStartingAfterConversionPoint(t *testing.T) {
 }
 
 func TestConvertPBTStandaloneReopenRequiresBothDomains(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
@@ -1030,12 +890,7 @@ func TestConvertPBTBinOnlyRefusesBeforeFork(t *testing.T) {
 }
 
 func TestConvertPBTRefusesSourceFileEndAfterPoint(t *testing.T) {
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, _ := newPBTConversionSourceAt(t, 6)
@@ -1140,12 +995,7 @@ func TestRemovePBTFilesPastPointKeepsOnlyPublishedRanges(t *testing.T) {
 }
 
 func TestConvertPBTIgnoresDatabaseRowsPastFiles(t *testing.T) {
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, _ := newPBTConversionSourceAtWithFutureLeaf(t, 7, 8)
@@ -1184,26 +1034,10 @@ func addPBTCommitmentStateAfterFiles(t *testing.T, source pbtConversionSource, t
 }
 
 func TestConvertPBTLegacyHexSourceIsRefusedAndRemoved(t *testing.T) {
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-	})
 	source, _ := newPBTConversionSource(t)
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
 	statecfg.ExperimentalBinCommitment = false
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ExperimentalCommitmentV3 = true

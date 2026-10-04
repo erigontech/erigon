@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 // TestShouldComputeOnRequest_GenesisFirstBatch is the regression test for
@@ -469,16 +470,7 @@ func TestCommitmentCalculatorBALComputeAheadDualFold(t *testing.T) {
 }
 
 func TestCommitmentCalculatorBALHexOnlySkipsBinaryFeed(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousDual := statecfg.ExperimentalHexBinCommitment
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousDual
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.ExperimentalCommitmentV3 = previousV3
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = false
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ExperimentalParallelCommitment = false

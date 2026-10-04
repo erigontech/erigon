@@ -34,22 +34,11 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestPBTCommandsUseFrozenBlockFiles(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ConfigureCommitmentV3Records(false)
@@ -141,19 +130,7 @@ func TestPBTCommandsUseFrozenBlockFiles(t *testing.T) {
 }
 
 func TestPBTConvertUsesFrozenBlockFilesMidBlock(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ConfigureCommitmentV3Records(false)

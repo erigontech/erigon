@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
 
@@ -40,8 +41,7 @@ func TestExecWorkerCountPrefersNodeConfig(t *testing.T) {
 }
 
 func TestParallelCommitmentReaders(t *testing.T) {
-	previous := statecfg.ExperimentalParallelCommitment
-	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = previous })
+	commitmentflags.Restore(t)
 
 	statecfg.ExperimentalParallelCommitment = false
 	require.Zero(t, parallelCommitmentReaders())

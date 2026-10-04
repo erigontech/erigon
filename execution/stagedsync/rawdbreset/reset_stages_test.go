@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 // TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers
@@ -113,20 +114,11 @@ func TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers(t *te
 }
 
 func TestResetExecClearsBothCommitmentDomains(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-	})
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(t.Context())

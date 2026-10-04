@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/logging"
 )
@@ -96,10 +97,11 @@ func TestCommitmentRebuildEnablesFilesGapSkipForV3(t *testing.T) {
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
 	rawDB.Close()
 	previousDatadir, previousChaindata := datadirCli, chaindata
-	previousV3, previousSkip := statecfg.ExperimentalCommitmentV3, skipFilesDBGapCheck
+	commitmentflags.Restore(t)
+	previousSkip := skipFilesDBGapCheck
 	t.Cleanup(func() {
 		datadirCli, chaindata = previousDatadir, previousChaindata
-		statecfg.ExperimentalCommitmentV3, skipFilesDBGapCheck = previousV3, previousSkip
+		skipFilesDBGapCheck = previousSkip
 	})
 	datadirCli = dirs.DataDir
 	chaindata = dirs.Chaindata
@@ -144,22 +146,7 @@ type executedHexBinRebuildFixture struct {
 
 func newExecutedHexBinRebuildFixture(t *testing.T, hash string) executedHexBinRebuildFixture {
 	t.Helper()
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousDual := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousDual
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true

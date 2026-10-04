@@ -44,28 +44,16 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/rpc"
 )
 
 func configurePBTWitnessGlobals(t *testing.T, commitmentV3, dual bool) {
 	t.Helper()
 	previousAssert := dbg.AssertEnabled
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
+	commitmentflags.Restore(t)
 	t.Cleanup(func() {
 		dbg.AssertEnabled = previousAssert
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
 	})
 	dbg.AssertEnabled = true
 	statecfg.ExperimentalBinCommitment = dual

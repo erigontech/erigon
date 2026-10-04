@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestImportPBTUsesOnlySnapshotInput(t *testing.T) {
@@ -878,22 +879,7 @@ type pbtImportFixture struct {
 
 func newPBTImportFixture(t *testing.T) pbtImportFixture {
 	t.Helper()
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	selectPBTHexCommandSuite(t)
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
@@ -978,22 +964,7 @@ func overwritePBTImportHexCheckpoint(t *testing.T, dataDir string, blockNum, che
 
 func readPBTImportCheckpoint(t *testing.T, dataDir string) (uint64, uint64) {
 	t.Helper()
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		_ = commitment.SetPBinHashSuite(previousSuite)
-	})
+	commitmentflags.Restore(t)
 	dirs := datadir.Open(dataDir)
 	resolved, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)

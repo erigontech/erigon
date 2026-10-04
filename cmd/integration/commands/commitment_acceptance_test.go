@@ -53,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestPBTAcceptanceChainTxCountsHeaderRoots(t *testing.T) {
@@ -250,22 +251,7 @@ func TestPBTAttachRejectsPublishedRootMismatchWithoutMutation(t *testing.T) {
 }
 
 func TestPBTAttachRejectsCorruptedPublishedBinaryRowsWithoutMutation(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
@@ -936,22 +922,7 @@ func readPBTFilesRoot(t *testing.T, output string) common.Hash {
 }
 
 func selectPBTCommandSuite(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
@@ -963,22 +934,7 @@ func selectPBTCommandSuite(t *testing.T) {
 }
 
 func selectPBTBinaryCommandSuite(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ExperimentalCommitmentV3 = false
@@ -988,22 +944,7 @@ func selectPBTBinaryCommandSuite(t *testing.T) {
 }
 
 func selectPBTHexCommandSuite(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = false
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ExperimentalCommitmentV3 = true

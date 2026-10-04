@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestValidatePBTAttachFilesRequiresBothCommitmentDomains(t *testing.T) {
@@ -115,9 +116,8 @@ func TestAttachPBTUsesLegacyStepSizeWithoutNodeSettings(t *testing.T) {
 	}))
 	require.NoError(t, os.WriteFile(filepath.Join(node.Snap, "salt-state.txt"), []byte{1}, 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(published.Snap, "salt-state.txt"), []byte{1}, 0o644))
-	previousHash := statecfg.BinCommitmentHash
+	commitmentflags.Restore(t)
 	statecfg.BinCommitmentHash = hash
-	t.Cleanup(func() { statecfg.BinCommitmentHash = previousHash })
 	before := snapshotTree(t, node.DataDir)
 	err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
 	require.ErrorContains(t, err, "step size")
@@ -152,16 +152,7 @@ func TestValidatePBTAttachHistoryFrontierChecksEachFileExtension(t *testing.T) {
 }
 
 func TestAttachPBTRejectsHistorySpanningPointWithoutMutation(t *testing.T) {
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
@@ -217,20 +208,7 @@ func TestConfiguredPBTNodeHashUsesPersistedSuite(t *testing.T) {
 }
 
 func TestAttachPBTResetsAndReopensAtPublishedRoot(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.BinCommitmentHash = ""
@@ -259,14 +237,7 @@ func TestAttachPBTResetsAndReopensAtPublishedRoot(t *testing.T) {
 }
 
 func TestAttachPBTRejectsDifferentStateSalt(t *testing.T) {
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
@@ -291,8 +262,7 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 		require.ErrorContains(t, err, "no erigondb.toml")
 	})
 	t.Run("missing node settings leaves datadir unchanged", func(t *testing.T) {
-		previousHash := statecfg.BinCommitmentHash
-		t.Cleanup(func() { statecfg.BinCommitmentHash = previousHash })
+		commitmentflags.Restore(t)
 		statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 		node, published := newPBTAttachFileTrees(t, true)
 		refs := false
@@ -529,11 +499,7 @@ func TestPBTAttachRemedyHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
 	}
-	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-	})
+	commitmentflags.Restore(t)
 	fixture, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
 	fixture.Genesis.Config.ChainName = "test"
@@ -622,22 +588,7 @@ func newPBTAttachRemedyFixture(t *testing.T, stepSize, sourceTx, nodeFileTx uint
 }
 
 func TestPBTAttachPrintedRemediesRunInFreshProcesses(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	erigonBinary := buildPBTTestErigon(t)
 	t.Run("block end", func(t *testing.T) {
 		nodeDirs, published := newPBTAttachRemedyFixture(t, 1, 7, 7)
@@ -750,20 +701,7 @@ func TestAdoptPBTFilesKeepsTorrentSidecarsWithBytes(t *testing.T) {
 }
 
 func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.BinCommitmentHash = ""
@@ -794,20 +732,7 @@ func TestAttachPBTRetryAfterEachInterruptedStep(t *testing.T) {
 }
 
 func TestAttachPBTRetryAfterPartialSwap(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.BinCommitmentHash = ""
@@ -835,20 +760,7 @@ func TestAttachPBTRetryAfterPartialSwap(t *testing.T) {
 }
 
 func TestAttachPBTRetryAfterPartialSettingsWrite(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.BinCommitmentHash = ""
@@ -869,20 +781,7 @@ func TestAttachPBTRetryAfterPartialSettingsWrite(t *testing.T) {
 }
 
 func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
@@ -900,20 +799,7 @@ func TestAttachPBTRejectsConversionPointBeyondPublishedCheckpoint(t *testing.T) 
 }
 
 func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
@@ -962,20 +848,7 @@ func TestAttachPBTRejectsTruncatedPublishedAccountsFile(t *testing.T) {
 }
 
 func TestAttachPBTRejectsPublishedLeafAfterConversion(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3

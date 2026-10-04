@@ -39,16 +39,13 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	etypes "github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestCommitmentFreezeRegistersV3FlagAndSchema(t *testing.T) {
 	require.NotNil(t, cmdCommitmentFreeze.Flags().Lookup(utils.ExperimentalCommitmentV3Flag.Name))
 
-	originalV3, originalSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = originalV3
-		statecfg.Schema = originalSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	cmdCommitmentFreeze.PreRun(cmdCommitmentFreeze, nil)
 	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
@@ -118,15 +115,8 @@ func TestFreezeHexCommitmentRejectsUnalignedBinary(t *testing.T) {
 func newCommitmentFreezeTest(t *testing.T, blockTime uint64) (kv.TemporalRwTx, *dbstate.Aggregator) {
 	t.Helper()
 	withBinCommitmentProcess(t, "")
-	previousDual := statecfg.ExperimentalHexBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalHexBinCommitment = previousDual })
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalHexBinCommitment = true
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-	})
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	dirs := datadir.New(t.TempDir())

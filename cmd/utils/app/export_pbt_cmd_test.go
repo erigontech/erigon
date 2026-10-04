@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
@@ -63,18 +64,7 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 }
 
 func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
@@ -115,18 +105,7 @@ func TestRunExportPBTWritesStrictArtifacts(t *testing.T) {
 }
 
 func TestRunExportPBTRefusesChangedBinRecord(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
@@ -329,22 +308,7 @@ func TestDoExportPreimagesUsesFrozenBlockFiles(t *testing.T) {
 }
 
 func TestDoExportPBTHexOnlyDefaultsToBlake3(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousHash := statecfg.BinCommitmentHash
-	previousSchema := statecfg.Schema
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.BinCommitmentHash = previousHash
-		statecfg.Schema = previousSchema
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = false
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ExperimentalCommitmentV3 = true
@@ -388,12 +352,7 @@ func TestDoExportPBTHexOnlyDefaultsToBlake3(t *testing.T) {
 }
 
 func TestConfigurePBTExportHashDefaultsForPreimages(t *testing.T) {
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	dirs := datadir.New(t.TempDir())
 	variant := state.TrieVariantHex
 	require.NoError(t, state.WriteErigonDBSettings(dirs, &state.ErigonDBSettings{TrieVariant: &variant}))
@@ -472,20 +431,7 @@ func buildFrozenPBTExportDatadir(t *testing.T) datadir.Dirs {
 }
 
 func selectPBTExportSuite(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.BinCommitmentHash = previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true

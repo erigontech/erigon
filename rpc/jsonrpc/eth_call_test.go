@@ -63,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -1050,11 +1051,8 @@ func (missingHeaderBlockReader) HeaderByNumber(context.Context, kv.Getter, uint6
 }
 
 func TestGetProofMissingHeader(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() {
-		statecfg.Schema = previousSchema
-	})
 
 	m, bankAddr, _, _ := chainWithDeployedContract(t)
 	base := newBaseApiForTest(m)
@@ -1072,11 +1070,8 @@ func TestGetProofMissingHeader(t *testing.T) {
 }
 
 func TestGetProofPinsReadSnapshot(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() {
-		statecfg.Schema = previousSchema
-	})
 
 	m, _, contractAddress, _ := chainWithDeployedContract(t)
 
@@ -1115,11 +1110,8 @@ func TestGetProofPinsReadSnapshot(t *testing.T) {
 }
 
 func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() {
-		statecfg.Schema = previousSchema
-	})
 
 	m, _, contractAddress, _ := chainWithDeployedContract(t)
 	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -1221,9 +1213,8 @@ func TestGetProofStorageKeyEncoding(t *testing.T) {
 // fields for each account shape, the block parameter forms execution-apis allows, and
 // the storage-key list rules.
 func TestGetProofRequestShapes(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, bankAddr, contractAddr, _ := chainWithDeployedContract(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
@@ -1355,9 +1346,8 @@ func TestGetProofRequestShapes(t *testing.T) {
 // empty storage-key list serializes as an array rather than null, and a short key is
 // echoed minimized next to a zero value.
 func TestGetProofJSONShape(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, bankAddr, _, _ := chainWithDeployedContract(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
@@ -2313,9 +2303,8 @@ func TestCreateAccessListPreBerlin(t *testing.T) {
 }
 
 func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 	chainConfig := chain.TestChainOsakaConfig.Copy()
 	historyAddr := params.HistoryStorageAddress.Value()
 	gspec := &types.Genesis{

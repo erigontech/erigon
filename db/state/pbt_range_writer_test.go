@@ -44,12 +44,12 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
 
 func TestNewPBinRangeWriter(t *testing.T) {
-	previous := statecfg.ExperimentalHexBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalHexBinCommitment = previous })
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalHexBinCommitment = true
 	db, agg := commitmenttemporal.Open(t, 8)
 	writePBinRangeWriterAccounts(t, db, 32)
@@ -61,8 +61,7 @@ func TestNewPBinRangeWriter(t *testing.T) {
 }
 
 func TestNewPBinRangeWriterExtendsPastStateFrontier(t *testing.T) {
-	previous := statecfg.ExperimentalHexBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalHexBinCommitment = previous })
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalHexBinCommitment = true
 	db, agg := commitmenttemporal.Open(t, 8)
 	writePBinRangeWriterAccounts(t, db, 32)
@@ -457,15 +456,10 @@ func pbinRangeWriterRows(t *testing.T, at *state.AggregatorRoTx) map[string][]by
 }
 
 func selectPBinRangeWriterHash(t *testing.T) {
-	previousPBin := commitment.PBinHashSuiteName()
 	previousEIP := eip8297.HashSuiteName()
-	previousDual := statecfg.ExperimentalHexBinCommitment
-	previousBinHash := statecfg.BinCommitmentHash
+	commitmentflags.Restore(t)
 	t.Cleanup(func() {
-		require.NoError(t, commitment.SetPBinHashSuite(previousPBin))
 		require.NoError(t, eip8297.SetHashSuite(previousEIP))
-		statecfg.ExperimentalHexBinCommitment = previousDual
-		statecfg.BinCommitmentHash = previousBinHash
 	})
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	statecfg.ExperimentalHexBinCommitment = true

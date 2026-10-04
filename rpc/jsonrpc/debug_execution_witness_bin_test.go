@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -49,14 +50,7 @@ var pbinBeaconRootsCode = common.FromHex("0x3373ffffffffffffffffffffffffffffffff
 
 func withBinCommitmentDatadir(t *testing.T) {
 	t.Helper()
-	origBin, origHash, origSuite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
-	origParallel := statecfg.ExperimentalParallelCommitment
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = origBin
-		statecfg.BinCommitmentHash = origHash
-		require.NoError(t, commitment.SetPBinHashSuite(origSuite))
-		statecfg.ExperimentalParallelCommitment = origParallel
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
@@ -65,8 +59,7 @@ func withBinCommitmentDatadir(t *testing.T) {
 
 func withCommitmentHistory(t *testing.T) {
 	t.Helper()
-	previousSchema := statecfg.Schema
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
 }
 
@@ -120,15 +113,7 @@ func pbinWitnessFixtureWithGeneratorNConfig(t *testing.T, activation uint64, blo
 		withBinCommitmentDatadir(t)
 	}
 	if activation > 0 || hexOnly {
-		previousDual := statecfg.ExperimentalHexBinCommitment
-		previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-		previousBin := statecfg.ExperimentalBinCommitment
-		t.Cleanup(func() {
-			statecfg.ExperimentalHexBinCommitment = previousDual
-			statecfg.ExperimentalCommitmentV3 = previousV3
-			statecfg.ExperimentalBinCommitment = previousBin
-			statecfg.Schema = previousSchema
-		})
+		commitmentflags.Restore(t)
 		statecfg.ExperimentalHexBinCommitment = dual
 		statecfg.ExperimentalCommitmentV3 = true
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)

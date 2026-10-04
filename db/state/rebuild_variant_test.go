@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 )
 
 func TestRebuildTargetResolve(t *testing.T) {
@@ -49,14 +50,7 @@ func TestRebuildTargetResolve(t *testing.T) {
 }
 
 func TestRebuildCommitmentFilesV3Target(t *testing.T) {
-	previousV3, previousParallel, previousBin, previousHexBin, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.Schema
-	t.Cleanup(func() {
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.Schema = previousSchema
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.ExperimentalParallelCommitment = false
 	statecfg.ExperimentalBinCommitment = false
@@ -68,11 +62,7 @@ func TestRebuildCommitmentFilesV3Target(t *testing.T) {
 }
 
 func TestRebuildCommitmentFilesDefaultTargetIsProcessVariant(t *testing.T) {
-	previousParallel, previousV3 := statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3
-	t.Cleanup(func() {
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.ExperimentalCommitmentV3 = previousV3
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalParallelCommitment = false
 	statecfg.ExperimentalCommitmentV3 = false
 	target, err := state.DefaultRebuildTarget().Resolve()

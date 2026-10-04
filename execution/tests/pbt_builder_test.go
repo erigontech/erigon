@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/txnprovider"
 )
 
@@ -54,16 +55,7 @@ func TestPBTBuilderCanonicalCommitment(t *testing.T) {
 }
 
 func testPBTBuilderCanonicalCommitment(t *testing.T, dual bool) {
-	previousBin, previousDual := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment
-	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
-	previousParallel, previousHash := statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = previousBin, previousDual
-		statecfg.ExperimentalCommitmentV3, statecfg.Schema = previousV3, previousSchema
-		statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash = previousParallel, previousHash
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = true, dual
 	statecfg.ExperimentalCommitmentV3 = dual
 	if dual {

@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -474,9 +475,8 @@ func TestWitnessReaderComposition(t *testing.T) {
 // plane does not match parent(B). The build must fail a validation gate and return no
 // result — a wrong witness is never produced.
 func TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
@@ -509,9 +509,8 @@ func TestBuildWitnessResultHeadCapture_FailsClosedOnBadParent(t *testing.T) {
 // node nothing is cached and the block serves out-of-window — a wrong witness is never
 // produced and a miss never falls through to a history recompute.
 func TestHeadCaptureFailClosedYieldsOutOfWindow(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()

@@ -36,13 +36,13 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
@@ -56,25 +56,12 @@ func TestPBTDualCommitmentFlipAndReorg(t *testing.T) {
 }
 
 func testPBTDualCommitmentFlipAndReorg(t *testing.T, parallel bool) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
+	commitmentflags.Restore(t)
 	previousExec3Parallel := dbg.Exec3Parallel
 	previousBatchCommitments := dbg.BatchCommitments
 	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
 		dbg.Exec3Parallel = previousExec3Parallel
 		dbg.BatchCommitments = previousBatchCommitments
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
 	})
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
@@ -216,25 +203,12 @@ func testPBTDualCommitmentFlipAndReorg(t *testing.T, parallel bool) {
 }
 
 func TestPBTCommittedHexStopContinuesInSameProcess(t *testing.T) {
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	previousV3 := statecfg.ExperimentalCommitmentV3
-	previousSchema := statecfg.Schema
-	previousHash := statecfg.BinCommitmentHash
-	previousSuite := commitment.PBinHashSuiteName()
+	commitmentflags.Restore(t)
 	previousExec3Parallel := dbg.Exec3Parallel
 	previousBatchCommitments := dbg.BatchCommitments
 	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalParallelCommitment = previousParallel
-		statecfg.ExperimentalCommitmentV3 = previousV3
-		statecfg.Schema = previousSchema
-		statecfg.BinCommitmentHash = previousHash
 		dbg.Exec3Parallel = previousExec3Parallel
 		dbg.BatchCommitments = previousBatchCommitments
-		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
 	})
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
@@ -526,14 +500,7 @@ func runPBinBALContractCreate(t *testing.T, genesis *types.Genesis, key *ecdsa.P
 
 func runPBinBALBlock(t *testing.T, genesis *types.Genesis, key *ecdsa.PrivateKey, from, to common.Address, useBAL bool, makeTx func(*blockgen.BlockGen)) common.Hash {
 	t.Helper()
-	previousBin := statecfg.ExperimentalBinCommitment
-	previousHexBin := statecfg.ExperimentalHexBinCommitment
-	previousParallel := statecfg.ExperimentalParallelCommitment
-	t.Cleanup(func() {
-		statecfg.ExperimentalBinCommitment = previousBin
-		statecfg.ExperimentalHexBinCommitment = previousHexBin
-		statecfg.ExperimentalParallelCommitment = previousParallel
-	})
+	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ExperimentalParallelCommitment = false

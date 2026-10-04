@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/internal/commitmenttest/commitmentflags"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -237,9 +238,8 @@ func TestCacheAddAloneDoesNotPublish(t *testing.T) {
 // instead of through store, which stops the push with nothing else failing.
 func TestBuildPathsPublish(t *testing.T) {
 	t.Run("durable", func(t *testing.T) {
-		previousSchema := statecfg.Schema
+		commitmentflags.Restore(t)
 		statecfg.EnableHistoricalCommitment()
-		t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 		m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 		ctx, cancel := context.WithCancel(context.Background())
@@ -362,9 +362,8 @@ func TestOpenRollingPin(t *testing.T) {
 // The parent-commitment gate rejects it, so nothing is cached and the pin is
 // re-established at the committed head for the next block.
 func TestBuildAndCacheHeadCaptureStalePin(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
@@ -510,9 +509,8 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 }
 
 func TestBuildAndCacheJoinsRunningBuild(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
@@ -605,9 +603,8 @@ func TestBuildAndCacheHeadCaptureJoinsRunningBuild(t *testing.T) {
 // the shared setup for the head-capture builder tests.
 func insertHeadCaptureChain(t *testing.T, ctx context.Context, buildNum uint64) (*execmoduletester.ExecModuleTester, *rollingPin, common.Hash) {
 	t.Helper()
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
 	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
@@ -716,9 +713,8 @@ func readCommittedCommitmentState(t *testing.T, ctx context.Context, db kv.Tempo
 // independent snapshots. The held pin must keep resolving its original committed snapshot —
 // Finish, canonical hash, and commitment-state latest all unchanged — with no use-after-free.
 func TestRollingPinStableUnderTipAdvance(t *testing.T) {
-	previousSchema := statecfg.Schema
+	commitmentflags.Restore(t)
 	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, testChain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
 	ctx := context.Background()
