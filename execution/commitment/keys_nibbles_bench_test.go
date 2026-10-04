@@ -34,9 +34,9 @@ func Benchmark_KeyNibbleHash_Cached(b *testing.B) {
 		b.Run(w.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				var c addrHashCache
+				var c AddrHashCache
 				for _, k := range keys {
-					_ = keyToHexNibbleHashCached(k, &c)
+					_ = KeyToHexNibbleHashCached(k, &c)
 				}
 			}
 		})

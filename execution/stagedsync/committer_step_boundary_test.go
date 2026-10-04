@@ -216,6 +216,57 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 		"the step checkpoint sits inside the straddling block")
 }
 
+func TestHandleMessage_BlockEndStateFollowsMidBlockStepCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out)
+	require.NoError(t, err)
+
+	const block1End = uint64(10)
+	const stepEdgeTxNum = stepSize - 1
+	const block2End = stepEdgeTxNum + 2
+
+	rnd := rand.New(rand.NewSource(42))
+	writeAccount := func(txNum, blockNum uint64) {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
+		cc.handleMessage(ctx, &txResult{blockNum: blockNum, txNum: txNum, rules: &chain.Rules{}, writes: nonceBalanceWrites(addr, txNum, bal)})
+	}
+
+	for txNum := uint64(1); txNum <= block1End; txNum++ {
+		writeAccount(txNum, 1)
+	}
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, block1End, false))
+
+	for txNum := block1End + 1; txNum <= stepEdgeTxNum; txNum++ {
+		writeAccount(txNum, 2)
+	}
+	for txNum := stepEdgeTxNum + 1; txNum <= block2End; txNum++ {
+		cc.handleMessage(ctx, &txResult{blockNum: 2, txNum: txNum, rules: &chain.Rules{}, writes: &state.WriteSet{}})
+	}
+	cc.handleMessage(ctx, newTestBlockResult(2, common.Hash{0x02}, block2End, false))
+
+	cc.Stop()
+
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(stateBlob), 16)
+	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+	require.Equal(t, block2End, gotTxNum,
+		"a block whose writes end at a mid-block step edge must still save commitment state at its last txNum; a state left at the edge makes the next cycle re-execute the block")
+	require.Equal(t, uint64(2), gotBlockNum)
+}
+
 // TestHandleMessage_PartialBlockComputeFailureNotSwallowed pins that when the
 // first partial block's commitment computation fails, the calculator does not
 // mark the block computed. A swallowed compute error there would let exec
