@@ -1537,13 +1537,15 @@ func TestNoBALSkipsAccessRecording(t *testing.T) {
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
 	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
 	for _, noBAL := range []bool{false, true} {
 		ibs := state.New(state.NewNoopReader())
-		blockCtx := evmtypes.BlockContext{CanTransfer: CanTransfer, Transfer: misc.Transfer, GasLimit: 30_000_000}
+		blockCtx := evmtypes.BlockContext{CanTransfer: CanTransfer, Transfer: misc.Transfer, GasLimit: 30_000_000, Coinbase: coinbase}
 		evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true, NoBAL: noBAL})
 		_, err := NewTxnExecutor(evm, newSimpleTransferMsg(sender, recipient, 21_000, false), new(GasPool).AddGas(30_000_000)).Execute(true, false)
 		require.NoError(t, err)
 		require.Equal(t, !noBAL, ibs.AccessedAddr(recipient), "NoBAL=%v", noBAL)
+		require.Equal(t, !noBAL, ibs.AccessedAddr(coinbase), "NoBAL=%v: Prepare marks the coinbase", noBAL)
 		ibs.Close()
 	}
 }
