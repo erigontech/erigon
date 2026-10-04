@@ -182,7 +182,8 @@ func inlineReturns(body string, o fastOp) string {
 			step = "pc++\ncontinue run"
 		case o.jump:
 			// A valid destination holds a JUMPDEST: charge it here and step over it.
-			step = "pc = " + next + "\nif gasLeft >= params.JumpdestGas {\ngasLeft -= params.JumpdestGas\npc++\n}\npc++\ncontinue run"
+			// min instead of an if: the if costs every jump a taken branch.
+			step = "pc = " + next + "\nskip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas\ngasLeft -= skip * params.JumpdestGas\npc += skip + 1\ncontinue run"
 		default:
 			step = "pc = " + next + "\npc++\ncontinue run"
 		}
