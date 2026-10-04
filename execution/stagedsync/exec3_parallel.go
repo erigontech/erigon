@@ -1995,20 +1995,26 @@ func (result *execResult) calcFees(
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
 	coinbaseSelfdestructed := false
 	coinbaseCreatedContract := false
+	coinbaseWritten := false
 	if bw, ok := result.TxOut.GetBalance(recipient); ok {
 		newCoinbaseBalance = bw.Val
+		coinbaseWritten = true
 	}
 	if nw, ok := result.TxOut.GetNonce(recipient); ok {
 		coinbaseNonce = nw.Val
+		coinbaseWritten = true
 	}
 	if _, ok := result.TxOut.GetCodeHash(recipient); ok {
 		coinbaseHasCodeHashWrite = true
+		coinbaseWritten = true
 	}
 	if sw, ok := result.TxOut.GetSelfDestruct(recipient); ok {
 		coinbaseSelfdestructed = sw.Val
+		coinbaseWritten = true
 	}
 	if cw, ok := result.TxOut.GetCreateContract(recipient); ok {
 		coinbaseCreatedContract = cw.Val
+		coinbaseWritten = true
 	}
 	if hasBurnt {
 		if bw, ok := result.TxOut.GetBalance(burntAddr); ok {
@@ -2046,7 +2052,11 @@ func (result *execResult) calcFees(
 	// and Normalize's sdSet filter drops them.
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
-	coinbaseEmptied := coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero()
+	// Removing an account that neither exists nor was written is a no-op in
+	// serial, but a delete here would leave a SelfDestruct cell that hides
+	// later tips from readers further on in the block.
+	coinbaseExists := coinbaseAcc != nil || coinbaseWritten
+	coinbaseEmptied := coinbaseEmptyRemoval && coinbaseExists && coinbaseEmptyPre && newCoinbaseBalance.IsZero()
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance || coinbaseEmptied
 
 	if !emitCoinbase && !emitBurnt {
