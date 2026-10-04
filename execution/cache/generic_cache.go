@@ -205,8 +205,8 @@ type GenericCache[T any] struct {
 	// atomic w.r.t. a concurrent Put (freelru offers no conditional insert).
 	putStripes [putStripeCount]sync.Mutex
 
-	hits         atomic.Uint64
-	misses       atomic.Uint64
+	hits         stripedCounter
+	misses       stripedCounter
 	inserts      atomic.Uint64
 	evictions    atomic.Uint64 // capacity evictions only, counted from Add's evicted return (see newShards)
 	dropped      atomic.Uint64
@@ -412,7 +412,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	lru := c.data.Load()
 	e, ok := lru.Get(h)
 	if !ok || !bytes.Equal(e.key, key) {
-		c.misses.Add(1)
+		c.misses.Add(h)
 		var zero T
 		return zero, 0, false
 	}
@@ -427,11 +427,11 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	if coh.IsStale(e.txNum, e.epoch) {
 		c.dropStale(h, key)
 		c.staleEvicted.Add(1)
-		c.misses.Add(1)
+		c.misses.Add(h)
 		var zero T
 		return zero, 0, false
 	}
-	c.hits.Add(1)
+	c.hits.Add(h)
 	return e.val, e.txNum, true
 }
 
@@ -633,8 +633,8 @@ func (c *GenericCache[T]) CapacityBytes() datasize.ByteSize {
 
 // PrintStatsAndReset prints cache statistics and resets counters.
 func (c *GenericCache[T]) PrintStatsAndReset(name string) {
-	hits := c.hits.Swap(0)
-	misses := c.misses.Swap(0)
+	hits := c.hits.Swap()
+	misses := c.misses.Swap()
 	inserts := c.inserts.Swap(0)
 	evictions := c.evictions.Swap(0)
 	dropped := c.dropped.Swap(0)
@@ -672,4 +672,27 @@ func (c *GenericCache[T]) slotsPct() float64 {
 		return 0
 	}
 	return float64(held) / float64(allocated) * 100
+}
+
+// stripedCounter spreads a hot counter over cache lines, so readers of
+// different keys do not contend on one atomic.
+type stripedCounter [16]struct {
+	n atomic.Uint64
+	_ [56]byte
+}
+
+func (s *stripedCounter) Add(h uint64) { s[h&15].n.Add(1) }
+
+func (s *stripedCounter) Load() (sum uint64) {
+	for i := range s {
+		sum += s[i].n.Load()
+	}
+	return sum
+}
+
+func (s *stripedCounter) Swap() (sum uint64) {
+	for i := range s {
+		sum += s[i].n.Swap(0)
+	}
+	return sum
 }
