@@ -431,7 +431,17 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	}
 	// Increment the call depth which is restricted to 1024
 	evm.depth++
+	// One defer, so the compiler can open-code it despite the many returns.
 	defer func() {
+		// The tracer needs the stacks before callContext.put() returns them to the pool.
+		if debug && err != nil {
+			switch {
+			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
+				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
+				tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
+			}
+		}
 		// EIP-8037: snapshot the spilled portion and derive the frame's net
 		// state-gas usage from the reservoir delta before callContext.put()
 		// clears them. A state charge lowers stateGas (or raises stateGasSpill
@@ -447,22 +457,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 		evm.depth--
 	}()
-
-	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
-	// the stacks before callContext.put() returns them to the pool.
-	if debug {
-		defer func() {
-			if err == nil {
-				return
-			}
-			switch {
-			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
-				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
-				tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
-			}
-		}()
-	}
 
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
