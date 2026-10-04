@@ -91,7 +91,7 @@ func TestStackBoundsInvariant(t *testing.T) {
 	for name, jt := range tables {
 		for i, op := range jt {
 			require.NotNilf(t, op, "%s[0x%02X] nil entry", name, i)
-			require.GreaterOrEqualf(t, op.numPop, 0, "%s[0x%02X]", name, i)
+			require.GreaterOrEqualf(t, int(op.numPop), 0, "%s[0x%02X]", name, i)
 			require.LessOrEqualf(t, op.numPop, op.maxStack, "%s[0x%02X]", name, i)
 		}
 	}
@@ -133,8 +133,8 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 				require.Equal(t, uint64(16-w.numPop), scope.Stack.peek().Uint64(), "table %d %s top", i, op)
 			}
 			require.Equal(t, w.gas, got.constantGas, "table %d %s gas", i, op)
-			require.Equal(t, w.numPop, got.numPop, "table %d %s numPop", i, op)
-			require.Equal(t, w.numPush, got.numPush, "table %d %s numPush", i, op)
+			require.Equal(t, w.numPop, int(got.numPop), "table %d %s numPop", i, op)
+			require.Equal(t, w.numPush, int(got.numPush), "table %d %s numPush", i, op)
 			if w.memorySize == nil {
 				require.Nil(t, got.dynamicGas, "table %d %s dynamicGas", i, op)
 				require.Nil(t, got.memorySize, "table %d %s memorySize", i, op)
