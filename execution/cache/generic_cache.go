@@ -18,6 +18,7 @@ package cache
 
 import (
 	"bytes"
+	"math/rand/v2"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -412,7 +413,7 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	lru := c.data.Load()
 	e, ok := lru.Get(h)
 	if !ok || !bytes.Equal(e.key, key) {
-		c.misses.Add(h)
+		c.misses.Add()
 		var zero T
 		return zero, 0, false
 	}
@@ -427,11 +428,11 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	if coh.IsStale(e.txNum, e.epoch) {
 		c.dropStale(h, key)
 		c.staleEvicted.Add(1)
-		c.misses.Add(h)
+		c.misses.Add()
 		var zero T
 		return zero, 0, false
 	}
-	c.hits.Add(h)
+	c.hits.Add()
 	return e.val, e.txNum, true
 }
 
@@ -674,14 +675,17 @@ func (c *GenericCache[T]) slotsPct() float64 {
 	return float64(held) / float64(allocated) * 100
 }
 
-// stripedCounter spreads a hot counter over cache lines, so readers of
-// different keys do not contend on one atomic.
-type stripedCounter [16]struct {
+// stripedCounter counts one in 16 events, scaled: an exact shared counter
+// would make every concurrent reader write the same cache line.
+type stripedCounter [1]struct {
 	n atomic.Uint64
-	_ [56]byte
 }
 
-func (s *stripedCounter) Add(h uint64) { s[h&15].n.Add(1) }
+func (s *stripedCounter) Add() {
+	if rand.Uint32()&15 == 0 {
+		s[0].n.Add(16)
+	}
+}
 
 func (s *stripedCounter) Load() (sum uint64) {
 	for i := range s {

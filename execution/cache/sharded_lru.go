@@ -121,8 +121,7 @@ func (s *shardedLRU[V]) Get(h uint64) (v V, ok bool) {
 	s.mus[i].RUnlock()
 	// Moving a hit to the LRU front needs the write lock, on which readers of a
 	// hot key would serialize, so only a sample of hits refreshes recency.
-	if ok && rand.Uint32()&15 == 0 {
-		s.mus[i].Lock()
+	if ok && rand.Uint32()&15 == 0 && s.mus[i].TryLock() {
 		s.shards[i].Get(h)
 		s.mus[i].Unlock()
 	}
