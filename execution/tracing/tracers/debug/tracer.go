@@ -17,6 +17,7 @@
 package debug
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -203,7 +204,7 @@ func (t *Tracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGa
 			Stack:      stack,
 			Memory:     memory,
 			MemorySize: len(memory),
-			ReturnData: returnData,
+			ReturnData: bytes.Clone(returnData),
 			Depth:      depth,
 			Error:      errStr,
 		},
