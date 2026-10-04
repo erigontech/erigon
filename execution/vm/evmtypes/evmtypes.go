@@ -17,8 +17,6 @@
 package evmtypes
 
 import (
-	"bytes"
-
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -99,7 +97,7 @@ func (result *ExecutionResult) Return() []byte {
 	if result.Err != nil {
 		return nil
 	}
-	return bytes.Clone(result.ReturnData)
+	return result.ReturnData
 }
 
 // Revert returns the concrete revert reason if the execution is aborted by `REVERT`
@@ -108,7 +106,7 @@ func (result *ExecutionResult) Revert() []byte {
 	if !result.Reverted {
 		return nil
 	}
-	return bytes.Clone(result.ReturnData)
+	return result.ReturnData
 }
 
 type (

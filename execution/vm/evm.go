@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -366,6 +367,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		if gasTracing {
 			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
 		}
+		if depth == 0 {
+			ret = bytes.Clone(ret)
+		}
 	}()
 
 	p, isPrecompile := evm.precompile(addr)
@@ -642,6 +646,9 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if gasTracing {
 			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
+		}
+		if depth == 0 {
+			ret = bytes.Clone(ret)
 		}
 	}()
 
