@@ -102,8 +102,6 @@ func TestPBinWitnessInputKeepsSystemAddressReads(t *testing.T) {
 	rs := NewRecordingState(inner)
 	_, err := rs.ReadAccountData(accounts.InternAddress(address))
 	require.NoError(t, err)
-	designator := append([]byte{0xef, 0x01, 0x00}, address[:]...)
-	rs.OnCodeAccess(accounts.InternAddress(common.Address{1}), designator)
 
 	got, err := buildPBinWitnessInput(rs)
 	require.NoError(t, err)

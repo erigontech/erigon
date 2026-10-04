@@ -74,14 +74,14 @@ parent pointer, and checks the root against the pre-state anchor. `replayBlockOv
 that tree, the supplied code blobs, and the in-block overlays. It applies the block's writes through the same PBT
 driver and compares the resulting root with the post-state anchor.
 
-PBT requires proofs for every pre-state account, storage, and code read, including reads of `SYSTEM_ADDRESS`. The
-per-transaction access set still gates the MPT key set for user transactions. Loading a delegation designator with
-`EXTCODE*` does not follow it, and an access-list entry alone is not enough. Genuine reads of system contracts need
-their proofs. PBT replay also compares the receipt root after Byzantium, gas used, and blob gas used with the block
-header. Contract creation over an
-existing account with storage wipes that storage; creation of a previously absent account does not walk an unproved
-storage subtree. An account without `BASIC_DATA` is considered present only after its code-hash or delegation leaf is
-resolved. All supplied PBT entries must be consumed before verification succeeds.
+PBT requires proofs for every pre-state account, storage, and code read, including reads of `SYSTEM_ADDRESS`. In the
+MPT key set, `SYSTEM_ADDRESS` is kept only when it changes or a user transaction's access set records it. Loading a
+delegation designator with `EXTCODE*` does not follow it, and an access-list entry alone is not enough. Genuine reads
+of system contracts need their proofs. PBT replay also compares the receipt root after Byzantium, gas used, and blob
+gas used with the block header. Contract creation over an existing account with storage wipes that storage; creation
+of a previously absent account does not walk an unproved storage subtree. An account without `BASIC_DATA` is considered
+present only after its code-hash or delegation leaf is resolved. All supplied PBT entries must be consumed before
+verification succeeds.
 
 Before Cancun, a block that destroys a contract in one transaction and funds or recreates the address in a later
 transaction cannot be witnessed. The PBT engine retains code chunks after their last holder is destroyed, so its
