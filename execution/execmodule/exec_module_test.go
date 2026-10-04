@@ -2692,6 +2692,35 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 	}))
 }
 
+// A block that fails validation while it only exists in the InsertBlocks
+// overlay must not stay readable: purgeBadChain cannot reach it in the DB.
+func TestValidateChainBadBlockIsDroppedFromOverlay(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	badHeader := types.CopyHeader(chainPack.Blocks[0].HeaderNoCopy())
+	badHeader.Root = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	badBlock := types.NewBlockFromNetwork(badHeader, chainPack.Blocks[0].Body(), chainPack.Blocks[0].BlockAccessListSidecar())
+	badHash, badNum := badBlock.Hash(), badBlock.NumberU64()
+
+	insRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	inserted, err := m.ExecModule.GetHeader(ctx, &badHash, &badNum)
+	require.NoError(t, err)
+	require.NotNil(t, inserted, "InsertBlocks must make the header readable through the overlay")
+
+	validation, err := m.ValidateChain(ctx, badBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+
+	afterBad, err := m.ExecModule.GetHeader(ctx, &badHash, &badNum)
+	require.NoError(t, err)
+	require.Nil(t, afterBad, "header of a block that failed validation must not be readable")
+}
+
 // transferGen returns a deterministic per-block tx generator so tests can
 // build forks that share a prefix with the canonical chain.
 func transferGen(t *testing.T, key *ecdsa.PrivateKey, to common.Address, amount uint64) func(int, *blockgen.BlockGen) {

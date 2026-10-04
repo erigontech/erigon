@@ -658,8 +658,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
 		validationStatus = ExecutionStatusBadBlock
 		// Discard the block overlay — it may contain the bad block's data.
-		if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-			e.currentContext.BlockOverlay().Close()
+		if e.currentContext != nil {
+			e.currentContext.CloseBlockOverlay()
 		}
 		if err := purgeTx.Commit(); err != nil {
 			return ValidationResult{}, err
