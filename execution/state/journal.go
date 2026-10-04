@@ -98,6 +98,7 @@ type journalEntry struct {
 type journal struct {
 	dirties map[accounts.Address]int // Dirty accounts and the number of changes
 	entries []journalEntry           // Current changes tracked by the journal
+	epoch   uint64                   // Moves on every revert, reset and unjournalled state change
 }
 
 // newJournal gets a journal from the pool.
@@ -112,6 +113,7 @@ func (j *journal) release() {
 }
 
 func (j *journal) Reset() {
+	j.epoch++
 	clear(j.entries)
 	j.entries = j.entries[:0]
 	clear(j.dirties)
@@ -137,6 +139,7 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 	}
 	clear(j.entries[snapshot:])
 	j.entries = j.entries[:snapshot]
+	j.epoch++
 }
 
 // dirty explicitly sets an address to dirty, even if the change entries would

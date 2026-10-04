@@ -1182,3 +1182,48 @@ func TestPropagatesBalanceIncGetStateObjectError(t *testing.T) {
 		})
 	}
 }
+
+// GetState serves repeat reads from a small cache: every way a slot can change must show
+// in the next read.
+func TestGetStateFollowsEveryChange(t *testing.T) {
+	ibs := New(NewNoopReader())
+	defer ibs.Close()
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	k1 := accounts.InternKey(common.HexToHash("0x01"))
+	k2 := accounts.InternKey(common.HexToHash("0x02"))
+	k3 := accounts.InternKey(common.HexToHash("0x03"))
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	set := func(k accounts.StorageKey, v uint64) {
+		t.Helper()
+		require.NoError(t, ibs.SetState(addr, k, *uint256.NewInt(v)))
+	}
+	get := func(k accounts.StorageKey) uint64 {
+		t.Helper()
+		v, err := ibs.GetState(addr, k)
+		require.NoError(t, err)
+		return v.Uint64()
+	}
+
+	set(k1, 1)
+	require.Equal(t, uint64(1), get(k1))
+	set(k1, 2)
+	require.Equal(t, uint64(2), get(k1), "a write")
+
+	// A revert and a different write leave the journal as long as when the cache was filled.
+	snap := ibs.PushSnapshot()
+	set(k1, 3)
+	require.Equal(t, uint64(3), get(k1))
+	ibs.RevertToSnapshot(snap, nil)
+	ibs.PopSnapshot(snap)
+	set(k1, 4)
+	require.Equal(t, uint64(4), get(k1), "a revert, then a write")
+
+	set(k2, 20)
+	set(k3, 30)
+	for range 2 {
+		require.Equal(t, []uint64{4, 20, 30}, []uint64{get(k1), get(k2), get(k3)}, "more slots than the cache holds")
+	}
+
+	require.NoError(t, ibs.SetStorage(addr, Storage{}))
+	require.Equal(t, uint64(0), get(k1), "a storage override")
+}

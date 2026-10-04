@@ -1549,6 +1549,11 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
+	if s.versionMap == nil {
+		if v, clean, ok := s.slots.get(s.journal, addr, key); ok {
+			return v, StorageRead, UnknownVersion, clean, nil
+		}
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {
@@ -1593,6 +1598,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		if err != nil {
 			return uint256.Int{}, StorageRead, UnknownVersion, false, err
 		}
+		s.slots.put(s.journal, addr, key, v, clean)
 		return v, StorageRead, UnknownVersion, clean, nil
 	case outcomeReturnZero, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, false, nil
@@ -1765,4 +1771,40 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 	default:
 		panic(fmt.Sprintf("refreshAccount: unexpected outcome %d for %x", r.outcome, addr))
 	}
+}
+
+// slotCache holds the last two storage reads of the serial path, as gevm keeps its last
+// slots. They stay valid while the journal does: every state change adds an entry, and
+// reverts, resets and the unjournalled changes move its epoch.
+type slotCache struct {
+	journalLen int
+	epoch      uint64
+	next       int
+	ok         [2]bool
+	clean      [2]bool
+	addr       [2]accounts.Address
+	key        [2]accounts.StorageKey
+	val        [2]uint256.Int
+}
+
+func (c *slotCache) get(j *journal, addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, bool) {
+	if c.journalLen != len(j.entries) || c.epoch != j.epoch {
+		return uint256.Int{}, false, false
+	}
+	for i := range c.ok {
+		if c.ok[i] && c.addr[i] == addr && c.key[i] == key {
+			return c.val[i], c.clean[i], true
+		}
+	}
+	return uint256.Int{}, false, false
+}
+
+func (c *slotCache) put(j *journal, addr accounts.Address, key accounts.StorageKey, v uint256.Int, clean bool) {
+	if c.journalLen != len(j.entries) || c.epoch != j.epoch {
+		c.ok = [2]bool{}
+		c.journalLen, c.epoch = len(j.entries), j.epoch
+	}
+	i := c.next
+	c.next ^= 1
+	c.ok[i], c.clean[i], c.addr[i], c.key[i], c.val[i] = true, clean, addr, key, v
 }

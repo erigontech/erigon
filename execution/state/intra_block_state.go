@@ -214,6 +214,8 @@ type IntraBlockState struct {
 	// via FinalizeTx→so.data.
 	noMaterialize bool
 
+	slots slotCache // last storage reads of the serial path
+
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
 	// SelfDestructPath=true account must read as a live, balance-preserving,
@@ -1702,6 +1704,7 @@ func (ibs *IntraBlockState) setStateVersioned(addr accounts.Address, key account
 // SetStorage replaces the entire storage for the specified account with given
 // storage. This function should only be used for debugging.
 func (ibs *IntraBlockState) SetStorage(addr accounts.Address, storage Storage) error {
+	ibs.journal.epoch++ // the override replaces the whole storage outside the journal
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
 		return err
@@ -2440,6 +2443,7 @@ func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool 
 }
 
 func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool, eip8246 bool) error {
+	stateObject.db.journal.epoch++ // storage moves to committed, deletions apply
 	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	// EIP-8246: a self-destructed account that still holds a balance is reset to
 	// a balance-only account (nonce 0, empty code, empty storage) not deleted.
