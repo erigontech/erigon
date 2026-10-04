@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"math/rand/v2"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -158,6 +159,14 @@ type fastPathWant struct {
 // TestRunIsGenerated fails when vm_run_gen.go or fast_path_gen_test.go are
 // stale against execution/vm/vmgen.
 func TestRunIsGenerated(t *testing.T) {
+	// The test cache keys on the files this process reads, not on what go run reads.
+	srcs, err := filepath.Glob("vmgen/*.go")
+	require.NoError(t, err)
+	require.NotEmpty(t, srcs)
+	for _, src := range srcs {
+		_, err := os.ReadFile(src)
+		require.NoError(t, err)
+	}
 	out, err := exec.CommandContext(t.Context(), "go", "run", "./vmgen", "-check").CombinedOutput()
 	require.NoError(t, err, string(out))
 }
@@ -198,10 +207,11 @@ func TestRunEmptyCodeReturnsBeforeTraceChoice(t *testing.T) {
 // not in the measured cost, so the full budget is always run as well.
 func TestRunMatchesRunTraced(t *testing.T) {
 	t.Parallel()
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Close()
-	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 	runOnce := func(code []byte, gas uint64, traced bool) (string, uint64) {
+		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
+		ibs := state.New(state.NewNoopReader())
+		defer ibs.Close()
+		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 		c.Code = code
 		f := evm.run
@@ -263,7 +273,17 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			case 2:
 				b = append(b, byte(PUSH2), byte(rng.IntN(2)), byte(rng.IntN(256)))
 			default:
-				b = append(b, byte(alphabet[rng.IntN(len(alphabet))]))
+				// Jumps land on their own JUMPDEST, so the program runs on to the tail that returns the stack.
+				switch op := alphabet[rng.IntN(len(alphabet))]; op {
+				case JUMP:
+					dest := len(b) + 4
+					b = append(b, byte(PUSH2), byte(dest>>8), byte(dest), byte(JUMP), byte(JUMPDEST))
+				case JUMPI:
+					dest := len(b) + 6
+					b = append(b, byte(PUSH1), byte(rng.IntN(2)), byte(PUSH2), byte(dest>>8), byte(dest), byte(JUMPI), byte(JUMPDEST))
+				default:
+					b = append(b, byte(op))
+				}
 			}
 		}
 		programs[fmt.Sprintf("random%d", i)] = prog(b)
