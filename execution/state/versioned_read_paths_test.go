@@ -112,6 +112,62 @@ func TestVersionedRead_B_DirtyAddressServesRecordedRead(t *testing.T) {
 	balance, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.EqualValues(t, 77, balance.Uint64(), "an own write still wins")
+
+	_, err = ibs.GetCode(addr)
+	require.NoError(t, err)
+	mvhm.WriteCode(addr, Version{TxIndex: 2}, accounts.Code{Bytes: []byte{0x60}}, false)
+	code, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	assert.Empty(t, code, "code is served from the recorded read too")
+}
+
+// A committed read of a slot this tx already read is served from the read set:
+// the recorded value is the slot's value before the tx.
+func TestVersionedRead_B_CommittedStorageServesRecordedRead(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), mvhm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	addr := accounts.InternAddress([20]byte{0xb5})
+	key := accounts.InternKey([32]byte{0x01})
+	mvhm.WriteStorage(addr, key, Version{TxIndex: 1}, *uint256.NewInt(10), true)
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 10, v.Uint64())
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(20)))
+
+	mvhm.WriteStorage(addr, key, Version{TxIndex: 2}, *uint256.NewInt(30), false)
+	committed, err := ibs.GetCommittedState(addr, key)
+	require.NoError(t, err)
+	assert.EqualValues(t, 10, committed.Uint64())
+}
+
+// Touching an account whose own balance write is already zero changes nothing,
+// so it adds no journal entry.
+func TestVersionedRead_B_RepeatedTouchIsNoop(t *testing.T) {
+	t.Parallel()
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress([20]byte{0xb6})
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	addrValue := addr.Value()
+	domains.SetTxNum(10)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetTxContext(1, 5)
+
+	require.NoError(t, ibs.TouchAccount(addr))
+	n := ibs.journal.length()
+	require.Positive(t, n)
+	require.NoError(t, ibs.TouchAccount(addr))
+	assert.Equal(t, n, ibs.journal.length())
+	balance, ok := ibs.versionedWrites.GetBalance(addr)
+	require.True(t, ok)
+	assert.True(t, balance.Val.IsZero())
 }
 
 // ------------------------------------------------------------------

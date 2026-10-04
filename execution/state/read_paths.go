@@ -1315,7 +1315,11 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 // readCode returns the contract code with its hash. The commited flag selects whether
 // the version-aware lookup honours the committed-only contract.
 func readCode(s *IntraBlockState, addr accounts.Address, commited bool) (accounts.Code, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
+	if !commited {
+		if v, src, ver, ok := warmField(s, addr, s.versionedWrites.code, s.versionedReads.code); ok {
+			return v, src, ver, nil
+		}
+	} else if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
 		}
@@ -1614,6 +1618,14 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 
 // readCommittedState reads a storage slot with committed-view semantics.
 func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
+	// A recorded read of the slot is its value before this tx, whatever the tx wrote since.
+	if s.versionMap != nil {
+		if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
+			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
+				return tr.Val, tr.Source, tr.Version, nil
+			}
+		}
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, true, false, &r)
 	if r.err != nil {
