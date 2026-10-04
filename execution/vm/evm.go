@@ -454,11 +454,7 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 	switch {
 	case isPrecompile:
 		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
-	case code.Len() == 0:
-		// If the account has no code, we can abort here
-		// The depth-check is already done, and precompiles handled above
-		ret, err = nil, nil // gas is unchanged
-	default:
+	case code.Len() > 0:
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
 		contract := Contract{caller: caller, addr: addr, value: value, Code: code.Bytes, CodeHash: code.Hash}
@@ -488,16 +484,9 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 	depth := evm.depth
 	gasRemaining = gas
 	inputTotal := gas.Total()
-	var (
-		snapshot      int
-		snapshotTaken bool
-	)
 	tracer := evm.Config().Tracer
 	gasTracing := tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook() || dbg.TraceTransactionIO
 	defer func() {
-		if snapshotTaken {
-			evm.intraBlockState.PopSnapshot(snapshot)
-		}
 		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if gasTracing {
 			evm.captureEnd(depth, CALLCODE, caller, addr, gasRemaining, gasUsed, ret, err)
@@ -534,15 +523,13 @@ func (evm *EVM) CallCode(caller accounts.Address, addr accounts.Address, input [
 		}
 	}
 
-	snapshot = evm.intraBlockState.PushSnapshot()
-	snapshotTaken = true
+	snapshot := evm.intraBlockState.PushSnapshot()
+	defer evm.intraBlockState.PopSnapshot(snapshot)
 
 	switch {
 	case isPrecompile:
 		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
-	case code.Len() == 0:
-		ret, err = nil, nil // gas is unchanged
-	default:
+	case code.Len() > 0:
 		contract := Contract{caller: caller, addr: caller, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, false)
 	}
@@ -565,16 +552,9 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 	depth := evm.depth
 	gasRemaining = gas
 	inputTotal := gas.Total()
-	var (
-		snapshot      int
-		snapshotTaken bool
-	)
 	tracer := evm.Config().Tracer
 	gasTracing := tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook() || dbg.TraceTransactionIO
 	defer func() {
-		if snapshotTaken {
-			evm.intraBlockState.PopSnapshot(snapshot)
-		}
 		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if gasTracing {
 			evm.captureEnd(depth, DELEGATECALL, caller, addr, gasRemaining, gasUsed, ret, err)
@@ -602,15 +582,13 @@ func (evm *EVM) DelegateCall(caller accounts.Address, callerAddress accounts.Add
 		return nil, gasRemaining, mdgas.MdGasUsage{}, ErrDepth
 	}
 
-	snapshot = evm.intraBlockState.PushSnapshot()
-	snapshotTaken = true
+	snapshot := evm.intraBlockState.PushSnapshot()
+	defer evm.intraBlockState.PopSnapshot(snapshot)
 
 	switch {
 	case isPrecompile:
 		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
-	case code.Len() == 0:
-		ret, err = nil, nil // gas is unchanged
-	default:
+	case code.Len() > 0:
 		contract := Contract{caller: callerAddress, addr: caller, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, false)
 	}
@@ -632,16 +610,9 @@ func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input
 	depth := evm.depth
 	gasRemaining = gas
 	inputTotal := gas.Total()
-	var (
-		snapshot      int
-		snapshotTaken bool
-	)
 	tracer := evm.Config().Tracer
 	gasTracing := tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook() || dbg.TraceTransactionIO
 	defer func() {
-		if snapshotTaken {
-			evm.intraBlockState.PopSnapshot(snapshot)
-		}
 		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if gasTracing {
 			evm.captureEnd(depth, STATICCALL, caller, addr, gasRemaining, gasUsed, ret, err)
@@ -669,8 +640,8 @@ func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input
 		return nil, gasRemaining, mdgas.MdGasUsage{}, ErrDepth
 	}
 
-	snapshot = evm.intraBlockState.PushSnapshot()
-	snapshotTaken = true
+	snapshot := evm.intraBlockState.PushSnapshot()
+	defer evm.intraBlockState.PopSnapshot(snapshot)
 
 	// Trigger a touch on the callee so EIP-161 state clearing applies to
 	// empty accounts (matters on test networks; on Mainnet all empties are
@@ -689,9 +660,7 @@ func (evm *EVM) StaticCall(caller accounts.Address, addr accounts.Address, input
 	switch {
 	case isPrecompile:
 		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, tracer)
-	case code.Len() == 0:
-		ret, err = nil, nil // gas is unchanged
-	default:
+	case code.Len() > 0:
 		contract := Contract{caller: caller, addr: addr, Code: code.Bytes, CodeHash: code.Hash}
 		ret, gasRemaining, gasUsed, err = evm.Run(contract, gasRemaining, input, true)
 	}
