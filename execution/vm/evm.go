@@ -655,7 +655,14 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	if gasTracing {
 		evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, gas, value, nil)
 	}
+	ret, createAddress, gasRemaining, gasUsed, err = evm.createFrame(caller, codeAndHash, gas, value, address, incrementNonce, bailout, preparation, depth)
+	return ret, createAddress, gasRemaining, gasUsed, err
+}
 
+// createFrame is the body of createWithPreparation after its defers are set up, split out for the
+// same reason as callFrame.
+func (evm *EVM) createFrame(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, incrementNonce bool, bailout bool, preparation *createPreparation, depth int) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+	gasRemaining = gas
 	if preparation == nil {
 		var prepared createPreparation
 		prepared, err = evm.prepareCreate(caller, address, value, incrementNonce, bailout, false)
