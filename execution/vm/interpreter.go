@@ -102,28 +102,22 @@ type frameSlots struct {
 	val     [2]uint256.Int
 }
 
-// get returns the entry for word, or -1.
-func (f *frameSlots) get(stamp state.ReadStamp, word *uint256.Int) int {
-	if f.stamp != stamp {
-		return -1
-	}
-	for i := range f.ok {
-		if f.ok[i] && f.word[i] == *word {
-			return i
+// lookupSlot returns the frame's entry for the top-of-stack word, or -1; called only when
+// slots.on. It records the result for the op, and a hit's interned key for peekStorageKey.
+func (ctx *CallContext) lookupSlot(evm *EVM) int {
+	f := &ctx.slots
+	i := -1
+	if stamp, _ := evm.IntraBlockState().ReadStamp(); f.stamp == stamp {
+		word := ctx.Stack.peek()
+		for j := range f.ok {
+			if f.ok[j] && f.word[j] == *word {
+				i = j
+				ctx.cachedKey, ctx.cachedKeyGen = f.key[j], ctx.cacheGen
+				break
+			}
 		}
 	}
-	return -1
-}
-
-// lookupSlot is get for the gas function, called only when slots.on: it records the result
-// for the op, and a hit's interned key for peekStorageKey.
-func (ctx *CallContext) lookupSlot(evm *EVM) int {
-	stamp, _ := evm.IntraBlockState().ReadStamp()
-	i := ctx.slots.get(stamp, ctx.Stack.peek())
-	ctx.slots.memo, ctx.slots.memoGen = i, ctx.cacheGen
-	if i >= 0 {
-		ctx.cachedKey, ctx.cachedKeyGen = ctx.slots.key[i], ctx.cacheGen
-	}
+	f.memo, f.memoGen = i, ctx.cacheGen
 	return i
 }
 
@@ -462,7 +456,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	var (
 		op          OpCode // current opcode
 		callContext = getCallContext(contract, input, gas)
-		_, slotsOn  = evm.intraBlockState.ReadStamp()
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
@@ -478,7 +471,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		debug   = tracer != nil && (tracer.HasOpcodeHook() || tracer.HasGasChangeHook() || tracer.HasFaultHook())
 		trace   = dbg.TraceInstructions && evm.intraBlockState.Trace()
 	)
-	callContext.slots.on = slotsOn
+	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
