@@ -368,9 +368,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		if gasTracing {
 			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
 		}
-		if depth == 0 {
-			ret = bytes.Clone(ret)
-		}
 	}()
 
 	p, isPrecompile := evm.precompile(addr)
@@ -473,6 +470,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	switch {
 	case isPrecompile:
 		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, evm.Config().Tracer)
+		if depth == 0 { // a precompile may return a shared buffer
+			ret = bytes.Clone(ret)
+		}
 	case code.Len() == 0:
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -647,9 +647,6 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if gasTracing {
 			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
-		}
-		if depth == 0 {
-			ret = bytes.Clone(ret)
 		}
 	}()
 
@@ -871,13 +868,16 @@ func (evm *EVM) captureEnd(depth int, leftOverGas mdgas.MdGas, gasUsed mdgas.MdG
 	tracer.EmitExit(depth, bytes.Clone(ret), gasUsed, VMErrorFromErr(err), reverted)
 }
 
-// returnCopy copies a frame's RETURN/REVERT data into a buffer the EVM reuses: the frame's
-// memory goes back to a shared pool. The data stays valid until the next frame returns;
-// frames run one at a time, so the caller has used it by then. Data that leaves the EVM is
-// copied again: at depth 0, for tracers, and as contract code.
+// returnCopy copies a frame's RETURN/REVERT data: the frame's memory goes back to a shared
+// pool. The top frame's data leaves the EVM, so it gets its own copy. An inner frame's goes
+// to a buffer the EVM reuses; it stays valid until the next frame returns, and frames run
+// one at a time, so the caller has used it by then. Tracers and contract code copy it again.
 func (evm *EVM) returnCopy(data []byte) []byte {
 	if len(data) == 0 {
 		return nil
+	}
+	if evm.depth == 1 {
+		return bytes.Clone(data)
 	}
 	if evm.returnBuf == nil {
 		evm.returnBuf = new([]byte)

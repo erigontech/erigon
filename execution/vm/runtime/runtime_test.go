@@ -1033,8 +1033,10 @@ func TestCreatedCodeOutlivesLaterReturns(t *testing.T) {
 	evm, statedb, _, _, top := newReturnDataEVM(t, nil, nil)
 	initcode := returnWord(0xaa)
 	factory := func(initOffset int) []byte {
-		code := []byte{byte(vm.PUSH1), byte(len(initcode)), byte(vm.PUSH1), byte(initOffset), byte(vm.PUSH1), 0, byte(vm.CODECOPY),
-			byte(vm.PUSH1), byte(len(initcode)), byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.CREATE)}
+		code := []byte{
+			byte(vm.PUSH1), byte(len(initcode)), byte(vm.PUSH1), byte(initOffset), byte(vm.PUSH1), 0, byte(vm.CODECOPY),
+			byte(vm.PUSH1), byte(len(initcode)), byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.CREATE),
+		}
 		code = append(code, callTo(0xbb, 0)...)
 		return append(code, byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
 	}
