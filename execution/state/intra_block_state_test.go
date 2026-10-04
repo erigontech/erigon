@@ -1230,3 +1230,63 @@ func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
 	require.Same(t, &stored[0][0], &stored[1][0], "an equal code reuses the previous one")
 	require.NotSame(t, &stored[0][0], &stored[3][0], "a different code in between replaces the memo")
 }
+
+// SetState reads the previous value through a small cache. A stale entry that matches the new
+// value would drop the write, so every way a slot can change must show in the next SetState.
+func TestSetStateCacheFollowsEveryChange(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	ibs := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer ibs.Close()
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	k1 := accounts.InternKey(common.HexToHash("0x01"))
+	k2 := accounts.InternKey(common.HexToHash("0x02"))
+	k3 := accounts.InternKey(common.HexToHash("0x03"))
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	set := func(k accounts.StorageKey, v uint64) {
+		t.Helper()
+		require.NoError(t, ibs.SetState(addr, k, *uint256.NewInt(v)))
+	}
+	get := func(k accounts.StorageKey) uint64 {
+		t.Helper()
+		v, err := ibs.GetState(addr, k)
+		require.NoError(t, err)
+		return v.Uint64()
+	}
+
+	set(k1, 1)
+	set(k1, 1) // a no-op SetState caches the value it read
+	set(k1, 2)
+	set(k1, 1)
+	require.Equal(t, uint64(1), get(k1), "a write")
+
+	// A revert, then another change, leave the journal as long as when the cache was filled.
+	snap := ibs.PushSnapshot()
+	set(k1, 3)
+	set(k1, 3)
+	filled := ibs.journal.length()
+	ibs.RevertToSnapshot(snap, nil)
+	ibs.PopSnapshot(snap)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	require.Equal(t, filled, ibs.journal.length())
+	set(k1, 3)
+	require.Equal(t, uint64(3), get(k1), "a revert")
+
+	set(k2, 20)
+	set(k3, 30)
+	for _, k := range []accounts.StorageKey{k1, k2, k3, k1, k2, k3} {
+		set(k, get(k))
+	}
+	set(k1, 4)
+	set(k2, 21)
+	set(k3, 31)
+	require.Equal(t, []uint64{4, 21, 31}, []uint64{get(k1), get(k2), get(k3)}, "more slots than the cache holds")
+
+	// Reset drops what the cache read; the database still has the committed value.
+	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
+	set(k1, 9)
+	require.NoError(t, ibs.FinalizeTx(&chain.Rules{}, NewNoopWriter()))
+	set(k1, 9)
+	ibs.Reset()
+	set(k1, 9)
+	require.Equal(t, uint64(9), get(k1), "a reset")
+}

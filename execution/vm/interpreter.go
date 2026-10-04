@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -83,7 +84,53 @@ type CallContext struct {
 	// Stack.data is 32 KB it can skip entirely.
 	Contract Contract
 	create   createGasPreparation
+	slots    frameSlots
 	Stack    Stack
+}
+
+// frameSlots holds the frame's last two storage reads by stack word, ahead of key interning:
+// the frame's storage address is fixed. A read under the current stamp also means the slot
+// is warm, because warming it is journalled and so changed the stamp before the read.
+type frameSlots struct {
+	on    bool // the state is on the serial path; fixed for the frame
+	stamp state.ReadStamp
+	next  int
+	// The gas function's lookup, for the op that follows it; valid while memoGen == cacheGen.
+	memoGen uint64
+	memo    int
+	ok      [2]bool
+	key     [2]accounts.StorageKey
+	word    [2]uint256.Int
+	val     [2]uint256.Int
+}
+
+// lookupSlot returns the frame's entry for the top-of-stack word, or -1; called only when
+// slots.on. It records the result for the op, and a hit's interned key for peekStorageKey.
+func (ctx *CallContext) lookupSlot(evm *EVM) int {
+	f := &ctx.slots
+	i := -1
+	if stamp, _ := evm.IntraBlockState().ReadStamp(); f.stamp == stamp {
+		word := ctx.Stack.peek()
+		for j := range f.ok {
+			if f.ok[j] && f.word[j] == *word {
+				i = j
+				ctx.cachedKey, ctx.cachedKeyGen = f.key[j], ctx.cacheGen
+				break
+			}
+		}
+	}
+	f.memo, f.memoGen = i, ctx.cacheGen
+	return i
+}
+
+func (f *frameSlots) put(stamp state.ReadStamp, word uint256.Int, key accounts.StorageKey, v uint256.Int) {
+	if f.stamp != stamp {
+		f.ok = [2]bool{}
+		f.stamp = stamp
+	}
+	i := f.next
+	f.next ^= 1
+	f.ok[i], f.key[i], f.word[i], f.val[i] = true, key, word, v
 }
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
@@ -151,6 +198,9 @@ func (ctx *CallContext) put() {
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
 	ctx.create = createGasPreparation{}
+	ctx.slots.ok = [2]bool{}                 // the next frame may have another storage address
+	ctx.slots.key = [2]accounts.StorageKey{} // like cachedKey below: release the canonMap pins
+	ctx.slots.memoGen = ^uint64(0)
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	ctx.cachedKeyGen = ^uint64(0)
@@ -436,6 +486,7 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		res     []byte // result of the opcode execution function
 		tracer  = evm.config.Tracer
 	)
+	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
