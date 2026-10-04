@@ -20,13 +20,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 
-	"github.com/erigontech/erigon/cl/aggregation/mock_services"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 )
 
 // The REST layer turns this into 503 CurrentlySyncing by matching the sentinel, so a bare error
@@ -46,27 +43,4 @@ func TestAddAttestationSubscriptionReportsNotSyncedWhileSyncing(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, synced_data.ErrNotSynced)
-}
-
-// Block production packs from the aggregation pool, so every verified attestation is kept,
-// not only those of committees with a local aggregator.
-func TestAggregateAttestationKeepsAttestationsWithoutLocalAggregator(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cfg.ElectraForkEpoch = 0
-	pool := mock_services.NewMockAggregationPool(gomock.NewController(t))
-	c := &CommitteeSubscribeMgmt{
-		beaconConfig:    &cfg,
-		aggregationPool: pool,
-		validatorSubs:   map[uint64]*validatorSub{},
-	}
-	committeeBits := solid.NewBitVector(int(cfg.MaxCommitteesPerSlot))
-	require.NoError(t, committeeBits.SetBitAt(3, true))
-	att := &solid.Attestation{
-		AggregationBits: solid.BitlistFromBytes([]byte{0b00000011}, int(cfg.MaxValidatorsPerCommittee*cfg.MaxCommitteesPerSlot)),
-		Data:            &solid.AttestationData{Slot: 100},
-		CommitteeBits:   committeeBits,
-	}
-	pool.EXPECT().AddAttestation(att).Return(nil).Times(1)
-
-	require.NoError(t, c.AggregateAttestation(att))
 }

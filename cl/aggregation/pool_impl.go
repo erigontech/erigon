@@ -45,7 +45,6 @@ type aggregationPoolImpl struct {
 	aggregates     map[common.Hash]*solid.Attestation // don't need this anymore after electra upgrade
 	// aggregationInCommittee is a cache for aggregation in committee, which is used after electra upgrade
 	aggregatesInCommittee *lru.CacheWithTTL[keyAggrInCommittee, *solid.Attestation]
-	committeeKeysBySlot   map[uint64]map[keyAggrInCommittee]struct{}
 }
 
 type keyAggrInCommittee struct {
@@ -66,7 +65,6 @@ func NewAggregationPool(
 		aggregatesLock:        sync.RWMutex{},
 		aggregates:            make(map[common.Hash]*solid.Attestation),
 		aggregatesInCommittee: lru.NewWithTTL[keyAggrInCommittee, *solid.Attestation]("aggregation_in_committee", 100_000, 30*time.Minute),
-		committeeKeysBySlot:   make(map[uint64]map[keyAggrInCommittee]struct{}),
 	}
 	go p.sweepStaleAtt(ctx)
 	return p
@@ -144,19 +142,11 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 		dataRoot:       hashRoot,
 		committeeIndex: committeeIndex,
 	}
-	p.aggregatesLock.Lock()
-	defer p.aggregatesLock.Unlock()
 	att, exist := p.aggregatesInCommittee.Get(key)
 	if !exist {
 		storedAttestation := inAtt.Copy()
 		storedAttestation.SetVersion(version)
 		p.aggregatesInCommittee.Add(key, storedAttestation)
-		keys, ok := p.committeeKeysBySlot[inAtt.Data.Slot]
-		if !ok {
-			keys = make(map[keyAggrInCommittee]struct{})
-			p.committeeKeysBySlot[inAtt.Data.Slot] = keys
-		}
-		keys[key] = struct{}{}
 		return nil
 	}
 
@@ -211,20 +201,6 @@ func (p *aggregationPoolImpl) GetAggregatationByRootAndCommittee(root common.Has
 	return att
 }
 
-func (p *aggregationPoolImpl) Aggregates() []*solid.Attestation {
-	p.aggregatesLock.RLock()
-	defer p.aggregatesLock.RUnlock()
-	var aggregates []*solid.Attestation
-	for _, keys := range p.committeeKeysBySlot {
-		for key := range keys {
-			if att, ok := p.aggregatesInCommittee.Get(key); ok {
-				aggregates = append(aggregates, att)
-			}
-		}
-	}
-	return aggregates
-}
-
 func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	for {
@@ -243,11 +219,6 @@ func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
 			// remove stale attestation
 			for _, hashRoot := range toRemoves {
 				delete(p.aggregates, hashRoot)
-			}
-			for slot := range p.committeeKeysBySlot {
-				if p.slotIsStale(slot) {
-					delete(p.committeeKeysBySlot, slot)
-				}
 			}
 			p.aggregatesLock.Unlock()
 		}
