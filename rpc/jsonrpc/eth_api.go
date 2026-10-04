@@ -192,17 +192,14 @@ type BaseAPI struct {
 // heap, so this holds ~1600 of them, about 5 hours of chain.
 var BlockCacheBytes = dbg.EnvDataSize("RPC_BLOCK_CACHE", 512*datasize.MB)
 
-// HeaderCacheBytes bounds the headers cached for header-only lookups.
-var HeaderCacheBytes = 1 * datasize.MB
-
 // blockHeapSize approximates a decoded block's heap: its encoding plus the header and one
 // transaction struct per transaction, which hold inline integers and hash and sender caches.
-func headerHeapSize(h *types.Header) int64 {
-	return int64(h.EncodingSize()) + int64(unsafe.Sizeof(types.Header{}))
-}
-
 func blockHeapSize(b *types.Block) int64 {
 	return int64(b.EncodingSize()) + int64(unsafe.Sizeof(types.Header{})) + int64(len(b.Transactions()))*int64(unsafe.Sizeof(types.DynamicFeeTransaction{}))
+}
+
+func headerHeapSize(h *types.Header) int64 {
+	return int64(h.EncodingSize()) + int64(unsafe.Sizeof(types.Header{}))
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, conf *rpccfg.BaseApiConfig) *BaseAPI {
@@ -220,7 +217,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		filters:           f,
 		stateCache:        stateCache,
 		blocksLRU:         blocksLRU,
-		headersLRU:        cache.NewHashByteLRU(HeaderCacheBytes, headerHeapSize),
+		headersLRU:        cache.NewHashByteLRU(1*datasize.MB, headerHeapSize),
 		_blockReader:      blockReader,
 		_txnReader:        blockReader,
 		_txNumReader:      blockReader.TxnumReader(),
