@@ -17,17 +17,22 @@
 package txpool
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -208,6 +213,59 @@ func TestRemoteAuthorizationRecoveryPreservesQueue(t *testing.T) {
 	require.NoError(t, pool.processRemoteTxns(ctx))
 	require.Contains(t, pool.byHash, string(later.IDHash[:]))
 	require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+	require.Empty(t, pool.unprocessedRemoteByHash)
+	require.Empty(t, pool.unprocessedRemotePeers)
+	require.False(t, pool.hasUnprocessedRemoteTxns.Load())
+}
+
+type failSecondTemporalReadDB struct {
+	kv.TemporalRoDB
+	reads int
+	err   error
+}
+
+func (db *failSecondTemporalReadDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	db.reads++
+	if db.reads == 2 {
+		return nil, db.err
+	}
+	return db.TemporalRoDB.BeginTemporalRo(ctx)
+}
+
+func TestRemoteAuthorizationRecoveryKeepsQueueOnError(t *testing.T) {
+	ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.started.Store(true)
+	readErr := errors.New("state read failed")
+	pool._chainDB = &failSecondTemporalReadDB{TemporalRoDB: coreDB, err: readErr}
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := types.SignAuthorization(key, pool.chainID, common.Address{2}, 0)
+	require.NoError(t, err)
+	txn := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+	txn.IDHash[0] = 1
+	txn.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
+	var slots TxnSlots
+	slots.Append(txn, sender[:], false)
+	peer := PeerID(gointerfaces.ConvertHashToH512([64]byte{1}))
+	sentry := sentryproto.NewMockSentryClient(gomock.NewController(t))
+	pool.AddRemoteTxns(ctx, slots, peer, sentry)
+
+	require.ErrorIs(t, pool.processRemoteTxns(ctx), readErr)
+	require.Equal(t, []AuthAndNonce{{crypto.PubkeyToAddress(key.PublicKey), 0}}, txn.AuthAndNonces,
+		"recovery must finish before the failed state read")
+	require.Empty(t, pool.byHash)
+	require.Empty(t, pool.auths)
+	require.Equal(t, slots, *pool.unprocessedRemoteTxns)
+	require.Equal(t, map[string]*TxnSlot{string(txn.IDHash[:]): txn}, pool.unprocessedRemoteByHash)
+	require.Equal(t, []remoteSource{{peerID: peer, sentry: sentry}}, pool.unprocessedRemotePeers)
+	require.True(t, pool.hasUnprocessedRemoteTxns.Load())
+
+	require.NoError(t, pool.processRemoteTxns(ctx))
+	require.Contains(t, pool.byHash, string(txn.IDHash[:]))
+	require.Same(t, pool.byHash[string(txn.IDHash[:])], pool.auths[txn.AuthAndNonces[0]])
+	require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+	require.Empty(t, pool.unprocessedRemoteTxns.Senders)
+	require.Empty(t, pool.unprocessedRemoteTxns.IsLocal)
 	require.Empty(t, pool.unprocessedRemoteByHash)
 	require.Empty(t, pool.unprocessedRemotePeers)
 	require.False(t, pool.hasUnprocessedRemoteTxns.Load())
