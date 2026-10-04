@@ -1290,3 +1290,20 @@ func TestSetStateCacheFollowsEveryChange(t *testing.T) {
 	set(k1, 9)
 	require.Equal(t, uint64(9), get(k1), "a reset")
 }
+
+// After Reset the state holds no code, so the caller may reuse the buffer it passed to SetCode.
+func TestSetCodeAfterResetHashesAReusedBuffer(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	buf := []byte{0x60, 0x01, 0x60, 0x00, 0xf3}
+	require.NoError(t, ibs.SetCode(accounts.InternAddress(common.HexToAddress("0x01")), buf, tracing.CodeChangeContractCreation))
+	ibs.Reset()
+
+	buf[1] = 0x02
+	addr := accounts.InternAddress(common.HexToAddress("0x02"))
+	require.NoError(t, ibs.SetCode(addr, buf, tracing.CodeChangeContractCreation))
+	codeHash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(buf)), codeHash)
+}
