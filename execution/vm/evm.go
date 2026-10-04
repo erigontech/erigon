@@ -363,7 +363,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	//	}()
 	//}
 
-	gasTracing := evm.Config().Tracer != nil
+	tracer := evm.Config().Tracer
+	gasTracing := tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook()
 	// One defer, so the compiler can open-code it despite the many returns.
 	defer func() {
 		if snapshotTaken {
@@ -644,7 +645,8 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 
 	depth := evm.depth
 	inputTotal := gas.Total()
-	gasTracing := evm.Config().Tracer != nil
+	tracer := evm.Config().Tracer
+	gasTracing := tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook()
 	var (
 		snapshot      int
 		snapshotTaken bool
@@ -692,7 +694,7 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	if collision {
 		err = ErrContractAddressCollision
 		gasRemaining.Execution = 0
-		if tracer := evm.config.Tracer; tracer.HasGasChangeHook() {
+		if tracer.HasGasChangeHook() {
 			tracer.EmitGasChange(gas, gasRemaining, tracing.GasChangeCallFailedExecution)
 		}
 		return nil, accounts.NilAddress, gasRemaining, mdgas.MdGasUsage{}, err
