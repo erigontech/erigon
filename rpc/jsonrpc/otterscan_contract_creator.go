@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -58,12 +59,14 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	if plainStateAcc.IsEmptyCodeHash() {
 		return nil, nil
 	}
-	code, err := latestState.ReadAccountCode(accounts.InternAddress(addr))
-	if err != nil {
-		return nil, err
-	}
-	if _, delegated := types.ParseDelegation(code); delegated {
-		return nil, nil
+	if plainStateAcc.Incarnation == state.NonContractIncarnation {
+		code, err := latestState.ReadAccountCode(accounts.InternAddress(addr))
+		if err != nil {
+			return nil, err
+		}
+		if _, delegated := types.ParseDelegation(code); delegated {
+			return nil, nil
+		}
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
