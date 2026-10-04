@@ -1808,3 +1808,17 @@ func (c *slotCache) put(j *journal, addr accounts.Address, key accounts.StorageK
 	c.next ^= 1
 	c.ok[i], c.clean[i], c.addr[i], c.key[i], c.val[i] = true, clean, addr, key, v
 }
+
+// ReadStamp identifies the state a serial-path read sees; any state change gives a new one.
+type ReadStamp struct {
+	journalLen int
+	epoch      uint64
+}
+
+// ReadStamp is ok only on the serial path: a versioned read must reach the read set.
+func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
+	if ibs.versionMap != nil || dbg.TraceTransactionIO {
+		return ReadStamp{}, false
+	}
+	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch}, true
+}

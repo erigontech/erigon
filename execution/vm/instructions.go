@@ -761,7 +761,19 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+	ibs := evm.IntraBlockState()
+	stamp, cacheable := ibs.ReadStamp()
+	if cacheable {
+		if i := scope.slots.get(stamp, loc); i >= 0 {
+			*loc = scope.slots.val[i]
+			return pc, nil, nil
+		}
+	}
+	word, key := *loc, scope.peekStorageKey(evm)
+	*loc, err = ibs.GetState(scope.Contract.Address(), key)
+	if stamp, cacheable = ibs.ReadStamp(); cacheable && err == nil {
+		scope.slots.put(stamp, word, key, *loc)
+	}
 	return pc, nil, err
 }
 
@@ -774,10 +786,19 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	key := scope.peekStorageKey(evm)
+	ibs := evm.IntraBlockState()
+	var key accounts.StorageKey
+	if stamp, ok := ibs.ReadStamp(); ok {
+		if i := scope.slots.get(stamp, scope.Stack.peek()); i >= 0 {
+			key = scope.slots.key[i]
+		}
+	}
+	if key == accounts.NilKey {
+		key = scope.peekStorageKey(evm)
+	}
 	scope.Stack.drop()
 	val := scope.Stack.popCopy()
-	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
+	return pc, nil, ibs.SetState(scope.Contract.Address(), key, val)
 }
 
 func stSstore(_ uint64, scope *CallContext) string {

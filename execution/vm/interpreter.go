@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -81,7 +82,43 @@ type CallContext struct {
 	// Stack.data is 32 KB it can skip entirely.
 	Contract Contract
 	create   createGasPreparation
+	slots    frameSlots
 	Stack    Stack
+}
+
+// frameSlots holds the frame's last two storage reads by stack word, ahead of key interning:
+// the frame's storage address is fixed. A read under the current stamp also means the slot
+// is warm, because warming it is journalled and so changed the stamp before the read.
+type frameSlots struct {
+	stamp state.ReadStamp
+	next  int
+	ok    [2]bool
+	key   [2]accounts.StorageKey
+	word  [2]uint256.Int
+	val   [2]uint256.Int
+}
+
+// get returns the entry for word, or -1.
+func (f *frameSlots) get(stamp state.ReadStamp, word *uint256.Int) int {
+	if f.stamp != stamp {
+		return -1
+	}
+	for i := range f.ok {
+		if f.ok[i] && f.word[i] == *word {
+			return i
+		}
+	}
+	return -1
+}
+
+func (f *frameSlots) put(stamp state.ReadStamp, word uint256.Int, key accounts.StorageKey, v uint256.Int) {
+	if f.stamp != stamp {
+		f.ok = [2]bool{}
+		f.stamp = stamp
+	}
+	i := f.next
+	f.next ^= 1
+	f.ok[i], f.key[i], f.word[i], f.val[i] = true, key, word, v
 }
 
 // peekStorageKey returns the top-of-stack value as an interned StorageKey.
@@ -149,6 +186,7 @@ func (ctx *CallContext) put() {
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
 	ctx.create = createGasPreparation{}
+	ctx.slots.ok = [2]bool{} // the next frame may have another storage address
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	ctx.cachedKeyGen = ^uint64(0)
