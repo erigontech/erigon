@@ -1205,13 +1205,17 @@ func TestRevertSetCodeOnCodelessAccount(t *testing.T) {
 	require.Equal(t, accounts.EmptyCodeHash, codeHash)
 }
 
-func TestSetCodeHashesEachDistinctCode(t *testing.T) {
+// TestSetCodeReusesTheLastEqualCode pins the SetCode memo: an equal code from a
+// separate allocation gets the previous code's bytes and hash, a different code
+// gets its own.
+func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
 	t.Parallel()
 
 	ibs := New(NewNoopReader())
 	codeA := []byte{0x60, 0x01, 0x60, 0x00, 0xf3}
 	codeB := []byte{0x60, 0x02, 0x60, 0x00, 0xf3}
-	for i, code := range [][]byte{codeA, codeA, codeB, codeA} {
+	var stored [][]byte
+	for i, code := range [][]byte{codeA, bytes.Clone(codeA), codeB, bytes.Clone(codeA)} {
 		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
 		require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeContractCreation))
 
@@ -1221,5 +1225,8 @@ func TestSetCodeHashesEachDistinctCode(t *testing.T) {
 		codeHash, err := ibs.GetCodeHash(addr)
 		require.NoError(t, err)
 		require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(code)), codeHash)
+		stored = append(stored, got)
 	}
+	require.Same(t, &stored[0][0], &stored[1][0], "an equal code reuses the previous one")
+	require.NotSame(t, &stored[0][0], &stored[3][0], "a different code in between replaces the memo")
 }
