@@ -196,7 +196,8 @@ func (ctx *CallContext) put() {
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
 	ctx.create = createGasPreparation{}
-	ctx.slots.ok = [2]bool{} // the next frame may have another storage address
+	ctx.slots.ok = [2]bool{}                 // the next frame may have another storage address
+	ctx.slots.key = [2]accounts.StorageKey{} // like cachedKey below: release the canonMap pins
 	ctx.slots.memoGen = ^uint64(0)
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
