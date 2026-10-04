@@ -596,10 +596,15 @@ func TestSetCodeAuthRecoveryDeferred(t *testing.T) {
 	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
 	require.NoError(t, setCodeTx.DecodeRLP(rlpStream))
 	require.Equal(t, setCodeTx.Authorizations, txn.Txn.GetAuthorizations())
-	authority, err := txn.Txn.GetAuthorizations()[0].RecoverSigner()
-	require.NoError(t, err)
-	require.Equal(t, common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3"), authority)
 	require.Empty(t, txn.AuthAndNonces)
+	pool := &TxPool{chainID: ctx.chainID}
+	pool.recoverAuthorizations(&txn)
+	require.Len(t, txn.AuthAndNonces, 1)
+	require.Equal(t, common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3"), txn.AuthAndNonces[0].authority)
+
+	_, err = ctx.ParseTransaction(hexutil.MustDecodeHex(testdata.ValidSetCodeTxn2), 0, &txn, nil, false, false, nil)
+	require.NoError(t, err)
+	require.Nil(t, txn.AuthAndNonces, "parsing a new transaction must clear the previous recovery")
 }
 
 func TestSetCodeTxnParsing(t *testing.T) {

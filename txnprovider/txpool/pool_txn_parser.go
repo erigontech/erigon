@@ -371,6 +371,7 @@ func (ctx *TxnParseContext) ParseTransaction(payload []byte, pos int, slot *TxnS
 	// which txn.Hash() would do via rlpHash/prefixedRlpHash + reflection).
 	// For wrapped blob txns, the hash is of the inner tx_payload_body, not the full wrapper.
 	slot.Txn = txn
+	slot.AuthAndNonces = nil
 	hashInput := txBytes
 	if innerTxBytes != nil {
 		hashInput = innerTxBytes

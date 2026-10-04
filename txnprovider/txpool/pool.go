@@ -524,8 +524,12 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 }
 
 func (p *TxPool) removeProcessedRemoteTxns(n int) {
-	for _, txn := range p.unprocessedRemoteTxns.Txns[:n] {
-		delete(p.unprocessedRemoteByHash, string(txn.IDHash[:]))
+	if n == len(p.unprocessedRemoteTxns.Txns) {
+		p.unprocessedRemoteByHash = make(map[string]*TxnSlot)
+	} else {
+		for _, txn := range p.unprocessedRemoteTxns.Txns[:n] {
+			delete(p.unprocessedRemoteByHash, string(txn.IDHash[:]))
+		}
 	}
 	p.unprocessedRemoteTxns.Txns = slices.Delete(p.unprocessedRemoteTxns.Txns, 0, n)
 	p.unprocessedRemoteTxns.Senders = slices.Delete(p.unprocessedRemoteTxns.Senders, 0, n*length.Addr)
@@ -1354,6 +1358,26 @@ func (p *TxPool) recoverAuthorizations(tx *TxnSlot) {
 	tx.AuthAndNonces = authorities
 }
 
+func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kvcache.CacheView) error) error {
+	coreDB, cache := p.chainDB()
+	coreTx, err := coreDB.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer coreTx.Rollback()
+	view, err := cache.View(ctx, coreTx)
+	if err != nil {
+		return err
+	}
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	if err := p.senders.registerNewSenders(txns, p.logger); err != nil {
+		return err
+	}
+	defer p.forgetUnusedSenders(senderIDsOf(txns))
+	return f(view)
+}
+
 // Precheck SetCode transactions under the pool lock, then recover their
 // authorization signers without it. The caller must validate the surviving
 // transactions again with a fresh state view before inserting them.
@@ -1373,29 +1397,16 @@ func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]tx
 		return nil, nil
 	}
 
-	coreDB, cache := p.chainDB()
-	coreTx, err := coreDB.BeginTemporalRo(ctx)
+	var precheckReasons []txpoolcfg.DiscardReason
+	var goodTxns TxnSlots
+	err := p.withLockedState(ctx, &setCode, func(view kvcache.CacheView) error {
+		var err error
+		precheckReasons, goodTxns, err = p.validateTxns(&setCode, view, nil)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer coreTx.Rollback()
-	view, err := cache.View(ctx, coreTx)
-	if err != nil {
-		return nil, err
-	}
-	precheckReasons, goodTxns, err := func() ([]txpoolcfg.DiscardReason, TxnSlots, error) {
-		p.lock.Lock()
-		defer p.lock.Unlock()
-		if err := p.senders.registerNewSenders(&setCode, p.logger); err != nil {
-			return nil, TxnSlots{}, err
-		}
-		defer p.forgetUnusedSenders(senderIDsOf(&setCode))
-		return p.validateTxns(&setCode, view, nil)
-	}()
-	if err != nil {
-		return nil, err
-	}
-	coreTx.Rollback()
 
 	reasons := make([]txpoolcfg.DiscardReason, len(txns.Txns))
 	for i, index := range indices {
@@ -1494,60 +1505,47 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 	if err != nil {
 		return nil, err
 	}
-	coreDb, cache := p.chainDB()
-	coreTx, err := coreDb.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer coreTx.Rollback()
-
-	cacheView, err := cache.View(ctx, coreTx)
-	if err != nil {
-		return nil, err
-	}
-
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	if err := p.senders.registerNewSenders(&newTxns, p.logger); err != nil {
-		return nil, err
-	}
-	defer p.forgetUnusedSenders(senderIDsOf(&newTxns))
-
-	reasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, reasons)
-	if err != nil {
-		return nil, err
-	}
-	if fromRemoteQueue {
-		p.kickKZGOffenders(ctx, reasons)
-	}
-
-	announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns,
-		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
-	if err != nil {
-		return nil, err
-	}
-	// reasons is indexed by newTxns; addReasons is indexed by goodTxns.
-	// Walk reasons and advance j only on slots that survived validation.
-	for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
-		if reasons[i] != txpoolcfg.NotSet {
-			continue
+	err = p.withLockedState(ctx, &newTxns, func(cacheView kvcache.CacheView) error {
+		validatedReasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, reasons)
+		if err != nil {
+			return err
 		}
-		reasons[i] = addReasons[j]
-		j++
-	}
-	p.promoted.Reset()
-	p.promoted.AppendOther(announcements)
-
-	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
-	if p.promoted.Len() > 0 {
-		select {
-		case p.newPendingTxns <- p.promoted.Copy():
-		default:
+		reasons = validatedReasons
+		if fromRemoteQueue {
+			p.kickKZGOffenders(ctx, reasons)
 		}
-	}
-	if fromRemoteQueue {
-		p.removeProcessedRemoteTxns(len(newTxns.Txns))
+
+		announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns,
+			p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
+		if err != nil {
+			return err
+		}
+		// reasons is indexed by newTxns; addReasons is indexed by goodTxns.
+		// Walk reasons and advance j only on slots that survived validation.
+		for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
+			if reasons[i] != txpoolcfg.NotSet {
+				continue
+			}
+			reasons[i] = addReasons[j]
+			j++
+		}
+		p.promoted.Reset()
+		p.promoted.AppendOther(announcements)
+
+		reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
+		if p.promoted.Len() > 0 {
+			select {
+			case p.newPendingTxns <- p.promoted.Copy():
+			default:
+			}
+		}
+		if fromRemoteQueue {
+			p.removeProcessedRemoteTxns(len(newTxns.Txns))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return reasons, nil
 }
@@ -1594,7 +1592,6 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 
 		if reason := p.addLocked(mt, &announcements); reason != txpoolcfg.NotSet {
 			discardReasons[i] = reason
-			p.discardReasonsLRU.Add(string(txn.IDHash[:]), reason)
 			continue
 		}
 		discardReasons[i] = txpoolcfg.NotSet // unnecessary
@@ -1837,6 +1834,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			// Self authorization nonce should be senderNonce + 1
 			if a.authority == senderAddr && a.nonce != mt.TxnSlot.Nonce+1 {
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				p.discardReasonsLRU.Add(string(mt.TxnSlot.IDHash[:]), txpoolcfg.NonceTooLow)
 				return txpoolcfg.NonceTooLow
 			}
 			if _, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok {

@@ -663,19 +663,23 @@ func TestSetCodeAuthorizationAdmission(t *testing.T) {
 
 				var txns TxnSlots
 				txns.Append(&slot, sender[:], local)
+				var reasons []txpoolcfg.DiscardReason
 				if local {
-					reasons, err := pool.AddLocalTxns(ctx, txns)
-					require.NoError(t, err)
-					require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
+					reasons, err = pool.AddLocalTxns(ctx, txns)
 				} else {
-					pool.started.Store(true)
 					pool.AddRemoteTxns(ctx, txns, nil, nil)
-					require.NoError(t, pool.processRemoteTxns(ctx))
+					reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
 				}
+				require.NoError(t, err)
+				require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
+				require.Empty(t, pool.unprocessedRemoteTxns.Txns)
+				require.Empty(t, pool.unprocessedRemoteByHash)
 				if tc.reason == txpoolcfg.Success {
+					require.Contains(t, pool.byHash, string(slot.IDHash[:]))
 					require.Equal(t, []AuthAndNonce{{authority, 0}}, slot.AuthAndNonces)
 					require.Contains(t, pool.auths, AuthAndNonce{authority, 0})
 				} else {
+					require.NotContains(t, pool.byHash, string(slot.IDHash[:]))
 					require.Empty(t, slot.AuthAndNonces)
 					require.Empty(t, pool.auths)
 				}

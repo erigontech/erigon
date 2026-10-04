@@ -19,15 +19,21 @@ package txpool
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/remotedb"
+	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -38,16 +44,54 @@ import (
 
 type authorizationReadProbe struct {
 	types.Transaction
-	reads    int
-	onSecond func()
+	pool       *TxPool
+	reads      int
+	onUnlocked func()
 }
 
 func (p *authorizationReadProbe) GetAuthorizations() []types.Authorization {
 	p.reads++
-	if p.reads == 2 {
-		p.onSecond()
+	if p.onUnlocked != nil && p.pool.lock.TryLock() {
+		p.pool.lock.Unlock()
+		callback := p.onUnlocked
+		p.onUnlocked = nil
+		callback()
 	}
 	return p.Transaction.GetAuthorizations()
+}
+
+func TestAuthorizationRecoveryRemoteDB(t *testing.T) {
+	ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer()
+	remoteproto.RegisterKVServer(server, remotedbserver.NewKvServer(ctx, coreDB, nil, nil, pool.logger))
+	t.Cleanup(server.Stop)
+	go func() {
+		if err := server.Serve(listener); err != nil {
+			t.Error(err)
+		}
+	}()
+	conn, err := grpc.NewClient("passthrough:///bufconn", grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return listener.DialContext(ctx)
+		}))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	remoteDB, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), pool.logger, remoteproto.NewKVClient(conn)).Open()
+	require.NoError(t, err)
+	pool._chainDB = remoteDB
+
+	for nonce := range uint64(2) {
+		txn := newTestSetCodeTxnSlot(nonce, 0, 1, 2, 100_000)
+		txn.IDHash[0] = byte(nonce + 1)
+		var slots TxnSlots
+		slots.Append(txn, sender[:], true)
+		require.NotPanics(t, func() {
+			reasons, err := pool.AddLocalTxns(ctx, slots)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+		})
+	}
 }
 
 func TestLocalAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
@@ -61,12 +105,8 @@ func TestLocalAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
 	txn.IDHash[0] = 1
 	txn.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
 	var unlocked bool
-	txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, onSecond: func() {
-		// Validation reads the list length first; recovery reads its entries next.
-		unlocked = pool.lock.TryLock()
-		if unlocked {
-			pool.lock.Unlock()
-		}
+	txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, pool: pool, onUnlocked: func() {
+		unlocked = true
 	}}
 	var slots TxnSlots
 	slots.Append(txn, sender[:], true)
@@ -79,7 +119,7 @@ func TestLocalAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
 	defer dbTx.Rollback()
 	known, err := pool.IdHashKnown(dbTx, txn.IDHash[:])
 	require.NoError(t, err)
-	require.True(t, known, "late rejections must be remembered before the next parse")
+	require.True(t, known, "an invalid self-authorization nonce must be remembered before the next parse")
 }
 
 func TestAuthorizationRecoveryRevalidatesBalance(t *testing.T) {
@@ -91,7 +131,7 @@ func TestAuthorizationRecoveryRevalidatesBalance(t *testing.T) {
 	txn := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
 	txn.IDHash[0] = 1
 	txn.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
-	txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, onSecond: func() {
+	txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, pool: pool, onUnlocked: func() {
 		// Apply the balance change after prechecks and before admission resumes.
 		account := accounts.Account{CodeHash: accounts.EmptyCodeHash}
 		encoded := accounts.SerialiseV3(&account)
@@ -134,11 +174,8 @@ func TestRemoteAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
 	txn.IDHash[0] = 1
 	txn.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{auth}
 	var unlocked bool
-	txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, onSecond: func() {
-		unlocked = pool.lock.TryLock()
-		if unlocked {
-			pool.lock.Unlock()
-		}
+	txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, pool: pool, onUnlocked: func() {
+		unlocked = true
 	}}
 	var slots TxnSlots
 	slots.Append(txn, sender[:], false)
@@ -186,6 +223,52 @@ func TestRejectedUnwindKeepsAuthorityReservation(t *testing.T) {
 	require.Equal(t, pooled.AuthAndNonces, rejected.AuthAndNonces)
 }
 
+func TestAdmissionRejectionsRemainRetryable(t *testing.T) {
+	for _, reason := range []txpoolcfg.DiscardReason{txpoolcfg.ErrAuthorityReserved, txpoolcfg.NotReplaced} {
+		t.Run(reason.String(), func(t *testing.T) {
+			ctx, pool, db, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			pooled := newTestTxnSlot(0, 0, 10, 10, 100_000)
+			retry := newTestTxnSlot(0, 0, 10, 10, 100_000)
+			if reason == txpoolcfg.ErrAuthorityReserved {
+				pooled = newTestSetCodeTxnSlot(0, 0, 10, 10, 100_000)
+				retry = newTestSetCodeTxnSlot(1, 0, 10, 10, 100_000)
+				pooled.AuthAndNonces = []AuthAndNonce{{common.Address{2}, 0}}
+				retry.AuthAndNonces = pooled.AuthAndNonces
+			}
+			pooled.IDHash[0], retry.IDHash[0] = 1, 2
+			var slots TxnSlots
+			slots.Append(pooled, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, slots)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+			var retrySlots TxnSlots
+			retrySlots.Append(retry, sender[:], true)
+			reasons, err = pool.AddLocalTxns(ctx, retrySlots)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{reason}, reasons)
+			require.NotContains(t, pool.byHash, string(retry.IDHash[:]))
+
+			pool.lock.Lock()
+			owner := pool.byHash[string(pooled.IDHash[:])]
+			pool.removeFromSubPool(owner, "test")
+			pool.discardLocked(owner, txpoolcfg.Mined)
+			pool.lock.Unlock()
+
+			dbTx, err := db.BeginRo(ctx)
+			require.NoError(t, err)
+			defer dbTx.Rollback()
+			known, err := pool.IdHashKnown(dbTx, retry.IDHash[:])
+			require.NoError(t, err)
+			require.False(t, known, "a temporary rejection must not prevent resubmission")
+			reasons, err = pool.AddLocalTxns(ctx, retrySlots)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			require.Contains(t, pool.byHash, string(retry.IDHash[:]))
+		})
+	}
+}
+
 func TestSetCodeAuthorizationChainIDs(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	keyA, err := crypto.GenerateKey()
@@ -231,7 +314,7 @@ func TestRemoteAuthorizationRecoveryPreservesQueue(t *testing.T) {
 	dbTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer dbTx.Rollback()
-	txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, onSecond: func() {
+	txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, pool: pool, onUnlocked: func() {
 		known, err := pool.IdHashKnown(dbTx, txn.IDHash[:])
 		require.NoError(t, err)
 		require.True(t, known, "a transaction being recovered must remain known")
@@ -328,12 +411,11 @@ func TestAuthorizationRecoveryIsCached(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			txn := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
 			txn.Txn.(*types.SetCodeTransaction).Authorizations = []types.Authorization{tc.auth}
-			probe := &authorizationReadProbe{Transaction: txn.Txn, onSecond: func() {
-				t.Error("authorization recovery must not repeat for the same transaction")
-			}}
+			probe := &authorizationReadProbe{Transaction: txn.Txn}
 			txn.Txn = probe
 			pool.recoverAuthorizations(txn)
 			pool.recoverAuthorizations(txn)
+			require.Equal(t, 1, probe.reads, "authorization recovery must not repeat for the same transaction")
 		})
 	}
 }
