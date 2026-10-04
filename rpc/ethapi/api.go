@@ -68,7 +68,7 @@ type CallArgs struct {
 
 var callArgsParsers fastjson.ParserPool
 
-type callArgsFields CallArgs
+type callArgs CallArgs
 
 // UnmarshalJSON decodes a call object and rejects one whose data and input disagree.
 // Fields are decoded straight from one fastjson parse: encoding/json would scan a large
@@ -133,9 +133,8 @@ func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
 }
 
 var callArgsJSONNames = func() (names []string) {
-	t := reflect.TypeFor[CallArgs]()
-	for i := range t.NumField() {
-		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+	for f := range reflect.TypeFor[CallArgs]().Fields() {
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 		names = append(names, name)
 	}
 	return names
@@ -164,7 +163,7 @@ func setText[T any, PT interface {
 
 // unmarshalStd decodes with encoding/json alone, so malformed input gets its error messages.
 func (args *CallArgs) unmarshalStd(raw []byte) error {
-	if err := json.Unmarshal(raw, (*callArgsFields)(args)); err != nil {
+	if err := json.Unmarshal(raw, (*callArgs)(args)); err != nil {
 		return err
 	}
 	return CheckCallData(args.Data, args.Input)

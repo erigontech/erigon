@@ -581,6 +581,12 @@ func TestRPCBlockTransactionCountIsANumber(t *testing.T) {
 	require.Contains(t, fastJSON(t, &RPCBlock{TransactionCount: &n}), `"transactionCount":15`)
 }
 
+// encoding/json names the decoded type in its errors, and RPC clients see them.
+func TestCallArgsUnmarshalErrorNamesCallArgs(t *testing.T) {
+	var args CallArgs
+	require.ErrorContains(t, args.UnmarshalJSON([]byte(`{"blobs":1}`)), "Go struct field callArgs.blobs")
+}
+
 func TestCallArgsUnmarshalMatchesEncodingJSON(t *testing.T) {
 	for _, in := range []string{
 		`{"to":"0x0000000000000000000000000000000000000001","data":"0x0102","gas":"0x10"}`,
