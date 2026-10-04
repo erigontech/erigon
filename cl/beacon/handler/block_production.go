@@ -3120,9 +3120,20 @@ func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, 
 	return headRoot, headSlot, headState, nil
 }
 
+type attesterFlag struct {
+	validatorIndex uint64
+	flagIndex      uint8
+	currentEpoch   bool
+}
+
+type attesterFlagReward struct {
+	attesterFlag
+	numerator uint64
+}
+
 type attestationCandidate struct {
 	attestation *solid.Attestation
-	reward      uint64
+	rewards     []attesterFlagReward
 }
 
 func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) (map[common.Hash][]*solid.Attestation, error) {
@@ -3416,23 +3427,17 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	attestationCandidates := []attestationCandidate{}
 	for _, atts := range hashToAtts {
 		for _, att := range atts {
-			expectedReward, err := computeAttestationReward(s, att)
+			rewards, err := attestationFlagRewards(s, att)
 			if err != nil {
 				log.Debug("[Block Production] Could not compute expected attestation reward", "reason", err)
 				continue
 			}
-			if expectedReward == 0 {
-				continue
-			}
 			attestationCandidates = append(attestationCandidates, attestationCandidate{
 				attestation: att,
-				reward:      expectedReward,
+				rewards:     rewards,
 			})
 		}
 	}
-	slices.SortFunc(attestationCandidates, func(a, b attestationCandidate) int {
-		return cmp.Compare(b.reward, a.reward)
-	})
 
 	// decide the max attestation length based on the version
 	var maxAttLen int
@@ -3442,13 +3447,53 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		maxAttLen = int(a.beaconChainCfg.MaxAttestationsElectra)
 	}
 	ret := solid.NewDynamicListSSZ[*solid.Attestation](maxAttLen)
-	for _, candidate := range attestationCandidates {
-		ret.Append(candidate.attestation)
-		if ret.Len() >= maxAttLen {
-			break
-		}
+	for _, att := range selectAttestations(attestationCandidates, proposerRewardDenominator(s.BeaconConfig()), maxAttLen) {
+		ret.Append(att)
 	}
 	return ret
+}
+
+// selectAttestations greedily picks up to limit attestations by the proposer reward
+// of participation flags not already set by attestations picked before them.
+func selectAttestations(candidates []attestationCandidate, denominator uint64, limit int) []*solid.Attestation {
+	var maxValidatorIndex uint64
+	for _, c := range candidates {
+		for _, r := range c.rewards {
+			maxValidatorIndex = max(maxValidatorIndex, r.validatorIndex)
+		}
+	}
+	covered := make([]uint8, maxValidatorIndex+1)
+	flagBit := func(f attesterFlag) uint8 {
+		if f.currentEpoch {
+			return 1 << (f.flagIndex + 4)
+		}
+		return 1 << f.flagIndex
+	}
+	available := slices.Clone(candidates)
+	selected := make([]*solid.Attestation, 0, min(limit, len(available)))
+	for len(selected) < limit {
+		bestIndex, bestNumerator := -1, uint64(0)
+		for i, candidate := range available {
+			var numerator uint64
+			for _, r := range candidate.rewards {
+				if covered[r.validatorIndex]&flagBit(r.attesterFlag) == 0 {
+					numerator += r.numerator
+				}
+			}
+			if numerator > bestNumerator {
+				bestIndex, bestNumerator = i, numerator
+			}
+		}
+		if bestIndex < 0 || bestNumerator/denominator == 0 {
+			break
+		}
+		for _, r := range available[bestIndex].rewards {
+			covered[r.validatorIndex] |= flagBit(r.attesterFlag)
+		}
+		selected = append(selected, available[bestIndex].attestation)
+		available = slices.Delete(available, bestIndex, bestIndex+1)
+	}
+	return selected
 }
 
 func (a *ApiHandler) aggregatePayloadAttestations(
@@ -3490,11 +3535,11 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 	return aggregated
 }
 
-// computeAttestationReward computes the reward for a specific attestation.
-func computeAttestationReward(
+// attestationFlagRewards returns the proposer reward numerator of every participation flag the attestation would newly set.
+func attestationFlagRewards(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
-) (uint64, error) {
+) ([]attesterFlagReward, error) {
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 	data := attestation.Data
 	currentEpoch := state.Epoch(s)
@@ -3512,20 +3557,20 @@ func computeAttestationReward(
 		false,
 	)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	attestingIndicies, err := s.GetAttestingIndicies(attestation, true)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	var proposerRewardNumerator uint64
+	var rewards []attesterFlagReward
 
 	isCurrentEpoch := data.Target.Epoch == currentEpoch
 
 	for _, attesterIndex := range attestingIndicies {
 		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 
 		baseReward := (val / beaconConfig.EffectiveBalanceIncrement) * baseRewardPerIncrement
@@ -3538,12 +3583,17 @@ func computeAttestationReward(
 				flagParticipation.HasFlag(flagIndex) {
 				continue
 			}
-			proposerRewardNumerator += baseReward * weight
+			rewards = append(rewards, attesterFlagReward{
+				attesterFlag: attesterFlag{validatorIndex: attesterIndex, flagIndex: uint8(flagIndex), currentEpoch: isCurrentEpoch},
+				numerator:    baseReward * weight,
+			})
 		}
 	}
-	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
-	reward := proposerRewardNumerator / proposerRewardDenominator
-	return reward, nil
+	return rewards, nil
+}
+
+func proposerRewardDenominator(beaconConfig *clparams.BeaconChainConfig) uint64 {
+	return (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 }
 
 // cacheExecutionBody caches the execution payload body so the beacon API

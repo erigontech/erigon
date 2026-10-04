@@ -88,7 +88,7 @@ import (
 
 var _ serviceinterface.Service[*cltypes.SignedExecutionPayloadBid] = acceptingExecutionPayloadBidService{}
 
-func TestComputeAttestationRewardUsesGloasParentHeaderSlot(t *testing.T) {
+func TestAttestationFlagRewardsUsesGloasParentHeaderSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	s := state_mock.NewMockBeaconState(ctrl)
 	cfg := clparams.MainnetBeaconConfig
@@ -104,7 +104,7 @@ func TestComputeAttestationRewardUsesGloasParentHeaderSlot(t *testing.T) {
 	s.EXPECT().LatestBlockHeader().Return(cltypes.BeaconBlockHeader{Slot: 11}).AnyTimes()
 	s.EXPECT().GetAttestationParticipationFlagIndicies(data, uint64(2), uint64(11), false).Return(nil, wantErr)
 
-	_, err := computeAttestationReward(s, attestation)
+	_, err := attestationFlagRewards(s, attestation)
 	require.ErrorIs(t, err, wantErr)
 }
 
