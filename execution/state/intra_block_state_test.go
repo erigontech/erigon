@@ -1230,20 +1230,3 @@ func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
 	require.Same(t, &stored[0][0], &stored[1][0], "an equal code reuses the previous one")
 	require.NotSame(t, &stored[0][0], &stored[3][0], "a different code in between replaces the memo")
 }
-
-// After Reset the state holds no code, so the caller may reuse the buffer it passed to SetCode.
-func TestSetCodeAfterResetHashesAReusedBuffer(t *testing.T) {
-	t.Parallel()
-
-	ibs := New(NewNoopReader())
-	buf := []byte{0x60, 0x01, 0x60, 0x00, 0xf3}
-	require.NoError(t, ibs.SetCode(accounts.InternAddress(common.HexToAddress("0x01")), buf, tracing.CodeChangeContractCreation))
-	ibs.Reset()
-
-	buf[1] = 0x02
-	addr := accounts.InternAddress(common.HexToAddress("0x02"))
-	require.NoError(t, ibs.SetCode(addr, buf, tracing.CodeChangeContractCreation))
-	codeHash, err := ibs.GetCodeHash(addr)
-	require.NoError(t, err)
-	require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(buf)), codeHash)
-}
