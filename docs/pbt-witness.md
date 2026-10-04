@@ -74,11 +74,11 @@ parent pointer, and checks the root against the pre-state anchor. `replayBlockOv
 that tree, the supplied code blobs, and the in-block overlays. It applies the block's writes through the same PBT
 driver and compares the resulting root with the post-state anchor.
 
-System-call reads are recorded like other pre-state reads, including reads of `SYSTEM_ADDRESS`. A user transaction
-access to `SYSTEM_ADDRESS` is retained when the per-transaction access set records it. Loading a delegation designator
-with `EXTCODE*` does not follow it, and an access-list entry alone is not enough. Both cases need the basic-data proof
-when the account has been read. Genuine reads of system contracts need their proofs. PBT replay also compares the receipt root after
-Byzantium, gas used, and blob gas used with the block header. Contract creation over an
+PBT requires proofs for every pre-state account, storage, and code read, including reads of `SYSTEM_ADDRESS`. The
+per-transaction access set still gates the MPT key set for user transactions. Loading a delegation designator with
+`EXTCODE*` does not follow it, and an access-list entry alone is not enough. Genuine reads of system contracts need
+their proofs. PBT replay also compares the receipt root after Byzantium, gas used, and blob gas used with the block
+header. Contract creation over an
 existing account with storage wipes that storage; creation of a previously absent account does not walk an unproved
 storage subtree. An account without `BASIC_DATA` is considered present only after its code-hash or delegation leaf is
 resolved. All supplied PBT entries must be consumed before verification succeeds.

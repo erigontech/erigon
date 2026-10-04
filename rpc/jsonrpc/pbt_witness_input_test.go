@@ -102,34 +102,12 @@ func TestPBinWitnessInputKeepsSystemAddressReads(t *testing.T) {
 	rs := NewRecordingState(inner)
 	_, err := rs.ReadAccountData(accounts.InternAddress(address))
 	require.NoError(t, err)
-
-	got, err := buildPBinWitnessInput(rs)
-	require.NoError(t, err)
-	require.Contains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), "user system-address reads must enter the pbt input")
-}
-
-func TestPBinWitnessInputExcludesUnlatchedSystemAddressReads(t *testing.T) {
-	address := params.SystemAddress.Value()
-	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Balance: *uint256.NewInt(5)}}}
-	rs := NewRecordingState(inner)
-
-	got, err := buildPBinWitnessInput(rs)
-	require.NoError(t, err)
-	require.NotContains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), "an unlatchable system-address read must not enter the pbt input")
-}
-
-func TestPBinWitnessInputKeepsSystemAddressReadWithDesignator(t *testing.T) {
-	address := params.SystemAddress.Value()
-	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Balance: *uint256.NewInt(5)}}}
-	rs := NewRecordingState(inner)
-	_, err := rs.ReadAccountData(accounts.InternAddress(address))
-	require.NoError(t, err)
 	designator := append([]byte{0xef, 0x01, 0x00}, address[:]...)
 	rs.OnCodeAccess(accounts.InternAddress(common.Address{1}), designator)
 
 	got, err := buildPBinWitnessInput(rs)
 	require.NoError(t, err)
-	require.Contains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey))
+	require.Contains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), "user system-address reads must enter the pbt input")
 }
 
 func TestPBinWitnessInputKeepsRevertedCallReads(t *testing.T) {

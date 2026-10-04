@@ -770,19 +770,9 @@ type codeAccessTracker interface {
 	OnCodeAccess(accounts.Address, []byte)
 }
 
-type delegationAccessTracker interface {
-	OnDelegationTarget(accounts.Address)
-}
-
 func (ibs *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
 	if hook, ok := ibs.stateReader.(codeAccessTracker); ok {
 		hook.OnCodeAccess(addr, code)
-	}
-}
-
-func (ibs *IntraBlockState) callDelegationAccessHook(addr accounts.Address) {
-	if hook, ok := ibs.stateReader.(delegationAccessTracker); ok {
-		hook.OnDelegationTarget(addr)
 	}
 }
 
@@ -838,7 +828,6 @@ func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, e
 	code, err := ibs.getCode(addr, false)
 	// eip-7702
 	if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-		ibs.callDelegationAccessHook(delegation)
 		return ibs.getCode(delegation, false)
 	}
 	if err != nil {
