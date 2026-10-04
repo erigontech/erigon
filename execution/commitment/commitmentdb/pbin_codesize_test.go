@@ -43,7 +43,7 @@ func pbinCodeSizeAddr(i byte) []byte {
 
 func pbinCodeSizeSharedDomains(t *testing.T, opts []execctx.SharedDomainOption, addr []byte, acc *accounts.Account, code []byte) (*execctx.SharedDomains, kv.TemporalTx) {
 	t.Helper()
-	db := pbinNewTestDb(t)
+	db := pbinNewTestDb(t, true)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)

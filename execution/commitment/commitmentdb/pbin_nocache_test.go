@@ -98,11 +98,11 @@ func TestPBinBranchCacheTrunkSlotCollision(t *testing.T) {
 	require.Equal(t, dataA, got)
 }
 
-func pbinNewTestDb(tb testing.TB) kv.TemporalRwDB {
+func pbinNewTestDb(tb testing.TB, bin bool) kv.TemporalRwDB {
 	tb.Helper()
 	pbinTestConfigMu.Lock()
 	previousBin := statecfg.ExperimentalBinCommitment
-	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalBinCommitment = bin
 	defer func() {
 		statecfg.ExperimentalBinCommitment = previousBin
 		pbinTestConfigMu.Unlock()
@@ -125,7 +125,7 @@ func pbinNewTestDb(tb testing.TB) kv.TemporalRwDB {
 func TestPBinSharedDomainsHasNoSharedBranchCache(t *testing.T) {
 	t.Parallel()
 
-	db := pbinNewTestDb(t)
+	db := pbinNewTestDb(t, false)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -133,6 +133,7 @@ func TestPBinSharedDomainsHasNoSharedBranchCache(t *testing.T) {
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
 
+	require.NotNil(t, tx.AggTx().(commitment.BranchCacheProvider).BranchCache(kv.CommitmentDomain))
 	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg))
 	require.NoError(t, err)
 	defer sd.Close()
