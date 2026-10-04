@@ -129,7 +129,7 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	defer fv.lock.Unlock()
 	start := time.Now()
 	if fv.sharedDom != nil {
-		if err := fv.sharedDom.FlushPendingUpdates(ctx, tx); err != nil {
+		if err := fv.sharedDom.FlushPendingUpdates(tx); err != nil {
 			return err
 		}
 		sdTxNum, _, err := sd.SeekCommitment(ctx, tx)
@@ -166,7 +166,7 @@ type HasDiff interface {
 // if the payload extends the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meets the canonical chain, and there we check whether it is valid.
 // if for any reason none of the actions above can be performed due to lack of information, we accept the payload and avoid validation.
-func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+func (fv *ForkValidator) ValidatePayload(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.validatePayload == nil {
@@ -277,7 +277,7 @@ func (fv *ForkValidator) clear() {
 }
 
 // Clear wipes out current extending fork data.
-func (fv *ForkValidator) ClearWithUnwind(accumulator *shards.Accumulator, c shards.StateChangeConsumer) {
+func (fv *ForkValidator) ClearWithUnwind() {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	fv.clear()

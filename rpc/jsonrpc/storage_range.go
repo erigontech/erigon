@@ -194,7 +194,8 @@ func storageRangeAtGethCompat(ttx kv.TemporalTx, contractAddress common.Address,
 	// Fill result with up to maxResult entries; the extra one (if present) becomes nextKey.
 	for i := range entries {
 		if i >= maxResult {
-			result.NextKey = &entries[i].seckey
+			nextKey := entries[i].seckey
+			result.NextKey = &nextKey
 			break
 		}
 		key := entries[i].key

@@ -149,76 +149,22 @@ func (r *minimalStateReader) SetTrace(trace bool, tracePrefix string) {}
 func (r *minimalStateReader) Trace() bool                             { return false }
 func (r *minimalStateReader) TracePrefix() string                     { return "" }
 
-// TestAsBlockAccessList_SystemAddressExcludedWithoutChanges verifies that the
-// system address (0xff...fe) is excluded from the BAL when it has no actual
-// state changes and only revertable accesses (e.g. incidental gas-calculation
-// reads during system calls).
-func TestAsBlockAccessList_SystemAddressExcludedWithoutChanges(t *testing.T) {
+// TestAsBlockAccessList_SystemAddressIsOrdinary pins that SystemAddress follows
+// the same BAL rules as any other address: an access-only entry is included even
+// from the system-call slot (txIndex -1). System calls do not record their
+// caller, so no SystemAddress exclusion belongs in AsBlockAccessList.
+func TestAsBlockAccessList_SystemAddressIsOrdinary(t *testing.T) {
 	t.Parallel()
 
-	sysAddr := params.SystemAddress
-	userAddr := accounts.InternAddress(common.HexToAddress("0x1111"))
-
-	io := NewVersionedIO(1) // 2 tx slots: system call at -1, user tx at 0
-
-	// System call (txIndex = -1): record system address as a revertable access.
-	// This simulates EIP-4788 beacon root call where system address is msg.sender.
-	recordTouch(io, -1, sysAddr, true)
-
-	// User tx (txIndex = 0): record a normal address with a balance write.
-	readSets := ReadSet{}
-	readSets.SetBalance(userAddr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(100)})
-	io.RecordReads(Version{TxIndex: 0}, readSets)
-	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: userAddr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(200)},
-	))
+	io := NewVersionedIO(1)
+	rs := io.ReadSet(-1)
+	rs.access = AccessSet{params.SystemAddress: accessOptions{revertable: true}}
+	io.RecordReads(Version{TxIndex: -1}, rs)
 
 	bal := io.AsBlockAccessList()
 
-	// System address should be excluded (no state changes, only revertable access).
-	for _, ac := range bal {
-		require.NotEqual(t, sysAddr.Value(), ac.Address,
-			"system address should be excluded from BAL when it has no state changes and only revertable accesses")
-	}
-	// User address should be present.
-	found := false
-	for _, ac := range bal {
-		if ac.Address == userAddr.Value() {
-			found = true
-			break
-		}
-	}
-	require.True(t, found, "user address should be present in BAL")
-}
-
-// TestAsBlockAccessList_SystemAddressIncludedWithNonRevertableAccess verifies
-// that the system address is included in the BAL when a user tx performs a
-// non-revertable access to it (e.g. BALANCE opcode, direct call, SELFDESTRUCT
-// beneficiary), even without actual state changes.
-func TestAsBlockAccessList_SystemAddressIncludedWithNonRevertableAccess(t *testing.T) {
-	t.Parallel()
-
-	sysAddr := params.SystemAddress
-
-	io := NewVersionedIO(1) // system call at -1, user tx at 0
-
-	// System call (txIndex = -1): revertable access (as usual).
-	recordTouch(io, -1, sysAddr, true)
-
-	// User tx (txIndex = 0): non-revertable access (e.g. BALANCE opcode on system address).
-	recordTouch(io, 0, sysAddr, false)
-
-	bal := io.AsBlockAccessList()
-
-	found := false
-	for _, ac := range bal {
-		if ac.Address == sysAddr.Value() {
-			found = true
-			break
-		}
-	}
-	require.True(t, found,
-		"system address should be included in BAL when a user tx has non-revertable access")
+	require.Len(t, bal, 1)
+	require.Equal(t, params.SystemAddress.Value(), bal[0].Address)
 }
 
 func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
@@ -235,105 +181,6 @@ func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
 
 	require.Len(t, bal, 1)
 	require.Equal(t, params.SystemAddress.Value(), bal[0].Address)
-}
-
-// TestAsBlockAccessList_SystemAddressIncludedWithStateChanges verifies that the
-// system address is kept in the BAL when it has actual state changes (e.g. a
-// value transfer to the system address), regardless of access type.
-func TestAsBlockAccessList_SystemAddressIncludedWithStateChanges(t *testing.T) {
-	t.Parallel()
-
-	sysAddr := params.SystemAddress
-
-	io := NewVersionedIO(1)
-
-	// System call (txIndex = -1): revertable access only.
-	recordTouch(io, -1, sysAddr, true)
-
-	// User tx (txIndex = 0): revertable access BUT with a balance change
-	// (e.g. ETH transferred to system address).
-	recordTouch(io, 0, sysAddr, true)
-	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: sysAddr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(42)},
-	))
-
-	bal := io.AsBlockAccessList()
-
-	found := false
-	for _, ac := range bal {
-		if ac.Address == sysAddr.Value() {
-			found = true
-			break
-		}
-	}
-	require.True(t, found,
-		"system address should be included in BAL when it has actual state changes")
-}
-
-// TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly verifies that
-// a revertable access from a system call (txIndex = -1) does NOT set the
-// nonRevertableUserAccess flag, so the system address is still excluded.
-func TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly(t *testing.T) {
-	t.Parallel()
-
-	sysAddr := params.SystemAddress
-	otherAddr := accounts.InternAddress(common.HexToAddress("0x2222"))
-
-	io := NewVersionedIO(1)
-
-	// System call (txIndex = -1): non-revertable access. Even though it's
-	// non-revertable, it's from a system call (txIndex < 0) so it should
-	// NOT mark the system address for inclusion.
-	recordTouch(io, -1, sysAddr, false)
-
-	// User tx (txIndex = 0): touches a different address to ensure there's
-	// at least one user tx in the block.
-	readSets := ReadSet{}
-	readSets.SetBalance(otherAddr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(50)})
-	io.RecordReads(Version{TxIndex: 0}, readSets)
-	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: otherAddr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(100)},
-	))
-
-	bal := io.AsBlockAccessList()
-
-	for _, ac := range bal {
-		require.NotEqual(t, sysAddr.Value(), ac.Address,
-			"system address should be excluded: non-revertable access from system call (txIndex < 0) should not trigger inclusion")
-	}
-}
-
-// TestAsBlockAccessList_NonRevertableOverridesRevertable verifies that if the
-// system address first gets a revertable access from a user tx, then a
-// non-revertable access from another user tx, the non-revertable wins and the
-// address is included.
-func TestAsBlockAccessList_NonRevertableOverridesRevertable(t *testing.T) {
-	t.Parallel()
-
-	sysAddr := params.SystemAddress
-
-	io := NewVersionedIO(2) // 3 slots: system call at -1, user tx 0, user tx 1
-
-	// System call: revertable.
-	recordTouch(io, -1, sysAddr, true)
-
-	// User tx 0: revertable access (e.g. gas calc).
-	recordTouch(io, 0, sysAddr, true)
-
-	// User tx 1: non-revertable access (e.g. BALANCE opcode).
-	recordTouch(io, 1, sysAddr, false)
-
-	bal := io.AsBlockAccessList()
-
-	found := false
-	for _, ac := range bal {
-		if ac.Address == sysAddr.Value() {
-			found = true
-			break
-		}
-	}
-	require.True(t, found,
-		"system address should be included: non-revertable user access overrides earlier revertable access")
 }
 
 // TestVersionedIO_BalanceNetZeroWriteOmittedFromBAL verifies that a balance
@@ -909,17 +756,6 @@ func TestApplyVersionedWrites_NewAccountNoBalanceRead(t *testing.T) {
 		"newly-created account (not in DB) should NOT generate a BalancePath read")
 }
 
-// recordTouch records an address-level ephemeral access for txIndex on the
-// read-set (accesses feed the BAL through the read-set now).
-func recordTouch(io *VersionedIO, txIndex int, addr accounts.Address, revertable bool) {
-	rs := io.ReadSet(txIndex)
-	if rs.access == nil {
-		rs.access = make(AccessSet)
-	}
-	rs.access[addr] = accessOptions{revertable: revertable}
-	io.RecordReads(Version{TxIndex: txIndex}, rs)
-}
-
 // hasRead reports whether the ReadSet has a read for the given address and path.
 func hasRead(reads ReadSet, addr accounts.Address, path AccountPath) bool {
 	_, ok := reads.getHeader(addr, path, accounts.NilKey)
@@ -1156,7 +992,7 @@ func TestVersionedRead_EIP8246_PriorTxSelfDestructReadsAsPreserved(t *testing.T)
 		_, err := tx3.Selfdestruct(addr, eip8246)
 		require.NoError(t, err)
 		require.NoError(t, tx3.MakeWriteSet(&chain.Rules{IsAmsterdam: eip8246}, NewNoopWriter()))
-		vm.FlushVersionedWrites(tx3.VersionedWrites(), true, "")
+		vm.FlushVersionedWrites(tx3.VersionedWrites(), true)
 
 		ibs := New(reader)
 		ibs.SetTxContext(0, 4)

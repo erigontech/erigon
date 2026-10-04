@@ -1012,3 +1012,35 @@ func TestQueryResolver_BlockTransactionsBySelection(t *testing.T) {
 		require.Equal(t, ptr(true), mock.withTxs, q)
 	}
 }
+
+type countingBlocksAPI struct {
+	mockGraphQLAPI
+	head  uint64
+	calls int
+}
+
+func (m *countingBlocksAPI) GetBlockDetails(_ context.Context, number rpc.BlockNumber, _ *bool) (map[string]any, error) {
+	m.calls++
+	if number < 0 || uint64(number) > m.head {
+		return nil, nil
+	}
+	header := &types.Header{Number: *uint256.NewInt(uint64(number))}
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, nil, nil)
+	return map[string]any{"block": ethapi.RPCMarshalBlock(block, false, false)}, nil
+}
+
+func TestQueryResolver_Blocks_RangeCapCannotWrap(t *testing.T) {
+	t.Parallel()
+
+	mock := &countingBlocksAPI{head: 100}
+	srv := handler.New(NewExecutableSchema(Config{Resolvers: &Resolver{GraphQLAPI: mock}}))
+	srv.AddTransport(transport.POST{})
+	body, err := json.Marshal(map[string]string{"query": `{blocks(from:0,to:"0xffffffffffffffff"){number}}`})
+	require.NoError(t, err)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	require.Contains(t, rec.Body.String(), "Invalid params")
+	require.Zero(t, mock.calls, "a range wider than the cap must be rejected before any block is read")
+}

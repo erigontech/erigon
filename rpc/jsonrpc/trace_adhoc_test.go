@@ -1185,6 +1185,8 @@ func TestTraceCallFailureLabels(t *testing.T) {
 	// bn256Add of (1, 1), which is not on the curve, and the zero point.
 	badPoint := append([]byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 1, byte(vm.PUSH1), 32, byte(vm.MSTORE)},
 		callCode(vm.CALL, 0x06, 1, 128)...)
+	// ecrecover costs 3000 gas; 100 gas plus the 2300 value stipend is not enough.
+	ecrecoverWith100Gas := []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.PUSH1), 0x01, byte(vm.PUSH1), 100, byte(vm.CALL), byte(vm.STOP)}
 
 	for _, tc := range []struct {
 		name    string
@@ -1216,6 +1218,11 @@ func TestTraceCallFailureLabels(t *testing.T) {
 			error: "Out of gas",
 		},
 		{
+			name:  "create whose code deposit runs out of gas",
+			code:  createCode(0, []byte{byte(vm.PUSH2), byte(params.MaxCodeSize >> 8), byte(params.MaxCodeSize & 0xff), byte(vm.PUSH0), byte(vm.RETURN)}),
+			error: "Out of gas",
+		},
+		{
 			name:  "create of code starting with 0xEF",
 			code:  createCode(0, []byte{byte(vm.PUSH1), 0xef, byte(vm.PUSH0), byte(vm.MSTORE8), byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.RETURN)}),
 			error: "Invalid code",
@@ -1239,6 +1246,7 @@ func TestTraceCallFailureLabels(t *testing.T) {
 			callee: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.SSTORE)}, error: "Mutable Call In Static Context",
 		},
 		{name: "precompile failure", code: badPoint, balance: 1, error: "Built-in failed"},
+		{name: "precompile out of gas", code: ecrecoverWith100Gas, balance: 1, error: "Out of gas"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, calleeCode := hexutil.Bytes(tc.code), hexutil.Bytes(tc.callee)
@@ -3028,4 +3036,24 @@ func TestTraceCallManyChargesEachCall(t *testing.T) {
 	requireErrorCode(t, err, rpc.ErrCodeBaseFeeTooLow)
 	require.ErrorIs(t, err, protocol.ErrFeeCapTooLow)
 	require.Contains(t, err.Error(), "txIndex 1")
+}
+
+// TestTraceCallManyZeroesBlobBaseFeePerCall checks that only a call with unpriced blobs
+// sees BLOBBASEFEE 0, and that the zeroing does not reach the calls after it.
+func TestTraceCallManyZeroesBlobBaseFeePerCall(t *testing.T) {
+	c := newFeeProbeChain(t)
+	price := new(big.Int).Add(c.header.BaseFee.ToBig(), big.NewInt(2))
+	blobHash := `"blobVersionedHashes":["0x0100000000000000000000000000000000000000000000000000000000000001"]`
+
+	unpricedBlobs := c.call(c.bankAddress, ","+blobHash)
+	noBlobs := c.call(c.bankAddress, "")
+	pricedBlobs := c.call(c.bankAddress, fmt.Sprintf(`,"gasPrice":%q,"maxFeePerBlobGas":"0x3b9aca00",%s`, hexutil.EncodeBig(price), blobHash))
+	bundle := fmt.Sprintf(`[[%s,["trace"]],[%s,["trace"]],[%s,["trace"]]]`, unpricedBlobs, noBlobs, pricedBlobs)
+	results, err := c.traceAPI().CallMany(context.Background(), json.RawMessage(bundle), nil, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+
+	require.Zero(t, readFeeProbe(t, results[0].Output).blobBaseFee.Sign(), "unpriced blobs see a zero BLOBBASEFEE")
+	require.Positive(t, readFeeProbe(t, results[1].Output).blobBaseFee.Sign(), "a call without blobs keeps the block's BLOBBASEFEE")
+	require.Positive(t, readFeeProbe(t, results[2].Output).blobBaseFee.Sign(), "priced blobs keep the block's BLOBBASEFEE")
 }
