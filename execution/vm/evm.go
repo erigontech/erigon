@@ -85,6 +85,7 @@ type EVM struct {
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
+	returnBuf  []byte // RETURN/REVERT data of the last frame that returned, see returnCopy
 
 	// Pointers before counters: interleaving them adds a word of padding.
 	internCache *storageKeyCache
@@ -753,7 +754,7 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		}
 
 		if gasOK {
-			if err := evm.intraBlockState.SetCode(address, ret, tracing.CodeChangeContractCreation); err != nil {
+			if err := evm.intraBlockState.SetCode(address, bytes.Clone(ret), tracing.CodeChangeContractCreation); err != nil {
 				return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 			}
 			// EIP-8037: post-Run code-deposit state charge counts toward this
@@ -867,5 +868,17 @@ func (evm *EVM) captureEnd(depth int, leftOverGas mdgas.MdGas, gasUsed mdgas.MdG
 	if !evm.chainRules.IsHomestead && errors.Is(err, ErrCodeStoreOutOfGas) {
 		reverted = false
 	}
-	tracer.EmitExit(depth, ret, gasUsed, VMErrorFromErr(err), reverted)
+	tracer.EmitExit(depth, bytes.Clone(ret), gasUsed, VMErrorFromErr(err), reverted)
+}
+
+// returnCopy copies a frame's RETURN/REVERT data into a buffer the EVM reuses: the frame's
+// memory goes back to a shared pool. The data stays valid until the next frame returns;
+// frames run one at a time, so the caller has used it by then. Data that leaves the EVM is
+// copied again: at depth 0, for tracers, and as contract code.
+func (evm *EVM) returnCopy(data []byte) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+	evm.returnBuf = append(evm.returnBuf[:0], data...)
+	return evm.returnBuf
 }
