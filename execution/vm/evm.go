@@ -21,6 +21,7 @@ package vm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -40,8 +41,27 @@ import (
 )
 
 func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
+	if evm.precompilesLow && !isLowAddress(addr) {
+		return nil, false
+	}
 	p, ok := evm.precompiles[addr]
 	return p, ok
+}
+
+// isLowAddress reports whether only the last two bytes of addr can be non-zero, as for every
+// chain's precompiles; any other address skips the precompile map lookup.
+func isLowAddress(addr accounts.Address) bool {
+	a := addr.Value()
+	return binary.BigEndian.Uint64(a[0:8])|binary.BigEndian.Uint64(a[8:16])|uint64(binary.BigEndian.Uint16(a[16:18])) == 0
+}
+
+func allLowAddresses(precompiles PrecompiledContracts) bool {
+	for addr := range precompiles {
+		if !isLowAddress(addr) {
+			return false
+		}
+	}
+	return true
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -76,6 +96,8 @@ type EVM struct {
 	// abort is used to abort the EVM calling operations
 	abort    atomic.Bool
 	readOnly bool // Whether to throw on stateful modifications
+	// precompilesLow: every address in precompiles is a low address (see isLowAddress).
+	precompilesLow bool
 	// callGasTemp holds the gas available for the current call. This is needed because the
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
@@ -242,7 +264,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state
 		chainRules:      blockCtx.Rules(chainConfig),
 	}
 	evm.jt = jumpTable(evm.chainRules, vmConfig)
-	evm.precompiles = Precompiles(evm.chainRules)
+	evm.precompiles, evm.precompilesLow = Precompiles(evm.chainRules), true
 
 	return evm
 }
@@ -267,7 +289,7 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.depth = 0
 	evm.returnData = nil
 	evm.jt = jumpTable(chainRules, vmConfig)
-	evm.precompiles = Precompiles(chainRules)
+	evm.precompiles, evm.precompilesLow = Precompiles(chainRules), true
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
@@ -342,7 +364,7 @@ func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 	if precompiles == nil {
 		precompiles = Precompiles(evm.chainRules)
 	}
-	evm.precompiles = precompiles
+	evm.precompiles, evm.precompilesLow = precompiles, allLowAddresses(precompiles)
 }
 
 func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, gas mdgas.MdGas, value uint256.Int, bailout bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {

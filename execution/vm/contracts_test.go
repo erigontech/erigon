@@ -478,3 +478,13 @@ func TestDeprecatedForkAddressExportsTrackTheirSets(t *testing.T) {
 		require.ElementsMatch(t, slices.Collect(maps.Keys(tc.contracts)), tc.addrs, name)
 	}
 }
+
+// precompile skips the map for addresses that are not low; that holds only while every chain's
+// set uses low addresses.
+func TestForkPrecompilesUseLowAddresses(t *testing.T) {
+	for tier, set := range forkSets {
+		require.True(t, allLowAddresses(set.contracts), "fork tier %d", tier)
+	}
+	require.False(t, isLowAddress(accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000010000"))))
+	require.True(t, isLowAddress(accounts.InternAddress(common.HexToAddress("0x000000000000000000000000000000000000a100"))))
+}
