@@ -21,6 +21,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -148,7 +149,8 @@ type IntraBlockState struct {
 	stateObjects      map[accounts.Address]*stateObject // used only if `noMaterialize == false`
 	stateObjectsDirty map[accounts.Address]struct{}
 
-	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
+	nilAccounts  map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
+	deployedCode accounts.Code                 // last code stored by SetDeployedCode
 
 	// The refund counter, also used by state transitioning.
 	refund uint64
@@ -1524,6 +1526,23 @@ func printCode(c []byte) (int, string) {
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason tracing.CodeChangeReason) error {
+	return ibs.SetCodeTyped(addr, accounts.NewCode(code), reason)
+}
+
+// SetDeployedCode stores the code a CREATE returned; ret may alias EVM memory.
+// Factories deploy the same bytes many times, so the last code is reused.
+func (ibs *IntraBlockState) SetDeployedCode(addr accounts.Address, ret []byte, reason tracing.CodeChangeReason) error {
+	code := ibs.deployedCode
+	if len(ret) == 0 || !bytes.Equal(ret, code.Bytes) {
+		code = accounts.NewCode(bytes.Clone(ret))
+		ibs.deployedCode = code
+	}
+	return ibs.SetCodeTyped(addr, code, reason)
+}
+
+// SetCodeTyped is SetCode for a caller that already holds the hashed code.
+func (ibs *IntraBlockState) SetCodeTyped(addr accounts.Address, canonical accounts.Code, reason tracing.CodeChangeReason) error {
+	code := canonical.Bytes
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 		lenc, cs := printCode(code)
 		fmt.Printf("%d (%d.%d) SetCode %x, %d: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, lenc, cs)
@@ -1533,7 +1552,6 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	if err != nil {
 		return err
 	}
-	canonical := accounts.NewCode(code)
 	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
 	origHash := stateObject.original.CodeHash
