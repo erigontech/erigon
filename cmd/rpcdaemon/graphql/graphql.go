@@ -19,6 +19,8 @@ package graphql
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -62,7 +64,16 @@ func bodyLimitMiddleware(next http.Handler) http.Handler {
 			http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBodySize))
+		if err != nil {
+			status := http.StatusBadRequest
+			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+				status = http.StatusRequestEntityTooLarge
+			}
+			http.Error(w, http.StatusText(status), status)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		next.ServeHTTP(w, r)
 	})
 }
