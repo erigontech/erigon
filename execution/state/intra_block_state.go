@@ -281,12 +281,27 @@ func NewPooled(stateReader StateReader) *IntraBlockState {
 	return ibs
 }
 
+// Maps never shrink, so an IntraBlockState that grew past these stays out of
+// the pool: one huge call must not pin its capacity for every later one.
+const (
+	maxPooledStateObjects = 4096
+	maxPooledJournal      = 1 << 16
+)
+
 // ReleasePooled resets ibs and hands it to the next NewPooled.
 func ReleasePooled(ibs *IntraBlockState) {
+	tooBig := len(ibs.stateObjects) > maxPooledStateObjects || cap(ibs.journal.entries) > maxPooledJournal
 	ibs.releasePooledReads()
 	ibs.Reset()
+	if tooBig {
+		ibs.Close()
+		return
+	}
 	ibs.revisions.reset()
 	ibs.stateObjectArena.reset()
+	// Reset only bumps the probe epoch; a pooled ibs would collect every
+	// address all later calls touch.
+	clear(ibs.sdProbe)
 	ibs.tracingHooks = nil
 	ibs.trace = false
 	ibs.stateReader, ibs.codeAccess = nil, nil
@@ -421,9 +436,12 @@ func (ibs *IntraBlockState) releasePooledReads() {
 		return
 	}
 	rs := ibs.versionedReads
+	ibs.versionedReads, ibs.pooledReads = ReadSet{}, false
+	if len(rs.address) > maxPooledStateObjects || len(rs.storage) > maxPooledStateObjects {
+		return
+	}
 	rs.clearForReuse()
 	rpcReadSetPool.Put(&rs)
-	ibs.versionedReads, ibs.pooledReads = ReadSet{}, false
 }
 
 // Release Deprecated use Close
