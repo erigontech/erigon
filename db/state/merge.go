@@ -388,9 +388,9 @@ type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, err
 
 const DomainMinStepsToCompress = 16
 
-func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*FilesItem, r DomainRanges, vt valueTransformer, seqReadahead bool, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *FilesItem, err error) {
+func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*FilesItem, r DomainRanges, vt valueTransformer, seqReadahead bool, ps *background.ProgressSet) (_, _, _ *FilesItem, err error) {
 	if !r.any() {
-		return
+		return nil, nil, nil, nil
 	}
 	defer func() {
 		// Merge is background operation. It must not crush application.
@@ -401,6 +401,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}()
 
 	closeFiles := true
+	var valuesIn, indexIn, historyIn *FilesItem
 	var kvWriter *seg.Writer
 	defer func() {
 		if closeFiles {
@@ -424,7 +425,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	if !r.values.needMerge {
 		closeFiles = false
-		return
+		return valuesIn, indexIn, historyIn, nil
 	}
 
 	fromStep, toStep := kv.Step(r.values.from/r.aggStep), kv.Step(r.values.to/r.aggStep)
@@ -595,7 +596,7 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 	}
 
 	closeFiles = false
-	return
+	return valuesIn, indexIn, historyIn, nil
 }
 
 func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem, startTxNum, endTxNum uint64, ps *background.ProgressSet) (*FilesItem, error) {
@@ -753,10 +754,12 @@ func (iit *InvertedIndexRoTx) mergeFiles(ctx context.Context, files []*FilesItem
 	return outItem, nil
 }
 
-func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles []*FilesItem, r HistoryRanges, ps *background.ProgressSet) (indexIn, historyIn *FilesItem, err error) {
+func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles []*FilesItem, r HistoryRanges, ps *background.ProgressSet) (*FilesItem, *FilesItem, error) {
 	if !r.any() {
 		return nil, nil, nil
 	}
+	var indexIn, historyIn *FilesItem
+	var err error
 	closeIndex := true
 	defer func() {
 		if closeIndex {
@@ -934,7 +937,7 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	}
 
 	closeIndex = false
-	return
+	return indexIn, historyIn, nil
 }
 
 func (d *Domain) integrateMergedDirtyFiles(valuesIn, indexIn, historyIn *FilesItem) {
