@@ -1765,6 +1765,18 @@ func TestCalcFees_SkipsRedundantReCreditOnEmptyRemoval(t *testing.T) {
 		"the delete is already recorded, so the round is a no-op")
 }
 
+// A zero tip to a recipient that does not exist removes nothing. A delete would
+// leave a SelfDestruct cell that hides later tips from a reader further on in
+// the block.
+func TestCalcFees_ZeroTipToAbsentRecipientWritesNothing(t *testing.T) {
+	t.Parallel()
+	s := zeroTipEmptyCoinbaseScenario()
+	delete(s.accts, s.coinbase)
+	r := newFeeCreditRound(t, s)
+
+	require.Nil(t, r.run(t))
+}
+
 func TestFeeEntry_RecordedInAcceptsWhatWriteToWrote(t *testing.T) {
 	t.Parallel()
 	version := state.Version{TxIndex: 3, Incarnation: 1}

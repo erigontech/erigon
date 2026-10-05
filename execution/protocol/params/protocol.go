@@ -159,6 +159,7 @@ const (
 	CometBFTLightBlockValidateGas uint64 = 3000
 	BlsSignatureVerifyBaseGas     uint64 = 1000
 	BlsSignatureVerifyPerKeyGas   uint64 = 3500
+	DoubleSignEvidenceVerifyGas   uint64 = 10000
 
 	Sha256BaseGas       uint64 = 60  // Base price for a SHA256 operation
 	Sha256PerWordGas    uint64 = 12  // Per-word price for a SHA256 operation

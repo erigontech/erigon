@@ -78,8 +78,15 @@ func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 		return PrecompiledContractsOsaka
 	case chainRules.IsPrague:
 		return PrecompiledContractsPrague
+	case chainRules.IsHaber:
+		return PrecompiledContractsHaberForBSC
 	case chainRules.IsCancun:
+		if chainRules.IsParlia {
+			return PrecompiledContractsCancunForBSC
+		}
 		return PrecompiledContractsCancun
+	case chainRules.IsFeynman:
+		return PrecompiledContractsFeynmanForBSC
 	case chainRules.IsHertz:
 		return PrecompiledContractsHertzForBSC
 	case chainRules.IsPlato:
@@ -264,6 +271,27 @@ var PrecompiledContractsHertzForBSC = func() PrecompiledContracts {
 	return m
 }()
 
+var PrecompiledContractsFeynmanForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsHertzForBSC)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{104}))] = &verifyDoubleSignEvidence{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{105}))] = &secp256k1SignatureRecover{}
+	return m
+}()
+
+var PrecompiledContractsCancunForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsFeynmanForBSC)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{0x0a}))] = &pointEvaluation{}
+	return m
+}()
+
+// PrecompiledContractsHaberForBSC carries RIP-7212's P256VERIFY pricing, not the
+// doubled EIP-7951 price Ethereum adopted at Osaka.
+var PrecompiledContractsHaberForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsCancunForBSC)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00}))] = &p256Verify{}
+	return m
+}()
+
 var (
 	PrecompiledAddressesOsaka          []accounts.Address
 	PrecompiledAddressesPrague         []accounts.Address
@@ -277,6 +305,9 @@ var (
 	PrecompiledAddressesLubanForBSC    []accounts.Address
 	PrecompiledAddressesPlatoForBSC    []accounts.Address
 	PrecompiledAddressesHertzForBSC    []accounts.Address
+	PrecompiledAddressesFeynmanForBSC  []accounts.Address
+	PrecompiledAddressesCancunForBSC   []accounts.Address
+	PrecompiledAddressesHaberForBSC    []accounts.Address
 	PrecompiledAddressesByzantium      []accounts.Address
 	PrecompiledAddressesHomestead      []accounts.Address
 )
@@ -312,6 +343,15 @@ func init() {
 	for k := range PrecompiledContractsHertzForBSC {
 		PrecompiledAddressesHertzForBSC = append(PrecompiledAddressesHertzForBSC, k)
 	}
+	for k := range PrecompiledContractsFeynmanForBSC {
+		PrecompiledAddressesFeynmanForBSC = append(PrecompiledAddressesFeynmanForBSC, k)
+	}
+	for k := range PrecompiledContractsCancunForBSC {
+		PrecompiledAddressesCancunForBSC = append(PrecompiledAddressesCancunForBSC, k)
+	}
+	for k := range PrecompiledContractsHaberForBSC {
+		PrecompiledAddressesHaberForBSC = append(PrecompiledAddressesHaberForBSC, k)
+	}
 	for k := range PrecompiledContractsBerlin {
 		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
 	}
@@ -333,8 +373,15 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 		return PrecompiledAddressesOsaka
 	case rules.IsPrague:
 		return PrecompiledAddressesPrague
+	case rules.IsHaber:
+		return PrecompiledAddressesHaberForBSC
 	case rules.IsCancun:
+		if rules.IsParlia {
+			return PrecompiledAddressesCancunForBSC
+		}
 		return PrecompiledAddressesCancun
+	case rules.IsFeynman:
+		return PrecompiledAddressesFeynmanForBSC
 	case rules.IsHertz:
 		return PrecompiledAddressesHertzForBSC
 	case rules.IsPlato:

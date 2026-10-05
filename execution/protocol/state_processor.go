@@ -88,7 +88,16 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
-	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+	systemTxEngine, err := SystemTxEngineFor(engine, txn, header)
+	if err != nil {
+		return nil, err
+	}
+	var result *evmtypes.ExecutionResult
+	if systemTxEngine != nil {
+		result, err = ApplySystemTransaction(systemTxEngine, evm, ibs, header, txn, msg)
+	} else {
+		result, err = ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+	}
 	if err != nil {
 		return nil, err
 	}
