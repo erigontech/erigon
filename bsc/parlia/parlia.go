@@ -87,6 +87,10 @@ func New(chainConfig *chain.Config, logger log.Logger) *Parlia {
 	p := &Parlia{chainConfig: chainConfig, signer: types.LatestSigner(chainConfig), logger: logger}
 	if chainConfig.Parlia != nil {
 		p.upgrades = parseSystemContractUpgrades(chainConfig.Parlia.BlockAlloc)
+		if chainConfig.PragueTime != nil {
+			p.upgrades = append(p.upgrades, historyStorageUpgrade(*chainConfig.PragueTime))
+			sortUpgrades(p.upgrades)
+		}
 	}
 	if chainConfig.ChainID != nil {
 		p.storageOverrides = hertzFixPatches[chainConfig.ChainID.Uint64()]
@@ -111,8 +115,24 @@ func parseSystemContractUpgrades(blockAlloc map[string]any) []systemContractUpgr
 			alloc:     alloc,
 		})
 	}
-	sort.Slice(upgrades, func(i, j int) bool { return upgrades[i].numOrTime < upgrades[j].numOrTime })
+	sortUpgrades(upgrades)
 	return upgrades
+}
+
+func sortUpgrades(upgrades []systemContractUpgrade) {
+	sort.SliceStable(upgrades, func(i, j int) bool { return upgrades[i].numOrTime < upgrades[j].numOrTime })
+}
+
+// historyStorageUpgrade installs the EIP-2935 history contract at Prague: BSC
+// has no deployment transaction for it.
+func historyStorageUpgrade(pragueTime uint64) systemContractUpgrade {
+	return systemContractUpgrade{
+		numOrTime: pragueTime,
+		byTime:    true,
+		alloc: types.GenesisAlloc{
+			params.HistoryStorageAddress.Value(): {Code: params.HistoryStorageCode, Nonce: 1},
+		},
+	}
 }
 
 // IsSystemTransaction reports whether tx is a Parlia system transaction: a
@@ -274,6 +294,11 @@ func (p *Parlia) upgradeSystemContracts(chain rules.ChainHeaderReader, header *t
 		for addr, account := range u.alloc {
 			if err := ibs.SetCode(accounts.InternAddress(addr), account.Code, tracing.CodeChangeUnspecified); err != nil {
 				return err
+			}
+			if account.Nonce != 0 {
+				if err := ibs.SetNonce(accounts.InternAddress(addr), account.Nonce, tracing.NonceChangeUnspecified); err != nil {
+					return err
+				}
 			}
 		}
 	}

@@ -279,6 +279,9 @@ var BeaconRootsAddress = accounts.InternAddress(common.HexToAddress("0x000F3df6D
 // EIP-2935: Historical block hashes in state
 var HistoryStorageAddress = accounts.InternAddress(common.HexToAddress("0x0000F90827F1C53a10cb7A02335B175320002935"))
 
+// HistoryStorageCode is the runtime code of the EIP-2935 history contract.
+var HistoryStorageCode = common.FromHex("3373fffffffffffffffffffffffffffffffffffffffe14604657602036036042575f35600143038111604257611fff81430311604257611fff9006545f5260205ff35b5f5ffd5b5f35611fff60014303065500")
+
 // EIP-7002: Execution layer triggerable withdrawals
 var WithdrawalRequestAddress = accounts.InternAddress(common.HexToAddress("0x00000961Ef480Eb55e80D19ad83579A64c007002"))
 
