@@ -1224,7 +1224,7 @@ func (ibs *IntraBlockState) readSelfDestructMemo(addr accounts.Address) (bool, R
 	}
 	destructed, res, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex)
 	if ibs.sdProbe == nil {
-		ibs.sdProbe = make(map[accounts.Address]sdProbeEntry, 8)
+		ibs.sdProbe = make(map[accounts.Address]sdProbeEntry, 512)
 	}
 	ibs.sdProbe[addr] = sdProbeEntry{epoch: ibs.sdProbeEpoch, res: res, destructed: destructed, ok: ok}
 	return destructed, res, ok

@@ -137,7 +137,7 @@ type ReadSet struct {
 
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
 	if *m == nil {
-		*m = make(map[accounts.Address]VersionedRead[T])
+		*m = make(map[accounts.Address]VersionedRead[T], 512)
 	}
 	(*m)[addr] = tr
 }
