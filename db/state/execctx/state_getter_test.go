@@ -425,3 +425,22 @@ func TestCachedTemporalTxStateGetterUnversionedCacheReadsTx(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, encAccount(2), v)
 }
+
+func TestCachedTemporalTxStateGetterServesRepeatPositiveReadFromCache(t *testing.T) {
+	db, stateCache := committedCacheState(t)
+	key := bytes.Repeat([]byte{0xdd}, 20)
+	commitAccount(t, db, stateCache, key, encAccount(2), 6)
+	stateCache.Applier().Clear()
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	tx := &countingLatestTx{TemporalTx: roTx}
+	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
+	for range 2 {
+		v, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Equal(t, encAccount(2), v)
+	}
+	require.Equal(t, 1, tx.reads)
+}

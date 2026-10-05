@@ -114,7 +114,12 @@ func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetL
 	}
 	v, step, err := g.TemporalTx.GetLatest(name, k, opts)
 	if err == nil && g.stateCache.Caches(name) {
-		g.view.Fill(name, k, v, step.LastTxNum(g.stepSize))
+		readTxNum := step.LastTxNum(g.stepSize)
+		// A read-only tx's visible end is exact, so its latest value was written below it.
+		if end, ok := g.Debug().DomainVisibleEnd(name); ok && end > 0 {
+			readTxNum = min(readTxNum, end-1)
+		}
+		g.view.Fill(name, k, v, readTxNum)
 	}
 	return v, step, err
 }
