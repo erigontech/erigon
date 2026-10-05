@@ -1,0 +1,102 @@
+---
+title: "Run the Embedded ePBS Builder Pilot"
+description: "Start, verify, and use Erigon's experimental embedded ePBS builder on a Gloas network."
+sidebar_position: 4
+---
+
+# Run the Embedded ePBS Builder Pilot
+
+Erigon's embedded builder can assemble execution payloads from the public transaction pool, publish ePBS bids through Caplin, and retain selected payloads for reveal. This is an experimental Gloas pilot, not a mainnet production recommendation.
+
+## Before you start
+
+You need:
+
+- a fully synced Erigon node using embedded Caplin on a Gloas-enabled network;
+- a builder BLS private key registered through that network's builder-deposit process;
+- enough builder deposit for the network to consider the builder active; and
+- the 32-byte raw BLS private key in a file readable only by the Erigon process.
+
+Erigon does not register a builder. Use the network's official tooling, then confirm that the builder public key is active before starting Erigon; see [Top up builder collateral](#top-up-builder-collateral) for existing builders. Keep the key outside the datadir and restrict its permissions, for example with `chmod 600 /secure/builder.key`.
+
+## Start the builder
+
+The builder builds from transactions Erigon already receives.
+
+```bash
+erigon \
+  --datadir=/data/erigon \
+  --chain=<network> \
+  --builder \
+  --builder.key=/secure/builder.key \
+  --builder.bid-margin=0.95 \
+  --builder.max-bid-margin=0.97 \
+  --builder.min-profit-gwei=0 \
+  --builder.bid-publish-lead=400ms \
+  --builder.collateral-warning-gwei=20000000000 \
+  --http \
+  --http.addr=127.0.0.1 \
+  --http.api=eth,net,web3,builder
+```
+
+For a custom devnet, also provide its `--caplin.custom-config` and `--caplin.custom-genesis` files. By default, Erigon starts its first build attempt three quarters of a slot after the preceding slot starts, minus `--builder.bid-publish-lead`. An explicit non-zero `--builder.bid-delay` overrides this derived timing; `0` derives it. `--builder.bid-margin` must not exceed `--builder.max-bid-margin`, and the bid delay must place the first attempt before the publish time; otherwise startup fails.
+
+Erigon holds an attempt until `--builder.bid-publish-lead` before the target slot if that time is still in the future, and finalizes the payload at that time. Setting `--builder.bid-publish-lead=0` disables this hold. If another builder's bid is already visible, Erigon targets the higher of its `--builder.bid-margin` bid and 1 Gwei above the visible bid. It bids up to `--builder.max-bid-margin` of the block value and its reservable collateral, or skips the slot with outcome `outbid` if it cannot beat the visible bid within those limits. Set `--builder.min-profit-gwei` to keep at least that much block value after the bid; `0` disables the profit floor, and a bid that would cross it is skipped with outcome `below_min_profit`.
+
+`--builder.collateral-warning-gwei` logs one warning each time observed collateral drops below the threshold, and re-arms only after collateral rises above it; `0` disables the warning.
+
+The `builder` RPC namespace exposes builder state; keep it on a local listener.
+
+## Check builder health
+
+Call `builder_status` over the local RPC endpoint:
+
+```bash
+curl -s http://127.0.0.1:8545 \
+  -H 'content-type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"builder_status","params":[]}'
+```
+
+The result distinguishes configuration from runtime state:
+
+- `enabled` confirms that `--builder` was configured and remains true if the configured runtime later becomes disabled.
+- `phase` is `starting`, `running`, `disabled`, or `stopped`.
+- `reason` explains a disabled or stopped state, such as `pending_payload_store_unavailable`, `runtime_error`, or `node_stopping`.
+- `lastAttemptSlot` advances when payload assembly starts.
+- `lastBidSlot` and `lastBidValueGwei` advance only after a bid is processed and published successfully.
+- `availableCollateralGwei` is the builder balance minus `MIN_DEPOSIT_AMOUNT` and pending payments and withdrawals at the latest observation; it does not subtract this node's in-flight bids. It is `0x0` before the first observation and when collateral is exhausted, and keeps its last value when later attempts fail for other reasons.
+- `lastOutcomeSlot` identifies the newest slot with a recorded processing result. It can advance before `lastAttemptSlot` because input resolution happens before payload assembly. `lastOutcome` is one of `published`, `outbid`, `below_min_profit`, `collateral_exhausted`, `stale_input`, `input_unavailable`, `execution_busy`, `payload_not_ready`, `already_tracked`, `bid_rejected`, `no_bid`, or `failed`.
+
+A bid is not proof that the block became canonical. Check the network explorer for the builder public key and compare canonical blocks separately.
+
+## Top up builder collateral
+
+Build and run `builder-deposit` with the existing builder key. It only writes a deposit request; it does not change the key or send a transaction.
+
+```bash
+go run ./cmd/builder-deposit \
+  -key=/secure/builder.key \
+  -execution-address=0x<builder-withdrawal-address> \
+  -genesis-fork-version=0x<four-byte-version> \
+  -amount-gwei=1000000000 \
+  -out=builder-top-up.json
+```
+
+Before sending, check that the JSON file's `builder_pubkey` is the registered builder. A key that is not registered creates a new builder; for such a registration, a wrong `-genesis-fork-version` causes the request to be dropped and leaves the ETH in the contract.
+
+From any funded account, send the JSON file's `transaction_value_wei` with its `calldata` to the network's builder deposit request contract. Use the network's `GENESIS_FORK_VERSION`. `-request-fee-wei` must be at least the contract's current fee, which an `eth_call` to the contract with empty calldata returns; otherwise the transaction reverts. Any excess in `-request-fee-wei` above the current fee is not credited to the builder.
+
+## Diagnose common states
+
+| Observation | Meaning | Action |
+| --- | --- | --- |
+| `phase: starting` does not change | Caplin has not finished initializing the builder runtime | Check sync progress, Gloas configuration, builder key loading, and Caplin logs |
+| `phase: disabled` with `pending_payload_store_unavailable` | Durable pending-payload recovery could not open or recover | Check permissions and storage under `<datadir>/builder/pending` before restarting |
+| `lastAttemptSlot` advances but `lastBidSlot` does not | Assembly started but no bid was published | Use `lastOutcome` only when `lastOutcomeSlot` matches the slot being diagnosed; it distinguishes stale input, unavailable input, a busy execution layer or one that rejected moving its head to the payload parent (`execution_busy`), a payload that was not ready, an already tracked auction, a locally rejected bid, no bid produced or reserved, or another failure (`failed`) |
+| `lastOutcome: failed` | The attempt failed for another reason. For example, the execution layer returned an error while it read its head or moved it to the payload parent, or the head moved again before the build started, so the build failed with `wrong head block` | Find the error in the `Embedded builder proposer preferences attempt failed` log, which is written only for the first failed attempt for each slot and dependent root. The execution layer also logs a failed build as `Failed to build PoS block`. No action is required unless it repeats; the builder retries the attempt until the target slot ends |
+| `lastOutcome: outbid` | Another visible bid was at or above the maximum bid margin or reservable collateral | Check the `Embedded builder bid skipped` log line for the reason. If it is `insufficient_collateral`, top up the builder; otherwise no action is required |
+| `lastOutcome: below_min_profit` | The margin bid or the bid needed to beat a visible competitor would leave less than `--builder.min-profit-gwei` | Lower the minimum profit only if the expected return justifies it |
+| `lastOutcome: collateral_exhausted` | The builder has no available collateral | Top up the builder as described in [Top up builder collateral](#top-up-builder-collateral) |
+| `lastBidSlot` advances but no canonical block appears | The bid was published but was not selected or did not become canonical | Compare competing bids and proposer selection on the network explorer |
+
+Stop the process normally so the runtime reports `node_stopping` and retained payload state remains recoverable on restart.
