@@ -21,9 +21,11 @@ package vm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -68,4 +70,31 @@ func TestValidJumpdest(t *testing.T) {
 	if contract.validJumpdest(overflow.AddUint64(overflow, 2)) {
 		t.Error("dest 2^64+2: expected false")
 	}
+}
+
+// Two codes whose hashes pick the same slot of jumpDestTable must each get their own analysis.
+func TestJumpdestAnalysisSlotCollision(t *testing.T) {
+	slot := func(code []byte) uint64 {
+		h := accounts.NewCode(code).Hash.Value()
+		return binary.LittleEndian.Uint64(h[:8]) & uint64(len(jumpDestTable)-1)
+	}
+	destFirst := func(i int) []byte { return []byte{byte(JUMPDEST), byte(PUSH2), byte(i >> 8), byte(i)} }
+	destLast := func(i int) []byte { return []byte{byte(PUSH2), byte(i >> 8), byte(i), byte(JUMPDEST)} }
+	firstBySlot := map[uint64][]byte{}
+	for i := range 4096 {
+		firstBySlot[slot(destFirst(i))] = destFirst(i)
+	}
+	var a, b []byte
+	for i := 0; b == nil; i++ {
+		if c, ok := firstBySlot[slot(destLast(i))]; ok {
+			a, b = c, destLast(i)
+		}
+	}
+	at := func(code []byte, pc uint64) bool {
+		c := &Contract{Code: code, CodeHash: accounts.NewCode(code).Hash}
+		return c.validJumpdest(uint256.NewInt(pc))
+	}
+	require.True(t, at(a, 0))
+	require.True(t, at(b, 3), "the second code must not reuse the first code's analysis")
+	require.False(t, at(b, 0))
 }
