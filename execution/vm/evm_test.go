@@ -200,3 +200,21 @@ func TestZeroUnpricedBaseFee(t *testing.T) {
 		})
 	}
 }
+
+// TestPrecompileMovedToLongAddress pins that a precompile moved by a state
+// override to an address beyond the short range is still found.
+func TestPrecompileMovedToLongAddress(t *testing.T) {
+	t.Parallel()
+
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	moved := accounts.InternAddress(common.HexToAddress("0x1000000000000000000000000000000000000001"))
+	evm.SetPrecompiles(PrecompiledContracts{moved: &ecrecover{}})
+	_, ok := evm.precompile(moved)
+	require.True(t, ok)
+
+	evm.ResetBetweenBlocks(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, Config{}, evm.chainRules)
+	_, ok = evm.precompile(moved)
+	require.False(t, ok)
+	_, ok = evm.precompile(accounts.InternAddress(common.BytesToAddress([]byte{1})))
+	require.True(t, ok)
+}

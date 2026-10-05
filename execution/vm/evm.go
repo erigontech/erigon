@@ -40,8 +40,18 @@ import (
 )
 
 func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
+	if !evm.longPrecompile && !isShortAddress(addr) {
+		return nil, false
+	}
 	p, ok := evm.precompiles[addr]
 	return p, ok
+}
+
+// isShortAddress reports whether addr fits in its last two bytes, as every
+// standard precompile address does.
+func isShortAddress(addr accounts.Address) bool {
+	a := addr.Value()
+	return [18]byte(a[:18]) == [18]byte{}
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -76,6 +86,8 @@ type EVM struct {
 	// abort is used to abort the EVM calling operations
 	abort    atomic.Bool
 	readOnly bool // Whether to throw on stateful modifications
+	// longPrecompile: an override moved a precompile beyond the short address range.
+	longPrecompile bool
 	// callGasTemp holds the gas available for the current call. This is needed because the
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
@@ -268,6 +280,7 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.returnData = nil
 	evm.jt = jumpTable(chainRules, vmConfig)
 	evm.precompiles = Precompiles(chainRules)
+	evm.longPrecompile = false
 
 	// ensure the evm is reset to be used again
 	evm.abort.Store(false)
@@ -343,6 +356,13 @@ func (evm *EVM) SetPrecompiles(precompiles PrecompiledContracts) {
 		precompiles = Precompiles(evm.chainRules)
 	}
 	evm.precompiles = precompiles
+	evm.longPrecompile = false
+	for addr := range precompiles {
+		if !isShortAddress(addr) {
+			evm.longPrecompile = true
+			break
+		}
+	}
 }
 
 func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, input []byte, gas mdgas.MdGas, value uint256.Int, bailout bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
