@@ -323,7 +323,7 @@ func TestCallManyStateDiffBaselineIncludesStateOverrides(t *testing.T) {
 	require.Equal(t, hexutil.U256(*want), *balance["*"].From)
 }
 
-func TestCallManyStateOverrideReplacesStorageInEveryCall(t *testing.T) {
+func TestCallManyStorageOverrideAppliesToEveryCall(t *testing.T) {
 	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	bankAddr := crypto.PubkeyToAddress(bankKey.PublicKey)
@@ -356,6 +356,45 @@ func TestCallManyStateOverrideReplacesStorageInEveryCall(t *testing.T) {
 	for i, result := range results {
 		require.Equal(t, common.Hash{}.String(), result.Output.String(), "call %d", i)
 	}
+}
+
+// The second SSTORE is a dirty write only if the overridden slot keeps its
+// original value, so the gas left after it exposes a wrong original.
+func TestCallManyStateOverrideGasDoesNotDependOnTraceType(t *testing.T) {
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bankAddr := crypto.PubkeyToAddress(bankKey.PublicKey)
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0001")
+	gspec := &types.Genesis{
+		Config: chain.AllProtocolChanges.Copy(),
+		Alloc: types.GenesisAlloc{
+			bankAddr: {Balance: big.NewInt(1_000_000_000_000_000_000)},
+			target: {
+				// SSTORE(1, 9), SSTORE(1, 11), then return GAS
+				Code: []byte{
+					0x60, 0x09, 0x60, 0x01, 0x55,
+					0x60, 0x0b, 0x60, 0x01, 0x55,
+					0x5a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3,
+				},
+			},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))
+	api := newTraceApiForTest(m)
+
+	call := fmt.Sprintf(`{"from":%q,"to":%q,"gas":"0x30000"}`, bankAddr, target)
+	gasLeft := func(traceType string) string {
+		bundle := fmt.Sprintf(`[[%s,[%q]]]`, call, traceType)
+		results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, &config.TraceConfig{
+			StateOverrides: &ethapi.StateOverrides{
+				accounts.InternAddress(target): {State: &map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x07")}},
+			},
+		})
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		return results[0].Output.String()
+	}
+	require.Equal(t, gasLeft("stateDiff"), gasLeft("trace"))
 }
 
 func TestCallManyMovedPrecompileAppliesToEveryCall(t *testing.T) {

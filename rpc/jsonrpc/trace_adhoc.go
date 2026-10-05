@@ -1400,15 +1400,15 @@ func applyStateOverrides(ibs *state.IntraBlockState, overrides *ethapi.StateOver
 	return precompiles, nil
 }
 
-// replacedStorageReader serves the storage of accounts whose storage a `state`
-// override replaces, so slots missing from the override read as zero instead of
-// falling through to the database.
-type replacedStorageReader struct {
+// overriddenStorageReader serves the storage of accounts with a full `state`
+// override, so slots missing from the override read as zero instead of falling
+// through to the database.
+type overriddenStorageReader struct {
 	state.StateReader
 	storage map[accounts.Address]map[common.Hash]common.Hash
 }
 
-func withReplacedStorage(r state.StateReader, overrides *ethapi.StateOverrides) state.StateReader {
+func withOverriddenStorage(r state.StateReader, overrides *ethapi.StateOverrides) state.StateReader {
 	storage := make(map[accounts.Address]map[common.Hash]common.Hash)
 	for addr, account := range *overrides {
 		if account.State != nil {
@@ -1418,10 +1418,10 @@ func withReplacedStorage(r state.StateReader, overrides *ethapi.StateOverrides) 
 	if len(storage) == 0 {
 		return r
 	}
-	return &replacedStorageReader{StateReader: r, storage: storage}
+	return &overriddenStorageReader{StateReader: r, storage: storage}
 }
 
-func (r *replacedStorageReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+func (r *overriddenStorageReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	slots, ok := r.storage[address]
 	if !ok {
 		return r.StateReader.ReadAccountStorage(address, key)
@@ -1543,7 +1543,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	var overrides *ethapi.StateOverrides
 	if traceConfig != nil && traceConfig.StateOverrides != nil {
 		overrides = traceConfig.StateOverrides
-		stateReader = withReplacedStorage(stateReader, overrides)
+		stateReader = withOverriddenStorage(stateReader, overrides)
 	}
 	stateCache := shards.NewStateCache(
 		32, 0, /* no limit */
@@ -1607,10 +1607,12 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		if precompiles, err = applyStateOverrides(ibs, overrides, rules); err != nil {
 			return nil, nil, err
 		}
-		// Committed to the cache because a stateDiff call resets ibs.
+		// Committed to the cache because a stateDiff call resets ibs. The reset
+		// here drops the fake storage, whose committed value tracks every write.
 		if err := ibs.CommitOverrideDirtyAccounts(rules, cachedWriter, ibs.ExtractAndClearDirty()); err != nil {
 			return nil, nil, err
 		}
+		ibs.Reset()
 	}
 	var tracer *tracers.Tracer
 	var tracingHooks *tracing.Hooks
