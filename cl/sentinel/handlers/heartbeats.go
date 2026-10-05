@@ -43,7 +43,7 @@ func (c *ConsensusHandlers) pingHandler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
-	peerId := s.Conn().RemotePeer().String()
+	peerId := s.Conn().RemotePeer()
 	gid := &cltypes.Ping{}
 	if s.Conn().IsClosed() {
 		return nil
@@ -54,9 +54,10 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 		}
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
+	log.Debug("Received goodbye message", "peer", peerId, "reason", gid.Id)
 
 	if gid.Id > 250 { // 250 is the status code for getting banned due to whatever reason
-		v, err := c.host.Peerstore().Get("AgentVersion", peerId)
+		v, err := c.host.Peerstore().Get(peerId, "AgentVersion")
 		if err == nil {
 			log.Warn("Received goodbye message from peer", "v", v)
 		}

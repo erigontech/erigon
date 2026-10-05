@@ -85,17 +85,19 @@ func NewPool(h host.Host) *Pool {
 	}
 }
 
-// RecordHandshakeFailure records a failure. Failures stop our dials before they refuse the peer's
-// own connections, because a peer may close our dials without misbehaving.
-func (p *Pool) RecordHandshakeFailure(pid peer.ID) {
+// RecordHandshakeFailure records a failure and reports threshold transitions. Failures stop our
+// dials before they refuse the peer's own connections, because a peer may close our dials without
+// misbehaving.
+func (p *Pool) RecordHandshakeFailure(pid peer.ID) (count int, becameUndialable bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	count, _ := p.handshakeFailures.Get(pid)
+	count, _ = p.handshakeFailures.Get(pid)
 	count++
 	if count == handshakeFailureUndialableThreshold {
 		p.undialable.Add(pid, struct{}{})
 	}
 	p.handshakeFailures.Add(pid, count)
+	return count, count == handshakeFailureUndialableThreshold
 }
 
 func (p *Pool) BanStatus(pid peer.ID) bool {

@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -84,21 +85,21 @@ func testLocalNode(t *testing.T) *enode.LocalNode {
 	return ln
 }
 
-func newHeartbeatTestStream(t *testing.T, protocolID protocol.ID) network.Stream {
+func newHeartbeatTestStream(t *testing.T, protocolID protocol.ID) (network.Stream, host.Host) {
 	t.Helper()
 	ctx := t.Context()
 
-	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	localHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
-	t.Cleanup(func() { host.Close() })
+	t.Cleanup(func() { localHost.Close() })
 
-	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	remoteHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
 	require.NoError(t, err)
-	t.Cleanup(func() { host1.Close() })
+	t.Cleanup(func() { remoteHost.Close() })
 
-	err = host.Connect(ctx, peer.AddrInfo{
-		ID:    host1.ID(),
-		Addrs: host1.Addrs(),
+	err = localHost.Connect(ctx, peer.AddrInfo{
+		ID:    remoteHost.ID(),
+		Addrs: remoteHost.Addrs(),
 	})
 	require.NoError(t, err)
 
@@ -110,7 +111,7 @@ func newHeartbeatTestStream(t *testing.T, protocolID protocol.ID) network.Stream
 		ctx,
 		beaconDB,
 		indiciesDB,
-		host,
+		localHost,
 		&clparams.NetworkConfig{},
 		testLocalNode(t),
 		beaconCfg,
@@ -119,9 +120,9 @@ func newHeartbeatTestStream(t *testing.T, protocolID protocol.ID) network.Stream
 	)
 	c.Start()
 
-	stream, err := host1.NewStream(ctx, host.ID(), protocolID)
+	stream, err := remoteHost.NewStream(ctx, localHost.ID(), protocolID)
 	require.NoError(t, err)
-	return stream
+	return stream, localHost
 }
 
 func requireResponseCode(t *testing.T, stream network.Stream, expected byte) {
@@ -133,7 +134,7 @@ func requireResponseCode(t *testing.T, stream network.Stream, expected byte) {
 }
 
 func TestPing(t *testing.T) {
-	stream := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
 
 	err := ssz_snappy.EncodeAndWrite(stream, &cltypes.Ping{Id: 1})
 	require.NoError(t, err)
@@ -148,14 +149,14 @@ func TestPing(t *testing.T) {
 }
 
 func TestPingRejectsEmptyRequest(t *testing.T) {
-	stream := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
 	require.NoError(t, stream.CloseWrite())
 
 	requireResponseCode(t, stream, byte(InvalidRequestPrefix))
 }
 
 func TestPingRejectsTruncatedRequest(t *testing.T) {
-	stream := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
 	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, rawSSZ(make([]byte, 7))))
 	require.NoError(t, stream.CloseWrite())
 
@@ -163,7 +164,7 @@ func TestPingRejectsTruncatedRequest(t *testing.T) {
 }
 
 func TestPingRejectsOversizedRequest(t *testing.T) {
-	stream := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
 	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, rawSSZ(make([]byte, 9))))
 	require.NoError(t, stream.CloseWrite())
 
@@ -171,7 +172,7 @@ func TestPingRejectsOversizedRequest(t *testing.T) {
 }
 
 func TestPingRejectsTrailingBytes(t *testing.T) {
-	stream := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.PingProtocolV1))
 	var request bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, &cltypes.Ping{Id: 1}))
 	require.NoError(t, request.WriteByte(0))
@@ -183,18 +184,52 @@ func TestPingRejectsTrailingBytes(t *testing.T) {
 }
 
 func TestGoodbye(t *testing.T) {
-	stream := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
-	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, &cltypes.Ping{}))
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
+	sendGoodbye(t, stream, 0)
+}
+
+func TestGoodbyeLogsAgentVersionForHighReason(t *testing.T) {
+	stream, localHost := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
+	const agentVersion = "remote-client/v1.2.3"
+	require.NoError(t, localHost.Peerstore().Put(stream.Conn().LocalPeer(), "AgentVersion", agentVersion))
+
+	records := make(chan *log.Record, 16)
+	previous := log.Root().GetHandler()
+	log.Root().SetHandler(log.ChannelHandler(records))
+	t.Cleanup(func() { log.Root().SetHandler(previous) })
+
+	sendGoodbye(t, stream, 251)
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case record := <-records:
+			if record.Msg != "Received goodbye message from peer" {
+				continue
+			}
+			require.Equal(t, log.LvlWarn, record.Lvl)
+			require.Equal(t, []any{"v", agentVersion}, record.Ctx)
+			return
+		case <-deadline:
+			t.Fatal("goodbye warning was not logged")
+		}
+	}
+}
+
+func sendGoodbye(t *testing.T, stream network.Stream, reason uint64) {
+	t.Helper()
+	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, &cltypes.Ping{Id: reason}))
 	require.NoError(t, stream.CloseWrite())
+
 	requireResponseCode(t, stream, byte(SuccessfulResponsePrefix))
 
 	p := &cltypes.Ping{}
-	err := ssz_snappy.DecodeAndReadNoForkDigest(stream, p, clparams.Phase0Version)
-	require.NoError(t, err)
+
+	require.NoError(t, ssz_snappy.DecodeAndReadNoForkDigest(stream, p, clparams.Phase0Version))
 }
 
 func TestGoodbyeRejectsOversizedRequest(t *testing.T) {
-	stream := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
 	require.NoError(t, ssz_snappy.EncodeAndWrite(stream, rawSSZ(make([]byte, 9))))
 	require.NoError(t, stream.CloseWrite())
 
@@ -202,7 +237,7 @@ func TestGoodbyeRejectsOversizedRequest(t *testing.T) {
 }
 
 func TestGoodbyeRejectsTrailingBytes(t *testing.T) {
-	stream := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
 	var request bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&request, &cltypes.Ping{Id: 1}))
 	require.NoError(t, request.WriteByte(0))
@@ -214,7 +249,7 @@ func TestGoodbyeRejectsTrailingBytes(t *testing.T) {
 }
 
 func TestGoodbyeRejectsMaxDeclaredLengthBeforeAllocation(t *testing.T) {
-	stream := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
+	stream, _ := newHeartbeatTestStream(t, protocol.ID(communication.GoodbyeProtocolV1))
 	var header [binary.MaxVarintLen64]byte
 	headerLen := binary.PutUvarint(header[:], 16*1024*1024)
 

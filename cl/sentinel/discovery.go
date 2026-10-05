@@ -569,15 +569,16 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		"direction", conn.Stat().Direction,
 		"addr", addr,
 		"transport", transport)
-	go s.handleNewConnection(peerId, func() (bool, error) {
+	go s.handleNewConnection(peerId, conn.Stat().Direction, addr, func() (bool, error) {
 		return s.handshaker.ValidatePeer(s.ctx, peerId)
 	})
 }
 
 // handleNewConnection admits or rejects a peer that has just connected, then runs its status
 // handshake. Reports whether the peer was kept.
-func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, error)) bool {
+func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Direction, addr multiaddr.Multiaddr, validate func() (bool, error)) bool {
 	if s.peers.RefuseConnections(peerId) {
+		s.logger.Debug("[Sentinel] Closing refused peer connection", "peer", peerId, "direction", direction, "addr", addr)
 		s.closePeer(peerId)
 		return false
 	}
@@ -610,13 +611,21 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, er
 	}
 
 	valid, err := validate()
-	if err != nil {
-		// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
-		// The peer may still work for gossip even if status exchange failed.
-		log.Trace("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
+	if !valid && err != nil {
+		failureCount, becameUndialable := s.peers.RecordHandshakeFailure(peerId)
+		s.logger.Debug("[Sentinel] Handshake failed", "peer", peerId, "count", failureCount, "err", err)
+		if becameUndialable {
+			s.logger.Debug("[Sentinel] Peer became undialable", "peer", peerId)
+		}
+		if s.peers.RefuseConnections(peerId) {
+			s.logger.Debug("[Sentinel] Refusing peer connections", "peer", peerId, "count", failureCount)
+			s.closePeer(peerId)
+			return false
+		}
+		return true
 	}
 
-	if !valid && err == nil {
+	if !valid {
 		// Handshake succeeded but fork digest mismatched — peer is on a different fork.
 		// Must disconnect to avoid receiving incompatible blocks.
 		log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
@@ -625,14 +634,6 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, er
 		return false
 	}
 
-	if !valid {
-		s.peers.RecordHandshakeFailure(peerId)
-		if s.peers.RefuseConnections(peerId) {
-			s.closePeer(peerId)
-			return false
-		}
-		return true
-	}
 	s.peers.AddPeer(peerId)
 	log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
 	return true

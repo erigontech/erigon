@@ -93,7 +93,7 @@ func TestBannedPeerIsClosedInsteadOfHandshaked(t *testing.T) {
 	s := testSentinel(t, local)
 	s.peers.SetBanStatus(remote.ID(), true)
 
-	kept := s.handleNewConnection(remote.ID(), func() (bool, error) {
+	kept := s.handleNewConnection(remote.ID(), network.DirUnknown, nil, func() (bool, error) {
 		t.Error("a banned peer must not be handshaked")
 		return false, nil
 	})
@@ -137,13 +137,14 @@ func TestOnConnectionLogsActualTransport(t *testing.T) {
 			require.NotEmpty(t, conns)
 			conn := conns[0]
 			s.onConnection(local.Network(), conn)
+			waitDisconnected(t, local, remote.ID())
 
 			logs := output.String()
 			require.Contains(t, logs, fmt.Sprintf("peer=%s", remote.ID()))
 			require.Contains(t, logs, "direction=Outbound")
 			require.Contains(t, logs, fmt.Sprintf("addr=%s", conn.RemoteMultiaddr()))
 			require.Contains(t, logs, fmt.Sprintf("transport=%s", tt.transport))
-			waitDisconnected(t, local, remote.ID())
+			require.Contains(t, logs, "Closing refused peer connection")
 		})
 	}
 }
@@ -157,7 +158,7 @@ func TestRepeatedHandshakeFailuresStopOutboundDials(t *testing.T) {
 	}
 
 	for range 3 {
-		require.True(t, s.handleNewConnection(remote.ID(), failing),
+		require.True(t, s.handleNewConnection(remote.ID(), network.DirUnknown, nil, failing),
 			"a transport error keeps the peer: it may still serve gossip")
 	}
 	require.NoError(t, local.Network().ClosePeer(remote.ID()))
@@ -177,11 +178,11 @@ func TestHandshakeFailuresDoNotRefuseThePeersLaterConnection(t *testing.T) {
 		return false, errors.New("stream reset")
 	}
 	for range 3 {
-		require.True(t, s.handleNewConnection(remote.ID(), failing))
+		require.True(t, s.handleNewConnection(remote.ID(), network.DirUnknown, nil, failing))
 	}
 
 	validated := false
-	require.True(t, s.handleNewConnection(remote.ID(), func() (bool, error) {
+	require.True(t, s.handleNewConnection(remote.ID(), network.DirUnknown, nil, func() (bool, error) {
 		validated = true
 		return true, nil
 	}))
@@ -196,12 +197,12 @@ func TestHandshakeFailuresRefuseConnectionsAtLimit(t *testing.T) {
 		return false, errors.New("stream reset")
 	}
 	for range 9 {
-		require.True(t, s.handleNewConnection(remote.ID(), failing))
+		require.True(t, s.handleNewConnection(remote.ID(), network.DirInbound, nil, failing))
 	}
 	require.Equal(t, network.Connected, local.Network().Connectedness(remote.ID()))
 
 	tenthHandshakeCalled := false
-	require.False(t, s.handleNewConnection(remote.ID(), func() (bool, error) {
+	require.False(t, s.handleNewConnection(remote.ID(), network.DirInbound, nil, func() (bool, error) {
 		tenthHandshakeCalled = true
 		return false, errors.New("stream reset")
 	}))
@@ -209,7 +210,7 @@ func TestHandshakeFailuresRefuseConnectionsAtLimit(t *testing.T) {
 	waitDisconnected(t, local, remote.ID())
 
 	followingHandshakeCalled := false
-	require.False(t, s.handleNewConnection(remote.ID(), func() (bool, error) {
+	require.False(t, s.handleNewConnection(remote.ID(), network.DirInbound, nil, func() (bool, error) {
 		followingHandshakeCalled = true
 		return true, nil
 	}))
@@ -222,7 +223,7 @@ func TestUnbannedPeerIsHandshakedAndKept(t *testing.T) {
 	s := testSentinel(t, local)
 
 	validations := 0
-	require.True(t, s.handleNewConnection(remote.ID(), func() (bool, error) {
+	require.True(t, s.handleNewConnection(remote.ID(), network.DirUnknown, nil, func() (bool, error) {
 		validations++
 		return true, nil
 	}))

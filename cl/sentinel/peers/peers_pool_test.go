@@ -69,8 +69,10 @@ func TestHandshakeFailureThresholds(t *testing.T) {
 	pid := peer.ID("failure-thresholds")
 
 	for failure := 1; failure <= 12; failure++ {
-		pool.RecordHandshakeFailure(pid)
+		count, becameUndialable := pool.RecordHandshakeFailure(pid)
 
+		require.Equal(t, failure, count)
+		require.Equal(t, failure == 3, becameUndialable)
 		require.Equal(t, failure >= 10, pool.RefuseConnections(pid))
 		require.Equal(t, failure < 3, pool.Dialable(pid))
 	}
