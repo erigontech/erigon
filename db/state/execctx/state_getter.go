@@ -18,6 +18,10 @@ package execctx
 
 import (
 	"slices"
+	"sync/atomic"
+	"time"
+
+	"github.com/erigontech/erigon/common/log/v3"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
@@ -77,6 +81,8 @@ func NewTemporalTxStateGetter(tx kv.TemporalTx) *TemporalTxStateGetter {
 }
 
 // NewCachedTemporalTxStateGetter reads through the shared state cache.
+var dbgCacheLogAt atomic.Int64
+
 func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCache) *TemporalTxStateGetter {
 	g := &TemporalTxStateGetter{TemporalTx: tx}
 	if stateCache == nil || !dbg.UseStateCache {
@@ -95,6 +101,11 @@ func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCac
 	}
 	g.stateCache = stateCache
 	g.view = stateCache.View(cache.FrontierWithStateVersion(cache.FrontierFunc(tx.Debug().DomainVisibleEnd), stateVersion))
+	if now := time.Now().Unix(); dbgCacheLogAt.Swap(now) != now {
+		known, cv, pub := stateCache.DebugBindState()
+		end, endOK := tx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+		log.Warn("[dbgcache] bind", "txStateVersion", stateVersion, "cacheKnown", known, "cacheVersion", cv, "publishing", pub, "accEnd", end, "accEndOK", endOK)
+	}
 	g.stepSize = tx.Debug().StepSize()
 	return g
 }

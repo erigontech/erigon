@@ -140,6 +140,13 @@ func (v ReadView) WithFrontier(f Frontier) ReadView {
 	return v
 }
 
+// DebugBindState reports the version binding state, for a throwaway diagnosis.
+func (c *StateCache) DebugBindState() (known bool, version uint64, publishing bool) {
+	c.admissionMu.RLock()
+	defer c.admissionMu.RUnlock()
+	return c.stateVersionKnown, c.stateVersion, c.publishing
+}
+
 func (c *StateCache) bindFrontierLocked(frontier Frontier) Frontier {
 	if frontier == nil || c.publishing {
 		return nil
