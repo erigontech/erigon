@@ -3857,18 +3857,63 @@ func (v *writeView) live() *WriteSet {
 	return ws
 }
 
-// Snapshot returns a detached copy, as WriteSet.Snapshot.
+// Snapshot returns a detached copy with WriteSet.Snapshot's self-destruct rules.
 func (v *writeView) Snapshot() *WriteSet {
-	ws := v.live()
-	defer ws.ReleaseMaps()
-	return ws.Snapshot()
+	out := &WriteSet{}
+	for i := range v.t.recs {
+		r := &v.t.recs[i]
+		a := r.addr
+		sd := false
+		if r.wSelfDestruct != nil {
+			out.SetSelfDestruct(a, cloneVW(r.wSelfDestruct))
+			sd = r.wSelfDestruct.Val
+		}
+		if r.wBalance != nil {
+			out.SetBalance(a, cloneVW(r.wBalance))
+		}
+		if r.wIncarnation != nil {
+			out.SetIncarnation(a, cloneVW(r.wIncarnation))
+		}
+		for k, w := range r.wStorage {
+			out.SetStorage(a, k, cloneVW(w))
+		}
+		if r.wCreateContract != nil {
+			out.SetCreateContract(a, cloneVW(r.wCreateContract))
+		}
+		if sd {
+			continue
+		}
+		if r.wAddress != nil {
+			out.SetAddress(a, cloneVW(r.wAddress))
+		}
+		if r.wNonce != nil {
+			out.SetNonce(a, cloneVW(r.wNonce))
+		}
+		if r.wCode != nil {
+			out.SetCode(a, cloneVW(r.wCode))
+		}
+		if r.wCodeHash != nil {
+			out.SetCodeHash(a, cloneVW(r.wCodeHash))
+		}
+		if r.wCodeSize != nil {
+			out.SetCodeSize(a, cloneVW(r.wCodeSize))
+		}
+	}
+	return out
 }
 
-// Finalize returns the committable copy, as WriteSet.Finalize.
+// Finalize zeroes the storage of contracts created and destroyed in this tx,
+// then snapshots, as WriteSet.Finalize.
 func (v *writeView) Finalize() *WriteSet {
-	ws := v.live()
-	defer ws.ReleaseMaps()
-	return ws.Finalize()
+	for i := range v.t.recs {
+		r := &v.t.recs[i]
+		if r.wCreateContract != nil && r.wCreateContract.Val && r.wSelfDestruct != nil && r.wSelfDestruct.Val {
+			for _, w := range r.wStorage {
+				w.Val = uint256.Int{}
+			}
+		}
+	}
+	return v.Snapshot()
 }
 
 func (v *writeView) ReleaseAndReset() {
