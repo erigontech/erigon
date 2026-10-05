@@ -16,6 +16,8 @@
 
 package state
 
+import "sync"
+
 // The cap bounds the working set, not coverage: slots are handed out in
 // sequence, so an arena that outgrows L2 costs more in cache misses than the
 // allocations it saves. 2048 slots is 574 KB. Past the cap the caller
@@ -59,9 +61,13 @@ func (a *stateObjectArena) grow() bool {
 	if len(a.slabs) == arenaMaxSlabs {
 		return false
 	}
-	a.slabs = append(a.slabs, new([arenaSlabSize]stateObject))
+	a.slabs = append(a.slabs, arenaSlabPool.Get().(*[arenaSlabSize]stateObject))
 	return true
 }
+
+// arenaSlabPool keeps slabs across IntraBlockStates: an eth_call builds a fresh
+// one per request, and its transients die with the tx anyway.
+var arenaSlabPool = sync.Pool{New: func() any { return new([arenaSlabSize]stateObject) }}
 
 // reset makes every slot handed out since the last reset available again. Slots
 // are zeroed as well as rewound so a slot that is not reused stops retaining the
@@ -79,5 +85,9 @@ func (a *stateObjectArena) reset() {
 }
 
 func (a *stateObjectArena) release() {
+	a.reset()
+	for _, slab := range a.slabs {
+		arenaSlabPool.Put(slab)
+	}
 	a.slabs, a.slab, a.idx = nil, 0, 0
 }
