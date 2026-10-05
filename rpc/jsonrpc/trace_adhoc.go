@@ -1311,7 +1311,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		blockOverrides = traceConfig.BlockOverrides
 	}
 	effectiveHeader := blockOverrides.OverrideHeader(header)
-	blockCtx := transactions.NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(engine, effectiveHeader, tx, api._blockReader, chainConfig)
 	if err := blockOverrides.Override(&blockCtx); err != nil {
 		return nil, err
 	}
@@ -1562,7 +1562,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		baseTxNum = historicalStateReader.GetTxNum()
 	}
 
-	blockCtx := transactions.NewEVMBlockContext(engine, header, requireCanonical, dbtx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, dbtx, api._blockReader, chainConfig)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 		return nil, nil, err
 	}
@@ -1727,7 +1727,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		baseTxNum = historicalStateReader.GetTxNum()
 	}
 
-	blockCtx := transactions.NewEVMBlockContext(engine, header, requireCanonical, dbtx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, dbtx, api._blockReader, chainConfig)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 		return nil, err
 	}
@@ -1932,7 +1932,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 
 	signer := types.MakeSigner(chainConfig, header.Number.Uint64(), header.Time)
-	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, dbtx, api._blockReader, chainConfig)
 	rules := blockCtx.Rules(chainConfig)
 
 	// Keep the nonce, EIP-3607 sender-code and EIP-7825 gas-limit checks that

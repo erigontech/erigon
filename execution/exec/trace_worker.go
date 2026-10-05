@@ -47,7 +47,7 @@ type Resetable interface {
 type TraceWorker struct {
 	stateReader  *state.HistoryReaderV3
 	engine       rules.EngineReader
-	headerReader dbservices.HeaderReader
+	headerReader dbservices.CanonicalReader
 	tx           kv.Getter
 	chainConfig  *chain.Config
 	tracer       GenericTracer
@@ -64,7 +64,7 @@ type TraceWorker struct {
 	vmConfig  *vm.Config
 }
 
-func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine rules.EngineReader, br dbservices.HeaderReader, tracer GenericTracer) *TraceWorker {
+func NewTraceWorker(tx kv.TemporalTx, cc *chain.Config, engine rules.EngineReader, br dbservices.CanonicalReader, tracer GenericTracer) *TraceWorker {
 	stateReader := state.NewHistoryReaderV3(tx, 0)
 
 	ie := &TraceWorker{
@@ -90,7 +90,7 @@ func (e *TraceWorker) Close() {
 
 func (e *TraceWorker) ChangeBlock(header *types.Header) {
 	e.blockNum = header.Number.Uint64()
-	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.headerReader, e.evm.ChainConfig())
+	blockCtx := transactions.NewEVMBlockContext(e.engine, header, e.tx, e.headerReader, e.evm.ChainConfig())
 	e.blockCtx = &blockCtx
 	e.blockHash = header.Hash()
 	e.header = header
