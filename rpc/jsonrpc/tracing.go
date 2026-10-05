@@ -361,7 +361,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 
 	var precompiles vm.PrecompiledContracts
 
-	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, dbtx, api._blockReader, chainConfig)
 	if config != nil {
 		if config.BlockOverrides != nil {
 			err := config.BlockOverrides.Override(&blockCtx)

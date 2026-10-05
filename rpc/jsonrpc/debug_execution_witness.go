@@ -629,7 +629,7 @@ func (api *BaseAPI) buildAccessedState(
 	header := block.HeaderNoCopy()
 
 	// Create EVM block context
-	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, tx, api._blockReader, chainConfig)
 	blockRules := blockCtx.Rules(chainConfig)
 	signer := types.MakeSigner(chainConfig, blockNum, header.Time)
 
