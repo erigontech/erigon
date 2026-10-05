@@ -1454,7 +1454,7 @@ func TestTraceCallVmTraceExecutedOps(t *testing.T) {
 }
 
 // DUPN, SWAPN and EXCHANGE check their immediate and the stack inside execute, so an operation that
-// fails there halted and is listed.
+// fails there has halted and is listed.
 func TestTraceCallVmTraceImmediateOpsHalt(t *testing.T) {
 	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
 	api := newTraceApiForTest(m)

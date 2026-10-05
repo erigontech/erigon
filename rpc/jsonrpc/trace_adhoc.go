@@ -842,12 +842,11 @@ func (ot *OeTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.Md
 }
 
 // rejectedBeforeExecution reports whether err rejects an operation before it executes:
-// an undefined opcode (including the designated INVALID, 0xFE) or a stack underflow or overflow.
+// a stack underflow or overflow.
 func rejectedBeforeExecution(err error) bool {
 	var underflow *vm.ErrStackUnderflow
 	var overflow *vm.ErrStackOverflow
-	var invalid *vm.ErrInvalidOpCode
-	return errors.As(err, &underflow) || errors.As(err, &overflow) || errors.As(err, &invalid)
+	return errors.As(err, &underflow) || errors.As(err, &overflow)
 }
 
 func (ot *OeTracer) GetResult() (json.RawMessage, error) {
