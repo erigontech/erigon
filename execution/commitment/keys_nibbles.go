@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	keccak "github.com/erigontech/fastkeccak"
-
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -82,7 +80,7 @@ func updatedNibs(num uint16) string {
 	return strings.Join(nibbles, ",")
 }
 
-func hashKey(_ keccak.KeccakState, plainKey []byte, dest []byte, hashedKeyOffset int16, hashBuf []byte) error {
+func hashKey(plainKey []byte, dest []byte, hashedKeyOffset int16, hashBuf []byte) {
 	_, _ = hashBuf[length.Hash-1], dest[length.Hash*2-1]
 	h := crypto.Keccak256Hash(plainKey)
 	copy(hashBuf, h[:])
@@ -92,7 +90,6 @@ func hashKey(_ keccak.KeccakState, plainKey []byte, dest []byte, hashedKeyOffset
 		dest, hb = dest[1:], hb[1:]
 	}
 	nibbles.Expand(hb, dest)
-	return nil
 }
 
 func PrefixStringToNibbles(hexStr string) ([]byte, error) {
