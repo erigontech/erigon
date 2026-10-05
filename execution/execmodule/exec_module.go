@@ -232,6 +232,7 @@ type ExecModule struct {
 	readAheader *exec.BlockReadAheader
 
 	stateTransitionObserver StateTransitionObserver
+	conditionalReadyHook    func() error
 
 	stopNode func() error
 }
@@ -246,6 +247,13 @@ type ExecModuleOption func(*ExecModule)
 func WithStateTransitionObserver(observer StateTransitionObserver) ExecModuleOption {
 	return func(module *ExecModule) {
 		module.stateTransitionObserver = observer
+	}
+}
+
+// WithConditionalForkChoiceReadyHook injects a post-preflight failure boundary for integration tests.
+func WithConditionalForkChoiceReadyHook(hook func() error) ExecModuleOption {
+	return func(module *ExecModule) {
+		module.conditionalReadyHook = hook
 	}
 }
 

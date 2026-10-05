@@ -41,6 +41,12 @@ const (
 	// StateTransitionCommitReady means the tip FCU's metadata and domain writes
 	// have been flushed into its MDBX transaction, which has not committed yet.
 	StateTransitionCommitReady
+	// StateTransitionPostForkchoiceStarted means background prune owns the
+	// execution semaphore and is about to start.
+	StateTransitionPostForkchoiceStarted
+	// StateTransitionConditionalResultSent means a successful conditional
+	// forkchoice result is visible while execution still owns the semaphore.
+	StateTransitionConditionalResultSent
 )
 
 // StateTransitionObserver is an integration-test hook that runs inline at each
