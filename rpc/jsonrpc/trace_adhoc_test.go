@@ -1454,6 +1454,33 @@ func TestTraceCallVmTraceExecutedOps(t *testing.T) {
 	})
 }
 
+// DUPN, SWAPN and EXCHANGE check their immediate and the stack inside execute, so an operation that
+// fails there has halted and is listed.
+func TestTraceCallVmTraceImmediateOpsHalt(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newTraceApiForTest(m)
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0005")
+
+	for _, op := range []vm.OpCode{vm.DUPN, vm.SWAPN, vm.EXCHANGE} {
+		for _, tc := range []struct {
+			name      string
+			immediate byte
+		}{
+			{name: "invalid immediate", immediate: 0x5b},
+			{name: "stack underflow", immediate: 0x01},
+		} {
+			t.Run(op.String()+" "+tc.name, func(t *testing.T) {
+				code := hexutil.Bytes{byte(op), tc.immediate}
+				overrides := ethapi.StateOverrides{accounts.InternAddress(target): {Code: &code}}
+				result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
+					[]string{TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+				require.NoError(t, err)
+				require.Equal(t, []string{"0 " + op.String() + " halted"}, vmTraceSteps(result.VmTrace))
+			})
+		}
+	}
+}
+
 // Call data takes the same data/input precedence as eth_call: input wins when both are set.
 // Call data comes from data or input, as in eth_call. Both may be set only to the same value.
 func TestTraceCallInputField(t *testing.T) {
