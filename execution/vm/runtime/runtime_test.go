@@ -985,8 +985,8 @@ func returnWord(b byte) []byte {
 	return append(code, byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
 }
 
-// newReturnDataEVM deploys contracts returning 0xaa.. and 0xbb.. words, and code.
-func newReturnDataEVM(t *testing.T, hooks *tracing.Hooks, code []byte) (evm *vm.EVM, statedb *state.IntraBlockState, a, b, top accounts.Address) {
+// newReturnDataEVM deploys contracts at a and b returning 0xaa.. and 0xbb.. words.
+func newReturnDataEVM(t *testing.T, hooks *tracing.Hooks) (evm *vm.EVM, statedb *state.IntraBlockState, a, b, top accounts.Address) {
 	statedb = state.New(state.NewNoopReader())
 	t.Cleanup(statedb.Close)
 	a = accounts.InternAddress(common.HexToAddress("0xaa"))
@@ -1002,7 +1002,7 @@ func newReturnDataEVM(t *testing.T, hooks *tracing.Hooks, code []byte) (evm *vm.
 // The EVM reuses its return-data buffer, so what a caller outside it gets must be its own.
 func TestCallReturnDataOutlivesNextCall(t *testing.T) {
 	t.Parallel()
-	evm, _, a, b, _ := newReturnDataEVM(t, nil, nil)
+	evm, _, a, b, _ := newReturnDataEVM(t, nil)
 	gas := mdgas.MdGas{Execution: 1_000_000}
 	first, _, _, err := evm.Call(accounts.ZeroAddress, a, nil, gas, uint256.Int{}, false)
 	require.NoError(t, err)
@@ -1020,17 +1020,32 @@ func TestTracerKeepsFrameOutputs(t *testing.T) {
 			outputs = append(outputs, output)
 		}
 	}}
-	evm, statedb, _, _, top := newReturnDataEVM(t, hooks, nil)
+	evm, statedb, _, _, top := newReturnDataEVM(t, hooks)
 	require.NoError(t, statedb.SetCode(top, append(callTo(0xaa, 0), callTo(0xbb, 0)...), tracing.CodeChangeUnspecified))
 	_, _, _, err := evm.Call(accounts.ZeroAddress, top, nil, mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, false)
 	require.NoError(t, err)
 	require.Equal(t, [][]byte{bytes.Repeat([]byte{0xaa}, 32), bytes.Repeat([]byte{0xbb}, 32)}, outputs)
 }
 
+// Block execution always sets a tracer with only an enter hook; it must not pay for copying frame outputs.
+func TestEnterOnlyTracerDoesNotCopyFrameOutputs(t *testing.T) {
+	allocs := func(hooks *tracing.Hooks) float64 {
+		evm, statedb, _, _, top := newReturnDataEVM(t, hooks)
+		require.NoError(t, statedb.SetCode(top, append(callTo(0xaa, 0), callTo(0xbb, 0)...), tracing.CodeChangeUnspecified))
+		return testing.AllocsPerRun(100, func() {
+			if _, _, _, err := evm.Call(accounts.ZeroAddress, top, nil, mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, false); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	enterOnly := &tracing.Hooks{OnEnterV2: func(int, byte, accounts.Address, accounts.Address, bool, []byte, mdgas.MdGas, uint256.Int, []byte) {}}
+	require.Equal(t, allocs(nil), allocs(enterOnly))
+}
+
 // CREATE stores the initcode's return data as code; later frames returning must not change it.
 func TestCreatedCodeOutlivesLaterReturns(t *testing.T) {
 	t.Parallel()
-	evm, statedb, _, _, top := newReturnDataEVM(t, nil, nil)
+	evm, statedb, _, _, top := newReturnDataEVM(t, nil)
 	initcode := returnWord(0xaa)
 	factory := func(initOffset int) []byte {
 		code := []byte{

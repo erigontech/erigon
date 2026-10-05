@@ -865,7 +865,9 @@ func (evm *EVM) captureEnd(depth int, leftOverGas mdgas.MdGas, gasUsed mdgas.MdG
 	if !evm.chainRules.IsHomestead && errors.Is(err, ErrCodeStoreOutOfGas) {
 		reverted = false
 	}
-	tracer.EmitExit(depth, bytes.Clone(ret), gasUsed, VMErrorFromErr(err), reverted)
+	if tracer.HasExitHook() {
+		tracer.EmitExit(depth, bytes.Clone(ret), gasUsed, VMErrorFromErr(err), reverted)
+	}
 }
 
 // returnCopy copies a frame's RETURN/REVERT data: the frame's memory goes back to a shared
