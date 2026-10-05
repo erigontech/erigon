@@ -733,7 +733,7 @@ func opPop(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 func opMload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	v := scope.Stack.peek()
 	offset := v.Uint64()
-	v.SetBytes(scope.Memory.GetPtr(offset, 32))
+	v.SetBytes32(scope.Memory.GetPtr(offset, 32))
 	return pc, nil, nil
 }
 
@@ -762,7 +762,24 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+	if !scope.slots.on {
+		*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+		return pc, nil, err
+	}
+	i := scope.slots.memo
+	if scope.slots.memoGen != scope.cacheGen {
+		i = scope.lookupSlot(evm)
+	}
+	if i >= 0 {
+		*loc = scope.slots.val[i]
+		return pc, nil, nil
+	}
+	ibs := evm.IntraBlockState()
+	word, key := *loc, scope.peekStorageKey(evm)
+	if *loc, err = ibs.GetState(scope.Contract.Address(), key); err == nil {
+		stamp, _ := ibs.ReadStamp()
+		scope.slots.put(stamp, word, key, *loc)
+	}
 	return pc, nil, err
 }
 
@@ -791,7 +808,7 @@ func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, errStopToken
 	}
 	pos := scope.Stack.pop()
-	if !scope.Contract.validJumpdest(pos) {
+	if !scope.Contract.analysedJumpdest(pos) && !scope.Contract.validJumpdest(pos) {
 		return pc, nil, ErrInvalidJump
 	}
 	// pc will be increased by the interpreter loop
@@ -808,13 +825,13 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, errStopToken
 	}
 	pos, cond := scope.Stack.pop2()
-	if !cond.IsZero() {
-		if !scope.Contract.validJumpdest(pos) {
-			return pc, nil, ErrInvalidJump
-		}
-		pc = pos.Uint64() - 1 // pc will be increased by the interpreter loop
+	if cond.IsZero() {
+		return pc, nil, nil
 	}
-	return pc, nil, nil
+	if !scope.Contract.analysedJumpdest(pos) && !scope.Contract.validJumpdest(pos) {
+		return pc, nil, ErrInvalidJump
+	}
+	return pos.Uint64() - 1, nil, nil // pc will be increased by the interpreter loop
 }
 
 func stJumpi(_ uint64, scope *CallContext) string {
@@ -934,7 +951,7 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		v, o, sz     = scope.Stack.pop3()
 		value        = *v
 		offset, size = o.Uint64(), sz.Uint64()
-		input        = scope.Memory.GetCopy(offset, size)
+		input        = scope.Memory.GetPtr(offset, size)
 	)
 	return execCreate(pc, evm, scope, value, input, nil)
 }
@@ -961,7 +978,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	)
 	scope.create.initCode = nil
 	if !evm.chainRules.IsAmsterdam {
-		input = scope.Memory.GetCopy(offset, size)
+		input = scope.Memory.GetPtr(offset, size)
 	}
 	return execCreate(pc, evm, scope, endowment, input, &salt)
 }

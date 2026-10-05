@@ -768,7 +768,6 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		snapshot      int
 		snapshotTaken bool
 	)
-	// One defer, so the compiler can open-code it despite the many returns.
 	defer func() {
 		if snapshotTaken {
 			evm.intraBlockState.PopSnapshot(snapshot)
