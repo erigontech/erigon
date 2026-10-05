@@ -270,7 +270,7 @@ func (s *executionPayloadService) processMessage(
 		builderIndex:    builderIndex,
 	}
 	if s.seenEnvelopesCache.Contains(seenKey) {
-		return fmt.Errorf("%w: already seen envelope for block %v from builder %d", ErrIgnore, beaconBlockRoot, builderIndex)
+		return fmt.Errorf("%w: %w for block %v from builder %d", ErrIgnore, ErrExecutionPayloadEnvelopeAlreadySeen, beaconBlockRoot, builderIndex)
 	}
 
 	var err error

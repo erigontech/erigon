@@ -817,6 +817,50 @@ func TestOnExecutionPayloadPreservesArrivalBeforeBlockValidation(t *testing.T) {
 	require.False(t, f.ExecutionPayloadReceivedBefore(blockRoot, arrival))
 }
 
+func TestRetryPendingExecutionPayloadEnvelopesCompletesEnvelopeOnceColumnsAreAvailable(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(new(cltypes.KZGCommitment))
+	bodyRoot, err := block.Block.Body.HashSSZ()
+	require.NoError(t, err)
+	blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
+		Slot:          block.Block.Slot,
+		ProposerIndex: block.Block.ProposerIndex,
+		ParentRoot:    block.Block.ParentRoot,
+		BodyRoot:      bodyRoot,
+	})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	envelope.Message.BeaconBlockRoot = blockRoot
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	peerDas := das_mock.NewMockPeerDas(ctrl)
+	gomock.InOrder(
+		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, blockRoot).Return(false, nil),
+		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, blockRoot).Return(true, nil),
+	)
+	graph := &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+	f := newPayloadVoteTestStore(t, blockRoot, false, false)
+	f.beaconCfg = cfg
+	f.forkGraph = graph
+	f.peerDas = peerDas
+	f.syncedDataManager = synced_data.NewSyncedDataManager(cfg, true)
+	f.pendingEnvelopes = pending
+	f.pendingLocalSelfBuildEnvelopes = local
+
+	require.ErrorIs(t, f.OnExecutionPayloadAt(t.Context(), envelope, true, true, time.Now()), ErrEIP7594ColumnDataNotAvailable)
+	require.True(t, pending.Contains(blockRoot))
+	require.False(t, graph.hasEnvelope)
+
+	f.RetryPendingExecutionPayloadEnvelopes(t.Context(), 1)
+	require.False(t, pending.Contains(blockRoot))
+	require.True(t, graph.hasEnvelope)
+	require.Same(t, envelope, graph.envelope)
+}
+
 func TestInvalidPendingEnvelopeDoesNotPoisonLaterArrival(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	blockRoot := envelope.Message.BeaconBlockRoot

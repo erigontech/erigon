@@ -163,8 +163,9 @@ type BlockData struct {
 }
 
 type BlockGossipData struct {
-	Slot  uint64      `json:"slot,string"`
-	Block common.Hash `json:"block"`
+	Slot        uint64                     `json:"slot,string"`
+	Block       common.Hash                `json:"block"`
+	SignedBlock *cltypes.SignedBeaconBlock `json:"-"`
 }
 
 type FinalizedCheckpointData struct {

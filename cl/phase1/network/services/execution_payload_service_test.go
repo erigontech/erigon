@@ -347,6 +347,9 @@ func TestExecutionPayloadServiceAcceptsGossipWhenValidatedEnvelopeWaitsForColumn
 	default:
 		t.Fatal("validated gossip envelope did not emit execution_payload_gossip while waiting for columns")
 	}
+	err := service.ProcessMessage(t.Context(), nil, envelope)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
 }
 
 func TestExecutionPayloadServiceDoesNotEmitStaleHeadV2AfterReorg(t *testing.T) {
@@ -495,6 +498,7 @@ func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {
 	err = service.ProcessMessage(context.Background(), nil, envelope)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrIgnore))
+	require.ErrorIs(t, err, ErrExecutionPayloadEnvelopeAlreadySeen)
 	require.Contains(t, err.Error(), "already seen envelope")
 }
 

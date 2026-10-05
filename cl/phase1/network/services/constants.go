@@ -49,6 +49,10 @@ var (
 	ErrCommitmentsInclusionProofFailed = errors.New("commitments inclusion proof failed")
 	ErrInvalidSidecarSlot              = errors.New("invalid sidecar slot")
 	ErrBlobIndexOutOfRange             = errors.New("blob index out of range")
+
+	// ErrExecutionPayloadEnvelopeAlreadySeen means that an envelope from the same builder for the
+	// same block already passed validation; its data columns may still be unavailable.
+	ErrExecutionPayloadEnvelopeAlreadySeen = errors.New("already seen envelope")
 )
 
 var (
