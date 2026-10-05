@@ -20,8 +20,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 
@@ -1150,27 +1148,26 @@ func TestDomainMergeCancellationRemovesOutput(t *testing.T) {
 	const stepSize = uint64(32)
 	logger := log.New()
 	_, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, stepSize, logger)
-	d.ReferencesInCommitmentBranches = false
-	inputs := make([]*FilesItem, 0, 2)
-	for start := kv.Step(0); start < 4; start += 2 {
-		path := d.kvNewFilePath(start, start+2)
-		comp, err := seg.NewCompressor(t.Context(), "test", path, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, logger)
-		require.NoError(t, err)
-		t.Cleanup(comp.Close)
-		writer := d.dataWriter(comp, true)
-		_, err = writer.Write([]byte("key"))
-		require.NoError(t, err)
-		_, err = writer.Write([]byte("value"))
-		require.NoError(t, err)
-		require.NoError(t, writer.Compress())
-		writer.Close()
-
-		input := newFilesItem(uint64(start)*stepSize, uint64(start+2)*stepSize)
-		input.decompressor, err = seg.NewDecompressor(path)
-		require.NoError(t, err)
-		t.Cleanup(input.closeFiles)
-		inputs = append(inputs, input)
+	d.Accessors = statecfg.AccessorBTree | statecfg.AccessorHashMap | statecfg.AccessorExistence
+	dt := d.beginForTests()
+	defer dt.Close()
+	r := NewDomainRanges(kv.CommitmentDomain, *NewMergeRange("commitment", true, 0, 4*stepSize), HistoryRanges{}, stepSize)
+	outputs := []string{
+		d.kvNewFilePath(0, 4), d.kviAccessorNewFilePath(0, 4),
+		d.kvBtAccessorNewFilePath(0, 4), d.kvExistenceIdxNewFilePath(0, 4),
 	}
+	merge := func() {
+		t.Helper()
+		values, index, history, err := dt.mergeFiles(t.Context(), nil, nil, nil, r, nil, true, background.NewProgressSet())
+		values.closeFiles()
+		index.closeFiles()
+		history.closeFiles()
+		require.NoError(t, err)
+		for _, path := range outputs {
+			require.FileExists(t, path)
+		}
+	}
+	merge()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -1179,36 +1176,80 @@ func TestDomainMergeCancellationRemovesOutput(t *testing.T) {
 		require.FileExists(t, outputPath)
 		cancel()
 	}
-	dt := d.beginForTests()
-	defer dt.Close()
-	r := NewDomainRanges(kv.CommitmentDomain, *NewMergeRange("commitment", true, 0, 4*stepSize), HistoryRanges{}, stepSize)
-	values, index, history, err := dt.mergeFiles(ctx, inputs, nil, nil, r, nil, true, background.NewProgressSet())
+	values, index, history, err := dt.mergeFiles(ctx, nil, nil, nil, r, nil, true, background.NewProgressSet())
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, values)
 	require.Nil(t, index)
 	require.Nil(t, history)
-	require.NoFileExists(t, outputPath)
+	for _, path := range outputs {
+		require.NoFileExists(t, path)
+	}
+	d._testBuildAccessorHook = nil
+	merge()
 }
 
-func TestHistoryMergeFailureRemovesIndex(t *testing.T) {
+func TestHistoryMergeCancellationRemovesOutputs(t *testing.T) {
 	t.Parallel()
-	_, h := testDbAndHistory(t, false, log.New())
-	blocked := filepath.Join(h.dirs.Tmp, filepath.Base(h.vNewFilePath(0, 2))) + ".idt"
-	require.NoError(t, os.MkdirAll(blocked, 0o755))
-	ht := h.beginForTests()
-	defer ht.Close()
-	r := NewHistoryRanges(
-		*NewMergeRange("accounts", true, 0, 2*h.stepSize),
-		*NewMergeRange("accounts", true, 0, 2*h.stepSize),
-	)
-	index, history, err := ht.mergeFiles(t.Context(), nil, nil, r, background.NewProgressSet())
-	var pathErr *os.PathError
-	require.ErrorAs(t, err, &pathErr)
-	require.Equal(t, blocked, pathErr.Path)
-	require.Nil(t, index)
-	require.Nil(t, history)
-	require.NoFileExists(t, h.InvertedIndex.efNewFilePath(0, 2))
-	require.NoFileExists(t, h.InvertedIndex.efAccessorNewFilePath(0, 2))
+	for _, existingOutput := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_output=%t", existingOutput), func(t *testing.T) {
+			db, h := filledHistoryValues(t, false, map[string][]upd{
+				"key": {{txNum: 1}, {txNum: 17, value: []byte("value")}},
+			}, log.New())
+			ps := background.NewProgressSet()
+			require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+				for step := range kv.Step(2) {
+					if err := h.collateBuildIntegrate(t.Context(), step, tx, ps); err != nil {
+						return err
+					}
+				}
+				return nil
+			}))
+			ht := h.beginForTests()
+			defer ht.Close()
+			r := NewHistoryRanges(
+				*NewMergeRange("accounts", true, 0, 2*h.stepSize),
+				*NewMergeRange("accounts", true, 0, 2*h.stepSize),
+			)
+			indexFiles, historyFiles, err := ht.staticFilesInRange(r)
+			require.NoError(t, err)
+			require.Len(t, indexFiles, 2)
+			require.Len(t, historyFiles, 2)
+			outputs := []string{
+				h.vNewFilePath(0, 2), h.vAccessorNewFilePath(0, 2),
+				h.InvertedIndex.efNewFilePath(0, 2), h.InvertedIndex.efAccessorNewFilePath(0, 2),
+			}
+			merge := func() {
+				t.Helper()
+				index, history, err := ht.mergeFiles(t.Context(), indexFiles, historyFiles, r, ps)
+				index.closeFiles()
+				history.closeFiles()
+				require.NoError(t, err)
+				for _, path := range outputs {
+					require.FileExists(t, path)
+				}
+			}
+			if existingOutput {
+				merge()
+			}
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			h._testBuildVIHook = func(*recsplit.RecSplit) {
+				require.FileExists(t, h.vNewFilePath(0, 2))
+				cancel()
+			}
+			index, history, err := ht.mergeFiles(ctx, indexFiles, historyFiles, r, ps)
+			require.ErrorIs(t, err, context.Canceled)
+			require.Nil(t, index)
+			require.Nil(t, history)
+			for _, path := range outputs {
+				require.NoFileExists(t, path)
+			}
+
+			h._testBuildVIHook = nil
+			merge()
+		})
+	}
 }
 
 func TestMergeFilesWithDependency(t *testing.T) {

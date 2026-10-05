@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/erigon/db/datastruct/existence"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/mvcc"
-	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -402,21 +401,10 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	closeFiles := true
 	var valuesIn, indexIn, historyIn *FilesItem
-	var kvWriter *seg.Writer
 	defer func() {
 		if closeFiles {
-			if kvWriter != nil {
-				kvWriter.Close()
-			}
-			if indexIn != nil {
-				indexIn.closeFilesAndRemove()
-			}
-			if historyIn != nil {
-				historyIn.closeFilesAndRemove()
-			}
-			if valuesIn != nil {
-				valuesIn.closeFilesAndRemove()
-			}
+			historyIn.closeFilesAndRemove()
+			indexIn.closeFilesAndRemove()
 		}
 	}()
 	if indexIn, historyIn, err = dt.ht.mergeFiles(ctx, indexFiles, historyFiles, r.history, ps); err != nil {
@@ -430,6 +418,27 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 
 	fromStep, toStep := kv.Step(r.values.from/r.aggStep), kv.Step(r.values.to/r.aggStep)
 	kvFilePath := dt.d.kvNewFilePath(fromStep, toStep)
+	var kvWriter *seg.Writer
+	defer func() {
+		if closeFiles {
+			if kvWriter != nil {
+				kvWriter.Close()
+			}
+			valuesIn.closeFiles()
+			for _, path := range []string{
+				dt.d.kviAccessorNewFilePath(fromStep, toStep),
+				dt.d.kvBtAccessorNewFilePath(fromStep, toStep),
+				dt.d.kvExistenceIdxNewFilePath(fromStep, toStep),
+				kvFilePath,
+			} {
+				for _, file := range []string{path, path + ".torrent"} {
+					if err := dir.RemoveFile(file); err != nil {
+						dt.d.logger.Trace("remove after failed merge", "err", err, "file", file)
+					}
+				}
+			}
+		}
+	}()
 
 	kvFile, err := seg.NewCompressor(ctx, "merge domain "+dt.d.FilenameBase, kvFilePath, dt.d.dirs.Tmp, dt.d.CompressCfg, log.LvlTrace, dt.d.logger)
 	if err != nil {
@@ -760,12 +769,10 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	}
 	var indexIn, historyIn *FilesItem
 	var err error
-	closeIndex := true
+	closeFiles := true
 	defer func() {
-		if closeIndex {
-			if indexIn != nil {
-				indexIn.closeFilesAndRemove()
-			}
+		if closeFiles {
+			indexIn.closeFilesAndRemove()
 		}
 	}()
 
@@ -775,33 +782,24 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 	}
 	if r.history.needMerge {
-		var comp *seg.Compressor
-		var decomp *seg.Decompressor
-		var rs *recsplit.RecSplit
-		var index *recsplit.Index
-		closeItem := true
-		defer func() {
-			if closeItem {
-				if comp != nil {
-					comp.Close()
-				}
-				if decomp != nil {
-					decomp.Close()
-				}
-				if rs != nil {
-					rs.Close()
-				}
-				if index != nil {
-					index.Close()
-				}
-				if historyIn != nil {
-					historyIn.closeFilesAndRemove()
-				}
-			}
-		}()
 		fromStep, toStep := kv.Step(r.history.from/ht.stepSize), kv.Step(r.history.to/ht.stepSize)
 		datPath := ht.h.vNewFilePath(fromStep, toStep)
 		idxPath := ht.h.vAccessorNewFilePath(fromStep, toStep)
+		historyIn = newFilesItem(r.history.from, r.history.to)
+		var comp *seg.Compressor
+		defer func() {
+			if closeFiles {
+				if comp != nil {
+					comp.Close()
+				}
+				historyIn.closeFiles()
+				for _, path := range []string{idxPath, idxPath + ".torrent", datPath, datPath + ".torrent"} {
+					if err := dir.RemoveFile(path); err != nil {
+						ht.h.logger.Trace("remove after failed merge", "err", err, "file", path)
+					}
+				}
+			}
+		}()
 		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.FilenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.FilenameBase, err)
 		}
@@ -917,26 +915,21 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 		comp.Close()
 		comp = nil
-		if decomp, err = seg.NewDecompressor(datPath); err != nil {
+		if historyIn.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 			return nil, nil, err
 		}
 		ps.Delete(p)
 
-		if err := ht.h.buildVI(ctx, idxPath, decomp, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
+		if err := ht.h.buildVI(ctx, idxPath, historyIn.decompressor, indexIn.decompressor, indexIn.startTxNum, ps); err != nil {
 			return nil, nil, err
 		}
 
-		if index, err = ht.h.openHashMapAccessor(idxPath); err != nil {
+		if historyIn.index, err = ht.h.openHashMapAccessor(idxPath); err != nil {
 			return nil, nil, fmt.Errorf("open %s idx: %w", ht.h.FilenameBase, err)
 		}
-		historyIn = newFilesItem(r.history.from, r.history.to)
-		historyIn.decompressor = decomp
-		historyIn.index = index
-
-		closeItem = false
 	}
 
-	closeIndex = false
+	closeFiles = false
 	return indexIn, historyIn, nil
 }
 
