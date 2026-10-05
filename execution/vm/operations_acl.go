@@ -86,15 +86,19 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		var value uint256.Int
 		value.Set(callContext.Stack.back(1))
 		var current uint256.Int
+		var readErr error
 		if cached >= 0 {
 			current = callContext.slots.val[cached]
 		} else {
 			word := *callContext.Stack.peek()
-			current, _ = ibs.GetState(callContext.Address(), slot)
+			current, readErr = ibs.GetState(callContext.Address(), slot)
 			if callContext.slots.on {
 				stamp, _ := ibs.ReadStamp()
 				callContext.slots.put(stamp, word, slot, current)
 			}
+		}
+		if readErr == nil {
+			callContext.sstoreCurrent, callContext.sstoreGen = current, callContext.cacheGen
 		}
 
 		if current.Eq(&value) { // noop (1)

@@ -917,10 +917,18 @@ func (ibs *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 // create path never reads balance (matching the old stateObject path). The journal
 // prev is read only in the existing branch so a create does not widen the OCC
 // read-set with a spurious BalancePath read.
-func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
+// writeBalanceVersioned takes prev from a caller that already read the balance; nil reads it here.
+func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *uint256.Int, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
 	base, _, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
 		return err
+	}
+	if base != nil && prev == nil {
+		cur, _, err := ibs.getBalance(addr)
+		if err != nil {
+			return err
+		}
+		prev = &cur
 	}
 	if base == nil || ibs.accountLifecycle(addr) {
 		stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -933,23 +941,15 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, update 
 		// balance. Seed the live balance first. The base==nil create path never
 		// read balance, so leave it untouched (avoids widening the OCC read-set).
 		if base != nil {
-			cur, _, err := ibs.getBalance(addr)
-			if err != nil {
-				return err
-			}
-			stateObject.setBalance(cur)
+			stateObject.setBalance(*prev)
 		}
 		stateObject.SetBalance(update, wasCommited, reason)
 		ibs.recordWriteBalance(addr, update)
 		return nil
 	}
-	prev, _, err := ibs.getBalance(addr)
-	if err != nil {
-		return err
-	}
-	ibs.journal.balanceChange(addr, prev, wasCommited)
+	ibs.journal.balanceChange(addr, *prev, wasCommited)
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
-		ibs.tracingHooks.OnBalanceChange(addr, prev, update, reason)
+		ibs.tracingHooks.OnBalanceChange(addr, *prev, update, reason)
 	}
 	ibs.recordWriteBalance(addr, update)
 	return nil
@@ -960,7 +960,7 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, update 
 func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	if ibs.versionMap == nil {
 		// If this account has not been read, add to the balance increment map
-		if _, needAccount := ibs.stateObjects[addr]; !needAccount && addr == ripemd && amount.IsZero() {
+		if addr == ripemd && amount.IsZero() && ibs.stateObjects[addr] == nil {
 			ibs.journal.balanceIncrease(addr, amount)
 
 			bi, ok := ibs.balanceInc[addr]
@@ -1028,7 +1028,7 @@ func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 	update := u256.Add(prev, amount)
 
 	if ibs.versionMap != nil {
-		return ibs.writeBalanceVersioned(addr, update, wasCommited, reason)
+		return ibs.writeBalanceVersioned(addr, &prev, update, wasCommited, reason)
 	}
 
 	stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -1425,7 +1425,7 @@ func (ibs *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 	update := u256.Sub(prev, amount)
 
 	if ibs.versionMap != nil {
-		return ibs.writeBalanceVersioned(addr, update, wasCommited, reason)
+		return ibs.writeBalanceVersioned(addr, &prev, update, wasCommited, reason)
 	}
 
 	stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -1443,7 +1443,7 @@ func (ibs *IntraBlockState) SetBalance(addr accounts.Address, amount uint256.Int
 		fmt.Printf("%d (%d.%d) SetBalance %x, %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, amount.String())
 	}
 	if ibs.versionMap != nil {
-		return ibs.writeBalanceVersioned(addr, amount, !ibs.hasWrite(addr, BalancePath, accounts.NilKey), reason)
+		return ibs.writeBalanceVersioned(addr, nil, amount, !ibs.hasWrite(addr, BalancePath, accounts.NilKey), reason)
 	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
@@ -1653,10 +1653,15 @@ func (ibs *IntraBlockState) Incarnation() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetState(addr accounts.Address, key accounts.StorageKey, value uint256.Int) error {
-	return ibs.setState(addr, key, value, false)
+	return ibs.setState(addr, key, value, false, nil)
 }
 
-func (ibs *IntraBlockState) setState(addr accounts.Address, key accounts.StorageKey, value uint256.Int, force bool) error {
+// SetStateFrom is SetState for a caller that already read the slot's current value; a nil prev reads it here.
+func (ibs *IntraBlockState) SetStateFrom(addr accounts.Address, key accounts.StorageKey, prev *uint256.Int, value uint256.Int) error {
+	return ibs.setState(addr, key, value, false, prev)
+}
+
+func (ibs *IntraBlockState) setState(addr accounts.Address, key accounts.StorageKey, value uint256.Int, force bool, prev *uint256.Int) error {
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) SetState %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, key, value.Hex())
 	}
@@ -1674,7 +1679,7 @@ func (ibs *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 	if err != nil {
 		return err
 	}
-	set, err := stateObject.SetState(key, value, force)
+	set, err := stateObject.SetState(key, value, force, prev)
 	if err != nil {
 		return err
 	}
@@ -3462,7 +3467,7 @@ func (ibs *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 			if !ok {
 				continue
 			}
-			if err := ibs.setState(addr, hdr.Key, vw.Val, true); err != nil {
+			if err := ibs.setState(addr, hdr.Key, vw.Val, true, nil); err != nil {
 				return err
 			}
 		case BalancePath:
