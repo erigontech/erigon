@@ -174,6 +174,31 @@ func TestEVMFitsItsSizeClass(t *testing.T) {
 	}
 }
 
+func TestNestedCallsReuseOneFrameContext(t *testing.T) {
+	t.Parallel()
+
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	caller := accounts.InternAddress(common.HexToAddress("0x1000"))
+	callee := accounts.InternAddress(common.HexToAddress("0x2000"))
+	call := []byte{byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH2), 0x20, 0x00, byte(GAS), byte(CALL), byte(POP)}
+	require.NoError(t, ibs.SetCode(caller, append(call, call...), tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(callee, []byte{byte(STOP)}, tracing.CodeChangeUnspecified))
+
+	var nested []*CallContext
+	hooks := &tracing.Hooks{OnOpcode: func(_ uint64, _ byte, _, _ uint64, scope tracing.OpContext, _ []byte, depth int, _ error) {
+		if depth == 2 {
+			nested = append(nested, scope.(*CallContext))
+		}
+	}}
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+	_, _, _, err := evm.Call(accounts.ZeroAddress, caller, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Len(t, nested, 2)
+	require.Same(t, nested[0], nested[1], "the second nested call reuses the first one's context")
+	require.Nil(t, evm.spareFrame, "the outermost frame returns the spare context to the pool")
+}
+
 func TestZeroUnpricedBaseFee(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
