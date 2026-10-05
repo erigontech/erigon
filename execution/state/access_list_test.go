@@ -306,6 +306,9 @@ func TestPrepareKeepsPrecompilesWarm(t *testing.T) {
 	for range 2 {
 		s.Prepare(&chain.Rules{IsBerlin: true}, accounts.NilAddress, accounts.NilAddress, accounts.NilAddress, precompiles, nil)
 		require.NotContains(t, s.accessList.addresses, precompile)
+		addrMod, slotMod := s.AddSlotToAccessList(precompile, accounts.InternKey(common.HexToHash("0x01")))
+		require.False(t, addrMod, "a precompile is already in the access list")
+		require.True(t, slotMod)
 		require.True(t, s.AddressInAccessList(precompile))
 		require.False(t, s.AddressInAccessList(other))
 		n := s.journal.length()

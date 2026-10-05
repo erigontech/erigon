@@ -193,7 +193,7 @@ func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.Storag
 		slotmap[slot] = struct{}{}
 		al.slots = append(al.slots, slotmap)
 		al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
-		return !addrPresent, true
+		return !addrPresent && !al.isPrecompile(address), true
 	}
 	slotmap := al.slots[idx]
 	al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
