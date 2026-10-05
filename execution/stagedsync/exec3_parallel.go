@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -3268,6 +3269,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if r := be.retryLimitResult(tx, txVersion.TxIndex, be.txIncarnations[tx], "validator-invalid retries", nil); r != nil {
 				return r, nil
 			}
+			if cntInvalid == 1 && i+1 < len(toValidate) && tx == be.validateTasks.maxComplete()+1 {
+				be.scheduleExecutionUpTo(ctx, pe, tx)
+			}
 		}
 	}
 
@@ -3553,6 +3557,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 }
 
 func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExecutor) {
+	be.scheduleExecutionUpTo(ctx, pe, math.MaxInt)
+}
+
+func (be *blockExecutor) scheduleExecutionUpTo(ctx context.Context, pe *parallelExecutor, maxTx int) {
 	// Drain deferred tx N when its predecessor is validated AND no worker
 	// at index < N is in flight. Lower-indexed workers' flushes land at
 	// indices visible to N's reads via vm.Read's floor(N-1); higher-indexed
@@ -3576,6 +3584,9 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 		}
 		budget := pe.in.Capacity() - pe.in.NewTasksLen()
 		be.execTasks.dispatchPending(func(nextTx int) dispatchAction {
+			if nextTx > maxTx {
+				return dispatchStop
+			}
 			incarnation := be.txIncarnations[nextTx]
 			// A fresh tx needs a free input-channel slot. With none, stop: it is
 			// the lowest pending, so nothing after it dispatches this pass either.
@@ -3645,7 +3656,7 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 	// dispatched, pending is empty, and nothing is in flight. Guarded on empty
 	// pending because the next-to-validate tx is never gate-rejected, so non-empty
 	// pending is always dispatchable — the net must not force-drain past it.
-	if dispatch() == 0 && be.execTasks.minPending() < 0 && be.execTasks.inProgressCount() == 0 {
+	if dispatch() == 0 && maxTx == math.MaxInt && be.execTasks.minPending() < 0 && be.execTasks.inProgressCount() == 0 {
 		be.execTasks.drainDeferred()
 		dispatch()
 	}
