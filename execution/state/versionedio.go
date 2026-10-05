@@ -191,15 +191,46 @@ func (s *ReadSet) SetCodeSize(addr accounts.Address, tr VersionedRead[int]) {
 }
 
 func (s *ReadSet) SetStorage(addr accounts.Address, key accounts.StorageKey, tr VersionedRead[uint256.Int]) {
+	s.setStorageReuse(addr, key, tr, nil)
+}
+
+// setStorageReuse is SetStorage taking a fresh per-address map from free.
+func (s *ReadSet) setStorageReuse(addr accounts.Address, key accounts.StorageKey, tr VersionedRead[uint256.Int], free *[]map[accounts.StorageKey]VersionedRead[uint256.Int]) {
 	if s.storage == nil {
 		s.storage = make(map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int])
 	}
 	inner := s.storage[addr]
 	if inner == nil {
-		inner = make(map[accounts.StorageKey]VersionedRead[uint256.Int])
+		if free != nil && len(*free) > 0 {
+			inner = (*free)[len(*free)-1]
+			*free = (*free)[:len(*free)-1]
+		} else {
+			inner = make(map[accounts.StorageKey]VersionedRead[uint256.Int])
+		}
 		s.storage[addr] = inner
 	}
 	inner[key] = tr
+}
+
+// clearForReuse empties every map in place, parking the per-address storage
+// maps in free.
+func (s *ReadSet) clearForReuse(free *[]map[accounts.StorageKey]VersionedRead[uint256.Int]) {
+	clear(s.address)
+	clear(s.balance)
+	clear(s.nonce)
+	clear(s.incarnation)
+	clear(s.selfDestruct)
+	clear(s.selfDestructWitnesses)
+	clear(s.createContract)
+	clear(s.code)
+	clear(s.codeHash)
+	clear(s.codeSize)
+	for _, inner := range s.storage {
+		clear(inner)
+		*free = append(*free, inner)
+	}
+	clear(s.storage)
+	clear(s.access)
 }
 
 func (s *ReadSet) GetAddress(addr accounts.Address) (VersionedRead[AccountView], bool) {
@@ -684,6 +715,109 @@ type WriteSet struct {
 	// maps leave the set reading as empty, so under assertions readers panic
 	// instead.
 	released bool
+
+	// rec is set only on an IntraBlockState's own set: its writes and maps are
+	// reused by the next tx instead of round-tripping through the global pools.
+	rec *wsRecycler
+}
+
+// vwSlab hands out the writes of one IBS-owned set; reset rewinds it for the
+// next tx, put returns a reverted write for reuse in the same tx.
+type vwSlab[T any] struct {
+	items []*VersionedWrite[T]
+	used  int
+	free  []*VersionedWrite[T]
+}
+
+func (s *vwSlab[T]) get() *VersionedWrite[T] {
+	if n := len(s.free); n > 0 {
+		vw := s.free[n-1]
+		s.free = s.free[:n-1]
+		return vw
+	}
+	if s.used == len(s.items) {
+		s.items = append(s.items, new(VersionedWrite[T]))
+	}
+	vw := s.items[s.used]
+	s.used++
+	return vw
+}
+
+func (s *vwSlab[T]) put(vw *VersionedWrite[T]) { s.free = append(s.free, vw) }
+
+func (s *vwSlab[T]) reset() {
+	s.used = 0
+	s.free = s.free[:0]
+}
+
+// ponytail: slabs keep the largest tx's writes for the IBS lifetime; cap them if a worker's RSS matters.
+type wsRecycler struct {
+	address        vwSlab[*accounts.Account]
+	balance        vwSlab[uint256.Int]
+	nonce          vwSlab[uint64]
+	incarnation    vwSlab[uint64]
+	selfDestruct   vwSlab[bool]
+	createContract vwSlab[bool]
+	code           vwSlab[accounts.Code]
+	codeHash       vwSlab[accounts.CodeHash]
+	codeSize       vwSlab[int]
+	storage        vwSlab[uint256.Int]
+	inner          []map[accounts.StorageKey]*VersionedWrite[uint256.Int]
+}
+
+func (ws *WriteSet) recycler() *wsRecycler {
+	if ws.rec == nil {
+		ws.rec = &wsRecycler{}
+	}
+	return ws.rec
+}
+
+func (r *wsRecycler) getInner() map[accounts.StorageKey]*VersionedWrite[uint256.Int] {
+	if n := len(r.inner); n > 0 {
+		m := r.inner[n-1]
+		r.inner = r.inner[:n-1]
+		return m
+	}
+	return make(map[accounts.StorageKey]*VersionedWrite[uint256.Int])
+}
+
+func (r *wsRecycler) putInner(m map[accounts.StorageKey]*VersionedWrite[uint256.Int]) {
+	clear(m)
+	r.inner = append(r.inner, m)
+}
+
+func (r *wsRecycler) reset(ws *WriteSet) {
+	r.address.reset()
+	r.balance.reset()
+	r.nonce.reset()
+	r.incarnation.reset()
+	r.selfDestruct.reset()
+	r.createContract.reset()
+	r.code.reset()
+	r.codeHash.reset()
+	r.codeSize.reset()
+	r.storage.reset()
+	for _, inner := range ws.storage {
+		r.putInner(inner)
+	}
+	clear(ws.address)
+	clear(ws.balance)
+	clear(ws.nonce)
+	clear(ws.incarnation)
+	clear(ws.selfDestruct)
+	clear(ws.createContract)
+	clear(ws.code)
+	clear(ws.codeHash)
+	clear(ws.codeSize)
+	clear(ws.storage)
+	ws.released = false
+}
+
+func dropVW[T any](m map[accounts.Address]*VersionedWrite[T], addr accounts.Address, s *vwSlab[T]) {
+	if vw, ok := m[addr]; ok {
+		s.put(vw)
+		delete(m, addr)
+	}
 }
 
 // Released reports whether ReleaseMaps pooled this set's maps and no later
@@ -825,7 +959,11 @@ func (ws *WriteSet) SetStorage(addr accounts.Address, key accounts.StorageKey, v
 	}
 	inner := ws.storage[addr]
 	if inner == nil {
-		inner = wsGetStorageInner()
+		if ws.rec != nil {
+			inner = ws.rec.getInner()
+		} else {
+			inner = wsGetStorageInner()
+		}
 		ws.storage[addr] = inner
 	}
 	inner[key] = vw
@@ -1001,6 +1139,25 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 }
 
 func (ws *WriteSet) deleteAddr(addr accounts.Address) {
+	if r := ws.rec; r != nil {
+		dropVW(ws.address, addr, &r.address)
+		dropVW(ws.balance, addr, &r.balance)
+		dropVW(ws.nonce, addr, &r.nonce)
+		dropVW(ws.incarnation, addr, &r.incarnation)
+		dropVW(ws.selfDestruct, addr, &r.selfDestruct)
+		dropVW(ws.createContract, addr, &r.createContract)
+		dropVW(ws.code, addr, &r.code)
+		dropVW(ws.codeHash, addr, &r.codeHash)
+		dropVW(ws.codeSize, addr, &r.codeSize)
+		if inner, ok := ws.storage[addr]; ok {
+			for _, vw := range inner {
+				r.storage.put(vw)
+			}
+			r.putInner(inner)
+			delete(ws.storage, addr)
+		}
+		return
+	}
 	delete(ws.address, addr)
 	delete(ws.balance, addr)
 	delete(ws.nonce, addr)
@@ -1058,12 +1215,21 @@ func (ws *WriteSet) snapshotCreateFields(addr accounts.Address) *createWriteSnap
 // recreation back to snap (nil entries in snap become deletions). Only the
 // fields creation writes are touched.
 func (ws *WriteSet) restoreCreateFields(addr accounts.Address, snap *createWriteSnapshot) {
-	delete(ws.address, addr)
-	delete(ws.balance, addr)
-	delete(ws.incarnation, addr)
-	delete(ws.selfDestruct, addr)
-	delete(ws.createContract, addr)
-	delete(ws.codeHash, addr)
+	if r := ws.rec; r != nil {
+		dropVW(ws.address, addr, &r.address)
+		dropVW(ws.balance, addr, &r.balance)
+		dropVW(ws.incarnation, addr, &r.incarnation)
+		dropVW(ws.selfDestruct, addr, &r.selfDestruct)
+		dropVW(ws.createContract, addr, &r.createContract)
+		dropVW(ws.codeHash, addr, &r.codeHash)
+	} else {
+		delete(ws.address, addr)
+		delete(ws.balance, addr)
+		delete(ws.incarnation, addr)
+		delete(ws.selfDestruct, addr)
+		delete(ws.createContract, addr)
+		delete(ws.codeHash, addr)
+	}
 	if snap == nil {
 		return
 	}
@@ -1410,6 +1576,10 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 // through pools rather than getting GC'd. The values must go back before
 // ReleaseMaps clears the maps that hold them.
 func (ws *WriteSet) ReleaseAndReset() {
+	if ws.rec != nil {
+		ws.rec.reset(ws)
+		return
+	}
 	for _, vw := range ws.address {
 		releaseVWAddress(vw)
 	}
@@ -1478,49 +1648,77 @@ func (ws *WriteSet) ReleaseMaps() {
 
 func (ws *WriteSet) DelBalance(addr accounts.Address) {
 	if vw, ok := ws.balance[addr]; ok {
-		releaseVWBalance(vw)
+		if ws.rec != nil {
+			ws.rec.balance.put(vw)
+		} else {
+			releaseVWBalance(vw)
+		}
 		delete(ws.balance, addr)
 	}
 }
 
 func (ws *WriteSet) DelNonce(addr accounts.Address) {
 	if vw, ok := ws.nonce[addr]; ok {
-		releaseVWNonce(vw)
+		if ws.rec != nil {
+			ws.rec.nonce.put(vw)
+		} else {
+			releaseVWNonce(vw)
+		}
 		delete(ws.nonce, addr)
 	}
 }
 
 func (ws *WriteSet) DelIncarnation(addr accounts.Address) {
 	if vw, ok := ws.incarnation[addr]; ok {
-		releaseVWIncarnation(vw)
+		if ws.rec != nil {
+			ws.rec.incarnation.put(vw)
+		} else {
+			releaseVWIncarnation(vw)
+		}
 		delete(ws.incarnation, addr)
 	}
 }
 
 func (ws *WriteSet) DelSelfDestruct(addr accounts.Address) {
 	if vw, ok := ws.selfDestruct[addr]; ok {
-		releaseVWSelfDestruct(vw)
+		if ws.rec != nil {
+			ws.rec.selfDestruct.put(vw)
+		} else {
+			releaseVWSelfDestruct(vw)
+		}
 		delete(ws.selfDestruct, addr)
 	}
 }
 
 func (ws *WriteSet) DelCode(addr accounts.Address) {
 	if vw, ok := ws.code[addr]; ok {
-		releaseVWCode(vw)
+		if ws.rec != nil {
+			ws.rec.code.put(vw)
+		} else {
+			releaseVWCode(vw)
+		}
 		delete(ws.code, addr)
 	}
 }
 
 func (ws *WriteSet) DelCodeHash(addr accounts.Address) {
 	if vw, ok := ws.codeHash[addr]; ok {
-		releaseVWCodeHash(vw)
+		if ws.rec != nil {
+			ws.rec.codeHash.put(vw)
+		} else {
+			releaseVWCodeHash(vw)
+		}
 		delete(ws.codeHash, addr)
 	}
 }
 
 func (ws *WriteSet) DelCodeSize(addr accounts.Address) {
 	if vw, ok := ws.codeSize[addr]; ok {
-		releaseVWCodeSize(vw)
+		if ws.rec != nil {
+			ws.rec.codeSize.put(vw)
+		} else {
+			releaseVWCodeSize(vw)
+		}
 		delete(ws.codeSize, addr)
 	}
 }
@@ -1528,10 +1726,17 @@ func (ws *WriteSet) DelCodeSize(addr accounts.Address) {
 func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 	if inner := ws.storage[addr]; inner != nil {
 		if vw, ok := inner[key]; ok {
-			releaseVWStorage(vw)
+			if ws.rec != nil {
+				ws.rec.storage.put(vw)
+			} else {
+				releaseVWStorage(vw)
+			}
 			delete(inner, key)
 		}
 		if len(inner) == 0 {
+			if ws.rec != nil {
+				ws.rec.putInner(inner)
+			}
 			delete(ws.storage, addr)
 		}
 	}

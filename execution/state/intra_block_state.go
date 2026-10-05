@@ -183,6 +183,10 @@ type IntraBlockState struct {
 	versionMap      *VersionMap
 	versionedWrites WriteSet
 	versionedReads  ReadSet
+	// readsTaken marks versionedReads as handed over; until then reset clears
+	// the maps in place and keeps them for the next tx.
+	readsTaken    bool
+	readInnerFree []map[accounts.StorageKey]VersionedRead[uint256.Int]
 	// committedBase memoizes the committed (pre-block) account that
 	// versionedAccountBase and committedCodeHash read from the state reader.
 	// The committed view is block-immutable, so the cached pointer is safe to
@@ -353,10 +357,7 @@ func (ibs *IntraBlockState) Reset() {
 	// both right after Reset; the block assembler never calls Reset mid-block.
 	ibs.noMaterialize = false
 	clear(ibs.committedBase)
-	// Read side rebinds to a fresh empty set: VersionedReads() at end of
-	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
-	// handed-over maps intact while the next tx lazily reallocs.
-	ibs.versionedReads = ReadSet{}
+	ibs.resetReads()
 	// Write side: VersionedWrites() returns Cloned snapshots, so the
 	// originals in ibs.versionedWrites are no longer referenced after the
 	// boundary call.  Walk the per-path maps and return every VW to its
@@ -2770,7 +2771,7 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 // MergeTxIOInto folds the current transaction's reads and supplied writes into io.
 func (ibs *IntraBlockState) MergeTxIOInto(io *VersionedIO, writes *WriteSet) {
 	version := Version{BlockNum: ibs.blockNum, TxIndex: ibs.txIndex, Incarnation: ibs.version}
-	io.mergeTx(version, ibs.versionedReads, writes)
+	io.mergeTx(version, ibs.VersionedReads(), writes)
 }
 
 // FlushWritesToVersionMap publishes the supplied writes to this state's version map.
@@ -3036,7 +3037,7 @@ func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint25
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWBalance()
+	vw := ibs.versionedWrites.recycler().balance.get()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: BalancePath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetBalance(addr, vw)
@@ -3055,7 +3056,7 @@ func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, 
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWNonce()
+	vw := ibs.versionedWrites.recycler().nonce.get()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: ibs.Version(), NonceReason: reason}
 	vw.Val = val
 	ibs.versionedWrites.SetNonce(addr, vw)
@@ -3073,7 +3074,7 @@ func (ibs *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val ui
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWIncarnation()
+	vw := ibs.versionedWrites.recycler().incarnation.get()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: IncarnationPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetIncarnation(addr, vw)
@@ -3091,7 +3092,7 @@ func (ibs *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val b
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWSelfDestruct()
+	vw := ibs.versionedWrites.recycler().selfDestruct.get()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: SelfDestructPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetSelfDestruct(addr, vw)
@@ -3109,7 +3110,7 @@ func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCreateContract()
+	vw := ibs.versionedWrites.recycler().createContract.get()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CreateContractPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCreateContract(addr, vw)
@@ -3127,7 +3128,7 @@ func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCode()
+	vw := ibs.versionedWrites.recycler().code.get()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodePath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCode(addr, vw)
@@ -3145,7 +3146,7 @@ func (ibs *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accou
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCodeHash()
+	vw := ibs.versionedWrites.recycler().codeHash.get()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeHashPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCodeHash(addr, vw)
@@ -3163,7 +3164,7 @@ func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) 
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCodeSize()
+	vw := ibs.versionedWrites.recycler().codeSize.get()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeSizePath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCodeSize(addr, vw)
@@ -3181,7 +3182,7 @@ func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, val *accou
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWAddress()
+	vw := ibs.versionedWrites.recycler().address.get()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: AddressPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetAddress(addr, vw)
@@ -3199,7 +3200,7 @@ func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accoun
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWStorage()
+	vw := ibs.versionedWrites.recycler().storage.get()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetStorage(addr, key, vw)
@@ -3415,11 +3416,21 @@ func (ibs *IntraBlockState) Version() Version {
 // end of tx (RecordReads / TxIn), after which ResetVersionedIO rebinds
 // the IBS field to a fresh set.
 func (ibs *IntraBlockState) VersionedReads() ReadSet {
+	ibs.readsTaken = true
 	return ibs.versionedReads
 }
 
+func (ibs *IntraBlockState) resetReads() {
+	if ibs.readsTaken {
+		ibs.versionedReads = ReadSet{}
+		ibs.readsTaken = false
+		return
+	}
+	ibs.versionedReads.clearForReuse(&ibs.readInnerFree)
+}
+
 func (ibs *IntraBlockState) ResetVersionedIO() {
-	ibs.versionedReads = ReadSet{}
+	ibs.resetReads()
 	ibs.versionedWrites.ReleaseAndReset()
 	ibs.dep = UnknownDep
 	ibs.stateReadErr = nil
@@ -3428,7 +3439,7 @@ func (ibs *IntraBlockState) ResetVersionedIO() {
 
 // ResetVersionedReads clears tracked versioned reads without affecting writes.
 func (ibs *IntraBlockState) ResetVersionedReads() {
-	ibs.versionedReads = ReadSet{}
+	ibs.resetReads()
 }
 
 // VersionedWrites returns a frozen typed snapshot of this tx's recorded writes.
