@@ -92,10 +92,8 @@ func (al *accessList) dropMemo() {
 
 // ContainsAddress returns true if the address is in the access list.
 func (al *accessList) ContainsAddress(address accounts.Address) bool {
-	if _, ok := al.addresses[address]; ok {
-		return true
-	}
-	return al.isPrecompile(address)
+	_, ok := al.addresses[address]
+	return ok || al.isPrecompile(address)
 }
 
 // Contains checks if a slot within an account is present in the access list, returning
