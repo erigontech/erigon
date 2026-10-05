@@ -198,7 +198,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 			}
 		}
 		switch {
-		case fields&fieldAccountAddr != 0 && depth < 64 && len(hashedKey) > 64:
+		case fields&(fieldAccountAddr|fieldStorageAddr|fieldHash) == fieldAccountAddr|fieldHash && depth < 64 && len(hashedKey) > 64:
 			depth = 64 + extLen
 		case fields&(fieldAccountAddr|fieldStorageAddr) != 0:
 			return

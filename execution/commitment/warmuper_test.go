@@ -270,23 +270,21 @@ type branchReadRecorder struct {
 }
 
 func (r *branchReadRecorder) Branch(prefix []byte) ([]byte, kv.Step, error) {
-	data, step, err := r.MockState.Branch(prefix)
-	if len(data) > 0 {
-		r.read[string(prefix)] = true
-	}
-	return data, step, err
+	r.read[string(prefix)] = true
+	return r.MockState.Branch(prefix)
 }
 
 func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 	t.Parallel()
 
 	ub := NewUpdateBuilder()
+	var newSlots [][]byte
 	for i := range 64 {
 		addr := fmt.Sprintf("%040x", i+1)
 		ub.Balance(addr, uint64(i+1))
-		slots := 2
-		if i%8 == 0 {
-			slots = 300
+		slots := [...]int{300, 2, 2, 2, 2, 1, 1, 0}[i%8]
+		if slots == 0 {
+			newSlots = append(newSlots, decodeHex(addr+fmt.Sprintf("%064x", 1)))
 		}
 		for s := range slots {
 			ub.Storage(addr, fmt.Sprintf("%064x", i*1000+s+1), fmt.Sprintf("%02x", s%250+1))
@@ -297,7 +295,7 @@ func TestWarmupKeyReadsEveryBranchOnThePath(t *testing.T) {
 
 	w := &Warmuper{maxDepth: WarmupMaxDepth}
 	extensionHops, storageRootExtensions := 0, 0
-	for _, pk := range plainKeys {
+	for _, pk := range append(plainKeys, newSlots...) {
 		hk := KeyToHexNibbleHash(pk)
 		want := map[string]bool{}
 		var depths []int
