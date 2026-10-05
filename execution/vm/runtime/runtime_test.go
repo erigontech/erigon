@@ -161,6 +161,21 @@ func TestCall(t *testing.T) {
 	}
 }
 
+func TestCallDoesNotCreateOrigin(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	origin := accounts.InternAddress(common.HexToAddress("0xbb"))
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	_, _, err := Call(address, nil, &Config{State: statedb, Origin: origin})
+	require.NoError(t, err)
+	exists, err := statedb.Exist(origin)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())
