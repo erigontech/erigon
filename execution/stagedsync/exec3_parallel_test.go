@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,6 +71,8 @@ type testExecTask struct {
 	nonce        int
 	strictNonce  bool
 	dependencies []int
+	before       func()
+	after        func()
 }
 
 type PathGenerator func(i int, j int, total int) opkey
@@ -202,6 +205,12 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	dirs datadir.Dirs,
 	calcFees bool,
 ) *exec.TxResult {
+	if t.before != nil {
+		t.before()
+	}
+	if t.after != nil {
+		defer t.after()
+	}
 	// Sleep for 50 microsecond to simulate setup time
 	sleepWithContext(t.ctx, time.Microsecond*50) //nolint:errcheck
 
@@ -583,6 +592,11 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 
 func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
 	tb.Helper()
+	return runParallelWorkers(tb, tasks, validation, metadata, logger, runtime.NumCPU()-1)
+}
+
+func runParallelWorkers(tb testing.TB, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger, workerCount int) time.Duration {
+	tb.Helper()
 	ctx := tb.Context()
 
 	dirs := datadir.New(tb.TempDir())
@@ -610,7 +624,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 			logger: logger,
 		},
-		workerCount: runtime.NumCPU() - 1,
+		workerCount: workerCount,
 	}
 
 	executorContext, executorCancel, err := pe.run(ctx)
@@ -1960,25 +1974,29 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 func TestSameSenderSuccessorWaitsForPredecessorValidation(t *testing.T) {
 	slow := accounts.InternAddress(common.HexToAddress("0x5101"))
 	sender := accounts.InternAddress(common.HexToAddress("0x5e4d"))
-	task := func(txIdx int, from accounts.Address, nonce int, d time.Duration) exec.Task {
+	task := func(txIdx int, from accounts.Address, nonce int) *testExecTask {
 		ops := []Op{
 			{opType: readType, key: opkey{addr: from, path: state.NoncePath}, val: nonce},
 			{opType: writeType, key: opkey{addr: from, path: state.NoncePath}, val: nonce + 1},
-			{opType: otherType, duration: d},
 		}
 		task := NewTestExecTask(txIdx, ops, from, nonce)
 		task.strictNonce = true
 		return task
 	}
-	tasks := []exec.Task{
-		task(0, slow, 0, 50*time.Millisecond),
-		task(1, sender, 0, time.Millisecond),
-		task(2, sender, 1, time.Millisecond),
+	successorRan := make(chan struct{})
+	var once sync.Once
+	t0, t1, t2 := task(0, slow, 0), task(1, sender, 0), task(2, sender, 1)
+	t0.before = func() {
+		select {
+		case <-successorRan:
+		case <-time.After(time.Second):
+		}
 	}
-	runParallel(t, tasks, func(pe *parallelExecutor) error {
+	t2.after = func() { once.Do(func() { close(successorRan) }) }
+	runParallelWorkers(t, []exec.Task{t0, t1, t2}, func(pe *parallelExecutor) error {
 		if aborts := pe.abortCount.Load(); aborts != 0 {
 			return fmt.Errorf("same-sender successor re-executed: abortCount=%d execCount=%d", aborts, pe.execCount.Load())
 		}
 		return nil
-	}, false, logger(true))
+	}, false, logger(true), 2)
 }
