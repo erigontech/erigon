@@ -1044,13 +1044,15 @@ func (p *boundarySequencePeerCounter) SendBlobsSidecarByIdentifierReq(context.Co
 
 type boundarySnapshot uint64
 
-func (s boundarySnapshot) FrozenBlobs() uint64 { return uint64(s) }
+func (s boundarySnapshot) FrozenBlobs() uint64     { return uint64(s) }
+func (s boundarySnapshot) BlocksAvailable() uint64 { return uint64(s) }
 
 type boundaryMutableSnapshot struct {
 	frozen atomic.Uint64
 }
 
-func (s *boundaryMutableSnapshot) FrozenBlobs() uint64 { return s.frozen.Load() }
+func (s *boundaryMutableSnapshot) FrozenBlobs() uint64     { return s.frozen.Load() }
+func (s *boundaryMutableSnapshot) BlocksAvailable() uint64 { return s.frozen.Load() }
 
 type boundarySyncedChecker bool
 
