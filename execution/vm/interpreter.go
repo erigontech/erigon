@@ -79,8 +79,6 @@ type CallContext struct {
 	cachedAddrGen uint64
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
-	sstoreGen     uint64
-	sstoreCurrent uint256.Int // the current slot value SSTORE's gas func read at sstoreGen
 
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
@@ -89,6 +87,10 @@ type CallContext struct {
 	create   createGasPreparation
 	slots    frameSlots
 	Stack    Stack
+
+	// SSTORE-only and pointer-free, so placed after Stack to keep Stack.data's alignment.
+	sstoreGen     uint64
+	sstoreCurrent uint256.Int // the current slot value SSTORE's gas func read at sstoreGen
 }
 
 // maxFrameSlotMisses is how many fills a frame makes without a hit before it stops caching.
