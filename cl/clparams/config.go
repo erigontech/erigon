@@ -32,6 +32,7 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -70,6 +71,7 @@ type CaplinConfig struct {
 	MevRelayUrl string
 	// AllowPrivateBuilderURLs permits validator-configured builder URLs to resolve to private addresses.
 	AllowPrivateBuilderURLs bool
+	EpbsBuilder             epbscfg.Config
 	// EnableValidatorMonitor is used to enable the validator monitor metrics and corresponding logs
 	EnableValidatorMonitor bool
 

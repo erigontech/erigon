@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -35,6 +36,8 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/handler"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/builder/epbs"
+	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -78,6 +81,8 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/version"
+	executionbuilder "github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/node/ethconfig"
 	p2pnat "github.com/erigontech/erigon/p2p/nat"
 )
@@ -191,9 +196,30 @@ func upgradeGenesisState(s *state.CachingBeaconState, from, to clparams.StateVer
 	return nil
 }
 
+func ValidateEmbeddedBuilderConfig(config clparams.CaplinConfig) error {
+	if !config.EpbsBuilder.Enabled {
+		return nil
+	}
+	var beaconConfig *clparams.BeaconChainConfig
+	if config.IsDevnet() {
+		if config.HaveInvalidDevnetParams() {
+			return errors.New("devnet config and genesis state paths must be set together")
+		}
+		customBeaconConfig, _, err := clparams.CustomConfig(config.CustomConfigPath)
+		if err != nil {
+			return err
+		}
+		beaconConfig = &customBeaconConfig
+	} else {
+		_, beaconConfig = clparams.GetConfigsByNetwork(config.NetworkId)
+	}
+	return epbs.ValidateRuntimeConfig(config.EpbsBuilder, beaconConfig)
+}
+
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
+	executionModule execmodule.ExecutionModule, builderStatus *executionbuilder.EmbeddedBuilderStatus,
 ) error {
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig
@@ -511,8 +537,48 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
 	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, epbsPool, emitters)
-	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
+	var embeddedBuilder *epbs.Runtime
+	var preferencesSink services.ValidatedProposerPreferencesSink
+	if config.EpbsBuilder.Enabled {
+		if executionModule == nil {
+			return errors.New("embedded ePBS builder requires the in-process execution module")
+		}
+		embeddedBuilder, err = epbs.NewRuntime(config.EpbsBuilder, epbs.RuntimeDependencies{
+			BeaconConfig:     beaconConfig,
+			PendingDirectory: filepath.Join(dirs.DataDir, "builder", "pending"),
+			Clock:            ethClock,
+			Head:             syncedDataManager,
+			Forkchoice:       forkChoice,
+			Assembler:        eladapter.NewAdapter(executionModule, beaconConfig),
+			Publisher:        gossipManager,
+			ColumnStorage:    columnStorage,
+			BidProcessor:     executionPayloadBidService,
+			PayloadProcessor: executionPayloadService,
+			AcceptedBlocks:   forkChoice,
+			HighestBids:      epbsPool,
+			Events:           emitters,
+			Status:           builderStatus,
+		})
+		if err != nil {
+			if !errors.Is(err, epbs.ErrPendingPayloadStore) {
+				return fmt.Errorf("initialize embedded ePBS builder: %w", err)
+			}
+			builderStatus.MarkDisabled(executionbuilder.BuilderDisabledPendingPayloadStore)
+			logger.Error("Embedded ePBS builder disabled; pending payload recovery unavailable", "err", err)
+		} else {
+			preferencesSink = embeddedBuilder
+		}
+	}
+	proposerPreferencesService := services.NewProposerPreferencesServiceWithSink(
+		syncedDataManager,
+		forkChoice,
+		ethClock,
+		beaconConfig,
+		epbsPool,
+		emitters,
+		preferencesSink,
+	)
 	registry.RegisterGossipServices(
 		gossipManager,
 		forkChoice,
@@ -534,6 +600,20 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		executionPayloadBidService,
 	)
 	peerDas.Start(ctx)
+	if embeddedBuilder != nil {
+		builderDone := make(chan struct{})
+		go func() {
+			defer close(builderDone)
+			if err := embeddedBuilder.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Error("Embedded ePBS builder stopped", "err", err)
+			}
+		}()
+		defer func() {
+			cn()
+			<-builderDone
+		}()
+		logger.Info("Embedded ePBS builder started")
+	}
 
 	{
 		go batchSignatureVerifier.Start()

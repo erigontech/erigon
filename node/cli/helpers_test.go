@@ -20,12 +20,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v3"
 
+	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
+	cmdutils "github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/nodecfg"
 )
@@ -47,6 +50,46 @@ func buildHttpCfg(t *testing.T, args []string) nodecfg.Config {
 	}
 	require.NoError(t, app.Run(context.Background(), append([]string{"erigon"}, args...)))
 	return result
+}
+
+func TestDefaultFlagsIncludeEmbeddedBuilderFlags(t *testing.T) {
+	for _, name := range []string{"builder.bid-delay", "builder.min-profit-gwei"} {
+		found := false
+		for _, flag := range DefaultFlags {
+			if slices.Contains(flag.Names(), name) {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "%s is not registered", name)
+	}
+
+	defaults := epbscfg.DefaultConfig()
+	for _, test := range []struct {
+		flag cli.Flag
+		want any
+	}{
+		{flag: &cmdutils.EpbsBuilderBidMarginFlag, want: 0.95},
+		{flag: &cmdutils.EpbsBuilderMaxBidMarginFlag, want: defaults.MaxBidMargin},
+		{flag: &cmdutils.EpbsBuilderMinProfitGweiFlag, want: uint64(0)},
+		{flag: &cmdutils.EpbsBuilderBidPublishLeadFlag, want: defaults.BidPublishLead},
+		{flag: &cmdutils.EpbsBuilderCollateralWarningGweiFlag, want: defaults.CollateralWarningGwei},
+	} {
+		require.Contains(t, DefaultFlags, test.flag, "%s is not registered", test.flag.Names()[0])
+		switch flag := test.flag.(type) {
+		case *cli.Float64Flag:
+			require.Equal(t, test.want, flag.Value)
+		case *cli.DurationFlag:
+			require.Equal(t, test.want, flag.Value)
+		case *cli.Uint64Flag:
+			require.Equal(t, test.want, flag.Value)
+		default:
+			t.Fatalf("unexpected flag type %T", flag)
+		}
+	}
+	require.Contains(t, cmdutils.EpbsBuilderBidPublishLeadFlag.Usage, "0 disables the hold")
+	require.Contains(t, cmdutils.EpbsBuilderBidDelayFlag.Usage, "0 derives")
+	require.Contains(t, cmdutils.EpbsBuilderBidDelayFlag.Usage, "slot length and --builder.bid-publish-lead")
 }
 
 // TestOnUsageErrorHandler verifies that the custom OnUsageError handler

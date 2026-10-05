@@ -187,6 +187,7 @@ type Ethereum struct {
 	txPoolGrpcServer          txpoolproto.TxpoolServer
 	txPoolRpcClient           txpoolproto.TxpoolClient
 	shutterPool               *shutter.Pool
+	builderStatus             *builder.EmbeddedBuilderStatus
 	blockBuilderNotifyNewTxns chan struct{}
 	components                *nodebuilder.Builder
 
@@ -275,6 +276,14 @@ func New(
 	tracer *tracers.Tracer,
 	opts ...NewOption,
 ) (*Ethereum, error) {
+	if err := validateEmbeddedBuilderMode(config); err != nil {
+		return nil, err
+	}
+	caplinConfig := config.CaplinConfig
+	caplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
+	if err := caplin1.ValidateEmbeddedBuilderConfig(caplinConfig); err != nil {
+		return nil, fmt.Errorf("validate embedded ePBS builder: %w", err)
+	}
 	options := newOptions{}
 	for _, opt := range opts {
 		opt(&options)
@@ -352,6 +361,7 @@ func New(
 		config:                    config,
 		networkID:                 config.NetworkID,
 		etherbase:                 config.Builder.Etherbase,
+		builderStatus:             builder.NewEmbeddedBuilderStatus(config.CaplinConfig.EpbsBuilder.Enabled),
 		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
 		sealCancel:                make(chan struct{}),
 		minedBlocks:               make(chan *types.Block, 1),
@@ -978,7 +988,7 @@ func New(
 		}
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter); err != nil {
+			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.execModule, backend.builderStatus); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logger.Error("could not start caplin", "err", err)
 				}
@@ -1028,6 +1038,14 @@ func New(
 	}
 
 	return backend, nil
+}
+
+func validateEmbeddedBuilderMode(config *ethconfig.Config) error {
+	if config.CaplinConfig.EpbsBuilder.Enabled && (!config.InternalCL ||
+		(!clparams.EmbeddedSupported(config.NetworkID) && !config.CaplinConfig.IsDevnet())) {
+		return errors.New("embedded ePBS builder requires embedded Caplin")
+	}
+	return nil
 }
 
 func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
@@ -1112,6 +1130,13 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	// RPC server and MCP share the BaseApi block/receipt caches instead of
 	// each holding their own.
 	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, testingEntry, witnessCache)
+	if config.CaplinConfig.EpbsBuilder.Enabled {
+		allAPIs = append(allAPIs, rpc.API{
+			Namespace: "builder",
+			Service:   jsonrpc.BuilderAPI(jsonrpc.NewBuilderAPI(s.builderStatus)),
+			Version:   "1.0",
+		})
+	}
 	s.apiList = apisForNamespaces(allAPIs, append(slices.Clone(httpRpcCfg.API), "graphql"))
 
 	if config.MCPAddress != "" {
