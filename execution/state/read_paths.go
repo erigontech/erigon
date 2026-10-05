@@ -1767,3 +1767,19 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 		panic(fmt.Sprintf("refreshAccount: unexpected outcome %d for %x", r.outcome, addr))
 	}
 }
+
+// ReadStamp identifies the state a serial-path read sees: every state change adds a journal
+// entry, and reverts, resets and the unjournalled changes move its epoch.
+type ReadStamp struct {
+	journalLen int
+	epoch      uint64
+}
+
+// ReadStamp is ok unless reads are traced. On the versioned path a repeated read returns
+// the value the first read recorded in the read set, so a cached value stays consistent.
+func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
+	if ibs == nil || dbg.TraceTransactionIO {
+		return ReadStamp{}, false
+	}
+	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch}, true
+}
