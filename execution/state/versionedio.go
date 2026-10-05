@@ -3672,6 +3672,9 @@ func (v *writeView) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 		if w, ok := r.wStorage[key]; ok {
 			v.slabs.storage.put(w)
 			delete(r.wStorage, key)
+			if len(r.wStorage) == 0 {
+				clear(r.wStorage) // drops the tombstones a revert leaves behind
+			}
 		}
 	}
 }
