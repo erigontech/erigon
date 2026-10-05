@@ -219,6 +219,8 @@ type IntraBlockState struct {
 	// SelfDestruct cells. Left false for genesis/RPC/serial, which still commit
 	// via FinalizeTx→so.data.
 	noMaterialize bool
+	// pooledReads marks a read set drawn from rpcReadSetPool; Close returns it.
+	pooledReads bool
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -281,6 +283,7 @@ func NewPooled(stateReader StateReader) *IntraBlockState {
 
 // ReleasePooled resets ibs and hands it to the next NewPooled.
 func ReleasePooled(ibs *IntraBlockState) {
+	ibs.releasePooledReads()
 	ibs.Reset()
 	ibs.revisions.reset()
 	ibs.stateObjectArena.reset()
@@ -406,6 +409,23 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
+// SetPooledReads draws the read set from a pool, for a single call whose reads
+// nobody validates; Close returns it.
+func (ibs *IntraBlockState) SetPooledReads() {
+	ibs.versionedReads = *rpcReadSetPool.Get().(*ReadSet)
+	ibs.pooledReads = true
+}
+
+func (ibs *IntraBlockState) releasePooledReads() {
+	if !ibs.pooledReads {
+		return
+	}
+	rs := ibs.versionedReads
+	rs.clearForReuse()
+	rpcReadSetPool.Put(&rs)
+	ibs.versionedReads, ibs.pooledReads = ReadSet{}, false
+}
+
 // Release Deprecated use Close
 func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
 
@@ -421,6 +441,7 @@ func (ibs *IntraBlockState) Close() {
 	stateObjects, journal := ibs.stateObjects, ibs.journal
 	ibs.stateObjects, ibs.journal = nil, nil
 	ibs.lastObj = nil
+	ibs.releasePooledReads()
 	ibs.stateObjectArena.release()
 	ibs.logs.release()
 	ibs.revisions.reset()
