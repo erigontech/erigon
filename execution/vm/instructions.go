@@ -1287,13 +1287,13 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop2Uint64()
-	ret := evm.returnCopy(scope.Memory.GetPtr(offset, size))
+	ret := scope.Memory.GetCopy(offset, size)
 	return pc, ret, errStopToken
 }
 
 func opRevert(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop2Uint64()
-	ret := evm.returnCopy(scope.Memory.GetPtr(offset, size))
+	ret := scope.Memory.GetCopy(offset, size)
 	evm.returnData = ret
 	return pc, ret, ErrExecutionReverted
 }
