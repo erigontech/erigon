@@ -243,6 +243,24 @@ func (tx *countingLatestTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetL
 	return tx.TemporalTx.GetLatest(domain, key, opts)
 }
 
+// commitAccount commits one account write; a nil stateCache commits without
+// publishing to any cache.
+func commitAccount(t *testing.T, db kv.TemporalRwDB, stateCache *cache.StateCache, key, value []byte, txNum uint64) {
+	t.Helper()
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	if stateCache != nil {
+		sd.BindStateCache(stateCache)
+	}
+	sd.SetTxNum(txNum)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, value, txNum, nil))
+	require.NoError(t, sd.Commit(t.Context(), rwTx))
+}
+
 // committedCacheState commits one account, so a read tx has a frontier above
 // zero, through a SharedDomains bound to the returned cache.
 func committedCacheState(t *testing.T) (kv.TemporalRwDB, *cache.StateCache) {
@@ -250,18 +268,9 @@ func committedCacheState(t *testing.T) (kv.TemporalRwDB, *cache.StateCache) {
 	db := newTestDb(t, 16)
 	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	rwTx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
-	require.NoError(t, err)
-	defer sd.Close()
-	sd.BindStateCache(stateCache)
-	sd.SetTxNum(5)
 	committed := make([]byte, 20)
 	committed[0] = 0xcc
-	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, committed, encAccount(1), 5, nil))
-	require.NoError(t, sd.Commit(t.Context(), rwTx))
+	commitAccount(t, db, stateCache, committed, encAccount(1), 5)
 	return db, stateCache
 }
 
@@ -332,17 +341,16 @@ func TestCachedTemporalTxStateGetterUnwindReadsTx(t *testing.T) {
 
 // The cache holds a newer durable state version's values, which are not this tx's state.
 func TestCachedTemporalTxStateGetterStaleStateVersionReadsTx(t *testing.T) {
-	db := newTestDb(t, 16)
+	db, stateCache := committedCacheState(t)
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
 	stateVersion, err := rawdb.GetStateVersion(roTx)
 	require.NoError(t, err)
-	stateCache := newSmallStateCache()
-	defer stateCache.Close()
+	end, ok := roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+	require.True(t, ok)
 	key := make([]byte, 20)
-	stateCache.Applier().Initialize(stateVersion)
-	stateCache.Applier().Publish(stateVersion, stateVersion+1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte{1}, TxNum: 1}})
+	stateCache.Applier().PublishUnwind(stateVersion, stateVersion+1, end-1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte{1}, TxNum: end - 1}})
 
 	tx := &countingLatestTx{TemporalTx: roTx}
 	v, _, err := execctx.NewCachedTemporalTxStateGetter(tx, stateCache).GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
@@ -377,12 +385,10 @@ type roWrappingRwTx struct {
 func (tx roWrappingRwTx) UnderlyingTx() kv.TemporalTx { return tx.under }
 
 func TestCachedTemporalTxStateGetterRefusesWrappedWritableTx(t *testing.T) {
-	db := newTestDb(t, 16)
+	db, stateCache := committedCacheState(t)
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-	stateCache := newSmallStateCache()
-	defer stateCache.Close()
 
 	counting := &countingLatestTx{TemporalTx: rwTx}
 	getter := execctx.NewCachedTemporalTxStateGetter(roWrappingRwTx{TemporalTx: counting, under: rwTx}, stateCache)

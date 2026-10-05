@@ -93,14 +93,8 @@ func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCac
 	if err != nil {
 		return g
 	}
-	view := stateCache.View(cache.FrontierWithStateVersion(cache.FrontierFunc(tx.Debug().DomainVisibleEnd), stateVersion))
-	// A view the cache refuses fills from belongs to a superseded or unknown
-	// durable generation, so its hits are not this tx's state either.
-	if !view.CanFill() {
-		return g
-	}
 	g.stateCache = stateCache
-	g.view = view
+	g.view = stateCache.View(cache.FrontierWithStateVersion(cache.FrontierFunc(tx.Debug().DomainVisibleEnd), stateVersion))
 	g.stepSize = tx.Debug().StepSize()
 	return g
 }
