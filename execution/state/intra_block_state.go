@@ -1066,6 +1066,10 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			var prev uint256.Int
 			if had {
 				prev = prevWrite.Val
+				// An own zero balance already is the touch; repeating it would journal a no-op.
+				if prev.IsZero() && addr != ripemd {
+					return
+				}
 			}
 			ibs.recordWriteBalance(addr, uint256.Int{})
 			ibs.journal.touchAccount(addr, !had, prev)
