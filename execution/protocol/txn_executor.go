@@ -117,6 +117,7 @@ type TxnExecutor struct {
 	data                  []byte
 	state                 *state.IntraBlockState
 	evm                   *vm.EVM
+	engine                rules.EngineReader
 
 	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
 	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
@@ -223,6 +224,7 @@ func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 	}
 	st := NewTxnExecutor(evm, msg, gp)
 	st.noFeeBurnAndTip = noFeeBurnAndTip
+	st.engine = engine
 	return st.Execute(refunds, gasBailout)
 }
 
@@ -893,6 +895,10 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 			continue
 		}
 		authority := accounts.InternAddress(recovered)
+		if blocker, ok := st.engine.(rules.AuthorityBlocker); ok && blocker.BlocksAuthority(authority) {
+			log.Trace("blocked authority, skipping", "authIndex", i)
+			continue
+		}
 
 		// 3. add authority account to accesses_addresses
 		st.state.AddAddressToAccessList(authority)

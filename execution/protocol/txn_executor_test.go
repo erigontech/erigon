@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -1294,4 +1295,42 @@ func BenchmarkSysCallContract(b *testing.B) {
 			}
 		}
 	})
+}
+
+type authorityBlockingEngine struct {
+	rules.Engine
+	blocked accounts.Address
+}
+
+func (e authorityBlockingEngine) BlocksAuthority(authority accounts.Address) bool {
+	return authority == e.blocked
+}
+
+func TestBlockedAuthorityIsSkipped(t *testing.T) {
+	const blockGasLimit = 1_000_000
+
+	auth, authority := eip2780TestAuthorization()
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	cfg := eip2780TestConfig(t)
+	cfg.AmsterdamTime = nil
+	ibs := state.New(state.NewNoopReader())
+	require.NoError(t, ibs.SetNonce(authority, auth.Nonce, tracing.NonceChangeUnspecified))
+	evm := newTestEVM(ibs, cfg, blockGasLimit)
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+	msg.SetAuthorizations([]types.Authorization{auth})
+
+	engine := authorityBlockingEngine{Engine: ethash.NewFaker(), blocked: authority}
+	result, err := ApplyMessage(evm, msg, NewGasPool(blockGasLimit, 0), true, false, engine)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.Equal(t, params.TxGas+params.PerEmptyAccountCost, result.ReceiptGasUsed)
+
+	nonce, err := ibs.GetNonce(authority)
+	require.NoError(t, err)
+	require.Equal(t, auth.Nonce, nonce)
+	_, delegated, err := ibs.GetDelegatedDesignation(authority)
+	require.NoError(t, err)
+	require.False(t, delegated)
 }

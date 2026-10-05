@@ -170,6 +170,14 @@ func (p *Parlia) CalculateRewards(config *chain.Config, header *types.Header, un
 	return nil, nil
 }
 
+var _ rules.AuthorityBlocker = (*Parlia)(nil)
+
+// BlocksAuthority rejects EIP-7702 authorizations signed by a blacklisted account.
+func (p *Parlia) BlocksAuthority(authority accounts.Address) bool {
+	_, ok := bscchain.NanoBlackList[authority.Value()]
+	return ok
+}
+
 func (p *Parlia) GetTransferFunc() evmtypes.TransferFunc { return misc.Transfer }
 
 func (p *Parlia) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc { return nil }
