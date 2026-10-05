@@ -42,22 +42,23 @@ type accessList struct {
 	lastSlots    map[accounts.StorageKey]struct{}
 	lastWarmSlot accounts.StorageKey
 
-	// precompiles are warm in every tx. They stay out of addresses, so Reset
-	// does not clear them and Prepare does not insert them again per tx.
+	// precompiles are warm from Prepare until Reset, as if Prepare inserted them into
+	// addresses. precompileSet keeps the built set, so Prepare does not insert them per tx.
 	precompiles    map[accounts.Address]struct{}
+	precompileSet  map[accounts.Address]struct{}
 	precompilesSrc []accounts.Address
 }
 
-// setPrecompiles rebuilds the precompile set only when the fork's list changes.
+// setPrecompiles makes addrs warm; it rebuilds the set only when the fork's list changes.
 func (al *accessList) setPrecompiles(addrs []accounts.Address) {
-	if len(addrs) == len(al.precompilesSrc) && (len(addrs) == 0 || &addrs[0] == &al.precompilesSrc[0]) {
-		return
+	if len(addrs) != len(al.precompilesSrc) || (len(addrs) > 0 && &addrs[0] != &al.precompilesSrc[0]) {
+		al.precompileSet = make(map[accounts.Address]struct{}, len(addrs))
+		for _, addr := range addrs {
+			al.precompileSet[addr] = struct{}{}
+		}
+		al.precompilesSrc = addrs
 	}
-	al.precompiles = make(map[accounts.Address]struct{}, len(addrs))
-	for _, addr := range addrs {
-		al.precompiles[addr] = struct{}{}
-	}
-	al.precompilesSrc = addrs
+	al.precompiles = al.precompileSet
 }
 
 func (al *accessList) isPrecompile(address accounts.Address) bool {
@@ -81,6 +82,7 @@ func (al *accessList) Reset() {
 	}
 	al.slots = al.slots[:0]
 	clear(al.addresses)
+	al.precompiles = nil
 	al.dropMemo()
 }
 
@@ -135,6 +137,7 @@ func (al *accessList) Copy() *accessList {
 		addresses:      maps.Clone(al.addresses),
 		slots:          make([]map[accounts.StorageKey]struct{}, len(al.slots)),
 		precompiles:    al.precompiles,
+		precompileSet:  al.precompileSet,
 		precompilesSrc: al.precompilesSrc,
 	}
 	for i, slotMap := range al.slots {
