@@ -483,6 +483,7 @@ func (m *Message) SetCheckGas(checkGas bool) {
 // maxFeePerGas or maxPriorityFeePerGas, even as zero. A transaction is checked against
 // its fork by AsMessage instead.
 func (m *Message) DynamicFeeArgs() bool { return m.dynamicFeeArgs }
+
 func (m *Message) SetDynamicFeeArgs(dynamicFeeArgs bool) {
 	m.dynamicFeeArgs = dynamicFeeArgs
 }
