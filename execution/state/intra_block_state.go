@@ -21,6 +21,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -226,6 +227,8 @@ type IntraBlockState struct {
 	isAura bool
 
 	revisions revisions
+
+	lastCode accounts.Code // last code stored by SetCode
 }
 
 type sdProbeEntry struct {
@@ -330,6 +333,7 @@ func (ibs *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, ke
 // the underlying state trie to avoid reloading data for the next operations.
 func (ibs *IntraBlockState) Reset() {
 	clear(ibs.nilAccounts)
+	ibs.lastCode = accounts.Code{}
 	for _, so := range ibs.stateObjects {
 		so.release()
 	}
@@ -1527,6 +1531,8 @@ func printCode(c []byte) (int, string) {
 	return lenc, fmt.Sprintf("%x...", c)
 }
 
+// SetCode keeps code, also after a revert or Reset: the caller must not modify it afterwards.
+//
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason tracing.CodeChangeReason) error {
@@ -1539,7 +1545,12 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	if err != nil {
 		return err
 	}
-	canonical := accounts.NewCode(code)
+	// Factories deploy the same bytes many times: reuse the last hash instead of re-hashing.
+	canonical := ibs.lastCode
+	if len(code) == 0 || !bytes.Equal(code, canonical.Bytes) {
+		canonical = accounts.NewCode(code)
+		ibs.lastCode = canonical
+	}
 	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
 	origHash := stateObject.original.CodeHash
