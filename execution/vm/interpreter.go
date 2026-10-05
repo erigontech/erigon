@@ -19,6 +19,8 @@
 
 package vm
 
+//go:generate go run ./vmgen
+
 import (
 	"errors"
 	"fmt"
@@ -413,7 +415,21 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	if len(contract.Code) == 0 {
 		return nil, gas, mdgas.MdGasUsage{}, nil
 	}
+	tracer := evm.config.Tracer
+	debug := tracer != nil && (tracer.HasOpcodeHook() || tracer.HasGasChangeHook() || tracer.HasFaultHook())
+	trace := dbg.TraceInstructions && evm.intraBlockState.Trace()
+	if debug || trace || dbg.TraceDynamicGas {
+		return evm.runTraced(contract, gas, input, readOnly, debug, trace)
+	}
+	return evm.run(contract, gas, input, readOnly, false, false)
+}
 
+// anyTrace is true here; execution/vm/vmgen sets it to false in run.
+const anyTrace = true
+
+// runTraced is Run's loop with the tracing code. execution/vm/vmgen generates
+// run in vm_run_gen.go from it, with anyTrace false and the fast-path switch.
+func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, readOnly, debug, trace bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	evm.returnData = nil
@@ -433,8 +449,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 		tracer  = evm.config.Tracer
-		debug   = tracer != nil && (tracer.HasOpcodeHook() || tracer.HasGasChangeHook() || tracer.HasFaultHook())
-		trace   = dbg.TraceInstructions && evm.intraBlockState.Trace()
 	)
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
@@ -464,7 +478,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
 	// the stacks before callContext.put() returns them to the pool.
-	if debug {
+	if anyTrace && debug {
 		defer func() {
 			if err == nil {
 				return
@@ -484,13 +498,24 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	// parent context.
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
-	anyTrace := dbg.TraceDynamicGas || debug || trace
 	stack := &callContext.Stack
 	jt := evm.jt
+	// The fast path keeps gas in a register. It is stored back before the generic
+	// path and after the loop, and reloaded after each generic op.
+	gasLeft := callContext.gas
 
+run:
 	for {
+		op = contract.GetOp(pc)
+		// The hottest constant-gas opcodes run inline, without the jump table and
+		// its indirect call. A failed check falls through to the generic path,
+		// which reports the error.
+		if !anyTrace {
+			// execution/vm/vmgen inserts the fastOps switch here.
+			callContext.gas = gasLeft
+		}
 		callContext.cacheGen++
-		if debug {
+		if anyTrace && debug {
 			// Capture pre-execution values for tracing.
 			logged = false
 			pcCopy = pc
@@ -498,7 +523,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
-		op = contract.GetOp(pc)
 		operation := &jt[op]
 		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
@@ -567,7 +591,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		}
 
 		// Do gas tracing before memory expansion
-		if debug {
+		if anyTrace && debug {
 			if tracer.HasGasChangeHook() {
 				tracer.EmitGasChange(oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
 			}
@@ -583,7 +607,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 		// TODO - move this to a trace & set in the worker
 
-		if trace {
+		if anyTrace && trace {
 			var opstr string
 			if operation.string != nil {
 				opstr = operation.string(pc, callContext)
@@ -597,11 +621,13 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 		// execute the operation
 		pc, res, err = operation.execute(pc, evm, callContext)
+		gasLeft = callContext.gas
 		if err != nil {
-			break
+			break run
 		}
 		pc++
 	}
+	callContext.gas = gasLeft
 
 	if errors.Is(err, errStopToken) {
 		err = nil // clear stop token error
