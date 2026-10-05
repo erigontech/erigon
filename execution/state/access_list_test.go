@@ -306,9 +306,21 @@ func TestPrepareKeepsPrecompilesWarm(t *testing.T) {
 	for range 2 {
 		s.Prepare(&chain.Rules{IsBerlin: true}, accounts.NilAddress, accounts.NilAddress, accounts.NilAddress, precompiles, nil)
 		require.True(t, s.AddressInAccessList(precompile))
+		require.NotContains(t, s.accessList.addresses, precompile)
 		require.False(t, s.AddressInAccessList(other))
 		n := s.journal.length()
 		require.False(t, s.AddAddressToAccessList(precompile))
 		require.Equal(t, n, s.journal.length())
 	}
+}
+
+func TestPrepareWarmsDestinationThatLeftThePrecompileSet(t *testing.T) {
+	t.Parallel()
+	s := New(NewNoopReader())
+	defer s.Close()
+	dst := accounts.InternAddress(common.HexToAddress("0x0100"))
+	rules := &chain.Rules{IsBerlin: true}
+	s.Prepare(rules, accounts.NilAddress, accounts.NilAddress, accounts.NilAddress, []accounts.Address{dst}, nil)
+	s.Prepare(rules, accounts.NilAddress, accounts.NilAddress, dst, []accounts.Address{}, nil)
+	require.True(t, s.AddressInAccessList(dst))
 }
