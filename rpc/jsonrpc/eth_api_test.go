@@ -821,8 +821,7 @@ func TestHeaderByHashAndNumberServesRepeatedLookupsFromCache(t *testing.T) {
 	require.Same(t, first, second)
 }
 
-// A block read must not put the block's own header into the header cache: that
-// header lives inside the Block, and caching it would keep the whole block alive.
+// A block read leaves the header cache alone: the block cache already serves that header.
 func TestBlockReadDoesNotFillHeaderCache(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newBaseApiForTest(m)

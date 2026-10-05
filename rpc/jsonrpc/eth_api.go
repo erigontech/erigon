@@ -151,7 +151,7 @@ type BaseAPI struct {
 	// all caches are thread-safe
 	stateCache kvcache.Cache
 	blocksLRU  *cache.HashByteLRU[*types.Block]
-	// headersLRU holds headers decoded for header-only lookups, never a header owned by a cached block.
+	// headersLRU holds headers decoded for header-only lookups.
 	headersLRU *cache.HashByteLRU[*types.Header]
 
 	filters                   *rpchelper.Filters
