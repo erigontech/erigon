@@ -314,3 +314,11 @@ func (d *DomainDiff) GetDiffSet() (keysToValue []DomainEntryDiff) {
 	})
 	return d.prevValsSlice
 }
+
+// RollbackUnless rolls tx back unless *ok is true. Defer it right after opening
+// a tx that is returned to the caller, so an early return or panic cannot leak it.
+func RollbackUnless(ok *bool, tx Tx) {
+	if !*ok {
+		tx.Rollback()
+	}
+}

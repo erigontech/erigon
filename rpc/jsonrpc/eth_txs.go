@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -180,22 +182,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	}
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockHashAndIndex
-	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
-	}
-
-	txs := block.Transactions()
-	idx := uint64(txIndex)
-	n := uint64(len(txs))
-	if idx >= n {
-		return nil, nil // not error
-	}
-
-	return ethapi.NewRPCTransaction(txs[txIndex], block.Hash(), block.Time(), block.NumberU64(), idx, block.BaseFee()), nil
+	return api.rpcTxnByIdxInBlock(ctx, tx, blockHash, blockNum, uint64(txIndex))
 }
 
 // GetRawTransactionByBlockHashAndIndex returns the bytes of the transaction for the given block hash and index.
@@ -216,15 +203,7 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 		return nil, err
 	}
 
-	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
-	}
-
-	return newRPCRawTransactionFromBlockIndex(block, uint64(index))
+	return api.rawTxnByIdxInBlock(ctx, tx, blockHash, blockNum, uint64(index))
 }
 
 // GetTransactionByBlockNumberAndIndex implements eth_getTransactionByBlockNumberAndIndex. Returns information about a transaction given a block number and transaction index.
@@ -264,22 +243,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
-	}
-
-	txs := block.Transactions()
-	idx := uint64(txIndex)
-	n := uint64(len(txs))
-	if idx >= n {
-		return nil, nil // not error
-	}
-
-	return ethapi.NewRPCTransaction(txs[txIndex], hash, block.Time(), blockNum, idx, block.BaseFee()), nil
+	return api.rpcTxnByIdxInBlock(ctx, tx, hash, blockNum, uint64(txIndex))
 }
 
 // GetRawTransactionByBlockNumberAndIndex returns the bytes of the transaction for the given block number and index.
@@ -301,7 +265,7 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return newRPCRawTransactionFromBlockIndex(b, uint64(index))
 	}
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -314,16 +278,53 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return nil, err
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
-	if err != nil {
-		if errors.As(err, &rpc.BlockNotFoundErr{}) {
-			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
+	return api.rawTxnByIdxInBlock(ctx, tx, hash, blockNum, uint64(index))
+}
+
+// txnByIdxInBlock returns the i-th transaction of a canonical block with its header, from the
+// block cache when the whole block is there, else reading only that transaction. ok is false when
+// the block or that transaction is missing - not an error, see https://github.com/erigontech/erigon/issues/1645
+func (api *APIImpl) txnByIdxInBlock(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum, txIdxInBlock uint64) (types.Transaction, *types.Header, bool, error) {
+	if txIdxInBlock > math.MaxInt { // the readers take an int index
+		return nil, nil, false, nil
+	}
+	if api.blocksLRU != nil {
+		if b, ok := api.blocksLRU.Get(blockHash); ok && b != nil {
+			txs := b.Transactions()
+			if txIdxInBlock >= uint64(len(txs)) {
+				return nil, nil, false, nil
+			}
+			return txs[txIdxInBlock], b.HeaderNoCopy(), true, nil
 		}
+	}
+	header, err := api.headerByHashAndNumber(ctx, tx, blockHash, blockNum)
+	if err != nil || header == nil {
+		return nil, nil, false, err
+	}
+	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txIdxInBlock))
+	if err != nil || !ok {
+		return nil, nil, false, err
+	}
+	return txn, header, true, nil
+}
+
+func (api *APIImpl) rpcTxnByIdxInBlock(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum, txIdxInBlock uint64) (*ethapi.RPCTransaction, error) {
+	txn, header, ok, err := api.txnByIdxInBlock(ctx, tx, blockHash, blockNum, txIdxInBlock)
+	if err != nil || !ok {
 		return nil, err
 	}
-	if block == nil {
-		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
-	}
+	return ethapi.NewRPCTransaction(txn, blockHash, header.Time, blockNum, txIdxInBlock, header.BaseFee), nil
+}
 
-	return newRPCRawTransactionFromBlockIndex(block, uint64(index))
+// rawTxnByIdxInBlock returns the binary encoding of the i-th transaction of a canonical block.
+func (api *APIImpl) rawTxnByIdxInBlock(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNum, txIdxInBlock uint64) (hexutil.Bytes, error) {
+	txn, _, ok, err := api.txnByIdxInBlock(ctx, tx, blockHash, blockNum, txIdxInBlock)
+	if err != nil || !ok {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := txn.MarshalBinary(&buf); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
