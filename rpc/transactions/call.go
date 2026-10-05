@@ -104,6 +104,7 @@ func DoCall(
 	txCtx := protocol.NewEVMTxContext(msg)
 	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
 	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
+	defer evm.ReleaseCaches()
 	// stop() runs before cancel() (LIFO), so the callback cannot fire for a later call, and
 	// this EVM is not reused, so a callback already running needs no join.
 	var timedOut atomic.Bool

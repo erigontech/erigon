@@ -22,6 +22,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -141,6 +142,25 @@ func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey 
 // internStorageKey returns word interned as a StorageKey, skipping unique.Make
 // for words seen before. Short-lived EVMs intern uncached: the table only earns
 // back its allocation over a few hundred storage ops.
+// The intern tables map a word to its process-wide canonical handle, so a
+// released table stays correct for the next EVM without clearing.
+var (
+	storageKeyCachePool = sync.Pool{New: func() any { return new(storageKeyCache) }}
+	addressCachePool    = sync.Pool{New: func() any { return new(addressCache) }}
+)
+
+// ReleaseCaches hands the intern tables to the next EVM. The EVM must not run after it.
+func (evm *EVM) ReleaseCaches() {
+	if evm.internCache != nil {
+		storageKeyCachePool.Put(evm.internCache)
+		evm.internCache = nil
+	}
+	if evm.addrCache != nil {
+		addressCachePool.Put(evm.addrCache)
+		evm.addrCache = nil
+	}
+}
+
 func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 	c := evm.internCache
 	if c == nil {
@@ -148,7 +168,7 @@ func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 			evm.internOps++
 			return accounts.InternKey(word.Bytes32())
 		}
-		c = new(storageKeyCache)
+		c = storageKeyCachePool.Get().(*storageKeyCache)
 		evm.internCache = c
 		return c.fill(slotIndex(word), word)
 	}
@@ -207,7 +227,7 @@ func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
 			evm.addrOps++
 			return accounts.InternAddress(word.Bytes20())
 		}
-		c = new(addressCache)
+		c = addressCachePool.Get().(*addressCache)
 		evm.addrCache = c
 		return c.fill(addrIndex(word), word)
 	}
