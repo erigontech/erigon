@@ -1377,6 +1377,12 @@ func (ws *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[acc
 	return maps.All(ws.codeHash)
 }
 
+// StoragesChanged cannot filter: a plain WriteSet carries no version map to
+// compare a write against, so it yields every write, intra-tx no-ops included.
+func (ws *WriteSet) StoragesChanged() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
+	return ws.Storages()
+}
+
 func (ws *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	if ws == nil {
 		return maps.All(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int](nil))
