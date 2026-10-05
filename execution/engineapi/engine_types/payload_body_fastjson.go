@@ -29,25 +29,11 @@ type (
 )
 
 func (bs ExecutionPayloadBodies) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	return writeBodies(s, bs)
+	jsonstream.ArrayValue(s, bs, writeMarshaler[*ExecutionPayloadBody])
+	return nil
 }
 
 func (bs ExecutionPayloadBodiesV2) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	return writeBodies(s, bs)
-}
-
-// writeBodies writes a nil list as null and a nil body as null, as encoding/json does.
-func writeBodies[B jsonstream.Marshaler](s *jsonstream.Stream, bodies []B) error {
-	if bodies == nil {
-		s.WriteNil()
-		return nil
-	}
-	s.WriteArrayStart()
-	for _, b := range bodies {
-		if err := b.MarshalFastJSONTo(s); err != nil {
-			return err
-		}
-	}
-	s.WriteArrayEnd()
+	jsonstream.ArrayValue(s, bs, writeMarshaler[*ExecutionPayloadBodyV2])
 	return nil
 }
