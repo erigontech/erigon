@@ -1618,9 +1618,12 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 
 // readCommittedState reads a storage slot with committed-view semantics.
 func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
-	// A recorded read of the slot is its value before this tx, whatever the tx wrote since.
+	// A recorded read of the slot is its value before this tx, whatever the tx wrote
+	// since, unless the tx created the contract over it.
 	if s.versionMap != nil {
-		if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
+		so, resident := s.stateObjects[addr]
+		created, _ := s.versionedWriteCreateContract(addr)
+		if (!resident || !so.deleted) && !created {
 			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
 				return tr.Val, tr.Source, tr.Version, nil
 			}
