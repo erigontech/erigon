@@ -24,9 +24,10 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// Matches chain tip sync's 50 ms polling. GetHead is a cached read unless fork choice changed since the last call (a
-// block, payload, attestation or slot tick), in which case it recomputes the head under the fork choice lock.
-const sleepForSlotHeadPollInterval = 50 * time.Millisecond
+// A head change only has to reach the synced head before the next slot, seconds after the attestation and payload
+// deadlines that cause it. A poll that finds the head cache invalidated recomputes the head under the fork choice lock,
+// so this loop adds at most five such recomputations a second.
+const sleepForSlotHeadPollInterval = 200 * time.Millisecond
 
 type sleepForSlotForkChoice interface {
 	gloasHeadReader
