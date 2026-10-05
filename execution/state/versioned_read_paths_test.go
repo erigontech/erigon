@@ -759,13 +759,7 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetCaughtAtCommit(t *testing.T
 
 	var io VersionedIO
 	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
-	valid := mvhm.ValidateVersion(5, &io, func(rv, wv Version) VersionValidity {
-		if rv == wv {
-			return VersionValid
-		}
-		return VersionInvalid
-	}, true, false, false, "")
-	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the stale read")
+	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, false, false, ""), "commit-time validation catches the stale read")
 }
 
 // D1 for storage: a repeat SLOAD of a slot this tx wrote serves the own write,
@@ -794,13 +788,7 @@ func TestVersionedRead_D1_StorageWriteSetHitWithStaleReadSetCaughtAtCommit(t *te
 
 	var io VersionedIO
 	ibs.MergeTxIOInto(&io, ibs.VersionedWrites())
-	valid := mvhm.ValidateVersion(5, &io, func(rv, wv Version) VersionValidity {
-		if rv == wv {
-			return VersionValid
-		}
-		return VersionInvalid
-	}, true, false, false, "")
-	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the stale read")
+	assert.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, &io, validateEqualVersion, true, false, false, ""), "commit-time validation catches the stale read")
 }
 
 // The nil≡empty arm of readValueUnchanged carries the same gates as
