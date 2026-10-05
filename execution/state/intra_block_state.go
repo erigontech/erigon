@@ -1986,20 +1986,7 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		return ibs.stateObjectForAccount(addr, account), nil
 	}
 
-	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
-		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
-	}
-	var readStart time.Time
-	if dbg.KVReadLevelledMetrics {
-		readStart = time.Now()
-	}
-	readAccount, err := ibs.stateReader.ReadAccountData(addr)
-	if dbg.KVReadLevelledMetrics {
-		ibs.accountReadDuration += time.Since(readStart)
-		ibs.accountReadCount++
-	}
-	ibs.stateReader.SetTrace(false, "")
-	ibs.recordStateReadError(err)
+	readAccount, err := ibs.readCommittedAccount(addr)
 
 	accountSource := StorageRead
 	// A DB-loaded record is pre-block state — older than any in-block cell.
@@ -2123,6 +2110,38 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	}
 	ibs.setStateObject(addr, obj)
 	return obj, nil
+}
+
+// readCommittedAccount reads addr from the state reader. On the versioned path
+// the result goes through committedBase: the committed view is block-immutable,
+// and noMaterialize rebuilds the account from it on every field read.
+func (ibs *IntraBlockState) readCommittedAccount(addr accounts.Address) (*accounts.Account, error) {
+	if ibs.versionMap != nil {
+		if acc, ok := ibs.committedBase[addr]; ok {
+			return acc, nil
+		}
+	}
+	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
+		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
+	}
+	var readStart time.Time
+	if dbg.KVReadLevelledMetrics {
+		readStart = time.Now()
+	}
+	acc, err := ibs.stateReader.ReadAccountData(addr)
+	if dbg.KVReadLevelledMetrics {
+		ibs.accountReadDuration += time.Since(readStart)
+		ibs.accountReadCount++
+	}
+	ibs.stateReader.SetTrace(false, "")
+	ibs.recordStateReadError(err)
+	if err == nil && ibs.versionMap != nil {
+		if ibs.committedBase == nil {
+			ibs.committedBase = make(map[accounts.Address]*accounts.Account)
+		}
+		ibs.committedBase[addr] = acc
+	}
+	return acc, err
 }
 
 func (ibs *IntraBlockState) setStateObject(addr accounts.Address, object *stateObject) {
