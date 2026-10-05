@@ -85,7 +85,7 @@ func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCac
 	// A writable tx's visible end comes from the SharedDomains flush memo, not
 	// from the tx, so only a read-only tx can vouch for a fill here. A read-only
 	// wrapper can hide a writable tx, so both ends are checked.
-	generationTx := cacheGenerationTx(tx)
+	generationTx := kv.UnderlyingTx(tx)
 	if generationTx == nil || writableTx(tx) || writableTx(generationTx) {
 		return g
 	}
