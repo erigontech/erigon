@@ -92,8 +92,20 @@ func (al *accessList) dropMemo() {
 
 // ContainsAddress returns true if the address is in the access list.
 func (al *accessList) ContainsAddress(address accounts.Address) bool {
-	_, ok := al.addresses[address]
-	return ok || al.isPrecompile(address)
+	if _, ok := al.addresses[address]; ok {
+		return true
+	}
+	return al.warmPrecompile(address)
+}
+
+// warmPrecompile reports whether address is a precompile and, if so, adds it to
+// addresses unjournaled, so later lookups in the tx hit on the first map probe.
+func (al *accessList) warmPrecompile(address accounts.Address) bool {
+	if !al.isPrecompile(address) {
+		return false
+	}
+	al.addresses[address] = -1
+	return true
 }
 
 // Contains checks if a slot within an account is present in the access list, returning
@@ -134,7 +146,7 @@ func (al *accessList) Copy() *accessList {
 // AddAddress adds an address to the access list, and returns 'true' if the operation
 // caused a change (addr was not previously in the list).
 func (al *accessList) AddAddress(address accounts.Address) bool {
-	if _, present := al.addresses[address]; present || al.isPrecompile(address) {
+	if _, present := al.addresses[address]; present || al.warmPrecompile(address) {
 		return false
 	}
 	al.addresses[address] = -1

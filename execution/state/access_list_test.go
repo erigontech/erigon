@@ -305,8 +305,8 @@ func TestPrepareKeepsPrecompilesWarm(t *testing.T) {
 	precompiles := []accounts.Address{precompile}
 	for range 2 {
 		s.Prepare(&chain.Rules{IsBerlin: true}, accounts.NilAddress, accounts.NilAddress, accounts.NilAddress, precompiles, nil)
-		require.True(t, s.AddressInAccessList(precompile))
 		require.NotContains(t, s.accessList.addresses, precompile)
+		require.True(t, s.AddressInAccessList(precompile))
 		require.False(t, s.AddressInAccessList(other))
 		n := s.journal.length()
 		require.False(t, s.AddAddressToAccessList(precompile))
