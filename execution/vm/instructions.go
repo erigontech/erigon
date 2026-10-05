@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -1030,9 +1031,9 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var addr accounts.Address
 	if suberr == nil {
 		res, addr, returnGas, childGasUsed, suberr = evm.createPrepared(scope.Contract.Address(), codeAndHash, gas, value, address, typ, preparation)
-	} else if forwarded && evm.Config().Tracer != nil {
+	} else if tracer := evm.Config().Tracer; forwarded && (tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook() || dbg.TraceTransactionIO) {
 		evm.captureBegin(evm.depth, typ, scope.Contract.Address(), address, false, codeAndHash.code, gas, value, nil)
-		evm.captureEnd(evm.depth, returnGas, childGasUsed, nil, suberr)
+		evm.captureEnd(evm.depth, typ, scope.Contract.Address(), address, returnGas, childGasUsed, nil, suberr)
 	}
 	scope.Contract.selfBalanceCached = false
 	if forwarded {
