@@ -1580,6 +1580,14 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
 		}
 	}
+	if s.versionMap != nil && s.warmReadable(addr) {
+		// A resident deleted object outranks the read set, as in versionedReadCore.
+		if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
+			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
+				return tr.Val, tr.Source, tr.Version, false, nil
+			}
+		}
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {

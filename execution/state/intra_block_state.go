@@ -144,6 +144,7 @@ func (aa AccessSet) Merge(other AccessSet) AccessSet {
 // NOT THREAD SAFE!
 type IntraBlockState struct {
 	stateReader StateReader
+	codeAccess  codeAccessTracker // stateReader, if it tracks code access
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
 	stateObjects      map[accounts.Address]*stateObject // used only if `noMaterialize == false`
@@ -252,6 +253,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		trace:             false,
 		dep:               UnknownDep,
 	}
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
 	return ibs
 }
@@ -773,8 +775,8 @@ type codeAccessTracker interface {
 }
 
 func (ibs *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
-	if hook, ok := ibs.stateReader.(codeAccessTracker); ok {
-		hook.OnCodeAccess(addr, code)
+	if ibs.codeAccess != nil {
+		ibs.codeAccess.OnCodeAccess(addr, code)
 	}
 }
 
@@ -2957,6 +2959,12 @@ func (ibs *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 // and FinalizedWrites withholds its created-empty writes.
 func (ibs *IntraBlockState) StartAccessRecording() {
 	ibs.recordAccess = true
+}
+
+// StopAccessRecording turns access tracking off for a caller that builds no BAL.
+func (ibs *IntraBlockState) StopAccessRecording() {
+	ibs.recordAccess = false
+	ibs.versionedReads.access = nil
 }
 
 // MarkReadsInternal marks all versioned reads for addr as internal.
