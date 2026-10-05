@@ -1611,6 +1611,14 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 
 // readCommittedState reads a storage slot with committed-view semantics.
 func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
+	if s.versionMap == nil {
+		so, err := s.getStateObject(addr, true)
+		if err != nil || so == nil || so.deleted {
+			return uint256.Int{}, StorageRead, UnknownVersion, err
+		}
+		v, err := so.GetCommittedState(key)
+		return v, StorageRead, UnknownVersion, err
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, true, false, &r)
 	if r.err != nil {
