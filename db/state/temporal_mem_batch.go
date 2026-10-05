@@ -17,11 +17,14 @@
 package state
 
 import (
+	"runtime/debug"
+
 	"bytes"
 	"cmp"
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon/common/log/v3"
 	"maps"
 	"slices"
 	"sync"
@@ -752,8 +755,10 @@ func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
 	}
-	if _, err := rawdb.IncrementStateVersion(tx); err != nil {
+	if v, err := rawdb.IncrementStateVersion(tx); err != nil {
 		return fmt.Errorf("can't write plain state version: %w", err)
+	} else {
+		log.Warn("[dbgver] state version incremented", "to", v+1, "stack", string(debug.Stack()))
 	}
 	return nil
 }
