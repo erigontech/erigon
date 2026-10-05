@@ -411,13 +411,15 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 			}
 		}
-		// System calls use TouchAccount instead of Transfer to avoid
+		// System calls skip Transfer (and, outside AuRa, TouchAccount) to avoid
 		// spurious balance reads on the caller that would pollute the
 		// Block Access List (EIP-7928). The touch is still needed so
 		// AuRa/Gnosis keeps the empty system account in the PMT.
 		if syscall && value.IsZero() {
-			if err := evm.intraBlockState.TouchAccount(caller); err != nil {
-				return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			if evm.chainRules.IsAura {
+				if err := evm.intraBlockState.TouchAccount(caller); err != nil {
+					return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+				}
 			}
 		} else {
 			// Normal (non-syscall) calls always go through Transfer —
