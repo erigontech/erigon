@@ -459,9 +459,11 @@ func BenchmarkAccountCopy(b *testing.B) {
 	}
 }
 
+var accountSink *Account
+
 func BenchmarkAccountSelfCopy(b *testing.B) {
 	a := Account{Nonce: 1, Balance: *uint256.NewInt(2), Root: empty.RootHash, CodeHash: EmptyCodeHash, Incarnation: 5, PrevIncarnation: 6}
 	for b.Loop() {
-		_ = a.SelfCopy()
+		accountSink = a.SelfCopy()
 	}
 }
