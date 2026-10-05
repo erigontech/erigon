@@ -297,6 +297,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			so.release()
 		}
 		delete(s.stateObjects, je.account)
+		s.lastObj = nil
 		delete(s.stateObjectsDirty, je.account)
 		// The account did not exist before this create, so all of its versioned
 		// writes originate from the creation being reverted. Field-level entries
@@ -315,6 +316,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		}
 		if s.noMaterialize {
 			delete(s.stateObjects, je.account)
+			s.lastObj = nil
 		} else {
 			s.setStateObject(je.account, prev)
 		}
