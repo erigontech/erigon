@@ -80,3 +80,42 @@ func TestGasCallDoesNotCharge(t *testing.T) {
 		})
 	}
 }
+
+// failOnceStorageReader serves an existing account whose slots hold value, but fails the first storage read.
+type failOnceStorageReader struct {
+	state.StateReader
+	value  uint256.Int
+	failed bool
+}
+
+func (r *failOnceStorageReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return &accounts.Account{Nonce: 1}, nil
+}
+
+func (r *failOnceStorageReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
+	if !r.failed {
+		r.failed = true
+		return uint256.Int{}, false, errors.New("storage read failed")
+	}
+	return r.value, true, nil
+}
+
+func TestSStoreRereadsAfterAFailedGasRead(t *testing.T) {
+	t.Parallel()
+
+	reader := &failOnceStorageReader{StateReader: state.NewNoopReader(), value: *uint256.NewInt(7)}
+	ibs := state.New(reader)
+	defer ibs.Close()
+	addr := accounts.InternAddress([20]byte{0x10})
+	require.NoError(t, ibs.SetCode(addr, []byte{byte(PUSH0), byte(PUSH0), byte(SSTORE), byte(STOP)}, tracing.CodeChangeUnspecified))
+	var prevs []uint256.Int
+	ibs.SetHooks(&tracing.Hooks{OnStorageChange: func(_ accounts.Address, _ accounts.StorageKey, prev, _ uint256.Int) {
+		prevs = append(prevs, prev)
+	}})
+
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	_, _, _, err := evm.Call(accounts.ZeroAddress, addr, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.True(t, reader.failed)
+	require.Equal(t, []uint256.Int{reader.value}, prevs, "a failed gas-phase read of 0 must not turn clearing the slot into a no-op")
+}
