@@ -2959,6 +2959,12 @@ func (ibs *IntraBlockState) StartAccessRecording() {
 	ibs.recordAccess = true
 }
 
+// StopAccessRecording turns access tracking off for a caller that builds no BAL.
+func (ibs *IntraBlockState) StopAccessRecording() {
+	ibs.recordAccess = false
+	ibs.versionedReads.access = nil
+}
+
 // MarkReadsInternal marks all versioned reads for addr as internal.
 // Internal reads are kept for parallel-execution conflict detection
 // but excluded from the block access list (BAL).  This is used when
