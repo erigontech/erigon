@@ -48,11 +48,11 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 	if s.Conn().IsClosed() {
 		return nil
 	}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, gid, clparams.Phase0Version); err != nil {
+	if err := ssz_snappy.DecodeAndReadNoForkDigestExact(s, gid, clparams.Phase0Version, uint64(gid.EncodingSizeSSZ())); err != nil {
 		if strings.Contains(err.Error(), "stream reset") {
 			return nil
 		}
-		return err
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 
 	if gid.Id > 250 { // 250 is the status code for getting banned due to whatever reason

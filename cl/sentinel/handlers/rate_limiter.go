@@ -79,6 +79,9 @@ func (tb *tokenBucket) tryConsume(n int) bool {
 type protocolRateConfig struct {
 	maxTokens  float64 // burst capacity
 	refillRate float64 // tokens per second
+	// noPunishment is for messages peers send on every connection: an
+	// exhausted bucket must recover at refillRate, not lock the peer out.
+	noPunishment bool
 }
 
 // maxConcurrentRequestsPerPeer is the maximum number of concurrent in-flight
@@ -120,17 +123,16 @@ func newPeerRateLimiter() *peerRateLimiter {
 		protocolLimits: make(map[string]protocolRateConfig),
 	}
 
-	// Rate limits aligned with Lighthouse/Lodestar.
+	// Rate limits aligned with other consensus clients.
 	// Format: maxTokens (burst), refillRate (tokens/second)
-	// Lighthouse uses ~128 tokens per 10s for block requests, 5/15s for status, etc.
-	blockRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}       // 128 per 10s
-	blobRate := protocolRateConfig{maxTokens: 72, refillRate: 7.2}          // 72 per 10s
-	dataColRate := protocolRateConfig{maxTokens: 16384, refillRate: 1638.4} // 16384 per 10s (proportional to blockRate × NumberOfColumns)
-	lcRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}          // 128 per 10s
-	pingRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}           // 2 per 10s
-	goodbyeRate := protocolRateConfig{maxTokens: 1, refillRate: 0.1}        // 1 per 10s
-	statusRate := protocolRateConfig{maxTokens: 5, refillRate: 0.33}        // 5 per 15s
-	metadataRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}       // 2 per 10s
+	blockRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}                  // 128 per 10s
+	blobRate := protocolRateConfig{maxTokens: 72, refillRate: 7.2}                     // 72 per 10s
+	dataColRate := protocolRateConfig{maxTokens: 16384, refillRate: 1638.4}            // 16384 per 10s (proportional to blockRate × NumberOfColumns)
+	lcRate := protocolRateConfig{maxTokens: 128, refillRate: 12.8}                     // 128 per 10s
+	pingRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}                      // 2 per 10s
+	goodbyeRate := protocolRateConfig{maxTokens: 1, refillRate: 1, noPunishment: true} // 1 per second
+	statusRate := protocolRateConfig{maxTokens: 5, refillRate: 1, noPunishment: true}  // 5 burst, 1 per second
+	metadataRate := protocolRateConfig{maxTokens: 2, refillRate: 0.2}                  // 2 per 10s
 
 	rl.protocolLimits[communication.BeaconBlocksByRangeProtocolV2] = blockRate
 	rl.protocolLimits[communication.BeaconBlocksByRootProtocolV2] = blockRate
@@ -174,9 +176,9 @@ func (rl *peerRateLimiter) allowRequest(peerID string, protocol string, cost int
 }
 
 // consumeTokens attempts to consume cost tokens from the bucket for the given
-// peer and protocol. If the bucket is exhausted, the peer is punished and false
-// is returned. Batch handlers call this after decoding the request to charge for
-// the actual number of response items.
+// peer and protocol. If the bucket is exhausted, false is returned and, unless
+// the protocol has noPunishment, the peer is punished. Batch handlers call this
+// after decoding the request to charge for the actual number of response items.
 func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost int) bool {
 	if cost <= 0 {
 		return true
@@ -192,6 +194,9 @@ func (rl *peerRateLimiter) consumeTokens(peerID string, protocol string, cost in
 	}
 	bucket := bucketI.(*tokenBucket)
 	if !bucket.tryConsume(cost) {
+		if cfg.noPunishment {
+			return false
+		}
 		// Drain the bucket and suppress refill during punishment. Advance
 		// lastRefill so only tokens accumulated *after* the punishment
 		// expires are available. We leave a small grace window (enough for
