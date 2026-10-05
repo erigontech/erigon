@@ -436,6 +436,7 @@ func (m *memoReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
 func (m *memoReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return m.inner.ReadAccountDataForDebug(addr)
 }
+
 func (m *memoReader) ReadAccountIncarnation(addr accounts.Address) (uint64, error) {
 	return m.inner.ReadAccountIncarnation(addr)
 }
