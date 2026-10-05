@@ -2460,7 +2460,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// access list), promote it: without a real read the unchanged balance write has no
 	// baseline and would emit a spurious net-zero balance change.
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap != nil {
+	if ibs.versionMap != nil && !ibs.pooledReads {
 		if vr, seen := ibs.versionedReads.GetBalance(addr); !seen {
 			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, newObj.Balance()})
 		} else if vr.internal {
