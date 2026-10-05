@@ -252,6 +252,7 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"jumpend":  {byte(PUSH1), 3, byte(JUMP), byte(JUMPDEST)},
 		// A failed frame returns no data, whatever the last CALL returned.
 		"callthenbadjump": {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(PUSH1), 0, byte(JUMP)},
+		"callthenend":     {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL)},
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
