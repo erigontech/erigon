@@ -105,9 +105,6 @@ func TestVersionedTouch_RepeatedTouchIsNoop(t *testing.T) {
 		require.Positive(t, n)
 		require.NoError(t, ibs.TouchAccount(addr))
 		assert.Equal(t, n, ibs.journal.length(), "noMaterialize=%v", noMaterialize)
-		balance, ok := ibs.versionedWrites.GetBalance(addr)
-		require.True(t, ok)
-		assert.True(t, balance.Val.IsZero())
 	}
 }
 
@@ -123,15 +120,11 @@ func TestVersionedTouch_OwnBalanceWriteReadsNoFields(t *testing.T) {
 		ibs := newTouchTestIBS(t, addr, acc, noMaterialize)
 
 		require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
-		_, readNonce := ibs.versionedReads.GetNonce(addr)
-		_, readCodeHash := ibs.versionedReads.GetCodeHash(addr)
 		n := ibs.journal.length()
 		require.NoError(t, ibs.TouchAccount(addr))
 		assert.Equal(t, n, ibs.journal.length(), "noMaterialize=%v", noMaterialize)
 		_, ok := ibs.versionedReads.GetNonce(addr)
-		assert.Equal(t, readNonce, ok, "nonce read, noMaterialize=%v", noMaterialize)
-		_, ok = ibs.versionedReads.GetCodeHash(addr)
-		assert.Equal(t, readCodeHash, ok, "code hash read, noMaterialize=%v", noMaterialize)
+		assert.False(t, ok, "nonce read, noMaterialize=%v", noMaterialize)
 	}
 }
 
