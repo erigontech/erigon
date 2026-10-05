@@ -933,7 +933,7 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		v, o, sz     = scope.Stack.pop3()
 		value        = *v
 		offset, size = o.Uint64(), sz.Uint64()
-		input        = scope.Memory.GetCopy(offset, size)
+		input        = scope.Memory.GetPtr(offset, size)
 	)
 	return execCreate(pc, evm, scope, value, input, nil)
 }
@@ -960,7 +960,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	)
 	scope.create.initCode = nil
 	if !evm.chainRules.IsAmsterdam {
-		input = scope.Memory.GetCopy(offset, size)
+		input = scope.Memory.GetPtr(offset, size)
 	}
 	return execCreate(pc, evm, scope, endowment, input, &salt)
 }
