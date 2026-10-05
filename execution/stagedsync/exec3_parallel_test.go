@@ -276,6 +276,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 		return &exec.TxResult{Err: protocol.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
+	if t.strictNonce {
+		return &exec.TxResult{TxOut: t.writeMap}
+	}
 	return &exec.TxResult{}
 }
 
@@ -643,9 +646,12 @@ func runParallelWorkers(tb testing.TB, tasks []exec.Task, validation propertyChe
 	}
 
 	start := time.Now()
-	_, err = executeParallelWithCheck(tb, pe, tasks, false, validation, metadata)
+	result, err := executeParallelWithCheck(tb, pe, tasks, false, validation, metadata)
 
 	assert.NoError(tb, err, "error occur during parallel execution")
+	if result != nil {
+		assert.NoError(tb, result.Err, "block rejected")
+	}
 
 	// Need to apply the final write set to storage
 
