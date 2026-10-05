@@ -200,6 +200,52 @@ func TestVersionedRead_B_RepeatedTouchIsNoop(t *testing.T) {
 	assert.True(t, balance.Val.IsZero())
 }
 
+func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, noMaterialize bool) *IntraBlockState {
+	_, tx, domains := NewTestRwTx(t)
+	addrValue := addr.Value()
+	domains.SetTxNum(10)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
+	t.Cleanup(ibs.Close)
+	ibs.SetNoMaterialize(noMaterialize)
+	ibs.SetTxContext(1, 5)
+	return ibs
+}
+
+func TestVersionedTouch_RepeatedTouchIsNoop(t *testing.T) {
+	t.Parallel()
+	for _, noMaterialize := range []bool{false, true} {
+		addr := accounts.InternAddress([20]byte{0xb6})
+		acc := accounts.NewAccount()
+		acc.Incarnation = 1
+		ibs := newTouchTestIBS(t, addr, acc, noMaterialize)
+
+		require.NoError(t, ibs.TouchAccount(addr))
+		n := ibs.journal.length()
+		require.Positive(t, n)
+		require.NoError(t, ibs.TouchAccount(addr))
+		assert.Equal(t, n, ibs.journal.length(), "noMaterialize=%v", noMaterialize)
+	}
+}
+
+// The touch result does not depend on the other fields once the tx wrote the balance.
+func TestVersionedTouch_OwnBalanceWriteReadsNoFields(t *testing.T) {
+	t.Parallel()
+	for _, noMaterialize := range []bool{false, true} {
+		addr := accounts.InternAddress([20]byte{0xb7})
+		acc := accounts.NewAccount()
+		acc.Incarnation = 1
+		acc.Nonce = 1
+		acc.Balance = *uint256.NewInt(5)
+		ibs := newTouchTestIBS(t, addr, acc, noMaterialize)
+
+		require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
+		require.NoError(t, ibs.TouchAccount(addr))
+		_, ok := ibs.versionedReads.GetNonce(addr)
+		assert.False(t, ok, "nonce read, noMaterialize=%v", noMaterialize)
+	}
+}
+
 // ------------------------------------------------------------------
 // Section C: SelfDestruct active in versionMap
 // ------------------------------------------------------------------
