@@ -21,6 +21,8 @@ import (
 	"context"
 	"errors"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -56,7 +58,8 @@ import (
 // 3.3.0 - merge EngineGetBlobsBundleV1 into EngineGetPayload
 // 4.0.0 - remove BorTxnLookup and BorEvents
 // 4.1.0 - add FrozenBlocks function
-var EthBackendAPIVersion = &typesproto.VersionReply{Major: 4, Minor: 1, Patch: 0}
+// 4.2.0 - add BlockBody function
+var EthBackendAPIVersion = &typesproto.VersionReply{Major: 4, Minor: 2, Patch: 0}
 
 type EthBackendServer struct {
 	remoteproto.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -352,6 +355,35 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 		copy(sendersBytes[i*20:], sender[:])
 	}
 	return &remoteproto.BlockReply{BlockRlp: blockRlp, Senders: sendersBytes}, nil
+}
+
+func (s *EthBackendServer) BlockBody(ctx context.Context, req *remoteproto.BlockRequest) (*remoteproto.BlockBodyReply, error) {
+	hash := req.GetBlockHash()
+	if hash == nil || hash.Hi == nil || hash.Lo == nil {
+		return nil, status.Error(codes.InvalidArgument, "block hash is required")
+	}
+	blockHash := gointerfaces.ConvertH256ToHash(hash)
+	if blockHash == (common.Hash{}) {
+		return nil, status.Error(codes.InvalidArgument, "block hash must be non-zero")
+	}
+	tx, err := s.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	body, txCount, err := s.blockReader.Body(ctx, tx, blockHash, req.BlockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if body == nil {
+		return &remoteproto.BlockBodyReply{}, nil
+	}
+	bodyRlp, err := rlp.EncodeToBytes(body)
+	if err != nil {
+		return nil, err
+	}
+	return &remoteproto.BlockBodyReply{BodyRlp: bodyRlp, TxCount: txCount}, nil
 }
 
 func (s *EthBackendServer) CanonicalBodyForStorage(ctx context.Context, req *remoteproto.CanonicalBodyForStorageRequest) (*remoteproto.CanonicalBodyForStorageReply, error) {
