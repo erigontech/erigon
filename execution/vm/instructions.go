@@ -762,7 +762,24 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+	if !scope.slots.on {
+		*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+		return pc, nil, err
+	}
+	i := scope.slots.memo
+	if scope.slots.memoGen != scope.cacheGen {
+		i = scope.lookupSlot(evm)
+	}
+	if i >= 0 {
+		*loc = scope.slots.val[i]
+		return pc, nil, nil
+	}
+	ibs := evm.IntraBlockState()
+	word, key := *loc, scope.peekStorageKey(evm)
+	if *loc, err = ibs.GetState(scope.Contract.Address(), key); err == nil {
+		stamp, _ := ibs.ReadStamp()
+		scope.slots.put(stamp, word, key, *loc)
+	}
 	return pc, nil, err
 }
 

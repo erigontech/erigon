@@ -248,7 +248,7 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	var source ReadSource
 
 	if known != nil && so.db.versionMap == nil {
-		// The journal reads commited only with a version map.
+		// The journal reads the committed flag only with a version map.
 		prev, source = *known, StorageRead
 	} else {
 		// we need to use versioned read here otherwise we will miss versionmap entries
