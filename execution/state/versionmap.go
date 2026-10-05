@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
@@ -165,6 +166,9 @@ type VersionMap struct {
 	// unchanged; only the lock granularity moved from global to per-account.
 	s     sync.Map // accounts.Address -> *AddressEntry
 	trace bool
+	// written stays false for a map nothing was ever stored in, such as the one
+	// a single eth_call executes against.
+	written atomic.Bool
 }
 
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
@@ -371,6 +375,7 @@ func (vm *VersionMap) entryOrCreate(addr accounts.Address) *AddressEntry {
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
 	}
+	vm.written.Store(true)
 	e, _ := vm.s.LoadOrStore(addr, &AddressEntry{})
 	return e.(*AddressEntry)
 }

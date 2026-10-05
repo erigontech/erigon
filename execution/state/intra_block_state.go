@@ -1216,6 +1216,9 @@ func (ibs *IntraBlockState) finalizeProvisionalAddressRead(addr accounts.Address
 // writes; the tx's own SelfDestruct lives in versionedWrites and is consulted
 // separately, so the memoized value is stable for the attempt.
 func (ibs *IntraBlockState) readSelfDestructMemo(addr accounts.Address) (bool, ReadResult, bool) {
+	if !ibs.versionMap.written.Load() {
+		return ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex)
+	}
 	if e, hit := ibs.sdProbe[addr]; hit && e.epoch == ibs.sdProbeEpoch {
 		return e.destructed, e.res, e.ok
 	}
