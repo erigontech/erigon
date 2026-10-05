@@ -306,6 +306,9 @@ func TestPrepareKeepsPrecompilesWarm(t *testing.T) {
 	for range 2 {
 		s.Prepare(&chain.Rules{IsBerlin: true}, accounts.NilAddress, accounts.NilAddress, accounts.NilAddress, precompiles, nil)
 		require.NotContains(t, s.accessList.addresses, precompile)
+		addrMod, slotMod := s.AddSlotToAccessList(precompile, accounts.InternKey(common.HexToHash("0x01")))
+		require.False(t, addrMod, "a precompile is already in the access list")
+		require.True(t, slotMod)
 		require.True(t, s.AddressInAccessList(precompile))
 		require.False(t, s.AddressInAccessList(other))
 		n := s.journal.length()
@@ -323,4 +326,22 @@ func TestPrepareWarmsDestinationThatLeftThePrecompileSet(t *testing.T) {
 	s.Prepare(rules, accounts.NilAddress, accounts.NilAddress, accounts.NilAddress, []accounts.Address{dst}, nil)
 	s.Prepare(rules, accounts.NilAddress, accounts.NilAddress, dst, []accounts.Address{}, nil)
 	require.True(t, s.AddressInAccessList(dst))
+}
+
+// System calls run without Prepare; after a Reset they must see precompiles cold, as when
+// Prepare inserted them into the per-tx list.
+func TestResetLeavesPrecompilesCold(t *testing.T) {
+	t.Parallel()
+	s := New(NewNoopReader())
+	defer s.Close()
+	precompile := accounts.InternAddress(common.HexToAddress("0x01"))
+	precompiles := []accounts.Address{precompile}
+	rules := &chain.Rules{IsBerlin: true}
+	s.Prepare(rules, accounts.NilAddress, accounts.NilAddress, accounts.NilAddress, precompiles, nil)
+	s.Reset()
+	require.False(t, s.AddressInAccessList(precompile))
+	addrPresent, _ := s.SlotInAccessList(precompile, accounts.InternKey(common.HexToHash("0x01")))
+	require.False(t, addrPresent)
+	s.Prepare(rules, accounts.NilAddress, accounts.NilAddress, accounts.NilAddress, precompiles, nil)
+	require.True(t, s.AddressInAccessList(precompile))
 }
