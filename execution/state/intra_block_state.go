@@ -28,6 +28,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -261,6 +262,32 @@ func New(stateReader StateReader) *IntraBlockState {
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
 	return ibs
+}
+
+// ibsPool keeps IntraBlockStates of single calls: Reset keeps their maps'
+// capacity, which a fresh New would grow again from empty.
+var ibsPool sync.Pool
+
+// NewPooled is New over a reused IntraBlockState. Release it with ReleasePooled.
+func NewPooled(stateReader StateReader) *IntraBlockState {
+	ibs, ok := ibsPool.Get().(*IntraBlockState)
+	if !ok {
+		return New(stateReader)
+	}
+	ibs.stateReader = stateReader
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+	return ibs
+}
+
+// ReleasePooled resets ibs and hands it to the next NewPooled.
+func ReleasePooled(ibs *IntraBlockState) {
+	ibs.Reset()
+	ibs.revisions.reset()
+	ibs.stateObjectArena.reset()
+	ibs.tracingHooks = nil
+	ibs.trace = false
+	ibs.stateReader, ibs.codeAccess = nil, nil
+	ibsPool.Put(ibs)
 }
 
 func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockState {
