@@ -21,6 +21,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -143,6 +144,7 @@ func (aa AccessSet) Merge(other AccessSet) AccessSet {
 // NOT THREAD SAFE!
 type IntraBlockState struct {
 	stateReader StateReader
+	codeAccess  codeAccessTracker // stateReader, if it tracks code access
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
 	stateObjects      map[accounts.Address]*stateObject // used only if `noMaterialize == false`
@@ -181,12 +183,10 @@ type IntraBlockState struct {
 	versionMap      *VersionMap
 	versionedWrites WriteSet
 	versionedReads  ReadSet
-	// committedBase memoizes the per-tx committed (pre-block) account fallback
-	// used by versionedAccountBase when the versionMap has no cell for addr.
-	// The committed view is block-immutable and this branch is only reached on
-	// a versionMap miss (a written account returns via the write-set), so the
-	// cached pointer is safe to share across the tx's read-only callers. Reset
-	// per tx.
+	// committedBase memoizes the committed (pre-block) account that
+	// versionedAccountBase and committedCodeHash read from the state reader.
+	// The committed view is block-immutable, so the cached pointer is safe to
+	// share across the tx's read-only callers. Reset per tx.
 	committedBase       map[accounts.Address]*accounts.Account
 	accountReadDuration time.Duration
 	accountReadCount    int64
@@ -226,6 +226,8 @@ type IntraBlockState struct {
 	isAura bool
 
 	revisions revisions
+
+	lastCode accounts.Code // last code stored by SetCode
 }
 
 type sdProbeEntry struct {
@@ -251,6 +253,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		trace:             false,
 		dep:               UnknownDep,
 	}
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
 	return ibs
 }
@@ -330,6 +333,7 @@ func (ibs *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, ke
 // the underlying state trie to avoid reloading data for the next operations.
 func (ibs *IntraBlockState) Reset() {
 	clear(ibs.nilAccounts)
+	ibs.lastCode = accounts.Code{}
 	for _, so := range ibs.stateObjects {
 		so.release()
 	}
@@ -771,8 +775,8 @@ type codeAccessTracker interface {
 }
 
 func (ibs *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
-	if hook, ok := ibs.stateReader.(codeAccessTracker); ok {
-		hook.OnCodeAccess(addr, code)
+	if ibs.codeAccess != nil {
+		ibs.codeAccess.OnCodeAccess(addr, code)
 	}
 }
 
@@ -1048,6 +1052,12 @@ func (ibs *IntraBlockState) touchAccount(addr accounts.Address) {
 // TouchAccount materializes an empty account and records the zero-balance touch
 // needed for state clearing and trie consistency.
 func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
+	// An own balance write settles the touch: zero already is the touch, non-zero is a non-empty account.
+	if ibs.versionMap != nil && addr != ripemd {
+		if _, ok := ibs.versionedWrites.GetBalance(addr); ok {
+			return nil
+		}
+	}
 	markTouched := func() {
 		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Touch %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
@@ -1060,6 +1070,10 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			var prev uint256.Int
 			if had {
 				prev = prevWrite.Val
+				// An own zero balance already is the touch; repeating it would journal a no-op.
+				if prev.IsZero() && addr != ripemd {
+					return
+				}
 			}
 			ibs.recordWriteBalance(addr, uint256.Int{})
 			ibs.journal.touchAccount(addr, !had, prev)
@@ -1521,6 +1535,8 @@ func printCode(c []byte) (int, string) {
 	return lenc, fmt.Sprintf("%x...", c)
 }
 
+// SetCode keeps code, also after a revert or Reset: the caller must not modify it afterwards.
+//
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason tracing.CodeChangeReason) error {
@@ -1533,7 +1549,12 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	if err != nil {
 		return err
 	}
-	canonical := accounts.NewCode(code)
+	// Factories deploy the same bytes many times: reuse the last hash instead of re-hashing.
+	canonical := ibs.lastCode
+	if len(code) == 0 || !bytes.Equal(code, canonical.Bytes) {
+		canonical = accounts.NewCode(code)
+		ibs.lastCode = canonical
+	}
 	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
 	origHash := stateObject.original.CodeHash
@@ -2440,6 +2461,7 @@ func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool 
 }
 
 func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool, eip8246 bool) error {
+	stateObject.db.journal.epoch++ // storage moves to committed, deletions apply
 	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	// EIP-8246: a self-destructed account that still holds a balance is reset to
 	// a balance-only account (nonce 0, empty code, empty storage) not deleted.
@@ -2937,6 +2959,12 @@ func (ibs *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 // and FinalizedWrites withholds its created-empty writes.
 func (ibs *IntraBlockState) StartAccessRecording() {
 	ibs.recordAccess = true
+}
+
+// StopAccessRecording turns access tracking off for a caller that builds no BAL.
+func (ibs *IntraBlockState) StopAccessRecording() {
+	ibs.recordAccess = false
+	ibs.versionedReads.access = nil
 }
 
 // MarkReadsInternal marks all versioned reads for addr as internal.
