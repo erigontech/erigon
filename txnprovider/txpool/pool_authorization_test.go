@@ -260,7 +260,7 @@ func TestRemoteAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
 }
 
 func TestRejectedUnwindKeepsAuthorityReservation(t *testing.T) {
-	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	ctx, pool, db, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	authority := crypto.PubkeyToAddress(key.PublicKey)
@@ -294,6 +294,48 @@ func TestRejectedUnwindKeepsAuthorityReservation(t *testing.T) {
 	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, TxnSlots{}, TxnSlots{}))
 	require.Same(t, owner, pool.auths[reservation])
 	require.Equal(t, pooled.AuthAndNonces, rejected.AuthAndNonces)
+	dbTx, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer dbTx.Rollback()
+	known, err := pool.IdHashKnown(dbTx, rejected.IDHash[:])
+	require.NoError(t, err)
+	require.False(t, known, "a temporary unwind rejection must remain retryable")
+}
+
+func TestRejectedUnwindKeepsPooledTransaction(t *testing.T) {
+	for _, kind := range []string{"regular", "blob"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			pooled := newTestTxnSlot(0, 0, 10, 10, 100_000)
+			pooled.IDHash[0] = 1
+			var slots TxnSlots
+			slots.Append(pooled, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, slots)
+			require.NoError(t, err)
+			require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+			owner := pool.byHash[string(pooled.IDHash[:])]
+
+			rejected := newTestTxnSlot(0, 0, 10, 10, 100_000)
+			if kind == "blob" {
+				rejected = newTestBlobTxnSlot(0, 0, 10, 10, 100_000)
+				rejected.Txn.(*types.BlobTx).BlobVersionedHashes = []common.Hash{{1}}
+			}
+			rejected.IDHash[0] = 2
+			var unwind TxnSlots
+			unwind.Append(rejected, sender[:], false)
+			err = pool.withLockedState(ctx, &unwind, func(view kvcache.CacheView) error {
+				_, err := pool.addTxnsOnNewBlock(1, view, &remoteproto.StateChangeBatch{}, pool.senders, unwind,
+					pool.pendingBaseFee.Load(), pool.blockGasLimit.Load(), pool.logger)
+				return err
+			})
+			require.NoError(t, err)
+			require.Zero(t, pool.totalBlobsInPool.Load())
+			require.Same(t, owner, pool.all.get(pooled.SenderID, pooled.Nonce))
+			require.Same(t, owner, pool.byHash[string(pooled.IDHash[:])])
+			require.Equal(t, 1, pool.pending.Len())
+			require.NotContains(t, pool.byHash, string(rejected.IDHash[:]))
+		})
+	}
 }
 
 func TestAdmissionRejectionsRemainRetryable(t *testing.T) {

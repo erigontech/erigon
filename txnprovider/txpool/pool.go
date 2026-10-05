@@ -1662,7 +1662,6 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 		if reason := p.addLocked(mt, &announcements); reason != txpoolcfg.NotSet {
-			p.discardLocked(mt, reason)
 			continue
 		}
 		sendersWithChangedState[mt.TxnSlot.SenderID] = struct{}{}
@@ -1847,6 +1846,8 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			// Self authorization nonce should be senderNonce + 1
 			if a.authority == senderAddr && a.nonce != mt.TxnSlot.Nonce+1 {
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				// This pool rule is stricter than execution. Its rejection depends only on
+				// the transaction, so cache it to avoid repeating authorization recovery.
 				p.discardReasonsLRU.Add(string(mt.TxnSlot.IDHash[:]), txpoolcfg.NonceTooLow)
 				return txpoolcfg.NonceTooLow
 			}
@@ -1904,9 +1905,7 @@ func (p *TxPool) discardLocked(mt *metaTxn, reason txpoolcfg.DiscardReason) {
 	}
 	if mt.TxnSlot.TxType() == SetCodeTxnType {
 		for _, a := range mt.TxnSlot.AuthAndNonces {
-			if p.auths[a] == mt {
-				delete(p.auths, a)
-			}
+			delete(p.auths, a)
 		}
 	}
 }
