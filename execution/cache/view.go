@@ -187,7 +187,7 @@ func (v ReadView) GetWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64, bo
 // written at or above its frontier, or any value once an unwind revoked the
 // view, is a miss.
 func (v ReadView) GetVisible(domain kv.Domain, key []byte) ([]byte, uint64, bool) {
-	if v.c == nil || v.frontier == nil || v.readViewEpoch != v.c.readViewEpoch.Load() {
+	if v.c == nil || v.frontier == nil {
 		return nil, 0, false
 	}
 	end, ok := v.frontier.DomainVisibleEnd(domain)
@@ -195,7 +195,9 @@ func (v ReadView) GetVisible(domain kv.Domain, key []byte) ([]byte, uint64, bool
 		return nil, 0, false
 	}
 	val, txNum, hit := v.c.getWithTxNum(domain, key)
-	if !hit || txNum >= end {
+	// The epoch is loaded after the entry: an unwind bumps it before it installs
+	// the replacement fork's entries.
+	if !hit || txNum >= end || v.readViewEpoch != v.c.readViewEpoch.Load() {
 		return nil, 0, false
 	}
 	return val, txNum, true
