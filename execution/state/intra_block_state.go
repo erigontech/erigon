@@ -144,6 +144,7 @@ func (aa AccessSet) Merge(other AccessSet) AccessSet {
 // NOT THREAD SAFE!
 type IntraBlockState struct {
 	stateReader StateReader
+	codeAccess  codeAccessTracker // stateReader, if it tracks code access
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
 	stateObjects      map[accounts.Address]*stateObject // used only if `noMaterialize == false`
@@ -254,6 +255,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		trace:             false,
 		dep:               UnknownDep,
 	}
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
 	return ibs
 }
@@ -775,8 +777,8 @@ type codeAccessTracker interface {
 }
 
 func (ibs *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
-	if hook, ok := ibs.stateReader.(codeAccessTracker); ok {
-		hook.OnCodeAccess(addr, code)
+	if ibs.codeAccess != nil {
+		ibs.codeAccess.OnCodeAccess(addr, code)
 	}
 }
 
