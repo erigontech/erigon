@@ -491,8 +491,6 @@ func TestInitStateCacheVersionLetsReadOnlyTxsUseTheCache(t *testing.T) {
 	require.Equal(t, 1, reads, "the repeat read is served from the cache")
 }
 
-// Snapshot downloads add state without bumping the state version, and a node
-// without executed blocks may still be downloading.
 func TestInitStateCacheVersionSkipsANodeWithoutExecutedBlocks(t *testing.T) {
 	db := newTestDb(t, 16)
 	stateCache := newSmallStateCache()
@@ -506,34 +504,31 @@ func TestInitStateCacheVersionSkipsANodeWithoutExecutedBlocks(t *testing.T) {
 	require.Equal(t, 2, reads)
 }
 
-func TestInitStateCacheVersionThenPublishedCommitServesTheNewValue(t *testing.T) {
-	db := newTestDb(t, 16)
-	stateCache := newSmallStateCache()
-	defer stateCache.Close()
-	commitAccount(t, db, nil, bytes.Repeat([]byte{0xcc}, 20), encAccount(1), 5)
-	indexBlock1(t, db, 1)
-	require.NoError(t, execctx.InitStateCacheVersion(t.Context(), db, stateCache))
-	key := bytes.Repeat([]byte{0xdd}, 20)
-	v, _ := readTwice(t, db, stateCache, key)
-	require.Empty(t, v)
+// A commit after the startup bind must replace the absent read it cached,
+// whether or not the commit is published to the cache.
+func TestInitStateCacheVersionThenCommitServesTheNewValue(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		published bool
+	}{{"published", true}, {"missed", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDb(t, 16)
+			stateCache := newSmallStateCache()
+			defer stateCache.Close()
+			commitAccount(t, db, nil, bytes.Repeat([]byte{0xcc}, 20), encAccount(1), 5)
+			indexBlock1(t, db, 1)
+			require.NoError(t, execctx.InitStateCacheVersion(t.Context(), db, stateCache))
+			key := bytes.Repeat([]byte{0xdd}, 20)
+			v, _ := readTwice(t, db, stateCache, key)
+			require.Empty(t, v)
 
-	commitAccount(t, db, stateCache, key, encAccount(2), 10)
-	v, _ = readTwice(t, db, stateCache, key)
-	require.Equal(t, encAccount(2), v)
-}
-
-func TestInitStateCacheVersionThenMissedCommitDoesNotServeTheStartupFill(t *testing.T) {
-	db := newTestDb(t, 16)
-	stateCache := newSmallStateCache()
-	defer stateCache.Close()
-	commitAccount(t, db, nil, bytes.Repeat([]byte{0xcc}, 20), encAccount(1), 5)
-	indexBlock1(t, db, 1)
-	require.NoError(t, execctx.InitStateCacheVersion(t.Context(), db, stateCache))
-	key := bytes.Repeat([]byte{0xdd}, 20)
-	v, _ := readTwice(t, db, stateCache, key)
-	require.Empty(t, v)
-
-	commitAccount(t, db, nil, key, encAccount(2), 10)
-	v, _ = readTwice(t, db, stateCache, key)
-	require.Equal(t, encAccount(2), v, "a commit the cache never saw must not leave the absent read in place")
+			publishTo := stateCache
+			if !tc.published {
+				publishTo = nil
+			}
+			commitAccount(t, db, publishTo, key, encAccount(2), 10)
+			v, _ = readTwice(t, db, stateCache, key)
+			require.Equal(t, encAccount(2), v)
+		})
+	}
 }

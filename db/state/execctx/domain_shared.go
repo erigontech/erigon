@@ -992,9 +992,6 @@ func GuardAggregatorForCache(db any, sc *cache.StateCache) {
 // downloads add state without advancing the state version, and Execution
 // progress is raised only after the initial download completes.
 func InitStateCacheVersion(ctx context.Context, db kv.RoDB, sc *cache.StateCache) error {
-	if sc == nil {
-		return nil
-	}
 	return db.View(ctx, func(tx kv.Tx) error {
 		progress, err := stages.GetStageProgress(tx, stages.Execution)
 		if err != nil || progress == 0 {
