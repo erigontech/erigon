@@ -956,7 +956,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 // to resolve sibling-account reads without taking a typed callback.
 func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
 	if !s.warmReadable(addr) {
-		if vw, ok := s.versionedWrites.address[addr]; ok {
+		if vw, ok := s.versionedWrites.GetAddress(addr); ok {
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
 		}
 	}
@@ -1073,14 +1073,14 @@ func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
 
 // warmField serves a repeat read of an account field without the version-map
 // probe: this tx's own write on a dirty address, else the recorded read.
-func warmField[T any](s *IntraBlockState, addr accounts.Address, writes map[accounts.Address]*VersionedWrite[T], path AccountPath, pick func(*acctRead) *VersionedRead[T]) (T, ReadSource, Version, bool) {
+func warmField[T any](s *IntraBlockState, addr accounts.Address, pickW func(*acctIO) **VersionedWrite[T], path AccountPath, pick func(*acctIO) *VersionedRead[T]) (T, ReadSource, Version, bool) {
 	r := s.versionedReads.find(addr)
 	if r == nil {
 		var zero T
 		return zero, UnknownSource, UnknownVersion, false
 	}
 	if r.dirty > 0 {
-		if vw, ok := writes[addr]; ok {
+		if vw := *pickW(r); vw != nil {
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, true
 		}
 	}
@@ -1096,7 +1096,7 @@ func warmField[T any](s *IntraBlockState, addr accounts.Address, writes map[acco
 // readBalance returns the address's balance using the version-aware
 // read pipeline.  Inlines the storage-read fallback.
 func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSource, Version, error) {
-	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.balance, BalancePath, pickBalance); ok {
+	if v, src, ver, ok := warmField(s, addr, pickWBalance, BalancePath, pickBalance); ok {
 		return v, src, ver, nil
 	}
 	var r readPathResult
@@ -1141,7 +1141,7 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 // miss and does not perform a storage fallback.  When the core signals
 // recordVR, records the read with currentBalance as the typed default.
 func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance uint256.Int) (uint256.Int, ReadSource, Version, error) {
-	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.balance, BalancePath, pickBalance); ok {
+	if v, src, ver, ok := warmField(s, addr, pickWBalance, BalancePath, pickBalance); ok {
 		return v, src, ver, nil
 	}
 	var r readPathResult
@@ -1180,7 +1180,7 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 
 // readNonce returns the nonce using the version-aware read pipeline.
 func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
-	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.nonce, NoncePath, pickNonce); ok {
+	if v, src, ver, ok := warmField(s, addr, pickWNonce, NoncePath, pickNonce); ok {
 		return v, src, ver, nil
 	}
 	var r readPathResult
@@ -1222,7 +1222,7 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 }
 
 func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64) (uint64, ReadSource, Version, error) {
-	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.nonce, NoncePath, pickNonce); ok {
+	if v, src, ver, ok := warmField(s, addr, pickWNonce, NoncePath, pickNonce); ok {
 		return v, src, ver, nil
 	}
 	var r readPathResult
@@ -1330,7 +1330,7 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 // the version-aware lookup honours the committed-only contract.
 func readCode(s *IntraBlockState, addr accounts.Address, commited bool) (accounts.Code, ReadSource, Version, error) {
 	if !commited {
-		if v, src, ver, ok := warmField(s, addr, s.versionedWrites.code, CodePath, pickCode); ok {
+		if v, src, ver, ok := warmField(s, addr, pickWCode, CodePath, pickCode); ok {
 			return v, src, ver, nil
 		}
 	} else if s.warmReadable(addr) {
@@ -1485,7 +1485,7 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 
 // readCodeHash returns the contract code hash.
 func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash, ReadSource, Version, error) {
-	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.codeHash, CodeHashPath, pickCodeHash); ok {
+	if v, src, ver, ok := warmField(s, addr, pickWCodeHash, CodeHashPath, pickCodeHash); ok {
 		return v, src, ver, nil
 	}
 	var r readPathResult
@@ -1530,7 +1530,7 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash,
 
 // refreshCodeHash is the in-memory-only variant for CodeHashPath.
 func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash accounts.CodeHash) (accounts.CodeHash, ReadSource, Version, error) {
-	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.codeHash, CodeHashPath, pickCodeHash); ok {
+	if v, src, ver, ok := warmField(s, addr, pickWCodeHash, CodeHashPath, pickCodeHash); ok {
 		return v, src, ver, nil
 	}
 	var r readPathResult

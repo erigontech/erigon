@@ -838,7 +838,7 @@ func TestReadValueUnchanged(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xcd, 0x02})
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
 	defer ibs.Release(false)
-	ibs.versionedReads.reset()
+	ibs.versionedReads.clearReads()
 	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(100)})
 	r := &readPathResult{mapBalanceVal: *uint256.NewInt(100)}
 	assert.True(t, ibs.readValueUnchanged(addr, BalancePath, accounts.NilKey, r))

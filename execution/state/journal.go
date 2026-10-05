@@ -97,7 +97,7 @@ type journalEntry struct {
 // exception or revertal request.
 type journal struct {
 	dirties map[accounts.Address]int // Dirty accounts and the number of changes
-	reads   *readTable               // mirrors dirties' counts while the state is versioned
+	reads   *ioTable                 // mirrors dirties' counts while the state is versioned
 	entries []journalEntry           // Current changes tracked by the journal
 	epoch   uint64                   // Moves on every revert, reset and unjournalled state change
 }

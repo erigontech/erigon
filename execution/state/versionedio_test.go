@@ -428,7 +428,7 @@ func TestVersionedIO_RemovedDependencyFallsThroughToStorage(t *testing.T) {
 	ibs := NewWithVersionMap(sr, NewVersionMap(nil))
 	ibs.SetTxContext(2, 0)
 
-	ibs.versionedReads.reset()
+	ibs.versionedReads.clearReads()
 	ibs.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(0xBB),

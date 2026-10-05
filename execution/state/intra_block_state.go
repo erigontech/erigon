@@ -181,8 +181,8 @@ type IntraBlockState struct {
 	// non-storage paths; the AccountKey{Path,Key} struct allocation is gone
 	// from the probe hot path.
 	versionMap      *VersionMap
-	versionedWrites WriteSet
-	versionedReads  readTable
+	versionedWrites writeView
+	versionedReads  ioTable
 	// committedBase memoizes the committed (pre-block) account that
 	// versionedAccountBase and committedCodeHash read from the state reader.
 	// The committed view is block-immutable, so the cached pointer is safe to
@@ -254,6 +254,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		dep:               UnknownDep,
 	}
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+	ibs.versionedWrites.t = &ibs.versionedReads
 	ibs.revisions.init()
 	return ibs
 }
@@ -3330,7 +3331,7 @@ func (ibs *IntraBlockState) versionedWriteHit(addr accounts.Address, path Accoun
 	if ibs.versionMap == nil {
 		return false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+	if !ibs.versionedReads.isDirty(addr) {
 		return false
 	}
 	switch path {
@@ -3441,7 +3442,7 @@ func (ibs *IntraBlockState) ResetVersionedIO() {
 
 // ResetVersionedReads clears tracked versioned reads without affecting writes.
 func (ibs *IntraBlockState) ResetVersionedReads() {
-	ibs.resetReads()
+	ibs.versionedReads.clearReads()
 }
 
 // VersionedWrites returns a frozen typed snapshot of this tx's recorded writes.

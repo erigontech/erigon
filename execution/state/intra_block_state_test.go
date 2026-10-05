@@ -774,10 +774,10 @@ func TestVersionMapOverwrite(t *testing.T) {
 	for h := range states[1].versionedWrites.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
 	}
-	states[1].versionedWrites = WriteSet{}
+	states[1].versionedWrites.ReleaseAndReset()
 
 	// Tx2 read should get Tx0's value
-	states[2].versionedReads.reset()
+	states[2].versionedReads.clearReads()
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -797,10 +797,10 @@ func TestVersionMapOverwrite(t *testing.T) {
 	for h := range states[0].versionedWrites.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 0, true)
 	}
-	states[0].versionedWrites = WriteSet{}
+	states[0].versionedWrites.ReleaseAndReset()
 
 	// Tx2 read again should get default vals
-	states[2].versionedReads.reset()
+	states[2].versionedReads.clearReads()
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -868,7 +868,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Now that Tx1 has flushed, re-reading without stale cache simulates a
 	// re-execution that the scheduler would trigger on dependency.
 	states[2].stateObjects = map[accounts.Address]*stateObject{}
-	states[2].versionedReads.reset()
+	states[2].versionedReads.clearReads()
 	v, err = states[2].GetState(addr, key2)
 	assert.NoError(t, err)
 	assert.Equal(t, val2, v)
@@ -895,10 +895,10 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	for h := range states[2].versionedWrites.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 2, true)
 	}
-	states[2].versionedWrites = WriteSet{}
+	states[2].versionedWrites.ReleaseAndReset()
 
 	// Tx3 read
-	states[3].versionedReads.reset()
+	states[3].versionedReads.clearReads()
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
@@ -923,7 +923,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// we need to flush the local state objects as we're not
 	// resetting the state - which is artificial for the test
 	states[3].stateObjects = map[accounts.Address]*stateObject{}
-	states[3].versionedReads.reset()
+	states[3].versionedReads.clearReads()
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -938,10 +938,10 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	for h := range states[1].versionedWrites.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
 	}
-	states[1].versionedWrites = WriteSet{}
+	states[1].versionedWrites.ReleaseAndReset()
 
 	// Tx3 read
-	states[3].versionedReads.reset()
+	states[3].versionedReads.clearReads()
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
