@@ -45,7 +45,7 @@ func TestChapelForkPrecompiles(t *testing.T) {
 
 	addr := func(b ...byte) accounts.Address { return accounts.InternAddress(common.BytesToAddress(b)) }
 	blsVerify, cometBFT, doubleSign, secp256k1Recover := addr(102), addr(103), addr(104), addr(105)
-	pointEvaluation, p256Verify := addr(0x0a), addr(0x01, 0x00)
+	pointEvaluation, p256Verify, blsG1Add := addr(0x0a), addr(0x01, 0x00), addr(0x0b)
 
 	for _, tc := range []struct {
 		name       string
@@ -56,14 +56,16 @@ func TestChapelForkPrecompiles(t *testing.T) {
 		doubleSign bool
 		cancun     bool
 		haber      bool
+		prague     bool
 	}{
-		{"planck", 28196022, 1679276104, false, "", false, false, false},
-		{"luban", 29613785, 1683534184, true, "CometBFTLightBlockValidate", false, false, false},
-		{"plato", 29861024, 1684276126, true, "CometBFTLightBlockValidate", false, false, false},
-		{"hertz", 31103030, 1688004519, true, "CometBFTLightBlockValidateHertz", false, false, false},
-		{"feynman", 39000000, 1711712272, true, "CometBFTLightBlockValidateHertz", true, false, false},
-		{"cancun", 40000000, 1714713485, true, "CometBFTLightBlockValidateHertz", true, true, false},
-		{"haber", 42000000, 1720719209, true, "CometBFTLightBlockValidateHertz", true, true, true},
+		{"planck", 28196022, 1679276104, false, "", false, false, false, false},
+		{"luban", 29613785, 1683534184, true, "CometBFTLightBlockValidate", false, false, false, false},
+		{"plato", 29861024, 1684276126, true, "CometBFTLightBlockValidate", false, false, false, false},
+		{"hertz", 31103030, 1688004519, true, "CometBFTLightBlockValidateHertz", false, false, false, false},
+		{"feynman", 39000000, 1711712272, true, "CometBFTLightBlockValidateHertz", true, false, false, false},
+		{"cancun", 40000000, 1714713485, true, "CometBFTLightBlockValidateHertz", true, true, false, false},
+		{"haber", 42000000, 1720719209, true, "CometBFTLightBlockValidateHertz", true, true, true, false},
+		{"prague", 49000000, 1741722894, true, "CometBFTLightBlockValidateHertz", true, true, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			blockContext := evmtypes.BlockContext{BlockNumber: tc.block, Time: tc.time}
@@ -71,6 +73,7 @@ func TestChapelForkPrecompiles(t *testing.T) {
 			assert.Equal(t, tc.doubleSign, set[doubleSign] != nil)
 			assert.Equal(t, tc.doubleSign, set[secp256k1Recover] != nil)
 			assert.Equal(t, tc.cancun, set[pointEvaluation] != nil)
+			assert.Equal(t, tc.prague, set[blsG1Add] != nil)
 			if tc.haber {
 				require.Contains(t, set, p256Verify)
 				assert.Equal(t, params.P256VerifyGas, set[p256Verify].RequiredGas(nil))

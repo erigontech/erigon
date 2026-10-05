@@ -91,6 +91,12 @@ type SystemTxEngine interface {
 	ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error
 }
 
+// AuthorityBlocker is implemented by engines (Parlia) that reject EIP-7702
+// authorizations signed by some accounts.
+type AuthorityBlocker interface {
+	BlocksAuthority(authority accounts.Address) bool
+}
+
 // RewardKind - The kind of block reward.
 // Depending on the rules engine the allocated block reward might have
 // different semantics which could lead e.g. to different reward values.
