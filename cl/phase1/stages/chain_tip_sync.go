@@ -32,6 +32,7 @@ const (
 	// sync (forwardRequestRetryInterval); retrying at once floods peers until the stage deadline.
 	chainTipRequestRetryInterval = 300 * time.Millisecond
 	chainTipNoPeersRetryInterval = 2 * time.Second
+	chainTipPollInterval         = time.Second
 )
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
@@ -205,7 +206,11 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		case respCh <- blocks:
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Second): // Take a short pause before the next iteration
+		}
+		select {
+		case <-time.After(chainTipPollInterval):
+		case <-ctx.Done():
+			return
 		}
 	}
 }
