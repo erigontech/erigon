@@ -24,6 +24,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"maps"
 	"math/big"
 	"math/bits"
@@ -245,6 +246,11 @@ func init() {
 		forkPrague:    {PrecompiledContractsPrague, &PrecompiledAddressesPrague},
 		forkOsaka:     {PrecompiledContractsOsaka, &PrecompiledAddressesOsaka},
 	} {
+		for addr := range tierSet.contracts {
+			if !isShortAddress(addr) {
+				panic(fmt.Sprintf("precompile %x is beyond the short address range EVM.precompile checks first", addr))
+			}
+		}
 		forkSets[tier] = mergedPrecompileSet{tierSet.contracts, slices.Collect(maps.Keys(tierSet.contracts))}
 		*tierSet.addresses = forkSets[tier].addresses
 	}
