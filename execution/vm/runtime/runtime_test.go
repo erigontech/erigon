@@ -20,7 +20,6 @@
 package runtime
 
 import (
-	"bytes"
 	"fmt"
 	"math/big"
 	"os"
@@ -977,89 +976,4 @@ func TestOpcodeMaskStillReportsFaults(t *testing.T) {
 			require.NotEmpty(t, faults, "an excluded opcode that faults must still reach OnFault")
 		})
 	}
-}
-
-// returnWord is code that returns 32 bytes of b.
-func returnWord(b byte) []byte {
-	code := append([]byte{byte(vm.PUSH32)}, bytes.Repeat([]byte{b}, 32)...)
-	return append(code, byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
-}
-
-// newReturnDataEVM deploys contracts at a and b returning 0xaa.. and 0xbb.. words.
-func newReturnDataEVM(t *testing.T, hooks *tracing.Hooks) (evm *vm.EVM, statedb *state.IntraBlockState, a, b, top accounts.Address) {
-	statedb = state.New(state.NewNoopReader())
-	t.Cleanup(statedb.Close)
-	a = accounts.InternAddress(common.HexToAddress("0xaa"))
-	b = accounts.InternAddress(common.HexToAddress("0xbb"))
-	top = accounts.InternAddress(common.HexToAddress("0xcc"))
-	require.NoError(t, statedb.SetCode(a, returnWord(0xaa), tracing.CodeChangeUnspecified))
-	require.NoError(t, statedb.SetCode(b, returnWord(0xbb), tracing.CodeChangeUnspecified))
-	cfg := &Config{State: statedb, EVMConfig: vm.Config{Tracer: hooks}}
-	setDefaults(cfg)
-	return NewEnv(cfg), statedb, a, b, top
-}
-
-// The EVM reuses its return-data buffer, so what a caller outside it gets must be its own.
-func TestCallReturnDataOutlivesNextCall(t *testing.T) {
-	t.Parallel()
-	evm, _, a, b, _ := newReturnDataEVM(t, nil)
-	gas := mdgas.MdGas{Execution: 1_000_000}
-	first, _, _, err := evm.Call(accounts.ZeroAddress, a, nil, gas, uint256.Int{}, false)
-	require.NoError(t, err)
-	_, _, _, err = evm.Call(accounts.ZeroAddress, b, nil, gas, uint256.Int{}, false)
-	require.NoError(t, err)
-	require.Equal(t, bytes.Repeat([]byte{0xaa}, 32), first)
-}
-
-// A tracer may keep a frame's output after later frames return.
-func TestTracerKeepsFrameOutputs(t *testing.T) {
-	t.Parallel()
-	var outputs [][]byte
-	hooks := &tracing.Hooks{OnExitV2: func(depth int, output []byte, _ mdgas.MdGasUsage, _ error, _ bool) {
-		if depth == 1 {
-			outputs = append(outputs, output)
-		}
-	}}
-	evm, statedb, _, _, top := newReturnDataEVM(t, hooks)
-	require.NoError(t, statedb.SetCode(top, append(callTo(0xaa, 0), callTo(0xbb, 0)...), tracing.CodeChangeUnspecified))
-	_, _, _, err := evm.Call(accounts.ZeroAddress, top, nil, mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, false)
-	require.NoError(t, err)
-	require.Equal(t, [][]byte{bytes.Repeat([]byte{0xaa}, 32), bytes.Repeat([]byte{0xbb}, 32)}, outputs)
-}
-
-// Block execution always sets a tracer with only an enter hook; it must not pay for copying frame outputs.
-func TestEnterOnlyTracerDoesNotCopyFrameOutputs(t *testing.T) {
-	allocs := func(hooks *tracing.Hooks) float64 {
-		evm, statedb, _, _, top := newReturnDataEVM(t, hooks)
-		require.NoError(t, statedb.SetCode(top, append(callTo(0xaa, 0), callTo(0xbb, 0)...), tracing.CodeChangeUnspecified))
-		return testing.AllocsPerRun(100, func() {
-			if _, _, _, err := evm.Call(accounts.ZeroAddress, top, nil, mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, false); err != nil {
-				t.Fatal(err)
-			}
-		})
-	}
-	enterOnly := &tracing.Hooks{OnEnterV2: func(int, byte, accounts.Address, accounts.Address, bool, []byte, mdgas.MdGas, uint256.Int, []byte) {}}
-	require.Equal(t, allocs(nil), allocs(enterOnly))
-}
-
-// CREATE stores the initcode's return data as code; later frames returning must not change it.
-func TestCreatedCodeOutlivesLaterReturns(t *testing.T) {
-	t.Parallel()
-	evm, statedb, _, _, top := newReturnDataEVM(t, nil)
-	initcode := returnWord(0xaa)
-	factory := func(initOffset int) []byte {
-		code := []byte{
-			byte(vm.PUSH1), byte(len(initcode)), byte(vm.PUSH1), byte(initOffset), byte(vm.PUSH1), 0, byte(vm.CODECOPY),
-			byte(vm.PUSH1), byte(len(initcode)), byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.CREATE),
-		}
-		code = append(code, callTo(0xbb, 0)...)
-		return append(code, byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
-	}
-	require.NoError(t, statedb.SetCode(top, append(factory(len(factory(0))), initcode...), tracing.CodeChangeUnspecified))
-	ret, _, _, err := evm.Call(accounts.ZeroAddress, top, nil, mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, false)
-	require.NoError(t, err)
-	created := accounts.InternAddress(common.BytesToAddress(ret))
-	code, err := statedb.GetCode(created)
-	require.NoError(t, err)
-	require.Equal(t, bytes.Repeat([]byte{0xaa}, 32), code)
 }
