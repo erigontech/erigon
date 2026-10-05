@@ -1621,7 +1621,8 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		}
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 		if reason := p.addLocked(mt, &announcements); reason != txpoolcfg.NotSet {
-			p.discardLocked(mt, reason)
+			p.deletedTxns = append(p.deletedTxns, mt)
+			p.discardReasonsLRU.Add(string(mt.TxnSlot.IDHash[:]), reason)
 			continue
 		}
 		sendersWithChangedState[mt.TxnSlot.SenderID] = struct{}{}
