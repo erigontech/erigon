@@ -300,6 +300,22 @@ func WithRPCStateCacheDecorator(decorator func(kvcache.Cache) kvcache.Cache) New
 
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
+// shutdownOnFatal builds the hook a component calls when it has died for good.
+// Cancelling the backend context stops the backend's goroutines, but the
+// process blocks in Node.Wait until the stack is closed, so a component that
+// gives up without this leaves a node that serves nothing and never exits.
+func shutdownOnFatal(cancel context.CancelFunc, stopNode func() error, logger log.Logger) func() {
+	return func() {
+		cancel()
+		if stopNode == nil {
+			return
+		}
+		if err := stopNode(); err != nil {
+			logger.Error("[backend] stopping node after fatal component exit", "err", err)
+		}
+	}
+}
+
 func New(
 	ctx context.Context,
 	stack *node.Node,
@@ -1855,7 +1871,7 @@ func New(
 			}
 		}
 		launchCaplin := backend.caplinLaunchBuilder(chainConfig)
-		backend.caplinService = caplincomp.NewCaplinService(ctx, dirs, launchCaplin, ctxCancel, logger)
+		backend.caplinService = caplincomp.NewCaplinService(ctx, dirs, launchCaplin, shutdownOnFatal(ctxCancel, backend.stopNode, logger), logger)
 		caplinProvider.SetRestarter(backend.caplinService)
 		if err := backend.caplinService.Start(ctx); err != nil {
 			return nil, fmt.Errorf("caplin service start: %w", err)
