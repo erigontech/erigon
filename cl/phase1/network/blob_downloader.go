@@ -57,6 +57,11 @@ const (
 	blobBackfillCompleteMetric = "caplin_blob_backfill_complete"
 )
 
+// Created on the first report, so a node that never runs blob backfill exports no misleading 0.
+var blobBackfillCompleteGauge = sync.OnceValue(func() metrics.Gauge {
+	return metrics.GetOrCreateGauge(blobBackfillCompleteMetric)
+})
+
 type blobRetryRange struct {
 	start          uint64
 	end            uint64
@@ -231,12 +236,10 @@ func (b *BlobHistoryDownloader) SetNotifyBlobBackfilled(notify *BlobBackfilledNo
 }
 
 func (b *BlobHistoryDownloader) setBackfillCompleted(completed bool) {
-	// Created on the first report, so a node that never runs blob backfill exports no misleading 0.
-	gauge := metrics.GetOrCreateGauge(blobBackfillCompleteMetric)
 	if completed {
-		gauge.SetUint64(1)
+		blobBackfillCompleteGauge().SetUint64(1)
 	} else {
-		gauge.SetUint64(0)
+		blobBackfillCompleteGauge().SetUint64(0)
 	}
 	if b.backfillCompleted.Swap(completed) == completed {
 		return
