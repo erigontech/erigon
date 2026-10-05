@@ -514,7 +514,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ot.traceAddr = []int{}
 		vmConfig.Tracer = ot.Tracer().Hooks
 
-		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
+		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, dbtx, api._blockReader, chainConfig)
 		if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 			return nil, err
 		}
@@ -590,7 +590,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 
 			lastBlockHash = lastHeader.Hash()
-			blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, chainConfig)
+			blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, dbtx, api._blockReader, chainConfig)
 			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 				return err
 			}
@@ -740,7 +740,7 @@ func (api *TraceAPIImpl) callBlock(
 
 	header := block.Header()
 	engine := api.engine()
-	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, dbtx, api._blockReader, cfg)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 		return nil, nil, err
 	}
@@ -942,7 +942,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 			// Per-worker constants: same for every job this worker processes.
 			// blockCtx captures workerTx in its GetHash closure, so it cannot
 			// be shared across workers (each needs its own copy).
-			blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, workerTx, api._blockReader, chainConfig)
+			blockCtx := transactions.NewEVMBlockContext(engine, header, workerTx, api._blockReader, chainConfig)
 			if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 				return err
 			}
@@ -1040,7 +1040,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	engine := api.engine()
-	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, dbtx, api._blockReader, cfg)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 		return nil, err
 	}

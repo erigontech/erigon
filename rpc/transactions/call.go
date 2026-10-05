@@ -53,7 +53,7 @@ func DoCall(
 	gasCap uint64,
 	chainConfig *chain.Config,
 	stateReader state.StateReader,
-	headerReader dbservices.HeaderReader,
+	headerReader dbservices.CanonicalReader,
 	callTimeout time.Duration,
 ) (*evmtypes.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
@@ -94,7 +94,7 @@ func DoCall(
 	if err != nil {
 		return nil, err
 	}
-	blockCtx := NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+	blockCtx := NewEVMBlockContext(engine, effectiveHeader, tx, headerReader, chainConfig)
 	if blockOverrides != nil {
 		if err := blockOverrides.Override(&blockCtx); err != nil {
 			return nil, err
@@ -147,10 +147,10 @@ func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineRea
 	return blockContext
 }
 
-func NewEVMBlockContext(engine rules.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
-	headerReader dbservices.HeaderReader, config *chain.Config,
+func NewEVMBlockContext(engine rules.EngineReader, header *types.Header, tx kv.Getter,
+	reader dbservices.CanonicalReader, config *chain.Config,
 ) evmtypes.BlockContext {
-	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
+	blockHashFunc := MakeBlockHashProvider(context.Background(), tx, reader, nil)
 	return protocol.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 }
 
@@ -166,21 +166,6 @@ func MakeBlockHashProvider(ctx context.Context, tx kv.Getter, reader dbservices.
 			log.Debug("[evm] canonical hash not found", "blockNum", blockNum, "ok", ok, "err", err)
 		}
 		return blockHash, err
-	}
-}
-
-func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader dbservices.HeaderReader) BlockHashProvider {
-	return func(n uint64) (common.Hash, error) {
-		h, err := headerReader.HeaderByNumber(context.Background(), tx, n)
-		if err != nil {
-			log.Error("Can't get block hash by number", "number", n, "only-canonical", requireCanonical)
-			return common.Hash{}, err
-		}
-		if h == nil {
-			log.Warn("[evm] header is nil", "blockNum", n)
-			return common.Hash{}, nil
-		}
-		return h.Hash(), nil
 	}
 }
 
@@ -302,7 +287,7 @@ func NewReusableCaller(
 	gasCap uint64,
 	blockNrOrHash rpc.BlockNumberOrHash,
 	tx kv.Tx,
-	headerReader dbservices.HeaderReader,
+	headerReader dbservices.CanonicalReader,
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
@@ -313,7 +298,7 @@ func NewReusableCaller(
 		return nil, err
 	}
 
-	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
+	blockCtx := NewEVMBlockContext(engine, header, tx, headerReader, chainConfig)
 
 	if blockOverrides != nil {
 		if err := blockOverrides.Override(&blockCtx); err != nil {

@@ -1041,7 +1041,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list
-	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, tx, api._blockReader, chainConfig)
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
 	excl := make(map[common.Address]struct{})
