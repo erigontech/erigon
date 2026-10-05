@@ -64,8 +64,8 @@ func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.Tempora
 }
 
 func RCacheEndBlockNum(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
-	visibleEnd, ok := tx.Debug().DomainVisibleEnd(kv.RCacheDomain)
-	if !ok {
+	visibleEnd, exact := tx.Debug().DomainVisibleEnd(kv.RCacheDomain)
+	if !exact {
 		visibleEnd = tx.Debug().DomainProgress(kv.RCacheDomain)
 	}
 	if visibleEnd == 0 {
@@ -78,6 +78,9 @@ func RCacheEndBlockNum(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdb
 	}
 	if !ok {
 		return 0, fmt.Errorf("findBlockNum(%d) not found", lastTxNum)
+	}
+	if exact && visibleEnd > tx.Debug().TxNumsInFiles(kv.RCacheDomain) {
+		return tip + 1, nil
 	}
 	tipMaxTxNum, err := txNumsReader.Max(ctx, tx, tip)
 	if err != nil {
