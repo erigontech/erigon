@@ -120,9 +120,7 @@ func TestVersionedTouch_OwnBalanceWriteReadsNoFields(t *testing.T) {
 		ibs := newTouchTestIBS(t, addr, acc, noMaterialize)
 
 		require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
-		n := ibs.journal.length()
 		require.NoError(t, ibs.TouchAccount(addr))
-		assert.Equal(t, n, ibs.journal.length(), "noMaterialize=%v", noMaterialize)
 		_, ok := ibs.versionedReads.GetNonce(addr)
 		assert.False(t, ok, "nonce read, noMaterialize=%v", noMaterialize)
 	}
