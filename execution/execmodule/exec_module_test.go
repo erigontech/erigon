@@ -2721,6 +2721,42 @@ func TestValidateChainBadBlockIsDroppedFromOverlay(t *testing.T) {
 	require.Nil(t, afterBad, "header of a block that failed validation must not be readable")
 }
 
+// Rejecting a block must not discard valid siblings that are still only in
+// the overlay, waiting for the next forkchoice update.
+func TestValidateChainBadBlockKeepsValidSiblingInOverlay(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	valid := chainPack.Blocks[0]
+	validHash, validNum := valid.Hash(), valid.NumberU64()
+
+	badHeader := types.CopyHeader(valid.HeaderNoCopy())
+	badHeader.Root = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	badBlock := types.NewBlockFromNetwork(badHeader, valid.Body(), valid.BlockAccessListSidecar())
+
+	_, err = m.InsertBlocks(ctx, []*types.Block{valid})
+	require.NoError(t, err)
+	validation, err := m.ValidateChain(ctx, valid.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+	_, err = m.InsertBlocks(ctx, []*types.Block{badBlock})
+	require.NoError(t, err)
+	validation, err = m.ValidateChain(ctx, badBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+
+	kept, err := m.ExecModule.GetHeader(ctx, &validHash, &validNum)
+	require.NoError(t, err)
+	require.NotNil(t, kept, "valid sibling must stay readable after a bad block is rejected")
+
+	result, err := m.ExecModule.UpdateForkChoice(ctx, validHash, validHash, validHash)
+	require.NoError(t, err)
+	m.ExecModule.WaitIdle(ctx)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+}
+
 // transferGen returns a deterministic per-block tx generator so tests can
 // build forks that share a prefix with the canonical chain.
 func transferGen(t *testing.T, key *ecdsa.PrivateKey, to common.Address, amount uint64) func(int, *blockgen.BlockGen) {
