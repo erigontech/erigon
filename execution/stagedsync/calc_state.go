@@ -108,6 +108,8 @@ type calcState struct {
 
 	logger    log.Logger
 	logPrefix string
+
+	prefetch func(plainKey []byte)
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -172,6 +174,10 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	}
 	acc.dirty = true
 	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+	if cs.prefetch != nil {
+		address := addr.Value()
+		cs.prefetch(address[:])
+	}
 }
 
 // ApplyWrites folds a tx's typed write collections into the local state.
@@ -248,6 +254,10 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			cs.storageDirty[addr] = dirty
 		}
 		for key, vw := range inner {
+			if cs.prefetch != nil && !dirty[key] {
+				address, slot := addr.Value(), key.Value()
+				cs.prefetch(append(address[:], slot[:]...))
+			}
 			slots[key] = vw.Val
 			dirty[key] = true
 		}
