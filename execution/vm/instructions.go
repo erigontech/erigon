@@ -778,7 +778,11 @@ func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	key := scope.peekStorageKey(evm)
 	scope.Stack.drop()
 	val := scope.Stack.popCopy()
-	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
+	var prev *uint256.Int
+	if scope.sstoreGen == scope.cacheGen {
+		prev = &scope.sstoreCurrent
+	}
+	return pc, nil, evm.IntraBlockState().SetStateFrom(scope.Contract.Address(), key, prev, val)
 }
 
 func stSstore(_ uint64, scope *CallContext) string {

@@ -1649,10 +1649,15 @@ func (ibs *IntraBlockState) Incarnation() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetState(addr accounts.Address, key accounts.StorageKey, value uint256.Int) error {
-	return ibs.setState(addr, key, value, false)
+	return ibs.setState(addr, key, value, false, nil)
 }
 
-func (ibs *IntraBlockState) setState(addr accounts.Address, key accounts.StorageKey, value uint256.Int, force bool) error {
+// SetStateFrom is SetState for a caller that already read the slot's current value; a nil prev reads it here.
+func (ibs *IntraBlockState) SetStateFrom(addr accounts.Address, key accounts.StorageKey, prev *uint256.Int, value uint256.Int) error {
+	return ibs.setState(addr, key, value, false, prev)
+}
+
+func (ibs *IntraBlockState) setState(addr accounts.Address, key accounts.StorageKey, value uint256.Int, force bool, prev *uint256.Int) error {
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) SetState %x, %x=%s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, key, value.Hex())
 	}
@@ -1670,7 +1675,7 @@ func (ibs *IntraBlockState) setState(addr accounts.Address, key accounts.Storage
 	if err != nil {
 		return err
 	}
-	set, err := stateObject.SetState(key, value, force)
+	set, err := stateObject.SetState(key, value, force, prev)
 	if err != nil {
 		return err
 	}
@@ -3452,7 +3457,7 @@ func (ibs *IntraBlockState) ApplyVersionedWrites(writes *WriteSet) error {
 			if !ok {
 				continue
 			}
-			if err := ibs.setState(addr, hdr.Key, vw.Val, true); err != nil {
+			if err := ibs.setState(addr, hdr.Key, vw.Val, true, nil); err != nil {
 				return err
 			}
 		case BalancePath:

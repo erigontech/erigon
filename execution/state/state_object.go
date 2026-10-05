@@ -235,7 +235,7 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 }
 
 // SetState updates a value in account storage.
-func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, force bool) (_ bool, err error) {
+func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, force bool, known *uint256.Int) (_ bool, err error) {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.fakeStorageChange(so.address, key, so.fakeStorage[key])
@@ -247,10 +247,15 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	var commited bool
 	var source ReadSource
 
-	// we need to use versioned read here otherwise we will miss versionmap entries
-	prev, source, _, commited, err = readStateForSet(so.db, so.address, key)
-	if err != nil {
-		return false, err
+	if known != nil && so.db.versionMap == nil {
+		// The journal reads commited only with a version map.
+		prev, source = *known, StorageRead
+	} else {
+		// we need to use versioned read here otherwise we will miss versionmap entries
+		prev, source, _, commited, err = readStateForSet(so.db, so.address, key)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	// When versionedReadCore resolves the previous value from a cached read
@@ -294,7 +299,7 @@ func (so *stateObject) SetStorage(storage Storage) {
 	// so.fakeStorage is non-nil at this point, so SetState always takes its
 	// fake-storage branch and returns a nil error.
 	for key, value := range storage {
-		_, _ = so.SetState(key, value, false)
+		_, _ = so.SetState(key, value, false, nil)
 	}
 }
 

@@ -73,7 +73,10 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		var value uint256.Int
 		value.Set(callContext.Stack.back(1))
-		current, _ := evm.IntraBlockState().GetState(callContext.Address(), slot)
+		current, readErr := evm.IntraBlockState().GetState(callContext.Address(), slot)
+		if readErr == nil {
+			callContext.sstoreCurrent, callContext.sstoreGen = current, callContext.cacheGen
+		}
 
 		if current.Eq(&value) { // noop (1)
 			return mdgas.MdGasCost{Execution: access}, nil
