@@ -114,6 +114,44 @@ func VerifyDataColumnSidecarKZGProofsWithCommitments(sidecar *cltypes.DataColumn
 	return verifyKZGProofsInternal(sidecar, kzgCommitments)
 }
 
+// VerifyDataColumnSidecarsKZGProofsWithCommitments verifies several columns in one KZG batch.
+func VerifyDataColumnSidecarsKZGProofsWithCommitments(sidecars []*cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
+	if len(sidecars) == 0 || kzgCommitments == nil || kzgCommitments.Len() == 0 {
+		return false
+	}
+	cellCount := 0
+	for _, sidecar := range sidecars {
+		if sidecar == nil || sidecar.Column == nil || sidecar.KzgProofs == nil ||
+			sidecar.Column.Len() != kzgCommitments.Len() || sidecar.KzgProofs.Len() != kzgCommitments.Len() {
+			return false
+		}
+		cellCount += sidecar.Column.Len()
+	}
+	ckzgCommitments := make([]goethkzg.KZGCommitment, 0, cellCount)
+	cellIndices := make([]uint64, 0, cellCount)
+	ckzgCells := make([]*goethkzg.Cell, 0, cellCount)
+	ckzgProofs := make([]goethkzg.KZGProof, 0, cellCount)
+	for _, sidecar := range sidecars {
+		for i := range kzgCommitments.Len() {
+			commitment := kzgCommitments.Get(i)
+			proof := sidecar.KzgProofs.Get(i)
+			cell := sidecar.Column.Get(i)
+			if commitment == nil || proof == nil || cell == nil {
+				return false
+			}
+			ckzgCommitments = append(ckzgCommitments, goethkzg.KZGCommitment(*commitment))
+			cellIndices = append(cellIndices, sidecar.Index)
+			ckzgCells = append(ckzgCells, (*goethkzg.Cell)(cell))
+			ckzgProofs = append(ckzgProofs, goethkzg.KZGProof(*proof))
+		}
+	}
+	if err := kzg.Ctx().VerifyCellKZGProofBatch(ckzgCommitments, cellIndices, ckzgCells, ckzgProofs); err != nil {
+		log.Warn("failed to verify cell kzg proofs", "error", err)
+		return false
+	}
+	return true
+}
+
 // verifyKZGProofsInternal is the internal implementation for KZG proof verification.
 func verifyKZGProofsInternal(sidecar *cltypes.DataColumnSidecar, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) bool {
 	// The column index represents the cell index for each proof
