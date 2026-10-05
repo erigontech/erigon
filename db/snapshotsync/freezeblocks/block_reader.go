@@ -1370,7 +1370,7 @@ func (r *BlockReader) txnRlpByIdxInBlock(ctx context.Context, tx kv.Getter, bloc
 	}
 
 	// if block has no transactions, or requested txNum out of non-system transactions length
-	if b.TxCount == 2 || txIdxInBlock == -1 || txIdxInBlock >= int(b.TxCount-2) {
+	if b.TxCount == 2 || txIdxInBlock < 0 || txIdxInBlock >= int(b.TxCount-2) {
 		return nil, nil, nil
 	}
 

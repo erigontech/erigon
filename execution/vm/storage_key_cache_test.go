@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -264,3 +265,13 @@ func TestInternAddressSurvivesResetBetweenBlocks(t *testing.T) {
 var internSink accounts.Address
 
 var keySink accounts.StorageKey
+
+// A context idle in the pool must not pin interned keys: a handle keeps its canonical
+// map entry alive.
+func TestPutReleasesFrameSlotKeys(t *testing.T) {
+	ctx := getCallContext(Contract{}, nil, mdgas.MdGas{})
+	ctx.slots.key[0] = accounts.InternKey(common.Hash{1})
+	ctx.slots.key[1] = accounts.InternKey(common.Hash{2})
+	ctx.put()
+	require.Equal(t, [2]accounts.StorageKey{}, ctx.slots.key)
+}

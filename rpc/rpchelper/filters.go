@@ -1193,19 +1193,32 @@ func (ff *Filters) OverlaySnapshot() (*membatchwithdb.MemoryMutation, uint64) {
 func (ff *Filters) BeginTemporalRoWithOverlay(ctx context.Context, db kv.TemporalRoDB) (kv.TemporalTx, error) {
 	const maxAttempts = 5
 	for attempt := 1; ; attempt++ {
-		overlay, seq := ff.OverlaySnapshot()
-		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
-		if err != nil {
-			return nil, err
+		tx, stable, err := ff.beginPinnedTemporalRo(ctx, db, attempt == maxAttempts)
+		if err != nil || stable {
+			return tx, err
 		}
-		if _, current := ff.OverlaySnapshot(); current == seq {
-			return PinToOverlay(tx, overlay), nil
-		}
-		if attempt == maxAttempts {
-			return PinToOverlay(tx, nil), nil
-		}
-		tx.Rollback()
 	}
+}
+
+// beginPinnedTemporalRo reports stable=false, with no tx, when the publish
+// sequence moved around the open and last is false.
+func (ff *Filters) beginPinnedTemporalRo(ctx context.Context, db kv.TemporalRoDB, last bool) (kv.TemporalTx, bool, error) {
+	overlay, seq := ff.OverlaySnapshot()
+	tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, false, err
+	}
+	ok := false
+	defer kv.RollbackUnless(&ok, tx)
+	if _, current := ff.OverlaySnapshot(); current != seq {
+		if !last {
+			return nil, false, nil
+		}
+		overlay = nil
+	}
+	pinned := PinToOverlay(tx, overlay)
+	ok = true
+	return pinned, true, nil
 }
 
 // latestOverlay returns the block overlay behind the latest published SD, or nil.

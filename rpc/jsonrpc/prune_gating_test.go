@@ -444,8 +444,8 @@ func traceCallManyRequest() json.RawMessage {
 func blockTraceFilter(block uint64) TraceFilterRequest {
 	n := rpc.BlockNumber(block)
 	return TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		FromBlock: &n,
+		ToBlock:   &n,
 	}
 }
 
