@@ -1064,9 +1064,9 @@ func (ibs *IntraBlockState) recordWipedRead(addr accounts.Address, path AccountP
 // read that the wrapper-level read-once fast path can return directly.
 func warmSource(src ReadSource) bool { return src == MapRead || src == StorageRead }
 
-// warmReadable reports whether addr has no own write this tx, so a recorded read
-// of it is a stable snapshot the read-once fast path can serve (own writes take
-// precedence and must go through the full path). Same gate as versionedWriteHit.
+// warmReadable reports whether addr has no own write this tx. When it has one,
+// the read-once fast paths check this tx's write set before the recorded read.
+// Same gate as versionedWriteHit.
 func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
 	_, dirty := ibs.journal.dirties[addr]
 	return !dirty

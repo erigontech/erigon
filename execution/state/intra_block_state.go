@@ -181,12 +181,10 @@ type IntraBlockState struct {
 	versionMap      *VersionMap
 	versionedWrites WriteSet
 	versionedReads  ReadSet
-	// committedBase memoizes the per-tx committed (pre-block) account fallback
-	// used by versionedAccountBase when the versionMap has no cell for addr.
-	// The committed view is block-immutable and this branch is only reached on
-	// a versionMap miss (a written account returns via the write-set), so the
-	// cached pointer is safe to share across the tx's read-only callers. Reset
-	// per tx.
+	// committedBase memoizes the committed (pre-block) account that
+	// versionedAccountBase and committedCodeHash read from the state reader.
+	// The committed view is block-immutable, so the cached pointer is safe to
+	// share across the tx's read-only callers. Reset per tx.
 	committedBase       map[accounts.Address]*accounts.Account
 	accountReadDuration time.Duration
 	accountReadCount    int64
