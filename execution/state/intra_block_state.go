@@ -919,6 +919,13 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *u
 	if err != nil {
 		return err
 	}
+	if base != nil && prev == nil {
+		cur, _, err := ibs.getBalance(addr)
+		if err != nil {
+			return err
+		}
+		prev = &cur
+	}
 	if base == nil || ibs.accountLifecycle(addr) {
 		stateObject, err := ibs.GetOrNewStateObject(addr)
 		if err != nil {
