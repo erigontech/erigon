@@ -507,10 +507,18 @@ func isBlobBacklog(from, to uint64) bool {
 	return to >= from && to-from >= 2*snaptype.CaplinMergeLimit
 }
 
+type blobRetirementSnapshots interface {
+	FrozenBlobs() uint64
+	VisibleSegmentsMaxTo(snaptype.Enum) uint64
+}
+
 // nextBlobSegment returns the dump bounds of the next blob segment to retire and the end of
 // the whole pending backlog, which decides the compression parallelism. Retiring one segment
 // per attempt publishes each segment as soon as it is written, instead of after the backlog.
-func nextBlobSegment(frozenBlobs, frozenBlocks uint64, cfg *clparams.BeaconChainConfig) (from, to, backlogTo uint64, ok bool) {
+func nextBlobSegment(sn blobRetirementSnapshots, cfg *clparams.BeaconChainConfig) (from, to, backlogTo uint64, ok bool) {
+	// Both frontiers are exclusive segment ends: BlocksAvailable is the last frozen slot and
+	// would hold every blob segment back by one block segment.
+	frozenBlobs, frozenBlocks := sn.FrozenBlobs(), sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum())
 	minimumBlobsProgress := ((cfg.DenebForkEpoch * cfg.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 	from = max(frozenBlobs, minimumBlobsProgress)
 	if frozenBlocks < from+snaptype.CaplinMergeLimit {
@@ -535,7 +543,7 @@ func (s *Antiquary) antiquateBlobs() error {
 	}
 	defer roTx.Rollback()
 	// perform blob antiquation if it is time to.
-	currentBlobsProgress, to, backlogTo, ok := nextBlobSegment(s.sn.FrozenBlobs(), s.sn.BlocksAvailable(), s.cfg)
+	currentBlobsProgress, to, backlogTo, ok := nextBlobSegment(s.sn, s.cfg)
 	if !ok {
 		return nil
 	}

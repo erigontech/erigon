@@ -22,36 +22,47 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/db/snaptype"
 )
+
+// frozenSegments models the snapshot frontiers by where the last blob and block segments end.
+type frozenSegments struct{ blobsTo, blocksTo uint64 }
+
+func (f frozenSegments) FrozenBlobs() uint64 { return f.blobsTo }
+
+func (f frozenSegments) VisibleSegmentsMaxTo(t snaptype.Enum) uint64 {
+	if t == snaptype.BeaconBlocks.Enum() {
+		return f.blocksTo
+	}
+	return f.blobsTo
+}
 
 func TestNextBlobSegment(t *testing.T) {
 	// Deneb at slot 132,608*32 = 4,243,456, so the lowest blob segment starts at 4,240,000.
 	cfg := &clparams.BeaconChainConfig{DenebForkEpoch: 132_608, SlotsPerEpoch: 32}
 	for _, tc := range []struct {
-		name                      string
-		frozenBlobs, frozenBlocks uint64
-		from, to, backlogTo       uint64
-		ok                        bool
+		name                string
+		frozen              frozenSegments
+		from, to, backlogTo uint64
+		ok                  bool
 	}{
-		{name: "blobs caught up with blocks", frozenBlobs: 11_250_000, frozenBlocks: 11_249_999},
-		// BlocksAvailable is the last frozen slot and FrozenBlobs the end of the last blob
-		// segment, so one segment behind reads as 9,999 slots and is not yet retirable.
-		{name: "one slot short of a segment", frozenBlobs: 11_240_000, frozenBlocks: 11_249_999},
+		{name: "blobs caught up with blocks", frozen: frozenSegments{blobsTo: 11_250_000, blocksTo: 11_250_000}},
+		{name: "blocks short of a whole segment past the blobs", frozen: frozenSegments{blobsTo: 11_240_000, blocksTo: 11_249_999}},
 		{
-			name: "exactly one segment", frozenBlobs: 11_240_000, frozenBlocks: 11_250_000,
+			name: "a frozen block segment makes its blob segment retirable", frozen: frozenSegments{blobsTo: 11_240_000, blocksTo: 11_250_000},
 			from: 11_240_000, to: 11_250_000, backlogTo: 11_250_000, ok: true,
 		},
 		{
-			name: "a backlog retires only its first segment", frozenBlobs: 10_470_000, frozenBlocks: 11_189_999,
-			from: 10_470_000, to: 10_480_000, backlogTo: 11_189_999, ok: true,
+			name: "a backlog retires only its first segment", frozen: frozenSegments{blobsTo: 10_470_000, blocksTo: 11_190_000},
+			from: 10_470_000, to: 10_480_000, backlogTo: 11_190_000, ok: true,
 		},
 		{
-			name: "no blob segments yet starts at the Deneb segment", frozenBlobs: 0, frozenBlocks: 4_279_999,
-			from: 4_240_000, to: 4_250_000, backlogTo: 4_279_999, ok: true,
+			name: "no blob segments yet starts at the Deneb segment", frozen: frozenSegments{blocksTo: 4_280_000},
+			from: 4_240_000, to: 4_250_000, backlogTo: 4_280_000, ok: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			from, to, backlogTo, ok := nextBlobSegment(tc.frozenBlobs, tc.frozenBlocks, cfg)
+			from, to, backlogTo, ok := nextBlobSegment(tc.frozen, cfg)
 			require.Equal(t, tc.ok, ok)
 			require.Equal(t, tc.from, from)
 			require.Equal(t, tc.to, to)
@@ -65,9 +76,9 @@ func TestNextBlobSegment(t *testing.T) {
 func TestNextBlobSegmentKeepsTheBacklogForCompressionParallelism(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{DenebForkEpoch: 132_608, SlotsPerEpoch: 32}
 
-	from, to, backlogTo, ok := nextBlobSegment(10_470_000, 11_189_999, cfg)
+	from, to, backlogTo, ok := nextBlobSegment(frozenSegments{blobsTo: 11_240_000, blocksTo: 11_260_000}, cfg)
 
 	require.True(t, ok)
 	require.False(t, isBlobBacklog(from, to))
-	require.True(t, isBlobBacklog(from, backlogTo))
+	require.True(t, isBlobBacklog(from, backlogTo), "two pending segments are a catch-up")
 }
