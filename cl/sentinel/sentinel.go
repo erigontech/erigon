@@ -144,7 +144,7 @@ func New(
 	s.peers = peers.NewPool(s.p2p.Host())
 
 	mux := chi.NewRouter()
-	mux.Get("/", httpreqresp.NewRequestHandler(s.p2p.Host()))
+	mux.Get("/", httpreqresp.NewRequestHandler(s.p2p.Host(), s.peers.Dialable))
 	s.httpApi = mux
 
 	s.handshaker = handshake.New(ctx, s.ethClock, cfg.BeaconConfig, s.httpApi, peerDasStateReader)

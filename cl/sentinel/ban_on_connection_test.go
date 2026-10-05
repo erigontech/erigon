@@ -88,10 +88,6 @@ func waitDisconnected(t *testing.T, local host.Host, pid peer.ID) {
 	}
 }
 
-// ConnectWithPeer consults the ban list, but it only covers dials we initiate. A peer banned
-// for repeated handshake failures reconnects and its connection event must close it rather
-// than run another status handshake — otherwise the ban never takes effect on inbound
-// connections and the peer is handshaked again on every reconnect.
 func TestBannedPeerIsClosedInsteadOfHandshaked(t *testing.T) {
 	local, remote := connectedPair(t)
 	s := testSentinel(t, local)
@@ -152,15 +148,11 @@ func TestOnConnectionLogsActualTransport(t *testing.T) {
 	}
 }
 
-// Three handshake failures ban the peer, and the ban must then be honoured: the storm this
-// fixes was one peer handshaked repeatedly because its failures were recorded and never read.
-func TestRepeatedHandshakeFailuresStopBeingHandshaked(t *testing.T) {
+func TestRepeatedHandshakeFailuresStopOutboundDials(t *testing.T) {
 	local, remote := connectedPair(t)
 	s := testSentinel(t, local)
 
-	validations := 0
 	failing := func() (bool, error) {
-		validations++
 		return false, errors.New("stream reset")
 	}
 
@@ -168,12 +160,60 @@ func TestRepeatedHandshakeFailuresStopBeingHandshaked(t *testing.T) {
 		require.True(t, s.handleNewConnection(remote.ID(), failing),
 			"a transport error keeps the peer: it may still serve gossip")
 	}
-	require.Equal(t, 3, validations)
-	require.True(t, s.peers.BanStatus(remote.ID()), "three handshake failures must ban the peer")
-
-	require.False(t, s.handleNewConnection(remote.ID(), failing))
-	require.Equal(t, 3, validations, "a banned peer must not be handshaked again")
+	require.NoError(t, local.Network().ClosePeer(remote.ID()))
 	waitDisconnected(t, local, remote.ID())
+	require.False(t, s.peers.Dialable(remote.ID()))
+
+	err := s.ConnectWithPeer(t.Context(), peer.AddrInfo{ID: remote.ID(), Addrs: remote.Addrs()}, nil)
+	require.EqualError(t, err, "refused to connect to bad peer")
+	require.Equal(t, network.NotConnected, local.Network().Connectedness(remote.ID()))
+}
+
+func TestHandshakeFailuresDoNotRefuseThePeersLaterConnection(t *testing.T) {
+	local, remote := connectedPair(t)
+	s := testSentinel(t, local)
+
+	failing := func() (bool, error) {
+		return false, errors.New("stream reset")
+	}
+	for range 3 {
+		require.True(t, s.handleNewConnection(remote.ID(), failing))
+	}
+
+	validated := false
+	require.True(t, s.handleNewConnection(remote.ID(), func() (bool, error) {
+		validated = true
+		return true, nil
+	}))
+	require.True(t, validated)
+	require.Equal(t, network.Connected, local.Network().Connectedness(remote.ID()))
+}
+
+func TestHandshakeFailuresRefuseConnectionsAtLimit(t *testing.T) {
+	local, remote := connectedPair(t)
+	s := testSentinel(t, local)
+	failing := func() (bool, error) {
+		return false, errors.New("stream reset")
+	}
+	for range 9 {
+		require.True(t, s.handleNewConnection(remote.ID(), failing))
+	}
+	require.Equal(t, network.Connected, local.Network().Connectedness(remote.ID()))
+
+	tenthHandshakeCalled := false
+	require.False(t, s.handleNewConnection(remote.ID(), func() (bool, error) {
+		tenthHandshakeCalled = true
+		return false, errors.New("stream reset")
+	}))
+	require.True(t, tenthHandshakeCalled)
+	waitDisconnected(t, local, remote.ID())
+
+	followingHandshakeCalled := false
+	require.False(t, s.handleNewConnection(remote.ID(), func() (bool, error) {
+		followingHandshakeCalled = true
+		return true, nil
+	}))
+	require.False(t, followingHandshakeCalled)
 }
 
 // A peer that is not banned still reaches its handshake and is kept.

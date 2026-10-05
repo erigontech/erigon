@@ -144,8 +144,7 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 			continue
 		}
 
-		// Skip banned peers
-		if s.peers.BanStatus(peerInfo.ID) {
+		if !s.peers.Dialable(peerInfo.ID) {
 			continue
 		}
 
@@ -441,7 +440,7 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 	if info.ID == s.p2p.Host().ID() {
 		return nil
 	}
-	if s.peers.BanStatus(info.ID) {
+	if !s.peers.Dialable(info.ID) {
 		return errors.New("refused to connect to bad peer")
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
@@ -578,9 +577,7 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 // handleNewConnection admits or rejects a peer that has just connected, then runs its status
 // handshake. Reports whether the peer was kept.
 func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, error)) bool {
-	// ConnectWithPeer consults the ban list, but it only covers dials we initiate; a peer
-	// banned for repeated handshake failures reconnects and reaches here regardless.
-	if s.peers.BanStatus(peerId) {
+	if s.peers.RefuseConnections(peerId) {
 		s.closePeer(peerId)
 		return false
 	}
@@ -629,10 +626,14 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, er
 	}
 
 	if !valid {
-		// Handshake had a transport error AND returned invalid — keep anyway.
 		s.peers.RecordHandshakeFailure(peerId)
+		if s.peers.RefuseConnections(peerId) {
+			s.closePeer(peerId)
+			return false
+		}
 		return true
 	}
+	s.peers.AddPeer(peerId)
 	log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
 	return true
 }
