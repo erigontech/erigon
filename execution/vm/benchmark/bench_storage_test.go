@@ -276,3 +276,66 @@ func BenchmarkAddressDiversity(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkTxLifecycle runs one whole versioned transaction per iteration over
+// committed state, so the per-tx setup and teardown of the read and write sets
+// is measured: "call" resets and executes as a single eth_call does, "exec" also
+// hands the sets over at the end as a parallel-execution worker does.
+func BenchmarkTxLifecycle(b *testing.B) {
+	transfer := program.New().
+		Push(0).Op(vm.SLOAD).Push(100).Op(vm.SWAP1, vm.SUB).Push(0).Op(vm.SSTORE).
+		Push(1).Op(vm.SLOAD).Push(100).Op(vm.ADD).Push(1).Op(vm.SSTORE).
+		Push(100).Push(0).Op(vm.MSTORE).
+		Push(0xDEAD).Push(0xCAFE).Push(transferEventSig).Push(32).Push(0).Op(vm.LOG3).
+		Op(vm.STOP).Bytes()
+	fresh := program.New()
+	for i := range 100 {
+		fresh.Sstore(i, 0xBEEF)
+	}
+	cases := []struct {
+		name  string
+		code  []byte
+		slots map[uint256.Int]uint256.Int
+	}{
+		{"erc20-transfer", transfer, map[uint256.Int]uint256.Int{
+			*uint256.NewInt(0): *uint256.NewInt(1_000_000),
+			*uint256.NewInt(1): *uint256.NewInt(500_000),
+		}},
+		{"sstore-100-fresh", fresh.Op(vm.STOP).Bytes(), nil},
+	}
+	for _, c := range cases {
+		for _, handover := range []bool{false, true} {
+			name := c.name + "/call"
+			if handover {
+				name = c.name + "/exec"
+			}
+			b.Run(name, func(b *testing.B) {
+				b.ReportAllocs()
+				vmenv := newCommittedBenchEnv(b, 10_000_000, func(statedb *state.IntraBlockState) {
+					deployContract(b, statedb, addrContract, c.code)
+					setStorage(b, statedb, addrContract, c.slots)
+				})
+				vmap := state.NewVersionMap(nil)
+				runVersionedTx(b, vmenv, vmap, handover)
+				for b.Loop() {
+					runVersionedTx(b, vmenv, vmap, handover)
+				}
+			})
+		}
+	}
+}
+
+func runVersionedTx(b *testing.B, vmenv *vm.EVM, vmap *state.VersionMap, handover bool) {
+	statedb := vmenv.IntraBlockState()
+	statedb.Reset()
+	statedb.SetVersionMap(vmap)
+	statedb.SetNoMaterialize(true)
+	statedb.SetTxContext(1, 0)
+	if _, _, err := prepareAndCall(vmenv, addrContract, nil); err != nil {
+		b.Fatal(err)
+	}
+	if handover {
+		statedb.FinalizedWrites(vmenv.ChainRules()).ReleaseMaps()
+		_ = statedb.VersionedReads()
+	}
+}

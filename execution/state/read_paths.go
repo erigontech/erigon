@@ -1042,7 +1042,7 @@ func (ibs *IntraBlockState) recordWipedRead(addr accounts.Address, path AccountP
 	case AddressPath:
 		ibs.versionedReads.SetAddress(addr, VersionedRead[AccountView]{ReadHeader: hdr})
 	case StoragePath:
-		ibs.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr})
+		ibs.versionedReads.setStorageReuse(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr}, &ibs.readInnerFree)
 	case CodePath:
 		ibs.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr})
 	case CodeSizePath:
@@ -1602,7 +1602,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 	case outcomeMapDone:
 		v := r.mapStorageVal
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.versionedReads.setStorageReuse(addr, key, VersionedRead[uint256.Int]{r.hdr, v}, &s.readInnerFree)
 		}
 		return v, r.source, r.version, false, nil
 	case outcomeStorageRead:
@@ -1621,7 +1621,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			v, clean = r.mapStorageVal, true
 		}
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.versionedReads.setStorageReuse(addr, key, VersionedRead[uint256.Int]{r.hdr, v}, &s.readInnerFree)
 		}
 		return v, r.source, r.version, clean, nil
 	case outcomeReturnZero, outcomeReturnDefault:
@@ -1666,7 +1666,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 	case outcomeMapDone:
 		v := r.mapStorageVal
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.versionedReads.setStorageReuse(addr, key, VersionedRead[uint256.Int]{r.hdr, v}, &s.readInnerFree)
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
@@ -1683,7 +1683,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 			v = r.mapStorageVal
 		}
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			s.versionedReads.setStorageReuse(addr, key, VersionedRead[uint256.Int]{r.hdr, v}, &s.readInnerFree)
 		}
 		return v, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnDefault:
