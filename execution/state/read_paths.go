@@ -1549,6 +1549,14 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
+	if s.versionMap == nil {
+		so, err := s.getStateObject(addr, true)
+		if err != nil || so == nil || so.deleted {
+			return uint256.Int{}, StorageRead, UnknownVersion, false, err
+		}
+		v, clean, err := so.GetState(key)
+		return v, StorageRead, UnknownVersion, clean, err
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {
@@ -1585,15 +1593,6 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, clean, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, false, nil
-		}
-		v, clean, err := r.so.GetState(key)
-		if err != nil {
-			return uint256.Int{}, StorageRead, UnknownVersion, false, err
-		}
-		return v, StorageRead, UnknownVersion, clean, nil
 	case outcomeReturnZero, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, false, nil
 	default:
@@ -1603,6 +1602,14 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 
 // readCommittedState reads a storage slot with committed-view semantics.
 func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
+	if s.versionMap == nil {
+		so, err := s.getStateObject(addr, true)
+		if err != nil || so == nil || so.deleted {
+			return uint256.Int{}, StorageRead, UnknownVersion, err
+		}
+		v, err := so.GetCommittedState(key)
+		return v, StorageRead, UnknownVersion, err
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, true, false, &r)
 	if r.err != nil {
@@ -1637,12 +1644,6 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, nil
-		}
-		v, err := r.so.GetCommittedState(key)
-		return v, StorageRead, UnknownVersion, err
 	case outcomeReturnZero, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, nil
 	default:
