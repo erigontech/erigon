@@ -147,7 +147,12 @@ type IntraBlockState struct {
 	codeAccess  codeAccessTracker // stateReader, if it tracks code access
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
-	stateObjects      map[accounts.Address]*stateObject // used only if `noMaterialize == false`
+	stateObjects map[accounts.Address]*stateObject // used only if `noMaterialize == false`
+	// lastObj memoizes the last stateObjects hit: consecutive accesses of one
+	// account (a CALL's gas checks, an SLOAD loop) skip the map. Every
+	// stateObjects mutation clears it.
+	lastAddr          accounts.Address
+	lastObj           *stateObject
 	stateObjectsDirty map[accounts.Address]struct{}
 
 	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
@@ -338,6 +343,7 @@ func (ibs *IntraBlockState) Reset() {
 		so.release()
 	}
 	clear(ibs.stateObjects)
+	ibs.lastObj = nil
 	clear(ibs.stateObjectsDirty)
 	ibs.logs.reset()
 	clear(ibs.balanceInc)
@@ -387,6 +393,7 @@ func (ibs *IntraBlockState) Close() {
 
 	stateObjects, journal := ibs.stateObjects, ibs.journal
 	ibs.stateObjects, ibs.journal = nil, nil
+	ibs.lastObj = nil
 	ibs.stateObjectArena.release()
 	ibs.logs.release()
 	ibs.revisions.reset()
@@ -1970,7 +1977,11 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	// only because the materializing versioned flows keep so.data in step with the
 	// cells on every write (the setters mirror recordWrite*); the noMaterialize
 	// path never populates this cache, so it can't serve a stale object there.
+	if ibs.lastObj != nil && ibs.lastAddr == addr {
+		return ibs.lastObj, nil
+	}
 	if so, ok := ibs.stateObjects[addr]; ok {
+		ibs.lastAddr, ibs.lastObj = addr, so
 		return so, nil
 	}
 
@@ -2141,6 +2152,7 @@ func (ibs *IntraBlockState) setStateObject(addr accounts.Address, object *stateO
 		ibs.journal.balanceIncreaseTransfer(bi)
 	}
 	ibs.stateObjects[addr] = object
+	ibs.lastObj = nil
 }
 
 // Retrieve a state object or create a new state object if nil.
@@ -2605,6 +2617,7 @@ func (ibs *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter Stat
 			preserved := accounts.NewAccount()
 			preserved.Balance = so.data.Balance
 			ibs.stateObjects[addr] = newObject(ibs, addr, &preserved, &preserved)
+			ibs.lastObj = nil
 		}
 
 		so.newlyCreated = false
