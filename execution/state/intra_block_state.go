@@ -930,25 +930,11 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *u
 		// balance. Seed the live balance first. The base==nil create path never
 		// read balance, so leave it untouched (avoids widening the OCC read-set).
 		if base != nil {
-			if prev == nil {
-				cur, _, err := ibs.getBalance(addr)
-				if err != nil {
-					return err
-				}
-				prev = &cur
-			}
 			stateObject.setBalance(*prev)
 		}
 		stateObject.SetBalance(update, wasCommited, reason)
 		ibs.recordWriteBalance(addr, update)
 		return nil
-	}
-	if prev == nil {
-		cur, _, err := ibs.getBalance(addr)
-		if err != nil {
-			return err
-		}
-		prev = &cur
 	}
 	ibs.journal.balanceChange(addr, *prev, wasCommited)
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
