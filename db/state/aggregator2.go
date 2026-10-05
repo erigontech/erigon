@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,12 +26,18 @@ type AggOpts struct { //nolint:gocritic
 	stepsInFrozenFile               uint64 // != 0 mean override erigondb.toml settings
 	erigondbDomainStepsInFrozenFile uint64
 	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
+	frozenAtTxNum                   map[string]uint64
 
-	genSaltIfNeed       bool
-	sanityOldNaming     bool // prevent start directory with old file names
-	disableFsync        bool // for tests speed
-	disableBranchCache  bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
-	skipFilesDBGapCheck bool
+	genSaltIfNeed        bool
+	sanityOldNaming      bool // prevent start directory with old file names
+	disableFsync         bool // for tests speed
+	disableBranchCache   bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
+	skipFilesDBGapCheck  bool
+	skipPBinStateDBCheck bool
+	// disableInterDomainDeps drops the accounts/storage -> commitment alignment for a
+	// directory that holds state files and no commitment yet, which is what the
+	// commitment rebuild reads from. Left on, every state file is invisible there.
+	disableInterDomainDeps bool
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -41,6 +48,14 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 		sanityOldNaming: false,
 		disableFsync:    false,
 	}
+}
+
+func NewPBTStateAggregator(dirs datadir.Dirs, settings *ErigonDBSettings, logger log.Logger) AggOpts {
+	opts := New(dirs).Logger(logger).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps()
+	if settings != nil {
+		opts = opts.WithErigonDBSettings(settings)
+	}
+	return opts
 }
 
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
@@ -72,15 +87,24 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
 	a.skipFilesDBGapCheck = opts.skipFilesDBGapCheck
+	a.skipPBinStateDBCheck = opts.skipPBinStateDBCheck
 
 	a.savedSalt = salt
 
 	if opts.referencesInCommitmentBranches != nil {
 		a.applyReferencesInCommitmentBranches(*opts.referencesInCommitmentBranches)
 	}
+	if opts.frozenAtTxNum != nil {
+		a.setFrozenAtTxNums(opts.frozenAtTxNum)
+	}
 
 	if err := a.ConfigureDomains(); err != nil {
 		return nil, err
+	}
+	// After ConfigureDomains, which is what registers the dependencies, and before
+	// OpenFolder, which is what first reads them.
+	if opts.disableInterDomainDeps && a.checker != nil {
+		a.checker.DisableInterDomain()
 	}
 
 	return a, nil
@@ -115,7 +139,13 @@ func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; retu
 func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }          //nolint:gocritic
 func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
 
-func (opts AggOpts) SkipFilesDBGapCheck() AggOpts { opts.skipFilesDBGapCheck = true; return opts } //nolint:gocritic
+func (opts AggOpts) SkipFilesDBGapCheck() AggOpts  { opts.skipFilesDBGapCheck = true; return opts }  //nolint:gocritic
+func (opts AggOpts) SkipPBinStateDBCheck() AggOpts { opts.skipPBinStateDBCheck = true; return opts } //nolint:gocritic
+func (opts AggOpts) DisableInterDomainDeps() AggOpts { //nolint:gocritic
+	opts.disableInterDomainDeps = true
+	return opts
+}
+
 func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
 	return opts
@@ -132,6 +162,7 @@ func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint
 	opts.stepsInFrozenFile = s.StepsInFrozenFile
 	refs := s.RefsInCommitmentBranches()
 	opts.referencesInCommitmentBranches = &refs
+	opts.frozenAtTxNum = maps.Clone(s.FrozenAtTxNum)
 	return opts
 }
 

@@ -267,7 +267,7 @@ func runWitnessTest(test *testutil.WitnessBlockTest) error {
 			return fmt.Errorf("block index %d has a witness but no parseable block number", i)
 		}
 
-		res, err := debugApi.ExecutionWitness(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum)), &canonicalMode)
+		res, err := debugApi.ExecutionWitness(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum)), &canonicalMode, nil)
 		if err != nil {
 			return fmt.Errorf("ExecutionWitness(block %d): %w", blockNum, err)
 		}

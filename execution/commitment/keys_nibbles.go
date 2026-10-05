@@ -23,19 +23,19 @@ func KeyToHexNibbleHash(key []byte) []byte {
 	return nibblized
 }
 
-// addrHashCache memoizes the nibblized keccak(addr) prefix of the most recent
+// AddrHashCache memoizes the nibblized keccak(addr) prefix of the most recent
 // storage key's address, so a run of slots under one address (whale storage)
 // reuses the 64-nibble prefix instead of re-hashing the address. keccak(addr)
 // is immutable, so a hit is always correct and a miss simply recomputes.
-type addrHashCache struct {
+type AddrHashCache struct {
 	addr  [20]byte
 	nibs  [64]byte
 	valid bool
 }
 
-func (c *addrHashCache) reset() { c.valid = false }
+func (c *AddrHashCache) reset() { c.valid = false }
 
-func keyToHexNibbleHashCached(key []byte, c *addrHashCache) []byte {
+func KeyToHexNibbleHashCached(key []byte, c *AddrHashCache) []byte {
 	if len(key) <= length.Addr {
 		return KeyToHexNibbleHash(key)
 	}

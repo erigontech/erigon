@@ -59,7 +59,7 @@ var readDomains = &cobra.Command{
 	Use:       "read_domains",
 	Short:     `Run block execution and commitment with Domains.`,
 	Example:   "go run ./cmd/integration read_domains --datadir=... --verbosity=3",
-	ValidArgs: []string{"account", "storage", "code", "commitment"},
+	ValidArgs: []string{"account", "storage", "code", "commitment", "commitment-bin"},
 	Args:      cobra.ArbitraryArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
@@ -80,7 +80,7 @@ var readDomains = &cobra.Command{
 		for i := range args {
 			if i == 0 {
 				switch s := strings.ToLower(args[i]); s {
-				case "account", "storage", "code", "commitment":
+				case "account", "storage", "code", "commitment", "commitment-bin":
 					readFromDomain = s
 				default:
 					logger.Error("invalid domain to read from", "arg", args[i])

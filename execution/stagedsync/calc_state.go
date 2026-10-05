@@ -1,16 +1,22 @@
 package stagedsync
 
 import (
+	"context"
 	"fmt"
-	"math"
+	"slices"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -25,6 +31,70 @@ type calcAccountState struct {
 	Deleted     bool
 	// dirty tracks whether this account was modified in the current block
 	dirty bool
+	hash  [32]byte
+}
+
+type calcSlot struct {
+	value uint256.Int
+	hash  [32]byte
+}
+
+type calcStorage struct {
+	hash  [32]byte
+	slots map[accounts.StorageKey]calcSlot
+}
+
+type calcStateReader struct {
+	state    *calcState
+	fallback commitmentdb.StateReader
+}
+
+func (r *calcStateReader) WithHistory() bool { return r.fallback.WithHistory() }
+
+func (r *calcStateReader) CheckDataAvailable(domain kv.Domain, step kv.Step) error {
+	return r.fallback.CheckDataAvailable(domain, step)
+}
+
+func (r *calcStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	return &calcStateReader{state: r.state, fallback: r.fallback.Clone(tx)}
+}
+
+func (r *calcStateReader) CloneForWorker(ctx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
+	return &calcStateReader{state: r.state, fallback: r.fallback.CloneForWorker(ctx, tx)}
+}
+
+func (r *calcStateReader) Read(domain kv.Domain, key []byte, stepSize uint64) ([]byte, kv.Step, error) {
+	if domain == kv.AccountsDomain && len(key) == length.Addr {
+		addr := accounts.InternAddress(common.BytesToAddress(key))
+		if acc, ok := r.state.accounts[addr]; ok {
+			if acc.Deleted && acc.Incarnation == 0 && acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash {
+				return nil, 0, nil
+			}
+			account := accounts.Account{
+				Nonce:       acc.Nonce,
+				Balance:     acc.Balance,
+				CodeHash:    accounts.InternCodeHash(common.Hash(acc.CodeHash)),
+				Incarnation: acc.Incarnation,
+			}
+			return accounts.SerialiseV3(&account), 0, nil
+		}
+	}
+	if domain == kv.StorageDomain && len(key) == length.Addr+length.Hash {
+		addr := accounts.InternAddress(common.BytesToAddress(key[:length.Addr]))
+		if storage, ok := r.state.storageState[addr]; ok {
+			slot := accounts.InternKey(common.BytesToHash(key[length.Addr:]))
+			if value, ok := storage.slots[slot]; ok {
+				return value.value.Bytes(), 0, nil
+			}
+		}
+	}
+	if domain == kv.CodeDomain && len(key) == length.Addr {
+		addr := accounts.InternAddress(common.BytesToAddress(key))
+		if code, ok := r.state.codeValues[addr]; ok {
+			return code, 0, nil
+		}
+	}
+	return r.fallback.Read(domain, key, stepSize)
 }
 
 // calcDomainReader provides lazy-load reads for calcState using the
@@ -74,11 +144,6 @@ type accountBaselineReader interface {
 	ReadAccountData(addr accounts.Address) (*accounts.Account, error)
 }
 
-// storageEnumerator lists every persisted storage slot under an address.
-type storageEnumerator interface {
-	EachStorageSlot(addr accounts.Address, fn func(key accounts.StorageKey) error) error
-}
-
 // calcState is the commitment calculator's local state accumulator.
 // It maintains the current state for every account/storage key that has been
 // touched. On first touch, values are lazy-loaded from the domain via the
@@ -88,17 +153,17 @@ type calcState struct {
 	accounts      map[accounts.Address]*calcAccountState
 	dirtyAccounts []accounts.Address
 	// storageState holds the accumulated value for each slot
-	storageState map[accounts.Address]map[accounts.StorageKey]uint256.Int
+	storageState map[accounts.Address]*calcStorage
 	// storageDirty tracks which slots were modified in the current block
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
+	codeValues   map[accounts.Address][]byte
+	binFeed      bool
+	wiped        map[accounts.Address]struct{}
+	resetCount   int
+	reader       commitmentdb.StateReader
 
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader accountBaselineReader
-
-	// storageEnum is a test injection point; production leaves it nil. The
-	// self-destruct path no longer reads it — the account delete collapses the
-	// subtree — so it exists only to assert that in tests.
-	storageEnum storageEnumerator
 
 	// lazyLoadErr captures the first error encountered during ensureAccount /
 	// ensureStorage. Sticky — never cleared — so the calculator can fail the
@@ -108,6 +173,12 @@ type calcState struct {
 
 	logger    log.Logger
 	logPrefix string
+
+	feedUpdates []commitment.Update
+	feedSlots   []commitment.FeedSlot
+	feedValues  []byte
+
+	prefetch *branchPrefetcher
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -119,8 +190,10 @@ func (cs *calcState) LazyLoadErr() error { return cs.lazyLoadErr }
 func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) *calcState {
 	return &calcState{
 		accounts:     make(map[accounts.Address]*calcAccountState),
-		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
+		storageState: make(map[accounts.Address]*calcStorage),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
+		wiped:        make(map[accounts.Address]struct{}),
+		reader:       reader,
 		domainReader: &calcDomainReader{reader: reader},
 		logger:       logger,
 		logPrefix:    logPrefix,
@@ -142,8 +215,10 @@ func (cs *calcState) ensureAccount(addr accounts.Address, writes *state.WriteSet
 		return acc
 	}
 
+	address := addr.Value()
 	acc := &calcAccountState{
 		CodeHash: empty.CodeHash,
+		hash:     keccak.Sum256(address[:]),
 	}
 	if cs.domainReader != nil && !writesCoverBaseline(writes, addr) {
 		dbAcc, err := cs.domainReader.ReadAccountData(addr)
@@ -172,6 +247,13 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	}
 	acc.dirty = true
 	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+	address := addr.Value()
+	cs.prefetch.add(prefetchItem{account: acc.hash, address: address})
+}
+
+func (cs *calcState) markWiped(addr accounts.Address) {
+	cs.wiped[addr] = struct{}{}
+	cs.deleteStorageSubtree(addr)
 }
 
 // ApplyWrites folds a tx's typed write collections into the local state.
@@ -184,13 +266,21 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 // — even zero — means it is alive (clears Deleted).
 func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	sdThisCall := make(map[accounts.Address]bool)
+	for header := range writes.AllHeaders() {
+		if header.Path != state.CreateContractPath {
+			continue
+		}
+		if vw, ok := writes.GetCreateContract(header.Address); ok && vw.Val {
+			cs.markWiped(header.Address)
+		}
+	}
 	for addr, vw := range writes.SelfDestructs() {
 		sdThisCall[addr] = vw.Val
 		if vw.Val {
+			cs.markWiped(addr)
 			acc := cs.ensureAccount(addr, writes)
 			acc.Deleted = true
 			cs.markDirty(addr, acc)
-			cs.deleteStorageSubtree(addr)
 		}
 	}
 	clearsDeleted := func(addr accounts.Address, nonZero bool) bool {
@@ -221,7 +311,15 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		}
 	}
 	for addr, vw := range writes.Codes() {
+		if cs.binFeed {
+			if cs.codeValues == nil {
+				cs.codeValues = make(map[accounts.Address][]byte)
+			}
+			cs.codeValues[addr] = append([]byte(nil), vw.Val.Bytes...)
+		}
 		acc := cs.ensureAccount(addr, writes)
+		address := addr.Value()
+		cs.prefetch.add(prefetchItem{account: acc.hash, address: address, codeHash: vw.Val.Hash.Value(), codeChunks: (len(vw.Val.Bytes) + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen, codeWritten: true})
 		acc.CodeHash = vw.Val.Hash.Value()
 		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, vw.Val.Len() > 0) {
@@ -237,19 +335,30 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		// Skip lazy-loading the prior slot value: the only downstream consumer
 		// (FlushToUpdates) reads exactly the value set below, so the cold
 		// GetAsOf seek it would cost is wasted.
-		slots := cs.storageState[addr]
-		if slots == nil {
-			slots = make(map[accounts.StorageKey]uint256.Int)
-			cs.storageState[addr] = slots
+		address := addr.Value()
+		st := cs.storageState[addr]
+		if st == nil {
+			st = &calcStorage{hash: keccak.Sum256(address[:]), slots: make(map[accounts.StorageKey]calcSlot)}
+			cs.storageState[addr] = st
 		}
 		dirty := cs.storageDirty[addr]
 		if dirty == nil {
 			dirty = make(map[accounts.StorageKey]bool)
 			cs.storageDirty[addr] = dirty
+			cs.prefetch.add(prefetchItem{account: st.hash, address: address})
 		}
 		for key, vw := range inner {
-			slots[key] = vw.Val
-			dirty[key] = true
+			slot, ok := st.slots[key]
+			if !ok {
+				k := key.Value()
+				slot.hash = keccak.Sum256(k[:])
+			}
+			slot.value = vw.Val
+			st.slots[key] = slot
+			if !dirty[key] {
+				dirty[key] = true
+				cs.prefetch.add(prefetchItem{account: st.hash, slot: slot.hash, address: address, plainSlot: key.Value(), storage: true})
+			}
 		}
 	}
 	// An account still Deleted after the field writes (no reviving non-zero
@@ -272,8 +381,8 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 // own DeleteUpdate collapses the rest of the subtree, so untouched on-disk slots
 // need not be read.
 func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
-	slots := cs.storageState[addr]
-	if len(slots) == 0 {
+	st := cs.storageState[addr]
+	if st == nil || len(st.slots) == 0 {
 		return
 	}
 	dirty := cs.storageDirty[addr]
@@ -281,24 +390,14 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 		dirty = make(map[accounts.StorageKey]bool)
 		cs.storageDirty[addr] = dirty
 	}
-	for key := range slots {
-		slots[key] = uint256.Int{}
+	for key, slot := range st.slots {
+		slot.value = uint256.Int{}
+		st.slots[key] = slot
 		dirty[key] = true
 	}
 }
 
-// LoadFromBAL populates calcState from an EIP-7928 Block Access List rather
-// than the per-tx VersionedWrites stream: it takes each field's block-end value
-// and feeds the existing ApplyWrites. The BAL carries no deletion marker, so an
-// account whose block-end state is empty (EIP-161) must be reconstructed as a
-// delete here: after the field changes and lazy-loaded pre-block fields are
-// merged, a touched all-zero account is marked Deleted so FlushToUpdates removes
-// its leaf instead of writing a zero-valued one. Storage reads are ignored.
-func (cs *calcState) LoadFromBAL(blockAccessList types.BlockAccessList, emptyRemoval bool, isAura bool, eip8246 bool) {
-	cs.LoadFromBALUpTo(blockAccessList, math.MaxUint32, emptyRemoval, isAura, eip8246)
-}
-
-// LoadFromBALUpTo is LoadFromBAL restricted to changes at tx index ≤ maxTxIndex,
+// LoadFromBALUpTo populates calcState from changes at tx index ≤ maxTxIndex,
 // i.e. the state as of that point within the block. Used to fold a block up to a
 // mid-block step boundary (checkpoint) from the same per-tx BAL, then fold the
 // remainder — the BAL carries every change's tx index, so no re-execution is
@@ -329,61 +428,132 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 // always include the full current state (all fields) so the trie sees
 // complete values.
 func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
+	n := len(cs.dirtyAccounts)
+	for _, dirtySlots := range cs.storageDirty {
+		n += len(dirtySlots)
+	}
+	updates.Grow(n)
 	for _, addr := range cs.dirtyAccounts {
-		acc := cs.accounts[addr]
 		address := addr.Value()
-		key := string(address[:])
-
-		// A "Deleted" account only encodes as serial's leaf-removing DeleteUpdate
-		// when every field is actually zero; a Deleted account that still holds a
-		// non-zero balance/nonce/code (or a retained incarnation) keeps its leaf,
-		// so emit a regular UPDATE with the real values instead.
-		isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
-		switch {
-		case acc.Deleted && acc.Incarnation > 0 && isAllZero:
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
-				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-				Balance:  uint256.Int{},
-				Nonce:    0,
-				CodeHash: empty.CodeHash,
-			})
-		case acc.Deleted && isAllZero:
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
-				Flags:    commitment.DeleteUpdate,
-				CodeHash: empty.CodeHash,
-			})
-		default:
-			// Either not Deleted, or Deleted-with-retained-values.
-			updates.TouchPlainKeyDirect(key, &commitment.Update{
-				Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-				Balance:  acc.Balance,
-				Nonce:    acc.Nonce,
-				CodeHash: acc.CodeHash,
-			})
-		}
+		update := accountUpdateOf(cs.accounts[addr])
+		updates.TouchPlainKeyUnique(string(address[:]), &update)
 	}
 
 	for addr, dirtySlots := range cs.storageDirty {
 		address := addr.Value()
 		slots := cs.storageState[addr]
 		for key := range dirtySlots {
-			val := slots[key]
+			val := slots.slots[key].value
 			keyVal := key.Value()
-			composite := make([]byte, 20+32)
-			copy(composite, address[:])
+			var composite [20 + 32]byte
+			copy(composite[:], address[:])
 			copy(composite[20:], keyVal[:])
 
-			vBytes := val.Bytes()
 			var u commitment.Update
-			if len(vBytes) == 0 {
+			if n := val.ByteLen(); n == 0 {
 				u.Flags = commitment.DeleteUpdate
 			} else {
 				u.Flags = commitment.StorageUpdate
-				u.StorageLen = int8(len(vBytes))
-				copy(u.Storage[:], vBytes)
+				u.StorageLen = int8(n)
+				val.WriteToSlice(u.Storage[:n])
 			}
-			updates.TouchPlainKeyDirect(string(composite), &u)
+			updates.TouchPlainKeyUnique(string(composite[:]), &u)
 		}
+	}
+}
+
+func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
+	slots := 0
+	for _, dirty := range cs.storageDirty {
+		slots += len(dirty)
+	}
+	feed.Keys = len(cs.dirtyAccounts) + slots
+	feed.Accounts = slices.Grow(feed.Accounts[:0], len(cs.dirtyAccounts)+len(cs.storageDirty))
+	cs.feedUpdates = slices.Grow(cs.feedUpdates[:0], len(cs.dirtyAccounts))
+	cs.feedSlots = slices.Grow(cs.feedSlots[:0], slots)
+	cs.feedValues = slices.Grow(cs.feedValues[:0], length.Hash*slots)
+	for addr, dirty := range cs.storageDirty {
+		if len(dirty) == 0 {
+			continue
+		}
+		st := cs.storageState[addr]
+		start := len(cs.feedSlots)
+		for key := range dirty {
+			slot := st.slots[key]
+			at, n := len(cs.feedValues), slot.value.ByteLen()
+			cs.feedValues = cs.feedValues[:at+n]
+			slot.value.WriteToSlice(cs.feedValues[at:])
+			cs.feedSlots = append(cs.feedSlots, commitment.FeedSlot{Hash: slot.hash, Value: cs.feedValues[at : at+n : at+n]})
+		}
+		account := commitment.FeedAccount{Hash: st.hash, Slots: cs.feedSlots[start:len(cs.feedSlots):len(cs.feedSlots)]}
+		if acc := cs.accounts[addr]; acc != nil && acc.dirty {
+			account.Update = cs.feedUpdate(acc)
+		}
+		feed.Accounts = append(feed.Accounts, account)
+	}
+	for _, addr := range cs.dirtyAccounts {
+		if len(cs.storageDirty[addr]) != 0 {
+			continue
+		}
+		acc := cs.accounts[addr]
+		feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: acc.hash, Update: cs.feedUpdate(acc)})
+	}
+}
+
+func (cs *calcState) BinFeed() (*commitment.PBinFeed, error) {
+	keys := make(map[string]struct{}, len(cs.dirtyAccounts)+len(cs.storageDirty))
+	for _, addr := range cs.dirtyAccounts {
+		address := addr.Value()
+		keys[string(address[:])] = struct{}{}
+	}
+	for addr, dirty := range cs.storageDirty {
+		address := addr.Value()
+		for slot := range dirty {
+			key := slot.Value()
+			keys[string(address[:])+string(key[:])] = struct{}{}
+		}
+	}
+	codeKeys := make(map[string]struct{}, len(cs.codeValues))
+	for addr := range cs.codeValues {
+		address := addr.Value()
+		codeKeys[string(address[:])] = struct{}{}
+	}
+	wiped := make(map[string]struct{}, len(cs.wiped))
+	for addr := range cs.wiped {
+		address := addr.Value()
+		wiped[string(address[:])] = struct{}{}
+	}
+	return commitmentdb.BinFeedFromState(keys, codeKeys, wiped, &calcStateReader{state: cs, fallback: cs.reader})
+}
+
+func (cs *calcState) feedUpdate(acc *calcAccountState) *commitment.Update {
+	cs.feedUpdates = append(cs.feedUpdates, accountUpdateOf(acc))
+	return &cs.feedUpdates[len(cs.feedUpdates)-1]
+}
+
+func accountUpdateOf(acc *calcAccountState) commitment.Update {
+	// A "Deleted" account only encodes as serial's leaf-removing DeleteUpdate
+	// when every field is actually zero; a Deleted account that still holds a
+	// non-zero balance/nonce/code (or a retained incarnation) keeps its leaf,
+	// so emit a regular UPDATE with the real values instead.
+	isAllZero := acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash
+	switch {
+	case acc.Deleted && acc.Incarnation > 0 && isAllZero:
+		return commitment.Update{
+			Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
+			CodeHash: empty.CodeHash,
+		}
+	case acc.Deleted && isAllZero:
+		return commitment.Update{
+			Flags:    commitment.DeleteUpdate,
+			CodeHash: empty.CodeHash,
+		}
+	}
+	return commitment.Update{
+		Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
+		Balance:  acc.Balance,
+		Nonce:    acc.Nonce,
+		CodeHash: acc.CodeHash,
 	}
 }
 
@@ -391,6 +561,7 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 // accumulated state values. Called after commitment computation to
 // prepare for the next block.
 func (cs *calcState) ResetBlockFlags() {
+	cs.resetCount++
 	for _, addr := range cs.dirtyAccounts {
 		cs.accounts[addr].dirty = false
 	}
@@ -398,4 +569,6 @@ func (cs *calcState) ResetBlockFlags() {
 	for addr := range cs.storageDirty {
 		delete(cs.storageDirty, addr)
 	}
+	clear(cs.codeValues)
+	clear(cs.wiped)
 }

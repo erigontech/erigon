@@ -47,12 +47,28 @@ func requireVisibleEnd(t *testing.T, agg *Aggregator, end uint64) {
 	t.Helper()
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	for _, d := range kv.StateDomains {
+	for _, d := range kv.StateDomains(kv.CommitmentDomain) {
 		require.EqualValues(t, end, at.d[d].files.EndTxNum(), "domain %s", d)
 	}
 	for _, ii := range at.standaloneIIs() {
 		require.EqualValues(t, end, ii.files.EndTxNum(), "index %s", ii.name)
 	}
+}
+
+func TestStateMinimaxUsesCanonicalCommitmentDomain(t *testing.T) {
+	t.Parallel()
+
+	visible := &aggregatorVisible{}
+	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		visible.d[domain] = newDomainVisible(domain, visibleFiles{{endTxNum: 50}})
+	}
+	visible.d[kv.CommitmentDomain] = newDomainVisible(kv.CommitmentDomain, visibleFiles{{endTxNum: 40}})
+	visible.d[kv.ReceiptDomain] = newDomainVisible(kv.ReceiptDomain, nil)
+
+	require.EqualValues(t, 40, visible.stateMinimaxTxNum(kv.CommitmentDomain))
+
+	visible.d[kv.CommitmentDomain] = newDomainVisible(kv.CommitmentDomain, nil)
+	require.EqualValues(t, 0, visible.stateMinimaxTxNum(kv.CommitmentDomain))
 }
 
 // state visible past commitment's files = state no commitment covers
@@ -95,7 +111,7 @@ func TestVisibleFilesAligned_EntityWithoutFilesDoesNotClamp(t *testing.T) {
 
 	at := agg.BeginFilesRo()
 	defer at.Close()
-	for _, d := range kv.StateDomains {
+	for _, d := range kv.StateDomains(kv.CommitmentDomain) {
 		require.EqualValues(t, 2*alignStepSize, at.d[d].files.EndTxNum(), "domain %s", d)
 	}
 }
@@ -116,7 +132,7 @@ func TestUnalign_KeepsStateVisibleWhileReceiptsLag(t *testing.T) {
 
 	realign := agg.Unalign(kv.ReceiptDomain)
 	at := agg.BeginFilesRo()
-	for _, d := range kv.StateDomains {
+	for _, d := range kv.StateDomains(kv.CommitmentDomain) {
 		require.EqualValues(t, 2*alignStepSize, at.d[d].files.EndTxNum(), "domain %s", d)
 	}
 	at.Close()

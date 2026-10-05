@@ -1,0 +1,11 @@
+{
+  "bytes": "000000000000000000000000000000000000000000000000000000000000000001010101020200011103022233010000000000000000000000000000000000000000000000000000000000000002010200aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa011f0101014402000000000000000000000000000000000000000000000000000000000000000301030104bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0003cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc010001550702667704000000000000000000000000000000000000000000000000000000000000000105dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd40018806eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee010101990201aa07000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "snapshotDigest": "3e0c0672d8779f7b05e9aeeb504f0a10cf6829ba9dbdd6b9f2ce451e2e6a25cd",
+  "breakdown": {
+    "root": "00..1f",
+    "headers": "three accounts: kind 0, kind 1, and kind 2; header slots 0, 1, and 3",
+    "codeGroups": "one stem with subindices 0 and 7",
+    "storageGroups": "one address with one single-leaf and one multi-leaf stem",
+    "counts": "headers=3, codeGroups=1, storageGroups=1"
+  }
+}

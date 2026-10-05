@@ -1,0 +1,465 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package jsonrpc
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	eipWitness "github.com/erigontech/erigon/execution/commitment/eip8297/witness"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+)
+
+func verifyPBinWitnessAgainstBlock(ctx context.Context, result *ExecutionWitnessResult, block *types.Block, parentRoot, expectedRoot common.Hash, chainConfig *chain.Config, engine rules.Engine) error {
+	fail := func(err error) error { return fmt.Errorf("pbin stateless execution: %w", err) }
+	if block.NumberU64() == 0 {
+		if block.Root() != expectedRoot {
+			return fmt.Errorf("pbin state root mismatch after stateless execution: got %x, expected %x", block.Root(), expectedRoot)
+		}
+		return nil
+	}
+	if len(result.State) == 0 && parentRoot != eip8297.EmptyTreeHash {
+		return fail(errors.New("empty State field in witness"))
+	}
+	stateless, err := newPBinWitnessStateless(result, parentRoot)
+	if err != nil {
+		return fail(err)
+	}
+	if err := replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
+		err = stateless.resolveErrorOr(err)
+		return fail(err)
+	}
+	if err := stateless.resolveErrorOr(nil); err != nil {
+		return fail(err)
+	}
+	root, err := stateless.Finalize(ctx)
+	if err != nil {
+		return fail(fmt.Errorf("pbin post-state root: %w", err))
+	}
+	if err := stateless.checkAllNodesConsumed(); err != nil {
+		return fail(err)
+	}
+	if root != expectedRoot {
+		return fmt.Errorf("pbin state root mismatch after stateless execution: got %x, expected %x", root, expectedRoot)
+	}
+	return nil
+}
+
+type pbinWitnessStateless struct {
+	tree  *eipWitness.PBinTree
+	codes map[common.Hash][]byte
+
+	codeUpdates      map[common.Address][]byte
+	accountUpdates   map[common.Address]*accounts.Account
+	preStateAccounts map[common.Address]bool
+	storageWrites    map[common.Address]map[common.Hash]uint256.Int
+	deleted          map[common.Address]struct{}
+	paths            [][]byte
+	resolveError     error
+
+	trace       bool
+	tracePrefix string
+}
+
+func (s *pbinWitnessStateless) latchPBinResolveError(err error) {
+	if err != nil && s.resolveError == nil {
+		s.resolveError = err
+	}
+}
+
+func (s *pbinWitnessStateless) resolveErrorOr(err error) error {
+	if s.resolveError != nil {
+		return s.resolveError
+	}
+	return err
+}
+
+var (
+	_ state.StateReader = (*pbinWitnessStateless)(nil)
+	_ state.StateWriter = (*pbinWitnessStateless)(nil)
+)
+
+func newPBinWitnessStateless(result *ExecutionWitnessResult, parentRoot common.Hash) (*pbinWitnessStateless, error) {
+	if len(result.Keys) != len(result.State) {
+		return nil, fmt.Errorf("pbin witness: keys and state lengths differ: %d and %d", len(result.Keys), len(result.State))
+	}
+	blobs := make(map[string][]byte, len(result.State))
+	paths := make([][]byte, len(result.Keys))
+	for index, key := range result.Keys {
+		path := bytes.Clone(key)
+		paths[index] = path
+		if len(result.State[index]) == 0 {
+			return nil, fmt.Errorf("pbin witness: empty node at path %x", path)
+		}
+		if _, exists := blobs[string(path)]; exists {
+			return nil, fmt.Errorf("pbin witness: duplicate node path %x", path)
+		}
+		blobs[string(path)] = bytes.Clone(result.State[index])
+	}
+	var stateless *pbinWitnessStateless
+	resolve := func(path []byte) ([]byte, error) {
+		blob, ok := blobs[string(path)]
+		if !ok {
+			err := fmt.Errorf("%w: missing node at path %x", commitment.ErrPBinWitnessBlinded, path)
+			if stateless != nil {
+				stateless.latchPBinResolveError(err)
+			}
+			return nil, err
+		}
+		return bytes.Clone(blob), nil
+	}
+	tree, err := eipWitness.NewPBinTree(parentRoot, resolve)
+	if err != nil {
+		return nil, err
+	}
+	codes := make(map[common.Hash][]byte, len(result.Codes))
+	for _, code := range result.Codes {
+		hash := crypto.Keccak256Hash(code)
+		if old, exists := codes[hash]; exists && !bytes.Equal(old, code) {
+			return nil, fmt.Errorf("pbin witness: code hash collision for %x", hash)
+		}
+		codes[hash] = bytes.Clone(code)
+	}
+	stateless = &pbinWitnessStateless{
+		tree:             tree,
+		codes:            codes,
+		codeUpdates:      make(map[common.Address][]byte),
+		accountUpdates:   make(map[common.Address]*accounts.Account),
+		preStateAccounts: make(map[common.Address]bool),
+		storageWrites:    make(map[common.Address]map[common.Hash]uint256.Int),
+		deleted:          make(map[common.Address]struct{}),
+		paths:            paths,
+	}
+	return stateless, nil
+}
+
+func (s *pbinWitnessStateless) checkAllNodesConsumed() error {
+	consumed := make(map[string]struct{}, len(s.tree.Resolved()))
+	for _, node := range s.tree.Resolved() {
+		consumed[string(node.Path)] = struct{}{}
+	}
+	for _, path := range s.paths {
+		if _, ok := consumed[string(path)]; !ok {
+			return fmt.Errorf("pbin witness: unconsumed node at path %x", path)
+		}
+	}
+	return nil
+}
+
+func (s *pbinWitnessStateless) SetTrace(trace bool, tracePrefix string) {
+	s.trace, s.tracePrefix = trace, tracePrefix
+}
+
+func (s *pbinWitnessStateless) Trace() bool { return s.trace }
+
+func (s *pbinWitnessStateless) TracePrefix() string { return s.tracePrefix }
+
+func (s *pbinWitnessStateless) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	return s.ReadAccountData(address)
+}
+
+func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	addr := address.Value()
+	if account, ok := s.accountUpdates[addr]; ok {
+		return account, nil
+	}
+	if _, deleted := s.deleted[addr]; deleted {
+		return nil, nil
+	}
+	value, present, err := s.tree.Read(eip8297.TreeKeyAccount(addr[:], eip8297.BasicDataLeafKey))
+	if err != nil {
+		return nil, err
+	}
+	s.preStateAccounts[addr] = present
+	if !present {
+		codeHash, codeHashPresent, err := s.readAccountCodeHash(addr)
+		if err != nil {
+			return nil, err
+		}
+		if codeHashPresent {
+			s.preStateAccounts[addr] = true
+			return &accounts.Account{Root: empty.RootHash, CodeHash: accounts.InternCodeHash(codeHash)}, nil
+		}
+		var cache eip8297.DigestCache
+		headerPresent, err := s.tree.PBinHasPrefix(cache.AccountHeaderStem(addr[:]))
+		if err != nil {
+			return nil, err
+		}
+		if headerPresent {
+			return nil, fmt.Errorf("pbin witness: account %x has header data but no code-hash or delegation leaf", addr)
+		}
+		return nil, nil
+	}
+	account := &accounts.Account{Root: empty.RootHash}
+	account.Nonce = binary.BigEndian.Uint64(value[eip8297.BasicDataNonceOffset:])
+	account.Balance.SetBytes(value[eip8297.BasicDataBalanceOffset : eip8297.BasicDataBalanceOffset+16])
+	codeHash, codeHashPresent, err := s.readAccountCodeHash(addr)
+	if err != nil {
+		return nil, err
+	}
+	if !codeHashPresent {
+		return nil, fmt.Errorf("pbin witness: account %x has no code-hash or delegation leaf", addr)
+	}
+	account.CodeHash = accounts.InternCodeHash(codeHash)
+	return account, nil
+}
+
+func (s *pbinWitnessStateless) readAccountCodeHash(addr common.Address) (common.Hash, bool, error) {
+	delegation, present, err := s.readDelegation(addr)
+	if err != nil {
+		return common.Hash{}, false, err
+	}
+	if present {
+		return crypto.Keccak256Hash(delegation), true, nil
+	}
+	return s.readCodeHash(addr)
+}
+
+func (s *pbinWitnessStateless) readCodeHash(addr common.Address) (common.Hash, bool, error) {
+	value, present, err := s.tree.Read(eip8297.TreeKeyAccount(addr[:], eip8297.CodeHashLeafKey))
+	if err != nil {
+		return common.Hash{}, false, err
+	}
+	if !present {
+		return common.Hash{}, false, nil
+	}
+	return common.BytesToHash(value), true, nil
+}
+
+func (s *pbinWitnessStateless) readDelegation(addr common.Address) ([]byte, bool, error) {
+	value, present, err := s.tree.Read(eip8297.TreeKeyAccount(addr[:], eip8297.DelegationLeafKey))
+	if err != nil {
+		return nil, false, err
+	}
+	if !present {
+		return nil, false, nil
+	}
+	if !eip8297.IsDelegation(value[:eip8297.DelegationCodeLength]) {
+		return nil, false, fmt.Errorf("pbin witness: invalid delegation leaf for %x", addr)
+	}
+	return bytes.Clone(value[:eip8297.DelegationCodeLength]), true, nil
+}
+
+func (s *pbinWitnessStateless) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	addr, slot := address.Value(), key.Value()
+	if writes, ok := s.storageWrites[addr]; ok {
+		if value, ok := writes[slot]; ok {
+			return value, !value.IsZero(), nil
+		}
+	}
+	if _, deleted := s.deleted[addr]; deleted {
+		return uint256.Int{}, false, nil
+	}
+	value, present, err := s.tree.Read(eip8297.TreeKeyStorage(addr[:], slot[:]))
+	if err != nil {
+		return uint256.Int{}, false, err
+	}
+	if !present {
+		return uint256.Int{}, false, nil
+	}
+	var result uint256.Int
+	result.SetBytes(value)
+	return result, !result.IsZero(), nil
+}
+
+func (s *pbinWitnessStateless) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	addr := address.Value()
+	if code, ok := s.codeUpdates[addr]; ok {
+		return bytes.Clone(code), nil
+	}
+	if _, deleted := s.deleted[addr]; deleted {
+		return nil, nil
+	}
+	account, err := s.ReadAccountData(address)
+	if err != nil || account == nil {
+		return nil, err
+	}
+	if delegation, present, err := s.readDelegation(addr); err != nil {
+		return nil, err
+	} else if present {
+		return delegation, nil
+	}
+	codeHash := account.CodeHash.Value()
+	if eip8297.IsEmptyCodeHash(codeHash) {
+		return nil, nil
+	}
+	code, ok := s.codes[codeHash]
+	if !ok {
+		err := fmt.Errorf("pbin witness: missing code for account %x with code hash %x", addr, codeHash)
+		if s.resolveError == nil {
+			s.resolveError = err
+		}
+		return nil, err
+	}
+	return bytes.Clone(code), nil
+}
+
+func (s *pbinWitnessStateless) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	code, err := s.ReadAccountCode(address)
+	return len(code), err
+}
+
+func (*pbinWitnessStateless) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
+
+func (s *pbinWitnessStateless) UpdateAccountData(address accounts.Address, _, account *accounts.Account) error {
+	addr := address.Value()
+	if account == nil {
+		s.accountUpdates[addr] = nil
+		return nil
+	}
+	copyAccount := new(accounts.Account)
+	copyAccount.Copy(account)
+	s.accountUpdates[addr] = copyAccount
+	delete(s.deleted, addr)
+	return nil
+}
+
+func (s *pbinWitnessStateless) DeleteAccount(address accounts.Address, _ *accounts.Account) error {
+	addr := address.Value()
+	if _, checked := s.preStateAccounts[addr]; !checked {
+		if _, err := s.ReadAccountData(address); err != nil {
+			return err
+		}
+	}
+	if s.preStateAccounts[addr] {
+		if err := s.tree.DeleteAccount(addr[:]); err != nil {
+			return err
+		}
+		s.deleted[addr] = struct{}{}
+	}
+	delete(s.accountUpdates, addr)
+	delete(s.codeUpdates, addr)
+	delete(s.storageWrites, addr)
+	return nil
+}
+
+func (s *pbinWitnessStateless) UpdateAccountCode(address accounts.Address, _ uint64, codeHash accounts.CodeHash, code []byte) error {
+	addr := address.Value()
+	if _, updated := s.accountUpdates[addr]; !updated {
+		account, err := s.ReadAccountData(address)
+		if err != nil {
+			return err
+		}
+		if account == nil {
+			account = &accounts.Account{Root: empty.RootHash}
+		}
+		copyAccount := new(accounts.Account)
+		copyAccount.Copy(account)
+		s.accountUpdates[addr] = copyAccount
+	}
+	s.codeUpdates[addr] = append([]byte{}, code...)
+	s.accountUpdates[addr].CodeHash = codeHash
+	return nil
+}
+
+func (s *pbinWitnessStateless) WriteAccountStorage(address accounts.Address, _ uint64, key accounts.StorageKey, _, value uint256.Int) error {
+	addr, slot := address.Value(), key.Value()
+	writes := s.storageWrites[addr]
+	if writes == nil {
+		writes = make(map[common.Hash]uint256.Int)
+		s.storageWrites[addr] = writes
+	}
+	writes[slot] = value
+	return nil
+}
+
+func (s *pbinWitnessStateless) CreateContract(address accounts.Address) error {
+	addr := address.Value()
+	if s.preStateAccounts[addr] {
+		if err := s.tree.DeleteAccount(addr[:]); err != nil {
+			return err
+		}
+	}
+	delete(s.deleted, addr)
+	delete(s.storageWrites, addr)
+	return nil
+}
+
+func (s *pbinWitnessStateless) Finalize(ctx context.Context) (common.Hash, error) {
+	if err := ctx.Err(); err != nil {
+		return common.Hash{}, err
+	}
+	input := eipWitness.PBinDriverInput{}
+	for addr, writes := range s.storageWrites {
+		for slot, value := range writes {
+			encoded := value.Bytes32()
+			input.Storage = append(input.Storage, eipWitness.PBinStorageWrite{Address: bytes.Clone(addr[:]), Slot: bytes.Clone(slot[:]), Value: bytes.Clone(encoded[:])})
+		}
+	}
+	for addr, account := range s.accountUpdates {
+		if account == nil {
+			continue
+		}
+		codeSize, err := s.codeSize(addr)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		basic, err := eip8297.EncodeBasicData(account.Nonce, &account.Balance, codeSize)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		update := eipWitness.PBinAccountUpdate{Address: bytes.Clone(addr[:]), Values: map[byte][]byte{eip8297.BasicDataLeafKey: basic[:]}}
+		if code, changed := s.codeUpdates[addr]; changed {
+			if eip8297.IsDelegation(code) {
+				update.Delegation = bytes.Clone(code)
+			} else {
+				update.Code = append([]byte{}, code...)
+			}
+		} else if delegation, present, err := s.readDelegation(addr); err != nil {
+			return common.Hash{}, err
+		} else if present {
+			update.Delegation = delegation
+		} else {
+			codeHash := eip8297.CodeHashValue(account.CodeHash.Value())
+			update.Values[eip8297.CodeHashLeafKey] = codeHash[:]
+		}
+		input.Accounts = append(input.Accounts, update)
+	}
+	root, _, err := s.tree.Apply(input)
+	return root, err
+}
+
+func (s *pbinWitnessStateless) codeSize(addr common.Address) (uint64, error) {
+	if code, changed := s.codeUpdates[addr]; changed {
+		return uint64(len(code)), nil
+	}
+	if account, updated := s.accountUpdates[addr]; updated && account != nil && eip8297.IsEmptyCodeHash(account.CodeHash.Value()) {
+		return 0, nil
+	}
+	value, present, err := s.tree.Read(eip8297.TreeKeyAccount(addr[:], eip8297.BasicDataLeafKey))
+	if err != nil {
+		return 0, err
+	}
+	if !present {
+		return 0, fmt.Errorf("pbin witness: missing basic data for account %x", addr)
+	}
+	return uint64(binary.BigEndian.Uint32(value[eip8297.BasicDataCodeSizeOffset:])), nil
+}

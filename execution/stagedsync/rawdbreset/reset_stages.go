@@ -164,12 +164,12 @@ func ResetSenders(ctx context.Context, db kv.RwDB) error {
 }
 
 func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
-	domainTablesCount := len(db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain))
+	domainTablesCount := len(db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.CommitmentBinDomain, kv.ReceiptDomain, kv.RCacheDomain))
 	invertedIdxTablesCount := len(db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx))
 	cleanupList := make([]string, 0, len(stateBuckets)+len(stateHistoryBuckets)+domainTablesCount+invertedIdxTablesCount)
 	cleanupList = append(cleanupList, stateBuckets...)
 	cleanupList = append(cleanupList, stateHistoryBuckets...)
-	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
+	cleanupList = append(cleanupList, db.Debug().DomainTables(kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.CommitmentBinDomain, kv.ReceiptDomain, kv.RCacheDomain)...)
 	cleanupList = append(cleanupList, db.Debug().InvertedIdxTables(kv.LogAddrIdx, kv.LogTopicIdx, kv.TracesFromIdx, kv.TracesToIdx)...)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -179,6 +179,11 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 		// corner case: state files may be ahead of block files - so, can't use SharedDomains here. just leave progress as 0.
 		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
 			return fmt.Errorf("reset exec state tables: %w", err)
+		}
+		for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+			if err := rawdb.DeleteCommitmentDomainStopped(tx, domain); err != nil {
+				return fmt.Errorf("reset commitment stop marker: %w", err)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -191,12 +196,15 @@ func ResetExec(ctx context.Context, db kv.TemporalRwDB) error {
 	branchCacheCleared := false
 	if hasAgg, ok := db.(dbstate.HasAgg); ok {
 		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok {
+			agg.ClearStoppedCommitmentDomains()
 			aggTx := agg.BeginFilesRo()
 			defer aggTx.Close()
-			if bc := aggTx.BranchCache(); bc != nil {
-				bc.Clear()
+			for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+				if bc := aggTx.BranchCache(domain); bc != nil {
+					bc.Clear()
+					branchCacheCleared = true
+				}
 			}
-			branchCacheCleared = true
 		}
 	}
 	if !branchCacheCleared {

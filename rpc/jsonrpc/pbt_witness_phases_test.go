@@ -1,0 +1,33 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package jsonrpc
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
+)
+
+func TestWitnessAppendsEmptyStorageNode(t *testing.T) {
+	accountLeaf := hexutil.Bytes(append([]byte{0xf8, 0x44}, empty.RootHash[:]...))
+	nodes := []hexutil.Bytes{accountLeaf}
+	want := append(append([]hexutil.Bytes{}, nodes...), hexutil.Bytes{0x80})
+	require.Equal(t, want, appendLegacyEmptyStorageNode(nodes, witnessModeLegacy))
+}

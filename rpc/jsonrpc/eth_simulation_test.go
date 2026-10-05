@@ -743,11 +743,11 @@ func TestComputeSimulatedStateRootWithoutCommitmentHistory(t *testing.T) {
 					t.Fatalf("state-history commitment was computed on a frozen chain: %v", r)
 				}
 			}()
-			sim := &simulator{blockReader: observedFrozenBlocks{frozen: tc.frozen, observed: tc.observed}}
+			sim := &simulator{chainConfig: &chain.Config{}, blockReader: observedFrozenBlocks{frozen: tc.frozen, observed: tc.observed}}
 			block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
 
 			err := sim.computeSimulatedStateRoot(context.Background(), nil, nil, &SimulatedBlock{}, block,
-				&types.Header{Number: *uint256.NewInt(0)}, 0, 0, nil, nil, false)
+				0, 0, nil, nil, false)
 
 			require.NoError(t, err)
 			require.Equal(t, common.Hash{}, block.Root())

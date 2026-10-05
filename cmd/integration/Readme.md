@@ -119,11 +119,61 @@ integration stage_exec
 # Option 2 is good 
 ```
 
-## How to re-gen CommitmentDomain
+## Commitment migration
 
 ```sh
-integration commitment rebuild
+# hex, in place
+integration commitment rebuild --datadir=<datadir>
+
+# Convert v3 hex files into a fresh PBT output datadir.
+integration commitment convert-pbt --datadir=<src> --chain=<chain> --output.datadir=<out> --keep-hex \
+  --experimental.bin-commitment.hash=<suite>
+
+# Attach the published output to a stopped node.
+integration commitment attach-pbt --datadir=<node> --chain=<chain> --from=<out> \
+  --experimental.bin-commitment.hash=<suite>
+
+# Test-only substitute for conversion and attach.
+integration stage_exec --datadir=<node> --chain=<chain> --block=<X> --experimental.commitment-v3
+erigon snapshots export-pbt --datadir=<node> --chain=<chain> --out=<export> \
+  --experimental.bin-commitment.hash=<suite>
+integration commitment import-pbt --datadir=<node> --chain=<chain> \
+  --snapshot=<export>/pbt-snapshot.bin --experimental.bin-commitment.hash=<suite>
+integration stage_exec --datadir=<node> --chain=<chain> --experimental.commitment-v3 \
+  --experimental.bin-commitment --experimental.bin-commitment.hash=<suite>
 ```
+
+Pass `--experimental.bin-commitment.hash=<suite>` to `export-pbt` and
+`import-pbt`. `export-pbt` defaults to BLAKE3. The
+producer and node must use the network's hash suite; attach refuses a suite
+mismatch. The EIP-8297 reference implementation uses BLAKE3, but the suite is
+a network choice.
+
+For a v3 source without a recorded schema setting, prefix these commands with
+`COMMITMENT_V3=true`. Current commands detect v3 commitment files before they
+open the source. The same environment setting can be used with
+`erigon snapshots export-pbt` and `integration commitment import-pbt`.
+
+`integration commitment rebuild` remains the hex rebuild and has no binary target. Use
+`convert-pbt` to produce the binary files, then publish and attach the output. See
+`docs/pbt-migration.md` for the operator checks and recovery rules.
+
+## Convert legacy binary-trie record files
+
+To convert a pre-version binary-trie datadir without changing the source, stage it into a separate
+output datadir:
+
+```sh
+integration commitment convert-format --datadir=<src> --output.datadir=<out> \
+  --verify.sample=1000
+```
+
+The command is one-way and leaves the source unchanged. The output must be separate from the source
+and on the same filesystem because the staging step uses hardlinks. Current-format shards remain
+hardlinked; legacy shards are replaced in the output. An interrupted run can be resumed with
+`--resume`, and `--verify.sample=N` reads back every Nth converted legacy branch record (`0`
+disables sampling). A single-cell input is invalid and can leave partial output; inspect and remove
+that output before starting again rather than resuming it.
 
 ## How to re-generate optional Domain/Index
 

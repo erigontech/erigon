@@ -160,6 +160,7 @@ func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
 		key := dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)})
 		require.NoError(t, tx.Put(kv.ChangeSets3, key, []byte{0x01}))
 		require.NoError(t, tx.Put(kv.BlockAccessList, key, []byte{0x01}))
+		require.NoError(t, tx.Put(kv.ShadowStateRoot, key, []byte{0x01}))
 	}
 	state := &PruneState{
 		ID:              stages.Execution,
@@ -189,5 +190,11 @@ func TestPruneExecutionStageInitialCycleUsesMaxReorgDepth(t *testing.T) {
 		has, err := tx.Has(table, key)
 		require.NoError(t, err)
 		require.True(t, has, "%s pruned the reorg boundary", table)
+	}
+	for _, blockNum := range []uint64{finalisedBlockNum, 200, forwardProgress - maxReorgDepth - 1, forwardProgress - maxReorgDepth} {
+		key := dbutils.BlockBodyKey(blockNum, common.Hash{byte(blockNum)})
+		has, err := tx.Has(kv.ShadowStateRoot, key)
+		require.NoError(t, err)
+		require.True(t, has, "%s pruned block %d", kv.ShadowStateRoot, blockNum)
 	}
 }

@@ -60,7 +60,7 @@ func (sf *visibleFilesForMerge) Close() {
 func (at *AggregatorRoTx) filesInRange(r *Ranges) (*visibleFilesForMerge, error) {
 	sf := &visibleFilesForMerge{}
 	for id := range at.d {
-		if !at.d[id].d.Enabled {
+		if at.d[id] == nil || !at.d[id].d.Enabled {
 			continue
 		}
 		if !r.domain[id].any() {

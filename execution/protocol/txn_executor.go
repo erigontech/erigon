@@ -872,7 +872,8 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	if auths == nil {
 		return gasRemaining, gasUsed, nil
 	}
-	isAmsterdam := st.evm.ChainRules().IsAmsterdam
+	rules := st.evm.ChainRules()
+	isAmsterdam := rules.IsAmsterdam
 	writtenAccounts := map[accounts.Address]struct{}{st.msg.From(): {}}
 	if !st.msg.Value().IsZero() {
 		writtenAccounts[st.msg.To()] = struct{}{}

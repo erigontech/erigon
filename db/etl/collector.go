@@ -157,6 +157,16 @@ func (c *Collector) Allocator(a *Allocator) *Collector {
 	return c
 }
 
+func (c *Collector) InMemorySize() int {
+	if c.buf == nil {
+		return 0
+	}
+	if sized, ok := c.buf.(interface{ Size() int }); ok {
+		return sized.Size()
+	}
+	return 0
+}
+
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	if c.buf == nil || c.buf.Len() == 0 {
 		return nil
@@ -297,6 +307,27 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 	}
 	//logger.Trace(fmt.Sprintf("[%s] ETL Load done", c.logPrefix), "bucket", bucket, "records", i)
 	return nil
+}
+
+func MergeLoad(logPrefix string, collectors []*Collector, loadFunc func(k, v []byte) error, args TransformArgs) error {
+	errs := make([]error, len(collectors))
+	var wg sync.WaitGroup
+	for i, c := range collectors {
+		if c.allFlushed {
+			continue
+		}
+		wg.Go(func() { errs[i] = c.flushBuffer(true) })
+	}
+	wg.Wait()
+	if err := errors.Join(errs...); err != nil {
+		return err
+	}
+	var providers []dataProvider
+	for _, c := range collectors {
+		providers = append(providers, c.dataProviders...)
+		args.BufferType = c.bufType
+	}
+	return mergeSortFiles(logPrefix, providers, loadFunc, args)
 }
 
 func (c *Collector) Close() {

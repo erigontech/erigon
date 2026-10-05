@@ -137,6 +137,34 @@ func WriteFileWithFsync(name string, data []byte, perm os.FileMode) error {
 	return writeFileWithFsyncAndFlags(name, data, perm, 0)
 }
 
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = RemoveFile(tmpPath)
+	}()
+	if err := tmp.Chmod(perm); err != nil {
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	return FsyncDir(filepath.Dir(path))
+}
+
 func WriteExclusiveFileWithFsync(name string, data []byte, perm os.FileMode) error {
 	return writeFileWithFsyncAndFlags(name, data, perm, os.O_EXCL)
 }

@@ -1,6 +1,9 @@
 package state
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -10,14 +13,46 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 const ERIGONDB_SETTINGS_FILE = "erigondb.toml"
 
+const (
+	TrieVariantHex    = "hex"
+	TrieVariantBin    = "bin"
+	TrieVariantHexBin = "hex+bin"
+)
+
+var ErrConversionFloor = kv.ErrConversionFloor
+
+type (
+	ConversionFloorKind  = kv.ConversionFloorKind
+	ConversionFloorError = kv.ConversionFloorError
+)
+
+const (
+	ConversionFloorBlock = kv.ConversionFloorBlock
+	ConversionFloorTx    = kv.ConversionFloorTx
+)
+
+func NewConversionFloorError(blockNum, txNum, requested uint64, kind ConversionFloorKind) error {
+	return kv.NewConversionFloorError(blockNum, txNum, requested, kind)
+}
+
 type ErigonDBSettings struct {
-	StepSize                       uint64 `toml:"step_size"`
-	StepsInFrozenFile              uint64 `toml:"steps_in_frozen_file"`
-	ReferencesInCommitmentBranches *bool  `toml:"references_in_commitment_branches"`
+	StepSize                       uint64            `toml:"step_size"`
+	StepsInFrozenFile              uint64            `toml:"steps_in_frozen_file"`
+	ReferencesInCommitmentBranches *bool             `toml:"references_in_commitment_branches"`
+	TrieVariant                    *string           `toml:"trie_variant,omitempty"`
+	TrieHash                       *string           `toml:"trie_hash,omitempty"`
+	FrozenAtTxNum                  map[string]uint64 `toml:"frozen_at_txnum,omitempty"`
+	ConversionBlockNum             *uint64           `toml:"conversion_block,omitempty"`
+	ConversionTxNum                *uint64           `toml:"conversion_txnum,omitempty"`
 }
 
 // RefsInCommitmentBranches resolves the commitment "references in branches" regime,
@@ -27,6 +62,213 @@ func (s *ErigonDBSettings) RefsInCommitmentBranches() bool {
 		return config3.DefaultReferencesInCommitmentBranches
 	}
 	return *s.ReferencesInCommitmentBranches
+}
+
+// TrieVariantName resolves the persisted commitment trie variant, treating an
+// absent field as the hex trie.
+func (s *ErigonDBSettings) TrieVariantName() string {
+	if s.TrieVariant == nil || *s.TrieVariant == "" {
+		return TrieVariantHex
+	}
+	return *s.TrieVariant
+}
+
+// TrieHashName resolves H for a bin datadir, treating an absent field as Keccak.
+func (s *ErigonDBSettings) TrieHashName() string {
+	if s.TrieHash == nil || *s.TrieHash == "" {
+		return commitment.PBinHashKeccak
+	}
+	return *s.TrieHash
+}
+
+func (s *ErigonDBSettings) FrozenAt(domain kv.Domain) (uint64, bool) {
+	if s == nil || s.FrozenAtTxNum == nil {
+		return 0, false
+	}
+	txNum, ok := s.FrozenAtTxNum[domain.String()]
+	return txNum, ok
+}
+
+func (s *ErigonDBSettings) ConversionPoint() (blockNum, txNum uint64, ok bool, err error) {
+	blockSet := s != nil && s.ConversionBlockNum != nil
+	txSet := s != nil && s.ConversionTxNum != nil
+	if !blockSet && !txSet {
+		return 0, 0, false, nil
+	}
+	if blockSet != txSet {
+		return 0, 0, false, errors.New("erigondb.toml: conversion point requires conversion_block and conversion_txnum")
+	}
+	return *s.ConversionBlockNum, *s.ConversionTxNum, true, nil
+}
+
+func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
+	switch s.TrieVariantName() {
+	case TrieVariantBin, TrieVariantHexBin:
+		hexBin := s.TrieVariantName() == TrieVariantHexBin
+		if hexBin && !statecfg.ExperimentalCommitmentV3 {
+			logger.Info("datadir uses hex+bin commitment; enabling v3-hex for its hex domain")
+			statecfg.ExperimentalCommitmentV3 = true
+			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		}
+		if !hexBin && statecfg.ExperimentalCommitmentV3 {
+			return errors.New("the bin commitment trie does not support v3-hex; disable --experimental.commitment-v3 or use a hex+bin datadir")
+		}
+		if !hexBin && s.RefsInCommitmentBranches() {
+			return errors.New("the bin commitment trie does not support references_in_commitment_branches; set it to false")
+		}
+		if statecfg.ExperimentalHexBinCommitment != hexBin {
+			statecfg.ExperimentalHexBinCommitment = hexBin
+		}
+		if !hexBin && statecfg.ExperimentalParallelCommitment {
+			return errors.New("the bin commitment trie is sequential-only; drop --experimental.parallel-commitment")
+		}
+		if !statecfg.ExperimentalBinCommitment {
+			logger.Info("datadir uses the bin commitment trie; enabling it for this process")
+			statecfg.ExperimentalBinCommitment = true
+		}
+		// The stored hash wins over the flag: every root on disk was built with it,
+		// so honouring a differing flag would silently produce a second tree.
+		stored := s.TrieHashName()
+		if statecfg.BinCommitmentHash != "" && statecfg.BinCommitmentHash != stored {
+			return fmt.Errorf("--experimental.bin-commitment.hash=%s: datadir was built with %q; the bin trie needs a fresh datadir to change hash",
+				statecfg.BinCommitmentHash, stored)
+		}
+		// Resolution runs per RPC request and per aggregator open, while the
+		// selected suite is read unsynchronized by every engine; only write it
+		// when it actually has to change.
+		if commitment.PBinHashSuiteName() != stored {
+			if err := commitment.SetPBinHashSuite(stored); err != nil {
+				return fmt.Errorf("erigondb.toml: %w", err)
+			}
+		}
+	case TrieVariantHex:
+		if statecfg.ExperimentalHexBinCommitment {
+			statecfg.ExperimentalHexBinCommitment = false
+		}
+		if s.TrieHash != nil {
+			return errors.New("erigondb.toml: trie_hash is meaningless under trie_variant \"hex\"")
+		}
+		if statecfg.ExperimentalBinCommitment {
+			return errors.New("--experimental.bin-commitment: datadir was created with the hex commitment trie; the bin trie needs a fresh datadir")
+		}
+		if statecfg.BinCommitmentHash != "" {
+			return errors.New("--experimental.bin-commitment.hash needs --experimental.bin-commitment")
+		}
+	default:
+		return fmt.Errorf("erigondb.toml: unknown trie_variant %q", s.TrieVariantName())
+	}
+	return nil
+}
+
+// ReadErigonDBSettings reads a datadir's erigondb.toml as plain data. Unlike
+// ResolveErigonDBSettings it does not apply the file to the process, so a tool
+// can inspect a datadir it is not running on.
+func ReadErigonDBSettings(dirs datadir.Dirs) (*ErigonDBSettings, error) {
+	return readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
+}
+
+func EnableCommitmentV3FromFiles(dirs datadir.Dirs) (bool, error) {
+	settings, err := ReadErigonDBSettings(dirs)
+	if err == nil && settings.TrieVariantName() == TrieVariantBin {
+		return false, nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	hasLegacy, detected, err := commitmentFileVersions(dirs)
+	if err != nil {
+		return false, err
+	}
+	if hasLegacy && detected {
+		return false, errors.New("commitment files straddle v3.0")
+	}
+	if detected {
+		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.InitSchemas()
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		return true, nil
+	}
+	return false, nil
+}
+
+func commitmentFileVersions(dirs datadir.Dirs) (bool, bool, error) {
+	type commitmentDataFile struct {
+		from, to uint64
+		version  version.Version
+	}
+	var files []commitmentDataFile
+	err := filepath.WalkDir(dirs.SnapDomain, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, fs.ErrNotExist) {
+				return filepath.SkipDir
+			}
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		parsed, _, ok := snaptype.ParseFileName(dirs.SnapDomain, entry.Name())
+		if ok && parsed.TypeString == kv.CommitmentDomain.String() && filepath.Ext(entry.Name()) == ".kv" {
+			files = append(files, commitmentDataFile{from: parsed.From, to: parsed.To, version: parsed.Version})
+		}
+		return nil
+	})
+	if err != nil {
+		return false, false, err
+	}
+	var hasLegacy, hasV3 bool
+	for i, file := range files {
+		covered := false
+		for j, other := range files {
+			if i != j && other.from <= file.from && other.to >= file.to && (other.from < file.from || other.to > file.to) {
+				covered = true
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+		if file.version.Less(version.V3_0) {
+			hasLegacy = true
+		} else {
+			hasV3 = true
+		}
+	}
+	return hasLegacy, hasV3, nil
+}
+
+func ReadErigonDBConversionPoint(dirs datadir.Dirs) (blockNum, txNum uint64, ok bool, err error) {
+	settings, err := ReadErigonDBSettings(dirs)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, err
+	}
+	return settings.ConversionPoint()
+}
+
+func ResolveErigonDBStepSize(dirs datadir.Dirs) (uint64, error) {
+	settings, err := ReadErigonDBSettings(dirs)
+	if err == nil {
+		return settings.StepSize, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return 0, err
+	}
+	preverifiedExists, err := dir.FileExist(filepath.Join(dirs.Snap, datadir.PreverifiedFileName))
+	if err != nil {
+		return 0, err
+	}
+	if preverifiedExists {
+		return config3.LegacyStepSize, nil
+	}
+	return config3.DefaultStepSize, nil
+}
+
+// WriteErigonDBSettings writes a datadir's erigondb.toml.
+func WriteErigonDBSettings(dirs datadir.Dirs, s *ErigonDBSettings) error {
+	return writeErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), s)
 }
 
 func readErigonDBSettings(path string) (*ErigonDBSettings, error) {
@@ -46,7 +288,7 @@ func writeErigonDBSettings(path string, s *ErigonDBSettings) error {
 	if err != nil {
 		return err
 	}
-	return dir.WriteFileWithFsync(path, data, 0o644)
+	return dir.WriteFileAtomic(path, data, 0o644)
 }
 
 // ResolveErigonDBSettings determines the active ErigonDB settings:
@@ -56,13 +298,21 @@ func writeErigonDBSettings(path string, s *ErigonDBSettings) error {
 //  3. Fresh datadir (neither file present): returns default settings without writing,
 //     so the downloader can provide the real erigondb.toml during header-chain phase.
 func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader bool) (*ErigonDBSettings, error) {
-	return ResolveErigonDBSettingsWithRefsDefault(dirs, logger, noDownloader, nil)
+	return resolveErigonDBSettings(dirs, logger, noDownloader, nil, false)
 }
 
 // ResolveErigonDBSettingsWithRefsDefault is ResolveErigonDBSettings with an optional first-start
 // override: when refsFirstStart is non-nil and erigondb.toml is being created, it sets the initial
 // references_in_commitment_branches; an existing or downloader-delivered toml wins (override logged, ignored).
 func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger, noDownloader bool, refsFirstStart *bool) (*ErigonDBSettings, error) {
+	return resolveErigonDBSettings(dirs, logger, noDownloader, refsFirstStart, false)
+}
+
+func ResolveErigonDBSettingsForGenesis(dirs datadir.Dirs, logger log.Logger, noDownloader, binTrieScheduled bool) (*ErigonDBSettings, error) {
+	return resolveErigonDBSettings(dirs, logger, noDownloader, nil, binTrieScheduled)
+}
+
+func resolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader bool, refsFirstStart *bool, binTrieScheduled bool) (*ErigonDBSettings, error) {
 	settingsPath := filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)
 
 	settingsExists, err := dir.FileExist(settingsPath)
@@ -77,6 +327,9 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 		if err != nil {
 			return nil, err
 		}
+		if err := reconcileTrieVariant(settings, logger); err != nil {
+			return nil, err
+		}
 		if refsFirstStart != nil {
 			logger.Info("--commitment.plainValues ignored: erigondb.toml already exists",
 				"references_in_commitment_branches", settings.RefsInCommitmentBranches())
@@ -84,7 +337,8 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 		// An absent field is resolved through RefsInCommitmentBranches(); the file is synced
 		// snapshot metadata and must not be rewritten.
 		logger.Info("erigondb settings", "step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile,
-			"references_in_commitment_branches", settings.RefsInCommitmentBranches())
+			"references_in_commitment_branches", settings.RefsInCommitmentBranches(),
+			"trie_variant", settings.TrieVariantName(), "trie_hash", settings.TrieHashName())
 		return settings, nil
 	}
 
@@ -93,15 +347,38 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 		refs = *refsFirstStart
 	}
 
-	preverifiedExists, err := dir.FileExist(filepath.Join(dirs.Snap, datadir.PreverifiedFileName))
+	var trieVariant, trieHash *string
+	if statecfg.ExperimentalBinCommitment || binTrieScheduled {
+		v := TrieVariantBin
+		if statecfg.ExperimentalHexBinCommitment {
+			v = TrieVariantHexBin
+		}
+		trieVariant = &v
+		h := statecfg.BinCommitmentHash
+		if h == "" {
+			// blake3 on a datadir being created, not keccak: geth and besu both hash the
+			// tree with BLAKE3, and a keccak tree agrees with no other client. An existing
+			// toml keeps whatever it recorded -- see TrieHashName.
+			h = commitment.PBinHashBlake3
+		}
+		trieHash = &h
+	}
+
+	stepSize, err := ResolveErigonDBStepSize(dirs)
 	if err != nil {
 		return nil, err
 	}
 
 	// Legacy datadir (Erigon <= 3.3): write legacy settings so erigondb.toml exists on disk.
-	if preverifiedExists {
+	if stepSize == config3.LegacyStepSize {
+		if statecfg.ExperimentalBinCommitment {
+			return nil, errors.New("--experimental.bin-commitment: this datadir already has hex commitment state; the bin trie needs a fresh datadir")
+		}
+		if binTrieScheduled {
+			return nil, errors.New("genesis schedules EIP-8297 but this datadir already has hex commitment state; the bin trie needs a fresh datadir")
+		}
 		settings := &ErigonDBSettings{
-			StepSize:                       config3.LegacyStepSize,
+			StepSize:                       stepSize,
 			StepsInFrozenFile:              config3.LegacyStepsInFrozenFile,
 			ReferencesInCommitmentBranches: &refs,
 		}
@@ -116,15 +393,25 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 
 	// Fresh datadir, no preverified.toml: use default settings.
 	settings := &ErigonDBSettings{
-		StepSize:                       config3.DefaultStepSize,
+		StepSize:                       stepSize,
 		StepsInFrozenFile:              config3.DefaultStepsInFrozenFile,
 		ReferencesInCommitmentBranches: &refs,
+		TrieVariant:                    trieVariant,
+		TrieHash:                       trieHash,
 	}
-	if noDownloader {
+	if err := reconcileTrieVariant(settings, logger); err != nil {
+		return nil, err
+	}
+	// A bin datadir persists its variant right away even with a downloader running:
+	// no published snapshot set carries a bin erigondb.toml, and leaving the variant
+	// unpersisted lets the empty preverified.toml that the snapshots stage commits for
+	// a chain without published hashes read as a legacy datadir at the next resolve.
+	if noDownloader || trieVariant != nil {
 		// No downloader to provide the real file — write defaults to disk now.
 		logger.Info("Initializing erigondb.toml with DEFAULT settings (nodownloader)",
 			"step_size", settings.StepSize, "steps_in_frozen_file", settings.StepsInFrozenFile,
-			"references_in_commitment_branches", settings.RefsInCommitmentBranches())
+			"references_in_commitment_branches", settings.RefsInCommitmentBranches(),
+			"trie_variant", settings.TrieVariantName())
 		if err := writeErigonDBSettings(settingsPath, settings); err != nil {
 			return nil, err
 		}

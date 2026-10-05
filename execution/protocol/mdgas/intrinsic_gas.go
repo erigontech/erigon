@@ -78,7 +78,8 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	case args.IsEIP2780:
 		result.ExecutionGas = params.TxBaseEIP2780
 		if args.IsContractCreation {
-			result.ExecutionGas += params.CreateAccessEIP2780
+			createAccess := params.CreateAccessEIP2780
+			result.ExecutionGas += createAccess
 		} else if !args.IsSelfTransfer {
 			result.ExecutionGas += params.ColdAccountAccessEIP2780
 			if args.HasValue {
@@ -265,9 +266,10 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	// Add the cost of authorizations
 	var perAuthCost uint64
 	if args.IsEIP2780 {
-		if args.IsAATxn {
+		switch {
+		case args.IsAATxn:
 			perAuthCost = params.PerAuthExecutionCostEIP8038
-		} else {
+		default:
 			perAuthCost = params.ExecutionPerAuthBaseCostEIP8038
 		}
 	} else {

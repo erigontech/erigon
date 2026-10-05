@@ -37,7 +37,9 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawdbhelpers"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -104,6 +106,35 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	inputTxNum = min
 
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
+}
+
+// executeInParallel picks the executor. The parallel executor's normalized write
+// set produces a different bin-trie root than the serial one for the same block,
+// so the bin variant stays on the serial executor until that is resolved.
+func executeInParallel(variant commitment.TrieVariant, exec3Parallel, experimentalBAL bool) bool {
+	if variant == commitment.VariantBinPatriciaTrie {
+		return false
+	}
+	return exec3Parallel || experimentalBAL
+}
+
+// deferCommitmentUpdates reports whether Process() may leave branch updates as a
+// pending update flushed at the block boundary instead of applying them inline.
+// Deferring cuts re-org validation overhead; the parallel apply path also needs
+// Flush() to carry the pending update across sync cycles. The bin trie has no
+// deferred-update path and refuses the request, so it stays on the inline path.
+func deferCommitmentUpdates(variant commitment.TrieVariant, isForkValidation, parallel, isApplyingBlocks bool) bool {
+	if variant == commitment.VariantBinPatriciaTrie {
+		return false
+	}
+	return isForkValidation || (parallel && isApplyingBlocks)
+}
+
+func storageFanOutMin(initialCycle bool) int {
+	if initialCycle {
+		return 1024
+	}
+	return 128
 }
 
 func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
@@ -201,17 +232,17 @@ func execV3(ctx context.Context,
 	// would panic on the dropped sequential-buffer keys (ERIGON_COMMITMENT_PARALLEL).
 	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
-		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
 		// Enable deferred commitment updates for fork validation and parallel initial sync.
 		// Deferred updates batch commitment calculations to block boundaries rather than
 		// per-transaction, significantly reducing re-org validation overhead.
 		// For the parallel path during initial sync, Flush() now includes pending updates,
 		// so they are no longer silently discarded between StageLoopIteration cycles.
-		if isForkValidation || isApplyingBlocks {
+		if deferCommitmentUpdates(doms.GetCommitmentCtx().Trie().Variant(), isForkValidation, true, isApplyingBlocks) {
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
+		doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	}
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForWarmup(ctx)
@@ -345,12 +376,12 @@ func execV3Serial(ctx context.Context,
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
 	doms.EnableParaTrieDB(cfg.db)
-	doms.EnableTrieWarmup(true)
 	doms.SetDeferCommitmentUpdates(false)
-	if isForkValidation {
+	if deferCommitmentUpdates(doms.GetCommitmentCtx().Trie().Variant(), isForkValidation, false, isApplyingBlocks) {
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
+	doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForWarmup(ctx)
 	}
@@ -460,7 +491,7 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 	lastCommittedStep := kv.Step(lastCommittedTxNum / doms.StepSize())
 	var lastFrozenStep kv.Step
 	if stepCheckTx, stepErr := cfg.db.BeginTemporalRo(ctx); stepErr == nil {
-		lastFrozenStep = kv.Step(stepCheckTx.StepsInFiles(kv.CommitmentDomain))
+		lastFrozenStep = kv.Step(stepCheckTx.StepsInFiles(canonicalCommitmentDomain(stepCheckTx)))
 		stepCheckTx.Rollback()
 	}
 
@@ -481,6 +512,30 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 	}
 
 	return execErr
+}
+
+func canonicalCommitmentDomain(tx interface{ AggTx() any }) kv.Domain {
+	if p, ok := tx.AggTx().(interface{ CanonicalCommitmentDomain() kv.Domain }); ok {
+		return p.CanonicalCommitmentDomain()
+	}
+	return kv.CommitmentDomain
+}
+
+func snapshotStepAlignment(tx interface {
+	AggTx() any
+	StepsInFiles(...kv.Domain) kv.Step
+},
+) (kv.Step, error) {
+	cmtStep := tx.StepsInFiles(canonicalCommitmentDomain(tx))
+	acctStep := tx.StepsInFiles(kv.AccountsDomain)
+	storStep := tx.StepsInFiles(kv.StorageDomain)
+	codeStep := tx.StepsInFiles(kv.CodeDomain)
+	maxStateStep := max(acctStep, storStep, codeStep)
+	if maxStateStep > cmtStep {
+		return 0, fmt.Errorf("snapshot step misalignment: state domains (accounts=%d, storage=%d, code=%d) ahead of commitment=%d — snapshot files need rebuilding",
+			acctStep, storStep, codeStep, cmtStep)
+	}
+	return cmtStep, nil
 }
 
 type txExecutor struct {
@@ -709,16 +764,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 
 		// Use the max of all state domain steps (not just commitment) to
 		// determine which txNums need history reads.
-		cmtStep := execRoTx.StepsInFiles(kv.CommitmentDomain)
-		acctStep := execRoTx.StepsInFiles(kv.AccountsDomain)
-		storStep := execRoTx.StepsInFiles(kv.StorageDomain)
-		codeStep := execRoTx.StepsInFiles(kv.CodeDomain)
-		maxStateStep := max(acctStep, storStep, codeStep)
-		if maxStateStep > cmtStep {
-			return fmt.Errorf("snapshot step misalignment: state domains (accounts=%d, storage=%d, code=%d) ahead of commitment=%d — snapshot files need rebuilding",
-				acctStep, storStep, codeStep, cmtStep)
+		lastFrozenStep, err := snapshotStepAlignment(execRoTx)
+		if err != nil {
+			return err
 		}
-		lastFrozenStep := cmtStep
 
 		var lastFrozenTxNum uint64
 		if lastFrozenStep > 0 {
@@ -858,6 +907,20 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 	return nil
 }
 
+// headerRootMismatch reports whether a computed state root fails the header
+// state-root check. Variant-independent and on by default;
+// dbg.CheckHeaderStateRoot switches the check off for a chain whose headers
+// this node cannot reproduce.
+func headerRootMismatch(computed, expected []byte) bool {
+	if !dbg.CheckHeaderStateRoot {
+		// Every execution entry point runs through here, so this is what reaches the
+		// integration and test runners too, not just node startup.
+		dbg.WarnHeaderStateRootCheckDisabled()
+		return false
+	}
+	return !bytes.Equal(computed, expected)
+}
+
 func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, applyTx kv.TemporalRwTx, cfg ExecuteBlockCfg, s *StageState, logger log.Logger, u Unwinder) error {
 	if cfg.badBlockHalt {
 		return fmt.Errorf("%w, block=%d", ErrWrongTrieRoot, blockNumber)
@@ -883,6 +946,9 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 		return err
 	}
 	if !ok {
+		if err := checkUnwindConversionPoint(applyTx.Debug().Dirs(), unwindTo, dbstate.ConversionFloorBlock); err != nil {
+			return err
+		}
 		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
 	}
 	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
@@ -937,7 +1003,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return false, times, fmt.Errorf("compute commitment: %w", err)
 	}
 
-	if !bytes.Equal(computedRootHash, header.Root[:]) {
+	if headerRootMismatch(computedRootHash, header.Root[:]) {
 		logger.Warn(fmt.Sprintf("[%s] Wrong trie root of block %d: %x, expected (from header): %x. Block hash: %x", e.LogPrefix(), header.Number.Uint64(), computedRootHash, header.Root[:], header.Hash()))
 		err = handleIncorrectRootHashError(header.Number.Uint64(), header.Hash(), applyTx, cfg, e, logger, u)
 		return false, times, err

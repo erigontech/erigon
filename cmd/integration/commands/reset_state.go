@@ -206,7 +206,7 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots) error 
 		d := kv.Domain(i)
 		txNum := dbg.DomainProgress(d)
 		step := txNum / stepSize
-		if d == kv.CommitmentDomain {
+		if d == kv.CommitmentDomain || d == kv.CommitmentBinDomain {
 			fmt.Fprintf(w, "%s \t\t - \t\t - \t\t %d\n", d.String(), step)
 			continue
 		}

@@ -44,7 +44,7 @@ func poisonSharedBranchCache(t *testing.T, db kv.TemporalRoDB) (branchKey, branc
 
 	provider, ok := tx.AggTx().(commitment.BranchCacheProvider)
 	require.True(t, ok)
-	cache := provider.BranchCache()
+	cache := provider.BranchCache(kv.CommitmentDomain)
 	require.NotNil(t, cache)
 	cache.Clear()
 	t.Cleanup(cache.Clear)

@@ -43,9 +43,12 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func nonceBalanceWrites(addr accounts.Address, nonce uint64, bal uint256.Int) *state.WriteSet {
@@ -56,7 +59,11 @@ func nonceBalanceWrites(addr accounts.Address, nonce uint64, bal uint256.Int) *s
 }
 
 func newTestBlockResult(blockNum uint64, blockHash common.Hash, lastTxNum uint64, partial bool) *blockResult {
-	header := &types.Header{Number: *uint256.NewInt(blockNum)}
+	return newTestBlockResultWithRoot(blockNum, blockHash, lastTxNum, common.Hash{}, partial)
+}
+
+func newTestBlockResultWithRoot(blockNum uint64, blockHash common.Hash, lastTxNum uint64, root common.Hash, partial bool) *blockResult {
+	header := &types.Header{Number: *uint256.NewInt(blockNum), Root: root}
 	return &blockResult{
 		Block:     types.NewBlockFromStorage(blockHash, header, nil, nil, nil, nil),
 		lastTxNum: lastTxNum,
@@ -69,12 +76,141 @@ type latestMetricsCaptureTx struct {
 	nonNilMetrics bool
 }
 
+type domainStepFrontierTx struct {
+	kv.TemporalTx
+	frontiers map[kv.Domain]kv.Step
+}
+
+func (tx *domainStepFrontierTx) StepsInFiles(domains ...kv.Domain) kv.Step {
+	if len(domains) == 0 {
+		return 0
+	}
+	return tx.frontiers[domains[0]]
+}
+
 func (tx *latestMetricsCaptureTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	metrics, _ := opts.Metrics()
 	if dm, ok := metrics.(*kvmetrics.DomainMetrics); ok {
 		tx.nonNilMetrics = dm != nil
 	}
 	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func TestSharedDomainsStepEdgeUsesDomainFrontier(t *testing.T) {
+	_, tx, doms := setupStepTest(t)
+	frontierTx := &domainStepFrontierTx{
+		TemporalTx: tx,
+		frontiers: map[kv.Domain]kv.Step{
+			kv.CommitmentDomain:    0,
+			kv.CommitmentBinDomain: 1,
+		},
+	}
+
+	require.True(t, doms.IsUnfrozenStepEdge(frontierTx, kv.CommitmentDomain, 15))
+	require.False(t, doms.IsUnfrozenStepEdge(frontierTx, kv.CommitmentBinDomain, 15))
+	require.False(t, doms.IsUnfrozenStepEdge(frontierTx, kv.CommitmentDomain, 14))
+}
+
+func TestHandleMessage_StepBoundaryCheckpointBothCommitmentDomains(t *testing.T) {
+	ctx := context.Background()
+	db, tx, doms := dualCalculatorTest(t)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out)
+	require.NoError(t, err)
+	resetCounts := make(chan int, 2)
+	cc.onDualArmComplete = func(kv.Domain) {
+		resetCounts <- cc.state.resetCount
+	}
+
+	addr := accounts.InternAddress(common.Address{0x42})
+	addrBytes := addr.Value()
+	for txNum := uint64(1); txNum <= 20; txNum++ {
+		balance := *uint256.NewInt(txNum * 1000)
+		account := accounts.Account{Nonce: txNum, Balance: balance, CodeHash: accounts.EmptyCodeHash}
+		encoded := accounts.SerialiseV3(&account)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes[:], encoded, txNum, nil))
+		blockNum := uint64(1)
+		if txNum > 10 {
+			blockNum = 2
+		}
+		cc.handleMessage(ctx, &txResult{
+			blockNum: blockNum,
+			txNum:    txNum,
+			rules:    &chain.Rules{},
+			writes:   nonceBalanceWrites(addr, txNum, balance),
+		})
+	}
+	cc.Stop()
+	firstResetCount := <-resetCounts
+	secondResetCount := <-resetCounts
+	require.Zero(t, firstResetCount)
+	require.Zero(t, secondResetCount)
+	require.Zero(t, cc.state.resetCount)
+	if len(out) > 0 {
+		result := <-out
+		t.Logf("result root=%x shadow=%x err=%v", result.rootHash, result.shadowRoot, result.err)
+		require.NoError(t, result.err)
+	}
+	require.NoError(t, doms.Flush(ctx, tx))
+	require.NoError(t, pbt.ValidateEngineIdentityFromTx(tx, kv.CommitmentBinDomain))
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		key := commitmentStateKeyForTest(doms, domain)
+		stateBlob, _, err := doms.GetLatest(domain, tx, key)
+		require.NoError(t, err)
+		require.NotEmpty(t, stateBlob, "domain %s commitment state", domain)
+		gotTxNum, gotBlockNum := decodeCommitmentPositionForTest(stateBlob)
+		require.Equal(t, uint64(15), gotTxNum, "domain %s checkpoint", domain)
+		require.Equal(t, uint64(2), gotBlockNum, "domain %s checkpoint", domain)
+	}
+
+	accountAtEdge, ok, err := doms.GetAsOf(kv.AccountsDomain, addrBytes[:], 16)
+	require.NoError(t, err)
+	require.True(t, ok)
+	var expected accounts.Account
+	expected.Nonce = 15
+	expected.Balance = *uint256.NewInt(15 * 1000)
+	expected.CodeHash = accounts.EmptyCodeHash
+	require.Equal(t, accounts.SerialiseV3(&expected), accountAtEdge)
+}
+
+func TestHandleMessage_StepBoundaryBinFeedUsesPendingState(t *testing.T) {
+	ctx := context.Background()
+	db, tx, doms := dualCalculatorTest(t)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	addr := accounts.InternAddress(common.Address{0x43})
+	address := addr.Value()
+	oldCode := accounts.NewCode([]byte{0x60, 0x01})
+	oldAccount := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: oldCode.Hash}
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, address[:], accounts.SerialiseV3(&oldAccount), 0, nil))
+	require.NoError(t, doms.DomainPut(kv.CodeDomain, tx, address[:], oldCode.Bytes, 0, nil))
+
+	feedSeen := make(chan *commitment.PBinFeed, 1)
+	cc.binFeedObserver = func(feed *commitment.PBinFeed) { feedSeen <- feed }
+	newBalance := *uint256.NewInt(9)
+	newCode := accounts.NewCode([]byte{0x60, 0x02})
+	writes := newWS().bal(addr, state.Version{}, newBalance).code(addr, state.Version{}, newCode).build()
+	cc.handleMessage(ctx, &txResult{blockNum: 1, txNum: 15, rules: &chain.Rules{}, writes: writes})
+
+	var feed *commitment.PBinFeed
+	select {
+	case feed = <-feedSeen:
+	case result := <-out:
+		require.NoError(t, result.err, "step-boundary bin feed must use pending code")
+	case <-time.After(time.Second):
+		require.FailNow(t, "step-boundary bin feed was not built")
+	}
+	require.Len(t, feed.Accounts, 1, "step-boundary bin feed must include the pending account")
+	require.Equal(t, newCode.Bytes, feed.Accounts[0].Code, "step-boundary bin feed must include pending code")
+	want := eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{{Address: address[:], Nonce: 1, Balance: newBalance, Code: newCode.Bytes}}}))
+	got, err := pbt.NewTrie(&calcPBinTrieContext{MapBranchStore: commitmenttest.NewMapBranchStore()}).ProcessFeed(feed)
+	require.NoError(t, err)
+	require.Equal(t, want, got, "step-boundary bin root must include pending balance")
 }
 
 // TestHandleMessage_StepBoundaryCheckpointMidBlock pins the parallel-exec
@@ -144,11 +280,11 @@ func TestHandleMessage_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	// Batch mode computes commitment only on an explicit request, which this
 	// stream never sends; the sole writer of a checkpoint is the step-boundary
 	// hook at txNum 15, so the latest checkpoint must decode to that edge.
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentStateKeyForTest(doms, kv.CommitmentDomain))
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(stateBlob), 16,
 		"no commitment checkpoint was saved at the mid-block step edge — the step-boundary hook in handleMessage's txResult case never ran")
-	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+	gotTxNum, gotBlockNum := decodeCommitmentPositionForTest(stateBlob)
 	require.Equal(t, stepEdgeTxNum, gotTxNum,
 		"step-boundary checkpoint must reflect the straddling step's last txNum (stepEnd-1), not the last complete block before the edge")
 	require.Equal(t, uint64(2), gotBlockNum,
@@ -206,14 +342,65 @@ func TestHandleMessage_StepCheckpointInPerBlockMode(t *testing.T) {
 
 	cc.Stop()
 
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentStateKeyForTest(doms, kv.CommitmentDomain))
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(stateBlob), 16, "a commitment checkpoint must exist at the mid-block step edge")
-	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+	gotTxNum, gotBlockNum := decodeCommitmentPositionForTest(stateBlob)
 	require.Equal(t, stepEdgeTxNum, gotTxNum,
 		"per-block mode must still checkpoint at the mid-block step edge (snapshot producer needs step-aligned commitment)")
 	require.Equal(t, uint64(2), gotBlockNum,
 		"the step checkpoint sits inside the straddling block")
+}
+
+func TestHandleMessage_BlockEndStateFollowsMidBlockStepCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out)
+	require.NoError(t, err)
+
+	const block1End = uint64(10)
+	const stepEdgeTxNum = stepSize - 1
+	const block2End = stepEdgeTxNum + 2
+
+	rnd := rand.New(rand.NewSource(42))
+	writeAccount := func(txNum, blockNum uint64) {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
+		cc.handleMessage(ctx, &txResult{blockNum: blockNum, txNum: txNum, rules: &chain.Rules{}, writes: nonceBalanceWrites(addr, txNum, bal)})
+	}
+
+	for txNum := uint64(1); txNum <= block1End; txNum++ {
+		writeAccount(txNum, 1)
+	}
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, block1End, false))
+
+	for txNum := block1End + 1; txNum <= stepEdgeTxNum; txNum++ {
+		writeAccount(txNum, 2)
+	}
+	for txNum := stepEdgeTxNum + 1; txNum <= block2End; txNum++ {
+		cc.handleMessage(ctx, &txResult{blockNum: 2, txNum: txNum, rules: &chain.Rules{}, writes: &state.WriteSet{}})
+	}
+	cc.handleMessage(ctx, newTestBlockResult(2, common.Hash{0x02}, block2End, false))
+
+	cc.Stop()
+
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(stateBlob), 16)
+	gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+	require.Equal(t, block2End, gotTxNum,
+		"a block whose writes end at a mid-block step edge must still save commitment state at its last txNum; a state left at the edge makes the next cycle re-execute the block")
+	require.Equal(t, uint64(2), gotBlockNum)
 }
 
 // TestHandleMessage_PartialBlockComputeFailureNotSwallowed pins that when the
@@ -229,7 +416,7 @@ func TestHandleMessage_PartialBlockComputeFailureNotSwallowed(t *testing.T) {
 
 	in := make(chan applyResult, 64)
 	out := make(chan commitmentResult, 64)
-	// forcePerBlockCompute=true routes the first partial block to computeWithoutCheck.
+	// forcePerBlockCompute=true routes the first partial block through the checked per-block path.
 	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 1<<62, in, nil, out)
 	require.NoError(t, err)
 	defer cc.Stop()
@@ -279,7 +466,7 @@ func requireBranchesConsistentWithAccounts(t *testing.T, doms *execctx.SharedDom
 	for it.HasNext() {
 		k, v, err := it.Next()
 		require.NoError(t, err)
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if commitment.IsCommitmentStateKey(k) {
 			continue
 		}
 		require.NoError(t, commitment.VerifyBranchHashes(k, commitment.BranchData(v), accountValues, storageValues),
@@ -343,7 +530,7 @@ func runBlockEndingOnStepEdge(t *testing.T, edgeTxHasWrites bool) stepEdgeOutcom
 	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, edgeTxNum, false))
 	cc.Stop()
 
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentStateKeyForTest(doms, kv.CommitmentDomain))
 	require.NoError(t, err)
 
 	require.NoError(t, doms.Flush(ctx, tx))
@@ -438,11 +625,11 @@ func TestHandleMessage_StepBoundaryDoesNotPolluteLiveChangeset(t *testing.T) {
 
 	// The checkpoint must still advance to the step edge: the fix isolates the
 	// changeset, it does not suppress the checkpoint.
-	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState)
+	stateBlob, _, err := doms.GetLatest(kv.CommitmentDomain, tx, commitmentStateKeyForTest(doms, kv.CommitmentDomain))
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, len(stateBlob), 16,
 		"step-boundary checkpoint must still be written to sd, only kept out of the changeset")
-	gotTxNum, _ := commitmentdb.DecodeTxBlockNums(stateBlob)
+	gotTxNum, _ := decodeCommitmentPositionForTest(stateBlob)
 	require.Equal(t, stepEdgeTxNum, gotTxNum)
 }
 
@@ -584,7 +771,7 @@ func TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset(t *te
 			writes:   nonceBalanceWrites(addr, txNum, bal),
 		})
 	}
-	// First partial block => computeWithoutCheck, a per-block compute with no
+	// First partial block uses the regular per-block checked path with no
 	// root check; pre-window, so it must isolate its commitment writes.
 	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, 5, true))
 
@@ -629,6 +816,53 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	return db, tx, doms
 }
 
+func commitmentStateKeyForTest(doms *execctx.SharedDomains, domain kv.Domain) []byte {
+	if doms.GetCommitmentCtxForDomain(domain).Trie().Variant() == commitment.VariantCommitmentV3 {
+		return commitment.KeyCommitmentV3State
+	}
+	return commitmentdb.KeyCommitmentState
+}
+
+func decodeCommitmentPositionForTest(stateBlob []byte) (uint64, uint64) {
+	if len(stateBlob) == commitment.CommitmentV3StateSize && stateBlob[0] == commitment.CommitmentV3StateMarker {
+		blockNum, txNum, _, err := commitment.DecodeCommitmentV3State(stateBlob)
+		if err != nil {
+			panic(err)
+		}
+		return txNum, blockNum
+	}
+	return commitmentdb.DecodeTxBlockNums(stateBlob)
+}
+
+func TestReadCommitmentBlockFromDBUsesCanonicalVariantState(t *testing.T) {
+	db, tx, doms := dualCalculatorTest(t)
+	root := common.Hash{1}
+	hexState, err := commitment.EncodeCommitmentV3State(root[:], 7, 10, nil)
+	require.NoError(t, err)
+	binState, err := commitmentdb.NewCommitmentState(15, 9, nil).Encode()
+	require.NoError(t, err)
+	require.NoError(t, doms.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, hexState, 10, nil))
+	require.NoError(t, doms.DomainPut(kv.CommitmentBinDomain, tx, commitment.KeyCommitmentState, binState, 10, nil))
+	tx.AggTx().(interface{ SetCanonicalCommitmentDomain(kv.Domain) }).SetCanonicalCommitmentDomain(kv.CommitmentDomain)
+	require.NoError(t, doms.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+	require.Equal(t, uint64(7), readCommitmentBlockFromDB(t.Context(), db))
+
+	tx2, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx2.Rollback()
+	doms2, err := execctx.NewSharedDomains(t.Context(), tx2, log.New(), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	binState, err = commitmentdb.NewCommitmentState(21, 12, nil).Encode()
+	require.NoError(t, err)
+	require.NoError(t, doms2.DomainPut(kv.CommitmentBinDomain, tx2, commitment.KeyCommitmentState, binState, 12, nil))
+	tx2.AggTx().(interface{ SetCanonicalCommitmentDomain(kv.Domain) }).SetCanonicalCommitmentDomain(kv.CommitmentBinDomain)
+	require.NoError(t, doms2.Flush(t.Context(), tx2))
+	require.NoError(t, tx2.Commit())
+	doms2.Close()
+	require.Equal(t, uint64(12), readCommitmentBlockFromDB(t.Context(), db))
+}
+
 func TestAsOfStateReaderCloneForWorkerDoesNotBoxNilMetrics(t *testing.T) {
 	metricsEnabled := dbg.KVReadLevelledMetrics
 	dbg.KVReadLevelledMetrics = true
@@ -637,7 +871,7 @@ func TestAsOfStateReaderCloneForWorkerDoesNotBoxNilMetrics(t *testing.T) {
 	require.NotNil(t, doms.Collector())
 	doms.StartRequestMetrics(kvmetrics.SourceCommitment)
 	captureTx := &latestMetricsCaptureTx{TemporalTx: tx}
-	reader := (&asOfStateReader{sd: doms, roTx: captureTx}).CloneForWorker(context.Background(), captureTx)
+	reader := (&asOfStateReader{sd: doms, roTx: captureTx, commitmentDomain: kv.CommitmentDomain}).CloneForWorker(context.Background(), captureTx)
 	_, _, err := reader.Read(kv.CommitmentDomain, []byte{0xaa, 0xbb}, doms.StepSize())
 	require.NoError(t, err)
 	require.True(t, captureTx.nonNilMetrics)
@@ -712,11 +946,11 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	// compute-ahead wrote at the step edge — not the pre-block-2 checkpoint.
 	// Without checkpointStepsFromBAL, compute-ahead would write only the
 	// block-end (txNum 20) checkpoint and this as-of read would miss the edge.
-	blob, ok, err := doms.GetAsOf(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, edgeTxNum+1)
+	blob, ok, err := doms.GetAsOf(kv.CommitmentDomain, commitmentStateKeyForTest(doms, kv.CommitmentDomain), edgeTxNum+1)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.GreaterOrEqual(t, len(blob), 16)
-	gotTx, gotBlock := commitmentdb.DecodeTxBlockNums(blob)
+	gotTx, gotBlock := decodeCommitmentPositionForTest(blob)
 	require.Equal(t, edgeTxNum, gotTx, "compute-ahead must checkpoint commitment at the mid-block step edge (txNum 15)")
 	require.Equal(t, uint64(2), gotBlock, "the checkpoint sits inside the straddling block 2")
 
@@ -1036,7 +1270,44 @@ func TestShadowCrossCheck_Mismatch(t *testing.T) {
 	require.ErrorIs(t, res.err, ErrWrongTrieRoot, "shadow mismatch must surface as ErrWrongTrieRoot")
 }
 
-func isolatedCommitmentBranchKeys(t *testing.T, checkRoot bool) (int, []commitmentResult, bool) {
+func isolatedCommitmentRoot(t *testing.T) common.Hash {
+	t.Helper()
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+
+	db, tx, doms := setupStepTest(t)
+	doms.SetDeferCommitmentUpdates(true)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	rnd := rand.New(rand.NewSource(43))
+	for txNum := uint64(1); txNum <= 5; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
+		cc.handleMessage(ctx, &txResult{
+			rules:    &chain.Rules{},
+			blockNum: 1,
+			txNum:    txNum,
+			writes:   nonceBalanceWrites(addr, txNum, bal),
+		})
+	}
+
+	cc.compute(ctx, commitTarget{blockNum: 1, blockHash: common.Hash{0x01}, lastTxNum: 5}, computeMode{checkRoot: true})
+	result := <-out
+	require.NotEmpty(t, result.rootHash)
+	require.ErrorIs(t, result.err, ErrWrongTrieRoot)
+	return common.BytesToHash(result.rootHash)
+}
+
+func isolatedCommitmentBranchKeys(t *testing.T, root common.Hash) (int, []commitmentResult, bool) {
 	t.Helper()
 	ctx := context.Background()
 	logger := log.New()
@@ -1067,9 +1338,7 @@ func isolatedCommitmentBranchKeys(t *testing.T, checkRoot bool) (int, []commitme
 		})
 	}
 
-	// isPartial picks computeWithoutCheck over computeAndCheck; the test header
-	// carries the zero root, so a checked root always mismatches.
-	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, 5, !checkRoot))
+	cc.handleMessage(ctx, newTestBlockResultWithRoot(1, common.Hash{0x01}, 5, root, false))
 
 	var published []commitmentResult
 	for len(out) > 0 {
@@ -1079,7 +1348,7 @@ func isolatedCommitmentBranchKeys(t *testing.T, checkRoot bool) (int, []commitme
 	var branches int
 	require.NoError(t, doms.Flush(ctx, tx))
 	require.NoError(t, doms.GetMemBatch().IteratePrefix(kv.CommitmentDomain, nil, tx, func(k, v []byte) (bool, error) {
-		if len(v) > 0 && !bytes.Equal(k, commitment.KeyCommitmentState) {
+		if len(v) > 0 && !commitment.IsCommitmentStateKey(k) {
 			branches++
 		}
 		return true, nil
@@ -1088,12 +1357,13 @@ func isolatedCommitmentBranchKeys(t *testing.T, checkRoot bool) (int, []commitme
 }
 
 func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {
-	accepted, published, pending := isolatedCommitmentBranchKeys(t, false)
-	require.NotEmpty(t, accepted, "an unchecked isolated round must write its branch records, or the rejection arm proves nothing")
-	require.Empty(t, published, "an unchecked round publishes nothing")
+	root := isolatedCommitmentRoot(t)
+	accepted, published, pending := isolatedCommitmentBranchKeys(t, root)
+	require.NotEmpty(t, accepted, "an accepted isolated round must write its branch records, or the rejection arm proves nothing")
+	require.Empty(t, published, "an empty round publishes nothing")
 	require.False(t, pending, "an accepted round must leave nothing pending")
 
-	rejected, published, pending := isolatedCommitmentBranchKeys(t, true)
+	rejected, published, pending := isolatedCommitmentBranchKeys(t, common.Hash{})
 	require.Len(t, published, 1)
 	require.ErrorIs(t, published[0].err, ErrWrongTrieRoot)
 	require.Empty(t, rejected, "a rejected root must leave no branch record in the commitment domain")

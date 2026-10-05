@@ -119,6 +119,11 @@ func testDelegationCodeHash() accounts.CodeHash {
 
 func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
 	t.Helper()
+	return newTestPoolWithFundedSenderOn(t, chain.AllProtocolChanges, codeHash)
+}
+
+func newTestPoolWithFundedSenderOn(t *testing.T, cfg *chain.Config, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -132,7 +137,7 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 		coreDB,
 		txpoolcfg.DefaultConfig,
 		kvcache.New(kvcache.DefaultCoherentConfig),
-		chain.AllProtocolChanges,
+		cfg,
 		nil,
 		nil,
 		func() {},

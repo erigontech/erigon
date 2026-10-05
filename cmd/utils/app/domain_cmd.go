@@ -23,7 +23,7 @@ func domainStat(ctx context.Context, cliCtx *cli.Command) error {
 	defer ticker.Stop()
 
 	domain := cliCtx.Uint("domain")
-	if domain > uint(kv.DomainLen-1) {
+	if domain >= uint(kv.DomainLen) {
 		return fmt.Errorf("invalid domain: %d", domain)
 	}
 

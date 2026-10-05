@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func forceDirectSpill(ut *Updates) { ut.directMemLimit = 0 }
@@ -43,15 +44,9 @@ func forEachMode(t *testing.T, fn func(t *testing.T, mode Mode)) {
 
 func processSeq(tb testing.TB, ms *MockState, trie *HexPatriciaHashed, plainKeys [][]byte, updates []Update) []byte {
 	tb.Helper()
-	ctx := context.Background()
 	var root []byte
 	for i := range updates {
-		require.NoError(tb, ms.applyPlainUpdates(plainKeys[i:i+1], updates[i:i+1]))
-		upds := WrapKeyUpdates(tb, ModeDirect, KeyToHexNibbleHash, plainKeys[i:i+1], updates[i:i+1])
-		r, err := trie.Process(ctx, upds, "", nil, WarmupConfig{})
-		upds.Close()
-		require.NoError(tb, err)
-		root = bytes.Clone(r)
+		root = processBatch(tb, ms, trie, plainKeys[i:i+1], updates[i:i+1])
 	}
 	return root
 }
@@ -71,12 +66,7 @@ func processFreshTrie(t *testing.T, plainKeys [][]byte, updates []Update) (*HexP
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
 	hph.SetTraceWriter(nil)
-	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
-	toProcess := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
-	defer toProcess.Close()
-	root, err := hph.Process(context.Background(), toProcess, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	return hph, root
+	return hph, processBatch(t, ms, hph, plainKeys, updates)
 }
 
 func fixtureBaseAccounts() *UpdateBuilder {
@@ -137,25 +127,18 @@ func generateCellRow(tb testing.TB, size int) (row []*cell, bitmap uint16) {
 	for i := 0; i < len(row); i++ {
 		row[i] = new(cell)
 		row[i].hashLen = 32
-		n, err := rand.Read(row[i].hash[:])
-		require.NoError(tb, err)
-		require.Equal(tb, int(row[i].hashLen), n)
-
+		commitmenttest.Read(tb, row[i].hash[:], rand.Read)
 		th := rand.Intn(120)
 		switch {
 		case th > 70:
-			n, err = rand.Read(row[i].accountAddr[:])
-			require.NoError(tb, err)
-			row[i].accountAddrLen = int16(n)
-		case th > 20 && th <= 70:
-			n, err = rand.Read(row[i].storageAddr[:])
-			require.NoError(tb, err)
-			row[i].storageAddrLen = int16(n)
-		case th <= 20:
-			n, err = rand.Read(row[i].extension[:th])
-			row[i].extLen = int16(n)
-			require.NoError(tb, err)
-			require.Equal(tb, th, n)
+			commitmenttest.Read(tb, row[i].accountAddr[:], rand.Read)
+			row[i].accountAddrLen = int16(len(row[i].accountAddr))
+		case th > 20:
+			commitmenttest.Read(tb, row[i].storageAddr[:], rand.Read)
+			row[i].storageAddrLen = int16(len(row[i].storageAddr))
+		default:
+			commitmenttest.Read(tb, row[i].extension[:th], rand.Read)
+			row[i].extLen = int16(th)
 		}
 		bm |= uint16(1 << i)
 	}

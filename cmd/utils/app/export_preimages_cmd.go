@@ -20,11 +20,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"time"
@@ -39,18 +37,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
-	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/kv/temporal"
-	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/db/state/execctx"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/commitment/eip8297/artifact"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 const (
@@ -58,7 +52,6 @@ const (
 	preimageSlotLen  = 32
 	preimageCountLen = 4
 
-	preimagesFileName     = "framed.bin"
 	preimagesMetaFileName = "preimages.meta.json"
 
 	// Records are ordered by keccak256 of the plain key. A file written before that
@@ -81,74 +74,40 @@ var exportPreimagesCommand = cli.Command{
 		&utils.DataDirFlag,
 		&cli.StringFlag{Name: "out", Value: ".", Usage: "output directory for the framed file and preimages.meta.json"},
 		&cli.StringFlag{Name: "tmpdir", Usage: "scratch directory for the external sort, sized for the whole key set (default: <datadir>/temp)"},
+		&utils.ExperimentalBinCommitmentHashFlag,
 	}),
 }
 
 type preimagesMeta struct {
-	Block     uint64 `json:"block"`
-	StateRoot string `json:"stateRoot"`
-	Order     string `json:"order"`
-	Accounts  uint64 `json:"accounts"`
-	Storage   uint64 `json:"storage"`
+	Block          uint64 `json:"block"`
+	BlockHash      string `json:"blockHash"`
+	StateRoot      string `json:"stateRoot"`
+	Order          string `json:"order"`
+	Accounts       uint64 `json:"accounts"`
+	Storage        uint64 `json:"storage"`
+	PreimageDigest string `json:"preimageDigest"`
 }
 
 func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
-	logger := log.Root()
-	dirs, err := openExportDirs(cliCtx.String(utils.DataDirFlag.Name))
-	if err != nil {
-		return err
-	}
 	outDir := cliCtx.String("out")
 	tmpDir := cliCtx.String("tmpdir")
-	if tmpDir == "" {
-		tmpDir = dirs.Tmp
-	}
-
-	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
-	chainConfig := fromdb.ChainConfig(chainDB)
-	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
-	agg := openAgg(ctx, dirs, chainDB, logger)
-	defer agg.Close()
-	blockSnaps := blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
-	if err := blockSnaps.OpenFolder(); err != nil {
-		return err
-	}
-	defer blockSnaps.Close()
-	db, err := temporal.New(chainDB, agg, blockSnaps)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	br := freezeblocks.NewBlockReader(blockSnaps)
-	headerAt := func(blockNum uint64) (*types.Header, error) {
-		return br.HeaderByNumber(ctx, tx, blockNum)
-	}
-	return runExport(ctx, tx, headerAt, outDir, tmpDir, logger)
+	return withExportTx(ctx, cliCtx, func(dirs datadir.Dirs, tx kv.TemporalTx, br *freezeblocks.BlockReader) error {
+		if tmpDir == "" {
+			tmpDir = dirs.Tmp
+		}
+		headerAt := func(blockNum uint64) (*types.Header, error) {
+			return br.HeaderByNumber(ctx, tx, blockNum)
+		}
+		return runExportWithTxNumReader(ctx, tx, br.TxnumReader(), headerAt, outDir, tmpDir, log.Root())
+	})
 }
 
-func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir, tmpDir string, logger log.Logger) error {
-	root, err := pinnedStateRoot(ctx, tx, logger)
+func runExportWithTxNumReader(ctx context.Context, tx kv.TemporalTx, txNums rawdbv3.TxNumsReader, headerAt func(uint64) (*types.Header, error), outDir, tmpDir string, logger log.Logger) error {
+	pin, err := sharedExportPinWithTxNumReader(ctx, tx, headerAt, txNums, logger)
 	if err != nil {
 		return err
 	}
-	block, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return err
-	}
-	header, err := headerAt(block)
-	if err != nil {
-		return fmt.Errorf("read canonical header for block %d: %w", block, err)
-	}
-	if err := checkRootPin(root, header, block); err != nil {
-		return err
-	}
-	logger.Info("[export-preimages] pin", "block", block, "stateRoot", root.Hex())
+	logger.Info("[export-preimages] pin", "block", pin.Block, "txNum", pin.TxNum, "stateRoot", pin.Root.Hex(), "domain", pin.Domain)
 
 	tmpDir, err = prepareScratchDir(tmpDir)
 	if err != nil {
@@ -157,10 +116,19 @@ func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*ty
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
-	framedPath, metaPath, err := preparePreimagesOutput(outDir)
-	if err != nil {
-		return err
+	framedPath := filepath.Join(outDir, pbtPreimagesFileName)
+	metaPath := filepath.Join(outDir, preimagesMetaFileName)
+	if err := dir.RemoveFile(metaPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale metadata %s: %w", metaPath, err)
 	}
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		_ = dir.RemoveFile(framedPath)
+		_ = dir.RemoveFile(metaPath)
+	}()
 	outputFile, err := os.Create(framedPath)
 	if err != nil {
 		return err
@@ -173,35 +141,49 @@ func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*ty
 	if err != nil {
 		return fmt.Errorf("export aborted (partial file %s): %w", framedPath, err)
 	}
+	info, err := outputFile.Stat()
+	if err != nil {
+		return err
+	}
+	if err := artifact.CheckPreimageSetAt(outputFile, info.Size(), func(yield func([]byte) error) error {
+		return state.ForEachPBinLeaf(aggTx, tx, false, func(leaf state.PBinLeaf) error {
+			if len(leaf.Key) == 0 {
+				return nil
+			}
+			switch leaf.Key[0] {
+			case eip8297.AccountZone:
+				subIndex := leaf.Key[len(leaf.Key)-1]
+				if subIndex != eip8297.BasicDataLeafKey && subIndex < eip8297.HeaderStorageOffset {
+					return nil
+				}
+			case eip8297.CodeZone:
+				return nil
+			}
+			return yield(leaf.Key)
+		})
+	}, eip8297.HashBytes, tmpDir); err != nil {
+		return fmt.Errorf("export aborted (preimage set): %w", err)
+	}
+	preimageDigest, err := digestPBTFile(outputFile, logger, "preimage digest")
+	if err != nil {
+		return err
+	}
 
 	metadata := preimagesMeta{
-		Block: block, StateRoot: root.Hex(), Order: preimagesOrderKeccak256,
-		Accounts: stats.Accounts, Storage: stats.Slots,
+		Block: pin.Block, BlockHash: pin.Header.Hash().Hex(), StateRoot: pin.Root.Hex(), Order: preimagesOrderKeccak256,
+		Accounts: stats.Accounts, Storage: stats.Slots, PreimageDigest: preimageDigest.Hex(),
 	}
 	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(metaPath, append(metadataJSON, '\n'), 0o644); err != nil {
+	metadataJSON = append(metadataJSON, '\n')
+	if err := dir.WriteFileAtomic(metaPath, metadataJSON, 0o644); err != nil {
 		return err
 	}
+	completed = true
 	logger.Info("[export-preimages] done", "accounts", stats.Accounts, "slots", stats.Slots, "file", framedPath, "bytes", stats.sizeBytes(), "took", time.Since(start).Round(time.Second))
 	return nil
-}
-
-func pinnedStateRoot(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (common.Hash, error) {
-	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
-	if domains != nil {
-		defer domains.Close()
-	}
-	if err != nil {
-		return common.Hash{}, err
-	}
-	rootBytes, err := domains.GetCommitmentCtx().Trie().RootHash()
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return common.BytesToHash(rootBytes), nil
 }
 
 // writePreimagesFile hashes both domain scans through an ETL sort and writes the
@@ -254,7 +236,7 @@ func writePreimagesFile(
 	if err != nil {
 		return collected, err
 	}
-	stats, err = writeHashedPreimages(ctx, collector, countedWriter, reportWriting)
+	stats, err = writeHashedPreimages(ctx, collector, countedWriter, reportWriting, tmpDir)
 	if err != nil {
 		return stats, err
 	}
@@ -303,15 +285,6 @@ func prepareScratchDir(tmpDir string) (string, error) {
 	return scratch, nil
 }
 
-func preparePreimagesOutput(outDir string) (framedPath, metaPath string, err error) {
-	framedPath = filepath.Join(outDir, preimagesFileName)
-	metaPath = filepath.Join(outDir, preimagesMetaFileName)
-	if err := dir.RemoveFile(metaPath); err != nil && !os.IsNotExist(err) {
-		return "", "", fmt.Errorf("remove stale metadata %s: %w", metaPath, err)
-	}
-	return framedPath, metaPath, nil
-}
-
 type countingWriter struct {
 	writer  io.Writer
 	written uint64
@@ -324,9 +297,6 @@ func (c *countingWriter) Write(data []byte) (int, error) {
 }
 
 func checkRootPin(commitmentRoot common.Hash, header *types.Header, blockNum uint64) error {
-	if header == nil {
-		return fmt.Errorf("canonical header for block %d not found; cannot verify state root %s", blockNum, commitmentRoot.Hex())
-	}
 	if header.Root != commitmentRoot {
 		return fmt.Errorf("state root mismatch at block %d: commitment %s vs header %s", blockNum, commitmentRoot.Hex(), header.Root.Hex())
 	}
@@ -393,9 +363,7 @@ func collectHashedPreimages(
 			return err
 		}
 		stats.Accounts++
-		if onProgress != nil {
-			onProgress(stats)
-		}
+		onProgress(stats)
 		return nil
 	}
 
@@ -448,36 +416,28 @@ func writeHashedPreimages(
 	collector *etl.Collector,
 	writer io.Writer,
 	onProgress func(exportPreimagesStats),
+	tmpDir string,
 ) (exportPreimagesStats, error) {
 	var stats exportPreimagesStats
-	var recordHeader [preimageAddrLen + preimageCountLen]byte
+	records, err := artifact.NewPreimageRecordWriter(writer, tmpDir)
+	if err != nil {
+		return stats, err
+	}
+	defer records.Close()
 	var accountHash common.Hash
-	slotKeys := make([]byte, 0, 1<<20)
 	pending := false
-
-	// slotCount precedes the slots, so a record can only be written once its last
-	// slot has arrived.
 	flushRecord := func() error {
 		if !pending {
 			return nil
 		}
-		slotCount := uint64(len(slotKeys) / preimageSlotLen)
-		if slotCount > math.MaxUint32 {
-			return fmt.Errorf("account %x has %d slots (> uint32)", recordHeader[:preimageAddrLen], slotCount)
-		}
-		binary.BigEndian.PutUint32(recordHeader[preimageAddrLen:], uint32(slotCount))
-		if _, err := writer.Write(recordHeader[:]); err != nil {
-			return err
-		}
-		if _, err := writer.Write(slotKeys); err != nil {
+		slotCount, err := records.End()
+		if err != nil {
 			return err
 		}
 		stats.Accounts++
 		stats.Slots += slotCount
+		onProgress(stats)
 		pending = false
-		if onProgress != nil {
-			onProgress(stats)
-		}
 		return nil
 	}
 
@@ -490,9 +450,12 @@ func writeHashedPreimages(
 			if err := flushRecord(); err != nil {
 				return err
 			}
-			copy(recordHeader[:preimageAddrLen], v)
+			var address common.Address
+			copy(address[:], v)
 			accountHash = common.BytesToHash(k)
-			slotKeys = slotKeys[:0]
+			if err := records.Begin(address); err != nil {
+				return err
+			}
 			pending = true
 			return nil
 		case 2 * length.Hash:
@@ -502,8 +465,7 @@ func writeHashedPreimages(
 			if !pending || !bytes.Equal(k[:length.Hash], accountHash[:]) {
 				return fmt.Errorf("storage slot %x under account hash %x has no matching account", v, k[:length.Hash])
 			}
-			slotKeys = append(slotKeys, v...)
-			return nil
+			return records.AddSlot(v)
 		default:
 			return fmt.Errorf("collector: unexpected key length %d: %x", len(k), k)
 		}
@@ -518,6 +480,6 @@ func writeHashedPreimages(
 		return stats, err
 	}
 	// flushRecord mutates stats, so it cannot share a return statement with it.
-	err := flushRecord()
+	err = flushRecord()
 	return stats, err
 }

@@ -75,6 +75,7 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/exec"
@@ -119,6 +120,8 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
+
+const pbinCommitmentUnsupportedMethods = "eth_getProof, eth_getWitness, debug_executionWitness, eth_simulateV1, receipt regeneration, deferred commitment updates, collapse tracing and trie traces"
 
 // Config contains the configuration options of the ETH protocol.
 //
@@ -292,6 +295,9 @@ func New(
 	}
 
 	dirs := stack.Config().Dirs
+	if err := refusePBTStartupMarkers(dirs, config.Snapshot.ChainName); err != nil {
+		return nil, err
+	}
 
 	tmpdir := dirs.Tmp
 	if err := RemoveContents(tmpdir); err != nil { // clean it on startup
@@ -299,6 +305,15 @@ func New(
 	}
 
 	// Assemble the Ethereum object
+	if config.ExperimentalBinCommitment {
+		statecfg.ExperimentalBinCommitment = true
+	}
+	if config.BinCommitmentHash != "" {
+		if err := commitment.SetPBinHashSuite(config.BinCommitmentHash); err != nil {
+			return nil, err
+		}
+		statecfg.BinCommitmentHash = config.BinCommitmentHash
+	}
 	stack.Config().ExecWorkerCount = config.Sync.ExecWorkerCount
 	rawChainDB, err := node.OpenDatabase(ctx, stack.Config(), dbcfg.ChainDB, "", false, logger)
 	if err != nil {
@@ -343,6 +358,8 @@ func New(
 		return nil, err
 	}
 
+	dbg.WarnHeaderStateRootCheckDisabled()
+
 	ctx, ctxCancel := context.WithCancel(context.Background())
 
 	// kv_remote architecture does blocks on stream.Send - means current architecture require unlimited amount of txs to provide good throughput
@@ -371,6 +388,17 @@ func New(
 	// drops the flag. Seeding here first makes --commitment.plainValues stick.
 	if _, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, config.Snapshot.NoDownloader, config.CommitmentRefsFirstStart()); err != nil {
 		return nil, err
+	}
+
+	// After the resolve: a flagless restart of a bin datadir adopts the variant
+	// and the hash recorded there, so both are read back rather than assumed.
+	if statecfg.ExperimentalBinCommitment {
+		peers := "matches the execution-specs reference"
+		if commitment.PBinHashSuiteName() == commitment.PBinHashKeccak {
+			peers = "agrees with no other client"
+		}
+		logger.Warn("EXPERIMENTAL BINARY COMMITMENT TRIE IS ENABLED: roots follow EIP-8297 and "+peers+"; "+pbinCommitmentUnsupportedMethods+" are unsupported and refuse rather than degrade",
+			"hash", commitment.PBinHashSuiteName())
 	}
 
 	var chainConfig *chain.Config
@@ -1028,6 +1056,13 @@ func New(
 	}
 
 	return backend, nil
+}
+
+func refusePBTStartupMarkers(dirs datadir.Dirs, chainName string) error {
+	if err := state.RefusePBTAttachMarker(dirs); err != nil {
+		return err
+	}
+	return state.RefusePBTImportMarker(dirs, chainName)
 }
 
 func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
