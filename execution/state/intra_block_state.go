@@ -214,8 +214,6 @@ type IntraBlockState struct {
 	// via FinalizeTx→so.data.
 	noMaterialize bool
 
-	slots slotCache // SetState's last previous-value reads on the serial path
-
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
 	// SelfDestructPath=true account must read as a live, balance-preserving,

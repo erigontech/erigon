@@ -247,22 +247,10 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	var commited bool
 	var source ReadSource
 
-	stamp, cacheable := so.db.ReadStamp()
-	cacheable = cacheable && so.db.versionMap == nil // the versioned revert needs the committed flag
-	hit := false
-	if cacheable {
-		prev, hit = so.db.slots.get(stamp, so.address, key)
-		source = StorageRead
-	}
-	if !hit {
-		// we need to use versioned read here otherwise we will miss versionmap entries
-		prev, source, _, commited, err = readStateForSet(so.db, so.address, key)
-		if err != nil {
-			return false, err
-		}
-		if cacheable {
-			so.db.slots.put(stamp, so.address, key, prev)
-		}
+	// we need to use versioned read here otherwise we will miss versionmap entries
+	prev, source, _, commited, err = readStateForSet(so.db, so.address, key)
+	if err != nil {
+		return false, err
 	}
 
 	// When versionedReadCore resolves the previous value from a cached read
