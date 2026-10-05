@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -1054,8 +1055,8 @@ func loadTo(p *program.Program, slot, at int) *program.Program {
 	return p.Push(slot).Op(vm.SLOAD).Push(at).Op(vm.MSTORE)
 }
 
-// The serial path serves repeat storage reads from caches; the versioned path reads through.
-// Both must agree on results and gas.
+// Repeat storage reads are served from caches on both the serial and the versioned path.
+// Both must match the versioned path with the caches off, in results and gas.
 func TestStorageCachesMatchVersionedPath(t *testing.T) {
 	writeThenRevert := program.New().Sstore(1, 7).Push(0).Push(0).Op(vm.REVERT).Bytes()
 	warmThenRevert := program.New().Push(2).Op(vm.SLOAD, vm.POP).Push(0).Push(0).Op(vm.REVERT).Bytes()
@@ -1086,13 +1087,20 @@ func TestStorageCachesMatchVersionedPath(t *testing.T) {
 		require.NoError(t, err)
 		return gasLimit - left.Total(), ret
 	}
-	versioned := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
-	versioned.SetNoMaterialize(true)
-	wantGas, want := run(versioned)
-	gas, got := run(state.New(state.NewNoopReader()))
-	require.Equal(t, want, got)
-	require.Equal(t, wantGas, gas)
-	require.Equal(t, uint64(5), new(uint256.Int).SetBytes(got[96:128]).Uint64(), "a reverted DELEGATECALL wrote the slot")
+	versioned := func() *state.IntraBlockState {
+		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+		ibs.SetNoMaterialize(true)
+		return ibs
+	}
+	dbg.TraceTransactionIO = true // turns the caches off
+	wantGas, want := run(versioned())
+	dbg.TraceTransactionIO = false
+	require.Equal(t, uint64(5), new(uint256.Int).SetBytes(want[96:128]).Uint64(), "a reverted DELEGATECALL wrote the slot")
+	for name, statedb := range map[string]*state.IntraBlockState{"versioned": versioned(), "serial": state.New(state.NewNoopReader())} {
+		gas, got := run(statedb)
+		require.Equal(t, want, got, name)
+		require.Equal(t, wantGas, gas, name)
+	}
 }
 
 // Frames reuse pooled contexts. A frame with another storage address must not read the

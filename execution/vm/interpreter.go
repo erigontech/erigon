@@ -89,13 +89,18 @@ type CallContext struct {
 	Stack    Stack
 }
 
+// maxFrameSlotMisses is how many fills a frame makes without a hit before it stops caching.
+const maxFrameSlotMisses = 8
+
 // frameSlots holds the frame's last two storage reads by stack word, ahead of key interning:
 // the frame's storage address is fixed. A read under the current stamp also means the slot
 // is warm, because warming it is journalled and so changed the stamp before the read.
 type frameSlots struct {
-	on    bool // the state is on the serial path; fixed for the frame
-	stamp state.ReadStamp
-	next  int
+	on bool // reads can be cached; fixed for the frame unless it keeps missing
+	// fills since the last hit: a frame that only reads new slots turns the cache off
+	misses int
+	stamp  state.ReadStamp
+	next   int
 	// The gas function's lookup, for the op that follows it; valid while memoGen == cacheGen.
 	memoGen uint64
 	memo    int
@@ -115,6 +120,7 @@ func (ctx *CallContext) lookupSlot(evm *EVM) int {
 		for j := range f.ok {
 			if f.ok[j] && f.word[j] == *word {
 				i = j
+				f.misses = 0
 				ctx.cachedKey, ctx.cachedKeyGen = f.key[j], ctx.cacheGen
 				break
 			}
@@ -125,6 +131,10 @@ func (ctx *CallContext) lookupSlot(evm *EVM) int {
 }
 
 func (f *frameSlots) put(stamp state.ReadStamp, word uint256.Int, key accounts.StorageKey, v uint256.Int) {
+	if f.misses++; f.misses > maxFrameSlotMisses {
+		f.on = false
+		return
+	}
 	if f.stamp != stamp {
 		f.ok = [2]bool{}
 		f.stamp = stamp
@@ -488,6 +498,7 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		tracer  = evm.config.Tracer
 	)
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
+	callContext.slots.misses = 0
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
