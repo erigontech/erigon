@@ -964,7 +964,7 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, update 
 func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int, reason tracing.BalanceChangeReason) error {
 	if ibs.versionMap == nil {
 		// If this account has not been read, add to the balance increment map
-		if _, needAccount := ibs.stateObjects[addr]; !needAccount && addr == ripemd && amount.IsZero() {
+		if addr == ripemd && amount.IsZero() && ibs.stateObjects[addr] == nil {
 			ibs.journal.balanceIncrease(addr, amount)
 
 			bi, ok := ibs.balanceInc[addr]
