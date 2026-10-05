@@ -21,6 +21,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -34,10 +35,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -226,6 +227,8 @@ type IntraBlockState struct {
 	isAura bool
 
 	revisions revisions
+
+	lastCode accounts.Code // last code stored by SetCode
 }
 
 type sdProbeEntry struct {
@@ -330,6 +333,7 @@ func (ibs *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, ke
 // the underlying state trie to avoid reloading data for the next operations.
 func (ibs *IntraBlockState) Reset() {
 	clear(ibs.nilAccounts)
+	ibs.lastCode = accounts.Code{}
 	for _, so := range ibs.stateObjects {
 		so.release()
 	}
@@ -1048,6 +1052,12 @@ func (ibs *IntraBlockState) touchAccount(addr accounts.Address) {
 // TouchAccount materializes an empty account and records the zero-balance touch
 // needed for state clearing and trie consistency.
 func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
+	// An own balance write settles the touch: zero already is the touch, non-zero is a non-empty account.
+	if ibs.versionMap != nil && addr != ripemd {
+		if _, ok := ibs.versionedWrites.GetBalance(addr); ok {
+			return nil
+		}
+	}
 	markTouched := func() {
 		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Touch %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
@@ -1173,7 +1183,7 @@ func (ibs *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 		}
 		return nil, false
 	}
-	acc.Root.SetBytes(trie.EmptyRoot[:])
+	acc.Root.SetBytes(empty.RootHash[:])
 	return acc, true
 }
 
@@ -1386,7 +1396,7 @@ func (ibs *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 			// Spurious Dragon (see PR 5645 and Issue 18276).
 			//
 			// The primary syscall path in evm.call() handles this via
-			// TouchAccount directly; this branch is retained as
+			// TouchAccount directly on AuRa; this branch is retained as
 			// defense-in-depth for other callers (AuRa engine,
 			// consensus callbacks).
 			return ibs.TouchAccount(addr)
@@ -1521,6 +1531,8 @@ func printCode(c []byte) (int, string) {
 	return lenc, fmt.Sprintf("%x...", c)
 }
 
+// SetCode keeps code, also after a revert or Reset: the caller must not modify it afterwards.
+//
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason tracing.CodeChangeReason) error {
@@ -1533,7 +1545,12 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	if err != nil {
 		return err
 	}
-	canonical := accounts.NewCode(code)
+	// Factories deploy the same bytes many times: reuse the last hash instead of re-hashing.
+	canonical := ibs.lastCode
+	if len(code) == 0 || !bytes.Equal(code, canonical.Bytes) {
+		canonical = accounts.NewCode(code)
+		ibs.lastCode = canonical
+	}
 	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
 	origHash := stateObject.original.CodeHash
@@ -2140,7 +2157,7 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		original = &previous.original
 	}
 
-	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
+	account.Root.SetBytes(empty.RootHash[:]) // old storage should be ignored
 	newobj = newObject(ibs, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
@@ -2440,6 +2457,7 @@ func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool 
 }
 
 func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool, eip8246 bool) error {
+	stateObject.db.journal.epoch++ // storage moves to committed, deletions apply
 	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	// EIP-8246: a self-destructed account that still holds a balance is reset to
 	// a balance-only account (nonce 0, empty code, empty storage) not deleted.
@@ -2756,7 +2774,7 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if ibs.versionMap == nil {
 		return
 	}
-	ibs.versionMap.FlushVersionedWrites(writes, true, "")
+	ibs.versionMap.FlushVersionedWrites(writes, true)
 }
 
 func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {

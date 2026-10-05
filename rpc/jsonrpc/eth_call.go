@@ -125,7 +125,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, header.Number.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -738,8 +738,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return emptyWitnessBytes()
 	}
 
-	// The stateless verifier navigates the system address (system-call msg.sender, then its
-	// EIP-161 empty-account cleanup via DeleteSubtree), so its path must be in the witness.
+	// On AuRa the stateless verifier navigates the system address (system-call msg.sender),
+	// so its path must be in the witness.
 	// collectAccessedState drops it per EIP-7928 — a witness-content rule for the
 	// debug_executionWitness format that does not apply to this op-stream witness.
 	accessed.Addresses[common.Address(params.SystemAddress.Value())] = struct{}{}

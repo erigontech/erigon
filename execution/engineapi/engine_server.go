@@ -519,7 +519,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
-	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
+	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -998,7 +998,6 @@ func (e *EngineServer) HandleNewPayload(
 	ctx context.Context,
 	logPrefix string,
 	block *types.Block,
-	versionedHashes []common.Hash,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -1136,56 +1135,9 @@ func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_t
 // assembledBlockToPayloadResponse converts a native assembled block to an engine-API payload response.
 func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *uint256.Int, version clparams.StateVersion) (*engine_types.GetPayloadResponse, error) {
 	block := br.Block
-	header := block.Header()
-
-	encodedTxs, err := types.MarshalTransactionsBinary(block.Transactions())
+	ep, err := engine_types.ExecutionPayloadFromBlock(block)
 	if err != nil {
 		return nil, err
-	}
-	txs := make([]hexutil.Bytes, len(encodedTxs))
-	for i, tx := range encodedTxs {
-		txs[i] = tx
-	}
-
-	bloom := header.Bloom
-	ep := &engine_types.ExecutionPayload{
-		ParentHash:    header.ParentHash,
-		FeeRecipient:  header.Coinbase,
-		StateRoot:     header.Root,
-		ReceiptsRoot:  header.ReceiptHash,
-		LogsBloom:     bloom[:],
-		PrevRandao:    header.MixDigest,
-		BlockNumber:   hexutil.Uint64(header.Number.Uint64()),
-		GasLimit:      hexutil.Uint64(header.GasLimit),
-		GasUsed:       hexutil.Uint64(header.GasUsed),
-		Timestamp:     hexutil.Uint64(header.Time),
-		ExtraData:     header.Extra,
-		BaseFeePerGas: (*hexutil.U256)(header.BaseFee),
-		BlockHash:     block.Hash(),
-		Transactions:  txs,
-	}
-	if block.Withdrawals() != nil {
-		ep.Withdrawals = block.Withdrawals()
-	}
-	if header.BlobGasUsed != nil {
-		bgu := hexutil.Uint64(*header.BlobGasUsed)
-		ep.BlobGasUsed = &bgu
-	}
-	if header.ExcessBlobGas != nil {
-		ebg := hexutil.Uint64(*header.ExcessBlobGas)
-		ep.ExcessBlobGas = &ebg
-	}
-	if header.SlotNumber != nil {
-		sn := hexutil.Uint64(*header.SlotNumber)
-		ep.SlotNumber = &sn
-	}
-	if header.BlockAccessListHash != nil && block.BlockAccessListSidecar() != nil {
-		encoded, err := block.BlockAccessListSidecar().Bytes()
-		if err != nil {
-			return nil, fmt.Errorf("encode block access list: %w", err)
-		}
-		bal := hexutil.Bytes(encoded)
-		ep.BlockAccessList = &bal
 	}
 
 	blobsBundle, err := engine_types.BlobsBundleFromTransactions(block.Transactions())
