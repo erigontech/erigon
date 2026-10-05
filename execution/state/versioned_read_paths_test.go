@@ -217,6 +217,36 @@ func TestVersionedRead_B_CommittedStorageServesRecordedRead(t *testing.T) {
 	assert.EqualValues(t, 10, committed.Uint64())
 }
 
+// CREATE over an account with storage but no code or nonce: the slot read
+// before the CREATE belongs to the old incarnation, so committed storage is zero.
+func TestVersionedRead_B_CommittedStorageAfterCreateIsZero(t *testing.T) {
+	t.Parallel()
+	for _, noMaterialize := range []bool{false, true} {
+		_, tx, domains := NewTestRwTx(t)
+		addr := accounts.InternAddress([20]byte{0xb7})
+		key := accounts.InternKey([32]byte{0x01})
+		acc := accounts.NewAccount()
+		acc.Balance = *uint256.NewInt(1)
+		acc.Incarnation = 1
+		addrValue, keyValue := addr.Value(), key.Value()
+		domains.SetTxNum(10)
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(addrValue[:], keyValue[:]...), []byte{0x07}, 10, nil))
+		ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
+		t.Cleanup(ibs.Close)
+		ibs.SetNoMaterialize(noMaterialize)
+		ibs.SetTxContext(1, 5)
+
+		v, err := ibs.GetState(addr, key)
+		require.NoError(t, err)
+		require.EqualValues(t, 7, v.Uint64(), "noMaterialize=%v", noMaterialize)
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		committed, err := ibs.GetCommittedState(addr, key)
+		require.NoError(t, err)
+		assert.True(t, committed.IsZero(), "noMaterialize=%v", noMaterialize)
+	}
+}
+
 // Touching an account whose own balance write is already zero changes nothing,
 // so it adds no journal entry.
 func TestVersionedRead_B_RepeatedTouchIsNoop(t *testing.T) {
