@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/remotedb"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/execution/types"
@@ -161,6 +162,78 @@ func TestAuthorizationRecoveryRevalidatesBalance(t *testing.T) {
 		"the transaction must pass prechecks and complete recovery")
 	require.Empty(t, pool.byHash)
 	require.Empty(t, pool.auths)
+}
+
+type stateViewProbe struct {
+	kvcache.Cache
+	onView func()
+}
+
+func (c *stateViewProbe) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
+	view, err := c.Cache.View(ctx, tx)
+	if err == nil && c.onView != nil {
+		callback := c.onView
+		c.onView = nil
+		callback()
+	}
+	return view, err
+}
+
+func TestAuthorizationRecoveryReopensStaleView(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		nonce   uint64
+		balance uint64
+		reason  txpoolcfg.DiscardReason
+	}{
+		{"balance", 0, 0, txpoolcfg.InsufficientFunds},
+		{"nonce", 1, common.Ether, txpoolcfg.NonceTooLow},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+			cache := &stateViewProbe{Cache: pool._stateCache}
+			pool._stateCache = cache
+			height := pool.lastSeenBlock.Load()
+			txn := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+			txn.IDHash[0] = 1
+			changed := false
+			txn.Txn = &authorizationReadProbe{Transaction: txn.Txn, pool: pool, onUnlocked: func() {
+				cache.onView = func() {
+					require.True(t, pool.lock.TryLock(), "opening a state view must not hold the pool lock")
+					pool.lock.Unlock()
+					account := accounts.Account{Nonce: tc.nonce, Balance: *uint256.NewInt(tc.balance), CodeHash: accounts.EmptyCodeHash}
+					encoded := accounts.SerialiseV3(&account)
+					writeTestSenderState(t, ctx, coreDB, pool.logger, sender, encoded, 1)
+					change := &remoteproto.StateChangeBatch{
+						StateVersionId:      1,
+						PendingBlockBaseFee: 1,
+						BlockGasLimit:       1_000_000,
+						ChangeBatch: []*remoteproto.StateChange{{
+							// State changes at the same height must also invalidate the read view.
+							BlockHeight: height,
+							BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
+							Changes: []*remoteproto.AccountChange{{
+								Action:  remoteproto.Action_UPSERT,
+								Address: gointerfaces.ConvertAddressToH160(sender),
+								Data:    encoded,
+							}},
+						}},
+					}
+					require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+					changed = true
+				}
+			}}
+			var slots TxnSlots
+			slots.Append(txn, sender[:], true)
+			reasons, err := pool.AddLocalTxns(ctx, slots)
+			require.NoError(t, err)
+			require.True(t, changed, "the block update must run after the final view opens")
+			require.Equal(t, height, pool.lastSeenBlock.Load())
+			require.NotNil(t, txn.AuthAndNonces, "recovery must complete before the block update")
+			require.Equal(t, []txpoolcfg.DiscardReason{tc.reason}, reasons)
+			require.Empty(t, pool.byHash)
+		})
+	}
 }
 
 func TestRemoteAuthorizationRecoveryReleasesPoolLock(t *testing.T) {
@@ -348,12 +421,12 @@ type failSecondTemporalReadDB struct {
 	err   error
 }
 
-func (db *failSecondTemporalReadDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+func (db *failSecondTemporalReadDB) ViewTemporal(ctx context.Context, f func(kv.TemporalTx) error) error {
 	db.reads++
 	if db.reads == 2 {
-		return nil, db.err
+		return db.err
 	}
-	return db.TemporalRoDB.BeginTemporalRo(ctx)
+	return db.TemporalRoDB.ViewTemporal(ctx, f)
 }
 
 func TestRemoteAuthorizationRecoveryKeepsQueueOnError(t *testing.T) {

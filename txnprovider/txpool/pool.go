@@ -139,6 +139,7 @@ type TxPool struct {
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
+	stateGeneration         uint64
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -353,6 +354,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 
 	p.lock.Lock()
+	p.stateGeneration++
 	defer func() {
 		if err == nil {
 			p.lastSeenBlock.Store(block)
@@ -1359,23 +1361,34 @@ func (p *TxPool) recoverAuthorizations(tx *TxnSlot) {
 }
 
 func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kvcache.CacheView) error) error {
-	coreDB, cache := p.chainDB()
-	coreTx, err := coreDB.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
+	for {
+		p.lock.Lock()
+		coreDB, cache, generation := p._chainDB, p._stateCache, p.stateGeneration
+		p.lock.Unlock()
+
+		var retry bool
+		// The cache may wait for a block update, so open the view outside the pool lock.
+		err := coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
+			view, err := cache.View(ctx, coreTx)
+			if err != nil {
+				return err
+			}
+			p.lock.Lock()
+			defer p.lock.Unlock()
+			if generation != p.stateGeneration {
+				retry = true
+				return nil
+			}
+			if err := p.senders.registerNewSenders(txns, p.logger); err != nil {
+				return err
+			}
+			defer p.forgetUnusedSenders(senderIDsOf(txns))
+			return f(view)
+		})
+		if err != nil || !retry {
+			return err
+		}
 	}
-	defer coreTx.Rollback()
-	view, err := cache.View(ctx, coreTx)
-	if err != nil {
-		return err
-	}
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	if err := p.senders.registerNewSenders(txns, p.logger); err != nil {
-		return err
-	}
-	defer p.forgetUnusedSenders(senderIDsOf(txns))
-	return f(view)
 }
 
 // Precheck SetCode transactions under the pool lock, then recover their
