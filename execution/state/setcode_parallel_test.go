@@ -94,7 +94,7 @@ func TestSetCodeParallel_RevertToOriginalBug(t *testing.T) {
 
 	// Flush TX 88 writes to versionMap
 	writes88 := ibs88.VersionedWrites()
-	vm.FlushVersionedWrites(writes88, true, "")
+	vm.FlushVersionedWrites(writes88, true)
 
 	// Verify TX 88 wrote empty code hash to versionMap
 	ch, rr, ok := vm.ReadCodeHash(addr, 89)

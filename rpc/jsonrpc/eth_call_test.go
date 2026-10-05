@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -66,6 +67,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -585,6 +587,48 @@ func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", result.String())
+}
+
+// TestEthCallNoMaterializeParity pins that suppressing the stateObject cache
+// does not change what eth_call returns. The override code writes a slot and
+// reads it back in the same call, so the read must come from this call's own
+// write and not from committed state.
+func TestEthCallNoMaterializeParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, contractAddr, _ := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	// PUSH1 0x2a PUSH1 0 SSTORE PUSH1 0 SLOAD PUSH1 0 MSTORE PUSH1 0x20 PUSH1 0 RETURN
+	writeThenRead := hexutil.Bytes(hexutil.MustDecode("0x602a60005560005460005260206000f3"))
+	storeCall := hexutil.Bytes(contractInvocationData(7))
+
+	for _, noMaterialize := range []bool{false, true} {
+		t.Run(fmt.Sprintf("noMaterialize=%v", noMaterialize), func(t *testing.T) {
+			prev := dbg.CallNoMaterialize
+			dbg.CallNoMaterialize = noMaterialize
+			defer func() { dbg.CallNoMaterialize = prev }()
+
+			result, err := api.Call(context.Background(), ethapi.CallArgs{
+				From: &bankAddr,
+				To:   &contractAddr,
+				Data: &writeThenRead,
+			}, nil, &ethapi.StateOverrides{
+				accounts.InternAddress(contractAddr): {Code: &writeThenRead},
+			}, nil)
+			require.NoError(t, err)
+			require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", result.String())
+
+			result, err = api.Call(context.Background(), ethapi.CallArgs{
+				From: &bankAddr,
+				To:   &contractAddr,
+				Data: &storeCall,
+			}, nil, nil, nil)
+			require.NoError(t, err)
+			require.Equal(t, "0x", result.String())
+		})
+	}
 }
 
 func newTestEthAPIWithFilters(t *testing.T, m *execmoduletester.ExecModuleTester) *APIImpl {
@@ -2294,4 +2338,60 @@ func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
 	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, written))
 	require.True(t, (*uint256.Int)(notYetWritten.Value).IsZero(), "slot %d at block %d holds %x, which only block %d writes", bn, bn, (*uint256.Int)(notYetWritten.Value).Bytes32(), bn+1)
 	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, notYetWritten))
+}
+
+// A chainId for another chain makes a call object invalid whatever the state, so every
+// endpoint that takes ethapi.CallArgs rejects it as invalid params instead of running the call.
+func TestCallArgsRejectOtherChainID(t *testing.T) {
+	m, _, bank := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api, debugApi := newCallManyApisForTest(m)
+	ctx := context.Background()
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	txIndex := -1
+	stateCtx := StateContext{BlockNumber: latest, TransactionIndex: &txIndex}
+
+	own := ethapi.CallArgs{From: &bank, To: &bank, ChainID: (*hexutil.U256)(uint256.NewInt(1337))}
+	other := own
+	other.ChainID = (*hexutil.U256)(uint256.NewInt(1))
+	bundles := []Bundle{{Transactions: []ethapi.CallArgs{own, other}}}
+
+	_, err := api.Call(ctx, own, &latest, nil, nil)
+	require.NoError(t, err)
+
+	mismatch := "chainId does not match node's (have=1, want=1337)"
+	for name, tc := range map[string]struct {
+		call func() error
+		want string
+	}{
+		"eth_call": {func() error {
+			_, err := api.Call(ctx, other, &latest, nil, nil)
+			return err
+		}, mismatch},
+		"eth_estimateGas": {func() error {
+			_, err := api.EstimateGas(ctx, &other, &latest, nil, nil)
+			return err
+		}, mismatch},
+		"eth_createAccessList": {func() error {
+			_, err := api.CreateAccessList(ctx, other, &latest, nil, nil)
+			return err
+		}, mismatch},
+		"eth_callMany": {func() error {
+			_, err := api.CallMany(ctx, bundles, stateCtx, nil, nil)
+			return err
+		}, "bundle 0, transaction 1: " + mismatch},
+		"debug_traceCall": {func() error {
+			return debugApi.TraceCall(ctx, other, &latest, nil, jsonstream.New(io.Discard))
+		}, mismatch},
+		"debug_traceCallMany": {func() error {
+			return debugApi.TraceCallMany(ctx, bundles, stateCtx, nil, jsonstream.New(io.Discard))
+		}, "bundle 0, transaction 1: " + mismatch},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := tc.call()
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			require.EqualError(t, err, tc.want)
+		})
+	}
 }
