@@ -273,6 +273,9 @@ func NewExecModule(
 ) *ExecModule {
 	domainCache := newDomainStateCache(stateCacheBudget)
 	execctx.GuardAggregatorForCache(db, domainCache)
+	if err := execctx.InitStateCacheVersion(ctx, db, domainCache); err != nil {
+		logger.Warn("[exec] state cache serves RPC only after the first executed block", "err", err)
+	}
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth, syncCfg.SlowBlockThreshold)
 
 	em := &ExecModule{
