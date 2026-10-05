@@ -17,12 +17,18 @@
 package jsonrpc
 
 import (
+	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -72,4 +78,38 @@ func TestGetTransactionBySenderAndNonce(t *testing.T) {
 		require.NoError(err)
 		require.Nil(results)
 	})
+}
+
+func TestGetTransactionBySenderAndNonceIgnoresTxnsFromOtherSenders(t *testing.T) {
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000_000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	recipient := common.HexToAddress("0x000000000000000000000000000000000000beef")
+	signer := types.LatestSignerForChainID(nil)
+	var sent []common.Hash
+	c, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), recipient, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+		sent = append(sent, txn.Hash())
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
+
+	reply, err := api.GetTransactionBySenderAndNonce(m.Ctx, testAddr, 1)
+	require.NoError(t, err)
+	require.Equal(t, &sent[1], reply)
+
+	for nonce := range uint64(2) {
+		reply, err = api.GetTransactionBySenderAndNonce(m.Ctx, recipient, nonce)
+		require.NoError(t, err)
+		require.Nil(t, reply, "nonce %d", nonce)
+	}
 }

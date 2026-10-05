@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -976,4 +977,81 @@ func TestOpcodeMaskStillReportsFaults(t *testing.T) {
 			require.NotEmpty(t, faults, "an excluded opcode that faults must still reach OnFault")
 		})
 	}
+}
+
+// loadTo is SLOAD slot, MSTORE at.
+func loadTo(p *program.Program, slot, at int) *program.Program {
+	return p.Push(slot).Op(vm.SLOAD).Push(at).Op(vm.MSTORE)
+}
+
+// Repeat storage reads are served from caches on both the serial and the versioned path.
+// Both must match the versioned path with the caches off, in results and gas.
+func TestStorageCachesMatchVersionedPath(t *testing.T) {
+	writeThenRevert := program.New().Sstore(1, 7).Push(0).Push(0).Op(vm.REVERT).Bytes()
+	warmThenRevert := program.New().Push(2).Op(vm.SLOAD, vm.POP).Push(0).Push(0).Op(vm.REVERT).Bytes()
+	c1, c2 := common.HexToAddress("0x2001"), common.HexToAddress("0x2002")
+	p := program.New()
+	loadTo(p, 1, 0)
+	loadTo(p, 1, 32)
+	p.Sstore(1, 5)
+	loadTo(p, 1, 64)
+	p.Sstore(1, 5)
+	p.DelegateCall(nil, c1, 0, 0, 0, 0).Op(vm.POP)
+	loadTo(p, 1, 96)
+	p.DelegateCall(nil, c2, 0, 0, 0, 0).Op(vm.POP)
+	loadTo(p, 2, 128)
+	p.Sstore(1, 0)
+	loadTo(p, 1, 160)
+	p.Return(0, 192)
+
+	run := func(statedb *state.IntraBlockState) (uint64, []byte) {
+		t.Helper()
+		defer statedb.Close()
+		top := accounts.InternAddress(common.HexToAddress("0x2000"))
+		require.NoError(t, statedb.SetCode(top, p.Bytes(), tracing.CodeChangeUnspecified))
+		require.NoError(t, statedb.SetCode(accounts.InternAddress(c1), writeThenRevert, tracing.CodeChangeUnspecified))
+		require.NoError(t, statedb.SetCode(accounts.InternAddress(c2), warmThenRevert, tracing.CodeChangeUnspecified))
+		const gasLimit = 2_000_000
+		ret, left, err := Call(top, nil, &Config{State: statedb, GasLimit: gasLimit})
+		require.NoError(t, err)
+		return gasLimit - left.Total(), ret
+	}
+	versioned := func() *state.IntraBlockState {
+		ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+		ibs.SetNoMaterialize(true)
+		return ibs
+	}
+	was := dbg.TraceTransactionIO
+	t.Cleanup(func() { dbg.TraceTransactionIO = was })
+	dbg.TraceTransactionIO = true // turns the caches off
+	wantGas, want := run(versioned())
+	dbg.TraceTransactionIO = false
+	require.Equal(t, uint64(5), new(uint256.Int).SetBytes(want[96:128]).Uint64(), "a reverted DELEGATECALL wrote the slot")
+	for name, statedb := range map[string]*state.IntraBlockState{"versioned": versioned(), "serial": state.New(state.NewNoopReader())} {
+		gas, got := run(statedb)
+		require.Equal(t, want, got, name)
+		require.Equal(t, wantGas, gas, name)
+	}
+}
+
+// Frames reuse pooled contexts. A frame with another storage address must not read the
+// previous frame's slots, even when nothing changed the state in between.
+func TestStorageCacheIsPerFrame(t *testing.T) {
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	x, y := common.HexToAddress("0x2001"), common.HexToAddress("0x2002")
+	readSlot := program.New()
+	loadTo(readSlot, 1, 0).Return(0, 32)
+	for addr, v := range map[common.Address]uint64{x: 11, y: 22} {
+		require.NoError(t, statedb.SetCode(accounts.InternAddress(addr), readSlot.Bytes(), tracing.CodeChangeUnspecified))
+		require.NoError(t, statedb.SetState(accounts.InternAddress(addr), accounts.InternKey(common.BigToHash(big.NewInt(1))), *uint256.NewInt(v)))
+	}
+	// The first two calls warm both accounts and slots, so the last two change nothing.
+	p := program.New().StaticCall(nil, x, 0, 0, 0, 0).Op(vm.POP).StaticCall(nil, y, 0, 0, 0, 0).Op(vm.POP)
+	p.StaticCall(nil, x, 0, 0, 0, 32).Op(vm.POP).StaticCall(nil, y, 0, 0, 32, 32).Op(vm.POP).Return(0, 64)
+	top := accounts.InternAddress(common.HexToAddress("0x2000"))
+	require.NoError(t, statedb.SetCode(top, p.Bytes(), tracing.CodeChangeUnspecified))
+	ret, _, err := Call(top, nil, &Config{State: statedb, GasLimit: 1_000_000})
+	require.NoError(t, err)
+	require.Equal(t, []uint64{11, 22}, []uint64{new(uint256.Int).SetBytes(ret[:32]).Uint64(), new(uint256.Int).SetBytes(ret[32:]).Uint64()})
 }
