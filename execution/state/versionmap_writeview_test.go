@@ -207,17 +207,17 @@ func TestVersionMapWriteView_DestructAtOriginIndexWipesIt(t *testing.T) {
 
 // An account created in this tx has its storage wiped, so its origin is the
 // pre-creation snapshot: a write that happens to equal it is still a real
-// change and must survive the filter.
+// change and must survive the filter, with its value from the version map.
 func TestVersionMapWriteView_CreatedAccountKeepsEveryWrite(t *testing.T) {
 	t.Parallel()
 
 	const priorTx, myTx = 2, 5
 	addr := getAddress(2)
 	key := accounts.InternKey(uint256.NewInt(0x33).Bytes32())
-	val := *uint256.NewInt(100)
+	val, keySetVal := *uint256.NewInt(100), *uint256.NewInt(1)
 
 	keys := &WriteSet{}
-	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val})
+	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: keySetVal})
 	keys.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath}, Val: true})
 
 	vm := NewVersionMap(nil)
@@ -231,5 +231,5 @@ func TestVersionMapWriteView_CreatedAccountKeepsEveryWrite(t *testing.T) {
 		}
 	}
 	require.Equal(t, map[accounts.StorageKey]uint256.Int{key: val}, got,
-		"a created account's storage write is never a no-op")
+		"a created account's storage write is never a no-op, and its value comes from the version map")
 }
