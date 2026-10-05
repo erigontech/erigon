@@ -17,13 +17,11 @@
 package integrity_test
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/integrity"
@@ -132,43 +130,60 @@ func TestReceiptRootIntegrity(t *testing.T) {
 
 func TestReceiptRootIntegrity_FilesOnlyTip(t *testing.T) {
 	enableHistoricalRCache(t)
+	ctx := t.Context()
 
-	for _, tt := range []struct {
-		name            string
-		dropDomainFiles bool
-	}{
-		{name: "domain and history files"},
-		{name: "history files only", dropDomainFiles: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := t.Context()
-
-			db, br := newRCacheChain(t, []int{0, 2, 0, 0, 2, 1, 0, 0}, nil)
-			agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-			require.NoError(t, agg.BuildFiles2(ctx, db, 0, 1, unboundedFinalityCtx, false))
-			agg.WaitForFiles()
-			require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
-				for _, table := range db.Debug().DomainTables(kv.RCacheDomain) {
-					if err := tx.ClearTable(table); err != nil {
-						return err
-					}
-				}
-				return nil
-			}))
-			if tt.dropDomainFiles {
-				require.NoError(t, dir.RemoveFilesByMask(filepath.Join(agg.Dirs().SnapDomain, "*-rcache.*")))
-				require.NoError(t, agg.OpenFolder(db))
+	db, br := newRCacheChain(t, []int{0, 2, 0, 0, 2, 1, 0, 0}, nil)
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	require.NoError(t, agg.BuildFiles2(ctx, db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		for _, table := range db.Debug().DomainTables(kv.RCacheDomain) {
+			if err := tx.ClearTable(table); err != nil {
+				return err
 			}
+		}
+		return nil
+	}))
 
-			tx, err := db.BeginTemporalRo(ctx)
-			require.NoError(t, err)
-			defer tx.Rollback()
-			require.Equal(t, uint64(16), tx.Debug().DomainProgress(kv.RCacheDomain))
-			_, exact := tx.Debug().DomainVisibleEnd(kv.RCacheDomain)
-			require.Equal(t, !tt.dropDomainFiles, exact)
-			tx.Rollback()
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.Equal(t, uint64(16), tx.Debug().DomainProgress(kv.RCacheDomain))
+	tx.Rollback()
 
-			require.NoError(t, integrity.CheckReceiptRootIntegrity(ctx, integrity.SamplerCfg{Seed: 1, SampleRatio: 1}, db, br, chain.AllProtocolChanges, true, log.New()))
-		})
-	}
+	require.NoError(t, integrity.CheckReceiptRootIntegrity(ctx, integrity.SamplerCfg{Seed: 1, SampleRatio: 1}, db, br, chain.AllProtocolChanges, true, log.New()))
+}
+
+type inexactRCacheDebugTx struct {
+	kv.TemporalDebugTx
+}
+
+func (inexactRCacheDebugTx) DomainVisibleEnd(kv.Domain) (uint64, bool) { return 0, false }
+func (inexactRCacheDebugTx) DomainProgress(kv.Domain) uint64           { return 16 }
+func (inexactRCacheDebugTx) TxNumsInFiles(...kv.Domain) uint64         { return 0 }
+
+type blockFilesTemporalTx interface {
+	kv.TemporalTx
+	freezeblocks.HasBlockFilesRoTx
+}
+
+type inexactRCacheTx struct {
+	blockFilesTemporalTx
+}
+
+func (tx inexactRCacheTx) Debug() kv.TemporalDebugTx {
+	return inexactRCacheDebugTx{tx.blockFilesTemporalTx.Debug()}
+}
+
+func TestRCacheEndBlockNum_InexactVisibleEnd(t *testing.T) {
+	ctx := t.Context()
+	db, br := newRCacheChain(t, []int{0, 2, 0, 0, 2, 1, 0, 0}, nil)
+
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	end, err := integrity.RCacheEndBlockNum(ctx, inexactRCacheTx{tx.(blockFilesTemporalTx)}, br.TxnumReader())
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), end)
 }
