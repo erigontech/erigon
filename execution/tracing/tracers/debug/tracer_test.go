@@ -114,10 +114,12 @@ func TestOpcodeV2Recording(t *testing.T) {
 			receivedCost = append(receivedCost, cost)
 		},
 	}}}
-	recorder.Hooks().EmitOpcode(42, byte(vm.SSTORE), gas, cost, scope, []byte{1}, 2, nil)
+	returnData := []byte{1}
+	recorder.Hooks().EmitOpcode(42, byte(vm.SSTORE), gas, cost, scope, returnData, 2, nil)
 	require.Equal(t, []mdgas.MdGas{gas}, receivedGas)
 	require.Equal(t, []mdgas.MdGasCost{cost}, receivedCost)
 	scope.Memory.Set(0, 2, []byte{0, 0})
+	returnData[0] = 0
 	encoded, err := json.Marshal(recorder.traces)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"traces":[{"onOpcodeV2":{"pc":42,"op":"SSTORE","gas":{"Execution":100,"State":200},"cost":{"Execution":10,"State":50},"caller":"0x0000000000000000000000000000000000000000","memory":"0xabcd","memSize":2,"returnData":"0x01","depth":2}}]}`, string(encoded))
