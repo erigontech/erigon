@@ -1365,19 +1365,23 @@ func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, erro
 	if r.err != nil {
 		return accounts.Code{}, r.err
 	}
+	var code accounts.Code
 	switch r.outcome {
 	case outcomeWriteSetHit:
-		return r.vwCode.Val, nil
+		code = r.vwCode.Val
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		return tr.Val, nil
+		code = tr.Val
 	case outcomeMapDone:
-		return r.mapCodeVal, nil
+		code = r.mapCodeVal
 	case outcomeReturnZero, outcomeReturnDefault:
-		return accounts.Code{}, nil
 	default:
 		panic(fmt.Sprintf("refreshCode: unexpected outcome %d for %x", r.outcome, addr))
 	}
+	if dbg.AssertEnabled && code.Bytes != nil && code.Hash == accounts.NilCodeHash {
+		panic(fmt.Sprintf("refreshCode: code without hash for %x", addr))
+	}
+	return code, nil
 }
 
 // readCodeSize returns the contract code size.
