@@ -81,7 +81,28 @@ func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 		state.NewVersionMap(nil),
 	)
 	statedb.SetNoMaterialize(noMaterialize)
+	return envFor(statedb, gasLimit)
+}
 
+// newCommittedBenchEnv commits what seed writes to the DB and returns an env
+// over a fresh unversioned state, so reads of it come from the state reader as
+// in eth_call, not from the same tx's writes.
+func newCommittedBenchEnv(t testing.TB, gasLimit uint64, seed func(*state.IntraBlockState)) *vm.EVM {
+	t.Helper()
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
+	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+
+	seeded := state.New(reader)
+	seed(seeded)
+	vmenv := envFor(seeded, gasLimit)
+	require.NoError(t, seeded.CommitBlock(vmenv.ChainRules(), state.NewWriter(domains.AsPutDel(tx), nil, 1)))
+	return envFor(state.New(reader), gasLimit)
+}
+
+func envFor(statedb *state.IntraBlockState, gasLimit uint64) *vm.EVM {
 	return runtime.NewEnv(&runtime.Config{
 		ChainConfig: cancunConfig(),
 		Origin:      addrSender,
