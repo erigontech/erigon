@@ -149,10 +149,18 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 // recording an OCC read. Used on the noMaterialize path where the rebuilt
 // transient's original reflects this tx's own code cell rather than tx start.
 func (ibs *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
-	acc, err := ibs.stateReader.ReadAccountData(addr)
-	ibs.recordStateReadError(err)
-	if err != nil {
-		return accounts.EmptyCodeHash, err
+	acc, ok := ibs.committedBase[addr]
+	if !ok {
+		var err error
+		acc, err = ibs.stateReader.ReadAccountData(addr)
+		ibs.recordStateReadError(err)
+		if err != nil {
+			return accounts.EmptyCodeHash, err
+		}
+		if ibs.committedBase == nil {
+			ibs.committedBase = make(map[accounts.Address]*accounts.Account)
+		}
+		ibs.committedBase[addr] = acc
 	}
 	if acc == nil || acc.CodeHash.IsEmpty() {
 		return accounts.EmptyCodeHash, nil
