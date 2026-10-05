@@ -59,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/runtime"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func TestEmptyQuery(t *testing.T) {
@@ -2614,7 +2615,8 @@ func TestTraceCallFields(t *testing.T) {
 // TestRawTransactionValidatesAgainstLatestState checks that trace_rawTransaction
 // runs a signed transaction only if it is valid at the latest state: the nonce
 // must equal the state nonce, the sender must afford value plus gas limit times
-// fee cap, and the sender must not have code other than an EIP-7702 delegation.
+// fee cap, the sender must not have code other than an EIP-7702 delegation, and
+// the gas limit must not exceed the RPC gas cap.
 // A valid transaction that reverts or runs out of gas is still traced.
 func TestRawTransactionValidatesAgainstLatestState(t *testing.T) {
 	const stateNonce = 10
@@ -2706,6 +2708,22 @@ func TestRawTransactionValidatesAgainstLatestState(t *testing.T) {
 			}
 		})
 	}
+
+	cappedAPI := NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{GasCap: valid.gasLimit})
+
+	t.Run("gas limit above the server gas cap", func(t *testing.T) {
+		tx := valid
+		tx.gasLimit++
+		result, err := cappedAPI.RawTransaction(context.Background(), rawTx(t, tx), []string{TraceTypeTrace})
+		require.Nil(t, result)
+		requireErrorCode(t, err, rpc.ErrCodeClientLimitExceeded)
+	})
+
+	t.Run("gas limit at the server gas cap", func(t *testing.T) {
+		result, err := cappedAPI.RawTransaction(context.Background(), rawTx(t, valid), []string{TraceTypeTrace})
+		require.NoError(t, err)
+		require.Equal(t, word42, result.Output.String())
+	})
 
 	traceValid := func(t *testing.T, tx tx) *TraceCallResult {
 		t.Helper()

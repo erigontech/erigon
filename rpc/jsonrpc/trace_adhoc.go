@@ -1852,6 +1852,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if err != nil {
 		return nil, err
 	}
+	if api.gasCap != 0 && txn.GetGasLimit() > api.gasCap {
+		return nil, clientLimitExceededError(fmt.Sprintf("transaction gas limit %d exceeds the RPC gas cap %d", txn.GetGasLimit(), api.gasCap))
+	}
 
 	dbtx, err := api.kv.BeginTemporalRo(ctx)
 	if err != nil {
