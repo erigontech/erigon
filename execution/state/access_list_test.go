@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -293,4 +294,21 @@ func TestSlotKnownWarmOnEmptyAccessList(t *testing.T) {
 
 	require.False(t, state.SlotKnownWarm(accounts.NilAddress, accounts.NilKey))
 	require.False(t, state.SlotKnownWarm(accounts.NilAddress, accounts.ZeroKey))
+}
+
+func TestPrepareKeepsPrecompilesWarm(t *testing.T) {
+	t.Parallel()
+	s := New(NewNoopReader())
+	defer s.Close()
+	precompile := accounts.InternAddress(common.HexToAddress("0x01"))
+	other := accounts.InternAddress(common.HexToAddress("0xaa"))
+	precompiles := []accounts.Address{precompile}
+	for range 2 {
+		s.Prepare(&chain.Rules{IsBerlin: true}, accounts.NilAddress, accounts.NilAddress, accounts.NilAddress, precompiles, nil)
+		require.True(t, s.AddressInAccessList(precompile))
+		require.False(t, s.AddressInAccessList(other))
+		n := s.journal.length()
+		require.False(t, s.AddAddressToAccessList(precompile))
+		require.Equal(t, n, s.journal.length())
+	}
 }
