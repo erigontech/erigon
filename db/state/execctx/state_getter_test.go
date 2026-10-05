@@ -399,3 +399,29 @@ func TestCachedTemporalTxStateGetterRefusesWrappedWritableTx(t *testing.T) {
 		require.Equal(t, i, counting.reads)
 	}
 }
+
+// Before any SharedDomains binds the cache, commits do not publish to it, so a
+// fill from one read tx is not valid state for a later one.
+func TestCachedTemporalTxStateGetterUnversionedCacheReadsTx(t *testing.T) {
+	db := newTestDb(t, 16)
+	stateCache := newSmallStateCache()
+	defer stateCache.Close()
+	commitAccount(t, db, nil, bytes.Repeat([]byte{0xcc}, 20), encAccount(1), 5)
+	key := bytes.Repeat([]byte{0xdd}, 20)
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	v, _, err := execctx.NewCachedTemporalTxStateGetter(roTx, stateCache).GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Empty(t, v)
+	roTx.Rollback()
+
+	commitAccount(t, db, nil, key, encAccount(2), 10)
+	roTx, err = db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	v, _, err = execctx.NewCachedTemporalTxStateGetter(roTx, stateCache).GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, encAccount(2), v)
+}
