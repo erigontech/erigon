@@ -1190,8 +1190,16 @@ func TestDomainMergeCancellationRemovesOutput(t *testing.T) {
 
 func TestHistoryMergeCancellationRemovesOutputs(t *testing.T) {
 	t.Parallel()
-	for _, existingOutput := range []bool{false, true} {
-		t.Run(fmt.Sprintf("existing_output=%t", existingOutput), func(t *testing.T) {
+	for _, tc := range []struct {
+		phase          string
+		existingOutput bool
+	}{
+		{phase: "history"},
+		{phase: "history", existingOutput: true},
+		{phase: "index", existingOutput: true},
+		{phase: "before_merge", existingOutput: true},
+	} {
+		t.Run(fmt.Sprintf("%s/existing_output=%t", tc.phase, tc.existingOutput), func(t *testing.T) {
 			db, h := filledHistoryValues(t, false, map[string][]upd{
 				"key": {{txNum: 1}, {txNum: 17, value: []byte("value")}},
 			}, log.New())
@@ -1228,15 +1236,24 @@ func TestHistoryMergeCancellationRemovesOutputs(t *testing.T) {
 					require.FileExists(t, path)
 				}
 			}
-			if existingOutput {
+			if tc.existingOutput {
 				merge()
 			}
 
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			h._testBuildVIHook = func(*recsplit.RecSplit) {
+			cancelBuild := func(*recsplit.RecSplit) {
+				require.FileExists(t, h.InvertedIndex.efNewFilePath(0, 2))
 				require.FileExists(t, h.vNewFilePath(0, 2))
 				cancel()
+			}
+			switch tc.phase {
+			case "before_merge":
+				cancel()
+			case "index":
+				h.InvertedIndex._testBuildAccessorHook = cancelBuild
+			case "history":
+				h._testBuildVIHook = cancelBuild
 			}
 			index, history, err := ht.mergeFiles(ctx, indexFiles, historyFiles, r, ps)
 			require.ErrorIs(t, err, context.Canceled)
@@ -1247,6 +1264,7 @@ func TestHistoryMergeCancellationRemovesOutputs(t *testing.T) {
 			}
 
 			h._testBuildVIHook = nil
+			h.InvertedIndex._testBuildAccessorHook = nil
 			merge()
 		})
 	}

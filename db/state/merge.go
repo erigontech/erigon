@@ -768,11 +768,40 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		return nil, nil, nil
 	}
 	var indexIn, historyIn *FilesItem
+	var comp *seg.Compressor
+	var datPath, idxPath string
+	if r.history.needMerge {
+		fromStep, toStep := kv.Step(r.history.from/ht.stepSize), kv.Step(r.history.to/ht.stepSize)
+		datPath = ht.h.vNewFilePath(fromStep, toStep)
+		idxPath = ht.h.vAccessorNewFilePath(fromStep, toStep)
+		historyIn = newFilesItem(r.history.from, r.history.to)
+	}
 	var err error
 	closeFiles := true
 	defer func() {
-		if closeFiles {
+		if !closeFiles {
+			return
+		}
+		if comp != nil {
+			comp.Close()
+		}
+		historyIn.closeFiles()
+		if !r.history.needMerge {
 			indexIn.closeFilesAndRemove()
+			return
+		}
+		indexIn.closeFiles()
+		paths := []string{idxPath, datPath}
+		if r.index.needMerge {
+			fromStep, toStep := kv.Step(r.index.from/ht.stepSize), kv.Step(r.index.to/ht.stepSize)
+			paths = append(paths, ht.h.InvertedIndex.efAccessorNewFilePath(fromStep, toStep), ht.h.InvertedIndex.efNewFilePath(fromStep, toStep))
+		}
+		for _, path := range paths {
+			for _, file := range []string{path, path + ".torrent"} {
+				if err := dir.RemoveFile(file); err != nil {
+					ht.h.logger.Trace("remove after failed merge", "err", err, "file", file)
+				}
+			}
 		}
 	}()
 
@@ -782,24 +811,6 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 		}
 	}
 	if r.history.needMerge {
-		fromStep, toStep := kv.Step(r.history.from/ht.stepSize), kv.Step(r.history.to/ht.stepSize)
-		datPath := ht.h.vNewFilePath(fromStep, toStep)
-		idxPath := ht.h.vAccessorNewFilePath(fromStep, toStep)
-		historyIn = newFilesItem(r.history.from, r.history.to)
-		var comp *seg.Compressor
-		defer func() {
-			if closeFiles {
-				if comp != nil {
-					comp.Close()
-				}
-				historyIn.closeFiles()
-				for _, path := range []string{idxPath, idxPath + ".torrent", datPath, datPath + ".torrent"} {
-					if err := dir.RemoveFile(path); err != nil {
-						ht.h.logger.Trace("remove after failed merge", "err", err, "file", path)
-					}
-				}
-			}
-		}()
 		if comp, err = seg.NewCompressor(ctx, "merge hist "+ht.h.FilenameBase, datPath, ht.h.dirs.Tmp, ht.h.CompressorCfg, log.LvlTrace, ht.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", ht.h.FilenameBase, err)
 		}
