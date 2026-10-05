@@ -130,8 +130,7 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 				}
 				if op.IsPushWithImmediateArgs() {
 					// The immediate is 16, the top the check below wants.
-					scope.Contract.Code = make([]byte, 33)
-					scope.Contract.Code[op-PUSH0] = 16
+					scope.Contract.Code = append(make([]byte, op-PUSH0), 16)
 				}
 				_, _, err := got.execute(0, nil, scope)
 				require.NoError(t, err)
