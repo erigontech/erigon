@@ -1107,6 +1107,8 @@ func TestStorageCachesMatchVersionedPath(t *testing.T) {
 		ibs.SetNoMaterialize(true)
 		return ibs
 	}
+	was := dbg.TraceTransactionIO
+	t.Cleanup(func() { dbg.TraceTransactionIO = was })
 	dbg.TraceTransactionIO = true // turns the caches off
 	wantGas, want := run(versioned())
 	dbg.TraceTransactionIO = false
