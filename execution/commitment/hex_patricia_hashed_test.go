@@ -1975,7 +1975,7 @@ func TestComputeCellHashKeepsLeafPath(t *testing.T) {
 	hph.updateCell(acct[:], KeyToHexNibbleHash(acct[:]), &upd)
 	addStorageToCell(&hph.root, acct, common.Hash{}, []byte{0xaa})
 	hph.root.hashedExtLen = 0
-	require.NoError(t, hph.root.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]))
+	require.NoError(t, hph.root.deriveHashedKeys(0, hph.accountKeyLen, hph.cellHashBuf[:]))
 	path := bytes.Clone(hph.root.hashedExtension[:hph.root.hashedExtLen])
 
 	_, err := hph.computeCellHash(&hph.root, 0, nil)
