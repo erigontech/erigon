@@ -194,6 +194,9 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
 func CanTransfer(db evmtypes.IntraBlockState, addr accounts.Address, amount uint256.Int) (can bool, err error) {
+	if amount.IsZero() {
+		return true, nil
+	}
 	balance, err := db.GetBalance(addr)
 
 	if dbg.TraceTransactionIO && db.Trace() || dbg.TraceAccount(addr.Handle()) {
