@@ -92,6 +92,8 @@ type EVM struct {
 	addrCache   *addressCache
 	internOps   uint32
 	addrOps     uint32
+
+	spareFrame *CallContext // a finished nested frame's context, see putCallContext
 }
 
 // evmSizeClass is the Go allocation size class EVM fills. One more word moves
@@ -101,7 +103,7 @@ type EVM struct {
 // TestEVMFitsItsSizeClass is therefore a tripwire for the growth nobody meant,
 // not a budget — a build-time assert would also fire in every package that
 // grows an embedded type such as evmtypes.BlockContext.
-const evmSizeClass = 448
+const evmSizeClass = 480
 
 // storageKeyCacheSize must comfortably exceed a contract's live slot count,
 // or conflict misses dominate.
