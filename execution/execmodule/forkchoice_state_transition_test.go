@@ -18,7 +18,6 @@ package execmodule_test
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -40,10 +39,10 @@ func TestRepeatedForkchoicePersistsFinality(t *testing.T) {
 		storedFinality              bool
 		updateSafe, updateFinalized bool
 	}{
-		{name: "both_unset", updateSafe: true, updateFinalized: true},
-		{name: "both", storedFinality: true, updateSafe: true, updateFinalized: true},
-		{name: "safe_only", storedFinality: true, updateSafe: true},
-		{name: "finalized_only", storedFinality: true, updateFinalized: true},
+		{name: "initialize_both", updateSafe: true, updateFinalized: true},
+		{name: "update_both", storedFinality: true, updateSafe: true, updateFinalized: true},
+		{name: "update_safe_only", storedFinality: true, updateSafe: true},
+		{name: "update_finalized_only", storedFinality: true, updateFinalized: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := execmoduletester.New(t)
@@ -77,11 +76,13 @@ func TestRepeatedForkchoicePersistsFinality(t *testing.T) {
 			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
 			m.ExecModule.Drain()
 			assertPersistedForkchoice(t, m.DB, head, wantSafe, wantFinalized)
+
 			result, err = m.ExecModule.UpdateForkChoice(t.Context(), head, common.Hash{0xff}, wantFinalized)
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
 			m.ExecModule.Drain()
 			assertPersistedForkchoice(t, m.DB, head, wantSafe, wantFinalized)
+
 			result, err = m.ExecModule.UpdateForkChoice(t.Context(), chain.Blocks[0].Hash(), common.Hash{}, common.Hash{})
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
@@ -102,23 +103,27 @@ func TestRepeatedForkchoiceDoesNotWaitForWriter(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
 	m.ExecModule.Drain()
-	for _, zeroFinality := range []bool{false, true} {
-		t.Run(fmt.Sprintf("zero_finality_%t", zeroFinality), func(t *testing.T) {
+
+	for _, tc := range []struct {
+		name            string
+		safe, finalized common.Hash
+	}{
+		{name: "unchanged_hashes", safe: safe, finalized: finalized},
+		{name: "zero_safe_and_finalized"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			defer m.ExecModule.Drain()
 			writer, err := m.DB.BeginTemporalRw(t.Context())
 			require.NoError(t, err)
 			defer writer.Rollback()
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			requestSafe, requestFinalized := safe, finalized
-			if zeroFinality {
-				requestSafe, requestFinalized = common.Hash{}, common.Hash{}
-			}
-			result, err := m.ExecModule.UpdateForkChoice(ctx, head, requestSafe, requestFinalized)
+			result, err := m.ExecModule.UpdateForkChoice(ctx, head, tc.safe, tc.finalized)
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status, "unchanged markers must not need the MDBX writer lock")
 		})
 	}
+
 	assertPersistedForkchoice(t, m.DB, head, safe, finalized)
 }
 

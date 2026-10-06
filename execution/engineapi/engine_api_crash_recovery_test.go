@@ -72,7 +72,7 @@ type crashRecoveryRequest struct {
 	Deadline       time.Time
 	Canonical      []*engineapitester.MockClPayload
 	Replacement    []*engineapitester.MockClPayload
-	CatchupCommit  int
+	CatchupCycle   int // One-based catch-up cycle; zero selects tip-mode crash windows.
 	Downloaded     []crashRecoveryBlock
 }
 
@@ -502,7 +502,7 @@ func runUnwindCrashChild(t *testing.T) {
 		EngineApiClientTimeout:  &clientTimeout,
 		StateTransitionObserver: transitions.observe,
 		EthConfigTweaker: func(config *ethconfig.Config) {
-			if request.CatchupCommit > 0 {
+			if request.CatchupCycle > 0 {
 				configureCatchupCrashRecovery(config)
 			} else {
 				configureCrashRecovery(config)
@@ -542,7 +542,7 @@ func runUnwindCrashChild(t *testing.T) {
 	t.Log("importing the replacement chain")
 	var boundary *stateTransitionHold
 	var replacementHead common.Hash
-	if request.CatchupCommit > 0 {
+	if request.CatchupCycle > 0 {
 		blocks, err := decodeCrashRecoveryBlocks(request.Downloaded)
 		require.NoError(t, err)
 		require.NotEmpty(t, blocks)
@@ -562,7 +562,7 @@ func runUnwindCrashChild(t *testing.T) {
 		seen := 0
 		boundary = transitions.holdMatching(t, request.Point, 1, func(context.Context) bool {
 			seen++
-			return seen == request.CatchupCommit
+			return seen == request.CatchupCycle
 		})
 	} else {
 		insertCrashRecoveryPayloads(ctx, t, eat, request.Replacement)
@@ -575,7 +575,7 @@ func runUnwindCrashChild(t *testing.T) {
 	t.Logf("waiting for replacement transition %d", request.Point)
 	// A prevalidated tip FCU may return VALID before its commit. Bulk import
 	// clears that validation, so a catch-up response before the barrier is a failure.
-	require.NoError(t, waitCrashRecoveryTransition(ctx, boundary, response, request.CatchupCommit == 0), "replacement FCU, catch-up cycle %d", request.CatchupCommit)
+	require.NoError(t, waitCrashRecoveryTransition(ctx, boundary, response, request.CatchupCycle == 0), "replacement FCU, catch-up cycle %d", request.CatchupCycle)
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", request.ControlAddress)
 	require.NoError(t, err)
@@ -621,7 +621,7 @@ func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	t.Helper()
 	require.NotEmpty(t, request.Canonical)
 	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
-	if request.CatchupCommit > 0 {
+	if request.CatchupCycle > 0 {
 		require.Empty(t, request.Replacement, "catch-up imports use only the downloaded blocks")
 		require.NotEmpty(t, request.Downloaded)
 	} else {

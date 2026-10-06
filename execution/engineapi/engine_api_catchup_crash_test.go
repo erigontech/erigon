@@ -73,7 +73,7 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 	const prefixBlocks = prefixPokes + 2
 	// Reference runs execute one block per forkchoice update, so the expected
 	// state does not depend on the catch-up batching being tested.
-	buildReference := func(side bool) (chain crashRecoveryChain, checkpoints []crashRecoveryState, downloaded []crashRecoveryBlock, addr common.Address) {
+	buildReference := func(replacement bool) (chain crashRecoveryChain, checkpoints []crashRecoveryState, downloaded []crashRecoveryBlock, addr common.Address) {
 		args := baseArgs
 		args.Logger, args.DataDir = testlog.Logger(t, log.LvlError), newSmallStepDataDir(t)
 		eat, initErr := engineapitester.InitialiseEngineApiTester(ctx, args)
@@ -84,11 +84,11 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 		prefix, addr, churn, _ := buildChurnChain(ctx, t, eat, prefixPokes, func(k int) int64 { return int64(k) })
 		chain.payloads = append([]*engineapitester.MockClPayload{empty}, prefix...)
 		chunks, chunkSize := 1, 12
-		if side {
+		if replacement {
 			chunks, chunkSize = 5, catchupCrashBlockLimit
 		}
 		for chunk := range chunks {
-			suffix, sums := buildCrashRecoverySuffix(ctx, t, eat, churn, prefixPokes+chunk*chunkSize, chunkSize, side)
+			suffix, sums := buildCrashRecoverySuffix(ctx, t, eat, churn, prefixPokes+chunk*chunkSize, chunkSize, replacement)
 			chain.payloads = append(chain.payloads, suffix...)
 			chain.sum = sums[len(sums)-1]
 			chain.state = readCrashRecoveryState(t, eat.ChainDB)
@@ -96,7 +96,7 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 			require.Positive(t, chain.state.CommitmentTx/eat.ChainDB.StepSize(), "the batch limit needs at least one domain step")
 			checkpoints = append(checkpoints, chain.state)
 		}
-		if side {
+		if replacement {
 			downloaded = readCrashRecoveryBlocks(t, eat.ChainDB, chain.payloads)
 			chain.continuation, chain.continuationSums = churnAndAssert(ctx, t, eat, churn, 3, func(k int) int64 { return int64(2_000 + k) })
 		}
@@ -104,10 +104,13 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 		return chain, checkpoints, downloaded, addr
 	}
 	canonical, _, _, addr := buildReference(false)
-	side, checkpoints, downloaded, sideAddr := buildReference(true)
-	require.Equal(t, addr, sideAddr)
-	require.Equal(t, canonical.payloads[prefixBlocks-1].ExecutionPayload.BlockHash, side.payloads[prefixBlocks-1].ExecutionPayload.BlockHash)
-	require.NotEqual(t, canonical.payloads[prefixBlocks].ExecutionPayload.BlockHash, side.payloads[prefixBlocks].ExecutionPayload.BlockHash)
+	replacement, checkpoints, downloaded, replacementAddr := buildReference(true)
+	require.Equal(t, addr, replacementAddr)
+	require.Equal(t, canonical.payloads[prefixBlocks-1].ExecutionPayload.BlockHash, replacement.payloads[prefixBlocks-1].ExecutionPayload.BlockHash)
+	require.NotEqual(t, canonical.payloads[prefixBlocks].ExecutionPayload.BlockHash, replacement.payloads[prefixBlocks].ExecutionPayload.BlockHash)
+	// Checkpoints below and above the old head cover both partial re-execution
+	// of the unwound range and execution beyond it. Keep them before the
+	// replacement tip so the restart still has blocks to execute.
 	require.Less(t, checkpoints[0].CommitmentBlock, canonical.state.CommitmentBlock)
 	require.Greater(t, checkpoints[1].CommitmentBlock, canonical.state.CommitmentBlock)
 	require.NotEqual(t, canonical.state.Domains[kv.CodeDomain], checkpoints[0].Domains[kv.CodeDomain])
@@ -115,7 +118,7 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 	for cycle := 1; cycle <= 2; cycle++ {
 		checkpoint := checkpoints[cycle-1].CommitmentBlock
 		require.Equal(t, uint64(prefixBlocks+cycle*catchupCrashBlockLimit), checkpoint, "reference catch-up checkpoint %d", cycle)
-		require.Less(t, checkpoint, side.state.CommitmentBlock, "catch-up checkpoint %d must be intermediate", cycle)
+		require.Less(t, checkpoint, replacement.state.CommitmentBlock, "catch-up checkpoint %d must be intermediate", cycle)
 	}
 
 	for cycle := 1; cycle <= 2; cycle++ {
@@ -130,22 +133,22 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 			} {
 				t.Run(window.name, func(t *testing.T) {
 					request := crashRecoveryRequest{
-						Genesis:       genesis,
-						CoinbaseKey:   crypto.FromECDSA(key),
-						DataDir:       newSmallStepDataDir(t),
-						Point:         window.point,
-						Canonical:     canonical.payloads,
-						CatchupCommit: cycle,
-						Downloaded:    downloaded,
+						Genesis:      genesis,
+						CoinbaseKey:  crypto.FromECDSA(key),
+						DataDir:      newSmallStepDataDir(t),
+						Point:        window.point,
+						Canonical:    canonical.payloads,
+						CatchupCycle: cycle,
+						Downloaded:   downloaded,
 					}
 					killAtUnwindBoundary(t, request)
-					completed := cycle - 1
+					committedCycles := cycle - 1
 					if window.committed {
-						completed++
+						committedCycles++
 					}
 					want := canonical.state
-					if completed > 0 {
-						want = catchupRecoveryCheckpoint(checkpoints[completed-1], canonical.state, side.state)
+					if committedCycles > 0 {
+						want = catchupRecoveryCheckpoint(checkpoints[committedCycles-1], canonical.state, replacement.state)
 					}
 					args := baseArgs
 					// Without the artificial batch cap, startup can finish catch-up
@@ -156,30 +159,30 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 					// Inspect persisted state before startup execution can hide partial writes.
 					args.BeforeNodeStart = func(db kv.TemporalRoDB) {
 						assertCatchupRecoveryState(t, want, readCrashRecoveryCheckpoint(t, db))
-						require.Equal(t, downloaded, readCrashRecoveryBlocks(t, db, side.payloads), "bulk-imported blocks and BALs must survive every crash")
+						require.Equal(t, downloaded, readCrashRecoveryBlocks(t, db, replacement.payloads), "bulk-imported blocks and BALs must survive every crash")
 						inspected = true
 					}
 					eat, initErr := engineapitester.InitialiseEngineApiTester(t.Context(), args)
 					require.NoError(t, initErr)
 					t.Cleanup(func() { require.NoError(t, eat.Close()) })
 					require.True(t, inspected, "the crash oracle must run before startup execution")
-					if completed > 0 {
-						require.NoError(t, waitCrashRecoveryExecution(t.Context(), eat.ChainDB, side.state.CommitmentBlock))
+					if committedCycles > 0 {
+						require.NoError(t, waitCrashRecoveryExecution(t.Context(), eat.ChainDB, replacement.state.CommitmentBlock))
 					}
 					// Bulk import is durable before the FCU; recovery must not re-import.
 					// Re-importing would hide missing headers, bodies, or BALs after the crash.
-					require.NoError(t, eat.MockCl.UpdateForkChoice(t.Context(), side.payloads[len(side.payloads)-1]))
-					assertCatchupRecoveryState(t, side.state, readCrashRecoveryState(t, eat.ChainDB))
+					require.NoError(t, eat.MockCl.UpdateForkChoice(t.Context(), replacement.payloads[len(replacement.payloads)-1]))
+					assertCatchupRecoveryState(t, replacement.state, readCrashRecoveryState(t, eat.ChainDB))
 					churn, bindErr := contracts.NewStateChurn(addr, eat.ContractBackend)
 					require.NoError(t, bindErr)
-					assertChurnState(t.Context(), t, eat, churn, side.payloads[len(side.payloads)-1], side.sum)
-					for _, target := range []crashRecoveryChain{canonical, side} {
+					assertChurnState(t.Context(), t, eat, churn, replacement.payloads[len(replacement.payloads)-1], replacement.sum)
+					for _, target := range []crashRecoveryChain{canonical, replacement} {
 						insertCrashRecoveryPayloads(t.Context(), t, eat, target.payloads)
 						require.NoError(t, eat.MockCl.UpdateForkChoice(t.Context(), target.payloads[len(target.payloads)-1]))
 						assertCatchupRecoveryState(t, target.state, readCrashRecoveryState(t, eat.ChainDB))
 						assertChurnState(t.Context(), t, eat, churn, target.payloads[len(target.payloads)-1], target.sum)
 					}
-					assertCrashRecoveryContinuation(t, eat, churn, side)
+					assertCrashRecoveryContinuation(t, eat, churn, replacement)
 				})
 			}
 		})
