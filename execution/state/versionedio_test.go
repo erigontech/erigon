@@ -1714,6 +1714,7 @@ func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {
 		}
 	})
 	require.Zero(t, allocs)
+}
 
 // An arena-backed write set hands out distinct cells and keeps its slabs across
 // resets, so a reused set allocates nothing after the first call.
