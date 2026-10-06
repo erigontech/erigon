@@ -420,8 +420,6 @@ func (ibs *IntraBlockState) resetForPool() bool {
 	// instead of the empty set Reset installs.
 	reads.clearForReuse()
 	ibs.versionedReads = reads
-	ibs.revisions.reset()
-	ibs.stateObjectArena.reset()
 	// Reset only bumps the probe epoch; a pooled ibs would collect every
 	// address later calls touch.
 	clear(ibs.sdProbe)
