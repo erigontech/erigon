@@ -734,6 +734,16 @@ func isInitialSyncPublicationError(err error) bool {
 	return errors.As(err, &publicationErr)
 }
 
+// processFrozenBlocks binds the state cache after the startup sync: its commit
+// advances the state version without publishing to the cache.
+func (e *ExecModule) processFrozenBlocks(ctx context.Context, hook *stageloop.Hook) error {
+	err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart)
+	if initErr := execctx.InitStateCacheVersion(ctx, e.db, e.stateCache); initErr != nil {
+		e.logger.Warn("[exec] state cache serves RPC only after the first executed block", "err", initErr)
+	}
+	return err
+}
+
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !commonerrors.IsOnlyCanceled(err) {
@@ -743,7 +753,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}
 	defer e.semaphore.Release(1)
 
-	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
+	if err := e.processFrozenBlocks(ctx, hook); err != nil {
 		if !isRoutineInitialSyncStop(err) {
 			if isInitialSyncPublicationError(err) {
 				e.logger.Error("Could not publish initial sync updates", "err", err)
