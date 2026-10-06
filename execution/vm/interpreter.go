@@ -187,10 +187,14 @@ var contextPool = sync.Pool{
 	},
 }
 
-func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallContext {
-	ctx, ok := contextPool.Get().(*CallContext)
-	if !ok {
-		log.Error("Type assertion failure", "err", "cannot get CallContext from contextPool")
+func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallContext {
+	ctx := evm.spareFrame
+	evm.spareFrame = nil
+	if ctx == nil {
+		var ok bool
+		if ctx, ok = contextPool.Get().(*CallContext); !ok {
+			log.Error("Type assertion failure", "err", "cannot get CallContext from contextPool")
+		}
 	}
 
 	ctx.gas = gas.Execution
@@ -202,7 +206,10 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 	return ctx
 }
 
-func (ctx *CallContext) put() {
+// putCallContext parks one nested frame's context on the EVM so the next nested
+// frame takes it without the pool; the spare is not tied to the depth that left
+// it. The outermost frame returns both contexts to the pool.
+func (evm *EVM) putCallContext(ctx *CallContext) {
 	ctx.Memory.reset()
 	ctx.Stack.Reset()
 	ctx.cacheGen = 0
@@ -222,7 +229,15 @@ func (ctx *CallContext) put() {
 	ctx.cachedAddr = accounts.NilAddress
 	ctx.input = nil
 	ctx.Contract = Contract{}
+	if evm.depth > 1 && evm.spareFrame == nil {
+		evm.spareFrame = ctx
+		return
+	}
 	contextPool.Put(ctx)
+	if evm.depth == 1 && evm.spareFrame != nil {
+		contextPool.Put(evm.spareFrame)
+		evm.spareFrame = nil
+	}
 }
 
 func (ctx *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
@@ -483,7 +498,7 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 
 	var (
 		op          OpCode // current opcode
-		callContext = getCallContext(contract, input, gas)
+		callContext = evm.getCallContext(contract, input, gas)
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
@@ -518,7 +533,7 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
 		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
-		callContext.put()
+		evm.putCallContext(callContext)
 		if restoreReadonly {
 			evm.readOnly = false
 		}

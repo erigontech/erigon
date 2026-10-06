@@ -21,7 +21,7 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 
 	var (
 		op          OpCode // current opcode
-		callContext = getCallContext(contract, input, gas)
+		callContext = evm.getCallContext(contract, input, gas)
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
@@ -56,7 +56,7 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
 		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
-		callContext.put()
+		evm.putCallContext(callContext)
 		if restoreReadonly {
 			evm.readOnly = false
 		}
