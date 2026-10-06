@@ -166,7 +166,7 @@ func TestRepeatedHandshakeFailuresStopOutboundDials(t *testing.T) {
 	require.False(t, s.peers.Dialable(remote.ID()))
 
 	err := s.ConnectWithPeer(t.Context(), peer.AddrInfo{ID: remote.ID(), Addrs: remote.Addrs()}, nil)
-	require.EqualError(t, err, "refused to connect to bad peer")
+	require.EqualError(t, err, "peer is not dialable")
 	require.Equal(t, network.NotConnected, local.Network().Connectedness(remote.ID()))
 }
 

@@ -441,7 +441,7 @@ func (s *Sentinel) ConnectWithPeer(ctx context.Context, info peer.AddrInfo, sem 
 		return nil
 	}
 	if !s.peers.Dialable(info.ID) {
-		return errors.New("refused to connect to bad peer")
+		return errors.New("peer is not dialable")
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
