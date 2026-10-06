@@ -31,7 +31,6 @@ const (
 	gloasPendingParentMaxWaitDivisor    = 8
 	gloasPendingParentSlotCutoffDivisor = 6
 	gloasPendingParentPollInterval      = 100 * time.Millisecond
-	gloasPendingParentRetryLimit        = 4
 )
 
 // gloasPendingParentDeadline bounds how long a proposal may wait for the parent payload
@@ -87,7 +86,7 @@ func (a *ApiHandler) awaitPendingParentPayload(
 	deadline := gloasPendingParentDeadline(time.Now(), a.ethClock.GetSlotTime(targetSlot), slotDuration)
 	a.logger.Info("BlockProduction: waiting for parent payload decision", "slot", targetSlot, "head", baseBlockRoot, "budget", time.Until(deadline).Round(time.Millisecond))
 	return awaitGloasPayloadSource(ctx, deadline, gloasPendingParentPollInterval, func() (executionPayloadSource, error) {
-		a.forkchoiceStore.RetryPendingExecutionPayloadEnvelopes(ctx, gloasPendingParentRetryLimit)
+		a.forkchoiceStore.RetryPendingExecutionPayloadEnvelope(ctx, baseBlockRoot)
 		return a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
 	})
 }

@@ -777,6 +777,27 @@ func (f *ForkChoiceStore) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx
 	}
 }
 
+// RetryPendingExecutionPayloadEnvelope re-applies the envelope queued for blockRoot as soon as
+// its data columns are available, so the payload can be used before the next slot boundary.
+func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) {
+	if f.pendingEnvelopes == nil || f.pendingLocalSelfBuildEnvelopes == nil {
+		return
+	}
+	if !f.pendingEnvelopes.Contains(blockRoot) && !f.pendingLocalSelfBuildEnvelopes.Contains(blockRoot) {
+		return
+	}
+	if f.peerDas != nil {
+		block, ok := f.forkGraph.GetBlock(blockRoot)
+		if !ok || block == nil {
+			return
+		}
+		if available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot); err != nil || !available {
+			return
+		}
+	}
+	f.processPendingEnvelopeAfterBlock(ctx, blockRoot, true)
+}
+
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {
 	for _, repair := range f.envelopeIndexRepairs.repairs() {
 		if limit <= 0 || ctx.Err() != nil {

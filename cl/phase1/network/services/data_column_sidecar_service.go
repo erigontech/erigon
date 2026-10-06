@@ -361,6 +361,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return fmt.Errorf("failed to write data column sidecar: %w", err)
 	}
 	s.seenGloasSidecar.Add(seenKey, struct{}{})
+	s.forkChoice.RetryPendingExecutionPayloadEnvelope(ctx, blockRoot)
 
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(slot, blockRoot); err != nil {
 		log.Warn("failed to schedule recover", "err", err, "slot", slot, "blockRoot", blockRoot.String())

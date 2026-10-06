@@ -120,7 +120,7 @@ type ForkChoiceStorageMock struct {
 	ShouldExtendPayloadVal bool
 	ShouldBuildOnFullVal   *bool
 
-	RetryPendingEnvelopesFunc func(ctx context.Context, limit int)
+	RetryPendingEnvelopeFunc func(ctx context.Context, blockRoot common.Hash)
 
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
@@ -658,9 +658,9 @@ func (f *ForkChoiceStorageMock) GetBlock(
 	return f.Blocks[blockRoot], f.Blocks[blockRoot] != nil
 }
 
-func (f *ForkChoiceStorageMock) RetryPendingExecutionPayloadEnvelopes(ctx context.Context, limit int) {
-	if f.RetryPendingEnvelopesFunc != nil {
-		f.RetryPendingEnvelopesFunc(ctx, limit)
+func (f *ForkChoiceStorageMock) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) {
+	if f.RetryPendingEnvelopeFunc != nil {
+		f.RetryPendingEnvelopeFunc(ctx, blockRoot)
 	}
 }
 
