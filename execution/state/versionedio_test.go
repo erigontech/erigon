@@ -1732,4 +1732,22 @@ func TestReusedReadSetDropsTooManySlotMaps(t *testing.T) {
 	}
 	rs.clearForReuse()
 	require.Empty(t, rs.storage, "too many addresses must drop the outer map")
+
+// synthesizeCreatedAccountBase must allocate nothing when the version map holds
+// no cell for the address: every probe would miss and the account is dropped.
+func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {
+	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
+	defer ibs.Close()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	acc, ok := ibs.synthesizeCreatedAccountBase(addr)
+	require.Nil(t, acc)
+	require.False(t, ok)
+
+	allocs := testing.AllocsPerRun(50, func() {
+		if _, ok := ibs.synthesizeCreatedAccountBase(addr); ok {
+			t.Fatal("no cell may synthesize an account")
+		}
+	})
+	require.Zero(t, allocs)
 }
