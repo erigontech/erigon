@@ -435,6 +435,11 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
+		topicForkDigest, err := a.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
+		}
 		encodedSSZ, err := v.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
@@ -445,7 +450,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &services.SignedAggregateAndProofForGossip{
 			SignedAggregateAndProof: v,
 			ImmediateProcess:        true, // we want to process aggregate and proof immediately
-			TopicVersion:            a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetCurrentEpoch()),
+			TopicForkDigest:         &topicForkDigest,
 		}); errors.Is(err, services.ErrIgnore) {
 			log.Debug("[Beacon REST] aggregate ignored", "err", err, "slot", v.Message.Aggregate.Data.Slot)
 			continue
@@ -454,7 +459,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue
 		}
-		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameBeaconAggregateAndProof, encodedSSZ); err != nil {
+		if err := a.gossipManager.PublishToForkDigest(r.Context(), topicForkDigest, gossip.TopicNameBeaconAggregateAndProof, encodedSSZ); err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish aggregate and proof to gossip", "err", err)
 		}
 	}

@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
@@ -38,6 +39,7 @@ import (
 	mockCommittee "github.com/erigontech/erigon/cl/validator/committee_subscription/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 var (
@@ -569,6 +571,12 @@ func (t *attestationTestSuite) TestAttestationGossipPreForkAttestationOnPostFork
 	}
 	t.ethClock.EXPECT().GetEpochAtSlot(slot).Return(epoch).AnyTimes()
 	t.ethClock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+	topicClock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	messageDigest, err := topicClock.ComputeForkDigest(epoch)
+	t.Require().NoError(err)
+	postForkDigest, err := topicClock.ComputeForkDigest(epoch + 1)
+	t.Require().NoError(err)
+	t.ethClock.EXPECT().ComputeForkDigest(epoch).Return(messageDigest, nil).Times(2)
 	t.mockForkChoice.HighestSeenVal = slot
 	t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
 		blockRoot: {},
@@ -582,12 +590,48 @@ func (t *attestationTestSuite) TestAttestationGossipPreForkAttestationOnPostFork
 
 	gloasMessage, err := t.attService.DecodeGossipMessage("peer", encoded, clparams.GloasVersion)
 	t.Require().NoError(err)
+	gloasMessage.SetTopicForkDigest(postForkDigest)
 	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), gloasMessage)
 	t.Require().ErrorIs(err, ErrIgnore)
 
 	fuluMessage, err := t.attService.DecodeGossipMessage("peer", encoded, clparams.FuluVersion)
 	t.Require().NoError(err)
+	fuluMessage.SetTopicForkDigest(messageDigest)
 	t.Require().NoError(t.attService.ProcessMessage(context.Background(), common.NewUint64(1), fuluMessage))
+}
+
+func TestAttestationGossipRejectsDifferentBPOForkDigest(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = cfg.FarFutureEpoch
+	cfg.BlobSchedule = []clparams.BlobParameters{
+		{Epoch: 1, MaxBlobsPerBlock: 15},
+		{Epoch: 2, MaxBlobsPerBlock: 21},
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	oldDigest, err := clock.ComputeForkDigest(1)
+	require.NoError(t, err)
+	messageDigest, err := clock.ComputeForkDigest(2)
+	require.NoError(t, err)
+	require.Equal(t, clparams.FuluVersion, cfg.GetCurrentStateVersion(1))
+	require.Equal(t, clparams.FuluVersion, cfg.GetCurrentStateVersion(2))
+	require.NotEqual(t, oldDigest, messageDigest)
+
+	message := &AttestationForGossip{
+		SingleAttestation: &solid.SingleAttestation{Data: &solid.AttestationData{Slot: 2 * cfg.SlotsPerEpoch}},
+		Receiver:          &sentinelproto.Peer{Pid: "peer"},
+	}
+	message.SetTopicForkDigest(oldDigest)
+	service := &attestationService{ethClock: clock, beaconCfg: &cfg}
+
+	err = service.ProcessMessage(context.Background(), nil, message)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Contains(t, err.Error(), "fork digest does not match topic")
 }
 
 func (t *attestationTestSuite) TestAttestationProcessMessageRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt() {

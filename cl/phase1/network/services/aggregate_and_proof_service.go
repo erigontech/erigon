@@ -40,8 +40,10 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -51,7 +53,11 @@ type SignedAggregateAndProofForGossip struct {
 	SignedAggregateAndProof *cltypes.SignedAggregateAndProof
 	Receiver                *sentinelproto.Peer
 	ImmediateProcess        bool
-	TopicVersion            clparams.StateVersion
+	TopicForkDigest         *common.Bytes4
+}
+
+func (m *SignedAggregateAndProofForGossip) SetTopicForkDigest(digest common.Bytes4) {
+	m.TopicForkDigest = &digest
 }
 
 type aggregateJob struct {
@@ -69,6 +75,7 @@ const seenAggregateCacheSize = 10_000
 type aggregateAndProofServiceImpl struct {
 	syncedDataManager      *synced_data.SyncedDataManager
 	forkchoiceStore        forkchoice.ForkChoiceStorage
+	ethClock               eth_clock.EthereumClock
 	beaconCfg              *clparams.BeaconChainConfig
 	opPool                 pool.OperationsPool
 	test                   bool
@@ -87,6 +94,7 @@ func NewAggregateAndProofService(
 	ctx context.Context,
 	syncedDataManager *synced_data.SyncedDataManager,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
+	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	opPool pool.OperationsPool,
 	test bool,
@@ -104,6 +112,7 @@ func NewAggregateAndProofService(
 	a := &aggregateAndProofServiceImpl{
 		syncedDataManager:      syncedDataManager,
 		forkchoiceStore:        forkchoiceStore,
+		ethClock:               ethClock,
 		beaconCfg:              beaconCfg,
 		opPool:                 opPool,
 		test:                   test,
@@ -163,7 +172,6 @@ func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(pid peer.ID, data []b
 	obj := &SignedAggregateAndProofForGossip{
 		Receiver:                &sentinelproto.Peer{Pid: pid.String()},
 		SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
-		TopicVersion:            version,
 	}
 	if err := obj.SignedAggregateAndProof.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
@@ -196,9 +204,17 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
-	// Messages SHOULD NOT be re-broadcast from one fork to the other.
-	if clversion < aggregateAndProof.TopicVersion {
-		return fmt.Errorf("%w: aggregate slot predates topic fork", ErrIgnore)
+	// Messages are valid only on the fork topic selected by their data slot.
+	if aggregateAndProof.TopicForkDigest != nil {
+		messageForkDigest, err := a.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			return fmt.Errorf("%w: compute aggregate fork digest: %w", ErrIgnore, err)
+		}
+		if messageForkDigest != *aggregateAndProof.TopicForkDigest {
+			return fmt.Errorf("%w: aggregate fork digest does not match topic", ErrIgnore)
+		}
+	} else if aggregateAndProof.Receiver != nil {
+		return fmt.Errorf("%w: aggregate topic fork digest is missing", ErrIgnore)
 	}
 	aggregateAndProof.SignedAggregateAndProof.SetVersion(clversion)
 	if err := aggregate.ValidateForConfig(a.beaconCfg, clversion); err != nil {

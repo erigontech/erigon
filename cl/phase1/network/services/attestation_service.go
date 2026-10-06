@@ -82,7 +82,11 @@ type AttestationForGossip struct {
 	Receiver          *sentinelproto.Peer
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
-	TopicVersion     clparams.StateVersion
+	TopicForkDigest  *common.Bytes4
+}
+
+func (a *AttestationForGossip) SetTopicForkDigest(digest common.Bytes4) {
+	a.TopicForkDigest = &digest
 }
 
 func NewAttestationService(
@@ -131,7 +135,6 @@ func (s *attestationService) DecodeGossipMessage(pid peer.ID, data []byte, versi
 	obj := &AttestationForGossip{
 		Receiver:         &sentinelproto.Peer{Pid: pid.String()},
 		ImmediateProcess: false,
-		TopicVersion:     version,
 	}
 	obj.SingleAttestation = &solid.SingleAttestation{}
 	if err := obj.SingleAttestation.DecodeSSZ(data, int(version)); err != nil {
@@ -156,9 +159,17 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	attEpoch := s.ethClock.GetEpochAtSlot(slot)
 	clVersion := s.beaconCfg.GetCurrentStateVersion(attEpoch)
-	// Messages SHOULD NOT be re-broadcast from one fork to the other.
-	if clVersion < att.TopicVersion {
-		return fmt.Errorf("%w: attestation slot predates topic fork", ErrIgnore)
+	// Messages are valid only on the fork topic selected by their data slot.
+	if att.TopicForkDigest != nil {
+		messageForkDigest, err := s.ethClock.ComputeForkDigest(attEpoch)
+		if err != nil {
+			return fmt.Errorf("%w: compute attestation fork digest: %w", ErrIgnore, err)
+		}
+		if messageForkDigest != *att.TopicForkDigest {
+			return fmt.Errorf("%w: attestation fork digest does not match topic", ErrIgnore)
+		}
+	} else if att.Receiver != nil {
+		return fmt.Errorf("%w: attestation topic fork digest is missing", ErrIgnore)
 	}
 
 	var err error

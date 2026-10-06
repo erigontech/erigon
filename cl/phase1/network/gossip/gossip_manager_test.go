@@ -51,6 +51,14 @@ type mockService struct {
 	namesFunc   func() []string
 }
 
+type topicForkDigestMessage struct {
+	digest common.Bytes4
+}
+
+func (m *topicForkDigestMessage) SetTopicForkDigest(digest common.Bytes4) {
+	m.digest = digest
+}
+
 func (m *mockService) Names() []string {
 	if m.namesFunc != nil {
 		return m.namesFunc()
@@ -414,6 +422,30 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_UnknownForkDigestIg
 	result := validator(context.Background(), peer.ID("test-peer"), msg)
 	s.Equal(pubsub.ValidationIgnore, result)
 	s.False(processCalled)
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorCarriesExactTopicForkDigest() {
+	wantDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
+	message := &topicForkDigestMessage{}
+	service := &mockService{
+		decodeFunc: func(peer.ID, []byte, clparams.StateVersion) (any, error) {
+			return message, nil
+		},
+		processFunc: func(context.Context, *uint64, any) error {
+			if message.digest != wantDigest {
+				return errors.New("topic fork digest was not carried to the service")
+			}
+			return nil
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/abcd1234/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+
+	result := validator(context.Background(), peer.ID("test-peer"), msg)
+	s.Equal(pubsub.ValidationAccept, result)
 }
 
 type subscribeUpcomingTopicsTestSuite struct {

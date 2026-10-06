@@ -118,6 +118,10 @@ type publishJob struct {
 	logCtx []any
 }
 
+type topicForkDigestSetter interface {
+	SetTopicForkDigest(common.Bytes4)
+}
+
 // GossipManager is responsible for managing the gossip subscriptions and publications
 // making sure that this module is simple and don't depend on network services pkg
 type GossipManager struct {
@@ -273,6 +277,9 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
+		if message, ok := msgObj.(topicForkDigestSetter); ok {
+			message.SetTopicForkDigest(forkDigest)
+		}
 
 		// process msg
 		var subnetId *uint64
@@ -386,10 +393,14 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	return g.publishToDigest(ctx, forkDigest, name, data)
 }
 
+func (g *GossipManager) PublishToForkDigest(ctx context.Context, forkDigest common.Bytes4, name string, data []byte) error {
+	return g.publishToDigest(ctx, forkDigest, name, data)
+}
+
 func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.Bytes4, name string, data []byte) error {
 	compressedData := utils.CompressSnappy(data)
 	topic := composeTopic(forkDigest, name)
-	topicHandle := g.subscriptions.Get(topic)
+	topicHandle := g.subscriptions.GetTopic(topic)
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
 	}
@@ -404,7 +415,7 @@ func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.B
 	}
 	// Note: before publishing the message to the network, Publish() internally runs the validator function.
 	// Removed MinTopicSize(1) - don't fail if no peers on subnet, message will propagate when peers join
-	return topicHandle.topic.Publish(ctx, compressedData)
+	return topicHandle.Publish(ctx, compressedData)
 }
 
 // PublishBackground queues data for asynchronous publish to the given
