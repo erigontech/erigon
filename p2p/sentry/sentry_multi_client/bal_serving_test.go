@@ -2,6 +2,8 @@ package sentry_multi_client
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -48,22 +50,56 @@ func newBALTestClient(t *testing.T) *MultiClient {
 	return cs
 }
 
-func queryBALs(t *testing.T, cs *MultiClient, query eth.GetBlockAccessListsPacket) []rlp.RawValue {
-	t.Helper()
+func queryBALs(ctx context.Context, cs *MultiClient, query eth.GetBlockAccessListsPacket) ([]rlp.RawValue, error) {
 	request := eth.GetBlockAccessListsPacket66{RequestId: 42, GetBlockAccessListsPacket: query}
 	encoded, err := rlp.EncodeToBytes(request)
-	require.NoError(t, err)
+	if err != nil {
+		return nil, err
+	}
 	var response eth.BlockAccessListsPacket66
 	sentry := &mockSentryClient{
 		sendMessageByIdFunc: func(ctx context.Context, req *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
-			require.NoError(t, ctx.Err(), "the reply must not use the expired replay context")
-			require.NoError(t, rlp.DecodeBytes(req.Data.Data, &response))
-			return &sentryproto.SentPeers{}, nil
+			if err := ctx.Err(); err != nil {
+				return nil, fmt.Errorf("reply uses an expired context: %w", err)
+			}
+			return &sentryproto.SentPeers{}, rlp.DecodeBytes(req.Data.Data, &response)
 		},
 	}
-	require.NoError(t, cs.getBlockAccessLists71(t.Context(), &sentryproto.InboundMessage{Data: encoded}, sentry))
-	require.Equal(t, request.RequestId, response.RequestId)
-	return response.BlockAccessListsPacket
+	if err := cs.getBlockAccessLists71(ctx, &sentryproto.InboundMessage{Data: encoded}, sentry); err != nil {
+		return nil, err
+	}
+	if request.RequestId != response.RequestId {
+		return nil, fmt.Errorf("response request ID %d, want %d", response.RequestId, request.RequestId)
+	}
+	return response.BlockAccessListsPacket, nil
+}
+
+func requireBALs(t *testing.T, cs *MultiClient, query eth.GetBlockAccessListsPacket) []rlp.RawValue {
+	t.Helper()
+	response, err := queryBALs(t.Context(), cs, query)
+	require.NoError(t, err)
+	return response
+}
+
+func TestQueryBALs_InvalidResponse(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cs := newBALTestClient(t)
+		cs.balGenerator = balGetterFunc(func(context.Context, *chain.Config, kv.TemporalTx, common.Hash, uint64) ([]byte, error) {
+			return []byte{0xff}, nil
+		})
+		result := make(chan error, 1)
+		go func() {
+			_, err := queryBALs(t.Context(), cs, eth.GetBlockAccessListsPacket{{2}})
+			result <- err
+		}()
+		synctest.Wait()
+		select {
+		case err := <-result:
+			require.ErrorIs(t, err, rlp.ErrElemTooLarge)
+		default:
+			t.Fatal("query worker exited without reporting its result")
+		}
+	})
 }
 
 func TestGetBlockAccessLists71_ReplayDeadline(t *testing.T) {
@@ -81,7 +117,7 @@ func TestGetBlockAccessLists71_ReplayDeadline(t *testing.T) {
 			<-ctx.Done()
 			return nil, ctx.Err()
 		})
-		response := queryBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {2}, {3}})
+		response := requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {2}, {3}})
 		require.Equal(t, []rlp.RawValue{{0xc0}}, response)
 		require.Equal(t, 1, calls, "a timed-out request must not start another replay")
 	})
@@ -96,17 +132,17 @@ func TestGetBlockAccessLists71_ReplayRateLimit(t *testing.T) {
 			return []byte{0xc0}, nil
 		})
 
-		require.Equal(t, []rlp.RawValue{{0xc0}, {0x80}}, queryBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {99}}))
+		require.Equal(t, []rlp.RawValue{{0xc0}, {0x80}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {99}}))
 		require.Zero(t, calls, "stored and unknown blocks must not consume the replay budget")
-		require.Equal(t, []rlp.RawValue{{0xc0}, {0xc0}}, queryBALs(t, cs, eth.GetBlockAccessListsPacket{{2}, {3}}))
+		require.Equal(t, []rlp.RawValue{{0xc0}, {0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}, {3}}))
 		require.Equal(t, 2, calls, "one replay budget covers a batch")
 
-		require.Empty(t, queryBALs(t, cs, eth.GetBlockAccessListsPacket{{2}}))
-		require.Equal(t, []rlp.RawValue{{0xc0}}, queryBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {3}}))
+		require.Empty(t, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}}))
+		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {3}}))
 		require.Equal(t, 2, calls, "throttled requests must not replay blocks")
 
 		time.Sleep(time.Second)
-		require.Equal(t, []rlp.RawValue{{0xc0}}, queryBALs(t, cs, eth.GetBlockAccessListsPacket{{2}}))
+		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}}))
 		require.Equal(t, 3, calls, "replay must resume after the budget refills")
 	})
 }
@@ -117,6 +153,8 @@ func TestGetBlockAccessLists71_ReplayRemainsExclusiveAfterDeadline(t *testing.T)
 		var calls atomic.Int32
 		deadlineReached := make(chan struct{})
 		release := make(chan struct{})
+		unblockReplay := sync.OnceFunc(func() { close(release) })
+		defer unblockReplay()
 		cs.balGenerator = balGetterFunc(func(ctx context.Context, _ *chain.Config, _ kv.TemporalTx, _ common.Hash, _ uint64) ([]byte, error) {
 			if calls.Add(1) == 1 {
 				<-ctx.Done()
@@ -127,19 +165,28 @@ func TestGetBlockAccessLists71_ReplayRemainsExclusiveAfterDeadline(t *testing.T)
 			}
 			return []byte{0xc0}, nil
 		})
-		firstResponse := make(chan []rlp.RawValue, 1)
+		var firstResponse []rlp.RawValue
+		firstDone := make(chan error, 1)
 		go func() {
-			firstResponse <- queryBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {2}})
+			var err error
+			firstResponse, err = queryBALs(t.Context(), cs, eth.GetBlockAccessListsPacket{{1}, {2}})
+			firstDone <- err
 		}()
-		<-deadlineReached
+		select {
+		case <-deadlineReached:
+		case err := <-firstDone:
+			require.NoError(t, err)
+			t.Fatal("replay returned before reaching its deadline")
+		}
 		time.Sleep(time.Second)
 
-		assert.Equal(t, []rlp.RawValue{{0xc0}}, queryBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {3}}))
+		assert.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {3}}))
 		assert.Equal(t, int32(1), calls.Load(), "a refilled rate budget must not allow overlapping replay")
-		close(release)
-		require.Equal(t, []rlp.RawValue{{0xc0}}, <-firstResponse)
+		unblockReplay()
+		require.NoError(t, <-firstDone)
+		require.Equal(t, []rlp.RawValue{{0xc0}}, firstResponse)
 
-		require.Equal(t, []rlp.RawValue{{0xc0}}, queryBALs(t, cs, eth.GetBlockAccessListsPacket{{3}}))
+		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{3}}))
 		require.Equal(t, int32(2), calls.Load(), "the replay slot must be released when work actually finishes")
 	})
 }
