@@ -135,6 +135,21 @@ type ReadSet struct {
 	access AccessSet
 }
 
+func (s *ReadSet) clearForReuse() {
+	clear(s.address)
+	clear(s.balance)
+	clear(s.nonce)
+	clear(s.incarnation)
+	clear(s.selfDestruct)
+	clear(s.selfDestructWitnesses)
+	clear(s.createContract)
+	clear(s.code)
+	clear(s.codeHash)
+	clear(s.codeSize)
+	clear(s.storage)
+	s.access = nil
+}
+
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
 	if *m == nil {
 		*m = make(map[accounts.Address]VersionedRead[T])

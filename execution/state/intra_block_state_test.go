@@ -1230,3 +1230,44 @@ func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
 	require.Same(t, &stored[0][0], &stored[1][0], "an equal code reuses the previous one")
 	require.NotSame(t, &stored[0][0], &stored[3][0], "a different code in between replaces the memo")
 }
+
+// A pooled IntraBlockState serves call after call: nothing of one call may be
+// visible to the next, while the read set keeps its maps.
+func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	startNoMaterializeTx(ibs, vm, 0)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeUnspecified))
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(9)))
+	ibs.AddLog(&types.Log{Address: addr.Value()})
+	ibs.AddAddressToAccessList(addr)
+	ibs.readSelfDestructMemo(addr)
+	require.NotEmpty(t, ibs.sdProbe)
+	require.NotNil(t, ibs.versionedReads.address)
+
+	require.True(t, ibs.resetForPool())
+	require.Nil(t, ibs.stateReader)
+	require.Empty(t, ibs.sdProbe)
+	require.NotNil(t, ibs.versionedReads.address, "the read set keeps its maps")
+	require.Empty(t, ibs.versionedReads.address)
+
+	ibs.stateReader = NewNoopReader()
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
+	value, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.True(t, value.IsZero())
+	require.Empty(t, ibs.GetRawLogs(0))
+	require.False(t, ibs.AddressInAccessList(addr))
+}
+
+// Maps never shrink, so a call that grew the state past the bound is not pooled.
+func TestResetForPoolDropsAnOversizedState(t *testing.T) {
+	ibs := New(NewNoopReader())
+	for i := range maxPooledStateObjects + 1 {
+		require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	}
+	require.False(t, ibs.resetForPool())
+}
