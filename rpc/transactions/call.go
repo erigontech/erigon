@@ -71,7 +71,7 @@ func DoCall(
 		ibs.SetVersionMap(state.NewVersionMap(nil))
 		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(0, 0)
-		ibs.SetSingleCall()
+		ibs.SetNoConflictDetection()
 	}
 	defer ibs.Close()
 

@@ -56,8 +56,8 @@ func TestCreateContractPath_ContractOnlySignal(t *testing.T) {
 }
 
 // CreateAccount records its balance and incarnation reads only for conflict
-// detection, which a single call does not have; Reset ends the single call.
-func TestSingleCallCreateAccountRecordsNoConflictReads(t *testing.T) {
+// detection; Reset turns detection back on.
+func TestNoConflictDetectionCreateAccountRecordsNoConflictReads(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	ibs, vm := newNoMaterializeIBS(NewNoopReader())
 	defer ibs.Close()
@@ -69,11 +69,11 @@ func TestSingleCallCreateAccountRecordsNoConflictReads(t *testing.T) {
 	}
 
 	startNoMaterializeTx(ibs, vm, 0)
-	ibs.SetSingleCall()
+	ibs.SetNoConflictDetection()
 	require.NoError(t, ibs.CreateAccount(addr, true))
 	balance, incarnation := conflictReads()
-	require.False(t, balance, "a single call records no balance read")
-	require.False(t, incarnation, "a single call records no incarnation read")
+	require.False(t, balance, "no conflict detection records no balance read")
+	require.False(t, incarnation, "no conflict detection records no incarnation read")
 
 	startNoMaterializeTx(ibs, vm, 0)
 	require.NoError(t, ibs.CreateAccount(addr, true))
