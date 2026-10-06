@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
@@ -163,8 +164,13 @@ type VersionMap struct {
 	// so reads/writes of different accounts never contend — the global RWMutex
 	// this replaced serialised every access. Per-read conflict detection is
 	// unchanged; only the lock granularity moved from global to per-account.
-	s     sync.Map // accounts.Address -> *AddressEntry
-	trace bool
+	s sync.Map // accounts.Address -> *AddressEntry
+	// entries counts the addresses s holds. A single call never writes the map,
+	// so load can answer every probe without the sync.Map lookup.
+	entries atomic.Int64
+	// lookups counts the sync.Map lookups load performed, for tests only.
+	lookups atomic.Int64
+	trace   bool
 }
 
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
@@ -175,6 +181,12 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
 func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
+	if vm.entries.Load() == 0 {
+		return nil
+	}
+	if dbg.AssertEnabled {
+		vm.lookups.Add(1)
+	}
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
 	}
@@ -371,7 +383,10 @@ func (vm *VersionMap) entryOrCreate(addr accounts.Address) *AddressEntry {
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
 	}
-	e, _ := vm.s.LoadOrStore(addr, &AddressEntry{})
+	e, loaded := vm.s.LoadOrStore(addr, &AddressEntry{})
+	if !loaded {
+		vm.entries.Add(1)
+	}
 	return e.(*AddressEntry)
 }
 
