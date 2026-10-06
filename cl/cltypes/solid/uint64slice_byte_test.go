@@ -17,6 +17,7 @@
 package solid_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -59,4 +60,13 @@ func TestUint64SliceCopyTo(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, firstHash, secondHash)
+}
+
+func TestUint64SliceRejectsNegativeIndex(t *testing.T) {
+	slice := solid.NewUint64Slice(8)
+	slice.Append(3)
+	for _, idx := range []int{-1, math.MinInt64 / 4} {
+		require.PanicsWithValue(t, "index out of range", func() { slice.Get(idx) })
+		require.PanicsWithValue(t, "index out of range", func() { slice.Set(idx, 1) })
+	}
 }
