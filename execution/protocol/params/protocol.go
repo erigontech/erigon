@@ -159,6 +159,9 @@ const (
 	IdentityBaseGas     uint64 = 15   // Base price for a data copy operation
 	IdentityPerWordGas  uint64 = 3    // Per-work price for a data copy operation
 
+	TendermintHeaderValidateGas uint64 = 3000
+	IAVLMerkleProofValidateGas  uint64 = 3000
+
 	Bn254AddGasByzantium             uint64 = 500    // Byzantium gas needed for an elliptic curve addition
 	Bn254AddGasIstanbul              uint64 = 150    // Gas needed for an elliptic curve addition
 	Bn254ScalarMulGasByzantium       uint64 = 40000  // Byzantium gas needed for an elliptic curve scalar multiplication
