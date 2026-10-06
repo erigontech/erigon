@@ -47,9 +47,10 @@ func (tracer *rpcReceiveTracer) Trace(event *pb.TraceEvent) {
 	}
 }
 
-// TestPubsubRejectsOversizedIHave pins the pre-decode control-message bound: an
-// IHAVE frame under the raised message-size cap but over the default
-// control-message budget must reset the stream before it is unmarshalled.
+// TestPubsubRejectsOversizedIHave pins Caplin's control-message bound: an IHAVE
+// frame under the raised message-size cap but over the default control-message
+// budget is rejected (stream reset) instead of being delivered to the pubsub
+// event loop.
 func TestPubsubRejectsOversizedIHave(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
