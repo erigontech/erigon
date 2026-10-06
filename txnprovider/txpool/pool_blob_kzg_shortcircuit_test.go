@@ -207,8 +207,16 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 	attackerPeerID := gointerfaces.ConvertHashToH512([64]byte{0x41})
 	honestPeerID := gointerfaces.ConvertHashToH512([64]byte{0x42})
 
+	kicked := make(chan struct{}, 1)
 	sentryServer := sentryproto.NewMockSentryServer(ctrl)
-	sentryServer.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).Return(&emptypb.Empty{}, nil).AnyTimes()
+	sentryServer.EXPECT().
+		PenalizePeer(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
+			assert.Equal(t, attackerPeerID, req.PeerId)
+			kicked <- struct{}{}
+			return &emptypb.Empty{}, nil
+		}).
+		Times(1)
 	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
 	require.NoError(t, err)
 
@@ -233,6 +241,12 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 	pool.AddRemoteTxns(ctx, trailingFromAttacker, attackerPeerID, sentryClient)
 
 	require.NoError(t, pool.processRemoteTxns(ctx))
+
+	select {
+	case <-kicked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("PenalizePeer was not called within 5s")
+	}
 
 	pool.lock.Lock()
 	defer pool.lock.Unlock()
