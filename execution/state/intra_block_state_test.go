@@ -1282,6 +1282,13 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 		reads.versionedReads.SetCodeSize(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), VersionedRead[int]{})
 	}
 	require.False(t, reads.resetForPool(), "any read-set map counts toward the bound")
+
+	warm := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	for i := range maxPooledReads + 1 {
+		warm.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))))
+	}
+	require.False(t, warm.resetForPool(), "access-list slots count toward the bound")
 }
 
 func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
