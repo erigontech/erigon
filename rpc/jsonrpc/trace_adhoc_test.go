@@ -594,6 +594,25 @@ func TestReplayBlockTransactions(t *testing.T) {
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
+func TestTraceBlockUnknownBlockIsResourceNotFound(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	past := rpc.BlockNumber(1_000_000)
+
+	t.Run("trace_block", func(t *testing.T) {
+		_, err := api.Block(m.Ctx, past, nil, nil)
+		requireResourceNotFound(t, err, "block not found")
+	})
+	t.Run("trace_replayBlockTransactions by number", func(t *testing.T) {
+		_, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithNumber(past), []string{TraceTypeTrace}, nil, nil)
+		requireResourceNotFound(t, err, "block not found")
+	})
+	t.Run("trace_replayBlockTransactions by hash", func(t *testing.T) {
+		_, err := api.ReplayBlockTransactions(m.Ctx, rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, false), []string{TraceTypeTrace}, nil, nil)
+		requireResourceNotFound(t, err, "block not found")
+	})
+}
+
 func TestParityTraceGasUsageAcrossRPCPaths(t *testing.T) {
 	m, generated, calls := gasTracingTestChain(t)
 	api := newTraceApiForTest(m)
