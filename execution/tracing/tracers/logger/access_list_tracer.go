@@ -49,23 +49,35 @@ func newAccessList() accessList {
 	return make(map[common.Address]accessListSlots)
 }
 
+// set allocates the slot map on first write, so an address that is only ever
+// touched as an address keeps a nil slots map.
+func (s *accessListSlots) set(slot common.Hash) {
+	if s.slots == nil {
+		s.slots = make(map[common.Hash]int)
+	}
+	if _, ok := s.slots[slot]; !ok {
+		s.slots[slot] = len(s.slots)
+	}
+}
+
 // addAddress adds an address to the accesslist.
 func (al accessList) addAddress(address common.Address) {
 	// Set address if not previously present
 	if _, present := al[address]; !present {
-		al[address] = accessListSlots{len(al), map[common.Hash]int{}}
+		al[address] = accessListSlots{order: len(al)}
 	}
 }
 
 // addSlot adds a storage slot to the accesslist.
 func (al accessList) addSlot(address common.Address, slot common.Hash) {
-	// Set address if not previously present
-	al.addAddress(address)
-
-	// Set the slot on the surely existent storage set
-	storage := al[address]
-	if _, ok := storage.slots[slot]; !ok {
-		storage.slots[slot] = len(storage.slots)
+	storage, present := al[address]
+	if !present {
+		storage.order = len(al)
+	}
+	newSlotMap := storage.slots == nil
+	storage.set(slot)
+	if newSlotMap {
+		al[address] = storage
 	}
 }
 
@@ -95,34 +107,20 @@ func (al accessList) cloneExcluding(excl map[common.Address]struct{}) accessList
 // equal checks if the content of the current access list is the same as the
 // content of the other one.
 func (al accessList) equal(other accessList) bool {
-	// Cross reference the accounts first
+	// Equal sizes plus one-way containment implies set equality, so only al is walked.
 	if len(al) != len(other) {
 		return false
 	}
-	for addr := range al {
-		if _, ok := other[addr]; !ok {
-			return false
-		}
-	}
-	for addr := range other {
-		if _, ok := al[addr]; !ok {
-			return false
-		}
-	}
-	// Accounts match, cross reference the storage slots too
 	for addr, storage := range al {
-		otherStorage := other[addr]
-
+		otherStorage, ok := other[addr]
+		if !ok {
+			return false
+		}
 		if len(storage.slots) != len(otherStorage.slots) {
 			return false
 		}
 		for hash := range storage.slots {
 			if _, ok := otherStorage.slots[hash]; !ok {
-				return false
-			}
-		}
-		for hash := range otherStorage.slots {
-			if _, ok := storage.slots[hash]; !ok {
 				return false
 			}
 		}
@@ -203,11 +201,9 @@ func newAccessListTracer(excl map[common.Address]struct{}, list accessList, stat
 		excl = make(map[common.Address]struct{})
 	}
 	return &AccessListTracer{
-		excl:               excl,
-		list:               list,
-		state:              state,
-		createdContracts:   make(map[common.Address]struct{}),
-		usedBeforeCreation: make(map[common.Address]struct{}),
+		excl:  excl,
+		list:  list,
+		state: state,
 	}
 }
 
@@ -218,6 +214,22 @@ func (a *AccessListTracer) SeedNew(state *state.IntraBlockState) *AccessListTrac
 	return newAccessListTracer(a.excl, a.list.cloneExcluding(a.excl), state)
 }
 
+// markCreated and markUsedBeforeCreation each allocate their set lazily, on
+// its own first insertion.
+func (a *AccessListTracer) markCreated(addr common.Address) {
+	if a.createdContracts == nil {
+		a.createdContracts = make(map[common.Address]struct{})
+	}
+	a.createdContracts[addr] = struct{}{}
+}
+
+func (a *AccessListTracer) markUsedBeforeCreation(addr common.Address) {
+	if a.usedBeforeCreation == nil {
+		a.usedBeforeCreation = make(map[common.Address]struct{})
+	}
+	a.usedBeforeCreation[addr] = struct{}{}
+}
+
 func (a *AccessListTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
 		OnOpcode: a.OnOpcode,
@@ -225,60 +237,73 @@ func (a *AccessListTracer) Hooks() *tracing.Hooks {
 }
 
 func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
-	stackData := scope.StackData()
-	stackLen := len(stackData)
-	op := vm.OpCode(opcode)
-	if (op == vm.SLOAD || op == vm.SSTORE) && stackLen >= 1 {
+	// StackData crosses an interface, so it cannot inline: keep it off the
+	// opcodes that don't read the stack.
+	switch op := vm.OpCode(opcode); op {
+	case vm.SLOAD, vm.SSTORE:
+		stackData := scope.StackData()
+		if len(stackData) < 1 {
+			return
+		}
 		addr := scope.Address()
-
-		slot := common.Hash(stackData[stackLen-1].Bytes32())
+		slot := common.Hash(stackData[len(stackData)-1].Bytes32())
 		a.list.addSlot(addr.Value(), slot)
 		if _, ok := a.createdContracts[addr.Value()]; !ok {
-			a.usedBeforeCreation[addr.Value()] = struct{}{}
+			a.markUsedBeforeCreation(addr.Value())
 		}
-	}
-	if (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT) && stackLen >= 1 {
-		addr := common.Address(stackData[stackLen-1].Bytes20())
-		if _, ok := a.excl[addr]; !ok {
-			a.list.addAddress(addr)
-			if _, ok := a.createdContracts[addr]; !ok {
-				a.usedBeforeCreation[addr] = struct{}{}
-			}
+
+	case vm.EXTCODECOPY, vm.EXTCODEHASH, vm.EXTCODESIZE, vm.BALANCE, vm.SELFDESTRUCT:
+		stackData := scope.StackData()
+		if len(stackData) < 1 {
+			return
 		}
-	}
-	if (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE) && stackLen >= 5 {
-		addr := common.Address(stackData[stackLen-2].Bytes20())
-		if _, ok := a.excl[addr]; !ok {
-			a.list.addAddress(addr)
-			if _, ok := a.createdContracts[addr]; !ok {
-				a.usedBeforeCreation[addr] = struct{}{}
-			}
+		a.addTouchedAddress(common.Address(stackData[len(stackData)-1].Bytes20()))
+
+	case vm.DELEGATECALL, vm.CALL, vm.STATICCALL, vm.CALLCODE:
+		stackData := scope.StackData()
+		if len(stackData) < 5 {
+			return
 		}
-	}
-	if op == vm.CREATE {
+		a.addTouchedAddress(common.Address(stackData[len(stackData)-2].Bytes20()))
+
+	case vm.CREATE:
 		// contract address for CREATE can only be generated with state
-		if a.state != nil {
-			nonce, _ := a.state.GetNonce(scope.Address())
-			addr := types.CreateAddress(scope.Address().Value(), nonce)
-			if _, ok := a.excl[addr]; !ok {
-				a.createdContracts[addr] = struct{}{}
-			}
+		if a.state == nil {
+			return
 		}
-	}
-	if op == vm.CREATE2 && stackLen >= 4 {
-		offset := stackData[stackLen-2]
-		size := stackData[stackLen-3]
+		nonce, _ := a.state.GetNonce(scope.Address())
+		addr := types.CreateAddress(scope.Address().Value(), nonce)
+		if _, ok := a.excl[addr]; !ok {
+			a.markCreated(addr)
+		}
+
+	case vm.CREATE2:
+		stackData := scope.StackData()
+		if len(stackData) < 4 {
+			return
+		}
+		offset := stackData[len(stackData)-2]
+		size := stackData[len(stackData)-3]
 		init, err := tracers.GetMemoryCopyPadded(scope.MemoryData(), int64(offset.Uint64()), int64(size.Uint64()))
 		if err != nil {
-			// t.Stop(fmt.Errorf("failed to copy CREATE2 in prestate tracer input err: %s", err))
 			return
 		}
 		inithash := accounts.InternCodeHash(crypto.Keccak256Hash(init))
-		salt := stackData[stackLen-4]
+		salt := stackData[len(stackData)-4]
 		addr := types.CreateAddress2(scope.Address().Value(), salt.Bytes32(), inithash)
 		if _, ok := a.excl[addr]; !ok {
-			a.createdContracts[addr] = struct{}{}
+			a.markCreated(addr)
 		}
+	}
+}
+
+func (a *AccessListTracer) addTouchedAddress(addr common.Address) {
+	if _, ok := a.excl[addr]; ok {
+		return
+	}
+	a.list.addAddress(addr)
+	if _, ok := a.createdContracts[addr]; !ok {
+		a.markUsedBeforeCreation(addr)
 	}
 }
 
@@ -292,8 +317,13 @@ func (a *AccessListTracer) AccessListSorted() types.AccessList {
 	return a.list.accessListSorted()
 }
 
-// CreatedContracts returns the set of all addresses of contracts created during txn execution.
+// CreatedContracts returns the set of all addresses of contracts created during
+// txn execution. It always returns a writable map, allocating it on first call
+// if no CREATE has happened yet.
 func (a *AccessListTracer) CreatedContracts() map[common.Address]struct{} {
+	if a.createdContracts == nil {
+		a.createdContracts = make(map[common.Address]struct{})
+	}
 	return a.createdContracts
 }
 

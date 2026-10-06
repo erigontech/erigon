@@ -127,33 +127,3 @@ var (
 		BaseFee:     uint256.NewInt(7),
 	}
 )
-
-func BenchmarkLegacySmallList(b *testing.B) {
-	for b.Loop() {
-		legacyDeriveSha(smallTxList)
-	}
-}
-
-func BenchmarkCurrentSmallList(b *testing.B) {
-	for b.Loop() {
-		DeriveSha(smallTxList)
-	}
-}
-
-func BenchmarkLegacyLargeList(b *testing.B) {
-	for b.Loop() {
-		legacyDeriveSha(largeTxList)
-	}
-}
-
-func BenchmarkCurrentLargeList(b *testing.B) {
-	for b.Loop() {
-		DeriveSha(largeTxList)
-	}
-}
-
-func BenchmarkRlpHashHeader(b *testing.B) {
-	for b.Loop() {
-		RlpHash(benchHeader)
-	}
-}

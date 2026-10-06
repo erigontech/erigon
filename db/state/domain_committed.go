@@ -189,8 +189,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 			return 0, false
 		}
 
-		k, _ := itemGetter.Next(nil)
-		if !bytes.Equal(fullKey, k) {
+		if itemGetter.MatchCmp(fullKey) != 0 {
 			dt.d.logger.Warn("commitment branch key replacement seek invalid key",
 				"key", hex.EncodeToString(fullKey), "idx", "hash", "file", item.decompressor.FileName())
 
@@ -202,7 +201,7 @@ func (dt *DomainRoTx) findShortenedKey(fullKey []byte, itemGetter *seg.Reader, i
 		if item.bindex == nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement: file doesn't have index", "name", item.decompressor.FileName())
 		}
-		_, _, offset, ok, err := item.bindex.Get(fullKey, itemGetter)
+		_, _, offset, ok, err := item.bindex.Get(fullKey, nil, itemGetter)
 		if err != nil {
 			dt.d.logger.Warn("[agg] commitment branch key replacement seek failed",
 				"key", hex.EncodeToString(fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
@@ -373,7 +372,6 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 		}
 
 		replacer := func(key []byte, isStorage bool) ([]byte, error) {
-			var found bool
 			auxBuf := keyBuf[:0]
 			if isStorage {
 				plainKey := len(key) == length.Addr+length.Hash
@@ -382,6 +380,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					auxBuf = append(auxBuf[:0], key...)
 				} else {
 					// Optimised key referencing a state file record (file number and offset within the file)
+					var found bool
 					auxBuf, found = storage.lookupByShortenedKey(key, sig)
 					if !found {
 						dt.d.logger.Crit("valTransform: lost storage full key",
@@ -430,6 +429,7 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				// Non-optimised key originating from a database record
 				auxBuf = append(auxBuf[:0], key...)
 			} else {
+				var found bool
 				auxBuf, found = accounts.lookupByShortenedKey(key, aig)
 				if !found {
 					dt.d.logger.Crit("valTransform: lost account full key",

@@ -225,7 +225,8 @@ jobs:
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
           genesis_glamsterdam=$(yq -e '.ethereum_genesis_generator_params.image' "$glamsterdam_io")
           spamoor_glamsterdam=$(yq -e '.spamoor_params.image' "$glamsterdam_io")
-          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' "$caplin_io")
+          pectra_lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$pectra_io")
+          minimal_vc=$(yq -e '.participants[] | select(.use_separate_vc == true) | .vc_image' "$caplin_io")
           # pectra's clients and caplin-minimal's assertoor are warmed under the tag
           # another suite pins. Bumping one alone leaves it out of the cache, which
           # is a slow path rather than a failure: warn, and hand the tag to the
@@ -239,8 +240,6 @@ jobs:
           }
           check_warmed "$pectra_io" \
             "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$pectra_io")" "$teku"
-          check_warmed "$pectra_io" \
-            "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$pectra_io")" "$lighthouse_vc"
           check_warmed "$caplin_io" "$(yq -e '.assertoor_params.image' "$caplin_io")" "$assertoor"
           echo "UNCACHED_IMAGES=${uncached# }" >> "$GITHUB_ENV"
           {
@@ -251,13 +250,14 @@ jobs:
             echo "TEKU_IMAGE=$teku"
             echo "GLAMSTERDAM_GENESIS_GENERATOR_IMAGE=$genesis_glamsterdam"
             echo "GLAMSTERDAM_SPAMOOR_IMAGE=$spamoor_glamsterdam"
-            echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
+            echo "PECTRA_LIGHTHOUSE_IMAGE=$pectra_lighthouse"
+            echo "MINIMAL_VC_IMAGE=$minimal_vc"
           } >> "$GITHUB_ENV"
           # Every cached tag stays spelled out in the cache key so a glance at the
           # Actions cache list shows what a key holds. Only the registry/org prefix
           # is dropped, which keeps the key clear of actions/cache's 512-char cap.
           key=docker-cl
-          for image in "$lighthouse" "$lighthouse_vc" "$teku" "$assertoor" \
+          for image in "$lighthouse" "$pectra_lighthouse" "$minimal_vc" "$teku" "$assertoor" \
             "kurtosis:$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
             "$KURTOSIS_CURL_JQ_IMAGE" "$KURTOSIS_TRAEFIK_IMAGE" "$KURTOSIS_ALPINE_IMAGE" \
             "$ETH2_VAL_TOOLS_IMAGE" "$KURTOSIS_SNOOPER_IMAGE" "$pectra" "$glamsterdam" \
@@ -290,7 +290,8 @@ jobs:
             return 1
           }
           pull "${LIGHTHOUSE_IMAGE}"
-          pull "${LIGHTHOUSE_VC_IMAGE}"
+          pull "${PECTRA_LIGHTHOUSE_IMAGE}"
+          pull "${MINIMAL_VC_IMAGE}"
           pull "${TEKU_IMAGE}"
           pull "${ASSERTOOR_IMAGE}"
           pull "${ASSERTOOR_PECTRA_IMAGE}"
@@ -311,7 +312,8 @@ jobs:
           pull "${KURTOSIS_SNOOPER_IMAGE}"
           pull "${KURTOSIS_PYTHON_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
-          docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
+          docker save "${PECTRA_LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/pectra-lighthouse.tar
+          docker save "${MINIMAL_VC_IMAGE}" -o /tmp/docker-cache/minimal-vc.tar
           docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
           docker save "${ASSERTOOR_PECTRA_IMAGE}" -o /tmp/docker-cache/assertoor-pectra.tar
@@ -481,7 +483,8 @@ jobs:
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
           genesis_glamsterdam=$(yq -e '.ethereum_genesis_generator_params.image' "$glamsterdam_io")
           spamoor_glamsterdam=$(yq -e '.spamoor_params.image' "$glamsterdam_io")
-          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' "$caplin_io")
+          pectra_lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$pectra_io")
+          minimal_vc=$(yq -e '.participants[] | select(.use_separate_vc == true) | .vc_image' "$caplin_io")
           # pectra's clients and caplin-minimal's assertoor are warmed under the tag
           # another suite pins. Bumping one alone leaves it out of the cache, which
           # is a slow path rather than a failure: warn, and hand the tag to the
@@ -495,8 +498,6 @@ jobs:
           }
           check_warmed "$pectra_io" \
             "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$pectra_io")" "$teku"
-          check_warmed "$pectra_io" \
-            "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$pectra_io")" "$lighthouse_vc"
           check_warmed "$caplin_io" "$(yq -e '.assertoor_params.image' "$caplin_io")" "$assertoor"
           echo "UNCACHED_IMAGES=${uncached# }" >> "$GITHUB_ENV"
           {
@@ -507,13 +508,14 @@ jobs:
             echo "TEKU_IMAGE=$teku"
             echo "GLAMSTERDAM_GENESIS_GENERATOR_IMAGE=$genesis_glamsterdam"
             echo "GLAMSTERDAM_SPAMOOR_IMAGE=$spamoor_glamsterdam"
-            echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
+            echo "PECTRA_LIGHTHOUSE_IMAGE=$pectra_lighthouse"
+            echo "MINIMAL_VC_IMAGE=$minimal_vc"
           } >> "$GITHUB_ENV"
           # Every cached tag stays spelled out in the cache key so a glance at the
           # Actions cache list shows what a key holds. Only the registry/org prefix
           # is dropped, which keeps the key clear of actions/cache's 512-char cap.
           key=docker-cl
-          for image in "$lighthouse" "$lighthouse_vc" "$teku" "$assertoor" \
+          for image in "$lighthouse" "$pectra_lighthouse" "$minimal_vc" "$teku" "$assertoor" \
             "kurtosis:$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
             "$KURTOSIS_CURL_JQ_IMAGE" "$KURTOSIS_TRAEFIK_IMAGE" "$KURTOSIS_ALPINE_IMAGE" \
             "$ETH2_VAL_TOOLS_IMAGE" "$KURTOSIS_SNOOPER_IMAGE" "$pectra" "$glamsterdam" \
@@ -536,7 +538,8 @@ jobs:
         if: steps.cache-cl-images.outputs.cache-hit == 'true'
         run: |
           docker load -i /tmp/docker-cache/lighthouse.tar
-          docker load -i /tmp/docker-cache/lighthouse-vc.tar
+          docker load -i /tmp/docker-cache/pectra-lighthouse.tar
+          docker load -i /tmp/docker-cache/minimal-vc.tar
           docker load -i /tmp/docker-cache/teku.tar
           docker load -i /tmp/docker-cache/assertoor.tar
           docker load -i /tmp/docker-cache/assertoor-pectra.tar
@@ -570,7 +573,8 @@ jobs:
             return 1
           }
           pull "${LIGHTHOUSE_IMAGE}"
-          pull "${LIGHTHOUSE_VC_IMAGE}"
+          pull "${PECTRA_LIGHTHOUSE_IMAGE}"
+          pull "${MINIMAL_VC_IMAGE}"
           pull "${TEKU_IMAGE}"
           pull "${ASSERTOOR_IMAGE}"
           pull "${ASSERTOOR_PECTRA_IMAGE}"
@@ -591,7 +595,8 @@ jobs:
           pull "${KURTOSIS_SNOOPER_IMAGE}"
           pull "${KURTOSIS_PYTHON_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
-          docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
+          docker save "${PECTRA_LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/pectra-lighthouse.tar
+          docker save "${MINIMAL_VC_IMAGE}" -o /tmp/docker-cache/minimal-vc.tar
           docker save "${TEKU_IMAGE}" -o /tmp/docker-cache/teku.tar
           docker save "${ASSERTOOR_IMAGE}" -o /tmp/docker-cache/assertoor.tar
           docker save "${ASSERTOOR_PECTRA_IMAGE}" -o /tmp/docker-cache/assertoor-pectra.tar

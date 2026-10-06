@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -48,6 +49,7 @@ var (
 	ErrNewPayloadNoStatus            = errors.New("newPayload returned no status")
 	ErrMissingSegment                = errors.New("missing segment: parent state not available")
 	ErrParentEnvelopePending         = errors.New("parent execution payload envelope not yet available")
+	ErrBlockTooEarly                 = errors.New("block is too early compared to current_slot")
 	ErrNotFinalizedDescendant        = errors.New("block is not a descendant of the finalized checkpoint")
 	ErrForkSchemaSlotMismatch        = errors.New("block schema fork disagrees with the fork implied by its slot")
 )
@@ -86,7 +88,124 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
+var ErrBlockInvalid = errors.New("beacon block is permanently invalid")
+
+var errBlockAtFinalizedHorizon = errors.New("beacon block is at or below the finalized horizon")
+
+func invalidBlockError(err error) error {
+	return fmt.Errorf("%w: %w", ErrBlockInvalid, err)
+}
+
+func invalidKzgCommitmentsError(err error) error {
+	return invalidBlockError(fmt.Errorf("OnBlock: failed to process kzg commitments: %w", err))
+}
+
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+	return f.onBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability, false)
+}
+
+func (f *ForkChoiceStore) OnBlockWithEquivocationCheck(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+	return f.onBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability, true)
+}
+
+func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeaconBlock, rejectEquivocation bool) error {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return invalidBlockError(errors.New("missing beacon block"))
+	}
+	f.mu.RLock()
+	knownRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		f.mu.RUnlock()
+		return invalidBlockError(err)
+	}
+	if _, known := f.forkGraph.GetHeader(knownRoot); known {
+		stored, ok := f.forkGraph.GetBlock(knownRoot)
+		if !ok || stored == nil || stored.Block == nil || stored.Version() != block.Version() || stored.Signature != block.Signature {
+			f.mu.RUnlock()
+			return invalidBlockError(errors.New("published block does not match the validated block for its root"))
+		}
+		if rejectEquivocation && f.forkGraph.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, knownRoot) {
+			f.mu.RUnlock()
+			return invalidBlockError(errors.New("block conflicts with a previously validated proposal"))
+		}
+		if block.Version() >= clparams.GloasVersion {
+			if err := f.validateParentPayloadPath(block.Block, true); err != nil {
+				f.mu.RUnlock()
+				if errors.Is(err, ErrParentEnvelopePending) {
+					return err
+				}
+				return invalidBlockError(err)
+			}
+		}
+		f.mu.RUnlock()
+		return nil
+	}
+	blockRoot, _, err := f.validateBlockAdmissionLocked(block, rejectEquivocation, true)
+	if err != nil {
+		f.mu.RUnlock()
+		if errors.Is(err, errBlockAtFinalizedHorizon) || errors.Is(err, ErrBlockTooEarly) {
+			return invalidBlockError(err)
+		}
+		return err
+	}
+	if _, known := f.forkGraph.GetHeader(blockRoot); known {
+		f.mu.RUnlock()
+		return nil
+	}
+	parentState, err := f.forkGraph.GetState(block.Block.ParentRoot, true)
+	f.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	if parentState == nil {
+		return ErrMissingSegment
+	}
+	if err := transition.TransitionState(parentState, block, nil, true); err != nil {
+		return invalidBlockError(err)
+	}
+	return nil
+}
+
+func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeaconBlock, rejectEquivocation, requireEngineAcceptance bool) (common.Hash, clparams.StateVersion, error) {
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return common.Hash{}, 0, invalidBlockError(err)
+	}
+	root := common.Hash(blockRoot)
+	if rejectEquivocation && f.forkGraph.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, root) {
+		return common.Hash{}, 0, invalidBlockError(errors.New("block conflicts with a previously validated proposal"))
+	}
+	if f.Slot() < block.Block.Slot {
+		return common.Hash{}, 0, ErrBlockTooEarly
+	}
+	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+	// A checkpoint-sync anchor can be newer than the store's finalized checkpoint and defines the earliest admissible block.
+	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
+		finalizedSlot = anchorSlot
+	}
+	if block.Block.Slot <= finalizedSlot {
+		return common.Hash{}, 0, errBlockAtFinalizedHorizon
+	}
+	if ancestorNode := f.getAncestor(ForkChoiceNode{Root: block.Block.ParentRoot, PayloadStatus: cltypes.PayloadStatusPending}, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
+		return common.Hash{}, 0, invalidBlockError(ErrNotFinalizedDescendant)
+	}
+	if !f.beaconCfg.ForkSchemaMatchesSlot(block.Block.Slot, block.Version()) {
+		return common.Hash{}, 0, invalidBlockError(ErrForkSchemaSlotMismatch)
+	}
+	blockVersion := f.beaconCfg.GetCurrentStateVersion(f.computeEpochAtSlot(block.Block.Slot))
+	if blockVersion >= clparams.GloasVersion {
+		if err := f.validateParentPayloadPath(block.Block, requireEngineAcceptance); err != nil {
+			if errors.Is(err, ErrParentEnvelopePending) {
+				return common.Hash{}, 0, err
+			}
+			return common.Hash{}, 0, invalidBlockError(err)
+		}
+	}
+	return root, blockVersion, nil
+}
+
+func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {
 	f.mu.Lock()
 	unlocked := false
 	defer f.drainQueuedWork()
@@ -95,45 +214,43 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			f.mu.Unlock()
 		}
 	}()
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
 	start := time.Now()
-	blockRoot, err := block.Block.HashSSZ()
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return invalidBlockError(errors.New("missing beacon block"))
+	}
+	knownRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return invalidBlockError(err)
+	}
+	if block.Version() >= clparams.GloasVersion {
+		if _, known := f.forkGraph.GetHeader(knownRoot); known {
+			if rejectEquivocation && f.forkGraph.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, knownRoot) {
+				return invalidBlockError(errors.New("block conflicts with a previously validated proposal"))
+			}
+			if newPayload {
+				if err := f.validateParentPayloadPath(block.Block, true); err != nil {
+					if errors.Is(err, ErrParentEnvelopePending) {
+						return err
+					}
+					return invalidBlockError(err)
+				}
+			}
+			return nil
+		}
+	}
+	blockRoot, blockVersion, err := f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
+	if errors.Is(err, errBlockAtFinalizedHorizon) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	// Use the store's current slot (set via OnTick) to validate the block is not from the future.
-	// The spec says: assert get_current_slot(store) >= block.slot
-	if f.Slot() < block.Block.Slot {
-		return errors.New("block is too early compared to current_slot")
-	}
-
-	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
-	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
-	finalizedSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
-	// After checkpoint sync, the anchor block may sit inside (not at the start of)
-	// the finalized epoch. The fork graph only contains the anchor and its descendants,
-	// so Ancestor() cannot trace past the anchor. Cap finalizedSlot to the anchor slot
-	// so the descendant check stays within the fork graph's horizon.
-	if anchorSlot := f.forkGraph.AnchorSlot(); finalizedSlot < anchorSlot {
-		finalizedSlot = anchorSlot
-	}
-	if block.Block.Slot <= finalizedSlot {
-		return nil
-	}
-	// Check block is a descendant of the finalized block at the checkpoint finalized slot
-	if ancestorNode := f.Ancestor(block.Block.ParentRoot, finalizedSlot); ancestorNode.Root != finalizedCheckpoint.Root {
-		return ErrNotFinalizedDescendant
-	}
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
-
-	if !f.beaconCfg.ForkSchemaMatchesSlot(block.Block.Slot, block.Version()) {
-		return ErrForkSchemaSlotMismatch
-	}
 
 	// Validate parent payload status path early (before expensive operations)
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
-	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
 	isGloas := blockVersion >= clparams.GloasVersion
 	headBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
@@ -145,30 +262,27 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		}
 		headBeforeBlock = head.Root
 	}
-	if isGloas {
-		if err := f.validateParentPayloadPath(block.Block); err != nil {
-			return err
-		}
-	}
 
 	// Pre-GLOAS execution payload processing.
 	// In GLOAS, ExecutionPayload and BlobKzgCommitments are nil in BeaconBlock.
 	// These fields are handled separately in OnExecutionPayload when the envelope arrives.
 	startEngine := time.Now()
-	isVerifiedExecutionPayload := f.verifiedExecutionPayload.Contains(blockRoot)
+	isVerifiedExecutionPayload := f.IsPayloadVerified(blockRoot)
 	if blockVersion < clparams.GloasVersion {
 		// Find the versioned hashes from blob commitments
 		var versionedHashes []common.Hash
 		if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
 			versionedHashes = []common.Hash{}
-			solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
+			if err := solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
 				versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
 				if err != nil {
 					return err
 				}
 				versionedHashes = append(versionedHashes, versionedHash)
 				return nil
-			})
+			}); err != nil {
+				return err
+			}
 		}
 
 		// Check if EL has blobs
@@ -219,17 +333,42 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 		// Call NewPayload to validate execution payload
 		if newPayload && f.engine != nil && !isVerifiedExecutionPayload {
+			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
+			if f.payloadInvalidatedLocked(blockRoot, executionBlockHash) {
+				f.markPayloadStatusLocked(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated)
+				if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
+					return fmt.Errorf("failed to remove block from optimistic store: %w", err)
+				}
+				return errors.New("block is invalid")
+			}
 			if block.Version() >= clparams.DenebVersion {
 				if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block); err != nil {
-					return fmt.Errorf("OnBlock: failed to process kzg commitments: %w", err)
+					return invalidKzgCommitmentsError(err)
 				}
 			}
 			payloadStatus, err := f.NewPayloadWithAdmission(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
+			if validationErr := validatePayloadValidationResult(payloadStatus, err); validationErr != nil {
+				return validationErr
+			}
+			if payloadStatus == execution_client.PayloadStatusInvalidated {
+				var requestsHash common.Hash
+				if block.Version() >= clparams.ElectraVersion {
+					requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
+				}
+				if _, hashErr := block.Block.Body.ExecutionPayload.RlpHeader(&block.Block.ParentRoot, requestsHash, nil); hashErr != nil {
+					return fmt.Errorf("OnBlock: invalid execution payload hash: %w", hashErr)
+				}
+			}
 
 			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
-			executionBlockHash := block.Block.Body.ExecutionPayload.BlockHash
-			f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)
+			if err := f.rejectKnownInvalidPayloadStatusLocked(payloadStatus, blockRoot, executionBlockHash); err != nil {
+				if cleanupErr := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); cleanupErr != nil {
+					return fmt.Errorf("failed to remove block from optimistic store: %w", cleanupErr)
+				}
+				return err
+			}
+			payloadStatus = f.markPayloadStatusLocked(blockRoot, executionBlockHash, payloadStatus)
 			f.executionPayloadGasLimit.Add(executionBlockHash, block.Block.Body.ExecutionPayload.GasLimit)
 
 			switch payloadStatus {
@@ -244,19 +383,17 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 				}
 			case execution_client.PayloadStatusInvalidated:
 				log.Warn("OnBlock: block is invalid", "block", common.Hash(blockRoot), "err", err)
-				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 				// remove from optimistic candidate
 				if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to remove block from optimistic store: %w", err)
 				}
-				return errors.New("block is invalid")
+				return invalidBlockError(errors.New("execution payload is invalid"))
 			case execution_client.PayloadStatusValidated:
 				log.Trace("OnBlock: block is validated", "block", common.Hash(blockRoot))
 				// remove from optimistic candidate
 				if err := f.optimisticStore.ValidateBlock(blockRoot, block.Block); err != nil {
 					return fmt.Errorf("failed to validate block in optimistic store: %w", err)
 				}
-				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
 			}
 			if err != nil {
 				return fmt.Errorf("newPayload failed: %w", err)
@@ -282,6 +419,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 
 	lastProcessedState, status, err := f.addChainSegmentAndQueueLightClientEvents(block, fullValidation)
 	if err != nil {
+		if status == fork_graph.InvalidBlock {
+			return invalidBlockError(err)
+		}
 		return err
 	}
 	monitor.ObserveFullBlockProcessingTime(startStateProcess)
@@ -338,10 +478,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		f.payloadTimelinessVote.Store(common.Hash(blockRoot), [clparams.PtcSize]int8{})
 		f.payloadDataAvailabilityVote.Store(common.Hash(blockRoot), [clparams.PtcSize]int8{})
 
-		// Notify PTC messages from payload attestations in the block.
-		// Skip during forward sync (newPayload=false) — PTC votes only matter
-		// for fork choice at the chain tip, not for historical blocks.
-		if block.Block.Body.PayloadAttestations != nil && newPayload {
+		if block.Block.Body.PayloadAttestations != nil {
 			f.notifyPtcMessages(lastProcessedState, block.Block.Body.PayloadAttestations)
 		}
 
@@ -446,8 +583,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	f.mu.Unlock()
 
 	var appliedEnvelope *cltypes.ExecutionPayloadEnvelope
+	var envelopeApplied bool
 	if pendingEnvelopeFound {
-		appliedEnvelope = f.applyPendingEnvelope(ctx, common.Hash(blockRoot), pendingEnvelope, pendingEnvelopeLocal, checkDataAvaiability)
+		appliedEnvelope, envelopeApplied = f.applyPendingEnvelope(ctx, common.Hash(blockRoot), pendingEnvelope, pendingEnvelopeLocal, checkDataAvaiability)
 	}
 	f.mu.Lock()
 	blockData := &beaconevents.BlockData{
@@ -462,7 +600,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Write execution payload envelope indices outside f.mu to avoid deadlock
 	// with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
 	if appliedEnvelope != nil {
-		f.writePendingEnvelopeIndices(ctx, common.Hash(blockRoot), pendingEnvelope, appliedEnvelope, pendingEnvelopeLocal)
+		f.writePendingEnvelopeIndices(ctx, common.Hash(blockRoot), pendingEnvelope, appliedEnvelope, pendingEnvelopeLocal, envelopeApplied)
 	}
 
 	return nil
@@ -483,29 +621,39 @@ func (f *ForkChoiceStore) processPendingEnvelopeAfterBlock(ctx context.Context, 
 	if !found {
 		return
 	}
-	appliedEnvelope := f.applyPendingEnvelope(ctx, blockRoot, pending, local, checkDataAvailability)
+	appliedEnvelope, envelopeApplied := f.applyPendingEnvelope(ctx, blockRoot, pending, local, checkDataAvailability)
 	if appliedEnvelope != nil {
-		f.writePendingEnvelopeIndices(ctx, blockRoot, pending, appliedEnvelope, local)
+		f.writePendingEnvelopeIndices(ctx, blockRoot, pending, appliedEnvelope, local, envelopeApplied)
 	}
 }
 
-func (f *ForkChoiceStore) writePendingEnvelopeIndices(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, appliedEnvelope *cltypes.ExecutionPayloadEnvelope, local bool) {
-	if f.db == nil {
-		return
-	}
+func (f *ForkChoiceStore) writePendingEnvelopeIndices(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, appliedEnvelope *cltypes.ExecutionPayloadEnvelope, local, envelopeApplied bool) {
 	if pending == nil || pending.Message != appliedEnvelope {
 		pending = &cltypes.SignedExecutionPayloadEnvelope{Message: appliedEnvelope}
 	}
-	indexEnvelope, err := f.ensureExecutionPayloadEnvelopeIndices(ctx, blockRoot, pending, true)
-	if err == nil {
+	token, tracked, err := f.claimEnvelopeIndexRepair(blockRoot, pending, envelopeApplied)
+	if err != nil {
+		log.Warn("OnBlock: failed to prepare execution payload index repair", "blockRoot", blockRoot, "local", local, "err", err)
 		return
 	}
-	if local {
-		f.pendingLocalSelfBuildEnvelopes.Add(blockRoot, indexEnvelope)
-	} else {
-		f.pendingEnvelopes.Add(blockRoot, indexEnvelope)
+	indexEnvelope, notify, err := f.ensureClaimedEnvelopeIndexRepair(ctx, blockRoot, token, tracked, pending, envelopeApplied)
+	if err == nil {
+		if tracked {
+			f.envelopeIndexRepairs.complete(token)
+		}
+		if notify {
+			f.emitExecutionPayloadIntegrationEvents(blockRoot, indexEnvelope)
+		}
+		return
 	}
-	log.Warn("OnBlock: failed to write execution payload indices for pending envelope", "blockRoot", blockRoot, "err", err)
+	if !tracked {
+		if local {
+			f.pendingLocalSelfBuildEnvelopes.Add(blockRoot, indexEnvelope)
+		} else {
+			f.pendingEnvelopes.Add(blockRoot, indexEnvelope)
+		}
+	}
+	log.Warn("OnBlock: failed to write execution payload indices for pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Context, limit int) {
@@ -540,7 +688,66 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 	}
 }
 
-func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local, checkDataAvailability bool) *cltypes.ExecutionPayloadEnvelope {
+func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {
+	for _, repair := range f.envelopeIndexRepairs.repairs() {
+		if limit <= 0 || ctx.Err() != nil {
+			return
+		}
+		var persisted *cltypes.SignedExecutionPayloadEnvelope
+		var readErr error
+		readAttempted := false
+		if !repair.valuesKnown {
+			persisted, readErr = f.forkGraph.ReadEnvelopeFromDisk(repair.root)
+			readAttempted = true
+			if readErr != nil || persisted == nil || persisted.Message == nil || persisted.Message.Payload == nil {
+				if readErr == nil {
+					readErr = errors.New("persisted execution payload envelope is incomplete")
+				}
+				if f.forkGraph.HasEnvelope(repair.root) {
+					f.envelopeIndexRepairs.retryFailed(repair)
+				} else {
+					f.envelopeIndexRepairs.complete(repair)
+				}
+				log.Warn("Failed to load execution payload envelope index repair values", "blockRoot", repair.root, "err", readErr)
+				limit--
+				continue
+			}
+			repair = f.envelopeIndexRepairs.setValues(repair, persisted.Message.Payload.BlockNumber, persisted.Message.Payload.BlockHash)
+			if repair.generation == 0 {
+				limit--
+				continue
+			}
+		}
+		_, indexed, err := f.ensureKnownExecutionPayloadEnvelopeIndices(ctx, repair.root, envelopeForIndexRepair(repair), true)
+		if indexed {
+			repair = f.envelopeIndexRepairs.markNotify(repair)
+		}
+		if err != nil {
+			f.envelopeIndexRepairs.retryFailed(repair)
+			log.Warn("Failed to repair execution payload envelope indices", "blockRoot", repair.root, "err", err)
+		} else {
+			if repair.notify && !readAttempted {
+				persisted, readErr = f.forkGraph.ReadEnvelopeFromDisk(repair.root)
+			}
+			if repair.notify && (readErr != nil || persisted == nil || persisted.Message == nil || persisted.Message.Payload == nil) {
+				if f.forkGraph.HasEnvelope(repair.root) {
+					f.envelopeIndexRepairs.retryFailed(repair)
+				} else {
+					f.envelopeIndexRepairs.complete(repair)
+				}
+				limit--
+				continue
+			}
+			f.envelopeIndexRepairs.complete(repair)
+			if repair.notify {
+				f.emitExecutionPayloadIntegrationEvents(repair.root, persisted)
+			}
+		}
+		limit--
+	}
+}
+
+func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local, checkDataAvailability bool) (*cltypes.ExecutionPayloadEnvelope, bool) {
 	if pending == nil {
 		if !f.forkGraph.HasEnvelope(blockRoot) {
 			if local {
@@ -550,11 +757,11 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 			} else if current, ok := f.pendingEnvelopes.Peek(blockRoot); ok && current == nil {
 				f.pendingEnvelopes.Remove(blockRoot)
 			}
-			return nil
+			return nil, false
 		}
 		persisted, err := f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil || persisted == nil || persisted.Message == nil {
-			return nil
+			return nil, false
 		}
 		if local {
 			if current, ok := f.pendingLocalSelfBuildEnvelopes.Peek(blockRoot); ok && current == nil {
@@ -563,18 +770,31 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 		} else if current, ok := f.pendingEnvelopes.Peek(blockRoot); ok && current == nil {
 			f.pendingEnvelopes.Remove(blockRoot)
 		}
-		return persisted.Message
+		return persisted.Message, false
 	}
 	var applied bool
 	var err error
 	if local {
 		applied, err = f.applyLocalSelfBuildEnvelope(ctx, pending, retryQueuedEnvelope)
 	} else {
-		applied, err = f.applyEnvelope(ctx, pending, checkDataAvailability, true, retryQueuedEnvelope)
+		commitmentsValidated := false
+		if pending.Message != nil && !f.forkGraph.HasEnvelope(blockRoot) {
+			commitmentsValidated, err = f.validatePendingEnvelopeCommitments(pending, true)
+			if err != nil {
+				err = fmt.Errorf("%w: OnBlock: invalid execution payload envelope commitments: %w", ErrInvalidExecutionPayloadEnvelope, err)
+			}
+		}
+		if err == nil {
+			receivedAt := f.pendingEnvelopeReceivedAt(pending, time.Now())
+			applied, err = f.applyEnvelope(ctx, pending, checkDataAvailability, true, commitmentsValidated, retryQueuedEnvelope, receivedAt)
+		}
 	}
 	if err != nil {
 		log.Warn("OnBlock: failed to process pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
 		if !f.retryPendingEnvelopeError(err, pending) {
+			if !local {
+				f.forgetPendingEnvelopeArrival(pending)
+			}
 			if local {
 				if current, ok := f.pendingLocalSelfBuildEnvelopes.Peek(blockRoot); ok && current == pending {
 					f.pendingLocalSelfBuildEnvelopes.Remove(blockRoot)
@@ -583,17 +803,17 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 				f.pendingEnvelopes.Remove(blockRoot)
 			}
 		}
-		return nil
+		return nil, false
 	}
 	completedByAnother := !applied && f.forkGraph.HasEnvelope(blockRoot)
 	if !applied && !completedByAnother {
-		return nil
+		return nil, false
 	}
 	completedSameEnvelope := applied
 	if completedByAnother {
 		persisted, err := f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
 		if err != nil {
-			return nil
+			return nil, false
 		}
 		if persisted != nil && persisted.Message != nil {
 			persistedRoot, persistedErr := persisted.Message.HashSSZ()
@@ -609,13 +829,16 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 		f.pendingEnvelopes.Remove(blockRoot)
 	}
 	if !completedSameEnvelope {
-		return nil
+		return nil, false
 	}
-	return pending.Message
+	if !local {
+		f.forgetPendingEnvelopeArrival(pending)
+	}
+	return pending.Message, applied
 }
 
 func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.SignedExecutionPayloadEnvelope) bool {
-	if errors.Is(err, errInvalidExecutionPayloadEnvelope) {
+	if errors.Is(err, ErrInvalidExecutionPayloadEnvelope) {
 		return false
 	}
 	if pending == nil {

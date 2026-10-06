@@ -133,8 +133,20 @@ func (a *Attestation) DecodeSSZ(buf []byte, version int) error {
 	return a.DecodeSSZWithConfig(buf, version, nil)
 }
 
+func (a *Attestation) DecodeSSZStrict(buf []byte, version int) error {
+	return a.DecodeSSZStrictWithConfig(buf, version, nil)
+}
+
 // DecodeSSZWithConfig decodes the provided buffer using cfg when it is available.
 func (a *Attestation) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
+	return a.decodeSSZWithConfig(buf, version, cfg, false)
+}
+
+func (a *Attestation) DecodeSSZStrictWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig) error {
+	return a.decodeSSZWithConfig(buf, version, cfg, true)
+}
+
+func (a *Attestation) decodeSSZWithConfig(buf []byte, version int, cfg *clparams.BeaconChainConfig, strict bool) error {
 	clversion := clparams.StateVersion(version)
 	a.version = clversion
 	if clversion.AfterOrEqual(clparams.ElectraVersion) {
@@ -146,7 +158,11 @@ func (a *Attestation) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams
 		if len(buf) < electraFixedHeaderSize+1 {
 			return ssz.ErrLowBufferSize
 		}
-		aggrBitsOffset := int(binary.LittleEndian.Uint32(buf[:4]))
+		aggrBitsOffsetUint32 := binary.LittleEndian.Uint32(buf[:4])
+		if uint64(aggrBitsOffsetUint32) > uint64(len(buf)) {
+			return ssz.ErrBadOffset
+		}
+		aggrBitsOffset := int(aggrBitsOffsetUint32)
 		committeeBitsBytes := aggrBitsOffset - electraFixedHeaderSize
 		if committeeBitsBytes <= 0 {
 			return ssz.ErrLowBufferSize
@@ -166,6 +182,9 @@ func (a *Attestation) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams
 		a.AggregationBits = NewBitList(0, aggrBitsLimit)
 		a.Data = &AttestationData{}
 		a.CommitteeBits = NewBitVector(committeeBitsLimit)
+		if strict {
+			return ssz2.UnmarshalSSZStrict(buf, version, a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
+		}
 		return ssz2.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:], a.CommitteeBits)
 	}
 
@@ -175,6 +194,9 @@ func (a *Attestation) DecodeSSZWithConfig(buf []byte, version int, cfg *clparams
 	}
 	a.AggregationBits = NewBitList(0, aggregationBitsSizeDeneb)
 	a.Data = &AttestationData{}
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, a.AggregationBits, a.Data, a.Signature[:])
+	}
 	return ssz2.UnmarshalSSZ(buf, version, a.AggregationBits, a.Data, a.Signature[:])
 }
 
@@ -298,9 +320,14 @@ func (s *SingleAttestation) Static() bool {
 	return true
 }
 
-func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int, maxCommittees int, cfg *clparams.BeaconChainConfig) *Attestation {
+func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeLen int, maxCommittees int, cfg *clparams.BeaconChainConfig) (*Attestation, error) {
 	committeeBits := NewBitVector(maxCommittees)
-	committeeBits.SetBitAt(int(s.CommitteeIndex), true)
+	if err := committeeBits.SetBitAt(int(s.CommitteeIndex), true); err != nil {
+		return nil, fmt.Errorf("committee index out of range: %w", err)
+	}
+	if memberIndexInCommittee < 0 || memberIndexInCommittee >= committeeLen {
+		return nil, fmt.Errorf("member index %d out of range for committee of length %d", memberIndexInCommittee, committeeLen)
+	}
 	// flip the bit for the validator and also mark the last bit
 	bytes := make([]byte, committeeLen/8+1)
 	bytes[memberIndexInCommittee/8] |= 1 << (memberIndexInCommittee % 8)
@@ -319,7 +346,7 @@ func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeL
 	if cfg != nil && cfg.SlotsPerEpoch > 0 && s.Data != nil {
 		attestation.SetVersion(cfg.GetCurrentStateVersion(s.Data.Slot / cfg.SlotsPerEpoch))
 	}
-	return attestation
+	return attestation, nil
 }
 
 func (s *SingleAttestation) AttestationData() *AttestationData {

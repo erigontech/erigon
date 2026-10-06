@@ -20,18 +20,24 @@ import "github.com/erigontech/erigon/cl/cltypes/solid"
 
 // Below are setters.
 
-func (b *CachingBeaconState) SetSlot(slot uint64) {
-	b.BeaconState.SetSlot(slot)
+func (b *CachingBeaconState) SetSlot(slot uint64) error {
+	if err := b.BeaconState.SetSlot(slot); err != nil {
+		return err
+	}
 	b.proposerIndex = nil
 	if slot%b.BeaconConfig().SlotsPerEpoch == 0 {
 		b.totalActiveBalanceCache = nil
 	}
+	return nil
 }
 
-func (b *CachingBeaconState) AddValidator(validator solid.Validator, balance uint64) {
-	b.BeaconState.AddValidator(validator, balance)
+func (b *CachingBeaconState) AddValidator(validator solid.Validator, balance uint64) error {
+	if err := b.BeaconState.AddValidator(validator, balance); err != nil {
+		return err
+	}
 	pk := validator.PublicKey()
 	b.publicKeyIndicies.Set(pk[:], uint64(b.ValidatorLength())-1)
 	// change in validator set means cache purging
 	b.totalActiveBalanceCache = nil
+	return nil
 }

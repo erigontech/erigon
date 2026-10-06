@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
-	"math/big"
 
 	"google.golang.org/grpc"
 
@@ -73,8 +72,8 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 }
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
-func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHashArg *rpc.BlockNumberOrHash) (*hexutil.Big, error) {
-	blockNrOrHash := orLatest(blockNrOrHashArg)
+func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHashArg *rpc.BlockNumberOrHash) (*hexutil.U256, error) {
+	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
 	if err != nil {
 		return nil, err
@@ -87,15 +86,15 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	}
 	if acc == nil {
 		// Special case - non-existent account is assumed to have zero balance
-		return (*hexutil.Big)(big.NewInt(0)), nil
+		return new(hexutil.U256), nil
 	}
 
-	return (*hexutil.Big)(acc.Balance.ToBig()), nil
+	return (*hexutil.U256)(&acc.Balance), nil
 }
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
 func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHashArg *rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
-	blockNrOrHash := orLatest(blockNrOrHashArg)
+	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
 		reply, err := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
 			Address: gointerfaces.ConvertAddressToH160(address),
@@ -125,7 +124,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
 func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHashArg *rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
-	blockNrOrHash := orLatest(blockNrOrHashArg)
+	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
 	if err != nil {
 		return nil, err
@@ -147,7 +146,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 // GetStorageValues implements eth_getStorageValues. Returns the values of multiple
 // storage slots for multiple accounts in a single request.
 func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHashArg *rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error) {
-	blockNrOrHash := orLatest(blockNrOrHashArg)
+	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	var totalSlots int
 
 	for _, keys := range requests {
@@ -209,7 +208,7 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
 func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHashArg *rpc.BlockNumberOrHash) (string, error) {
-	blockNrOrHash := orLatest(blockNrOrHashArg)
+	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
 	var empty []byte
 	// Validation for index i.e. storage slot is non-standard: it can be interpreted as QUANTITY (stricter) or as DATA (like Hive tests do).
 	// Waiting for a spec, we choose the latter because it's more general, but we check that the length is not greater than 64 hex-digits.

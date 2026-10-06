@@ -39,7 +39,7 @@ func TestResolveExecResumePoint(t *testing.T) {
 
 	ctx := context.Background()
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 10_000)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(10_000))
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)

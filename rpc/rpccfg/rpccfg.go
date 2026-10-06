@@ -118,7 +118,7 @@ type OverlayApiConfig struct {
 }
 
 var SlowLogBlackList = []string{
-	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_blockNumber",
+	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_getHeaderByNumber", "eth_getHeaderByHash", "eth_blockNumber",
 	"erigon_blockNumber", "erigon_getHeaderByNumber", "erigon_getHeaderByHash", "erigon_getBlockByTimestamp",
 	"eth_call",
 }

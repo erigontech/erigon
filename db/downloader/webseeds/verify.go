@@ -63,7 +63,8 @@ func Verify(
 	}
 	g.MakeMapWithCap(&checker.state, len(chains))
 	defer func() {
-		items.Wait()
+		// The early-return err takes priority; the normal path already returns items.Wait().
+		_ = items.Wait()
 		// Strict evaluation for the win.
 		err = cmp.Or(err, json.NewEncoder(os.Stdout).Encode(checker.state))
 		logger.Info("finished check",

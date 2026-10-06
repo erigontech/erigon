@@ -22,13 +22,10 @@ package ethash
 import (
 	"bytes"
 	"encoding/binary"
-	"io"
 	"reflect"
 	"testing"
 
 	"github.com/erigontech/erigon/common/hexutil"
-
-	"github.com/erigontech/erigon/common/length"
 )
 
 // prepare converts an ethash cache or dataset from a byte stream into the internal
@@ -692,95 +689,5 @@ func TestHashimoto(t *testing.T) {
 	}
 	if !bytes.Equal(result, wantResult) {
 		t.Errorf("full hashimoto result mismatch: have %x, want %x", result, wantResult)
-	}
-}
-
-// Benchmarks the cache generation performance.
-func BenchmarkCacheGeneration(b *testing.B) {
-	for b.Loop() {
-		cache := make([]uint32, cacheSize(1)/4)
-		generateCache(cache, 0, make([]byte, 32))
-	}
-}
-
-// Benchmarks the dataset (small) generation performance.
-func BenchmarkSmallDatasetGeneration(b *testing.B) {
-	cache := make([]uint32, 65536/4)
-	generateCache(cache, 0, make([]byte, 32))
-
-	for b.Loop() {
-		dataset := make([]uint32, 32*65536/4)
-		generateDataset(dataset, 0, cache)
-	}
-}
-
-// Benchmarks the light verification performance.
-func BenchmarkHashimotoLight(b *testing.B) {
-	cache := make([]uint32, cacheSize(1)/4)
-	generateCache(cache, 0, make([]byte, 32))
-
-	hash := hexutil.MustDecode("0xc9149cc0386e689d789a1c2f3d5d169a61a6218ed30e74414dc736e442ef3d1f")
-
-	for b.Loop() {
-		hashimotoLight(datasetSize(1), cache, hash, 0)
-	}
-}
-
-// Benchmarks the full (small) verification performance.
-func BenchmarkHashimotoFullSmall(b *testing.B) {
-	cache := make([]uint32, 65536/4)
-	generateCache(cache, 0, make([]byte, 32))
-
-	dataset := make([]uint32, 32*65536/4)
-	generateDataset(dataset, 0, cache)
-
-	hash := hexutil.MustDecode("0xc9149cc0386e689d789a1c2f3d5d169a61a6218ed30e74414dc736e442ef3d1f")
-
-	for b.Loop() {
-		hashimotoFull(dataset, hash, 0)
-	}
-}
-
-func benchmarkHashimotoFullMmap(b *testing.B, name string, lock bool) {
-	b.Run(name, func(b *testing.B) {
-		tmpdir := b.TempDir()
-		d := &dataset{epoch: 0}
-		d.generate(tmpdir, 1, lock, testing.Short())
-		var hash [length.Hash]byte
-		b.ResetTimer()
-		for i := 0; b.Loop(); i++ {
-			binary.PutVarint(hash[:], int64(i))
-			hashimotoFull(d.dataset, hash[:], 0)
-		}
-	})
-}
-
-// Benchmarks the full verification performance for mmap
-func BenchmarkHashimotoFullMmap(b *testing.B) {
-	benchmarkHashimotoFullMmap(b, "WithLock", true)
-	benchmarkHashimotoFullMmap(b, "WithoutLock", false)
-}
-
-func BenchmarkSeedHash(b *testing.B) {
-	var res []byte
-	for i := uint64(0); b.Loop(); i++ {
-		res = seedHash(i*epochLength + 1)
-	}
-
-	_, err := io.Copy(io.Discard, bytes.NewBuffer(res))
-	if err != nil {
-		b.Error(err)
-	}
-}
-
-func BenchmarkSeedHashOld(b *testing.B) {
-	var res []byte
-	for i := uint64(0); b.Loop(); i++ {
-		res = seedHashOld(i*epochLength + 1)
-	}
-
-	_, err := io.Copy(io.Discard, bytes.NewBuffer(res))
-	if err != nil {
-		b.Error(err)
 	}
 }

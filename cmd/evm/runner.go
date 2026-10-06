@@ -182,7 +182,11 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	defer dir.RemoveAll(tmpDir)
+	defer func() {
+		if err := dir.RemoveAll(tmpDir); err != nil {
+			log.Warn("failed to remove temp dir", "dir", tmpDir, "err", err)
+		}
+	}()
 	db := temporaltest.NewTestDB(nil, datadir.New(tmpDir))
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
@@ -210,7 +214,9 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))
 	}
-	statedb.CreateAccount(sender, true)
+	if err := statedb.CreateAccount(sender, true); err != nil {
+		return err
+	}
 
 	if ctx.String(ReceiverFlag.Name) != "" {
 		receiver = accounts.InternAddress(common.HexToAddress(ctx.String(ReceiverFlag.Name)))
@@ -317,7 +323,9 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		}
 	} else {
 		if len(code) > 0 {
-			statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified)
+			if err := statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified); err != nil {
+				return err
+			}
 		}
 		execFunc = func() ([]byte, uint64, error) {
 			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)

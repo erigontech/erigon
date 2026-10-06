@@ -230,9 +230,8 @@ func (ef *EliasFano) Write(w io.Writer) error {
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
-	p := (*[maxDataSize]byte)(unsafe.Pointer(&ef.data[0]))
-	b := (*p)[:]
-	if _, e := w.Write(b[:len(ef.data)*8]); e != nil {
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&ef.data[0])), len(ef.data)*8)
+	if _, e := w.Write(b); e != nil {
 		return e
 	}
 	return nil
@@ -244,13 +243,10 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 	ef.count = binary.BigEndian.Uint64(r[:8])
 	ef.u = binary.BigEndian.Uint64(r[8:16])
 	ef.minDelta = binary.BigEndian.Uint64(r[16:24])
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[24]))
-	ef.data = p[:]
+	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[24])), (len(r)-24)/8)
 	ef.deriveFields()
 	return ef, 24 + 8*len(ef.data)
 }
-
-const maxDataSize = 0xFFFFFFFFFFFF
 
 // DoubleEliasFano can be used to encode two monotone sequences
 // it is called "double" because the lower bits array contains two sequences interleaved
@@ -533,9 +529,8 @@ func (ef *DoubleEliasFano) Write(w io.Writer) error {
 	if _, e := w.Write(numBuf[:]); e != nil {
 		return e
 	}
-	p := (*[maxDataSize]byte)(unsafe.Pointer(&ef.data[0]))
-	b := (*p)[:]
-	if _, e := w.Write(b[:len(ef.data)*8]); e != nil {
+	b := unsafe.Slice((*byte)(unsafe.Pointer(&ef.data[0])), len(ef.data)*8)
+	if _, e := w.Write(b); e != nil {
 		return e
 	}
 	return nil
@@ -548,8 +543,7 @@ func (ef *DoubleEliasFano) Read(r []byte) int {
 	ef.uPosition = binary.BigEndian.Uint64(r[16:24])
 	ef.cumKeysMinDelta = binary.BigEndian.Uint64(r[24:32])
 	ef.posMinDelta = binary.BigEndian.Uint64(r[32:40])
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&r[40]))
-	ef.data = p[:]
+	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[40])), (len(r)-40)/8)
 	ef.deriveFields()
 	return 40 + 8*len(ef.data)
 }

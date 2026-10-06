@@ -16,11 +16,23 @@
 
 package jsonstream
 
+import "io"
+
+var (
+	_ Stream = (*StackStream)(nil)
+	_ Stream = (*LazyFieldStream)(nil)
+)
+
 // LazyFieldStream lazily writes fieldName: on the first value write; nothing is written if no
 // value is written. When prependSeparator is true, a comma is emitted before the field name (for
 // fields that follow other already-written fields in the same JSON object).
+//
+// It forwards to inner explicitly rather than embedding Stream: a method that
+// reached inner without ensure would put the value's bytes at the enclosing
+// object's level, and embedding would grant exactly that to every method later
+// added to the interface.
 type LazyFieldStream struct {
-	Stream
+	inner            Stream
 	written          bool
 	openDepth        uint
 	field            string
@@ -30,7 +42,7 @@ type LazyFieldStream struct {
 // NewLazyFieldStream creates a LazyFieldStream wrapping s. On the first value write it emits
 // (optionally) a comma separator followed by fieldName: before forwarding the write.
 func NewLazyFieldStream(s Stream, field string, prependSeparator bool) *LazyFieldStream {
-	return &LazyFieldStream{Stream: s, field: field, prependSeparator: prependSeparator}
+	return &LazyFieldStream{inner: s, field: field, prependSeparator: prependSeparator}
 }
 
 // Written reports whether a value has been written to this field.
@@ -43,7 +55,7 @@ func (s *LazyFieldStream) ResetField() { s.written = false }
 // It is a no-op when nothing has been written.
 func (s *LazyFieldStream) CloseIfOpen() {
 	if s.written {
-		_ = s.Stream.ClosePending(s.openDepth)
+		_ = s.inner.ClosePending(s.openDepth)
 	}
 }
 
@@ -51,34 +63,53 @@ func (s *LazyFieldStream) ensure() {
 	if !s.written {
 		s.written = true
 		if s.prependSeparator {
-			s.Stream.WriteMore()
+			s.inner.WriteMore()
 		}
-		s.Stream.WriteObjectField(s.field)
-		s.openDepth = uint(s.Stream.Depth() - 1)
+		s.inner.WriteObjectField(s.field)
+		s.openDepth = uint(s.inner.Depth() - 1)
 	}
 }
 
-func (s *LazyFieldStream) WriteNil()                   { s.ensure(); s.Stream.WriteNil() }
-func (s *LazyFieldStream) WriteTrue()                  { s.ensure(); s.Stream.WriteTrue() }
-func (s *LazyFieldStream) WriteFalse()                 { s.ensure(); s.Stream.WriteFalse() }
-func (s *LazyFieldStream) WriteBool(v bool)            { s.ensure(); s.Stream.WriteBool(v) }
-func (s *LazyFieldStream) WriteInt(v int)              { s.ensure(); s.Stream.WriteInt(v) }
-func (s *LazyFieldStream) WriteInt8(v int8)            { s.ensure(); s.Stream.WriteInt8(v) }
-func (s *LazyFieldStream) WriteInt16(v int16)          { s.ensure(); s.Stream.WriteInt16(v) }
-func (s *LazyFieldStream) WriteInt32(v int32)          { s.ensure(); s.Stream.WriteInt32(v) }
-func (s *LazyFieldStream) WriteInt64(v int64)          { s.ensure(); s.Stream.WriteInt64(v) }
-func (s *LazyFieldStream) WriteUint(v uint)            { s.ensure(); s.Stream.WriteUint(v) }
-func (s *LazyFieldStream) WriteUint8(v uint8)          { s.ensure(); s.Stream.WriteUint8(v) }
-func (s *LazyFieldStream) WriteUint16(v uint16)        { s.ensure(); s.Stream.WriteUint16(v) }
-func (s *LazyFieldStream) WriteUint32(v uint32)        { s.ensure(); s.Stream.WriteUint32(v) }
-func (s *LazyFieldStream) WriteUint64(v uint64)        { s.ensure(); s.Stream.WriteUint64(v) }
-func (s *LazyFieldStream) WriteFloat32(v float32)      { s.ensure(); s.Stream.WriteFloat32(v) }
-func (s *LazyFieldStream) WriteFloat64(v float64)      { s.ensure(); s.Stream.WriteFloat64(v) }
-func (s *LazyFieldStream) WriteString(v string)        { s.ensure(); s.Stream.WriteString(v) }
-func (s *LazyFieldStream) WriteObjectStart()           { s.ensure(); s.Stream.WriteObjectStart() }
-func (s *LazyFieldStream) WriteArrayStart()            { s.ensure(); s.Stream.WriteArrayStart() }
-func (s *LazyFieldStream) WriteEmptyArray()            { s.ensure(); s.Stream.WriteEmptyArray() }
-func (s *LazyFieldStream) WriteEmptyObject()           { s.ensure(); s.Stream.WriteEmptyObject() }
-func (s *LazyFieldStream) Write(p []byte) (int, error) { s.ensure(); return s.Stream.Write(p) }
-func (s *LazyFieldStream) WriteRaw(v string)           { s.ensure(); s.Stream.WriteRaw(v) }
-func (s *LazyFieldStream) WriteRawBytes(v []byte)      { s.ensure(); s.Stream.WriteRawBytes(v) }
+func (s *LazyFieldStream) WriteNil()              { s.ensure(); s.inner.WriteNil() }
+func (s *LazyFieldStream) WriteTrue()             { s.ensure(); s.inner.WriteTrue() }
+func (s *LazyFieldStream) WriteFalse()            { s.ensure(); s.inner.WriteFalse() }
+func (s *LazyFieldStream) WriteBool(v bool)       { s.ensure(); s.inner.WriteBool(v) }
+func (s *LazyFieldStream) WriteInt(v int)         { s.ensure(); s.inner.WriteInt(v) }
+func (s *LazyFieldStream) WriteInt8(v int8)       { s.ensure(); s.inner.WriteInt8(v) }
+func (s *LazyFieldStream) WriteInt16(v int16)     { s.ensure(); s.inner.WriteInt16(v) }
+func (s *LazyFieldStream) WriteInt32(v int32)     { s.ensure(); s.inner.WriteInt32(v) }
+func (s *LazyFieldStream) WriteInt64(v int64)     { s.ensure(); s.inner.WriteInt64(v) }
+func (s *LazyFieldStream) WriteUint(v uint)       { s.ensure(); s.inner.WriteUint(v) }
+func (s *LazyFieldStream) WriteUint8(v uint8)     { s.ensure(); s.inner.WriteUint8(v) }
+func (s *LazyFieldStream) WriteUint16(v uint16)   { s.ensure(); s.inner.WriteUint16(v) }
+func (s *LazyFieldStream) WriteUint32(v uint32)   { s.ensure(); s.inner.WriteUint32(v) }
+func (s *LazyFieldStream) WriteUint64(v uint64)   { s.ensure(); s.inner.WriteUint64(v) }
+func (s *LazyFieldStream) WriteFloat32(v float32) { s.ensure(); s.inner.WriteFloat32(v) }
+func (s *LazyFieldStream) WriteFloat64(v float64) { s.ensure(); s.inner.WriteFloat64(v) }
+func (s *LazyFieldStream) WriteString(v string)   { s.ensure(); s.inner.WriteString(v) }
+func (s *LazyFieldStream) WriteRaw(v string)      { s.ensure(); s.inner.WriteRaw(v) }
+func (s *LazyFieldStream) WriteRawBytes(v []byte) { s.ensure(); s.inner.WriteRawBytes(v) }
+func (s *LazyFieldStream) WriteObjectStart()      { s.ensure(); s.inner.WriteObjectStart() }
+func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArrayStart() }
+func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
+func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
+
+// A separator and a field name carry no value bytes, so opening the field for
+// them would emit `"result":` with nothing to follow it. They belong to a
+// container a value write already opened.
+func (s *LazyFieldStream) WriteMore()                   { s.inner.WriteMore() }
+func (s *LazyFieldStream) WriteObjectField(name string) { s.inner.WriteObjectField(name) }
+
+// The ends close what a value opened, so the field is already there.
+func (s *LazyFieldStream) WriteObjectEnd() { s.inner.WriteObjectEnd() }
+func (s *LazyFieldStream) WriteArrayEnd()  { s.inner.WriteArrayEnd() }
+
+func (s *LazyFieldStream) Buffer() []byte                 { return s.inner.Buffer() }
+func (s *LazyFieldStream) Flush() error                   { return s.inner.Flush() }
+func (s *LazyFieldStream) ClosePending(target uint) error { return s.inner.ClosePending(target) }
+func (s *LazyFieldStream) Depth() int                     { return s.inner.Depth() }
+
+func (s *LazyFieldStream) Reset(out io.Writer) {
+	s.inner.Reset(out)
+	s.written = false
+}

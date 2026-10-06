@@ -42,7 +42,7 @@ func TestStateEvents(t *testing.T) {
 	events.ChangeActivationEligibilityEpoch(2, 5)
 	events.ChangeSlashed(2, true)
 	// Ok now lets replay it.
-	ReplayEvents(func(validatorIndex uint64, validator solid.Validator) error {
+	require.NoError(t, ReplayEvents(func(validatorIndex uint64, validator solid.Validator) error {
 		require.Equal(t, validator, solid.NewValidator())
 		return nil
 	}, func(validatorIndex, exitEpoch uint64) error {
@@ -83,5 +83,5 @@ func TestStateEvents(t *testing.T) {
 	}, func(validatorIndex uint64, slashed bool) error {
 		require.True(t, slashed)
 		return nil
-	}, events)
+	}, events))
 }

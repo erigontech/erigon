@@ -40,7 +40,8 @@ var (
 	chaindata                    string
 	databaseVerbosity            int
 	referenceChaindata           string
-	block, pruneTo, unwind       uint64
+	block, unwind                uint64
+	limit                        uint64
 	unwindEvery                  uint64
 	batchSizeStr                 string
 	domain                       string
@@ -109,13 +110,13 @@ func withBlock(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&block, "block", 0, "block test at this block")
 }
 
+func withLimit(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&limit, "limit", 0, "execute at most this many blocks past current progress, then stop (0 = unlimited, overridden by --block if --block is lower)")
+}
+
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
-func withPruneTo(cmd *cobra.Command) {
-	cmd.Flags().Uint64Var(&pruneTo, "prune.to", 0, "how much blocks unwind on each iteration")
-}
-
 func withUnwindEvery(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwindEvery, "unwind.every", 0, "each iteration test will move forward `--unwind.every` blocks, then unwind `--unwind` blocks")
 }
@@ -173,7 +174,8 @@ func withDataDir(cmd *cobra.Command) {
 }
 
 func withExperimentalCommitment(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Usage)
+	def := statecfg.ExperimentalParallelCommitment
+	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {

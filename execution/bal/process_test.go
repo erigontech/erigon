@@ -209,7 +209,7 @@ func TestBALBlock943Direct(t *testing.T) {
 		// EIP-2935: 1 storage change at accessIndex 0 (system call txIndex=-1)
 		{
 			Address: eip2935Addr,
-			StorageChanges: []*types.SlotChanges{
+			StorageChanges: []types.SlotChanges{
 				{
 					Slot:    slot2935,
 					Changes: []*types.StorageChange{{Index: 0, Value: *val2935}},
@@ -219,7 +219,7 @@ func TestBALBlock943Direct(t *testing.T) {
 		// EIP-4788: 2 storage changes at accessIndex 0 (system call txIndex=-1)
 		{
 			Address: eip4788Addr,
-			StorageChanges: []*types.SlotChanges{
+			StorageChanges: []types.SlotChanges{
 				{
 					Slot:    slot4788Timestamp,
 					Changes: []*types.StorageChange{{Index: 0, Value: *val4788Timestamp}},

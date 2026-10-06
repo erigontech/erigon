@@ -26,18 +26,19 @@ import (
 func transitionSlot(s abstract.BeaconState) error {
 	slot := s.Slot()
 	previousStateRoot := s.PreviousStateRoot()
-	var err error
-
 	if previousStateRoot == (common.Hash{}) {
-		previousStateRoot, err = s.HashSSZ()
+		root, err := s.HashSSZ()
 		if err != nil {
 			return err
 		}
+		previousStateRoot = root
 	}
 
 	beaconConfig := s.BeaconConfig()
 
-	s.SetStateRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousStateRoot)
+	if err := s.SetStateRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousStateRoot); err != nil {
+		return err
+	}
 
 	latestBlockHeader := s.LatestBlockHeader()
 	if latestBlockHeader.Root == [32]byte{} {
@@ -50,7 +51,9 @@ func transitionSlot(s abstract.BeaconState) error {
 	if err != nil {
 		return err
 	}
-	s.SetBlockRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousBlockRoot)
+	if err := s.SetBlockRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousBlockRoot); err != nil {
+		return err
+	}
 
 	if s.Version() >= clparams.GloasVersion {
 		// Unset the next payload availability

@@ -94,6 +94,7 @@ func (s *CodeStore) GetByHash(tx kv.Getter, codeHash []byte) ([]byte, bool) {
 
 // PutByHash records decompressed code in both tiers. The MDBX write needs an
 // RwTx, so this runs on the code write path (deploy/commit), not on reads.
+// The memory tier retains code without copying, so the caller must not reuse it.
 func (s *CodeStore) PutByHash(tx kv.RwTx, codeHash, code []byte) error {
 	if s == nil || len(codeHash) != 32 || len(code) == 0 {
 		return nil

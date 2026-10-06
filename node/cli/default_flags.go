@@ -46,6 +46,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.KeepExecutionProofsFlag,
 	&utils.CommitmentHistoryDistanceFlag,
 	&utils.FcuTimeoutFlag,
+	&utils.SlowBlockThresholdFlag,
 	&utils.FcuBackgroundPruneFlag,
 	&utils.ExecBatchedIOFlag,
 	&utils.ExecStateCacheFlag,
@@ -196,6 +197,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.DownloaderAddrFlag,
 	&utils.DisableIPV4,
 	&utils.DisableIPV6,
+	&utils.DisableTCP,
 	&utils.NoDownloaderFlag,
 	&utils.DownloaderVerifyFlag,
 	&utils.HealthCheckFlag,
@@ -247,6 +249,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinResumeMaxStalenessEpochsFlag,
 	&utils.CaplinEnableSnapshotGeneration,
 	&utils.CaplinMevRelayUrl,
+	&utils.CaplinAllowPrivateBuilderURLs,
 	&utils.CaplinValidatorMonitorFlag,
 	&utils.CaplinCustomConfigFlag,
 	&utils.CaplinCustomGenesisFlag,
@@ -267,8 +270,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.ShutterEnabledFlag,
 	&utils.ShutterP2pBootstrapNodesFlag,
 	&utils.ShutterP2pListenPortFlag,
-
-	&utils.WitProtocolFlag,
 
 	&utils.GDBMeFlag,
 

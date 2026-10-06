@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -82,11 +84,11 @@ func TestNormalize_SelfDestructDeletesVmAndDomainStorageSlots(t *testing.T) {
 	kDomain := accounts.InternKey(common.HexToHash("0x02")) // pre-block, in domain only
 	vm := NewVersionMap(nil)
 	vm.WriteStorage(addr, kVM, Version{TxIndex: 0}, *uint256.NewInt(9), true)
-	domainKeys := func(a accounts.Address) []accounts.StorageKey {
+	domainKeys := func(a accounts.Address) ([]accounts.StorageKey, error) {
 		if a == addr {
-			return []accounts.StorageKey{kDomain}
+			return []accounts.StorageKey{kDomain}, nil
 		}
-		return nil
+		return nil, nil
 	}
 
 	ws := &WriteSet{}
@@ -254,4 +256,88 @@ func TestAssertSelfDestructNormalized(t *testing.T) {
 		})
 		ws.assertSelfDestructNormalized()
 	}, "balance and storage deletes are legal on a self-destructed address")
+}
+
+// TestCommittedStorageKeys pins the account probe that guards the self-destruct
+// storage walk. A contract created and destroyed inside one batch never has a
+// committed account, which is what makes the probe worth its own read.
+func TestCommittedStorageKeys(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	slot := common.HexToHash("0x01")
+
+	putStorage := func(t *testing.T, addr accounts.Address) {
+		t.Helper()
+		av := addr.Value()
+		key := append(append([]byte{}, av[:]...), slot[:]...)
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, key, []byte{0x42}, 0, nil))
+	}
+
+	t.Run("walks when the account is committed", func(t *testing.T) {
+		addr := accounts.InternAddress(common.HexToAddress("0xaa"))
+		av := addr.Value()
+		acc := accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), 0, nil))
+		putStorage(t, addr)
+
+		keys, err := CommittedStorageKeys(domains, tx, addr)
+		require.NoError(t, err)
+		require.Equal(t, []accounts.StorageKey{accounts.InternKey(slot)}, keys)
+	})
+
+	t.Run("skips the walk without a committed account", func(t *testing.T) {
+		// Storage with no account is the state the guard treats as unreachable.
+		// Writing it is what makes the skip observable: a walk would return it.
+		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
+		dbg.AssertEnabled = false
+		addr := accounts.InternAddress(common.HexToAddress("0xbb"))
+		putStorage(t, addr)
+
+		keys, err := CommittedStorageKeys(domains, tx, addr)
+		require.NoError(t, err)
+		require.Empty(t, keys, "walked the storage prefix for an address with no committed account")
+	})
+
+	t.Run("skips silently when neither account nor storage is committed", func(t *testing.T) {
+		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
+		dbg.AssertEnabled = true
+		addr := accounts.InternAddress(common.HexToAddress("0xee"))
+
+		keys, err := CommittedStorageKeys(domains, tx, addr)
+		require.NoError(t, err)
+		require.Empty(t, keys)
+	})
+
+	t.Run("asserts on storage without an account", func(t *testing.T) {
+		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
+		dbg.AssertEnabled = true
+		addr := accounts.InternAddress(common.HexToAddress("0xcc"))
+		putStorage(t, addr)
+
+		require.Panics(t, func() { _, _ = CommittedStorageKeys(domains, tx, addr) },
+			"the skip rests on this invariant, so breaking it must not stay silent")
+	})
+}
+
+// A storage-key lookup failure must reach the caller as an error, not be
+// swallowed into an empty slot list that silently drops the self-destruct
+// cascade.
+func TestNormalizeReturnsStorageKeysError(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	want := errors.New("domain read failed")
+	vm := NewVersionMap(nil)
+
+	ws := &WriteSet{}
+	ws.SetSelfDestruct(addr, &VersionedWrite[bool]{
+		WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 1}},
+		Val:         true,
+	})
+	ws.SetBalance(addr, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Version: Version{TxIndex: 1}},
+		Val:         *uint256.NewInt(0),
+	})
+
+	_, err := ws.Normalize(vm, 1, 0, &minimalStateReader{}, func(accounts.Address) ([]accounts.StorageKey, error) {
+		return nil, want
+	}, false, false, false)
+	require.ErrorIs(t, err, want)
 }

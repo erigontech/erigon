@@ -88,6 +88,7 @@ var Defaults = Config{
 		ChaosMonkey:              false,
 		AlwaysGenerateChangesets: !dbg.BatchCommitments,
 		MaxReorgDepth:            dbg.MaxReorgDepth,
+		PersistReceiptsCacheV2:   true,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -313,6 +314,8 @@ type Sync struct {
 	ExperimentalParallelCommitment bool
 	PersistReceiptsCacheV2         bool
 	SnapshotDownloadToBlock        uint64 // exclusive [0,toBlock)
+
+	SlowBlockThreshold *time.Duration
 
 	// TargetBlock bounds the block-download driver: sync stops once the head
 	// reaches it. 0 = no bound.

@@ -302,6 +302,12 @@ func (s *Sentinel) getSubnetCoverageWithPeers() (coverage [attestationSubnetCoun
 	return coverage, subnetToPeers
 }
 
+func (s *Sentinel) closePeer(pid peer.ID) {
+	if err := s.p2p.Host().Network().ClosePeer(pid); err != nil {
+		log.Trace("[Sentinel] failed to close peer", "peer", pid, "err", err)
+	}
+}
+
 // pruneExcessPeers disconnects excess peers while ensuring no subnet becomes empty
 func (s *Sentinel) pruneExcessPeers() {
 	peerCount := len(s.p2p.Host().Network().Peers())
@@ -408,7 +414,7 @@ func (s *Sentinel) pruneExcessPeers() {
 		}
 
 		// Disconnect the peer
-		s.p2p.Host().Network().ClosePeer(info.pid)
+		s.closePeer(info.pid)
 		s.p2p.Host().Peerstore().RemovePeer(info.pid)
 		s.peers.RemovePeer(info.pid)
 		removed++
@@ -548,9 +554,23 @@ func (s *Sentinel) listenForPeers() {
 }
 
 func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
-	go func() {
-		peerId := conn.RemotePeer()
+	peerId := conn.RemotePeer()
+	go s.handleNewConnection(peerId, func() (bool, error) {
+		return s.handshaker.ValidatePeer(s.ctx, peerId)
+	})
+}
 
+// handleNewConnection admits or rejects a peer that has just connected, then runs its status
+// handshake. Reports whether the peer was kept.
+func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, error)) bool {
+	// ConnectWithPeer consults the ban list, but it only covers dials we initiate; a peer
+	// banned for repeated handshake failures reconnects and reaches here regardless.
+	if s.peers.BanStatus(peerId) {
+		s.closePeer(peerId)
+		return false
+	}
+
+	{
 		// Check if this peer helps any underserved subnets (< minimumPeersPerSubnet)
 		peerHelpsSubnets := false
 		if nodeVal, ok := s.pidToEnr.Load(peerId); ok {
@@ -572,36 +592,36 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 		if s.HasTooManyPeers() && !peerHelpsSubnets {
 			log.Trace("[Sentinel] Rejecting peer, at peer limit")
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
-			s.p2p.Host().Network().ClosePeer(peerId)
+			s.closePeer(peerId)
 			s.peers.RemovePeer(peerId)
-			return
+			return false
 		}
+	}
 
-		valid, err := s.handshaker.ValidatePeer(s.ctx, peerId)
-		if err != nil {
-			// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
-			// The peer may still work for gossip even if status exchange failed.
-			log.Trace("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
-		}
+	valid, err := validate()
+	if err != nil {
+		// Handshake transport error (stream reset, timeout, etc.) — keep the peer.
+		// The peer may still work for gossip even if status exchange failed.
+		log.Trace("[Sentinel] Handshake transport error (keeping connection)", "peer", peerId, "err", err)
+	}
 
-		if !valid && err == nil {
-			// Handshake succeeded but fork digest mismatched — peer is on a different fork.
-			// Must disconnect to avoid receiving incompatible blocks.
-			log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
-			s.p2p.Host().Peerstore().RemovePeer(peerId)
-			s.p2p.Host().Network().ClosePeer(peerId)
-			s.peers.RemovePeer(peerId)
-			return
-		}
+	if !valid && err == nil {
+		// Handshake succeeded but fork digest mismatched — peer is on a different fork.
+		// Must disconnect to avoid receiving incompatible blocks.
+		log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
+		s.p2p.Host().Peerstore().RemovePeer(peerId)
+		s.closePeer(peerId)
+		s.peers.RemovePeer(peerId)
+		return false
+	}
 
-		if !valid {
-			// Handshake had a transport error AND returned invalid — keep anyway.
-			s.peers.RecordHandshakeFailure(peerId)
-		} else {
-			// we were able to successfully connect, so add this peer to our pool
-			s.peers.AddPeer(peerId)
-
-			log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
-		}
-	}()
+	if !valid {
+		// Handshake had a transport error AND returned invalid — keep anyway.
+		s.peers.RecordHandshakeFailure(peerId)
+		return true
+	}
+	// we were able to successfully connect, so add this peer to our pool
+	s.peers.AddPeer(peerId)
+	log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
+	return true
 }

@@ -55,6 +55,19 @@ type BlockContext struct {
 	// L2Version is populated by the chain's engine/block-context construction
 	// for L2 chains; zero otherwise.
 	L2Version uint64
+
+	// FeePolicy is where this block's transaction fees go, as the rules engine
+	// resolved it.
+	FeePolicy FeePolicy
+}
+
+// FeePolicy says where a transaction's fees go, so a chain whose recipients
+// differ from the block beneficiary does not have to be special-cased at every
+// crediting site. A nil TipRecipient credits BlockContext.Coinbase; a nil
+// BlobFeeRecipient burns the blob fee.
+type FeePolicy struct {
+	TipRecipient     accounts.Address
+	BlobFeeRecipient accounts.Address
 }
 
 // TxContext provides the EVM with information about a transaction.

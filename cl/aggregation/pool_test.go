@@ -108,12 +108,11 @@ func (t *PoolTestSuite) TearDownTest() {
 
 func (t *PoolTestSuite) TestAddAttestationElectra() {
 	cBits1 := solid.NewBitVector(64)
-	cBits1.SetBitAt(10, true)
+	t.Require().NoError(cBits1.SetBitAt(10, true))
 	cBits2 := solid.NewBitVector(64)
-	cBits2.SetBitAt(10, true)
+	t.Require().NoError(cBits2.SetBitAt(10, true))
 	expectedCommitteeBits := solid.NewBitVector(64)
-	expectedCommitteeBits.SetBitAt(10, true)
-	expectedCommitteeBits.SetBitAt(10, true)
+	t.Require().NoError(expectedCommitteeBits.SetBitAt(10, true))
 	expected := &solid.Attestation{
 		AggregationBits: solid.BitlistFromBytes([]byte{0b00001101}, 2048*64),
 		Data:            attData1,
@@ -166,7 +165,7 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 			defer cancel()
 			pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
 			for i := range tc.atts {
-				pool.AddAttestation(tc.atts[i])
+				t.Require().NoError(pool.AddAttestation(tc.atts[i]))
 			}
 			att := pool.GetAggregatationByRootAndCommittee(tc.hashRoot, 10)
 			t.Equal(tc.expect, att, tc.name)
@@ -176,7 +175,7 @@ func (t *PoolTestSuite) TestAddAttestationElectra() {
 
 func (t *PoolTestSuite) TestMergedGloasAttestationUsesProgressiveHash() {
 	committeeBits := solid.NewBitVector(64)
-	committeeBits.SetBitAt(10, true)
+	t.Require().NoError(committeeBits.SetBitAt(10, true))
 	att1 := &solid.Attestation{
 		AggregationBits: solid.BitlistFromBytes([]byte{0b00001001}, 2048*64),
 		Data:            attData1,
@@ -204,7 +203,7 @@ func (t *PoolTestSuite) TestMergedGloasAttestationUsesProgressiveHash() {
 
 func (t *PoolTestSuite) TestFirstGloasAttestationIsCopiedAndVersioned() {
 	committeeBits := solid.NewBitVector(64)
-	committeeBits.SetBitAt(10, true)
+	t.Require().NoError(committeeBits.SetBitAt(10, true))
 	att := &solid.Attestation{
 		AggregationBits: solid.BitlistFromBytes([]byte{0b00001001}, 2048*64),
 		Data:            attData1,
@@ -235,7 +234,7 @@ func (t *PoolTestSuite) TestFirstGloasAttestationIsCopiedAndVersioned() {
 
 func (t *PoolTestSuite) TestElectraAggregationErrorIsReturned() {
 	committeeBits := solid.NewBitVector(64)
-	committeeBits.SetBitAt(10, true)
+	t.Require().NoError(committeeBits.SetBitAt(10, true))
 	att := &solid.Attestation{
 		AggregationBits: solid.BitlistFromBytes([]byte{0b00001001}, 2048*64),
 		Data:            attData1,
@@ -317,7 +316,10 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			defer cancel()
 			pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
 			for i := range tc.atts {
-				pool.AddAttestation(tc.atts[i])
+				// Subset attestations are rejected by design; anything else is a failure.
+				if err := pool.AddAttestation(tc.atts[i]); err != nil {
+					t.Require().ErrorIs(err, ErrIsSuperset)
+				}
 			}
 			att := pool.GetAggregatationByRoot(tc.hashRoot)
 			expected := tc.expect.Copy()

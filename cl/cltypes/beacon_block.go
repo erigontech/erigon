@@ -127,6 +127,10 @@ func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
 	return ssz2.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
 }
 
+func (b *SignedBeaconBlock) DecodeSSZStrict(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZStrict(buf, version, b.Block, b.Signature[:])
+}
+
 func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.Block, b.Signature[:])
 }
@@ -199,6 +203,10 @@ func (b *BeaconBlock) EncodingSizeSSZ() int {
 
 func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+}
+
+func (b *BeaconBlock) DecodeSSZStrict(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZStrict(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
 func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
@@ -516,6 +524,14 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 }
 
 func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
+	return b.decodeSSZ(buf, version, false)
+}
+
+func (b *BeaconBody) DecodeSSZStrict(buf []byte, version int) error {
+	return b.decodeSSZ(buf, version, true)
+}
+
+func (b *BeaconBody) decodeSSZ(buf []byte, version int, strict bool) error {
 	b.Version = clparams.StateVersion(version)
 	if b.Version >= clparams.GloasVersion {
 		b.resetGloasProgressiveLists()
@@ -538,7 +554,13 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 		}
 		b.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 	}
-	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...); err != nil {
+	var err error
+	if strict {
+		err = ssz2.UnmarshalSSZStrict(buf, version, b.getSchema(false)...)
+	} else {
+		err = ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
+	}
+	if err != nil {
 		return err
 	}
 
@@ -744,6 +766,10 @@ func (b *BeaconBody) KzgCommitmentsInclusionProof() ([][32]byte, error) {
 
 func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 	limits := beaconBodyLimitsForConfig(b.beaconCfg, b.Version)
+	ptcSize := clparams.MaxPtcSize
+	if b.beaconCfg != nil && b.beaconCfg.PtcSize > 0 {
+		ptcSize = b.beaconCfg.PtcSize
+	}
 
 	var tmp struct {
 		RandaoReveal       common.Bytes96                              `json:"randao_reveal"`
@@ -789,10 +815,6 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 				BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(b.beaconCfg), 48),
 			},
 		}
-		ptcSize := clparams.MaxPtcSize
-		if b.beaconCfg != nil && b.beaconCfg.PtcSize > 0 {
-			ptcSize = b.beaconCfg.PtcSize
-		}
 		tmp.PayloadAttestations = solid.NewStaticProgressiveListSSZ[*PayloadAttestation](maxPayloadAttestationsForConfig(b.beaconCfg), PayloadAttestationSSZSizeWithPtcSize(ptcSize))
 		tmp.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 	}
@@ -818,6 +840,9 @@ func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
 		if err := solid.RangeErr(tmp.PayloadAttestations, func(i int, attestation *PayloadAttestation, _ int) error {
 			if attestation == nil || attestation.AggregationBits == nil || attestation.Data == nil {
 				return fmt.Errorf("payload attestation %d is incomplete", i)
+			}
+			if err := attestation.AggregationBits.ValidateSize(int(ptcSize)); err != nil {
+				return fmt.Errorf("payload attestation %d aggregation bits: %w", i, err)
 			}
 			return nil
 		}); err != nil {
@@ -1050,10 +1075,6 @@ type DenebSignedBeaconBlock struct {
 	SignedBlock *SignedBeaconBlock        `json:"signed_block"`
 	KZGProofs   *solid.ListSSZ[*KZGProof] `json:"kzg_proofs"`
 	Blobs       *solid.ListSSZ[*Blob]     `json:"blobs"`
-	// SignedExecutionPayloadEnvelope is the validator-signed envelope for GLOAS self-build blocks.
-	// Present only on POST /eth/v2/beacon/blocks when the validator client submits a signed
-	// envelope alongside the signed block. [New in Gloas:EIP7732]
-	SignedExecutionPayloadEnvelope *SignedExecutionPayloadEnvelope `json:"signed_execution_payload_envelope,omitempty"`
 }
 
 func NewDenebSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig, version clparams.StateVersion) *DenebSignedBeaconBlock {

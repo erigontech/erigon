@@ -58,12 +58,12 @@ func requireVisibleEnd(t *testing.T, agg *Aggregator, end uint64) {
 // state visible past commitment's files = state no commitment covers
 func TestVisibleFilesAligned_LaggingCommitmentClampsEveryone(t *testing.T) {
 	t.Parallel()
-	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	requireVisibleEnd(t, agg, alignStepSize)
 }
@@ -71,7 +71,7 @@ func TestVisibleFilesAligned_LaggingCommitmentClampsEveryone(t *testing.T) {
 // domains visible past the log/trace indexes answer eth_getLogs from blocks no index saw
 func TestVisibleFilesAligned_LaggingStandaloneIdxClampsEveryone(t *testing.T) {
 	t.Parallel()
-	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
@@ -79,7 +79,7 @@ func TestVisibleFilesAligned_LaggingStandaloneIdxClampsEveryone(t *testing.T) {
 		generateStandaloneIIFile(t, name, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	}
 	generateStandaloneIIFile(t, kv.LogAddrIdx, agg.Dirs(), []testFileRange{{0, 1}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	requireVisibleEnd(t, agg, alignStepSize)
 }
@@ -87,11 +87,11 @@ func TestVisibleFilesAligned_LaggingStandaloneIdxClampsEveryone(t *testing.T) {
 // no files at all = nothing to be misaligned with, so the domains stay visible
 func TestVisibleFilesAligned_EntityWithoutFilesDoesNotClamp(t *testing.T) {
 	t.Parallel()
-	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	at := agg.BeginFilesRo()
 	defer at.Close()
@@ -104,13 +104,13 @@ func TestVisibleFilesAligned_EntityWithoutFilesDoesNotClamp(t *testing.T) {
 // doing it
 func TestUnalign_KeepsStateVisibleWhileReceiptsLag(t *testing.T) {
 	t.Parallel()
-	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateDomainFiles(t, "receipt", agg.Dirs(), []testFileRange{{0, 1}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	requireVisibleEnd(t, agg, alignStepSize)
 
@@ -129,12 +129,12 @@ func TestUnalign_KeepsStateVisibleWhileReceiptsLag(t *testing.T) {
 // rebuilt so far
 func TestUnalign_KeepsStateVisibleWhileCommitmentLags(t *testing.T) {
 	t.Parallel()
-	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	agg.DisableAllDependencies() // what the rebuild does about file ranges
 	realign := agg.Unalign(kv.CommitmentDomain)
@@ -168,13 +168,13 @@ func TestUnalign_RejectsStateDomain(t *testing.T) {
 // must panic, whichever entry point caused it.
 func TestVisibilityLowering_ForbiddenAggregatorPanicsOnLoweringOnly(t *testing.T) {
 	t.Parallel()
-	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateDomainFiles(t, "receipt", agg.Dirs(), []testFileRange{{0, 1}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	agg.ForbidVisibilityLowering()
 	realign := agg.Unalign(kv.ReceiptDomain) // raises the ceiling: allowed
@@ -213,7 +213,7 @@ func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	craftedClampedVisible(t, agg)
 
@@ -232,12 +232,12 @@ func TestDomainVisibleEnd_ClampedViewHasNoExactFrontier(t *testing.T) {
 // ceiling they can lower while every values end stays put.
 func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 	t.Parallel()
-	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+	db, agg := testDbAndAggregatorv3(t, alignStepSize)
 
 	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
 	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	craftedClampedVisible(t, agg)
 	agg.ForbidVisibilityLowering()

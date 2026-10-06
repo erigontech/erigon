@@ -182,7 +182,9 @@ func computePreviousAndCurrentTargetBalancePostAltair(s abstract.BeaconState, un
 		}
 	}
 
-	wp.Execute()
+	if err = wp.Execute(); err != nil {
+		return
+	}
 
 	for i := range numWorkers {
 		previousTargetBalance += previousTargetBalanceShards[i]

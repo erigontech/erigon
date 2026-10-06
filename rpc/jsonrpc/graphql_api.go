@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/types/ethutils"
@@ -46,6 +46,42 @@ type GraphQLCallResult struct {
 	Data    hexutil.Bytes
 	GasUsed uint64
 	Status  uint64
+}
+
+// GraphQLReceipt is a receipt with the transaction fields the GraphQL resolver reads.
+// Its Logs replaces the RPC logs with the receipt's own.
+type GraphQLReceipt struct {
+	*ethutils.RPCReceipt
+	Nonce                uint64           `json:"nonce"`
+	Value                *uint256.Int     `json:"value"`
+	Data                 []byte           `json:"data"`
+	Logs                 types.Logs       `json:"logs"`
+	Gas                  uint64           `json:"gas"`
+	MaxFeePerGas         *uint256.Int     `json:"maxFeePerGas,omitempty"`
+	MaxPriorityFeePerGas *uint256.Int     `json:"maxPriorityFeePerGas,omitempty"`
+	MaxFeePerBlobGas     *hexutil.U256    `json:"maxFeePerBlobGas,omitempty"`
+	AccessList           types.AccessList `json:"accessList"`
+}
+
+func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *GraphQLReceipt {
+	transaction := &GraphQLReceipt{
+		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true, false),
+		Nonce:      txn.GetNonce(),
+		Value:      txn.GetValue(),
+		Data:       txn.GetData(),
+		Logs:       receipt.Logs,
+		Gas:        txn.GetGasLimit(),
+		AccessList: txn.GetAccessList(),
+	}
+	txType := txn.Type()
+	if txType == types.DynamicFeeTxType || txType == types.SetCodeTxType || txType == types.BlobTxType {
+		transaction.MaxFeePerGas = txn.GetFeeCap()
+		transaction.MaxPriorityFeePerGas = txn.GetTipCap()
+	}
+	if blobTx, ok := txn.(*types.BlobTx); ok {
+		transaction.MaxFeePerBlobGas = (*hexutil.U256)(new(uint256.Int).Set(&blobTx.MaxFeePerBlobGas))
+	}
+	return transaction
 }
 
 type GraphQLAPI interface {
@@ -94,7 +130,7 @@ func (api *GraphQLAPIImpl) GetLatestBlockNumber(ctx context.Context) (uint64, er
 }
 
 func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.Hash) (uint64, bool, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, false, err
 	}
@@ -105,6 +141,9 @@ func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.
 }
 
 func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*uint256.Int, error) {
+	if cc, ok := api.tryChainConfig(); ok {
+		return cc.ChainID, nil
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -120,7 +159,7 @@ func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*uint256.Int, error)
 }
 
 func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -143,15 +182,19 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 }
 
 func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(hash, false)
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, blockHeight); err != nil {
 		return nil, err
 	}
 
@@ -171,7 +214,7 @@ func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash commo
 	return api.buildBlockDetailsResponse(ctx, tx, block, getBlockRes)
 }
 
-func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.TemporalTx, block *types.Block, getBlockRes map[string]any) (map[string]any, error) {
+func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.TemporalTx, block *types.Block, getBlockRes *ethapi.RPCBlock) (map[string]any, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -182,28 +225,10 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		return nil, err
 	}
 
-	result := make([]map[string]any, 0, len(receipts))
+	result := make([]*GraphQLReceipt, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-
-		transaction := ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false)
-		transaction["nonce"] = txn.GetNonce()
-		transaction["value"] = txn.GetValue()
-		transaction["data"] = txn.GetData()
-		transaction["logs"] = receipt.Logs
-		transaction["gas"] = txn.GetGasLimit()
-		txType := txn.Type()
-		if txType == types.DynamicFeeTxType || txType == types.SetCodeTxType || txType == types.BlobTxType {
-			transaction["maxFeePerGas"] = txn.GetFeeCap()
-			transaction["maxPriorityFeePerGas"] = txn.GetTipCap()
-		}
-		if txType == types.BlobTxType {
-			if blobTx, ok := txn.(*types.BlobTx); ok {
-				transaction["maxFeePerBlobGas"] = (*hexutil.Big)(blobTx.MaxFeePerBlobGas.ToBig())
-			}
-		}
-		transaction["accessList"] = txn.GetAccessList()
-		result = append(result, transaction)
+		result = append(result, NewGraphQLReceipt(receipt, txn, chainConfig, block.HeaderNoCopy()))
 	}
 
 	td, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())
@@ -211,38 +236,50 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		return nil, err
 	}
 	if td != nil {
-		getBlockRes["totalDifficulty"] = (*hexutil.Big)(td.ToBig())
+		getBlockRes.TotalDifficulty = (*hexutil.U256)(td)
 	} else {
-		getBlockRes["totalDifficulty"] = (*hexutil.Big)(new(big.Int))
+		getBlockRes.TotalDifficulty = new(hexutil.U256)
 	}
 
 	response := map[string]any{}
 	response["block"] = getBlockRes
 	response["receipts"] = result
 
-	wresult := make([]map[string]any, 0, len(block.Withdrawals()))
-	for _, withdrawal := range block.Withdrawals() {
-		wmap := make(map[string]any)
-		wmap["index"] = hexutil.Uint64(withdrawal.Index)
-		wmap["validator"] = hexutil.Uint64(withdrawal.Validator)
-		wmap["address"] = withdrawal.Address
-		wmap["amount"] = withdrawal.Amount
-
-		wresult = append(wresult, wmap)
-	}
-
-	response["withdrawals"] = wresult
+	response["withdrawals"] = marshalWithdrawals(block.Withdrawals())
 
 	return response, nil
 }
 
-func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
+// marshalWithdrawals renders withdrawals for the graphql_ block responses. The
+// three integers are hexutil.Uint64, so they encode as 0x-quantities.
+func marshalWithdrawals(withdrawals types.Withdrawals) []map[string]any {
+	out := make([]map[string]any, 0, len(withdrawals))
+	for _, withdrawal := range withdrawals {
+		out = append(out, map[string]any{
+			"index":     withdrawal.Index,
+			"validator": withdrawal.Validator,
+			"address":   withdrawal.Address,
+			"amount":    withdrawal.Amount,
+		})
+	}
+	return out
+}
+
+// getBlockWithSenders resolves and reads on the view tx exposes; the caller selects it
+// once and uses the same one for everything it derives from the block.
+func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.TemporalTx) (*types.Block, []common.Address, error) {
 	if number == rpc.PendingBlockNumber {
 		return api.pendingBlock(), nil, nil
 	}
 
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
 	if err != nil {
+		return nil, nil, err
+	}
+
+	// Gate here rather than in the caller: a pruned body reads back as nil, which
+	// the caller reports as "not found" before any gate downstream could fire.
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, blockHeight); err != nil {
 		return nil, nil, err
 	}
 
@@ -357,22 +394,18 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 	return hexutil.Encode(res.PaddedBytes(32)), nil
 }
 
-func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (map[string]any, error) {
-	additionalFields := make(map[string]any)
-	response, err := ethapi.RPCMarshalBlock(b, inclTx, inclTx, additionalFields)
+func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, inclTx bool) (*ethapi.RPCBlock, error) {
+	response := ethapi.RPCMarshalBlock(b, inclTx, inclTx)
 	if !inclTx {
-		delete(response, "transactions") // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
+		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
-	response["transactionCount"] = hexutil.Uint64(b.Transactions().Len())
+	response.TransactionCount = hexutil.Uint64(b.Transactions().Len())
 
-	if err == nil && number == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	if number == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
 
-	return response, err
+	return response, nil
 }
 
 func (api *GraphQLAPIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
@@ -381,21 +414,15 @@ func (api *GraphQLAPIImpl) SendRawTransaction(ctx context.Context, encodedTx hex
 
 func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error) {
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
 
-	roTx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
-	defer roTx.Rollback()
-
-	var tx kv.TemporalTx = roTx
-	if api.filters != nil {
-		if sd := api.filters.LatestSD(); sd != nil {
-			if overlayTx := sd.BlockOverlayTemporalTx(roTx); overlayTx != nil {
-				tx = overlayTx
-			}
-		}
-	}
+	defer tx.Rollback()
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
@@ -406,7 +433,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		args.Gas = (*hexutil.Uint64)(&api.gasCap)
 	}
 
-	header, _, err := api.headerByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +445,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, err
 	}
 
-	if err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
+	if err := rpchelper.CheckBlockExecuted(tx, header.Number.Uint64()); err != nil {
 		return nil, err
 	}
 

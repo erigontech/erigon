@@ -51,9 +51,9 @@ func blsChangeFixture(t *testing.T) (*state.CachingBeaconState, *cltypes.SignedB
 	creds[0] = byte(cfg.BLSWithdrawalPrefixByte)
 	copy(creds[1:], hashedFrom[1:])
 
-	s.AddValidator(solid.NewValidatorFromParameters(
+	require.NoError(t, s.AddValidator(solid.NewValidatorFromParameters(
 		from, creds, cfg.MaxEffectiveBalance, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch,
-	), cfg.MaxEffectiveBalance)
+	), cfg.MaxEffectiveBalance))
 
 	change := &cltypes.BLSToExecutionChange{ValidatorIndex: 0, From: from, To: common.Address{0xab}}
 	domain, err := fork.ComputeDomain(

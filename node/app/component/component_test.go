@@ -443,8 +443,9 @@ func TestLogger(t *testing.T) {
 	require.NotNil(t, c)
 	require.Equal(t, "root:provider", c.Id().String())
 
-	c.Activate(t.Context())
-	c.AwaitState(t.Context(), component.Active)
+	require.Nil(t, c.Activate(t.Context()))
+	_, err = c.AwaitState(t.Context(), component.Active)
+	require.Nil(t, err)
 
 	liblog.Root().SetHandler(
 		liblog.DiscardHandler())
@@ -457,9 +458,9 @@ func TestLogger(t *testing.T) {
 	require.NotNil(t, c)
 	require.Equal(t, "root:provider", c.Id().String())
 
-	c.Activate(t.Context())
-	c.AwaitState(t.Context(), component.Active)
-
+	require.Nil(t, c.Activate(t.Context()))
+	_, err = c.AwaitState(t.Context(), component.Active)
+	require.Nil(t, err)
 }
 
 type ctxprovider struct {
@@ -517,9 +518,9 @@ func TestContext(t *testing.T) {
 
 	c.Provider().c = c
 
-	c.Configure(t.Context())
+	require.Nil(t, c.Configure(t.Context()))
 
-	c.Activate(t.Context())
+	require.Nil(t, c.Activate(t.Context()))
 	state, err := c.AwaitState(t.Context(), component.Active)
 	require.Nil(t, err)
 	require.Equal(t, component.Active, state)
@@ -563,7 +564,7 @@ func TestFlags(t *testing.T) {
 	require.NotNil(t, c)
 	require.Len(t, c.Flags(), 2)
 	require.Equal(t, 0, callcount)
-	c.Configure(t.Context())
+	require.Nil(t, c.Configure(t.Context()))
 	require.Equal(t, 2, callcount)
 
 	callcount = 0
@@ -602,7 +603,7 @@ func TestFlags(t *testing.T) {
 	require.Equal(t, "root:c1", c1.Id().String())
 	require.Len(t, c1.Flags(), 3)
 	require.Equal(t, 0, callcount)
-	c1.Configure(t.Context())
+	require.Nil(t, c1.Configure(t.Context()))
 	require.Equal(t, 3, callcount)
 }
 
@@ -642,12 +643,12 @@ func TestEvents(t *testing.T) {
 	bus := c.EventBus("t")
 
 	testfn := c.Provider().test
-	bus.Register(
+	require.NoError(t, bus.Register(
 		&c,
 		func(s string) {
 			callch <- s
 		},
-		testfn)
+		testfn))
 
 	nocalls := bus.Post("test")
 	require.Equal(t, 2, nocalls)
@@ -667,12 +668,12 @@ func TestEvents(t *testing.T) {
 
 	bus = c.EventBus("tb")
 
-	bus.Register(c.Provider(),
+	require.NoError(t, bus.Register(c.Provider(),
 		func(s string) {
 			callch <- s
 		},
 		testfn,
-	)
+	))
 
 	nocalls = bus.Post("test-2")
 	require.Equal(t, 2, nocalls)
@@ -682,7 +683,7 @@ func TestEvents(t *testing.T) {
 	}
 	require.Equal(t, "test-2", c.Provider().s)
 
-	bus.Unregister(c.Provider(), testfn)
+	require.NoError(t, bus.Unregister(c.Provider(), testfn))
 
 	nocalls = bus.Post("test-3")
 	require.Equal(t, 1, nocalls)
@@ -690,13 +691,13 @@ func TestEvents(t *testing.T) {
 	require.Equal(t, "test-3", r)
 	require.Equal(t, "test-2", c.Provider().s)
 
-	bus.UnregisterAll(c.Provider())
+	require.NoError(t, bus.UnregisterAll(c.Provider()))
 	nocalls = bus.Post("test-4")
 	require.Equal(t, 0, nocalls)
 
 	bus = c.EventBus("tc")
 	h := &handler{callch}
-	bus.Register(h)
+	require.NoError(t, bus.Register(h))
 	nocalls = bus.Post("test-5")
 	require.Equal(t, 1, nocalls)
 	r = <-callch
@@ -892,7 +893,7 @@ func TestAddRemoveDeps(t *testing.T) {
 	require.NotNil(t, d2)
 	require.Equal(t, "root:d2", d2.Id().String())
 
-	c1.Configure(t.Context())
+	require.Nil(t, c1.Configure(t.Context()))
 	require.Equal(t, component.Configured, c1.State())
 
 	c1.AddDependency(d2)
@@ -911,7 +912,7 @@ func TestAddRemoveDeps(t *testing.T) {
 	require.NotNil(t, d2)
 	require.Equal(t, "root:d2", d2.Id().String())
 
-	c1.Initialize(t.Context())
+	require.Nil(t, c1.Initialize(t.Context()))
 	require.Equal(t, component.Initialised, c1.State())
 
 	c1.AddDependency(d2)
@@ -1013,7 +1014,9 @@ func TestFails(t *testing.T) {
 		}))
 	require.Nil(t, err)
 
-	c.AwaitState(t.Context(), component.Failed)
+	state, err := c.AwaitState(t.Context(), component.Failed)
+	require.Nil(t, err)
+	require.Equal(t, component.Failed, state)
 
 	c, err = component.NewComponent[errprovider](t.Context(),
 		component.WithProvider(&errprovider{component.Deactivating}))
@@ -1024,7 +1027,9 @@ func TestFails(t *testing.T) {
 	err = c.Activate(t.Context())
 	require.Nil(t, err)
 
-	c.AwaitState(t.Context(), component.Active)
+	state, err = c.AwaitState(t.Context(), component.Active)
+	require.Nil(t, err)
+	require.Equal(t, component.Active, state)
 
 	err = c.Deactivate(t.Context(), component.ActivityHandlerFunc[errprovider](
 		func(ctx context.Context, c component.Component[errprovider], state component.State, err error) {
@@ -1040,5 +1045,7 @@ func TestFails(t *testing.T) {
 		}))
 	require.Nil(t, err)
 
-	c.AwaitState(t.Context(), component.Failed)
+	state, err = c.AwaitState(t.Context(), component.Failed)
+	require.Nil(t, err)
+	require.Equal(t, component.Failed, state)
 }

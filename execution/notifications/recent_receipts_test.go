@@ -25,6 +25,24 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+type recordingChainEventNotifier struct {
+	logs []*LogNotification
+}
+
+func (n *recordingChainEventNotifier) OnNewHeader([][]byte) {}
+
+func (n *recordingChainEventNotifier) OnNewPendingLogs(types.Logs) {}
+
+func (n *recordingChainEventNotifier) OnLogs(logs []*LogNotification) {
+	n.logs = append(n.logs, logs...)
+}
+
+func (n *recordingChainEventNotifier) HasLogSubscriptions() bool { return true }
+
+func (n *recordingChainEventNotifier) OnReceipts([]*ReceiptNotification) {}
+
+func (n *recordingChainEventNotifier) HasReceiptSubscriptions() bool { return false }
+
 func TestRecentReceipts(t *testing.T) {
 	t.Parallel()
 	t.Run("Evict", func(t *testing.T) {
@@ -53,4 +71,18 @@ func TestRecentReceipts(t *testing.T) {
 		e.Add(types.Receipts{{BlockNumber: uint256.NewInt(11)}}, []types.Transaction{}, nil)
 		require.Len(t, e.receipts, 2)
 	})
+}
+
+func TestRecentReceiptsNotifyLogsIncludesBlockTimestamp(t *testing.T) {
+	recent := NewRecentReceipts(3)
+	recent.Add(types.Receipts{{
+		BlockNumber: uint256.NewInt(1),
+		Logs:        types.Logs{{}},
+	}}, nil, &types.Header{Time: 123})
+	notifier := &recordingChainEventNotifier{}
+
+	recent.NotifyLogs(notifier, 1, 2, false)
+
+	require.Len(t, notifier.logs, 1)
+	require.Equal(t, uint64(123), notifier.logs[0].BlockTimestamp)
 }

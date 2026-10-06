@@ -303,7 +303,11 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	defer dir.RemoveAll(tmpDir)
+	defer func() {
+		if err := dir.RemoveAll(tmpDir); err != nil {
+			log.Warn("failed to remove temp dir", "dir", tmpDir, "err", err)
+		}
+	}()
 	db := temporaltest.NewTestDB(nil, datadir.New(tmpDir))
 	defer db.Close()
 
@@ -313,7 +317,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	}
 	defer tx.Rollback()
 
-	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	sd, err := newT8nSharedDomains(context.Background(), db, tx)
 	if err != nil {
 		return err
 	}
@@ -366,7 +370,9 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	collector := make(Alloc)
 
 	dumper := state.NewDumper(tx, rawdbv3.TxNums, blockNum)
-	dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0)
+	if _, err := dumper.DumpToCollector(context.Background(), collector, false, false, common.Address{}, 0); err != nil {
+		return err
+	}
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
 
@@ -662,4 +668,13 @@ func CalculateStateRoot(sd *execctx.SharedDomains, tx kv.TemporalRwTx, blockNum 
 	hashRoot.SetBytes(root)
 
 	return &hashRoot, nil
+}
+
+func newT8nSharedDomains(ctx context.Context, db kv.TemporalRwDB, tx kv.TemporalTx) (*execctx.SharedDomains, error) {
+	sd, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	sd.EnableParaTrieDB(db)
+	return sd, nil
 }

@@ -18,6 +18,7 @@ package commitment
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"sync"
@@ -352,8 +353,8 @@ func ContractHashFromPrefix(prefix []byte) (hash [32]byte, ok bool) {
 		return hash, false
 	}
 	if prefix[0]&0x10 != 0 { // odd: first nibble is the low nibble of byte 0
-		for i := range 32 {
-			hash[i] = prefix[i]&0x0f<<4 | prefix[i+1]>>4
+		for i := 0; i < 32; i += 8 {
+			binary.BigEndian.PutUint64(hash[i:], binary.BigEndian.Uint64(prefix[i:])<<4|uint64(prefix[i+8]>>4))
 		}
 		return hash, true
 	}

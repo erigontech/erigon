@@ -188,7 +188,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			}
 		} else {
 			for _, w := range withdrawals {
-				amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(common.GWei))
+				amountInWei := new(uint256.Int).Mul(uint256.NewInt(uint64(w.Amount)), uint256.NewInt(common.GWei))
 				if err := state.AddBalance(accounts.InternAddress(w.Address), *amountInWei, tracing.BalanceIncreaseWithdrawal); err != nil {
 					return nil, fmt.Errorf("crediting withdrawal %d to %x: %w", w.Index, w.Address, err)
 				}
@@ -313,6 +313,14 @@ func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime u
 
 func (c *Merge) TxDependencies(h *types.Header) [][]int {
 	return nil
+}
+
+func (s *Merge) IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error) {
+	return s.eth1Engine.IsSystemTransaction(tx, header)
+}
+
+func (s *Merge) ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error {
+	return s.eth1Engine.ApplySystemTx(tx, ibs, header)
 }
 
 // verifyHeader checks whether a Proof-of-Stake header conforms to the consensus rules of the
@@ -451,7 +459,9 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		}
 		if parent.Time < *config.BalancerTime { // first Balancer HF block
 			for address, rewrittenCode := range config.BalancerRewriteBytecode {
-				state.SetCode(accounts.InternAddress(address), rewrittenCode, tracing.CodeChangeUnspecified)
+				if err := state.SetCode(accounts.InternAddress(address), rewrittenCode, tracing.CodeChangeUnspecified); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -462,6 +472,7 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 		var vmContext *tracing.VMContext
 		if tracer != nil {
 			random := header.MixDigest
+			execCtx := evmtypes.BlockContext{BlockNumber: header.Number.Uint64(), Time: header.Time}
 			// GasPrice is intentionally zero — system calls have no gas price.
 			vmContext = &tracing.VMContext{
 				Coinbase:        accounts.InternAddress(header.Coinbase),
@@ -470,6 +481,7 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 				Random:          &random,
 				ChainConfig:     config,
 				IntraBlockState: state,
+				Rules:           execCtx.Rules(config),
 			}
 		}
 		misc.ApplyBeaconRootEip4788(header.ParentBeaconBlockRoot, func(addr accounts.Address, data []byte) ([]byte, error) {
@@ -486,6 +498,10 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 
 func (s *Merge) APIs(chain rules.ChainHeaderReader) []rpc.API {
 	return s.eth1Engine.APIs(chain)
+}
+
+func (s *Merge) FeePolicy(header *types.Header) evmtypes.FeePolicy {
+	return s.eth1Engine.FeePolicy(header)
 }
 
 func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {

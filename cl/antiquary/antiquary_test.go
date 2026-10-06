@@ -63,10 +63,10 @@ func newTestCompressor(buf *bytes.Buffer) *zstd.Encoder {
 func collectAll(t *testing.T, c *etl.Collector) map[string][]byte {
 	t.Helper()
 	result := make(map[string][]byte)
-	c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error { //nolint:gocritic
+	require.NoError(t, c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error { //nolint:gocritic
 		result[string(k)] = bytes.Clone(v)
 		return next(nil, nil, nil)
-	}, etl.TransformArgs{})
+	}, etl.TransformArgs{}))
 	return result
 }
 
@@ -428,8 +428,10 @@ func TestNotifyBlobBackfilled(t *testing.T) {
 	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.Dirs{}, nil, nil, nil, nil, nil, nil, log.New(), true, true, true, false, nil)
 
 	require.False(t, a.blobBackfilled.Load())
-	a.NotifyBlobBackfilled()
+	a.NotifyBlobBackfilled(true)
 	require.True(t, a.blobBackfilled.Load())
+	a.NotifyBlobBackfilled(false)
+	require.False(t, a.blobBackfilled.Load())
 }
 
 func TestBeaconStatesCollector_CollectStateRoot(t *testing.T) {
@@ -801,4 +803,64 @@ func TestRetirementLoopReturnsOnContextCancellation(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("retirementLoop did not return after context cancellation")
 	}
+}
+
+func staticSnapshotHeaderReader(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
+	return &cltypes.SignedBeaconBlockHeader{
+		Header: &cltypes.BeaconBlockHeader{
+			Slot:       slot,
+			Root:       common.Hash{byte(slot % 251)},
+			ParentRoot: common.Hash{byte((slot + 1) % 251)},
+		},
+	}, slot + 1, common.Hash{byte((slot + 2) % 251)}, nil
+}
+
+// BlocksAvailable is the inclusive last readable slot and ReadBeaconBlockBodyBySlot serves that slot
+// from the snapshot path, but indexBeaconSnapshots takes an exclusive bound. Handing it the
+// inclusive tip leaves that slot unindexed while the cursor records it as done, so a reader that
+// resolves roots through the canonical index sees a block with no root there for as long as the tip
+// stays put.
+func TestRebuildBeaconSnapshotIndexIndexesTheVisibleTip(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	const tip = uint64(antiquaryIndexBatchSlots + 3)
+
+	_, err := rebuildBeaconSnapshotIndex(ctx, db, func() uint64 { return tip },
+		staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, tip)
+		require.NoError(t, err)
+		require.NotEqual(t, common.Hash{}, root, "the visible snapshot tip was left unindexed")
+
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, tip+1, progress, "the cursor must be the first slot not yet indexed")
+		return nil
+	}))
+}
+
+// Re-running against an unchanged tip must be a no-op rather than treating a cursor of tip+1 as
+// progress that ran ahead of the snapshots.
+func TestRebuildBeaconSnapshotIndexIsIdempotentAtAStaticTip(t *testing.T) {
+	baseDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	const tip = uint64(4)
+	tipFn := func() uint64 { return tip }
+
+	_, err := rebuildBeaconSnapshotIndex(ctx, baseDB, tipFn, staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+
+	db := &countingRwDB{RwDB: baseDB}
+	_, err = rebuildBeaconSnapshotIndex(ctx, db, tipFn, staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+	require.Zero(t, db.commits, "a static tip must not be re-indexed")
+
+	require.NoError(t, baseDB.View(ctx, func(tx kv.Tx) error {
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, tip+1, progress)
+		return nil
+	}))
 }

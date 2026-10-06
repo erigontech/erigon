@@ -84,7 +84,7 @@ func seedableSegmentFiles(dir string, chainName string, skipSeedableCheck bool) 
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
 		// A bit hacky but whatever... basically caplin is incompatible with enums.
-		if strings.HasSuffix(fPath, path.Join("caplin", name)) {
+		if strings.HasSuffix(filepath.ToSlash(fPath), path.Join("caplin", name)) {
 			res = append(res, path.Join("caplin", name))
 			continue
 		}
@@ -132,7 +132,7 @@ func seedableStateFilesBySubDir(dir, subDir string, skipSeedableCheck bool) ([]s
 		if !skipSeedableCheck && !snaptype.IsStateFileSeedable(name) {
 			continue
 		}
-		res = append(res, filepath.Join(subDir, name))
+		res = append(res, path.Join(subDir, name)) // torrent names are slash-separated
 	}
 	return res, nil
 }
@@ -151,7 +151,7 @@ func ensureCantLeaveDir(fName, root string) (string, error) {
 	if !filepath.IsLocal(fName) {
 		return fName, fmt.Errorf("relative paths are not allowed: %s", fName)
 	}
-	return fName, nil
+	return filepath.ToSlash(fName), nil // torrent names are slash-separated
 }
 
 func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *AtomicTorrentFS) (ok bool, err error) {
@@ -180,7 +180,6 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *A
 	if err := info.BuildFromFilePath(fPath); err != nil {
 		return false, fmt.Errorf("createTorrentFileFromSegment: %w", err)
 	}
-	// Really need to check this is "slash"-style. I suspect it will do the wrong thing on Windows.
 	info.Name = fName
 
 	return torrentFiles.CreateWithMetaInfo(info, nil)
@@ -378,11 +377,7 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err != nil {
-			f.Close()
-		}
-	}()
+	defer f.Close()
 
 	hasher := sha1.New()
 	for i := 0; i < info.NumPieces(); i++ {

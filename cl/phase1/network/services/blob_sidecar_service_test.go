@@ -69,14 +69,12 @@ func getObjectsForBlobSidecarServiceTests(t *testing.T) (*state.CachingBeaconSta
 
 func setupBlobSidecarService(t *testing.T, ctrl *gomock.Controller, test bool) (BlobSidecarsService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
 	ctx := context.Background()
-	ctx2, cn := context.WithTimeout(ctx, 1)
-	cn()
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitters := beaconevents.NewEventEmitter()
-	blockService := NewBlobSidecarService(ctx2, cfg, forkchoiceMock, syncedDataManager, ethClock, emitters, test)
+	blockService := NewBlobSidecarService(ctx, cfg, forkchoiceMock, syncedDataManager, ethClock, emitters, test)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }
 
@@ -102,7 +100,7 @@ func TestBlobServiceInvalidIndex(t *testing.T) {
 
 	blobService, syncedData, _, _ := setupBlobSidecarService(t, ctrl, true)
 	stateObj, _, _ := getObjectsForBlobSidecarServiceTests(t)
-	syncedData.OnHeadState(stateObj)
+	require.NoError(t, syncedData.OnHeadState(stateObj))
 
 	ctx := t.Context()
 	require.Error(t, blobService.ProcessMessage(ctx, nil, &cltypes.BlobSidecar{
@@ -116,7 +114,7 @@ func TestBlobServiceInvalidSubnet(t *testing.T) {
 
 	blobService, syncedData, _, _ := setupBlobSidecarService(t, ctrl, true)
 	stateObj, _, _ := getObjectsForBlobSidecarServiceTests(t)
-	syncedData.OnHeadState(stateObj)
+	require.NoError(t, syncedData.OnHeadState(stateObj))
 	sn := uint64(99999)
 
 	ctx := t.Context()
@@ -131,7 +129,7 @@ func TestBlobServiceBadTimings(t *testing.T) {
 
 	blobService, syncedData, ethClock, _ := setupBlobSidecarService(t, ctrl, false)
 	stateObj, _, blobSidecar := getObjectsForBlobSidecarServiceTests(t)
-	syncedData.OnHeadState(stateObj)
+	require.NoError(t, syncedData.OnHeadState(stateObj))
 	sn := uint64(0)
 
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
@@ -147,7 +145,7 @@ func TestBlobServiceAlreadyHave(t *testing.T) {
 
 	blobService, syncedData, ethClock, fcu := setupBlobSidecarService(t, ctrl, false)
 	stateObj, _, blobSidecar := getObjectsForBlobSidecarServiceTests(t)
-	syncedData.OnHeadState(stateObj)
+	require.NoError(t, syncedData.OnHeadState(stateObj))
 	sn := uint64(0)
 	sidecarRoot, err := blobSidecar.SignedBlockHeader.Header.HashSSZ()
 	require.NoError(t, err)
@@ -167,7 +165,7 @@ func TestBlobServiceDontHaveParentRoot(t *testing.T) {
 
 	blobService, syncedData, ethClock, _ := setupBlobSidecarService(t, ctrl, false)
 	stateObj, _, blobSidecar := getObjectsForBlobSidecarServiceTests(t)
-	syncedData.OnHeadState(stateObj)
+	require.NoError(t, syncedData.OnHeadState(stateObj))
 	sn := uint64(0)
 
 	// fcu.Headers[blobSidecar.SignedBlockHeader.Header.ParentRoot] = blobSidecar.SignedBlockHeader.Header.Copy()
@@ -185,7 +183,7 @@ func TestBlobServiceInvalidSidecarSlot(t *testing.T) {
 
 	blobService, syncedData, ethClock, fcu := setupBlobSidecarService(t, ctrl, false)
 	stateObj, _, blobSidecar := getObjectsForBlobSidecarServiceTests(t)
-	syncedData.OnHeadState(stateObj)
+	require.NoError(t, syncedData.OnHeadState(stateObj))
 	sn := uint64(0)
 
 	fcu.Headers[blobSidecar.SignedBlockHeader.Header.ParentRoot] = blobSidecar.SignedBlockHeader.Header.Copy()
@@ -203,7 +201,7 @@ func TestBlobServiceSuccess(t *testing.T) {
 
 	blobService, syncedData, ethClock, fcu := setupBlobSidecarService(t, ctrl, true)
 	stateObj, _, blobSidecar := getObjectsForBlobSidecarServiceTests(t)
-	syncedData.OnHeadState(stateObj)
+	require.NoError(t, syncedData.OnHeadState(stateObj))
 	sn := uint64(0)
 
 	fcu.Headers[blobSidecar.SignedBlockHeader.Header.ParentRoot] = blobSidecar.SignedBlockHeader.Header.Copy()
