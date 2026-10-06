@@ -500,8 +500,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		finalisedBlockNum = *bn
 	}
 	belowFinality := fcuHeader.Number.Uint64() < finalisedBlockNum
-	sameExecutedHead := fcuHeader.Number.Uint64() == finishProgressBefore
-	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash && (belowFinality || sameExecutedHead) {
+	sameExecutedBlockNum := fcuHeader.Number.Uint64() == finishProgressBefore
+	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash && (belowFinality || sameExecutedBlockNum) {
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
