@@ -1042,9 +1042,9 @@ func TestValidateRead_StaleCodeReadOfDestroyedAccountMustInvalidate(t *testing.T
 	addr := getAddress(151)
 	io := NewVersionedIO(4)
 	rs := ReadSet{}
-	rs.SetCode(addr, VersionedRead[[]byte]{
+	rs.SetCode(addr, VersionedRead[accounts.Code]{
 		ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
-		Val:        []byte{0x60, 0x00},
+		Val:        accounts.NewCode([]byte{0x60, 0x00}),
 	})
 	io.RecordReads(Version{TxIndex: 3, Incarnation: 0}, rs)
 	vm := NewVersionMap(nil)
@@ -1081,7 +1081,7 @@ func TestValidateRead_CodeReadMustSeeLaterSD(t *testing.T) {
 	newIO := func(readVer Version) *VersionedIO {
 		io := NewVersionedIO(6)
 		rs := ReadSet{}
-		rs.SetCode(addr, VersionedRead[[]byte]{ReadHeader: ReadHeader{Source: MapRead, Version: readVer}, Val: code})
+		rs.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: ReadHeader{Source: MapRead, Version: readVer}, Val: accounts.NewCode(code)})
 		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
 		return io
 	}
@@ -1255,7 +1255,7 @@ func TestValidateRead_FieldReadsOfPreservedAccountCrossValidate(t *testing.T) {
 		rs.SetNonce(addr, VersionedRead[uint64]{
 			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
 		})
-		rs.SetCode(addr, VersionedRead[[]byte]{
+		rs.SetCode(addr, VersionedRead[accounts.Code]{
 			ReadHeader: ReadHeader{Source: StorageRead, Version: UnknownVersion},
 		})
 		io.RecordReads(Version{TxIndex: 1}, rs)
@@ -1892,7 +1892,7 @@ func TestValidateRead_CodeReadRevivedWithoutCode(t *testing.T) {
 	newIO := func(hdr ReadHeader, readVal []byte) *VersionedIO {
 		io := NewVersionedIO(6)
 		rs := ReadSet{}
-		rs.SetCode(addr, VersionedRead[[]byte]{ReadHeader: hdr, Val: readVal})
+		rs.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr, Val: accounts.NewCode(readVal)})
 		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
 		return io
 	}
