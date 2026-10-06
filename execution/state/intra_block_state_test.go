@@ -1249,7 +1249,8 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	ibs.SetVersion(3)
 	ibs.eip8246, ibs.eip161, ibs.isAura = true, true, true
 
-	require.True(t, ibs.resetForPool())
+	require.True(t, ibs.poolable())
+	ibs.resetForReuse()
 	require.Nil(t, ibs.stateReader)
 	require.Zero(t, ibs.blockNum)
 	require.Zero(t, ibs.version)
@@ -1275,27 +1276,27 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 	for i := range maxPooledEntries + 1 {
 		require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 	}
-	require.False(t, ibs.resetForPool())
+	require.False(t, ibs.poolable())
 
 	reads := New(NewNoopReader())
 	for i := range maxPooledEntries + 1 {
 		reads.versionedReads.SetCodeSize(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), VersionedRead[int]{})
 	}
-	require.False(t, reads.resetForPool(), "any read-set map counts toward the bound")
+	require.False(t, reads.poolable(), "any read-set map counts toward the bound")
 
 	warm := New(NewNoopReader())
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	for i := range maxPooledEntries + 1 {
 		warm.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))))
 	}
-	require.False(t, warm.resetForPool(), "access-list slots count toward the bound")
+	require.False(t, warm.poolable(), "access-list slots count toward the bound")
 
 	absent := New(NewNoopReader())
 	for i := range maxPooledEntries + 1 {
 		_, err := absent.GetBalance(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1)))))
 		require.NoError(t, err)
 	}
-	require.False(t, absent.resetForPool(), "absent-account memos count toward the bound")
+	require.False(t, absent.poolable(), "absent-account memos count toward the bound")
 }
 
 func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
@@ -1337,7 +1338,7 @@ func TestResetForPoolDropsARevertedWarmUp(t *testing.T) {
 	}
 	ibs.RevertToSnapshot(snap, nil)
 	require.Zero(t, ibs.accessList.liveEntries(), "the revert leaves nothing live")
-	require.False(t, ibs.resetForPool(), "the grown slot maps are still retained")
+	require.False(t, ibs.poolable(), "the grown slot maps are still retained")
 }
 
 func big2(i int) *big.Int { return big.NewInt(int64(i)) }
@@ -1350,5 +1351,5 @@ func TestResetForPoolDropsAStateWithTooManySlots(t *testing.T) {
 	for i := range maxPooledEntries + 1 {
 		ibs.versionedReads.SetStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))), VersionedRead[uint256.Int]{})
 	}
-	require.False(t, ibs.resetForPool(), "one address with that many slots must not be pooled")
+	require.False(t, ibs.poolable(), "one address with that many slots must not be pooled")
 }
