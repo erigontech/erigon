@@ -104,6 +104,9 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	if cached, ok := g.cache.Get(blockHash); ok {
 		return cached, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if beforeReplay != nil {
 		if err := beforeReplay(); err != nil {
 			return nil, err
