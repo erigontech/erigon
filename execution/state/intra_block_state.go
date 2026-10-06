@@ -219,8 +219,9 @@ type IntraBlockState struct {
 	// SelfDestruct cells. Left false for genesis/RPC/serial, which still commit
 	// via FinalizeTx→so.data.
 	noMaterialize bool
-	// pooledReads marks a read set drawn from rpcReadSetPool; Close returns it.
-	pooledReads bool
+	// singleCall marks a pooled IntraBlockState: it serves one call, and
+	// nobody validates its reads.
+	singleCall bool
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -274,10 +275,11 @@ var ibsPool sync.Pool
 func NewPooled(stateReader StateReader) *IntraBlockState {
 	ibs, ok := ibsPool.Get().(*IntraBlockState)
 	if !ok {
-		return New(stateReader)
+		ibs = New(stateReader)
 	}
 	ibs.stateReader = stateReader
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+	ibs.singleCall = true
 	return ibs
 }
 
@@ -290,13 +292,18 @@ const (
 
 // ReleasePooled resets ibs and hands it to the next NewPooled.
 func ReleasePooled(ibs *IntraBlockState) {
-	tooBig := len(ibs.stateObjects) > maxPooledStateObjects || cap(ibs.journal.entries) > maxPooledJournal
-	ibs.releasePooledReads()
+	reads := ibs.versionedReads
+	tooBig := len(ibs.stateObjects) > maxPooledStateObjects || cap(ibs.journal.entries) > maxPooledJournal ||
+		len(reads.address) > maxPooledStateObjects || len(reads.storage) > maxPooledStateObjects
 	ibs.Reset()
 	if tooBig {
 		ibs.Close()
 		return
 	}
+	// A single call never hands its read set out, so the maps keep their
+	// capacity instead of the empty set Reset installs.
+	reads.clearForReuse()
+	ibs.versionedReads = reads
 	ibs.revisions.reset()
 	ibs.stateObjectArena.reset()
 	// Reset only bumps the probe epoch; a pooled ibs would collect every
@@ -424,26 +431,6 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
-// SetPooledReads draws the read set from a pool, for a single call whose reads
-// nobody validates; Close returns it.
-func (ibs *IntraBlockState) SetPooledReads() {
-	ibs.versionedReads = *rpcReadSetPool.Get().(*ReadSet)
-	ibs.pooledReads = true
-}
-
-func (ibs *IntraBlockState) releasePooledReads() {
-	if !ibs.pooledReads {
-		return
-	}
-	rs := ibs.versionedReads
-	ibs.versionedReads, ibs.pooledReads = ReadSet{}, false
-	if len(rs.address) > maxPooledStateObjects || len(rs.storage) > maxPooledStateObjects {
-		return
-	}
-	rs.clearForReuse()
-	rpcReadSetPool.Put(&rs)
-}
-
 // Release Deprecated use Close
 func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
 
@@ -459,7 +446,6 @@ func (ibs *IntraBlockState) Close() {
 	stateObjects, journal := ibs.stateObjects, ibs.journal
 	ibs.stateObjects, ibs.journal = nil, nil
 	ibs.lastObj = nil
-	ibs.releasePooledReads()
 	ibs.stateObjectArena.release()
 	ibs.logs.release()
 	ibs.revisions.reset()
@@ -2478,7 +2464,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// access list), promote it: without a real read the unchanged balance write has no
 	// baseline and would emit a spurious net-zero balance change.
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap != nil && !ibs.pooledReads {
+	if ibs.versionMap != nil && !ibs.singleCall {
 		if vr, seen := ibs.versionedReads.GetBalance(addr); !seen {
 			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, newObj.Balance()})
 		} else if vr.internal {

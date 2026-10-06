@@ -135,10 +135,6 @@ type ReadSet struct {
 	access AccessSet
 }
 
-// rpcReadSetPool keeps read sets of single-call IntraBlockStates, which never
-// hand them to a validator, so their maps keep their capacity across calls.
-var rpcReadSetPool = sync.Pool{New: func() any { return new(ReadSet) }}
-
 func (s *ReadSet) clearForReuse() {
 	clear(s.address)
 	clear(s.balance)
