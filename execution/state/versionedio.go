@@ -718,54 +718,63 @@ func (ws *WriteSet) newVWAddress() *VersionedWrite[*accounts.Account] {
 	}
 	return getVWAddress()
 }
+
 func (ws *WriteSet) newVWBalance() *VersionedWrite[uint256.Int] {
 	if ws.cells.on {
 		return ws.cells.balance.alloc()
 	}
 	return getVWBalance()
 }
+
 func (ws *WriteSet) newVWNonce() *VersionedWrite[uint64] {
 	if ws.cells.on {
 		return ws.cells.nonce.alloc()
 	}
 	return getVWNonce()
 }
+
 func (ws *WriteSet) newVWIncarnation() *VersionedWrite[uint64] {
 	if ws.cells.on {
 		return ws.cells.incarnation.alloc()
 	}
 	return getVWIncarnation()
 }
+
 func (ws *WriteSet) newVWSelfDestruct() *VersionedWrite[bool] {
 	if ws.cells.on {
 		return ws.cells.selfDestruct.alloc()
 	}
 	return getVWSelfDestruct()
 }
+
 func (ws *WriteSet) newVWCreateContract() *VersionedWrite[bool] {
 	if ws.cells.on {
 		return ws.cells.createContract.alloc()
 	}
 	return getVWCreateContract()
 }
+
 func (ws *WriteSet) newVWCode() *VersionedWrite[accounts.Code] {
 	if ws.cells.on {
 		return ws.cells.code.alloc()
 	}
 	return getVWCode()
 }
+
 func (ws *WriteSet) newVWCodeHash() *VersionedWrite[accounts.CodeHash] {
 	if ws.cells.on {
 		return ws.cells.codeHash.alloc()
 	}
 	return getVWCodeHash()
 }
+
 func (ws *WriteSet) newVWCodeSize() *VersionedWrite[int] {
 	if ws.cells.on {
 		return ws.cells.codeSize.alloc()
 	}
 	return getVWCodeSize()
 }
+
 func (ws *WriteSet) newVWStorage() *VersionedWrite[uint256.Int] {
 	if ws.cells.on {
 		return ws.cells.storage.alloc()
@@ -1651,21 +1660,27 @@ func delCell[T any](ws *WriteSet, m map[accounts.Address]*VersionedWrite[T], add
 func (ws *WriteSet) DelBalance(addr accounts.Address) {
 	delCell(ws, ws.balance, addr, releaseVWBalance)
 }
+
 func (ws *WriteSet) DelNonce(addr accounts.Address) {
 	delCell(ws, ws.nonce, addr, releaseVWNonce)
 }
+
 func (ws *WriteSet) DelIncarnation(addr accounts.Address) {
 	delCell(ws, ws.incarnation, addr, releaseVWIncarnation)
 }
+
 func (ws *WriteSet) DelSelfDestruct(addr accounts.Address) {
 	delCell(ws, ws.selfDestruct, addr, releaseVWSelfDestruct)
 }
+
 func (ws *WriteSet) DelCode(addr accounts.Address) {
 	delCell(ws, ws.code, addr, releaseVWCode)
 }
+
 func (ws *WriteSet) DelCodeHash(addr accounts.Address) {
 	delCell(ws, ws.codeHash, addr, releaseVWCodeHash)
 }
+
 func (ws *WriteSet) DelCodeSize(addr accounts.Address) {
 	delCell(ws, ws.codeSize, addr, releaseVWCodeSize)
 }
