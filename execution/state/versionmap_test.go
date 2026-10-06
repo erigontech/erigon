@@ -2139,8 +2139,8 @@ func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
 	}
 }
 
-// Every write must make load see the map as non-empty: load's fast path answers
-// nil for an empty map, so an uncounted entry would hide a published cell.
+// load answers nil for an empty map, so every writer must latch nonEmpty or a
+// published cell stays invisible.
 func TestVersionMapLoadSeesEveryWriter(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	key := accounts.InternKey(common.HexToHash("0x01"))
@@ -2162,7 +2162,7 @@ func TestVersionMapLoadSeesEveryWriter(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := NewVersionMap(nil)
-			require.Nil(t, m.load(addr), "an empty map holds no entry")
+			require.Nil(t, m.load(addr))
 			tc.write(m)
 			require.NotNil(t, m.load(addr), "a written address must be visible to load")
 		})

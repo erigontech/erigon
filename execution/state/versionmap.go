@@ -165,8 +165,7 @@ type VersionMap struct {
 	// this replaced serialised every access. Per-read conflict detection is
 	// unchanged; only the lock granularity moved from global to per-account.
 	s sync.Map // accounts.Address -> *AddressEntry
-	// nonEmpty latches once s holds an address, so a map nothing wrote answers
-	// a probe without the lookup. Entries are never removed.
+	// nonEmpty latches on the first address: nothing removes entries.
 	nonEmpty atomic.Bool
 	trace    bool
 }
