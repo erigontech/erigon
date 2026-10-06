@@ -87,6 +87,9 @@ type ForkChoiceStorageReader interface {
 	IsPayloadVerified(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] ReadEnvelopeFromDisk reads a signed execution payload envelope from disk.
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+	// [New in Gloas:EIP7732] RetryPendingExecutionPayloadEnvelopes re-applies envelopes whose
+	// block arrived before their data became available.
+	RetryPendingExecutionPayloadEnvelopes(ctx context.Context, limit int)
 	GetRecentExecutionPayloadStatusByRoot(blockRoot common.Hash) (execution_client.PayloadStatus, bool)
 	// [New in Gloas:EIP7732] IsBlobDataAvailable returns the local node's assessment of whether
 	// blob data is available for the given block. Used by the payload_attestation_data API so PTC

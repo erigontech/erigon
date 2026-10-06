@@ -174,7 +174,7 @@ func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request)
 		map[string]any{
 			"head_slot":     strconv.FormatUint(a.syncedData.HeadSlot(), 10),
 			"sync_distance": strconv.FormatUint(currentSlot-a.syncedData.HeadSlot(), 10),
-			"is_syncing":    a.syncedData.Syncing(),
+			"is_syncing":    a.headLagsBehind(currentSlot),
 			"is_optimistic": false, // needs to change
 			"el_offline":    false,
 		},
