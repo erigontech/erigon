@@ -71,6 +71,8 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 	}
 	const prefixPokes = 20
 	const prefixBlocks = prefixPokes + 2
+	// Reference runs execute one block per forkchoice update, so the expected
+	// state does not depend on the catch-up batching being tested.
 	buildReference := func(side bool) (chain crashRecoveryChain, checkpoints []crashRecoveryState, downloaded []crashRecoveryBlock, addr common.Address) {
 		args := baseArgs
 		args.Logger, args.DataDir = testlog.Logger(t, log.LvlError), newSmallStepDataDir(t)
@@ -150,6 +152,7 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 					args.EthConfigTweaker = configureCrashRecovery
 					args.Logger, args.DataDir = testlog.Logger(t, log.LvlError), request.DataDir
 					inspected := false
+					// Inspect persisted state before startup execution can hide partial writes.
 					args.BeforeNodeStart = func(db kv.TemporalRoDB) {
 						assertCatchupRecoveryState(t, want, readCrashRecoveryCheckpoint(t, db))
 						require.Equal(t, downloaded, readCrashRecoveryBlocks(t, db, side.payloads), "bulk-imported blocks and BALs must survive every crash")

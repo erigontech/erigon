@@ -501,8 +501,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}
 	belowFinality := fcuHeader.Number.Uint64() < finalisedBlockNum
 	sameExecutedHead := fcuHeader.Number.Uint64() == finishProgressBefore
-	// Canonical ancestors below finality are ignored; an already-executed head
-	// needs no execution. Both cases still require valid safe/finalized hashes.
 	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash && (belowFinality || sameExecutedHead) {
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 		if err != nil {
@@ -515,7 +513,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, false)
 			return nil
 		}
-		// Ignored ancestors must not change saved hashes, even if Finish matches their height.
 		// Compare committed data so unchanged requests do not take the MDBX writer lock.
 		if !belowFinality && !forkChoiceHashesMatch(roTx, blockHash, safeHash, finalizedHash) {
 			// Close the overlay before its backing read view, then release the view
@@ -523,8 +520,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			teardownOverlay()
 			roTx.Rollback()
 			roTx = nil
-			// This path skips the execution commit, so persist hash changes separately
-			// before reporting success; overlay-only writes would be discarded.
+			// This path skips the execution commit; overlay-only writes would be lost.
 			if err := e.db.Update(ctx, func(rwTx kv.RwTx) error {
 				writeForkChoiceHashes(rwTx, blockHash, safeHash, finalizedHash)
 				return nil
