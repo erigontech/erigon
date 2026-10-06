@@ -25,6 +25,7 @@ import (
 
 	bscp2p "github.com/erigontech/erigon/bsc/p2p"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
@@ -41,6 +42,8 @@ import (
 // waypoint sizing) used to bound worker count: a worker buffers a whole range,
 // so RAM/worker ≈ rangeSize × estBlockSize.
 const estBlockSize = 1 * datasize.MB
+
+var rangeSize = dbg.EnvUint("BSC_BLOCK_RANGE_SIZE", 1024)
 
 // insertFunc persists an ascending, gap-free batch of blocks. It is the seam
 // bor filled with store.InsertBlocks; here it wraps the exec-module client.

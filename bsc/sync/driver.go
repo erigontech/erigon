@@ -37,7 +37,6 @@ import (
 
 const (
 	defaultFcuBlocks = 8192 // fallback FCU interval when LoopBlockLimit is unset
-	rangeSize        = 1024 // blocks per worker range (~1GB/worker at 1MB/block, matching bor)
 	peerBackoff      = 3 * time.Second
 )
 
