@@ -45,6 +45,7 @@ type Config struct {
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Skips the EIP-1559 and EIP-4844 fee cap checks (needed for 0 price calls)
 	NoReceipts    bool // Do not calculate receipts
+	NoBAL         bool // Do not record the accesses an EIP-7928 block access list needs
 	ReadOnly      bool // Do no perform any block finalisation
 	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
@@ -569,6 +570,12 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 
 run:
 	for {
+		// Past the end of the code is STOP. Exiting here, out of line, spares
+		// every op a taken jump in GetOp.
+		if !anyTrace && pc >= uint64(len(contract.Code)) {
+			res, err = nil, errStopToken
+			break run
+		}
 		op = contract.GetOp(pc)
 		// The hottest constant-gas opcodes run inline, without the jump table and
 		// its indirect call. A failed check falls through to the generic path,

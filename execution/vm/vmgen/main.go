@@ -44,7 +44,7 @@ import (
 // TestRunMatchesRunTraced pins the inlined bodies against the jump-table ops.
 type fastOp struct {
 	name       string
-	execute    string // jump-table execute func, inlined as the case body; "" for the makeDup closures
+	execute    string // jump-table execute func, inlined as the case body; "" for the makeDup and makePush closures
 	gas        string
 	pop, push  int
 	memorySize string // set for memory ops, which take the fast path only when memory need not grow
@@ -73,6 +73,9 @@ func fastOps() []fastOp {
 		op("ISZERO", "opIszero", "GasFastestStep", 1, 1),
 		{name: "MLOAD", execute: "opMload", gas: "GasFastestStep", pop: 1, push: 1, memorySize: "memoryMLoad"},
 		{name: "MSTORE", execute: "opMstore", gas: "GasFastestStep", pop: 2, memorySize: "memoryMStore"},
+	}
+	for n := 3; n <= 32; n++ {
+		ops = append(ops, op(fmt.Sprintf("PUSH%d", n), "", "GasFastestStep", 0, 1))
 	}
 	for n := 1; n <= 8; n++ {
 		ops = append(ops, op(fmt.Sprintf("DUP%d", n), "", "GasFastestStep", n, n+1))
@@ -106,15 +109,15 @@ func inlineBody(instructions []byte, o fastOp) string {
 		case !ok:
 		case fn.Name.Name == o.execute:
 			typ, body = fn.Type, fn.Body
-		case o.execute == "" && fn.Name.Name == "makeDup":
+		case o.execute == "" && strings.HasPrefix(o.name, "DUP") && fn.Name.Name == "makeDup":
 			// The DUP closure reads depth, which makeDup derives from the DUP number.
 			n, _ := strconv.Atoi(strings.TrimPrefix(o.name, "DUP"))
 			rename["depth"] = strconv.Itoa(n - 1)
-			for n := range ast.Preorder(fn.Body) {
-				if lit, ok := n.(*ast.FuncLit); ok {
-					typ, body = lit.Type, lit.Body
-				}
-			}
+			typ, body = closure(fn)
+		case o.execute == "" && strings.HasPrefix(o.name, "PUSH") && fn.Name.Name == "makePush":
+			// One body serves every PUSH size, so all of them share one case.
+			rename["size"], rename["pushByteSize"] = "uint64(op-PUSH0)", "int(op-PUSH0)"
+			typ, body = closure(fn)
 		}
 	}
 	if body == nil {
@@ -153,6 +156,16 @@ func inlineBody(instructions []byte, o fastOp) string {
 	return inlineReturns(text(fset, body), o)
 }
 
+// closure returns the type and body of the func literal that fn returns.
+func closure(fn *ast.FuncDecl) (*ast.FuncType, *ast.BlockStmt) {
+	for n := range ast.Preorder(fn.Body) {
+		if lit, ok := n.(*ast.FuncLit); ok {
+			return lit.Type, lit.Body
+		}
+	}
+	return nil, nil
+}
+
 // inlineReturns replaces each `return pc, res, err` in the printed body block:
 // a return without an error moves to the next op, one with an error leaves the
 // loop. It returns the block's statements without the braces.
@@ -182,7 +195,8 @@ func inlineReturns(body string, o fastOp) string {
 			step = "pc++\ncontinue run"
 		case o.jump:
 			// A valid destination holds a JUMPDEST: charge it here and step over it.
-			step = "pc = " + next + "\nif gasLeft >= params.JumpdestGas {\ngasLeft -= params.JumpdestGas\npc++\n}\npc++\ncontinue run"
+			// min instead of an if: the if costs every jump a taken branch.
+			step = "pc = " + next + "\nskip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas\ngasLeft -= skip * params.JumpdestGas\npc += skip + 1\ncontinue run"
 		default:
 			step = "pc = " + next + "\npc++\ncontinue run"
 		}
@@ -200,8 +214,7 @@ func text(fset *token.FileSet, n any) string {
 }
 
 func fastSwitch(instructions []byte, ops []fastOp) string {
-	var b strings.Builder
-	b.WriteString("sLen := stack.len()\nswitch op {\n")
+	var names, codes []string
 	for _, o := range ops {
 		var cond []string
 		if o.pop > 0 {
@@ -218,7 +231,18 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 			cond = append(cond, "callContext.Memory.allocated32(stack.peek())")
 		}
 		cond = append(cond, "gasLeft >= "+o.gas)
-		fmt.Fprintf(&b, "case %s:\nif %s {\ngasLeft -= %s\n%s\n}\n", o.name, strings.Join(cond, " && "), o.gas, inlineBody(instructions, o))
+		code := fmt.Sprintf("if %s {\ngasLeft -= %s\n%s\n}\n", strings.Join(cond, " && "), o.gas, inlineBody(instructions, o))
+		// Ops with the same code share a case: each case deepens run's compare tree.
+		if n := len(codes); n > 0 && codes[n-1] == code {
+			names[n-1] += ", " + o.name
+			continue
+		}
+		names, codes = append(names, o.name), append(codes, code)
+	}
+	var b strings.Builder
+	b.WriteString("sLen := stack.len()\nswitch op {\n")
+	for i := range names {
+		fmt.Fprintf(&b, "case %s:\n%s", names[i], codes[i])
 	}
 	b.WriteString("}\n")
 	return b.String()

@@ -93,6 +93,12 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 
 run:
 	for {
+		// Past the end of the code is STOP. Exiting here, out of line, spares
+		// every op a taken jump in GetOp.
+		if !false && pc >= uint64(len(contract.Code)) {
+			res, err = nil, errStopToken
+			break run
+		}
 		op = contract.GetOp(pc)
 		// The hottest constant-gas opcodes run inline, without the jump table and
 		// its indirect call. A failed check falls through to the generic path,
@@ -165,11 +171,9 @@ run:
 					}
 
 					pc = pos.Uint64() - 1
-					if gasLeft >= params.JumpdestGas {
-						gasLeft -= params.JumpdestGas
-						pc++
-					}
-					pc++
+					skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+					gasLeft -= skip * params.JumpdestGas
+					pc += skip + 1
 					continue run
 				}
 			case JUMPI:
@@ -189,11 +193,9 @@ run:
 						break run
 					}
 					pc = pos.Uint64() - 1
-					if gasLeft >= params.JumpdestGas {
-						gasLeft -= params.JumpdestGas
-						pc++
-					}
-					pc++
+					skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+					gasLeft -= skip * params.JumpdestGas
+					pc += skip + 1
 					continue run
 				}
 			case SUB:
@@ -290,6 +292,31 @@ run:
 					gasLeft -= GasFastestStep
 					mStart, val := callContext.Stack.pop2()
 					callContext.Memory.Set32(mStart.Uint64(), val)
+					pc++
+					continue run
+				}
+			case PUSH3, PUSH4, PUSH5, PUSH6, PUSH7, PUSH8, PUSH9, PUSH10, PUSH11, PUSH12, PUSH13, PUSH14, PUSH15, PUSH16, PUSH17, PUSH18, PUSH19, PUSH20, PUSH21, PUSH22, PUSH23, PUSH24, PUSH25, PUSH26, PUSH27, PUSH28, PUSH29, PUSH30, PUSH31, PUSH32:
+				if sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(callContext.Contract.Code)) {
+						callContext.Stack.pushRef().SetBytes(callContext.Contract.Code[pc+1 : end])
+						pc = pc + uint64(op-PUSH0)
+						pc++
+						continue run
+					}
+					codeLen := len(callContext.Contract.Code)
+
+					startMin := min(int(pc+1), codeLen)
+					endMin := min(startMin+int(op-PUSH0), codeLen)
+
+					integer := callContext.Stack.pushRef()
+					integer.SetBytes(callContext.Contract.Code[startMin:endMin])
+
+					if missing := int(op-PUSH0) - (endMin - startMin); missing > 0 {
+						integer.ILsh(uint(8 * missing))
+					}
+
+					pc += uint64(op - PUSH0)
 					pc++
 					continue run
 				}
