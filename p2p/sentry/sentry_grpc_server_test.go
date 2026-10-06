@@ -911,6 +911,50 @@ func TestSentryServer_BoundsQueuedPayloadBytes(t *testing.T) {
 	require.LessOrEqual(t, queuedBytes, libsentry.MessagesQueueByteLimit)
 }
 
+func TestSentryServer_BoundsMixedUploadRequestBytes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ss := &GrpcServer{}
+	ids := []sentryproto.MessageId{
+		sentryproto.MessageId_GET_BLOCK_BODIES_66,
+		sentryproto.MessageId_GET_RECEIPTS_66,
+	}
+	server, client := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
+	defer server.Close()
+	defer ss.addMessagesStream(ids, server)()
+	data, err := rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
+		RequestId:            1,
+		GetBlockBodiesPacket: make(eth.GetBlockBodiesPacket, 317700),
+	})
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(data), eth.ProtocolMaxMsgSize)
+	var receipts eth.GetReceiptsPacket66
+	require.NoError(t, rlp.DecodeBytes(data, &receipts))
+	const flood = 20
+	for i := range flood {
+		ss.send(ids[i%len(ids)], [64]byte{byte(i)}, data)
+	}
+	server.Close()
+	var queuedBytes int
+	messages := make([]*sentryproto.InboundMessage, 0, 6)
+	for {
+		message, err := client.Recv()
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+		queuedBytes += len(message.Data)
+		messages = append(messages, message)
+	}
+	require.LessOrEqual(t, queuedBytes, libsentry.MessagesQueueByteLimit)
+	require.Len(t, messages, 6)
+	for i, message := range messages {
+		sequence := flood - len(messages) + i
+		require.Equal(t, [64]byte{byte(sequence)}, gointerfaces.ConvertH512ToHash(message.PeerId))
+		require.Equal(t, ids[sequence%len(ids)], message.Id)
+	}
+}
+
 // minimalP2PServer returns an un-networked p2p.Server (no discovery, no
 // dial, no listener) suitable for tests that only need a non-nil Server
 // to inject into a GrpcServer.
