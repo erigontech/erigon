@@ -25,6 +25,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/db/datadir"
 
@@ -33,6 +34,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -56,6 +58,7 @@ import (
 // RecvMessage - processing incoming headers/bodies
 // RecvUploadMessage - sending bodies/receipts - may be heavy, it's ok to not process this messages enough fast, it's also ok to drop some of these messages if we can't process.
 // RecvUploadHeadersMessage - sending headers - dedicated stream because headers propagation speed important for network health
+// RecvUploadBlockAccessListsMessage - sending BALs - separate stream so historical replay cannot delay bodies or receipts
 // PeerEventsLoop - logging peer connect/disconnect events
 // AnnounceBlockRangeLoop - announces available block range to all peers every epoch
 func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
@@ -65,6 +68,7 @@ func (cs *MultiClient) StartStreamLoops(ctx context.Context) {
 		go cs.RecvMessageLoop(ctx, sentry, nil)
 		go cs.RecvUploadMessageLoop(ctx, sentry, nil)
 		go cs.RecvUploadHeadersMessageLoop(ctx, sentry, nil)
+		go cs.RecvUploadBlockAccessListsMessageLoop(ctx, sentry, nil)
 		go cs.PeerEventsLoop(ctx, sentry, nil)
 	}
 }
@@ -79,14 +83,25 @@ func (cs *MultiClient) RecvUploadMessageLoop(
 		eth.ToProto[direct.ETH68][eth.GetReceiptsMsg],
 		eth.ToProto[direct.ETH69][eth.GetReceiptsMsg],
 		eth.ToProto[direct.ETH70][eth.GetReceiptsMsg],
-		// eth/71 (EIP-8159) BAL exchange
-		eth.ToProto[direct.ETH71][eth.GetBlockAccessListsMsg],
 	}
 	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
 		return sentry.Messages(streamCtx, &sentryproto.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 
 	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
+}
+
+func (cs *MultiClient) RecvUploadBlockAccessListsMessageLoop(
+	ctx context.Context,
+	sentry sentryproto.SentryClient,
+	wg *sync.WaitGroup,
+) {
+	streamFactory := func(streamCtx context.Context, sentry sentryproto.SentryClient) (grpc.ClientStream, error) {
+		return sentry.Messages(streamCtx, &sentryproto.MessagesRequest{
+			Ids: []sentryproto.MessageId{eth.ToProto[direct.ETH71][eth.GetBlockAccessListsMsg]},
+		}, grpc.WaitForReady(true))
+	}
+	libsentry.ReconnectAndPumpStreamLoop(ctx, sentry, cs.makeStatusData, "RecvUploadBlockAccessListsMessage", streamFactory, MakeInboundMessage, cs.HandleInboundMessage, wg, cs.logger)
 }
 
 func (cs *MultiClient) RecvUploadHeadersMessageLoop(
@@ -157,6 +172,8 @@ type MultiClient struct {
 	getReceiptsActiveGoroutineNumber *semaphore.Weighted
 	ethApiWrapper                    eth.ReceiptsGetter
 	balGenerator                     eth.BlockAccessListGetter
+	balReplayLimiter                 *rate.Limiter
+	balReplayMu                      sync.Mutex
 }
 
 var (
@@ -187,6 +204,7 @@ func NewMultiClient(
 		getReceiptsActiveGoroutineNumber: semaphore.NewWeighted(1),
 		ethApiWrapper:                    receipts.NewGenerator(dirs, blockReader, engine, nil, 5*time.Minute),
 		balGenerator:                     bal.NewRegenerator(blockReader, engine, logger),
+		balReplayLimiter:                 rate.NewLimiter(rate.Every(balReplayInterval), 1),
 	}
 
 	return cs, nil
@@ -246,6 +264,38 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 	return nil
 }
 
+// Limit aggregate replay work even when requests come from different peers or
+// sentries. The time budget is shared by all blocks in one request.
+const (
+	balReplayInterval = time.Second
+	balReplayTimeout  = 500 * time.Millisecond
+)
+
+type balReplayRequest struct {
+	client  *MultiClient
+	started bool
+}
+
+func (r *balReplayRequest) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, hash common.Hash, number uint64) ([]byte, error) {
+	if !r.started {
+		if !r.client.balReplayMu.TryLock() {
+			return nil, eth.ErrBlockAccessListThrottled
+		}
+		if !r.client.balReplayLimiter.Allow() {
+			r.client.balReplayMu.Unlock()
+			return nil, eth.ErrBlockAccessListThrottled
+		}
+		r.started = true
+	}
+	return r.client.balGenerator.GetBlockAccessListBytes(ctx, cfg, tx, hash, number)
+}
+
+func (r *balReplayRequest) close() {
+	if r.started {
+		r.client.balReplayMu.Unlock()
+	}
+}
+
 // getBlockAccessLists71 answers an inbound eth/71 GetBlockAccessLists request
 // (EIP-8159) by looking up stored BALs from rawdb — regenerating pruned ones
 // via re-execution — and replying with a BlockAccessLists response positionally
@@ -255,12 +305,26 @@ func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryp
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {
 		return fmt.Errorf("decoding getBlockAccessLists71: %w, data: %x", err, inreq.Data)
 	}
-	tx, err := cs.db.BeginTemporalRo(ctx)
+	// The budget covers the whole batch, not each block. Keep the parent context
+	// for sending the completed prefix after replay reaches its deadline.
+	queryCtx, cancel := context.WithTimeout(ctx, balReplayTimeout)
+	defer cancel()
+	tx, err := cs.db.BeginTemporalRo(queryCtx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	response := eth.AnswerGetBlockAccessListsQuery(ctx, cs.ChainConfig, tx, query.GetBlockAccessListsPacket, cs.blockReader, cs.balGenerator)
+	var getter eth.BlockAccessListGetter
+	if cs.balGenerator != nil {
+		// Only requests that need replay consume the shared budget. Stored BALs
+		// can still be served while replay is throttled.
+		replay := &balReplayRequest{client: cs}
+		// Hold the slot until work returns, even if cancellation is slow. A
+		// deadline alone must not allow another sentry to start a second replay.
+		defer replay.close()
+		getter = replay
+	}
+	response := eth.AnswerGetBlockAccessListsQuery(queryCtx, cs.ChainConfig, tx, query.GetBlockAccessListsPacket, cs.blockReader, getter)
 	// Encode before releasing the tx: stored BALs are mdbx-backed slices only
 	// valid while the tx is open.
 	b, err := rlp.EncodeToBytes(&eth.BlockAccessListsPacket66{

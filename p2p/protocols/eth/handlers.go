@@ -22,6 +22,7 @@ package eth
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
@@ -187,6 +188,9 @@ type BlockAccessListGetter interface {
 	GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) ([]byte, error)
 }
 
+// ErrBlockAccessListThrottled leaves the unserved suffix available for retry.
+var ErrBlockAccessListThrottled = errors.New("block access list replay throttled")
+
 // AnswerGetBlockAccessListsQuery looks up the RLP-encoded Block Access List
 // for each requested block hash (EIP-7928 / EIP-8159 eth/71). The response is
 // positionally aligned with the request: entry i is the BAL bytes for query[i],
@@ -205,17 +209,22 @@ type BlockAccessListGetter interface {
 // MaxBlockAccessListsRegenerate caps the re-execution work per request. When a
 // limit is reached, the response is truncated (not padded with 0x80) — the peer
 // sees a shorter array than requested, same convention as the BlockBodies handler.
+// Cancellation or throttling also truncates the response, so interrupted replays
+// remain retryable instead of being reported as unavailable.
 func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db kv.TemporalTx, query GetBlockAccessListsPacket, blockReader dbservices.HeaderReader, balGetter BlockAccessListGetter) []rlp.RawValue {
 	var bytes int
 	var regenerations int
 	bals := make([]rlp.RawValue, 0, len(query))
 
 	for lookups, hash := range query {
-		if bytes >= softResponseLimit || len(bals) >= MaxBlockAccessListsServe ||
+		if ctx.Err() != nil || bytes >= softResponseLimit || len(bals) >= MaxBlockAccessListsServe ||
 			lookups >= 2*MaxBlockAccessListsServe {
 			break
 		}
 		number, _ := blockReader.HeaderNumber(ctx, db, hash)
+		if ctx.Err() != nil {
+			break
+		}
 		if number == nil {
 			// We don't know the block — peer can retry elsewhere.
 			bals = append(bals, notAvailableSentinel)
@@ -228,7 +237,12 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db k
 				break
 			}
 			regenerations++
-			bal, _ = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, *number)
+			var err error
+			bal, err = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, *number)
+			if ctx.Err() != nil || errors.Is(err, ErrBlockAccessListThrottled) ||
+				errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				break
+			}
 		}
 		if len(bal) == 0 {
 			// We have the block but no BAL: pre-Amsterdam, or pruned beyond

@@ -154,6 +154,8 @@ type mockSentryClient struct {
 	sendMessageToAllFunc func(ctx context.Context, req *proto_sentry.OutboundMessageData, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error)
 	handShakeFunc        func(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error)
 	penalizePeerFunc     func(ctx context.Context, req *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	setStatusFunc        func(ctx context.Context, req *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error)
+	messagesFunc         func(ctx context.Context, req *proto_sentry.MessagesRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error)
 }
 
 func (m *mockSentryClient) SendMessageById(ctx context.Context, req *proto_sentry.SendMessageByIdRequest, opts ...grpc.CallOption) (*proto_sentry.SentPeers, error) {
@@ -166,6 +168,14 @@ func (m *mockSentryClient) SendMessageToAll(ctx context.Context, req *proto_sent
 
 func (m *mockSentryClient) HandShake(ctx context.Context, req *emptypb.Empty, opts ...grpc.CallOption) (*proto_sentry.HandShakeReply, error) {
 	return m.handShakeFunc(ctx, req, opts...)
+}
+
+func (m *mockSentryClient) SetStatus(ctx context.Context, req *proto_sentry.StatusData, opts ...grpc.CallOption) (*proto_sentry.SetStatusReply, error) {
+	return m.setStatusFunc(ctx, req, opts...)
+}
+
+func (m *mockSentryClient) Messages(ctx context.Context, req *proto_sentry.MessagesRequest, opts ...grpc.CallOption) (proto_sentry.Sentry_MessagesClient, error) {
+	return m.messagesFunc(ctx, req, opts...)
 }
 
 func (m *mockSentryClient) PenalizePeer(ctx context.Context, req *proto_sentry.PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {

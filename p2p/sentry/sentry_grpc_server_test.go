@@ -9,6 +9,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -821,6 +822,46 @@ func TestRunPeer_NewBlockHashesFloodKicksPeer(t *testing.T) {
 		assertKicked(peerErr)
 	case <-time.After(5 * time.Second):
 		t.Fatal("runPeer did not kick flooding peer within timeout")
+	}
+}
+
+func TestRunPeer_BALRequestRateLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		interval  time.Duration
+		forwarded int
+		errCode   p2p.PeerErrorCode
+	}{
+		{name: "flood", forwarded: 4, errCode: p2p.PeerErrorInvalidMessage},
+		{name: "paced", interval: 500 * time.Millisecond, forwarded: 6, errCode: p2p.PeerErrorStatusUnexpected},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				peerInfo, peerID := newTestPeerInfoWithEth(t)
+				peerInfo.SetEthProtocol(direct.ETH71)
+				rw := NewRLPReadWriter()
+				t.Cleanup(rw.Close)
+				for i := range 6 {
+					b, err := rlp.EncodeToBytes(eth.GetBlockAccessListsPacket66{
+						RequestId: uint64(i), GetBlockAccessListsPacket: eth.GetBlockAccessListsPacket{{1}},
+					})
+					require.NoError(t, err)
+					rw.readCh <- p2p.Msg{Code: eth.GetBlockAccessListsMsg, Size: uint32(len(b)), Payload: bytes.NewReader(b)}
+				}
+				// A second Status ends the loop if the requests are all accepted.
+				rw.readCh <- p2p.Msg{Code: eth.StatusMsg, Payload: bytes.NewReader(nil)}
+				forwarded := 0
+				peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH71}, rw, peerInfo,
+					func(id sentryproto.MessageId, _ [64]byte, _ []byte) {
+						require.Equal(t, sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71, id)
+						forwarded++
+						time.Sleep(tc.interval)
+					}, func(sentryproto.MessageId) bool { return true }, log.New())
+				require.NotNil(t, peerErr)
+				require.Equal(t, tc.errCode, peerErr.Code)
+				require.Equal(t, tc.forwarded, forwarded)
+			})
+		})
 	}
 }
 

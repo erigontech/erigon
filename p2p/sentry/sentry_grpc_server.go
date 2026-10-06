@@ -358,6 +358,10 @@ const (
 	// newBlockHashesBurst and newBlockHashesRate bound how frequently one peer may send NewBlockHashes packets before it is disconnected.
 	newBlockHashesBurst            = 30
 	newBlockHashesRate  rate.Limit = 10
+	// BAL requests may require historical execution. Allow short bursts, but
+	// disconnect sustained floods before they fill the serving queue.
+	blockAccessListsBurst            = 4
+	blockAccessListsRate  rate.Limit = 2
 )
 
 // newBlockHashesExceedsCap reports whether the RLP NewBlockHashes payload holds more than maxBlockHashesPerMsg entries; malformed RLP returns false and is left to the decoding subscriber.
@@ -408,6 +412,7 @@ func runPeer(
 	}()
 
 	newBlockHashesLimiter := rate.NewLimiter(newBlockHashesRate, newBlockHashesBurst)
+	blockAccessListsLimiter := rate.NewLimiter(blockAccessListsRate, blockAccessListsBurst)
 
 	for {
 		if !peerPrinted {
@@ -479,8 +484,10 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetBlockAccessListsMsg:
-			// eth/71 (EIP-8159) — inbound BAL request. Mirrors GetBlockBodiesMsg:
-			// read-only request, no permit change, forward to subscribers.
+			if !blockAccessListsLimiter.Allow() {
+				msg.Discard()
+				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, "sentry.runPeer: GetBlockAccessLists rate limit exceeded")
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}

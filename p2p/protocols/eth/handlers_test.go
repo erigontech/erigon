@@ -675,15 +675,75 @@ type fakeBalGetter struct {
 	bals  map[common.Hash][]byte
 	errs  map[common.Hash]error
 	calls map[common.Hash]int
+	onGet func()
 }
 
 func (f *fakeBalGetter) GetBlockAccessListBytes(_ context.Context, _ *chain.Config, _ kv.TemporalTx, hash common.Hash, _ uint64) ([]byte, error) {
 	f.calls[hash]++
+	if f.onGet != nil {
+		f.onGet()
+	}
 	err := f.errs[hash]
 	if err != nil {
 		return nil, err
 	}
 	return f.bals[hash], nil
+}
+
+func TestAnswerGetBlockAccessListsQuery_CancelledRegeneration(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	storedHash, prunedHash, nextHash := common.Hash{1}, common.Hash{2}, common.Hash{3}
+	storedBAL := []byte{0xc0}
+	if err := rawdb.WriteBlockAccessListBytes(tx, storedHash, 1, storedBAL); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	getter := &fakeBalGetter{
+		errs:  map[common.Hash]error{prunedHash: context.Canceled},
+		calls: map[common.Hash]int{},
+		onGet: cancel,
+	}
+	query := GetBlockAccessListsPacket{storedHash, prunedHash, nextHash}
+	reader := balHeaderReader{storedHash: 1, prunedHash: 2, nextHash: 3}
+	result := AnswerGetBlockAccessListsQuery(ctx, chain.AllProtocolChanges, tx, query, reader, getter)
+	if len(result) != 1 || !bytes.Equal(result[0], storedBAL) {
+		t.Errorf("cancelled replay must return only the completed prefix: got %x", result)
+	}
+	if getter.calls[nextHash] != 0 {
+		t.Errorf("started %d replays after cancellation", getter.calls[nextHash])
+	}
+}
+
+type cancellingBALHeaderReader struct {
+	balHeaderReader
+	cancel context.CancelFunc
+}
+
+func (r cancellingBALHeaderReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {
+	r.cancel()
+	return nil, context.Canceled
+}
+
+func TestAnswerGetBlockAccessListsQuery_CancelledLookup(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRo(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result := AnswerGetBlockAccessListsQuery(ctx, chain.AllProtocolChanges, tx,
+		GetBlockAccessListsPacket{{1}}, cancellingBALHeaderReader{cancel: cancel}, nil)
+	if len(result) != 0 {
+		t.Errorf("cancelled lookup must leave the block retryable, got %x", result)
+	}
 }
 
 // TestAnswerGetBlockAccessListsQuery_GeneratorFallback verifies that a BAL
