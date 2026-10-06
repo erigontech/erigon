@@ -2138,3 +2138,33 @@ func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
 		})
 	}
 }
+
+// Every write must make load see the map as non-empty: load's fast path answers
+// nil for an empty map, so an uncounted entry would hide a published cell.
+func TestVersionMapLoadSeesEveryWriter(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	v := Version{TxIndex: 0}
+
+	for _, tc := range []struct {
+		name  string
+		write func(*VersionMap)
+	}{
+		{"balance", func(m *VersionMap) { m.WriteBalance(addr, v, *uint256.NewInt(1), true) }},
+		{"nonce", func(m *VersionMap) { m.WriteNonce(addr, v, 1, true) }},
+		{"storage", func(m *VersionMap) { m.WriteStorage(addr, key, v, *uint256.NewInt(1), true) }},
+		{"address", func(m *VersionMap) { m.WriteAddress(addr, v, &accounts.Account{}, true) }},
+		{"selfdestruct", func(m *VersionMap) { m.WriteSelfDestruct(addr, v, true, true) }},
+		{"incarnation", func(m *VersionMap) { m.WriteIncarnation(addr, v, 1, true) }},
+		{"codehash", func(m *VersionMap) { m.WriteCodeHash(addr, v, accounts.EmptyCodeHash, true) }},
+		{"codesize", func(m *VersionMap) { m.WriteCodeSize(addr, v, 0, true) }},
+		{"createcontract", func(m *VersionMap) { m.WriteCreateContract(addr, v, true, true) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewVersionMap(nil)
+			require.Nil(t, m.load(addr), "an empty map holds no entry")
+			tc.write(m)
+			require.NotNil(t, m.load(addr), "a written address must be visible to load")
+		})
+	}
+}
