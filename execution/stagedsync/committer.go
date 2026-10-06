@@ -308,13 +308,7 @@ func newCommitmentCalculator(
 	}
 	ok := false
 	defer kv.RollbackUnless(&ok, roTx)
-	// roTx lives for the calculator's lifetime — rolled back in Stop().
-	// Safe across collate/prune cycles because the calculator
-	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
-	// stageloop's rwTx.Commit(), and CollateAndPrune only fires
-	// between batches via FCU. So this roTx never spans a prune — by the
-	// time prune holds commitGate.Lock(), Stop() has already rolled this tx
-	// back and the calculator goroutine is gone.
+	// Stop rolls back this transaction before the batch commits or pruning starts.
 
 	// Single asOfStateReader shared by calcState (lazy-load) and compute
 	// methods (fold/unfold sibling reads). Uses GetAsOf for account/storage
