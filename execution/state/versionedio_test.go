@@ -1749,3 +1749,35 @@ func TestWriteSetArenaCellsComeBackZeroed(t *testing.T) {
 	require.Zero(t, again.Val)
 	require.Equal(t, WriteHeader{}, again.WriteHeader)
 }
+
+// A delete must not hand an arena cell to the shared pool: the arena reuses and
+// zeroes that memory, so another set holding it would be corrupted. SetCode's
+// revert-to-base path and journal rollback both delete cells.
+func TestArenaDeleteKeepsItsCellOutOfThePool(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	var arena WriteSet
+	arena.UseArena()
+	nonce := arena.newVWNonce()
+	nonce.WriteHeader = WriteHeader{Address: addr, Path: NoncePath}
+	arena.SetNonce(addr, nonce)
+	arena.DelNonce(addr)
+
+	code := arena.newVWCode()
+	code.WriteHeader = WriteHeader{Address: addr, Path: CodePath}
+	arena.SetCode(addr, code)
+	arena.DelCode(addr)
+
+	storage := arena.newVWStorage()
+	storage.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key}
+	arena.SetStorage(addr, key, storage)
+	arena.DelStorage(addr, key)
+
+	var shared WriteSet
+	for range 8 {
+		require.NotSame(t, nonce, shared.newVWNonce(), "a deleted arena cell reached the shared pool")
+		require.NotSame(t, code, shared.newVWCode(), "a deleted arena cell reached the shared pool")
+		require.NotSame(t, storage, shared.newVWStorage(), "a deleted arena cell reached the shared pool")
+	}
+}

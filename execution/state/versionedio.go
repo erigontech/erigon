@@ -1627,49 +1627,63 @@ func (ws *WriteSet) ReleaseMaps() {
 
 func (ws *WriteSet) DelBalance(addr accounts.Address) {
 	if vw, ok := ws.balance[addr]; ok {
-		releaseVWBalance(vw)
+		if !ws.cells.on {
+			releaseVWBalance(vw)
+		}
 		delete(ws.balance, addr)
 	}
 }
 
 func (ws *WriteSet) DelNonce(addr accounts.Address) {
 	if vw, ok := ws.nonce[addr]; ok {
-		releaseVWNonce(vw)
+		if !ws.cells.on {
+			releaseVWNonce(vw)
+		}
 		delete(ws.nonce, addr)
 	}
 }
 
 func (ws *WriteSet) DelIncarnation(addr accounts.Address) {
 	if vw, ok := ws.incarnation[addr]; ok {
-		releaseVWIncarnation(vw)
+		if !ws.cells.on {
+			releaseVWIncarnation(vw)
+		}
 		delete(ws.incarnation, addr)
 	}
 }
 
 func (ws *WriteSet) DelSelfDestruct(addr accounts.Address) {
 	if vw, ok := ws.selfDestruct[addr]; ok {
-		releaseVWSelfDestruct(vw)
+		if !ws.cells.on {
+			releaseVWSelfDestruct(vw)
+		}
 		delete(ws.selfDestruct, addr)
 	}
 }
 
 func (ws *WriteSet) DelCode(addr accounts.Address) {
 	if vw, ok := ws.code[addr]; ok {
-		releaseVWCode(vw)
+		if !ws.cells.on {
+			releaseVWCode(vw)
+		}
 		delete(ws.code, addr)
 	}
 }
 
 func (ws *WriteSet) DelCodeHash(addr accounts.Address) {
 	if vw, ok := ws.codeHash[addr]; ok {
-		releaseVWCodeHash(vw)
+		if !ws.cells.on {
+			releaseVWCodeHash(vw)
+		}
 		delete(ws.codeHash, addr)
 	}
 }
 
 func (ws *WriteSet) DelCodeSize(addr accounts.Address) {
 	if vw, ok := ws.codeSize[addr]; ok {
-		releaseVWCodeSize(vw)
+		if !ws.cells.on {
+			releaseVWCodeSize(vw)
+		}
 		delete(ws.codeSize, addr)
 	}
 }
@@ -1677,7 +1691,9 @@ func (ws *WriteSet) DelCodeSize(addr accounts.Address) {
 func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 	if inner := ws.storage[addr]; inner != nil {
 		if vw, ok := inner[key]; ok {
-			releaseVWStorage(vw)
+			if !ws.cells.on {
+				releaseVWStorage(vw)
+			}
 			delete(inner, key)
 		}
 		if len(inner) == 0 {
