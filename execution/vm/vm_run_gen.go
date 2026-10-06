@@ -35,6 +35,8 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		res     []byte // result of the opcode execution function
 		tracer  = evm.config.Tracer
 	)
+	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
+	callContext.slots.misses = 0
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
@@ -91,6 +93,12 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 
 run:
 	for {
+		// Past the end of the code is STOP. Exiting here, out of line, spares
+		// every op a taken jump in GetOp.
+		if !false && pc >= uint64(len(contract.Code)) {
+			res, err = nil, errStopToken
+			break run
+		}
 		op = contract.GetOp(pc)
 		// The hottest constant-gas opcodes run inline, without the jump table and
 		// its indirect call. A failed check falls through to the generic path,
@@ -163,11 +171,9 @@ run:
 					}
 
 					pc = pos.Uint64() - 1
-					if gasLeft >= params.JumpdestGas {
-						gasLeft -= params.JumpdestGas
-						pc++
-					}
-					pc++
+					skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+					gasLeft -= skip * params.JumpdestGas
+					pc += skip + 1
 					continue run
 				}
 			case JUMPI:
@@ -187,11 +193,9 @@ run:
 						break run
 					}
 					pc = pos.Uint64() - 1
-					if gasLeft >= params.JumpdestGas {
-						gasLeft -= params.JumpdestGas
-						pc++
-					}
-					pc++
+					skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+					gasLeft -= skip * params.JumpdestGas
+					pc += skip + 1
 					continue run
 				}
 			case SUB:
