@@ -217,7 +217,8 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 
 	bad := makeBlobSlot(0x50, true)
 	good := makeBlobSlot(0x51, false)
-	a0, a1 := [20]byte{1}, [20]byte{2}
+	trailing := makeBlobSlot(0x52, false)
+	a0, a1, a2 := [20]byte{1}, [20]byte{2}, [20]byte{3}
 
 	var fromAttacker TxnSlots
 	fromAttacker.Append(&bad, a0[:], false)
@@ -227,10 +228,15 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 	fromHonest.Append(&good, a1[:], false)
 	pool.AddRemoteTxns(ctx, fromHonest, honestPeerID, sentryClient)
 
+	var trailingFromAttacker TxnSlots
+	trailingFromAttacker.Append(&trailing, a2[:], false)
+	pool.AddRemoteTxns(ctx, trailingFromAttacker, attackerPeerID, sentryClient)
+
 	require.NoError(t, pool.processRemoteTxns(ctx))
 
 	pool.lock.Lock()
 	defer pool.lock.Unlock()
 	assert.NotContains(t, pool.byHash, string(bad.IDHash[:]))
 	assert.Contains(t, pool.byHash, string(good.IDHash[:]), "valid txn from another peer must not be dropped")
+	assert.NotContains(t, pool.byHash, string(trailing.IDHash[:]), "trailing txn from the KZG offender must be skipped")
 }
