@@ -144,13 +144,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 			break
 		}
 	}
-	if responseErr != nil {
-		return responseErr
-	}
-	if count == 0 {
-		return nil
-	}
-	return nil
+	return responseErr
 }
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) error {
