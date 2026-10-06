@@ -739,8 +739,11 @@ func isInitialSyncPublicationError(err error) bool {
 // advances the state version without publishing to the cache.
 func (e *ExecModule) processFrozenBlocks(ctx context.Context, hook *stageloop.Hook) error {
 	err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart)
-	if initErr := execctx.InitStateCacheVersion(ctx, e.db, e.stateCache); initErr != nil {
-		e.logger.Warn("[exec] state cache serves RPC only after the first executed block", "err", initErr)
+	if e.stateCache != nil {
+		initErr := execctx.InitStateCacheVersion(ctx, e.db, e.stateCache)
+		if initErr != nil && !commonerrors.IsOnlyCanceled(initErr) {
+			e.logger.Warn("[exec] state cache serves RPC only after the first executed block", "err", initErr)
+		}
 	}
 	return err
 }
