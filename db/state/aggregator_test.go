@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1661,4 +1662,37 @@ func TestGetStateIndicesSaltReadOnlyKeepsMalformedFile(t *testing.T) {
 	saltBytes, err := os.ReadFile(fpath)
 	require.NoError(t, err)
 	require.Equal(t, content, saltBytes, "genNew=false must not rewrite the salt file")
+}
+
+// A preverified bootstrap under --prune.mode=minimal lands the domains and
+// deliberately skips the standalone indices, so the two do not share a
+// frontier. EndTxNumMinimax is a domain frontier — stateMinimaxTxNum ranges
+// over kv.StateDomains only — and pruning every index to it records an index
+// as pruned past files it does not have. CheckFilesDBGap then reads the
+// datadir as corrupt and refuses to open it.
+func TestAggregator_PruneDoesNotOutrunAnIndexsOwnFiles(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	dirs := agg.Dirs()
+
+	// Domains carry files; the standalone indices carry none.
+	generateAccountsFile(t, dirs, []testFileRange{{0, 1}})
+	generateStorageFile(t, dirs, []testFileRange{{0, 1}})
+	generateCodeFile(t, dirs, []testFileRange{{0, 1}})
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder(db))
+	require.Greater(t, agg.EndTxNumMinimax(), uint64(0), "domains must set a non-zero frontier")
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	at := agg.BeginFilesRo()
+	defer at.Close()
+	_, err = at.prune(t.Context(), tx, math.MaxUint64, false, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, at.CheckFilesDBGap(tx),
+		"prune must not record an index as pruned past the files it has")
 }

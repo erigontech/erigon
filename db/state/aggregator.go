@@ -2242,12 +2242,7 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 	}
 
 	var txFrom uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
-	var step kv.Step
 	txTo := at.a.EndTxNumMinimax()
-	if txTo > 0 {
-		// txTo is first txNum in next step, has to go 1 tx behind to get correct step number
-		step = kv.Step((txTo - 1) / at.StepSize())
-	}
 
 	if txFrom == txTo || !at.CanPrune(tx, txTo) {
 		return nil, nil
@@ -2282,7 +2277,17 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 			return aggStat, ctx.Err()
 		default:
 		}
-		aggStat.Domains[at.d[id].d.FilenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+		// EndTxNumMinimax is a domain frontier (stateMinimaxTxNum ranges over
+		// kv.StateDomains), so it can sit above an entity that has fewer files
+		// — a preverified bootstrap under minimal prune lands the domains and
+		// skips the standalone indices entirely. Recording an entity as pruned
+		// past its own files is what CheckFilesDBGap calls a corrupt datadir.
+		dTxTo := min(txTo, d.files.EndTxNum())
+		if dTxTo <= txFrom {
+			continue
+		}
+		dStep := kv.Step((dTxTo - 1) / at.StepSize())
+		aggStat.Domains[at.d[id].d.FilenameBase], err = d.Prune(ctx, tx, dStep, txFrom, dTxTo, limit, logEvery)
 		if err != nil {
 			return aggStat, err
 		}
@@ -2304,7 +2309,11 @@ func (at *AggregatorRoTx) prune(ctx context.Context, tx kv.RwTx, limit uint64, a
 		//	invalidateOnce[fmt.Sprintf("ii%s", at.iis[iikey].ii.ValuesTable)] = 1
 		//	at.iis[iikey].ii.logger.Info("invalidated ii prune progress", "name", at.iis[iikey].ii.Name)
 		//}
-		stat, err := at.iis[iikey].TableScanningPrune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil,
+		iiTxTo := min(txTo, at.iis[iikey].files.EndTxNum())
+		if iiTxTo <= txFrom {
+			continue
+		}
+		stat, err := at.iis[iikey].TableScanningPrune(ctx, tx, txFrom, iiTxTo, limit, logEvery, false, nil,
 			nil, nil, prune.DefaultStorageMode)
 		if err != nil {
 			return nil, err
