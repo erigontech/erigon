@@ -842,7 +842,8 @@ func (ws *WriteSet) assertNotArena(op string) {
 	}
 }
 
-// UseArena is ReuseWriteCells, which states the caller's obligation.
+// UseArena routes this set's cells to its own slabs. New does it for every
+// state; a set that shares its cells out must not (see assertNotArena).
 func (ws *WriteSet) UseArena() { ws.cells.on = true }
 
 // Released reports whether ReleaseMaps pooled this set's maps and no later

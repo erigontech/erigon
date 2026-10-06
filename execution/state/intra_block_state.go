@@ -255,6 +255,7 @@ func New(stateReader StateReader) *IntraBlockState {
 	}
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
+	ibs.versionedWrites.UseArena()
 	return ibs
 }
 
@@ -372,11 +373,6 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.dep = UnknownDep
 	ibs.stateReadErr = nil
 }
-
-// ReuseWriteCells recycles this state's write cells instead of pooling them.
-// Only a caller that never merges or filters its write set may ask for it,
-// because those share cell pointers; eth_call does neither.
-func (ibs *IntraBlockState) ReuseWriteCells() { ibs.versionedWrites.UseArena() }
 
 // Release Deprecated use Close
 func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
