@@ -1575,6 +1575,11 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		v, clean, err := so.GetState(key)
 		return v, StorageRead, UnknownVersion, clean, err
 	}
+	if s.noConflictDetection {
+		if v, ok := s.versionedReads.GetColdSlot(addr, key); ok && !s.hasWrite(addr, StoragePath, key) {
+			return v, StorageRead, UnknownVersion, true, nil
+		}
+	}
 	if s.versionMap != nil && !s.warmReadable(addr) {
 		if vw, ok := s.versionedWrites.GetStorage(addr, key); ok {
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
@@ -1621,7 +1626,11 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			v, clean = r.mapStorageVal, true
 		}
 		if r.recordVR {
-			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			if s.noConflictDetection {
+				s.versionedReads.SetColdSlot(addr, key, v)
+			} else {
+				s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
+			}
 		}
 		return v, r.source, r.version, clean, nil
 	case outcomeReturnZero, outcomeReturnDefault:

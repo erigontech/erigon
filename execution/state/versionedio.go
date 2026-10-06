@@ -129,14 +129,37 @@ type ReadSet struct {
 	codeSize              map[accounts.Address]VersionedRead[int]
 	storage               map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
 
+	// coldSlots memoizes committed slot reads for an execution nobody validates:
+	// the versioned record would carry a 48-byte header that is UnknownVersion
+	// for every one of them, in a map per address.
+	coldSlots map[slotRef]uint256.Int
+
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
 	// travels with the read-set rather than as a separate IntraBlockState cache.
 	access AccessSet
 }
 
+// slotRef addresses one slot without a map per account.
+type slotRef struct {
+	addr accounts.Address
+	key  accounts.StorageKey
+}
+
+func (s *ReadSet) SetColdSlot(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
+	if s.coldSlots == nil {
+		s.coldSlots = make(map[slotRef]uint256.Int)
+	}
+	s.coldSlots[slotRef{addr, key}] = val
+}
+
+func (s *ReadSet) GetColdSlot(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
+	v, ok := s.coldSlots[slotRef{addr, key}]
+	return v, ok
+}
+
 func (s *ReadSet) entries() int {
-	return len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
+	return len(s.coldSlots) + len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
 		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize) + len(s.storage)
 }
 
@@ -151,6 +174,7 @@ func (s *ReadSet) clearForReuse() {
 	clear(s.code)
 	clear(s.codeHash)
 	clear(s.codeSize)
+	clear(s.coldSlots)
 	// Keep the per-address slot maps: a call that reads one contract's slots
 	// would otherwise regrow its map from scratch on every later call.
 	if len(s.storage) <= maxReusedStorageAddrs {
