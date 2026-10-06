@@ -73,13 +73,15 @@ func TestSelectAttestationsDropsCandidatesWithoutNewReward(t *testing.T) {
 }
 
 func TestSelectAttestationsCountsNewFlagsOfCoveredValidators(t *testing.T) {
-	sourceAndTarget := newTestCandidate(1, true, 0b011, 0, 1, 2)
+	// sourceAndTarget wins first; afterwards only the head flags of allFlagsSameValidators
+	// are new, and they are still worth more than otherValidators.
+	sourceAndTarget := newTestCandidate(1, true, 0b011, 0, 1, 2, 3, 4, 5)
 	allFlagsSameValidators := newTestCandidate(2, true, allFlags, 0, 1, 2)
 	otherValidators := newTestCandidate(3, true, sourceFlag, 7)
 
 	selected := selectAttestations([]attestationCandidate{sourceAndTarget, allFlagsSameValidators, otherValidators}, testParticipationWeights, 1, 2)
 
-	require.Equal(t, []uint64{2, 3}, selectedSlots(selected))
+	require.Equal(t, []uint64{1, 2}, selectedSlots(selected))
 }
 
 func TestSelectAttestationsTracksEpochsSeparately(t *testing.T) {
