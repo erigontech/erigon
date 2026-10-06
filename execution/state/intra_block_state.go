@@ -373,10 +373,12 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
-// UsePrivateWriteCells routes this state's write cells to the write set's own
-// slabs instead of the shared pools. Only a caller that never publishes them
-// (no FlushWritesToVersionMap, no MergeInto) may ask for it, such as eth_call.
-func (ibs *IntraBlockState) UsePrivateWriteCells() { ibs.versionedWrites.UseArena() }
+// ReuseWriteCells draws this state's write cells from the write set's own
+// slabs instead of the shared pools, and recycles them when the set resets.
+// Only a caller that never lets a cell outlive the set may ask for it: a
+// merged set shares cell pointers, so a set that MergeInto may take must not
+// reuse. eth_call qualifies — it merges nothing.
+func (ibs *IntraBlockState) ReuseWriteCells() { ibs.versionedWrites.UseArena() }
 
 // Release Deprecated use Close
 func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
