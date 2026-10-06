@@ -90,16 +90,18 @@ type EVM struct {
 	addrCache   *addressCache
 	internOps   uint32
 	addrOps     uint32
+
+	spareFrame *CallContext // a finished nested frame's context, see putCallContext
 }
 
-// evmSizeClass is the Go allocation size class EVM fills. One more word moves
-// every EVM into the 480-byte class, whose cost measured within workload noise:
-// a field added here either packs into existing padding or bumps this const,
-// and bumping it is the expected answer to growth someone meant.
+// evmSizeClass is the Go allocation size class EVM fills. Growing it from the
+// 448-byte class measured within workload noise: a field added here either
+// packs into existing padding or bumps this const, and bumping it is the
+// expected answer to growth someone meant.
 // TestEVMFitsItsSizeClass is therefore a tripwire for the growth nobody meant,
 // not a budget — a build-time assert would also fire in every package that
 // grows an embedded type such as evmtypes.BlockContext.
-const evmSizeClass = 448
+const evmSizeClass = 480
 
 // storageKeyCacheSize must comfortably exceed a contract's live slot count,
 // or conflict misses dominate.
@@ -597,6 +599,10 @@ func (evm *EVM) prepareCreate(caller accounts.Address, address accounts.Address,
 }
 
 func (evm *EVM) hasCreateCollision(address accounts.Address) (bool, error) {
+	// An absent account has no nonce or code.
+	if exists, err := evm.intraBlockState.Exist(address); err != nil || !exists {
+		return false, err
+	}
 	targetCodeHash, err := evm.intraBlockState.GetCodeHash(address)
 	if err != nil {
 		return false, err

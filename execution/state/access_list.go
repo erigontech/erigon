@@ -72,15 +72,6 @@ func (al *accessList) Reset() {
 // addSlotSlow to reuse, so the live count would under-report what is retained.
 func (al *accessList) entries() int { return al.inserted }
 
-// liveEntries counts the keys currently in the list, which a revert reduces.
-func (al *accessList) liveEntries() int {
-	n := len(al.addresses)
-	for _, s := range al.slots {
-		n += len(s)
-	}
-	return n
-}
-
 func (al *accessList) dropMemo() {
 	al.lastAddr = accounts.NilAddress
 	al.lastSlots = nil
