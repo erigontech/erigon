@@ -1341,3 +1341,14 @@ func TestResetForPoolDropsARevertedWarmUp(t *testing.T) {
 }
 
 func big2(i int) *big.Int { return big.NewInt(int64(i)) }
+
+// Slots, not just addresses, decide poolability: one contract's slot map is
+// what a reused read set keeps, and Go maps never shrink.
+func TestResetForPoolDropsAStateWithTooManySlots(t *testing.T) {
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	for i := range maxPooledEntries + 1 {
+		ibs.versionedReads.SetStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))), VersionedRead[uint256.Int]{})
+	}
+	require.False(t, ibs.resetForPool(), "one address with that many slots must not be pooled")
+}
