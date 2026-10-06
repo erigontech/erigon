@@ -1,6 +1,7 @@
 package temporal
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -17,12 +18,41 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
+
+func TestTemporalMemBatchPrefetchReuse(t *testing.T) {
+	mdbxDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	agg := state.NewTest(datadir.New(t.TempDir())).StepSize(16).MustOpen(t.Context())
+	defer agg.Close()
+	db, err := New(mdbxDB, agg, nil)
+	require.NoError(t, err)
+	defer db.Close()
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	batch := tx.(*RwTx).NewMemBatch(&kvmetrics.DomainMetrics{})
+	defer batch.Close()
+	other := tx.(*RwTx).NewMemBatch(&kvmetrics.DomainMetrics{})
+	defer other.Close()
+	require.NoError(t, other.IndexAdd(kv.TracesToIdx, []byte("key"), 0))
+	require.NoError(t, batch.Merge(other))
+	for txNum := uint64(1); txNum <= 2; txNum++ {
+		ctx, cancel := context.WithCancel(t.Context())
+		require.NoError(t, batch.IndexAdd(kv.TracesToIdx, []byte("key"), txNum))
+		err := batch.Flush(ctx, tx)
+		cancel()
+		require.NoError(t, err)
+		n, err := tx.Count(kv.TblTracesToIdx)
+		require.NoError(t, err)
+		require.Equal(t, txNum+1, n)
+	}
+}
 
 // TestTemporalTx_PinsBlockFilesView: with block snapshots wired at construction,
 // every temporal tx pins its own block-files view (the peer of aggtx); with none

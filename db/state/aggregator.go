@@ -107,13 +107,6 @@ type Aggregator struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
-	// commitGate serializes background db.View() txs against commit+prune.
-	// Background readers (collation, sentry, etc.) hold RLock; commit+prune
-	// path holds Lock (exclusive). This ensures no background RO tx is open
-	// during MDBX commit, allowing the GC to reclaim freed pages (requires
-	// openTxs=1). Exposed via CommitGate() for use by any component.
-	commitGate sync.RWMutex
-
 	background         concurrent.ClosingWaitGroup // background goroutines
 	backgroundProgress *background.ProgressSet     // progress of background goroutines
 
@@ -713,10 +706,6 @@ func (a *Aggregator) closeDirtyFilesNoReopen() {
 	a.recalcVisibleFiles(nil)
 }
 
-func (a *Aggregator) OpenList(db kv.RoDB, files []string, readonly bool) error {
-	return a.OpenFolder(db)
-}
-
 func (a *Aggregator) WaitForFiles() {
 	for range a.WaitForBuildAndMerge(a.ctx) {
 		// The loop will exit when the channel is closed
@@ -1166,8 +1155,6 @@ func (a *Aggregator) buildFiles(ctx context.Context, db kv.TemporalRoDB, step kv
 }
 
 func (a *Aggregator) readyForCollation(ctx context.Context, db kv.TemporalRoDB, step kv.Step, finalityCtx kv.FinalityContext) (finalisedBlockNum, lastBlockInStep, lastBlockInDB, lastTxInDB uint64, ok bool, err error) {
-	a.commitGate.RLock()
-	defer a.commitGate.RUnlock()
 	return finalityCtx.ReadyForCollation(ctx, db, step.LastTxNum(a.stepSize.Load()))
 }
 
@@ -1175,8 +1162,6 @@ func (a *Aggregator) reorgSafeBlockAndStep(ctx context.Context, db kv.RoDB, maxR
 	if maxReorgDepth == 0 {
 		return 0, 0, false
 	}
-	a.commitGate.RLock()
-	defer a.commitGate.RUnlock()
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		lastBlockInDB, _, err := rawdbv3.TxNums.Last(tx)
 		if err != nil {
@@ -1295,7 +1280,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 	return true, nil
 }
 
-func (a *Aggregator) RemoveOverlapsAfterMerge(ctx context.Context) (err error) {
+func (a *Aggregator) RemoveOverlapsAfterMerge() (err error) {
 	a.cleanAfterMerge(nil)
 	return nil
 }
@@ -1772,31 +1757,14 @@ func (a *Aggregator) MaxPrunableStepsBacklog() uint64 {
 	)
 }
 
-// LockCollation acquires exclusive access, blocking until all in-flight
-// background db.View() txs complete. Callers must call UnlockCollation when done.
-// Use around BeginTemporalRw (NOT the full commit) — once the RW tx exists,
-// new RO txs see the same snapshot (txnid N) and don't block MDBX GC.
-// The GC reclaims pages from txns < min(active_reader_txnid), so as long as
-// no pre-existing RO txs with older snapshots remain, it works.
-func (a *Aggregator) LockCollation()   { a.commitGate.Lock() }
-func (a *Aggregator) UnlockCollation() { a.commitGate.Unlock() }
-
-// CommitGate returns the RWMutex used to serialize background RO txs against
-// commits. Background readers (collation, sentry status, etc.) should hold
-// RLock around their db.View() calls. Commit paths hold the write Lock
-// around BeginTemporalRw to drain old readers.
-func (a *Aggregator) CommitGate() *sync.RWMutex { return &a.commitGate }
-
 // CollateAndPrune commits a prune pass before starting bounded file building.
 func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) (kv.FinalityContext, error)) (bool, <-chan struct{}, error) {
 	var finalityCtx kv.FinalityContext
-	a.commitGate.Lock()
 	err := db.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
 		var err error
 		finalityCtx, err = pruneFn(tx)
 		return err
 	})
-	a.commitGate.Unlock()
 	if err != nil {
 		return false, nil, err
 	}
@@ -2283,16 +2251,12 @@ func (a *Aggregator) buildFilesInBackground(db kv.TemporalRoDB, txNum uint64, do
 			defer a.snapshotBuildSema.Release(1)
 		}
 
-		lastInDB := func() kv.Step {
-			a.commitGate.RLock()
-			defer a.commitGate.RUnlock()
-			return max(
-				lastIdInDB(db, a.d[kv.AccountsDomain]),
-				lastIdInDB(db, a.d[kv.CodeDomain]),
-				lastIdInDB(db, a.d[kv.StorageDomain]),
-				lastIdInDB(db, a.d[kv.CommitmentDomain]),
-			)
-		}()
+		lastInDB := max(
+			lastIdInDB(db, a.d[kv.AccountsDomain]),
+			lastIdInDB(db, a.d[kv.CodeDomain]),
+			lastIdInDB(db, a.d[kv.StorageDomain]),
+			lastIdInDB(db, a.d[kv.CommitmentDomain]),
+		)
 		reorgSafeBlock, reorgSafeStep, reorgSafeOK := a.reorgSafeBlockAndStep(a.ctx, db, finalityCtx.MaxReorgDepth())
 		a.logger.Info("BuildFilesInBackground", "step", step, "lastInDB", lastInDB, "targetStep", kv.Step(txNum/a.StepSize()),
 			"reorgSafeBlock", reorgSafeBlock, "reorgSafeStep", fmt.Sprintf("%.2f", reorgSafeStep), "reorgSafeOK", reorgSafeOK)

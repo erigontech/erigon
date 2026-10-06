@@ -142,28 +142,237 @@ func TestPostPtcDutiesDeduplicatesRepeatedCommitteeSeats(t *testing.T) {
 	require.Equal(t, expected, seen)
 }
 
+func postPtcDutiesDependentRoot(t *testing.T, handler *ApiHandler, epoch uint64) common.Hash {
+	t.Helper()
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		fmt.Sprintf("/eth/v1/validator/duties/ptc/%d", epoch),
+		strings.NewReader(`["1"]`),
+	)
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		DependentRoot common.Hash `json:"dependent_root"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	return response.DependentRoot
+}
+
+func newPtcDutiesHeadState(t *testing.T, cfg *clparams.BeaconChainConfig, slot uint64) *state.CachingBeaconState {
+	t.Helper()
+	headState := state.New(cfg)
+	headState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, headState.SetSlot(slot))
+	headState.SetPtcWindow(solid.NewUint64VectorOfVectors(
+		int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch),
+		int(cfg.PtcSize),
+	))
+	return headState
+}
+
+func publishPtcDutiesHead(t *testing.T, syncedData synced_data.SyncedData, headState *state.CachingBeaconState, headRoot common.Hash) {
+	t.Helper()
+	manager, ok := syncedData.(*synced_data.SyncedDataManager)
+	require.True(t, ok)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(headState, headRoot))
+}
+
+func TestPostPtcDutiesDependentRootAtGloasGenesis(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+
+	headState := newPtcDutiesHeadState(t, handler.beaconChainCfg, 0)
+	headRoot := common.Hash{0x42}
+	publishPtcDutiesHead(t, syncedData, headState, headRoot)
+
+	for _, epoch := range []uint64{0, 1} {
+		t.Run(fmt.Sprintf("epoch_%d", epoch), func(t *testing.T) {
+			require.Equal(t, headRoot, postPtcDutiesDependentRoot(t, handler, epoch))
+		})
+	}
+}
+
+func TestPostPtcDutiesDependentRootAtEpochOne(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	headSlot := slotsPerEpoch + 1
+	headState := newPtcDutiesHeadState(t, handler.beaconChainCfg, headSlot)
+	genesisRoot := common.Hash{0x51}
+	nextRoot := common.Hash{0x52}
+	require.NoError(t, headState.SetBlockRootAt(0, genesisRoot))
+	require.NoError(t, headState.SetBlockRootAt(int(slotsPerEpoch-1), nextRoot))
+
+	headRoot := common.Hash{0x53}
+	publishPtcDutiesHead(t, syncedData, headState, headRoot)
+	headEvent, err := beaconevents.BuildHeadV2Data(
+		handler.beaconChainCfg,
+		headState,
+		headSlot,
+		headRoot,
+		common.Hash{0x54},
+		"full",
+		false,
+	)
+	require.NoError(t, err)
+	require.Equal(t, genesisRoot, headEvent.Data.CurrentEpochDependentRoot)
+	require.Equal(t, nextRoot, headEvent.Data.NextEpochDependentRoot)
+	require.Equal(t, headEvent.Data.CurrentEpochDependentRoot, postPtcDutiesDependentRoot(t, handler, 1))
+	require.Equal(t, headEvent.Data.NextEpochDependentRoot, postPtcDutiesDependentRoot(t, handler, 2))
+}
+
+func TestPostPtcDutiesDependentRootMatchesHeadV2(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	headEpoch := uint64(2)
+	headSlot := headEpoch*slotsPerEpoch + 1
+	headState := newPtcDutiesHeadState(t, handler.beaconChainCfg, headSlot)
+	currentRoot := common.Hash{0x41}
+	nextRoot := common.Hash{0x42}
+	currentRootSlot := (headEpoch-1)*slotsPerEpoch - 1
+	nextRootSlot := headEpoch*slotsPerEpoch - 1
+	require.NoError(t, headState.SetBlockRootAt(int(currentRootSlot), currentRoot))
+	require.NoError(t, headState.SetBlockRootAt(int(nextRootSlot), nextRoot))
+	currentStateRoot, err := headState.GetBlockRootAtSlot(currentRootSlot)
+	require.NoError(t, err)
+	nextStateRoot, err := headState.GetBlockRootAtSlot(nextRootSlot)
+	require.NoError(t, err)
+
+	headRoot := common.Hash{0x43}
+	publishPtcDutiesHead(t, syncedData, headState, headRoot)
+
+	headEvent, err := beaconevents.BuildHeadV2Data(
+		handler.beaconChainCfg,
+		headState,
+		headSlot,
+		headRoot,
+		common.Hash{0x44},
+		"full",
+		false,
+	)
+	require.NoError(t, err)
+	require.Equal(t, currentStateRoot, headEvent.Data.CurrentEpochDependentRoot)
+	require.Equal(t, nextStateRoot, headEvent.Data.NextEpochDependentRoot)
+
+	tests := []struct {
+		epoch uint64
+		want  common.Hash
+	}{
+		{epoch: headEpoch, want: headEvent.Data.CurrentEpochDependentRoot},
+		{epoch: headEpoch + 1, want: headEvent.Data.NextEpochDependentRoot},
+	}
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("epoch_%d", test.epoch), func(t *testing.T) {
+			require.Equal(t, test.want, postPtcDutiesDependentRoot(t, handler, test.epoch))
+		})
+	}
+}
+
+func TestPostPtcDutiesDependentRootUnchangedWithinEpoch(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	headEpoch := uint64(2)
+	firstHeadState := newPtcDutiesHeadState(t, handler.beaconChainCfg, headEpoch*slotsPerEpoch+1)
+	currentRoot := common.Hash{0x61}
+	nextRoot := common.Hash{0x62}
+	require.NoError(t, firstHeadState.SetBlockRootAt(int((headEpoch-1)*slotsPerEpoch-1), currentRoot))
+	require.NoError(t, firstHeadState.SetBlockRootAt(int(headEpoch*slotsPerEpoch-1), nextRoot))
+	publishPtcDutiesHead(t, syncedData, firstHeadState, common.Hash{0x63})
+
+	currentBefore := postPtcDutiesDependentRoot(t, handler, headEpoch)
+	nextBefore := postPtcDutiesDependentRoot(t, handler, headEpoch+1)
+	require.Equal(t, currentRoot, currentBefore)
+	require.Equal(t, nextRoot, nextBefore)
+
+	secondHeadState, err := firstHeadState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, secondHeadState.SetSlot(headEpoch*slotsPerEpoch+5))
+	publishPtcDutiesHead(t, syncedData, secondHeadState, common.Hash{0x64})
+
+	require.Equal(t, currentBefore, postPtcDutiesDependentRoot(t, handler, headEpoch))
+	require.Equal(t, nextBefore, postPtcDutiesDependentRoot(t, handler, headEpoch+1))
+}
+
+func TestPostPtcDutiesForkEpochUnavailableBeforeGloasHead(t *testing.T) {
+	_, _, _, _, preForkState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	forkEpoch := state.Epoch(preForkState) + 1
+	previousHandlerForkEpoch := handler.beaconChainCfg.GloasForkEpoch
+	previousStateForkEpoch := preForkState.BeaconConfig().GloasForkEpoch
+	t.Cleanup(func() {
+		handler.beaconChainCfg.GloasForkEpoch = previousHandlerForkEpoch
+		preForkState.BeaconConfig().GloasForkEpoch = previousStateForkEpoch
+	})
+	handler.beaconChainCfg.GloasForkEpoch = forkEpoch
+	preForkState.BeaconConfig().GloasForkEpoch = forkEpoch
+
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	publishPtcDutiesHead(t, syncedData, preForkState, common.Hash{0x71})
+	predictedPtc, err := preForkState.GetPTC(forkEpoch * slotsPerEpoch)
+	require.NoError(t, err)
+	require.NotEmpty(t, predictedPtc)
+	requestedValidator := predictedPtc[0]
+
+	postDuties := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequestWithContext(
+			t.Context(),
+			http.MethodPost,
+			fmt.Sprintf("/eth/v1/validator/duties/ptc/%d", forkEpoch),
+			strings.NewReader(fmt.Sprintf(`["%d"]`, requestedValidator)),
+		)
+		recorder := httptest.NewRecorder()
+		handler.mux.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	preForkResponse := postDuties()
+	require.Equal(t, http.StatusServiceUnavailable, preForkResponse.Code, preForkResponse.Body.String())
+
+	gloasState, err := preForkState.Copy()
+	require.NoError(t, err)
+	gloasState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, gloasState.SetSlot(forkEpoch*slotsPerEpoch))
+	gloasState.SetPtcWindow(solid.NewUint64VectorOfVectors(
+		int((2+handler.beaconChainCfg.MinSeedLookahead)*slotsPerEpoch),
+		int(handler.beaconChainCfg.PtcSize),
+	))
+	publishPtcDutiesHead(t, syncedData, gloasState, common.Hash{0x72})
+	gloasResponse := postDuties()
+	require.Equal(t, http.StatusOK, gloasResponse.Code, gloasResponse.Body.String())
+}
+
 func TestGetPayloadAttestationDataUsesEnvelopeReceiptDeadline(t *testing.T) {
 	const slot = uint64(64)
 	slotStart := time.Unix(1_700_000_000, 0)
-	payloadDue := 9 * time.Second
+	payloadDue := 6 * time.Second
 
 	tests := []struct {
-		name      string
-		received  time.Time
-		persisted bool
-		want      bool
+		name          string
+		payloadDueBps uint64
+		received      time.Time
+		persisted     bool
+		want          bool
 	}{
 		{name: "accepted before data availability", received: slotStart.Add(payloadDue - time.Millisecond), want: true},
 		{name: "persisted after deadline", received: slotStart.Add(payloadDue + time.Millisecond), persisted: true},
 		{name: "persisted at deadline", received: slotStart.Add(payloadDue), persisted: true},
+		{name: "uses configured payload due BPS", payloadDueBps: 4000, received: slotStart.Add(5 * time.Second)},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 			handler.beaconChainCfg.GloasForkEpoch = 0
-			handler.beaconChainCfg.SecondsPerSlot = 12
-			handler.beaconChainCfg.PayloadDueBps = 7500
+			if test.payloadDueBps != 0 {
+				handler.beaconChainCfg.PayloadDueBps = test.payloadDueBps
+			}
 			root := common.HexToHash("0x1234")
 			fcu.HeadSlotVal = slot
 			fcu.HeadVal = root
@@ -2208,11 +2417,13 @@ func TestPostExecutionPayloadEnvelopeSuppressesPreparationDuringExecutionWork(t 
 }
 
 func TestPostPtcDutiesDoesNotCapValidatorCount(t *testing.T) {
-	_, _, _, _, headState, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, _, _, _, headState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
 	previousHeadForkEpoch := headState.BeaconConfig().GloasForkEpoch
 	t.Cleanup(func() { headState.BeaconConfig().GloasForkEpoch = previousHeadForkEpoch })
 	headState.BeaconConfig().GloasForkEpoch = 0
+	headState.SetVersion(clparams.GloasVersion)
+	publishPtcDutiesHead(t, syncedData, headState, common.Hash{})
 	indices := make([]string, 2049)
 	for i := range indices {
 		indices[i] = `"1"`
