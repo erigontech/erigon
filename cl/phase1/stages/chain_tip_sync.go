@@ -1113,6 +1113,20 @@ func gloasVerificationHeadRoot(forkChoice gloasHeadReader) (common.Hash, error) 
 	return headRoot, err
 }
 
+func sweepUntilHeadSettles(ctx context.Context, head func() (common.Hash, error), sweep func(context.Context)) {
+	for ctx.Err() == nil {
+		before, err := head()
+		if err != nil {
+			return
+		}
+		sweep(ctx)
+		after, err := head()
+		if err != nil || after == before {
+			return
+		}
+	}
+}
+
 func continueGloasVerificationAfterItemFailure(ctx context.Context, completeBatch *bool) bool {
 	if ctx.Err() == nil {
 		return true
@@ -1368,9 +1382,14 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				retryUnverifiedAnchorPayload(retryCtx, cfg)
 			},
 			// Payloads persisted by an earlier run have no EL status in this process. Until the
-			// sweep re-verifies the head's, fork choice sees no FULL variant and cannot advance.
+			// sweep re-verifies the head's, fork choice sees no FULL variant and cannot advance;
+			// each verified head exposes the next unverified block, so sweep until it settles.
 			func(retryCtx context.Context) {
-				verifyUnverifiedGloasPayloads(retryCtx, cfg)
+				sweepUntilHeadSettles(retryCtx, func() (common.Hash, error) {
+					return gloasVerificationHeadRoot(cfg.forkChoice)
+				}, func(sweepCtx context.Context) {
+					verifyUnverifiedGloasPayloads(sweepCtx, cfg)
+				})
 			},
 		)
 	}
