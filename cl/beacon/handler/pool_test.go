@@ -18,6 +18,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -327,6 +328,55 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	require.Len(t, out.Data, 2)
 	require.Equal(t, msg[0].Message.Aggregate, out.Data[0])
 	require.Equal(t, msg[1].Message.Aggregate, out.Data[1])
+}
+
+func TestPoolAggregatesAndProofsDoesNotPublishIgnoredAggregate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := services_mock.NewMockAggregateAndProofService(ctrl)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	topicVersion := cfg.GetCurrentStateVersion(clock.GetCurrentEpoch())
+
+	committeeBits := solid.NewBitVector(int(cfg.MaxCommitteesPerSlot))
+	require.NoError(t, committeeBits.SetBitAt(0, true))
+	requestBody, err := json.Marshal([]*cltypes.SignedAggregateAndProof{{
+		Message: &cltypes.AggregateAndProof{
+			Aggregate: &solid.Attestation{
+				AggregationBits: solid.BitlistFromBytes([]byte{1}, int(cfg.MaxValidatorsPerCommittee*cfg.MaxCommitteesPerSlot)),
+				Data:            &solid.AttestationData{},
+				CommitteeBits:   committeeBits,
+			},
+		},
+	}})
+	require.NoError(t, err)
+
+	service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).DoAndReturn(
+		func(ctx context.Context, subnetID *uint64, msg *services.SignedAggregateAndProofForGossip) error {
+			require.Equal(t, topicVersion, msg.TopicVersion)
+			return services.ErrIgnore
+		},
+	).Times(1)
+	handler := &ApiHandler{
+		logger:                    log.Root(),
+		ethClock:                  clock,
+		beaconChainCfg:            &cfg,
+		aggregateAndProofsService: service,
+		gossipManager:             gossipManager,
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/aggregate_and_proofs", bytes.NewReader(requestBody))
+
+	handler.PostEthV1ValidatorAggregatesAndProof(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
 }
 
 func TestPoolAggregatesAndProofsReportsRequestIndex(t *testing.T) {

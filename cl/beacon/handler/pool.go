@@ -442,12 +442,13 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			return
 		}
 
-		// for this service we are not publishing gossipData as the service does it internally, we just pass that data as a parameter.
 		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &services.SignedAggregateAndProofForGossip{
 			SignedAggregateAndProof: v,
 			ImmediateProcess:        true, // we want to process aggregate and proof immediately
+			TopicVersion:            a.beaconChainCfg.GetCurrentStateVersion(a.ethClock.GetCurrentEpoch()),
 		}); errors.Is(err, services.ErrIgnore) {
 			log.Debug("[Beacon REST] aggregate ignored", "err", err, "slot", v.Message.Aggregate.Data.Slot)
+			continue
 		} else if err != nil {
 			log.Warn("[Beacon REST] failed to process aggregate", "err", err)
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
