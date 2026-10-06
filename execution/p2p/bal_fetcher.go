@@ -119,6 +119,10 @@ type peerFetchFunc func(ctx context.Context, reqs []BALRequest, peerId *PeerId) 
 // a tight retry loop.
 const balFetchRequestInterval = 500 * time.Millisecond
 
+// Allow time for a replay budget to refill, but cap consecutive empty replies
+// so optional BALs do not hold up block delivery until the batch deadline.
+const balFetchMaxEmptyReplies = 3
+
 // balFetchShardingThreshold is the request-set size above which the first
 // round shards; at or below it the dedup savings are negligible and coverage
 // matters more, so every peer is asked for everything from the start.
@@ -127,7 +131,8 @@ const balFetchShardingThreshold = 16
 // fetchAcrossPeers first splits large batches into disjoint per-peer shards.
 // Later rounds ask each peer for its remaining requests, excluding BALs already
 // returned by any peer. Answered entries leave that peer's queue even when
-// unavailable; unanswered suffixes remain eligible for retry within the batch deadline.
+// unavailable; unanswered suffixes remain eligible for retry until the peer's
+// empty-reply limit or the batch deadline is reached.
 func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch peerFetchFunc) map[common.Hash]*types.BlockAccessListSidecar {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -137,6 +142,7 @@ func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, 
 		return out
 	}
 	remaining := make([][]BALRequest, len(peerIds))
+	emptyReplies := make([]int, len(peerIds))
 	for i := range remaining {
 		remaining[i] = slices.Clone(reqs)
 	}
@@ -167,6 +173,14 @@ func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, 
 				}
 				got, retryFrom := fetch(ctx, slice, &peerId)
 				remaining[peerIndex] = slices.Delete(pending, start, start+retryFrom)
+				if retryFrom == 0 {
+					emptyReplies[peerIndex]++
+					if emptyReplies[peerIndex] >= balFetchMaxEmptyReplies {
+						remaining[peerIndex] = nil
+					}
+				} else {
+					emptyReplies[peerIndex] = 0
+				}
 				mu.Lock()
 				defer mu.Unlock()
 				for hash, bal := range got {

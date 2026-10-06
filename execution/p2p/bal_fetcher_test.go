@@ -109,6 +109,70 @@ func TestBALFetcher_RetriesThrottledSuffix(t *testing.T) {
 	})
 }
 
+func TestBALFetcher_EmptyRepliesStopBeforeBatchDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		fetcher, tracker := newTestBALFetcher(t, func(context.Context, []common.Hash, *PeerId) ([]rlp.RawValue, error) {
+			calls++
+			return nil, nil
+		})
+		peer := PeerIdFromUint64(1)
+		tracker.PeerConnected(peer)
+		reqs := []BALRequest{{Hash: common.Hash{1}, Number: 1, ExpectedHash: empty.BlockAccessListHash}}
+		started := time.Now()
+		got := fetcher.Fetch(t.Context(), reqs, peer, nil, defaultBbdRequestConfig.balsBatchFetchTimeout, defaultBbdRequestConfig.balsRequestTimeout)
+		require.Empty(t, got)
+		require.Equal(t, 3, calls, "stop after three consecutive empty replies")
+		require.Equal(t, time.Second, time.Since(started), "optional BALs must not hold up blocks until the batch deadline")
+		require.True(t, tracker.PeerMayHaveBALNum(peer, 1), "empty replies do not establish that the peer lacks a BAL")
+	})
+}
+
+func TestBALFetcher_EmptyReplyBudgetResetsOnAnsweredPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		first rlp.RawValue
+		bals  int
+	}{
+		{name: "available prefix", first: rlp.RawValue{0xc0}, bals: 2},
+		{name: "unavailable prefix", first: rlp.RawValue{0x80}, bals: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				busy, serving := PeerIdFromUint64(1), PeerIdFromUint64(2)
+				var busyCalls, servingCalls int
+				fetcher, tracker := newTestBALFetcher(t, func(_ context.Context, hashes []common.Hash, peer *PeerId) ([]rlp.RawValue, error) {
+					if peer.Equal(busy) {
+						busyCalls++
+						return nil, nil
+					}
+					servingCalls++
+					if servingCalls%3 != 0 {
+						return nil, nil
+					}
+					if len(hashes) == 2 {
+						return []rlp.RawValue{tc.first}, nil
+					}
+					return []rlp.RawValue{{0xc0}}, nil
+				})
+				tracker.PeerConnected(busy)
+				tracker.PeerConnected(serving)
+				reqs := []BALRequest{
+					{Hash: common.Hash{1}, Number: 1, ExpectedHash: empty.BlockAccessListHash},
+					{Hash: common.Hash{2}, Number: 2, ExpectedHash: empty.BlockAccessListHash},
+				}
+
+				got := fetcher.Fetch(t.Context(), reqs, busy, []PeerId{*serving}, time.Minute, time.Second)
+				require.Equal(t, 3, busyCalls, "another peer's progress must not reset an empty peer's budget")
+				require.Equal(t, 6, servingCalls, "each answered prefix resets that peer's empty-reply budget")
+				require.Len(t, got, tc.bals)
+				require.Contains(t, got, reqs[1].Hash, "keep retrying the unanswered suffix on a peer that makes progress")
+				require.True(t, tracker.PeerMayHaveBALNum(busy, 1))
+			})
+		})
+	}
+}
+
 func TestBALFetcher_ConcurrentBatchesRespectPeerRate(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		limiter := rate.NewLimiter(2, 4)
