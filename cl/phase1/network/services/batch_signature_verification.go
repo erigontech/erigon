@@ -16,6 +16,7 @@ const (
 	batchSignatureVerificationThreshold = 50
 	reservedSize                        = 512
 	batchCheckInterval                  = 50 * time.Millisecond
+	peerBanQueueSize                    = 256
 )
 
 var blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
@@ -28,6 +29,7 @@ type BatchSignatureVerifier struct {
 	syncContributionVerify     chan *AggregateVerificationData
 	syncCommitteeMessage       chan *AggregateVerificationData
 	voluntaryExitVerify        chan *AggregateVerificationData
+	peerBanQueue               chan *sentinelproto.Peer
 	ctx                        context.Context
 }
 
@@ -44,7 +46,7 @@ type AggregateVerificationData struct {
 }
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.SentinelClient) *BatchSignatureVerifier {
-	return &BatchSignatureVerifier{
+	verifier := &BatchSignatureVerifier{
 		ctx:                        ctx,
 		sentinel:                   sentinel,
 		attVerifyAndExecute:        make(chan *AggregateVerificationData, 1024),
@@ -54,6 +56,10 @@ func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.Senti
 		syncCommitteeMessage:       make(chan *AggregateVerificationData, 1024),
 		voluntaryExitVerify:        make(chan *AggregateVerificationData, 1024),
 	}
+	if sentinel != nil {
+		verifier.peerBanQueue = make(chan *sentinelproto.Peer, peerBanQueueSize)
+	}
+	return verifier
 }
 
 func (b *BatchSignatureVerifier) VerifyAttestation(ctx context.Context, data *AggregateVerificationData) error {
@@ -113,12 +119,28 @@ func (b *BatchSignatureVerifier) ImmediateVerification(data *AggregateVerificati
 }
 
 func (b *BatchSignatureVerifier) Start() {
+	if b.peerBanQueue != nil {
+		go b.runPeerBans()
+	}
 	b.startVerifier(b.attVerifyAndExecute)
 	b.startVerifier(b.aggregateProofVerify)
 	b.startVerifier(b.blsToExecutionChangeVerify)
 	b.startVerifier(b.syncContributionVerify)
 	b.startVerifier(b.syncCommitteeMessage)
 	b.startVerifier(b.voluntaryExitVerify)
+}
+
+func (b *BatchSignatureVerifier) runPeerBans() {
+	for {
+		select {
+		case <-b.ctx.Done():
+			return
+		case peerToBan := <-b.peerBanQueue:
+			if _, err := b.sentinel.BanPeer(b.ctx, peerToBan); err != nil {
+				log.Debug("[BatchVerifier] failed to ban peer", "peer", peerToBan.Pid, "err", err)
+			}
+		}
+	}
 }
 
 func (b *BatchSignatureVerifier) startVerifier(incoming chan *AggregateVerificationData) {
@@ -241,12 +263,12 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 	if peerToBan != nil && logInvalidPeer {
 		log.Debug("[BatchVerifier] received invalid signature on the gossip", "peer", peerToBan.Pid)
 	}
-	if b.sentinel != nil && peerToBan != nil {
-		go func() {
-			if _, err := b.sentinel.BanPeer(b.ctx, peerToBan); err != nil {
-				log.Debug("[BatchVerifier] failed to ban peer", "peer", peerToBan.Pid, "err", err)
-			}
-		}()
+	if b.peerBanQueue != nil && peerToBan != nil {
+		select {
+		case b.peerBanQueue <- peerToBan:
+		default:
+			log.Debug("[BatchVerifier] peer ban queue full, dropping ban", "peer", peerToBan.Pid)
+		}
 	}
 	return callbacks
 }

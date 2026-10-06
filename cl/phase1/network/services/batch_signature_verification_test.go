@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,12 +14,13 @@ import (
 
 type blockingBanSentinel struct {
 	sentinelproto.SentinelClient
-	started chan struct{}
-	release chan struct{}
+	started     chan struct{}
+	release     chan struct{}
+	startedOnce sync.Once
 }
 
 func (s *blockingBanSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
-	close(s.started)
+	s.startedOnce.Do(func() { close(s.started) })
 	<-s.release
 	return &sentinelproto.EmptyMessage{}, nil
 }
@@ -120,6 +122,66 @@ func TestBatchSignatureVerifierContinuesAfterBlockingBan(t *testing.T) {
 	}
 
 	validResult := make(chan error, 1)
+	go func() {
+		validResult <- verifier.VerifyAttestation(t.Context(), &AggregateVerificationData{
+			Signatures: [][]byte{{1}},
+			SignRoots:  [][]byte{{1}},
+			Pks:        [][]byte{{1}},
+			F:          func() {},
+		})
+	}()
+	select {
+	case err := <-validResult:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("later batch waited for peer ban")
+	}
+
+	close(releaseBan)
+}
+
+func TestBatchSignatureVerifierBoundsBlockingBans(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		if len(signatures) > 1 {
+			return false, nil
+		}
+		return signatures[0][0] == 1, nil
+	}
+
+	banStarted := make(chan struct{})
+	releaseBan := make(chan struct{})
+	t.Cleanup(func() { close(releaseBan) })
+	verifier := NewBatchSignatureVerifier(t.Context(), &blockingBanSentinel{
+		started: banStarted,
+		release: releaseBan,
+	})
+	verifier.Start()
+
+	queueInvalidBatch := func() {
+		for range batchSignatureVerificationThreshold {
+			verifier.AsyncVerifySyncCommitteeMessage(&AggregateVerificationData{
+				Signatures:  [][]byte{{2}},
+				SignRoots:   [][]byte{{2}},
+				Pks:         [][]byte{{2}},
+				F:           func() {},
+				SendingPeer: &sentinelproto.Peer{Pid: "invalid-peer"},
+			})
+		}
+	}
+
+	queueInvalidBatch()
+	select {
+	case <-banStarted:
+	case <-time.After(time.Second):
+		t.Fatal("peer ban did not start")
+	}
+	baselineGoroutines := runtime.NumGoroutine()
+	for range 319 {
+		queueInvalidBatch()
+	}
+
+	validResult := make(chan error, 1)
 	verifier.AsyncVerifySyncCommitteeMessage(&AggregateVerificationData{
 		Signatures: [][]byte{{1}},
 		SignRoots:  [][]byte{{1}},
@@ -131,10 +193,10 @@ func TestBatchSignatureVerifierContinuesAfterBlockingBan(t *testing.T) {
 	case err := <-validResult:
 		require.NoError(t, err)
 	case <-time.After(time.Second):
-		t.Fatal("later batch waited for peer ban")
+		t.Fatal("later batch did not report its result")
 	}
 
-	close(releaseBan)
+	require.LessOrEqual(t, runtime.NumGoroutine(), baselineGoroutines+4)
 }
 
 func TestBatchSignatureVerifierDoesNotBanWaitedEntry(t *testing.T) {

@@ -53,7 +53,10 @@ type PeerBanner interface {
 // minPublishQueueSize is the floor for the background-publish queue
 // capacity, used when a chain config's sync committee is smaller than this
 // (e.g. the minimal preset).
-const minPublishQueueSize = 64
+const (
+	minPublishQueueSize = 64
+	peerBanQueueSize    = 256
+)
 
 // publishQueueSizeFor sizes the background-publish queue to hold at least
 // one full sync-committee-sized burst without dropping, when the queue
@@ -118,6 +121,11 @@ type publishJob struct {
 	logCtx []any
 }
 
+type peerBan struct {
+	banner PeerBanner
+	pid    string
+}
+
 type topicForkDigestSetter interface {
 	SetTopicForkDigest(common.Bytes4)
 }
@@ -140,6 +148,7 @@ type GossipManager struct {
 	subscribeAll   bool
 
 	publishQueue chan publishJob
+	peerBanQueue chan peerBan
 	// nowFunc returns the current time for expiry checks; time.Now unless
 	// overridden in tests.
 	nowFunc func() time.Time
@@ -186,6 +195,7 @@ func NewGossipManager(
 		subscribeAll:       subscribeAll,
 		activeIndicies:     activeIndicies,
 		publishQueue:       make(chan publishJob, publishQueueSizeFor(beaconConfig)),
+		peerBanQueue:       make(chan peerBan, peerBanQueueSize),
 		nowFunc:            time.Now,
 		workerDone:         make(chan struct{}),
 		lifetimeCtx:        cctx,
@@ -195,6 +205,7 @@ func NewGossipManager(
 	go gm.observeBandwidth(cctx, maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
 	go gm.goCheckForkAndResubscribe(cctx)
 	go gm.publishWorker(cctx)
+	go gm.runPeerBans(cctx)
 	//gm.stats.goPrintStats(cctx)
 	return gm
 }
@@ -302,8 +313,12 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		} else if err != nil {
 			log.Warn("[GossipManager] reject message", "topic", name, "err", err, "peer", pid)
 			g.stats.addReject(name)
-			if g.peerBanner != nil {
-				g.peerBanner.BanPeer(string(pid))
+			if banner := g.peerBanner; banner != nil {
+				select {
+				case g.peerBanQueue <- peerBan{banner: banner, pid: string(pid)}:
+				default:
+					log.Debug("[GossipManager] peer ban queue full, dropping ban", "peer", pid)
+				}
 			}
 			return pubsub.ValidationReject
 		}
@@ -313,6 +328,26 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		g.stats.addAccept(name)
 		return pubsub.ValidationAccept
 	}
+}
+
+func (g *GossipManager) runPeerBans(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ban := <-g.peerBanQueue:
+			g.runPeerBan(ban)
+		}
+	}
+}
+
+func (g *GossipManager) runPeerBan(ban peerBan) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("[GossipManager] panic banning peer", "peer", ban.pid, "err", r)
+		}
+	}()
+	ban.banner.BanPeer(ban.pid)
 }
 
 func (g *GossipManager) registerGossipService(service serviceintf.Service[any], conditions ...ConditionFunc) (subscribed, expired int, err error) {

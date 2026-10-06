@@ -55,6 +55,35 @@ type topicForkDigestMessage struct {
 	digest common.Bytes4
 }
 
+type blockingPeerBanner struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingPeerBanner) BanPeer(string) {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+}
+
+type panicOncePeerBanner struct {
+	firstStarted chan struct{}
+	secondCalled chan string
+	once         sync.Once
+}
+
+func (b *panicOncePeerBanner) BanPeer(pid string) {
+	panicked := false
+	b.once.Do(func() {
+		close(b.firstStarted)
+		panicked = true
+	})
+	if panicked {
+		panic("peer ban panic")
+	}
+	b.secondCalled <- pid
+}
+
 func (m *topicForkDigestMessage) SetTopicForkDigest(digest common.Bytes4) {
 	m.digest = digest
 }
@@ -292,6 +321,75 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_ProcessMessageError
 
 	result := validator(ctx, pid, msg)
 	s.Equal(pubsub.ValidationReject, result)
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorRejectsWhilePeerBanBlocks() {
+	banStarted := make(chan struct{})
+	releaseBan := make(chan struct{})
+	s.T().Cleanup(func() { close(releaseBan) })
+	s.gm.SetPeerBanner(&blockingPeerBanner{started: banStarted, release: releaseBan})
+	service := &mockService{
+		processFunc: func(context.Context, *uint64, any) error {
+			return errors.New("invalid signature")
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/abcd1234/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+	results := make(chan pubsub.ValidationResult, 2)
+
+	go func() { results <- validator(context.Background(), peer.ID("first-peer"), msg) }()
+	select {
+	case <-banStarted:
+	case <-time.After(time.Second):
+		s.T().Fatal("peer ban did not start")
+	}
+	go func() { results <- validator(context.Background(), peer.ID("second-peer"), msg) }()
+
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for received := range 2 {
+		select {
+		case result := <-results:
+			s.Equal(pubsub.ValidationReject, result)
+		case <-deadline.C:
+			s.T().Fatalf("got %d validator results before blocked peer ban returned, want 2", received)
+		}
+	}
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorContinuesAfterPeerBannerPanic() {
+	banner := &panicOncePeerBanner{
+		firstStarted: make(chan struct{}),
+		secondCalled: make(chan string, 1),
+	}
+	s.gm.SetPeerBanner(banner)
+	service := &mockService{
+		processFunc: func(context.Context, *uint64, any) error {
+			return errors.New("invalid signature")
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/abcd1234/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+
+	s.Equal(pubsub.ValidationReject, validator(context.Background(), peer.ID("first-peer"), msg))
+	select {
+	case <-banner.firstStarted:
+	case <-time.After(time.Second):
+		s.T().Fatal("first peer ban did not start")
+	}
+	s.Equal(pubsub.ValidationReject, validator(context.Background(), peer.ID("second-peer"), msg))
+	select {
+	case pid := <-banner.secondCalled:
+		s.Equal("second-peer", pid)
+	case <-time.After(time.Second):
+		s.T().Fatal("peer ban worker did not continue after panic")
+	}
 }
 
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_ProcessMessageErrNotSynced() {
