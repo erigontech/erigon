@@ -6,8 +6,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 )
+
+type blockingBanSentinel struct {
+	sentinelproto.SentinelClient
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingBanSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+	close(s.started)
+	<-s.release
+	return &sentinelproto.EmptyMessage{}, nil
+}
 
 func TestBatchSignatureVerifierReportsEachEntryResult(t *testing.T) {
 	saveSignatureGlobals(t)
@@ -64,6 +78,83 @@ func TestBatchSignatureVerifierReportsEachEntryResult(t *testing.T) {
 	case <-invalidRan:
 		t.Fatal("invalid callback ran")
 	default:
+	}
+}
+
+func TestBatchSignatureVerifierReportsWholeBatchBeforeBanningPeer(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		if len(signatures) > 1 {
+			return false, nil
+		}
+		return signatures[0][0] == 1, nil
+	}
+
+	banStarted := make(chan struct{})
+	releaseBan := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseBan:
+		default:
+			close(releaseBan)
+		}
+	})
+	verifier := NewBatchSignatureVerifier(t.Context(), &blockingBanSentinel{
+		started: banStarted,
+		release: releaseBan,
+	})
+
+	invalidResult := make(chan error, 1)
+	go func() {
+		invalidResult <- verifier.VerifyAttestation(t.Context(), &AggregateVerificationData{
+			Signatures:  [][]byte{{2}},
+			SignRoots:   [][]byte{{2}},
+			Pks:         [][]byte{{2}},
+			F:           func() {},
+			SendingPeer: &sentinelproto.Peer{Pid: "invalid-peer"},
+		})
+	}()
+	waitForQueuedVerification(t, verifier.attVerifyAndExecute, 1)
+
+	validResult := make(chan error, 1)
+	go func() {
+		validResult <- verifier.VerifyAttestation(t.Context(), &AggregateVerificationData{
+			Signatures: [][]byte{{1}},
+			SignRoots:  [][]byte{{1}},
+			Pks:        [][]byte{{1}},
+			F:          func() {},
+		})
+	}()
+	waitForQueuedVerification(t, verifier.attVerifyAndExecute, 2)
+	verifier.Start()
+
+	select {
+	case <-banStarted:
+	case <-time.After(time.Second):
+		t.Fatal("peer ban did not start")
+	}
+	select {
+	case err := <-validResult:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("valid result waited for peer ban")
+	}
+
+	close(releaseBan)
+	require.ErrorIs(t, <-invalidResult, ErrInvalidBlsSignature)
+}
+
+func waitForQueuedVerification(t *testing.T, queue chan *AggregateVerificationData, want int) {
+	t.Helper()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for len(queue) != want {
+		select {
+		case <-deadline.C:
+			t.Fatalf("got %d queued verification entries, want %d", len(queue), want)
+		default:
+			runtime.Gosched()
+		}
 	}
 }
 

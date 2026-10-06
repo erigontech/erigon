@@ -208,38 +208,39 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 
 // we could locate failing signature with binary search but for now let's choose simplicity over optimisation.
 func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) []func() {
-	alreadyBanned := false
 	callbacks := make([]func(), 0, len(aggregateVerificationData))
+	var peerToBan *sentinelproto.Peer
+	logInvalidPeer := false
 	for _, v := range aggregateVerificationData {
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
 			log.Crit("[BatchVerifier] signature verification failed with the error: " + err.Error())
 			v.report(err)
-			if b.sentinel != nil && v.SendingPeer != nil {
-				if _, err := b.sentinel.BanPeer(b.ctx, v.SendingPeer); err != nil {
-					log.Debug("[BatchVerifier] failed to ban peer", "peer", v.SendingPeer.Pid, "err", err)
-				}
+			if peerToBan == nil {
+				peerToBan = v.SendingPeer
 			}
 			continue
 		}
 
 		if !valid {
 			v.report(ErrInvalidBlsSignature)
-			if v.SendingPeer == nil || alreadyBanned {
-				continue
-			}
-			log.Debug("[BatchVerifier] received invalid signature on the gossip", "peer", v.SendingPeer.Pid)
-			if b.sentinel != nil && v.SendingPeer != nil {
-				if _, err := b.sentinel.BanPeer(b.ctx, v.SendingPeer); err != nil {
-					log.Debug("[BatchVerifier] failed to ban peer", "peer", v.SendingPeer.Pid, "err", err)
-				}
-				alreadyBanned = true
+			if peerToBan == nil && v.SendingPeer != nil {
+				peerToBan = v.SendingPeer
+				logInvalidPeer = true
 			}
 			continue
 		}
 
 		v.report(nil)
 		callbacks = append(callbacks, v.F)
+	}
+	if peerToBan != nil && logInvalidPeer {
+		log.Debug("[BatchVerifier] received invalid signature on the gossip", "peer", peerToBan.Pid)
+	}
+	if b.sentinel != nil && peerToBan != nil {
+		if _, err := b.sentinel.BanPeer(b.ctx, peerToBan); err != nil {
+			log.Debug("[BatchVerifier] failed to ban peer", "peer", peerToBan.Pid, "err", err)
+		}
 	}
 	return callbacks
 }
