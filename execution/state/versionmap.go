@@ -165,7 +165,7 @@ type VersionMap struct {
 	// this replaced serialised every access. Per-read conflict detection is
 	// unchanged; only the lock granularity moved from global to per-account.
 	s sync.Map // accounts.Address -> *AddressEntry
-	// nonEmpty latches on the first address: nothing removes entries.
+	// nonEmpty latches before the first entry is taken: nothing removes entries.
 	nonEmpty atomic.Bool
 	trace    bool
 }
@@ -374,11 +374,16 @@ func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKe
 // returned pointer is stable for the map's lifetime; the caller locks e.mu for
 // the cell mutation. Self-synchronised via sync.Map — no caller lock required.
 func (vm *VersionMap) entryOrCreate(addr accounts.Address) *AddressEntry {
+	// Latch before taking the entry, not after publishing it: a creator
+	// descheduled in between would otherwise let this writer finish a cell
+	// while load still answers from the empty fast path.
+	if !vm.nonEmpty.Load() {
+		vm.nonEmpty.Store(true)
+	}
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
 	}
 	e, _ := vm.s.LoadOrStore(addr, &AddressEntry{})
-	vm.nonEmpty.Store(true)
 	return e.(*AddressEntry)
 }
 
