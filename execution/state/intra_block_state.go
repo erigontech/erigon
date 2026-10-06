@@ -403,6 +403,7 @@ func ReleasePooled(ibs *IntraBlockState) {
 const (
 	maxPooledStateObjects = 4096
 	maxPooledJournal      = 1 << 16
+	maxPooledReads        = 4 * maxPooledStateObjects
 )
 
 // resetForPool clears everything one call left and reports whether ibs is
@@ -410,7 +411,7 @@ const (
 func (ibs *IntraBlockState) resetForPool() bool {
 	reads := ibs.versionedReads
 	poolable := len(ibs.stateObjects) <= maxPooledStateObjects && cap(ibs.journal.entries) <= maxPooledJournal &&
-		len(reads.address) <= maxPooledStateObjects && len(reads.storage) <= maxPooledStateObjects
+		reads.entries() <= maxPooledReads
 	ibs.Reset()
 	if !poolable {
 		return false
@@ -427,6 +428,9 @@ func (ibs *IntraBlockState) resetForPool() bool {
 	ibs.tracingHooks = nil
 	ibs.trace = false
 	ibs.stateReader, ibs.codeAccess = nil, nil
+	// Reset keeps the tx context and fork flags; New starts them at zero.
+	ibs.blockNum, ibs.version = 0, 0
+	ibs.eip8246, ibs.eip161, ibs.isAura = false, false, false
 	return true
 }
 
