@@ -61,19 +61,23 @@ func TestSingleCallCreateAccountRecordsNoConflictReads(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 	ibs, vm := newNoMaterializeIBS(NewNoopReader())
 	defer ibs.Close()
-	conflictReads := func() bool {
+	conflictReads := func() (balance, incarnation bool) {
 		reads := ibs.VersionedReads()
-		_, balance := reads.GetBalance(addr)
-		_, incarnation := reads.GetIncarnation(addr)
-		return balance || incarnation
+		_, balance = reads.GetBalance(addr)
+		_, incarnation = reads.GetIncarnation(addr)
+		return balance, incarnation
 	}
 
 	startNoMaterializeTx(ibs, vm, 0)
 	ibs.SetSingleCall()
 	require.NoError(t, ibs.CreateAccount(addr, true))
-	require.False(t, conflictReads(), "a single call records no conflict-detection reads")
+	balance, incarnation := conflictReads()
+	require.False(t, balance, "a single call records no balance read")
+	require.False(t, incarnation, "a single call records no incarnation read")
 
 	startNoMaterializeTx(ibs, vm, 0)
 	require.NoError(t, ibs.CreateAccount(addr, true))
-	require.True(t, conflictReads(), "after Reset the reads are recorded again")
+	balance, incarnation = conflictReads()
+	require.True(t, balance, "after Reset the balance read is recorded again")
+	require.True(t, incarnation, "after Reset the incarnation read is recorded again")
 }
