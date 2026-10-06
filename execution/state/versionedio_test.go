@@ -1803,6 +1803,10 @@ func TestArenaBackedSetRefusesToShareItsCells(t *testing.T) {
 	require.Panics(t, func() { newArenaSet().MergeInto(&WriteSet{}) })
 	require.Panics(t, func() { (&WriteSet{}).MergeInto(newArenaSet()) })
 	require.Panics(t, func() { newArenaSet().Filter(func(WriteHeader) bool { return true }) })
+	// Merge returns an input directly when the other side is empty.
+	require.Panics(t, func() { newArenaSet().Merge(&WriteSet{}) })
+	require.Panics(t, func() { (&WriteSet{}).Merge(newArenaSet()) })
+	require.Panics(t, func() { newArenaSet().Merge(newArenaSet()) })
 }
 
 // ReleaseMaps zeroes the set; the arena must survive it, or a reused set

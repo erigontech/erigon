@@ -2297,6 +2297,11 @@ func (ws *WriteSet) copyMissingFrom(src *WriteSet) {
 
 // Merge returns the union of prev and next, with next winning on (addr,path,key).
 func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
+	if dbg.AssertEnabled && (ws.ArenaBacked() || next.ArenaBacked()) {
+		// An empty side returns the other input as the merged set, and copyFrom
+		// shares cells, so the product would hold cells the arena recycles.
+		panic("merging an arena-backed write set")
+	}
 	if ws.IsEmpty() {
 		return next
 	}
