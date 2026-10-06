@@ -136,8 +136,14 @@ type ReadSet struct {
 }
 
 func (s *ReadSet) entries() int {
-	return len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
-		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize) + len(s.storage)
+	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
+		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize)
+	// Slots, not addresses: one contract's slot map is what a reused set keeps,
+	// and a map never shrinks back.
+	for _, inner := range s.storage {
+		n += len(inner)
+	}
+	return n
 }
 
 func (s *ReadSet) clearForReuse() {
@@ -151,9 +157,21 @@ func (s *ReadSet) clearForReuse() {
 	clear(s.code)
 	clear(s.codeHash)
 	clear(s.codeSize)
-	clear(s.storage)
+	// Keep the per-address slot maps: a call that reads one contract's slots
+	// would otherwise regrow its map from scratch on every later call.
+	if len(s.storage) <= maxReusedStorageAddrs {
+		for _, inner := range s.storage {
+			clear(inner)
+		}
+	} else {
+		clear(s.storage)
+	}
 	s.access = nil
 }
+
+// maxReusedStorageAddrs bounds how many per-address slot maps a reused read set
+// keeps; past it the outer map is dropped with them.
+const maxReusedStorageAddrs = 64
 
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
 	if *m == nil {
