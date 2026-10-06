@@ -1113,18 +1113,57 @@ func gloasVerificationHeadRoot(forkChoice gloasHeadReader) (common.Hash, error) 
 	return headRoot, err
 }
 
-func sweepUntilHeadSettles(ctx context.Context, head func() (common.Hash, error), sweep func(context.Context)) {
-	for ctx.Err() == nil {
-		before, err := head()
-		if err != nil {
-			return
-		}
-		sweep(ctx)
-		after, err := head()
-		if err != nil || after == before {
-			return
-		}
+// verifyGloasPayload records the EL verdict for a persisted payload. verified is false when the
+// payload was skipped (known invalid or no longer retained); err reports an unreadable envelope.
+func verifyGloasPayload(ctx context.Context, cfg *Cfg, item gloasVerificationItem) (verified bool, err error) {
+	envelope, err := cfg.forkChoice.ReadEnvelopeFromDisk(item.root)
+	if err != nil {
+		log.Debug("[chainTipSync] failed to read GLOAS envelope for verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root, "err", err)
+		return false, err
 	}
+	execHash, ok := gloasEnvelopePayloadHash(envelope)
+	if !ok {
+		log.Warn("[chainTipSync] missing GLOAS envelope payload during verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root)
+		return false, errors.New("missing execution payload in persisted envelope")
+	}
+	if isGloasPayloadKnownInvalid(cfg, envelope) {
+		cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(item.root, execHash, execution_client.PayloadStatusInvalidated, envelope.Message.Payload.GasLimit)
+		return false, nil
+	}
+	status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
+	if err != nil {
+		log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
+	}
+	status, retained := recordGloasPayloadRetryResult(
+		cfg.forkChoice,
+		forkchoice.PendingELPayload{Block: item.block, Envelope: envelope},
+		status,
+	)
+	if !retained {
+		return false, nil
+	}
+	if status == execution_client.PayloadStatusInvalidated {
+		log.Warn("[chainTipSync] GLOAS verification sweep found invalid payload", "slot", item.block.Block.Slot, "blockRoot", item.root)
+	}
+	return true, nil
+}
+
+// verifyGloasHeadPayload verifies the selected head's persisted payload when it has no EL status
+// yet. It reports whether a status was recorded, which can move the head to the next block.
+func verifyGloasHeadPayload(ctx context.Context, cfg *Cfg) bool {
+	headRoot, err := gloasVerificationHeadRoot(cfg.forkChoice)
+	if err != nil || headRoot == (common.Hash{}) {
+		return false
+	}
+	if !cfg.forkChoice.HasEnvelope(headRoot) || cfg.forkChoice.IsPayloadVerified(headRoot) {
+		return false
+	}
+	block, ok := cfg.forkChoice.GetBlock(headRoot)
+	if !ok || block == nil {
+		return false
+	}
+	verified, err := verifyGloasPayload(ctx, cfg, gloasVerificationItem{root: headRoot, block: block})
+	return err == nil && verified
 }
 
 func continueGloasVerificationAfterItemFailure(ctx context.Context, completeBatch *bool) bool {
@@ -1237,39 +1276,13 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		if cfg.forkChoice.IsPayloadVerified(item.root) {
 			return true
 		}
-		envelope, err := cfg.forkChoice.ReadEnvelopeFromDisk(item.root)
+		verified, err := verifyGloasPayload(ctx, cfg, item)
 		if err != nil {
-			log.Debug("[chainTipSync] failed to read GLOAS envelope for verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root, "err", err)
 			return continueGloasVerificationAfterItemFailure(ctx, &completeBatch)
 		}
-		execHash, ok := gloasEnvelopePayloadHash(envelope)
-		if !ok {
-			log.Warn("[chainTipSync] missing GLOAS envelope payload during verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root)
-			return continueGloasVerificationAfterItemFailure(ctx, &completeBatch)
+		if verified {
+			swept++
 		}
-		if isGloasPayloadKnownInvalid(cfg, envelope) {
-			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(item.root, execHash, execution_client.PayloadStatusInvalidated, envelope.Message.Payload.GasLimit)
-			return true
-		}
-		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
-		if err != nil {
-			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
-		}
-		if status == execution_client.PayloadStatusNone && ctx.Err() != nil {
-			return false
-		}
-		status, retained := recordGloasPayloadRetryResult(
-			cfg.forkChoice,
-			forkchoice.PendingELPayload{Block: item.block, Envelope: envelope},
-			status,
-		)
-		if !retained {
-			return true
-		}
-		if status == execution_client.PayloadStatusInvalidated {
-			log.Warn("[chainTipSync] GLOAS verification sweep found invalid payload", "slot", item.block.Block.Slot, "blockRoot", item.root)
-		}
-		swept++
 		return true
 	}
 	processImmediateGloasVerificationItems(selectedHead, immediateHead, processItem, &completeBatch)
@@ -1382,14 +1395,12 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				retryUnverifiedAnchorPayload(retryCtx, cfg)
 			},
 			// Payloads persisted by an earlier run have no EL status in this process. Until the
-			// sweep re-verifies the head's, fork choice sees no FULL variant and cannot advance;
-			// each verified head exposes the next unverified block, so sweep until it settles.
+			// head's is re-verified, fork choice sees no FULL variant and cannot advance; each
+			// verified head exposes the next unverified block, so repeat until the head settles.
 			func(retryCtx context.Context) {
-				sweepUntilHeadSettles(retryCtx, func() (common.Hash, error) {
-					return gloasVerificationHeadRoot(cfg.forkChoice)
-				}, func(sweepCtx context.Context) {
-					verifyUnverifiedGloasPayloads(sweepCtx, cfg)
-				})
+				for retryCtx.Err() == nil && verifyGloasHeadPayload(retryCtx, cfg) {
+				}
+				verifyUnverifiedGloasPayloads(retryCtx, cfg)
 			},
 		)
 	}
