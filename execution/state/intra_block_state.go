@@ -21,6 +21,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -34,10 +35,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -143,6 +144,7 @@ func (aa AccessSet) Merge(other AccessSet) AccessSet {
 // NOT THREAD SAFE!
 type IntraBlockState struct {
 	stateReader StateReader
+	codeAccess  codeAccessTracker // stateReader, if it tracks code access
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
 	stateObjects      map[accounts.Address]*stateObject // used only if `noMaterialize == false`
@@ -181,12 +183,10 @@ type IntraBlockState struct {
 	versionMap      *VersionMap
 	versionedWrites WriteSet
 	versionedReads  ReadSet
-	// committedBase memoizes the per-tx committed (pre-block) account fallback
-	// used by versionedAccountBase when the versionMap has no cell for addr.
-	// The committed view is block-immutable and this branch is only reached on
-	// a versionMap miss (a written account returns via the write-set), so the
-	// cached pointer is safe to share across the tx's read-only callers. Reset
-	// per tx.
+	// committedBase memoizes the committed (pre-block) account that
+	// versionedAccountBase and committedCodeHash read from the state reader.
+	// The committed view is block-immutable, so the cached pointer is safe to
+	// share across the tx's read-only callers. Reset per tx.
 	committedBase       map[accounts.Address]*accounts.Account
 	accountReadDuration time.Duration
 	accountReadCount    int64
@@ -226,6 +226,8 @@ type IntraBlockState struct {
 	isAura bool
 
 	revisions revisions
+
+	lastCode accounts.Code // last code stored by SetCode
 }
 
 type sdProbeEntry struct {
@@ -251,6 +253,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		trace:             false,
 		dep:               UnknownDep,
 	}
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
 	return ibs
 }
@@ -330,6 +333,7 @@ func (ibs *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, ke
 // the underlying state trie to avoid reloading data for the next operations.
 func (ibs *IntraBlockState) Reset() {
 	clear(ibs.nilAccounts)
+	ibs.lastCode = accounts.Code{}
 	for _, so := range ibs.stateObjects {
 		so.release()
 	}
@@ -771,8 +775,8 @@ type codeAccessTracker interface {
 }
 
 func (ibs *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
-	if hook, ok := ibs.stateReader.(codeAccessTracker); ok {
-		hook.OnCodeAccess(addr, code)
+	if ibs.codeAccess != nil {
+		ibs.codeAccess.OnCodeAccess(addr, code)
 	}
 }
 
@@ -913,10 +917,18 @@ func (ibs *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 // create path never reads balance (matching the old stateObject path). The journal
 // prev is read only in the existing branch so a create does not widen the OCC
 // read-set with a spurious BalancePath read.
-func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
+// writeBalanceVersioned takes prev from a caller that already read the balance; nil reads it here.
+func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *uint256.Int, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
 	base, _, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
 		return err
+	}
+	if base != nil && prev == nil {
+		cur, _, err := ibs.getBalance(addr)
+		if err != nil {
+			return err
+		}
+		prev = &cur
 	}
 	if base == nil || ibs.accountLifecycle(addr) {
 		stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -929,23 +941,15 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, update 
 		// balance. Seed the live balance first. The base==nil create path never
 		// read balance, so leave it untouched (avoids widening the OCC read-set).
 		if base != nil {
-			cur, _, err := ibs.getBalance(addr)
-			if err != nil {
-				return err
-			}
-			stateObject.setBalance(cur)
+			stateObject.setBalance(*prev)
 		}
 		stateObject.SetBalance(update, wasCommited, reason)
 		ibs.recordWriteBalance(addr, update)
 		return nil
 	}
-	prev, _, err := ibs.getBalance(addr)
-	if err != nil {
-		return err
-	}
-	ibs.journal.balanceChange(addr, prev, wasCommited)
+	ibs.journal.balanceChange(addr, *prev, wasCommited)
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
-		ibs.tracingHooks.OnBalanceChange(addr, prev, update, reason)
+		ibs.tracingHooks.OnBalanceChange(addr, *prev, update, reason)
 	}
 	ibs.recordWriteBalance(addr, update)
 	return nil
@@ -1024,7 +1028,7 @@ func (ibs *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 	update := u256.Add(prev, amount)
 
 	if ibs.versionMap != nil {
-		return ibs.writeBalanceVersioned(addr, update, wasCommited, reason)
+		return ibs.writeBalanceVersioned(addr, &prev, update, wasCommited, reason)
 	}
 
 	stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -1048,6 +1052,12 @@ func (ibs *IntraBlockState) touchAccount(addr accounts.Address) {
 // TouchAccount materializes an empty account and records the zero-balance touch
 // needed for state clearing and trie consistency.
 func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
+	// An own balance write settles the touch: zero already is the touch, non-zero is a non-empty account.
+	if ibs.versionMap != nil && addr != ripemd {
+		if _, ok := ibs.versionedWrites.GetBalance(addr); ok {
+			return nil
+		}
+	}
 	markTouched := func() {
 		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Touch %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
@@ -1060,6 +1070,10 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			var prev uint256.Int
 			if had {
 				prev = prevWrite.Val
+				// An own zero balance already is the touch; repeating it would journal a no-op.
+				if prev.IsZero() && addr != ripemd {
+					return
+				}
 			}
 			ibs.recordWriteBalance(addr, uint256.Int{})
 			ibs.journal.touchAccount(addr, !had, prev)
@@ -1173,7 +1187,7 @@ func (ibs *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 		}
 		return nil, false
 	}
-	acc.Root.SetBytes(trie.EmptyRoot[:])
+	acc.Root.SetBytes(empty.RootHash[:])
 	return acc, true
 }
 
@@ -1386,7 +1400,7 @@ func (ibs *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 			// Spurious Dragon (see PR 5645 and Issue 18276).
 			//
 			// The primary syscall path in evm.call() handles this via
-			// TouchAccount directly; this branch is retained as
+			// TouchAccount directly on AuRa; this branch is retained as
 			// defense-in-depth for other callers (AuRa engine,
 			// consensus callbacks).
 			return ibs.TouchAccount(addr)
@@ -1411,7 +1425,7 @@ func (ibs *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 	update := u256.Sub(prev, amount)
 
 	if ibs.versionMap != nil {
-		return ibs.writeBalanceVersioned(addr, update, wasCommited, reason)
+		return ibs.writeBalanceVersioned(addr, &prev, update, wasCommited, reason)
 	}
 
 	stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -1429,7 +1443,7 @@ func (ibs *IntraBlockState) SetBalance(addr accounts.Address, amount uint256.Int
 		fmt.Printf("%d (%d.%d) SetBalance %x, %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, amount.String())
 	}
 	if ibs.versionMap != nil {
-		return ibs.writeBalanceVersioned(addr, amount, !ibs.hasWrite(addr, BalancePath, accounts.NilKey), reason)
+		return ibs.writeBalanceVersioned(addr, nil, amount, !ibs.hasWrite(addr, BalancePath, accounts.NilKey), reason)
 	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
 	if err != nil {
@@ -1521,6 +1535,8 @@ func printCode(c []byte) (int, string) {
 	return lenc, fmt.Sprintf("%x...", c)
 }
 
+// SetCode keeps code, also after a revert or Reset: the caller must not modify it afterwards.
+//
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason tracing.CodeChangeReason) error {
@@ -1533,7 +1549,12 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	if err != nil {
 		return err
 	}
-	canonical := accounts.NewCode(code)
+	// Factories deploy the same bytes many times: reuse the last hash instead of re-hashing.
+	canonical := ibs.lastCode
+	if len(code) == 0 || !bytes.Equal(code, canonical.Bytes) {
+		canonical = accounts.NewCode(code)
+		ibs.lastCode = canonical
+	}
 	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
 	origHash := stateObject.original.CodeHash
@@ -2140,7 +2161,7 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		original = &previous.original
 	}
 
-	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
+	account.Root.SetBytes(empty.RootHash[:]) // old storage should be ignored
 	newobj = newObject(ibs, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
@@ -2156,8 +2177,7 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 	if !ibs.noMaterialize {
 		ibs.setStateObject(addr, newobj)
 	}
-	data := newobj.data
-	ibs.recordWriteAddress(addr, &data)
+	ibs.recordWriteAddress(addr, &newobj.data)
 	// Write CodeHashPath so that any stale versionedReads cache entry
 	// (e.g. from the pre-creation GetCodeHash check in EVM create()) is
 	// invalidated.  newObject normalises the zero-value CodeHash to
@@ -2440,6 +2460,7 @@ func EIP161EmptyRemoval(eip161Enabled, isAura bool, addr accounts.Address) bool 
 }
 
 func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, addr accounts.Address, stateObject *stateObject, isDirty bool, trace bool, tracingHooks *tracing.Hooks, useBlockOrigin bool, eip8246 bool) error {
+	stateObject.db.journal.epoch++ // storage moves to committed, deletions apply
 	emptyRemoval := EIP161EmptyRemoval(eip161Enabled, isAura, addr) && stateObject.data.Empty()
 	// EIP-8246: a self-destructed account that still holds a balance is reset to
 	// a balance-only account (nonce 0, empty code, empty storage) not deleted.
@@ -2756,7 +2777,7 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if ibs.versionMap == nil {
 		return
 	}
-	ibs.versionMap.FlushVersionedWrites(writes, true, "")
+	ibs.versionMap.FlushVersionedWrites(writes, true)
 }
 
 func (ibs *IntraBlockState) Print(chainRules chain.Rules, all bool) {
@@ -2937,6 +2958,12 @@ func (ibs *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 // and FinalizedWrites withholds its created-empty writes.
 func (ibs *IntraBlockState) StartAccessRecording() {
 	ibs.recordAccess = true
+}
+
+// StopAccessRecording turns access tracking off for a caller that builds no BAL.
+func (ibs *IntraBlockState) StopAccessRecording() {
+	ibs.recordAccess = false
+	ibs.versionedReads.access = nil
 }
 
 // MarkReadsInternal marks all versioned reads for addr as internal.
@@ -3142,11 +3169,13 @@ func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) 
 	traceWrite(ibs, vw)
 }
 
-func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, val *accounts.Account) {
+func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *accounts.Account) {
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
 	}
+	// A copy, made only here: the caller's account keeps changing.
+	val := account.SelfCopy()
 	if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val

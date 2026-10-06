@@ -606,7 +606,7 @@ func TestSelfdestructRecordReadsBackWiped(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, destroyed)
 
-			vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{}), true, "")
+			vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{}), true)
 
 			acc := base
 			vm.applySubFieldWrites(addr, 5, &acc)
