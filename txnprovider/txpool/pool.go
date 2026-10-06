@@ -107,8 +107,6 @@ type remoteSource struct {
 // txpool doesn't start any goroutines - "leave concurrency to user" design
 // txpool has no DB-TX fields - "leave db transactions management to user" design
 // txpool has _chainDB field - but it must maximize local state cache hit-rate - and perform minimum _chainDB transactions
-//
-// It preserve TxnSlot objects immutable
 type TxPool struct {
 	_chainDB               kv.TemporalRoDB // remote db - use it wisely
 	_stateCache            kvcache.Cache

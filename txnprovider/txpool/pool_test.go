@@ -3019,6 +3019,29 @@ func TestFromDBBlobsOutliveReadTx(t *testing.T) {
 	require.Equal(want, bundles[0].Blob, "blob loaded from the pool DB must not change after its read tx ends")
 }
 
+func TestAddLocalTxnsClearsPreviousDiscardReason(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	txn := newTestTxnSlot(0, 0, 1, 2, 100_000)
+	txn.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(txn, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	hash := string(txn.IDHash[:])
+	pool.lock.Lock()
+	pooled := pool.byHash[hash]
+	pool.removeFromSubPool(pooled, "test")
+	pool.discardLocked(pooled, txpoolcfg.Mined)
+	pool.lock.Unlock()
+
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Contains(t, pool.byHash, hash)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+}
+
 func TestAddLocalTxnsKeepsOriginalWhenReplacementRejected(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
