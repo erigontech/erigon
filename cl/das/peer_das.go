@@ -36,6 +36,16 @@ import (
 // BlockGetter is an interface for getting blocks by root.
 // Used to avoid import cycle with forkchoice package.
 // [New in Gloas:EIP7732]
+const (
+	deferredColumnSyncInterval    = time.Second
+	deferredColumnSyncSlotDivisor = 6
+)
+
+// pendingEnvelopeRetrier re-applies an envelope that waited for the block's column data.
+type pendingEnvelopeRetrier interface {
+	RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash)
+}
+
 type BlockGetter interface {
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 }
@@ -1920,9 +1930,20 @@ func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 	return nil
 }
 
+// deferredColumnSyncDue reports whether gossip has had its share of the slot to deliver a
+// block's columns, after which the missing custody columns are requested from peers.
+func deferredColumnSyncDue(now, slotStart time.Time, slotDuration time.Duration) bool {
+	return !now.Before(slotStart.Add(slotDuration / deferredColumnSyncSlotDivisor))
+}
+
+func (d *peerdas) slotDuration() time.Duration {
+	return time.Duration(d.beaconConfig.SecondsPerSlot) * time.Second
+}
+
 func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(deferredColumnSyncInterval)
 	defer ticker.Stop()
+	nextAttempt := map[common.Hash]time.Time{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -1939,15 +1960,14 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				}
 			}
 
+			now := time.Now()
 			// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
 			blocks := []cltypes.ColumnSyncableSignedBlock{}
 			roots := []common.Hash{}
 			d.blocksToCheckSync.Range(func(key, value any) bool {
 				root := key.(common.Hash)
 				block := value.(cltypes.ColumnSyncableSignedBlock)
-				curSlot := d.ethClock.GetCurrentSlot()
-				if curSlot-block.GetSlot() < 5 { // wait slow data from peers
-					// skip blocks that are too close to the current slot
+				if !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), d.slotDuration()) || now.Before(nextAttempt[root]) {
 					return true
 				}
 				available, err := d.IsDataAvailable(block.GetSlot(), root)
@@ -1957,6 +1977,11 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				case available:
 					log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
 					d.blocksToCheckSync.Delete(root)
+					delete(nextAttempt, root)
+				case block.GetSlot()+d.beaconConfig.SlotsPerEpoch < d.ethClock.GetCurrentSlot():
+					log.Debug("[syncColumnDataWorker] giving up on column data", "slot", block.GetSlot(), "blockRoot", root)
+					d.blocksToCheckSync.Delete(root)
+					delete(nextAttempt, root)
 				default:
 					blocks = append(blocks, block)
 					roots = append(roots, root)
@@ -1967,20 +1992,29 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				continue
 			}
 			log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))
+			syncCtx, cancelSync := context.WithTimeout(ctx, d.slotDuration())
+			var err error
 			if d.IsArchivedMode() {
-				if err := d.DownloadColumnsAndRecoverBlobs(ctx, blocks); err != nil {
-					log.Warn("failed to download columns and recover blobs", "err", err)
-					continue
-				}
+				err = d.DownloadColumnsAndRecoverBlobs(syncCtx, blocks)
 			} else {
-				if err := d.DownloadOnlyCustodyColumns(ctx, blocks); err != nil {
-					log.Warn("failed to download only custody columns", "err", err)
-					continue
-				}
+				err = d.DownloadOnlyCustodyColumns(syncCtx, blocks)
+			}
+			cancelSync()
+			if err != nil {
+				log.Warn("failed to download column data", "err", err)
 			}
 			for i, root := range roots {
+				available, err := d.IsDataAvailable(blocks[i].GetSlot(), root)
+				if err != nil || !available {
+					nextAttempt[root] = time.Now().Add(d.slotDuration())
+					continue
+				}
 				d.blocksToCheckSync.Delete(root)
+				delete(nextAttempt, root)
 				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].GetSlot(), "blockRoot", root)
+				if retrier, ok := d.forkChoice.(pendingEnvelopeRetrier); ok {
+					retrier.RetryPendingExecutionPayloadEnvelope(ctx, root)
+				}
 			}
 		}
 	}
