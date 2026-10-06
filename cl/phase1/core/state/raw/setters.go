@@ -88,6 +88,9 @@ func (b *BeaconState) SetStateRootAt(index int, root common.Hash) error {
 }
 
 func (b *BeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) error {
+	if index < 0 || index >= b.validators.Length() {
+		return ErrInvalidValidatorIndex
+	}
 	if b.events.OnNewValidatorWithdrawalCredentials != nil {
 		if err := b.events.OnNewValidatorWithdrawalCredentials(index, creds[:]); err != nil {
 			return err
@@ -99,6 +102,9 @@ func (b *BeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, cred
 }
 
 func (b *BeaconState) SetExitEpochForValidatorAtIndex(index int, epoch uint64) error {
+	if index < 0 || index >= b.validators.Length() {
+		return ErrInvalidValidatorIndex
+	}
 	if b.events.OnNewValidatorExitEpoch != nil {
 		if err := b.events.OnNewValidatorExitEpoch(index, epoch); err != nil {
 			return err
@@ -125,6 +131,9 @@ func (b *BeaconState) SetWithdrawableEpochForValidatorAtIndex(index int, epoch u
 }
 
 func (b *BeaconState) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) error {
+	if index < 0 || index >= b.validators.Length() {
+		return ErrInvalidValidatorIndex
+	}
 	if b.events.OnNewValidatorEffectiveBalance != nil {
 		if err := b.events.OnNewValidatorEffectiveBalance(index, balance); err != nil {
 			return err
@@ -136,6 +145,9 @@ func (b *BeaconState) SetEffectiveBalanceForValidatorAtIndex(index int, balance 
 }
 
 func (b *BeaconState) SetActivationEpochForValidatorAtIndex(index int, epoch uint64) error {
+	if index < 0 || index >= b.validators.Length() {
+		return ErrInvalidValidatorIndex
+	}
 	if b.events.OnNewValidatorActivationEpoch != nil {
 		if err := b.events.OnNewValidatorActivationEpoch(index, epoch); err != nil {
 			return err
@@ -147,6 +159,9 @@ func (b *BeaconState) SetActivationEpochForValidatorAtIndex(index int, epoch uin
 }
 
 func (b *BeaconState) SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) error {
+	if index < 0 || index >= b.validators.Length() {
+		return ErrInvalidValidatorIndex
+	}
 	if b.events.OnNewValidatorActivationEligibilityEpoch != nil {
 		if err := b.events.OnNewValidatorActivationEligibilityEpoch(index, epoch); err != nil {
 			return err

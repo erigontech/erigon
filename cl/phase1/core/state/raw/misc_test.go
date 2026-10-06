@@ -164,6 +164,11 @@ func TestValidatorAccessorsRejectNegativeIndex(t *testing.T) {
 		"SetValidatorIsPreviousMatchingHeadAttester":       func(i int) error { return state.SetValidatorIsPreviousMatchingHeadAttester(i, true) },
 		"SetValidatorBalance":                              func(i int) error { return state.SetValidatorBalance(i, 1) },
 		"SetValidatorInactivityScore":                      func(i int) error { return state.SetValidatorInactivityScore(i, 1) },
+		"SetWithdrawalCredentialForValidatorAtIndex":       func(i int) error { return state.SetWithdrawalCredentialForValidatorAtIndex(i, common.Hash{}) },
+		"SetExitEpochForValidatorAtIndex":                  func(i int) error { return state.SetExitEpochForValidatorAtIndex(i, 1) },
+		"SetEffectiveBalanceForValidatorAtIndex":           func(i int) error { return state.SetEffectiveBalanceForValidatorAtIndex(i, 1) },
+		"SetActivationEpochForValidatorAtIndex":            func(i int) error { return state.SetActivationEpochForValidatorAtIndex(i, 1) },
+		"SetActivationEligibilityEpochForValidatorAtIndex": func(i int) error { return state.SetActivationEligibilityEpochForValidatorAtIndex(i, 1) },
 	}
 	for _, index := range []int{-1, math.MinInt64} {
 		for name, accessor := range accessors {
