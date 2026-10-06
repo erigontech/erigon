@@ -28,11 +28,13 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
+	gossipnames "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	log "github.com/erigontech/erigon/common/log/v3"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
@@ -100,7 +102,8 @@ func (s *newPubsubValidatorTestSuite) SetupTest() {
 		SlotsPerEpoch:  32,
 		SecondsPerSlot: 12,
 	}
-	networkConfig := &clparams.NetworkConfig{}
+	mainnetNetwork := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	networkConfig := &mainnetNetwork
 
 	// Setup mock expectations
 	s.mockClock.EXPECT().GetCurrentEpoch().Return(uint64(10)).AnyTimes()
@@ -390,7 +393,8 @@ func (s *subscribeUpcomingTopicsTestSuite) SetupTest() {
 		SlotsPerEpoch:  32,
 		SecondsPerSlot: 12,
 	}
-	networkConfig := &clparams.NetworkConfig{}
+	mainnetNetwork := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	networkConfig := &mainnetNetwork
 
 	// Setup mock expectations
 	s.mockClock.EXPECT().GetCurrentEpoch().Return(uint64(10)).AnyTimes()
@@ -1437,4 +1441,23 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishAcceptedAndOutcomeCounters
 func TestGossipManager(t *testing.T) {
 	suite.Run(t, new(subscribeUpcomingTopicsTestSuite))
 	suite.Run(t, new(newPubsubValidatorTestSuite))
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_RejectsPayloadAboveTopicBound() {
+	mainnetNetwork := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	s.gm.beaconConfig, s.gm.networkConfig = &clparams.MainnetBeaconConfig, &mainnetNetwork
+	bound := gossipnames.MaxUncompressedSize(gossipnames.TopicNameBeaconAggregateAndProof, s.gm.beaconConfig, s.gm.networkConfig)
+	topic := "/eth2/abcd1234/beacon_aggregate_and_proof/ssz_snappy"
+	decoded := 0
+	service := &mockService{decodeFunc: func(peer.ID, []byte, clparams.StateVersion) (any, error) {
+		decoded++
+		return "decoded_message", nil
+	}}
+	validator := s.gm.newPubsubValidator(service)
+	ctx, pid := context.Background(), peer.ID("test-peer")
+
+	s.Equal(pubsub.ValidationAccept, validator(ctx, pid, createMockMessage(topic, utils.CompressSnappy(make([]byte, bound)))))
+	s.Equal(1, decoded)
+	s.Equal(pubsub.ValidationReject, validator(ctx, pid, createMockMessage(topic, utils.CompressSnappy(make([]byte, bound+1)))))
+	s.Equal(1, decoded, "a payload above the topic bound must be rejected before decoding")
 }
