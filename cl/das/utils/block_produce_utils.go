@@ -15,8 +15,6 @@ const (
 
 type CellsAndKZGProofs = cltypes.CellsAndKZGProofs
 
-// GetCellsAndKZGProofsFromBlobsBundle extracts cells and KZG proofs from a blobs bundle
-
 // GetDataColumnSidecars assembles sidecars that can be distributed to peers given a signed block header
 // and the commitments, inclusion proof, cells/proofs associated with each blob in the block.
 func GetDataColumnSidecars(
