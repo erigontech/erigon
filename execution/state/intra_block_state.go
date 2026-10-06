@@ -398,20 +398,15 @@ func ReleasePooled(ibs *IntraBlockState) {
 	ibs.Close()
 }
 
-// Maps never shrink, so a call that grew past these must not pin its capacity
+// Maps never shrink, so a call that grew past this must not pin its capacity
 // for every later one.
-const (
-	maxPooledStateObjects = 4096
-	maxPooledJournal      = 64 * 1024
-	maxPooledReads        = 4 * maxPooledStateObjects
-)
+const maxPooledEntries = 16 * 1024
 
 // resetForPool clears everything one call left and reports whether ibs is
 // small enough to pool.
 func (ibs *IntraBlockState) resetForPool() bool {
 	reads := ibs.versionedReads
-	poolable := len(ibs.stateObjects) <= maxPooledStateObjects && cap(ibs.journal.entries) <= maxPooledJournal &&
-		reads.entries() <= maxPooledReads
+	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+reads.entries() <= maxPooledEntries
 	ibs.Reset()
 	if !poolable {
 		return false
