@@ -458,10 +458,14 @@ func (ibs *IntraBlockState) Close() {
 	releaseResources(stateObjects, journal)
 }
 
+// cacheObjects reports whether resident stateObjects may serve reads under
+// noMaterialize: only when no other tx can publish a cell this call would miss.
+func (ibs *IntraBlockState) cacheObjects() bool { return ibs.noConflictDetection }
+
 // The noMaterialize path never releases what it takes, so a pool draw there
 // would be a one-way drain on the materializing paths.
 func (ibs *IntraBlockState) allocStateObject() *stateObject {
-	if ibs.noMaterialize {
+	if ibs.noMaterialize && !ibs.cacheObjects() {
 		if so := ibs.stateObjectArena.alloc(); so != nil {
 			return so
 		}
@@ -2020,7 +2024,9 @@ func (ibs *IntraBlockState) stateObjectForAccount(addr accounts.Address, account
 	obj := newObject(ibs, addr, account, account)
 	if ibs.noMaterialize {
 		ibs.reconstructCellFlags(obj, addr)
-		return obj
+		if !ibs.cacheObjects() {
+			return obj
+		}
 	}
 	ibs.setStateObject(addr, obj)
 	return obj
@@ -2185,7 +2191,9 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	}
 	if ibs.noMaterialize {
 		ibs.reconstructCellFlags(obj, addr)
-		return obj, nil
+		if !ibs.cacheObjects() {
+			return obj, nil
+		}
 	}
 	ibs.setStateObject(addr, obj)
 	return obj, nil
@@ -2240,7 +2248,7 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		ibs.journal.resetObjectChange(addr, previous, prevWrites)
 	}
 	newobj.newlyCreated = true
-	if !ibs.noMaterialize {
+	if !ibs.noMaterialize || ibs.cacheObjects() {
 		ibs.setStateObject(addr, newobj)
 	}
 	ibs.recordWriteAddress(addr, &newobj.data)
