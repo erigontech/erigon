@@ -35,43 +35,76 @@ import (
 )
 
 func TestRepeatedForkchoicePersistsFinality(t *testing.T) {
-	m := execmoduletester.New(t)
-	chain, err := m.GenerateChain(4, nil)
-	require.NoError(t, err)
-	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks))
-	m.ExecModule.Drain()
-	head, safe, finalized := chain.TopBlock.Hash(), chain.Blocks[2].Hash(), chain.Blocks[1].Hash()
-	result, err := m.ExecModule.UpdateForkChoice(t.Context(), head, safe, finalized)
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
-	m.ExecModule.Drain()
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-		require.Equal(t, head, rawdb.ReadForkchoiceHead(tx))
-		require.Equal(t, safe, rawdb.ReadForkchoiceSafe(tx))
-		require.Equal(t, finalized, rawdb.ReadForkchoiceFinalized(tx))
-		return nil
-	}))
-	result, err = m.ExecModule.UpdateForkChoice(t.Context(), head, common.Hash{0xff}, finalized)
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
-	m.ExecModule.Drain()
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-		require.Equal(t, head, rawdb.ReadForkchoiceHead(tx))
-		require.Equal(t, safe, rawdb.ReadForkchoiceSafe(tx), "rejected finality must not be persisted")
-		require.Equal(t, finalized, rawdb.ReadForkchoiceFinalized(tx))
-		return nil
-	}))
-	result, err = m.ExecModule.UpdateForkChoice(t.Context(), chain.Blocks[0].Hash(), common.Hash{}, common.Hash{})
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
-	m.ExecModule.Drain()
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-		require.Equal(t, head, rawdb.ReadHeadBlockHash(tx), "an FCU below finality must not move the executed head")
-		require.Equal(t, head, rawdb.ReadForkchoiceHead(tx))
-		require.Equal(t, safe, rawdb.ReadForkchoiceSafe(tx))
-		require.Equal(t, finalized, rawdb.ReadForkchoiceFinalized(tx))
-		return nil
-	}))
+	for _, tc := range []struct {
+		name                        string
+		storedFinality              bool
+		updateSafe, updateFinalized bool
+	}{
+		{name: "both_unset", updateSafe: true, updateFinalized: true},
+		{name: "both", storedFinality: true, updateSafe: true, updateFinalized: true},
+		{name: "safe_only", storedFinality: true, updateSafe: true},
+		{name: "finalized_only", storedFinality: true, updateFinalized: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := execmoduletester.New(t)
+			chain, err := m.GenerateChain(4, nil)
+			require.NoError(t, err)
+			var previousSafe, previousFinalized common.Hash
+			fcuOpts := make([][]execmoduletester.UFCOpt, len(chain.Blocks))
+			if tc.storedFinality {
+				previousSafe, previousFinalized = chain.Blocks[2].Hash(), chain.Blocks[1].Hash()
+				fcuOpts[len(fcuOpts)-1] = []execmoduletester.UFCOpt{
+					execmoduletester.WithSafeHash(previousSafe),
+					execmoduletester.WithFinalisedHash(previousFinalized),
+				}
+			}
+			require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks, execmoduletester.WithFcuOptSeq(fcuOpts)))
+			m.ExecModule.Drain()
+
+			head := chain.TopBlock.Hash()
+			var safe, finalized common.Hash
+			wantSafe, wantFinalized := previousSafe, previousFinalized
+			if tc.updateSafe {
+				safe = head
+				wantSafe = safe
+			}
+			if tc.updateFinalized {
+				finalized = chain.Blocks[2].Hash()
+				wantFinalized = finalized
+			}
+			result, err := m.ExecModule.UpdateForkChoice(t.Context(), head, safe, finalized)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+			m.ExecModule.Drain()
+			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+				require.Equal(t, head, rawdb.ReadForkchoiceHead(tx))
+				require.Equal(t, wantSafe, rawdb.ReadForkchoiceSafe(tx), "safe hash")
+				require.Equal(t, wantFinalized, rawdb.ReadForkchoiceFinalized(tx), "finalized hash")
+				return nil
+			}))
+			result, err = m.ExecModule.UpdateForkChoice(t.Context(), head, common.Hash{0xff}, wantFinalized)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
+			m.ExecModule.Drain()
+			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+				require.Equal(t, head, rawdb.ReadForkchoiceHead(tx))
+				require.Equal(t, wantSafe, rawdb.ReadForkchoiceSafe(tx), "rejected finality must not be persisted")
+				require.Equal(t, wantFinalized, rawdb.ReadForkchoiceFinalized(tx))
+				return nil
+			}))
+			result, err = m.ExecModule.UpdateForkChoice(t.Context(), chain.Blocks[0].Hash(), common.Hash{}, common.Hash{})
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+			m.ExecModule.Drain()
+			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+				require.Equal(t, head, rawdb.ReadHeadBlockHash(tx), "an FCU below finality must not move the executed head")
+				require.Equal(t, head, rawdb.ReadForkchoiceHead(tx))
+				require.Equal(t, wantSafe, rawdb.ReadForkchoiceSafe(tx))
+				require.Equal(t, wantFinalized, rawdb.ReadForkchoiceFinalized(tx))
+				return nil
+			}))
+		})
+	}
 }
 
 func TestRepeatedForkchoiceDoesNotWaitForWriter(t *testing.T) {
