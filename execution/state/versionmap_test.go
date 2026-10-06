@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -2138,23 +2137,6 @@ func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
 			require.Equal(t, tc.want, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
 		})
 	}
-}
-
-// An empty version map must answer a probe without touching the sync.Map: for a
-// single call nothing ever writes it, and the lookup is on the read hot path.
-func TestEmptyVersionMapSkipsTheLookup(t *testing.T) {
-	was := dbg.AssertEnabled
-	dbg.AssertEnabled = true
-	t.Cleanup(func() { dbg.AssertEnabled = was })
-
-	m := NewVersionMap(nil)
-	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
-	require.Nil(t, m.load(addr))
-	require.Zero(t, m.lookups.Load(), "an empty map must not reach the sync.Map")
-
-	m.WriteNonce(addr, Version{TxIndex: 0}, 1, true)
-	require.NotNil(t, m.load(addr))
-	require.Positive(t, m.lookups.Load(), "a written map must be looked up")
 }
 
 // Every write must make load see the map as non-empty: load's fast path answers

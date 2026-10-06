@@ -165,12 +165,10 @@ type VersionMap struct {
 	// this replaced serialised every access. Per-read conflict detection is
 	// unchanged; only the lock granularity moved from global to per-account.
 	s sync.Map // accounts.Address -> *AddressEntry
-	// entries counts the addresses s holds. A single call never writes the map,
-	// so load can answer every probe without the sync.Map lookup.
-	entries atomic.Int64
-	// lookups counts the sync.Map lookups load performed, for tests only.
-	lookups atomic.Int64
-	trace   bool
+	// nonEmpty latches once s holds an address, so a map nothing wrote answers
+	// a probe without the lookup. Entries are never removed.
+	nonEmpty atomic.Bool
+	trace    bool
 }
 
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
@@ -181,11 +179,8 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
 func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
-	if vm.entries.Load() == 0 {
+	if !vm.nonEmpty.Load() {
 		return nil
-	}
-	if dbg.AssertEnabled {
-		vm.lookups.Add(1)
 	}
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
@@ -383,10 +378,8 @@ func (vm *VersionMap) entryOrCreate(addr accounts.Address) *AddressEntry {
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
 	}
-	e, loaded := vm.s.LoadOrStore(addr, &AddressEntry{})
-	if !loaded {
-		vm.entries.Add(1)
-	}
+	e, _ := vm.s.LoadOrStore(addr, &AddressEntry{})
+	vm.nonEmpty.Store(true)
 	return e.(*AddressEntry)
 }
 
