@@ -1695,3 +1695,57 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 		Changes: []*types.StorageChange{{Index: idx, Value: val}},
 	})
 }
+
+// An arena-backed write set hands out distinct cells and keeps its slabs across
+// resets, so a reused set allocates nothing after the first call.
+func TestWriteSetArenaReusesItsCells(t *testing.T) {
+	var ws WriteSet
+	ws.UseArena()
+	addrs := make([]accounts.Address, vwSlabSize+3)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+
+	first := make(map[*VersionedWrite[uint64]]struct{}, len(addrs))
+	for _, a := range addrs {
+		vw := ws.newVWNonce()
+		_, dup := first[vw]
+		require.False(t, dup, "a live cell must not be handed out twice")
+		first[vw] = struct{}{}
+		vw.WriteHeader = WriteHeader{Address: a, Path: NoncePath}
+		vw.Val = 7
+		ws.SetNonce(a, vw)
+	}
+	require.Equal(t, len(addrs), ws.Count())
+
+	ws.ReleaseAndReset()
+	require.Zero(t, ws.Count())
+
+	allocs := testing.AllocsPerRun(20, func() {
+		for _, a := range addrs {
+			vw := ws.newVWNonce()
+			vw.WriteHeader = WriteHeader{Address: a, Path: NoncePath}
+			ws.SetNonce(a, vw)
+		}
+		ws.ReleaseAndReset()
+	})
+	require.Less(t, allocs, float64(len(addrs)), "cells must come from the slabs, not the heap")
+}
+
+// A reset cell carries nothing from the call that used it.
+func TestWriteSetArenaCellsComeBackZeroed(t *testing.T) {
+	var ws WriteSet
+	ws.UseArena()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	vw := ws.newVWNonce()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 3}}
+	vw.Val = 42
+	ws.SetNonce(addr, vw)
+	ws.ReleaseAndReset()
+
+	again := ws.newVWNonce()
+	require.Same(t, vw, again, "the slab hands the same cell back")
+	require.Zero(t, again.Val)
+	require.Equal(t, WriteHeader{}, again.WriteHeader)
+}
