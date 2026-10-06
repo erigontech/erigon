@@ -463,10 +463,14 @@ func (ibs *IntraBlockState) Close() {
 	releaseResources(stateObjects, journal)
 }
 
+// cacheObjects reports whether resident stateObjects may serve reads under
+// noMaterialize: only when no other tx can publish a cell this call would miss.
+func (ibs *IntraBlockState) cacheObjects() bool { return ibs.noConflictDetection }
+
 // The noMaterialize path never releases what it takes, so a pool draw there
 // would be a one-way drain on the materializing paths.
 func (ibs *IntraBlockState) allocStateObject() *stateObject {
-	if ibs.noMaterialize {
+	if ibs.noMaterialize && !ibs.cacheObjects() {
 		if so := ibs.stateObjectArena.alloc(); so != nil {
 			return so
 		}
@@ -584,6 +588,10 @@ func (ibs *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 			return false, err
 		}
 		return s != nil && !s.deleted, nil
+	}
+
+	if ibs.noConflictDetection {
+		return ibs.existsUnvalidated(addr)
 	}
 
 	// Existence needs only the base record + self-destruct gate, not the
@@ -1342,6 +1350,28 @@ func (ibs *IntraBlockState) getVersionedAccount(addr accounts.Address, readStora
 // overlay the per-field versionMap cells. It returns nil when the account is
 // absent or was destroyed with no revival. The AddressPath read it performs
 // records the nil-read that OCC uses to detect create/absent conflicts.
+// existsUnvalidated answers Exist without the version-map probes and read-set
+// records versionedAccountBase keeps for a validator: this tx's own writes come
+// from the write set, and committedBase memoizes the committed record.
+func (ibs *IntraBlockState) existsUnvalidated(addr accounts.Address) (bool, error) {
+	if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
+		return vw.Val != nil, nil
+	}
+	if acc, ok := ibs.committedBase[addr]; ok {
+		return acc != nil, nil
+	}
+	acc, err := ibs.stateReader.ReadAccountData(addr)
+	ibs.recordStateReadError(err)
+	if err != nil {
+		return false, err
+	}
+	if ibs.committedBase == nil {
+		ibs.committedBase = make(map[accounts.Address]*accounts.Account)
+	}
+	ibs.committedBase[addr] = acc
+	return acc != nil, nil
+}
+
 func (ibs *IntraBlockState) versionedAccountBase(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
 	if ibs.versionMap == nil {
 		return nil, UnknownSource, UnknownVersion, nil
@@ -2030,7 +2060,9 @@ func (ibs *IntraBlockState) stateObjectForAccount(addr accounts.Address, account
 	obj := newObject(ibs, addr, account, account)
 	if ibs.noMaterialize {
 		ibs.reconstructCellFlags(obj, addr)
-		return obj
+		if !ibs.cacheObjects() {
+			return obj
+		}
 	}
 	ibs.setStateObject(addr, obj)
 	return obj
@@ -2195,7 +2227,9 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	}
 	if ibs.noMaterialize {
 		ibs.reconstructCellFlags(obj, addr)
-		return obj, nil
+		if !ibs.cacheObjects() {
+			return obj, nil
+		}
 	}
 	ibs.setStateObject(addr, obj)
 	return obj, nil
@@ -2250,7 +2284,7 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		ibs.journal.resetObjectChange(addr, previous, prevWrites)
 	}
 	newobj.newlyCreated = true
-	if !ibs.noMaterialize {
+	if !ibs.noMaterialize || ibs.cacheObjects() {
 		ibs.setStateObject(addr, newobj)
 	}
 	ibs.recordWriteAddress(addr, &newobj.data)

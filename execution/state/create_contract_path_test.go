@@ -81,3 +81,84 @@ func TestNoConflictDetectionCreateAccountRecordsNoConflictReads(t *testing.T) {
 	require.True(t, balance, "after Reset the balance read is recorded again")
 	require.True(t, incarnation, "after Reset the incarnation read is recorded again")
 }
+
+// countingAccountReader serves one committed account and counts base reads.
+type countingAccountReader struct {
+	NoopReader
+	addr  accounts.Address
+	acc   *accounts.Account
+	reads int
+}
+
+func (r *countingAccountReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	r.reads++
+	if address == r.addr {
+		return r.acc, nil
+	}
+	return nil, nil
+}
+
+func (r *countingAccountReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(address)
+}
+
+// Exist must give the same answer with and without conflict detection: the
+// unvalidated path only drops records a validator would have read.
+func TestExistAgreesWithoutConflictDetection(t *testing.T) {
+	committed := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	absent := accounts.InternAddress(common.HexToAddress("0xbeef"))
+	created := accounts.InternAddress(common.HexToAddress("0xf00d"))
+	destructed := accounts.InternAddress(common.HexToAddress("0xdead"))
+
+	for _, tc := range []struct {
+		name string
+		addr accounts.Address
+		seed func(*IntraBlockState)
+	}{
+		{name: "committed", addr: committed},
+		{name: "absent", addr: absent},
+		{name: "created in this call", addr: created, seed: func(ibs *IntraBlockState) {
+			require.NoError(t, ibs.CreateAccount(created, true))
+		}},
+		{name: "self-destructed in this call", addr: destructed, seed: func(ibs *IntraBlockState) {
+			require.NoError(t, ibs.CreateAccount(destructed, true))
+			_, err := ibs.Selfdestruct(destructed, false)
+			require.NoError(t, err)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := make([]bool, 2)
+			for i, noConflict := range []bool{false, true} {
+				reader := &countingAccountReader{addr: committed, acc: &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}}
+				ibs, vm := newNoMaterializeIBS(reader)
+				startNoMaterializeTx(ibs, vm, 0)
+				if noConflict {
+					ibs.SetNoConflictDetection()
+				}
+				if tc.seed != nil {
+					tc.seed(ibs)
+				}
+				exists, err := ibs.Exist(tc.addr)
+				require.NoError(t, err)
+				got[i] = exists
+			}
+			require.Equal(t, got[0], got[1], "conflict detection must not change existence")
+		})
+	}
+}
+
+// The committed record is read once per address, however often Exist asks.
+func TestExistUnvalidatedMemoizesTheCommittedRead(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	reader := &countingAccountReader{addr: addr, acc: &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}}
+	ibs, vm := newNoMaterializeIBS(reader)
+	startNoMaterializeTx(ibs, vm, 0)
+	ibs.SetNoConflictDetection()
+
+	for range 4 {
+		exists, err := ibs.Exist(addr)
+		require.NoError(t, err)
+		require.True(t, exists)
+	}
+	require.Equal(t, 1, reader.reads)
+}
