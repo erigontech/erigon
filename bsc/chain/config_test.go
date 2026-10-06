@@ -17,6 +17,13 @@
 package chain_test
 
 import (
+	"cmp"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"maps"
+	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -57,4 +64,27 @@ func TestChapelStaticPeers(t *testing.T) {
 	for _, n := range nodes {
 		assert.Equal(t, 30311, n.TCP())
 	}
+}
+
+// The Chapel system-contract upgrade sets, keyed by activation block or time.
+// The digest pins their content so moving where they are stored cannot change them.
+func TestChapelSystemContractUpgrades(t *testing.T) {
+	t.Parallel()
+
+	blockAlloc := bscchain.Chapel.Config.Parlia.BlockAlloc
+	keys := slices.Collect(maps.Keys(blockAlloc))
+	slices.SortFunc(keys, func(a, b string) int {
+		x, _ := strconv.ParseUint(a, 10, 64)
+		y, _ := strconv.ParseUint(b, 10, 64)
+		return cmp.Compare(x, y)
+	})
+	assert.Equal(t, []string{
+		"1010000", "1014369", "5582500", "13837000", "19203503", "22800220", "23603940",
+		"28196022", "29295050", "29861024", "1702972800", "1710136800", "1711342800",
+		"1719986788", "1724116996", "1740452880", "1744097580", "1748243100", "1762741500",
+	}, keys)
+
+	encoded, err := json.Marshal(blockAlloc)
+	require.NoError(t, err)
+	assert.Equal(t, "c5defca32ed7f5279fce7278436cac133bd8dd9fa5a1fe8489b546a317f6bb9d", fmt.Sprintf("%x", sha256.Sum256(encoded)))
 }

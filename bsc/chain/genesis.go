@@ -30,7 +30,7 @@ import (
 //go:embed allocs
 var allocs embed.FS
 
-var chapelChainConfig = readParliaChainSpec("chainspecs/chapel.json")
+var chapelChainConfig = readParliaChainSpec("chainspecs/chapel.json", "upgrades/chapel")
 
 // ChapelGenesisBlock returns the BSC testnet (Chapel) genesis block.
 func ChapelGenesisBlock() *types.Genesis {
