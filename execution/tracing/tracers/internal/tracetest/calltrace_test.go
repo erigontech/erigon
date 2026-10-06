@@ -146,10 +146,10 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 				// This is a tweak to make it deterministic. Can be removed when
 				// we remove the legacy tracer.
 				var x callTrace
-				err = json.Unmarshal(res, &x)
+				require.NoError(t, json.Unmarshal(res, &x))
+				normalized, err := json.Marshal(x)
 				require.NoError(t, err)
-				res, err = json.Marshal(x)
-				require.NoError(t, err)
+				res = normalized
 			}
 			want, err := json.Marshal(test.Result)
 			if err != nil {
