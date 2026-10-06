@@ -666,14 +666,11 @@ func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.P
 func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
 func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
 
-// vwSlabSize is large enough that a CREATE-heavy call grows the arena only a
-// few times, and small enough that an outlier does not pin much.
 const vwSlabSize = 64
 
-// vwArena hands out VersionedWrite cells that die with the call that drew them.
-// Slabs are append-only, so a cell stays valid until reset. It replaces the
-// shared vwPools for a set nothing else can observe: no atomics on the hot
-// path, and no per-cell Put when the call ends.
+// vwArena hands out VersionedWrite cells from append-only slabs and recycles
+// them on reset, which costs no atomics and no per-cell Put. A cell stays valid
+// only until that reset, so nothing outside the owning set may hold one.
 type vwArena[T any] struct {
 	slabs []*[vwSlabSize]VersionedWrite[T]
 	slab  int
@@ -785,13 +782,9 @@ type WriteSet struct {
 	// instead.
 	released bool
 
-	// cells is set when nothing outside this set may hold its cells, so they
-	// come from its own slabs instead of the shared pools. ReleaseMaps zeroes
-	// the set, so ReleaseAndReset carries this across.
 	cells vwArenas
 }
 
-// vwArenas holds one slab allocator per write path.
 type vwArenas struct {
 	on             bool
 	address        vwArena[*accounts.Account]
@@ -819,12 +812,9 @@ func (a *vwArenas) reset() {
 	a.storage.reset()
 }
 
-// ArenaBacked reports whether this set's cells come from its own slabs, which
-// makes publishing them unsafe.
 func (ws *WriteSet) ArenaBacked() bool { return ws != nil && ws.cells.on }
 
-// UseArena routes this set's cells to its own slabs. Only a caller that never
-// publishes them (no FlushWritesToVersionMap, no MergeInto) may ask for it.
+// UseArena is ReuseWriteCells, which states the caller's obligation.
 func (ws *WriteSet) UseArena() { ws.cells.on = true }
 
 // Released reports whether ReleaseMaps pooled this set's maps and no later
@@ -995,7 +985,6 @@ func (ws *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 	}
 	ws.assertLive()
 	if dbg.AssertEnabled && ws.ArenaBacked() {
-		// out would hold cells the arena reuses and zeroes.
 		panic("filtering an arena-backed write set")
 	}
 	out := &WriteSet{}
@@ -1556,7 +1545,6 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 // ReleaseMaps clears the maps that hold them.
 func (ws *WriteSet) ReleaseAndReset() {
 	if ws.cells.on {
-		// The cells die with the call, so there is nothing to hand back.
 		ws.ReleaseMaps()
 		ws.cells.reset()
 		ws.revive() // a reset hands the set back for reuse
@@ -1630,9 +1618,8 @@ func (ws *WriteSet) ReleaseMaps() {
 // *VersionedWrite[T] back to its pool — keeps the pool cycle closed so
 // allocs land on Get and end at Del/ReleaseAndReset.
 
-// delCell drops addr's cell, returning it to its pool unless the set draws
-// cells from its own slabs — those are reused and zeroed by the next reset, so
-// the shared pool must never see them.
+// delCell drops addr's cell, returning it to its pool unless the set recycles
+// its own cells.
 func delCell[T any](ws *WriteSet, m map[accounts.Address]*VersionedWrite[T], addr accounts.Address, release func(*VersionedWrite[T])) {
 	vw, ok := m[addr]
 	if !ok {
@@ -2298,8 +2285,6 @@ func (ws *WriteSet) copyMissingFrom(src *WriteSet) {
 // Merge returns the union of prev and next, with next winning on (addr,path,key).
 func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
 	if dbg.AssertEnabled && (ws.ArenaBacked() || next.ArenaBacked()) {
-		// An empty side returns the other input as the merged set, and copyFrom
-		// shares cells, so the product would hold cells the arena recycles.
 		panic("merging an arena-backed write set")
 	}
 	if ws.IsEmpty() {
@@ -2324,7 +2309,6 @@ func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
 // map-level deletes on s stay safe.
 func (ws *WriteSet) MergeInto(next *WriteSet) *WriteSet {
 	if dbg.AssertEnabled && (ws.ArenaBacked() || next.ArenaBacked()) {
-		// The merged set would hold cells the arena reuses and zeroes.
 		panic("merging an arena-backed write set")
 	}
 	if ws.IsEmpty() {

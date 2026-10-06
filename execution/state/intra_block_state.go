@@ -373,11 +373,9 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
-// ReuseWriteCells draws this state's write cells from the write set's own
-// slabs instead of the shared pools, and recycles them when the set resets.
-// Only a caller that never lets a cell outlive the set may ask for it: a
-// merged set shares cell pointers, so a set that MergeInto may take must not
-// reuse. eth_call qualifies — it merges nothing.
+// ReuseWriteCells recycles this state's write cells instead of pooling them.
+// Only a caller that never merges or filters its write set may ask for it,
+// because those share cell pointers; eth_call does neither.
 func (ibs *IntraBlockState) ReuseWriteCells() { ibs.versionedWrites.UseArena() }
 
 // Release Deprecated use Close
@@ -2786,7 +2784,6 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 		return
 	}
 	if dbg.AssertEnabled && writes.ArenaBacked() {
-		// Publishing arena cells would hand the map memory the next call reuses.
 		panic("flushing an arena-backed write set")
 	}
 	ibs.versionMap.FlushVersionedWrites(writes, true)
