@@ -423,16 +423,11 @@ const maxPooledEntries = 16 * 1024
 // resetForPool clears everything one call left and reports whether ibs is
 // small enough to pool.
 func (ibs *IntraBlockState) resetForPool() bool {
-	reads := ibs.versionedReads
-	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+reads.entries() <= maxPooledEntries
+	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+ibs.versionedReads.entries() <= maxPooledEntries
 	ibs.Reset()
 	if !poolable {
 		return false
 	}
-	// One call never hands its read set out, so the maps keep their capacity
-	// instead of the empty set Reset installs.
-	reads.clearForReuse()
-	ibs.versionedReads = reads
 	// Reset only bumps the probe epoch; a pooled ibs would collect every
 	// address later calls touch.
 	clear(ibs.sdProbe)

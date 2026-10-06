@@ -1244,7 +1244,7 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	ibs.AddAddressToAccessList(addr)
 	ibs.readSelfDestructMemo(addr)
 	require.NotEmpty(t, ibs.sdProbe)
-	require.NotNil(t, ibs.versionedReads.address)
+	require.NotEmpty(t, ibs.versionedReads.recs)
 	ibs.SetTxContext(5, 2)
 	ibs.SetVersion(3)
 	ibs.eip8246, ibs.eip161, ibs.isAura = true, true, true
@@ -1255,8 +1255,8 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	require.Zero(t, ibs.version)
 	require.False(t, ibs.eip8246 || ibs.eip161 || ibs.isAura, "fork flags are the next call's to set")
 	require.Empty(t, ibs.sdProbe)
-	require.NotNil(t, ibs.versionedReads.address, "the read set keeps its maps")
-	require.Empty(t, ibs.versionedReads.address)
+	require.NotNil(t, ibs.versionedReads.idx, "the read set keeps its maps")
+	require.Empty(t, ibs.versionedReads.recs)
 
 	ibs.stateReader = NewNoopReader()
 	balance, err := ibs.GetBalance(addr)
