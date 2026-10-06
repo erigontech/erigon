@@ -73,6 +73,7 @@ func DoCall(
 		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(0, 0)
 		ibs.SetNoConflictDetection()
+		ibs.ReuseWriteCells()
 	}
 
 	// Setup context so it may be cancelled the call has completed

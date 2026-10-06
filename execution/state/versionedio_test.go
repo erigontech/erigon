@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -1696,21 +1697,142 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 	})
 }
 
-// synthesizeCreatedAccountBase must allocate nothing when the version map holds
-// no cell for the address: every probe would miss and the account is dropped.
-func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {
-	ibs := NewWithVersionMap(NewNoopReader(), NewVersionMap(nil))
-	defer ibs.Close()
+// An arena-backed write set hands out distinct cells and keeps its slabs across
+// resets, so a reused set allocates nothing after the first call.
+func TestWriteSetArenaReusesItsCells(t *testing.T) {
+	var ws WriteSet
+	ws.UseArena()
+	addrs := make([]accounts.Address, vwSlabSize+3)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+
+	first := make(map[*VersionedWrite[uint64]]struct{}, len(addrs))
+	for _, a := range addrs {
+		vw := ws.newVWNonce()
+		_, dup := first[vw]
+		require.False(t, dup, "a live cell must not be handed out twice")
+		first[vw] = struct{}{}
+		vw.WriteHeader = WriteHeader{Address: a, Path: NoncePath}
+		vw.Val = 7
+		ws.SetNonce(a, vw)
+	}
+	require.Equal(t, len(addrs), ws.Count())
+
+	ws.ReleaseAndReset()
+	require.Zero(t, ws.Count())
+
+	allocs := testing.AllocsPerRun(20, func() {
+		for _, a := range addrs {
+			vw := ws.newVWNonce()
+			vw.WriteHeader = WriteHeader{Address: a, Path: NoncePath}
+			ws.SetNonce(a, vw)
+		}
+		ws.ReleaseAndReset()
+	})
+	require.Less(t, allocs, float64(len(addrs)), "cells must come from the slabs, not the heap")
+}
+
+// A reset cell carries nothing from the call that used it.
+func TestWriteSetArenaCellsComeBackZeroed(t *testing.T) {
+	var ws WriteSet
+	ws.UseArena()
 	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
 
-	acc, ok := ibs.synthesizeCreatedAccountBase(addr)
-	require.Nil(t, acc)
-	require.False(t, ok)
+	vw := ws.newVWNonce()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: Version{TxIndex: 3}}
+	vw.Val = 42
+	ws.SetNonce(addr, vw)
+	ws.ReleaseAndReset()
 
-	allocs := testing.AllocsPerRun(50, func() {
-		if _, ok := ibs.synthesizeCreatedAccountBase(addr); ok {
-			t.Fatal("no cell may synthesize an account")
-		}
-	})
-	require.Zero(t, allocs)
+	again := ws.newVWNonce()
+	require.Same(t, vw, again, "the slab hands the same cell back")
+	require.Zero(t, again.Val)
+	require.Equal(t, WriteHeader{}, again.WriteHeader)
+}
+
+// A delete must not hand an arena cell to the shared pool: the arena reuses and
+// zeroes that memory, so another set holding it would be corrupted. SetCode's
+// revert-to-base path and journal rollback both delete cells.
+func TestArenaDeleteKeepsItsCellOutOfThePool(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+
+	var arena WriteSet
+	arena.UseArena()
+	nonce := arena.newVWNonce()
+	nonce.WriteHeader = WriteHeader{Address: addr, Path: NoncePath}
+	arena.SetNonce(addr, nonce)
+	arena.DelNonce(addr)
+
+	code := arena.newVWCode()
+	code.WriteHeader = WriteHeader{Address: addr, Path: CodePath}
+	arena.SetCode(addr, code)
+	arena.DelCode(addr)
+
+	storage := arena.newVWStorage()
+	storage.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key}
+	arena.SetStorage(addr, key, storage)
+	arena.DelStorage(addr, key)
+
+	var shared WriteSet
+	for range 8 {
+		require.NotSame(t, nonce, shared.newVWNonce(), "a deleted arena cell reached the shared pool")
+		require.NotSame(t, code, shared.newVWCode(), "a deleted arena cell reached the shared pool")
+		require.NotSame(t, storage, shared.newVWStorage(), "a deleted arena cell reached the shared pool")
+	}
+}
+
+// An arena-backed set must not hand its cells to another set: the arena reuses
+// and zeroes them, so the other set would read freed memory.
+func TestArenaBackedSetRefusesToShareItsCells(t *testing.T) {
+	was := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = was })
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	newArenaSet := func() *WriteSet {
+		ws := &WriteSet{}
+		ws.UseArena()
+		vw := ws.newVWNonce()
+		vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath}
+		ws.SetNonce(addr, vw)
+		return ws
+	}
+
+	require.Panics(t, func() { newArenaSet().MergeInto(&WriteSet{}) })
+	require.Panics(t, func() { (&WriteSet{}).MergeInto(newArenaSet()) })
+	require.Panics(t, func() { newArenaSet().Filter(func(WriteHeader) bool { return true }) })
+	// Merge returns an input directly when the other side is empty.
+	require.Panics(t, func() { newArenaSet().Merge(&WriteSet{}) })
+	require.Panics(t, func() { (&WriteSet{}).Merge(newArenaSet()) })
+	require.Panics(t, func() { newArenaSet().Merge(newArenaSet()) })
+}
+
+// ReleaseMaps zeroes the set; the arena must survive it, or a reused set
+// silently falls back to the shared pools and leaks its slabs.
+func TestReleaseMapsKeepsTheArena(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	vw := ws.newVWNonce()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath}
+	ws.SetNonce(addr, vw)
+
+	ws.ReleaseMaps()
+	require.True(t, ws.ArenaBacked(), "the arena must outlive the map release")
+}
+
+// The arena stops growing at its cap, so one outlier call cannot pin an
+// unbounded footprint on a set that keeps its slabs across resets.
+func TestArenaStopsGrowingAtItsCap(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+	for range vwMaxCells + vwSlabSize {
+		require.NotNil(t, ws.newVWNonce())
+	}
+	require.Len(t, ws.cells.nonce.slabs, vwMaxSlabs, "the arena must not grow past its cap")
+
+	ws.ReleaseAndReset()
+	require.Len(t, ws.cells.nonce.slabs, vwMaxSlabs, "a reset keeps the slabs for the next call")
 }
