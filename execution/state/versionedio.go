@@ -709,11 +709,7 @@ func (a *vwArena[T]) alloc(get func() *VersionedWrite[T]) *VersionedWrite[T] {
 }
 
 func (a *vwArena[T]) nextSlab() int {
-	n := vwFirstSlab
-	if a.cap > n {
-		n = a.cap
-	}
-	return min(n, vwMaxCells-a.cap)
+	return min(max(a.cap, vwFirstSlab), vwMaxCells-a.cap)
 }
 
 func (a *vwArena[T]) reset(release func(*VersionedWrite[T])) {
