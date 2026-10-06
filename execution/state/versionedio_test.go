@@ -1807,6 +1807,10 @@ func TestArenaBackedSetRefusesToShareItsCells(t *testing.T) {
 	require.Panics(t, func() { newArenaSet().Merge(&WriteSet{}) })
 	require.Panics(t, func() { (&WriteSet{}).Merge(newArenaSet()) })
 	require.Panics(t, func() { newArenaSet().Merge(newArenaSet()) })
+	// Normalize also takes cell pointers straight from the receiver.
+	require.Panics(t, func() {
+		_, _ = newArenaSet().Normalize(NewVersionMap(nil), 0, 0, NewNoopReader(), nil, false, false, false)
+	})
 }
 
 // ReleaseMaps zeroes the set; the arena must survive it, or a reused set
