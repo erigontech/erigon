@@ -18,6 +18,8 @@ package p2p
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -25,13 +27,253 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
+	"golang.org/x/time/rate"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/direct"
+	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
+
+func newTestBALFetcher(t *testing.T, serve func(context.Context, []common.Hash, *PeerId) ([]rlp.RawValue, error)) (BALFetcher, *PeerTracker) {
+	t.Helper()
+	sentry := direct.NewMockSentryClient(gomock.NewController(t))
+	logger := log.New()
+	penalizer := NewPeerPenalizer(sentry)
+	listener := NewMessageListener(logger, sentry, nil, penalizer)
+	tracker := NewPeerTracker(logger, listener)
+	sentry.EXPECT().SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, request *sentryproto.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentryproto.SentPeers, error) {
+			if request.Data.Id != sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71 {
+				return nil, fmt.Errorf("unexpected request message: %v", request.Data.Id)
+			}
+			var query eth.GetBlockAccessListsPacket66
+			if err := rlp.DecodeBytes(request.Data.Data, &query); err != nil {
+				return nil, err
+			}
+			response, err := serve(ctx, query.GetBlockAccessListsPacket, PeerIdFromH512(request.PeerId))
+			if err != nil {
+				return nil, err
+			}
+			encoded, err := rlp.EncodeToBytes(eth.BlockAccessListsPacket66{RequestId: query.RequestId, BlockAccessListsPacket: response})
+			if err != nil {
+				return nil, err
+			}
+			err = notifyInboundMessageObservers(ctx, logger, penalizer, listener.blockAccessListsObservers, &sentryproto.InboundMessage{
+				Id: sentryproto.MessageId_BLOCK_ACCESS_LISTS_71, PeerId: request.PeerId, Data: encoded,
+			})
+			return &sentryproto.SentPeers{Peers: []*typesproto.H512{request.PeerId}}, err
+		}).AnyTimes()
+	return NewBALFetcher(logger, listener, NewMessageSender(sentry), penalizer, tracker), tracker
+}
+
+func TestBALFetcher_RetriesThrottledSuffix(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		bal, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{Address: common.Address{1}}})
+		require.NoError(t, err)
+		reqs := make([]BALRequest, 40)
+		for i := range reqs {
+			reqs[i] = BALRequest{Hash: common.Hash{byte(i + 1)}, Number: uint64(i + 1), GasLimit: types.BalItemCost, ExpectedHash: crypto.Keccak256Hash(bal)}
+		}
+		limiter := rate.NewLimiter(rate.Every(time.Second), 1)
+		var queries [][]common.Hash
+		fetcher, tracker := newTestBALFetcher(t, func(_ context.Context, hashes []common.Hash, _ *PeerId) ([]rlp.RawValue, error) {
+			queries = append(queries, hashes)
+			if !limiter.Allow() {
+				return nil, nil
+			}
+			response := make([]rlp.RawValue, min(len(hashes), eth.MaxBlockAccessListsRegenerate))
+			for i := range response {
+				response[i] = bal
+			}
+			return response, nil
+		})
+		peer := PeerIdFromUint64(1)
+		tracker.PeerConnected(peer)
+		started := time.Now()
+		got := fetcher.Fetch(t.Context(), reqs, peer, nil, 5*time.Second, time.Second)
+		require.Len(t, got, 40, "a temporary empty response must not abandon the suffix")
+		require.GreaterOrEqual(t, time.Since(started), time.Second)
+		require.True(t, tracker.PeerMayHaveBALNum(peer, 40), "throttling must not mark the peer's BALs unavailable")
+		for _, query := range queries[1:] {
+			require.Equal(t, queries[0][32:], query, "retry only unanswered hashes")
+		}
+	})
+}
+
+func TestBALFetcher_ConcurrentBatchesRespectPeerRate(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		limiter := rate.NewLimiter(2, 4)
+		var rejected atomic.Int32
+		fetcher, tracker := newTestBALFetcher(t, func(context.Context, []common.Hash, *PeerId) ([]rlp.RawValue, error) {
+			if !limiter.Allow() {
+				rejected.Add(1)
+				return nil, fmt.Errorf("peer request rate exceeded")
+			}
+			return []rlp.RawValue{{0xc0}}, nil
+		})
+		peer := PeerIdFromUint64(1)
+		tracker.PeerConnected(peer)
+		results := make([]map[common.Hash]*types.BlockAccessListSidecar, 6)
+		var wg sync.WaitGroup
+		started := time.Now()
+		for i := range results {
+			wg.Go(func() {
+				reqs := []BALRequest{{Hash: common.Hash{byte(i + 1)}, Number: uint64(i + 1), ExpectedHash: empty.BlockAccessListHash}}
+				results[i] = fetcher.Fetch(t.Context(), reqs, peer, nil, 10*time.Second, time.Second)
+			})
+		}
+		wg.Wait()
+		require.Zero(t, rejected.Load(), "concurrent fetches must share the peer's request budget")
+		for _, got := range results {
+			require.Len(t, got, 1)
+		}
+		require.GreaterOrEqual(t, time.Since(started), time.Second)
+	})
+}
+
+func TestBALFetcher_RetryPacingIncludesResponseTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		fetcher, tracker := newTestBALFetcher(t, func(context.Context, []common.Hash, *PeerId) ([]rlp.RawValue, error) {
+			time.Sleep(time.Second)
+			return []rlp.RawValue{{0xc0}}, nil
+		})
+		peer := PeerIdFromUint64(1)
+		tracker.PeerConnected(peer)
+		reqs := []BALRequest{
+			{Hash: common.Hash{1}, Number: 1, ExpectedHash: empty.BlockAccessListHash},
+			{Hash: common.Hash{2}, Number: 2, ExpectedHash: empty.BlockAccessListHash},
+		}
+		started := time.Now()
+		got := fetcher.Fetch(t.Context(), reqs, peer, nil, 5*time.Second, 2*time.Second)
+		require.Len(t, got, 2)
+		require.Equal(t, 2*time.Second, time.Since(started), "time spent receiving a response already spaces requests")
+	})
+}
+
+func TestBALFetcher_ExplicitUnavailableStopsRetry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		calls := 0
+		fetcher, tracker := newTestBALFetcher(t, func(context.Context, []common.Hash, *PeerId) ([]rlp.RawValue, error) {
+			calls++
+			return []rlp.RawValue{{0x80}}, nil
+		})
+		peer := PeerIdFromUint64(1)
+		tracker.PeerConnected(peer)
+		reqs := []BALRequest{{Hash: common.Hash{1}, Number: 1, ExpectedHash: empty.BlockAccessListHash}}
+		started := time.Now()
+		got := fetcher.Fetch(t.Context(), reqs, peer, nil, 5*time.Second, time.Second)
+		require.Empty(t, got)
+		require.Equal(t, 1, calls, "explicit unavailability must not be retried as throttling")
+		require.Zero(t, time.Since(started))
+		require.False(t, tracker.PeerMayHaveBALNum(peer, 1))
+	})
+}
+
+func TestBALFetcher_RetriesOnlyUnansweredEntries(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var queries [][]common.Hash
+		fetcher, tracker := newTestBALFetcher(t, func(_ context.Context, hashes []common.Hash, _ *PeerId) ([]rlp.RawValue, error) {
+			queries = append(queries, hashes)
+			// The peer answers one entry per request, including unavailable entries.
+			if hashes[0] == (common.Hash{1}) {
+				return []rlp.RawValue{{0x80}}, nil
+			}
+			return []rlp.RawValue{{0xc0}}, nil
+		})
+		peer := PeerIdFromUint64(1)
+		tracker.PeerConnected(peer)
+		reqs := []BALRequest{
+			{Hash: common.Hash{1}, Number: 1, ExpectedHash: empty.BlockAccessListHash},
+			{Hash: common.Hash{2}, Number: 2, ExpectedHash: empty.BlockAccessListHash},
+		}
+		got := fetcher.Fetch(t.Context(), reqs, peer, nil, 2*time.Second, time.Second)
+		require.Len(t, got, 1)
+		require.Contains(t, got, reqs[1].Hash)
+		require.Equal(t, [][]common.Hash{{reqs[0].Hash, reqs[1].Hash}, {reqs[1].Hash}}, queries)
+	})
+}
+
+func TestBALFetcher_RetryStopsOnDeadlineOrCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		cancelAfter time.Duration
+		elapsed     time.Duration
+	}{
+		{name: "batch deadline", elapsed: 1250 * time.Millisecond},
+		{name: "caller cancellation", cancelAfter: 750 * time.Millisecond, elapsed: 750 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				calls := 0
+				fetcher, tracker := newTestBALFetcher(t, func(context.Context, []common.Hash, *PeerId) ([]rlp.RawValue, error) {
+					calls++
+					if calls == 1 {
+						return []rlp.RawValue{{0xc0}}, nil
+					}
+					return nil, nil
+				})
+				peer := PeerIdFromUint64(1)
+				tracker.PeerConnected(peer)
+				reqs := []BALRequest{
+					{Hash: common.Hash{1}, Number: 1, ExpectedHash: empty.BlockAccessListHash},
+					{Hash: common.Hash{2}, Number: 2, ExpectedHash: empty.BlockAccessListHash},
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				if tc.cancelAfter > 0 {
+					timer := time.AfterFunc(tc.cancelAfter, cancel)
+					defer timer.Stop()
+				}
+				started := time.Now()
+				got := fetcher.Fetch(ctx, reqs, peer, nil, 1250*time.Millisecond, time.Second)
+				require.Len(t, got, 1, "keep completed BALs when the retry budget ends")
+				require.Contains(t, got, reqs[0].Hash)
+				require.LessOrEqual(t, time.Since(started), tc.elapsed)
+				if tc.cancelAfter > 0 {
+					require.ErrorIs(t, ctx.Err(), context.Canceled)
+				}
+				require.GreaterOrEqual(t, calls, 2)
+				require.LessOrEqual(t, calls, 3, "empty replies must not cause a busy retry loop")
+				require.True(t, tracker.PeerMayHaveBALNum(peer, 2))
+			})
+		})
+	}
+}
+
+func TestBALFetcher_ThrottledShardFallsBack(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		busy, serving := PeerIdFromUint64(1), PeerIdFromUint64(2)
+		fetcher, tracker := newTestBALFetcher(t, func(_ context.Context, hashes []common.Hash, peer *PeerId) ([]rlp.RawValue, error) {
+			if peer.Equal(busy) {
+				return nil, nil
+			}
+			response := make([]rlp.RawValue, len(hashes))
+			for i := range response {
+				response[i] = rlp.RawValue{0xc0}
+			}
+			return response, nil
+		})
+		tracker.PeerConnected(busy)
+		tracker.PeerConnected(serving)
+		reqs := make([]BALRequest, 40)
+		for i := range reqs {
+			reqs[i] = BALRequest{Hash: common.Hash{byte(i + 1)}, Number: uint64(i + 1), ExpectedHash: empty.BlockAccessListHash}
+		}
+		started := time.Now()
+		got := fetcher.Fetch(t.Context(), reqs, busy, []PeerId{*serving}, 5*time.Second, time.Second)
+		require.Len(t, got, 40)
+		require.LessOrEqual(t, time.Since(started), time.Second, "a throttled shard must not prevent fallback to another peer")
+	})
+}
 
 func TestValidateBALResponse(t *testing.T) {
 	t.Parallel()
@@ -176,11 +418,11 @@ func TestFetchAcrossPeers(t *testing.T) {
 
 	t.Run("collects all BALs when one peer serves the batch", func(t *testing.T) {
 		serving := PeerIdFromUint64(3)
-		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) (map[common.Hash]*types.BlockAccessListSidecar, int) {
 			if p.Equal(serving) {
-				return serveAll(rs)
+				return serveAll(rs), len(rs)
 			}
-			return nil // non-serving peer
+			return nil, len(rs) // non-serving peer
 		}
 		out := fetchAcrossPeers(context.Background(), reqs,
 			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2), *serving}, 8, fetch)
@@ -196,19 +438,19 @@ func TestFetchAcrossPeers(t *testing.T) {
 			started := make(chan struct{})
 			stopped := make(chan struct{})
 			var queuedCalls atomic.Int32
-			fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+			fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) (map[common.Hash]*types.BlockAccessListSidecar, int) {
 				switch {
 				case p.Equal(serving):
 					<-started
-					return serveAll(rs)
+					return serveAll(rs), len(rs)
 				case p.Equal(blocked):
 					close(started)
 					<-ctx.Done()
 					close(stopped)
-					return nil
+					return nil, len(rs)
 				default:
 					queuedCalls.Add(1)
-					return nil
+					return nil, len(rs)
 				}
 			}
 			result := make(chan map[common.Hash]*types.BlockAccessListSidecar, 1)
@@ -234,11 +476,11 @@ func TestFetchAcrossPeers(t *testing.T) {
 	})
 
 	t.Run("merges partial results across peers", func(t *testing.T) {
-		fetch := func(_ context.Context, _ []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) (map[common.Hash]*types.BlockAccessListSidecar, int) {
 			if p.Equal(PeerIdFromUint64(1)) {
-				return map[common.Hash]*types.BlockAccessListSidecar{h0: balA}
+				return map[common.Hash]*types.BlockAccessListSidecar{h0: balA}, len(rs)
 			}
-			return map[common.Hash]*types.BlockAccessListSidecar{h1: balB}
+			return map[common.Hash]*types.BlockAccessListSidecar{h1: balB}, len(rs)
 		}
 		out := fetchAcrossPeers(context.Background(), reqs,
 			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2)}, 8, fetch)
@@ -248,8 +490,8 @@ func TestFetchAcrossPeers(t *testing.T) {
 	})
 
 	t.Run("no peer serves -> empty result", func(t *testing.T) {
-		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
-			return nil
+		fetch := func(_ context.Context, rs []BALRequest, _ *PeerId) (map[common.Hash]*types.BlockAccessListSidecar, int) {
+			return nil, len(rs)
 		}
 		out := fetchAcrossPeers(context.Background(), reqs,
 			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2)}, 8, fetch)
@@ -263,12 +505,12 @@ func TestFetchAcrossPeers(t *testing.T) {
 			hashes = append(hashes, h)
 			prefixReqs = append(prefixReqs, BALRequest{Hash: h})
 		}
-		fetch := func(_ context.Context, rs []BALRequest, _ *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+		fetch := func(_ context.Context, rs []BALRequest, _ *PeerId) (map[common.Hash]*types.BlockAccessListSidecar, int) {
 			out := map[common.Hash]*types.BlockAccessListSidecar{}
 			for _, r := range rs[:min(2, len(rs))] {
 				out[r.Hash] = balA
 			}
-			return out
+			return out, min(2, len(rs))
 		}
 		out := fetchAcrossPeers(
 			context.Background(),
@@ -289,7 +531,7 @@ func TestFetchAcrossPeers(t *testing.T) {
 		}
 		rare := many[37].Hash
 		holder := PeerIdFromUint64(7)
-		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) (map[common.Hash]*types.BlockAccessListSidecar, int) {
 			out := map[common.Hash]*types.BlockAccessListSidecar{}
 			for _, r := range rs {
 				if r.Hash == rare {
@@ -300,7 +542,7 @@ func TestFetchAcrossPeers(t *testing.T) {
 				}
 				out[r.Hash] = balA
 			}
-			return out
+			return out, len(rs)
 		}
 		peers := make([]PeerId, 0, 13)
 		for i := uint64(1); i <= 13; i++ {
@@ -312,9 +554,9 @@ func TestFetchAcrossPeers(t *testing.T) {
 	})
 	t.Run("stops when no peer makes progress", func(t *testing.T) {
 		var calls atomic.Int32
-		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+		fetch := func(_ context.Context, rs []BALRequest, _ *PeerId) (map[common.Hash]*types.BlockAccessListSidecar, int) {
 			calls.Add(1)
-			return map[common.Hash]*types.BlockAccessListSidecar{h0: balA}
+			return map[common.Hash]*types.BlockAccessListSidecar{h0: balA}, len(rs)
 		}
 		out := fetchAcrossPeers(
 			context.Background(),
@@ -328,7 +570,7 @@ func TestFetchAcrossPeers(t *testing.T) {
 	})
 	t.Run("honours the parallelism limit", func(t *testing.T) {
 		var live, peak atomic.Int32
-		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+		fetch := func(_ context.Context, rs []BALRequest, _ *PeerId) (map[common.Hash]*types.BlockAccessListSidecar, int) {
 			n := live.Add(1)
 			for {
 				if p := peak.Load(); n <= p || peak.CompareAndSwap(p, n) {
@@ -337,7 +579,7 @@ func TestFetchAcrossPeers(t *testing.T) {
 			}
 			time.Sleep(20 * time.Millisecond)
 			live.Add(-1)
-			return nil // none serve, so every peer is tried
+			return nil, len(rs) // none serve, so every peer is tried
 		}
 		fetchAcrossPeers(context.Background(), reqs,
 			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2), *PeerIdFromUint64(3), *PeerIdFromUint64(4)}, 2, fetch)

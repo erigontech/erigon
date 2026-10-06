@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/hashicorp/golang-lru/v2/simplelru"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/event"
@@ -123,6 +124,16 @@ func (pt *PeerTracker) PeerMayHaveBALNum(peerId *PeerId, blockNum uint64) bool {
 	return !ok || peerSyncProgress.peerMayHaveBALNum(blockNum)
 }
 
+func (pt *PeerTracker) waitForBALRequest(ctx context.Context, peerId *PeerId) error {
+	pt.mu.Lock()
+	progress := pt.peerSyncProgresses[*peerId]
+	pt.mu.Unlock()
+	if progress == nil {
+		return ErrPeerNotFound
+	}
+	return progress.balRequestLimiter.Wait(ctx)
+}
+
 func (pt *PeerTracker) ListPeersMayMissBlockHash(blockHash common.Hash) []*PeerId {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
@@ -174,7 +185,8 @@ func (pt *PeerTracker) peerConnected(peerId *PeerId) {
 	peerIdVal := *peerId
 	if _, ok := pt.peerSyncProgresses[peerIdVal]; !ok {
 		pt.peerSyncProgresses[peerIdVal] = &peerSyncProgress{
-			peerId: peerId,
+			peerId:            peerId,
+			balRequestLimiter: rate.NewLimiter(rate.Every(balFetchRequestInterval), 1),
 		}
 	}
 

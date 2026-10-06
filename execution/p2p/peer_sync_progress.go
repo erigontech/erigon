@@ -16,7 +16,11 @@
 
 package p2p
 
-import "time"
+import (
+	"time"
+
+	"golang.org/x/time/rate"
+)
 
 const (
 	missingBlockNumExpiry = time.Hour
@@ -29,6 +33,7 @@ type peerSyncProgress struct {
 	minMissingBlockNumTs time.Time
 	maxMissingBALNum     uint64
 	maxMissingBALNumTs   time.Time
+	balRequestLimiter    *rate.Limiter
 }
 
 func (psp *peerSyncProgress) blockNumPresent(blockNum uint64) {
