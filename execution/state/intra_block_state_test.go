@@ -1245,9 +1245,15 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	ibs.readSelfDestructMemo(addr)
 	require.NotEmpty(t, ibs.sdProbe)
 	require.NotNil(t, ibs.versionedReads.address)
+	ibs.SetTxContext(5, 2)
+	ibs.SetVersion(3)
+	ibs.eip8246, ibs.eip161, ibs.isAura = true, true, true
 
 	require.True(t, ibs.resetForPool())
 	require.Nil(t, ibs.stateReader)
+	require.Zero(t, ibs.blockNum)
+	require.Zero(t, ibs.version)
+	require.False(t, ibs.eip8246 || ibs.eip161 || ibs.isAura, "fork flags are the next call's to set")
 	require.Empty(t, ibs.sdProbe)
 	require.NotNil(t, ibs.versionedReads.address, "the read set keeps its maps")
 	require.Empty(t, ibs.versionedReads.address)
@@ -1270,4 +1276,23 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 		require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
 	}
 	require.False(t, ibs.resetForPool())
+
+	reads := New(NewNoopReader())
+	for i := range maxPooledReads + 1 {
+		reads.versionedReads.SetCodeSize(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), VersionedRead[int]{})
+	}
+	require.False(t, reads.resetForPool(), "any read-set map counts toward the bound")
+}
+
+func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
+	ibs := NewPooled(NewNoopReader())
+	ibs.SetTxContext(5, 2)
+	ReleasePooled(ibs)
+
+	reader := NewNoopReader()
+	got := NewPooled(reader)
+	defer ReleasePooled(got)
+	require.Same(t, reader, got.stateReader)
+	require.Zero(t, got.blockNum)
+	require.Zero(t, got.txIndex)
 }
