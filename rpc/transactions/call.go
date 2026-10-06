@@ -64,7 +64,8 @@ func DoCall(
 		}
 	*/
 
-	ibs := state.New(stateReader)
+	ibs := state.NewPooled(stateReader)
+	defer state.ReleasePooled(ibs)
 	// Overrides end in FinalizeTx, which clears the journal; the versioned read
 	// path then serves this tx's own writes only from a resident stateObject.
 	if dbg.CallNoMaterialize && stateOverrides == nil {
@@ -73,7 +74,6 @@ func DoCall(
 		ibs.SetTxContext(0, 0)
 		ibs.SetNoConflictDetection()
 	}
-	defer ibs.Close()
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.

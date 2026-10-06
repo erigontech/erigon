@@ -207,6 +207,8 @@ func TestNestedCallsReuseOneFrameContext(t *testing.T) {
 	// distinguishes parking from a pool round-trip.
 	require.Contains(t, parked, nested[0], "the returned nested context parks on the EVM")
 	require.Nil(t, evm.spareFrame, "the outermost frame returns the spare context to the pool")
+}
+
 func TestCreateCollisionCheckOfAnAbsentAccountReadsOnlyExistence(t *testing.T) {
 	t.Parallel()
 
