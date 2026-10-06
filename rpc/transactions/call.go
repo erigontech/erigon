@@ -72,6 +72,7 @@ func DoCall(
 		ibs.SetVersionMap(state.NewVersionMap(nil))
 		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(0, 0)
+		ibs.SetNoConflictDetection()
 	}
 
 	// Setup context so it may be cancelled the call has completed
