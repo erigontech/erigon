@@ -19,6 +19,7 @@ package utils
 import (
 	"encoding/binary"
 	"errors"
+	"math"
 	"math/bits"
 	"unsafe"
 
@@ -66,18 +67,27 @@ func Uint64ToLE(i uint64) []byte {
 	return buf
 }
 
+var errSnappyDecodedTooLarge = errors.New("snappy: decoded length is too large")
+
 func DecompressSnappy(data []byte, lengthCheck bool) ([]byte, error) {
-	// Decode the snappy
+	limit := uint64(math.MaxInt)
+	if lengthCheck {
+		limit = uint64(maxDecodeLenAllowed)
+	}
+	return DecompressSnappyWithLimit(data, limit)
+}
+
+// DecompressSnappyWithLimit rejects a payload whose declared decoded length exceeds
+// maxDecodedLen before allocating anything for it.
+func DecompressSnappyWithLimit(data []byte, maxDecodedLen uint64) ([]byte, error) {
 	lenDecoded, err := snappy.DecodedLen(data)
 	if err != nil {
 		return nil, err
 	}
-	if lengthCheck && lenDecoded > int(maxDecodeLenAllowed) {
-		return nil, errors.New("snappy: decoded length is too large")
+	if uint64(lenDecoded) > maxDecodedLen {
+		return nil, errSnappyDecodedTooLarge
 	}
-	decodedData := make([]byte, lenDecoded)
-
-	return snappy.Decode(decodedData, data)
+	return snappy.Decode(make([]byte, lenDecoded), data)
 }
 
 func CompressSnappy(data []byte) []byte {

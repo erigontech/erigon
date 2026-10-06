@@ -245,6 +245,13 @@ type NetworkConfig struct {
 	StaticPeers []string `yaml:"-" json:"-"`
 }
 
+// MaxGossipMessageSize is the spec's max_message_size(): the largest gossipsub RPC frame
+// a peer may send, max_compressed_len(payload) plus 1024 bytes of framing, at least 1 MiB.
+func (n *NetworkConfig) MaxGossipMessageSize() uint64 {
+	payload := n.GossipMaxSize
+	return max(32+payload+payload/6+1024, 1<<20)
+}
+
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
 	chainspec.MainnetChainID: {
 		GossipMaxSize:                   10485760,
