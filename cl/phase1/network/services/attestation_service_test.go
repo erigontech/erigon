@@ -468,6 +468,41 @@ func (t *attestationTestSuite) TestAttestationSeenOnlyAfterSignatureVerification
 	t.Require().Contains(err.Error(), "already seen")
 }
 
+func (t *attestationTestSuite) TestAttestationGossipNotAcceptedBeforeSignatureVerification() {
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
+		return 8
+	}
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+		return 1
+	}
+	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+		return [32]byte{}, nil
+	}
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return false, nil
+	}
+	t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
+	t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
+	t.mockForkChoice.HighestSeenVal = mockSlot
+
+	finalizedCheckpoint := solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
+	t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+		attData.BeaconBlockRoot: {},
+	}
+	t.mockForkChoice.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+		mockEpoch * mockSlotsPerEpoch:                 {Root: attData.Target.Root},
+		finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
+	}
+	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
+	t.committeeSubscibe.EXPECT().AggregateAttestation(gomock.Any()).Times(0)
+
+	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		Attestation:      att,
+		ImmediateProcess: false,
+	})
+	t.Require().ErrorIs(err, ErrInvalidBlsSignature)
+}
+
 func (t *attestationTestSuite) TestAttestationProcessMessageRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt() {
 	beyondNextEpochSlot := mockSlot + 2*mockSlotsPerEpoch
 	beyondNextEpoch := mockEpoch + 2

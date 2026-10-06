@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/cl/monitor"
@@ -14,7 +15,7 @@ import (
 const (
 	batchSignatureVerificationThreshold = 50
 	reservedSize                        = 512
-	batchCheckInterval                  = 500 * time.Millisecond
+	batchCheckInterval                  = 50 * time.Millisecond
 )
 
 var blsVerifyMultipleSignatures = bls.VerifyMultipleSignatures
@@ -32,15 +33,13 @@ type BatchSignatureVerifier struct {
 
 var ErrInvalidBlsSignature = errors.New("invalid bls signature")
 
-// each AggregateVerification request has sentinelproto.SentinelClient and *sentinelproto.GossipData
-// to make sure that we can validate it separately and in case of failure we ban corresponding
-// GossipData.Peer or simply run F and publish GossipData in case signature verification succeeds.
 type AggregateVerificationData struct {
 	Signatures  [][]byte
 	SignRoots   [][]byte
 	Pks         [][]byte
 	F           func()
 	SendingPeer *sentinelproto.Peer
+	result      chan error
 }
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.SentinelClient) *BatchSignatureVerifier {
@@ -56,17 +55,16 @@ func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.Senti
 	}
 }
 
-// AsyncVerifyAttestation schedules new verification
-func (b *BatchSignatureVerifier) AsyncVerifyAttestation(data *AggregateVerificationData) {
-	b.attVerifyAndExecute <- data
+func (b *BatchSignatureVerifier) VerifyAttestation(ctx context.Context, data *AggregateVerificationData) error {
+	return b.verifyAndWait(ctx, b.attVerifyAndExecute, data)
 }
 
-func (b *BatchSignatureVerifier) AsyncVerifyAggregateProof(data *AggregateVerificationData) {
-	b.aggregateProofVerify <- data
+func (b *BatchSignatureVerifier) VerifyAggregateProof(ctx context.Context, data *AggregateVerificationData) error {
+	return b.verifyAndWait(ctx, b.aggregateProofVerify, data)
 }
 
-func (b *BatchSignatureVerifier) AsyncVerifyBlsToExecutionChange(data *AggregateVerificationData) {
-	b.blsToExecutionChangeVerify <- data
+func (b *BatchSignatureVerifier) VerifyBlsToExecutionChange(ctx context.Context, data *AggregateVerificationData) error {
+	return b.verifyAndWait(ctx, b.blsToExecutionChangeVerify, data)
 }
 
 func (b *BatchSignatureVerifier) AsyncVerifySyncContribution(data *AggregateVerificationData) {
@@ -77,8 +75,29 @@ func (b *BatchSignatureVerifier) AsyncVerifySyncCommitteeMessage(data *Aggregate
 	b.syncCommitteeMessage <- data
 }
 
-func (b *BatchSignatureVerifier) AsyncVerifyVoluntaryExit(data *AggregateVerificationData) {
-	b.voluntaryExitVerify <- data
+func (b *BatchSignatureVerifier) VerifyVoluntaryExit(ctx context.Context, data *AggregateVerificationData) error {
+	return b.verifyAndWait(ctx, b.voluntaryExitVerify, data)
+}
+
+// verifyAndWait blocks until the entry's batch is verified so libp2p forwards gossip only after signature checks.
+func (b *BatchSignatureVerifier) verifyAndWait(ctx context.Context, queue chan<- *AggregateVerificationData, data *AggregateVerificationData) error {
+	data.result = make(chan error, 1)
+	select {
+	case queue <- data:
+	case <-ctx.Done():
+		return fmt.Errorf("%w: signature verification canceled: %w", ErrIgnore, ctx.Err())
+	case <-b.ctx.Done():
+		return fmt.Errorf("%w: batch signature verifier stopped: %w", ErrIgnore, b.ctx.Err())
+	}
+
+	select {
+	case err := <-data.result:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("%w: signature verification canceled: %w", ErrIgnore, ctx.Err())
+	case <-b.ctx.Done():
+		return fmt.Errorf("%w: batch signature verifier stopped: %w", ErrIgnore, b.ctx.Err())
+	}
 }
 
 func (b *BatchSignatureVerifier) ImmediateVerification(data *AggregateVerificationData) error {
@@ -130,9 +149,6 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 	}
 }
 
-// processSignatureVerification Runs signature verification for all the signatures altogether, if it
-// succeeds we publish all accumulated gossip data. If verification fails, start verifying each AggregateVerificationData one by
-// one, publish corresponding gossip data if verification succeeds, if not ban the corresponding peer that sent it.
 func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) error {
 	signatures, signRoots, pks :=
 		make([][]byte, 0, reservedSize),
@@ -150,7 +166,9 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 		return err
 	}
 
-	// Everything went well, run corresponding Fs and send all the gossip data to the network
+	for _, v := range aggregateVerificationData {
+		v.report(nil)
+	}
 	for _, v := range aggregateVerificationData {
 		v.F()
 	}
@@ -164,6 +182,7 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
 			log.Crit("[BatchVerifier] signature verification failed with the error: " + err.Error())
+			v.report(err)
 			if b.sentinel != nil && v.SendingPeer != nil {
 				if _, err := b.sentinel.BanPeer(b.ctx, v.SendingPeer); err != nil {
 					log.Debug("[BatchVerifier] failed to ban peer", "peer", v.SendingPeer.Pid, "err", err)
@@ -173,6 +192,7 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 		}
 
 		if !valid {
+			v.report(ErrInvalidBlsSignature)
 			if v.SendingPeer == nil || alreadyBanned {
 				continue
 			}
@@ -186,8 +206,14 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 			continue
 		}
 
-		// run corresponding function and publish the gossip into the network
+		v.report(nil)
 		v.F()
+	}
+}
+
+func (v *AggregateVerificationData) report(err error) {
+	if v.result != nil {
+		v.result <- err
 	}
 }
 

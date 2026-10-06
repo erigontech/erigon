@@ -305,6 +305,42 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 	require.NoError(t, aggService.ProcessMessage(context.Background(), nil, agg))
 }
 
+func TestAggregateAndProofGossipDoesNotAcceptBeforeBLSVerification(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return false, nil
+	}
+
+	agg, s := getAggregateAndProofAndState(t)
+	setValidAggregateSelectionProof(t, &clparams.MainnetBeaconConfig, agg, s)
+
+	service, syncedDataManager, forkchoiceMock := setupAggregateAndProofGossipTestWithConfig(t, &clparams.MainnetBeaconConfig)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	forkchoiceMock.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	forkchoiceMock.Ancestors[s.FinalizedCheckpoint().Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	forkchoiceMock.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
+	forkchoiceMock.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+
+	err := service.ProcessMessage(context.Background(), nil, agg)
+	require.ErrorIs(t, err, ErrInvalidBlsSignature)
+}
+
+func setValidAggregateSelectionProof(t *testing.T, cfg *clparams.BeaconChainConfig, agg *SignedAggregateAndProofForGossip, s *state.CachingBeaconState) {
+	t.Helper()
+	committee, err := s.GetBeaconCommitee(
+		agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot,
+		agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex,
+	)
+	require.NoError(t, err)
+	for i := range 256 {
+		agg.SignedAggregateAndProof.Message.SelectionProof[0] = byte(i)
+		if state.IsAggregator(cfg, uint64(len(committee)), 0, agg.SignedAggregateAndProof.Message.SelectionProof) {
+			return
+		}
+	}
+	t.Fatal("no valid selection proof found")
+}
+
 func TestSyncMapRangeDeadlock(t *testing.T) {
 	var m sync.Map
 	m.Store(1, 1)
@@ -366,6 +402,14 @@ func setupAggregateAndProofTestWithConfig(t *testing.T, cfg *clparams.BeaconChai
 	go batchSignatureVerifier.Start()
 	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
 	return blockService, syncedDataManager, forkchoiceMock
+}
+
+func setupAggregateAndProofGossipTestWithConfig(t *testing.T, cfg *clparams.BeaconChainConfig) (AggregateAndProofService, *synced_data.SyncedDataManager, *mock_services.ForkChoiceStorageMock) {
+	service, syncedDataManager, forkchoiceMock := setupAggregateAndProofTestWithConfig(t, cfg)
+	serviceImpl := service.(*aggregateAndProofServiceImpl)
+	serviceImpl.test = false
+	serviceImpl.validatorParams.SetFeeRecipient(0, common.Address{})
+	return service, syncedDataManager, forkchoiceMock
 }
 
 // TestAggregateAndProofGloasRejectIndexGte2 tests that GLOAS rejects aggregate.data.index >= 2

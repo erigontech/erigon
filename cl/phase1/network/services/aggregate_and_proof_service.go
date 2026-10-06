@@ -47,11 +47,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-// SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
-// asynchronously. That's why we cannot wait for its ProcessMessage call to finish to check error. The service
-// will do re-publishing of the gossip or banning the peer in case of invalid signature by itself.
-// that's why we are passing sentinelproto.SentinelClient and *sentinelproto.GossipData to enable the service
-// to do all of that by itself.
 type SignedAggregateAndProofForGossip struct {
 	SignedAggregateAndProof *cltypes.SignedAggregateAndProof
 	Receiver                *sentinelproto.Peer
@@ -361,7 +356,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if aggregateVerificationData == nil {
 		return ErrIgnore
 	}
-	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
 		a.opPool.AttestationsPool.Insert(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature,
@@ -380,8 +374,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
-	return nil
+	return a.batchSignatureVerifier.VerifyAggregateProof(ctx, aggregateVerificationData)
 }
 
 func GetSignaturesOnAggregate(
