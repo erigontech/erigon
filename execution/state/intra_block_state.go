@@ -257,6 +257,7 @@ func New(stateReader StateReader) *IntraBlockState {
 	}
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
+	ibs.versionedWrites.UseArena() // probe: write-cell arena on for every caller
 	return ibs
 }
 
