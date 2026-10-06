@@ -162,6 +162,9 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	}
 
 	blockHeader := msg.SignedBlockHeader.Header
+	if !s.cfg.ForkSchemaMatchesSlot(blockHeader.Slot, msg.Version()) {
+		return fmt.Errorf("%w: data column sidecar schema does not match slot", ErrIgnore)
+	}
 	seenKey := seenSidecarKey{
 		slot:          blockHeader.Slot,
 		proposerIndex: blockHeader.ProposerIndex,
@@ -270,6 +273,9 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 // Reference: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/p2p-interface.md
 func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subnet *uint64, msg *cltypes.DataColumnSidecar) error {
 	slot := msg.Slot
+	if !s.cfg.ForkSchemaMatchesSlot(slot, msg.Version()) {
+		return fmt.Errorf("%w: data column sidecar schema does not match slot", ErrIgnore)
+	}
 	blockRoot := msg.BeaconBlockRoot
 
 	seenKey := seenGloasSidecarKey{

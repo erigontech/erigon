@@ -19,6 +19,7 @@ package gossip
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -232,6 +233,18 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		if name == "" {
 			return pubsub.ValidationReject
 		}
+		digestBytes, err := hex.DecodeString(strings.Split(topic, "/")[2])
+		if err != nil || len(digestBytes) != len(common.Bytes4{}) {
+			g.stats.addIgnore(name)
+			return pubsub.ValidationIgnore
+		}
+		var forkDigest common.Bytes4
+		copy(forkDigest[:], digestBytes)
+		version, err := g.ethClock.StateVersionByForkDigest(forkDigest)
+		if err != nil {
+			g.stats.addIgnore(name)
+			return pubsub.ValidationIgnore
+		}
 
 		// check if the message satisfies the extra conditions
 		for _, condition := range conditions {
@@ -248,13 +261,12 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
-		msgData, err := utils.DecompressSnappy(msgData, true)
+		msgData, err = utils.DecompressSnappy(msgData, true)
 		if err != nil {
 			log.Debug("[GossipManager] reject decompress message", "topic", name, "err", err)
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
-		version := g.beaconConfig.GetCurrentStateVersion(g.ethClock.GetCurrentEpoch())
 		msgObj, err := service.DecodeGossipMessage(pid, msgData, version)
 		if err != nil {
 			log.Debug("[GossipManager] reject decode message", "topic", name, "err", err)

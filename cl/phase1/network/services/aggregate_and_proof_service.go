@@ -51,6 +51,7 @@ type SignedAggregateAndProofForGossip struct {
 	SignedAggregateAndProof *cltypes.SignedAggregateAndProof
 	Receiver                *sentinelproto.Peer
 	ImmediateProcess        bool
+	TopicVersion            clparams.StateVersion
 }
 
 type aggregateJob struct {
@@ -162,6 +163,7 @@ func (a *aggregateAndProofServiceImpl) DecodeGossipMessage(pid peer.ID, data []b
 	obj := &SignedAggregateAndProofForGossip{
 		Receiver:                &sentinelproto.Peer{Pid: pid.String()},
 		SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{},
+		TopicVersion:            version,
 	}
 	if err := obj.SignedAggregateAndProof.DecodeSSZ(data, int(version)); err != nil {
 		return nil, err
@@ -194,6 +196,10 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
+	// Messages SHOULD NOT be re-broadcast from one fork to the other.
+	if clversion < aggregateAndProof.TopicVersion {
+		return fmt.Errorf("%w: aggregate slot predates topic fork", ErrIgnore)
+	}
 	aggregateAndProof.SignedAggregateAndProof.SetVersion(clversion)
 	if err := aggregate.ValidateForConfig(a.beaconCfg, clversion); err != nil {
 		return err

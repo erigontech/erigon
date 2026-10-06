@@ -503,6 +503,93 @@ func (t *attestationTestSuite) TestAttestationGossipNotAcceptedBeforeSignatureVe
 	t.Require().ErrorIs(err, ErrInvalidBlsSignature)
 }
 
+func (t *attestationTestSuite) TestAttestationGossipPreForkAttestationOnPostForkTopicNotAccepted() {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+
+	_, st, _ := tests.GetBellatrixRandom()
+	slot := st.Slot()
+	epoch := slot / cfg.SlotsPerEpoch
+	cfg.GloasForkEpoch = epoch + 1
+	committee, err := st.GetBeaconCommitee(slot, 0)
+	t.Require().NoError(err)
+	t.Require().NotEmpty(committee)
+
+	blockRoot, err := st.BlockRoot()
+	t.Require().NoError(err)
+	targetRoot := common.Hash{1, 2, 3}
+	finalizedCheckpoint := solid.Checkpoint{Epoch: 1, Root: common.Hash{4, 5, 6}}
+	singleAttestation := &solid.SingleAttestation{
+		CommitteeIndex: 0,
+		AttesterIndex:  committee[0],
+		Data: &solid.AttestationData{
+			Slot:            slot,
+			BeaconBlockRoot: blockRoot,
+			Source:          st.CurrentJustifiedCheckpoint(),
+			Target:          solid.Checkpoint{Epoch: epoch, Root: targetRoot},
+		},
+		Signature: common.Bytes96{1},
+	}
+	encoded, err := singleAttestation.EncodeSSZ(nil)
+	t.Require().NoError(err)
+
+	t.syncedData = synced_data.NewSyncedDataManager(&cfg, true)
+	t.Require().NoError(t.syncedData.OnHeadState(st))
+	t.beaconConfig = &cfg
+	batchSignatureVerifier := NewBatchSignatureVerifier(t.T().Context(), nil)
+	batchSignatureVerifier.Start()
+	t.attService = NewAttestationService(
+		context.Background(),
+		t.mockForkChoice,
+		t.committeeSubscibe,
+		t.ethClock,
+		t.syncedData,
+		&cfg,
+		&clparams.NetworkConfig{},
+		beaconevents.NewEventEmitter(),
+		batchSignatureVerifier,
+	)
+
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
+		return st.CommitteeCount(epoch)
+	}
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+		return 1
+	}
+	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) {
+		return [32]byte{}, nil
+	}
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+	t.ethClock.EXPECT().GetEpochAtSlot(slot).Return(epoch).AnyTimes()
+	t.ethClock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+	t.mockForkChoice.HighestSeenVal = slot
+	t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+		blockRoot: {},
+	}
+	t.mockForkChoice.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+		epoch * cfg.SlotsPerEpoch:                     {Root: targetRoot},
+		finalizedCheckpoint.Epoch * cfg.SlotsPerEpoch: {Root: finalizedCheckpoint.Root},
+	}
+	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
+	t.committeeSubscibe.EXPECT().AggregateAttestation(gomock.Any()).Return(nil).AnyTimes()
+
+	gloasMessage, err := t.attService.DecodeGossipMessage("peer", encoded, clparams.GloasVersion)
+	t.Require().NoError(err)
+	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), gloasMessage)
+	t.Require().ErrorIs(err, ErrIgnore)
+
+	fuluMessage, err := t.attService.DecodeGossipMessage("peer", encoded, clparams.FuluVersion)
+	t.Require().NoError(err)
+	t.Require().NoError(t.attService.ProcessMessage(context.Background(), common.NewUint64(1), fuluMessage))
+}
+
 func (t *attestationTestSuite) TestAttestationProcessMessageRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt() {
 	beyondNextEpochSlot := mockSlot + 2*mockSlotsPerEpoch
 	beyondNextEpoch := mockEpoch + 2

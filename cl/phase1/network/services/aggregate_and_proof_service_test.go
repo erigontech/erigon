@@ -412,6 +412,45 @@ func setupAggregateAndProofGossipTestWithConfig(t *testing.T, cfg *clparams.Beac
 	return service, syncedDataManager, forkchoiceMock
 }
 
+func TestAggregateAndProofGossipPreForkAggregateOnPostForkTopicNotAccepted(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+
+	agg, s := getAggregateAndProofAndStateForVersion(t, clparams.FuluVersion)
+	aggregateEpoch := agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot / cfg.SlotsPerEpoch
+	cfg.GloasForkEpoch = aggregateEpoch + 1
+	setValidAggregateSelectionProof(t, &cfg, agg, s)
+	agg.SignedAggregateAndProof.SetVersion(clparams.FuluVersion)
+	encoded, err := agg.SignedAggregateAndProof.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	service, syncedDataManager, forkchoiceMock := setupAggregateAndProofGossipTestWithConfig(t, &cfg)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	forkchoiceMock.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	forkchoiceMock.Ancestors[s.FinalizedCheckpoint().Epoch*cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	forkchoiceMock.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
+	forkchoiceMock.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+
+	gloasMessage, err := service.DecodeGossipMessage("peer", encoded, clparams.GloasVersion)
+	require.NoError(t, err)
+	err = service.ProcessMessage(context.Background(), nil, gloasMessage)
+	require.ErrorIs(t, err, ErrIgnore)
+
+	fuluMessage, err := service.DecodeGossipMessage("peer", encoded, clparams.FuluVersion)
+	require.NoError(t, err)
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, fuluMessage))
+}
+
 // TestAggregateAndProofGloasRejectIndexGte2 tests that GLOAS rejects aggregate.data.index >= 2
 func TestAggregateAndProofGloasRejectIndexGte2(t *testing.T) {
 	ctrl := gomock.NewController(t)

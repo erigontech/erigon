@@ -1370,6 +1370,33 @@ func TestBlockServiceGossipAcceptsEmptyParentExecutionHead(t *testing.T) {
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
 }
 
+func TestBlockServiceProcessMessageIgnoresForkSchemaMismatchBeforeStorage(t *testing.T) {
+	service, child, fcu, _, _ := newGloasGossipValidationFixture(t, nil)
+	impl := service.(*blockService)
+	cfg := *impl.beaconCfg
+	cfg.GloasForkEpoch = child.Block.Slot/cfg.SlotsPerEpoch + 1
+	impl.beaconCfg = &cfg
+	require.False(t, cfg.ForkSchemaMatchesSlot(child.Block.Slot, child.Version()))
+
+	forkChoice := &onBlockErrorStore{
+		ForkChoiceStorage: fcu,
+		err:               errors.New("fork schema mismatch reached fork choice"),
+	}
+	impl.forkchoiceStore = forkChoice
+	blockRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+
+	err = service.ProcessMessage(t.Context(), nil, child)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, forkChoice.calls.Load())
+	require.NoError(t, impl.db.View(t.Context(), func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		require.NoError(t, err)
+		require.Nil(t, slot)
+		return nil
+	}))
+}
+
 func TestBlockServiceGossipAcceptsChildOfHeaderOnlyCheckpointAnchor(t *testing.T) {
 	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, func(parentExecutionHead, _ common.Hash) common.Hash {
 		return parentExecutionHead

@@ -110,6 +110,12 @@ func (s *newPubsubValidatorTestSuite) SetupTest() {
 		return slot / beaconConfig.SlotsPerEpoch
 	}).AnyTimes()
 	s.mockClock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+	s.mockClock.EXPECT().StateVersionByForkDigest(gomock.Any()).DoAndReturn(func(digest common.Bytes4) (clparams.StateVersion, error) {
+		if digest == (common.Bytes4{0xab, 0xcd, 0x12, 0x34}) {
+			return clparams.FuluVersion, nil
+		}
+		return 0, errors.New("unknown fork digest")
+	}).AnyTimes()
 	s.mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
 	s.mockP2P.EXPECT().Host().Return(nil).AnyTimes()
 
@@ -372,6 +378,44 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_Success() {
 	s.Equal(pubsub.ValidationAccept, result)
 }
 
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_DecodesWithTopicForkVersion() {
+	var decodedVersion clparams.StateVersion
+	service := &mockService{
+		decodeFunc: func(pid peer.ID, data []byte, version clparams.StateVersion) (any, error) {
+			decodedVersion = version
+			return "decoded_message", nil
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/abcd1234/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+
+	result := validator(context.Background(), peer.ID("test-peer"), msg)
+	s.Equal(pubsub.ValidationAccept, result)
+	s.Equal(clparams.FuluVersion, decodedVersion)
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_UnknownForkDigestIgnored() {
+	processCalled := false
+	service := &mockService{
+		processFunc: func(ctx context.Context, subnet *uint64, msg any) error {
+			processCalled = true
+			return nil
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/deadbeef/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+
+	result := validator(context.Background(), peer.ID("test-peer"), msg)
+	s.Equal(pubsub.ValidationIgnore, result)
+	s.False(processCalled)
+}
+
 type subscribeUpcomingTopicsTestSuite struct {
 	suite.Suite
 	gm        *GossipManager
@@ -400,6 +444,7 @@ func (s *subscribeUpcomingTopicsTestSuite) SetupTest() {
 		return slot / beaconConfig.SlotsPerEpoch
 	}).AnyTimes()
 	s.mockClock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+	s.mockClock.EXPECT().StateVersionByForkDigest(common.Bytes4{0xab, 0xcd, 0x12, 0x34}).Return(clparams.FuluVersion, nil).AnyTimes()
 
 	// Create actual libp2p host and pubsub
 	var err error

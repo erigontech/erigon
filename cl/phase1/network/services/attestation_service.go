@@ -82,6 +82,7 @@ type AttestationForGossip struct {
 	Receiver          *sentinelproto.Peer
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
+	TopicVersion     clparams.StateVersion
 }
 
 func NewAttestationService(
@@ -130,6 +131,7 @@ func (s *attestationService) DecodeGossipMessage(pid peer.ID, data []byte, versi
 	obj := &AttestationForGossip{
 		Receiver:         &sentinelproto.Peer{Pid: pid.String()},
 		ImmediateProcess: false,
+		TopicVersion:     version,
 	}
 	obj.SingleAttestation = &solid.SingleAttestation{}
 	if err := obj.SingleAttestation.DecodeSSZ(data, int(version)); err != nil {
@@ -154,6 +156,10 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	attEpoch := s.ethClock.GetEpochAtSlot(slot)
 	clVersion := s.beaconCfg.GetCurrentStateVersion(attEpoch)
+	// Messages SHOULD NOT be re-broadcast from one fork to the other.
+	if clVersion < att.TopicVersion {
+		return fmt.Errorf("%w: attestation slot predates topic fork", ErrIgnore)
+	}
 
 	var err error
 	if clVersion >= clparams.ElectraVersion {
