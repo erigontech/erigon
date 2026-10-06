@@ -1070,3 +1070,28 @@ func TestStorageCacheIsPerFrame(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []uint64{11, 22}, []uint64{new(uint256.Int).SetBytes(ret[:32]).Uint64(), new(uint256.Int).SetBytes(ret[32:]).Uint64()})
 }
+
+// Before EIP-158 an empty account survives in the post-state, so a zero-value
+// call has to leave its origin existing even though nothing transfers.
+func TestCallCreatesItsOriginBeforeSpuriousDragon(t *testing.T) {
+	t.Parallel()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+
+	ibs := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer ibs.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, ibs.SetCode(address, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	origin := accounts.InternAddress(common.HexToAddress("0xf00d"))
+	_, _, err := Call(address, nil, &Config{
+		State:       ibs,
+		Origin:      origin,
+		ChainConfig: &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0)},
+	})
+	require.NoError(t, err)
+
+	exists, err := ibs.Exist(origin)
+	require.NoError(t, err)
+	require.True(t, exists, "the origin must exist in the post-state")
+}
