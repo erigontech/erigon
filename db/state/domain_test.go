@@ -4000,3 +4000,47 @@ func TestDomainRetireDestPaths_TailStartsAtV4CoverageFrontier(t *testing.T) {
 		"tail must start where the step's v4 files stop covering, not at v4 #1's end")
 	require.Contains(t, kvPath, fmt.Sprintf(".%d-%d.kv", unwindEnd, stepEnd))
 }
+
+// A .kv and the .kvi named for it are only interchangeable across generations
+// if their contents correspond. A local build that replaces a .kv leaves the
+// previous accessor in place, and nothing rebuilds it because "missed" means
+// "absent by name" — so lookups resolve keys the data no longer holds and read
+// whatever lies past the end of the file.
+func TestDomain_AccessorNotMatchingItsDataIsRebuilt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	t.Parallel()
+
+	db, d, txs := filledDomainWithHashMapAccessor(t, log.New())
+	err := db.UpdateNosync(t.Context(), func(tx kv.RwTx) error {
+		collateAndMerge(t, tx, d, txs)
+		return nil
+	})
+	require.NoError(t, err)
+
+	dc := d.beginForTests()
+	files := dc.files
+	require.GreaterOrEqual(t, len(files), 2, "need two files to cross their accessors")
+	donor, victim := files[0].src, files[len(files)-1].src
+	donorKeys := donor.index.KeyCount()
+	victimKeys := victim.index.KeyCount()
+	donorPath := d.kviAccessorPathForItem(donor)
+	victimPath := d.kviAccessorPathForItem(victim)
+	dc.Close()
+	d.Close()
+	require.NotEqual(t, donorKeys, victimKeys, "the crossed accessors must describe different key counts")
+
+	// The victim's data now carries an accessor built over someone else's.
+	donorBytes, err := os.ReadFile(donorPath)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(victimPath, donorBytes, 0o644))
+
+	scanDirsRes, err := scanDirs(d.dirs)
+	require.NoError(t, err)
+	_, err = d.openFolder(t.Context(), scanDirsRes)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, d.MissedMapAccessors(),
+		"an accessor that does not match its data must count as missed, or it is never rebuilt")
+}

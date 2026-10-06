@@ -648,6 +648,26 @@ func openDirtyAccessor(mask string, dirEntries []string, dirPath string, ver ver
 	}
 }
 
+// dropAccessorNotMatching unlinks an accessor whose key count disagrees with
+// the data it is named for. A file name states the range it covers, not which
+// generation produced it, so a .kv rewritten locally over a downloaded one
+// inherits the accessor built for the bytes that are gone. Lookups then resolve
+// keys the data no longer holds and read past its end. Removing it is what
+// makes it count as missed, which is the only thing that rebuilds it.
+func (d *Domain) dropAccessorNotMatching(item *FilesItem, fPath string) error {
+	dataKeys := uint64(d.dataReader(item.decompressor).Count()) / 2
+	accessorKeys := item.index.KeyCount()
+	if dataKeys == accessorKeys {
+		return nil
+	}
+	item.index.Close()
+	item.index = nil
+	d.logger.Warn("[agg] accessor does not match its data; dropping it to be rebuilt",
+		"accessor", filepath.Base(fPath), "data", item.decompressor.FileName(),
+		"dataKeys", dataKeys, "accessorKeys", accessorKeys)
+	return dir.RemoveFile(fPath)
+}
+
 func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error {
 	const tag = "Domain.openDirtyFiles"
 	var invalidFileItems []*FilesItem
@@ -674,7 +694,10 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) error 
 		if item.index == nil && d.Accessors.Has(statecfg.AccessorHashMap) {
 			openDirtyAccessor(d.kviAccessorFileNameMaskForItem(item), dirEntries, d.dirs.SnapDomain, d.FileVersion.AccessorKVI, func(fPath string) (err error) {
 				item.index, err = d.openHashMapAccessor(fPath)
-				return err
+				if err != nil {
+					return err
+				}
+				return d.dropAccessorNotMatching(item, fPath)
 			}, tag, d.logger)
 		}
 		if item.bindex == nil && d.Accessors.Has(statecfg.AccessorBTree) {

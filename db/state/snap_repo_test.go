@@ -676,6 +676,13 @@ func populateFiles(t *testing.T, dirs datadir.Dirs, schema SnapNameSchema, allFi
 			if err = seg.AddWord([]byte("word")); err != nil {
 				t.Fatal(err)
 			}
+			// A .kv holds key/value pairs, so a one-word file describes half a
+			// key and cannot match the one-key accessor written below.
+			if strings.HasSuffix(filename, ".kv") {
+				if err = seg.AddWord([]byte("value")); err != nil {
+					t.Fatal(err)
+				}
+			}
 			require.NoError(t, seg.Compress())
 
 			if strings.Contains(filename, name) && containsSubstring(t, filename, extensions) && strings.Contains(filename, dataFolder) {
