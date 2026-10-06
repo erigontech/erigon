@@ -373,6 +373,11 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
+// UsePrivateWriteCells routes this state's write cells to the write set's own
+// slabs instead of the shared pools. Only a caller that never publishes them
+// (no FlushWritesToVersionMap, no MergeInto) may ask for it, such as eth_call.
+func (ibs *IntraBlockState) UsePrivateWriteCells() { ibs.versionedWrites.UseArena() }
+
 // Release Deprecated use Close
 func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
 
@@ -2778,6 +2783,10 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if ibs.versionMap == nil {
 		return
 	}
+	if dbg.AssertEnabled && writes.ArenaBacked() {
+		// Publishing arena cells would hand the map memory the next call reuses.
+		panic("flushing an arena-backed write set")
+	}
 	ibs.versionMap.FlushVersionedWrites(writes, true)
 }
 
@@ -3036,7 +3045,7 @@ func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint25
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWBalance()
+	vw := ibs.versionedWrites.newVWBalance()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: BalancePath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetBalance(addr, vw)
@@ -3055,7 +3064,7 @@ func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, 
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWNonce()
+	vw := ibs.versionedWrites.newVWNonce()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: ibs.Version(), NonceReason: reason}
 	vw.Val = val
 	ibs.versionedWrites.SetNonce(addr, vw)
@@ -3073,7 +3082,7 @@ func (ibs *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val ui
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWIncarnation()
+	vw := ibs.versionedWrites.newVWIncarnation()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: IncarnationPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetIncarnation(addr, vw)
@@ -3091,7 +3100,7 @@ func (ibs *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val b
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWSelfDestruct()
+	vw := ibs.versionedWrites.newVWSelfDestruct()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: SelfDestructPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetSelfDestruct(addr, vw)
@@ -3109,7 +3118,7 @@ func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCreateContract()
+	vw := ibs.versionedWrites.newVWCreateContract()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CreateContractPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCreateContract(addr, vw)
@@ -3127,7 +3136,7 @@ func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCode()
+	vw := ibs.versionedWrites.newVWCode()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodePath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCode(addr, vw)
@@ -3145,7 +3154,7 @@ func (ibs *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accou
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCodeHash()
+	vw := ibs.versionedWrites.newVWCodeHash()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeHashPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCodeHash(addr, vw)
@@ -3163,7 +3172,7 @@ func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) 
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCodeSize()
+	vw := ibs.versionedWrites.newVWCodeSize()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeSizePath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCodeSize(addr, vw)
@@ -3181,7 +3190,7 @@ func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, val *accou
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWAddress()
+	vw := ibs.versionedWrites.newVWAddress()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: AddressPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetAddress(addr, vw)
@@ -3199,7 +3208,7 @@ func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accoun
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWStorage()
+	vw := ibs.versionedWrites.newVWStorage()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetStorage(addr, key, vw)

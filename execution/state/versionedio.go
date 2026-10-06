@@ -666,6 +666,106 @@ func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.P
 func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
 func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
 
+// vwSlabSize keeps a slab inside one page-ish allocation while staying large
+// enough that a CREATE-heavy call grows the arena only a few times.
+const vwSlabSize = 64
+
+// vwArena hands out VersionedWrite cells that die with the call that drew them.
+// Slabs are append-only, so a cell stays valid until reset. It replaces the
+// shared vwPools for a set nothing else can observe: no atomics on the hot
+// path, and no per-cell Put when the call ends.
+type vwArena[T any] struct {
+	slabs []*[vwSlabSize]VersionedWrite[T]
+	slab  int
+	idx   int
+}
+
+func (a *vwArena[T]) alloc() *VersionedWrite[T] {
+	if a.slab == len(a.slabs) {
+		a.slabs = append(a.slabs, new([vwSlabSize]VersionedWrite[T]))
+	}
+	vw := &a.slabs[a.slab][a.idx]
+	*vw = VersionedWrite[T]{}
+	a.idx++
+	if a.idx == vwSlabSize {
+		a.slab++
+		a.idx = 0
+	}
+	return vw
+}
+
+func (a *vwArena[T]) reset() {
+	for s := 0; s <= a.slab && s < len(a.slabs); s++ {
+		used := a.slabs[s][:]
+		if s == a.slab {
+			used = used[:a.idx]
+		}
+		clear(used)
+	}
+	a.slab, a.idx = 0, 0
+}
+
+func (ws *WriteSet) newVWAddress() *VersionedWrite[*accounts.Account] {
+	if ws.cells.on {
+		return ws.cells.address.alloc()
+	}
+	return getVWAddress()
+}
+func (ws *WriteSet) newVWBalance() *VersionedWrite[uint256.Int] {
+	if ws.cells.on {
+		return ws.cells.balance.alloc()
+	}
+	return getVWBalance()
+}
+func (ws *WriteSet) newVWNonce() *VersionedWrite[uint64] {
+	if ws.cells.on {
+		return ws.cells.nonce.alloc()
+	}
+	return getVWNonce()
+}
+func (ws *WriteSet) newVWIncarnation() *VersionedWrite[uint64] {
+	if ws.cells.on {
+		return ws.cells.incarnation.alloc()
+	}
+	return getVWIncarnation()
+}
+func (ws *WriteSet) newVWSelfDestruct() *VersionedWrite[bool] {
+	if ws.cells.on {
+		return ws.cells.selfDestruct.alloc()
+	}
+	return getVWSelfDestruct()
+}
+func (ws *WriteSet) newVWCreateContract() *VersionedWrite[bool] {
+	if ws.cells.on {
+		return ws.cells.createContract.alloc()
+	}
+	return getVWCreateContract()
+}
+func (ws *WriteSet) newVWCode() *VersionedWrite[accounts.Code] {
+	if ws.cells.on {
+		return ws.cells.code.alloc()
+	}
+	return getVWCode()
+}
+func (ws *WriteSet) newVWCodeHash() *VersionedWrite[accounts.CodeHash] {
+	if ws.cells.on {
+		return ws.cells.codeHash.alloc()
+	}
+	return getVWCodeHash()
+}
+func (ws *WriteSet) newVWCodeSize() *VersionedWrite[int] {
+	if ws.cells.on {
+		return ws.cells.codeSize.alloc()
+	}
+	return getVWCodeSize()
+}
+func (ws *WriteSet) newVWStorage() *VersionedWrite[uint256.Int] {
+	if ws.cells.on {
+		return ws.cells.storage.alloc()
+	}
+	return getVWStorage()
+}
+
 // WriteSet is the cell-pipeline target shape for versionedWrites.
 // Symmetric with ReadSet — see that type for rationale.
 type WriteSet struct {
@@ -684,7 +784,48 @@ type WriteSet struct {
 	// maps leave the set reading as empty, so under assertions readers panic
 	// instead.
 	released bool
+
+	// cells is set when nothing outside this set may hold its cells, so they
+	// come from its own slabs instead of the shared pools. ReleaseMaps zeroes
+	// the set, so ReleaseAndReset carries this across.
+	cells vwArenas
 }
+
+// vwArenas holds one slab allocator per write path.
+type vwArenas struct {
+	on             bool
+	address        vwArena[*accounts.Account]
+	balance        vwArena[uint256.Int]
+	nonce          vwArena[uint64]
+	incarnation    vwArena[uint64]
+	selfDestruct   vwArena[bool]
+	createContract vwArena[bool]
+	code           vwArena[accounts.Code]
+	codeHash       vwArena[accounts.CodeHash]
+	codeSize       vwArena[int]
+	storage        vwArena[uint256.Int]
+}
+
+func (a *vwArenas) reset() {
+	a.address.reset()
+	a.balance.reset()
+	a.nonce.reset()
+	a.incarnation.reset()
+	a.selfDestruct.reset()
+	a.createContract.reset()
+	a.code.reset()
+	a.codeHash.reset()
+	a.codeSize.reset()
+	a.storage.reset()
+}
+
+// ArenaBacked reports whether this set's cells come from its own slabs, which
+// makes publishing them unsafe.
+func (ws *WriteSet) ArenaBacked() bool { return ws != nil && ws.cells.on }
+
+// UseArena routes this set's cells to its own slabs. Only a caller that never
+// publishes them (no FlushWritesToVersionMap, no MergeInto) may ask for it.
+func (ws *WriteSet) UseArena() { ws.cells.on = true }
 
 // Released reports whether ReleaseMaps pooled this set's maps and no later
 // write revived it.
@@ -1410,6 +1551,14 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 // through pools rather than getting GC'd. The values must go back before
 // ReleaseMaps clears the maps that hold them.
 func (ws *WriteSet) ReleaseAndReset() {
+	if ws.cells.on {
+		cells := ws.cells
+		ws.ReleaseMaps()
+		ws.cells = cells
+		ws.cells.reset()
+		ws.revive() // a reset hands the set back for reuse
+		return
+	}
 	for _, vw := range ws.address {
 		releaseVWAddress(vw)
 	}
