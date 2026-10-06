@@ -1122,8 +1122,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
 						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
-						"runN", VMRunCount.Swap(0), "reErr", VMReErr.Swap(0), "reDep", VMReDep.Swap(0),
-						"reInval", VMReInval.Swap(0), "reSlFlag", VMReSlFlag.Swap(0),
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
@@ -1862,7 +1860,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 					break
 				}
 			}
-			VMRunCount.Add(1) // DIAG: true execution count (every RunTxTask call)
 			result := w.RunTxTask(tv)
 			releaseSlot()
 			// A mid-EVM waitCommit failure already sent a terminal result and left the
@@ -1877,7 +1874,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 					send(result)
 					return
 				}
-				VMReErr.Add(1) // DIAG: re-exec due to speculative error
 				if !waitTo(tv.index-1) || !reExec() {
 					return
 				}
@@ -1888,7 +1884,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			// snapshot. Re-execute once that predecessor commits.
 			if result.Dep >= 0 {
 				pe.releaseWorker(w)
-				VMReDep.Add(1) // DIAG: re-exec due to read-dependency
 				if !waitTo(be.taskIndexOf(result.Dep)) || !reExec() {
 					return
 				}
@@ -1900,7 +1895,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 
 			valid, target, blocker := be.selfLoopEvaluate(tv, result)
 			if !valid {
-				VMReInval.Add(1) // DIAG: re-exec due to selfLoopEvaluate invalid
 				if blocker > be.frontier() && !waitTo(blocker) {
 					return
 				}
@@ -1924,7 +1918,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 				reexec := false
 				for {
 					if be.slReexecFlag[tv.index].Swap(false) {
-						VMReSlFlag.Add(1) // DIAG: re-exec — later write invalidated a committed tx (the hidden slReexec)
 						reexec = true
 						break
 					}
@@ -1957,19 +1950,6 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 
 // selfLoopFlush publishes tv's writes to the versionMap, plus deletion of any key
 // the previous incarnation wrote that this one dropped.
-// DIAG (strip): TRUE re-exec count. cntExec counts dispatches (always == tasks); the
-// worker re-executes in place via the self-loop, invisible to cntExec. VMRunCount is
-// every RunTxTask call (true executions); re-exec = VMRunCount - tasks. Reason counters
-// attribute each loop-back: speculative error / read-dependency / selfLoopEvaluate-invalid
-// / slReexec-flag (a later write invalidated a committed tx).
-var (
-	VMRunCount atomic.Int64
-	VMReErr    atomic.Int64
-	VMReDep    atomic.Int64
-	VMReInval  atomic.Int64
-	VMReSlFlag atomic.Int64
-)
-
 func (be *blockExecutor) selfLoopFlush(version state.Version, result *exec.TxResult, prevWrites *state.WriteSet) {
 	if prevWrites != nil {
 		for h := range prevWrites.AllHeaders() {

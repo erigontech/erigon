@@ -1472,10 +1472,6 @@ const (
 // readLive fetches the live version-map value for the same path and eq compares them for
 // the rare value tiebreaker. The recursive cross-path core is value-less, so it can't be
 // generic over T.
-// DIAG gate (strip): ERIGON_NO_TIEBREAKER=true disables the value tiebreaker so an
-// A/B can measure its effect on re-execution (runN) and exec/commit time.
-var noTiebreaker = dbg.EnvBool("NO_TIEBREAKER", false)
-
 func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, path AccountPath, key accounts.StorageKey, source ReadSource, version Version,
 	readVal T,
 	readLive func(*VersionMap, accounts.Address, accounts.StorageKey, int) (T, ReadResult, bool),
@@ -1558,7 +1554,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 				case recursive && matchesLive == nil:
 					// Synthetic cross-validate probe with no recorded value of its own —
 					// the outer entry's validation covers it; invalidating here would over-fire.
-				case !noTiebreaker && matchesLive != nil && matchesLive(): // DIAG gate
+				case matchesLive != nil && matchesLive():
 					// Value tiebreaker: the read was served cold and a concurrent Done cell
 					// now shadows it, but holds the same value, so the read is still accurate.
 					// Only value paths supply matchesLive; noValue paths fall through to the
@@ -1569,7 +1565,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
-			if !noTiebreaker && valid != VersionValid && rr.Version().TxIndex == version.TxIndex && // DIAG gate
+			if valid != VersionValid && rr.Version().TxIndex == version.TxIndex &&
 				matchesLive != nil && matchesLive() {
 				// The same writer re-published under a new incarnation but the value this
 				// read saw is still live, so the read stands; without this one
