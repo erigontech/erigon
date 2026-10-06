@@ -2783,9 +2783,7 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if ibs.versionMap == nil {
 		return
 	}
-	if dbg.AssertEnabled && writes.ArenaBacked() {
-		panic("flushing an arena-backed write set")
-	}
+	writes.assertNotArena("flush")
 	ibs.versionMap.FlushVersionedWrites(writes, true)
 }
 

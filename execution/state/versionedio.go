@@ -824,6 +824,15 @@ func (a *vwArenas) reset() {
 
 func (ws *WriteSet) ArenaBacked() bool { return ws != nil && ws.cells.on }
 
+// assertNotArena trips when a set that recycles its cells would hand one out.
+// Unreachable while every consumer takes a Snapshot clone; it is here so a
+// future caller that passes the live set fails loudly instead of silently.
+func (ws *WriteSet) assertNotArena(op string) {
+	if dbg.AssertEnabled && ws.ArenaBacked() {
+		panic("writeset: " + op + " of an arena-backed set")
+	}
+}
+
 // UseArena is ReuseWriteCells, which states the caller's obligation.
 func (ws *WriteSet) UseArena() { ws.cells.on = true }
 
@@ -994,9 +1003,7 @@ func (ws *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 		return nil
 	}
 	ws.assertLive()
-	if dbg.AssertEnabled && ws.ArenaBacked() {
-		panic("filtering an arena-backed write set")
-	}
+	ws.assertNotArena("filter")
 	out := &WriteSet{}
 	for a, vw := range ws.address {
 		if keep(vw.WriteHeader) {
@@ -2294,9 +2301,8 @@ func (ws *WriteSet) copyMissingFrom(src *WriteSet) {
 
 // Merge returns the union of prev and next, with next winning on (addr,path,key).
 func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
-	if dbg.AssertEnabled && (ws.ArenaBacked() || next.ArenaBacked()) {
-		panic("merging an arena-backed write set")
-	}
+	ws.assertNotArena("merge")
+	next.assertNotArena("merge")
 	if ws.IsEmpty() {
 		return next
 	}
@@ -2318,9 +2324,8 @@ func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
 // VersionedWrite in place afterwards; s's maps are never touched, so
 // map-level deletes on s stay safe.
 func (ws *WriteSet) MergeInto(next *WriteSet) *WriteSet {
-	if dbg.AssertEnabled && (ws.ArenaBacked() || next.ArenaBacked()) {
-		panic("merging an arena-backed write set")
-	}
+	ws.assertNotArena("merge")
+	next.assertNotArena("merge")
 	if ws.IsEmpty() {
 		return next
 	}
