@@ -3239,13 +3239,19 @@ func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *a
 		return
 	}
 	// A copy, made only here: the caller's account keeps changing.
-	val := account.SelfCopy()
 	if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
 		vw.Version = ibs.Version()
-		vw.Val = val
+		if vw.Val != nil && ibs.noConflictDetection {
+			// Nothing published this cell, so its account can take the new value
+			// in place instead of a fresh copy.
+			*vw.Val = *account
+		} else {
+			vw.Val = account.SelfCopy()
+		}
 		traceWrite(ibs, vw)
 		return
 	}
+	val := account.SelfCopy()
 	vw := getVWAddress()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: AddressPath, Version: ibs.Version()}
 	vw.Val = val
