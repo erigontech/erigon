@@ -201,7 +201,7 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 }
 
 type fastMarshaler interface {
-	MarshalFastJSONTo(*jsonstream.StackStream) error
+	MarshalFastJSONTo(*jsonstream.Stream) error
 }
 
 // sharedJSON gives every remote subscriber the bytes of one encoding of the event, and an
@@ -212,7 +212,7 @@ type sharedJSON[T any, V fastMarshaler] struct {
 	value func(T) V
 }
 
-func (s sharedJSON[T, V]) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (s sharedJSON[T, V]) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	enc, err := s.ev.Encode(func(v T) ([]byte, error) { return jsonstream.Marshal(s.value(v)) })
 	if err != nil {
 		return err

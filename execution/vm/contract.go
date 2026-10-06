@@ -75,28 +75,27 @@ func NewContract(caller accounts.Address, callerAddress accounts.Address, addr a
 	}
 }
 
-// First result tells us if the destination is valid
-// Second result tells us if the code bitmap was used
-func (c *Contract) validJumpdest(dest *uint256.Int) (bool, bool) {
+func (c *Contract) validJumpdest(dest *uint256.Int) bool {
 	udest, overflow := dest.Uint64WithOverflow()
 	// PC cannot go beyond len(code) and certainly can't be bigger than 64bits.
 	// Don't bother checking for JUMPDEST in that case.
 	if overflow || udest >= uint64(len(c.Code)) {
-		return false, false
+		return false
 	}
-	// Only JUMPDESTs allowed for destinations
-	if OpCode(c.Code[udest]) != JUMPDEST {
-		return false, false
+	if c.analysis == nil {
+		c.analysis = c.jumpdestAnalysis()
 	}
-	return c.isCode(udest), true
+	return c.analysis.isJumpdest(udest)
 }
 
-// isCode returns true if the provided PC location is an actual opcode, as
-// opposed to a data-segment following a PUSHN operation.
-func (c *Contract) isCode(udest uint64) bool {
-	if c.analysis != nil {
-		return c.analysis.codeSegment(udest)
-	}
+// analysedJumpdest is validJumpdest without the lazy analysis, small enough to
+// inline. It reports false while the analysis is missing.
+func (c *Contract) analysedJumpdest(dest *uint256.Int) bool {
+	return c.analysis != nil && dest.IsUint64() && dest.Uint64() < uint64(len(c.Code)) && c.analysis.isJumpdest(dest.Uint64())
+}
+
+// jumpdestAnalysis returns the cached JUMPDEST analysis of the code or computes it.
+func (c *Contract) jumpdestAnalysis() bitvec {
 	var codeHash common.Hash
 	isCodeHashZero := c.CodeHash.IsZero()
 	if !isCodeHashZero {
@@ -105,19 +104,18 @@ func (c *Contract) isCode(udest uint64) bool {
 
 	if !isCodeHashZero {
 		if analysis, ok := jumpDestCache.Get(codeHash[:]); ok {
-			c.analysis = analysis
-			return c.analysis.codeSegment(udest)
+			return analysis
 		}
 	}
 
-	c.analysis = codeBitmap(c.Code)
+	analysis := codeBitmap(c.Code)
 
 	if !isCodeHashZero {
 		// content-addressed by codeHash and never unwound, so txNum is irrelevant
-		jumpDestCache.Put(codeHash[:], c.analysis, 0)
+		jumpDestCache.Put(codeHash[:], analysis, 0)
 	}
 
-	return c.analysis.codeSegment(udest)
+	return analysis
 }
 
 // GetOp returns the n'th element in the contract's byte array

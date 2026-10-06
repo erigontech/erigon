@@ -15,7 +15,6 @@ import (
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -2510,19 +2509,11 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			}
 		}
 
-		isUserTx := txIndex >= 0
-		for addr, opts := range io.ReadSet(txIndex).access {
+		for addr := range io.ReadSet(txIndex).access {
 			if addr.IsNil() {
 				continue
 			}
-
-			account := ensureAccountState(ac, addr)
-			// A non-revertable access means the address was the target of an actual
-			// EVM operation, not just a gas-calculation read — used by the system
-			// address filter to tell real access from incidental reads.
-			if isUserTx && !opts.revertable {
-				account.nonRevertableUserAccess = true
-			}
+			ensureAccountState(ac, addr)
 		}
 	}
 
@@ -2530,13 +2521,6 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	for _, account := range ac {
 		account.finalize()
 		account.changes.Normalize()
-		// Per EIP-7928 the system address MUST NOT be included unless it
-		// experiences state access itself, so drop it unless it has actual state
-		// changes or a user tx performed a non-revertable access to it (it is
-		// touched every block as the beacon-root syscall's msg.sender).
-		if account.changes.Address == params.SystemAddress.Value() && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
-			continue
-		}
 		bal = append(bal, *account.changes)
 	}
 
@@ -2547,26 +2531,17 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	return bal
 }
 
-// hasAccountChanges returns true if the account has any state changes
-// (storage, balance, nonce, or code) that belong in the BAL.
-func hasAccountChanges(ac *types.AccountChanges) bool {
-	return len(ac.StorageChanges) > 0 || len(ac.StorageReads) > 0 ||
-		len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 ||
-		len(ac.CodeChanges) > 0
-}
-
 type accountState struct {
-	changes                 *types.AccountChanges
-	balance                 *fieldTracker[uint256.Int]
-	nonce                   *fieldTracker[uint64]
-	code                    *fieldTracker[accounts.Code]
-	balanceValue            *uint256.Int                        // tracks latest seen balance
-	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
-	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
-	slotWrites              map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
-	slotReads               map[accounts.StorageKey]int         // slot -> index into changes.StorageReads, built with slotWrites
-	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
-	initialCodeEmpty        bool                                // pre-block code was empty (created contract or empty-codehash read)
+	changes             *types.AccountChanges
+	balance             *fieldTracker[uint256.Int]
+	nonce               *fieldTracker[uint64]
+	code                *fieldTracker[accounts.Code]
+	balanceValue        *uint256.Int                        // tracks latest seen balance
+	initialBalanceValue *uint256.Int                        // tracks pre-block balance for net-zero detection
+	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
+	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
+	slotReads           map[accounts.StorageKey]int         // slot -> index into changes.StorageReads, built with slotWrites
+	initialCodeEmpty    bool                                // pre-block code was empty (created contract or empty-codehash read)
 }
 
 // check pre- and post-values, add to BAL if different

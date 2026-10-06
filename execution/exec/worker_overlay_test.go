@@ -72,7 +72,7 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 	doms, err := execctx.NewSharedDomains(t.Context(), roTx, logger)
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
-	require.NoError(t, doms.InitBlockOverlay(roTx, dirs.Tmp))
+	require.NoError(t, doms.InitBlockOverlay(roTx))
 
 	header := &types.Header{
 		Number:     *uint256.NewInt(2_713_395),

@@ -48,6 +48,7 @@ const (
 	ETHBACKEND_MinimumBlockAvailable_FullMethodName   = "/remote.ETHBACKEND/MinimumBlockAvailable"
 	ETHBACKEND_FrozenBlocks_FullMethodName            = "/remote.ETHBACKEND/FrozenBlocks"
 	ETHBACKEND_SetHead_FullMethodName                 = "/remote.ETHBACKEND/SetHead"
+	ETHBACKEND_BlockBody_FullMethodName               = "/remote.ETHBACKEND/BlockBody"
 )
 
 // ETHBACKENDClient is the client API for ETHBACKEND service.
@@ -98,6 +99,9 @@ type ETHBACKENDClient interface {
 	MinimumBlockAvailable(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*MinimumBlockAvailableReply, error)
 	FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*FrozenBlocksReply, error)
 	SetHead(ctx context.Context, in *SetHeadRequest, opts ...grpc.CallOption) (*SetHeadReply, error)
+	// Returns body metadata and the user transaction count without reading transactions.
+	// Requires a non-zero block hash and its height; height zero selects genesis.
+	BlockBody(ctx context.Context, in *BlockRequest, opts ...grpc.CallOption) (*BlockBodyReply, error)
 }
 
 type eTHBACKENDClient struct {
@@ -393,6 +397,16 @@ func (c *eTHBACKENDClient) SetHead(ctx context.Context, in *SetHeadRequest, opts
 	return out, nil
 }
 
+func (c *eTHBACKENDClient) BlockBody(ctx context.Context, in *BlockRequest, opts ...grpc.CallOption) (*BlockBodyReply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BlockBodyReply)
+	err := c.cc.Invoke(ctx, ETHBACKEND_BlockBody_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ETHBACKENDServer is the server API for ETHBACKEND service.
 // All implementations must embed UnimplementedETHBACKENDServer
 // for forward compatibility.
@@ -441,6 +455,9 @@ type ETHBACKENDServer interface {
 	MinimumBlockAvailable(context.Context, *emptypb.Empty) (*MinimumBlockAvailableReply, error)
 	FrozenBlocks(context.Context, *emptypb.Empty) (*FrozenBlocksReply, error)
 	SetHead(context.Context, *SetHeadRequest) (*SetHeadReply, error)
+	// Returns body metadata and the user transaction count without reading transactions.
+	// Requires a non-zero block hash and its height; height zero selects genesis.
+	BlockBody(context.Context, *BlockRequest) (*BlockBodyReply, error)
 	mustEmbedUnimplementedETHBACKENDServer()
 }
 
@@ -531,6 +548,9 @@ func (UnimplementedETHBACKENDServer) FrozenBlocks(context.Context, *emptypb.Empt
 }
 func (UnimplementedETHBACKENDServer) SetHead(context.Context, *SetHeadRequest) (*SetHeadReply, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetHead not implemented")
+}
+func (UnimplementedETHBACKENDServer) BlockBody(context.Context, *BlockRequest) (*BlockBodyReply, error) {
+	return nil, status.Error(codes.Unimplemented, "method BlockBody not implemented")
 }
 func (UnimplementedETHBACKENDServer) mustEmbedUnimplementedETHBACKENDServer() {}
 func (UnimplementedETHBACKENDServer) testEmbeddedByValue()                    {}
@@ -1010,6 +1030,24 @@ func _ETHBACKEND_SetHead_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ETHBACKEND_BlockBody_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BlockRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ETHBACKENDServer).BlockBody(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ETHBACKEND_BlockBody_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ETHBACKENDServer).BlockBody(ctx, req.(*BlockRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ETHBACKEND_ServiceDesc is the grpc.ServiceDesc for ETHBACKEND service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1112,6 +1150,10 @@ var ETHBACKEND_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetHead",
 			Handler:    _ETHBACKEND_SetHead_Handler,
+		},
+		{
+			MethodName: "BlockBody",
+			Handler:    _ETHBACKEND_BlockBody_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

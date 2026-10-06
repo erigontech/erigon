@@ -117,10 +117,10 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	{"eth_getBlockByHash", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetBlockByHash(ctx, rpc.BlockNumberOrHashWithHash(ref.hash, false), false)
 	}},
-	{"eth_getBlockTransactionCountByNumber", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	{"eth_getBlockTransactionCountByNumber", notGated, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetBlockTransactionCountByNumber(ctx, rpc.BlockNumber(ref.num))
 	}},
-	{"eth_getBlockTransactionCountByHash", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	{"eth_getBlockTransactionCountByHash", notGated, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetBlockTransactionCountByHash(ctx, ref.hash)
 	}},
 	{"eth_getTransactionByHash", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
@@ -301,17 +301,17 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	// Replaying a block reads its transactions and starts from the state history
 	// preceding it.
 	{"debug_traceBlockByNumber", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.debug.TraceBlockByNumber(ctx, rpc.BlockNumber(ref.num), &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
 	{"debug_traceBlockByHash", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.debug.TraceBlockByHash(ctx, ref.hash, &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
 	{"debug_traceTransaction", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.debug.TraceTransaction(ctx, ref.txHash, &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
@@ -325,7 +325,7 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 		return apis.trace.Get(ctx, ref.txHash, nil, new(bool), nil)
 	}},
 	{"trace_filter", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.trace.Filter(ctx, blockTraceFilter(ref.num), new(bool), nil, stream)
 		})
 	}},
@@ -343,7 +343,7 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	}},
 	{"debug_traceCall", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.debug.TraceCall(ctx, ethapi.CallArgs{From: &testAddr, To: &common.Address{}}, &bnh, &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
@@ -393,7 +393,7 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	}},
 	{"debug_traceCallMany", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		bundles, simulate := pruneGatingBundle(ref.num)
-		return streamedResult(func(stream jsonstream.Stream) error {
+		return streamedResult(func(stream *jsonstream.Stream) error {
 			return apis.debug.TraceCallMany(ctx, bundles, simulate, &tracersConfig.TraceConfig{}, stream)
 		})
 	}},
@@ -444,14 +444,14 @@ func traceCallManyRequest() json.RawMessage {
 func blockTraceFilter(block uint64) TraceFilterRequest {
 	n := rpc.BlockNumber(block)
 	return TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		FromBlock: &n,
+		ToBlock:   &n,
 	}
 }
 
 // streamedResult runs an endpoint that writes its answer to a JSON stream and
 // returns the bytes it produced, so the table asserts on a real result.
-func streamedResult(call func(stream jsonstream.Stream) error) (any, error) {
+func streamedResult(call func(stream *jsonstream.Stream) error) (any, error) {
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
 	if err := call(stream); err != nil {

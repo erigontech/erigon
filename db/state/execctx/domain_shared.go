@@ -172,24 +172,10 @@ func (f sdFrontier) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return f.sd.domainVisibleEnd(f.tx, domain)
 }
 
-// cacheGenerationTx unwraps table overlays because their sequence metadata
-// belongs to the overlay, while cache fills read temporal domains from the
-// backing transaction.
-func cacheGenerationTx(tx kv.TemporalTx) kv.TemporalTx {
-	for tx != nil {
-		wrapper, ok := tx.(interface{ UnderlyingTx() kv.TemporalTx })
-		if !ok {
-			return tx
-		}
-		tx = wrapper.UnderlyingTx()
-	}
-	return nil
-}
-
 // cacheFrontierFor binds fill authority to the transaction's durable state
 // version. StateCache admits it only while that version is current.
 func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
-	generationTx := cacheGenerationTx(tx)
+	generationTx := kv.UnderlyingTx(tx)
 	if generationTx == nil {
 		return nil
 	}
@@ -334,7 +320,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 	trieCfg := o.trieCfg
 
-	generationTx := cacheGenerationTx(tx)
+	generationTx := kv.UnderlyingTx(tx)
 	if generationTx == nil {
 		return nil, errors.New("state version transaction is nil")
 	}
@@ -552,17 +538,23 @@ func (sd *SharedDomains) ResetPendingUpdates() {
 	}
 }
 
-// FlushPendingUpdates applies the pending deferred commitment update under the
-// corresponding block's changeset. Acquires changesetMu itself; the inner swap
-// mutates the global accumulator pointer that DomainPut/DomainDel write through.
-func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.TemporalTx) error {
-	return sd.flushPendingUpdates(ctx, tx, false)
+// FlushPendingUpdates applies the pending deferred commitment update.
+// It sets the corresponding block's changeset as the accumulator
+// so writes go directly to the correct changeset.
+//
+// The inner swap mutates the commitment writer's diff, which the exec loop
+// also rewrites via SetChangesetAccumulator — hence changesetMu, taken here
+// unless lockHeld says the caller already holds it.
+func (sd *SharedDomains) FlushPendingUpdates(tx kv.TemporalTx) error {
+	return sd.flushPendingUpdates(tx, false)
 }
 
-// FlushPendingUpdatesLocked is FlushPendingUpdates for callers that already
-// hold changesetMu via LockChangesetAccumulator.
-func (sd *SharedDomains) FlushPendingUpdatesLocked(ctx context.Context, tx kv.TemporalTx) error {
-	return sd.flushPendingUpdates(ctx, tx, true)
+// FlushPendingUpdatesLocked is the variant for callers that already hold
+// changesetMu via LockChangesetAccumulator (the parallel calculator's
+// per-block compute window). The public FlushPendingUpdates above
+// acquires the lock itself.
+func (sd *SharedDomains) FlushPendingUpdatesLocked(tx kv.TemporalTx) error {
+	return sd.flushPendingUpdates(tx, true)
 }
 
 // FlushPendingUpdatesWithoutChangeset applies the pending deferred commitment
@@ -583,7 +575,7 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 	return err
 }
 
-func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.TemporalTx, lockHeld bool) error {
+func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) error {
 	upd := sd.sdCtx.TakePendingUpdate()
 	if upd == nil {
 		return nil
@@ -883,11 +875,11 @@ func (sd *SharedDomains) BlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalT
 // InitBlockOverlay creates (or replaces) the block-level metadata overlay backed by
 // the given base transaction. Writes to the overlay are visible to subsequent reads
 // and are flushed atomically alongside domain state via Flush().
-func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx, tmpDir string) error {
+func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx) error {
 	if old := sd.blockOverlay.Load(); old != nil {
 		old.Close()
 	}
-	overlay, err := membatchwithdb.NewMemoryBatch(tx, tmpDir, sd.logger)
+	overlay, err := membatchwithdb.NewMemoryBatch(tx)
 	if err != nil {
 		return fmt.Errorf("init block overlay: %w", err)
 	}
@@ -1038,7 +1030,7 @@ func (sd *SharedDomains) flushMem(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 	defer sd.visibleEnds.reset()
 	if sd.sdCtx.HasPendingUpdate() {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
-			if err := sd.FlushPendingUpdates(ctx, ttx); err != nil {
+			if err := sd.FlushPendingUpdates(ttx); err != nil {
 				return err
 			}
 		}
@@ -1874,7 +1866,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) ([]byte, error) {
 	// Flush the previous block's pending deferred updates into its own changeset
 	// (hash-aware lookup) so its branch writes can be reverted on unwind.
-	if err := sd.FlushPendingUpdates(ctx, tx); err != nil {
+	if err := sd.FlushPendingUpdates(tx); err != nil {
 		return nil, err
 	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)

@@ -213,7 +213,7 @@ func newPublishedOverlayTestBase(t *testing.T, m *execmoduletester.ExecModuleTes
 	doms, err := execctx.NewSharedDomains(m.Ctx, overlayRoTx, m.Log)
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
-	require.NoError(t, doms.InitBlockOverlay(overlayRoTx, m.Dirs.Tmp))
+	require.NoError(t, doms.InitBlockOverlay(overlayRoTx))
 
 	events := shards.NewEvents()
 	events.PublishOverlay(doms)
@@ -418,7 +418,7 @@ func signOverlayRaceTestTxWithTip(t *testing.T, m *execmoduletester.ExecModuleTe
 	t.Helper()
 	signer := types.LatestSigner(m.ChainConfig)
 	txn, err := types.SignTx(
-		types.NewEIP1559Transaction(*m.ChainConfig.ChainID, nonce, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, nil, uint256.NewInt(tip), uint256.NewInt(1_000_000_000_000), nil),
+		types.NewEIP1559Transaction(*m.ChainConfig.ChainID, nonce, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(tip), uint256.NewInt(1_000_000_000_000), nil),
 		*signer, m.Key,
 	)
 	require.NoError(t, err)
@@ -928,7 +928,7 @@ func TestGetBlockNumberReadsOnlyThePassedView(t *testing.T) {
 	replacementDomains, err := execctx.NewSharedDomains(m.Ctx, replacementTx, m.Log)
 	require.NoError(t, err)
 	defer replacementDomains.Close()
-	require.NoError(t, replacementDomains.InitBlockOverlay(replacementTx, m.Dirs.Tmp))
+	require.NoError(t, replacementDomains.InitBlockOverlay(replacementTx))
 
 	replacementHeader := types.CopyHeader(firstHeader)
 	replacementHeader.Coinbase = common.Address{2}
@@ -1230,8 +1230,8 @@ func TestTraceFilter_UsesCommittedFromTag(t *testing.T) {
 
 	stream := jsonstream.New(nil)
 
-	from := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
-	to := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize))
+	from := rpc.LatestBlockNumber
+	to := rpc.BlockNumber(overlayRaceChainSize)
 	err := api.Filter(h.m.Ctx, TraceFilterRequest{FromBlock: &from, ToBlock: &to}, new(bool), nil, stream)
 	require.NoError(t, err)
 }
@@ -1457,75 +1457,102 @@ func (r rejectTxNumsAboveIndex) BlockNumber(ctx context.Context, tx kv.Tx, txNum
 	return rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(ctx, tx, txNum)
 }
 
+func requireBlockRangeIntoFuture(t *testing.T, err error) {
+	t.Helper()
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	require.EqualError(t, err, ErrBlockRangeIntoFuture)
+}
+
+// requireResourceNotFound checks the -32001 a blockHash selector returns for a
+// block it cannot serve, and that the message names why.
+func requireResourceNotFound(t *testing.T, err error, message string) {
+	t.Helper()
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeResourceNotFound, rpcErr.ErrorCode())
+	require.ErrorContains(t, err, message)
+}
+
 // TestTraceFilter_FutureToBlockErrors pins that an explicit toBlock past the
-// executed head errors instead of silently clamping the scan to the last
-// available txnum, which would make an omitted head block look empty.
+// executed head is invalid params, even when its canonical header resolves or
+// the forkchoice head ("latest") is ahead of execution, instead of silently
+// clamping the scan to the last available txnum, which would make an omitted
+// head block look empty.
 func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
 	t.Parallel()
-	m, _ := newHeaderAheadTester(t)
+	m, _ := newBlockAheadOfExecutionTester(t)
 	api := newTraceApiForTest(m)
 
-	stream := jsonstream.New(nil)
-
-	to := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
-	require.ErrorContains(t, err, "not executed")
+	for name, to := range map[string]rpc.BlockNumber{
+		"number": rpc.BlockNumber(overlayRaceChainSize + 1),
+		"latest": rpc.LatestBlockNumber,
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.New(nil))
+			requireBlockRangeIntoFuture(t, err)
+		})
+	}
 }
 
 func TestTraceFilter_FutureFromBlockErrors(t *testing.T) {
 	t.Parallel()
-	m, _ := newHeaderAheadTester(t)
+	m, _ := newBlockAheadOfExecutionTester(t)
 	api := newTraceApiForTest(m)
 
-	stream := jsonstream.New(nil)
-
-	from := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
-	err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from}, new(bool), nil, stream)
-	require.ErrorContains(t, err, "not executed")
+	for name, from := range map[string]rpc.BlockNumber{
+		"number": rpc.BlockNumber(overlayRaceChainSize + 1),
+		"latest": rpc.LatestBlockNumber,
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from}, new(bool), nil, jsonstream.New(nil))
+			requireBlockRangeIntoFuture(t, err)
+		})
+	}
 }
 
-func TestTraceFilter_RejectsOverlayOnlyHead(t *testing.T) {
+// TestTraceFilter_BlockHashUsesCommittedView pins that blockHash selects only
+// a block of the committed view, as eth_getLogs does: a published head that is
+// not committed yet, or an overlay reorg at an executed height, is not found
+// (-32001).
+func TestTraceFilter_BlockHashUsesCommittedView(t *testing.T) {
 	base, m, overlayHeader := newOverlayAheadTestAPI(t)
-	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
-
-	stream := jsonstream.New(nil)
-	to := rpc.BlockNumberOrHashWithHash(overlayHeader.Hash(), true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
-	require.ErrorContains(t, err, "not executed")
-}
-
-func TestTraceFilter_RejectsOverlayReorgAtExecutedHeight(t *testing.T) {
-	base, m, _ := newOverlayAheadTestAPI(t)
 	reorgHeader := writeOverlayReorgHeader(t, base, m)
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	stream := jsonstream.New(nil)
-	to := rpc.BlockNumberOrHashWithHash(reorgHeader.Hash(), true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
-	require.ErrorContains(t, err, "not available in the committed view")
+	for name, hash := range map[string]common.Hash{
+		"overlay head":  overlayHeader.Hash(),
+		"overlay reorg": reorgHeader.Hash(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &hash}, new(bool), nil, jsonstream.New(nil))
+			requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", hash))
+		})
+	}
 }
 
-func TestTraceFilter_PropagatesOverlayProbeError(t *testing.T) {
+// TestTraceFilter_UnknownBlockErrors pins that a selector naming no known block
+// is an error, not an empty result.
+func TestTraceFilter_UnknownBlockErrors(t *testing.T) {
 	base, m, overlayHeader := newOverlayAheadTestAPI(t)
-	wantErr := errors.New("overlay header lookup failed")
-	base._blockReader = failOverlayHeaderNumberBlockReader{FullBlockReader: base._blockReader, err: wantErr}
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+	unknownHash := common.Hash{0xff}
+	// Past the overlay head too, so neither view knows the block.
+	unknownNumber := rpc.BlockNumber(overlayHeader.Number.Uint64() + 1)
 
-	stream := jsonstream.New(nil)
-	to := rpc.BlockNumberOrHashWithHash(overlayHeader.Hash(), true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
-	require.ErrorIs(t, err, wantErr)
-}
-
-func TestTraceFilter_UnknownBlockReturnsEmptyArray(t *testing.T) {
-	base, m, _ := newOverlayAheadTestAPI(t)
-	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
-
-	stream := jsonstream.New(nil)
-	to := rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
-	require.NoError(t, err)
-	require.Equal(t, "[]", string(stream.Buffer()))
+	t.Run("blockHash", func(t *testing.T) {
+		err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &unknownHash}, new(bool), nil, jsonstream.New(nil))
+		requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", unknownHash))
+	})
+	t.Run("fromBlock number", func(t *testing.T) {
+		err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &unknownNumber}, new(bool), nil, jsonstream.New(nil))
+		requireBlockRangeIntoFuture(t, err)
+	})
+	t.Run("toBlock number", func(t *testing.T) {
+		err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &unknownNumber}, new(bool), nil, jsonstream.New(nil))
+		requireBlockRangeIntoFuture(t, err)
+	})
 }
 
 func TestTraceFilter_OmittedToBlockUsesExecutionProgress(t *testing.T) {
@@ -1686,7 +1713,7 @@ func publishOverlayHeadE(h *overlayAheadHarness, head *types.Header) error {
 		return err
 	}
 	h.t.Cleanup(doms.Close)
-	if err := doms.InitBlockOverlay(roTx, h.m.Dirs.Tmp); err != nil {
+	if err := doms.InitBlockOverlay(roTx); err != nil {
 		return err
 	}
 	if err := writeHeadBlockMarkersE(doms.BlockOverlay(), head, &types.Body{}); err != nil {

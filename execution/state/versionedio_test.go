@@ -148,8 +148,6 @@ func (r *minimalStateReader) SetTrace(trace bool, tracePrefix string) {}
 func (r *minimalStateReader) Trace() bool                             { return false }
 func (r *minimalStateReader) TracePrefix() string                     { return "" }
 
-// TestAsBlockAccessList_SystemAddressExcludedWithoutChanges verifies that the
-// system address (0xff...fe) is excluded from the BAL when it has no actual
 // TestPrepareRecordsSystemCoinbaseInBlockAccessList pins that when the system
 // address is the block coinbase, the EIP-3651 warming records it as a real
 // (non-revertable) access so EIP-7928 keeps it in the block access list even
@@ -168,46 +166,6 @@ func TestPrepareRecordsSystemCoinbaseInBlockAccessList(t *testing.T) {
 
 	require.Len(t, bal, 1)
 	require.Equal(t, params.SystemAddress.Value(), bal[0].Address)
-}
-
-// state changes and only revertable accesses (e.g. incidental gas-calculation
-// reads during system calls).
-func TestAsBlockAccessList_SystemAddressExcludedWithoutChanges(t *testing.T) {
-	t.Parallel()
-
-	sysAddr := params.SystemAddress
-	userAddr := accounts.InternAddress(common.HexToAddress("0x1111"))
-
-	io := NewVersionedIO(1) // 2 tx slots: system call at -1, user tx at 0
-
-	// System call (txIndex = -1): record system address as a revertable access.
-	// This simulates EIP-4788 beacon root call where system address is msg.sender.
-	recordTouch(io, -1, sysAddr, true)
-
-	// User tx (txIndex = 0): record a normal address with a balance write.
-	readSets := ReadSet{}
-	readSets.SetBalance(userAddr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(100)})
-	io.RecordReads(Version{TxIndex: 0}, readSets)
-	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: userAddr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(200)},
-	))
-
-	bal := io.AsBlockAccessList()
-
-	// System address should be excluded (no state changes, only revertable access).
-	for _, ac := range bal {
-		require.NotEqual(t, sysAddr.Value(), ac.Address,
-			"system address should be excluded from BAL when it has no state changes and only revertable accesses")
-	}
-	// User address should be present.
-	found := false
-	for _, ac := range bal {
-		if ac.Address == userAddr.Value() {
-			found = true
-			break
-		}
-	}
-	require.True(t, found, "user address should be present in BAL")
 }
 
 // TestAsBlockAccessList_SystemAddressIncludedWithNonRevertableAccess verifies
@@ -271,39 +229,6 @@ func TestAsBlockAccessList_SystemAddressIncludedWithStateChanges(t *testing.T) {
 	}
 	require.True(t, found,
 		"system address should be included in BAL when it has actual state changes")
-}
-
-// TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly verifies that
-// a revertable access from a system call (txIndex = -1) does NOT set the
-// nonRevertableUserAccess flag, so the system address is still excluded.
-func TestAsBlockAccessList_SystemAddressRevertableFromSystemCallOnly(t *testing.T) {
-	t.Parallel()
-
-	sysAddr := params.SystemAddress
-	otherAddr := accounts.InternAddress(common.HexToAddress("0x2222"))
-
-	io := NewVersionedIO(1)
-
-	// System call (txIndex = -1): non-revertable access. Even though it's
-	// non-revertable, it's from a system call (txIndex < 0) so it should
-	// NOT mark the system address for inclusion.
-	recordTouch(io, -1, sysAddr, false)
-
-	// User tx (txIndex = 0): touches a different address to ensure there's
-	// at least one user tx in the block.
-	readSets := ReadSet{}
-	readSets.SetBalance(otherAddr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(50)})
-	io.RecordReads(Version{TxIndex: 0}, readSets)
-	io.RecordWrites(Version{TxIndex: 0}, newWriteSet(
-		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: otherAddr, Path: BalancePath, Version: Version{TxIndex: 0}}, Val: *uint256.NewInt(100)},
-	))
-
-	bal := io.AsBlockAccessList()
-
-	for _, ac := range bal {
-		require.NotEqual(t, sysAddr.Value(), ac.Address,
-			"system address should be excluded: non-revertable access from system call (txIndex < 0) should not trigger inclusion")
-	}
 }
 
 // TestAsBlockAccessList_NonRevertableOverridesRevertable verifies that if the

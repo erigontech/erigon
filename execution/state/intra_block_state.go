@@ -34,10 +34,10 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -832,18 +832,19 @@ func (ibs *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.Cod
 	return ibs.GetCodeHash(addr)
 }
 
-func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) ([]byte, error) {
+func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, error) {
 	// committed=false so the tx's own writes (e.g. EIP-7702 authorization) are
 	// visible rather than stale delegation code from the version map.
 	code, err := ibs.getCode(addr, false)
 	// eip-7702
 	if delegation, ok := types.ParseDelegation(code); ok {
-		return ibs.getCode(delegation, false)
+		dcode, derr := ibs.getCode(delegation, false)
+		return accounts.NewCode(dcode), derr
 	}
 	if err != nil {
-		return nil, err
+		return accounts.Code{}, err
 	}
-	return code, nil
+	return accounts.NewCode(code), nil
 }
 
 func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (accounts.Address, bool, error) {
@@ -1932,7 +1933,7 @@ func (ibs *IntraBlockState) createObject(addr accounts.Address, previous *stateO
 		original = &previous.original
 	}
 
-	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
+	account.Root.SetBytes(empty.RootHash[:]) // old storage should be ignored
 	newobj = newObject(ibs, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
@@ -2779,6 +2780,13 @@ func (ibs *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 // and FinalizedWrites withholds its created-empty writes.
 func (ibs *IntraBlockState) StartAccessRecording() {
 	ibs.recordAccess = true
+}
+
+// StopAccessRecording disables versioned access tracking and drops the recorded
+// access set, used on the NoBAL path (eth_call) where no block access list is built.
+func (ibs *IntraBlockState) StopAccessRecording() {
+	ibs.recordAccess = false
+	ibs.versionedReads.access = nil
 }
 
 // MarkReadsInternal marks all versioned reads for addr as internal.

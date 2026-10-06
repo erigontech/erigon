@@ -519,7 +519,6 @@ func (c *versionedWriteCollector) UpdateAccountData(address accounts.Address, or
 	// the stateObject is returned to the pool and its Account may be overwritten.
 	var accountCopy accounts.Account
 	accountCopy.Copy(account)
-	accountCopy.PrevIncarnation = account.PrevIncarnation
 
 	// A down-rev incarnation (contract destroyed then recreated) emits a
 	// SelfDestructPath write first to signal code+storage cleanup before the new

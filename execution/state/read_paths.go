@@ -1621,3 +1621,13 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 		panic(fmt.Sprintf("refreshAccount: unexpected outcome %d for %x", r.outcome, addr))
 	}
 }
+
+// ReadStamp is the token the vm's frame slot cache uses to detect state changes
+// between storage reads. The parallel write-side-validation path does not maintain
+// the journal epoch that token needs, so ReadStamp reports !ok and the vm leaves
+// the slot cache off (opSload's slots.on gate).
+type ReadStamp struct{}
+
+func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
+	return ReadStamp{}, false
+}
