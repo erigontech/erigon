@@ -617,18 +617,7 @@ func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
 	if request.CatchupCommit > 0 {
 		require.Empty(t, request.Replacement, "catch-up imports use only the downloaded blocks")
-		blocks, err := decodeCrashRecoveryBlocks(request.Downloaded)
-		require.NoError(t, err)
-		require.NotEmpty(t, blocks)
-		var forkPoint uint64
-		for i := 0; i < min(len(blocks), len(request.Canonical)); i++ {
-			if blocks[i].Hash() != request.Canonical[i].ExecutionPayload.BlockHash {
-				break
-			}
-			forkPoint = blocks[i].NumberU64()
-		}
-		checkpoint := forkPoint + uint64(request.CatchupCommit)*catchupCrashBlockLimit
-		require.Less(t, checkpoint, blocks[len(blocks)-1].NumberU64(), "the requested catch-up commit must be an intermediate checkpoint")
+		require.NotEmpty(t, request.Downloaded)
 	} else {
 		require.NotEmpty(t, request.Replacement)
 		replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber

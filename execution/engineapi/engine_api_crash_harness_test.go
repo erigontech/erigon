@@ -39,26 +39,9 @@ func TestCrashRecoveryBlocksRequireBAL(t *testing.T) {
 	bal := types.NewBlockAccessListSidecar(types.BlockAccessList{})
 	hash, err := bal.Hash()
 	require.NoError(t, err)
-	header := crashRecoveryBALHeader(hash)
-	block := types.NewBlockWithHeader(header, bal)
-	encoded, err := rlp.EncodeToBytes(block)
-	require.NoError(t, err)
-	var roundTrip types.Block
-	require.NoError(t, rlp.DecodeBytes(encoded, &roundTrip))
-	require.Equal(t, header.BlockAccessListHash, roundTrip.BlockAccessListHash())
-	_, err = decodeCrashRecoveryBlocks([]crashRecoveryBlock{{RLP: encoded}})
-	require.ErrorContains(t, err, "missing block access list")
-	balBytes, err := bal.Bytes()
-	require.NoError(t, err)
-	decoded, err := decodeCrashRecoveryBlocks([]crashRecoveryBlock{{RLP: encoded, BAL: balBytes}})
-	require.NoError(t, err)
-	require.NotNil(t, decoded[0].BlockAccessList())
-}
-
-func crashRecoveryBALHeader(hash common.Hash) *types.Header {
 	// Header extension fields are positional in RLP; include all fields before
 	// the BAL hash so the round trip preserves its meaning.
-	return &types.Header{
+	header := &types.Header{
 		Number:                uint256.Int{1},
 		BaseFee:               new(uint256.Int),
 		WithdrawalsHash:       new(common.Hash),
@@ -69,6 +52,17 @@ func crashRecoveryBALHeader(hash common.Hash) *types.Header {
 		BlockAccessListHash:   &hash,
 		SlotNumber:            new(uint64),
 	}
+	block := types.NewBlockWithHeader(header, bal)
+	encoded, err := rlp.EncodeToBytes(block)
+	require.NoError(t, err)
+	_, err = decodeCrashRecoveryBlocks([]crashRecoveryBlock{{RLP: encoded}})
+	require.ErrorContains(t, err, "missing block access list")
+	balBytes, err := bal.Bytes()
+	require.NoError(t, err)
+	decoded, err := decodeCrashRecoveryBlocks([]crashRecoveryBlock{{RLP: encoded, BAL: balBytes}})
+	require.NoError(t, err)
+	require.Equal(t, header.BlockAccessListHash, decoded[0].BlockAccessListHash())
+	require.NotNil(t, decoded[0].BlockAccessList())
 }
 
 type crashRecoveryReadFailure struct {

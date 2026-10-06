@@ -110,11 +110,12 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 	require.NotEqual(t, canonical.payloads[prefixBlocks].ExecutionPayload.BlockHash, side.payloads[prefixBlocks].ExecutionPayload.BlockHash)
 	require.Less(t, checkpoints[0].CommitmentBlock, canonical.state.CommitmentBlock)
 	require.Greater(t, checkpoints[1].CommitmentBlock, canonical.state.CommitmentBlock)
-	require.Less(t, checkpoints[1].CommitmentBlock, side.state.CommitmentBlock)
 	require.NotEqual(t, canonical.state.Domains[kv.CodeDomain], checkpoints[0].Domains[kv.CodeDomain])
 	require.NotEqual(t, checkpoints[0].Domains[kv.CodeDomain], checkpoints[1].Domains[kv.CodeDomain])
 	for cycle := 1; cycle <= 2; cycle++ {
-		require.Equal(t, uint64(prefixBlocks+cycle*catchupCrashBlockLimit), checkpoints[cycle-1].CommitmentBlock, "reference catch-up checkpoint %d", cycle)
+		checkpoint := checkpoints[cycle-1].CommitmentBlock
+		require.Equal(t, uint64(prefixBlocks+cycle*catchupCrashBlockLimit), checkpoint, "reference catch-up checkpoint %d", cycle)
+		require.Less(t, checkpoint, side.state.CommitmentBlock, "catch-up checkpoint %d must be intermediate", cycle)
 	}
 
 	for cycle := 1; cycle <= 2; cycle++ {
@@ -300,18 +301,14 @@ func decodeCrashRecoveryBlocks(downloaded []crashRecoveryBlock) ([]*types.Block,
 		if err := rlp.DecodeBytes(data.RLP, &block); err != nil {
 			return nil, err
 		}
-		if len(data.BAL) > 0 {
-			sidecar, err := types.DecodeBlockAccessListSidecar(data.BAL)
-			if err != nil {
-				return nil, err
-			}
-			blocks[i] = block.WithBlockAccessListSidecar(sidecar)
-		} else {
-			if block.BlockAccessListHash() != nil {
-				return nil, fmt.Errorf("block %d: missing block access list", block.NumberU64())
-			}
-			blocks[i] = &block
+		if len(data.BAL) == 0 {
+			return nil, fmt.Errorf("block %d: missing block access list", block.NumberU64())
 		}
+		sidecar, err := types.DecodeBlockAccessListSidecar(data.BAL)
+		if err != nil {
+			return nil, err
+		}
+		blocks[i] = block.WithBlockAccessListSidecar(sidecar)
 	}
 	return blocks, nil
 }
