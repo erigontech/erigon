@@ -666,11 +666,19 @@ func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.P
 func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
 func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
 
-const vwSlabSize = 64
+// A reusing set keeps its slabs, so the cap is what one outlier may pin on it.
+// Past the cap the caller allocates, which is what every cell did before.
+const (
+	vwSlabSize = 64
+	vwMaxSlabs = 16
+	vwMaxCells = vwSlabSize * vwMaxSlabs
+)
 
 // vwArena hands out VersionedWrite cells from append-only slabs and recycles
 // them on reset, which costs no atomics and no per-cell Put. A cell stays valid
-// only until that reset, so nothing outside the owning set may hold one.
+// only until that reset, so nothing outside the owning set may hold one. Every
+// cell it hands out is zero: a new slab starts zeroed and reset clears what it
+// rewinds.
 type vwArena[T any] struct {
 	slabs []*[vwSlabSize]VersionedWrite[T]
 	slab  int
@@ -679,10 +687,12 @@ type vwArena[T any] struct {
 
 func (a *vwArena[T]) alloc() *VersionedWrite[T] {
 	if a.slab == len(a.slabs) {
+		if a.slab == vwMaxSlabs {
+			return &VersionedWrite[T]{}
+		}
 		a.slabs = append(a.slabs, new([vwSlabSize]VersionedWrite[T]))
 	}
 	vw := &a.slabs[a.slab][a.idx]
-	*vw = VersionedWrite[T]{}
 	a.idx++
 	if a.idx == vwSlabSize {
 		a.slab++

@@ -1822,3 +1822,30 @@ func TestReleaseMapsKeepsTheArena(t *testing.T) {
 	ws.ReleaseMaps()
 	require.True(t, ws.ArenaBacked(), "the arena must outlive the map release")
 }
+
+// The arena stops growing at its cap, so one outlier call cannot pin an
+// unbounded footprint on a set that keeps its slabs across resets.
+func TestArenaStopsGrowingAtItsCap(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+	for range vwMaxCells + vwSlabSize {
+		require.NotNil(t, ws.newVWNonce())
+	}
+	require.Len(t, ws.cells.nonce.slabs, vwMaxSlabs, "the arena must not grow past its cap")
+
+	ws.ReleaseAndReset()
+	require.Len(t, ws.cells.nonce.slabs, vwMaxSlabs, "a reset keeps the slabs for the next call")
+}
+
+// Every cell the arena hands out is zero, including one past the cap.
+func TestArenaHandsOutZeroedCells(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+	for i := range vwMaxCells + 2 {
+		vw := ws.newVWNonce()
+		require.Zero(t, vw.Val, "cell %d", i)
+		require.Equal(t, WriteHeader{}, vw.WriteHeader, "cell %d", i)
+		vw.Val = 7
+		vw.WriteHeader = WriteHeader{Path: NoncePath}
+	}
+}
