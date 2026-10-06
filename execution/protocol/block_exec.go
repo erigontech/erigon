@@ -177,7 +177,7 @@ func ExecuteBlockEphemerally(
 	var err error
 	if !vmConfig.ReadOnly {
 		txs := block.Transactions()
-		newBlock, _, err = FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger, vmConfig.Tracer)
+		newBlock, _, err = FinalizeBlockExecution(engine, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, true, logger)
 		if err != nil {
 			return nil, err
 		}
@@ -238,7 +238,6 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 		nil,   // maxFeePerBlobGas
 	)
 	vmConfig := vmCfg
-	vmConfig.NoReceipts = true
 	vmConfig.RestoreState = constCall
 	vmConfig.Tracer = nil // set to nil to avoid trace sysCallContract
 	// Create a new context to be used in the EVM environment
@@ -284,12 +283,11 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 		true,  // isFree
 		nil,   // maxFeePerBlobGas
 	)
-	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment
 	author := contract
 	txContext := NewEVMTxContext(msg)
 	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), nil, author, chainConfig)
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
+	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vm.Config{})
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
 		State:     0, // state gas reservoir will consume from execution gas for sys calls
@@ -305,14 +303,13 @@ func SysCreate(contract accounts.Address, data []byte, chainConfig *chain.Config
 }
 
 func FinalizeBlockExecution(
-	engine rules.Engine, stateReader state.StateReader,
+	engine rules.Engine,
 	header *types.Header, txs types.Transactions, uncles []*types.Header,
 	stateWriter state.StateWriter, cc *chain.Config,
 	ibs *state.IntraBlockState, receipts types.Receipts,
 	withdrawals []*types.Withdrawal, chainReader rules.ChainReader,
 	isMining bool,
 	logger log.Logger,
-	tracer *tracing.Hooks,
 ) (newBlock *types.Block, retRequests types.FlatRequests, err error) {
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		ret, err := SysCallContract(contract, data, cc, ibs, header, engine, false /* constCall */, vm.Config{})

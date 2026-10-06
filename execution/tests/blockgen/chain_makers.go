@@ -505,7 +505,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if chainreader.Config().IsShanghai(parent.Time()) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
-		b.header = makeHeader(chainreader, parent, ibs, b.engine)
+		b.header = makeHeader(chainreader, parent, b.engine)
 		// blockIO carries the per-phase write-sets: it feeds both the Amsterdam
 		// BAL and the versioned write-set commit, so create it for any versioned
 		// block, not only Amsterdam.
@@ -651,7 +651,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
-func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.IntraBlockState, engine rules.Engine) *types.Header {
+func makeHeader(chain rules.ChainReader, parent *types.Block, engine rules.Engine) *types.Header {
 	var time uint64
 	if parent.Time() == 0 {
 		time = 10
