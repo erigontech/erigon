@@ -113,6 +113,7 @@ func envFor(statedb *state.IntraBlockState, gasLimit uint64) *vm.EVM {
 		GasLimit:    gasLimit,
 		Difficulty:  uint256.NewInt(0),
 		State:       statedb,
+		EVMConfig:   vm.Config{NoReceipts: true},
 	})
 }
 
