@@ -214,6 +214,11 @@ const DefaultParallelCommitment = true
 
 var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
 
+// ExperimentalParallelCommitmentExplicit records that COMMITMENT_PARALLEL or
+// --experimental.parallel-commitment was set, rather than left at the default. A bin-only
+// datadir refuses only an explicit request for the parallel trie.
+var ExperimentalParallelCommitmentExplicit = dbg.EnvIsSet("COMMITMENT_PARALLEL")
+
 // ExperimentalBinCommitment selects the EIP-8297 binary commitment trie
 // (commitment.ModeDirect + VariantBinPatriciaTrie). A whole-datadir property:
 // persisted to erigondb.toml on first start and adopted from it on later

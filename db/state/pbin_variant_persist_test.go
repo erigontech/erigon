@@ -39,6 +39,9 @@ func pbinWithVariantFlags(t *testing.T, bin, parallel bool) {
 	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = bin
 	statecfg.ExperimentalParallelCommitment = parallel
+	// Simulates a deliberately chosen --experimental.parallel-commitment, not a
+	// default sitting unrequested: reconcileTrieVariant only refuses the former.
+	statecfg.ExperimentalParallelCommitmentExplicit = true
 }
 
 func pbinWriteToml(t *testing.T, dirs datadir.Dirs, content string) string {

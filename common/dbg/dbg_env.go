@@ -66,6 +66,16 @@ func EnvStrings(envVarName string, sep string, defaultVal []string) []string {
 	return defaultVal
 }
 
+// EnvIsSet reports whether envVarName or its ERIGON_-prefixed form is present in the
+// environment. Unlike envLookup it does not log.
+func EnvIsSet(envVarName string) bool {
+	if _, ok := os.LookupEnv(envVarName); ok {
+		return true
+	}
+	_, ok := os.LookupEnv(ErigonEnvPrefix + envVarName)
+	return ok
+}
+
 func EnvBool(envVarName string, defaultVal bool) bool {
 	v, _ := envLookup(envVarName)
 	if strings.EqualFold(v, "true") {

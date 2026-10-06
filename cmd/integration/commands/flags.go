@@ -191,6 +191,9 @@ func withExperimentalCommitment(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Name, statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Usage)
 	cmd.Flags().BoolVar(&statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Name, statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Usage)
 	cmd.PreRun = func(*cobra.Command, []string) {
+		if cmd.Flags().Changed(utils.ExperimentalParallelCommitmentFlag.Name) {
+			statecfg.ExperimentalParallelCommitmentExplicit = true
+		}
 		if statecfg.ExperimentalCommitmentV3 {
 			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 		}
@@ -202,6 +205,9 @@ func withRebuildCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, def, utils.ExperimentalParallelCommitmentFlag.Usage)
 	cmd.Flags().BoolVar(&statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Name, statecfg.ExperimentalCommitmentV3, utils.ExperimentalCommitmentV3Flag.Usage)
 	cmd.PreRun = func(*cobra.Command, []string) {
+		if cmd.Flags().Changed(utils.ExperimentalParallelCommitmentFlag.Name) {
+			statecfg.ExperimentalParallelCommitmentExplicit = true
+		}
 		if statecfg.ExperimentalCommitmentV3 {
 			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 		}

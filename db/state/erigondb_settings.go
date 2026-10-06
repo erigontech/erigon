@@ -120,7 +120,12 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 			statecfg.ExperimentalHexBinCommitment = hexBin
 		}
 		if !hexBin && statecfg.ExperimentalParallelCommitment {
-			return errors.New("the bin commitment trie is sequential-only; drop --experimental.parallel-commitment")
+			if statecfg.ExperimentalParallelCommitmentExplicit {
+				return errors.New("the bin commitment trie is sequential-only; drop --experimental.parallel-commitment")
+			}
+			// Only the default asked for parallel; the genesis or datadir chose the bin trie.
+			logger.Info("datadir uses the bin commitment trie; parallel commitment defaults to off for it")
+			statecfg.ExperimentalParallelCommitment = false
 		}
 		if !statecfg.ExperimentalBinCommitment {
 			logger.Info("datadir uses the bin commitment trie; enabling it for this process")

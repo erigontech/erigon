@@ -29,6 +29,7 @@ func Restore(t testing.TB) {
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousParallel := statecfg.ExperimentalParallelCommitment
+	previousParallelExplicit := statecfg.ExperimentalParallelCommitmentExplicit
 	previousHash := statecfg.BinCommitmentHash
 	previousSchema := statecfg.Schema
 	previousSuite := commitment.PBinHashSuiteName()
@@ -37,6 +38,7 @@ func Restore(t testing.TB) {
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
 		statecfg.ExperimentalCommitmentV3 = previousV3
 		statecfg.ExperimentalParallelCommitment = previousParallel
+		statecfg.ExperimentalParallelCommitmentExplicit = previousParallelExplicit
 		statecfg.BinCommitmentHash = previousHash
 		statecfg.Schema = previousSchema
 		if err := commitment.SetPBinHashSuite(previousSuite); err != nil {

@@ -1958,6 +1958,7 @@ func CheckExclusive(ctx *cli.Command, args ...any) {
 func setParallelCommitment(ctx *cli.Command) {
 	if ctx.IsSet(ExperimentalParallelCommitmentFlag.Name) {
 		statecfg.ExperimentalParallelCommitment = ctx.Bool(ExperimentalParallelCommitmentFlag.Name)
+		statecfg.ExperimentalParallelCommitmentExplicit = true
 	}
 	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
 		statecfg.ExperimentalCommitmentV3 = ctx.Bool(ExperimentalCommitmentV3Flag.Name)
