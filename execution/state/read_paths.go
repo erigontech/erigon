@@ -1579,7 +1579,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 	// here is what tells the validated path apart. A contract created over the
 	// slot starts empty, and creation records CreateContractPath rather than
 	// StoragePath, so hasWrite alone would not see it.
-	if v, ok := s.versionedReads.GetColdSlot(addr, key); ok && !s.hasWrite(addr, StoragePath, key) && !s.createdOverSlot(addr) {
+	if v, ok := s.versionedReads.GetColdSlot(addr, key); ok && !s.hasWrite(addr, StoragePath, key) && !createdOverSlot(s, addr) {
 		return v, StorageRead, UnknownVersion, true, nil
 	}
 	if s.versionMap != nil && !s.warmReadable(addr) {
@@ -1645,7 +1645,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 // readCommittedState reads a storage slot with committed-view semantics.
 // createdOverSlot reports whether this call created a contract at addr, or
 // destroyed it, either of which empties its storage.
-func (s *IntraBlockState) createdOverSlot(addr accounts.Address) bool {
+func createdOverSlot(s *IntraBlockState, addr accounts.Address) bool {
 	if created, _ := s.versionedWriteCreateContract(addr); created {
 		return true
 	}
@@ -1665,7 +1665,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 	// A recorded read of the slot is its value before this tx, whatever the tx wrote
 	// since, unless the tx created the contract over it.
 	if s.versionMap != nil {
-		if !s.createdOverSlot(addr) {
+		if !createdOverSlot(s, addr) {
 			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
 				return tr.Val, tr.Source, tr.Version, nil
 			}
