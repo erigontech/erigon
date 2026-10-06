@@ -363,9 +363,9 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
-func WithoutAmsterdamBuilderContracts() Option {
+func WithoutSystemContracts() Option {
 	return func(opts *options) {
-		opts.skipAmsterdamBuilderContracts = true
+		opts.skipSystemContracts = true
 	}
 }
 
@@ -414,24 +414,24 @@ func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) Op
 }
 
 type options struct {
-	stepSize                      *uint64
-	e2RetireStep                  *uint64
-	experimentalBAL               bool
-	genesis                       *types.Genesis
-	chainConfig                   *chain.Config
-	key                           *ecdsa.PrivateKey
-	engine                        rules.Engine
-	pruneMode                     *prune.Mode
-	withTxPool                    bool
-	enableDomains                 []kv.Domain
-	fcuBackgroundPrune            bool
-	parallelStateFlushing         bool
-	alwaysGenerateChangesets      *bool
-	maxReorgDepth                 *uint64
-	slowBlockThreshold            *time.Duration
-	sentryProtocol                uint
-	stateTransitionObserver       execmodule.StateTransitionObserver
-	skipAmsterdamBuilderContracts bool
+	stepSize                 *uint64
+	e2RetireStep             *uint64
+	experimentalBAL          bool
+	genesis                  *types.Genesis
+	chainConfig              *chain.Config
+	key                      *ecdsa.PrivateKey
+	engine                   rules.Engine
+	pruneMode                *prune.Mode
+	withTxPool               bool
+	enableDomains            []kv.Domain
+	fcuBackgroundPrune       bool
+	parallelStateFlushing    bool
+	alwaysGenerateChangesets *bool
+	maxReorgDepth            *uint64
+	slowBlockThreshold       *time.Duration
+	sentryProtocol           uint
+	stateTransitionObserver  execmodule.StateTransitionObserver
+	skipSystemContracts      bool
 }
 
 func applyOptions(opts []Option) options {
@@ -457,7 +457,7 @@ func applyOptions(opts []Option) options {
 			},
 		}
 	}
-	if !opt.skipAmsterdamBuilderContracts {
+	if !opt.skipSystemContracts {
 		addAmsterdamBuilderContracts(opt.genesis)
 	}
 	// engine depends on genesis
@@ -628,7 +628,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	// Deploy Prague system contracts (EIP-7002, EIP-7251) when Prague is active.
 	// These are required for the Merge engine's FinalizeAndAssemble to process
 	// withdrawal and consolidation requests.
-	if gspec.Config.IsPrague(0) {
+	if gspec.Config.IsPrague(0) && !opt.skipSystemContracts {
 		if err := blockgen.InitPraguePreDeploys(mock.DB, gspec.Config, mock.Log); err != nil {
 			if tb != nil {
 				tb.Fatal(err)
@@ -741,7 +741,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		),
 		nil, /*notifier*/
 		&vm.Config{},
-		dirs.Tmp,
 		mock.TxPool,
 		sealCancel,
 		latestBlockBuiltStore,
@@ -760,7 +759,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			stagedsync.StageHeadersCfg(mock.BlockReader),
 			stagedsync.StageBlockHashesCfg(mock.Dirs.Tmp, blockWriter),
 			stagedsync.StageBodiesCfg(mock.BlockReader, blockWriter),
-			stagedsync.StageSendersCfg(mock.ChainConfig, cfg.Sync, false /* badBlockHalt */, dirs.Tmp, pruneMode, mock.BlockReader, readAheader),
+			stagedsync.StageSendersCfg(mock.ChainConfig, false /* badBlockHalt */, dirs.Tmp, mock.BlockReader, readAheader),
 			stagedsync.StageExecuteBlocksCfg(
 				mock.DB,
 				pruneMode,

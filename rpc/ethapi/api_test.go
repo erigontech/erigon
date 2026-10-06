@@ -350,7 +350,7 @@ func (s *jsonSink) Write(p []byte) (int, error) { *s = append(*s, p...); return 
 
 // fastJSON renders v through MarshalFastJSONTo on a pooled stream, as the server does.
 func fastJSON[T interface {
-	MarshalFastJSONTo(w *jsonstream.StackStream) error
+	MarshalFastJSONTo(w *jsonstream.Stream) error
 }](t *testing.T, v T) string {
 	t.Helper()
 	var b jsonSink
@@ -579,4 +579,49 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 func TestRPCBlockTransactionCountIsANumber(t *testing.T) {
 	n := uint64(15)
 	require.Contains(t, fastJSON(t, &RPCBlock{TransactionCount: &n}), `"transactionCount":15`)
+}
+
+// encoding/json names the decoded type in its errors, and RPC clients see them.
+func TestCallArgsUnmarshalErrorNamesCallArgs(t *testing.T) {
+	var args CallArgs
+	require.ErrorContains(t, args.UnmarshalJSON([]byte(`{"blobs":1}`)), "Go struct field callArgs.blobs")
+}
+
+func TestCallArgsUnmarshalMatchesEncodingJSON(t *testing.T) {
+	for _, in := range []string{
+		`{"to":"0x0000000000000000000000000000000000000001","data":"0x0102","gas":"0x10"}`,
+		`{"input":"0x0102","value":"0x1"}`,
+		`{"data":"0x0102","input":"0x0102"}`,
+		`{"data":"0x0102","input":"0x0103"}`,
+		`{"data":null,"input":"0x"}`,
+		`{"data":"0x01","data":"0x02"}`,
+		`{"Data":"0x01"}`,
+		`{"data":"0x0"}`,
+		`{"data":"01"}`,
+		`{"data":1}`,
+		`{"data":"0x01"`,
+		`[]`,
+		`{"accessList":[{"address":"0x0000000000000000000000000000000000000002","storageKeys":[]}],"data":"0xaa"}`,
+		`{"data":"0x01","Data":"0x02"}`,
+		`{"Data":"0x02","data":"0x01"}`,
+		`{"data":"0x\u0030\u0031"}`,
+		`{"from":"0x94fea3ef90b236f6809a8e412cd11ce99fd45933","to":null,"gas":"0x29040","gasPrice":"0x1","maxFeePerGas":"0x2","maxPriorityFeePerGas":"0x3","maxFeePerBlobGas":"0x4","value":"0x0","nonce":"0x7","chainId":"0x1","input":"0xa9059cbb"}`,
+		`{"gas":"0x1","gas":null}`,
+		`{"gas":16}`,
+		`{"value":"0x"}`,
+		`{"unknown":{"a":[1,2]},"data":"0x01"}`,
+		`{"blobVersionedHashes":["0x0100000000000000000000000000000000000000000000000000000000000000"],"blobs":["0x01"],"commitments":[],"proofs":null}`,
+		`{"authorizationList":[{"chainId":"0x1","address":"0x0000000000000000000000000000000000000003","nonce":"0x0","yParity":"0x0","r":"0x1","s":"0x1"}]}`,
+		`null`,
+	} {
+		var got, want CallArgs
+		gotErr := got.UnmarshalJSON([]byte(in))
+		wantErr := want.unmarshalStd([]byte(in))
+		require.Equal(t, wantErr == nil, gotErr == nil, in)
+		if wantErr == nil {
+			require.Equal(t, want, got, in)
+		} else {
+			require.Equal(t, wantErr.Error(), gotErr.Error(), in)
+		}
+	}
 }
