@@ -199,6 +199,24 @@ func TestNestedCallsReuseOneFrameContext(t *testing.T) {
 	require.Nil(t, evm.spareFrame, "the outermost frame returns the spare context to the pool")
 }
 
+func TestCreateCollisionCheckOfAnAbsentAccountReadsOnlyExistence(t *testing.T) {
+	t.Parallel()
+
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	collision, err := evm.hasCreateCollision(addr)
+	require.NoError(t, err)
+	require.False(t, collision)
+	reads := ibs.VersionedReads()
+	_, nonceRead := reads.GetNonce(addr)
+	_, codeHashRead := reads.GetCodeHash(addr)
+	require.False(t, nonceRead || codeHashRead, "an absent account needs no nonce or code hash read")
+}
+
 func TestZeroUnpricedBaseFee(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

@@ -28,6 +28,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -212,7 +213,8 @@ type IntraBlockState struct {
 	// resolve from the state reader, gated by this tx's own CreateContract /
 	// SelfDestruct cells. Left false for genesis/RPC/serial, which still commit
 	// via FinalizeTx→so.data.
-	noMaterialize bool
+	noMaterialize       bool
+	noConflictDetection bool
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -371,6 +373,7 @@ func (ibs *IntraBlockState) Reset() {
 	// suppressed (which would silently drop writes). The versioned worker re-sets
 	// both right after Reset; the block assembler never calls Reset mid-block.
 	ibs.noMaterialize = false
+	ibs.noConflictDetection = false
 	clear(ibs.committedBase)
 	ibs.resetReads()
 	// Write side: VersionedWrites() returns Cloned snapshots, so the
@@ -388,6 +391,64 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.dep = UnknownDep
 	ibs.stateReadErr = nil
 }
+
+var ibsPool sync.Pool
+
+// NewPooled is New over an IntraBlockState reused from an earlier call, whose
+// maps keep their capacity. Release it with ReleasePooled.
+func NewPooled(stateReader StateReader) *IntraBlockState {
+	ibs, ok := ibsPool.Get().(*IntraBlockState)
+	if !ok {
+		return New(stateReader)
+	}
+	ibs.stateReader = stateReader
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+	return ibs
+}
+
+// ReleasePooled hands ibs to the next NewPooled, or closes it when it grew too
+// large to keep.
+func ReleasePooled(ibs *IntraBlockState) {
+	if ibs.resetForPool() {
+		ibsPool.Put(ibs)
+		return
+	}
+	ibs.Close()
+}
+
+// Maps never shrink, so a call that grew past this must not pin its capacity
+// for every later one.
+const maxPooledEntries = 16 * 1024
+
+// resetForPool clears everything one call left and reports whether ibs is
+// small enough to pool.
+func (ibs *IntraBlockState) resetForPool() bool {
+	reads := ibs.versionedReads
+	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+reads.entries() <= maxPooledEntries
+	ibs.Reset()
+	if !poolable {
+		return false
+	}
+	// One call never hands its read set out, so the maps keep their capacity
+	// instead of the empty set Reset installs.
+	reads.clearForReuse()
+	ibs.versionedReads = reads
+	// Reset only bumps the probe epoch; a pooled ibs would collect every
+	// address later calls touch.
+	clear(ibs.sdProbe)
+	ibs.tracingHooks = nil
+	ibs.trace = false
+	ibs.stateReader, ibs.codeAccess = nil, nil
+	// Reset keeps the tx context and fork flags; New starts them at zero.
+	ibs.blockNum, ibs.version = 0, 0
+	ibs.eip8246, ibs.eip161, ibs.isAura = false, false, false
+	return true
+}
+
+// SetNoConflictDetection marks an execution whose reads ValidateVersion never
+// checks, such as eth_call: reads kept only for conflict detection are skipped.
+// Reset clears it.
+func (ibs *IntraBlockState) SetNoConflictDetection() { ibs.noConflictDetection = true }
 
 // Release Deprecated use Close
 func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
@@ -2344,7 +2405,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}
 	}
 	balSource, balVersion := StorageRead, UnknownVersion
-	if ibs.versionMap != nil {
+	if ibs.versionMap != nil && !ibs.noConflictDetection {
 		if _, res, ok := ibs.versionMap.ReadBalance(addr, ibs.txIndex); ok && res.Status() == MVReadResultDone {
 			balSource = MapRead
 			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
@@ -2416,7 +2477,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// access list), promote it: without a real read the unchanged balance write has no
 	// baseline and would emit a spurious net-zero balance change.
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap != nil {
+	if ibs.versionMap != nil && !ibs.noConflictDetection {
 		if vr, seen := ibs.versionedReads.GetBalance(addr); !seen {
 			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, newObj.Balance()})
 		} else if vr.internal {
