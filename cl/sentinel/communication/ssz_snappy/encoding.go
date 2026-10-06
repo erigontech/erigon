@@ -26,7 +26,6 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/snappypool"
 	"github.com/erigontech/erigon/common/ssz"
 )
@@ -89,20 +88,6 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	return wr.Flush()
 }
 
-func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, ethClock eth_clock.EthereumClock) error {
-	var forkDigest [4]byte
-	// TODO(issues/5884): assert the fork digest matches the expectation for
-	// a specific configuration.
-	if _, err := r.Read(forkDigest[:]); err != nil {
-		return err
-	}
-	version, err := ethClock.StateVersionByForkDigest(forkDigest)
-	if err != nil {
-		return err
-	}
-	return DecodeAndReadNoForkDigest(r, val, version)
-}
-
 func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) error {
 	return decodeAndReadNoForkDigest(r, val, version, nil)
 }
@@ -114,7 +99,7 @@ func DecodeAndReadNoForkDigestExact(r io.Reader, val ssz.EncodableSSZ, version c
 
 func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion, expectedSize *uint64) error {
 	// Read varint for length of message.
-	encodedLn, _, err := ReadUvarint(r)
+	encodedLn, err := ReadUvarint(r)
 	if err != nil {
 		return fmt.Errorf("unable to read varint from message prefix: %w", err)
 	}
@@ -165,25 +150,24 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	return nil
 }
 
-func ReadUvarint(r io.Reader) (x, n uint64, err error) {
+func ReadUvarint(r io.Reader) (x uint64, err error) {
 	currByte := make([]byte, 1)
 	for shift := uint(0); shift < 64; shift += 7 {
 		_, err := r.Read(currByte)
-		n++
 		if err != nil {
-			return 0, 0, err
+			return 0, err
 		}
 		b := uint64(currByte[0])
 		x |= (b & 0x7F) << shift
 		if (b & 0x80) == 0 {
 			// Check for overflow on the last byte
 			if shift == 63 && b > 1 {
-				return 0, n, errors.New("varint overflows a 64-bit integer")
+				return 0, errors.New("varint overflows a 64-bit integer")
 			}
-			return x, n, nil
+			return x, nil
 		}
 	}
 
 	// The number is too large to represent in a 64-bit value.
-	return 0, n, errors.New("varint overflows a 64-bit integer")
+	return 0, errors.New("varint overflows a 64-bit integer")
 }

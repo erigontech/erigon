@@ -463,7 +463,7 @@ func setupDataColumnSidecarHandlerTestWithStore(t *testing.T, fuluForkEpoch uint
 	_, mainnetCfg := clparams.GetConfigsByNetwork(1)
 	initDataColumnSidecarTestConfig.Do(func() {
 		if clparams.GetBeaconConfig() == nil {
-			clparams.InitGlobalStaticConfig(mainnetCfg, &clparams.CaplinConfig{})
+			clparams.InitGlobalStaticConfig(mainnetCfg)
 		}
 	})
 	beaconCfg := *mainnetCfg

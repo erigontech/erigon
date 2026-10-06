@@ -51,7 +51,7 @@ import (
 func TestCaplinBlockProductionIntegration(t *testing.T) {
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	for _, tc := range []struct {
 		name    string

@@ -120,7 +120,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 			}
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)

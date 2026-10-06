@@ -143,7 +143,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
@@ -269,7 +269,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)

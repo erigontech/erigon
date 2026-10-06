@@ -300,23 +300,6 @@ func RangeBlockRoots(tx kv.Tx, fromSlot, toSlot uint64, fn func(slot uint64, bea
 	return err
 }
 
-func ReadBeaconBlockRootsInSlotRange(tx kv.Tx, fromSlot, count uint64) ([]common.Hash, []uint64, error) {
-	blockRoots := make([]common.Hash, 0, count)
-	slots := make([]uint64, 0, count)
-	cursor, err := tx.Cursor(kv.CanonicalBlockRoots)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer cursor.Close()
-	currentCount := uint64(0)
-	for k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(fromSlot)); err == nil && k != nil && currentCount != count; k, v, err = cursor.Next() {
-		currentCount++
-		blockRoots = append(blockRoots, common.BytesToHash(v))
-		slots = append(slots, base_encoding.Decode64FromBytes4(k))
-	}
-	return blockRoots, slots, err
-}
-
 func WriteBeaconBlock(tx kv.RwTx, block *cltypes.SignedBeaconBlock) error {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {

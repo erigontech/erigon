@@ -633,7 +633,6 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, er
 		s.peers.RecordHandshakeFailure(peerId)
 		return true
 	}
-	// we were able to successfully connect, so add this peer to our pool
 	log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
 	return true
 }

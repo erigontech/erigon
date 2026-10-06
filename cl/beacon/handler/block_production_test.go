@@ -2429,7 +2429,7 @@ func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			cfg := clparams.MainnetBeaconConfig
 			if clparams.GetBeaconConfig() == nil {
-				clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+				clparams.InitGlobalStaticConfig(&cfg)
 			}
 			block := cltypes.NewSignedBeaconBlock(&cfg, version)
 			block.Block.Slot = cfg.SlotsPerEpoch

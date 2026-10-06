@@ -209,7 +209,7 @@ func testSentinelBlocksByRange(t *testing.T) {
 			noErr(err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
+		encodedLn, err := ssz_snappy.ReadUvarint(r)
 		noErr(err)
 
 		raw := make([]byte, encodedLn)
@@ -293,7 +293,7 @@ func testSentinelBlocksByRoots(t *testing.T) {
 			noErr(err)
 		}
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
+		encodedLn, err := ssz_snappy.ReadUvarint(r)
 		noErr(err)
 
 		raw := make([]byte, encodedLn)

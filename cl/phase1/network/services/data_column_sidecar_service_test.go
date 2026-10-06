@@ -40,7 +40,7 @@ func init() {
 			NumberOfColumns:             128,
 			SlotsPerEpoch:               32,
 		}
-		clparams.InitGlobalStaticConfig(cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(cfg)
 	})
 }
 

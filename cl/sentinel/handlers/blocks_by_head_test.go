@@ -213,7 +213,7 @@ func readBlocksByHeadResponses(t *testing.T, stream network.Stream, count int) [
 		_, err = io.ReadFull(stream, forkDigest)
 		require.NoError(t, err)
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)

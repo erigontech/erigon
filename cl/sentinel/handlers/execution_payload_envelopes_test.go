@@ -367,7 +367,7 @@ func testExecutionPayloadEnvelopesByRangeHandler(
 		require.True(t, version >= clparams.FuluVersion, "expected Fulu+ version for envelope %d, got %d", i, version)
 
 		// Read SSZ-snappy encoded envelope
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
@@ -527,7 +527,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, version >= clparams.FuluVersion, "expected Fulu+ version for envelope %d, got %d", i, version)
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
