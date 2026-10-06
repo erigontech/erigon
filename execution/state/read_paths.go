@@ -1576,8 +1576,10 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		return v, StorageRead, UnknownVersion, clean, err
 	}
 	// Only an execution without conflict detection fills coldSlots, so the miss
-	// here is what tells the validated path apart.
-	if v, ok := s.versionedReads.GetColdSlot(addr, key); ok && !s.hasWrite(addr, StoragePath, key) {
+	// here is what tells the validated path apart. A contract created over the
+	// slot starts empty, and creation records CreateContractPath rather than
+	// StoragePath, so hasWrite alone would not see it.
+	if v, ok := s.versionedReads.GetColdSlot(addr, key); ok && !s.hasWrite(addr, StoragePath, key) && !s.createdOverSlot(addr) {
 		return v, StorageRead, UnknownVersion, true, nil
 	}
 	if s.versionMap != nil && !s.warmReadable(addr) {
@@ -1641,6 +1643,16 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 }
 
 // readCommittedState reads a storage slot with committed-view semantics.
+// createdOverSlot reports whether this call created a contract at addr, or
+// destroyed it, either of which empties its storage.
+func (s *IntraBlockState) createdOverSlot(addr accounts.Address) bool {
+	if created, _ := s.versionedWriteCreateContract(addr); created {
+		return true
+	}
+	so, resident := s.stateObjects[addr]
+	return resident && so.deleted
+}
+
 func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
 	if s.versionMap == nil {
 		so, err := s.getStateObject(addr, true)
@@ -1653,9 +1665,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 	// A recorded read of the slot is its value before this tx, whatever the tx wrote
 	// since, unless the tx created the contract over it.
 	if s.versionMap != nil {
-		so, resident := s.stateObjects[addr]
-		created, _ := s.versionedWriteCreateContract(addr)
-		if (!resident || !so.deleted) && !created {
+		if !s.createdOverSlot(addr) {
 			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
 				return tr.Val, tr.Source, tr.Version, nil
 			}

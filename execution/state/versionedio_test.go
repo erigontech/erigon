@@ -1799,3 +1799,19 @@ func TestColdSlotMemoYieldsToACreateOverTheSlot(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, got.IsZero(), "a created contract has no committed slot")
 }
+
+// A contract created over the slot starts with empty storage, so a live read
+// must not see the memoized pre-creation value either.
+func TestColdSlotMemoYieldsToACreateOnTheLiveRead(t *testing.T) {
+	ibs, _, addr, key := newColdSlotState(t)
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, v.Uint64())
+	require.Len(t, ibs.versionedReads.coldSlots, 1)
+
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	got, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.True(t, got.IsZero(), "a created contract starts with empty storage")
+}
