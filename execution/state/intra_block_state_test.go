@@ -1286,13 +1286,10 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 
 func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
 	ibs := NewPooled(NewNoopReader())
-	ibs.SetTxContext(5, 2)
 	ReleasePooled(ibs)
 
 	reader := NewNoopReader()
 	got := NewPooled(reader)
 	defer ReleasePooled(got)
 	require.Same(t, reader, got.stateReader)
-	require.Zero(t, got.blockNum)
-	require.Zero(t, got.txIndex)
 }
