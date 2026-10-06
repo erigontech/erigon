@@ -154,7 +154,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 }
 
 func forkChoiceHashesMatch(tx kv.Getter, blockHash, safeHash, finalizedHash common.Hash) bool {
-	// Zero safe/finalized hashes mean "keep the stored marker", not "clear it".
+	// Match writeForkChoiceHashes: zero safe/finalized hashes are not written.
 	return rawdb.ReadHeadBlockHash(tx) == blockHash && rawdb.ReadForkchoiceHead(tx) == blockHash &&
 		(safeHash == (common.Hash{}) || rawdb.ReadForkchoiceSafe(tx) == safeHash) &&
 		(finalizedHash == (common.Hash{}) || rawdb.ReadForkchoiceFinalized(tx) == finalizedHash)
