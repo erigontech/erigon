@@ -118,7 +118,7 @@ func TestAccountLifecycle_LayersOwnTxWrites(t *testing.T) {
 		ibs.versionedWrites.SetSelfDestruct(addr, &VersionedWrite[bool]{
 			WriteHeader: WriteHeader{Address: addr, Path: SelfDestructPath, Version: Version{TxIndex: 5}}, Val: val,
 		})
-		ibs.journal.dirties[addr] = 1
+		ibs.journal.dirty(addr)
 	}
 
 	t.Run("own-tx SD wins over floor", func(t *testing.T) {

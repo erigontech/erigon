@@ -183,7 +183,7 @@ type IntraBlockState struct {
 	// from the probe hot path.
 	versionMap      *VersionMap
 	versionedWrites WriteSet
-	versionedReads  ReadSet
+	versionedReads  readTable
 	// committedBase memoizes the committed (pre-block) account that
 	// versionedAccountBase and committedCodeHash read from the state reader.
 	// The committed view is block-immutable, so the cached pointer is safe to
@@ -262,7 +262,7 @@ func New(stateReader StateReader) *IntraBlockState {
 
 func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockState {
 	ibs := New(stateReader)
-	ibs.versionMap = mvhm
+	ibs.SetVersionMap(mvhm)
 	return ibs
 }
 
@@ -300,6 +300,24 @@ func (ibs *IntraBlockState) CodeReadCount() int64 {
 
 func (ibs *IntraBlockState) SetVersionMap(versionMap *VersionMap) {
 	ibs.versionMap = versionMap
+	ibs.attachReads()
+}
+
+// attachReads makes the journal keep the read table's dirty counts while the
+// state is versioned; only the versioned read paths consult them.
+func (ibs *IntraBlockState) attachReads() {
+	if ibs.journal == nil {
+		return
+	}
+	if ibs.versionMap == nil {
+		ibs.journal.reads = nil
+		return
+	}
+	ibs.journal.reads = &ibs.versionedReads
+	ibs.versionedReads.clearDirty()
+	for addr, n := range ibs.journal.dirties {
+		ibs.versionedReads.get(addr).dirty = int32(n)
+	}
 }
 
 func (ibs *IntraBlockState) VersionMap() *VersionMap {
@@ -356,10 +374,7 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.noMaterialize = false
 	ibs.noConflictDetection = false
 	clear(ibs.committedBase)
-	// Read side rebinds to a fresh empty set: VersionedReads() at end of
-	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
-	// handed-over maps intact while the next tx lazily reallocs.
-	ibs.versionedReads = ReadSet{}
+	ibs.resetReads()
 	// Write side: VersionedWrites() returns Cloned snapshots, so the
 	// originals in ibs.versionedWrites are no longer referenced after the
 	// boundary call.  Walk the per-path maps and return every VW to its
@@ -407,16 +422,11 @@ const maxPooledEntries = 16 * 1024
 // resetForPool clears everything one call left and reports whether ibs is
 // small enough to pool.
 func (ibs *IntraBlockState) resetForPool() bool {
-	reads := ibs.versionedReads
-	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+reads.entries() <= maxPooledEntries
+	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+ibs.versionedReads.entries() <= maxPooledEntries
 	ibs.Reset()
 	if !poolable {
 		return false
 	}
-	// One call never hands its read set out, so the maps keep their capacity
-	// instead of the empty set Reset installs.
-	reads.clearForReuse()
-	ibs.versionedReads = reads
 	// Reset only bumps the probe epoch; a pooled ibs would collect every
 	// address later calls touch.
 	clear(ibs.sdProbe)
@@ -2835,7 +2845,7 @@ func (ibs *IntraBlockState) withholdCreatedEmptyAccounts(chainRules *chain.Rules
 // MergeTxIOInto folds the current transaction's reads and supplied writes into io.
 func (ibs *IntraBlockState) MergeTxIOInto(io *VersionedIO, writes *WriteSet) {
 	version := Version{BlockNum: ibs.blockNum, TxIndex: ibs.txIndex, Incarnation: ibs.version}
-	io.mergeTx(version, ibs.versionedReads, writes)
+	io.mergeTx(version, ibs.VersionedReads(), writes)
 }
 
 // FlushWritesToVersionMap publishes the supplied writes to this state's version map.
@@ -2948,7 +2958,7 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	}
 	// Reset transient storage at the beginning of transaction execution
 	clear(ibs.transientStorage)
-	ibs.versionedReads.access = nil
+	ibs.versionedReads.clearAccess()
 	ibs.recordAccess = true
 
 	// EIP-7928 records the EIP-3651 coinbase access even without a priority fee.
@@ -3002,17 +3012,7 @@ func (ibs *IntraBlockState) MarkAddressAccess(addr accounts.Address, revertable 
 	if !ibs.recordAccess {
 		return
 	}
-	if ibs.versionedReads.access == nil {
-		ibs.versionedReads.access = make(AccessSet)
-	}
-	if opts, ok := ibs.versionedReads.access[addr]; ok {
-		if opts.revertable && !revertable {
-			opts.revertable = false
-			ibs.versionedReads.access[addr] = opts
-		}
-	} else {
-		ibs.versionedReads.access[addr] = accessOptions{revertable: revertable}
-	}
+	ibs.versionedReads.markAccess(addr, revertable)
 }
 
 // StartAccessRecording enables versioned access tracking until ResetVersionedIO.
@@ -3027,7 +3027,7 @@ func (ibs *IntraBlockState) StartAccessRecording() {
 // StopAccessRecording turns access tracking off for a caller that builds no BAL.
 func (ibs *IntraBlockState) StopAccessRecording() {
 	ibs.recordAccess = false
-	ibs.versionedReads.access = nil
+	ibs.versionedReads.clearAccess()
 }
 
 // MarkReadsInternal marks all versioned reads for addr as internal.
@@ -3042,8 +3042,7 @@ func (ibs *IntraBlockState) MarkReadsInternal(addr accounts.Address) {
 }
 
 func (ibs *IntraBlockState) AccessedAddr(addr accounts.Address) bool {
-	_, ok := ibs.versionedReads.access[addr]
-	return ok
+	return ibs.versionedReads.accessed(addr)
 }
 
 func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts.Account, source ReadSource, version Version) {
@@ -3309,7 +3308,7 @@ func (ibs *IntraBlockState) versionedWriteSelfDestruct(addr accounts.Address) (b
 	if !ok {
 		return false, false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+	if !ibs.versionedReads.isDirty(addr) {
 		return false, false
 	}
 	return vw.Val, true
@@ -3322,7 +3321,7 @@ func (ibs *IntraBlockState) versionedWriteCreateContract(addr accounts.Address) 
 	if ibs.versionMap == nil {
 		return false, false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+	if !ibs.versionedReads.isDirty(addr) {
 		return false, false
 	}
 	vw, ok := ibs.versionedWrites.GetCreateContract(addr)
@@ -3387,7 +3386,7 @@ func (ibs *IntraBlockState) versionedWriteHit(addr accounts.Address, path Accoun
 	if ibs.versionMap == nil {
 		return false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+	if !ibs.versionedReads.isDirty(addr) {
 		return false
 	}
 	switch path {
@@ -3475,16 +3474,18 @@ func (ibs *IntraBlockState) Version() Version {
 	}
 }
 
-// VersionedReads returns the in-flight per-path read set.  The returned
-// value shares the underlying maps with the IBS; it is handed over at
-// end of tx (RecordReads / TxIn), after which ResetVersionedIO rebinds
-// the IBS field to a fresh set.
+// VersionedReads returns a copy of the in-flight reads for handover at end of tx.
 func (ibs *IntraBlockState) VersionedReads() ReadSet {
-	return ibs.versionedReads
+	return ibs.versionedReads.toReadSet()
+}
+
+func (ibs *IntraBlockState) resetReads() {
+	ibs.versionedReads.reset()
+	ibs.attachReads()
 }
 
 func (ibs *IntraBlockState) ResetVersionedIO() {
-	ibs.versionedReads = ReadSet{}
+	ibs.resetReads()
 	ibs.versionedWrites.ReleaseAndReset()
 	ibs.dep = UnknownDep
 	ibs.stateReadErr = nil
@@ -3493,7 +3494,7 @@ func (ibs *IntraBlockState) ResetVersionedIO() {
 
 // ResetVersionedReads clears tracked versioned reads without affecting writes.
 func (ibs *IntraBlockState) ResetVersionedReads() {
-	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.clearReads()
 }
 
 // VersionedWrites returns a frozen typed snapshot of this tx's recorded writes.

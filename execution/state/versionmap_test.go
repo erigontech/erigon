@@ -838,7 +838,7 @@ func TestReadValueUnchanged(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xcd, 0x02})
 	ibs := NewWithVersionMap(&minimalStateReader{}, mvhm)
 	defer ibs.Release(false)
-	ibs.versionedReads = ReadSet{}
+	ibs.versionedReads.clearReads()
 	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{Val: *uint256.NewInt(100)})
 	r := &readPathResult{mapBalanceVal: *uint256.NewInt(100)}
 	assert.True(t, ibs.readValueUnchanged(addr, BalancePath, accounts.NilKey, r))
@@ -962,7 +962,7 @@ func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
 				require.NotNil(t, tr.Val.Account())
 				creatorFlush(vm, addr, feed.balance, feed.nonce)
 				io := NewVersionedIO(2)
-				io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.versionedReads)
+				io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
 				valid := vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, "")
 				require.Equal(t, VersionValid, valid)
 				require.NotPanics(t, func() {
@@ -1457,7 +1457,7 @@ func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, exists)
 	io := NewVersionedIO(10)
-	io.RecordReads(Version{TxIndex: 9}, ibs.versionedReads)
+	io.RecordReads(Version{TxIndex: 9}, ibs.VersionedReads())
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(9, io, validateEqualVersion, true, false, false, ""))
 }
 
@@ -1512,7 +1512,7 @@ func TestBALFedReaderSurvivesCreatorFlushMidLoad(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, tr.Val)
 	io := NewVersionedIO(10)
-	io.RecordReads(Version{TxIndex: 9, Incarnation: 0}, ibs.versionedReads)
+	io.RecordReads(Version{TxIndex: 9, Incarnation: 0}, ibs.VersionedReads())
 	require.Equal(t, VersionValid, vm.ValidateVersion(9, io, validateEqualVersion, true, false, false, ""))
 }
 
@@ -1548,7 +1548,7 @@ func TestColdFieldReadAfterReconciledLoadValidates(t *testing.T) {
 		require.NotEqual(t, ReadSetRead, tr.Source)
 	}
 	io := NewVersionedIO(61)
-	io.RecordReads(Version{TxIndex: 60}, ibs.versionedReads)
+	io.RecordReads(Version{TxIndex: 60}, ibs.VersionedReads())
 	require.Equal(t, VersionValid, vm.ValidateVersion(60, io, checkVersionEqual, true, false, false, ""))
 }
 
@@ -1939,7 +1939,7 @@ func TestMetamorphicShadowedDestruct_ReaderValidatorRoundTrip(t *testing.T) {
 	}
 	validate := func(vm *VersionMap, ibs *IntraBlockState) VersionValidity {
 		io := NewVersionedIO(6)
-		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.versionedReads)
+		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.VersionedReads())
 		return vm.ValidateVersion(5, io, validateEqualVersion, true, false, false, "")
 	}
 	t.Run("code read is witnessed and a redeploy flush invalidates it", func(t *testing.T) {
@@ -2021,7 +2021,7 @@ func TestCommittedReadsAfterDestructWithBalanceOnlyRevival(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(1), bal)
 	io := NewVersionedIO(4)
-	io.RecordReads(Version{TxIndex: 3, Incarnation: 0}, ibs.versionedReads)
+	io.RecordReads(Version{TxIndex: 3, Incarnation: 0}, ibs.VersionedReads())
 	require.Equal(t, VersionValid, vm.ValidateVersion(3, io, validateEqualVersion, true, false, false, ""))
 }
 
@@ -2044,7 +2044,7 @@ func TestCodeHashCellBelowShadowedDestruct(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, accounts.EmptyCodeHash, ch)
 	io := NewVersionedIO(5)
-	io.RecordReads(Version{TxIndex: 4, Incarnation: 0}, ibs.versionedReads)
+	io.RecordReads(Version{TxIndex: 4, Incarnation: 0}, ibs.VersionedReads())
 	require.Equal(t, VersionValid, vm.ValidateVersion(4, io, validateEqualVersion, true, false, false, ""))
 }
 

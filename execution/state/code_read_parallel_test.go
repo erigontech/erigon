@@ -200,7 +200,7 @@ func TestPriorTxCodeWriteHashSurvivesReadSetHit(t *testing.T) {
 	require.True(t, ok, "the first read must be recorded")
 	require.Equal(t, MapRead, tr.Source)
 
-	ibs.journal.dirties[addr] = 1
+	ibs.journal.dirty(addr)
 
 	so, err := ibs.getStateObject(addr, false)
 	require.NoError(t, err)
