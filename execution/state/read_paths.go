@@ -1575,6 +1575,15 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		v, clean, err := so.GetState(key)
 		return v, StorageRead, UnknownVersion, clean, err
 	}
+	if s.cacheObjects() {
+		// The resident object holds this call's own writes (setStateVersioned
+		// mirrors them) and memoizes committed slots, so it answers without a
+		// read-set record per slot.
+		if so, ok := s.stateObjects[addr]; ok && !so.deleted {
+			v, clean, err := so.GetState(key)
+			return v, StorageRead, UnknownVersion, clean, err
+		}
+	}
 	if s.versionMap != nil && !s.warmReadable(addr) {
 		if vw, ok := s.versionedWrites.GetStorage(addr, key); ok {
 			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil

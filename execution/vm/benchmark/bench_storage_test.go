@@ -276,3 +276,47 @@ func BenchmarkAddressDiversity(b *testing.B) {
 		})
 	}
 }
+
+// TestStorageReadsAgreeWithObjectCache pins that serving SLOAD from the
+// resident object renders the same values and gas as the cell path.
+func TestStorageReadsAgreeWithObjectCache(t *testing.T) {
+	p, lbl := program.New().Jumpdest()
+	code := p.
+		Push(1).Op(vm.SLOAD).            // read a committed slot
+		Push(2).Op(vm.SLOAD).Op(vm.ADD). // read another, combine
+		Push(3).Op(vm.SSTORE).           // write a third
+		Push(3).Op(vm.SLOAD).Op(vm.POP). // read back the write
+		Push(1).Op(vm.SLOAD).Op(vm.POP). // re-read the first
+		Jump(lbl).Bytes()
+	slots := map[uint256.Int]uint256.Int{
+		*uint256.NewInt(1): *uint256.NewInt(0xAAAA),
+		*uint256.NewInt(2): *uint256.NewInt(0xBBBB),
+	}
+
+	run := func(cacheObjects bool) (uint64, uint256.Int) {
+		vmenv := newCommittedBenchEnv(t, 5_000_000, func(statedb *state.IntraBlockState) {
+			deployContract(t, statedb, addrContract, code)
+			setStorage(t, statedb, addrContract, slots)
+		})
+		statedb := vmenv.IntraBlockState()
+		statedb.SetVersionMap(state.NewVersionMap(nil))
+		statedb.SetNoMaterialize(true)
+		if cacheObjects {
+			statedb.SetNoConflictDetection()
+		}
+		// Reading a field first makes the object resident, which is the state the
+		// EVM reaches through its own code load before the first SLOAD.
+		_, err := statedb.GetBalance(addrContract)
+		require.NoError(t, err)
+		_, left, err := prepareAndCall(vmenv, addrContract, nil)
+		require.Error(t, err, "the loop runs until it is out of gas")
+		got, err := statedb.GetState(addrContract, accounts.InternKey(uint256.NewInt(3).Bytes32()))
+		require.NoError(t, err)
+		return left.Total(), got
+	}
+
+	cellGas, cellVal := run(false)
+	objGas, objVal := run(true)
+	require.Equal(t, cellVal, objVal, "the object cache must not change the stored value")
+	require.Equal(t, cellGas, objGas, "the object cache must not change gas")
+}
