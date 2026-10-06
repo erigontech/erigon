@@ -1620,7 +1620,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			// value exists on the parallel path, so it is always clean.
 			v, clean = r.mapStorageVal, true
 		}
-		if r.recordVR {
+		if r.recordVR && !s.noConflictDetection {
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, clean, nil
