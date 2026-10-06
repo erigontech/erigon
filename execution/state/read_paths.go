@@ -1575,10 +1575,10 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		v, clean, err := so.GetState(key)
 		return v, StorageRead, UnknownVersion, clean, err
 	}
-	if s.noConflictDetection {
-		if v, ok := s.versionedReads.GetColdSlot(addr, key); ok && !s.hasWrite(addr, StoragePath, key) {
-			return v, StorageRead, UnknownVersion, true, nil
-		}
+	// Only an execution without conflict detection fills coldSlots, so the miss
+	// here is what tells the validated path apart.
+	if v, ok := s.versionedReads.GetColdSlot(addr, key); ok && !s.hasWrite(addr, StoragePath, key) {
+		return v, StorageRead, UnknownVersion, true, nil
 	}
 	if s.versionMap != nil && !s.warmReadable(addr) {
 		if vw, ok := s.versionedWrites.GetStorage(addr, key); ok {
