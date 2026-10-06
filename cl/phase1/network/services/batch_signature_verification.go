@@ -40,6 +40,7 @@ type AggregateVerificationData struct {
 	F           func()
 	SendingPeer *sentinelproto.Peer
 	result      chan error
+	waiterDone  <-chan struct{}
 }
 
 func NewBatchSignatureVerifier(ctx context.Context, sentinel sentinelproto.SentinelClient) *BatchSignatureVerifier {
@@ -81,7 +82,10 @@ func (b *BatchSignatureVerifier) VerifyVoluntaryExit(ctx context.Context, data *
 
 // verifyAndWait blocks until the entry's batch is verified so libp2p forwards gossip only after signature checks.
 func (b *BatchSignatureVerifier) verifyAndWait(ctx context.Context, queue chan<- *AggregateVerificationData, data *AggregateVerificationData) error {
-	data.result = make(chan error, 1)
+	data.result = make(chan error)
+	waiterDone := make(chan struct{})
+	data.waiterDone = waiterDone
+	defer close(waiterDone)
 	select {
 	case queue <- data:
 	case <-ctx.Done():
@@ -215,16 +219,16 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
 			log.Crit("[BatchVerifier] signature verification failed with the error: " + err.Error())
-			v.report(err)
-			if peerToBan == nil {
+			reported := v.report(err)
+			if peerToBan == nil && !reported {
 				peerToBan = v.SendingPeer
 			}
 			continue
 		}
 
 		if !valid {
-			v.report(ErrInvalidBlsSignature)
-			if peerToBan == nil && v.SendingPeer != nil {
+			reported := v.report(ErrInvalidBlsSignature)
+			if peerToBan == nil && !reported && v.SendingPeer != nil {
 				peerToBan = v.SendingPeer
 				logInvalidPeer = true
 			}
@@ -238,16 +242,24 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 		log.Debug("[BatchVerifier] received invalid signature on the gossip", "peer", peerToBan.Pid)
 	}
 	if b.sentinel != nil && peerToBan != nil {
-		if _, err := b.sentinel.BanPeer(b.ctx, peerToBan); err != nil {
-			log.Debug("[BatchVerifier] failed to ban peer", "peer", peerToBan.Pid, "err", err)
-		}
+		go func() {
+			if _, err := b.sentinel.BanPeer(b.ctx, peerToBan); err != nil {
+				log.Debug("[BatchVerifier] failed to ban peer", "peer", peerToBan.Pid, "err", err)
+			}
+		}()
 	}
 	return callbacks
 }
 
-func (v *AggregateVerificationData) report(err error) {
-	if v.result != nil {
-		v.result <- err
+func (v *AggregateVerificationData) report(err error) bool {
+	if v.result == nil {
+		return false
+	}
+	select {
+	case v.result <- err:
+		return true
+	case <-v.waiterDone:
+		return false
 	}
 }
 

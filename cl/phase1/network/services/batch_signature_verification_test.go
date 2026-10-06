@@ -81,7 +81,7 @@ func TestBatchSignatureVerifierReportsEachEntryResult(t *testing.T) {
 	}
 }
 
-func TestBatchSignatureVerifierReportsWholeBatchBeforeBanningPeer(t *testing.T) {
+func TestBatchSignatureVerifierContinuesAfterBlockingBan(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
 		if len(signatures) > 1 {
@@ -104,9 +104,100 @@ func TestBatchSignatureVerifierReportsWholeBatchBeforeBanningPeer(t *testing.T) 
 		release: releaseBan,
 	})
 
-	invalidResult := make(chan error, 1)
+	verifier.AsyncVerifySyncCommitteeMessage(&AggregateVerificationData{
+		Signatures:  [][]byte{{2}},
+		SignRoots:   [][]byte{{2}},
+		Pks:         [][]byte{{2}},
+		F:           func() {},
+		SendingPeer: &sentinelproto.Peer{Pid: "invalid-peer"},
+	})
+	verifier.Start()
+
+	select {
+	case <-banStarted:
+	case <-time.After(time.Second):
+		t.Fatal("peer ban did not start")
+	}
+
+	validResult := make(chan error, 1)
+	verifier.AsyncVerifySyncCommitteeMessage(&AggregateVerificationData{
+		Signatures: [][]byte{{1}},
+		SignRoots:  [][]byte{{1}},
+		Pks:        [][]byte{{1}},
+		F:          func() {},
+		result:     validResult,
+	})
+	select {
+	case err := <-validResult:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("later batch waited for peer ban")
+	}
+
+	close(releaseBan)
+}
+
+func TestBatchSignatureVerifierDoesNotBanWaitedEntry(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return false, nil
+	}
+
+	banStarted := make(chan struct{})
+	releaseBan := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseBan:
+		default:
+			close(releaseBan)
+		}
+	})
+	verifier := NewBatchSignatureVerifier(t.Context(), &blockingBanSentinel{
+		started: banStarted,
+		release: releaseBan,
+	})
+	verifier.Start()
+
+	err := verifier.VerifyAttestation(t.Context(), &AggregateVerificationData{
+		Signatures:  [][]byte{{2}},
+		SignRoots:   [][]byte{{2}},
+		Pks:         [][]byte{{2}},
+		F:           func() {},
+		SendingPeer: &sentinelproto.Peer{Pid: "invalid-peer"},
+	})
+
+	require.ErrorIs(t, err, ErrInvalidBlsSignature)
+	select {
+	case <-banStarted:
+		t.Fatal("waited entry triggered verifier peer ban")
+	case <-time.After(2 * batchCheckInterval):
+	}
+}
+
+func TestBatchSignatureVerifierBansWhenWaiterCancelsAfterAdmission(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return false, nil
+	}
+
+	banStarted := make(chan struct{})
+	releaseBan := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseBan:
+		default:
+			close(releaseBan)
+		}
+	})
+	verifier := NewBatchSignatureVerifier(t.Context(), &blockingBanSentinel{
+		started: banStarted,
+		release: releaseBan,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
 	go func() {
-		invalidResult <- verifier.VerifyAttestation(t.Context(), &AggregateVerificationData{
+		result <- verifier.VerifyAttestation(ctx, &AggregateVerificationData{
 			Signatures:  [][]byte{{2}},
 			SignRoots:   [][]byte{{2}},
 			Pks:         [][]byte{{2}},
@@ -115,33 +206,16 @@ func TestBatchSignatureVerifierReportsWholeBatchBeforeBanningPeer(t *testing.T) 
 		})
 	}()
 	waitForQueuedVerification(t, verifier.attVerifyAndExecute, 1)
+	cancel()
+	require.ErrorIs(t, <-result, ErrIgnore)
 
-	validResult := make(chan error, 1)
-	go func() {
-		validResult <- verifier.VerifyAttestation(t.Context(), &AggregateVerificationData{
-			Signatures: [][]byte{{1}},
-			SignRoots:  [][]byte{{1}},
-			Pks:        [][]byte{{1}},
-			F:          func() {},
-		})
-	}()
-	waitForQueuedVerification(t, verifier.attVerifyAndExecute, 2)
 	verifier.Start()
-
 	select {
 	case <-banStarted:
 	case <-time.After(time.Second):
-		t.Fatal("peer ban did not start")
+		t.Fatal("canceled waiter left invalid peer without a ban owner")
 	}
-	select {
-	case err := <-validResult:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		t.Fatal("valid result waited for peer ban")
-	}
-
 	close(releaseBan)
-	require.ErrorIs(t, <-invalidResult, ErrInvalidBlsSignature)
 }
 
 func waitForQueuedVerification(t *testing.T, queue chan *AggregateVerificationData, want int) {
