@@ -25,6 +25,7 @@ import (
 func TestJumpDestCacheSizeBytes(t *testing.T) {
 	t.Parallel()
 	c := newJumpDestCache()
+	t.Cleanup(c.Close)
 	key := []byte("code hash")
 
 	c.Put(key, make(bitvec, 1), 0)
