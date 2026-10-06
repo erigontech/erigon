@@ -83,3 +83,48 @@ func requireAcceptedTopicScoreParams(t *testing.T, topic *pubsub.Topic, params *
 	require.NoError(t, topic.SetScoreParams(params), "active validators %d", activeValidators)
 	require.InDelta(t, rate, params.FirstMessageDeliveriesCap*(1-params.FirstMessageDeliveriesDecay), 1e-9, "active validators %d", activeValidators)
 }
+
+func TestTopicScoreParamsCoverEverySubscribedTopic(t *testing.T) {
+	mainnet := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	g := &GossipManager{beaconConfig: &clparams.MainnetBeaconConfig, networkConfig: &mainnet, activeIndicies: 1_000_000}
+	for _, name := range []string{
+		gossipnames.TopicNameBeaconAggregateAndProof,
+		gossipnames.TopicNameSyncCommitteeContributionAndProof,
+		gossipnames.TopicNameAttesterSlashing,
+		gossipnames.TopicNameProposerSlashing,
+		gossipnames.TopicNameBlsToExecutionChange,
+		gossipnames.TopicNameDataColumnSidecar(7),
+	} {
+		params := g.topicScoreParams(name)
+		require.NotNil(t, params, name)
+		require.Negative(t, params.InvalidMessageDeliveriesWeight, name)
+		require.Positive(t, params.TopicWeight, name)
+	}
+}
+
+func TestTopicScoreParamsAreAcceptedByGossipsub(t *testing.T) {
+	topic := newScoredTopicForTest(t)
+
+	mainnet := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	g := &GossipManager{beaconConfig: &clparams.MainnetBeaconConfig, networkConfig: &mainnet, activeIndicies: 1_000_000}
+	for _, name := range []string{
+		gossipnames.TopicNameBeaconBlock,
+		gossipnames.TopicNameBeaconAggregateAndProof,
+		gossipnames.TopicNameSyncCommitteeContributionAndProof,
+		gossipnames.TopicNameAttesterSlashing,
+		gossipnames.TopicNameProposerSlashing,
+		gossipnames.TopicNameVoluntaryExit,
+		gossipnames.TopicNameBlsToExecutionChange,
+		gossipnames.TopicNameBeaconAttestation(0),
+		gossipnames.TopicNameSyncCommittee(0),
+		gossipnames.TopicNameDataColumnSidecar(0),
+		gossipnames.TopicNameExecutionPayload,
+		gossipnames.TopicNameExecutionPayloadBid,
+		gossipnames.TopicNamePayloadAttestation,
+		gossipnames.TopicNameProposerPreferences,
+	} {
+		params := g.topicScoreParams(name)
+		require.NotNil(t, params, name)
+		require.NoError(t, topic.SetScoreParams(params), name)
+	}
+}
