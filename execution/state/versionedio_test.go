@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -1780,4 +1781,40 @@ func TestArenaDeleteKeepsItsCellOutOfThePool(t *testing.T) {
 		require.NotSame(t, code, shared.newVWCode(), "a deleted arena cell reached the shared pool")
 		require.NotSame(t, storage, shared.newVWStorage(), "a deleted arena cell reached the shared pool")
 	}
+}
+
+// An arena-backed set must not hand its cells to another set: the arena reuses
+// and zeroes them, so the other set would read freed memory.
+func TestArenaBackedSetRefusesToShareItsCells(t *testing.T) {
+	was := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = was })
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	newArenaSet := func() *WriteSet {
+		ws := &WriteSet{}
+		ws.UseArena()
+		vw := ws.newVWNonce()
+		vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath}
+		ws.SetNonce(addr, vw)
+		return ws
+	}
+
+	require.Panics(t, func() { newArenaSet().MergeInto(&WriteSet{}) })
+	require.Panics(t, func() { (&WriteSet{}).MergeInto(newArenaSet()) })
+	require.Panics(t, func() { newArenaSet().Filter(func(WriteHeader) bool { return true }) })
+}
+
+// ReleaseMaps zeroes the set; the arena must survive it, or a reused set
+// silently falls back to the shared pools and leaks its slabs.
+func TestReleaseMapsKeepsTheArena(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	vw := ws.newVWNonce()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath}
+	ws.SetNonce(addr, vw)
+
+	ws.ReleaseMaps()
+	require.True(t, ws.ArenaBacked(), "the arena must outlive the map release")
 }

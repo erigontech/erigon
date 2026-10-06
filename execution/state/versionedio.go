@@ -994,6 +994,10 @@ func (ws *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 		return nil
 	}
 	ws.assertLive()
+	if dbg.AssertEnabled && ws.ArenaBacked() {
+		// out would hold cells the arena reuses and zeroes.
+		panic("filtering an arena-backed write set")
+	}
 	out := &WriteSet{}
 	for a, vw := range ws.address {
 		if keep(vw.WriteHeader) {
@@ -1552,9 +1556,8 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 // ReleaseMaps clears the maps that hold them.
 func (ws *WriteSet) ReleaseAndReset() {
 	if ws.cells.on {
-		cells := ws.cells
+		// The cells die with the call, so there is nothing to hand back.
 		ws.ReleaseMaps()
-		ws.cells = cells
 		ws.cells.reset()
 		ws.revive() // a reset hands the set back for reuse
 		return
@@ -1616,7 +1619,9 @@ func (ws *WriteSet) ReleaseMaps() {
 		wsPutStorageInner(inner)
 	}
 	wsPutStorageOuter(ws.storage)
+	cells := ws.cells
 	*ws = WriteSet{}
+	ws.cells = cells
 	ws.released = true
 }
 
@@ -2313,6 +2318,10 @@ func (ws *WriteSet) Merge(next *WriteSet) *WriteSet {
 // VersionedWrite in place afterwards; s's maps are never touched, so
 // map-level deletes on s stay safe.
 func (ws *WriteSet) MergeInto(next *WriteSet) *WriteSet {
+	if dbg.AssertEnabled && (ws.ArenaBacked() || next.ArenaBacked()) {
+		// The merged set would hold cells the arena reuses and zeroes.
+		panic("merging an arena-backed write set")
+	}
 	if ws.IsEmpty() {
 		return next
 	}
