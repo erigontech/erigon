@@ -61,7 +61,7 @@ func testPBTBuilderCanonicalCommitment(t *testing.T, dual bool) {
 	if dual {
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	}
-	statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash = false, ""
+	statecfg.BinCommitmentHash = ""
 	config := chain.AllProtocolChanges.Copy()
 	amsterdam, activation := uint64(0), uint64(30)
 	if !dual {
