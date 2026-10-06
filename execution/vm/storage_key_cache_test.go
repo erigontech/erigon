@@ -269,9 +269,10 @@ var keySink accounts.StorageKey
 // A context idle in the pool must not pin interned keys: a handle keeps its canonical
 // map entry alive.
 func TestPutReleasesFrameSlotKeys(t *testing.T) {
-	ctx := getCallContext(Contract{}, nil, mdgas.MdGas{})
+	var evm EVM
+	ctx := evm.getCallContext(Contract{}, nil, mdgas.MdGas{})
 	ctx.slots.key[0] = accounts.InternKey(common.Hash{1})
 	ctx.slots.key[1] = accounts.InternKey(common.Hash{2})
-	ctx.put()
+	evm.putCallContext(ctx)
 	require.Equal(t, [2]accounts.StorageKey{}, ctx.slots.key)
 }
