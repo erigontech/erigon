@@ -62,8 +62,18 @@ const (
 
 func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	switch {
-	case topic == gossip.TopicNameBeaconBlock || gossip.IsTopicBlobSidecar(topic):
+	case topic == gossip.TopicNameBeaconBlock || gossip.IsTopicBlobSidecar(topic) || gossip.IsTopicDataColumnSidecar(topic):
 		return g.defaultBlockTopicParams()
+	case topic == gossip.TopicNameBeaconAggregateAndProof:
+		return g.defaultAggregateTopicParams()
+	case topic == gossip.TopicNameSyncCommitteeContributionAndProof:
+		return g.defaultSyncContributionTopicParams()
+	case topic == gossip.TopicNameAttesterSlashing:
+		return g.staticTopicParams(attesterSlashingWeight, 36, 1)
+	case topic == gossip.TopicNameProposerSlashing:
+		return g.staticTopicParams(proposerSlashingWeight, 36, 1)
+	case topic == gossip.TopicNameBlsToExecutionChange:
+		return g.staticTopicParams(blsToExecutionChangeWeight, 2, 5)
 	case topic == gossip.TopicNameExecutionPayload:
 		return g.defaultExecutionPayloadTopicParams()
 	case topic == gossip.TopicNameExecutionPayloadBid:
@@ -71,9 +81,9 @@ func (g *GossipManager) topicScoreParams(topic string) *pubsub.TopicScoreParams 
 	case topic == gossip.TopicNamePayloadAttestation:
 		return g.defaultPayloadAttestationTopicParams()
 	case topic == gossip.TopicNameProposerPreferences:
-		return g.defaultProposerPreferencesTopicParams()
+		return g.staticTopicParams(proposerPreferencesWeight, 2, 5)
 	case topic == gossip.TopicNameVoluntaryExit:
-		return g.defaultVoluntaryExitTopicParams()
+		return g.staticTopicParams(voluntaryExitWeight, 2, 5)
 	case gossip.IsTopicBeaconAttestation(topic):
 		return g.defaultAggregateSubnetTopicParams()
 	case gossip.IsTopicSyncCommittee(topic):
@@ -187,49 +197,56 @@ func (g *GossipManager) defaultPayloadAttestationTopicParams() *pubsub.TopicScor
 	}
 }
 
-// defaultProposerPreferencesTopicParams returns scoring parameters for the proposer_preferences topic.
-// Low-frequency messages from proposers. [New in Gloas:EIP7732]
-func (g *GossipManager) defaultProposerPreferencesTopicParams() *pubsub.TopicScoreParams {
+// staticTopicParams scores low-rate topics by first deliveries only, with a flat
+// invalid-message penalty.
+func (g *GossipManager) staticTopicParams(topicWeight, firstMessageWeight, firstMessageCap float64) *pubsub.TopicScoreParams {
 	return &pubsub.TopicScoreParams{
-		TopicWeight:                     proposerPreferencesWeight,
-		TimeInMeshWeight:                maxInMeshScore / g.inMeshCap(),
-		TimeInMeshQuantum:               g.oneSlotDuration(),
-		TimeInMeshCap:                   g.inMeshCap(),
-		FirstMessageDeliveriesWeight:    2,
-		FirstMessageDeliveriesDecay:     g.scoreDecay(100 * g.oneEpochDuration()),
-		FirstMessageDeliveriesCap:       5,
-		MeshMessageDeliveriesWeight:     0,
-		MeshMessageDeliveriesDecay:      0,
-		MeshMessageDeliveriesCap:        0,
-		MeshMessageDeliveriesThreshold:  0,
-		MeshMessageDeliveriesWindow:     0,
-		MeshMessageDeliveriesActivation: 0,
-		MeshFailurePenaltyWeight:        0,
-		MeshFailurePenaltyDecay:         0,
-		InvalidMessageDeliveriesWeight:  -2000,
-		InvalidMessageDeliveriesDecay:   g.scoreDecay(50 * g.oneEpochDuration()),
+		TopicWeight:                    topicWeight,
+		TimeInMeshWeight:               maxInMeshScore / g.inMeshCap(),
+		TimeInMeshQuantum:              g.oneSlotDuration(),
+		TimeInMeshCap:                  g.inMeshCap(),
+		FirstMessageDeliveriesWeight:   firstMessageWeight,
+		FirstMessageDeliveriesDecay:    g.scoreDecay(100 * g.oneEpochDuration()),
+		FirstMessageDeliveriesCap:      firstMessageCap,
+		InvalidMessageDeliveriesWeight: -2000,
+		InvalidMessageDeliveriesDecay:  g.scoreDecay(50 * g.oneEpochDuration()),
 	}
 }
 
-func (g *GossipManager) defaultVoluntaryExitTopicParams() *pubsub.TopicScoreParams {
+func (g *GossipManager) defaultAggregateTopicParams() *pubsub.TopicScoreParams {
+	aggregatorsPerSlot := g.committeeCountPerSlot() * g.beaconConfig.TargetAggregatorsPerCommittee
+	return g.rateBasedTopicParams(aggregateWeight, aggregatorsPerSlot)
+}
+
+func (g *GossipManager) defaultSyncContributionTopicParams() *pubsub.TopicScoreParams {
+	aggregatorsPerSlot := g.beaconConfig.SyncCommitteeSubnetCount * g.beaconConfig.TargetAggregatorsPerSyncSubcommittee
+	return g.rateBasedTopicParams(syncContributionWeight, aggregatorsPerSlot)
+}
+
+// rateBasedTopicParams scores a topic by its expected message rate; mesh delivery stays
+// unscored, like the subnet topics.
+func (g *GossipManager) rateBasedTopicParams(topicWeight float64, messagesPerSlot uint64) *pubsub.TopicScoreParams {
+	rate := messagesPerSlot * 2 / gossip.GossipSubD
+	if rate == 0 {
+		log.Warn("rate is 0, skipping initializing topic scoring")
+		return nil
+	}
+	firstMessageDecay := g.scoreDecay(g.oneEpochDuration())
+	firstMessageCap, err := decayLimit(firstMessageDecay, float64(rate))
+	if err != nil {
+		log.Warn("Skipping initializing topic scoring", "err", err)
+		return nil
+	}
 	return &pubsub.TopicScoreParams{
-		TopicWeight:                     voluntaryExitWeight,
-		TimeInMeshWeight:                maxInMeshScore / g.inMeshCap(),
-		TimeInMeshQuantum:               g.oneSlotDuration(),
-		TimeInMeshCap:                   g.inMeshCap(),
-		FirstMessageDeliveriesWeight:    2,
-		FirstMessageDeliveriesDecay:     g.scoreDecay(100 * g.oneEpochDuration()),
-		FirstMessageDeliveriesCap:       5,
-		MeshMessageDeliveriesWeight:     0,
-		MeshMessageDeliveriesDecay:      0,
-		MeshMessageDeliveriesCap:        0,
-		MeshMessageDeliveriesThreshold:  0,
-		MeshMessageDeliveriesWindow:     0,
-		MeshMessageDeliveriesActivation: 0,
-		MeshFailurePenaltyWeight:        0,
-		MeshFailurePenaltyDecay:         0,
-		InvalidMessageDeliveriesWeight:  -2000,
-		InvalidMessageDeliveriesDecay:   g.scoreDecay(50 * g.oneEpochDuration()),
+		TopicWeight:                    topicWeight,
+		TimeInMeshWeight:               maxInMeshScore / g.inMeshCap(),
+		TimeInMeshQuantum:              g.oneSlotDuration(),
+		TimeInMeshCap:                  g.inMeshCap(),
+		FirstMessageDeliveriesWeight:   maxFirstDeliveryScore / firstMessageCap,
+		FirstMessageDeliveriesDecay:    firstMessageDecay,
+		FirstMessageDeliveriesCap:      firstMessageCap,
+		InvalidMessageDeliveriesWeight: -maxScore() / topicWeight,
+		InvalidMessageDeliveriesDecay:  g.scoreDecay(50 * g.oneEpochDuration()),
 	}
 }
 
