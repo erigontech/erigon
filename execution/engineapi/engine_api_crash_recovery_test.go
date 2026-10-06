@@ -218,20 +218,7 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 						assertChurnState(t.Context(), t, eat, churn, tip, target.sum)
 						assertCrashRecoveryState(t, target.state, readCrashRecoveryState(t, eat.ChainDB))
 					}
-					for i, payload := range scenario.replacement.continuation {
-						insertCrashRecoveryPayloads(t.Context(), t, eat, []*engineapitester.MockClPayload{payload})
-						require.NoError(t, eat.MockCl.UpdateForkChoice(t.Context(), payload))
-						assertChurnState(t.Context(), t, eat, churn, payload, scenario.replacement.continuationSums[i])
-					}
-					built, buildErr := eat.MockCl.BuildCanonicalBlock(t.Context())
-					require.NoError(t, buildErr)
-					parent := scenario.replacement.continuation[len(scenario.replacement.continuation)-1]
-					require.NotNil(t, parent.ExecutionPayload.SlotNumber)
-					require.NotNil(t, built.ExecutionPayload.SlotNumber)
-					require.Greater(t, uint64(*built.ExecutionPayload.SlotNumber), uint64(*parent.ExecutionPayload.SlotNumber), "block production must advance the CL slot")
-					assertCanonicalHead(t.Context(), t, eat, built)
-					_, _, _, consistent := readChurn(t.Context(), t, churn)
-					require.True(t, consistent, "state must remain consistent after block production resumes")
+					assertCrashRecoveryContinuation(t, eat, churn, scenario.replacement)
 				})
 			}
 		})
@@ -440,6 +427,25 @@ func assertCrashRecoveryState(t *testing.T, want, got crashRecoveryState) {
 	require.Equal(t, want.TxLookup, got.TxLookup, "persisted transaction lookup index")
 	want.TxLookup, got.TxLookup = nil, nil
 	require.Equal(t, want, got, "persisted canonical metadata and commitment")
+}
+
+func assertCrashRecoveryContinuation(t *testing.T, eat engineapitester.EngineApiTester, churn *contracts.StateChurn, chain crashRecoveryChain) {
+	t.Helper()
+	ctx := t.Context()
+	for i, payload := range chain.continuation {
+		insertCrashRecoveryPayloads(ctx, t, eat, []*engineapitester.MockClPayload{payload})
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
+		assertChurnState(ctx, t, eat, churn, payload, chain.continuationSums[i])
+	}
+	built, err := eat.MockCl.BuildCanonicalBlock(ctx)
+	require.NoError(t, err)
+	parent := chain.continuation[len(chain.continuation)-1]
+	require.NotNil(t, parent.ExecutionPayload.SlotNumber)
+	require.NotNil(t, built.ExecutionPayload.SlotNumber)
+	require.Greater(t, uint64(*built.ExecutionPayload.SlotNumber), uint64(*parent.ExecutionPayload.SlotNumber), "block production must advance the CL slot")
+	assertCanonicalHead(ctx, t, eat, built)
+	_, _, _, consistent := readChurn(ctx, t, churn)
+	require.True(t, consistent, "state must remain consistent after block production resumes")
 }
 
 func insertCrashRecoveryPayloads(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, payloads []*engineapitester.MockClPayload) {

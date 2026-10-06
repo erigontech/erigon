@@ -76,33 +76,17 @@ func TestRepeatedForkchoicePersistsFinality(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
 			m.ExecModule.Drain()
-			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-				require.Equal(t, head, rawdb.ReadForkchoiceHead(tx))
-				require.Equal(t, wantSafe, rawdb.ReadForkchoiceSafe(tx), "safe hash")
-				require.Equal(t, wantFinalized, rawdb.ReadForkchoiceFinalized(tx), "finalized hash")
-				return nil
-			}))
+			assertPersistedForkchoice(t, m.DB, head, wantSafe, wantFinalized)
 			result, err = m.ExecModule.UpdateForkChoice(t.Context(), head, common.Hash{0xff}, wantFinalized)
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
 			m.ExecModule.Drain()
-			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-				require.Equal(t, head, rawdb.ReadForkchoiceHead(tx))
-				require.Equal(t, wantSafe, rawdb.ReadForkchoiceSafe(tx), "rejected finality must not be persisted")
-				require.Equal(t, wantFinalized, rawdb.ReadForkchoiceFinalized(tx))
-				return nil
-			}))
+			assertPersistedForkchoice(t, m.DB, head, wantSafe, wantFinalized)
 			result, err = m.ExecModule.UpdateForkChoice(t.Context(), chain.Blocks[0].Hash(), common.Hash{}, common.Hash{})
 			require.NoError(t, err)
 			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
 			m.ExecModule.Drain()
-			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-				require.Equal(t, head, rawdb.ReadHeadBlockHash(tx), "an FCU below finality must not move the executed head")
-				require.Equal(t, head, rawdb.ReadForkchoiceHead(tx))
-				require.Equal(t, wantSafe, rawdb.ReadForkchoiceSafe(tx))
-				require.Equal(t, wantFinalized, rawdb.ReadForkchoiceFinalized(tx))
-				return nil
-			}))
+			assertPersistedForkchoice(t, m.DB, head, wantSafe, wantFinalized)
 		})
 	}
 }
@@ -135,11 +119,7 @@ func TestRepeatedForkchoiceDoesNotWaitForWriter(t *testing.T) {
 			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status, "unchanged markers must not need the MDBX writer lock")
 		})
 	}
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-		require.Equal(t, safe, rawdb.ReadForkchoiceSafe(tx))
-		require.Equal(t, finalized, rawdb.ReadForkchoiceFinalized(tx))
-		return nil
-	}))
+	assertPersistedForkchoice(t, m.DB, head, safe, finalized)
 }
 
 func TestRepeatedForkchoicePersistsAfterCallerTimeout(t *testing.T) {
@@ -170,24 +150,14 @@ func TestRepeatedForkchoicePersistsAfterCallerTimeout(t *testing.T) {
 		require.NoError(collect, err)
 		require.False(collect, ready, "the pending marker update must hold the execution semaphore")
 	}, time.Minute, 10*time.Millisecond)
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-		require.Equal(t, previousSafe, rawdb.ReadForkchoiceSafe(tx))
-		require.Equal(t, previousFinalized, rawdb.ReadForkchoiceFinalized(tx))
-		return nil
-	}))
+	assertPersistedForkchoice(t, m.DB, head, previousSafe, previousFinalized)
 
 	writer.Rollback()
 	idleCtx, idleCancel := context.WithTimeout(t.Context(), time.Minute)
 	defer idleCancel()
 	m.ExecModule.WaitIdle(idleCtx)
 	require.NoError(t, idleCtx.Err(), "the marker update must finish after the writer is released")
-	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-		require.Equal(t, head, rawdb.ReadHeadBlockHash(tx))
-		require.Equal(t, head, rawdb.ReadForkchoiceHead(tx))
-		require.Equal(t, safe, rawdb.ReadForkchoiceSafe(tx))
-		require.Equal(t, finalized, rawdb.ReadForkchoiceFinalized(tx))
-		return nil
-	}))
+	assertPersistedForkchoice(t, m.DB, head, safe, finalized)
 	result, err = m.ExecModule.UpdateForkChoice(idleCtx, head, safe, finalized)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status, "later FCUs must be able to acquire the execution semaphore")
@@ -230,13 +200,7 @@ func TestRepeatedForkchoiceWithLaggingFinish(t *testing.T) {
 			if !tc.ignored {
 				wantHead, wantSafe, wantFinalized = requestedHead.Hash(), requestedHead.Hash(), requestedHead.Hash()
 			}
-			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
-				require.Equal(t, wantHead, rawdb.ReadHeadBlockHash(tx), "head block marker")
-				require.Equal(t, wantHead, rawdb.ReadForkchoiceHead(tx), "forkchoice head marker")
-				require.Equal(t, wantSafe, rawdb.ReadForkchoiceSafe(tx), "safe marker")
-				require.Equal(t, wantFinalized, rawdb.ReadForkchoiceFinalized(tx), "finalized marker")
-				return nil
-			}))
+			assertPersistedForkchoice(t, m.DB, wantHead, wantSafe, wantFinalized)
 		})
 	}
 }
@@ -273,4 +237,15 @@ func TestCatchupCommitObservations(t *testing.T) {
 		execmodule.StateTransitionCommitComplete,
 		execmodule.StateTransitionOverlayCleared,
 	}, observed)
+}
+
+func assertPersistedForkchoice(t *testing.T, db kv.RoDB, head, safe, finalized common.Hash) {
+	t.Helper()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		require.Equal(t, head, rawdb.ReadHeadBlockHash(tx), "head block marker")
+		require.Equal(t, head, rawdb.ReadForkchoiceHead(tx), "forkchoice head marker")
+		require.Equal(t, safe, rawdb.ReadForkchoiceSafe(tx), "safe marker")
+		require.Equal(t, finalized, rawdb.ReadForkchoiceFinalized(tx), "finalized marker")
+		return nil
+	}))
 }

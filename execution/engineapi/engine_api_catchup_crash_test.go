@@ -179,20 +179,7 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 						assertCatchupRecoveryState(t, target.state, readCrashRecoveryState(t, eat.ChainDB))
 						assertChurnState(t.Context(), t, eat, churn, target.payloads[len(target.payloads)-1], target.sum)
 					}
-					for i, payload := range side.continuation {
-						insertCrashRecoveryPayloads(t.Context(), t, eat, []*engineapitester.MockClPayload{payload})
-						require.NoError(t, eat.MockCl.UpdateForkChoice(t.Context(), payload))
-						assertChurnState(t.Context(), t, eat, churn, payload, side.continuationSums[i])
-					}
-					built, buildErr := eat.MockCl.BuildCanonicalBlock(t.Context())
-					require.NoError(t, buildErr)
-					parent := side.continuation[len(side.continuation)-1]
-					require.NotNil(t, built.ExecutionPayload.SlotNumber)
-					require.NotNil(t, parent.ExecutionPayload.SlotNumber)
-					require.Greater(t, uint64(*built.ExecutionPayload.SlotNumber), uint64(*parent.ExecutionPayload.SlotNumber))
-					assertCanonicalHead(t.Context(), t, eat, built)
-					_, _, _, consistent := readChurn(t.Context(), t, churn)
-					require.True(t, consistent)
+					assertCrashRecoveryContinuation(t, eat, churn, side)
 				})
 			}
 		})
