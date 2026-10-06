@@ -1341,3 +1341,34 @@ func TestResetForPoolDropsARevertedWarmUp(t *testing.T) {
 }
 
 func big2(i int) *big.Int { return big.NewInt(int64(i)) }
+
+// The IBS pool and the write-cell arena must compose: a pooled state comes back
+// with its slabs, so the next call draws cells from them rather than the shared
+// pool, and no cell carries anything from the call before.
+func TestPooledStateKeepsItsWriteCellArena(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	first := NewPooled(NewNoopReader())
+	first.SetVersionMap(NewVersionMap(nil))
+	first.SetNoMaterialize(true)
+	first.ReuseWriteCells()
+	require.True(t, first.versionedWrites.ArenaBacked())
+	require.NoError(t, first.SetNonce(addr, 7, tracing.NonceChangeUnspecified))
+	cell, ok := first.versionedWrites.GetNonce(addr)
+	require.True(t, ok)
+	require.EqualValues(t, 7, cell.Val)
+	ReleasePooled(first)
+
+	second := NewPooled(NewNoopReader())
+	defer ReleasePooled(second)
+	require.Same(t, first, second, "the pool must hand this state to the next call")
+	require.True(t, second.versionedWrites.ArenaBacked(), "the arena must survive the pool")
+
+	second.SetVersionMap(NewVersionMap(nil))
+	second.SetNoMaterialize(true)
+	second.ReuseWriteCells()
+	again := second.versionedWrites.newVWNonce()
+	require.Same(t, cell, again, "the slab hands the same cell to the next call")
+	require.Zero(t, again.Val, "a reused cell carries nothing from the call before")
+	require.Equal(t, WriteHeader{}, again.WriteHeader)
+}
