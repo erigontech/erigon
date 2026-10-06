@@ -1143,7 +1143,7 @@ func TestMergeFiles(t *testing.T) {
 	dc.Close()
 }
 
-func TestDomainMergeCancellationRemovesOutput(t *testing.T) {
+func TestDomainMergeCancellationClosesOutput(t *testing.T) {
 	t.Parallel()
 	const stepSize = uint64(32)
 	logger := log.New()
@@ -1172,8 +1172,11 @@ func TestDomainMergeCancellationRemovesOutput(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	outputPath := d.kvNewFilePath(0, 4)
-	d._testBuildAccessorHook = func(*recsplit.RecSplit) {
+	var mergedData *seg.Decompressor
+	d._testBuildAccessorHook = func(_ *recsplit.RecSplit, data *seg.Decompressor) {
 		require.FileExists(t, outputPath)
+		require.True(t, data.IsOpen())
+		mergedData = data
 		cancel()
 	}
 	values, index, history, err := dt.mergeFiles(ctx, nil, nil, nil, r, nil, true, background.NewProgressSet())
@@ -1181,11 +1184,24 @@ func TestDomainMergeCancellationRemovesOutput(t *testing.T) {
 	require.Nil(t, values)
 	require.Nil(t, index)
 	require.Nil(t, history)
+	require.NotNil(t, mergedData)
+	require.False(t, mergedData.IsOpen())
 	for _, path := range outputs {
-		require.NoFileExists(t, path)
+		require.FileExists(t, path)
 	}
 	d._testBuildAccessorHook = nil
 	merge()
+}
+
+func (a *Aggregator) MergeWithTempDirForTest(ctx context.Context, toTxNum uint64, domain kv.Domain, tmpDir string) (bool, error) {
+	mergeWorkers := a.workers.getMerge()
+	a.workers.setMerge(1)
+	defer a.workers.setMerge(mergeWorkers)
+	d := a.d[domain]
+	prevTmpDir := d.dirs.Tmp
+	d.dirs.Tmp = tmpDir
+	defer func() { d.dirs.Tmp = prevTmpDir }()
+	return a.mergeLoopStep(ctx, toTxNum)
 }
 
 func TestHistoryMergeCancellationRemovesOutputs(t *testing.T) {

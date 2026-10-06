@@ -424,19 +424,8 @@ func (dt *DomainRoTx) mergeFiles(ctx context.Context, domainFiles, indexFiles, h
 			if kvWriter != nil {
 				kvWriter.Close()
 			}
+			// Completed commitment files may still reference this output.
 			valuesIn.closeFiles()
-			for _, path := range []string{
-				dt.d.kviAccessorNewFilePath(fromStep, toStep),
-				dt.d.kvBtAccessorNewFilePath(fromStep, toStep),
-				dt.d.kvExistenceIdxNewFilePath(fromStep, toStep),
-				kvFilePath,
-			} {
-				for _, file := range []string{path, path + ".torrent"} {
-					if err := dir.RemoveFile(file); err != nil {
-						dt.d.logger.Trace("remove after failed merge", "err", err, "file", file)
-					}
-				}
-			}
 		}
 	}()
 
