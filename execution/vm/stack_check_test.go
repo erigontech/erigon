@@ -119,6 +119,9 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		}
 	}
 	for i, jt := range tables {
+		if sload := &jt[SLOAD]; sload.constantGas == 0 {
+			require.Equal(t, reflect.ValueOf(gasSLoadEIP2929).Pointer(), reflect.ValueOf(sload.dynamicGas).Pointer(), "table %d SLOAD", i)
+		}
 		for op, w := range fastPathOps {
 			got := &jt[op]
 			if w.execute != nil {
@@ -215,6 +218,12 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
+		// Warm slots with values, so a frame-cache hit fits in the gas sweep and shows its value.
+		for k, v := range map[uint64]uint64{1: 0xaa, 2: 0xbb} {
+			key := accounts.InternKey(uint256.NewInt(k).Bytes32())
+			require.NoError(t, ibs.SetState(accounts.ZeroAddress, key, *uint256.NewInt(v)))
+			ibs.AddSlotToAccessList(accounts.ZeroAddress, key)
+		}
 		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 		c.Code = code
@@ -258,6 +267,9 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A failed frame returns no data, whatever the last CALL returned.
 		"callthenbadjump": {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(PUSH1), 0, byte(JUMP)},
 		"callthenend":     {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL)},
+		// Slots 1 and 2 are warm and set, slot 3 is cold.
+		"sload":     prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, ADD, PUSH1, 2, SLOAD),
+		"sloadcold": prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 3, SLOAD),
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {

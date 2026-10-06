@@ -139,8 +139,14 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	// If the caller cannot afford the cost, this change will be rolled back
 	// If he does afford it, we can skip checking the same thing later on, during execution
-	if callContext.slots.on && callContext.lookupSlot(evm) >= 0 {
-		return mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929}, nil
+	if callContext.slots.on {
+		i := callContext.slots.memo
+		if callContext.slots.memoGen != callContext.cacheGen {
+			i = callContext.lookupSlot(evm)
+		}
+		if i >= 0 {
+			return mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929}, nil
+		}
 	}
 	addr, slot := callContext.Address(), callContext.peekStorageKey(evm)
 	if evm.IntraBlockState().SlotKnownWarm(addr, slot) {

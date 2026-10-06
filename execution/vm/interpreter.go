@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -585,6 +586,17 @@ run:
 			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
+		// A frame-cache hit is a warm SLOAD: it needs neither the gas func nor the op.
+		// A zero constant gas marks the EIP-2929 SLOAD; a miss leaves the memo to the gas func.
+		if !anyTrace && op == SLOAD && callContext.slots.on && jt[SLOAD].constantGas == 0 &&
+			stack.len() > 0 && gasLeft >= params.WarmStorageReadCostEIP2929 {
+			if i := callContext.lookupSlot(evm); i >= 0 {
+				gasLeft -= params.WarmStorageReadCostEIP2929
+				*stack.peek() = callContext.slots.val[i]
+				pc++
+				continue run
+			}
+		}
 		if anyTrace && debug {
 			// Capture pre-execution values for tracing.
 			logged = false
