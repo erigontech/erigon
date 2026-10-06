@@ -1702,7 +1702,7 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 func TestWriteSetArenaReusesItsCells(t *testing.T) {
 	var ws WriteSet
 	ws.UseArena()
-	addrs := make([]accounts.Address, vwSlabSize+3)
+	addrs := make([]accounts.Address, vwFirstSlab*4+3)
 	for i := range addrs {
 		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
 	}
@@ -1832,11 +1832,51 @@ func TestReleaseMapsKeepsTheArena(t *testing.T) {
 func TestArenaStopsGrowingAtItsCap(t *testing.T) {
 	ws := &WriteSet{}
 	ws.UseArena()
-	for range vwMaxCells + vwSlabSize {
+	for range vwMaxCells + vwFirstSlab {
 		require.NotNil(t, ws.newVWNonce())
 	}
-	require.Len(t, ws.cells.nonce.slabs, vwMaxSlabs, "the arena must not grow past its cap")
+	require.Equal(t, vwMaxCells, ws.cells.nonce.cap, "the arena must not grow past its cap")
+
+	slabs := len(ws.cells.nonce.slabs)
+	ws.ReleaseAndReset()
+	require.Len(t, ws.cells.nonce.slabs, slabs, "a reset keeps the slabs for the next call")
+}
+
+func TestArenaOverflowCellsReturnToThePool(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+
+	const overflow = 64
+	seen := map[*VersionedWrite[uint64]]struct{}{}
+	for range vwMaxCells + overflow {
+		seen[ws.newVWNonce()] = struct{}{}
+	}
+	require.Len(t, ws.cells.nonce.overflow, overflow, "cells past the cap must be tracked")
 
 	ws.ReleaseAndReset()
-	require.Len(t, ws.cells.nonce.slabs, vwMaxSlabs, "a reset keeps the slabs for the next call")
+	require.Empty(t, ws.cells.nonce.overflow, "a reset must hand the overflow cells back")
+
+	reused := 0
+	for range vwMaxCells + overflow {
+		if _, ok := seen[ws.newVWNonce()]; ok {
+			reused++
+		}
+	}
+	require.Greater(t, reused, vwMaxCells, "the next call must not allocate the overflow afresh")
+}
+
+// A path that writes a handful of cells must buy a handful: the first slab is
+// what a one-shot state pays for, and it grows only as the path keeps writing.
+func TestArenaSlabsGrowWithTheWrites(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+
+	require.NotNil(t, ws.newVWNonce())
+	require.Equal(t, vwFirstSlab, ws.cells.nonce.cap, "one write must not buy more than the first slab")
+
+	for range vwMaxCells - 1 {
+		require.NotNil(t, ws.newVWNonce())
+	}
+	require.Equal(t, vwMaxCells, ws.cells.nonce.cap)
+	require.Less(t, len(ws.cells.nonce.slabs), 12, "doubling must reach the cap in a few slabs")
 }
