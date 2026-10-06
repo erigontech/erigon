@@ -666,8 +666,8 @@ func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.P
 func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
 func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
 
-// vwSlabSize keeps a slab inside one page-ish allocation while staying large
-// enough that a CREATE-heavy call grows the arena only a few times.
+// vwSlabSize is large enough that a CREATE-heavy call grows the arena only a
+// few times, and small enough that an outlier does not pin much.
 const vwSlabSize = 64
 
 // vwArena hands out VersionedWrite cells that die with the call that drew them.
@@ -1625,80 +1625,55 @@ func (ws *WriteSet) ReleaseMaps() {
 // *VersionedWrite[T] back to its pool — keeps the pool cycle closed so
 // allocs land on Get and end at Del/ReleaseAndReset.
 
+// delCell drops addr's cell, returning it to its pool unless the set draws
+// cells from its own slabs — those are reused and zeroed by the next reset, so
+// the shared pool must never see them.
+func delCell[T any](ws *WriteSet, m map[accounts.Address]*VersionedWrite[T], addr accounts.Address, release func(*VersionedWrite[T])) {
+	vw, ok := m[addr]
+	if !ok {
+		return
+	}
+	if !ws.cells.on {
+		release(vw)
+	}
+	delete(m, addr)
+}
+
 func (ws *WriteSet) DelBalance(addr accounts.Address) {
-	if vw, ok := ws.balance[addr]; ok {
-		if !ws.cells.on {
-			releaseVWBalance(vw)
-		}
-		delete(ws.balance, addr)
-	}
+	delCell(ws, ws.balance, addr, releaseVWBalance)
 }
-
 func (ws *WriteSet) DelNonce(addr accounts.Address) {
-	if vw, ok := ws.nonce[addr]; ok {
-		if !ws.cells.on {
-			releaseVWNonce(vw)
-		}
-		delete(ws.nonce, addr)
-	}
+	delCell(ws, ws.nonce, addr, releaseVWNonce)
 }
-
 func (ws *WriteSet) DelIncarnation(addr accounts.Address) {
-	if vw, ok := ws.incarnation[addr]; ok {
-		if !ws.cells.on {
-			releaseVWIncarnation(vw)
-		}
-		delete(ws.incarnation, addr)
-	}
+	delCell(ws, ws.incarnation, addr, releaseVWIncarnation)
 }
-
 func (ws *WriteSet) DelSelfDestruct(addr accounts.Address) {
-	if vw, ok := ws.selfDestruct[addr]; ok {
-		if !ws.cells.on {
-			releaseVWSelfDestruct(vw)
-		}
-		delete(ws.selfDestruct, addr)
-	}
+	delCell(ws, ws.selfDestruct, addr, releaseVWSelfDestruct)
 }
-
 func (ws *WriteSet) DelCode(addr accounts.Address) {
-	if vw, ok := ws.code[addr]; ok {
-		if !ws.cells.on {
-			releaseVWCode(vw)
-		}
-		delete(ws.code, addr)
-	}
+	delCell(ws, ws.code, addr, releaseVWCode)
 }
-
 func (ws *WriteSet) DelCodeHash(addr accounts.Address) {
-	if vw, ok := ws.codeHash[addr]; ok {
-		if !ws.cells.on {
-			releaseVWCodeHash(vw)
-		}
-		delete(ws.codeHash, addr)
-	}
+	delCell(ws, ws.codeHash, addr, releaseVWCodeHash)
 }
-
 func (ws *WriteSet) DelCodeSize(addr accounts.Address) {
-	if vw, ok := ws.codeSize[addr]; ok {
-		if !ws.cells.on {
-			releaseVWCodeSize(vw)
-		}
-		delete(ws.codeSize, addr)
-	}
+	delCell(ws, ws.codeSize, addr, releaseVWCodeSize)
 }
 
 func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
-	if inner := ws.storage[addr]; inner != nil {
-		if vw, ok := inner[key]; ok {
-			if !ws.cells.on {
-				releaseVWStorage(vw)
-			}
-			delete(inner, key)
+	inner := ws.storage[addr]
+	if inner == nil {
+		return
+	}
+	if vw, ok := inner[key]; ok {
+		if !ws.cells.on {
+			releaseVWStorage(vw)
 		}
-		if len(inner) == 0 {
-			delete(ws.storage, addr)
-		}
+		delete(inner, key)
+	}
+	if len(inner) == 0 {
+		delete(ws.storage, addr)
 	}
 }
 
