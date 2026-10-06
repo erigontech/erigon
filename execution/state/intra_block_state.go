@@ -213,6 +213,7 @@ type IntraBlockState struct {
 	// SelfDestruct cells. Left false for genesis/RPC/serial, which still commit
 	// via FinalizeTx→so.data.
 	noMaterialize bool
+	singleCall    bool
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -352,6 +353,7 @@ func (ibs *IntraBlockState) Reset() {
 	// suppressed (which would silently drop writes). The versioned worker re-sets
 	// both right after Reset; the block assembler never calls Reset mid-block.
 	ibs.noMaterialize = false
+	ibs.singleCall = false
 	clear(ibs.committedBase)
 	// Read side rebinds to a fresh empty set: VersionedReads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
@@ -372,6 +374,10 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.dep = UnknownDep
 	ibs.stateReadErr = nil
 }
+
+// SetSingleCall marks a call whose reads nobody validates, such as eth_call:
+// reads kept only for conflict detection are skipped. Reset clears it.
+func (ibs *IntraBlockState) SetSingleCall() { ibs.singleCall = true }
 
 // Release Deprecated use Close
 func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
@@ -2396,7 +2402,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// access list), promote it: without a real read the unchanged balance write has no
 	// baseline and would emit a spurious net-zero balance change.
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap != nil {
+	if ibs.versionMap != nil && !ibs.singleCall {
 		if vr, seen := ibs.versionedReads.GetBalance(addr); !seen {
 			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, newObj.Balance()})
 		} else if vr.internal {

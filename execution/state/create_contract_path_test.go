@@ -19,7 +19,9 @@ package state
 import (
 	"testing"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,4 +53,27 @@ func TestCreateContractPath_ContractOnlySignal(t *testing.T) {
 	if _, ok := ibs.versionedWrites.GetCreateContract(plain); ok {
 		t.Fatal("non-contract account creation must not set CreateContractPath")
 	}
+}
+
+// CreateAccount records its balance and incarnation reads only for conflict
+// detection, which a single call does not have; Reset ends the single call.
+func TestSingleCallCreateAccountRecordsNoConflictReads(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	defer ibs.Close()
+	conflictReads := func() bool {
+		reads := ibs.VersionedReads()
+		_, balance := reads.GetBalance(addr)
+		_, incarnation := reads.GetIncarnation(addr)
+		return balance || incarnation
+	}
+
+	startNoMaterializeTx(ibs, vm, 0)
+	ibs.SetSingleCall()
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.False(t, conflictReads(), "a single call records no conflict-detection reads")
+
+	startNoMaterializeTx(ibs, vm, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.True(t, conflictReads(), "after Reset the reads are recorded again")
 }
