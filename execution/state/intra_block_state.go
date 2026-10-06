@@ -28,6 +28,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -371,6 +372,62 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.codeReadCount = 0
 	ibs.dep = UnknownDep
 	ibs.stateReadErr = nil
+}
+
+var ibsPool sync.Pool
+
+// NewPooled is New over an IntraBlockState reused from an earlier call, whose
+// maps keep their capacity. Release it with ReleasePooled.
+func NewPooled(stateReader StateReader) *IntraBlockState {
+	ibs, ok := ibsPool.Get().(*IntraBlockState)
+	if !ok {
+		return New(stateReader)
+	}
+	ibs.stateReader = stateReader
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+	return ibs
+}
+
+// ReleasePooled hands ibs to the next NewPooled, or closes it when it grew too
+// large to keep.
+func ReleasePooled(ibs *IntraBlockState) {
+	if ibs.resetForPool() {
+		ibsPool.Put(ibs)
+		return
+	}
+	ibs.Close()
+}
+
+// Maps never shrink, so a call that grew past these must not pin its capacity
+// for every later one.
+const (
+	maxPooledStateObjects = 4096
+	maxPooledJournal      = 1 << 16
+)
+
+// resetForPool clears everything one call left and reports whether ibs is
+// small enough to pool.
+func (ibs *IntraBlockState) resetForPool() bool {
+	reads := ibs.versionedReads
+	poolable := len(ibs.stateObjects) <= maxPooledStateObjects && cap(ibs.journal.entries) <= maxPooledJournal &&
+		len(reads.address) <= maxPooledStateObjects && len(reads.storage) <= maxPooledStateObjects
+	ibs.Reset()
+	if !poolable {
+		return false
+	}
+	// One call never hands its read set out, so the maps keep their capacity
+	// instead of the empty set Reset installs.
+	reads.clearForReuse()
+	ibs.versionedReads = reads
+	ibs.revisions.reset()
+	ibs.stateObjectArena.reset()
+	// Reset only bumps the probe epoch; a pooled ibs would collect every
+	// address later calls touch.
+	clear(ibs.sdProbe)
+	ibs.tracingHooks = nil
+	ibs.trace = false
+	ibs.stateReader, ibs.codeAccess = nil, nil
+	return true
 }
 
 // Release Deprecated use Close
