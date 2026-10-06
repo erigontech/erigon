@@ -101,22 +101,31 @@ func (b *BatchSignatureVerifier) verifyAndWait(ctx context.Context, queue chan<-
 }
 
 func (b *BatchSignatureVerifier) ImmediateVerification(data *AggregateVerificationData) error {
-	return b.processSignatureVerification([]*AggregateVerificationData{data})
+	callbacks, err := b.processSignatureVerification([]*AggregateVerificationData{data})
+	for _, callback := range callbacks {
+		callback()
+	}
+	return err
 }
 
 func (b *BatchSignatureVerifier) Start() {
-	// separate goroutines for each type of verification
-	go b.start(b.attVerifyAndExecute)
-	go b.start(b.aggregateProofVerify)
-	go b.start(b.blsToExecutionChangeVerify)
-	go b.start(b.syncContributionVerify)
-	go b.start(b.syncCommitteeMessage)
-	go b.start(b.voluntaryExitVerify)
+	b.startVerifier(b.attVerifyAndExecute)
+	b.startVerifier(b.aggregateProofVerify)
+	b.startVerifier(b.blsToExecutionChangeVerify)
+	b.startVerifier(b.syncContributionVerify)
+	b.startVerifier(b.syncCommitteeMessage)
+	b.startVerifier(b.voluntaryExitVerify)
+}
+
+func (b *BatchSignatureVerifier) startVerifier(incoming chan *AggregateVerificationData) {
+	callbacks := make(chan func(), cap(incoming))
+	go b.runCallbacks(callbacks)
+	go b.start(incoming, callbacks)
 }
 
 // When receiving AggregateVerificationData, we simply collect all the signature verification data
 // and verify them together - running all the final functions afterwards
-func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData) {
+func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData, callbacks chan<- func()) {
 	ticker := time.NewTicker(batchCheckInterval)
 	defer ticker.Stop()
 	aggregateVerificationData := make([]*AggregateVerificationData, 0, reservedSize)
@@ -127,10 +136,8 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 		case verification := <-incoming:
 			aggregateVerificationData = append(aggregateVerificationData, verification)
 			if len(aggregateVerificationData) >= batchSignatureVerificationThreshold {
-				// Failing signatures are already reprocessed and their senders banned
-				// inside processSignatureVerification; the error here is diagnostic only.
-				if err := b.processSignatureVerification(aggregateVerificationData); err != nil {
-					log.Debug("[BatchVerifier] batch signature verification failed", "err", err)
+				if !b.processBatch(aggregateVerificationData, callbacks) {
+					return
 				}
 				ticker.Reset(batchCheckInterval)
 				// clear the slice
@@ -140,8 +147,8 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 			if len(aggregateVerificationData) == 0 {
 				continue
 			}
-			if err := b.processSignatureVerification(aggregateVerificationData); err != nil {
-				log.Debug("[BatchVerifier] batch signature verification failed", "err", err)
+			if !b.processBatch(aggregateVerificationData, callbacks) {
+				return
 			}
 			// clear the slice
 			aggregateVerificationData = make([]*AggregateVerificationData, 0, reservedSize)
@@ -149,35 +156,60 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 	}
 }
 
-func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) error {
-	signatures, signRoots, pks :=
+func (b *BatchSignatureVerifier) processBatch(aggregateVerificationData []*AggregateVerificationData, callbacks chan<- func()) bool {
+	fns, err := b.processSignatureVerification(aggregateVerificationData)
+	if err != nil {
+		log.Debug("[BatchVerifier] batch signature verification failed", "err", err)
+	}
+	for _, callback := range fns {
+		select {
+		case callbacks <- callback:
+		case <-b.ctx.Done():
+			return false
+		}
+	}
+	return true
+}
+
+func (b *BatchSignatureVerifier) runCallbacks(callbacks <-chan func()) {
+	for {
+		select {
+		case <-b.ctx.Done():
+			return
+		case callback := <-callbacks:
+			callback()
+		}
+	}
+}
+
+func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) ([]func(), error) {
+	signatures, signRoots, pks, fns :=
 		make([][]byte, 0, reservedSize),
 		make([][]byte, 0, reservedSize),
-		make([][]byte, 0, reservedSize)
+		make([][]byte, 0, reservedSize),
+		make([]func(), 0, reservedSize)
 
 	for _, v := range aggregateVerificationData {
-		signatures, signRoots, pks =
+		signatures, signRoots, pks, fns =
 			append(signatures, v.Signatures...),
 			append(signRoots, v.SignRoots...),
-			append(pks, v.Pks...)
+			append(pks, v.Pks...),
+			append(fns, v.F)
 	}
 	if err := b.runBatchVerification(signatures, signRoots, pks); err != nil {
-		b.handleIncorrectSignatures(aggregateVerificationData)
-		return err
+		return b.handleIncorrectSignatures(aggregateVerificationData), err
 	}
 
 	for _, v := range aggregateVerificationData {
 		v.report(nil)
 	}
-	for _, v := range aggregateVerificationData {
-		v.F()
-	}
-	return nil
+	return fns, nil
 }
 
 // we could locate failing signature with binary search but for now let's choose simplicity over optimisation.
-func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) {
+func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) []func() {
 	alreadyBanned := false
+	callbacks := make([]func(), 0, len(aggregateVerificationData))
 	for _, v := range aggregateVerificationData {
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
@@ -207,8 +239,9 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 		}
 
 		v.report(nil)
-		v.F()
+		callbacks = append(callbacks, v.F)
 	}
+	return callbacks
 }
 
 func (v *AggregateVerificationData) report(err error) {
