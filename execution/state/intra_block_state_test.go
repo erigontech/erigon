@@ -1336,7 +1336,11 @@ func TestResetForPoolDropsARevertedWarmUp(t *testing.T) {
 		ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(i))))
 	}
 	ibs.RevertToSnapshot(snap, nil)
-	require.Zero(t, ibs.accessList.liveEntries(), "the revert leaves nothing live")
+	live := len(ibs.accessList.addresses)
+	for _, s := range ibs.accessList.slots {
+		live += len(s)
+	}
+	require.Zero(t, live, "the revert leaves nothing live")
 	require.False(t, ibs.resetForPool(), "the grown slot maps are still retained")
 }
 
