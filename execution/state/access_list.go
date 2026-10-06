@@ -62,6 +62,14 @@ func (al *accessList) Reset() {
 	al.dropMemo()
 }
 
+func (al *accessList) entries() int {
+	n := len(al.addresses)
+	for _, s := range al.slots {
+		n += len(s)
+	}
+	return n
+}
+
 func (al *accessList) dropMemo() {
 	al.lastAddr = accounts.NilAddress
 	al.lastSlots = nil
