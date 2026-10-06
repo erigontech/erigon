@@ -1843,30 +1843,39 @@ func TestArenaStopsGrowingAtItsCap(t *testing.T) {
 }
 
 func TestArenaOverflowCellsReturnToThePool(t *testing.T) {
-	ws := &WriteSet{}
-	ws.UseArena()
-
 	const overflow = 64
-	seen := map[*VersionedWrite[uint64]]struct{}{}
-	for range vwMaxCells + overflow {
-		seen[ws.newVWNonce()] = struct{}{}
-	}
-	require.Len(t, ws.cells.nonce.overflow, overflow, "cells past the cap must be tracked")
+	var a vwArena[uint64]
 
-	ws.ReleaseAndReset()
-	require.Empty(t, ws.cells.nonce.overflow, "a reset must hand the overflow cells back")
-
-	reused := 0
+	taken := make([]*VersionedWrite[uint64], 0, vwMaxCells+overflow)
 	for range vwMaxCells + overflow {
-		if _, ok := seen[ws.newVWNonce()]; ok {
-			reused++
-		}
+		taken = append(taken, a.alloc(getVWNonce))
 	}
-	require.Greater(t, reused, vwMaxCells, "the next call must not allocate the overflow afresh")
+	require.Len(t, a.overflow, overflow, "cells past the cap must be tracked")
+
+	var released []*VersionedWrite[uint64]
+	a.reset(func(vw *VersionedWrite[uint64]) { released = append(released, vw) })
+	require.Equal(t, taken[vwMaxCells:], released, "a reset must hand every overflow cell back")
+	require.Empty(t, a.overflow)
+
+	// The pools clear only what pins memory, so the arena has to finish the job.
+	dirty := &VersionedWrite[uint64]{WriteHeader: WriteHeader{Path: NoncePath}, Val: 7}
+	for range vwMaxCells {
+		a.alloc(getVWNonce)
+	}
+	require.Zero(t, *a.alloc(func() *VersionedWrite[uint64] { return dirty }))
+}
+
+func TestOnlyAReusedStateOwnsItsCells(t *testing.T) {
+	ibs := New(NewNoopReader())
+	require.False(t, ibs.versionedWrites.ArenaBacked(), "a one-shot state buys no slabs")
+
+	ibs.ResetVersionedIO()
+	require.True(t, ibs.versionedWrites.ArenaBacked(), "a state that outlives a tx owns its cells")
 }
 
 // A path that writes a handful of cells must buy a handful: the first slab is
-// what a one-shot state pays for, and it grows only as the path keeps writing.
+// what the first tx on a reused state pays for, and it grows as writes keep
+// coming.
 func TestArenaSlabsGrowWithTheWrites(t *testing.T) {
 	ws := &WriteSet{}
 	ws.UseArena()

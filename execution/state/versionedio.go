@@ -692,6 +692,7 @@ func (a *vwArena[T]) alloc(get func() *VersionedWrite[T]) *VersionedWrite[T] {
 	if a.slab == len(a.slabs) {
 		if a.cap == vwMaxCells {
 			vw := get()
+			*vw = VersionedWrite[T]{} // the pools clear only what pins memory
 			a.overflow = append(a.overflow, vw)
 			return vw
 		}
@@ -861,9 +862,18 @@ func (ws *WriteSet) assertNotArena(op string) {
 	}
 }
 
-// UseArena routes this set's cells to its own slabs. New does it for every
-// state; a set that shares its cells out must not (see assertNotArena).
+// UseArena routes this set's cells to its own slabs. Only a set the state keeps
+// across txs may do it, and a set that shares its cells out must not (see
+// assertNotArena and recycle).
 func (ws *WriteSet) UseArena() { ws.cells.on = true }
+
+// recycle resets the set and takes its cells from its own slabs from here on.
+// Slabs only pay off once the state outlives a tx: a one-shot state would buy
+// a slab per path it touches and throw it away.
+func (ws *WriteSet) recycle() {
+	ws.ReleaseAndReset()
+	ws.UseArena()
+}
 
 // Released reports whether ReleaseMaps pooled this set's maps and no later
 // write revived it.

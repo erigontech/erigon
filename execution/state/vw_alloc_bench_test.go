@@ -219,8 +219,8 @@ func BenchmarkArenaOverflowCycle(b *testing.B) {
 }
 
 // BenchmarkFreshSet writes three paths on a set that is never reused, the shape
-// of a single eth_call. The arena arm shows what a slab per touched path costs
-// when nothing amortizes it, which is why New leaves a set pooled.
+// of a single eth_call: the arena arm pays for a slab per path it touches with
+// nothing to amortize them.
 func BenchmarkFreshSet(b *testing.B) {
 	for _, arena := range []bool{false, true} {
 		name := "pooled"
@@ -260,7 +260,7 @@ func benchFreshSet(b *testing.B, arena bool) {
 		vws.Val = val
 		ws.SetStorage(addr, key, vws)
 
-		ws.ReleaseMaps()
+		ws.ReleaseAndReset()
 	}
 }
 
