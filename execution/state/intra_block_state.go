@@ -375,9 +375,10 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
-// SetNoConflictDetection marks an execution whose reads ValidateVersion never
-// checks, such as eth_call: reads kept only for conflict detection are skipped.
-// Reset clears it.
+// SetNoConflictDetection marks an execution that neither ValidateVersion checks
+// nor a block access list is built from, such as eth_call. CreateAccount's
+// balance read serves both, so skipping it needs both to be absent. Reset
+// clears it.
 func (ibs *IntraBlockState) SetNoConflictDetection() { ibs.noConflictDetection = true }
 
 // Release Deprecated use Close
