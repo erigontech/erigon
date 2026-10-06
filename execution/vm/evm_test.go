@@ -186,16 +186,26 @@ func TestNestedCallsReuseOneFrameContext(t *testing.T) {
 	require.NoError(t, ibs.SetCode(callee, []byte{byte(STOP)}, tracing.CodeChangeUnspecified))
 
 	var nested []*CallContext
+	var parked []*CallContext
+	var evm *EVM
 	hooks := &tracing.Hooks{OnOpcode: func(_ uint64, _ byte, _, _ uint64, scope tracing.OpContext, _ []byte, depth int, _ error) {
-		if depth == 2 {
+		switch depth {
+		case 1:
+			// Between the two CALLs the returned nested context sits in the
+			// spare slot; without the parking it would have gone to the pool.
+			parked = append(parked, evm.spareFrame)
+		case 2:
 			nested = append(nested, scope.(*CallContext))
 		}
 	}}
-	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+	evm = NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
 	_, _, _, err := evm.Call(accounts.ZeroAddress, caller, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
 	require.NoError(t, err)
 	require.Len(t, nested, 2)
 	require.Same(t, nested[0], nested[1], "the second nested call reuses the first one's context")
+	// The pool would hand the same context back too, so the spare slot is what
+	// distinguishes parking from a pool round-trip.
+	require.Contains(t, parked, nested[0], "the returned nested context parks on the EVM")
 	require.Nil(t, evm.spareFrame, "the outermost frame returns the spare context to the pool")
 }
 

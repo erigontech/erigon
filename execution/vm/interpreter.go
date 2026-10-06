@@ -205,8 +205,9 @@ func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas)
 	return ctx
 }
 
-// putCallContext keeps a nested frame's context for the next call at that depth, so a
-// CALL loop skips the pool. The outermost frame returns both contexts to the pool.
+// putCallContext parks one nested frame's context on the EVM so the next nested
+// frame takes it without the pool; the spare is not tied to the depth that left
+// it. The outermost frame returns both contexts to the pool.
 func (evm *EVM) putCallContext(ctx *CallContext) {
 	ctx.Memory.reset()
 	ctx.Stack.Reset()
