@@ -1766,3 +1766,36 @@ func TestColdSlotMemoYieldsToThisCallsWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 0xC0DE, got.Uint64(), "the write must outrank the memo")
 }
+
+// The committed value of a memoized slot comes from the memo too: SSTORE's gas
+// needs it, so a miss here reads the slot from the state reader a second time.
+func TestColdSlotMemoServesTheCommittedRead(t *testing.T) {
+	ibs, rd, addr, key := newColdSlotState(t)
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, v.Uint64())
+	require.Equal(t, 1, rd.reads)
+
+	got, err := ibs.GetCommittedState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, got.Uint64())
+	require.Equal(t, 1, rd.reads, "the committed read comes from the memo")
+	require.Empty(t, ibs.versionedReads.storage, "no versioned record is kept")
+}
+
+// A contract created over the slot has no committed storage, so the memo must
+// not answer the committed read for it.
+func TestColdSlotMemoYieldsToACreateOverTheSlot(t *testing.T) {
+	ibs, _, addr, key := newColdSlotState(t)
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, v.Uint64())
+	require.Len(t, ibs.versionedReads.coldSlots, 1)
+
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	got, err := ibs.GetCommittedState(addr, key)
+	require.NoError(t, err)
+	require.True(t, got.IsZero(), "a created contract has no committed slot")
+}

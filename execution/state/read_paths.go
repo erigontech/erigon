@@ -1659,6 +1659,11 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
 				return tr.Val, tr.Source, tr.Version, nil
 			}
+			// The memo holds the slot as it was before this call, which is what
+			// a committed read wants even after the call wrote it.
+			if v, ok := s.versionedReads.GetColdSlot(addr, key); ok {
+				return v, StorageRead, UnknownVersion, nil
+			}
 		}
 	}
 	var r readPathResult
