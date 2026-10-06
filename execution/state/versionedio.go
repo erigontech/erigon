@@ -146,9 +146,13 @@ type slotRef struct {
 	key  accounts.StorageKey
 }
 
+// coldSlotsHint presizes the memo so a storage-heavy call does not rehash its
+// way up from nothing; a reused read set keeps the capacity anyway.
+const coldSlotsHint = 1024
+
 func (s *ReadSet) SetColdSlot(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
 	if s.coldSlots == nil {
-		s.coldSlots = make(map[slotRef]uint256.Int)
+		s.coldSlots = make(map[slotRef]uint256.Int, coldSlotsHint)
 	}
 	s.coldSlots[slotRef{addr, key}] = val
 }
