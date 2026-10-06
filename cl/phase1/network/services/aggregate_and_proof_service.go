@@ -204,7 +204,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
-	// Messages are valid only on the fork topic selected by their data slot.
 	if aggregateAndProof.TopicForkDigest != nil {
 		messageForkDigest, err := a.ethClock.ComputeForkDigest(epoch)
 		if err != nil {

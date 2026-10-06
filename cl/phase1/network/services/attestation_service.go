@@ -159,7 +159,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	attEpoch := s.ethClock.GetEpochAtSlot(slot)
 	clVersion := s.beaconCfg.GetCurrentStateVersion(attEpoch)
-	// Messages are valid only on the fork topic selected by their data slot.
 	if att.TopicForkDigest != nil {
 		messageForkDigest, err := s.ethClock.ComputeForkDigest(attEpoch)
 		if err != nil {
