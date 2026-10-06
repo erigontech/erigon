@@ -45,7 +45,6 @@ func TestPBTAcceptanceBinaryChainSmoke(t *testing.T) {
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = false
 	statecfg.ExperimentalCommitmentV3 = false
-	statecfg.ExperimentalParallelCommitment = false
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	fixture, err := NewPBTAcceptanceChain(t, true, false)

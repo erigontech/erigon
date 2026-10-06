@@ -119,9 +119,6 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 		if statecfg.ExperimentalHexBinCommitment != hexBin {
 			statecfg.ExperimentalHexBinCommitment = hexBin
 		}
-		if !hexBin && statecfg.ExperimentalParallelCommitment {
-			return errors.New("the bin commitment trie is sequential-only; drop --experimental.parallel-commitment")
-		}
 		if !statecfg.ExperimentalBinCommitment {
 			logger.Info("datadir uses the bin commitment trie; enabling it for this process")
 			statecfg.ExperimentalBinCommitment = true

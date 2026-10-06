@@ -53,9 +53,6 @@ func TestPBinCommitmentReplayRefusesBin(t *testing.T) {
 
 	commitmentflags.Restore(t)
 	statecfg.ExperimentalBinCommitment = true
-	// erigondb.toml resolution refuses the combination: the bin trie is
-	// sequential-only, regardless of a process-wide parallel default.
-	statecfg.ExperimentalParallelCommitment = false
 
 	// Fresh dirs: the replay resolves erigondb.toml itself, and a hex toml would
 	// be refused there instead of at the SharedDomains this test pins.

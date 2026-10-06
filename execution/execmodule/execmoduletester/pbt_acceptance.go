@@ -121,9 +121,6 @@ func newPBTAcceptanceChain(tb testing.TB, binary bool, dual bool, sharedCode []b
 			hash = commitment.PBinHashBlake3
 		}
 		settings.TrieHash = &hash
-		previousParallel := statecfg.ExperimentalParallelCommitment
-		statecfg.ExperimentalParallelCommitment = false
-		tb.Cleanup(func() { statecfg.ExperimentalParallelCommitment = previousParallel })
 	}
 	if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
 		return nil, err

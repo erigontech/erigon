@@ -106,12 +106,18 @@ func TestPBinVariantHexDatadirRefusesBinFlag(t *testing.T) {
 	}
 }
 
-func TestPBinVariantBinDatadirRefusesParallel(t *testing.T) {
+func TestPBinVariantBinDatadirResolvesWithParallelDefault(t *testing.T) {
 	pbinWithVariantFlags(t, false, true)
 	dirs := datadir.New(t.TempDir())
 	pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\ntrie_variant = \"bin\"\n")
-	_, err := ResolveErigonDBSettings(dirs, log.New(), false)
-	require.ErrorContains(t, err, "sequential-only")
+	require.Equal(t, commitment.VariantParallelHexPatricia, execctx.PickTrieVariant())
+
+	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+	require.Equal(t, TrieVariantBin, settings.TrieVariantName())
+	require.True(t, statecfg.ExperimentalParallelCommitment)
+	require.True(t, statecfg.ExperimentalBinCommitment)
+	require.Equal(t, commitment.VariantBinPatriciaTrie, execctx.PickTrieVariant())
 }
 
 func TestPBinVariantHexBinAllowsParallelForHexArm(t *testing.T) {
