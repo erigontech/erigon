@@ -83,6 +83,7 @@ type Cfg struct {
 	gloasPayloadValidator        gloasPayloadValidator
 	gloasVerificationCursor      common.Hash
 	gloasVerificationHead        common.Hash
+	chainTipRejections           *chainTipRejections
 }
 
 type Args struct {
@@ -151,6 +152,7 @@ func ClStagesCfg(
 		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, dirs.CaplinHistory),
 		gloasPayloadValidator:   forkChoice,
 		attestationDataProducer: attestationDataProducer,
+		chainTipRejections:      newChainTipRejections(chainTipRejectionLogInterval, nil),
 	}
 }
 

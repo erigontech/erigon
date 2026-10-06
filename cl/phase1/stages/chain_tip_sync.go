@@ -190,8 +190,11 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		// Fetch blocks from the specified range
 		blocks, err := fetchBlocksFromReqResp(ctx, cfg, from, count)
 		if err != nil {
-			// Send error to the error channel and return
-			errCh <- err
+			// The listener's context is bounded, so the send must not outlive it.
+			select {
+			case errCh <- err:
+			case <-ctx.Done():
+			}
 			return
 		}
 
@@ -282,10 +285,11 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 		if !ensureAnchorEnvelopeForChild(ctx, cfg.forkChoice, func(recoveryCtx context.Context) error {
 			return ensureAnchorEnvelopeOnce(recoveryCtx, cfg)
 		}, block) {
-			log.Debug("[chainTipSync] anchor envelope unavailable, preserving child for retry", "slot", block.Block.Slot)
+			logChainTipRejection(cfg, "anchor envelope unavailable", block.Block.Slot, nil)
 			continue
 		}
 		if _, ok := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !ok {
+			logChainTipRejection(cfg, "parent not in fork graph", block.Block.Slot, nil)
 			time.Sleep(time.Millisecond)
 			continue
 		}
@@ -314,6 +318,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 				}
 				parentBlock := parentBlockByRoot(parentRoot)
 				if wasStored && parentEnvelopeRequired(block, parentBlock) && !payloadReplay.accepted(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr) {
+					logChainTipRejection(cfg, "parent payload not accepted", block.Block.Slot, envErr)
 					continue
 				}
 			}
@@ -321,7 +326,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 
 		// Process the block - DA can be downloaded later if we are behind (see blobHistoryDownloader)
 		if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
-			log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
+			logChainTipRejection(cfg, "process block failed", block.Block.Slot, err)
 			if rememberBlockAfterProcess(err) {
 				seenBlockRoots[blockRoot] = struct{}{}
 			}

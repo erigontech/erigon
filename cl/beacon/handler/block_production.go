@@ -722,6 +722,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
+	if a.headLagsBehind(targetSlot) {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, synced_data.ErrNotSynced)
+	}
 	builderBoostFactor := uint64(100)
 	if options := gloasBlockOptionsFromContext(ctx); options != nil {
 		builderBoostFactor = options.builderConfig.BuilderBoostFactor
@@ -1630,6 +1633,12 @@ func (a *ApiHandler) produceBeaconBody(
 	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
 	if err != nil {
 		return nil, nil, err
+	}
+	if payloadSource.gloasPath == gloasPayloadPathPending {
+		payloadSource, err = a.awaitPendingParentPayload(ctx, baseState, baseBlockRoot, targetSlot, stateVersion)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		switch payloadSource.gloasPath {
