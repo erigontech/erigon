@@ -18,6 +18,10 @@ package chain
 
 import (
 	"embed"
+	"encoding/json"
+	"fmt"
+	"path"
+	"strings"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
@@ -28,8 +32,35 @@ import (
 //go:embed chainspecs
 var chainspecs embed.FS
 
-func readParliaChainSpec(filename string) *chain.Config {
-	return chainspec.ReadChainConfig(chainspecs, filename)
+//go:embed upgrades
+var upgrades embed.FS
+
+// readParliaChainSpec reads a chainspec and fills its system-contract upgrades
+// from upgradesDir, one file per activation block or time.
+func readParliaChainSpec(filename, upgradesDir string) *chain.Config {
+	config := chainspec.ReadChainConfig(chainspecs, filename)
+	config.Parlia.BlockAlloc = readBlockAlloc(upgradesDir)
+	return config
+}
+
+func readBlockAlloc(dir string) map[string]any {
+	entries, err := upgrades.ReadDir(dir)
+	if err != nil {
+		panic(fmt.Sprintf("could not read system-contract upgrades %s: %v", dir, err))
+	}
+	blockAlloc := make(map[string]any, len(entries))
+	for _, entry := range entries {
+		data, err := upgrades.ReadFile(path.Join(dir, entry.Name()))
+		if err != nil {
+			panic(fmt.Sprintf("could not read system-contract upgrade %s: %v", entry.Name(), err))
+		}
+		var alloc any
+		if err := json.Unmarshal(data, &alloc); err != nil {
+			panic(fmt.Sprintf("could not parse system-contract upgrade %s: %v", entry.Name(), err))
+		}
+		blockAlloc[strings.TrimSuffix(entry.Name(), ".json")] = alloc
+	}
+	return blockAlloc
 }
 
 var (
