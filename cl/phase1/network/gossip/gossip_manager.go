@@ -254,7 +254,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 		if topic == "" {
 			return pubsub.ValidationReject
 		}
-		name := extractTopicName(topic)
+		name := gossip.ExtractTopicName(topic)
 		if name == "" {
 			return pubsub.ValidationReject
 		}
@@ -286,7 +286,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			g.stats.addReject(name)
 			return pubsub.ValidationReject
 		}
-		msgData, err = utils.DecompressSnappy(msgData, true)
+		msgData, err = utils.DecompressSnappyWithLimit(msgData, gossip.MaxUncompressedSize(name, g.beaconConfig, g.networkConfig))
 		if err != nil {
 			log.Debug("[GossipManager] reject decompress message", "topic", name, "err", err)
 			g.stats.addReject(name)
@@ -421,7 +421,7 @@ func (g *GossipManager) subscribePersistentAttestationSubnets() {
 	rotationEpoch := subnets.SubscribedSubnetsRotationEpoch(*nodeID, epoch)
 	expiry := g.ethClock.GetSlotTime(rotationEpoch*g.beaconConfig.SlotsPerEpoch + 1)
 	for _, topic := range g.subscriptions.AllTopics() {
-		name := extractTopicName(topic)
+		name := gossip.ExtractTopicName(topic)
 		if !gossip.IsTopicBeaconAttestation(name) {
 			continue
 		}
@@ -461,7 +461,7 @@ func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error
 		return err
 	}
 	for _, registeredTopic := range g.subscriptions.AllTopics() {
-		if registeredTopic == topic || extractTopicName(registeredTopic) != name {
+		if registeredTopic == topic || gossip.ExtractTopicName(registeredTopic) != name {
 			continue
 		}
 		if err := g.subscriptions.SubscribeWithExpiry(registeredTopic, expiry); err != nil {
@@ -697,7 +697,7 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4, names ...s
 	allTopics := g.subscriptions.AllTopics()
 	for _, oldTopic := range allTopics {
 		// replace fork digest with new one
-		name := extractTopicName(oldTopic)
+		name := gossip.ExtractTopicName(oldTopic)
 		if name == "" || len(names) > 0 && !slices.Contains(names, name) {
 			continue
 		}
@@ -738,15 +738,6 @@ func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4, names ...s
 		}
 	}
 	return nil
-}
-
-func extractTopicName(topic string) string {
-	// /eth2/[fork_digest]/[topic]/ssz_snappy
-	tokens := strings.Split(topic, "/")
-	if len(tokens) != 5 {
-		return ""
-	}
-	return tokens[3]
 }
 
 func extractSubnetIndexByGossipTopic(name string) int {

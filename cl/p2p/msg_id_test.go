@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common/crypto"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -64,4 +65,31 @@ func TestMsgID(t *testing.T) {
 	hashedData = crypto.Sha256(combinedObj)
 	msgID = string(hashedData[:20])
 	require.Equal(t, msgID, s.msgId(nMsg), "Got incorrect msg id")
+}
+
+func TestMsgIDUsesInvalidDomainAbovePayloadBounds(t *testing.T) {
+	n := clparams.NetworkConfigs[chainspec.MainnetChainID]
+	s := &p2pManager{cfg: &P2PConfig{BeaconConfig: &clparams.MainnetBeaconConfig, NetworkConfig: &n}}
+	expectedID := func(domain [4]byte, topic string, payload []byte) string {
+		combined := append([]byte{}, domain[:]...)
+		combined = append(combined, utils.Uint64ToLE(uint64(len(topic)))...)
+		combined = append(combined, topic...)
+		combined = append(combined, payload...)
+		h := crypto.Sha256(combined)
+		return string(h[:20])
+	}
+
+	blockTopic := "/eth2/6c7a2141/beacon_block/ssz_snappy"
+	aboveNetworkLimit := make([]byte, n.GossipMaxSize+1)
+	msg := &pubsubpb.Message{Data: snappy.Encode(nil, aboveNetworkLimit), Topic: &blockTopic}
+	require.Equal(t, expectedID(n.MessageDomainInvalidSnappy, blockTopic, msg.Data), s.msgId(msg))
+
+	aggregateTopic := "/eth2/6c7a2141/beacon_aggregate_and_proof/ssz_snappy"
+	bound := gossip.MaxUncompressedSize(gossip.TopicNameBeaconAggregateAndProof, &clparams.MainnetBeaconConfig, &n)
+	require.Less(t, bound, n.GossipMaxSize)
+	fitting := make([]byte, bound)
+	msg = &pubsubpb.Message{Data: snappy.Encode(nil, fitting), Topic: &aggregateTopic}
+	require.Equal(t, expectedID(n.MessageDomainValidSnappy, aggregateTopic, fitting), s.msgId(msg))
+	msg = &pubsubpb.Message{Data: snappy.Encode(nil, make([]byte, bound+1)), Topic: &aggregateTopic}
+	require.Equal(t, expectedID(n.MessageDomainInvalidSnappy, aggregateTopic, msg.Data), s.msgId(msg))
 }
