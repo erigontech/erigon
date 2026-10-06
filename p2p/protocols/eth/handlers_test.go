@@ -679,12 +679,10 @@ type fakeBalGetter struct {
 	onGet  func()
 }
 
-func (f *fakeBalGetter) GetCachedBlockAccessListBytes(hash common.Hash) ([]byte, bool) {
-	bal, ok := f.cached[hash]
-	return bal, ok
-}
-
 func (f *fakeBalGetter) GetBlockAccessListBytes(_ context.Context, _ *chain.Config, _ kv.TemporalTx, hash common.Hash, _ uint64, beforeReplay func() error) ([]byte, error) {
+	if bal, ok := f.cached[hash]; ok {
+		return bal, nil
+	}
 	if beforeReplay != nil {
 		if err := beforeReplay(); err != nil {
 			return nil, err

@@ -32,10 +32,6 @@ import (
 
 type balGetterFunc func(context.Context, *chain.Config, kv.TemporalTx, common.Hash, uint64) ([]byte, error)
 
-func (f balGetterFunc) GetCachedBlockAccessListBytes(common.Hash) ([]byte, bool) {
-	return nil, false
-}
-
 func (f balGetterFunc) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, hash common.Hash, number uint64, beforeReplay func() error) ([]byte, error) {
 	if beforeReplay != nil {
 		if err := beforeReplay(); err != nil {
@@ -50,9 +46,11 @@ type cachedBALGetter struct {
 	cached map[common.Hash][]byte
 }
 
-func (g cachedBALGetter) GetCachedBlockAccessListBytes(hash common.Hash) ([]byte, bool) {
-	bal, ok := g.cached[hash]
-	return bal, ok
+func (g cachedBALGetter) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, hash common.Hash, number uint64, beforeReplay func() error) ([]byte, error) {
+	if bal, ok := g.cached[hash]; ok {
+		return bal, nil
+	}
+	return g.balGetterFunc.GetBlockAccessListBytes(ctx, cfg, tx, hash, number, beforeReplay)
 }
 
 func (m *balHeaderNumberReader) TxnumReader() rawdbv3.TxNumsReader {
@@ -196,10 +194,14 @@ func TestGetBlockAccessLists71_PreflightBypassesReplayBudget(t *testing.T) {
 				cs := newBALTestClient(t)
 				reader := balPreflightReader{FullBlockReader: cs.blockReader, header: tc.header}
 				cs.balGenerator = bal.NewRegenerator(reader, nil, log.New())
-				query := eth.GetBlockAccessListsPacket{{2}}
-				unavailable := []rlp.RawValue{{0x80}}
+				query := make(eth.GetBlockAccessListsPacket, eth.MaxBlockAccessListsRegenerate+1)
+				unavailable := make([]rlp.RawValue, len(query))
+				for i := range query {
+					query[i] = common.Hash{2}
+					unavailable[i] = rlp.RawValue{0x80}
+				}
 
-				require.Equal(t, unavailable, requireBALs(t, cs, query))
+				require.Equal(t, unavailable, requireBALs(t, cs, query), "rejected preflight must not consume the per-request replay count")
 				require.True(t, cs.balReplayLimiter.Allow(), "rejected preflight must leave the replay budget available")
 				require.Equal(t, unavailable, requireBALs(t, cs, query), "preflight must still answer while replay is throttled")
 			})

@@ -72,11 +72,6 @@ func NewRegenerator(blockReader dbservices.FullBlockReader, engine rules.Engine,
 	}
 }
 
-// GetCachedBlockAccessListBytes returns shared, read-only RLP bytes without replay.
-func (g *Regenerator) GetCachedBlockAccessListBytes(blockHash common.Hash) ([]byte, bool) {
-	return g.cache.Get(blockHash)
-}
-
 // GetBlockAccessListBytes returns the canonical RLP-encoded Block Access List
 // for the given block, regenerating it via re-execution against historical
 // state. Returns (nil, nil) for blocks without a BAL commitment in the header

@@ -479,6 +479,8 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetBlockAccessListsMsg:
+			// eth/71 (EIP-8159) — inbound BAL request. Mirrors GetBlockBodiesMsg:
+			// read-only request, no permit change, forward to subscribers.
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}

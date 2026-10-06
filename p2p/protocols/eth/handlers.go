@@ -185,7 +185,6 @@ var notAvailableSentinel = rlp.RawValue{0x80}
 // when no BAL applies (pre-Amsterdam or unknown block) and an error when it fails
 // (e.g. the required state history is pruned).
 type BlockAccessListGetter interface {
-	GetCachedBlockAccessListBytes(blockHash common.Hash) ([]byte, bool)
 	GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64, beforeReplay func() error) ([]byte, error)
 }
 
@@ -215,6 +214,18 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db k
 	var bytes int
 	var regenerations int
 	bals := make([]rlp.RawValue, 0, len(query))
+	admitReplay := func() error {
+		if regenerations >= MaxBlockAccessListsRegenerate {
+			return ErrBlockAccessListThrottled
+		}
+		if beforeReplay != nil {
+			if err := beforeReplay(); err != nil {
+				return err
+			}
+		}
+		regenerations++
+		return nil
+	}
 
 	for lookups, hash := range query {
 		if ctx.Err() != nil || bytes >= softResponseLimit || len(bals) >= MaxBlockAccessListsServe ||
@@ -233,15 +244,8 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db k
 		}
 		bal, _ := rawdb.ReadBlockAccessListBytes(db, hash, *number)
 		if len(bal) == 0 && balGetter != nil {
-			bal, _ = balGetter.GetCachedBlockAccessListBytes(hash)
-		}
-		if len(bal) == 0 && balGetter != nil {
-			if regenerations >= MaxBlockAccessListsRegenerate {
-				break
-			}
-			regenerations++
 			var err error
-			bal, err = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, *number, beforeReplay)
+			bal, err = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, *number, admitReplay)
 			if errors.Is(err, ErrBlockAccessListThrottled) ||
 				errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				break

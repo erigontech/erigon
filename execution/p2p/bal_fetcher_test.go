@@ -175,20 +175,18 @@ func TestBALFetcher_EmptyReplyBudgetResetsOnAnsweredPrefix(t *testing.T) {
 
 func TestBALFetcher_ConcurrentBatchesRespectPeerRate(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		limiter := rate.NewLimiter(2, 4)
-		var rejected atomic.Int32
+		var mu sync.Mutex
+		sentAt := make([]time.Time, 0, 6)
 		fetcher, tracker := newTestBALFetcher(t, func(context.Context, []common.Hash, *PeerId) ([]rlp.RawValue, error) {
-			if !limiter.Allow() {
-				rejected.Add(1)
-				return nil, fmt.Errorf("peer request rate exceeded")
-			}
+			mu.Lock()
+			sentAt = append(sentAt, time.Now())
+			mu.Unlock()
 			return []rlp.RawValue{{0xc0}}, nil
 		})
 		peer := PeerIdFromUint64(1)
 		tracker.PeerConnected(peer)
 		results := make([]map[common.Hash]*types.BlockAccessListSidecar, 6)
 		var wg sync.WaitGroup
-		started := time.Now()
 		for i := range results {
 			wg.Go(func() {
 				reqs := []BALRequest{{Hash: common.Hash{byte(i + 1)}, Number: uint64(i + 1), ExpectedHash: empty.BlockAccessListHash}}
@@ -196,11 +194,13 @@ func TestBALFetcher_ConcurrentBatchesRespectPeerRate(t *testing.T) {
 			})
 		}
 		wg.Wait()
-		require.Zero(t, rejected.Load(), "concurrent fetches must share the peer's request budget")
+		require.Len(t, sentAt, len(results))
 		for _, got := range results {
 			require.Len(t, got, 1)
 		}
-		require.GreaterOrEqual(t, time.Since(started), time.Second)
+		for i := 1; i < len(sentAt); i++ {
+			require.GreaterOrEqual(t, sentAt[i].Sub(sentAt[i-1]), balFetchRequestInterval, "concurrent batches must share outgoing request pacing")
+		}
 	})
 }
 
