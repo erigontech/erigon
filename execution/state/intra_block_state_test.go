@@ -1300,10 +1300,44 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 
 func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
 	ibs := NewPooled(NewNoopReader())
+	ibs.SetTxContext(5, 2)
 	ReleasePooled(ibs)
 
 	reader := NewNoopReader()
 	got := NewPooled(reader)
 	defer ReleasePooled(got)
+	require.Same(t, ibs, got, "the release must hand this object to the next call")
 	require.Same(t, reader, got.stateReader)
+	require.Zero(t, got.blockNum)
+	require.Zero(t, got.txIndex)
 }
+
+// An oversized state must not reach the pool, so the next call does not inherit
+// its map capacity.
+func TestReleasePooledDropsAnOversizedState(t *testing.T) {
+	big := NewPooled(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		require.NoError(t, big.AddBalance(accounts.InternAddress(common.BigToAddress(big2(i+1))), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	}
+	ReleasePooled(big)
+
+	fresh := NewPooled(NewNoopReader())
+	defer ReleasePooled(fresh)
+	require.NotSame(t, big, fresh, "an oversized state must not come back from the pool")
+}
+
+// A call that warms slots and then reverts keeps the grown slot maps, so it is
+// not poolable even though nothing is live.
+func TestResetForPoolDropsARevertedWarmUp(t *testing.T) {
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	snap := ibs.PushSnapshot()
+	for i := range maxPooledEntries + 1 {
+		ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(i))))
+	}
+	ibs.RevertToSnapshot(snap, nil)
+	require.Zero(t, ibs.accessList.liveEntries(), "the revert leaves nothing live")
+	require.False(t, ibs.resetForPool(), "the grown slot maps are still retained")
+}
+
+func big2(i int) *big.Int { return big.NewInt(int64(i)) }
