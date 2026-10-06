@@ -402,7 +402,7 @@ func ReleasePooled(ibs *IntraBlockState) {
 // for every later one.
 const (
 	maxPooledStateObjects = 4096
-	maxPooledJournal      = 1 << 16
+	maxPooledJournal      = 64 * 1024
 	maxPooledReads        = 4 * maxPooledStateObjects
 )
 
