@@ -638,53 +638,52 @@ var (
 )
 
 func getVWAddress() *VersionedWrite[*accounts.Account] {
-	return vwPoolAddress.Get().(*VersionedWrite[*accounts.Account])
+	return &VersionedWrite[*accounts.Account]{}
 }
 
 func getVWBalance() *VersionedWrite[uint256.Int] {
-	return vwPoolBalance.Get().(*VersionedWrite[uint256.Int])
+	return &VersionedWrite[uint256.Int]{}
 }
-func getVWNonce() *VersionedWrite[uint64] { return vwPoolNonce.Get().(*VersionedWrite[uint64]) }
+func getVWNonce() *VersionedWrite[uint64] { return &VersionedWrite[uint64]{} }
 func getVWIncarnation() *VersionedWrite[uint64] {
-	return vwPoolIncarnation.Get().(*VersionedWrite[uint64])
+	return &VersionedWrite[uint64]{}
 }
 
 func getVWSelfDestruct() *VersionedWrite[bool] {
-	return vwPoolSelfDestruct.Get().(*VersionedWrite[bool])
+	return &VersionedWrite[bool]{}
 }
 
 func getVWCreateContract() *VersionedWrite[bool] {
-	return vwPoolCreateContract.Get().(*VersionedWrite[bool])
+	return &VersionedWrite[bool]{}
 }
 
 func getVWCode() *VersionedWrite[accounts.Code] {
-	return vwPoolCode.Get().(*VersionedWrite[accounts.Code])
+	return &VersionedWrite[accounts.Code]{}
 }
 
 func getVWCodeHash() *VersionedWrite[accounts.CodeHash] {
-	return vwPoolCodeHash.Get().(*VersionedWrite[accounts.CodeHash])
+	return &VersionedWrite[accounts.CodeHash]{}
 }
-func getVWCodeSize() *VersionedWrite[int] { return vwPoolCodeSize.Get().(*VersionedWrite[int]) }
+func getVWCodeSize() *VersionedWrite[int] { return &VersionedWrite[int]{} }
 func getVWStorage() *VersionedWrite[uint256.Int] {
-	return vwPoolStorage.Get().(*VersionedWrite[uint256.Int])
+	return &VersionedWrite[uint256.Int]{}
 }
 
 func releaseVWAddress(vw *VersionedWrite[*accounts.Account]) {
 	vw.Val = nil // unpin
-	vwPoolAddress.Put(vw)
+	_ = vw
 }
-func releaseVWBalance(vw *VersionedWrite[uint256.Int]) { vwPoolBalance.Put(vw) }
-func releaseVWNonce(vw *VersionedWrite[uint64])        { vwPoolNonce.Put(vw) }
-func releaseVWIncarnation(vw *VersionedWrite[uint64])  { vwPoolIncarnation.Put(vw) }
-func releaseVWSelfDestruct(vw *VersionedWrite[bool])   { vwPoolSelfDestruct.Put(vw) }
-func releaseVWCreateContract(vw *VersionedWrite[bool]) { vwPoolCreateContract.Put(vw) }
+func releaseVWBalance(vw *VersionedWrite[uint256.Int]) {}
+func releaseVWNonce(vw *VersionedWrite[uint64])        {}
+func releaseVWIncarnation(vw *VersionedWrite[uint64])  {}
+func releaseVWSelfDestruct(vw *VersionedWrite[bool])   {}
+func releaseVWCreateContract(vw *VersionedWrite[bool]) {}
 func releaseVWCode(vw *VersionedWrite[accounts.Code]) {
 	vw.Val = accounts.Code{} // unpin bytecode
-	vwPoolCode.Put(vw)
 }
-func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.Put(vw) }
-func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
-func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
+func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) {}
+func releaseVWCodeSize(vw *VersionedWrite[int])               {}
+func releaseVWStorage(vw *VersionedWrite[uint256.Int])        {}
 
 // WriteSet is the cell-pipeline target shape for versionedWrites.
 // Symmetric with ReadSet — see that type for rationale.

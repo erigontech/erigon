@@ -1195,6 +1195,11 @@ func (ibs *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	if ibs.versionMap == nil {
 		return nil, false
 	}
+	// No cell for the address means every probe below misses, so the account
+	// this builds would be thrown away.
+	if ibs.versionMap.load(addr) == nil {
+		return nil, false
+	}
 	// A definitive nil record read means this tx already consumed the account's
 	// absence; synthesizing from cells flushed since would fork the tx's view of
 	// the address mid-execution and reconcile the fork out of validation's
