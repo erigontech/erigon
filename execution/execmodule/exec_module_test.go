@@ -1740,6 +1740,44 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	}
 }
 
+// The payload bodies serve each transaction in its binary (canonical EIP-2718) encoding, so a
+// typed transaction must lose the RLP string header it is stored under.
+func TestGetPayloadBodiesServeBinaryTransactions(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	to := common.Address{1}
+	gasPrice := *uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		commonTx := func() types.CommonTx {
+			return types.CommonTx{Nonce: b.TxNonce(m.Address), To: &to, GasLimit: params.TxGas, Value: *uint256.NewInt(1)}
+		}
+		var txn types.Transaction = &types.LegacyTx{CommonTx: commonTx(), GasPrice: gasPrice}
+		if i == 1 {
+			txn = &types.DynamicFeeTransaction{CommonTx: commonTx(), ChainID: *m.ChainConfig.ChainID, TipCap: gasPrice, FeeCap: gasPrice}
+		}
+		signed, signErr := types.SignTx(txn, *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, signErr)
+		b.AddTx(signed)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	require.Equal(t, byte(types.DynamicFeeTxType), chainPack.Blocks[1].Transactions()[0].Type(),
+		"fixture: the typed branch is only exercised by a typed transaction")
+
+	for _, block := range chainPack.Blocks {
+		want, err := block.Body().BinaryRawBody()
+		require.NoError(t, err)
+		byHash, err := m.ExecModule.GetPayloadBodiesByHash(t.Context(), []common.Hash{block.Hash()})
+		require.NoError(t, err)
+		require.Len(t, byHash, 1)
+		require.Equal(t, want.Transactions, byHash[0].Transactions, "byHash block %d", block.NumberU64())
+		byRange, err := m.ExecModule.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
+		require.NoError(t, err)
+		require.Len(t, byRange, 1)
+		require.Equal(t, want.Transactions, byRange[0].Transactions, "byRange block %d", block.NumberU64())
+	}
+}
+
 func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
 	t.Parallel()
 	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
@@ -2732,6 +2770,71 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 		require.NotNil(t, td)
 		return nil
 	}))
+}
+
+// A block that fails validation while it only exists in the InsertBlocks
+// overlay must not stay readable: purgeBadChain cannot reach it in the DB.
+func TestValidateChainBadBlockIsDroppedFromOverlay(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	badHeader := types.CopyHeader(chainPack.Blocks[0].HeaderNoCopy())
+	badHeader.Root = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	badBlock := types.NewBlockFromNetwork(badHeader, chainPack.Blocks[0].Body(), chainPack.Blocks[0].BlockAccessListSidecar())
+	badHash, badNum := badBlock.Hash(), badBlock.NumberU64()
+
+	insRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	inserted, err := m.ExecModule.GetHeader(ctx, &badHash, &badNum)
+	require.NoError(t, err)
+	require.NotNil(t, inserted, "InsertBlocks must make the header readable through the overlay")
+
+	validation, err := m.ValidateChain(ctx, badBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+
+	afterBad, err := m.ExecModule.GetHeader(ctx, &badHash, &badNum)
+	require.NoError(t, err)
+	require.Nil(t, afterBad, "header of a block that failed validation must not be readable")
+}
+
+// Rejecting a block must not discard valid siblings that are still only in
+// the overlay, waiting for the next forkchoice update.
+func TestValidateChainBadBlockKeepsValidSiblingInOverlay(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	valid := chainPack.Blocks[0]
+	validHash, validNum := valid.Hash(), valid.NumberU64()
+
+	badHeader := types.CopyHeader(valid.HeaderNoCopy())
+	badHeader.Root = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	badBlock := types.NewBlockFromNetwork(badHeader, valid.Body(), valid.BlockAccessListSidecar())
+
+	_, err = m.InsertBlocks(ctx, []*types.Block{valid})
+	require.NoError(t, err)
+	validation, err := m.ValidateChain(ctx, valid.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+	_, err = m.InsertBlocks(ctx, []*types.Block{badBlock})
+	require.NoError(t, err)
+	validation, err = m.ValidateChain(ctx, badBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+
+	kept, err := m.ExecModule.GetHeader(ctx, &validHash, &validNum)
+	require.NoError(t, err)
+	require.NotNil(t, kept, "valid sibling must stay readable after a bad block is rejected")
+
+	result, err := m.ExecModule.UpdateForkChoice(ctx, validHash, validHash, validHash)
+	require.NoError(t, err)
+	m.ExecModule.WaitIdle(ctx)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
 }
 
 // transferGen returns a deterministic per-block tx generator so tests can
