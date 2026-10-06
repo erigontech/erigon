@@ -470,7 +470,9 @@ stage "Phase 4: run soak (iter=$ITER depths=$DEPTHS)"
 SOAK_OUT="/tmp/unwind-fresh-then-soak-$(date -u +%Y-%m-%dT%H%M%S).csv"
 SOAK_DRIVER_LOG="/tmp/unwind-fresh-then-soak-driver.log"
 set -o pipefail
-"$SOAK_CMD" --rpc "$RPC" --log "$LOG" --iter "$ITER" \
+# The soak polls the consumer for liveness. Name it by pid: a bare
+# process-name match also sees the publisher, which outlives any crash.
+ERIGON_PID="$ELPID" "$SOAK_CMD" --rpc "$RPC" --log "$LOG" --iter "$ITER" \
     --depths "$DEPTHS" --regimes "${REGIMES:-}" \
     --snap-dir "$SNAP_DIR" --out "$SOAK_OUT" \
     2>&1 | tee "$SOAK_DRIVER_LOG"

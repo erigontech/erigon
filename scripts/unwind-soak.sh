@@ -368,7 +368,15 @@ inventory_drift_names() {
 # matches any shell whose arguments happen to quote the pattern. It cannot
 # tell this soak's node from another erigon on the box, so it only makes
 # the common case fail fast — the caller's hard timeout is the guarantee.
+# ERIGON_PID is the consumer the caller launched. Without it a bare
+# process-name match answers for any erigon on the box — the publisher
+# runs throughout, so a crashed consumer still looked alive and the
+# dead-node branch below never fired.
 erigon_alive() {
+    if [[ -n "${ERIGON_PID:-}" ]]; then
+        kill -0 "$ERIGON_PID" 2>/dev/null
+        return
+    fi
     pgrep -x erigon >/dev/null 2>&1
 }
 
@@ -475,12 +483,17 @@ scenario_test() {
     # download advance credits its own duration back. A download that
     # stops advancing stops earning credit and the budget applies again.
     local dl_last=-1 dl_credit=0 dl_advancing=0
+    local last_rpc_gap_report=0
     while true; do
         sleep 5
         post_head_hex=$(eth_block_number)
         if [[ "$post_head_hex" == "null" || -z "$post_head_hex" ]]; then
             # A crashed erigon answers no RPC, so this branch would poll
             # forever — the hard timeout below is unreachable from here.
+            if [[ $(( $(date +%s) - last_rpc_gap_report )) -ge 30 ]]; then
+                echo "  t+$(( $(date +%s) - start_ts ))s RPC unanswered (process $( erigon_alive && echo up || echo gone ))"
+                last_rpc_gap_report=$(date +%s)
+            fi
             if ! erigon_alive; then
                 capture_diag "$iter" "$phase" "dead-node" \
                     "erigon process gone while polling for recovery"
