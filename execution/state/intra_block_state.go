@@ -1343,9 +1343,6 @@ func (ibs *IntraBlockState) existsUnvalidated(addr accounts.Address) (bool, erro
 	if vw, ok := ibs.versionedWrites.GetAddress(addr); ok {
 		return vw.Val != nil, nil
 	}
-	if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
-		return true, nil
-	}
 	if acc, ok := ibs.committedBase[addr]; ok {
 		return acc != nil, nil
 	}
