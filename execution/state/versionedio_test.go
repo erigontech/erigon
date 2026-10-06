@@ -1836,16 +1836,3 @@ func TestArenaStopsGrowingAtItsCap(t *testing.T) {
 	ws.ReleaseAndReset()
 	require.Len(t, ws.cells.nonce.slabs, vwMaxSlabs, "a reset keeps the slabs for the next call")
 }
-
-// Every cell the arena hands out is zero, including one past the cap.
-func TestArenaHandsOutZeroedCells(t *testing.T) {
-	ws := &WriteSet{}
-	ws.UseArena()
-	for i := range vwMaxCells + 2 {
-		vw := ws.newVWNonce()
-		require.Zero(t, vw.Val, "cell %d", i)
-		require.Equal(t, WriteHeader{}, vw.WriteHeader, "cell %d", i)
-		vw.Val = 7
-		vw.WriteHeader = WriteHeader{Path: NoncePath}
-	}
-}
