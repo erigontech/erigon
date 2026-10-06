@@ -2891,9 +2891,11 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 		return fmt.Errorf("%w: block conflicts with a previously validated proposal", errPublishedBlockValidation)
 	}
 	// Broadcast the block and its blobs
+	publishStart := time.Now()
 	if err := a.publishGossip(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
 		return err
 	}
+	blockPublished := time.Since(publishStart)
 	if onBlockPublished != nil {
 		onBlockPublished()
 	}
@@ -2930,6 +2932,15 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 			}
 		}
 	}
+	publishFields := []any{
+		"slot", blk.Block.Slot,
+		"block", blockPublished.Round(time.Millisecond),
+		"total", time.Since(publishStart).Round(time.Millisecond),
+	}
+	if a.ethClock != nil {
+		publishFields = append(publishFields, "sinceSlotStart", time.Since(a.ethClock.GetSlotTime(blk.Block.Slot)).Round(time.Millisecond))
+	}
+	log.Info("BlockPublishing: published", publishFields...)
 
 	if blk.Version() >= clparams.GloasVersion {
 		if err := a.validateSelfBuildPayloadAvailable(blk); err != nil {
