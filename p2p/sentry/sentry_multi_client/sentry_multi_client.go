@@ -34,7 +34,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -276,22 +275,18 @@ type balReplayRequest struct {
 	started bool
 }
 
-func (r *balReplayRequest) GetCachedBlockAccessListBytes(hash common.Hash) ([]byte, bool) {
-	return r.client.balGenerator.GetCachedBlockAccessListBytes(hash)
-}
-
-func (r *balReplayRequest) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, hash common.Hash, number uint64) ([]byte, error) {
+func (r *balReplayRequest) acquire() error {
 	if !r.started {
 		if !r.client.balReplayMu.TryLock() {
-			return nil, eth.ErrBlockAccessListThrottled
+			return eth.ErrBlockAccessListThrottled
 		}
 		if !r.client.balReplayLimiter.Allow() {
 			r.client.balReplayMu.Unlock()
-			return nil, eth.ErrBlockAccessListThrottled
+			return eth.ErrBlockAccessListThrottled
 		}
 		r.started = true
 	}
-	return r.client.balGenerator.GetBlockAccessListBytes(ctx, cfg, tx, hash, number)
+	return nil
 }
 
 func (r *balReplayRequest) close() {
@@ -318,17 +313,11 @@ func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryp
 		return err
 	}
 	defer tx.Rollback()
-	var getter eth.BlockAccessListGetter
-	if cs.balGenerator != nil {
-		// Only requests that need replay consume the shared budget. Stored and
-		// cached BALs can still be served while replay is throttled.
-		replay := &balReplayRequest{client: cs}
-		// Hold the slot until work returns, even if cancellation is slow. A
-		// deadline alone must not allow another sentry to start a second replay.
-		defer replay.close()
-		getter = replay
-	}
-	response := eth.AnswerGetBlockAccessListsQuery(queryCtx, cs.ChainConfig, tx, query.GetBlockAccessListsPacket, cs.blockReader, getter)
+	replay := &balReplayRequest{client: cs}
+	// Hold the slot until work returns, even if cancellation is slow. A
+	// deadline alone must not allow another sentry to start a second replay.
+	defer replay.close()
+	response := eth.AnswerGetBlockAccessListsQuery(queryCtx, cs.ChainConfig, tx, query.GetBlockAccessListsPacket, cs.blockReader, cs.balGenerator, replay.acquire)
 	// Encode before releasing the tx: stored BALs are mdbx-backed slices only
 	// valid while the tx is open.
 	b, err := rlp.EncodeToBytes(&eth.BlockAccessListsPacket66{

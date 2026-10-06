@@ -186,7 +186,7 @@ var notAvailableSentinel = rlp.RawValue{0x80}
 // (e.g. the required state history is pruned).
 type BlockAccessListGetter interface {
 	GetCachedBlockAccessListBytes(blockHash common.Hash) ([]byte, bool)
-	GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) ([]byte, error)
+	GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64, beforeReplay func() error) ([]byte, error)
 }
 
 // ErrBlockAccessListThrottled reports that the replay budget is unavailable.
@@ -211,7 +211,7 @@ var ErrBlockAccessListThrottled = errors.New("block access list replay throttled
 // limit is reached, the response is truncated (not padded with 0x80) — the peer
 // sees a shorter array than requested, same convention as the BlockBodies handler.
 // Cancellation or throttling also truncates the response.
-func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db kv.TemporalTx, query GetBlockAccessListsPacket, blockReader dbservices.HeaderReader, balGetter BlockAccessListGetter) []rlp.RawValue {
+func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db kv.TemporalTx, query GetBlockAccessListsPacket, blockReader dbservices.HeaderReader, balGetter BlockAccessListGetter, beforeReplay func() error) []rlp.RawValue {
 	var bytes int
 	var regenerations int
 	bals := make([]rlp.RawValue, 0, len(query))
@@ -241,7 +241,7 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db k
 			}
 			regenerations++
 			var err error
-			bal, err = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, *number)
+			bal, err = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, *number, beforeReplay)
 			if errors.Is(err, ErrBlockAccessListThrottled) ||
 				errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				break

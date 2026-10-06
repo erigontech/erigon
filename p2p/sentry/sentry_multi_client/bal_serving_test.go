@@ -17,12 +17,15 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 )
@@ -33,7 +36,12 @@ func (f balGetterFunc) GetCachedBlockAccessListBytes(common.Hash) ([]byte, bool)
 	return nil, false
 }
 
-func (f balGetterFunc) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, hash common.Hash, number uint64) ([]byte, error) {
+func (f balGetterFunc) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, hash common.Hash, number uint64, beforeReplay func() error) ([]byte, error) {
+	if beforeReplay != nil {
+		if err := beforeReplay(); err != nil {
+			return nil, err
+		}
+	}
 	return f(ctx, cfg, tx, hash, number)
 }
 
@@ -159,6 +167,44 @@ func TestGetBlockAccessLists71_ReplayRateLimit(t *testing.T) {
 		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}}))
 		require.Equal(t, 3, calls, "replay must resume after the budget refills")
 	})
+}
+
+type balPreflightReader struct {
+	dbservices.FullBlockReader
+	header *types.Header
+}
+
+func (r balPreflightReader) Header(context.Context, kv.Getter, common.Hash, uint64) (*types.Header, error) {
+	return r.header, nil
+}
+
+func (r balPreflightReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
+	return common.Hash{99}, true, nil
+}
+
+func TestGetBlockAccessLists71_PreflightBypassesReplayBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		header *types.Header
+	}{
+		{name: "missing header"},
+		{name: "pre-Amsterdam", header: &types.Header{}},
+		{name: "non-canonical", header: &types.Header{BlockAccessListHash: &common.Hash{8}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				cs := newBALTestClient(t)
+				reader := balPreflightReader{FullBlockReader: cs.blockReader, header: tc.header}
+				cs.balGenerator = bal.NewRegenerator(reader, nil, log.New())
+				query := eth.GetBlockAccessListsPacket{{2}}
+				unavailable := []rlp.RawValue{{0x80}}
+
+				require.Equal(t, unavailable, requireBALs(t, cs, query))
+				require.True(t, cs.balReplayLimiter.Allow(), "rejected preflight must leave the replay budget available")
+				require.Equal(t, unavailable, requireBALs(t, cs, query), "preflight must still answer while replay is throttled")
+			})
+		})
+	}
 }
 
 func TestGetBlockAccessLists71_CompletedReplayAfterDeadline(t *testing.T) {

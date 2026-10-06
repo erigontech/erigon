@@ -605,7 +605,7 @@ func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T)
 	}
 
 	query := GetBlockAccessListsPacket{hashKnownWithBAL, hashUnknown, hashKnownNoBAL}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil)
+	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil, nil)
 
 	if len(result) != 3 {
 		t.Fatalf("result len: have %d, want 3", len(result))
@@ -657,7 +657,7 @@ func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
 		query = append(query, h)
 	}
 
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil)
+	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil, nil)
 	if len(result) < 1 || len(result) >= len(query) {
 		t.Fatalf("expected truncation: have %d entries, want 1..%d", len(result), len(query)-1)
 	}
@@ -684,7 +684,12 @@ func (f *fakeBalGetter) GetCachedBlockAccessListBytes(hash common.Hash) ([]byte,
 	return bal, ok
 }
 
-func (f *fakeBalGetter) GetBlockAccessListBytes(_ context.Context, _ *chain.Config, _ kv.TemporalTx, hash common.Hash, _ uint64) ([]byte, error) {
+func (f *fakeBalGetter) GetBlockAccessListBytes(_ context.Context, _ *chain.Config, _ kv.TemporalTx, hash common.Hash, _ uint64, beforeReplay func() error) ([]byte, error) {
+	if beforeReplay != nil {
+		if err := beforeReplay(); err != nil {
+			return nil, err
+		}
+	}
 	f.calls[hash]++
 	if f.onGet != nil {
 		f.onGet()
@@ -717,7 +722,7 @@ func TestAnswerGetBlockAccessListsQuery_CancelledRegeneration(t *testing.T) {
 	}
 	query := GetBlockAccessListsPacket{storedHash, prunedHash, nextHash}
 	reader := balHeaderReader{storedHash: 1, prunedHash: 2, nextHash: 3}
-	result := AnswerGetBlockAccessListsQuery(ctx, chain.AllProtocolChanges, tx, query, reader, getter)
+	result := AnswerGetBlockAccessListsQuery(ctx, chain.AllProtocolChanges, tx, query, reader, getter, nil)
 	if len(result) != 1 || !bytes.Equal(result[0], storedBAL) {
 		t.Errorf("cancelled replay must return only the completed prefix: got %x", result)
 	}
@@ -746,7 +751,7 @@ func TestAnswerGetBlockAccessListsQuery_CancelledLookup(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	result := AnswerGetBlockAccessListsQuery(ctx, chain.AllProtocolChanges, tx,
-		GetBlockAccessListsPacket{{1}}, cancellingBALHeaderReader{cancel: cancel}, nil)
+		GetBlockAccessListsPacket{{1}}, cancellingBALHeaderReader{cancel: cancel}, nil, nil)
 	if len(result) != 0 {
 		t.Errorf("cancelled lookup must leave the block retryable, got %x", result)
 	}
@@ -790,7 +795,7 @@ func TestAnswerGetBlockAccessListsQuery_GeneratorFallback(t *testing.T) {
 		calls: map[common.Hash]int{},
 	}
 	query := GetBlockAccessListsPacket{hashStored, hashRegen, hashRegenEmpty, hashRegenErr, hashUnknown}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
+	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter, nil)
 	if len(result) != 5 {
 		t.Fatalf("result len: have %d, want 5", len(result))
 	}
@@ -864,7 +869,7 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 		getter.bals[h] = regenBal
 		query = append(query, h)
 	}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
+	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter, nil)
 	wantLen := storedCount + cachedCount + MaxBlockAccessListsRegenerate
 	if len(result) != wantLen {
 		t.Fatalf("result len: have %d, want %d (truncated at the regeneration budget)", len(result), wantLen)
