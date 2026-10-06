@@ -152,6 +152,42 @@ func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
 	assert.False(t, clean, "a read-set hit is never clean: it carries no dirty value to keep on revert")
 }
 
+// On a dirty address the read-once fast path must return what versionedReadCore
+// returns for a slot the tx has not written, while an own write still wins.
+func TestVersionedRead_B_DirtyAddressStorageReadReturnsCoreTuple(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xb6})
+	ibs, mvhm := warmReadIBS(t, addr)
+
+	committed, mapped, written := accounts.InternKey([32]byte{0x01}), accounts.InternKey([32]byte{0x02}), accounts.InternKey([32]byte{0x03})
+	mvhm.WriteStorage(addr, mapped, Version{TxIndex: 1}, *uint256.NewInt(99), true)
+	for _, key := range []accounts.StorageKey{committed, mapped} {
+		_, err := ibs.GetState(addr, key)
+		require.NoError(t, err)
+	}
+	require.NoError(t, ibs.SetState(addr, written, *uint256.NewInt(7)))
+	require.False(t, ibs.warmReadable(addr), "the storage write makes the address dirty")
+
+	for _, key := range []accounts.StorageKey{committed, mapped} {
+		var r readPathResult
+		versionedReadCore(ibs, addr, StoragePath, key, false, false, &r)
+		require.Equal(t, outcomeReadSetHit, r.outcome)
+		want, _ := ibs.versionedReads.GetStorage(addr, key)
+
+		v, source, version, clean, err := readStateForSet(ibs, addr, key)
+		require.NoError(t, err)
+		assert.Equal(t, want.Val, v)
+		assert.Equal(t, r.source, source)
+		assert.Equal(t, r.version, version)
+		assert.False(t, clean)
+	}
+
+	v, source, _, _, err := readStateForSet(ibs, addr, written)
+	require.NoError(t, err)
+	assert.EqualValues(t, 7, v.Uint64(), "an own write still wins")
+	assert.Equal(t, WriteSetRead, source)
+}
+
 // A dirty address serves the recorded read of a field it has not written, as a
 // clean one does: a later estimate in the version map is left to validation.
 func TestVersionedRead_B_DirtyAddressServesRecordedRead(t *testing.T) {
