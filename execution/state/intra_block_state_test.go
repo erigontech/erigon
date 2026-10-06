@@ -1230,3 +1230,80 @@ func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
 	require.Same(t, &stored[0][0], &stored[1][0], "an equal code reuses the previous one")
 	require.NotSame(t, &stored[0][0], &stored[3][0], "a different code in between replaces the memo")
 }
+
+// A pooled IntraBlockState serves call after call: nothing of one call may be
+// visible to the next, while the read set keeps its maps.
+func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	startNoMaterializeTx(ibs, vm, 0)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeUnspecified))
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(9)))
+	ibs.AddLog(&types.Log{Address: addr.Value()})
+	ibs.AddAddressToAccessList(addr)
+	ibs.readSelfDestructMemo(addr)
+	require.NotEmpty(t, ibs.sdProbe)
+	require.NotNil(t, ibs.versionedReads.address)
+	ibs.SetTxContext(5, 2)
+	ibs.SetVersion(3)
+	ibs.eip8246, ibs.eip161, ibs.isAura = true, true, true
+
+	require.True(t, ibs.resetForPool())
+	require.Nil(t, ibs.stateReader)
+	require.Zero(t, ibs.blockNum)
+	require.Zero(t, ibs.version)
+	require.False(t, ibs.eip8246 || ibs.eip161 || ibs.isAura, "fork flags are the next call's to set")
+	require.Empty(t, ibs.sdProbe)
+	require.NotNil(t, ibs.versionedReads.address, "the read set keeps its maps")
+	require.Empty(t, ibs.versionedReads.address)
+
+	ibs.stateReader = NewNoopReader()
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
+	value, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.True(t, value.IsZero())
+	require.Empty(t, ibs.GetRawLogs(0))
+	require.False(t, ibs.AddressInAccessList(addr))
+}
+
+// Maps never shrink, so a call that grew the state past the bound is not pooled.
+func TestResetForPoolDropsAnOversizedState(t *testing.T) {
+	ibs := New(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	}
+	require.False(t, ibs.resetForPool())
+
+	reads := New(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		reads.versionedReads.SetCodeSize(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), VersionedRead[int]{})
+	}
+	require.False(t, reads.resetForPool(), "any read-set map counts toward the bound")
+
+	warm := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	for i := range maxPooledEntries + 1 {
+		warm.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))))
+	}
+	require.False(t, warm.resetForPool(), "access-list slots count toward the bound")
+
+	absent := New(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		_, err := absent.GetBalance(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1)))))
+		require.NoError(t, err)
+	}
+	require.False(t, absent.resetForPool(), "absent-account memos count toward the bound")
+}
+
+func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
+	ibs := NewPooled(NewNoopReader())
+	ReleasePooled(ibs)
+
+	reader := NewNoopReader()
+	got := NewPooled(reader)
+	defer ReleasePooled(got)
+	require.Same(t, reader, got.stateReader)
+}
