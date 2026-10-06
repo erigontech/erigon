@@ -1367,6 +1367,11 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			func(retryCtx context.Context) {
 				retryUnverifiedAnchorPayload(retryCtx, cfg)
 			},
+			// Payloads persisted by an earlier run have no EL status in this process. Until the
+			// sweep re-verifies the head's, fork choice sees no FULL variant and cannot advance.
+			func(retryCtx context.Context) {
+				verifyUnverifiedGloasPayloads(retryCtx, cfg)
+			},
 		)
 	}
 	offset := cfg.gloasPayloadRetryOffset.Add(1) - 1
