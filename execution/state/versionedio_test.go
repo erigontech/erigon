@@ -1733,6 +1733,7 @@ func TestReusedReadSetDropsTooManySlotMaps(t *testing.T) {
 	}
 	rs.clearForReuse()
 	require.Empty(t, rs.storage, "too many addresses must drop the outer map")
+}
 
 // synthesizeCreatedAccountBase must allocate nothing when the version map holds
 // no cell for the address: every probe would miss and the account is dropped.
@@ -1751,6 +1752,7 @@ func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {
 		}
 	})
 	require.Zero(t, allocs)
+}
 
 // An arena-backed write set hands out distinct cells and keeps its slabs across
 // resets, so a reused set allocates nothing after the first call.
