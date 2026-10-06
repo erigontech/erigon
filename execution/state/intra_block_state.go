@@ -1600,6 +1600,19 @@ func printCode(c []byte) (int, string) {
 //
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
+// nonCreateCodeHashFloor resolves the pre-tx code-hash floor, except for a
+// newly created object whose floor SetCode never consults. It reports the hash,
+// whether a committed fallback is still needed, and whether the hash is set.
+func nonCreateCodeHashFloor(ibs *IntraBlockState, addr accounts.Address, so *stateObject) (accounts.CodeHash, bool, bool) {
+	if so.newlyCreated {
+		return accounts.CodeHash{}, false, false
+	}
+	if ch, res, ok := ibs.versionMap.ReadCodeHash(addr, ibs.txIndex); ok && res.Status() == MVReadResultDone {
+		return ch, false, true
+	}
+	return accounts.CodeHash{}, true, false
+}
+
 func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason tracing.CodeChangeReason) error {
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 		lenc, cs := printCode(code)
@@ -1630,9 +1643,12 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		if ch, chErr := ibs.GetCodeHash(addr); chErr == nil {
 			baseCodeHash = ch
 		}
-		if ch, res, ok := ibs.versionMap.ReadCodeHash(addr, ibs.txIndex); ok && res.Status() == MVReadResultDone {
+		// matchesOriginal below ignores origHash for a newly created object, so
+		// resolving the pre-tx floor would be dead work.
+		ch, needCommitted, ok := nonCreateCodeHashFloor(ibs, addr, stateObject)
+		if ok {
 			origHash = ch
-		} else if ibs.noMaterialize {
+		} else if needCommitted && ibs.noMaterialize {
 			// The rebuilt transient's original reflects this tx's own code cell
 			// (readAccount folds CodeHashPath), not the tx-start value. With no
 			// prior-tx floor entry the cumulative baseline is the committed hash.
