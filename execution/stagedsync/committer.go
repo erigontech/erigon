@@ -21,6 +21,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/exec"
 )
 
 // commitmentResult is the outcome of a single commitment computation.
@@ -89,6 +90,9 @@ type commitmentCalculator struct {
 	// updates to the commitment context and rotates this one in; the context
 	// drains its buffer synchronously, so by the next rotation it is idle.
 	spare *commitment.Updates
+
+	prefetch *commitment.Warmuper
+	balBlock bool
 
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
 	// instead of reallocated — reuse keeps the arena's grown slabs and ext chunks.
@@ -304,13 +308,7 @@ func newCommitmentCalculator(
 	}
 	ok := false
 	defer kv.RollbackUnless(&ok, roTx)
-	// roTx lives for the calculator's lifetime — rolled back in Stop().
-	// Safe across collate/prune cycles because the calculator
-	// is constructed in pe.exec() and its `defer Stop()` runs *before* the
-	// stageloop's rwTx.Commit(), and CollateAndPrune only fires
-	// between batches via FCU. So this roTx never spans a prune — by the
-	// time prune holds commitGate.Lock(), Stop() has already rolled this tx
-	// back and the calculator goroutine is gone.
+	// Stop rolls back this transaction before the batch commits or pruning starts.
 
 	// Single asOfStateReader shared by calcState (lazy-load) and compute
 	// methods (fold/unfold sibling reads). Uses GetAsOf for account/storage
@@ -319,7 +317,7 @@ func newCommitmentCalculator(
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
 
 	ok = true
-	return &commitmentCalculator{
+	cc := &commitmentCalculator{
 		doms:                 doms,
 		db:                   db,
 		chainConfig:          chainConfig,
@@ -341,7 +339,15 @@ func newCommitmentCalculator(
 		perBlockFrom:         perBlockFrom,
 		done:                 make(chan struct{}),
 		processedWake:        make(chan struct{}),
-	}, nil
+	}
+	if dbg.BALCommitmentWarmupReaders() > 0 {
+		cc.state.prefetch = func(plainKey []byte) {
+			if !cc.balBlock {
+				cc.prefetchKey(workCtx, plainKey)
+			}
+		}
+	}
+	return cc, nil
 }
 
 // onCommitProgress is handed to ComputeCommitment so the trie's counters
@@ -381,6 +387,9 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
+	if cc.prefetch != nil {
+		cc.prefetch.CloseAndWait()
+	}
 	// balUpdates isn't closed here: the shared commitment context may still reference it post-exec.
 	if cc.roTx != nil {
 		cc.roTx.Rollback()
@@ -477,6 +486,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// the lazy-load path and never leaks into the trie fold path.
 		if !r.writes.IsEmpty() {
 			cc.asOfReader.txNum = r.txNum
+			cc.balBlock = r.rules.IsAmsterdam
 			cc.state.ApplyWrites(r.writes, r.rules.IsAmsterdam)
 		}
 
@@ -795,6 +805,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // root is accepted. Used by BAL compute-ahead, which supplies its own
 // balState-derived updates rather than cc.state.
 func (cc *commitmentCalculator) computeRootFromUpdates(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader) ([]byte, func() error, error) {
+	cc.finishPrefetch()
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(updates)
 	reader.txNum = t.lastTxNum + 1
@@ -895,6 +906,22 @@ type computeMode struct {
 	publishRoot bool   // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
 }
 
+func (cc *commitmentCalculator) prefetchKey(ctx context.Context, plainKey []byte) {
+	if cc.prefetch == nil {
+		cc.prefetch = exec.StartBranchPrefetch(ctx, cc.db, dbg.TrieBALWarmupers)
+	}
+	cc.prefetch.WarmKey(commitment.KeyToHexNibbleHash(plainKey), 0, 0)
+}
+
+func (cc *commitmentCalculator) finishPrefetch() {
+	if cc.prefetch == nil {
+		return
+	}
+	_ = cc.prefetch.WaitBufferFree(0)
+	cc.prefetch.CloseAndWait()
+	cc.prefetch = nil
+}
+
 // handOffUpdates returns the filled buffer for the caller to compute against and
 // rotates the spare into cc.updates.
 func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
@@ -914,6 +941,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		})
 		return
 	}
+	cc.finishPrefetch()
 	cc.state.FlushToUpdates(cc.updates)
 	if !m.midBlock {
 		cc.state.ResetBlockFlags()
@@ -1188,3 +1216,7 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 	}
 	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
 }
+
+// BindsWorkerTx: CloneForWorker rebinds both roTx and getter, and state reads
+// resolve at txNum, so a worker view past the caller's cannot change the answer.
+func (r *asOfStateReader) BindsWorkerTx() bool { return true }

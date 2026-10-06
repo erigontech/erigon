@@ -125,7 +125,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, header.Number.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -671,6 +671,11 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, err
 	}
 
+	if err := api.checkPruneBlocks(ctx, tx, blockNr); err != nil {
+		return nil, err
+	}
+	// Witness generation needs history before the initial system transaction,
+	// not only the pre-state of the first user transaction.
 	if err := api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
 	}
