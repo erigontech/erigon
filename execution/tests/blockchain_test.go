@@ -252,10 +252,10 @@ func testShorterFork(t *testing.T) {
 
 // Tests that given a starting canonical chain of a given size, creating longer
 // forks do take canonical ownership.
-func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
-func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
+func TestLongerForkHeaders(t *testing.T) { testLongerFork(t) }
+func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t) }
 
-func testLongerFork(t *testing.T, full bool) {
+func testLongerFork(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}

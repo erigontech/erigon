@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"math/big"
 	"sync/atomic"
@@ -853,8 +854,8 @@ func TestGenesisRangesRequireContiguousBlocks(t *testing.T) {
 		}},
 		{"trace_filter", func(from, to uint64) (any, error) {
 			req := TraceFilterRequest{
-				FromBlock: new(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(from))),
-				ToBlock:   new(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(to))),
+				FromBlock: new(rpc.BlockNumber(from)),
+				ToBlock:   new(rpc.BlockNumber(to)),
 			}
 			return streamedResult(func(stream *jsonstream.Stream) error {
 				return apis.trace.Filter(ctx, req, new(bool), nil, stream)
@@ -1782,8 +1783,9 @@ func TestBlocksGateAppliesChainHistoryExpiry(t *testing.T) {
 }
 
 // TestLogsByBlockHashNamesThePruneBoundary pins that a filter pinned to a block
-// hash reports pruning rather than a missing block: the range is resolved from the
-// retained header, so the gate speaks before any body is read.
+// hash, in eth_getLogs or trace_filter, reports pruning rather than a missing
+// block: the range is resolved from the retained header, so the gate speaks
+// before any body is read.
 func TestLogsByBlockHashNamesThePruneBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -1810,6 +1812,9 @@ func TestLogsByBlockHashNamesThePruneBoundary(t *testing.T) {
 		}},
 		{"overlay_getLogs", func() (any, error) {
 			return apis.overlay.GetLogs(ctx, filters.FilterCriteria{BlockHash: &hash}, nil, nil)
+		}},
+		{"trace_filter", func() (any, error) {
+			return nil, apis.trace.Filter(ctx, TraceFilterRequest{BlockHash: &hash}, new(bool), nil, jsonstream.New(io.Discard))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

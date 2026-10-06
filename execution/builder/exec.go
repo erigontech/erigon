@@ -221,7 +221,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		ba.Receipts = types.Receipts{}
 	}
 
-	block, err := ba.AssembleBlock(stateReader, ibs, tx, logger)
+	block, err := ba.AssembleBlock(ibs, tx, logger)
 	if err != nil {
 		return err
 	}
