@@ -29,8 +29,22 @@ import (
 
 type balGetterFunc func(context.Context, *chain.Config, kv.TemporalTx, common.Hash, uint64) ([]byte, error)
 
+func (f balGetterFunc) GetCachedBlockAccessListBytes(common.Hash) ([]byte, bool) {
+	return nil, false
+}
+
 func (f balGetterFunc) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, hash common.Hash, number uint64) ([]byte, error) {
 	return f(ctx, cfg, tx, hash, number)
+}
+
+type cachedBALGetter struct {
+	balGetterFunc
+	cached map[common.Hash][]byte
+}
+
+func (g cachedBALGetter) GetCachedBlockAccessListBytes(hash common.Hash) ([]byte, bool) {
+	bal, ok := g.cached[hash]
+	return bal, ok
 }
 
 func (m *balHeaderNumberReader) TxnumReader() rawdbv3.TxNumsReader {
@@ -144,6 +158,44 @@ func TestGetBlockAccessLists71_ReplayRateLimit(t *testing.T) {
 		time.Sleep(time.Second)
 		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}}))
 		require.Equal(t, 3, calls, "replay must resume after the budget refills")
+	})
+}
+
+func TestGetBlockAccessLists71_CompletedReplayAfterDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cs := newBALTestClient(t)
+		calls := 0
+		cs.balGenerator = balGetterFunc(func(ctx context.Context, _ *chain.Config, _ kv.TemporalTx, _ common.Hash, _ uint64) ([]byte, error) {
+			calls++
+			<-ctx.Done()
+			return []byte{0xc0}, nil
+		})
+
+		response := requireBALs(t, cs, eth.GetBlockAccessListsPacket{{1}, {2}, {3}})
+		require.Equal(t, []rlp.RawValue{{0xc0}, {0xc0}}, response, "keep a completed BAL even if the deadline expires before it is returned")
+		require.Equal(t, 1, calls, "a timed-out request must not start another replay")
+	})
+}
+
+func TestGetBlockAccessLists71_CacheBypassesReplayBudget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cs := newBALTestClient(t)
+		calls := 0
+		cs.balGenerator = cachedBALGetter{
+			cached: map[common.Hash][]byte{{2}: {0xc0}},
+			balGetterFunc: func(context.Context, *chain.Config, kv.TemporalTx, common.Hash, uint64) ([]byte, error) {
+				calls++
+				return []byte{0xc0}, nil
+			},
+		}
+
+		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}}))
+		require.Zero(t, calls, "a cache hit must not start replay")
+		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{3}}))
+		require.Equal(t, 1, calls, "a cache hit must leave the replay budget available")
+
+		require.Equal(t, []rlp.RawValue{{0xc0}}, requireBALs(t, cs, eth.GetBlockAccessListsPacket{{2}, {3}}))
+		require.Equal(t, 1, calls, "cached BALs must remain available while replay is throttled")
 	})
 }
 

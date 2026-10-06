@@ -825,15 +825,13 @@ func TestRunPeer_NewBlockHashesFloodKicksPeer(t *testing.T) {
 	}
 }
 
-func TestRunPeer_BALRequestRateLimit(t *testing.T) {
+func TestRunPeer_BALRequestsForwarded(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		interval  time.Duration
-		forwarded int
-		errCode   p2p.PeerErrorCode
+		name     string
+		interval time.Duration
 	}{
-		{name: "flood", forwarded: 4, errCode: p2p.PeerErrorInvalidMessage},
-		{name: "paced", interval: 500 * time.Millisecond, forwarded: 6, errCode: p2p.PeerErrorStatusUnexpected},
+		{name: "burst"},
+		{name: "paced", interval: 500 * time.Millisecond},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -858,8 +856,8 @@ func TestRunPeer_BALRequestRateLimit(t *testing.T) {
 						time.Sleep(tc.interval)
 					}, func(sentryproto.MessageId) bool { return true }, log.New())
 				require.NotNil(t, peerErr)
-				require.Equal(t, tc.errCode, peerErr.Code)
-				require.Equal(t, tc.forwarded, forwarded)
+				require.Equal(t, 6, forwarded)
+				require.Equal(t, p2p.PeerErrorStatusUnexpected, peerErr.Code)
 			})
 		})
 	}

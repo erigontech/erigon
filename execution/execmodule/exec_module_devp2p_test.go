@@ -416,7 +416,7 @@ func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 				require.NoError(t, rlp.DecodeBytes(sent.Data, &resp))
 				require.Equal(t, requestID, resp.RequestId)
 				require.LessOrEqual(t, len(resp.BlockAccessListsPacket), len(query))
-				require.LessOrEqual(t, len(resp.BlockAccessListsPacket), eth.MaxBlockAccessListsRegenerate)
+				require.LessOrEqual(t, len(resp.BlockAccessListsPacket), eth.MaxBlockAccessListsServe)
 				received = append(received, resp.BlockAccessListsPacket...)
 				// Throttled responses keep their completed prefix. Retry only the
 				// remaining hashes once the shared replay budget can refill.

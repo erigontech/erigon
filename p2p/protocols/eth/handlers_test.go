@@ -672,10 +672,16 @@ func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
 // fakeBalGetter satisfies BlockAccessListGetter for handler tests: returns the
 // configured bytes/error per hash and counts how often each hash is requested.
 type fakeBalGetter struct {
-	bals  map[common.Hash][]byte
-	errs  map[common.Hash]error
-	calls map[common.Hash]int
-	onGet func()
+	bals   map[common.Hash][]byte
+	cached map[common.Hash][]byte
+	errs   map[common.Hash]error
+	calls  map[common.Hash]int
+	onGet  func()
+}
+
+func (f *fakeBalGetter) GetCachedBlockAccessListBytes(hash common.Hash) ([]byte, bool) {
+	bal, ok := f.cached[hash]
+	return bal, ok
 }
 
 func (f *fakeBalGetter) GetBlockAccessListBytes(_ context.Context, _ *chain.Config, _ kv.TemporalTx, hash common.Hash, _ uint64) ([]byte, error) {
@@ -814,10 +820,8 @@ func TestAnswerGetBlockAccessListsQuery_GeneratorFallback(t *testing.T) {
 	}
 }
 
-// TestAnswerGetBlockAccessListsQuery_RegenerationBudget verifies that a single
-// request triggers at most MaxBlockAccessListsRegenerate regenerations — the
-// response is truncated at the budget so the peer re-requests the remainder —
-// and that stored BALs do not consume the budget.
+// The replay cap excludes stored and cached BALs. Responses stop at the next
+// uncached block after MaxBlockAccessListsRegenerate replays.
 func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 	t.Parallel()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -827,15 +831,17 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 	}
 	defer tx.Rollback()
 	const storedCount = 5
+	const cachedCount = 5
 	regenCount := MaxBlockAccessListsRegenerate + 8
 	reader := balHeaderReader{}
 	getter := &fakeBalGetter{
-		bals:  map[common.Hash][]byte{},
-		calls: map[common.Hash]int{},
+		bals:   map[common.Hash][]byte{},
+		cached: map[common.Hash][]byte{},
+		calls:  map[common.Hash]int{},
 	}
 	storedBal := []byte{0xc3, 0x01, 0x02, 0x03}
 	regenBal := []byte{0xc3, 0x04, 0x05, 0x06}
-	query := make(GetBlockAccessListsPacket, 0, storedCount+regenCount)
+	query := make(GetBlockAccessListsPacket, 0, storedCount+cachedCount+regenCount)
 	for i := range storedCount {
 		h := common.Hash{0xaa, byte(i)}
 		num := uint64(100 + i)
@@ -843,6 +849,12 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 		if err := rawdb.WriteBlockAccessListBytes(tx, h, num, storedBal); err != nil {
 			t.Fatalf("WriteBlockAccessListBytes: %v", err)
 		}
+		query = append(query, h)
+	}
+	for i := range cachedCount {
+		h := common.Hash{0xcc, byte(i)}
+		reader[h] = uint64(300 + i)
+		getter.cached[h] = regenBal
 		query = append(query, h)
 	}
 	for i := range regenCount {
@@ -853,7 +865,7 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 		query = append(query, h)
 	}
 	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
-	wantLen := storedCount + MaxBlockAccessListsRegenerate
+	wantLen := storedCount + cachedCount + MaxBlockAccessListsRegenerate
 	if len(result) != wantLen {
 		t.Fatalf("result len: have %d, want %d (truncated at the regeneration budget)", len(result), wantLen)
 	}

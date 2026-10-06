@@ -276,6 +276,10 @@ type balReplayRequest struct {
 	started bool
 }
 
+func (r *balReplayRequest) GetCachedBlockAccessListBytes(hash common.Hash) ([]byte, bool) {
+	return r.client.balGenerator.GetCachedBlockAccessListBytes(hash)
+}
+
 func (r *balReplayRequest) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, hash common.Hash, number uint64) ([]byte, error) {
 	if !r.started {
 		if !r.client.balReplayMu.TryLock() {
@@ -316,8 +320,8 @@ func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryp
 	defer tx.Rollback()
 	var getter eth.BlockAccessListGetter
 	if cs.balGenerator != nil {
-		// Only requests that need replay consume the shared budget. Stored BALs
-		// can still be served while replay is throttled.
+		// Only requests that need replay consume the shared budget. Stored and
+		// cached BALs can still be served while replay is throttled.
 		replay := &balReplayRequest{client: cs}
 		// Hold the slot until work returns, even if cancellation is slow. A
 		// deadline alone must not allow another sentry to start a second replay.

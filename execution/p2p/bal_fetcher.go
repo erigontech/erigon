@@ -115,8 +115,8 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 // terminal failures use len(reqs) to stop retries for that peer.
 type peerFetchFunc func(ctx context.Context, reqs []BALRequest, peerId *PeerId) (bals map[common.Hash]*types.BlockAccessListSidecar, retryFrom int)
 
-// Pace requests across concurrent batches, including retries, to stay within
-// the serving limit of two BAL requests per second.
+// Pace requests across concurrent batches so truncated replies cannot cause
+// a tight retry loop.
 const balFetchRequestInterval = 500 * time.Millisecond
 
 // balFetchShardingThreshold is the request-set size above which the first

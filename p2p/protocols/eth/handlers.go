@@ -180,15 +180,16 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 // empty (e.g. a chain without system contracts)".
 var notAvailableSentinel = rlp.RawValue{0x80}
 
-// BlockAccessListGetter regenerates a Block Access List by re-executing the
-// block against historical state. Returns (nil, nil) when no BAL applies
-// (pre-Amsterdam or unknown block) and an error when regeneration fails
+// BlockAccessListGetter serves cached Block Access Lists or regenerates them by
+// re-executing blocks against historical state. Regeneration returns (nil, nil)
+// when no BAL applies (pre-Amsterdam or unknown block) and an error when it fails
 // (e.g. the required state history is pruned).
 type BlockAccessListGetter interface {
+	GetCachedBlockAccessListBytes(blockHash common.Hash) ([]byte, bool)
 	GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) ([]byte, error)
 }
 
-// ErrBlockAccessListThrottled leaves the unserved suffix available for retry.
+// ErrBlockAccessListThrottled reports that the replay budget is unavailable.
 var ErrBlockAccessListThrottled = errors.New("block access list replay throttled")
 
 // AnswerGetBlockAccessListsQuery looks up the RLP-encoded Block Access List
@@ -209,8 +210,7 @@ var ErrBlockAccessListThrottled = errors.New("block access list replay throttled
 // MaxBlockAccessListsRegenerate caps the re-execution work per request. When a
 // limit is reached, the response is truncated (not padded with 0x80) — the peer
 // sees a shorter array than requested, same convention as the BlockBodies handler.
-// Cancellation or throttling also truncates the response, so interrupted replays
-// remain retryable instead of being reported as unavailable.
+// Cancellation or throttling also truncates the response.
 func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db kv.TemporalTx, query GetBlockAccessListsPacket, blockReader dbservices.HeaderReader, balGetter BlockAccessListGetter) []rlp.RawValue {
 	var bytes int
 	var regenerations int
@@ -233,14 +233,21 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db k
 		}
 		bal, _ := rawdb.ReadBlockAccessListBytes(db, hash, *number)
 		if len(bal) == 0 && balGetter != nil {
+			bal, _ = balGetter.GetCachedBlockAccessListBytes(hash)
+		}
+		if len(bal) == 0 && balGetter != nil {
 			if regenerations >= MaxBlockAccessListsRegenerate {
 				break
 			}
 			regenerations++
 			var err error
 			bal, err = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, *number)
-			if ctx.Err() != nil || errors.Is(err, ErrBlockAccessListThrottled) ||
+			if errors.Is(err, ErrBlockAccessListThrottled) ||
 				errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				break
+			}
+			// Keep a completed BAL if the deadline expired after replay finished.
+			if ctx.Err() != nil && (err != nil || len(bal) == 0) {
 				break
 			}
 		}
