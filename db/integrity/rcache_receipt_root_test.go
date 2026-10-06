@@ -154,6 +154,18 @@ func TestReceiptRootIntegrity_FilesOnlyTip(t *testing.T) {
 	require.NoError(t, integrity.CheckReceiptRootIntegrity(ctx, integrity.SamplerCfg{Seed: 1, SampleRatio: 1}, db, br, chain.AllProtocolChanges, true, log.New()))
 }
 
+func TestReceiptRootIntegrity_GenesisWithoutRCache(t *testing.T) {
+	enableHistoricalRCache(t)
+	ctx := t.Context()
+	logger := log.New()
+
+	db, br := newRCacheChain(t, []int{0, 2, 0}, map[uint64]bool{0: true, 1: true})
+
+	sc := integrity.SamplerCfg{Seed: 1, SampleRatio: 1}
+	require.NoError(t, integrity.CheckRCacheRootAtBlkRange(ctx, sc, db, br, chain.AllProtocolChanges, 0, 3, true, logger))
+	require.NoError(t, integrity.CheckRCacheRootAtBlk(ctx, db, br, chain.AllProtocolChanges, 0, true, logger))
+}
+
 type inexactRCacheDebugTx struct {
 	kv.TemporalDebugTx
 }

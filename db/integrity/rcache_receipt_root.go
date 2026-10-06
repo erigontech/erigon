@@ -175,7 +175,7 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 	blockMinTxNum, entries := fromTxNum, uint64(0)
 
 	verifyAndAdvance := func() error {
-		if want := curMax - blockMinTxNum + 1; entries != want {
+		if want := curMax - blockMinTxNum + 1; blockNum > 0 && entries != want {
 			mismatch := fmt.Errorf("%w: check-rcache-root-at-blk: rcache entries mismatch at block %d: have=%d, want=%d, txNums=[%d,%d]",
 				ErrIntegrity, blockNum, entries, want, blockMinTxNum, curMax)
 			if failFast {
