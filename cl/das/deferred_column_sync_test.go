@@ -25,10 +25,9 @@ import (
 
 func TestDeferredColumnSyncDue(t *testing.T) {
 	slotStart := time.Unix(1000, 0)
-	slot := 12 * time.Second
-	require.False(t, deferredColumnSyncDue(slotStart, slotStart, slot))
-	require.False(t, deferredColumnSyncDue(slotStart.Add(1999*time.Millisecond), slotStart, slot))
-	require.True(t, deferredColumnSyncDue(slotStart.Add(2*time.Second), slotStart, slot))
-	require.True(t, deferredColumnSyncDue(slotStart.Add(time.Minute), slotStart, slot))
-	require.True(t, deferredColumnSyncDue(slotStart.Add(time.Second), slotStart, 6*time.Second))
+	delay := 2 * time.Second
+	require.False(t, deferredColumnSyncDue(slotStart, slotStart, delay))
+	require.False(t, deferredColumnSyncDue(slotStart.Add(1999*time.Millisecond), slotStart, delay))
+	require.True(t, deferredColumnSyncDue(slotStart.Add(2*time.Second), slotStart, delay))
+	require.True(t, deferredColumnSyncDue(slotStart.Add(time.Minute), slotStart, delay))
 }
