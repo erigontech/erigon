@@ -579,10 +579,6 @@ func TestValidateRead_PriorAccountCreation_DetectedViaIncarnationPath(t *testing
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, ""))
 }
 
-// TestValidateRead_SDStaleness_InvalidatesPreDestructRead covers the
-// validateReadImpl SD-staleness branch: a later tx self-destructed the account
-// with no revival, so a version-consistent pre-destruct BalancePath read is
-// stale and must invalidate. Restored after the typed-vio rework.
 func TestValidateRead_SDStaleness_InvalidatesPreDestructRead(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(77)
@@ -590,9 +586,8 @@ func TestValidateRead_SDStaleness_InvalidatesPreDestructRead(t *testing.T) {
 	vm := NewVersionMap(nil)
 	writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
 	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 2}, uint256.Int{}, true)
 
-	// Tx 5 read BalancePath as a MapRead at (0,0) — consistent on Balance alone,
-	// but stale because tx 2's destruct came after.
 	io := NewVersionedIO(5)
 	rs := ReadSet{}
 	rs.SetBalance(addr, VersionedRead[uint256.Int]{
@@ -613,15 +608,15 @@ func TestValidateRead_SDStaleness_RevivalDoesNotResurrectPreDestructRead(t *test
 	addr := getAddress(78)
 
 	vm := NewVersionMap(nil)
-	writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000), true)
+	vm.WriteNonce(addr, Version{TxIndex: 0}, 1, true)
 	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2, Incarnation: 0}, true, true)
-	writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: 3, Incarnation: 0}, uint64(1), true)
+	vm.WriteBalance(addr, Version{TxIndex: 3}, *uint256.NewInt(1_000), true)
 
 	io := NewVersionedIO(5)
 	rs := ReadSet{}
-	rs.SetBalance(addr, VersionedRead[uint256.Int]{
+	rs.SetNonce(addr, VersionedRead[uint64]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0, Incarnation: 0}},
-		Val:        *uint256.NewInt(1_000),
+		Val:        1,
 	})
 	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
 
