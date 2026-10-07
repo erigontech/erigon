@@ -272,3 +272,26 @@ func TestEncoding(t *testing.T) {
 		}
 	}
 }
+
+func TestValidationAtForkActivation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		headHeight uint64
+		headTime   uint64
+		id         ID
+		err        error
+	}{
+		{"exactly on Petersburg, remote Byzantium aware of Petersburg", 7280000, 0, ID{Hash: ChecksumToBytes(0xa00bc324), Next: 7280000}, nil},
+		{"exactly on Petersburg, remote Byzantium unaware of Petersburg", 7280000, 0, ID{Hash: ChecksumToBytes(0xa00bc324), Next: 0}, ErrRemoteStale},
+		{"exactly on Shanghai, remote Gray Glacier aware of Shanghai", 17034870, 1681338455, ID{Hash: ChecksumToBytes(0xf0afd0e3), Next: 1681338455}, nil},
+		{"exactly on Shanghai, remote Gray Glacier unaware of Shanghai", 17034870, 1681338455, ID{Hash: ChecksumToBytes(0xf0afd0e3), Next: 0}, ErrRemoteStale},
+	}
+	heightForks, timeForks := GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
+	for _, tt := range tests {
+		filter := newFilter(heightForks, timeForks, chainspec.Mainnet.GenesisHash, tt.headHeight, tt.headTime)
+		if err := filter(tt.id); !errors.Is(err, tt.err) {
+			t.Errorf("%s: validation error mismatch: have %v, want %v", tt.name, err, tt.err)
+		}
+	}
+}
