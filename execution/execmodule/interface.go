@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -129,6 +130,8 @@ type ExecutionModule interface {
 	// Returns ExecutionStatusSuccess on success or a non-success status on
 	// rejection (e.g. ExecutionStatusTooFarAway).
 	InsertBlocks(ctx context.Context, blocks []*types.Block) (ExecutionStatus, error)
+
+	AddSendersRecovery(blockHash common.Hash, recovery *exec.SendersRecovery)
 
 	// --- Chain validation -------------------------------------------------
 
