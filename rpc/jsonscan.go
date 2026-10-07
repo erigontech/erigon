@@ -22,8 +22,6 @@ package rpc
 import (
 	"bytes"
 	"encoding/binary"
-
-	"github.com/erigontech/erigon/common/bitutil"
 )
 
 // Helpers for finding the bounds of JSON values without parsing them, so a
@@ -217,47 +215,32 @@ func scanJSONLiteral(data []byte, i int, lit string) (int, bool) {
 	return i + len(lit), true
 }
 
+// Invalid UTF-8 counts as string content below: json.Valid accepts it, because
+// the v1 decoder substitutes U+FFFD rather than failing.
+const (
+	lowBits  = 0x0101010101010101
+	highBits = 0x8080808080808080
+)
+
+// wordInteresting reports whether any of the eight bytes in v needs a closer
+// look. The three masks are joined before the test so the loop branches once.
+func wordInteresting(v uint64) bool {
+	q := v ^ ('"' * lowBits)
+	b := v ^ ('\\' * lowBits)
+	return ((v-0x20*lowBits)&^v|(q-lowBits)&^q|(b-lowBits)&^b)&highBits != 0
+}
+
 // scanValidJSONString validates the string whose opening quote is at data[i] and
 // returns the offset just past its closing quote.
-//
-// Almost every string carries no escape, so bytes.IndexByte finds the closing
-// quote and one word-wise pass rejects raw control characters. Invalid UTF-8 is
-// content either way: json.Valid accepts it, because the v1 decoder substitutes
-// U+FFFD rather than failing.
 func scanValidJSONString(data []byte, i int) (int, bool) {
 	i++ // opening quote
-	n := bytes.IndexByte(data[i:], '"')
-	if n < 0 {
-		return len(data), false
-	}
-	// A backslash may escape that quote, so such a string is walked byte-wise.
-	if span := data[i : i+n]; bytes.IndexByte(span, '\\') < 0 {
-		if !controlFree(span) {
-			return i, false
-		}
-		return i + n + 1, true
-	}
-	return scanValidJSONStringEscaped(data, i)
-}
-
-// controlFree reports whether b holds no byte below 0x20, eight bytes per test.
-func controlFree(b []byte) bool {
-	i := 0
-	for ; i+8 <= len(b); i += 8 {
-		if bitutil.HasLess(binary.NativeEndian.Uint64(b[i:]), 0x20) != 0 {
-			return false
-		}
-	}
-	for ; i < len(b); i++ {
-		if b[i] < 0x20 {
-			return false
-		}
-	}
-	return true
-}
-
-func scanValidJSONStringEscaped(data []byte, i int) (int, bool) {
 	for i < len(data) {
+		if i+8 <= len(data) {
+			if !wordInteresting(binary.NativeEndian.Uint64(data[i:])) {
+				i += 8
+				continue
+			}
+		}
 		switch c := data[i]; {
 		case c == '"':
 			return i + 1, true
