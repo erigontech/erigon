@@ -132,6 +132,14 @@ func (ctx *CallContext) lookupSlot(evm *EVM) int {
 	return i
 }
 
+// slotIndex is lookupSlot, reusing the result it recorded for this op.
+func (ctx *CallContext) slotIndex(evm *EVM) int {
+	if ctx.slots.memoGen == ctx.cacheGen {
+		return ctx.slots.memo
+	}
+	return ctx.lookupSlot(evm)
+}
+
 func (f *frameSlots) put(stamp state.ReadStamp, word uint256.Int, key accounts.StorageKey, v uint256.Int) {
 	if f.misses++; f.misses > maxFrameSlotMisses {
 		f.on = false
