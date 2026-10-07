@@ -26,11 +26,12 @@ import (
 )
 
 const (
-	// Fractions of the slot: the wait budget and the point in the slot after which a proposal
-	// must not wait any longer, so the block still reaches attesters in time.
-	gloasPendingParentMaxWaitDivisor    = 8
-	gloasPendingParentSlotCutoffDivisor = 6
-	gloasPendingParentPollInterval      = 100 * time.Millisecond
+	// Fractions of the slot: the wait budget, the point in the slot after which a proposal
+	// must not wait any longer, and the budget of the first retry, which always runs.
+	gloasPendingParentMaxWaitDivisor     = 8
+	gloasPendingParentSlotCutoffDivisor  = 6
+	gloasPendingParentRetryBudgetDivisor = 24
+	gloasPendingParentPollInterval       = 100 * time.Millisecond
 )
 
 // gloasPendingParentDeadline bounds how long a proposal may wait for the parent payload
@@ -46,27 +47,29 @@ func gloasPendingParentDeadline(now, slotStart time.Time, slotDuration time.Dura
 	return deadline
 }
 
-// awaitGloasPayloadSource re-resolves the payload source until it is no longer pending or
-// the deadline passes, returning the last resolved source.
+// awaitGloasPayloadSource re-resolves the payload source until it is no longer pending or the
+// deadline passes. A resolve error keeps the last successfully resolved source.
 func awaitGloasPayloadSource(
 	ctx context.Context,
 	deadline time.Time,
 	interval time.Duration,
+	last executionPayloadSource,
 	resolve func() (executionPayloadSource, error),
-) (executionPayloadSource, error) {
+) executionPayloadSource {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		source, err := resolve()
 		if err != nil {
-			return source, err
+			return last
 		}
+		last = source
 		if source.gloasPath != gloasPayloadPathPending || !time.Now().Before(deadline) {
-			return source, nil
+			return source
 		}
 		select {
 		case <-ctx.Done():
-			return source, ctx.Err()
+			return source
 		case <-ticker.C:
 		}
 	}
@@ -74,20 +77,23 @@ func awaitGloasPayloadSource(
 
 // awaitPendingParentPayload gives the parent's payload a bounded chance to be applied before
 // the proposal falls back to the EMPTY parent. A pending envelope is only re-applied by an
-// explicit retry, so each poll triggers one.
+// explicit retry, so each poll triggers one; the first retry always runs, with its own small
+// budget, even when production starts after the cutoff.
 func (a *ApiHandler) awaitPendingParentPayload(
 	ctx context.Context,
 	baseState *state.CachingBeaconState,
 	baseBlockRoot common.Hash,
 	targetSlot uint64,
 	stateVersion clparams.StateVersion,
-) (executionPayloadSource, error) {
+	current executionPayloadSource,
+) executionPayloadSource {
 	slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
 	deadline := gloasPendingParentDeadline(time.Now(), a.ethClock.GetSlotTime(targetSlot), slotDuration)
-	a.logger.Info("BlockProduction: waiting for parent payload decision", "slot", targetSlot, "head", baseBlockRoot, "budget", time.Until(deadline).Round(time.Millisecond))
-	retryCtx, cancelRetry := context.WithDeadline(ctx, deadline)
+	retryBudget := max(time.Until(deadline), slotDuration/gloasPendingParentRetryBudgetDivisor)
+	retryCtx, cancelRetry := context.WithTimeout(ctx, retryBudget)
 	defer cancelRetry()
-	return awaitGloasPayloadSource(ctx, deadline, gloasPendingParentPollInterval, func() (executionPayloadSource, error) {
+	a.logger.Info("BlockProduction: waiting for parent payload decision", "slot", targetSlot, "head", baseBlockRoot, "budget", time.Until(deadline).Round(time.Millisecond))
+	return awaitGloasPayloadSource(ctx, deadline, gloasPendingParentPollInterval, current, func() (executionPayloadSource, error) {
 		if retryCtx.Err() == nil {
 			a.forkchoiceStore.RetryPendingExecutionPayloadEnvelope(retryCtx, baseBlockRoot)
 		}

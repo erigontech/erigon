@@ -23,6 +23,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+// pendingEnvelopeRetryBudgetDivisor bounds the envelope retry that follows a stored column.
+const pendingEnvelopeRetryBudgetDivisor = 6
+
 const (
 	// pendingGloasSidecarExpiry is how long to keep pending sidecars before expiring (2 slots)
 	pendingGloasSidecarExpiry = 24 * time.Second // ~2 slots at 12s per slot
@@ -44,6 +47,7 @@ var (
 )
 
 type dataColumnSidecarService struct {
+	ctx                  context.Context
 	cfg                  *clparams.BeaconChainConfig
 	ethClock             eth_clock.EthereumClock
 	forkChoice           forkchoice.ForkChoiceStorage
@@ -91,6 +95,7 @@ func NewDataColumnSidecarService(
 		panic(err)
 	}
 	s := &dataColumnSidecarService{
+		ctx:                  ctx,
 		cfg:                  cfg,
 		ethClock:             ethClock,
 		forkChoice:           forkChoice,
@@ -361,13 +366,23 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return fmt.Errorf("failed to write data column sidecar: %w", err)
 	}
 	s.seenGloasSidecar.Add(seenKey, struct{}{})
-	s.forkChoice.RetryPendingExecutionPayloadEnvelope(ctx, blockRoot)
+	s.retryPendingEnvelope(blockRoot)
 
 	if err := s.forkChoice.GetPeerDas().TryScheduleRecover(slot, blockRoot); err != nil {
 		log.Warn("failed to schedule recover", "err", err, "slot", slot, "blockRoot", blockRoot.String())
 	}
 	log.Trace("[dataColumnSidecarService] processed gloas data column sidecar", "slot", slot, "blockRoot", blockRoot.String(), "index", msg.Index)
 	return nil
+}
+
+// retryPendingEnvelope hands a completed root to fork choice off the gossip validator. The
+// store collapses concurrent retries of one root, so the last two columns cannot both apply.
+func (s *dataColumnSidecarService) retryPendingEnvelope(blockRoot common.Hash) {
+	go func() {
+		ctx, cancel := context.WithTimeout(s.ctx, time.Duration(s.cfg.SecondsPerSlot)*time.Second/pendingEnvelopeRetryBudgetDivisor)
+		defer cancel()
+		s.forkChoice.RetryPendingExecutionPayloadEnvelope(ctx, blockRoot)
+	}()
 }
 
 func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64, signedBlockHeader *cltypes.SignedBeaconBlockHeader) (bool, error) {
