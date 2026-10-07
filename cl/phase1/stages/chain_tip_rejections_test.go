@@ -42,7 +42,7 @@ func TestChainTipRejectionsReportsFirstThenPerInterval(t *testing.T) {
 	fields = r.record("process block failed", 103, nil)
 	require.Equal(t, []any{
 		"parent not in fork graph", "count=1 lastSlot=102",
-		"process block failed", "count=2 lastSlot=103 err=again",
+		"process block failed", "count=2 lastSlot=103",
 	}, fields)
 	now = now.Add(time.Second)
 	require.Nil(t, r.record("process block failed", 104, nil))

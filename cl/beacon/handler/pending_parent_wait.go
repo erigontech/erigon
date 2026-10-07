@@ -85,8 +85,12 @@ func (a *ApiHandler) awaitPendingParentPayload(
 	slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
 	deadline := gloasPendingParentDeadline(time.Now(), a.ethClock.GetSlotTime(targetSlot), slotDuration)
 	a.logger.Info("BlockProduction: waiting for parent payload decision", "slot", targetSlot, "head", baseBlockRoot, "budget", time.Until(deadline).Round(time.Millisecond))
+	retryCtx, cancelRetry := context.WithDeadline(ctx, deadline)
+	defer cancelRetry()
 	return awaitGloasPayloadSource(ctx, deadline, gloasPendingParentPollInterval, func() (executionPayloadSource, error) {
-		a.forkchoiceStore.RetryPendingExecutionPayloadEnvelope(ctx, baseBlockRoot)
+		if retryCtx.Err() == nil {
+			a.forkchoiceStore.RetryPendingExecutionPayloadEnvelope(retryCtx, baseBlockRoot)
+		}
 		return a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
 	})
 }

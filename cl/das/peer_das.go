@@ -1949,17 +1949,6 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// check peers count
-			if d.rpc != nil {
-				if peersCount, err := d.rpc.Peers(); err != nil {
-					log.Warn("failed to get peers count", "err", err)
-					continue
-				} else if peersCount == 0 {
-					log.Info("[syncColumnDataWorker] no peers available, skipping sync")
-					continue
-				}
-			}
-
 			now := time.Now()
 			// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
 			blocks := []cltypes.ColumnSyncableSignedBlock{}
@@ -1990,6 +1979,15 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			})
 			if len(blocks) == 0 {
 				continue
+			}
+			if d.rpc != nil {
+				if peersCount, err := d.rpc.Peers(); err != nil {
+					log.Warn("failed to get peers count", "err", err)
+					continue
+				} else if peersCount == 0 {
+					log.Info("[syncColumnDataWorker] no peers available, skipping sync")
+					continue
+				}
 			}
 			log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))
 			syncCtx, cancelSync := context.WithTimeout(ctx, d.slotDuration())

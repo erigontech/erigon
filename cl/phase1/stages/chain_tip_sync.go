@@ -1132,6 +1132,10 @@ func verifyGloasPayload(ctx context.Context, cfg *Cfg, item gloasVerificationIte
 	}
 	status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
 	if err != nil {
+		if ctx.Err() != nil {
+			// A budget expiry is not an EL verdict; recording it would mark the payload unavailable.
+			return false, err
+		}
 		log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
 	}
 	status, retained := recordGloasPayloadRetryResult(
@@ -1146,6 +1150,29 @@ func verifyGloasPayload(ctx context.Context, cfg *Cfg, item gloasVerificationIte
 		log.Warn("[chainTipSync] GLOAS verification sweep found invalid payload", "slot", item.block.Block.Slot, "blockRoot", item.root)
 	}
 	return true, nil
+}
+
+// verifyGloasHeadPayloads verifies the selected head's payload and repeats only while that moves
+// the head, so a head the EL cannot validate yet costs one NewPayload per cycle.
+func verifyGloasHeadPayloads(ctx context.Context, cfg *Cfg) {
+	advanceWhileHeadMoves(ctx, func() (common.Hash, error) {
+		return gloasVerificationHeadRoot(cfg.forkChoice)
+	}, func(stepCtx context.Context) bool {
+		return verifyGloasHeadPayload(stepCtx, cfg)
+	})
+}
+
+func advanceWhileHeadMoves(ctx context.Context, head func() (common.Hash, error), step func(context.Context) bool) {
+	for ctx.Err() == nil {
+		before, err := head()
+		if err != nil || !step(ctx) {
+			return
+		}
+		after, err := head()
+		if err != nil || after == before {
+			return
+		}
+	}
 }
 
 // verifyGloasHeadPayload verifies the selected head's persisted payload when it has no EL status
@@ -1398,8 +1425,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			// head's is re-verified, fork choice sees no FULL variant and cannot advance; each
 			// verified head exposes the next unverified block, so repeat until the head settles.
 			func(retryCtx context.Context) {
-				for retryCtx.Err() == nil && verifyGloasHeadPayload(retryCtx, cfg) {
-				}
+				verifyGloasHeadPayloads(retryCtx, cfg)
 				verifyUnverifiedGloasPayloads(retryCtx, cfg)
 			},
 		)
