@@ -356,6 +356,9 @@ func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 					if x := catchUpAfterImport(args); x != "" {
 						return x
 					}
+					if args.headUnpublished && args.seenSlot < args.targetSlot {
+						return ForkChoice
+					}
 					return ChainTipSync
 				},
 				ActionFunc: forwardSync,
