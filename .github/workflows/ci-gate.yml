@@ -97,11 +97,6 @@ jobs:
     needs: [changes]
     uses: ./.github/workflows/test-bench.yml
 
-  simd:
-    if: needs.changes.outputs.code != 'false'
-    needs: [changes]
-    uses: ./.github/workflows/test-simd.yml
-
   kurtosis:
     if: needs.changes.outputs.code != 'false'
     needs: [changes]
@@ -140,7 +135,6 @@ jobs:
       - docs-site
       - large-files
       - bench
-      - simd
       - kurtosis
       - repro
       - sonar

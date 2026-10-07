@@ -107,6 +107,12 @@ jobs:
         with:
           cache-namespace: lint
 
+      - name: Test the SIMD hex kernel
+        env:
+          GOTOOLCHAIN: go1.27.1
+          GOEXPERIMENT: jsonv2,simd
+        run: go test -count=1 ./common/hexutil/...
+
       # golangci-lint internally trims cache entries unused for 5 days,
       # so the cache is self-cleaning even as we save new versions.
       #
