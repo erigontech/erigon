@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -1015,8 +1016,9 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 
 // A pool submission the node's own validation ignores must not be published: the gossip layer accepts self-published
 // messages without validating them again, so peers would receive (and penalize the node for) what it just ignored.
-// Only an attestation already seen counts as submitted; any other ignored one is reported as a failure.
-func TestPoolAttestationsSkipsPublishForIgnoredAttestation(t *testing.T) {
+// An attestation already seen for the validator and target epoch passed validation earlier, so it is published again:
+// the earlier publish may have failed.
+func TestPoolAttestationsPublishIgnoredOnlyIfAlreadySeen(t *testing.T) {
 	data, err := json.Marshal(&solid.AttestationData{})
 	require.NoError(t, err)
 	single, err := json.Marshal([]*solid.SingleAttestation{{Data: &solid.AttestationData{}}})
@@ -1039,13 +1041,23 @@ func TestPoolAttestationsSkipsPublishForIgnoredAttestation(t *testing.T) {
 			body:    string(single),
 		},
 	}
+	type post struct {
+		processErr error
+		publish    bool
+		publishErr error
+		status     int
+	}
+	alreadySeen := fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationAlreadySeen)
 	outcomes := []struct {
-		name   string
-		err    error
-		status int
+		name  string
+		posts []post
 	}{
-		{name: "already seen", err: fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationAlreadySeen), status: http.StatusOK},
-		{name: "stale head", err: fmt.Errorf("head epoch 0 too far from attestation epoch 2: %w", services.ErrIgnore), status: http.StatusBadRequest},
+		{name: "already seen", posts: []post{{processErr: alreadySeen, publish: true, status: http.StatusOK}}},
+		{name: "stale head", posts: []post{{processErr: fmt.Errorf("head epoch 0 too far from attestation epoch 2: %w", services.ErrIgnore), status: http.StatusBadRequest}}},
+		{name: "retry after failed publish", posts: []post{
+			{publish: true, publishErr: errors.New("no peers"), status: http.StatusBadRequest},
+			{processErr: alreadySeen, publish: true, status: http.StatusOK},
+		}},
 	}
 	for _, tt := range requests {
 		for _, outcome := range outcomes {
@@ -1057,25 +1069,33 @@ func TestPoolAttestationsSkipsPublishForIgnoredAttestation(t *testing.T) {
 
 				ctrl := gomock.NewController(t)
 				attestationService := services_mock.NewMockAttestationService(ctrl)
-				attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(outcome.err).Times(1)
-				handler.attestationService = attestationService
 				mockGossip := gossip_mock.NewMockGossip(ctrl)
-				mockGossip.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+				calls := make([]any, 0, 2*len(outcome.posts))
+				for _, p := range outcome.posts {
+					calls = append(calls, attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(p.processErr))
+					if p.publish {
+						calls = append(calls, mockGossip.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Return(p.publishErr))
+					}
+				}
+				gomock.InOrder(calls...)
+				handler.attestationService = attestationService
 				handler.gossipManager = mockGossip
 
 				server := httptest.NewServer(handler.mux)
 				defer server.Close()
 
-				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+tt.path, strings.NewReader(tt.body))
-				require.NoError(t, err)
-				req.Header.Set("Content-Type", "application/json")
-				if tt.version != "" {
-					req.Header.Set("Eth-Consensus-Version", tt.version)
+				for _, p := range outcome.posts {
+					req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+tt.path, strings.NewReader(tt.body))
+					require.NoError(t, err)
+					req.Header.Set("Content-Type", "application/json")
+					if tt.version != "" {
+						req.Header.Set("Eth-Consensus-Version", tt.version)
+					}
+					resp, err := server.Client().Do(req)
+					require.NoError(t, err)
+					require.NoError(t, resp.Body.Close())
+					require.Equal(t, p.status, resp.StatusCode)
 				}
-				resp, err := server.Client().Do(req)
-				require.NoError(t, err)
-				defer resp.Body.Close()
-				require.Equal(t, outcome.status, resp.StatusCode)
 			})
 		}
 	}
