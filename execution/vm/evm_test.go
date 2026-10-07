@@ -174,6 +174,59 @@ func TestEVMFitsItsSizeClass(t *testing.T) {
 	}
 }
 
+func TestNestedCallsReuseOneFrameContext(t *testing.T) {
+	t.Parallel()
+
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	caller := accounts.InternAddress(common.HexToAddress("0x1000"))
+	callee := accounts.InternAddress(common.HexToAddress("0x2000"))
+	call := []byte{byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(PUSH2), 0x20, 0x00, byte(GAS), byte(CALL), byte(POP)}
+	require.NoError(t, ibs.SetCode(caller, append(call, call...), tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(callee, []byte{byte(STOP)}, tracing.CodeChangeUnspecified))
+
+	var nested []*CallContext
+	var parked []*CallContext
+	var evm *EVM
+	hooks := &tracing.Hooks{OnOpcode: func(_ uint64, _ byte, _, _ uint64, scope tracing.OpContext, _ []byte, depth int, _ error) {
+		switch depth {
+		case 1:
+			// Between the two CALLs the returned nested context sits in the
+			// spare slot; without the parking it would have gone to the pool.
+			parked = append(parked, evm.spareFrame)
+		case 2:
+			nested = append(nested, scope.(*CallContext))
+		}
+	}}
+	evm = NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+	_, _, _, err := evm.Call(accounts.ZeroAddress, caller, nil, mdgas.MdGas{Execution: 100_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Len(t, nested, 2)
+	require.Same(t, nested[0], nested[1], "the second nested call reuses the first one's context")
+	// The pool would hand the same context back too, so the spare slot is what
+	// distinguishes parking from a pool round-trip.
+	require.Contains(t, parked, nested[0], "the returned nested context parks on the EVM")
+	require.Nil(t, evm.spareFrame, "the outermost frame returns the spare context to the pool")
+}
+
+func TestCreateCollisionCheckOfAnAbsentAccountReadsOnlyExistence(t *testing.T) {
+	t.Parallel()
+
+	ibs := state.NewWithVersionMap(state.NewNoopReader(), state.NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	defer ibs.Close()
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	collision, err := evm.hasCreateCollision(addr)
+	require.NoError(t, err)
+	require.False(t, collision)
+	reads := ibs.VersionedReads()
+	_, nonceRead := reads.GetNonce(addr)
+	_, codeHashRead := reads.GetCodeHash(addr)
+	require.False(t, nonceRead || codeHashRead, "an absent account needs no nonce or code hash read")
+}
+
 func TestZeroUnpricedBaseFee(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
