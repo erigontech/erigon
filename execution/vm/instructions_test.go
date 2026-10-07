@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -305,15 +306,24 @@ func TestJsonTestcases(t *testing.T) {
 	}
 }
 
-func TestInnerFrameOutputReusesBuffer(t *testing.T) {
-	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+func innerOutputsShareBuffer(cfg Config) bool {
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, cfg)
 	evm.depth = 2
 	var mem Memory
 	mem.Resize(32)
-	first := evm.output(&mem, 0, 32)
-	second := evm.output(&mem, 0, 32)
-	if unsafe.SliceData(first) != unsafe.SliceData(second) {
+	return unsafe.SliceData(evm.output(&mem, 0, 32)) == unsafe.SliceData(evm.output(&mem, 0, 32))
+}
+
+func TestInnerFrameOutputReusesBuffer(t *testing.T) {
+	if !innerOutputsShareBuffer(Config{}) {
 		t.Fatal("each inner RETURN got a new buffer")
+	}
+}
+
+// Tracers such as callTracer keep every frame's output.
+func TestTracedInnerFrameOutputIsCopied(t *testing.T) {
+	if innerOutputsShareBuffer(Config{Tracer: &tracing.Hooks{}}) {
+		t.Fatal("a traced inner RETURN reused the buffer")
 	}
 }
 
