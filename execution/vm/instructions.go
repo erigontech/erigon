@@ -374,7 +374,10 @@ func opAddress(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 }
 
 func opBalance(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	address := scope.peekAddress(evm)
+	return opBalanceOf(pc, evm, scope, evm.internAddress(scope.Stack.peek()))
+}
+
+func opBalanceOf(pc uint64, evm *EVM, scope *CallContext, address accounts.Address) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
 	// BAL: BALANCE is a real state access per EIP-7928 — mark as non-revertable.
 	evm.IntraBlockState().MarkAddressAccess(address, false)
@@ -527,7 +530,10 @@ func stReturnDataCopy(_ uint64, scope *CallContext) string {
 }
 
 func opExtCodeSize(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	addr := scope.peekAddress(evm)
+	return opExtCodeSizeOf(pc, evm, scope, evm.internAddress(scope.Stack.peek()))
+}
+
+func opExtCodeSizeOf(pc uint64, evm *EVM, scope *CallContext, addr accounts.Address) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
 	// BAL: EXTCODESIZE is a real state access per EIP-7928.
 	evm.IntraBlockState().MarkAddressAccess(addr, false)
@@ -554,8 +560,7 @@ func opCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	return pc, nil, nil
 }
 
-func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	addr := scope.peekAddress(evm)
+func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext, addr accounts.Address) (uint64, []byte, error) {
 	stack := &scope.Stack
 	stack.drop() // consume addr
 	memOffset, codeOffset, length := stack.pop3()
@@ -614,7 +619,10 @@ func opExtCodeCopy(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, err
 //
 // equal the result of calling extcodehash on the account directly.
 func opExtCodeHash(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	address := scope.peekAddress(evm)
+	return opExtCodeHashOf(pc, evm, scope, evm.internAddress(scope.Stack.peek()))
+}
+
+func opExtCodeHashOf(pc uint64, evm *EVM, scope *CallContext, address accounts.Address) (uint64, []byte, error) {
 	slot := scope.Stack.peek()
 
 	// BAL: EXTCODEHASH is a real state access per EIP-7928 — mark as
@@ -762,14 +770,14 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	if !scope.slots.on {
-		*scope.Stack.peek(), err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+		*scope.Stack.peek(), err = evm.IntraBlockState().GetState(scope.Contract.Address(), evm.internStorageKey(scope.Stack.peek()))
 		return pc, nil, err
 	}
 	if i := scope.lookupSlot(evm); i >= 0 {
 		*scope.Stack.peek() = scope.slots.val[i]
 		return pc, nil, nil
 	}
-	return pc, nil, sloadRead(evm, scope, scope.peekStorageKey(evm))
+	return pc, nil, sloadRead(evm, scope, evm.internStorageKey(scope.Stack.peek()))
 }
 
 // sloadRead replaces the top of the stack with the value of its slot, interned as key,
@@ -789,11 +797,10 @@ func stSload(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %x", SLOAD, loc)
 }
 
-func opSstore(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+func opSstore(pc uint64, evm *EVM, scope *CallContext, key accounts.StorageKey) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	key := scope.peekStorageKey(evm)
 	scope.Stack.drop()
 	val := scope.Stack.popCopy()
 	return pc, nil, evm.IntraBlockState().SetState(scope.Contract.Address(), key, val)
@@ -1310,7 +1317,7 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	beneficiaryAddr := scope.peekAddress(evm)
+	beneficiaryAddr := evm.internAddress(scope.Stack.peek())
 	scope.Stack.drop()
 	self := scope.Contract.Address()
 	ibs := evm.IntraBlockState()
@@ -1335,7 +1342,7 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
 	}
-	beneficiaryAddr := scope.peekAddress(evm)
+	beneficiaryAddr := evm.internAddress(scope.Stack.peek())
 	scope.Stack.drop()
 	self := scope.Contract.Address()
 	ibs := evm.IntraBlockState()
