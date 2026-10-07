@@ -327,6 +327,36 @@ func TestAggregateAndProofGossipDoesNotAcceptBeforeBLSVerification(t *testing.T)
 	require.ErrorIs(t, err, ErrInvalidBlsSignature)
 }
 
+func TestAggregateAndProofImmediateRetryReturnsAlreadySeenOnlyForSameAggregate(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+
+	cfg := clparams.MainnetBeaconConfig
+	agg, s := getAggregateAndProofAndState(t)
+	epoch := agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot / cfg.SlotsPerEpoch
+	service, _ := setupValidAggregateGossipMessage(t, &cfg, agg, s, cfg.GetCurrentStateVersion(epoch))
+	digest, err := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg).ComputeForkDigest(epoch)
+	require.NoError(t, err)
+	agg.ImmediateProcess = true
+	agg.TopicForkDigest = &digest
+
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, agg))
+	err = service.ProcessMessage(context.Background(), nil, agg)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAggregatorAlreadySeen)
+	require.Contains(t, err.Error(), "ignore")
+
+	differentSignedAggregate := *agg.SignedAggregateAndProof
+	differentSignedAggregate.Signature[0] ^= 1
+	differentAggregate := *agg
+	differentAggregate.SignedAggregateAndProof = &differentSignedAggregate
+	err = service.ProcessMessage(context.Background(), nil, &differentAggregate)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.NotErrorIs(t, err, ErrAggregatorAlreadySeen)
+}
+
 func setValidAggregateSelectionProof(t *testing.T, cfg *clparams.BeaconChainConfig, agg *SignedAggregateAndProofForGossip, s *state.CachingBeaconState) {
 	t.Helper()
 	committee, err := s.GetBeaconCommitee(

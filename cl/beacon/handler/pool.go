@@ -461,14 +461,18 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 			return
 		}
 
-		if err := a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &services.SignedAggregateAndProofForGossip{
+		err = a.aggregateAndProofsService.ProcessMessage(r.Context(), nil, &services.SignedAggregateAndProofForGossip{
 			SignedAggregateAndProof: v,
 			ImmediateProcess:        true, // we want to process aggregate and proof immediately
 			TopicForkDigest:         &topicForkDigest,
-		}); errors.Is(err, services.ErrIgnore) {
+		})
+		switch {
+		case errors.Is(err, services.ErrAggregatorAlreadySeen):
+			// The service validated this exact aggregate earlier; its publication may have failed.
+		case errors.Is(err, services.ErrIgnore):
 			log.Debug("[Beacon REST] aggregate ignored", "err", err, "slot", v.Message.Aggregate.Data.Slot)
 			continue
-		} else if err != nil {
+		case err != nil:
 			log.Warn("[Beacon REST] failed to process aggregate", "err", err)
 			failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 			continue

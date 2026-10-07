@@ -80,7 +80,7 @@ type aggregateAndProofServiceImpl struct {
 	opPool                 pool.OperationsPool
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
-	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, struct{}]
+	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, common.Hash]
 	validatorParams        *validator_params.ValidatorParams
 
 	// Cached proposer indices per epoch (for current epoch check)
@@ -101,7 +101,7 @@ func NewAggregateAndProofService(
 	batchSignatureVerifier *BatchSignatureVerifier,
 	validatorParams *validator_params.ValidatorParams,
 ) AggregateAndProofService {
-	seenAggCache, err := lru.New[seenAggregateIndex, struct{}]("seenAggregate", seenAggregateCacheSize)
+	seenAggCache, err := lru.New[seenAggregateIndex, common.Hash]("seenAggregate", seenAggregateCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -245,6 +245,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	var (
 		aggregateVerificationData *AggregateVerificationData
+		aggregateRoot             common.Hash
 		attestingIndices          []uint64
 		seenIndex                 seenAggregateIndex
 		localValidatorIsProposer  bool
@@ -307,7 +308,18 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			epoch: target.Epoch,
 			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
 		}
-		if a.seenAggreatorIndexes.Contains(seenIndex) {
+		if aggregateAndProof.ImmediateProcess {
+			root, err := aggregateAndProof.SignedAggregateAndProof.HashSSZ()
+			if err != nil {
+				return err
+			}
+			aggregateRoot = root
+		}
+		if seenRoot, ok := a.seenAggreatorIndexes.Peek(seenIndex); ok {
+			if aggregateAndProof.ImmediateProcess && seenRoot == aggregateRoot {
+				// ErrAggregatorAlreadySeen means this exact signed aggregate was validated before.
+				return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadySeen)
+			}
 			return fmt.Errorf("%w: aggregator already seen", ErrIgnore)
 		}
 
@@ -386,7 +398,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
 			attestingIndices,
 		)
-		a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
+		// Keep the root of the first aggregate validated for this aggregator and epoch.
+		a.seenAggreatorIndexes.ContainsOrAdd(seenIndex, aggregateRoot)
 	}
 	// for this specific request, collect data for potential peer banning or gossip publishing
 	aggregateVerificationData.SendingPeer = aggregateAndProof.Receiver

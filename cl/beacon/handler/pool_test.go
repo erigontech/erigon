@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -577,7 +578,7 @@ func TestPoolAggregatesAndProofsPublishesOnMessageEpochForkDigest(t *testing.T) 
 	require.Equal(t, http.StatusOK, recorder.Code)
 }
 
-func TestPoolAggregatesAndProofsReportsPublishFailure(t *testing.T) {
+func TestPoolAggregatesAndProofsRetriesAfterPublishFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	service := services_mock.NewMockAggregateAndProofService(ctrl)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
@@ -606,14 +607,25 @@ func TestPoolAggregatesAndProofsReportsPublishFailure(t *testing.T) {
 	}})
 	require.NoError(t, err)
 
-	service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(nil).Times(1)
 	publishErr := errors.New("publish failed")
-	gossipManager.EXPECT().PublishToForkDigest(
-		gomock.Any(),
-		topicDigest,
-		clgossip.TopicNameBeaconAggregateAndProof,
-		gomock.Any(),
-	).Return(publishErr).Times(1)
+	gomock.InOrder(
+		service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(nil),
+		gossipManager.EXPECT().PublishToForkDigest(
+			gomock.Any(),
+			topicDigest,
+			clgossip.TopicNameBeaconAggregateAndProof,
+			gomock.Any(),
+		).Return(publishErr),
+		service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(
+			fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAggregatorAlreadySeen),
+		),
+		gossipManager.EXPECT().PublishToForkDigest(
+			gomock.Any(),
+			topicDigest,
+			clgossip.TopicNameBeaconAggregateAndProof,
+			gomock.Any(),
+		).Return(nil),
+	)
 	handler := &ApiHandler{
 		logger:                    log.Root(),
 		ethClock:                  clock,
@@ -630,6 +642,13 @@ func TestPoolAggregatesAndProofsReportsPublishFailure(t *testing.T) {
 	var response poolingError
 	require.NoError(t, json.NewDecoder(recorder.Body).Decode(&response))
 	require.Equal(t, []poolingFailure{{Index: 0, Message: publishErr.Error()}}, response.Failures)
+
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/aggregate_and_proofs", bytes.NewReader(requestBody))
+
+	handler.PostEthV1ValidatorAggregatesAndProof(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
 }
 
 func TestPoolAggregatesAndProofsReportsRequestIndex(t *testing.T) {
