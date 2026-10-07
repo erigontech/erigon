@@ -552,7 +552,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     1,
 		},
 		EXTCODECOPY: {
-			execute:     opExtCodeCopy,
 			constantGas: params.ExtcodeCopyBaseFrontier,
 			gasExecute:  opExtCodeCopyWithGas,
 			numPop:      4,
@@ -636,7 +635,6 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stSload,
 		},
 		SSTORE: {
-			execute:    opSstore,
 			gasExecute: opSstoreWithGas,
 			numPop:     2,
 			numPush:    0,

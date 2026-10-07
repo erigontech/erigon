@@ -24,14 +24,13 @@ func TestGasSStoreDoesNotRefill(t *testing.T) {
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 200_000})
 	defer evm.putCallContext(scope)
-	scope.cacheGen++
 	require.True(t, scope.useMdGas(params.StateGasPerStorageSet, mdgas.StateGas, nil, tracing.GasChangeIgnored))
 	scope.Stack.push(uint256.Int{})
 	scope.Stack.push(uint256.Int{})
 	old := scope.Gas()
 	oldSpill := scope.stateGasSpill
 
-	cost, err := sstoreGasEIP2929(evm, scope, old, params.SstoreClearsScheduleRefundEIP3529)
+	cost, _, err := sstoreGasEIP2929(evm, scope, old, params.SstoreClearsScheduleRefundEIP3529)
 	require.NoError(t, err)
 	require.Equal(t, old, scope.Gas())
 	require.Equal(t, oldSpill, scope.stateGasSpill)
@@ -54,7 +53,6 @@ func TestGasCallDoesNotCharge(t *testing.T) {
 			initial := mdgas.MdGas{Execution: 500_000, State: params.StateGasNewAccount / 2}
 			scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, initial)
 			defer evm.putCallContext(scope)
-			scope.cacheGen++
 			for range 4 {
 				scope.Stack.push(uint256.Int{})
 			}

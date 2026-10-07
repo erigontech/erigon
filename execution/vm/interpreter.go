@@ -66,19 +66,6 @@ type CallContext struct {
 	input             []byte
 	Memory            Memory
 
-	// Opcode-scoped key/address intern cache. cacheGen is incremented once per
-	// opcode dispatch in the interpreter loop; cachedKeyGen/cachedAddrGen hold
-	// the generation at which the entry was populated. An entry is valid only
-	// when its gen equals cacheGen, giving the gas phase and execute phase of
-	// the same opcode a shared interned value without a second unique.Make call.
-	// Placed before Stack so these fields stay in L1D rather than being pushed
-	// out by Stack.data (32 KB).
-	cacheGen      uint64
-	cachedKeyGen  uint64
-	cachedAddrGen uint64
-	cachedKey     accounts.StorageKey
-	cachedAddr    accounts.Address
-
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
@@ -107,7 +94,7 @@ type frameSlots struct {
 }
 
 // lookupSlot returns the frame's entry for the top-of-stack word, or -1; called only when
-// slots.on. It records a hit's interned key for peekStorageKey.
+// slots.on.
 func (ctx *CallContext) lookupSlot(evm *EVM) int {
 	f := &ctx.slots
 	i := -1
@@ -117,7 +104,6 @@ func (ctx *CallContext) lookupSlot(evm *EVM) int {
 			if f.ok[j] && f.word[j] == *word {
 				i = j
 				f.misses = 0
-				ctx.cachedKey, ctx.cachedKeyGen = f.key[j], ctx.cacheGen
 				break
 			}
 		}
@@ -137,43 +123,6 @@ func (f *frameSlots) put(stamp state.ReadStamp, word uint256.Int, key accounts.S
 	i := f.next
 	f.next ^= 1
 	f.ok[i], f.key[i], f.word[i], f.val[i] = true, key, word, v
-}
-
-// peekStorageKey returns the top-of-stack value as an interned StorageKey.
-// The result is cached for the lifetime of one opcode dispatch (gas phase +
-// execute phase share the same cacheGen), so the key is resolved at most
-// once per opcode. Callers must invoke this before any stack mutation
-// (pop/push/swap) within the same dispatch — the cache is keyed by generation
-// only and will not detect a changed stack top within the same opcode.
-func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
-	if ctx.cachedKeyGen == ctx.cacheGen {
-		return ctx.cachedKey
-	}
-	return ctx.memoStorageKey(evm)
-}
-
-// memoStorageKey is outlined from peekStorageKey, and memoAddress from
-// peekAddress, to keep the two peek functions inside the inlining budget.
-// Folding either back into its caller costs about 10% on the call benchmarks.
-func (ctx *CallContext) memoStorageKey(evm *EVM) accounts.StorageKey {
-	ctx.cachedKey = evm.internStorageKey(ctx.Stack.peek())
-	ctx.cachedKeyGen = ctx.cacheGen
-	return ctx.cachedKey
-}
-
-// peekAddress returns the top-of-stack value as an interned Address.
-// Cached like peekStorageKey; same constraint: call before any stack mutation.
-func (ctx *CallContext) peekAddress(evm *EVM) accounts.Address {
-	if ctx.cachedAddrGen == ctx.cacheGen {
-		return ctx.cachedAddr
-	}
-	return ctx.memoAddress(evm)
-}
-
-func (ctx *CallContext) memoAddress(evm *EVM) accounts.Address {
-	ctx.cachedAddr = evm.internAddress(ctx.Stack.peek())
-	ctx.cachedAddrGen = ctx.cacheGen
-	return ctx.cachedAddr
 }
 
 var contextPool = sync.Pool{
@@ -207,19 +156,10 @@ func (evm *EVM) getCallContext(contract Contract, input []byte, gas mdgas.MdGas)
 func (evm *EVM) putCallContext(ctx *CallContext) {
 	ctx.Memory.reset()
 	ctx.Stack.Reset()
-	ctx.cacheGen = 0
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
 	ctx.slots.ok = [2]bool{}                 // the next frame may have another storage address
-	ctx.slots.key = [2]accounts.StorageKey{} // like cachedKey below: release the canonMap pins
-	// Use sentinel values so that a peek call before the first cacheGen++ is
-	// always a miss rather than returning a stale handle from a prior use.
-	ctx.cachedKeyGen = ^uint64(0)
-	ctx.cachedAddrGen = ^uint64(0)
-	// Zero the handles to release their canonMap pins while the context is
-	// idle in the pool; unique.Handle values keep interned entries alive.
-	ctx.cachedKey = accounts.NilKey
-	ctx.cachedAddr = accounts.NilAddress
+	ctx.slots.key = [2]accounts.StorageKey{} // release the canonMap pins
 	ctx.input = nil
 	ctx.Contract = Contract{}
 	if evm.depth > 1 && evm.spareFrame == nil {
@@ -631,8 +571,8 @@ run:
 		if !anyTrace {
 			// execution/vm/vmgen inserts the fastOps switch here.
 			callContext.gas = gasLeft
+			// execution/vm/vmgen inserts the gasExecute switch here.
 		}
-		callContext.cacheGen++
 		if anyTrace && debug {
 			// Capture pre-execution values for tracing.
 			t.logged = false
