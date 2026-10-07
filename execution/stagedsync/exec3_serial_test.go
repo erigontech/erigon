@@ -75,7 +75,7 @@ func TestSerialTaskOperationalErrorPassesThrough(t *testing.T) {
 	task := &exec.TxTask{Header: header, TxNum: 1, TxIndex: 0}
 	block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
 
-	_, err := se.executeBlock(context.Background(), block, []exec.Task{task}, false, false)
+	_, err := se.executeBlock(context.Background(), block, []exec.Task{task}, false)
 
 	require.ErrorIs(t, err, cause)
 	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
@@ -127,7 +127,7 @@ func TestSerialFinalizeStateReadErrorPassesThrough(t *testing.T) {
 	task.Withdrawals = []*types.Withdrawal{{Address: beneficiary, Amount: 1}}
 	block := types.NewBlockFromStorage(common.Hash{}, task.Header, nil, nil, task.Withdrawals, nil)
 
-	_, err := se.executeBlock(t.Context(), block, []exec.Task{task}, false, false)
+	_, err := se.executeBlock(t.Context(), block, []exec.Task{task}, false)
 
 	require.ErrorIs(t, err, cause)
 	require.NotErrorIs(t, err, rules.ErrInvalidBlock)
@@ -155,7 +155,7 @@ func TestSerialFinalizeClassifiesRulesEngineError(t *testing.T) {
 			se, task := newSerialFinalizeTestExec(t, engine)
 			block := types.NewBlockFromStorage(common.Hash{}, task.Header, nil, nil, nil, nil)
 
-			_, err := se.executeBlock(t.Context(), block, []exec.Task{task}, false, false)
+			_, err := se.executeBlock(t.Context(), block, []exec.Task{task}, false)
 
 			require.ErrorIs(t, err, cause)
 			require.ErrorIs(t, err, rules.ErrInvalidBlock)
@@ -177,7 +177,7 @@ func TestSerialBlockEndChecksInclusionList(t *testing.T) {
 	block := types.NewBlockFromStorage(task.Header.Hash(), task.Header, nil, nil, nil, nil)
 	se.cfg.readAheader.AddInclusionList(block.Hash(), types.Transactions{omitted})
 
-	_, err = se.executeBlock(t.Context(), block, []exec.Task{task}, true, false)
+	_, err = se.executeBlock(t.Context(), block, []exec.Task{task}, true)
 	require.NoError(t, err)
 
 	satisfied, checked := se.cfg.readAheader.ReadInclusionListResult(block.Hash())

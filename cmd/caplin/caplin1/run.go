@@ -266,7 +266,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 
 	// init the current beacon config for global access
-	clparams.InitGlobalStaticConfig(beaconConfig, &config)
+	clparams.InitGlobalStaticConfig(beaconConfig)
 
 	if config.NetworkId == clparams.CustomNetwork {
 		config.NetworkId = clparams.NetworkType(beaconConfig.DepositNetworkID)
@@ -360,7 +360,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 	epbsPool := pool.NewEpbsPool()
 	pool := pool.NewOperationsPool(beaconConfig)
-	attestationProducer := attestation_producer.New(ctx, beaconConfig)
+	attestationProducer := attestation_producer.New(beaconConfig)
 
 	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
 	if err := dir.RemoveAll(caplinFcuPath); err != nil {
@@ -497,7 +497,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	batchSignatureVerifier := services.NewBatchSignatureVerifier(ctx, sentinel)
 	// Define gossip services
 	blockService := services.NewBlockService(ctx, indexDB, forkChoice, syncedDataManager, ethClock, beaconConfig, emitters)
-	blobService := services.NewBlobSidecarService(ctx, beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
+	blobService := services.NewBlobSidecarService(beaconConfig, forkChoice, syncedDataManager, ethClock, emitters, false)
 	dataColumnSidecarService := services.NewDataColumnSidecarService(ctx, beaconConfig, ethClock, forkChoice, syncedDataManager, columnStorage, emitters)
 	syncCommitteeMessagesService := services.NewSyncCommitteeMessagesService(beaconConfig, ethClock, syncedDataManager, syncContributionPool, batchSignatureVerifier, false)
 	attestationService := services.NewAttestationService(ctx, forkChoice, committeeSub, ethClock, syncedDataManager, beaconConfig, networkConfig, emitters, batchSignatureVerifier)
@@ -588,7 +588,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			return err
 		}
 	}
-	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}, beaconConfig, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB), logger)
+	stateSnapshots := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB), logger)
 	antiq := antiquary.NewAntiquary(ctx, blobStorage, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, stateSnapshots, csn, rcsn, syncedDataManager, logger, config.ArchiveStates, config.ArchiveBlocks, config.ArchiveBlobs, config.SnapshotGenerationEnabled, snBuildSema)
 	// Create the antiquary
 	go func() {
@@ -664,6 +664,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			}
 		}()
 		log.Info("Beacon API started", "addr", config.BeaconAPIRouter.Address)
+		apiHandler.LogGraffitiIdentification()
 	}
 
 	stageCfg := stages.ClStagesCfg(
@@ -687,7 +688,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		attestationProducer,
 		peerDas,
 	)
-	sync := stages.ConsensusClStages(ctx, stageCfg)
+	sync := stages.ConsensusClStages()
 
 	logger.Info("[Caplin] starting clstages loop")
 	err = sync.StartWithStage(ctx, "DownloadHistoricalBlocks", logger, stageCfg)

@@ -55,7 +55,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		var hasSignedHeaderInDB bool
 
 		if err = cfg.indiciesDB.View(ctx, func(tx kv.Tx) error {
-			_, hasSignedHeaderInDB, err = beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, blockRoot)
+			_, hasSignedHeaderInDB, err = beacon_indicies.ReadSignedHeaderByBlockRoot(tx, blockRoot)
 			return err
 		}); err != nil {
 			err = fmt.Errorf("failed to read signed header: %w", err)
@@ -466,15 +466,21 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 }
 
 func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anchorRoot common.Hash, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) error {
-	if !canValidateGloasPayloads(cfg) {
-		return nil
-	}
-	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, env)
-	if err != nil {
-		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+	status := execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated)
+	if canValidateGloasPayloads(cfg) {
+		var err error
+		status, err = validateAnchorPayloadWithEL(ctx, cfg, bid, env)
+		if err != nil {
+			log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
+		}
 	}
 	var retained bool
-	status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(anchorRoot, env.Message.Payload.BlockHash, status)
+	status, retained = cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+		anchorRoot,
+		env.Message.Payload.BlockHash,
+		status,
+		env.Message.Payload.GasLimit,
+	)
 	if !retained {
 		return nil
 	}

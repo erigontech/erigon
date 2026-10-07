@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
@@ -163,8 +164,10 @@ type VersionMap struct {
 	// so reads/writes of different accounts never contend — the global RWMutex
 	// this replaced serialised every access. Per-read conflict detection is
 	// unchanged; only the lock granularity moved from global to per-account.
-	s     sync.Map // accounts.Address -> *AddressEntry
-	trace bool
+	s sync.Map // accounts.Address -> *AddressEntry
+	// nonEmpty latches before the first entry is taken: nothing removes entries.
+	nonEmpty atomic.Bool
+	trace    bool
 }
 
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
@@ -175,6 +178,9 @@ func NewVersionMap(changes types.BlockAccessList) *VersionMap {
 
 // load returns the AddressEntry for addr, or nil when absent. Lock-free.
 func (vm *VersionMap) load(addr accounts.Address) *AddressEntry {
+	if !vm.nonEmpty.Load() {
+		return nil
+	}
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
 	}
@@ -368,6 +374,12 @@ func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKe
 // returned pointer is stable for the map's lifetime; the caller locks e.mu for
 // the cell mutation. Self-synchronised via sync.Map — no caller lock required.
 func (vm *VersionMap) entryOrCreate(addr accounts.Address) *AddressEntry {
+	// Latch before taking the entry, not after publishing it: a creator
+	// descheduled in between would otherwise let this writer finish a cell
+	// while load still answers from the empty fast path.
+	if !vm.nonEmpty.Load() {
+		vm.nonEmpty.Store(true)
+	}
 	if e, ok := vm.s.Load(addr); ok {
 		return e.(*AddressEntry)
 	}
@@ -926,7 +938,7 @@ func findDoneSelfDestructLocked(e *AddressEntry, lo, hi int, target bool) (Versi
 // FlushVersionedWrites routes a tx's typed write collections into the version
 // map. Each cell is positioned by the write's (txIndex, incarnation), so the
 // per-path loop order does not affect the result.
-func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string) {
+func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 	if writes == nil {
 		return
 	}
@@ -1278,9 +1290,8 @@ func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx i
 	return vm.ReadStorage(a, k, tx)
 }
 
-func liveCode(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) ([]byte, ReadResult, bool) {
-	c, res, ok := vm.ReadCode(a, tx)
-	return c.Bytes, res, ok
+func liveCode(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (accounts.Code, ReadResult, bool) {
+	return vm.ReadCode(a, tx)
 }
 
 func liveCodeSize(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (int, ReadResult, bool) {
@@ -1292,13 +1303,13 @@ func eqUint256(a, b uint256.Int) bool { return a.Eq(&b) }
 // Typed absence predicates (threaded like eq, so validateRead never boxes the
 // recorded value): a zero/absent value means the read concluded absence.
 func absentAccount(a *accounts.Account) bool { return a == nil }
-func absentBytes(b []byte) bool              { return len(b) == 0 }
+func absentCode(c accounts.Code) bool        { return len(c.Bytes) == 0 }
 func absentUint256(v uint256.Int) bool       { return v.IsZero() }
 func absentUint64(v uint64) bool             { return v == 0 }
 func absentInt(v int) bool                   { return v == 0 }
 func eqUint64(a, b uint64) bool              { return a == b }
 func eqInt(a, b int) bool                    { return a == b }
-func eqCode(a, b []byte) bool                { return bytes.Equal(a, b) }
+func eqCode(a, b accounts.Code) bool         { return bytes.Equal(a.Bytes, b.Bytes) }
 func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
@@ -1663,7 +1674,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, tr := range rs.code {
-		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, absentBytes, nil, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, absentCode, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}

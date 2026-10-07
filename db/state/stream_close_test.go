@@ -3,6 +3,7 @@ package state
 import (
 	"container/heap"
 	"context"
+	"errors"
 	"testing"
 	"unsafe"
 
@@ -21,6 +22,31 @@ func TestHistoryRangeAsOfDBCloseClosesDupSortCursor(t *testing.T) {
 	hi.Close()
 
 	require.Equal(t, 1, c.closed)
+}
+
+func TestHistoryRangeAsOfDBAdvanceSmallValsReturnsSeekError(t *testing.T) {
+	seekErr := errors.New("cursor seek failed")
+	seekCalls := 0
+	c := &testCursorDupSort{}
+	c.seekFn = func(seek []byte) ([]byte, []byte, error) {
+		seekCalls++
+		if seekCalls == 1 {
+			require.Equal(t, []byte("a"), seek)
+			return []byte("a"), nil, nil
+		}
+		require.Equal(t, []byte("b"), seek)
+		return nil, nil, seekErr
+	}
+	hi := &HistoryRangeAsOfDB{
+		roTx: &testTx{dupCursor: c},
+		from: []byte("a"),
+	}
+	defer hi.Close()
+
+	err := hi.advanceSmallVals()
+
+	require.ErrorIs(t, err, seekErr)
+	require.Equal(t, 2, seekCalls)
 }
 
 func TestDomainLatestIterFileCloseClosesHeldDbCursors(t *testing.T) {
@@ -121,11 +147,18 @@ func (tx *testTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
 type testCursor struct {
 	seekKey []byte
 	seekVal []byte
+	seekFn  func([]byte) ([]byte, []byte, error)
 	closed  int
 }
 
+func (c *testCursor) Seek(seek []byte) ([]byte, []byte, error) {
+	if c.seekFn != nil {
+		return c.seekFn(seek)
+	}
+	return c.seekKey, c.seekVal, nil
+}
+
 func (c *testCursor) First() ([]byte, []byte, error)               { return nil, nil, nil }
-func (c *testCursor) Seek(seek []byte) ([]byte, []byte, error)     { return c.seekKey, c.seekVal, nil }
 func (c *testCursor) SeekExact(key []byte) ([]byte, []byte, error) { return nil, nil, nil }
 func (c *testCursor) Next() ([]byte, []byte, error)                { return nil, nil, nil }
 func (c *testCursor) Prev() ([]byte, []byte, error)                { return nil, nil, nil }

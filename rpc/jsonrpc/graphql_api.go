@@ -65,7 +65,7 @@ type GraphQLReceipt struct {
 }
 
 // MarshalFastJSONTo shadows the promoted RPCReceipt method, which would drop the transaction fields.
-func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	return writeReflected(s, r)
 }
 
@@ -448,7 +448,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		args.Gas = (*hexutil.Uint64)(&api.gasCap)
 	}
 
-	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -464,7 +464,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, header.Number.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}

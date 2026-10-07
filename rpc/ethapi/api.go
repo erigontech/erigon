@@ -21,11 +21,15 @@ package ethapi
 
 import (
 	"bytes"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -62,9 +66,103 @@ type CallArgs struct {
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
+var callArgsParsers fastjson.ParserPool
+
+type callArgs CallArgs
+
 // UnmarshalJSON decodes a call object and rejects one whose data and input disagree.
+// Fields are decoded straight from one fastjson parse: encoding/json would scan a large
+// calldata string twice, once to validate and once to decode.
 func (args *CallArgs) UnmarshalJSON(raw []byte) error {
-	type callArgs CallArgs
+	// fastjson unescapes strings, while the hexutil types reject escaped text.
+	if bytes.IndexByte(raw, '\\') >= 0 {
+		return args.unmarshalStd(raw)
+	}
+	p := callArgsParsers.Get()
+	defer callArgsParsers.Put(p)
+	v, err := p.ParseBytes(raw)
+	if err != nil || v.Type() != fastjson.TypeObject {
+		return args.unmarshalStd(raw)
+	}
+	ok := true
+	v.GetObject().Visit(func(key []byte, f *fastjson.Value) {
+		ok = ok && args.setField(key, f)
+	})
+	if !ok {
+		return args.unmarshalStd(raw)
+	}
+	return CheckCallData(args.Data, args.Input)
+}
+
+// setField decodes one member as encoding/json would, and reports false where it cannot
+// promise the same result: a field without a case here, a key matching a field only case-insensitively,
+// or a value encoding/json would reject (so the caller gets encoding/json's error).
+func (args *CallArgs) setField(key []byte, f *fastjson.Value) bool {
+	switch string(key) {
+	case "from":
+		return setText(&args.From, f)
+	case "to":
+		return setText(&args.To, f)
+	case "gas":
+		return setText(&args.Gas, f)
+	case "gasPrice":
+		return setText(&args.GasPrice, f)
+	case "maxPriorityFeePerGas":
+		return setText(&args.MaxPriorityFeePerGas, f)
+	case "maxFeePerGas":
+		return setText(&args.MaxFeePerGas, f)
+	case "maxFeePerBlobGas":
+		return setText(&args.MaxFeePerBlobGas, f)
+	case "value":
+		return setText(&args.Value, f)
+	case "nonce":
+		return setText(&args.Nonce, f)
+	case "data":
+		return setText(&args.Data, f)
+	case "input":
+		return setText(&args.Input, f)
+	case "chainId":
+		return setText(&args.ChainID, f)
+	}
+	for _, name := range callArgsJSONNames {
+		if bytes.EqualFold(key, []byte(name)) {
+			return false
+		}
+	}
+	return true // encoding/json ignores unknown members
+}
+
+var callArgsJSONNames = func() (names []string) {
+	for f := range reflect.TypeFor[CallArgs]().Fields() {
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		names = append(names, name)
+	}
+	return names
+}()
+
+// setText decodes a JSON string member through T's UnmarshalText; null clears the field.
+func setText[T any, PT interface {
+	*T
+	encoding.TextUnmarshaler
+}](dst **T, f *fastjson.Value) bool {
+	if f.Type() == fastjson.TypeNull {
+		*dst = nil
+		return true
+	}
+	s, err := f.StringBytes()
+	if err != nil {
+		return false
+	}
+	v := PT(new(T))
+	if v.UnmarshalText(s) != nil {
+		return false
+	}
+	*dst = (*T)(v)
+	return true
+}
+
+// unmarshalStd decodes with encoding/json alone, so malformed input gets its error messages.
+func (args *CallArgs) unmarshalStd(raw []byte) error {
 	if err := json.Unmarshal(raw, (*callArgs)(args)); err != nil {
 		return err
 	}
@@ -76,6 +174,23 @@ func (args *CallArgs) UnmarshalJSON(raw []byte) error {
 func CheckCallData(data, input *hexutil.Bytes) error {
 	if data != nil && input != nil && !bytes.Equal(*data, *input) {
 		return &rpc.InvalidParamsError{Message: `both "data" and "input" are set and not equal. Please use "input" to pass transaction call data`}
+	}
+	return nil
+}
+
+// ChainIDMismatch returns an error when a call object's chainId names another chain.
+func ChainIDMismatch(have *hexutil.U256, want *uint256.Int) error {
+	if have != nil && !(*uint256.Int)(have).Eq(want) {
+		return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", (*uint256.Int)(have), want)
+	}
+	return nil
+}
+
+// CheckChainID rejects a call object whose chainId names another chain. Such a call is invalid
+// whatever the state, so it is invalid params rather than an execution error.
+func CheckChainID(have *hexutil.U256, want *uint256.Int) error {
+	if err := ChainIDMismatch(have, want); err != nil {
+		return &rpc.InvalidParamsError{Message: err.Error()}
 	}
 	return nil
 }

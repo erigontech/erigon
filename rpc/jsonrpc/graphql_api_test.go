@@ -159,7 +159,7 @@ func TestGraphQLReceiptFeeCapsMatchRPCTransaction(t *testing.T) {
 // fields; returned as a result, the embedder must still encode the way reflection does.
 func TestRPCReceiptEmbeddersKeepTheirFields(t *testing.T) {
 	for name, v := range map[string]interface {
-		MarshalFastJSONTo(*jsonstream.StackStream) error
+		MarshalFastJSONTo(*jsonstream.Stream) error
 	}{
 		"otterscan": ReceiptWithTimestamp{RPCReceipt: &ethutils.RPCReceipt{Logs: types.Logs{}}, Timestamp: 7},
 		"graphql":   &GraphQLReceipt{RPCReceipt: &ethutils.RPCReceipt{Logs: types.Logs{}}, Nonce: 3},

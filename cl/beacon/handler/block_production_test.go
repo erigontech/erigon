@@ -73,6 +73,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	dbversion "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -893,7 +894,7 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(nil))
 	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
 
-	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	_, err := h.publishBlindedBlocks(req, 2)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
 }
@@ -961,7 +962,7 @@ func TestGloasProductionRejectsChangedBeaconHead(t *testing.T) {
 		}).AnyTimes()
 	handler.engine = engine
 
-	_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), baseBlockRoot, postState,
+	_, _, err := handler.produceBeaconBody(t.Context(), postState.Slot(), baseBlockRoot, postState,
 		postState.Slot()+1, common.Bytes96{}, common.Hash{})
 
 	require.ErrorContains(t, err, "fork choice head changed")
@@ -2146,7 +2147,7 @@ func TestBroadcastBlockAcceptsExactKnownReplay(t *testing.T) {
 			engine := execution_client.NewMockExecutionEngine(ctrl)
 			engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).Times(2)
 			handler.engine = engine
-			handler.attestationProducer = attestation_producer.New(t.Context(), handler.beaconChainCfg)
+			handler.attestationProducer = attestation_producer.New(handler.beaconChainCfg)
 			gossipManager := gossip_mock.NewMockGossip(ctrl)
 			gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil).Times(2)
 			handler.gossipManager = gossipManager
@@ -2199,7 +2200,7 @@ func TestBroadcastBlockReportsAcceptedWhenEquivocationAppearsDuringIntegration(t
 	fcu.HeadSlotVal = block.Block.Slot
 	fcu.OnTickFn = func(uint64) {}
 	handler.forkchoiceStore = &conflictAfterValidationForkchoice{ForkChoiceStorage: fcu}
-	handler.attestationProducer = attestation_producer.New(t.Context(), handler.beaconChainCfg)
+	handler.attestationProducer = attestation_producer.New(handler.beaconChainCfg)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
 	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
 	handler.gossipManager = gossipManager
@@ -2428,7 +2429,7 @@ func TestBroadcastBlockExactReplayCompletesMissingDataSidecars(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			cfg := clparams.MainnetBeaconConfig
 			if clparams.GetBeaconConfig() == nil {
-				clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+				clparams.InitGlobalStaticConfig(&cfg)
 			}
 			block := cltypes.NewSignedBeaconBlock(&cfg, version)
 			block.Block.Slot = cfg.SlotsPerEpoch
@@ -2528,7 +2529,7 @@ func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Eth-Consensus-Version", version.String())
 
-			_, err = h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+			_, err = h.publishBlindedBlocks(req, 2)
 			require.ErrorContains(t, err, "blinded blocks are unsupported before Bellatrix")
 		})
 	}
@@ -2545,7 +2546,7 @@ func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 	req.Header.Set("Content-Type", "text/plain")
 	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
 
-	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	_, err := h.publishBlindedBlocks(req, 2)
 	var endpointErr *beaconhttp.EndpointError
 	require.True(t, errors.As(err, &endpointErr))
 	require.Equal(t, http.StatusUnsupportedMediaType, endpointErr.Code)
@@ -2572,7 +2573,7 @@ func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
 
-	resp, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	resp, err := h.publishBlindedBlocks(req, 2)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 }
@@ -2592,7 +2593,7 @@ func TestPublishBlindedBlocksRejectsMissingPreFuluPayload(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Eth-Consensus-Version", clparams.ElectraVersion.String())
 
-	_, err = h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+	_, err = h.publishBlindedBlocks(req, 2)
 	require.ErrorContains(t, err, "builder returned nil execution payload")
 }
 
@@ -2660,7 +2661,7 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
 
-			_, err = h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
+			_, err = h.publishBlindedBlocks(req, 2)
 			require.ErrorContains(t, err, tc.wantErr)
 		})
 	}
@@ -3065,6 +3066,7 @@ func TestProduceBlockV4IncludesRequestPayloadAfterSharedCacheEviction(t *testing
 			Blobs: []hexutil.Bytes{blob}, Commitments: []hexutil.Bytes{commitment}, Proofs: []hexutil.Bytes{proof},
 		}, nil, big.NewInt(1_000_000_000), nil)
 	handler.engine = engine
+	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 	handler.selfBuildPayloads = evictingSelfBuildPayloadCache{}
 	handler.blobBundles = evictingBlobBundleCache{}
 
@@ -3167,7 +3169,7 @@ func produceBodyWithBundle(t *testing.T, version clparams.StateVersion, bundle *
 	require.NoError(t, err)
 
 	body, _, err := h.produceBeaconBody(
-		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
+		t.Context(), baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
 		common.Bytes96{0xc0}, common.Hash{},
 	)
 	return body, err
@@ -3188,7 +3190,7 @@ func TestProduceBeaconBodyAcceptsMissingBlobsBundleBeforeDeneb(t *testing.T) {
 	require.NoError(t, err)
 
 	body, _, err := h.produceBeaconBody(
-		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
+		t.Context(), baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
 		common.Bytes96{0xc0}, common.Hash{},
 	)
 
@@ -3215,7 +3217,7 @@ func TestProduceBeaconBodyRejectsMissingBlobsBundleAtDeneb(t *testing.T) {
 	require.NoError(t, err)
 
 	body, _, err := h.produceBeaconBody(
-		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
+		t.Context(), baseBlock.Slot, baseBlockRoot, postState, targetSlot,
 		common.Bytes96{0xc0}, common.Hash{},
 	)
 
@@ -3245,7 +3247,7 @@ func produceBodyWithNilWithdrawals(t *testing.T, version clparams.StateVersion) 
 	require.NoError(t, err)
 
 	body, _, err := h.produceBeaconBody(
-		t.Context(), 3, baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
+		t.Context(), baseBlock.Slot, baseBlockRoot, postState, baseBlock.Slot+1,
 		common.Bytes96{0xc0}, common.Hash{},
 	)
 	return body, reader, err
@@ -3593,6 +3595,7 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).
 		Times(2)
 	handler.engine = engine
+	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 
 	produce := func() *cltypes.BeaconBlock {
 		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
@@ -3612,6 +3615,11 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 
 	selfBuiltBlock := produce()
 	require.Equal(t, uint64(clparams.BuilderIndexSelfBuild), selfBuiltBlock.Body.SignedExecutionPayloadBid.Message.BuilderIndex)
+	// Exercises the graffiti wiring end-to-end (graffitiFromHex, requestGraffiti,
+	// combinedGraffiti), not just those functions directly: the request's graffiti=0x01
+	// combines with the (EL-unavailable) consensus-only identification segment.
+	clCommit := graffitiCommitPrefix(dbversion.GitCommit)
+	require.Equal(t, graffitiFromString(caplinClientCode+clCommit+" \x01"), selfBuiltBlock.Body.Graffiti)
 	selfBuiltRoot, err := selfBuiltBlock.HashSSZ()
 	require.NoError(t, err)
 	key := selfBuildEnvelopeKey{Slot: fixture.block.Slot, BeaconBlockRoot: common.Hash(selfBuiltRoot)}
@@ -4119,7 +4127,7 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 
 	beaconBody, execValue, err := h.produceBeaconBody(
-		ctx, 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
+		ctx, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
 		common.Bytes96{0xc0}, // infinity BLS signature (skip RANDAO verification)
 		common.Hash{},
 	)
@@ -4238,7 +4246,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	})
 
 	beaconBody, _, err := h.produceBeaconBody(
-		ctx, 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
+		ctx, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
 		common.Bytes96{0xc0}, // infinity BLS signature (skip RANDAO verification)
 		common.Hash{},
 	)
@@ -4342,7 +4350,7 @@ func TestProduceBeaconBodyComputesWithdrawalsAtGloasTransition(t *testing.T) {
 	handler.engine = engine
 
 	_, _, err = handler.produceBeaconBody(
-		t.Context(), 3, handler.beaconChainCfg.SlotsPerEpoch-1, baseRoot, postState,
+		t.Context(), handler.beaconChainCfg.SlotsPerEpoch-1, baseRoot, postState,
 		handler.beaconChainCfg.SlotsPerEpoch, common.Bytes96{0xc0}, common.Hash{},
 	)
 	require.ErrorContains(t, err, "stop after capturing payload attributes")

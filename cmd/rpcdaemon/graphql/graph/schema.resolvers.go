@@ -31,6 +31,14 @@ func (r *accountResolver) Storage(ctx context.Context, obj *model.Account, slot 
 	return r.GraphQLAPI.GetAccountStorage(ctx, addr, slot, rpc.BlockNumber(obj.BlockNum))
 }
 
+// Parent is the resolver for the parent field.
+func (r *blockResolver) Parent(ctx context.Context, obj *model.Block) (*model.Block, error) {
+	if obj.Parent == nil || obj.Number == 0 {
+		return nil, nil
+	}
+	return (&queryResolver{r.Resolver}).block(ctx, nil, &obj.Parent.Hash, blockTxsRequested(ctx))
+}
+
 // Miner is the resolver for the miner field.
 func (r *blockResolver) Miner(ctx context.Context, obj *model.Block, block *uint64) (*model.Account, error) {
 	// miner is non-nullable (Account!): a miner-less block must return an
@@ -197,7 +205,7 @@ func (r *queryResolver) Blocks(ctx context.Context, from uint64, to *uint64) ([]
 	}
 
 	const maxBlocks = 25
-	if toBlockNumber-fromBlockNumber+1 > maxBlocks {
+	if toBlockNumber-fromBlockNumber >= maxBlocks {
 		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
 	}
 

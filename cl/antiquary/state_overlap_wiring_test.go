@@ -148,7 +148,7 @@ func overlapStateSnapshots(t *testing.T) (*snapshotsync.CaplinStateSnapshots, da
 		Compression:     map[string]bool{},
 	}
 	stateSn := snapshotsync.NewCaplinStateSnapshots(
-		ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, logger,
+		ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs, types, logger,
 	)
 	t.Cleanup(stateSn.Close)
 	require.NoError(t, stateSn.OpenFolder())
@@ -215,7 +215,7 @@ func TestIncrementBeaconStateRemovesOverlapsWithSnapgenOff(t *testing.T) {
 	blocks, preState, postState := tests.GetCapellaRandom()
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	reader := tests.LoadChain(blocks, postState, db, t)
+	reader := tests.LoadChain(blocks, db, t)
 	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	require.NoError(t, sd.OnHeadState(postState))
 	vt := state_accessors.NewStaticValidatorTable()

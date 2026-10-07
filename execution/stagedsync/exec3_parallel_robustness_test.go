@@ -934,7 +934,7 @@ func TestApplyLoopFlush_InvalidTxWritesAreEstimate(t *testing.T) {
 		"invalidated tx must flush as Estimate (not Done) — see "+
 			"TestApplyLoopFlushAsComplete for the unit-level guard")
 
-	vm.FlushVersionedWrites(invalidTxWrites, complete, "")
+	vm.FlushVersionedWrites(invalidTxWrites, complete)
 
 	// Downstream tx=16 reads the slot — this is the read that committed
 	// phantom state in the bug.

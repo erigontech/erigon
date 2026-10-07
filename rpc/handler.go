@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"slices"
 	"strconv"
@@ -92,7 +93,7 @@ type callProc struct {
 	notifiers []*RemoteNotifier
 }
 
-func HandleError(err error, stream jsonstream.Stream) {
+func HandleError(err error, stream *jsonstream.Stream) {
 	if err != nil {
 		stream.Field("error")
 		stream.WriteObjectStart()
@@ -301,6 +302,9 @@ func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
 	defer jsonstream.Put(stream)
 
 	h.answerInto(cp, msg, stream)
+	if msg.isNotification() {
+		return
+	}
 	if err := h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer())); err != nil {
 		h.logger.Debug("Failed to write RPC response", "err", err)
 	}
@@ -308,7 +312,7 @@ func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
 
 // answerInto runs the call and leaves its response in stream. The call writes a success
 // itself; only an error answer is encoded here.
-func (h *handler) answerInto(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) {
+func (h *handler) answerInto(cp *callProc, msg *jsonrpcMessage, stream *jsonstream.Stream) {
 	answer := h.handleCallMsg(cp, msg, stream)
 	h.addSubscriptions(cp.notifiers)
 	if answer != nil {
@@ -334,7 +338,7 @@ func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage
 }
 
 // handleMsg handles a single message.
-func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
+func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream) {
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
@@ -343,7 +347,9 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 			h.answerBuffered(cp, msg)
 		} else {
 			h.answerInto(cp, msg, stream)
-			stream.WriteRaw("\n")
+			if !msg.isNotification() {
+				stream.WriteRaw("\n")
+			}
 		}
 		for _, n := range cp.notifiers {
 			if err := n.activate(); err != nil {
@@ -552,10 +558,12 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 
 // handleCallMsg executes a call message. It returns the error answer, or nil once the
 // response is in the stream or the message needs none.
-func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
+func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream *jsonstream.Stream) *jsonrpcMessage {
 	switch {
 	case msg.isNotification():
-		_, _ = h.handleCall(ctx, msg, stream)
+		discard := jsonstream.Get(io.Discard)
+		defer jsonstream.Put(discard)
+		_, _ = h.handleCall(ctx, msg, discard)
 		if h.traceRequests {
 			h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
 		}
@@ -621,7 +629,7 @@ func (h *handler) isMethodAllowedByGranularControl(method string) bool {
 }
 
 // handleCall processes method calls.
-func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) (*jsonrpcMessage, error) {
+func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsonstream.Stream) (*jsonrpcMessage, error) {
 	allowed := h.isMethodAllowedByGranularControl(msg.Method)
 	if msg.isSubscribe() && allowed {
 		return h.handleSubscribe(cp, msg, stream)
@@ -657,7 +665,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstrea
 }
 
 // handleSubscribe processes *_subscribe method calls.
-func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) (*jsonrpcMessage, error) {
+func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jsonstream.Stream) (*jsonrpcMessage, error) {
 	if !h.allowSubscribe {
 		return msg.errorResponse(ErrNotificationsUnsupported), nil
 	}
@@ -701,7 +709,7 @@ func remapDBOverload(ctx context.Context, err error) error {
 
 // runMethod runs the Go callback for an RPC method. It returns either a response for the caller to
 // write, or the error it already answered with in the stream.
-func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream jsonstream.Stream) (*jsonrpcMessage, error) {
+func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream *jsonstream.Stream) (*jsonrpcMessage, error) {
 	if !callb.streamable {
 		result, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
@@ -713,8 +721,8 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		return nil, msg.writeResponse(stream, result)
 	}
 
-	return nil, writeLazyResponse(stream, msg.ID, func(rs *jsonstream.LazyFieldStream) error {
-		if _, err := callb.call(ctx, msg.Method, args, rs); err != nil {
+	return nil, writeResultResponse(stream, msg.ID, func(s *jsonstream.Stream) error {
+		if _, err := callb.call(ctx, msg.Method, args, s); err != nil {
 			return remapDBOverload(ctx, err)
 		}
 		return nil
@@ -724,7 +732,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 // writeTo writes a response built as a message, such as an error; success results go through
 // writeResponse. Nothing here may reach the underlying writer: the response must stay in the
 // stream buffer until the caller flushes, or the HTTP status is committed before ServeHTTP can set it.
-func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
+func (msg *jsonrpcMessage) writeTo(stream *jsonstream.Stream) {
 	buf, err := json.Marshal(msg)
 	if err != nil {
 		buf, err = json.Marshal(msg.errorResponse(err))

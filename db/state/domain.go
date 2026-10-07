@@ -96,8 +96,9 @@ type Domain struct {
 	// by block-access recency across all SharedDomains rather than per-SD.
 	adaptivePinController *commitment.AdaptivePinController
 
-	// _testBuildAccessorHook - test-only: called with the recsplit before the build loop in buildHashMapAccessor
-	_testBuildAccessorHook func(rs *recsplit.RecSplit)
+	// _testBuildAccessorHook - test-only: called with the recsplit and decompressor
+	// before the build loop in buildHashMapAccessor.
+	_testBuildAccessorHook func(rs *recsplit.RecSplit, data *seg.Decompressor)
 }
 
 type domainVisible struct {
@@ -329,8 +330,8 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.stepSize
 }
 
-func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter {
-	return dt.newWriter(dt.d.dirs.Tmp, !dt.d.Enabled)
+func (dt *DomainRoTx) NewWriter(db kv.RoDB) *DomainBufferedWriter {
+	return dt.newWriter(db, dt.d.dirs.Tmp, !dt.d.Enabled)
 }
 
 // openList - main method to open list of files.
@@ -476,7 +477,7 @@ func (w *DomainBufferedWriter) DeleteWithPrevDiff(k []byte, txNum uint64, prev [
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
 func (w *DomainBufferedWriter) Diff() *kv.DomainDiff        { return w.diff }
 
-func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
+func (dt *DomainRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.HistoryDisabled
 
 	w := &DomainBufferedWriter{
@@ -484,7 +485,7 @@ func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWrit
 		valsTable: dt.d.ValuesTable,
 		largeVals: dt.d.LargeValues,
 		name:      dt.d.Name,
-		h:         dt.ht.newWriter(tmpdir, discardHistory),
+		h:         dt.ht.newWriter(db, tmpdir, discardHistory),
 	}
 	return w
 }
@@ -507,7 +508,7 @@ type DomainBufferedWriter struct {
 }
 
 func (w *DomainBufferedWriter) Close() {
-	if w == nil { // allow dobule-close
+	if w == nil {
 		return
 	}
 	w.h.close()
@@ -1210,7 +1211,11 @@ func (d *Domain) buildHashMapAccessorAt(ctx context.Context, idxPath string, dat
 		NoFsync:    d.noFsync,
 		Workers:    d.BuildAccessorsWorkers,
 	}
-	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger, d._testBuildAccessorHook)
+	return buildHashMapAccessor(ctx, data, d.Compression, idxPath, false, cfg, ps, d.logger, func(rs *recsplit.RecSplit) {
+		if d._testBuildAccessorHook != nil {
+			d._testBuildAccessorHook(rs, data)
+		}
+	})
 }
 
 func (d *Domain) missedBtreeAccessors(source []*FilesItem, dl dirListing) (l []*FilesItem) {
@@ -2147,7 +2152,7 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 	prg.KeyProgress = prune.Done // domains don't have key tables
 
 	pruneStat, err := prune.TableScanningPrune(ctx, "domain "+dt.name.String(), dt.d.FilenameBase, txFrom, txTo, dt.stepSize,
-		logEvery, dt.d.logger, nil, valsCursor, asserts, prg, mode)
+		logEvery, dt.d.logger, nil, valsCursor, prg, mode)
 	if err != nil {
 		return stat, err
 	}
