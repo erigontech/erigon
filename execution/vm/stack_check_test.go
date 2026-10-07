@@ -392,3 +392,22 @@ func TestRunTracedFrameDoesNotAllocate(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, allocs)
 }
+
+// TestGasFuncErrorIsOutOfGas pins that an op whose gas func fails runs out of gas, keeping the cause.
+func TestGasFuncErrorIsOutOfGas(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	c := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	// The memory gas overflows past 0x1FFFFFFFE0 bytes.
+	c.Code = []byte{byte(PUSH5), 0x20, 0, 0, 0, 0, byte(MLOAD)}
+	for _, traced := range []bool{false, true} {
+		f := evm.run
+		if traced {
+			f = evm.runTraced
+		}
+		_, _, _, err := f(c, mdgas.MdGas{Execution: 1_000_000}, nil, false, false, false)
+		require.ErrorIs(t, err, ErrOutOfGas, "traced=%v", traced)
+		require.ErrorIs(t, err, ErrGasUintOverflow, "traced=%v", traced)
+	}
+}
