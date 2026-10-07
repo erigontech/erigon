@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/remotedb"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -198,6 +200,103 @@ func TestRemoteHistoryFloorFollowsRenewal(t *testing.T) {
 				require.NoError(t, err)
 				require.Greater(t, want.startTxNum, old.startTxNum)
 				require.Equal(t, want, got, "the floor must match the renewed view")
+			})
+		})
+	}
+}
+
+type expiringHistoryCursorTx struct {
+	kv.TemporalTx
+	expire  func()
+	onClose bool
+}
+
+func (tx *expiringHistoryCursorTx) Cursor(bucket string) (kv.Cursor, error) {
+	if bucket != kv.MaxTxNum || tx.expire == nil {
+		return tx.TemporalTx.Cursor(bucket)
+	}
+	expire := tx.expire
+	tx.expire = nil
+	if !tx.onClose {
+		expire()
+		return tx.TemporalTx.Cursor(bucket)
+	}
+	cursor, err := tx.TemporalTx.Cursor(bucket) //nolint:gocritic // Ownership passes to the caller.
+	if err != nil {
+		return nil, err
+	}
+	return &expiringHistoryCursor{Cursor: cursor, expire: expire}, nil
+}
+
+type expiringHistoryCursor struct {
+	kv.Cursor
+	expire func()
+}
+
+func (c *expiringHistoryCursor) Close() {
+	if c.expire != nil {
+		c.expire()
+		c.expire = nil
+	}
+	c.Cursor.Close()
+}
+
+func TestIndexedHistoryGateFollowsRemoteRenewal(t *testing.T) {
+	t.Parallel()
+	for _, phase := range []string{"open", "close"} {
+		t.Run(phase, func(t *testing.T) {
+			t.Parallel()
+			apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+			apis.eth._txNumReader = rawdbv3.TxNums
+			apis.eth._historyPruneFloor.ttl = time.Hour
+			const block, index = uint64(8), uint64(1)
+			local, err := apis.eth.db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer local.Rollback()
+			minTxNum, err := apis.eth._txNumReader.Min(t.Context(), local, block)
+			require.NoError(t, err)
+			start := minTxNum + index + 1
+			setHistoryStart := func(t *testing.T, start uint64) {
+				t.Helper()
+				require.NoError(t, apis.rwDB.Update(t.Context(), func(tx kv.RwTx) error {
+					for _, table := range []string{kv.TblAccountHistoryKeys, kv.TblStorageHistoryKeys, kv.TblCodeHistoryKeys} {
+						if err := tx.ClearTable(table); err != nil {
+							return err
+						}
+						if err := tx.Put(table, hexutil.EncodeTs(start), []byte{1}); err != nil {
+							return err
+						}
+					}
+					return nil
+				}))
+			}
+			setHistoryStart(t, start)
+
+			synctest.Test(t, func(t *testing.T) {
+				ctx := t.Context()
+				db, calls := remoteHistoryDB(t, apis.eth.db)
+				tx, err := db.BeginTemporalRo(ctx)
+				require.NoError(t, err)
+				defer tx.Rollback()
+				old, err := apis.eth.historyStartBlocks(ctx, tx, chainInfo.head)
+				require.NoError(t, err)
+				require.Equal(t, start, old.startTxNum)
+				require.Greater(t, old.replay, block, "the indexed check must use its exact fallback")
+				require.NoError(t, apis.eth.checkPruneTransactionHistoryAtIndex(ctx, tx, block, index))
+				require.EqualValues(t, 3, calls.Load(), "the gate must reuse the cached floor")
+				oldViewID := tx.ViewID()
+				setHistoryStart(t, start+1)
+
+				// The head reads must stay on the old view. Expire it only at the
+				// indexed cursor, after reading the cached history floor.
+				view := &expiringHistoryCursorTx{TemporalTx: tx, onClose: phase == "close", expire: func() {
+					time.Sleep(remotedbserver.MaxTxTTL + time.Nanosecond)
+				}}
+				err = apis.eth.checkPruneTransactionHistoryAtIndex(ctx, view, block, index)
+				require.Nil(t, view.expire, "the indexed fallback must open a cursor")
+				require.NotEqual(t, oldViewID, tx.ViewID(), "the remote transaction must renew during the indexed check")
+				require.ErrorIs(t, err, state.ErrPruned, "the renewed view no longer retains the requested pre-state")
+				require.EqualValues(t, 6, calls.Load(), "renewal must load the floor once for the new view")
 			})
 		})
 	}

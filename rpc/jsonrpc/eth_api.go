@@ -522,33 +522,46 @@ func (api *BaseAPI) checkPruneTransactionHistory(ctx context.Context, tx kv.Tx, 
 }
 
 func (api *BaseAPI) checkPruneTransactionHistoryAtIndex(ctx context.Context, tx kv.Tx, block, txIndex uint64) error {
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
-		floors, err := api.historyStartBlocks(ctx, tx, head)
-		if err != nil || txIndex == 0 || block >= floors.replay {
-			return floors.replay, err
+	for {
+		var indexedKey pruneFloorCacheKey
+		var hasIndexedKey bool
+		err := api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
+			floors, err := api.historyStartBlocks(ctx, tx, head)
+			if err != nil || txIndex == 0 || block >= floors.replay {
+				return floors.replay, err
+			}
+			indexedKey, hasIndexedKey = historyFloorCacheKey(tx.(kv.TemporalTx), head)
+			// The block-level replay floor may reject an indexed read whose pre-state
+			// survives. Check its exact txNum only when that floor would reject it.
+			c, err := tx.Cursor(kv.MaxTxNum)
+			if err != nil {
+				return 0, err
+			}
+			defer c.Close()
+			minTxNum, err := api._txNumReader.MinWithCursor(ctx, tx, c, block)
+			if err != nil {
+				return 0, err
+			}
+			maxTxNum, err := api._txNumReader.MaxWithCursor(ctx, tx, c, block)
+			if err != nil {
+				return 0, err
+			}
+			// Only a position in this block can bypass its replay floor. Max names the
+			// final system transaction, whose pre-state follows all user transactions.
+			if maxTxNum > minTxNum && txIndex < maxTxNum-minTxNum && minTxNum+txIndex+1 >= floors.startTxNum {
+				return block, nil
+			}
+			return 0, fmt.Errorf("%w: requested block %d at transaction index %d, history is available from txNum %d", state.ErrPruned, block, txIndex, floors.startTxNum)
+		})
+		// Closing a remote cursor can also renew its view. Check after the deferred
+		// Close completes, so the history floor and indexed bounds describe one view.
+		if hasIndexedKey {
+			if current, ok := historyFloorCacheKey(tx.(kv.TemporalTx), indexedKey.head); !ok || current != indexedKey {
+				continue
+			}
 		}
-		// The block-level replay floor may reject an indexed read whose pre-state
-		// survives. Check its exact txNum only when that floor would reject it.
-		c, err := tx.Cursor(kv.MaxTxNum)
-		if err != nil {
-			return 0, err
-		}
-		defer c.Close()
-		minTxNum, err := api._txNumReader.MinWithCursor(ctx, tx, c, block)
-		if err != nil {
-			return 0, err
-		}
-		maxTxNum, err := api._txNumReader.MaxWithCursor(ctx, tx, c, block)
-		if err != nil {
-			return 0, err
-		}
-		// Only a position in this block can bypass its replay floor. Max names the
-		// final system transaction, whose pre-state follows all user transactions.
-		if maxTxNum > minTxNum && txIndex < maxTxNum-minTxNum && minTxNum+txIndex+1 >= floors.startTxNum {
-			return block, nil
-		}
-		return 0, fmt.Errorf("%w: requested block %d at transaction index %d, history is available from txNum %d", state.ErrPruned, block, txIndex, floors.startTxNum)
-	})
+		return err
+	}
 }
 
 // checkPruneBlocks gates RPCs that need retained block transactions,
