@@ -4,9 +4,12 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
 )
 
 // run is runTraced without the tracing code and with the fast path.
@@ -22,8 +25,7 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
 		pc  = uint64(0) // program counter
-		t   *opTrace
-		res []byte // result of the opcode execution function
+		res []byte      // result of the opcode execution function
 	)
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
@@ -139,13 +141,7 @@ run:
 						break run
 					}
 					pos := callContext.Stack.pop()
-					valid := callContext.Contract.analysedJumpdest(pos)
-					if !valid {
-						callContext.gas, callContext.savedPC = gasLeft, pc
-						valid = callContext.Contract.validJumpdest(pos)
-						gasLeft, pc = callContext.gas, callContext.savedPC
-					}
-					if !valid {
+					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
 						res, err = nil, ErrInvalidJump
 						break run
 					}
@@ -168,13 +164,7 @@ run:
 						pc++
 						continue run
 					}
-					valid := callContext.Contract.analysedJumpdest(pos)
-					if !valid {
-						callContext.gas, callContext.savedPC = gasLeft, pc
-						valid = callContext.Contract.validJumpdest(pos)
-						gasLeft, pc = callContext.gas, callContext.savedPC
-					}
-					if !valid {
+					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
 						res, err = nil, ErrInvalidJump
 						break run
 					}
@@ -196,9 +186,7 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastStep {
 					gasLeft -= GasFastStep
 					x, y := callContext.Stack.pop1Peek1()
-					callContext.gas, callContext.savedPC = gasLeft, pc
 					y.Mul(x, y)
-					gasLeft, pc = callContext.gas, callContext.savedPC
 					pc++
 					continue run
 				}
@@ -206,9 +194,7 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastStep {
 					gasLeft -= GasFastStep
 					x, y := callContext.Stack.pop1Peek1()
-					callContext.gas, callContext.savedPC = gasLeft, pc
 					y.Div(x, y)
-					gasLeft, pc = callContext.gas, callContext.savedPC
 					pc++
 					continue run
 				}
@@ -289,9 +275,7 @@ run:
 				if sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
 					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(callContext.Contract.Code)) {
-						callContext.gas, callContext.savedPC = gasLeft, pc
 						callContext.Stack.pushRef().SetBytes(callContext.Contract.Code[pc+1 : end])
-						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc = pc + uint64(op-PUSH0)
 						pc++
 						continue run
@@ -302,14 +286,10 @@ run:
 					endMin := min(startMin+int(op-PUSH0), codeLen)
 
 					integer := callContext.Stack.pushRef()
-					callContext.gas, callContext.savedPC = gasLeft, pc
 					integer.SetBytes(callContext.Contract.Code[startMin:endMin])
-					gasLeft, pc = callContext.gas, callContext.savedPC
 
 					if missing := int(op-PUSH0) - (endMin - startMin); missing > 0 {
-						callContext.gas, callContext.savedPC = gasLeft, pc
 						integer.ILsh(uint(8 * missing))
-						gasLeft, pc = callContext.gas, callContext.savedPC
 					}
 
 					pc += uint64(op - PUSH0)
@@ -402,37 +382,35 @@ run:
 				}
 			}
 			callContext.gas = gasLeft
-			switch op {
-			case SLOAD:
-				o := &jt[SLOAD]
-				if o.gasExecute == nil || uint(stack.len()-o.numPop) > uint(o.maxStack-o.numPop) || gasLeft < o.constantGas {
-					break
-				}
-				gasLeft -= o.constantGas
-				if callContext.slots.on {
-					callContext.gas, callContext.savedPC = gasLeft, pc
-					i := callContext.lookupSlot(evm)
-					gasLeft, pc = callContext.gas, callContext.savedPC
-					if i >= 0 {
-						if gasLeft < params.WarmStorageReadCostEIP2929 {
-							res, err = nil, ErrOutOfGas
-							break run
-						}
-						gasLeft -= params.WarmStorageReadCostEIP2929
-						*callContext.Stack.peek() = callContext.slots.val[i]
-						pc++
-						continue run
-					}
-				}
-				callContext.gas = gasLeft
-				pc, res, err = opSloadEIP2929Miss(pc, evm, callContext, nil)
-				gasLeft = callContext.gas
-				if err != nil {
-					break run
-				}
-				pc++
-				continue run
+		}
+		callContext.cacheGen++
+		switch op {
+		case SLOAD:
+			o := &jt[SLOAD]
+			if o.gasExecute == nil || uint(stack.len()-o.numPop) > uint(o.maxStack-o.numPop) || gasLeft < o.constantGas {
+				break
 			}
+			gasLeft -= o.constantGas
+			if callContext.slots.on {
+				if i := callContext.lookupSlot(evm); i >= 0 {
+					if gasLeft < params.WarmStorageReadCostEIP2929 {
+						res, err = nil, ErrOutOfGas
+						break run
+					}
+					gasLeft -= params.WarmStorageReadCostEIP2929
+					*callContext.Stack.peek() = callContext.slots.val[i]
+					pc++
+					continue run
+				}
+			}
+			callContext.gas = gasLeft
+			pc, res, err = opSloadEIP2929Miss(pc, evm, callContext, nil)
+			gasLeft = callContext.gas
+			if err != nil {
+				break run
+			}
+			pc++
+			continue run
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
@@ -449,14 +427,53 @@ run:
 		} else {
 			callContext.gas -= cost
 		}
-		if operation.gasExecute != nil {
-			pc, res, err = operation.gasExecute(pc, evm, callContext, t)
-			gasLeft = callContext.gas
-			if err != nil {
-				break run
+
+		// All ops with a dynamic memory usage also has a dynamic gas cost.
+		var memorySize uint64
+		if operation.dynamicGas != nil {
+			// calculate the new memory size and expand the memory to fit
+			// the operation
+			// Memory check needs to be done prior to evaluating the dynamic gas portion,
+			// to detect calculation overflows
+			if operation.memorySize != nil {
+				memSize, overflow := operation.memorySize(callContext)
+				if overflow {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
+				}
+				// memory is expanded in words of 32 bytes. Gas
+				// is also calculated in words.
+				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
+				}
 			}
-			pc++
-			continue run
+			// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
+			evm.callGasTemp = 0
+			// Consume the gas and return an error if not enough gas is available.
+			// cost is explicitly set so that the capture state defer method can get the proper cost
+			var dynamicCost mdgas.MdGasCost
+			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
+			if err != nil {
+				if !errors.Is(err, ErrOutOfGas) {
+					err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
+				}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
+			}
+			if callContext.gas < dynamicCost.Execution {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+			}
+			callContext.gas -= dynamicCost.Execution
+			if dynamicCost.State > 0 {
+				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
+				if !ok {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+				}
+			} else if dynamicCost.State < 0 {
+				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+			}
+		}
+
+		if memorySize > 0 {
+			callContext.Memory.Resize(memorySize)
 		}
 
 		// execute the operation

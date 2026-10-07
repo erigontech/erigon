@@ -33,7 +33,6 @@ import (
 	"go/types"
 	"log"
 	"os"
-	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -128,7 +127,6 @@ func inlineBody(instructions []byte, o fastOp) string {
 		log.Fatalf("%s: execute func %q not found in instructions.go", o.name, o.execute)
 	}
 	toRunLocals(o.name, typ, body, rename, "")
-	saveAroundCalls(body)
 	return inlineReturns(text(fset, body), o)
 }
 
@@ -283,10 +281,10 @@ func untraced(traced []byte, fast, direct string) []byte {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
 	}
 	src := dropDeadCode(bytes.Replace(traced, []byte(switchHere), []byte(fast), 1))
-	if bytes.Count(src, []byte(directHere)) != 1 {
-		log.Fatalf("interpreter.go: want one %q", directHere)
+	if bytes.Count(src, []byte(cacheGenStep)) != 1 {
+		log.Fatalf("interpreter.go: want one %q", cacheGenStep)
 	}
-	src = bytes.Replace(src, []byte(directHere), []byte(direct), 1)
+	src = bytes.Replace(src, []byte(cacheGenStep), []byte(cacheGenStep+direct), 1)
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "interpreter.go", src, parser.ParseComments)
 	if err != nil {
@@ -411,7 +409,9 @@ func testTable(ops []fastOp, gasOps [][2]string) []byte {
 	return out
 }
 
-const directHere = "// execution/vm/vmgen inserts the gasExecute switch here.\n"
+// cacheGenStep is where run calls the gasExecute ops: after the per-op generation
+// moves, which the ops' memos read.
+const cacheGenStep = "callContext.cacheGen++\n"
 
 // gasExecuteOps returns the ops the jump tables give a gasExecute, with the func:
 // run inlines the func's copy without the trace. TestFastPathMatchesJumpTables
@@ -457,73 +457,7 @@ func inlineCopy(copies map[string]string, name string) string {
 	}
 	fn := f.Decls[0].(*ast.FuncDecl)
 	toRunLocals(name, fn.Type, fn.Body, map[string]string{}, "gasLeft")
-	saveAroundCalls(fn.Body)
 	return inlineReturns(text(fset, fn.Body), fastOp{name: name})
-}
-
-// outOfLine are the funcs run's inlined bodies call that Go does not inline.
-var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "lookupSlot"}
-
-// saveAroundCalls stores gasLeft and pc in callContext before each statement of body
-// that calls an outOfLine func, and loads them back after it. Neither is then live
-// across a call, so Go does not spill them at the top of run's loop, on every op.
-func saveAroundCalls(body *ast.BlockStmt) {
-	save := mustStmt("callContext.gas, callContext.savedPC = gasLeft, pc")
-	load := mustStmt("gasLeft, pc = callContext.gas, callContext.savedPC")
-	ast.Inspect(body, func(n ast.Node) bool {
-		block, ok := n.(*ast.BlockStmt)
-		if !ok {
-			return true
-		}
-		var list []ast.Stmt
-		for _, s := range block.List {
-			switch s.(type) {
-			case *ast.ExprStmt, *ast.AssignStmt:
-				if callsOutOfLine(s) {
-					list = append(list, save, s, load)
-					continue
-				}
-			}
-			list = append(list, s)
-		}
-		block.List = list
-		return true
-	})
-}
-
-func callsOutOfLine(s ast.Stmt) (found bool) {
-	ast.Inspect(s, func(n ast.Node) bool {
-		if c, ok := n.(*ast.CallExpr); ok {
-			if sel, ok := c.Fun.(*ast.SelectorExpr); ok && slices.Contains(outOfLine, sel.Sel.Name) {
-				found = true
-			}
-		}
-		return !found
-	})
-	return found
-}
-
-// mustStmt parses src as a statement without positions, so the printer lays it
-// out on its own line wherever it lands.
-func mustStmt(src string) ast.Stmt {
-	f, err := parser.ParseFile(token.NewFileSet(), "", "package p\nfunc _() {\n"+src+"\n}", 0)
-	if err != nil {
-		log.Fatal(err)
-	}
-	s := f.Decls[0].(*ast.FuncDecl).Body.List[0]
-	ast.Inspect(s, func(n ast.Node) bool {
-		if n == nil {
-			return false
-		}
-		v := reflect.ValueOf(n).Elem()
-		for i := range v.NumField() {
-			if v.Field(i).Type() == reflect.TypeFor[token.Pos]() {
-				v.Field(i).SetInt(int64(token.NoPos))
-			}
-		}
-		return true
-	})
-	return s
 }
 
 // traceFree returns, by name, for each func of operations_acl.go that takes a t *opTrace,
