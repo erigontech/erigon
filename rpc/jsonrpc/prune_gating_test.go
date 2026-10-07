@@ -117,10 +117,10 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	{"eth_getBlockByHash", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetBlockByHash(ctx, rpc.BlockNumberOrHashWithHash(ref.hash, false), false)
 	}},
-	{"eth_getBlockTransactionCountByNumber", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	{"eth_getBlockTransactionCountByNumber", notGated, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetBlockTransactionCountByNumber(ctx, rpc.BlockNumber(ref.num))
 	}},
-	{"eth_getBlockTransactionCountByHash", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	{"eth_getBlockTransactionCountByHash", notGated, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetBlockTransactionCountByHash(ctx, ref.hash)
 	}},
 	{"eth_getTransactionByHash", gatedByBlocks, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
@@ -444,8 +444,8 @@ func traceCallManyRequest() json.RawMessage {
 func blockTraceFilter(block uint64) TraceFilterRequest {
 	n := rpc.BlockNumber(block)
 	return TraceFilterRequest{
-		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
-		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		FromBlock: &n,
+		ToBlock:   &n,
 	}
 }
 

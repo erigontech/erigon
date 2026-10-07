@@ -421,7 +421,7 @@ func convertCommitmentFile(
 	}
 
 	batch := &TemporalMemBatch{}
-	batch.domainWriters[kv.CommitmentDomain] = commitmentRo.NewWriter()
+	batch.domainWriters[kv.CommitmentDomain] = commitmentRo.NewWriter(nil)
 	wal := batch.domainWriters[kv.CommitmentDomain]
 	defer wal.Close()
 
