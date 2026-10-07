@@ -429,6 +429,15 @@ run:
 		} else {
 			callContext.gas -= cost.Execution
 		}
+		if !false && operation.gasExecute != nil {
+			pc, res, err = operation.gasExecute(pc, evm, callContext)
+			gasLeft = callContext.gas
+			if err != nil {
+				break run
+			}
+			pc++
+			continue run
+		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
 		var memorySize uint64

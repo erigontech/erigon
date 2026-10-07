@@ -142,14 +142,18 @@ func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, m
 	if callContext.slots.on && callContext.lookupSlot(evm) >= 0 {
 		return mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929}, nil
 	}
-	addr, slot := callContext.Address(), callContext.peekStorageKey(evm)
+	return mdgas.MdGasCost{Execution: sloadAccess(evm, callContext.Address(), callContext.peekStorageKey(evm))}, nil
+}
+
+// sloadAccess warms the slot and returns SLOAD's EIP-2929 cost for it.
+func sloadAccess(evm *EVM, addr accounts.Address, slot accounts.StorageKey) uint64 {
 	if evm.IntraBlockState().SlotKnownWarm(addr, slot) {
-		return mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929}, nil
+		return params.WarmStorageReadCostEIP2929
 	}
 	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(addr, slot); slotMod {
-		return mdgas.MdGasCost{Execution: coldStorageAccessCost(evm.chainRules)}, nil
+		return coldStorageAccessCost(evm.chainRules)
 	}
-	return mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929}, nil
+	return params.WarmStorageReadCostEIP2929
 }
 
 // gasExtCodeCopyEIP2929 implements extcodecopy according to EIP-2929

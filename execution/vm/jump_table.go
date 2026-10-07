@@ -41,6 +41,10 @@ type operation struct {
 	execute     executionFunc
 	constantGas uint64
 	dynamicGas  gasFunc
+	// gasExecute, when set, is execute charging the dynamic gas itself; the untraced
+	// loop runs it in place of dynamicGas and execute, so what the gas needs is derived
+	// once. The traced loop keeps the two, as a tracer gets the cost before the op runs.
+	gasExecute executionFunc
 	// maxStack specifies the max length the stack can have for this operation
 	// to not overflow the stack.
 	maxStack int
