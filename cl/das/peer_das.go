@@ -1956,6 +1956,12 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			d.blocksToCheckSync.Range(func(key, value any) bool {
 				root := key.(common.Hash)
 				block := value.(cltypes.ColumnSyncableSignedBlock)
+				if block.GetSlot()+d.beaconConfig.SlotsPerEpoch < d.ethClock.GetCurrentSlot() {
+					log.Debug("[syncColumnDataWorker] giving up on column data", "slot", block.GetSlot(), "blockRoot", root)
+					d.blocksToCheckSync.Delete(root)
+					delete(nextAttempt, root)
+					return true
+				}
 				if !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), d.slotDuration()) || now.Before(nextAttempt[root]) {
 					return true
 				}
@@ -1963,12 +1969,9 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				switch {
 				case err != nil:
 					log.Warn("failed to check if data is available", "err", err)
+					nextAttempt[root] = now.Add(d.slotDuration())
 				case available:
 					log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
-					d.blocksToCheckSync.Delete(root)
-					delete(nextAttempt, root)
-				case block.GetSlot()+d.beaconConfig.SlotsPerEpoch < d.ethClock.GetCurrentSlot():
-					log.Debug("[syncColumnDataWorker] giving up on column data", "slot", block.GetSlot(), "blockRoot", root)
 					d.blocksToCheckSync.Delete(root)
 					delete(nextAttempt, root)
 				default:
@@ -1981,11 +1984,12 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				continue
 			}
 			if d.rpc != nil {
-				if peersCount, err := d.rpc.Peers(); err != nil {
-					log.Warn("failed to get peers count", "err", err)
-					continue
-				} else if peersCount == 0 {
-					log.Info("[syncColumnDataWorker] no peers available, skipping sync")
+				peersCount, err := d.rpc.Peers()
+				if err != nil || peersCount == 0 {
+					log.Debug("[syncColumnDataWorker] no peers available, deferring column sync", "err", err)
+					for _, root := range roots {
+						nextAttempt[root] = now.Add(d.slotDuration())
+					}
 					continue
 				}
 			}

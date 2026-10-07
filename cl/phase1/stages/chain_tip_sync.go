@@ -1415,6 +1415,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		recoverMissingEnvelopes(ctx, cfg)
 	}
 	canValidatePayloads := canValidateGloasPayloads(cfg)
+	var attemptedHeads map[common.Hash]struct{}
 	retryPhases := []func(context.Context){func(retryCtx context.Context) {
 		cfg.forkChoice.RetryPendingExecutionPayloadEnvelopeIndices(retryCtx, maxPendingGloasPayloadsPerCycle)
 	}}
@@ -1434,8 +1435,8 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			// head's is re-verified, fork choice sees no FULL variant and cannot advance; each
 			// verified head exposes the next unverified block, so repeat until the head settles.
 			func(retryCtx context.Context) {
-				attempted := verifyGloasHeadPayloads(retryCtx, cfg)
-				verifyUnverifiedGloasPayloads(retryCtx, cfg, attempted)
+				attemptedHeads = verifyGloasHeadPayloads(retryCtx, cfg)
+				verifyUnverifiedGloasPayloads(retryCtx, cfg, attemptedHeads)
 			},
 		)
 	}
@@ -1469,7 +1470,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			}
 			if canValidateGloasPayloads(cfg) {
 				verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
-				verifyUnverifiedGloasPayloads(verifyCtx, cfg, nil)
+				verifyUnverifiedGloasPayloads(verifyCtx, cfg, attemptedHeads)
 				cancelVerify()
 			}
 		}
