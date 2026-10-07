@@ -1553,7 +1553,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 	})
 	options := gloasBlockOptionsFromContext(ctx)
 	beaconBody, executionValue, err := a.produceBeaconBody(
-		ctx, 4, baseBlockSlot, baseBlockRoot, baseState, slot, common.Bytes96{}, common.Hash{},
+		ctx, baseBlockSlot, baseBlockRoot, baseState, slot, common.Bytes96{}, common.Hash{},
 	)
 	if err != nil {
 		if errors.Is(err, errForkChoiceHeadChanged) {

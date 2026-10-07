@@ -51,7 +51,7 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return nil, err
 	}
-	blockRoot, err := a.rootFromBlockId(ctx, tx, blockId)
+	blockRoot, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +137,7 @@ func (a *ApiHandler) GetEthV1DebugBeaconDataColumnSidecars(w http.ResponseWriter
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	blockRoot, err := a.rootFromBlockId(ctx, tx, blockId)
+	blockRoot, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
@@ -210,7 +210,7 @@ func (a *ApiHandler) GetEthV1BeaconBlobs(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
-	blockRoot, err := a.rootFromBlockId(ctx, tx, blockId)
+	blockRoot, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}

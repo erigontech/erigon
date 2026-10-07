@@ -215,7 +215,7 @@ func TestIncrementBeaconStateRemovesOverlapsWithSnapgenOff(t *testing.T) {
 	blocks, preState, postState := tests.GetCapellaRandom()
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	reader := tests.LoadChain(blocks, postState, db, t)
+	reader := tests.LoadChain(blocks, db, t)
 	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	require.NoError(t, sd.OnHeadState(postState))
 	vt := state_accessors.NewStaticValidatorTable()

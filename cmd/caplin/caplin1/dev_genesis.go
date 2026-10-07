@@ -69,7 +69,7 @@ func writeDevGenesisBeaconBlock(ctx context.Context, genesisState *state.Caching
 	)
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, true)
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true)
 	})
 }
 

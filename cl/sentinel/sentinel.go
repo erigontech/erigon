@@ -72,7 +72,6 @@ type Sentinel struct {
 	indiciesDB kv.RoDB
 
 	discoverConfig     discover.Config
-	subManager         *GossipManager
 	metrics            bool
 	logger             log.Logger
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
@@ -173,7 +172,6 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		s.blockReader,
 		s.indiciesDB,
 		s.p2p.Host(),
-		s.peers,
 		s.cfg.NetworkConfig,
 		s.p2p.UDPv5Listener().LocalNode(),
 		s.cfg.BeaconConfig, s.ethClock, s.handshaker, s.forkChoiceReader, s.blobStorage, s.dataColumnStorage, s.peerDasStateReader, s.cfg.EnableBlocks,
@@ -188,12 +186,8 @@ func (s *Sentinel) Start() (*enode.LocalNode, error) {
 		DisconnectedF: func(n network.Network, c network.Conn) {
 			peerId := c.RemotePeer()
 			log.Trace("[Sentinel] Peer disconnected", "peer", peerId, "direction", c.Stat().Direction, "addr", c.RemoteMultiaddr())
-			s.peers.RemovePeer(peerId)
 		},
 	})
-	s.subManager = NewGossipManager(s.ctx)
-	//s.subManager.Start(s.ctx)
-
 	go s.listenForPeers()
 	go s.proactiveSubnetPeerSearch() // Proactively search for peers when subnet coverage is low
 	_, connected, _ := s.GetPeersCount()
@@ -222,7 +216,6 @@ func (s *Sentinel) updatePeerMetrics() {
 
 func (s *Sentinel) Stop() {
 	//s.listener.Close()
-	//s.subManager.Close()
 	s.cancel()
 	s.p2p.Host().Close()
 }
@@ -351,10 +344,6 @@ func (s *Sentinel) Host() host.Host {
 
 func (s *Sentinel) Peers() *peers.Pool {
 	return s.peers
-}
-
-func (s *Sentinel) GossipManager() *GossipManager {
-	return s.subManager
 }
 
 func (s *Sentinel) Config() *SentinelConfig {

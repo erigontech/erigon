@@ -152,7 +152,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	cfg.downloader.SetBlockReader(cfg.blockReader)
 	cfg.downloader.SetOnInitialGloasBlock(blockRoot, func(block *cltypes.SignedBeaconBlock) error {
 		return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
-			return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, true)
+			return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true)
 		})
 	})
 
@@ -209,7 +209,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		isInCLSnapshots := cfg.sn.SegmentsMax() > blk.Block.Slot
 		// Skip blocks that are already in the snapshots
 		if !isInCLSnapshots {
-			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, blk, true); err != nil {
 				return false, err
 			}
 			// [New in Gloas:EIP7732] WriteBeaconBlockAndIndicies skips EL indices for GLOAS blocks

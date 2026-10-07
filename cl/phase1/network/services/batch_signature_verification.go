@@ -134,20 +134,18 @@ func (b *BatchSignatureVerifier) start(incoming chan *AggregateVerificationData)
 // succeeds we publish all accumulated gossip data. If verification fails, start verifying each AggregateVerificationData one by
 // one, publish corresponding gossip data if verification succeeds, if not ban the corresponding peer that sent it.
 func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificationData []*AggregateVerificationData) error {
-	signatures, signRoots, pks, fns :=
+	signatures, signRoots, pks :=
 		make([][]byte, 0, reservedSize),
 		make([][]byte, 0, reservedSize),
-		make([][]byte, 0, reservedSize),
-		make([]func(), 0, reservedSize)
+		make([][]byte, 0, reservedSize)
 
 	for _, v := range aggregateVerificationData {
-		signatures, signRoots, pks, fns =
+		signatures, signRoots, pks =
 			append(signatures, v.Signatures...),
 			append(signRoots, v.SignRoots...),
-			append(pks, v.Pks...),
-			append(fns, v.F)
+			append(pks, v.Pks...)
 	}
-	if err := b.runBatchVerification(signatures, signRoots, pks, fns); err != nil {
+	if err := b.runBatchVerification(signatures, signRoots, pks); err != nil {
 		b.handleIncorrectSignatures(aggregateVerificationData)
 		return err
 	}
@@ -193,7 +191,7 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 	}
 }
 
-func (b *BatchSignatureVerifier) runBatchVerification(signatures [][]byte, signRoots [][]byte, pks [][]byte, fns []func()) error {
+func (b *BatchSignatureVerifier) runBatchVerification(signatures, signRoots, pks [][]byte) error {
 	start := time.Now()
 	valid, err := blsVerifyMultipleSignatures(signatures, signRoots, pks)
 	if err != nil {

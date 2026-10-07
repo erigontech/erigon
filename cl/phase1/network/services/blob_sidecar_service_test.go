@@ -68,13 +68,12 @@ func getObjectsForBlobSidecarServiceTests(t *testing.T) (*state.CachingBeaconSta
 }
 
 func setupBlobSidecarService(t *testing.T, ctrl *gomock.Controller, test bool) (BlobSidecarsService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
-	ctx := context.Background()
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	emitters := beaconevents.NewEventEmitter()
-	blockService := NewBlobSidecarService(ctx, cfg, forkchoiceMock, syncedDataManager, ethClock, emitters, test)
+	blockService := NewBlobSidecarService(cfg, forkchoiceMock, syncedDataManager, ethClock, emitters, test)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }
 

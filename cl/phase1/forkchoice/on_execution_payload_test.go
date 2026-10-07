@@ -2699,7 +2699,7 @@ func TestCheckDataAvailability_NoBid(t *testing.T) {
 		},
 	}
 
-	err := f.checkDataAvailability(context.TODO(), block, common.Hash{})
+	err := f.checkDataAvailability(block, common.Hash{})
 	require.NoError(t, err)
 }
 
@@ -2724,7 +2724,7 @@ func TestCheckDataAvailability_NoBlobs(t *testing.T) {
 		},
 	}
 
-	err := f.checkDataAvailability(context.TODO(), block, common.Hash{})
+	err := f.checkDataAvailability(block, common.Hash{})
 	require.NoError(t, err)
 }
 

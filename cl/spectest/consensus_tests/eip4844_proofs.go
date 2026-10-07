@@ -79,7 +79,7 @@ var Eip4844MerkleProof = spectest.HandlerFunc(func(t *testing.T, root fs.FS, c s
 		for j := range proof {
 			commitmentInclusionProof.Set(j, common.Hash(proof[j]))
 		}
-		require.True(t, cltypes.VerifyCommitmentInclusionProof(common.Bytes48(*beaconBody.GetBlobKzgCommitments().Get(i)), commitmentInclusionProof, uint64(i), c.Version(), bodyRoot))
+		require.True(t, cltypes.VerifyCommitmentInclusionProof(common.Bytes48(*beaconBody.GetBlobKzgCommitments().Get(i)), commitmentInclusionProof, uint64(i), bodyRoot))
 	}
 	return nil
 })

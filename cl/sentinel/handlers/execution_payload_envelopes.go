@@ -121,7 +121,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	}
 	canonicalReadCount := uint64(0)
 	scanLimitReached := false
-	err = beacon_indicies.RangeBlockRoots(c.ctx, tx, startSlot, headSlot, func(slot uint64, root common.Hash) bool {
+	err = beacon_indicies.RangeBlockRoots(tx, startSlot, headSlot, func(slot uint64, root common.Hash) bool {
 		if pending == nil && slot > lastSlot {
 			return false
 		}

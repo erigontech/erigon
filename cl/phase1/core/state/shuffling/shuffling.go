@@ -24,7 +24,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/log/v3"
 )
 
 func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (uint64, error) {
@@ -255,27 +254,4 @@ func filterSlashedValidators(s *raw.BeaconState, indices []uint64) ([]uint64, er
 		}
 	}
 	return filtered, nil
-}
-
-// ComputeBalanceWeightedAcceptance returns whether to accept the selection of the validator at `index`,
-// with probability proportional to its effective balance, using randomness derived from `seed` and `i`.
-func ComputeBalanceWeightedAcceptance(s *raw.BeaconState, index uint64, seed [32]byte, i uint64) bool {
-	maxRandomValue := uint64(1<<16 - 1)
-
-	var buf [40]byte
-	copy(buf[:32], seed[:])
-	binary.LittleEndian.PutUint64(buf[32:], i/16)
-	randomBytes := crypto.Sha256(buf[:])
-
-	offset := (i % 16) * 2
-	randomValue := uint64(binary.LittleEndian.Uint16(randomBytes[offset : offset+2]))
-
-	validator, err := s.ValidatorForValidatorIndex(int(index))
-	if err != nil {
-		log.Warn("ComputeBalanceWeightedAcceptance: unable to get validator", "index", index, "err", err)
-		return false
-	}
-	effectiveBalance := validator.EffectiveBalance()
-
-	return effectiveBalance*maxRandomValue >= s.BeaconConfig().MaxEffectiveBalanceElectra*randomValue
 }

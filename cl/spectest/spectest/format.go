@@ -1,9 +1,5 @@
 package spectest
 
-import (
-	"slices"
-)
-
 type Format struct {
 	handlers map[string]Handler
 }
@@ -23,15 +19,6 @@ func (r *Format) With(name string, handler Handler) *Format {
 func (r *Format) WithFn(name string, handler HandlerFunc) *Format {
 	r.handlers[name] = handler
 	return r
-}
-
-func (r *Format) GetHandlers() []string {
-	o := make([]string, 0, len(r.handlers))
-	for k := range r.handlers {
-		o = append(o, k)
-	}
-	slices.Sort(o)
-	return o
 }
 
 func (r *Format) GetHandler(name string) (Handler, error) {

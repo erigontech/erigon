@@ -324,7 +324,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 
 		// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
-		if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), committeeIndex, selectionProof) {
+		if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), selectionProof) {
 			log.Warn("receveived aggregate and proof from invalid aggregator")
 			return errors.New("invalid aggregate and proof")
 		}

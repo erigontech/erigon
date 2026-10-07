@@ -1488,7 +1488,7 @@ func TestPostExecutionPayloadEnvelopeAttachesPendingLocalBlobData(t *testing.T) 
 	ctrl := gomock.NewController(t)
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	currentSlot := handler.ethClock.GetCurrentSlot()
@@ -2175,7 +2175,7 @@ func TestGetExecutionPayloadEnvelopeDoesNotFinalizeSameSlotSideBranch(t *testing
 	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: 2, Root: common.HexToHash("0xbeef")}
 	fcu.Ancestors[slot] = forkchoice.ForkChoiceNode{Root: common.HexToHash("0xbeef")}
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, common.HexToHash("0xbeef"))
+		return beacon_indicies.MarkRootCanonical(tx, slot, common.HexToHash("0xbeef"))
 	}))
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/execution_payload_envelope/"+root.Hex(), http.NoBody)
 	recorder := httptest.NewRecorder()

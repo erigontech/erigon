@@ -95,11 +95,6 @@ func TestGetStateFork(t *testing.T) {
 	}
 }
 
-func stringRPCErr(r io.Reader) string {
-	b, _ := io.ReadAll(r)
-	return string(b)
-}
-
 func TestGetStateRoot(t *testing.T) {
 	// setupTestingHandler(t, clparams.Phase0Version)
 	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)

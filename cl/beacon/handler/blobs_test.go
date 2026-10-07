@@ -157,7 +157,7 @@ func setupBlobsTest(t *testing.T) blobsTestFixture {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, blockRoot, slot))
-	require.NoError(t, beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, blockRoot))
+	require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, blockRoot))
 	require.NoError(t, tx.Commit())
 
 	return blobsTestFixture{

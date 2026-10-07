@@ -82,10 +82,10 @@ func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
 		for slot := uint64(0); slot < snaptype.CaplinMergeLimit; slot += 500 {
 			var root common.Hash
 			binary.BigEndian.PutUint64(root[:], slot+1)
-			if err := beacon_indicies.MarkRootCanonical(ctx, tx, slot, root); err != nil {
+			if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
 				return err
 			}
-			if err := beacon_indicies.WriteParentBlockRoot(ctx, tx, root, prevRoot); err != nil {
+			if err := beacon_indicies.WriteParentBlockRoot(tx, root, prevRoot); err != nil {
 				return err
 			}
 			if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(slot, root), root[:]); err != nil {

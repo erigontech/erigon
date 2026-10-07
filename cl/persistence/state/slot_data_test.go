@@ -23,17 +23,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
-	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
-	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func TestSlotData(t *testing.T) {
-	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
-	require.NoError(t, err)
 	m := &SlotData{
 		Version:                       clparams.ElectraVersion,
 		Eth1Data:                      &cltypes.Eth1Data{},
@@ -53,7 +49,7 @@ func TestSlotData(t *testing.T) {
 		t.Fatal(err)
 	}
 	m2 := &SlotData{}
-	if err := m2.ReadFrom(&b, s.BeaconConfig()); err != nil {
+	if err := m2.ReadFrom(&b); err != nil {
 		t.Fatal(err)
 	}
 
@@ -61,8 +57,6 @@ func TestSlotData(t *testing.T) {
 }
 
 func TestSlotDataGloas(t *testing.T) {
-	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
-	require.NoError(t, err)
 	m := &SlotData{
 		Version:                       clparams.GloasVersion,
 		Eth1Data:                      &cltypes.Eth1Data{},
@@ -83,14 +77,12 @@ func TestSlotDataGloas(t *testing.T) {
 	require.NoError(t, m.WriteTo(&b))
 
 	m2 := &SlotData{}
-	require.NoError(t, m2.ReadFrom(&b, s.BeaconConfig()))
+	require.NoError(t, m2.ReadFrom(&b))
 
 	require.Equal(t, m, m2)
 }
 
 func TestSlotDataGloasDefaultHash(t *testing.T) {
-	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
-	require.NoError(t, err)
 	// Test with zero-value hash to ensure it round-trips correctly
 	m := &SlotData{
 		Version:                       clparams.GloasVersion,
@@ -112,7 +104,7 @@ func TestSlotDataGloasDefaultHash(t *testing.T) {
 	require.NoError(t, m.WriteTo(&b))
 
 	m2 := &SlotData{}
-	require.NoError(t, m2.ReadFrom(&b, s.BeaconConfig()))
+	require.NoError(t, m2.ReadFrom(&b))
 
 	require.Equal(t, m, m2)
 }
@@ -121,9 +113,6 @@ func TestSlotDataGloasDefaultHash(t *testing.T) {
 // correctly when all fields carry non-trivial values (including Eth1Data with
 // non-zero sub-fields and large uint64 values).
 func TestSlotDataGloasAllFieldsNonZero(t *testing.T) {
-	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
-	require.NoError(t, err)
-
 	m := &SlotData{
 		Version: clparams.GloasVersion,
 		Eth1Data: &cltypes.Eth1Data{
@@ -158,7 +147,7 @@ func TestSlotDataGloasAllFieldsNonZero(t *testing.T) {
 	require.NoError(t, m.WriteTo(&b))
 
 	m2 := &SlotData{}
-	require.NoError(t, m2.ReadFrom(&b, s.BeaconConfig()))
+	require.NoError(t, m2.ReadFrom(&b))
 
 	require.Equal(t, m, m2)
 }
@@ -168,9 +157,6 @@ func TestSlotDataGloasAllFieldsNonZero(t *testing.T) {
 // populated on the struct, they are NOT included in the serialized form.
 // After deserialization, the GLOAS fields must be zero-valued.
 func TestSlotDataPreGloasDoesNotIncludeGloasFields(t *testing.T) {
-	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
-	require.NoError(t, err)
-
 	for _, version := range []clparams.StateVersion{
 		clparams.ElectraVersion,
 		clparams.FuluVersion,
@@ -198,7 +184,7 @@ func TestSlotDataPreGloasDoesNotIncludeGloasFields(t *testing.T) {
 			require.NoError(t, m.WriteTo(&b))
 
 			m2 := &SlotData{}
-			require.NoError(t, m2.ReadFrom(&b, s.BeaconConfig()))
+			require.NoError(t, m2.ReadFrom(&b))
 
 			// GLOAS fields should be zero after round-trip through a pre-GLOAS version.
 			require.Equal(t, uint64(0), m2.NextWithdrawalBuilderIndex)
@@ -253,9 +239,6 @@ func TestSlotDataGloasEncodesMoreBytesThanElectra(t *testing.T) {
 // mock GetValFn that simulates reading from the kv.SlotData table. This tests
 // the integration between WriteTo, ReadSlotData, and the SlotData DB encoding.
 func TestSlotDataReadSlotDataRoundTrip(t *testing.T) {
-	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
-	require.NoError(t, err)
-
 	testCases := []struct {
 		name string
 		sd   *SlotData
@@ -315,7 +298,7 @@ func TestSlotDataReadSlotDataRoundTrip(t *testing.T) {
 				return nil, nil
 			}
 
-			sd, err := ReadSlotData(mockGetVal, slot, s.BeaconConfig())
+			sd, err := ReadSlotData(mockGetVal, slot)
 			require.NoError(t, err)
 			require.NotNil(t, sd)
 			require.Equal(t, tc.sd, sd)
@@ -326,9 +309,6 @@ func TestSlotDataReadSlotDataRoundTrip(t *testing.T) {
 // TestSlotDataReadSlotDataPreGloasReturnsZeroGloasFields reads an Electra SlotData
 // via ReadSlotData and confirms the GLOAS fields are zero.
 func TestSlotDataReadSlotDataPreGloasReturnsZeroGloasFields(t *testing.T) {
-	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
-	require.NoError(t, err)
-
 	m := &SlotData{
 		Version:                       clparams.ElectraVersion,
 		Eth1Data:                      &cltypes.Eth1Data{},
@@ -357,7 +337,7 @@ func TestSlotDataReadSlotDataPreGloasReturnsZeroGloasFields(t *testing.T) {
 		return nil, nil
 	}
 
-	sd, err := ReadSlotData(mockGetVal, slot, s.BeaconConfig())
+	sd, err := ReadSlotData(mockGetVal, slot)
 	require.NoError(t, err)
 	require.NotNil(t, sd)
 

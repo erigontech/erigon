@@ -981,7 +981,7 @@ func seedCanonicalRoots(t *testing.T, db kv.RwDB, headSlot uint64, reader *bound
 			}
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
-			if err := beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, root); err != nil {
+			if err := beacon_indicies.MarkRootCanonical(tx, slot, root); err != nil {
 				return err
 			}
 		}
@@ -1101,7 +1101,7 @@ func TestBlobHistoryDownloaderDoesNotCompleteWhileASlotIsUnindexed(t *testing.T)
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(context.Background(), tx, head, root)
+		return beacon_indicies.MarkRootCanonical(tx, head, root)
 	}))
 	reader.slots = nil
 
