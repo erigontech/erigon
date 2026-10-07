@@ -153,14 +153,24 @@ jobs:
           set -euo pipefail
           python3 coordinated_start.py --client "$CLIENT" --run-id "$RUN_ID" --chain "$NETWORK" --signal-creation
 
+      - name: Checkout the rpc-tests version file
+        if: matrix.client != 'erigon' && needs.setup.outputs.run_geth == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts/rpc_version.env
+          sparse-checkout-cone-mode: false
+
       - name: Checkout RPC Tests Repository
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         env:
           RUNNER_WS: ${{ runner.workspace }}
         run: |
+          source .github/workflows/scripts/rpc_version.env
           rm -rf "$RUNNER_WS/rpc-tests"
-          git -c advice.detachedHead=false clone --depth 1 --branch main https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
+          git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
           cd "$RUNNER_WS/rpc-tests"
+          make rpc_perf
 
       - name: Clean Erigon Build Directory
         if: matrix.client == 'erigon'
@@ -317,18 +327,18 @@ jobs:
             # clean temporary area
             cd $workspace/rpc-tests/perf
             rm -rf ./reports/$network/*
-          
-            python3 ./run_perf_tests.py --blockchain "$network" \
+
+            # Move to home dir of rpc-tests
+            cd ..
+            ./build/bin/rpc_perf --blockchain "$network" \
                                       --test-type "$method" \
-                                      --pattern-file pattern/"$network"/"$pattern".tar \
+                                      --pattern-file perf/pattern/"$network"/"$pattern".tar \
                                       --test-sequence "$sequence" \
                                       --repetitions 5 \
-                                      --erigon-dir "/" \
-                                      --silk-dir "/" \
-                                      --test-mode 2 \
+                                      --client-build-dir "/" \
                                       --test-report \
                                       --json-report $result_dir/$result_file \
-                                      --testing-daemon $client 2>&1 | tee -a $output_log
+                                      --testing-client $client 2>&1 | tee -a $output_log
           
             # Capture test runner script exit status (use PIPESTATUS since we're piping to tee)
             perf_exit_status=${PIPESTATUS[0]}
