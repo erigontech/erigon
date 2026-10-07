@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func TestAwaitGloasPayloadSourceReturnsOnceDecided(t *testing.T) {
@@ -34,8 +36,8 @@ func TestAwaitGloasPayloadSourceReturnsOnceDecided(t *testing.T) {
 		}
 		return executionPayloadSource{gloasPath: gloasPayloadPathFull}, nil
 	}
-	src, err := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, resolve)
-	require.NoError(t, err)
+	pending := executionPayloadSource{gloasPath: gloasPayloadPathPending}
+	src := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, pending, resolve)
 	require.Equal(t, gloasPayloadPathFull, src.gloasPath)
 	require.Equal(t, 3, calls)
 }
@@ -44,18 +46,18 @@ func TestAwaitGloasPayloadSourceGivesUpAtDeadline(t *testing.T) {
 	resolve := func() (executionPayloadSource, error) {
 		return executionPayloadSource{gloasPath: gloasPayloadPathPending}, nil
 	}
-	src, err := awaitGloasPayloadSource(context.Background(), time.Now().Add(20*time.Millisecond), time.Millisecond, resolve)
-	require.NoError(t, err)
+	pending := executionPayloadSource{gloasPath: gloasPayloadPathPending}
+	src := awaitGloasPayloadSource(context.Background(), time.Now().Add(20*time.Millisecond), time.Millisecond, pending, resolve)
 	require.Equal(t, gloasPayloadPathPending, src.gloasPath)
 }
 
-func TestAwaitGloasPayloadSourcePropagatesResolveError(t *testing.T) {
-	want := errors.New("head changed")
+func TestAwaitGloasPayloadSourceKeepsLastSourceOnResolveError(t *testing.T) {
+	last := executionPayloadSource{gloasPath: gloasPayloadPathPending, head: common.Hash{1}}
 	resolve := func() (executionPayloadSource, error) {
-		return executionPayloadSource{}, want
+		return executionPayloadSource{}, errors.New("head changed")
 	}
-	_, err := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, resolve)
-	require.ErrorIs(t, err, want)
+	src := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, last, resolve)
+	require.Equal(t, last, src)
 }
 
 func TestGloasPendingParentDeadline(t *testing.T) {

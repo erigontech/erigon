@@ -902,6 +902,11 @@ func (a *ApiHandler) gloasPayloadPathForHead(head forkchoice.ForkChoiceNode, tar
 	case cltypes.PayloadStatusPending:
 		return gloasPayloadPathPending
 	case cltypes.PayloadStatusEmpty:
+		// A parked envelope leaves only the EMPTY variant in fork choice; the decision is
+		// still open until its data arrives.
+		if a.forkchoiceStore.HasPendingExecutionPayloadEnvelope(head.Root) {
+			return gloasPayloadPathPending
+		}
 		return gloasPayloadPathEmpty
 	case cltypes.PayloadStatusFull:
 		if !a.forkchoiceStore.ShouldBuildOnFull(head, targetSlot) {

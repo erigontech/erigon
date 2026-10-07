@@ -1183,7 +1183,7 @@ func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 		executionClient:       engine,
 		gloasPayloadValidator: engine,
 		forkChoice:            fc,
-	})
+	}, map[common.Hash]struct{}{})
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	queued := fc.DrainPendingELPayloads()
@@ -1218,7 +1218,7 @@ func TestDrainPendingGloasPayloadsStopsAfterCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc})
+	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc}, map[common.Hash]struct{}{})
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.Len(t, fc.DrainPendingELPayloads(), 3)

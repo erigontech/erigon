@@ -777,25 +777,33 @@ func (f *ForkChoiceStore) RetryDataAvailablePendingExecutionPayloadEnvelopes(ctx
 	}
 }
 
+func (f *ForkChoiceStore) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	return f.pendingEnvelopes != nil && f.pendingEnvelopes.Contains(blockRoot) ||
+		f.pendingLocalSelfBuildEnvelopes != nil && f.pendingLocalSelfBuildEnvelopes.Contains(blockRoot)
+}
+
 // RetryPendingExecutionPayloadEnvelope re-applies the envelope queued for blockRoot as soon as
 // its data columns are available, so the payload can be used before the next slot boundary.
+// Concurrent retries of one root collapse into the first; the availability check runs once
+// here, outside the store lock.
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) {
-	if f.pendingEnvelopes == nil || f.pendingLocalSelfBuildEnvelopes == nil {
+	if !f.HasPendingExecutionPayloadEnvelope(blockRoot) {
 		return
 	}
-	if !f.pendingEnvelopes.Contains(blockRoot) && !f.pendingLocalSelfBuildEnvelopes.Contains(blockRoot) {
+	if _, busy := f.retryingEnvelopes.LoadOrStore(blockRoot, struct{}{}); busy {
 		return
 	}
-	if f.peerDas != nil {
-		block, ok := f.forkGraph.GetBlock(blockRoot)
-		if !ok || block == nil {
-			return
-		}
+	defer f.retryingEnvelopes.Delete(blockRoot)
+	block, ok := f.forkGraph.GetBlock(blockRoot)
+	if !ok || block == nil {
+		return
+	}
+	if commitments := block.GetBlobKzgCommitments(); f.peerDas != nil && commitments != nil && commitments.Len() > 0 {
 		if available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot); err != nil || !available {
 			return
 		}
 	}
-	f.processPendingEnvelopeAfterBlock(ctx, blockRoot, true)
+	f.processPendingEnvelopeAfterBlock(ctx, blockRoot, false)
 }
 
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx context.Context, limit int) {

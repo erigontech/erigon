@@ -1089,6 +1089,13 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	var elBehind bool
 	if validatePayload && f.engine != nil {
 		payloadStatus, validationErr := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot))
+		if validationErr != nil && payloadStatus == execution_client.PayloadStatusNone && ctx.Err() != nil {
+			// An expired context is not an EL verdict; keep the envelope pending.
+			if missingMode == queueMissingEnvelope && !f.forkGraph.HasEnvelope(beaconBlockRoot) {
+				f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+			}
+			return false, fmt.Errorf("%w: execution payload validation interrupted for beacon_block_root %v: %w", ErrIgnore, common.Hash(beaconBlockRoot), validationErr)
+		}
 		if errors.Is(validationErr, errPayloadValidationAdmission) {
 			if missingMode == queueMissingEnvelope && !f.forkGraph.HasEnvelope(beaconBlockRoot) {
 				f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)

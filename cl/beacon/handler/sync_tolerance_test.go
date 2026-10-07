@@ -23,8 +23,9 @@ import (
 )
 
 func TestHeadLagExceedsSyncTolerance(t *testing.T) {
-	require.False(t, headLagExceedsSyncTolerance(100, 100, 32))
-	require.False(t, headLagExceedsSyncTolerance(132, 100, 32))
-	require.True(t, headLagExceedsSyncTolerance(133, 100, 32))
-	require.False(t, headLagExceedsSyncTolerance(90, 100, 32))
+	const head, tolerance = 100, 32
+	require.False(t, headLagExceedsSyncTolerance(head, head, tolerance))
+	require.False(t, headLagExceedsSyncTolerance(head+tolerance, head, tolerance))
+	require.True(t, headLagExceedsSyncTolerance(head+tolerance+1, head, tolerance))
+	require.False(t, headLagExceedsSyncTolerance(head-10, head, tolerance))
 }
