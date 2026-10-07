@@ -67,5 +67,8 @@ var fastPathOps = map[OpCode]fastPathWant{
 }
 
 var gasExecuteOps = map[OpCode]gasExecuteFunc{
-	SLOAD: opSloadEIP2929,
+	BALANCE:     opBalanceEIP2929,
+	EXTCODEHASH: opExtCodeHashEIP2929,
+	EXTCODESIZE: opExtCodeSizeEIP2929,
+	SLOAD:       opSloadEIP2929,
 }

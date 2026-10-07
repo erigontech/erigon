@@ -289,6 +289,13 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"copybig":   prog(PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 0, PUSH1, 0, CALLDATACOPY),
 		"revertmem": {byte(PUSH1), 64, byte(PUSH1), 200, byte(REVERT)},
 		"returnbig": {byte(PUSH8), 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, byte(PUSH1), 0, byte(RETURN)},
+		// The zero address is warm, 0x20 and 0x21 are cold.
+		"account":     prog(PUSH1, 0x20, BALANCE, PUSH1, 0x20, EXTCODESIZE, PUSH1, 0x21, EXTCODEHASH, PUSH1, 0x21, BALANCE, PUSH1, 0x22, EXTCODESIZE),
+		"accountwarm": prog(PUSH1, 0, BALANCE, PUSH1, 0, EXTCODESIZE, PUSH1, 0, EXTCODEHASH, DUP1),
+		"accountend":  {byte(PUSH1), 0x20, byte(EXTCODEHASH)},
+	}
+	for _, op := range []OpCode{BALANCE, EXTCODESIZE, EXTCODEHASH} {
+		programs["under"+op.String()] = []byte{byte(op)}
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
