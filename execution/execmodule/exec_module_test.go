@@ -459,6 +459,80 @@ func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
 
 func TestValidateChainAlreadyCanonicalExecutedAfterPrune(t *testing.T) {
 	ctx := t.Context()
+	m, chainPack := newChainPrunedBelowFinalizedTip(t)
+	tip := chainPack.Blocks[3]
+
+	canonical := chainPack.Blocks[1]
+	var headBefore common.Hash
+	var executionBefore uint64
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lowestUnwindable, err := changeset.ReadLowestUnwindableBlock(tx)
+		require.NoError(t, err)
+		require.Greater(t, lowestUnwindable, canonical.NumberU64())
+		headBefore = rawdb.ReadHeadBlockHash(tx)
+		executionBefore, err = stages.GetStageProgress(tx, stages.Execution)
+		return err
+	}))
+	require.Equal(t, tip.Hash(), headBefore)
+	require.Equal(t, tip.NumberU64(), executionBefore)
+
+	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{canonical})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	validation, err := m.ValidateChain(ctx, canonical.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Equal(t, canonical.Hash(), validation.LatestValidHash)
+
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		require.Equal(t, headBefore, rawdb.ReadHeadBlockHash(tx))
+		executionAfter, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, executionBefore, executionAfter)
+		return nil
+	}))
+
+	later := chainPack.Blocks[4]
+	insertStatus, err = m.InsertBlocks(ctx, []*types.Block{later})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	validation, err = m.ValidateChain(ctx, later.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	fcuResult, err := m.UpdateForkChoice(ctx, later.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
+	m.ExecModule.WaitIdle(ctx)
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		require.Equal(t, later.Hash(), rawdb.ReadHeadBlockHash(tx))
+		executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, later.NumberU64(), executionProgress)
+		return nil
+	}))
+}
+
+func TestValidateChainCanonicalNotExecutedAfterPrune(t *testing.T) {
+	ctx := t.Context()
+	m, chainPack := newChainPrunedBelowFinalizedTip(t)
+	canonical := chainPack.Blocks[1]
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, canonical.NumberU64()-1)
+	}))
+
+	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{canonical})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	_, err = m.ValidateChain(ctx, canonical.Header())
+	require.ErrorContains(t, err, "too far unwind")
+}
+
+// newChainPrunedBelowFinalizedTip executes blocks 1-4, finalizes block 4 and
+// waits for the background prune, after which an unwind to block 2 fails with
+// "too far unwind".
+func newChainPrunedBelowFinalizedTip(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
+	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	m := execmoduletester.New(
@@ -485,55 +559,7 @@ func TestValidateChainAlreadyCanonicalExecutedAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
 	m.ExecModule.WaitIdle(ctx)
-
-	canonical := chainPack.Blocks[1]
-	var headBefore common.Hash
-	var executionBefore uint64
-	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		lowestUnwindable, err := changeset.ReadLowestUnwindableBlock(tx)
-		require.NoError(t, err)
-		require.Greater(t, lowestUnwindable, canonical.NumberU64())
-		headBefore = rawdb.ReadHeadBlockHash(tx)
-		executionBefore, err = stages.GetStageProgress(tx, stages.Execution)
-		return err
-	}))
-	require.Equal(t, tip.Hash(), headBefore)
-	require.Equal(t, tip.NumberU64(), executionBefore)
-
-	insertStatus, err = m.InsertBlocks(ctx, []*types.Block{canonical})
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err := m.ValidateChain(ctx, canonical.Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
-	require.Equal(t, canonical.Hash(), validation.LatestValidHash)
-
-	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		require.Equal(t, headBefore, rawdb.ReadHeadBlockHash(tx))
-		executionAfter, err := stages.GetStageProgress(tx, stages.Execution)
-		require.NoError(t, err)
-		require.Equal(t, executionBefore, executionAfter)
-		return nil
-	}))
-
-	later := chainPack.Blocks[4]
-	insertStatus, err = m.InsertBlocks(ctx, []*types.Block{later})
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
-	validation, err = m.ValidateChain(ctx, later.Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
-	fcuResult, err = m.UpdateForkChoice(ctx, later.Header())
-	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
-	m.ExecModule.WaitIdle(ctx)
-	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		require.Equal(t, later.Hash(), rawdb.ReadHeadBlockHash(tx))
-		executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
-		require.NoError(t, err)
-		require.Equal(t, later.NumberU64(), executionProgress)
-		return nil
-	}))
+	return m, chainPack
 }
 
 func TestValidateChainDoesNotTrustCanonicalMarkerAboveFinalized(t *testing.T) {
