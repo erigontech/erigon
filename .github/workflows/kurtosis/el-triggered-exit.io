@@ -1,38 +1,97 @@
-
 id: el-triggered-exit
 name: "EL-triggered exit test"
-timeout: 1h
+timeout: 45m
 config:
-  #walletPrivkey: ""
+  walletPrivkey: ""
+  validatorMnemonic: ""
   validatorIndex: 20
-  waitForSlot: 41
 
 tasks:
 - name: check_clients_are_healthy
-  title: "Check if at least one client is ready"
+  title: "Wait for a ready client"
   timeout: 5m
   config:
     minClientCount: 1
 
-- name: check_consensus_validator_status
-  title: "Get status for validator ${validatorIndex}"
-  timeout: 1h
+- name: get_consensus_specs
+  id: specs
+  title: "Get fork and validator-age requirements"
+
+- name: check_consensus_slot_range
+  title: "Wait for Electra and eligible genesis validators"
+  timeout: 10m
+  configVars:
+    minEpochNumber: "| [.tasks.specs.outputs.specs.ELECTRA_FORK_EPOCH, .tasks.specs.outputs.specs.SHARD_COMMITTEE_PERIOD] | map(tonumber) | max"
+
+- name: generate_child_wallet
+  id: wallet
+  title: "Fund the exit sender"
   config:
-    validatorStatus:
-    - active_ongoing
+    walletSeed: "pectra-exit"
+    prefundMinBalance: 1000000000000000000
+  configVars:
+    privateKey: "walletPrivkey"
+
+- name: check_consensus_validator_status
+  title: "Require an active genesis validator"
+  timeout: 2m
+  config:
+    validatorStatus: [active_ongoing]
+    withdrawalCredsPrefix: "0x00"
     validatorPubKeyResultVar: "validatorPubKey"
   configVars:
     validatorIndex: "validatorIndex"
 
-- name: generate_transaction
-  title: "Exit Validator ${validatorIndex} via EL"
+- name: generate_bls_changes
+  title: "Authorize the exit sender"
   config:
-    targetAddress: "0x00000961Ef480Eb55e80D19ad83579A64c007002"
-    feeCap: 50000000000 # 50 gwei
-    gasLimit: 1000000
-    amount: "500000000000000000" # 0.5 ETH
-    failOnReject: true
+    limitTotal: 1
+    indexCount: 1
   configVars:
-    privateKey: "walletPrivkey"
-    # 0x0000000000000000 is the amount as uint64,  0 means full withdrawal / exit
-    callData: "| .validatorPubKey + \"0000000000000000\""
+    mnemonic: "validatorMnemonic"
+    startIndex: "validatorIndex"
+    targetAddress: "tasks.wallet.outputs.childWallet.address"
+
+- name: check_consensus_block_proposals
+  title: "Wait for the authorized BLS change in a beacon block"
+  timeout: 3m
+  config:
+    checkLookback: 8
+    minBlsChangeCount: 1
+  configVars:
+    expectBlsChanges: "| [{publicKey: .validatorPubKey, address: .tasks.wallet.outputs.childWallet.address}]"
+
+- name: run_task_background
+  title: "Request an exit and wait for the full withdrawal"
+  timeout: 30m
+  config:
+    onBackgroundComplete: failOrIgnore
+    backgroundTask:
+      name: generate_withdrawal_requests
+      title: "Exit validator ${validatorIndex} via EL"
+      config:
+        limitTotal: 1
+        sourceIndexCount: 1
+        withdrawAmount: 0
+        awaitReceipt: true
+        failOnReject: true
+      configVars:
+        walletPrivkey: "tasks.wallet.outputs.childWallet.privkey"
+        sourceStartValidatorIndex: "validatorIndex"
+    foregroundTask:
+      name: check_consensus_block_proposals
+      title: "Require the validator's full stake to reach its withdrawal address"
+      config:
+        checkLookback: 0
+        minWithdrawalCount: 1
+      configVars:
+        expectWithdrawals: "| [{publicKey: .validatorPubKey, address: .tasks.wallet.outputs.childWallet.address, minAmount: 31000000000}]"
+
+- name: check_consensus_validator_status
+  title: "Require the exited validator to have no remaining balance"
+  timeout: 10m
+  config:
+    validatorStatus: [withdrawal_done]
+    maxValidatorBalance: 0
+  configVars:
+    validatorIndex: "validatorIndex"
