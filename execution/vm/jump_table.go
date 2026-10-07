@@ -92,7 +92,7 @@ func (op *operation) UsesMemory() bool { return op.memorySize != nil }
 func validateAndFillMaxStack(jt *JumpTable) {
 	for i := range jt {
 		op := &jt[i]
-		if op.execute == nil {
+		if op.execute == nil && op.gasExecute == nil {
 			panic(fmt.Sprintf("op 0x%x is not set", i))
 		}
 		// The interpreter has an assumption that if the memorySize function is
@@ -252,7 +252,6 @@ func newByzantiumInstructionSet() JumpTable {
 		numPush:     1,
 	}
 	instructionSet[RETURNDATACOPY] = operation{
-		execute:     opReturnDataCopy,
 		constantGas: GasFastestStep,
 		gasExecute:  opReturnDataCopyWithGas,
 		numPop:      3,
@@ -261,7 +260,6 @@ func newByzantiumInstructionSet() JumpTable {
 		string:      stReturnDataCopy,
 	}
 	instructionSet[REVERT] = operation{
-		execute:    opRevert,
 		gasExecute: opRevertWithGas,
 		numPop:     2,
 		numPush:    0,
@@ -384,7 +382,6 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stMulmod,
 		},
 		EXP: {
-			execute:    opExp,
 			gasExecute: opExpFrontierWithGas,
 			numPop:     2,
 			numPush:    1,
@@ -472,7 +469,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     1,
 		},
 		KECCAK256: {
-			execute:     opKeccak256,
 			constantGas: params.Keccak256Gas,
 			gasExecute:  opKeccak256WithGas,
 			numPop:      2,
@@ -525,7 +521,6 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stCallDataSize,
 		},
 		CALLDATACOPY: {
-			execute:     opCallDataCopy,
 			constantGas: GasFastestStep,
 			gasExecute:  opCallDataCopyWithGas,
 			numPop:      3,
@@ -540,7 +535,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     1,
 		},
 		CODECOPY: {
-			execute:     opCodeCopy,
 			constantGas: GasFastestStep,
 			gasExecute:  opCodeCopyWithGas,
 			numPop:      3,
@@ -629,7 +623,6 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stMstore,
 		},
 		MSTORE8: {
-			execute:     opMstore8,
 			constantGas: GasFastestStep,
 			gasExecute:  opMstore8WithGas,
 			memorySize:  memoryMStore8,
@@ -1139,35 +1132,30 @@ func newFrontierInstructionSet() JumpTable {
 			string:      makeSwapStringer(16),
 		},
 		LOG0: {
-			execute:    makeLog(0),
 			gasExecute: makeLogWithGas(0),
 			numPop:     2,
 			numPush:    0,
 			memorySize: memoryLog,
 		},
 		LOG1: {
-			execute:    makeLog(1),
 			gasExecute: makeLogWithGas(1),
 			numPop:     3,
 			numPush:    0,
 			memorySize: memoryLog,
 		},
 		LOG2: {
-			execute:    makeLog(2),
 			gasExecute: makeLogWithGas(2),
 			numPop:     4,
 			numPush:    0,
 			memorySize: memoryLog,
 		},
 		LOG3: {
-			execute:    makeLog(3),
 			gasExecute: makeLogWithGas(3),
 			numPop:     5,
 			numPush:    0,
 			memorySize: memoryLog,
 		},
 		LOG4: {
-			execute:    makeLog(4),
 			gasExecute: makeLogWithGas(4),
 			numPop:     6,
 			numPush:    0,
@@ -1200,7 +1188,6 @@ func newFrontierInstructionSet() JumpTable {
 			memorySize:  memoryCall,
 		},
 		RETURN: {
-			execute:    opReturn,
 			gasExecute: opReturnWithGas,
 			numPop:     2,
 			numPush:    0,
@@ -1216,7 +1203,7 @@ func newFrontierInstructionSet() JumpTable {
 
 	// Fill all unassigned slots with opUndefined.
 	for i := range tbl {
-		if tbl[i].execute == nil {
+		if tbl[i].execute == nil && tbl[i].gasExecute == nil {
 			tbl[i] = operation{execute: opUndefined}
 		}
 	}

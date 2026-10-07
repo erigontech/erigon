@@ -193,7 +193,7 @@ func opSloadEIP2929Miss(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (ui
 // > Otherwise, charge WARM_STORAGE_READ_COST gas.
 func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	// memory expansion first (dynamic part of pre-2929 implementation)
-	gas, err := gasExtCodeCopy(evm, callContext, scopeGas, memorySize)
+	gas, err := copyGas(callContext, memorySize, 3)
 	if err != nil {
 		return mdgas.MdGasCost{}, err
 	}
