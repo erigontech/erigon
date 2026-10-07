@@ -690,7 +690,8 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 }
 
 // gloasAttestationIndex returns attestation_data.index for Gloas: 0 when the attested block is from the attestation
-// slot, otherwise 1 if the head's chain has the block FULL and 0 if not.
+// slot, otherwise 1 if the head's chain has the block FULL with a verified payload and 0 if not. Fork choice also makes
+// a block with an optimistic payload FULL, but attestations with index 1 for it are ignored.
 func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash) uint64 {
 	header, ok := a.forkchoiceStore.GetHeader(root)
 	if !ok || header.Slot == slot {
@@ -705,7 +706,7 @@ func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash) uint64
 	if node.Root != root {
 		node = a.forkchoiceStore.Ancestor(node.Root, header.Slot)
 	}
-	if node.Root != root || node.PayloadStatus != cltypes.PayloadStatusFull {
+	if node.Root != root || node.PayloadStatus != cltypes.PayloadStatusFull || !a.forkchoiceStore.IsPayloadVerified(root) {
 		return 0
 	}
 	return 1

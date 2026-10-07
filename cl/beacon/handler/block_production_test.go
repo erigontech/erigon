@@ -4736,8 +4736,8 @@ func (p cachedAttestationDataProducer) CachedAttestationData(uint64) (solid.Atte
 	return p.data, true, nil
 }
 
-// In Gloas, attestation_data.index signals whether the attested block's payload is in the canonical chain: always 0
-// for a block of the attestation slot, otherwise 1 if the head's chain has the block FULL and 0 if EMPTY.
+// In Gloas, attestation_data.index is 1 only when the head's chain has the block FULL and its payload is verified.
+// A block from the attestation slot always has index 0.
 func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 	const attestationSlot = uint64(10)
 	root := common.HexToHash("0xabcd")
@@ -4745,14 +4745,17 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 		name      string
 		blockSlot uint64
 		status    cltypes.PayloadStatus
+		verified  bool
 		childHead bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
 		wantIndex string
 	}{
-		{name: "older FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, wantIndex: "1"},
+		{name: "older FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, wantIndex: "1"},
 		{name: "older EMPTY head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, wantIndex: "0"},
-		{name: "block of the attestation slot", blockSlot: attestationSlot, status: cltypes.PayloadStatusFull, wantIndex: "0"},
-		{name: "FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, childHead: true, wantIndex: "1"},
+		{name: "block of the attestation slot", blockSlot: attestationSlot, status: cltypes.PayloadStatusFull, verified: true, wantIndex: "0"},
+		{name: "FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, childHead: true, wantIndex: "1"},
 		{name: "EMPTY in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, childHead: true, wantIndex: "0"},
+		{name: "optimistic FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, wantIndex: "0"},
+		{name: "optimistic FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, childHead: true, wantIndex: "0"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -4764,6 +4767,7 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 			handler.ethClock = clock
 			handler.attestationProducer = cachedAttestationDataProducer{data: solid.AttestationData{Slot: attestationSlot, BeaconBlockRoot: root}}
 			fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: tt.blockSlot}
+			fcu.VerifiedPayloads = map[common.Hash]bool{root: tt.verified}
 			fcu.HeadVal = root
 			fcu.HeadSlotVal = tt.blockSlot
 			fcu.HeadPayloadStatusVal = tt.status
