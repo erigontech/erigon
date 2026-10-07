@@ -472,7 +472,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 }
 
 // non-recursive version of get and returns: node and parent node
-func (t *Trie) getNode(hex []byte, doTouch bool) (Node, Node, bool, uint64) {
+func (t *Trie) getNode(hex []byte) (Node, Node, bool, uint64) {
 	nd := t.RootNode
 	var parent Node
 	pos := 0
