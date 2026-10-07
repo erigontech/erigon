@@ -38,7 +38,7 @@ func (s *Service) submitAggregateAndProof(
 		s.logger.Warn("[dev-validator] selection proof sign failed", "err", err)
 		return
 	}
-	if !state.IsAggregator(s.cfg, committeeLength, committeeIndex, selectionProof) {
+	if !state.IsAggregator(s.cfg, committeeLength, selectionProof) {
 		return
 	}
 

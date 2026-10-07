@@ -752,13 +752,6 @@ func (f *ForkChoiceStorageMock) GetCurrentParticipationIndicies(
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(
-	blockRoot common.Hash,
-	idx uint64,
-) (common.Bytes48, error) {
-	panic("implement me")
-}
-
 // func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
 // 	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
 // 	return nil

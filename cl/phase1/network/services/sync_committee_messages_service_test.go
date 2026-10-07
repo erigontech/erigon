@@ -32,7 +32,7 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-func setupSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (SyncCommitteeMessagesService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock) {
+func setupSyncCommitteesServiceTest(ctrl *gomock.Controller) (SyncCommitteeMessagesService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock) {
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
@@ -44,7 +44,7 @@ func setupSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (Sync
 	return s, syncedDataManager, ethClock
 }
 
-func getObjectsForSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (*state.CachingBeaconState, *SyncCommitteeMessageForGossip) {
+func getObjectsForSyncCommitteesServiceTest() (*state.CachingBeaconState, *SyncCommitteeMessageForGossip) {
 	_, _, state := tests.GetBellatrixRandom()
 	br, _ := state.BlockRoot()
 	msg := &SyncCommitteeMessageForGossip{
@@ -62,7 +62,7 @@ func TestSyncCommitteesServiceUnsynced(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	s, _, _ := setupSyncCommitteesServiceTest(t, ctrl)
+	s, _, _ := setupSyncCommitteesServiceTest(ctrl)
 	require.Error(t, s.ProcessMessage(context.TODO(), nil, nil))
 }
 
@@ -70,9 +70,9 @@ func TestSyncCommitteesBadTiming(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 
-	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	s, synced, ethClock := setupSyncCommitteesServiceTest(ctrl)
 	require.NoError(t, synced.OnHeadState(state))
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(false).AnyTimes()
 	require.Error(t, s.ProcessMessage(context.Background(), nil, msg))
@@ -82,10 +82,10 @@ func TestSyncCommitteesBadSubnet(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 	sn := uint64(1000)
 
-	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	s, synced, ethClock := setupSyncCommitteesServiceTest(ctrl)
 	require.NoError(t, synced.OnHeadState(state))
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
 	require.Error(t, s.ProcessMessage(context.Background(), &sn, msg))
@@ -99,9 +99,9 @@ func TestSyncCommitteesSuccess(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
-	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	s, synced, ethClock := setupSyncCommitteesServiceTest(ctrl)
 	require.NoError(t, synced.OnHeadState(state))
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
 	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg))
@@ -124,11 +124,11 @@ func TestSyncCommitteesIgnoresReplacementWithDifferentContent(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 	// Exactly one verification call is ever expected: gomock fails the test
 	// if the replacement below triggers a second one.
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
-	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	s, synced, ethClock := setupSyncCommitteesServiceTest(ctrl)
 	require.NoError(t, synced.OnHeadState(state))
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
 	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg))
@@ -163,9 +163,9 @@ func TestSyncCommitteesRetryAfterFailedPublishStillSucceeds(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
-	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	s, synced, ethClock := setupSyncCommitteesServiceTest(ctrl)
 	require.NoError(t, synced.OnHeadState(state))
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
 
@@ -186,9 +186,9 @@ func TestSyncCommitteesIgnoresRetryAfterSuccessfulPublish(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
-	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	s, synced, ethClock := setupSyncCommitteesServiceTest(ctrl)
 	require.NoError(t, synced.OnHeadState(state))
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
 

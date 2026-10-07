@@ -889,7 +889,7 @@ func TestPublishedBlockJobRetainsFullStoreUntilSuccess(t *testing.T) {
 		storedSidecars = true
 		imported = true
 		return db.Update(t.Context(), func(tx kv.RwTx) error {
-			return beacon_indicies.WriteBeaconBlockAndIndicies(t.Context(), tx, block, false)
+			return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 		})
 	})
 	jobValue, ok := service.blocksScheduledForLaterExecution.Load(root)

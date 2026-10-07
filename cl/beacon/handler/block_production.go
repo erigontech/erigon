@@ -966,7 +966,7 @@ func (a *ApiHandler) produceBlock(
 		defer func() {
 			a.logger.Debug("Produced BeaconBody", "slot", targetSlot, "duration", time.Since(start))
 		}()
-		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
+		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 		// collect blobs
 		if beaconBody != nil {
 			if options := gloasBlockOptionsFromContext(ctx); options != nil && options.selfBuildPayload != nil {
@@ -1604,7 +1604,6 @@ func validateBuilderExecutionRequests(cfg *clparams.BeaconChainConfig, version c
 
 func (a *ApiHandler) produceBeaconBody(
 	ctx context.Context,
-	apiVersion int,
 	baseBlockSlot uint64,
 	baseBlockRoot common.Hash,
 	baseState *state.CachingBeaconState,
@@ -2153,7 +2152,7 @@ func (a *ApiHandler) setupHeaderReponseForBlockProduction(
 }
 
 func (a *ApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	resp, err := a.postBeaconBlocks(w, r, 1)
+	resp, err := a.postBeaconBlocks(r, 1)
 	if err != nil {
 		log.Warn("Failed to post beacon block in v1 path", "err", err)
 	}
@@ -2161,14 +2160,14 @@ func (a *ApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *ApiHandler) PostEthV2BeaconBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	resp, err := a.postBeaconBlocks(w, r, 2)
+	resp, err := a.postBeaconBlocks(r, 2)
 	if err != nil {
 		log.Warn("Failed to post beacon block in v2 path", "err", err)
 	}
 	return resp, err
 }
 
-func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) postBeaconBlocks(r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	version, err := a.parseEthConsensusVersion(r.Header.Get("Eth-Consensus-Version"), apiVersion)
 	if err != nil {
@@ -2362,7 +2361,7 @@ func (a *ApiHandler) builderHandoffDeadline(slot uint64) time.Time {
 }
 
 func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	resp, err := a.publishBlindedBlocks(w, r, 1)
+	resp, err := a.publishBlindedBlocks(r, 1)
 	if err != nil {
 		log.Warn("Failed to publish blinded block in v1 path", "err", err)
 	}
@@ -2370,7 +2369,7 @@ func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Reque
 }
 
 func (a *ApiHandler) PostEthV2BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	resp, err := a.publishBlindedBlocks(w, r, 2)
+	resp, err := a.publishBlindedBlocks(r, 2)
 	if err != nil {
 		log.Warn("Failed to publish blinded block in v2 path", "err", err)
 	}
@@ -2415,7 +2414,7 @@ func validateBuilderPayload(blockPayload *cltypes.Eth1Block, executionRequests *
 	return nil
 }
 
-func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) publishBlindedBlocks(r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
 	ethVersion := r.Header.Get("Eth-Consensus-Version")
 	version, err := a.parseEthConsensusVersion(ethVersion, apiVersion)
 	if err != nil {
@@ -3035,7 +3034,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		if err := beacon_indicies.WriteHighestFinalized(tx, a.forkchoiceStore.FinalizedSlot()); err != nil {
 			return err
 		}
-		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 	}); err != nil {
 		return err
 	}
