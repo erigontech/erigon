@@ -20,7 +20,6 @@ package hexutil
 
 import (
 	"os/exec"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -40,12 +39,13 @@ func TestNoInstructionBeyondTheFeatureCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("objdump: %v", err)
 	}
-	// A zmm or mask register, or one of the instructions that AVX-512 introduced. The names are
-	// spelled out because the AVX2 set has near misses: VPMOVMSKB and VPMOVZXBW are not AVX-512.
-	forbidden := regexp.MustCompile(`\b(Z[0-9]+|K[1-7])\b|\b(VPMOV(S|US)?(WB|DB|QB|DW|QW|QD)|VPERM[BW]|VPCOMPRESS[BWDQ]|VPEXPAND[BWDQ]|VPTERNLOG[DQ])\b`)
+	// Every AVX-512 instruction is EVEX-encoded and, in 64-bit mode, an EVEX instruction always
+	// begins with the byte 0x62, which nothing else does. Naming the instructions instead would
+	// miss the AVX-512VL forms, which work on the same Y registers as AVX2.
 	for _, line := range strings.Split(string(out), "\n") {
-		if m := forbidden.FindString(line); m != "" {
-			t.Errorf("AVX-512 %q reached by a path that only checks AVX2:\n%s", m, strings.TrimSpace(line))
+		if f := strings.Fields(line); len(f) > 3 && strings.HasPrefix(f[2], "62") {
+			t.Errorf("AVX-512 (EVEX) instruction reached by a path that only checks AVX2:\n%s",
+				strings.TrimSpace(line))
 		}
 	}
 }
