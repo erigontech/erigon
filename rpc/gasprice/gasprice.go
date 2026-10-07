@@ -47,6 +47,11 @@ type OracleBackend interface {
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 
+	// CheckBlockRewardsAvailable reports whether the transactions of a block and the
+	// gas used GetReceiptsGasUsed reads for them can still be served under the node's
+	// retention.
+	CheckBlockRewardsAvailable(ctx context.Context, blockNumber uint64) error
+
 	// CanonicalHashes returns the canonical hashes of [from, to] on the
 	// backend's view, one entry per height. Heights the view has no canonical
 	// marker for (beyond the head, or pruned) get the zero hash. It resolves
@@ -308,7 +313,8 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 // on every comparison (O(n log n) allocations). Now we allocate exactly once
 // per transaction (O(n)) and sort with slices.SortFunc (pdqsort).
 func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend OracleBackend, blockNum uint64, limit int,
-	ignoreUnder *uint256.Int, out *[]*uint256.Int) error {
+	ignoreUnder *uint256.Int, out *[]*uint256.Int,
+) error {
 	block, err := backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if err != nil {
 		oracle.log.Error("getBlockPrices", "err", err)

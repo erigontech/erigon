@@ -18,9 +18,12 @@ package services
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 type pendingJob[M any] struct {
@@ -28,112 +31,191 @@ type pendingJob[M any] struct {
 	creationTime time.Time
 }
 
-// pendingJobQueue holds gossip messages whose processing dependencies have not
-// arrived yet and retries them periodically until processed or expired.
-type pendingJobQueue[K comparable, M any] struct {
-	capacity int32
-	expiry   time.Duration
-	tick     time.Duration
-	// tryProcess decides a job's fate: done=false keeps it queued for the next
-	// tick; done=true removes it. A non-nil process func runs after the removal,
-	// so that a concurrent re-enqueue under the same key is not lost.
-	tryProcess func(ctx context.Context, key K, msg M) (process func(), done bool)
-	onExpired  func(key K)
+type pendingJobQueueOptions struct {
+	name          string
+	capacity      int32
+	expiry        time.Duration
+	checkInterval time.Duration
+}
 
-	jobs  sync.Map // K -> *pendingJob[M]
-	count atomic.Int32
-	cond  *sync.Cond
+type pendingJobDecision uint8
+
+const (
+	pendingJobKeep pendingJobDecision = iota
+	pendingJobRemove
+	pendingJobRemoveThenProcess
+)
+
+var pendingJobQueueRejectedCounter = metrics.GetOrCreateCounterVec(
+	"caplin_pending_job_queue_rejected_total",
+	[]string{"queue"},
+	"Total pending queue admission attempts rejected at capacity",
+)
+
+var errPendingJobQueueFull = errors.New("pending job queue full")
+
+// pendingJobQueue retries dependency-blocked jobs on the single processing loop
+// started by newPendingJobQueue. Jobs remain until the service callback requests
+// removal or they expire.
+type pendingJobQueue[K comparable, M any] struct {
+	pendingJobQueueOptions
+	// tryProcess runs sequentially while the job is still stored, so it must not
+	// enqueue the same key. onExpired and processAfterRemove run only after a
+	// successful removal and may re-enqueue it.
+	tryProcess         func(ctx context.Context, key K, msg M) pendingJobDecision
+	processAfterRemove func(ctx context.Context, key K, msg M)
+	onExpired          func(key K, msg M)
+
+	jobs sync.Map // K -> *pendingJob[M]
+	// count includes stored jobs and reservations held by in-flight enqueues. It
+	// can exceed the number of visible jobs, but it never exceeds capacity.
+	count    atomic.Int32
+	wakeLoop chan struct{}
+
+	cancelLoop context.CancelFunc
+	loopWG     sync.WaitGroup
+
+	fullCounter metrics.Counter
 }
 
 func newPendingJobQueue[K comparable, M any](
-	capacity int32,
-	expiry time.Duration,
-	tick time.Duration,
-	tryProcess func(ctx context.Context, key K, msg M) (func(), bool),
-	onExpired func(key K),
+	ctx context.Context,
+	options pendingJobQueueOptions,
+	tryProcess func(ctx context.Context, key K, msg M) pendingJobDecision,
+	processAfterRemove func(ctx context.Context, key K, msg M),
+	onExpired func(key K, msg M),
 ) *pendingJobQueue[K, M] {
-	return &pendingJobQueue[K, M]{
-		capacity:   capacity,
-		expiry:     expiry,
-		tick:       tick,
-		tryProcess: tryProcess,
-		onExpired:  onExpired,
-		cond:       sync.NewCond(&sync.Mutex{}),
+	if options.capacity <= 0 {
+		panic("pending job queue capacity must be positive")
 	}
+	if options.expiry <= 0 {
+		panic("pending job queue expiry must be positive")
+	}
+	if options.checkInterval <= 0 {
+		panic("pending job queue check interval must be positive")
+	}
+	if options.name == "" {
+		panic("pending job queue name must not be empty")
+	}
+	if tryProcess == nil {
+		panic("pending job queue requires tryProcess")
+	}
+	if onExpired == nil {
+		panic("pending job queue requires onExpired")
+	}
+	loopCtx, cancelLoop := context.WithCancel(ctx)
+	q := &pendingJobQueue[K, M]{
+		pendingJobQueueOptions: options,
+		tryProcess:             tryProcess,
+		processAfterRemove:     processAfterRemove,
+		onExpired:              onExpired,
+		wakeLoop:               make(chan struct{}, 1),
+		cancelLoop:             cancelLoop,
+		fullCounter:            pendingJobQueueRejectedCounter.WithLabelValues(options.name),
+	}
+	q.loopWG.Go(func() {
+		q.loop(loopCtx)
+	})
+	return q
 }
 
+func (q *pendingJobQueue[K, M]) stopAndWait() {
+	q.cancelLoop()
+	q.loopWG.Wait()
+}
+
+// enqueueLazy reserves capacity before building the key so a full queue skips
+// potentially expensive work. A duplicate arriving at capacity is therefore
+// reported as full because detecting it would require building the key. Storage
+// keeps or releases the reservation; deferred cleanup handles key-construction
+// errors and panics.
 func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
 	if !q.reserve() {
-		return nil
+		return errPendingJobQueueFull
 	}
+
+	reservationOwned := true
+	defer func() {
+		if reservationOwned {
+			q.count.Add(-1)
+		}
+	}()
 
 	key, err := buildKey()
 	if err != nil {
-		q.count.Add(-1)
 		return err
 	}
 	q.storeReserved(key, msg)
+	reservationOwned = false
 	return nil
 }
 
 func (q *pendingJobQueue[K, M]) reserve() bool {
-	if q.count.Add(1) > q.capacity {
-		q.count.Add(-1)
-		return false
+	for {
+		count := q.count.Load()
+		if count >= q.capacity {
+			q.fullCounter.Inc()
+			return false
+		}
+		if q.count.CompareAndSwap(count, count+1) {
+			return true
+		}
 	}
-	return true
 }
 
+// storeReserved transfers the caller's reservation to a new job, or releases
+// it if the key is already present.
 func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) {
-	if _, loaded := q.jobs.LoadOrStore(key, &pendingJob[M]{
+	candidate := &pendingJob[M]{
 		msg:          msg,
 		creationTime: time.Now(),
-	}); loaded {
+	}
+	if _, loaded := q.jobs.LoadOrStore(key, candidate); loaded {
 		q.count.Add(-1)
-	} else {
-		q.cond.L.Lock()
-		q.cond.Signal()
-		q.cond.L.Unlock()
+		return
+	}
+	// Wake notifications may coalesce; count determines whether work remains.
+	select {
+	case q.wakeLoop <- struct{}{}:
+	default:
 	}
 }
 
-func (q *pendingJobQueue[K, M]) remove(key K) {
-	q.jobs.Delete(key)
+func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {
+	if !q.jobs.CompareAndDelete(key, job) {
+		return false
+	}
 	q.count.Add(-1)
+	return true
 }
 
 // loop is the background goroutine that retries pending jobs.
 func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
-	// Wake any blocked Wait() on context cancellation to prevent deadlock.
-	go func() {
-		<-ctx.Done()
-		q.cond.L.Lock()
-		q.cond.Broadcast()
-		q.cond.L.Unlock()
-	}()
-
 	for {
-		// Wait until there are pending jobs
-		q.cond.L.Lock()
+		if ctx.Err() != nil {
+			return
+		}
 		for q.count.Load() == 0 {
 			select {
 			case <-ctx.Done():
-				q.cond.L.Unlock()
 				return
-			default:
+			case <-q.wakeLoop:
 			}
-			q.cond.Wait()
 		}
-		q.cond.L.Unlock()
 
-		// Poll until all pending jobs are processed
-		ticker := time.NewTicker(q.tick)
+		ticker := time.NewTicker(q.checkInterval)
 		for q.count.Load() > 0 {
 			select {
 			case <-ctx.Done():
 				ticker.Stop()
 				return
 			case <-ticker.C:
+				// A tick can win the select after cancellation is ready. Recheck
+				// before invoking service code on an already-canceled queue.
+				if ctx.Err() != nil {
+					ticker.Stop()
+					return
+				}
 				q.processPending(ctx)
 			}
 		}
@@ -141,24 +223,39 @@ func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
 	}
 }
 
+// processPending runs callbacks sequentially. Once it observes cancellation, it
+// stops before the next job; an already-started callback may finish. It must not
+// be called concurrently.
 func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 	q.jobs.Range(func(key, value any) bool {
+		if ctx.Err() != nil {
+			return false
+		}
 		k := key.(K)
 		job := value.(*pendingJob[M])
-
 		if time.Since(job.creationTime) > q.expiry {
-			q.remove(k)
-			q.onExpired(k)
+			if q.remove(k, job) {
+				q.onExpired(k, job.msg)
+			}
 			return true
 		}
 
-		process, done := q.tryProcess(ctx, k, job.msg)
-		if !done {
+		decision := q.tryProcess(ctx, k, job.msg)
+		switch decision {
+		case pendingJobKeep:
 			return true
+		case pendingJobRemove:
+		case pendingJobRemoveThenProcess:
+			if q.processAfterRemove == nil {
+				panic("pending job queue requires processAfterRemove")
+			}
+		default:
+			panic("invalid pending job decision")
 		}
-		q.remove(k)
-		if process != nil {
-			process()
+
+		removed := q.remove(k, job)
+		if removed && decision == pendingJobRemoveThenProcess {
+			q.processAfterRemove(ctx, k, job.msg)
 		}
 		return true
 	})

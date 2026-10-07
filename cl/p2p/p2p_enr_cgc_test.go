@@ -68,3 +68,67 @@ func TestSetupENRAdvertisesTheCustodyRequirement(t *testing.T) {
 	require.NotEmpty(t, got, "cgc advertised as empty, i.e. custody of no groups")
 	require.Equal(t, []byte{byte(beaconCfg.CustodyRequirement)}, got)
 }
+
+func TestSetupENRAdvertisesQUICPort(t *testing.T) {
+	netCfg, beaconCfg, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	cfg := &P2PConfig{
+		NetworkConfig: netCfg,
+		BeaconConfig:  beaconCfg,
+		IpAddr:        "127.0.0.1",
+		Port:          0,
+		TCPPort:       4001,
+		QUICPort:      4002,
+		TmpDir:        t.TempDir(),
+	}
+	listener, err := NewUDPv5Listener(context.Background(), cfg, discover.Config{PrivateKey: privKey}, log.Root())
+	require.NoError(t, err)
+	defer listener.LocalNode().Database().Close()
+	defer listener.Close()
+
+	p := &p2pManager{
+		cfg:      cfg,
+		udpv5:    listener,
+		ethClock: eth_clock.NewEthereumClock(0, common.Hash{}, beaconCfg),
+	}
+	require.NoError(t, p.setupENR())
+
+	var port enr.QUIC
+	require.NoError(t, listener.LocalNode().Node().Load(&port))
+	require.Equal(t, enr.QUIC(4002), port)
+}
+
+func TestSetupENRAdvertisesIPv6QUICPort(t *testing.T) {
+	netCfg, beaconCfg, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	cfg := &P2PConfig{
+		NetworkConfig: netCfg,
+		BeaconConfig:  beaconCfg,
+		IpAddr:        "::1",
+		Port:          0,
+		TCPPort:       4001,
+		QUICPort:      4002,
+		TmpDir:        t.TempDir(),
+	}
+	listener, err := NewUDPv5Listener(context.Background(), cfg, discover.Config{PrivateKey: privKey}, log.Root())
+	require.NoError(t, err)
+	defer listener.LocalNode().Database().Close()
+	defer listener.Close()
+
+	p := &p2pManager{
+		cfg:      cfg,
+		udpv5:    listener,
+		ethClock: eth_clock.NewEthereumClock(0, common.Hash{}, beaconCfg),
+	}
+	require.NoError(t, p.setupENR())
+
+	var port enr.QUIC6
+	require.NoError(t, listener.LocalNode().Node().Load(&port))
+	require.Equal(t, enr.QUIC6(4002), port)
+}

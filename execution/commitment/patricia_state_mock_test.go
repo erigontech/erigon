@@ -43,6 +43,8 @@ type MockState struct {
 	sm     map[string][]byte
 	cm     map[string]BranchData
 	numBuf [binary.MaxVarintLen64]byte
+
+	putBranches int
 }
 
 func NewMockState(t testing.TB) *MockState {
@@ -70,6 +72,7 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 	// Clone is required by PutBranch's no-retain contract, not incidental: callers pass
 	// pooled buffers. Storing data directly silently corrupts branches on pool reuse.
 	ms.cm[string(prefix)] = bytes.Clone(data)
+	ms.putBranches++
 	return nil
 }
 
@@ -352,7 +355,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	keccak := keccak.NewFastKeccak()
 	for key := range ub.keyset {
 		keccak.Reset()
-		keccak.Write([]byte(key))
+		_, _ = keccak.Write([]byte(key))
 		h := keccak.Sum(nil)
 		hashedKey := make([]byte, len(h)*2)
 		for i, c := range h {
@@ -365,7 +368,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 	hashedKey := make([]byte, 128)
 	for sk1, k := range ub.keyset2 {
 		keccak.Reset()
-		keccak.Write([]byte(sk1))
+		_, _ = keccak.Write([]byte(sk1))
 		h := keccak.Sum(nil)
 		for i, c := range h {
 			hashedKey[i*2] = (c >> 4) & 0xf
@@ -373,7 +376,7 @@ func (ub *UpdateBuilder) Build() (plainKeys [][]byte, updates []Update) {
 		}
 		for sk2 := range k {
 			keccak.Reset()
-			keccak.Write([]byte(sk2))
+			_, _ = keccak.Write([]byte(sk2))
 			h2 := keccak.Sum(nil)
 			for i, c := range h2 {
 				hashedKey[64+i*2] = (c >> 4) & 0xf

@@ -461,6 +461,7 @@ func (m *Message) Authorizations() []Authorization { return m.authorizations }
 func (m *Message) SetBlobVersionedHashes(blobHashes []common.Hash) {
 	m.blobHashes = blobHashes
 }
+
 func (m *Message) SetAuthorizations(authorizations []Authorization) {
 	m.authorizations = authorizations
 }

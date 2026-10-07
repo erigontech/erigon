@@ -101,9 +101,11 @@ func (f *RollingFinality) isFinalized() bool {
 	}
 	return len(f.signCount)*2 > len(f.signers.validators)
 }
+
 func (f *RollingFinality) hasSigner(signer common.Address) bool {
 	return slices.Contains(f.signers.validators, signer)
 }
+
 func (f *RollingFinality) addSigners(signers []common.Address) bool {
 	for i := range signers {
 		count, ok := f.signCount[signers[i]]
@@ -115,6 +117,7 @@ func (f *RollingFinality) addSigners(signers []common.Address) bool {
 	}
 	return false
 }
+
 func (f *RollingFinality) removeSigners(signers []common.Address) {
 	for i := range signers {
 		count, ok := f.signCount[signers[i]]
@@ -129,6 +132,7 @@ func (f *RollingFinality) removeSigners(signers []common.Address) {
 		}
 	}
 }
+
 func (f *RollingFinality) buildAncestrySubChain(get func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool), parentHash, epochTransitionHash common.Hash) error { // starts from chainHeadParentHash
 	f.clear()
 

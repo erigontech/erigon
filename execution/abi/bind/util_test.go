@@ -62,9 +62,9 @@ func TestWaitDeployed(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	for name, test := range waitDeployedTests {
-
 		t.Run(name, func(t *testing.T) {
-			backend := backends.NewSimulatedBackend(t,
+			backend := backends.NewSimulatedBackend(
+				t,
 				types.GenesisAlloc{
 					crypto.PubkeyToAddress(testKey.PublicKey): {Balance: big.NewInt(10000000000)},
 				},
@@ -118,7 +118,8 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
-	backend := backends.NewSimulatedBackend(t,
+	backend := backends.NewSimulatedBackend(
+		t,
 		types.GenesisAlloc{
 			crypto.PubkeyToAddress(testKey.PublicKey): {Balance: big.NewInt(10000000000)},
 		},
