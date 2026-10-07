@@ -53,6 +53,15 @@ func (evm *EVM) chargeDynamic(pc uint64, scope *CallContext, t *opTrace, cost md
 	return nil
 }
 
+// chargeFast charges cost when no error, trace or state gas needs chargeDynamic, and reports whether it did.
+func (scope *CallContext) chargeFast(t *opTrace, cost mdgas.MdGasCost, err error) bool {
+	if err != nil || t != nil || cost.State != 0 || scope.gas < cost.Execution {
+		return false
+	}
+	scope.gas -= cost.Execution
+	return true
+}
+
 // chargeDynamicSlow is chargeDynamic for a gas func error, a trace or state gas.
 func (evm *EVM) chargeDynamicSlow(pc uint64, scope *CallContext, t *opTrace, cost mdgas.MdGasCost, err error, memorySize uint64) error {
 	if err != nil {
@@ -222,17 +231,19 @@ func makeLogWithGas(topics int) gasExecuteFunc {
 }
 
 func opExpFrontierWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	cost, err := gasExpFrontier(scope)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, 0); err != nil {
-		return pc, nil, err
+	if cost := gasExpFrontier(scope); !scope.chargeFast(t, cost, nil) {
+		if err := evm.chargeDynamic(pc, scope, t, cost, nil, 0); err != nil {
+			return pc, nil, err
+		}
 	}
 	return opExp(pc, evm, scope)
 }
 
 func opExpEIP160WithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	cost, err := gasExpEIP160(scope)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, 0); err != nil {
-		return pc, nil, err
+	if cost := gasExpEIP160(scope); !scope.chargeFast(t, cost, nil) {
+		if err := evm.chargeDynamic(pc, scope, t, cost, nil, 0); err != nil {
+			return pc, nil, err
+		}
 	}
 	return opExp(pc, evm, scope)
 }
