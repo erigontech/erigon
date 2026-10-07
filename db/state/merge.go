@@ -768,17 +768,13 @@ func (ht *HistoryRoTx) mergeFiles(ctx context.Context, indexFiles, historyFiles 
 	var err error
 	closeFiles := true
 	defer func() {
-		if !closeFiles {
+		if !closeFiles || !r.history.needMerge {
 			return
 		}
 		if comp != nil {
 			comp.Close()
 		}
 		historyIn.closeFiles()
-		if !r.history.needMerge {
-			indexIn.closeFilesAndRemove()
-			return
-		}
 		indexIn.closeFiles()
 		paths := []string{idxPath, datPath}
 		if r.index.needMerge {
