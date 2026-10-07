@@ -209,7 +209,7 @@ func accountSurcharge(evm *EVM, addr accounts.Address) uint64 {
 	return 0
 }
 
-// opBalanceEIP2929 is BALANCE with its EIP-2929 gas: it interns the address once for both.
+// opBalanceEIP2929 is BALANCE with its EIP-2929 gas charged in place.
 func opBalanceEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
 	cost := accountSurcharge(evm, scope.peekAddress(evm))
 	if t != nil {
@@ -225,7 +225,7 @@ func opBalanceEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint
 	return opBalance(pc, evm, scope)
 }
 
-// opExtCodeSizeEIP2929 is EXTCODESIZE with its EIP-2929 gas: it interns the address once for both.
+// opExtCodeSizeEIP2929 is EXTCODESIZE with its EIP-2929 gas charged in place.
 func opExtCodeSizeEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
 	cost := accountSurcharge(evm, scope.peekAddress(evm))
 	if t != nil {
@@ -241,7 +241,7 @@ func opExtCodeSizeEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (
 	return opExtCodeSize(pc, evm, scope)
 }
 
-// opExtCodeHashEIP2929 is EXTCODEHASH with its EIP-2929 gas: it interns the address once for both.
+// opExtCodeHashEIP2929 is EXTCODEHASH with its EIP-2929 gas charged in place.
 func opExtCodeHashEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
 	cost := accountSurcharge(evm, scope.peekAddress(evm))
 	if t != nil {
