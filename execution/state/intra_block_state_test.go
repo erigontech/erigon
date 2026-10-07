@@ -1304,12 +1304,18 @@ func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
 	ibs.SetTxContext(5, 2)
 	ReleasePooled(ibs)
 
+	// sync.Pool may drop the entry at any GC, so assert the release handed the
+	// state on rather than that the next Get returns this one: Close would have
+	// dropped the maps.
+	require.NotNil(t, ibs.stateObjects, "a poolable state must be handed on, not closed")
+	require.Nil(t, ibs.stateReader, "and must not keep the last call's reader")
+	require.Zero(t, ibs.blockNum)
+	require.Zero(t, ibs.txIndex)
+
 	reader := NewNoopReader()
 	got := NewPooled(reader)
 	defer ReleasePooled(got)
-	require.Same(t, ibs, got, "the release must hand this object to the next call")
 	require.Same(t, reader, got.stateReader)
-	require.Zero(t, got.blockNum)
 	require.Zero(t, got.txIndex)
 }
 
