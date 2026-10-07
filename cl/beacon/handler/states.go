@@ -701,11 +701,17 @@ func (a *ApiHandler) GetEthV1BeaconStatesProposerLookahead(w http.ResponseWriter
 		stateView := a.caplinStateSnapshots.View()
 		defer stateView.Close()
 		// read epoch data
-		epochData, err := state_accessors.ReadEpochData(state_accessors.GetValFnTxAndSnapshot(tx, stateView), *slot/a.beaconChainCfg.SlotsPerEpoch, a.beaconChainCfg)
+		epochData, err := state_accessors.ReadEpochData(state_accessors.GetValFnTxAndSnapshot(tx, stateView), a.beaconChainCfg.RoundSlotToEpoch(*slot), a.beaconChainCfg)
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(
 				http.StatusInternalServerError,
 				fmt.Errorf("failed to read historical epoch data: %w", err),
+			)
+		}
+		if epochData == nil || epochData.ProposerLookahead == nil {
+			return nil, beaconhttp.NewEndpointError(
+				http.StatusNotFound,
+				fmt.Errorf("proposer lookahead not found for slot %d", *slot),
 			)
 		}
 		proposerLookahead = epochData.ProposerLookahead
