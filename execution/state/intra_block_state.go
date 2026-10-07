@@ -583,7 +583,7 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	// self-destruct has already cleared the versioned nonce/code-hash/balance cells,
 	// so recognize the own-tx SelfDestruct write directly. Cross-tx destructs are
 	// handled above by versionedAccountBase returning nil. Only a true write counts:
-	// createObject records SelfDestructPath=false for every account it materializes,
+	// CreateAccount records SelfDestructPath=false for a new or revived account,
 	// which says "created", not "destroyed".
 	if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
 		return false, nil
