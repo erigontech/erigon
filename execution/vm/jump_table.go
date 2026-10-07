@@ -44,7 +44,6 @@ type operation struct {
 	// execute is the operation function
 	execute     executionFunc
 	constantGas uint64
-	dynamicGas  gasFunc
 	// gasExecute, when set, runs the op in place of dynamicGas and execute: it charges
 	// the dynamic gas itself, so what the gas needs is derived once.
 	gasExecute gasExecuteFunc
@@ -97,12 +96,12 @@ func validateAndFillMaxStack(jt *JumpTable) {
 			panic(fmt.Sprintf("op 0x%x is not set", i))
 		}
 		// The interpreter has an assumption that if the memorySize function is
-		// set, then the dynamicGas or gasExecute function is also set. This is a somewhat
+		// set, then the gasExecute function is also set. This is a somewhat
 		// arbitrary assumption, and can be removed if we need to -- but it
 		// allows us to avoid a condition check. As long as we have that assumption
 		// in there, this little sanity check prevents us from merging in a
 		// change which violates it.
-		if op.memorySize != nil && op.dynamicGas == nil && op.gasExecute == nil {
+		if op.memorySize != nil && op.gasExecute == nil {
 			panic(fmt.Sprintf("op %v has dynamic memory but not dynamic gas", OpCode(i).String()))
 		}
 		op.maxStack = maxStack(op.numPop, op.numPush)

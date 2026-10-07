@@ -120,10 +120,9 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		}
 	}
 	for i, jt := range tables {
-		// From EIP-2929 on, opSloadEIP2929 charges SLOAD's dynamic gas and SLOAD has no gas func.
+		// From EIP-2929 on, opSloadEIP2929 charges SLOAD's dynamic gas.
 		if sload := &jt[SLOAD]; sload.gasExecute != nil || sload.constantGas == 0 {
 			require.Equal(t, reflect.ValueOf(opSloadEIP2929).Pointer(), reflect.ValueOf(sload.gasExecute).Pointer(), "table %d SLOAD", i)
-			require.Nil(t, sload.dynamicGas, "table %d SLOAD", i)
 		}
 		// run inlines the copy of the func vmgen found for the op, whatever the table holds.
 		for op, want := range gasExecuteOps {
@@ -153,7 +152,6 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 			require.Equal(t, w.numPop, got.numPop, "table %d %s numPop", i, op)
 			require.Equal(t, w.numPush, got.numPush, "table %d %s numPush", i, op)
 			if w.memorySize == nil {
-				require.Nil(t, got.dynamicGas, "table %d %s dynamicGas", i, op)
 				require.Nil(t, got.memorySize, "table %d %s memorySize", i, op)
 				continue
 			}
