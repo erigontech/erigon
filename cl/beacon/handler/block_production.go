@@ -2899,9 +2899,11 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 			}
 		}
 	}
-	publishFields := []any{"slot", blk.Block.Slot,
+	publishFields := []any{
+		"slot", blk.Block.Slot,
 		"block", blockPublished.Round(time.Millisecond),
-		"total", time.Since(publishStart).Round(time.Millisecond)}
+		"total", time.Since(publishStart).Round(time.Millisecond),
+	}
 	if a.ethClock != nil {
 		publishFields = append(publishFields, "sinceSlotStart", time.Since(a.ethClock.GetSlotTime(blk.Block.Slot)).Round(time.Millisecond))
 	}
