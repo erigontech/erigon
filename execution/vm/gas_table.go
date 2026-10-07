@@ -114,12 +114,11 @@ func copyGas(callContext *CallContext, memorySize uint64, stackpos int) (mdgas.M
 	return mdgas.MdGasCost{Execution: gas}, nil
 }
 
-func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, key accounts.StorageKey) (mdgas.MdGasCost, error) {
 	if evm.readOnly {
 		return mdgas.MdGasCost{}, ErrWriteProtection
 	}
 	value := callContext.Stack.back(1)
-	key := callContext.peekStorageKey(evm)
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
@@ -200,7 +199,7 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 //     2.2.2. If original value equals new value (this storage slot is reset):
 //     2.2.2.1. If original value is 0, add SSTORE_SET_GAS - SLOAD_GAS to refund counter.
 //     2.2.2.2. Otherwise, add SSTORE_RESET_GAS - SLOAD_GAS gas to refund counter.
-func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, key accounts.StorageKey) (mdgas.MdGasCost, error) {
 	if evm.readOnly {
 		return mdgas.MdGasCost{}, ErrWriteProtection
 	}
@@ -210,7 +209,6 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
 	value := callContext.Stack.back(1)
-	key := callContext.peekStorageKey(evm)
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 
 	if current.Eq(value) { // noop (1)
@@ -667,7 +665,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas.Execution = params.SelfdestructGasEIP150
-		address := callContext.peekAddress(evm)
+		address := evm.internAddress(callContext.Stack.peek())
 
 		if evm.ChainRules().IsEIP161Enabled() {
 			// if empty and transfers value

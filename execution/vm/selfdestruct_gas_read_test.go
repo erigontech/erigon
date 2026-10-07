@@ -28,7 +28,6 @@ func runSelfdestructGasFn(t *testing.T, refundsEnabled bool) *state.IntraBlockSt
 	require.NoError(t, ibs.AddBalance(self, *uint256.NewInt(1000), 0))
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
 	scope := &CallContext{Contract: *NewContract(self, self, self, uint256.Int{})}
-	scope.cacheGen++
 	benVal := beneficiary.Value()
 	scope.Stack.push(*new(uint256.Int).SetBytes(benVal[:]))
 	_, err := selfdestructGasEIP2929(evm, scope, mdgas.MdGas{Execution: 1_000_000}, refundsEnabled)
