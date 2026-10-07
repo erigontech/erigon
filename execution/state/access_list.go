@@ -21,6 +21,8 @@ package state
 
 import (
 	"maps"
+	"slices"
+	"unsafe"
 
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -29,9 +31,95 @@ import (
 // addresses maps each address to its index in slots (-1 if address-only, no slots).
 // This layout matches go-ethereum's design: the slots slice backing array is
 // reused across transactions via Reset, eliminating per-tx slot-map allocations.
+// alSlotSet is an open-addressed set of interned slot handles stamped with the
+// call generation: a reset bumps the generation instead of clearing the table,
+// so the next call reuses the buckets and stale entries read as absent.
+// Entries are never removed, so a probe never stops early; DeleteSlot clears
+// the stamp in place.
+type alSlotSet struct {
+	ids  []uintptr
+	gens []uint32
+	live int
+}
+
+func slotID(k accounts.StorageKey) uintptr { return *(*uintptr)(unsafe.Pointer(&k)) }
+
+func (s *alSlotSet) probe(id uintptr) int {
+	mask := len(s.ids) - 1
+	i := int((uint64(id)*0x9E3779B97F4A7C15)>>32) & mask
+	for s.ids[i] != 0 && s.ids[i] != id {
+		i = (i + 1) & mask
+	}
+	return i
+}
+
+func (s *alSlotSet) has(id uintptr, gen uint32) bool {
+	if len(s.ids) == 0 {
+		return false
+	}
+	i := s.probe(id)
+	return s.ids[i] == id && s.gens[i] == gen
+}
+
+// add reports whether the slot was cold.
+func (s *alSlotSet) add(id uintptr, gen uint32) bool {
+	if s.live*4 >= len(s.ids)*3 {
+		s.grow(gen)
+	}
+	i := s.probe(id)
+	if s.ids[i] == id && s.gens[i] == gen {
+		return false
+	}
+	if s.ids[i] == 0 {
+		s.ids[i] = id
+	}
+	s.gens[i] = gen
+	s.live++
+	return true
+}
+
+func (s *alSlotSet) del(id uintptr) {
+	if len(s.ids) == 0 {
+		return
+	}
+	if i := s.probe(id); s.ids[i] == id {
+		s.gens[i] = 0
+		s.live--
+	}
+}
+
+func (s *alSlotSet) grow(gen uint32) {
+	n := 16
+	if len(s.ids) > 0 {
+		n = len(s.ids) * 2
+	}
+	oldIDs, oldGens := s.ids, s.gens
+	s.ids, s.gens, s.live = make([]uintptr, n), make([]uint32, n), 0
+	for j, id := range oldIDs {
+		if id != 0 && oldGens[j] == gen {
+			i := s.probe(id)
+			s.ids[i], s.gens[i] = id, gen
+			s.live++
+		}
+	}
+}
+
+// rebase drops every stamp older than gen so live counts stay honest.
+func (s *alSlotSet) rebase(gen uint32) {
+	s.live = 0
+	for j := range s.gens {
+		if s.gens[j] == gen {
+			s.live++
+		}
+	}
+}
+
 type accessList struct {
 	addresses map[accounts.Address]int
-	slots     []map[accounts.StorageKey]struct{}
+	slots     []alSlotSet
+
+	// gen stamps this call's warm marks; Reset bumps it instead of clearing.
+	gen uint32
 
 	// Memo of the last resolved (address -> slot set) and the last slot known
 	// warm within it: repeated AddSlot on the same addr skips the addresses
@@ -39,7 +127,7 @@ type accessList struct {
 	// lastSlots == nil means no memo — lastAddr alone can't say, since its
 	// zero value NilAddress is a legal argument.
 	lastAddr     accounts.Address
-	lastSlots    map[accounts.StorageKey]struct{}
+	lastSlots    *alSlotSet
 	lastWarmSlot accounts.StorageKey
 
 	// inserted counts the keys added since the last Reset, which is what the
@@ -51,6 +139,7 @@ type accessList struct {
 func newAccessList() *accessList {
 	return &accessList{
 		addresses: make(map[accounts.Address]int),
+		gen:       1,
 	}
 }
 
@@ -58,8 +147,15 @@ func newAccessList() *accessList {
 // The slots backing array is retained; cleared inner maps are reused by
 // subsequent AddSlot calls without new allocations.
 func (al *accessList) Reset() {
-	for _, s := range al.slots {
-		clear(s)
+	al.gen++
+	if al.gen == 0 { // 0 means "never warm"
+		al.gen = 1
+		for i := range al.slots[:cap(al.slots)] {
+			al.slots[:cap(al.slots)][i] = alSlotSet{}
+		}
+	}
+	for i := range al.slots {
+		al.slots[i].rebase(al.gen)
 	}
 	al.slots = al.slots[:0]
 	clear(al.addresses)
@@ -91,7 +187,7 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 		if slot == al.lastWarmSlot {
 			return true, true
 		}
-		_, slotPresent = al.lastSlots[slot]
+		slotPresent = al.lastSlots.has(slotID(slot), al.gen)
 		return true, slotPresent
 	}
 	idx, ok := al.addresses[address]
@@ -101,7 +197,7 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 	if idx == -1 {
 		return true, false
 	}
-	_, slotPresent = al.slots[idx][slot]
+	slotPresent = al.slots[idx].has(slotID(slot), al.gen)
 	return true, slotPresent
 }
 
@@ -109,10 +205,15 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 func (al *accessList) Copy() *accessList {
 	cp := &accessList{
 		addresses: maps.Clone(al.addresses),
-		slots:     make([]map[accounts.StorageKey]struct{}, len(al.slots)),
+		slots:     make([]alSlotSet, len(al.slots)),
+		gen:       al.gen,
 	}
-	for i, slotMap := range al.slots {
-		cp.slots[i] = maps.Clone(slotMap)
+	for i := range al.slots {
+		cp.slots[i] = alSlotSet{
+			ids:  slices.Clone(al.slots[i].ids),
+			gens: slices.Clone(al.slots[i].gens),
+			live: al.slots[i].live,
+		}
 	}
 	return cp
 }
@@ -138,14 +239,10 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		if slot == al.lastWarmSlot {
 			return false, false
 		}
-		// Probe-then-insert: a plain read on the warm case beats mapassign's
-		// write bookkeeping, and warm re-reads dominate cold inserts.
-		if _, ok := al.lastSlots[slot]; ok {
-			al.lastWarmSlot = slot
+		al.lastWarmSlot = slot
+		if !al.lastSlots.add(slotID(slot), al.gen) {
 			return false, false
 		}
-		al.lastSlots[slot] = struct{}{}
-		al.lastWarmSlot = slot
 		al.inserted++
 		return false, true
 	}
@@ -156,31 +253,27 @@ func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.Storag
 	idx, addrPresent := al.addresses[address]
 	if !addrPresent || idx == -1 {
 		// Address not present, or addr present but no slots yet.
-		// Reuse a cleared slot map from the backing array if available.
 		newIdx := len(al.slots)
 		al.addresses[address] = newIdx
-		var slotmap map[accounts.StorageKey]struct{}
 		if newIdx < cap(al.slots) {
-			slotmap = al.slots[:cap(al.slots)][newIdx]
+			al.slots = al.slots[:newIdx+1] // keeps this set's table from the last call
+		} else {
+			al.slots = append(al.slots, alSlotSet{})
 		}
-		if slotmap == nil {
-			slotmap = make(map[accounts.StorageKey]struct{})
-		}
-		slotmap[slot] = struct{}{}
-		al.slots = append(al.slots, slotmap)
-		al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
+		set := &al.slots[newIdx]
+		set.add(slotID(slot), al.gen)
+		al.lastAddr, al.lastSlots, al.lastWarmSlot = address, set, slot
 		al.inserted++
 		if !addrPresent {
 			al.inserted++
 		}
 		return !addrPresent, true
 	}
-	slotmap := al.slots[idx]
-	al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
-	if _, ok := slotmap[slot]; ok {
+	set := &al.slots[idx]
+	al.lastAddr, al.lastSlots, al.lastWarmSlot = address, set, slot
+	if !set.add(slotID(slot), al.gen) {
 		return false, false
 	}
-	slotmap[slot] = struct{}{}
 	al.inserted++
 	return false, true
 }
@@ -197,12 +290,12 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 	if idx == -1 {
 		panic("reverting slot change, address has no slots")
 	}
-	slotmap := al.slots[idx]
-	delete(slotmap, slot)
+	set := &al.slots[idx]
+	set.del(slotID(slot))
 	al.dropMemo()
 	// Since additions and rollbacks are always in LIFO order, when a slot map
 	// becomes empty it must be the last one appended — truncate the slice.
-	if len(slotmap) == 0 {
+	if set.live == 0 {
 		if idx != len(al.slots)-1 {
 			panic("reverting slot change, LIFO violation: emptied slot map is not the last element")
 		}

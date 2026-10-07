@@ -1344,8 +1344,8 @@ func TestResetForPoolDropsARevertedWarmUp(t *testing.T) {
 	}
 	ibs.RevertToSnapshot(snap, nil)
 	live := len(ibs.accessList.addresses)
-	for _, s := range ibs.accessList.slots {
-		live += len(s)
+	for i := range ibs.accessList.slots {
+		live += ibs.accessList.slots[i].live
 	}
 	require.Zero(t, live, "the revert leaves nothing live")
 	require.False(t, ibs.poolable(), "the grown slot maps are still retained")
