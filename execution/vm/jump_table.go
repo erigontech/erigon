@@ -36,15 +36,20 @@ type (
 	stringer       func(pc uint64, callContext *CallContext) string
 )
 
+// gasExecuteFunc is an op that charges its dynamic gas itself. With t set, it adds the
+// cost to t and calls traceCharged after charging and before it changes anything else.
+type gasExecuteFunc func(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error)
+
 type operation struct {
 	// execute is the operation function
 	execute     executionFunc
 	constantGas uint64
 	dynamicGas  gasFunc
-	// gasExecute, when set, is execute charging the dynamic gas itself; the untraced
-	// loop runs it in place of dynamicGas and execute, so what the gas needs is derived
-	// once. The traced loop keeps the two, as a tracer gets the cost before the op runs.
-	gasExecute executionFunc
+	// gasExecute, when set, runs the op in place of dynamicGas and execute: it charges
+	// the dynamic gas itself, so what the gas needs is derived once.
+	gasExecute gasExecuteFunc
+	// gasExecuteRun is gasExecute's copy without the trace, which vmgen writes for run.
+	gasExecuteRun executionFunc
 	// maxStack specifies the max length the stack can have for this operation
 	// to not overflow the stack.
 	maxStack int

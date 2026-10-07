@@ -453,6 +453,64 @@ func stackBoundsErr(sLen int, operation *operation) error {
 // traceGas picks the figure the dev instruction trace should report: call
 // opcodes forward gas to the callee, so their charged cost is not the
 // interesting number.
+// opTrace is runTraced's record of the op it runs: the hooks report it, and the
+// deferred fault report reads it when the op fails.
+type opTrace struct {
+	debug, trace bool
+	logged       bool // the opcode hook has reported the op
+	pc           uint64
+	oldGas       mdgas.MdGas
+	cost         mdgas.MdGasCost
+	callGas      mdgas.MdGasCost
+}
+
+// traceCost adds an op's dynamic cost to t.
+func (evm *EVM) traceCost(op OpCode, t *opTrace, dynamic mdgas.MdGasCost) {
+	t.cost = t.cost.Plus(dynamic)
+	t.callGas = t.cost
+	t.callGas.Execution -= evm.CallGasTemp()
+	if dbg.TraceDynamicGas && dynamic != (mdgas.MdGasCost{}) {
+		evm.printDynamicGas(op, t)
+	}
+}
+
+func (evm *EVM) printDynamicGas(op OpCode, t *opTrace) {
+	gasCost := traceGas(op, t.callGas, t.cost)
+	fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
+}
+
+// traceOp reports an op whose gas is charged, before it runs.
+func (evm *EVM) traceOp(callContext *CallContext, op OpCode, t *opTrace) {
+	tracer := evm.config.Tracer
+	if tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(t.oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
+	}
+	if tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)) {
+		tracer.EmitOpcode(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.returnData, evm.depth, nil)
+		t.logged = true
+	}
+}
+
+// tracePrint prints an op for the trace flag, after its memory is expanded.
+func (evm *EVM) tracePrint(callContext *CallContext, op OpCode, pc uint64, t *opTrace) {
+	opstr := op.String()
+	if s := evm.jt[op].string; s != nil {
+		opstr = s(pc, callContext)
+	}
+	gasCost := traceGas(op, t.callGas, t.cost)
+	fmt.Printf("%d (%d.%d) %5d %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, gasCost.Execution, gasCost.State, opstr)
+}
+
+// traceCharged is traceOp and tracePrint for a gasExecute op, which expands no memory.
+func (evm *EVM) traceCharged(callContext *CallContext, op OpCode, pc uint64, t *opTrace) {
+	if t.debug {
+		evm.traceOp(callContext, op, t)
+	}
+	if t.trace {
+		evm.tracePrint(callContext, op, pc, t)
+	}
+}
+
 func traceGas(op OpCode, callGas mdgas.MdGasCost, cost mdgas.MdGasCost) mdgas.MdGasCost {
 	switch op {
 	case CALL, CALLCODE, DELEGATECALL, STATICCALL:
@@ -497,15 +555,10 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc   = uint64(0) // program counter
-		cost mdgas.MdGasCost
-		// copies used by tracer
-		pcCopy  uint64 // needed for the deferred Tracer
-		oldGas  mdgas.MdGas
-		callGas mdgas.MdGasCost
-		logged  bool   // deferred Tracer should ignore already logged steps
-		res     []byte // result of the opcode execution function
-		tracer  = evm.config.Tracer
+		pc     = uint64(0) // program counter
+		t      = opTrace{debug: debug, trace: trace}
+		res    []byte // result of the opcode execution function
+		tracer = evm.config.Tracer
 	)
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
@@ -543,10 +596,10 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 				return
 			}
 			switch {
-			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
-				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+			case !t.logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
+				tracer.EmitOpcode(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
 			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
-				tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
+				tracer.EmitFault(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}()
 	}
@@ -582,27 +635,34 @@ run:
 		callContext.cacheGen++
 		if anyTrace && debug {
 			// Capture pre-execution values for tracing.
-			logged = false
-			pcCopy = pc
-			oldGas = callContext.Gas()
+			t.logged = false
+			t.pc = pc
+			t.oldGas = callContext.Gas()
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		operation := &jt[op]
-		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
+		cost := operation.constantGas
+		if anyTrace {
+			t.cost = mdgas.MdGasCost{Execution: cost}
+		}
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
 		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
-		if callContext.gas < cost.Execution {
+		if callContext.gas < cost {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 		} else {
-			callContext.gas -= cost.Execution
+			callContext.gas -= cost
 		}
-		if !anyTrace && operation.gasExecute != nil {
-			pc, res, err = operation.gasExecute(pc, evm, callContext)
+		if operation.gasExecute != nil {
+			if anyTrace {
+				pc, res, err = operation.gasExecute(pc, evm, callContext, &t)
+			} else {
+				pc, res, err = operation.gasExecuteRun(pc, evm, callContext)
+			}
 			gasLeft = callContext.gas
 			if err != nil {
 				break run
@@ -642,13 +702,7 @@ run:
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
 			}
 			if anyTrace {
-				cost = cost.Plus(dynamicCost)
-				callGas = cost
-				callGas.Execution -= evm.CallGasTemp()
-				if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGasCost{}) {
-					gasCost := traceGas(op, callGas, cost)
-					fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
-				}
+				evm.traceCost(op, &t, dynamicCost)
 			}
 			if callContext.gas < dynamicCost.Execution {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -666,13 +720,7 @@ run:
 
 		// Do gas tracing before memory expansion
 		if anyTrace && debug {
-			if tracer.HasGasChangeHook() {
-				tracer.EmitGasChange(oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
-			}
-			if tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)) {
-				tracer.EmitOpcode(pc, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-				logged = true
-			}
+			evm.traceOp(callContext, op, &t)
 		}
 
 		if memorySize > 0 {
@@ -682,15 +730,7 @@ run:
 		// TODO - move this to a trace & set in the worker
 
 		if anyTrace && trace {
-			var opstr string
-			if operation.string != nil {
-				opstr = operation.string(pc, callContext)
-			} else {
-				opstr = op.String()
-			}
-
-			gasCost := traceGas(op, callGas, cost)
-			fmt.Printf("%d (%d.%d) %5d %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, gasCost.Execution, gasCost.State, opstr)
+			evm.tracePrint(callContext, op, pc, &t)
 		}
 
 		// execute the operation
