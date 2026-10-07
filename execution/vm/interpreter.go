@@ -467,13 +467,9 @@ func (evm *EVM) traceCost(op OpCode, t *opTrace, dynamic mdgas.MdGasCost) {
 	t.callGas = t.cost
 	t.callGas.Execution -= evm.CallGasTemp()
 	if dbg.TraceDynamicGas && dynamic != (mdgas.MdGasCost{}) {
-		evm.printDynamicGas(op, t)
+		gasCost := traceGas(op, t.callGas, t.cost)
+		fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
 	}
-}
-
-func (evm *EVM) printDynamicGas(op OpCode, t *opTrace) {
-	gasCost := traceGas(op, t.callGas, t.cost)
-	fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
 }
 
 // traceOp reports an op whose gas is charged, before it runs.

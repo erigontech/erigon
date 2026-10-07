@@ -34,7 +34,6 @@ import (
 	"log"
 	"maps"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -128,10 +127,18 @@ func inlineBody(instructions []byte, o fastOp) string {
 	if body == nil {
 		log.Fatalf("%s: execute func %q not found in instructions.go", o.name, o.execute)
 	}
+	toRunLocals(o.name, typ, body, rename, "")
+	return inlineReturns(text(fset, body), o)
+}
+
+// toRunLocals renames, in body, the params of typ to run's locals and the other
+// names to their rename entries. With gas set, callContext.gas becomes gas, where
+// run keeps the gas; without it, a body that reads the gas is an error.
+func toRunLocals(name string, typ *ast.FuncType, body *ast.BlockStmt, rename map[string]string, gas string) {
 	i := 0
 	for _, field := range typ.Params.List {
-		for _, name := range field.Names {
-			rename[name.Name] = runLocals[i]
+		for _, n := range field.Names {
+			rename[n.Name] = runLocals[i]
 			i++
 		}
 	}
@@ -139,26 +146,34 @@ func inlineBody(instructions []byte, o fastOp) string {
 	for n := range ast.Preorder(body) {
 		switch n := n.(type) {
 		case *ast.FuncLit:
-			log.Fatalf("%s: a closure in the body would take the inlined returns", o.name)
+			log.Fatalf("%s: a closure in the body would take the inlined returns", name)
 		case *ast.SelectorExpr:
 			fields[n.Sel] = true
-			if x, ok := n.X.(*ast.Ident); ok && rename[x.Name] == "callContext" && n.Sel.Name == "gas" {
-				log.Fatalf("%s: the body reads gas, which run keeps in gasLeft", o.name)
-			}
 		case *ast.AssignStmt:
 			for _, l := range n.Lhs {
-				if id, ok := l.(*ast.Ident); ok && n.Tok == token.DEFINE && slices.Contains(runLocals, id.Name) {
-					log.Fatalf("%s: the body declares %s, which shadows run's", o.name, id.Name)
+				if id, ok := l.(*ast.Ident); ok && n.Tok == token.DEFINE && (slices.Contains(runLocals, id.Name) || id.Name == "o") {
+					log.Fatalf("%s: the body declares %s, which shadows run's", name, id.Name)
 				}
 			}
 		}
 	}
-	for n := range ast.Preorder(body) {
-		if id, ok := n.(*ast.Ident); ok && !fields[id] && rename[id.Name] != "" {
-			id.Name = rename[id.Name]
+	astutil.Apply(body, func(c *astutil.Cursor) bool {
+		switch n := c.Node().(type) {
+		case *ast.SelectorExpr:
+			if x, ok := n.X.(*ast.Ident); ok && rename[x.Name] == "callContext" && n.Sel.Name == "gas" {
+				if gas == "" {
+					log.Fatalf("%s: the body reads gas, which run keeps in gasLeft", name)
+				}
+				c.Replace(ast.NewIdent(gas))
+				return false
+			}
+		case *ast.Ident:
+			if !fields[n] && rename[n.Name] != "" {
+				n.Name = rename[n.Name]
+			}
 		}
-	}
-	return inlineReturns(text(fset, body), o)
+		return true
+	}, nil)
 }
 
 // closure returns the type and body of the func literal that fn returns.
@@ -347,7 +362,8 @@ func gasExecuteOps() [][2]string {
 
 // directCalls returns run's switch over the gasExecute ops, which runs their copies
 // without the trace, inlined, after the generic path's stack and constant-gas checks.
-// An op that fails a check goes on to the generic path, which reports it.
+// An op that fails a check goes on to the generic path, which reports it. It takes
+// the inlined copies out of copies.
 func directCalls(ops [][2]string, copies map[string]string) string {
 	var b strings.Builder
 	b.WriteString("switch op {\n")
@@ -358,19 +374,9 @@ func directCalls(ops [][2]string, copies map[string]string) string {
 		%s
 	}
 `, o[0], o[0], inlineCopy(copies, o[1]+"Run"))
+		delete(copies, o[1]+"Run")
 	}
 	b.WriteString("}\n")
-	return b.String()
-}
-
-// calledCopies returns the copies run calls: run inlines the gasExecute ops' own.
-func calledCopies(ops [][2]string, copies map[string]string) string {
-	var b strings.Builder
-	for _, name := range slices.Sorted(maps.Keys(copies)) {
-		if !slices.ContainsFunc(ops, func(o [2]string) bool { return o[1]+"Run" == name }) {
-			b.WriteString(copies[name])
-		}
-	}
 	return b.String()
 }
 
@@ -388,66 +394,23 @@ func inlineCopy(copies map[string]string, name string) string {
 		log.Fatal(err)
 	}
 	fn := f.Decls[0].(*ast.FuncDecl)
-	rename := map[string]string{}
-	j := 0
-	for _, field := range fn.Type.Params.List {
-		for _, n := range field.Names {
-			rename[n.Name] = runLocals[j]
-			j++
-		}
-	}
-	fields := map[*ast.Ident]bool{}
-	for n := range ast.Preorder(fn.Body) {
-		switch n := n.(type) {
-		case *ast.SelectorExpr:
-			fields[n.Sel] = true
-		case *ast.AssignStmt:
-			for _, l := range n.Lhs {
-				if id, ok := l.(*ast.Ident); ok && n.Tok == token.DEFINE && (slices.Contains(runLocals, id.Name) || id.Name == "o") {
-					log.Fatalf("%s: the body declares %s, which shadows run's", name, id.Name)
-				}
-			}
-		}
-	}
-	astutil.Apply(fn.Body, func(c *astutil.Cursor) bool {
-		switch n := c.Node().(type) {
-		case *ast.SelectorExpr:
-			if x, ok := n.X.(*ast.Ident); ok && rename[x.Name] == "callContext" && n.Sel.Name == "gas" {
-				c.Replace(ast.NewIdent("gasLeft"))
-				return false
-			}
-		case *ast.Ident:
-			if !fields[n] && rename[n.Name] != "" {
-				n.Name = rename[n.Name]
-			}
-		}
-		return true
-	}, nil)
+	toRunLocals(name, fn.Type, fn.Body, map[string]string{}, "gasLeft")
 	return inlineReturns(text(fset, fn.Body), fastOp{name: name})
 }
 
-// traceFree returns, by name, for each func of the package that takes a t *opTrace,
+// traceFree returns, by name, for each func of operations_acl.go that takes a t *opTrace,
 // its copy for run: named with a Run suffix, without t and its `if t != nil`
 // statements, calling the copies of the other such funcs.
 func traceFree() map[string]string {
-	names, err := filepath.Glob("*.go")
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "operations_acl.go", read("operations_acl.go"), parser.SkipObjectResolution)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fset := token.NewFileSet()
 	var funcs []*ast.FuncDecl
-	for _, name := range names {
-		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, "_gen.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, name, read(name), parser.SkipObjectResolution)
-		if err != nil {
-			log.Fatal(err)
-		}
-		for _, d := range f.Decls {
-			if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil && traceParam(fn) >= 0 {
-				funcs = append(funcs, fn)
-			}
+	for _, d := range f.Decls {
+		if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil && traceParam(fn) >= 0 {
+			funcs = append(funcs, fn)
 		}
 	}
 	traced := map[string]bool{}
@@ -528,11 +491,16 @@ func main() {
 	check := len(os.Args) > 1 && os.Args[1] == "-check"
 	ops := fastOps()
 	gasOps, copies := gasExecuteOps(), traceFree()
+	direct := directCalls(gasOps, copies)
+	var called strings.Builder
+	for _, name := range slices.Sorted(maps.Keys(copies)) {
+		called.WriteString(copies[name])
+	}
 	files := []struct {
 		name string
 		data []byte
 	}{
-		{"vm_run_gen.go", untraced(read("interpreter.go"), fastSwitch(read("instructions.go"), ops), directCalls(gasOps, copies), calledCopies(gasOps, copies))},
+		{"vm_run_gen.go", untraced(read("interpreter.go"), fastSwitch(read("instructions.go"), ops), direct, called.String())},
 		{"fast_path_gen_test.go", testTable(ops, gasOps)},
 	}
 	var stale []string
