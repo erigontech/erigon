@@ -113,7 +113,14 @@ func (a Address) Cmp(o Address) int {
 	return a.Value().Cmp(o.Value())
 }
 
-type StorageKey unique.Handle[common.Hash]
+// StorageKey holds the slot word itself rather than an interned handle to it:
+// a storage-key stream is dominated by first-touch keys, so unique.Make costs
+// more than the wider map key saves. set tells NilKey from a zero slot, which
+// a bare common.Hash could not.
+type StorageKey struct {
+	h   common.Hash
+	set bool
+}
 
 var (
 	ZeroKey = InternKey(common.Hash{})
@@ -121,18 +128,15 @@ var (
 )
 
 func InternKey(k common.Hash) StorageKey {
-	return StorageKey(unique.Make(k))
+	return StorageKey{h: k, set: true}
 }
 
 func (k StorageKey) IsNil() bool {
-	return k == NilKey
+	return !k.set
 }
 
 func (k StorageKey) Value() common.Hash {
-	if k == NilKey {
-		return common.Hash{}
-	}
-	return unique.Handle[common.Hash](k).Value()
+	return k.h
 }
 
 func (k StorageKey) String() string {

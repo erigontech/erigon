@@ -13,8 +13,10 @@ import (
 // TestJournalEntrySize guards the compact union against accidental bloat,
 // e.g. inlining rare *stateObject/[]byte fields that belong in journalExtra.
 func TestJournalEntrySize(t *testing.T) {
-	if got := unsafe.Sizeof(journalEntry{}); got > 72 {
-		t.Fatalf("journalEntry grew to %d B (want <= 72)", got)
+	// PROBE BRANCH ONLY: raw StorageKey takes 40 B instead of an 8 B handle,
+	// so the entry is 104 B. Measuring the intern trade; not for merge.
+	if got := unsafe.Sizeof(journalEntry{}); got > 104 {
+		t.Fatalf("journalEntry grew to %d B (want <= 104)", got)
 	}
 }
 
