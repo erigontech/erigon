@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/engineadapter"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -129,7 +130,7 @@ func (cc *ExecutionClientEngine) NewPayload(
 		return PayloadStatusValidated, nil
 	}
 
-	request := engine_types.ExecutionPayloadFromSSZBlock(payload, payload.Version())
+	request := engineadapter.ExecutionPayloadFromSSZBlock(payload, payload.Version())
 
 	var (
 		payloadStatus *engine_types.PayloadStatus
@@ -354,7 +355,7 @@ func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []b
 		return nil, nil, nil, nil, fmt.Errorf("%w: GetPayloadV3 returned missing blobs bundle", ErrInvalidGetPayloadResponse)
 	}
 
-	block, err := resp.ExecutionPayload.ToEth1Block(version, cc.beaconCfg)
+	block, err := engineadapter.ToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -380,7 +381,7 @@ func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_type
 		return nil, nil, nil, nil, errors.New("beaconCfg not set — call SetBeaconChainConfig before GetAssembledBlock")
 	}
 
-	block, err := resp.ExecutionPayload.ToEth1Block(version, cc.beaconCfg)
+	block, err := engineadapter.ToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
