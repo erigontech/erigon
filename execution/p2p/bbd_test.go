@@ -29,11 +29,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
-	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -101,11 +99,9 @@ func TestBackwardBlockDownloader_GapBehindCurrentHead_FailsFast(t *testing.T) {
 
 type bodyServingBbdFetcher struct {
 	stubBbdFetcher
-	delay time.Duration
 }
 
 func (s *bodyServingBbdFetcher) FetchBodies(_ context.Context, headers []*types.Header, _ *PeerId, _ ...FetcherOption) (FetcherResponse[[]*types.Body], error) {
-	time.Sleep(s.delay)
 	bodies := make([]*types.Body, len(headers))
 	for i := range bodies {
 		bodies[i] = &types.Body{Withdrawals: types.Withdrawals{}}
@@ -152,54 +148,6 @@ type balFetcherFunc func(context.Context, []BALRequest) map[common.Hash]*types.B
 
 func (f balFetcherFunc) Fetch(ctx context.Context, reqs []BALRequest, _ *PeerId, _ []PeerId, _ time.Duration, _ time.Duration) map[common.Hash]*types.BlockAccessListSidecar {
 	return f(ctx, reqs)
-}
-
-func TestBackwardBlockDownloader_BoundsBALWaitAfterBodies(t *testing.T) {
-	for _, bodyDelay := range []time.Duration{0, 3 * time.Second} {
-		t.Run(bodyDelay.String(), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				bal, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{Address: common.Address{1}}})
-				require.NoError(t, err)
-				balHash := crypto.Keccak256Hash(bal)
-				calls := 0
-				balFetcher, tracker := newTestBALFetcher(t, func(context.Context, []common.Hash, *PeerId) ([]rlp.RawValue, error) {
-					calls++
-					if calls%2 == 1 {
-						return nil, nil
-					}
-					return []rlp.RawValue{bal}, nil
-				})
-				tracker.PeerConnected(PeerIdFromUint64(1))
-				bbd := newTestBbd(t, &bodyServingBbdFetcher{delay: bodyDelay})
-				bbd.balFetcher = balFetcher
-				headers := make([]*types.Header, 50)
-				withdrawalsHash := empty.RootHash
-				for i := range headers {
-					headers[i] = &types.Header{
-						Number:              *uint256.NewInt(uint64(i + 1)),
-						TxHash:              empty.RootHash,
-						UncleHash:           empty.UncleHash,
-						WithdrawalsHash:     &withdrawalsHash,
-						BlockAccessListHash: &balHash,
-						GasLimit:            types.BalItemCost,
-					}
-				}
-				feed := BbdResultFeed{ch: make(chan BlockBatchResult, 1)}
-				ticker := time.NewTicker(time.Hour)
-				defer ticker.Stop()
-				started := time.Now()
-				err = bbd.downloadBlocksForHeaders(t.Context(), headers, peersContext{}, defaultBbdRequestConfig, ticker, feed)
-				require.NoError(t, err)
-				require.Equal(t, bodyDelay+2*time.Second, time.Since(started), "partial BAL progress must not extend the wait for ready bodies")
-				batch, err := feed.Next(t.Context())
-				require.NoError(t, err)
-				require.Len(t, batch.Blocks, len(headers))
-				require.NotNil(t, batch.Blocks[0].BlockAccessListSidecar(), "keep BALs received before cancellation")
-				require.Nil(t, batch.Blocks[len(headers)-1].BlockAccessListSidecar(), "deliver the remaining blocks without BALs")
-				require.NoError(t, t.Context().Err(), "BAL expiry must not cancel block delivery")
-			})
-		})
-	}
 }
 
 func TestBackwardBlockDownloader_CancelsBALFetchOnBodyFailure(t *testing.T) {
