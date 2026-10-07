@@ -17,7 +17,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-func runSelfdestructGasFn(t *testing.T, gasFn gasFunc) *state.IntraBlockState {
+func runSelfdestructGasFn(t *testing.T, refundsEnabled bool) *state.IntraBlockState {
 	t.Helper()
 	self := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
 	beneficiary := accounts.InternAddress(common.HexToAddress("0x4444444444444444444444444444444444444444"))
@@ -28,10 +28,9 @@ func runSelfdestructGasFn(t *testing.T, gasFn gasFunc) *state.IntraBlockState {
 	require.NoError(t, ibs.AddBalance(self, *uint256.NewInt(1000), 0))
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, Config{})
 	scope := &CallContext{Contract: *NewContract(self, self, self, uint256.Int{})}
-	scope.cacheGen++
 	benVal := beneficiary.Value()
 	scope.Stack.push(*new(uint256.Int).SetBytes(benVal[:]))
-	_, err := gasFn(evm, scope, mdgas.MdGas{Execution: 1_000_000}, 0)
+	_, err := selfdestructGasEIP2929(evm, scope, mdgas.MdGas{Execution: 1_000_000}, refundsEnabled)
 	require.NoError(t, err)
 	return ibs
 }
@@ -40,7 +39,7 @@ func runSelfdestructGasFn(t *testing.T, gasFn gasFunc) *state.IntraBlockState {
 // execution, so the refund probe must not run when the refund cannot apply.
 func TestGasSelfdestructNoRefunds_RecordsNoSelfDestructRead(t *testing.T) {
 	t.Parallel()
-	ibs := runSelfdestructGasFn(t, gasSelfdestructEIP3529)
+	ibs := runSelfdestructGasFn(t, false)
 	self := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
 	reads := ibs.VersionedReads()
 	_, tracked := reads.GetSelfDestruct(self)
@@ -50,7 +49,7 @@ func TestGasSelfdestructNoRefunds_RecordsNoSelfDestructRead(t *testing.T) {
 
 func TestGasSelfdestructWithRefunds_StillRefundsAndRecordsRead(t *testing.T) {
 	t.Parallel()
-	ibs := runSelfdestructGasFn(t, gasSelfdestructEIP2929)
+	ibs := runSelfdestructGasFn(t, true)
 	self := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
 	reads := ibs.VersionedReads()
 	_, tracked := reads.GetSelfDestruct(self)
