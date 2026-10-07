@@ -454,9 +454,9 @@ func mustStmt(src string) ast.Stmt {
 			return false
 		}
 		v := reflect.ValueOf(n).Elem()
-		for i := range v.NumField() {
-			if v.Field(i).Type() == reflect.TypeFor[token.Pos]() {
-				v.Field(i).SetInt(int64(token.NoPos))
+		for _, f := range v.Fields() {
+			if f.Type() == reflect.TypeFor[token.Pos]() {
+				f.SetInt(int64(token.NoPos))
 			}
 		}
 		return true
