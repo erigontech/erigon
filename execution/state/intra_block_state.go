@@ -213,7 +213,8 @@ type IntraBlockState struct {
 	// resolve from the state reader, gated by this tx's own CreateContract /
 	// SelfDestruct cells. Left false for genesis/RPC/serial, which still commit
 	// via FinalizeTx→so.data.
-	noMaterialize bool
+	noMaterialize       bool
+	noConflictDetection bool
 
 	// eip8246 pins whether SELFDESTRUCT preserves the account (EIP-8246 removes
 	// the balance burn). Set per-tx from the block rules in Prepare; under it a
@@ -353,6 +354,7 @@ func (ibs *IntraBlockState) Reset() {
 	// suppressed (which would silently drop writes). The versioned worker re-sets
 	// both right after Reset; the block assembler never calls Reset mid-block.
 	ibs.noMaterialize = false
+	ibs.noConflictDetection = false
 	clear(ibs.committedBase)
 	// Read side rebinds to a fresh empty set: VersionedReads() at end of
 	// tx hands the per-path maps to result.TxIn, so rebinding leaves the
@@ -426,6 +428,12 @@ func (ibs *IntraBlockState) resetForPool() bool {
 	ibs.eip8246, ibs.eip161, ibs.isAura = false, false, false
 	return true
 }
+
+// SetNoConflictDetection marks an execution that neither ValidateVersion checks
+// nor a block access list is built from, such as eth_call. CreateAccount's
+// balance read serves both, so skipping it needs both to be absent. Reset
+// clears it.
+func (ibs *IntraBlockState) SetNoConflictDetection() { ibs.noConflictDetection = true }
 
 // Release Deprecated use Close
 func (ibs *IntraBlockState) Release(bool) { ibs.Close() }
@@ -2377,7 +2385,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}
 	}
 	balSource, balVersion := StorageRead, UnknownVersion
-	if ibs.versionMap != nil {
+	if ibs.versionMap != nil && !ibs.noConflictDetection {
 		if _, res, ok := ibs.versionMap.ReadBalance(addr, ibs.txIndex); ok && res.Status() == MVReadResultDone {
 			balSource = MapRead
 			balVersion = Version{TxIndex: res.DepIdx(), Incarnation: res.Incarnation()}
@@ -2449,7 +2457,7 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 	// access list), promote it: without a real read the unchanged balance write has no
 	// baseline and would emit a spurious net-zero balance change.
 	ibs.MarkAddressAccess(addr, true)
-	if ibs.versionMap != nil {
+	if ibs.versionMap != nil && !ibs.noConflictDetection {
 		if vr, seen := ibs.versionedReads.GetBalance(addr); !seen {
 			ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader{Source: balSource, Version: balVersion}, newObj.Balance()})
 		} else if vr.internal {
