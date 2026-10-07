@@ -32,8 +32,8 @@ import (
 func ExampleMsgPipe() {
 	rw1, rw2 := MsgPipe()
 	go func() {
-		Send(rw1, 8, [][]byte{{0, 0}})
-		Send(rw1, 5, [][]byte{{1, 1}})
+		_ = Send(rw1, 8, [][]byte{{0, 0}})
+		_ = Send(rw1, 5, [][]byte{{1, 1}})
 		rw1.Close()
 	}()
 
@@ -43,7 +43,7 @@ func ExampleMsgPipe() {
 			break
 		}
 		var data [][]byte
-		msg.Decode(&data)
+		_ = msg.Decode(&data)
 		fmt.Printf("msg: %d, %x\n", msg.Code, data[0])
 	}
 	// Output:

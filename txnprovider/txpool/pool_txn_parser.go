@@ -43,10 +43,12 @@ const (
 	AATxnType         byte = 5 // RIP-7560
 )
 
-var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
-var ErrRejected = errors.New("rejected")
-var ErrAlreadyKnown = errors.New("already known")
-var ErrRlpTooBig = errors.New("txn rlp too big")
+var (
+	ErrParseTxn     = fmt.Errorf("%w transaction", rlp.ErrParse)
+	ErrRejected     = errors.New("rejected")
+	ErrAlreadyKnown = errors.New("already known")
+	ErrRlpTooBig    = errors.New("txn rlp too big")
+)
 
 // TxnParseContext is object that is required to parse transactions and turn transaction payload into TxnSlot objects
 // usage of TxContext helps avoid extra memory allocations
@@ -623,7 +625,7 @@ func (s *TxnSlots) Resize(targetSize uint) {
 	for uint(len(s.IsLocal)) < targetSize {
 		s.IsLocal = append(s.IsLocal, false)
 	}
-	//todo: set nil to overflow txns
+	// todo: set nil to overflow txns
 	oldLen := uint(len(s.Txns))
 	s.Txns = s.Txns[:targetSize]
 	for i := oldLen; i < targetSize; i++ {
@@ -684,7 +686,7 @@ func (r *TxnsRlp) Resize(targetSize uint) {
 	for uint(len(r.IsLocal)) < targetSize {
 		r.IsLocal = append(r.IsLocal, false)
 	}
-	//todo: set nil to overflow txns
+	// todo: set nil to overflow txns
 	r.Txns = r.Txns[:targetSize]
 	r.ParsedTxn = r.ParsedTxn[:targetSize]
 	r.Senders = r.Senders[:length.Addr*targetSize]

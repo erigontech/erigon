@@ -110,7 +110,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// If user specified a basedir, make sure it exists
 	if ctx.IsSet(OutputBasedir.Name) {
 		if base := ctx.String(OutputBasedir.Name); len(base) > 0 {
-			err2 := os.MkdirAll(base, 0755) // //rw-r--r--
+			err2 := os.MkdirAll(base, 0o755) // //rw-r--r--
 			if err2 != nil {
 				return NewError(ErrorIO, fmt.Errorf("failed creating output basedir: %w", err2))
 			}
@@ -163,7 +163,9 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// Figure out the prestate alloc
 	if allocStr == stdinSelector || envStr == stdinSelector || txStr == stdinSelector {
 		decoder := json.NewDecoder(os.Stdin)
-		decoder.Decode(inputData) //nolint:errcheck
+		if err := decoder.Decode(inputData); err != nil {
+			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling stdin: %w", err))
+		}
 	}
 	if allocStr != stdinSelector {
 		inFile, err1 := os.Open(allocStr)
@@ -192,6 +194,9 @@ func Main(_ context.Context, ctx *cli.Command) error {
 			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling env-file: %w", err))
 		}
 		inputData.Env = &env
+	}
+	if inputData.Env == nil {
+		return NewError(ErrorJson, errors.New("missing 'env' section in input"))
 	}
 	prestate.Env = *inputData.Env
 
@@ -276,7 +281,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// manufacture block from above inputs
 	header := NewHeader(prestate.Env)
 
-	var ommerHeaders = make([]*types.Header, len(prestate.Env.Ommers))
+	ommerHeaders := make([]*types.Header, len(prestate.Env.Ommers))
 	header.Number.AddUint64(&header.Number, uint64(len(prestate.Env.Ommers)))
 	for i, ommer := range prestate.Env.Ommers {
 		var ommerN uint256.Int
@@ -425,7 +430,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 		return uint256.Int(*b)
 	}
 	value := deref(txJson.Value)
-	gasPrice := deref(txJson.GasPrice)
+	gasPrice := uint256.Int(txJson.GasPrice)
 	chainId := deref(txJson.ChainID)
 	v, r, s := deref(txJson.V), deref(txJson.R), deref(txJson.S)
 
@@ -462,7 +467,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				GasPrice: gasPrice,
 			},
 			ChainID:    chainId,
-			AccessList: *txJson.Accesses,
+			AccessList: txJson.Accesses,
 		}, nil
 	case txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType:
 		tipCap := deref(txJson.MaxPriorityFeePerGas)
@@ -483,11 +488,11 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				ChainID:    chainId,
 				TipCap:     tipCap,
 				FeeCap:     feeCap,
-				AccessList: *txJson.Accesses,
+				AccessList: txJson.Accesses,
 			}, nil
 		}
 
-		jsonAuths := *txJson.Authorizations
+		jsonAuths := txJson.Authorizations
 		auths := make([]types.Authorization, 0, len(jsonAuths))
 		for i := range jsonAuths {
 			a, err := jsonAuths[i].ToAuthorization()
@@ -513,7 +518,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				ChainID:    chainId,
 				TipCap:     tipCap,
 				FeeCap:     feeCap,
-				AccessList: *txJson.Accesses,
+				AccessList: txJson.Accesses,
 			},
 			Authorizations: auths,
 		}, nil
@@ -584,7 +589,7 @@ func saveFile(baseDir, filename string, data any) error {
 		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %w", err))
 	}
 	location := filepath.Join(baseDir, filename)
-	if err = os.WriteFile(location, b, 0644); err != nil { //nolint:gosec
+	if err = os.WriteFile(location, b, 0o644); err != nil { //nolint:gosec
 		return NewError(ErrorIO, fmt.Errorf("failed writing output: %w", err))
 	}
 	log.Info("Wrote file", "file", location)

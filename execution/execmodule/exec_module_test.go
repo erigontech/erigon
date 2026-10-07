@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -43,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -240,6 +240,64 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	root, err := extendingSd.GetCommitmentCtx().Trie().RootHash()
 	require.NoError(t, err)
 	require.Equal(t, chainPack.Headers[0].Root, common.BytesToHash(root))
+}
+
+func TestUpdateForkChoiceRejectsSiblingHashes(t *testing.T) {
+	for _, mode := range []struct {
+		name     string
+		parallel bool
+	}{{"synchronous", false}, {"parallel", true}} {
+		t.Run(mode.name, func(t *testing.T) {
+			for _, field := range []string{"safe", "finalized"} {
+				t.Run(field, func(t *testing.T) {
+					m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(mode.parallel))
+					a, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+						b.SetCoinbase(common.Address{0x81})
+					})
+					require.NoError(t, err)
+					b, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+						b.SetCoinbase(common.Address{0x82})
+					})
+					require.NoError(t, err)
+					_, err = m.InsertBlocks(t.Context(), a.Blocks)
+					require.NoError(t, err)
+					_, err = m.InsertBlocks(t.Context(), b.Blocks)
+					require.NoError(t, err)
+					validation, err := m.ValidateChain(t.Context(), a.Blocks[0].Header())
+					require.NoError(t, err)
+					require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+					var safe, finalized common.Hash
+					if field == "safe" {
+						safe = b.Blocks[0].Hash()
+					} else {
+						finalized = b.Blocks[0].Hash()
+					}
+					result, err := m.ExecModule.UpdateForkChoice(t.Context(), a.Blocks[0].Hash(), safe, finalized)
+					require.NoError(t, err)
+					m.ExecModule.WaitIdle(t.Context())
+					require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
+				})
+			}
+		})
+	}
+}
+
+func TestUpdateForkChoiceParallelFlushingAcceptsAncestorHashes(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(true))
+	chainPack, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+	_, err = m.InsertBlocks(t.Context(), chainPack.Blocks)
+	require.NoError(t, err)
+	head := chainPack.Blocks[1]
+	validation, err := m.ValidateChain(t.Context(), head.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	result, err := m.ExecModule.UpdateForkChoice(t.Context(), head.Hash(), chainPack.Blocks[0].Hash(), m.Genesis.Hash())
+	require.NoError(t, err)
+	m.ExecModule.WaitIdle(t.Context())
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	require.Equal(t, head.Hash(), result.LatestValidHash)
 }
 
 func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeight(t *testing.T) {
@@ -717,7 +775,8 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 		release: make(chan struct{}),
 	}
 	t.Cleanup(func() { close(engine.release) })
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithChainConfig(chain.AllProtocolChanges),
 		execmoduletester.WithEngine(engine),
 	)
@@ -766,10 +825,41 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 	}
 }
 
+// Start building a block, then accept a competing block with the same parent.
+// The original build must still produce a valid block. Also run without the
+// competing commit as a control.
+// The 256 recipients must exceed commitment.minForkGrain (currently 128)
+// to exercise parallel commitment worker reads.
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
-	t.Parallel()
+	original := statecfg.ExperimentalParallelCommitment
+	statecfg.ExperimentalParallelCommitment = true
+	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = original })
+
+	t.Run("without_concurrent_commit", func(t *testing.T) {
+		testAssembleBlockWithSiblingCommit(t, false)
+	})
+	t.Run("with_concurrent_commit", func(t *testing.T) {
+		testAssembleBlockWithSiblingCommit(t, true)
+	})
+}
+
+func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
+	t.Helper()
 	ctx := t.Context()
-	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	genesis := &types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 30_000_000,
+		Alloc: types.GenesisAlloc{
+			crypto.PubkeyToAddress(key.PublicKey): {Balance: big.NewInt(common.Ether)},
+		},
+	}
+	for i := range 512 {
+		address := common.BigToAddress(big.NewInt(int64(4096 + i)))
+		genesis.Alloc[address] = types.GenesisAccount{Balance: big.NewInt(10_000)}
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithChainConfig(chain.AllProtocolChanges), execmoduletester.WithKey(key))
 	parentChain, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
 		tx, txErr := types.SignTx(
 			types.NewTransaction(0, common.Address{1}, uint256.NewInt(10_000), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -782,15 +872,21 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(parentChain))
 	parent := parentChain.TopBlock
-	builderTx, err := types.SignTx(
-		types.NewTransaction(1, common.Address{2}, uint256.NewInt(20_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
-		m.Key,
-	)
-	require.NoError(t, err)
-	builderTx.SetSender(accounts.InternAddress(m.Address))
+	builderTxs := make([]types.Transaction, 256)
+	for i := range builderTxs {
+		address := common.BigToAddress(big.NewInt(int64(4096 + i)))
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i+1), address, uint256.NewInt(20_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		)
+		require.NoError(t, err)
+		tx.SetSender(accounts.InternAddress(m.Address))
+		builderTxs[i] = tx
+	}
+	// The competing block pays an account that none of the payload transactions
+	// touch. Its transfer must not affect the balances in the built block.
 	siblingTx, err := types.SignTx(
-		types.NewTransaction(1, common.Address{3}, uint256.NewInt(30_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
+		types.NewTransaction(1, common.BigToAddress(big.NewInt(4496)), uint256.NewInt(30_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
 		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
 		m.Key,
 	)
@@ -803,9 +899,9 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		ready:     make(chan struct{}),
 		release:   make(chan struct{}, 1),
 		exhausted: make(chan struct{}),
-		txns:      []types.Transaction{builderTx},
+		txns:      builderTxs,
 	}
-	parentBeaconBlockRoot := randomHash()
+	parentBeaconBlockRoot := common.Hash{1}
 	payloadID, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            parent.Hash(),
 		Timestamp:             parent.Time() + 1,
@@ -829,7 +925,10 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("builder did not reach transaction selection")
 	}
-	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, siblingChain.Blocks))
+	if commitSibling {
+		// Make the competing block the chain head before the original build finishes.
+		require.NoError(t, m.InsertValidateAndUfc1By1(ctx, siblingChain.Blocks))
+	}
 	provider.release <- struct{}{}
 	select {
 	case <-provider.exhausted:
@@ -839,14 +938,15 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	built, err := m.GetAssembledBlock(ctx, payloadID)
 	require.NoError(t, err)
 	require.Equal(t, parent.Hash(), built.ParentHash())
-	require.Len(t, built.Transactions(), 1)
-	require.Equal(t, builderTx.Hash(), built.Transactions()[0].Hash())
+	require.Len(t, built.Transactions(), len(builderTxs))
+	require.Equal(t, builderTxs[0].Hash(), built.Transactions()[0].Hash())
 	status, err := m.InsertBlocks(ctx, []*types.Block{built})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	// Check that the built block is valid on its original parent, even if the head changed.
 	validation, err := m.ValidateChain(ctx, built.Header())
 	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
 }
 
 func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
@@ -1147,7 +1247,8 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
@@ -1168,7 +1269,8 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 		tx, txErr := types.SignTx(
 			types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(100),
 				params.TxGas, uint256.NewInt(baseFee), nil),
-			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		)
 		require.NoError(t, txErr)
 		var buf bytes.Buffer
 		err = tx.EncodeRLP(&buf)
@@ -1245,7 +1347,8 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	// nonce 1: simple transfer
 	tx1, err := types.SignTx(
 		types.NewTransaction(1, common.Address{2}, uint256.NewInt(5_000), params.TxGas, uint256.NewInt(baseFee), nil),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
 	require.NoError(t, err)
 
 	// nonce 2: contract creation (Changer bytecode)
@@ -1253,13 +1356,15 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	require.NoError(t, err)
 	tx2, err := types.SignTx(
 		types.NewContractCreation(2, uint256.NewInt(0), 300_000, uint256.NewInt(baseFee), changerBytecode),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
 	require.NoError(t, err)
 
 	// nonce 3: simple transfer
 	tx3, err := types.SignTx(
 		types.NewTransaction(3, common.Address{3}, uint256.NewInt(3_000), params.TxGas, uint256.NewInt(baseFee), nil),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
 	require.NoError(t, err)
 
 	// Add all 3 to pool.
@@ -1461,7 +1566,8 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		Ethash:                        new(chain.EthashConfig),
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithTxPool(),
 		execmoduletester.WithChainConfig(cfg),
 		execmoduletester.WithExperimentalBAL(),
@@ -1634,6 +1740,44 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	}
 }
 
+// The payload bodies serve each transaction in its binary (canonical EIP-2718) encoding, so a
+// typed transaction must lose the RLP string header it is stored under.
+func TestGetPayloadBodiesServeBinaryTransactions(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	to := common.Address{1}
+	gasPrice := *uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		commonTx := func() types.CommonTx {
+			return types.CommonTx{Nonce: b.TxNonce(m.Address), To: &to, GasLimit: params.TxGas, Value: *uint256.NewInt(1)}
+		}
+		var txn types.Transaction = &types.LegacyTx{CommonTx: commonTx(), GasPrice: gasPrice}
+		if i == 1 {
+			txn = &types.DynamicFeeTransaction{CommonTx: commonTx(), ChainID: *m.ChainConfig.ChainID, TipCap: gasPrice, FeeCap: gasPrice}
+		}
+		signed, signErr := types.SignTx(txn, *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, signErr)
+		b.AddTx(signed)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	require.Equal(t, byte(types.DynamicFeeTxType), chainPack.Blocks[1].Transactions()[0].Type(),
+		"fixture: the typed branch is only exercised by a typed transaction")
+
+	for _, block := range chainPack.Blocks {
+		want, err := block.Body().BinaryRawBody()
+		require.NoError(t, err)
+		byHash, err := m.ExecModule.GetPayloadBodiesByHash(t.Context(), []common.Hash{block.Hash()})
+		require.NoError(t, err)
+		require.Len(t, byHash, 1)
+		require.Equal(t, want.Transactions, byHash[0].Transactions, "byHash block %d", block.NumberU64())
+		byRange, err := m.ExecModule.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
+		require.NoError(t, err)
+		require.Len(t, byRange, 1)
+		require.Equal(t, want.Transactions, byRange[0].Transactions, "byRange block %d", block.NumberU64())
+	}
+}
+
 func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
 	t.Parallel()
 	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
@@ -1648,10 +1792,9 @@ func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
 
 func TestGetPayloadBodiesPreAmsterdamBlockAccessList(t *testing.T) {
 	t.Parallel()
-	var config chain.Config
-	require.NoError(t, copier.CopyWithOption(&config, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	config := chain.AllProtocolChanges.Copy()
 	config.AmsterdamTime = nil
-	m, chainPack := newPayloadBodiesBALTestChain(t, &config)
+	m, chainPack := newPayloadBodiesBALTestChain(t, config)
 	block := chainPack.Blocks[0]
 	require.Nil(t, block.Header().BlockAccessListHash)
 	requirePayloadBodiesBlockAccessList(t, m, block, nil)
@@ -1885,7 +2028,8 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 		},
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
@@ -1973,7 +2117,8 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 		},
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
@@ -1984,7 +2129,8 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	// Runtime: base = calldataload(0); sstore(base+i, 1) for i in 0..3.
 	deployCode, err := hex.DecodeString(
 		"601d600c600039601d6000f3" + // initcode: deploy 29-byte runtime
-			"6000356001815560018160010155600181600201556001816003015500") // runtime
+			"6000356001815560018160010155600181600201556001816003015500",
+	) // runtime
 	require.NoError(t, err)
 
 	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
@@ -2115,7 +2261,8 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 		Alloc:    alloc,
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(keys[0]),
 		execmoduletester.WithTxPool(),
@@ -2215,7 +2362,8 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 		Alloc:    alloc,
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(keys[0]),
 		execmoduletester.WithTxPool(),
@@ -2320,7 +2468,8 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -2392,8 +2541,8 @@ func TestInsertBlocksRejectsInvalidBlockAccessList(t *testing.T) {
 	block := chainPack.Blocks[0]
 	header := block.Header()
 	invalidBAL := types.BlockAccessList{
-		{Address: accounts.InternAddress(common.Address{2})},
-		{Address: accounts.InternAddress(common.Address{1})},
+		{Address: common.Address{2}},
+		{Address: common.Address{1}},
 	}
 	encoded, err := types.EncodeBlockAccessListBytes(invalidBAL)
 	require.NoError(t, err)
@@ -2413,7 +2562,7 @@ func TestInsertBlocksRejectsBlockAccessListHashMismatch(t *testing.T) {
 
 	block := chainPack.Blocks[0]
 	header := block.Header()
-	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	bal := types.BlockAccessList{{Address: common.Address{1}}}
 	wrongHash := common.Hash{1}
 	header.BlockAccessListHash = &wrongHash
 	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(bal))
@@ -2508,7 +2657,8 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -2622,6 +2772,71 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 	}))
 }
 
+// A block that fails validation while it only exists in the InsertBlocks
+// overlay must not stay readable: purgeBadChain cannot reach it in the DB.
+func TestValidateChainBadBlockIsDroppedFromOverlay(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	badHeader := types.CopyHeader(chainPack.Blocks[0].HeaderNoCopy())
+	badHeader.Root = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	badBlock := types.NewBlockFromNetwork(badHeader, chainPack.Blocks[0].Body(), chainPack.Blocks[0].BlockAccessListSidecar())
+	badHash, badNum := badBlock.Hash(), badBlock.NumberU64()
+
+	insRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	inserted, err := m.ExecModule.GetHeader(ctx, &badHash, &badNum)
+	require.NoError(t, err)
+	require.NotNil(t, inserted, "InsertBlocks must make the header readable through the overlay")
+
+	validation, err := m.ValidateChain(ctx, badBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+
+	afterBad, err := m.ExecModule.GetHeader(ctx, &badHash, &badNum)
+	require.NoError(t, err)
+	require.Nil(t, afterBad, "header of a block that failed validation must not be readable")
+}
+
+// Rejecting a block must not discard valid siblings that are still only in
+// the overlay, waiting for the next forkchoice update.
+func TestValidateChainBadBlockKeepsValidSiblingInOverlay(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	valid := chainPack.Blocks[0]
+	validHash, validNum := valid.Hash(), valid.NumberU64()
+
+	badHeader := types.CopyHeader(valid.HeaderNoCopy())
+	badHeader.Root = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	badBlock := types.NewBlockFromNetwork(badHeader, valid.Body(), valid.BlockAccessListSidecar())
+
+	_, err = m.InsertBlocks(ctx, []*types.Block{valid})
+	require.NoError(t, err)
+	validation, err := m.ValidateChain(ctx, valid.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+	_, err = m.InsertBlocks(ctx, []*types.Block{badBlock})
+	require.NoError(t, err)
+	validation, err = m.ValidateChain(ctx, badBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+
+	kept, err := m.ExecModule.GetHeader(ctx, &validHash, &validNum)
+	require.NoError(t, err)
+	require.NotNil(t, kept, "valid sibling must stay readable after a bad block is rejected")
+
+	result, err := m.ExecModule.UpdateForkChoice(ctx, validHash, validHash, validHash)
+	require.NoError(t, err)
+	m.ExecModule.WaitIdle(ctx)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+}
+
 // transferGen returns a deterministic per-block tx generator so tests can
 // build forks that share a prefix with the canonical chain.
 func transferGen(t *testing.T, key *ecdsa.PrivateKey, to common.Address, amount uint64) func(int, *blockgen.BlockGen) {
@@ -2644,7 +2859,8 @@ func TestLargeBatchExecGeneratesChangesetsForReorgWindow(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithAlwaysGenerateChangesets(false),
 	)
@@ -2680,7 +2896,8 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithAlwaysGenerateChangesets(false),
 	)
@@ -2811,7 +3028,8 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithGenesisSpec(&types.Genesis{
 			Config: chain.AllProtocolChanges, // Amsterdam-at-0 → every block carries a BAL
@@ -2947,8 +3165,7 @@ func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -2965,7 +3182,8 @@ func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -3048,8 +3266,7 @@ func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("c87f65ff3f271bf5dc8643484f66b200109caffe4bf98c4cb393dc35740b28c0")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -3066,7 +3283,8 @@ func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -3148,8 +3366,7 @@ func TestAuraSystemAddressRetainedUnderParallelExec(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	auraCfg := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(auraCfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	auraCfg := chain.AllProtocolChanges.Copy()
 	auraCfg.CancunTime = nil
 	auraCfg.PragueTime = nil
 	auraCfg.OsakaTime = nil
@@ -3169,7 +3386,8 @@ func TestAuraSystemAddressRetainedUnderParallelExec(t *testing.T) {
 			sysAddr:    {Balance: big.NewInt(0)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -3227,8 +3445,7 @@ func TestPreCancunSameTxStoreAndDie(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -3245,7 +3462,8 @@ func TestPreCancunSameTxStoreAndDie(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -3322,8 +3540,7 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -3340,7 +3557,8 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)

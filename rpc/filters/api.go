@@ -90,7 +90,7 @@ type ReceiptsFilterCriteria struct {
 }
 
 // UnmarshalJSON sets *args fields with given data.
-func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
+func (criteria *FilterCriteria) UnmarshalJSON(data []byte) error {
 	type input struct {
 		BlockHash *common.Hash     `json:"blockHash"`
 		FromBlock *rpc.BlockNumber `json:"fromBlock"`
@@ -109,18 +109,18 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 			// BlockHash is mutually exclusive with FromBlock/ToBlock criteria
 			return errors.New("cannot specify both BlockHash and FromBlock/ToBlock, choose one or the other")
 		}
-		args.BlockHash = raw.BlockHash
+		criteria.BlockHash = raw.BlockHash
 	} else {
 		if raw.FromBlock != nil {
-			args.FromBlock = big.NewInt(raw.FromBlock.Int64())
+			criteria.FromBlock = big.NewInt(raw.FromBlock.Int64())
 		}
 
 		if raw.ToBlock != nil {
-			args.ToBlock = big.NewInt(raw.ToBlock.Int64())
+			criteria.ToBlock = big.NewInt(raw.ToBlock.Int64())
 		}
 	}
 
-	args.Addresses = []common.Address{}
+	criteria.Addresses = []common.Address{}
 
 	if raw.Addresses != nil {
 		// raw.Address can contain a single address or an array of addresses
@@ -132,7 +132,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 					if err != nil {
 						return fmt.Errorf("invalid address at index %d: %w", i, err)
 					}
-					args.Addresses = append(args.Addresses, addr)
+					criteria.Addresses = append(criteria.Addresses, addr)
 				} else {
 					return fmt.Errorf("non-string address at index %d", i)
 				}
@@ -142,7 +142,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 			if err != nil {
 				return fmt.Errorf("invalid address: %w", err)
 			}
-			args.Addresses = []common.Address{addr}
+			criteria.Addresses = []common.Address{addr}
 		default:
 			return errors.New("invalid addresses in query")
 		}
@@ -151,7 +151,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 	// topics is an array consisting of strings and/or arrays of strings.
 	// JSON null values are converted to common.Hash{} and ignored by the filter manager.
 	if len(raw.Topics) > 0 {
-		args.Topics = make([][]common.Hash, len(raw.Topics))
+		criteria.Topics = make([][]common.Hash, len(raw.Topics))
 		for i, t := range raw.Topics {
 			switch topic := t.(type) {
 			case nil:
@@ -163,14 +163,14 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 				if err != nil {
 					return err
 				}
-				args.Topics[i] = []common.Hash{top}
+				criteria.Topics[i] = []common.Hash{top}
 
 			case []any:
 				// or case e.g. [null, "topic0", "topic1"]
 				for _, rawTopic := range topic {
 					if rawTopic == nil {
 						// null component, match all
-						args.Topics[i] = nil
+						criteria.Topics[i] = nil
 						break
 					}
 					if topic, ok := rawTopic.(string); ok {
@@ -178,7 +178,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 						if err != nil {
 							return err
 						}
-						args.Topics[i] = append(args.Topics[i], parsed)
+						criteria.Topics[i] = append(criteria.Topics[i], parsed)
 					} else {
 						return errors.New("invalid topic(s)")
 					}

@@ -108,8 +108,11 @@ func TestGloasProposalRetriesSameEnvelopeWithoutRepublishingBlock(t *testing.T) 
 	mux.HandleFunc("POST /eth/v1/beacon/execution_payload_envelopes", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
+		// Count before queueing: the test waits on the bodies, so a post the
+		// counter has not recorded yet would read as one post short.
+		first := envelopePosts.Add(1) == 1
 		envelopeBodies <- body
-		if envelopePosts.Add(1) == 1 {
+		if first {
 			close(firstEnvelopeStarted)
 			<-r.Context().Done()
 		}

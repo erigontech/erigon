@@ -98,9 +98,9 @@ func TestBALCommitmentWarmupKeysUseChangesOnly(t *testing.T) {
 	readSlot := accounts.InternKey(common.Hash{31: 4})
 	changedSlot := accounts.InternKey(common.Hash{31: 5})
 	bal := types.BlockAccessList{
-		{Address: readOnlyAddress, StorageReads: []accounts.StorageKey{readSlot}},
-		{Address: accountAddress, BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
-		{Address: storageAddress, StorageChanges: []types.SlotChanges{{
+		{Address: readOnlyAddress.Value(), StorageReads: []accounts.StorageKey{readSlot}},
+		{Address: accountAddress.Value(), BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}}},
+		{Address: storageAddress.Value(), StorageChanges: []types.SlotChanges{{
 			Slot: changedSlot, Changes: []*types.StorageChange{{Value: *uint256.NewInt(2)}},
 		}}},
 	}
@@ -126,7 +126,7 @@ func TestWarmBALCommitmentReadsCommitmentDomain(t *testing.T) {
 	tx := new(commitmentRecordingTx)
 	db := &singleTxRoDB{tx: tx}
 	bal := types.BlockAccessList{{
-		Address:        accounts.InternAddress(common.Address{19: 2}),
+		Address:        common.Address{19: 2},
 		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 	}}
 
@@ -146,11 +146,11 @@ func TestWarmBALCommitmentCollectsWorkerFactoryErrors(t *testing.T) {
 	db := &commitmentBeginErrorDB{errs: []error{firstErr, secondErr}}
 	bal := types.BlockAccessList{
 		{
-			Address:        accounts.InternAddress(common.Address{19: 1}),
+			Address:        common.Address{19: 1},
 			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 		},
 		{
-			Address:        accounts.InternAddress(common.Address{19: 2}),
+			Address:        common.Address{19: 2},
 			BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(2)}},
 		},
 	}
@@ -221,11 +221,29 @@ func TestWarmBALCommitmentUsesAvailableBranchCache(t *testing.T) {
 	}
 	db := &singleTxRoDB{tx: tx}
 	bal := types.BlockAccessList{{
-		Address:        accounts.InternAddress(common.Address{19: 2}),
+		Address:        common.Address{19: 2},
 		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
 	}}
 
 	require.NoError(t, warmBALCommitment(t.Context(), db, bal, 1))
 	require.Positive(t, tx.calls)
 	require.True(t, tx.opts.BranchCache())
+}
+
+func TestBranchPrefetchReadsTouchedKeysThroughBranchCache(t *testing.T) {
+	cache := commitment.NewBranchCache(100)
+	defer cache.Close()
+	tx := &commitmentBranchLookupTx{
+		data:  []byte("database"),
+		step:  9,
+		aggTx: commitmentBranchCacheProvider{cache: cache},
+	}
+	prefetch := StartBranchPrefetch(t.Context(), &singleTxRoDB{tx: tx}, 1)
+	address := common.Address{19: 2}
+	prefetch.WarmKey(commitment.KeyToHexNibbleHash(address[:]), 0, 0)
+	require.NoError(t, prefetch.WaitBufferFree(0))
+	prefetch.CloseAndWait()
+
+	require.Positive(t, tx.calls, "a touched key's path is read")
+	require.True(t, tx.opts.BranchCache(), "reads fill the shared BranchCache the calculator consults")
 }

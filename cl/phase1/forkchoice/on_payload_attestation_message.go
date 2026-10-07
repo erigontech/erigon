@@ -70,6 +70,31 @@ func (f *ForkChoiceStore) applyValidatedPayloadAttestation(
 	blockRoot common.Hash,
 	isFromBlock bool,
 ) error {
+	// Keep the votes and cached head decision consistent for head readers.
+	// The lock order is f.mu before ptcVoteMu.
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if err := f.recordPayloadAttestationVotes(validatorIndex, ptcIndices, data, blockRoot, isFromBlock); err != nil {
+		return err
+	}
+
+	// Current-slot votes affect the next slot's head tiebreaker. OnTick invalidates
+	// the cache at that boundary; votes arriving after it must invalidate it here.
+	if data.Slot < f.Slot() {
+		f.headHash = common.Hash{}
+		f.headPayloadStatus = cltypes.PayloadStatusPending
+	}
+	return nil
+}
+
+func (f *ForkChoiceStore) recordPayloadAttestationVotes(
+	validatorIndex uint64,
+	ptcIndices []int,
+	data *cltypes.PayloadAttestationData,
+	blockRoot common.Hash,
+	isFromBlock bool,
+) error {
 	f.ptcVoteMu.Lock()
 	defer f.ptcVoteMu.Unlock()
 

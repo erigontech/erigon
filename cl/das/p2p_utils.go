@@ -22,10 +22,8 @@ const (
 	KZG_COMMITMENTS_INCLUSION_PROOF_DEPTH = 4
 )
 
-// VerifyDataColumnSidecar verifies if the data column sidecar is valid according to protocol rules.
-// This function is re-entrant and thread-safe.
-// For Fulu: uses KzgCommitments from the sidecar.
-// For GLOAS: use VerifyDataColumnSidecarWithCommitments instead.
+// VerifyDataColumnSidecar checks the sidecar's structure without needing its block.
+// Gloas sidecars also need VerifyDataColumnSidecarWithCommitments once the block is available.
 func VerifyDataColumnSidecar(sidecar *cltypes.DataColumnSidecar) bool {
 	// The sidecar index must be within the valid range
 	if sidecar.Index >= clparams.GetBeaconConfig().NumberOfColumns {

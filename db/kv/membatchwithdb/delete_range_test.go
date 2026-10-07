@@ -21,7 +21,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 )
@@ -36,7 +35,7 @@ func TestMemoryMutationDeleteRange(t *testing.T) {
 		t.Helper()
 		_, rwTx := newTestTx(t)
 		initializeDbNonDupSort(t, rwTx)
-		batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+		batch, err := membatchwithdb.NewMemoryBatch(rwTx)
 		require.NoError(t, err)
 		t.Cleanup(batch.Close)
 		require.NoError(t, batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("overlay")))
@@ -102,7 +101,7 @@ func TestMemoryMutationDeleteRange(t *testing.T) {
 		require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("AAAA"), []byte("v2")))
 		require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("BBBB"), []byte("v1")))
 
-		batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+		batch, err := membatchwithdb.NewMemoryBatch(rwTx)
 		require.NoError(t, err)
 		t.Cleanup(batch.Close)
 
@@ -135,7 +134,7 @@ func TestMemoryMutationDeleteRangeDupSortIteration(t *testing.T) {
 	}
 	require.NoError(t, rwTx.Put(kv.TblAccountIdx, []byte("BBBB"), []byte("v1")))
 
-	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(t, err)
 	t.Cleanup(batch.Close)
 

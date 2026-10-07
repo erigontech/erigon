@@ -97,7 +97,7 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
   * Default: `true`
-* `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock and is silently raised to it. To genuinely reduce read concurrency, lower `--exec.workers` instead.
+* `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock. Erigon raises a lower value, with a warning, to a floor that sums the exec workers, the parallel-commitment readers (GOMAXPROCS + 1, with `--experimental.parallel-commitment`), the BAL warmup readers, the block read-ahead workers and a fixed reserve; rpcdaemon uses the value as given. To genuinely reduce read concurrency, lower `--exec.workers` instead.
   * Default: scales with the host as `min(max(10, GOMAXPROCS * 64), 9000)` — kept well above the CPU count because reads are I/O-bound, and capped below Go's roughly 10,000 OS-thread limit.
 * `--database.verbosity value`: Enables internal database logs.
   * Default: `2`
@@ -245,7 +245,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--authrpc.port value`: The HTTP-RPC server listening port for the Engine API.
   * Default: `8551`
 * `--authrpc.jwtsecret value`: The path to the [JWT secret](/fundamentals/jwt) file for the consensus layer.
-* `--http.compression`: Enables compression over HTTP-RPC.
+* `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more with the encoding the client's `Accept-Encoding` allows: Zstandard (preferred) or gzip. A client that accepts neither gets an uncompressed response.
   * Default: `true`
 * `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
 * `--http.vhosts value`: A comma-separated list of virtual hostnames.
@@ -544,8 +544,10 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `0.0.0.0`
 * `--caplin.discovery.port value`: The port for the Caplin DISCV5 protocol.
   * Default: `4000`
-* `--caplin.discovery.tcpport value`: The TCP port for the Caplin DISCV5 protocol.
-  * Default: `4001`
+* `--caplin.discovery.tcpport value`: The TCP port for Caplin libp2p.
+	* Default: `4001`
+* `--caplin.discovery.quicport value`: The QUIC UDP port for Caplin libp2p.
+	* Default: `4001`
 * `--caplin.checkpoint-sync-url value`: The checkpoint sync endpoint.
 * `--caplin.subscribe-all-topics`: Subscribes to all gossip topics.
   * Default: `false`
@@ -582,6 +584,8 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.snapgen`: Enables snapshot generation.
   * Default: `false`
 * `--caplin.mev-relay-url value`: The MEV relay endpoint.
+* `--caplin.builder.allow-private-urls`: Lets the builder URLs that validators submit as builder preferences resolve to private or loopback addresses, for a builder on the same host or LAN. Other non-public ranges stay blocked. Does not apply to `--caplin.mev-relay-url`.
+  * Default: `false`
 * `--caplin.validator-monitor`: Enables Caplin validator monitoring metrics.
   * Default: `false`
 * `--caplin.custom-config value`: Sets a custom config for Caplin.
@@ -672,7 +676,7 @@ Erigon's own variables — everything below except the [Docker](#docker-environm
 * `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--exec.no-prune`)
 * `NO_MERGE` - Disables merging operations (flag equivalent: `--exec.no-merge`)
 * `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
-* `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `96`)
+* `MAX_REORG_DEPTH` - Sets how many blocks behind the head Erigon keeps reorg data while no finalized block is known, and during the initial sync cycle (default: `96`). After that, once the consensus layer reports a finalized block, Erigon keeps changesets and holds snapshot retirement back to that block instead: during non-finality it can reorg deeper than this value — down to, but not below, the finalized block — and with normal finality it may keep fewer than 96 blocks. The value still caps how far a new payload's missing ancestors are downloaded and how far from the head a side fork is validated.
 * `CAPLIN_STATE_PRUNE_DISABLE` - Disables pruning of Caplin's state indexing DB after ranges are frozen into snapshots (default: `false`)
 * `CAPLIN_STATE_PRUNE_TIMEOUT` - Overrides the per-pass time budget for Caplin state pruning (a duration, e.g. `500ms`; default derived from the chain's slot time)
 
