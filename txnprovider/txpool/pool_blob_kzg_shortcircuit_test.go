@@ -115,7 +115,7 @@ func TestValidateTxnsBlobKZGShortCircuit(t *testing.T) {
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
-		reasons, goodTxns, err := pool.validateTxns(&slots, cacheView)
+		reasons, goodTxns, err := pool.validateTxns(&slots, cacheView, nil)
 		require.NoError(t, err)
 		return reasons, goodTxns
 	}
