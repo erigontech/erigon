@@ -127,7 +127,7 @@ func opChainID(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, e
 // enable2200 applies EIP-2200 (Rebalance net-metered SSTORE)
 func enable2200(jt *JumpTable) {
 	jt[SLOAD].constantGas = params.SloadGasEIP2200
-	jt[SSTORE].gasExecute = opSstoreEIP2200
+	jt[SSTORE].gasExecute = gasExecuteFor(nil, gasSStoreEIP2200, opSstore)
 }
 
 // enable2929 enables "EIP-2929: Gas cost increases for state access opcodes"
@@ -139,7 +139,7 @@ func enable2929(jt *JumpTable) {
 	jt[SLOAD].gasExecute = opSloadEIP2929
 
 	jt[EXTCODECOPY].constantGas = params.WarmStorageReadCostEIP2929
-	jt[EXTCODECOPY].gasExecute = opExtCodeCopyEIP2929
+	jt[EXTCODECOPY].gasExecute = gasExecuteFor(memoryExtCodeCopy, gasExtCodeCopyEIP2929, opExtCodeCopy)
 
 	jt[EXTCODESIZE].constantGas = params.WarmStorageReadCostEIP2929
 	jt[EXTCODESIZE].gasExecute = opExtCodeSizeEIP2929
@@ -292,7 +292,7 @@ func enable5656(jt *JumpTable) {
 	jt[MCOPY] = operation{
 		execute:     opMcopy,
 		constantGas: GasFastestStep,
-		gasExecute:  opMcopyWithGas,
+		gasExecute:  gasExecuteFor(memoryMcopy, gasMcopy, opMcopy),
 		numPop:      3,
 		numPush:     0,
 		memorySize:  memoryMcopy,

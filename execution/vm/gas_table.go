@@ -114,6 +114,22 @@ func copyGas(callContext *CallContext, memorySize uint64, stackpos int) (mdgas.M
 	return mdgas.MdGasCost{Execution: gas}, nil
 }
 
+func gasCallDataCopy(_ *EVM, cc *CallContext, _ mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return copyGas(cc, memorySize, 2)
+}
+
+func gasCodeCopy(_ *EVM, cc *CallContext, _ mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return copyGas(cc, memorySize, 2)
+}
+
+func gasReturnDataCopy(_ *EVM, cc *CallContext, _ mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return copyGas(cc, memorySize, 2)
+}
+
+func gasMcopy(_ *EVM, cc *CallContext, _ mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+	return copyGas(cc, memorySize, 2)
+}
+
 func gasExtCodeCopy(_ *EVM, callContext *CallContext, _ mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	return copyGas(callContext, memorySize, 3)
 }

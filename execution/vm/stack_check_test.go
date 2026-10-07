@@ -158,7 +158,7 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 				continue
 			}
 			// Memory that need not grow costs no dynamic gas.
-			require.Equal(t, reflect.ValueOf(map[OpCode]gasExecuteFunc{MLOAD: opMloadWithGas, MSTORE: opMstoreWithGas}[op]).Pointer(), reflect.ValueOf(got.gasExecute).Pointer(), "table %d %s gasExecute", i, op)
+			require.Equal(t, reflect.ValueOf(map[OpCode]gasExecuteFunc{MLOAD: gasExecuteFor(memoryMLoad, pureMemoryGascost, opMload), MSTORE: gasExecuteFor(memoryMStore, pureMemoryGascost, opMstore)}[op]).Pointer(), reflect.ValueOf(got.gasExecute).Pointer(), "table %d %s gasExecute", i, op)
 			require.Equal(t, reflect.ValueOf(w.memorySize).Pointer(), reflect.ValueOf(got.memorySize).Pointer(), "table %d %s memorySize", i, op)
 		}
 	}

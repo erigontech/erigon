@@ -255,7 +255,7 @@ func newByzantiumInstructionSet() JumpTable {
 	instructionSet[RETURNDATACOPY] = operation{
 		execute:     opReturnDataCopy,
 		constantGas: GasFastestStep,
-		gasExecute:  opReturnDataCopyWithGas,
+		gasExecute:  gasExecuteFor(memoryReturnDataCopy, gasReturnDataCopy, opReturnDataCopy),
 		numPop:      3,
 		numPush:     0,
 		memorySize:  memoryReturnDataCopy,
@@ -263,7 +263,7 @@ func newByzantiumInstructionSet() JumpTable {
 	}
 	instructionSet[REVERT] = operation{
 		execute:    opRevert,
-		gasExecute: opRevertWithGas,
+		gasExecute: gasExecuteFor(memoryRevert, pureMemoryGascost, opRevert),
 		numPop:     2,
 		numPush:    0,
 		memorySize: memoryRevert,
@@ -275,7 +275,7 @@ func newByzantiumInstructionSet() JumpTable {
 // EIP 158 a.k.a Spurious Dragon
 func newSpuriousDragonInstructionSet() JumpTable {
 	instructionSet := newTangerineWhistleInstructionSet()
-	instructionSet[EXP].gasExecute = opExpEIP160WithGas
+	instructionSet[EXP].gasExecute = gasExecuteFor(nil, gasExpEIP160, opExp)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
@@ -386,7 +386,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		EXP: {
 			execute:    opExp,
-			gasExecute: opExpFrontierWithGas,
+			gasExecute: gasExecuteFor(nil, gasExpFrontier, opExp),
 			numPop:     2,
 			numPush:    1,
 		},
@@ -475,7 +475,7 @@ func newFrontierInstructionSet() JumpTable {
 		KECCAK256: {
 			execute:     opKeccak256,
 			constantGas: params.Keccak256Gas,
-			gasExecute:  opKeccak256WithGas,
+			gasExecute:  gasExecuteFor(memoryKeccak256, gasKeccak256, opKeccak256),
 			numPop:      2,
 			numPush:     1,
 			memorySize:  memoryKeccak256,
@@ -528,7 +528,7 @@ func newFrontierInstructionSet() JumpTable {
 		CALLDATACOPY: {
 			execute:     opCallDataCopy,
 			constantGas: GasFastestStep,
-			gasExecute:  opCallDataCopyWithGas,
+			gasExecute:  gasExecuteFor(memoryCallDataCopy, gasCallDataCopy, opCallDataCopy),
 			numPop:      3,
 			numPush:     0,
 			memorySize:  memoryCallDataCopy,
@@ -543,7 +543,7 @@ func newFrontierInstructionSet() JumpTable {
 		CODECOPY: {
 			execute:     opCodeCopy,
 			constantGas: GasFastestStep,
-			gasExecute:  opCodeCopyWithGas,
+			gasExecute:  gasExecuteFor(memoryCodeCopy, gasCodeCopy, opCodeCopy),
 			numPop:      3,
 			numPush:     0,
 			memorySize:  memoryCodeCopy,
@@ -563,7 +563,7 @@ func newFrontierInstructionSet() JumpTable {
 		EXTCODECOPY: {
 			execute:     opExtCodeCopy,
 			constantGas: params.ExtcodeCopyBaseFrontier,
-			gasExecute:  opExtCodeCopyWithGas,
+			gasExecute:  gasExecuteFor(memoryExtCodeCopy, gasExtCodeCopy, opExtCodeCopy),
 			numPop:      4,
 			numPush:     0,
 			memorySize:  memoryExtCodeCopy,
@@ -614,7 +614,7 @@ func newFrontierInstructionSet() JumpTable {
 		MLOAD: {
 			execute:     opMload,
 			constantGas: GasFastestStep,
-			gasExecute:  opMloadWithGas,
+			gasExecute:  gasExecuteFor(memoryMLoad, pureMemoryGascost, opMload),
 			numPop:      1,
 			numPush:     1,
 			memorySize:  memoryMLoad,
@@ -623,7 +623,7 @@ func newFrontierInstructionSet() JumpTable {
 		MSTORE: {
 			execute:     opMstore,
 			constantGas: GasFastestStep,
-			gasExecute:  opMstoreWithGas,
+			gasExecute:  gasExecuteFor(memoryMStore, pureMemoryGascost, opMstore),
 			numPop:      2,
 			numPush:     0,
 			memorySize:  memoryMStore,
@@ -632,7 +632,7 @@ func newFrontierInstructionSet() JumpTable {
 		MSTORE8: {
 			execute:     opMstore8,
 			constantGas: GasFastestStep,
-			gasExecute:  opMstore8WithGas,
+			gasExecute:  gasExecuteFor(memoryMStore8, pureMemoryGascost, opMstore8),
 			memorySize:  memoryMStore8,
 			numPop:      2,
 			numPush:     0,
@@ -646,7 +646,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		SSTORE: {
 			execute:    opSstore,
-			gasExecute: opSstoreWithGas,
+			gasExecute: gasExecuteFor(nil, gasSStore, opSstore),
 			numPop:     2,
 			numPush:    0,
 			string:     stSstore,
@@ -1202,7 +1202,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		RETURN: {
 			execute:    opReturn,
-			gasExecute: opReturnWithGas,
+			gasExecute: gasExecuteFor(memoryReturn, pureMemoryGascost, opReturn),
 			numPop:     2,
 			numPush:    0,
 			memorySize: memoryReturn,

@@ -681,7 +681,7 @@ func TestOpMCopy(t *testing.T) {
 		callContext.Stack.push(*src)
 		callContext.Stack.push(*dst)
 		callContext.gas = 1_000_000
-		_, _, err := opMcopyWithGas(pc, evm, callContext, nil)
+		_, _, err := gasExecuteFor(memoryMcopy, gasMcopy, opMcopy)(pc, evm, callContext, nil)
 		if tc.wantGas == 0 {
 			if err == nil {
 				t.Errorf("case %d: want an error", i)
