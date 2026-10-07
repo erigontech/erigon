@@ -34,33 +34,37 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// The sync gate compares the head with the highest seen block, not with the clock, so a
-// chain-wide gap never trips it while a head that stopped advancing behind seen blocks does.
-func TestSyncGateFollowsHighestSeenBlock(t *testing.T) {
+// The sync gate compares the head with the highest imported block, not with the clock or with
+// blocks merely seen, so neither a chain-wide gap nor a rejected block trips it, while a head
+// that stopped advancing behind imported blocks does.
+func TestSyncGateFollowsHighestImportedBlock(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	headSlot := postState.Slot()
 	tolerance := handler.beaconChainCfg.SlotsPerEpoch
 
-	fcu.HighestSeenVal = headSlot
+	// A block that was seen but never imported does not count.
+	fcu.HighestSeenVal = headSlot + 10*tolerance
+
+	fcu.HighestImportedVal = headSlot
 	require.False(t, handler.headLagsBehind())
-	fcu.HighestSeenVal = headSlot + tolerance
+	fcu.HighestImportedVal = headSlot + tolerance
 	require.False(t, handler.headLagsBehind())
-	fcu.HighestSeenVal = headSlot + tolerance + 1
+	fcu.HighestImportedVal = headSlot + tolerance + 1
 	require.True(t, handler.headLagsBehind())
 }
 
-func TestNodeSyncingReportsHeadBehindSeenBlocks(t *testing.T) {
+func TestNodeSyncingReportsHeadBehindImportedBlocks(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	fcu.HighestSeenVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
+	fcu.HighestImportedVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
 
 	resp, err := handler.GetEthV1NodeSyncing(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/node/syncing", http.NoBody))
 	require.NoError(t, err)
 	require.Equal(t, true, resp.Data.(map[string]any)["is_syncing"])
 }
 
-func TestBlockProductionRefusesHeadBehindSeenBlocks(t *testing.T) {
+func TestBlockProductionRefusesHeadBehindImportedBlocks(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
-	fcu.HighestSeenVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
+	fcu.HighestImportedVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
 	targetSlot := postState.Slot() + 1
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(

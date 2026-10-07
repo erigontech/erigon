@@ -60,6 +60,7 @@ type ForkChoiceStorageMock struct {
 	GetStateAtBlockRootFn                 func(common.Hash, bool) (*state.CachingBeaconState, error)
 	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
 	HighestSeenVal                        uint64
+	HighestImportedVal                    uint64
 	JustifiedCheckpointVal                solid.Checkpoint
 	JustifiedSlotVal                      uint64
 	ProposerBoostRootVal                  common.Hash
@@ -312,6 +313,10 @@ func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Has
 
 func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 	return f.HighestSeenVal
+}
+
+func (f *ForkChoiceStorageMock) HighestImported() uint64 {
+	return f.HighestImportedVal
 }
 
 func (f *ForkChoiceStorageMock) BlockProcessing() bool {
