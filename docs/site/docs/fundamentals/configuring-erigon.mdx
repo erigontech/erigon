@@ -245,7 +245,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
 * `--authrpc.port value`: The HTTP-RPC server listening port for the Engine API.
   * Default: `8551`
 * `--authrpc.jwtsecret value`: The path to the [JWT secret](/fundamentals/jwt) file for the consensus layer.
-* `--http.compression`: Enables compression over HTTP-RPC.
+* `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more with the encoding the client's `Accept-Encoding` allows: Zstandard (preferred) or gzip. A client that accepts neither gets an uncompressed response.
   * Default: `true`
 * `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
 * `--http.vhosts value`: A comma-separated list of virtual hostnames.
@@ -584,6 +584,8 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
 * `--caplin.snapgen`: Enables snapshot generation.
   * Default: `false`
 * `--caplin.mev-relay-url value`: The MEV relay endpoint.
+* `--caplin.builder.allow-private-urls`: Lets the builder URLs that validators submit as builder preferences resolve to private or loopback addresses, for a builder on the same host or LAN. Other non-public ranges stay blocked. Does not apply to `--caplin.mev-relay-url`.
+  * Default: `false`
 * `--caplin.validator-monitor`: Enables Caplin validator monitoring metrics.
   * Default: `false`
 * `--caplin.custom-config value`: Sets a custom config for Caplin.
@@ -674,7 +676,7 @@ Erigon's own variables — everything below except the [Docker](#docker-environm
 * `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--exec.no-prune`)
 * `NO_MERGE` - Disables merging operations (flag equivalent: `--exec.no-merge`)
 * `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
-* `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `96`)
+* `MAX_REORG_DEPTH` - Sets how many blocks behind the head Erigon keeps reorg data while no finalized block is known, and during the initial sync cycle (default: `96`). After that, once the consensus layer reports a finalized block, Erigon keeps changesets and holds snapshot retirement back to that block instead: during non-finality it can reorg deeper than this value — down to, but not below, the finalized block — and with normal finality it may keep fewer than 96 blocks. The value still caps how far a new payload's missing ancestors are downloaded and how far from the head a side fork is validated.
 * `CAPLIN_STATE_PRUNE_DISABLE` - Disables pruning of Caplin's state indexing DB after ranges are frozen into snapshots (default: `false`)
 * `CAPLIN_STATE_PRUNE_TIMEOUT` - Overrides the per-pass time budget for Caplin state pruning (a duration, e.g. `500ms`; default derived from the chain's slot time)
 

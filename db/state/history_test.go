@@ -206,7 +206,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		defer tx.Rollback()
 		hc := h.beginForTests()
 		defer hc.Close()
-		writer := hc.NewWriter()
+		writer := hc.NewWriter(db)
 		defer writer.close()
 
 		err = writer.AddPrevValue([]byte("key1"), 2, nil)
@@ -221,7 +221,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.NoError(err)
 
 		flusher := writer
-		writer = hc.NewWriter()
+		writer = hc.NewWriter(db)
 
 		err = writer.AddPrevValue([]byte("key2"), 7, []byte("value2.2"))
 		require.NoError(err)
@@ -335,7 +335,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		defer tx.Rollback()
 		hc := h.beginForTests()
 		defer hc.Close()
-		writer := hc.NewWriter()
+		writer := hc.NewWriter(db)
 		defer writer.close()
 
 		err = writer.AddPrevValue([]byte("key1"), 2, nil)
@@ -515,7 +515,7 @@ func TestHistoryCanPrune(t *testing.T) {
 
 		hc := h.beginForTests()
 		defer hc.Close()
-		writer := hc.NewWriter()
+		writer := hc.NewWriter(db)
 		defer writer.close()
 
 		addr = common.FromHex("ed7229d50cde8de174cc64a882a0833ca5f11669")
@@ -807,7 +807,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 	err := db.Update(ctx, func(tx kv.RwTx) error {
 		hc := h.beginForTests()
 		defer hc.Close()
-		writer := hc.NewWriter()
+		writer := hc.NewWriter(db)
 		defer writer.close()
 		// keys are encodings of numbers 1..31
 		// each key changes value on every txNum which is multiple of the key
@@ -826,7 +826,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 					flusher = nil //nolint
 				}
 				flusher = writer
-				writer = hc.NewWriter()
+				writer = hc.NewWriter(db)
 			}
 		}
 		if flusher != nil {
@@ -849,7 +849,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	defer tx.Rollback()
 	hc := h.beginForTests()
 	defer hc.Close()
-	writer := hc.NewWriter()
+	writer := hc.NewWriter(db)
 	defer writer.close()
 
 	txs := uint64(1000)
@@ -879,7 +879,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 		}
 		if txNum%10 == 0 {
 			flusher = writer
-			writer = hc.NewWriter()
+			writer = hc.NewWriter(db)
 		}
 	}
 	if flusher != nil {
@@ -1682,7 +1682,7 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	defer tx.Rollback()
 	hc := h.beginForTests()
 	defer hc.Close()
-	writer := hc.NewWriter()
+	writer := hc.NewWriter(db)
 	defer writer.close()
 
 	keys := [][]byte{
@@ -1723,7 +1723,7 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 		}
 		if txNum%10 == 0 {
 			flusher = writer
-			writer = hc.NewWriter()
+			writer = hc.NewWriter(db)
 		}
 	}
 	if flusher != nil {
