@@ -123,7 +123,6 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		// From EIP-2929 on, opSloadEIP2929 charges SLOAD's dynamic gas and SLOAD has no gas func.
 		if sload := &jt[SLOAD]; sload.gasExecute != nil || sload.constantGas == 0 {
 			require.Equal(t, reflect.ValueOf(opSloadEIP2929).Pointer(), reflect.ValueOf(sload.gasExecute).Pointer(), "table %d SLOAD", i)
-			require.Nil(t, sload.dynamicGas, "table %d SLOAD", i)
 		}
 		// run inlines the copy of the func vmgen found for the op, whatever the table holds.
 		for op, want := range gasExecuteOps {
@@ -153,13 +152,13 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 			require.Equal(t, w.numPop, got.numPop, "table %d %s numPop", i, op)
 			require.Equal(t, w.numPush, got.numPush, "table %d %s numPush", i, op)
 			if w.memorySize == nil {
-				require.Nil(t, got.dynamicGas, "table %d %s dynamicGas", i, op)
-				require.Nil(t, got.memorySize, "table %d %s memorySize", i, op)
+				require.Nil(t, got.gasExecute, "table %d %s gasExecute", i, op)
+				require.False(t, got.usesMemory, "table %d %s usesMemory", i, op)
 				continue
 			}
 			// Memory that need not grow costs no dynamic gas.
 			require.Equal(t, reflect.ValueOf(map[OpCode]gasExecuteFunc{MLOAD: opMloadWithGas, MSTORE: opMstoreWithGas}[op]).Pointer(), reflect.ValueOf(got.gasExecute).Pointer(), "table %d %s gasExecute", i, op)
-			require.Equal(t, reflect.ValueOf(w.memorySize).Pointer(), reflect.ValueOf(got.memorySize).Pointer(), "table %d %s memorySize", i, op)
+			require.True(t, got.usesMemory, "table %d %s usesMemory", i, op)
 		}
 	}
 }

@@ -295,7 +295,7 @@ func enable5656(jt *JumpTable) {
 		gasExecute:  opMcopyWithGas,
 		numPop:      3,
 		numPush:     0,
-		memorySize:  memoryMcopy,
+		usesMemory:  true,
 	}
 }
 

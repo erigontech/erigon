@@ -31,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
@@ -669,60 +668,8 @@ run:
 			continue run
 		}
 
-		// All ops with a dynamic memory usage also has a dynamic gas cost.
-		var memorySize uint64
-		if operation.dynamicGas != nil {
-			// calculate the new memory size and expand the memory to fit
-			// the operation
-			// Memory check needs to be done prior to evaluating the dynamic gas portion,
-			// to detect calculation overflows
-			if operation.memorySize != nil {
-				memSize, overflow := operation.memorySize(callContext)
-				if overflow {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
-				}
-				// memory is expanded in words of 32 bytes. Gas
-				// is also calculated in words.
-				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
-				}
-			}
-			// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
-			evm.callGasTemp = 0
-			// Consume the gas and return an error if not enough gas is available.
-			// cost is explicitly set so that the capture state defer method can get the proper cost
-			var dynamicCost mdgas.MdGasCost
-			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
-			if err != nil {
-				if !errors.Is(err, ErrOutOfGas) {
-					err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
-				}
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
-			}
-			if anyTrace {
-				evm.traceCost(op, t, dynamicCost)
-			}
-			if callContext.gas < dynamicCost.Execution {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-			}
-			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			} else if dynamicCost.State < 0 {
-				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
-			}
-		}
-
-		// Do gas tracing before memory expansion
 		if anyTrace && debug {
 			evm.traceOp(callContext, op, t)
-		}
-
-		if memorySize > 0 {
-			callContext.Memory.Resize(memorySize)
 		}
 
 		// TODO - move this to a trace & set in the worker
