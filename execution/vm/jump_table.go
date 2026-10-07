@@ -223,7 +223,7 @@ func newConstantinopleInstructionSet() JumpTable {
 	instructionSet[CREATE2] = operation{
 		execute:     opCreate2,
 		constantGas: params.Create2Gas,
-		gasExecute:  makeWithGas(CREATE2, memoryCreate2, gasCreate2, opCreate2),
+		gasExecute:  makeWithGas(memoryCreate2, gasCreate2, opCreate2),
 		numPop:      4,
 		numPush:     1,
 		memorySize:  memoryCreate2,
@@ -240,7 +240,7 @@ func newByzantiumInstructionSet() JumpTable {
 	instructionSet[STATICCALL] = operation{
 		execute:     opStaticCall,
 		constantGas: params.CallGasEIP150,
-		gasExecute:  makeWithGas(STATICCALL, memoryStaticCall, gasStaticCall, opStaticCall),
+		gasExecute:  makeWithGas(memoryStaticCall, gasStaticCall, opStaticCall),
 		numPop:      6,
 		numPush:     1,
 		memorySize:  memoryStaticCall,
@@ -300,7 +300,7 @@ func newHomesteadInstructionSet() JumpTable {
 	instructionSet := newFrontierInstructionSet()
 	instructionSet[DELEGATECALL] = operation{
 		execute:     opDelegateCall,
-		gasExecute:  makeWithGas(DELEGATECALL, memoryDelegateCall, gasDelegateCall, opDelegateCall),
+		gasExecute:  makeWithGas(memoryDelegateCall, gasDelegateCall, opDelegateCall),
 		constantGas: params.CallGasFrontier,
 		numPop:      6,
 		numPush:     1,
@@ -1177,7 +1177,7 @@ func newFrontierInstructionSet() JumpTable {
 		CREATE: {
 			execute:     opCreate,
 			constantGas: params.CreateGas,
-			gasExecute:  makeWithGas(CREATE, memoryCreate, gasCreate, opCreate),
+			gasExecute:  makeWithGas(memoryCreate, gasCreate, opCreate),
 			numPop:      3,
 			numPush:     1,
 			memorySize:  memoryCreate,
@@ -1186,7 +1186,7 @@ func newFrontierInstructionSet() JumpTable {
 		CALL: {
 			execute:     opCall,
 			constantGas: params.CallGasFrontier,
-			gasExecute:  makeWithGas(CALL, memoryCall, gasCall, opCall),
+			gasExecute:  makeWithGas(memoryCall, gasCall, opCall),
 			numPop:      7,
 			numPush:     1,
 			memorySize:  memoryCall,
@@ -1195,7 +1195,7 @@ func newFrontierInstructionSet() JumpTable {
 		CALLCODE: {
 			execute:     opCallCode,
 			constantGas: params.CallGasFrontier,
-			gasExecute:  makeWithGas(CALLCODE, memoryCall, gasCallCode, opCallCode),
+			gasExecute:  makeWithGas(memoryCall, gasCallCode, opCallCode),
 			numPop:      7,
 			numPush:     1,
 			memorySize:  memoryCall,
