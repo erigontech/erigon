@@ -17,6 +17,7 @@
 package remotedbserver
 
 import (
+	"encoding/binary"
 	"errors"
 	"runtime"
 	"testing"
@@ -28,7 +29,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
@@ -188,4 +191,93 @@ func TestKVServerSnapshotsReturnsEmptyIfNoBlockSnapshots(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, reply.BlocksFiles)
 	require.Empty(t, reply.HistoryFiles)
+}
+
+func TestIndexRangePagesDoNotRepeatTimestamps(t *testing.T) {
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	key := []byte("addr-0000000000000000")
+	total := PageSizeLimit + 10
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	for txNum := range total {
+		require.NoError(t, sd.IndexAdd(kv.LogAddrIdx, key, uint64(txNum)))
+	}
+	require.NoError(t, sd.Flush(ctx, rwTx))
+	require.NoError(t, rwTx.Commit())
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	s := NewKvServer(ctx, db, nil, nil, log.New())
+	s.txs[1] = &threadSafeTx{TemporalTx: roTx}
+
+	for _, asc := range []order.By{order.Asc, order.Desc} {
+		from, to := int64(-1), int64(-1)
+		if !asc {
+			from, to = int64(total), int64(-1)
+		}
+		req := &remoteproto.IndexRangeReq{TxId: 1, Table: kv.LogAddrIdx.String(), K: key, FromTs: from, ToTs: to, OrderAscend: bool(asc), Limit: -1}
+		var got []uint64
+		for {
+			reply, err := s.IndexRange(ctx, req)
+			require.NoError(t, err)
+			got = append(got, reply.Timestamps...)
+			if reply.NextPageToken == "" {
+				break
+			}
+			req.PageToken = reply.NextPageToken
+		}
+		require.Equal(t, total, len(got), "asc=%t", asc)
+		for i := 1; i < len(got); i++ {
+			require.NotEqual(t, got[i-1], got[i], "asc=%t: timestamp %d repeated at position %d", asc, got[i], i)
+		}
+	}
+}
+
+func TestRangeAsOfPagesDoNotRepeatKeys(t *testing.T) {
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	total := PageSizeLimit + 10
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	for i := range total {
+		k := make([]byte, 20)
+		binary.BigEndian.PutUint64(k[12:], uint64(i))
+		require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, k, []byte{1}, 1, nil))
+	}
+	require.NoError(t, sd.Flush(ctx, rwTx))
+	require.NoError(t, rwTx.Commit())
+
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	s := NewKvServer(ctx, db, nil, nil, log.New())
+	s.txs[1] = &threadSafeTx{TemporalTx: roTx}
+
+	req := &remoteproto.RangeAsOfReq{TxId: 1, Table: kv.AccountsDomain.String(), Ts: 2, OrderAscend: true, Limit: -1}
+	var got [][]byte
+	for {
+		reply, err := s.RangeAsOf(ctx, req)
+		require.NoError(t, err)
+		got = append(got, reply.Keys...)
+		if reply.NextPageToken == "" {
+			break
+		}
+		req.PageToken = reply.NextPageToken
+	}
+	require.Equal(t, total, len(got))
+	for i := 1; i < len(got); i++ {
+		require.NotEqual(t, got[i-1], got[i], "key %x repeated at position %d", got[i], i)
+	}
 }
