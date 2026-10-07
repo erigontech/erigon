@@ -24,9 +24,8 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc   = uint64(0) // program counter
-		cost mdgas.MdGasCost
-		res  []byte // result of the opcode execution function
+		pc  = uint64(0) // program counter
+		res []byte      // result of the opcode execution function
 	)
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
@@ -385,20 +384,46 @@ run:
 			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
+		switch op {
+		case SLOAD:
+			if o := &jt[SLOAD]; o.gasExecute != nil && uint(stack.len()-o.numPop) <= uint(o.maxStack-o.numPop) && gasLeft >= o.constantGas {
+				gasLeft -= o.constantGas
+				if callContext.slots.on {
+					if i := callContext.lookupSlot(evm); i >= 0 {
+						if gasLeft < params.WarmStorageReadCostEIP2929 {
+							res, err = nil, ErrOutOfGas
+							break run
+						}
+						gasLeft -= params.WarmStorageReadCostEIP2929
+						*callContext.Stack.peek() = callContext.slots.val[i]
+						pc++
+						continue run
+					}
+				}
+				callContext.gas = gasLeft
+				pc, res, err = opSloadEIP2929Miss(pc, evm, callContext, nil)
+				gasLeft = callContext.gas
+				if err != nil {
+					break run
+				}
+				pc++
+				continue run
+			}
+		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		operation := &jt[op]
-		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
+		cost := operation.constantGas
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
 		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
-		if callContext.gas < cost.Execution {
+		if callContext.gas < cost {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 		} else {
-			callContext.gas -= cost.Execution
+			callContext.gas -= cost
 		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
