@@ -303,8 +303,8 @@ func TestDecodeHexMatchesStdlib(t *testing.T) {
 		require.Equal(t, want, got, "len %d", n)
 	}
 	src := []byte(strings.Repeat("ab", 100))
-	for i := 0; i < len(src); i++ {
-		for b := 0; b < 256; b++ {
+	for i := range src {
+		for b := range 256 {
 			bad := slices.Clone(src)
 			bad[i] = byte(b)
 			want, got := make([]byte, 100), make([]byte, 100)
