@@ -119,13 +119,14 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		}
 	}
 	for i, jt := range tables {
-		// SLOAD's gasExecute stands in for exactly gasSLoadEIP2929 and opSload.
-		sload := &jt[SLOAD]
-		eip2929 := reflect.ValueOf(sload.dynamicGas).Pointer() == reflect.ValueOf(gasSLoadEIP2929).Pointer()
-		require.Equal(t, eip2929, sload.gasExecute != nil, "table %d SLOAD", i)
-		if eip2929 {
+		// From EIP-2929 on, opSloadEIP2929 charges SLOAD's dynamic gas and SLOAD has no gas func.
+		if sload := &jt[SLOAD]; sload.gasExecute != nil || sload.constantGas == 0 {
 			require.Equal(t, reflect.ValueOf(opSloadEIP2929).Pointer(), reflect.ValueOf(sload.gasExecute).Pointer(), "table %d SLOAD", i)
-			require.Equal(t, reflect.ValueOf(opSload).Pointer(), reflect.ValueOf(sload.execute).Pointer(), "table %d SLOAD", i)
+			require.Equal(t, reflect.ValueOf(opSloadEIP2929Run).Pointer(), reflect.ValueOf(sload.gasExecuteRun).Pointer(), "table %d SLOAD", i)
+			require.Nil(t, sload.dynamicGas, "table %d SLOAD", i)
+		}
+		for op := range jt {
+			require.Equal(t, jt[op].gasExecute == nil, jt[op].gasExecuteRun == nil, "table %d %s gasExecuteRun", i, OpCode(op))
 		}
 		for op, w := range fastPathOps {
 			got := &jt[op]
@@ -334,22 +335,33 @@ func TestRunMatchesRunTraced(t *testing.T) {
 	}
 }
 
-// TestRunUsesGasExecute pins that run takes an op's gasExecute in place of its gas func and execute.
+// TestRunUsesGasExecute pins that run takes an op's gasExecuteRun, and runTraced its
+// gasExecute with the trace, in place of the gas func and execute.
 func TestRunUsesGasExecute(t *testing.T) {
 	t.Parallel()
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Close()
-	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-	table := *evm.jt
-	called := false
-	table[SLOAD].gasExecute = func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-		called = true
-		return opSloadEIP2929(pc, evm, scope)
+	for _, traced := range []bool{false, true} {
+		ibs := state.New(state.NewNoopReader())
+		defer ibs.Close()
+		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+		table := *evm.jt
+		called := false
+		table[SLOAD].gasExecute = func(pc uint64, evm *EVM, scope *CallContext, tr *opTrace) (uint64, []byte, error) {
+			called = traced && tr != nil
+			return opSloadEIP2929(pc, evm, scope, tr)
+		}
+		table[SLOAD].gasExecuteRun = func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+			called = !traced
+			return opSloadEIP2929Run(pc, evm, scope)
+		}
+		evm.jt = &table
+		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+		c.Code = []byte{byte(PUSH1), 1, byte(SLOAD)}
+		f := evm.run
+		if traced {
+			f = evm.runTraced
+		}
+		_, _, _, err := f(*c, mdgas.MdGas{Execution: 10_000}, nil, false, false, false)
+		require.NoError(t, err)
+		require.True(t, called, "traced=%v", traced)
 	}
-	evm.jt = &table
-	c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
-	c.Code = []byte{byte(PUSH1), 1, byte(SLOAD)}
-	_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 10_000}, nil, false, false, false)
-	require.NoError(t, err)
-	require.True(t, called)
 }

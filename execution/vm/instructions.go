@@ -782,27 +782,6 @@ func sloadRead(evm *EVM, scope *CallContext, key accounts.StorageKey) (err error
 	return err
 }
 
-// opSloadEIP2929 is SLOAD with its EIP-2929 gas: one frame-cache lookup serves both.
-func opSloadEIP2929(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if scope.slots.on {
-		if i := scope.lookupSlot(evm); i >= 0 {
-			if scope.gas < params.WarmStorageReadCostEIP2929 {
-				return pc, nil, ErrOutOfGas
-			}
-			scope.gas -= params.WarmStorageReadCostEIP2929
-			*scope.Stack.peek() = scope.slots.val[i]
-			return pc, nil, nil
-		}
-	}
-	key := scope.peekStorageKey(evm)
-	cost := sloadAccess(evm, scope.Contract.Address(), key)
-	if scope.gas < cost {
-		return pc, nil, ErrOutOfGas
-	}
-	scope.gas -= cost
-	return pc, nil, sloadRead(evm, scope, key)
-}
-
 func stSload(_ uint64, scope *CallContext) string {
 	loc := scope.Stack.peek()
 	return fmt.Sprintf("%s %x", SLOAD, loc)

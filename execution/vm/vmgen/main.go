@@ -16,7 +16,8 @@
 
 // vmgen writes run in vm_run_gen.go from runTraced in interpreter.go: the
 // same loop with anyTrace false and the fast-path switch, whose cases inline
-// the fastOps' execute funcs from instructions.go. It also writes
+// the fastOps' execute funcs from instructions.go. Next to run it writes a copy
+// without the trace of each func that takes one. It also writes
 // fast_path_gen_test.go. With -check it reports stale files instead of writing them.
 package main
 
@@ -29,8 +30,11 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"go/types"
 	"log"
 	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -250,7 +254,7 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 
 // untraced returns runTraced as run in a file of its own, with anyTrace set
 // to false and fast in place of the switchHere comment.
-func untraced(traced []byte, fast string) []byte {
+func untraced(traced []byte, fast, traceFreeFuncs string) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
 	}
@@ -290,6 +294,7 @@ func untraced(traced []byte, fast string) []byte {
 			b.WriteString("// run is runTraced without the tracing code and with the fast path.\n" + text(fset, &printer.CommentedNode{Node: d, Comments: f.Comments}) + "\n")
 		}
 	}
+	b.WriteString(traceFreeFuncs)
 	out, err := format.Source(b.Bytes())
 	if err != nil {
 		log.Fatal(err)
@@ -315,6 +320,95 @@ func testTable(ops []fastOp) []byte {
 }
 
 // read returns the file with LF line endings: Git checks it out with CRLF on Windows.
+// traceFree returns, for each func of the package that takes a t *opTrace, its copy
+// for run: named with a Run suffix, without t and its `if t != nil` statements,
+// calling the copies of the other such funcs.
+func traceFree() string {
+	names, err := filepath.Glob("*.go")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	var funcs []*ast.FuncDecl
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, "_gen.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, read(name), parser.SkipObjectResolution)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, d := range f.Decls {
+			if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil && traceParam(fn) >= 0 {
+				funcs = append(funcs, fn)
+			}
+		}
+	}
+	traced := map[string]bool{}
+	for _, fn := range funcs {
+		traced[fn.Name.Name] = true
+	}
+	var b strings.Builder
+	for _, fn := range funcs {
+		name := fn.Name.Name
+		fn.Type.Params.List = slices.Delete(fn.Type.Params.List, traceParam(fn), traceParam(fn)+1)
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.BlockStmt:
+				n.List = slices.DeleteFunc(n.List, isTraceIf)
+			case *ast.CaseClause:
+				n.Body = slices.DeleteFunc(n.Body, isTraceIf)
+			case *ast.CallExpr:
+				if id, ok := n.Fun.(*ast.Ident); ok && traced[id.Name] {
+					id.Name += "Run"
+					n.Args = slices.DeleteFunc(n.Args, isT)
+				}
+			}
+			return true
+		})
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if e, ok := n.(ast.Expr); ok && isT(e) {
+				log.Fatalf("%s: t is used outside an `if t != nil` statement", name)
+			}
+			return true
+		})
+		fn.Doc, fn.Name.Name = nil, name+"Run"
+		// The copy has no comments, so its blank lines are where the trace was.
+		code := regexp.MustCompile(`\n\s*\n`).ReplaceAllString(text(fset, fn), "\n")
+		fmt.Fprintf(&b, "\n// %sRun is %s without the trace.\n%s\n", name, name, code)
+	}
+	return b.String()
+}
+
+// traceParam returns the index of fn's t *opTrace parameter, or -1.
+func traceParam(fn *ast.FuncDecl) int {
+	return slices.IndexFunc(fn.Type.Params.List, func(p *ast.Field) bool {
+		star, ok := p.Type.(*ast.StarExpr)
+		if !ok || types.ExprString(star.X) != "opTrace" {
+			return false
+		}
+		if len(p.Names) != 1 || p.Names[0].Name != "t" {
+			log.Fatalf("%s: the *opTrace parameter must be t of its own", fn.Name.Name)
+		}
+		return true
+	})
+}
+
+func isT(e ast.Expr) bool {
+	id, ok := e.(*ast.Ident)
+	return ok && id.Name == "t"
+}
+
+// isTraceIf reports whether s is `if t != nil { ... }`.
+func isTraceIf(s ast.Stmt) bool {
+	is, ok := s.(*ast.IfStmt)
+	if !ok || is.Init != nil || is.Else != nil {
+		return false
+	}
+	c, ok := is.Cond.(*ast.BinaryExpr)
+	return ok && c.Op == token.NEQ && isT(c.X) && types.ExprString(c.Y) == "nil"
+}
+
 func read(name string) []byte {
 	b, err := os.ReadFile(name)
 	if err != nil {
@@ -330,7 +424,7 @@ func main() {
 		name string
 		data []byte
 	}{
-		{"vm_run_gen.go", untraced(read("interpreter.go"), fastSwitch(read("instructions.go"), ops))},
+		{"vm_run_gen.go", untraced(read("interpreter.go"), fastSwitch(read("instructions.go"), ops), traceFree())},
 		{"fast_path_gen_test.go", testTable(ops)},
 	}
 	var stale []string

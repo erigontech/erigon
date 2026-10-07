@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -25,15 +24,10 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc   = uint64(0) // program counter
-		cost mdgas.MdGasCost
-		// copies used by tracer
-		pcCopy  uint64 // needed for the deferred Tracer
-		oldGas  mdgas.MdGas
-		callGas mdgas.MdGasCost
-		logged  bool   // deferred Tracer should ignore already logged steps
-		res     []byte // result of the opcode execution function
-		tracer  = evm.config.Tracer
+		pc     = uint64(0) // program counter
+		t      = opTrace{debug: debug, trace: trace}
+		res    []byte // result of the opcode execution function
+		tracer = evm.config.Tracer
 	)
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
@@ -71,10 +65,10 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 				return
 			}
 			switch {
-			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
-				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+			case !t.logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
+				tracer.EmitOpcode(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
 			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
-				tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
+				tracer.EmitFault(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}()
 	}
@@ -410,27 +404,34 @@ run:
 		callContext.cacheGen++
 		if false && debug {
 			// Capture pre-execution values for tracing.
-			logged = false
-			pcCopy = pc
-			oldGas = callContext.Gas()
+			t.logged = false
+			t.pc = pc
+			t.oldGas = callContext.Gas()
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		operation := &jt[op]
-		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
+		cost := operation.constantGas
+		if false {
+			t.cost = mdgas.MdGasCost{Execution: cost}
+		}
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
 		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
-		if callContext.gas < cost.Execution {
+		if callContext.gas < cost {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 		} else {
-			callContext.gas -= cost.Execution
+			callContext.gas -= cost
 		}
-		if !false && operation.gasExecute != nil {
-			pc, res, err = operation.gasExecute(pc, evm, callContext)
+		if operation.gasExecute != nil {
+			if false {
+				pc, res, err = operation.gasExecute(pc, evm, callContext, &t)
+			} else {
+				pc, res, err = operation.gasExecuteRun(pc, evm, callContext)
+			}
 			gasLeft = callContext.gas
 			if err != nil {
 				break run
@@ -470,13 +471,7 @@ run:
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
 			}
 			if false {
-				cost = cost.Plus(dynamicCost)
-				callGas = cost
-				callGas.Execution -= evm.CallGasTemp()
-				if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGasCost{}) {
-					gasCost := traceGas(op, callGas, cost)
-					fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
-				}
+				evm.traceCost(op, &t, dynamicCost)
 			}
 			if callContext.gas < dynamicCost.Execution {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -494,13 +489,7 @@ run:
 
 		// Do gas tracing before memory expansion
 		if false && debug {
-			if tracer.HasGasChangeHook() {
-				tracer.EmitGasChange(oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
-			}
-			if tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)) {
-				tracer.EmitOpcode(pc, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-				logged = true
-			}
+			evm.traceOp(callContext, op, &t)
 		}
 
 		if memorySize > 0 {
@@ -510,15 +499,7 @@ run:
 		// TODO - move this to a trace & set in the worker
 
 		if false && trace {
-			var opstr string
-			if operation.string != nil {
-				opstr = operation.string(pc, callContext)
-			} else {
-				opstr = op.String()
-			}
-
-			gasCost := traceGas(op, callGas, cost)
-			fmt.Printf("%d (%d.%d) %5d %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, gasCost.Execution, gasCost.State, opstr)
+			evm.tracePrint(callContext, op, pc, &t)
 		}
 
 		// execute the operation
@@ -536,4 +517,35 @@ run:
 	}
 
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
+}
+
+// opSloadEIP2929Run is opSloadEIP2929 without the trace.
+func opSloadEIP2929Run(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	if scope.slots.on {
+		if i := scope.lookupSlot(evm); i >= 0 {
+			if scope.gas < params.WarmStorageReadCostEIP2929 {
+				return pc, nil, ErrOutOfGas
+			}
+			scope.gas -= params.WarmStorageReadCostEIP2929
+			*scope.Stack.peek() = scope.slots.val[i]
+			return pc, nil, nil
+		}
+	}
+	return opSloadEIP2929MissRun(pc, evm, scope)
+}
+
+// opSloadEIP2929MissRun is opSloadEIP2929Miss without the trace.
+func opSloadEIP2929MissRun(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	ibs, addr, key := evm.IntraBlockState(), scope.Contract.Address(), scope.peekStorageKey(evm)
+	cost := params.WarmStorageReadCostEIP2929
+	if !ibs.SlotKnownWarm(addr, key) {
+		if _, slotMod := ibs.AddSlotToAccessList(addr, key); slotMod {
+			cost = coldStorageAccessCost(evm.chainRules)
+		}
+	}
+	if scope.gas < cost {
+		return pc, nil, ErrOutOfGas
+	}
+	scope.gas -= cost
+	return pc, nil, sloadRead(evm, scope, key)
 }

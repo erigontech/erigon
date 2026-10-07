@@ -131,29 +131,49 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 	}
 }
 
-// gasSLoadEIP2929 calculates dynamic gas for SLOAD according to EIP-2929
-// For SLOAD, if the (address, storage_key) pair (where address is the address of the contract
-// whose storage is being read) is not yet in accessed_storage_keys,
-// charge 2100 gas and add the pair to accessed_storage_keys.
-// If the pair is already in accessed_storage_keys, charge 100 gas.
-func gasSLoadEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
-	// If the caller cannot afford the cost, this change will be rolled back
-	// If he does afford it, we can skip checking the same thing later on, during execution
-	if callContext.slots.on && callContext.lookupSlot(evm) >= 0 {
-		return mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929}, nil
+// opSloadEIP2929 is SLOAD with its EIP-2929 gas, which one frame-cache lookup serves.
+// If the (address, storage_key) pair is not yet in accessed_storage_keys, it charges
+// 2100 gas and adds the pair to accessed_storage_keys; otherwise it charges 100 gas.
+func opSloadEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	if scope.slots.on {
+		if i := scope.lookupSlot(evm); i >= 0 {
+			if t != nil {
+				evm.traceCost(SLOAD, t, mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929})
+			}
+			if scope.gas < params.WarmStorageReadCostEIP2929 {
+				return pc, nil, ErrOutOfGas
+			}
+			scope.gas -= params.WarmStorageReadCostEIP2929
+			if t != nil {
+				evm.traceCharged(scope, SLOAD, pc, t)
+			}
+			*scope.Stack.peek() = scope.slots.val[i]
+			return pc, nil, nil
+		}
 	}
-	return mdgas.MdGasCost{Execution: sloadAccess(evm, callContext.Address(), callContext.peekStorageKey(evm))}, nil
+	return opSloadEIP2929Miss(pc, evm, scope, t)
 }
 
-// sloadAccess warms the slot and returns SLOAD's EIP-2929 cost for it.
-func sloadAccess(evm *EVM, addr accounts.Address, slot accounts.StorageKey) uint64 {
-	if evm.IntraBlockState().SlotKnownWarm(addr, slot) {
-		return params.WarmStorageReadCostEIP2929
+// opSloadEIP2929Miss is opSloadEIP2929 for a slot the frame cache does not hold.
+func opSloadEIP2929Miss(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	ibs, addr, key := evm.IntraBlockState(), scope.Contract.Address(), scope.peekStorageKey(evm)
+	cost := params.WarmStorageReadCostEIP2929
+	if !ibs.SlotKnownWarm(addr, key) {
+		if _, slotMod := ibs.AddSlotToAccessList(addr, key); slotMod {
+			cost = coldStorageAccessCost(evm.chainRules)
+		}
 	}
-	if _, slotMod := evm.IntraBlockState().AddSlotToAccessList(addr, slot); slotMod {
-		return coldStorageAccessCost(evm.chainRules)
+	if t != nil {
+		evm.traceCost(SLOAD, t, mdgas.MdGasCost{Execution: cost})
 	}
-	return params.WarmStorageReadCostEIP2929
+	if scope.gas < cost {
+		return pc, nil, ErrOutOfGas
+	}
+	scope.gas -= cost
+	if t != nil {
+		evm.traceCharged(scope, SLOAD, pc, t)
+	}
+	return pc, nil, sloadRead(evm, scope, key)
 }
 
 // gasExtCodeCopyEIP2929 implements extcodecopy according to EIP-2929
