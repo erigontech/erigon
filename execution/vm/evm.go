@@ -69,7 +69,7 @@ type EVM struct {
 	txOutput *[]byte
 	// outputs[depth] receives a nested frame's output. Only the parent reads it,
 	// and only until its next call, which is the next frame at that depth.
-	outputs [16][]byte
+	outputs *[16][]byte
 
 	// chainConfig contains information about the current chain
 	chainConfig *chain.Config

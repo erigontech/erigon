@@ -1301,10 +1301,13 @@ func (evm *EVM) outputBuffer(size uint64) *[]byte {
 	if evm.depth == 1 {
 		return evm.txOutput
 	}
-	if evm.depth < len(evm.outputs) && size <= uint64(64*datasize.KB) && evm.config.Tracer == nil {
-		return &evm.outputs[evm.depth]
+	if evm.depth >= len(evm.outputs) || size > uint64(64*datasize.KB) || evm.config.Tracer != nil {
+		return nil
 	}
-	return nil
+	if evm.outputs == nil {
+		evm.outputs = new([16][]byte)
+	}
+	return &evm.outputs[evm.depth]
 }
 
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
