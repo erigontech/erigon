@@ -74,10 +74,6 @@ type EVM struct {
 	config Config
 	// abort is used to abort the EVM calling operations
 	abort atomic.Bool
-	// callGasTemp holds the gas available for the current call. This is needed because the
-	// available gas is calculated in gasCall* according to the 63/64 rule and later
-	// applied in opCall*.
-	callGasTemp uint64
 	// precompiles is the active set: resolved from the chain rules on reset,
 	// replaced wholesale by SetPrecompiles for state-override RPC calls.
 	precompiles PrecompiledContracts
@@ -319,16 +315,6 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, gasUsed *mdgas.MdGa
 // any gas magnitude.
 func deriveFrameExecutionGasUsed(inputTotal, gasRemainingTotal uint64, stateGasUsed int64) uint64 {
 	return inputTotal - gasRemainingTotal - uint64(stateGasUsed)
-}
-
-// CallGasTemp returns the callGasTemp for the EVM
-func (evm *EVM) CallGasTemp() uint64 {
-	return evm.callGasTemp
-}
-
-// SetCallGasTemp sets the callGasTemp for the EVM
-func (evm *EVM) SetCallGasTemp(gas uint64) {
-	evm.callGasTemp = gas
 }
 
 func isSystemCall(caller accounts.Address) bool {

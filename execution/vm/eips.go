@@ -127,50 +127,50 @@ func opChainID(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, e
 // enable2200 applies EIP-2200 (Rebalance net-metered SSTORE)
 func enable2200(jt *JumpTable) {
 	jt[SLOAD].constantGas = params.SloadGasEIP2200
-	jt[SSTORE].dynamicGas = gasSStoreEIP2200
+	jt[SSTORE].gasExecute = opSstoreEIP2200
 }
 
 // enable2929 enables "EIP-2929: Gas cost increases for state access opcodes"
 // https://eips.ethereum.org/EIPS/eip-2929
 func enable2929(jt *JumpTable) {
-	jt[SSTORE].dynamicGas = gasSStoreEIP2929
+	jt[SSTORE].gasExecute = makeSstoreEIP2929(params.SstoreClearsScheduleRefundEIP2200)
 
 	jt[SLOAD].constantGas = 0
 	jt[SLOAD].gasExecute = opSloadEIP2929
 
 	jt[EXTCODECOPY].constantGas = params.WarmStorageReadCostEIP2929
-	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP2929
+	jt[EXTCODECOPY].gasExecute = opExtCodeCopyEIP2929
 
 	jt[EXTCODESIZE].constantGas = params.WarmStorageReadCostEIP2929
-	jt[EXTCODESIZE].dynamicGas = gasEip2929AccountCheck
+	jt[EXTCODESIZE].gasExecute = opExtCodeSizeEIP2929
 
 	jt[EXTCODEHASH].constantGas = params.WarmStorageReadCostEIP2929
-	jt[EXTCODEHASH].dynamicGas = gasEip2929AccountCheck
+	jt[EXTCODEHASH].gasExecute = opExtCodeHashEIP2929
 
 	jt[BALANCE].constantGas = params.WarmStorageReadCostEIP2929
-	jt[BALANCE].dynamicGas = gasEip2929AccountCheck
+	jt[BALANCE].gasExecute = opBalanceEIP2929
 
 	jt[CALL].constantGas = params.WarmStorageReadCostEIP2929
-	jt[CALL].dynamicGas = gasCallEIP2929
+	jt[CALL].gasExecute = makeCallWithGas(memoryCall, gasCallEIP2929, opCall)
 
 	jt[CALLCODE].constantGas = params.WarmStorageReadCostEIP2929
-	jt[CALLCODE].dynamicGas = gasCallCodeEIP2929
+	jt[CALLCODE].gasExecute = makeCallWithGas(memoryCall, gasCallCodeEIP2929, opCallCode)
 
 	jt[STATICCALL].constantGas = params.WarmStorageReadCostEIP2929
-	jt[STATICCALL].dynamicGas = gasStaticCallEIP2929
+	jt[STATICCALL].gasExecute = makeCallWithGas(memoryStaticCall, gasStaticCallEIP2929, opStaticCall)
 
 	jt[DELEGATECALL].constantGas = params.WarmStorageReadCostEIP2929
-	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP2929
+	jt[DELEGATECALL].gasExecute = makeCallWithGas(memoryDelegateCall, gasDelegateCallEIP2929, opDelegateCall)
 
 	// This was previously part of the dynamic cost, but we're using it as a constantGas
 	// factor here
 	jt[SELFDESTRUCT].constantGas = params.SelfdestructGasEIP150
-	jt[SELFDESTRUCT].dynamicGas = gasSelfdestructEIP2929
+	jt[SELFDESTRUCT].gasExecute = makeSelfdestructEIP2929(true)
 }
 
 func enable3529(jt *JumpTable) {
-	jt[SSTORE].dynamicGas = gasSStoreEIP3529
-	jt[SELFDESTRUCT].dynamicGas = gasSelfdestructEIP3529
+	jt[SSTORE].gasExecute = makeSstoreEIP2929(params.SstoreClearsScheduleRefundEIP3529)
+	jt[SELFDESTRUCT].gasExecute = makeSelfdestructEIP2929(false)
 }
 
 // enable3198 applies EIP-3198 (BASEFEE Opcode)
@@ -252,8 +252,8 @@ func opPush0(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // EIP-3860: Limit and meter initcode
 // https://eips.ethereum.org/EIPS/eip-3860
 func enable3860(jt *JumpTable) {
-	jt[CREATE].dynamicGas = gasCreateEip3860
-	jt[CREATE2].dynamicGas = gasCreate2Eip3860
+	jt[CREATE].gasExecute = makeCreateWithGas(memoryCreate, gasCreateEip3860, opCreate)
+	jt[CREATE2].gasExecute = makeCreateWithGas(memoryCreate2, gasCreate2Eip3860, opCreate2)
 }
 
 // enable4844 applies mini-danksharding (BLOBHASH opcode)
@@ -290,12 +290,11 @@ func opCLZ(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // https://eips.ethereum.org/EIPS/eip-5656
 func enable5656(jt *JumpTable) {
 	jt[MCOPY] = operation{
-		execute:     opMcopy,
 		constantGas: GasFastestStep,
-		dynamicGas:  gasMcopy,
+		gasExecute:  opMcopyWithGas,
 		numPop:      3,
 		numPush:     0,
-		memorySize:  memoryMcopy,
+		usesMemory:  true,
 	}
 }
 
@@ -332,10 +331,10 @@ func enable7516(jt *JumpTable) {
 }
 
 func enable7702(jt *JumpTable) {
-	jt[CALL].dynamicGas = gasCallEIP7702
-	jt[CALLCODE].dynamicGas = gasCallCodeEIP7702
-	jt[STATICCALL].dynamicGas = gasStaticCallEIP7702
-	jt[DELEGATECALL].dynamicGas = gasDelegateCallEIP7702
+	jt[CALL].gasExecute = makeCallWithGas(memoryCall, gasCallEIP7702, opCall)
+	jt[CALLCODE].gasExecute = makeCallWithGas(memoryCall, gasCallCodeEIP7702, opCallCode)
+	jt[STATICCALL].gasExecute = makeCallWithGas(memoryStaticCall, gasStaticCallEIP7702, opStaticCall)
+	jt[DELEGATECALL].gasExecute = makeCallWithGas(memoryDelegateCall, gasDelegateCallEIP7702, opDelegateCall)
 }
 
 func enable7939(jt *JumpTable) {

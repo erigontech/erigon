@@ -33,7 +33,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -394,11 +393,12 @@ func TestCreate2InitCodeAllocations(t *testing.T) {
 			scope.Stack.push(*uint256.NewInt(64))
 			scope.Stack.push(uint256.Int{})
 			scope.Stack.push(uint256.Int{})
-			if _, err := gasCreate2Eip3860(evm, scope, scope.Gas(), 64); err != nil {
+			_, prepared, err := gasCreate2Eip3860(evm, scope, scope.Gas(), 64)
+			if err != nil {
 				t.Fatal(err)
 			}
 			scope.Memory.Resize(64)
-			if _, _, err := opCreate2(0, evm, scope); err != nil {
+			if _, _, err := opCreate2(0, evm, scope, &prepared); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -681,33 +681,18 @@ func TestOpMCopy(t *testing.T) {
 		callContext.Stack.push(*len)
 		callContext.Stack.push(*src)
 		callContext.Stack.push(*dst)
-		wantErr := (tc.wantGas == 0)
-		// Calc mem expansion
-		var memorySize uint64
-		if memSize, overflow := memoryMcopy(callContext); overflow {
-			if wantErr {
-				continue
+		callContext.gas = 1_000_000
+		_, _, err := opMcopyWithGas(pc, evm, callContext, nil)
+		if tc.wantGas == 0 {
+			if err == nil {
+				t.Errorf("case %d: want an error", i)
 			}
-			t.Errorf("overflow")
-		} else {
-			var overflow bool
-			if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-				t.Error(ErrGasUintOverflow)
-			}
+			continue
 		}
-		// and the dynamic cost
-		var haveGas uint64
-		if dynamicCost, err := gasMcopy(evm, callContext, mdgas.MdGas{}, memorySize); err != nil {
+		if err != nil {
 			t.Error(err)
-		} else {
-			haveGas = GasFastestStep + dynamicCost.Execution
 		}
-		// Expand mem
-		if memorySize > 0 {
-			callContext.Memory.Resize(memorySize)
-		}
-		// Do the copy
-		opMcopy(pc, evm, callContext)
+		haveGas := GasFastestStep + 1_000_000 - callContext.gas
 		want := common.FromHex(strings.ReplaceAll(tc.want, " ", ""))
 		if have := callContext.Memory.store; !bytes.Equal(want, have) {
 			t.Errorf("case %d: \nwant: %#x\nhave: %#x\n", i, want, have)

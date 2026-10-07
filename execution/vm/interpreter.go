@@ -31,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
@@ -84,7 +83,6 @@ type CallContext struct {
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
 	Contract Contract
-	create   createGasPreparation
 	slots    frameSlots
 	trace    opTrace
 	Stack    Stack
@@ -212,7 +210,6 @@ func (evm *EVM) putCallContext(ctx *CallContext) {
 	ctx.cacheGen = 0
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
-	ctx.create = createGasPreparation{}
 	ctx.slots.ok = [2]bool{}                 // the next frame may have another storage address
 	ctx.slots.key = [2]accounts.StorageKey{} // like cachedKey below: release the canonMap pins
 	// Use sentinel values so that a peek call before the first cacheGen++ is
@@ -378,11 +375,11 @@ func (ctx *CallContext) forwardStateGas(tracer *tracing.Hooks) {
 	tracer.EmitGasChange(old, ctx.Gas(), tracing.GasChangeCallGasForwarded)
 }
 
-// callGas builds the MdGas to pass to a child CALL frame from the
-// pre-computed callGasTemp (63/64 rule) and the current state reservoir.
-func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
+// callGas builds the MdGas to pass to a child CALL frame from the forwarded
+// gas (63/64 rule) and the current state reservoir.
+func (ctx *CallContext) callGas(forwarded uint64) mdgas.MdGas {
 	return mdgas.MdGas{
-		Execution: evm.CallGasTemp(),
+		Execution: forwarded,
 		State:     ctx.stateGas,
 	}
 }
@@ -456,7 +453,9 @@ func stackBoundsErr(sLen int, operation *operation) error {
 type opTrace struct {
 	debug, trace bool
 	logged       bool // the opcode hook has reported the op
+	op           OpCode
 	pc           uint64
+	forwarded    uint64 // the gas a call op forwards
 	oldGas       mdgas.MdGas
 	cost         mdgas.MdGasCost
 	callGas      mdgas.MdGasCost
@@ -466,7 +465,7 @@ type opTrace struct {
 func (evm *EVM) traceCost(op OpCode, t *opTrace, dynamic mdgas.MdGasCost) {
 	t.cost = t.cost.Plus(dynamic)
 	t.callGas = t.cost
-	t.callGas.Execution -= evm.CallGasTemp()
+	t.callGas.Execution -= t.forwarded
 	if dbg.TraceDynamicGas && dynamic != (mdgas.MdGasCost{}) {
 		gasCost := traceGas(op, t.callGas, t.cost)
 		fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
@@ -553,11 +552,12 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
 		pc     = uint64(0) // program counter
-		t      = &callContext.trace
+		t      *opTrace
 		res    []byte // result of the opcode execution function
 		tracer = evm.config.Tracer
 	)
 	if anyTrace {
+		t = &callContext.trace
 		*t = opTrace{debug: debug, trace: trace}
 	}
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
@@ -644,7 +644,7 @@ run:
 		operation := &jt[op]
 		cost := operation.constantGas
 		if anyTrace {
-			t.cost = mdgas.MdGasCost{Execution: cost}
+			t.op, t.cost, t.forwarded = op, mdgas.MdGasCost{Execution: cost}, 0
 		}
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
@@ -657,8 +657,7 @@ run:
 		} else {
 			callContext.gas -= cost
 		}
-		// run calls the gasExecute ops before its generic path: one that gets here failed a check above.
-		if anyTrace && operation.gasExecute != nil {
+		if operation.gasExecute != nil {
 			pc, res, err = operation.gasExecute(pc, evm, callContext, t)
 			gasLeft = callContext.gas
 			if err != nil {
@@ -668,60 +667,8 @@ run:
 			continue run
 		}
 
-		// All ops with a dynamic memory usage also has a dynamic gas cost.
-		var memorySize uint64
-		if operation.dynamicGas != nil {
-			// calculate the new memory size and expand the memory to fit
-			// the operation
-			// Memory check needs to be done prior to evaluating the dynamic gas portion,
-			// to detect calculation overflows
-			if operation.memorySize != nil {
-				memSize, overflow := operation.memorySize(callContext)
-				if overflow {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
-				}
-				// memory is expanded in words of 32 bytes. Gas
-				// is also calculated in words.
-				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
-				}
-			}
-			// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
-			evm.callGasTemp = 0
-			// Consume the gas and return an error if not enough gas is available.
-			// cost is explicitly set so that the capture state defer method can get the proper cost
-			var dynamicCost mdgas.MdGasCost
-			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
-			if err != nil {
-				if !errors.Is(err, ErrOutOfGas) {
-					err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
-				}
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
-			}
-			if anyTrace {
-				evm.traceCost(op, t, dynamicCost)
-			}
-			if callContext.gas < dynamicCost.Execution {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-			}
-			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			} else if dynamicCost.State < 0 {
-				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
-			}
-		}
-
-		// Do gas tracing before memory expansion
 		if anyTrace && debug {
 			evm.traceOp(callContext, op, t)
-		}
-
-		if memorySize > 0 {
-			callContext.Memory.Resize(memorySize)
 		}
 
 		// TODO - move this to a trace & set in the worker

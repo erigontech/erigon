@@ -947,14 +947,14 @@ func opSwap16(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	return pc, nil, nil
 }
 
-func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+func opCreate(pc uint64, evm *EVM, scope *CallContext, prepared *createGasPreparation) (uint64, []byte, error) {
 	var (
 		v, o, sz     = scope.Stack.pop3()
 		value        = *v
 		offset, size = o.Uint64(), sz.Uint64()
 		input        = scope.Memory.GetPtr(offset, size)
 	)
-	return execCreate(pc, evm, scope, value, input, nil)
+	return execCreate(pc, evm, scope, prepared, value, input, nil)
 }
 
 func stCreate(_ uint64, scope *CallContext) string {
@@ -969,23 +969,22 @@ func stCreate(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %d %x %d", CREATE.String(), &value, input, &scope.gas)
 }
 
-func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+func opCreate2(pc uint64, evm *EVM, scope *CallContext, prepared *createGasPreparation) (uint64, []byte, error) {
 	var (
 		v, o, sz     = scope.Stack.pop3()
 		endowment    = *v
 		offset, size = o.Uint64(), sz.Uint64()
 		salt         = scope.Stack.popCopy()
-		input        = scope.create.initCode
+		input        = prepared.initCode
 	)
-	scope.create.initCode = nil
 	if !evm.chainRules.IsAmsterdam {
 		input = scope.Memory.GetPtr(offset, size)
 	}
-	return execCreate(pc, evm, scope, endowment, input, &salt)
+	return execCreate(pc, evm, scope, prepared, endowment, input, &salt)
 }
 
 // execCreate is the shared implementation for opCreate (salt == nil) and opCreate2 (salt != nil).
-func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
+func execCreate(pc uint64, evm *EVM, scope *CallContext, prepared *createGasPreparation, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
 	codeAndHash := &codeAndHash{code: input}
 	typ := CREATE
 	if salt != nil {
@@ -996,10 +995,10 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var suberr error
 	switch {
 	case evm.chainRules.IsAmsterdam:
-		address = scope.create.address
-		codeAndHash.hash = scope.create.codeHash
-		preparation = scope.create.preparation
-		suberr = scope.create.err
+		address = prepared.address
+		codeAndHash.hash = prepared.codeHash
+		preparation = prepared.preparation
+		suberr = prepared.err
 		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
 			return pc, nil, suberr
 		}
@@ -1097,11 +1096,11 @@ func stCreate2(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.gas)
 }
 
-func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+func opCall(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error) {
 	stack := &scope.Stack
-	// Pop gas. The actual gas in evm.callGasTemp.
+	// Pop gas: the gas func turned it into forwarded.
 	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
+	gas := scope.callGas(forwarded)
 	// Pop other call parameters.
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
@@ -1158,11 +1157,11 @@ func stCall(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %x %x", CALL.String(), toAddr, args)
 }
 
-func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	// Pop gas. The actual gas is in evm.callGasTemp.
+func opCallCode(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error) {
+	// Pop gas: the gas func turned it into forwarded.
 	stack := &scope.Stack
 	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
+	gas := scope.callGas(forwarded)
 	// Pop other call parameters.
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
@@ -1197,11 +1196,11 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	return pc, ret, nil
 }
 
-func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+func opDelegateCall(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error) {
 	stack := &scope.Stack
-	// Pop gas. The actual gas is in evm.callGasTemp.
+	// Pop gas: the gas func turned it into forwarded.
 	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
+	gas := scope.callGas(forwarded)
 	// Pop other call parameters.
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()
@@ -1242,11 +1241,11 @@ func stDelegateCall(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %x %x", DELEGATECALL.String(), toAddr, args)
 }
 
-func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	// Pop gas. The actual gas is in evm.callGasTemp.
+func opStaticCall(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error) {
+	// Pop gas: the gas func turned it into forwarded.
 	stack := &scope.Stack
 	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
+	gas := scope.callGas(forwarded)
 	// Pop other call parameters.
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()
@@ -1495,31 +1494,29 @@ func opExchange(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 // following functions are used by the instruction jump  table
 
 // make log instruction function
-func makeLog(size int) executionFunc {
-	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-		if evm.readOnly {
-			return pc, nil, ErrWriteProtection
+func opLog(pc uint64, evm *EVM, scope *CallContext, size int) (uint64, []byte, error) {
+	if evm.readOnly {
+		return pc, nil, ErrWriteProtection
+	}
+	stack, ibs := &scope.Stack, evm.IntraBlockState()
+	mStart, mSize := stack.pop2Uint64()
+	if evm.config.NoReceipts && (evm.config.Tracer == nil || evm.config.Tracer.OnLog == nil) {
+		for range size {
+			stack.pop()
 		}
-		stack, ibs := &scope.Stack, evm.IntraBlockState()
-		mStart, mSize := stack.pop2Uint64()
-		if evm.config.NoReceipts && (evm.config.Tracer == nil || evm.config.Tracer.OnLog == nil) {
-			for range size {
-				stack.pop()
-			}
-			return pc, nil, nil
-		}
-		mem := scope.Memory.GetPtr(mStart, mSize)
-		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
-		// This is a non-consensus field, but assigned here because
-		// execution/state doesn't know the current block number.
-		log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
-		for i := range size {
-			log.Topics[i] = stack.pop().Bytes32()
-		}
-		copy(log.Data, mem)
-		ibs.NotifyLog(log)
 		return pc, nil, nil
 	}
+	mem := scope.Memory.GetPtr(mStart, mSize)
+	log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
+	// This is a non-consensus field, but assigned here because
+	// execution/state doesn't know the current block number.
+	log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
+	for i := range size {
+		log.Topics[i] = stack.pop().Bytes32()
+	}
+	copy(log.Data, mem)
+	ibs.NotifyLog(log)
+	return pc, nil, nil
 }
 
 // opPush1 is a specialized version of pushN
