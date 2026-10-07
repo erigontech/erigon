@@ -25,6 +25,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -175,6 +176,27 @@ func TestCallDoesNotCreateOrigin(t *testing.T) {
 	exists, err := statedb.Exist(origin)
 	require.NoError(t, err)
 	require.False(t, exists)
+}
+
+// returnCalldata32 returns the first 32 bytes of its calldata.
+var returnCalldata32 = []byte{
+	byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.CALLDATACOPY),
+	byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN),
+}
+
+func TestCallReusesOutputBufferAcrossTransactions(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+
+	first, _, err := Call(address, nil, cfg)
+	require.NoError(t, err)
+	second, _, err := Call(address, nil, cfg)
+	require.NoError(t, err)
+	require.Same(t, unsafe.SliceData(first), unsafe.SliceData(second))
 }
 
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {

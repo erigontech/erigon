@@ -1285,15 +1285,21 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %x %x", STATICCALL.String(), toAddr, args)
 }
 
+func (evm *EVM) output(mem *Memory, offset, size uint64) []byte {
+	if evm.depth == 1 && size != 0 {
+		return evm.intraBlockState.CopyTxOutput(mem.GetPtr(offset, size))
+	}
+	return mem.GetCopy(offset, size)
+}
+
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop2Uint64()
-	ret := scope.Memory.GetCopy(offset, size)
-	return pc, ret, errStopToken
+	return pc, evm.output(&scope.Memory, offset, size), errStopToken
 }
 
 func opRevert(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop2Uint64()
-	ret := scope.Memory.GetCopy(offset, size)
+	ret := evm.output(&scope.Memory, offset, size)
 	evm.returnData = ret
 	return pc, ret, ErrExecutionReverted
 }

@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -158,6 +159,7 @@ type IntraBlockState struct {
 	txIndex  int
 	blockNum uint64
 	logs     logArena
+	txOutput []byte
 
 	// Per-transaction access list
 	accessList accessList
@@ -424,6 +426,12 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	if journal != nil {
 		journal.release()
 	}
+}
+
+// CopyTxOutput copies the transaction's output into a buffer the next transaction reuses.
+func (ibs *IntraBlockState) CopyTxOutput(b []byte) []byte {
+	ibs.txOutput = append(ibs.txOutput[:0], b...)
+	return slices.Clip(ibs.txOutput)
 }
 
 // AllocLog reserves the next log slot of the current tx and returns it sized for
