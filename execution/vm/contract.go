@@ -74,7 +74,11 @@ func newJumpDestCache() *cache.GenericCache[bitvec] {
 	return cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) * 8 }, cache.ModeEvictLRU)
 }
 
-var programCache = cache.NewGenericCache[*program](64*datasize.MB, (*program).size, cache.ModeEvictLRU)
+// avgProgramBytes sets how many programs programCache's budget holds: the cache
+// bounds its entry count, not its bytes, and a program takes about 7 bytes per code byte.
+const avgProgramBytes = 48 * 1024
+
+var programCache = cache.NewGenericCacheWithAvg[*program](64*datasize.MB, avgProgramBytes, (*program).size, cache.ModeEvictLRU)
 
 // programSlots is a direct-mapped table in front of programCache: a hit is a load
 // and a compare, without programCache's hashing, locking and counters. It keeps up
