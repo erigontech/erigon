@@ -422,16 +422,6 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	return gas, prepared
 }
 
-func gasExpFrontier(callContext *CallContext) mdgas.MdGasCost {
-	expByteLen := uint64(callContext.Stack.back(1).ByteLen())
-	return mdgas.MdGasCost{Execution: params.ExpGas + expByteLen*params.ExpByteFrontier} // at most 32 bytes, so no overflow
-}
-
-func gasExpEIP160(callContext *CallContext) mdgas.MdGasCost {
-	expByteLen := uint64(callContext.Stack.back(1).ByteLen())
-	return mdgas.MdGasCost{Execution: params.ExpGas + expByteLen*params.ExpByteEIP160} // at most 32 bytes, so no overflow
-}
-
 func gasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, uint64, error) {
 	gas, transfersValue, err := statelessGasCall(evm, callContext, availableGas, memorySize)
 	if err != nil {
