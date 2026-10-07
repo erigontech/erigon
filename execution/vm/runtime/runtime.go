@@ -260,10 +260,6 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 
 	vmenv := NewEnv(cfg)
 
-	sender, err := cfg.State.GetOrNewStateObject(cfg.Origin)
-	if err != nil {
-		return nil, mdgas.MdGas{}, err
-	}
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
@@ -277,7 +273,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	var ret []byte
 	if err == nil {
 		ret, leftOverGas, _, err = vmenv.Call(
-			sender.Address(),
+			cfg.Origin,
 			address,
 			input,
 			leftOverGas,
@@ -286,7 +282,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 		)
 		protocol.RefillTopLevelGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err, cfg.EVMConfig.Tracer)
 	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
-		protocol.HandleRuntimeFailure(vmenv, vm.CALL, sender.Address(), address, input, gas, &leftOverGas, cfg.Value, err)
+		protocol.HandleRuntimeFailure(vmenv, vm.CALL, cfg.Origin, address, input, gas, &leftOverGas, cfg.Value, err)
 	}
 
 	if cfg.EVMConfig.Tracer.HasTxEndHook() {

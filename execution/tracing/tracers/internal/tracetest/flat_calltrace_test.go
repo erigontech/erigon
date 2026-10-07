@@ -28,15 +28,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/misc"
-	"github.com/erigontech/erigon/execution/tests/testutil"
-	"github.com/erigontech/erigon/execution/tracing/tracers"
-	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
-	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 type flatCallTrace struct {
@@ -79,57 +70,25 @@ func TestFlatCallTracerGethFixtures(t *testing.T) {
 			continue
 		}
 		t.Run(camel(strings.TrimSuffix(file.Name(), ".json")), func(t *testing.T) {
+			t.Parallel()
 			blob, err := os.ReadFile(filepath.Join("testdata", "call_tracer_flat", file.Name()))
 			require.NoError(t, err)
 			test := new(testcase)
 			require.NoError(t, json.Unmarshal(blob, test))
-			tx, err := types.UnmarshalTransactionFromBinary(common.FromHex(test.Input), false)
-			require.NoError(t, err)
-			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-			context := evmtypes.BlockContext{
-				CanTransfer: protocol.CanTransfer,
-				Transfer:    misc.Transfer,
-				Coinbase:    accounts.InternAddress(test.Context.Miner),
-				BlockNumber: uint64(test.Context.Number),
-				Time:        uint64(test.Context.Time),
-				GasLimit:    uint64(test.Context.GasLimit),
-			}
-			if test.Context.Difficulty != nil {
-				context.Difficulty = *test.Context.Difficulty
-			}
-			if test.Context.BaseFee != nil {
-				context.BaseFee = *test.Context.BaseFee
-			}
-			rules := context.Rules(test.Genesis.Config)
-			m := execmoduletester.New(t)
-			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
-			require.NoError(t, err)
-			defer dbTx.Rollback()
-			statedb, err := testutil.MakePreState(rules, m.DB, dbTx, test.Genesis.Alloc, context.BlockNumber)
-			require.NoError(t, err)
 			cfg := test.TracerConfig
 			if cfg == nil {
 				cfg = json.RawMessage("{}")
 			}
-			tracer, err := tracers.New("flatCallTracer", new(tracers.Context), cfg)
-			require.NoError(t, err)
-			statedb.SetHooks(tracer.Hooks)
-			msg, err := tx.AsMessage(*signer, test.Context.BaseFee, rules)
-			require.NoError(t, err)
-			evm := vm.NewEVM(context, protocol.NewEVMTxContext(msg), statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
-			tracer.OnTxStart(evm.GetVMContext(), tx, msg.From())
-			st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
-			vmRet, err := st.Execute(true, false)
-			require.NoError(t, err)
-			tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, nil)
-			res, err := tracer.GetResult()
-			require.NoError(t, err)
+			_, res, _ := traceFixtureTx(t, "flatCallTracer", test.Genesis, test.Context, test.Input, cfg)
 			var have, want []flatCallTrace
 			require.NoError(t, json.Unmarshal(res, &have))
-			wantBlob, _ := json.Marshal(test.Result)
+			wantBlob, err := json.Marshal(test.Result)
+			require.NoError(t, err)
 			require.NoError(t, json.Unmarshal(wantBlob, &want))
-			h, _ := json.MarshalIndent(have, "", " ")
-			w, _ := json.MarshalIndent(want, "", " ")
+			h, err := json.MarshalIndent(have, "", " ")
+			require.NoError(t, err)
+			w, err := json.MarshalIndent(want, "", " ")
+			require.NoError(t, err)
 			if !bytes.Equal(h, w) {
 				t.Fatalf("trace mismatch\nhave %s\nwant %s", h, w)
 			}
