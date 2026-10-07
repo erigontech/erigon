@@ -116,6 +116,23 @@ func (h *wsConnectionLimiter) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	h.next.ServeHTTP(w, r)
 }
 
+// NewWSOriginHandler refuses WebSocket handshakes from browser origins that the HTTP CORS
+// configuration would not accept. Requests without an Origin header are not from a browser and
+// pass through. With no allowed origins, next is returned unwrapped.
+func NewWSOriginHandler(allowedOrigins []string, next http.Handler) http.Handler {
+	if len(allowedOrigins) == 0 {
+		return next
+	}
+	c := cors.New(cors.Options{AllowedOrigins: allowedOrigins})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Origin") != "" && !c.OriginAllowed(r) {
+			http.Error(w, "origin not allowed", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func newCorsHandler(srv http.Handler, allowedOrigins []string) http.Handler {
 	// disable CORS support if user has not specified a custom CORS configuration
 	if len(allowedOrigins) == 0 {

@@ -66,7 +66,9 @@ func TestRegularRpcServerWebsocketOrigin(t *testing.T) {
 		req.Header.Set("Upgrade", "websocket")
 		req.Header.Set("Sec-WebSocket-Version", "13")
 		req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
-		req.Header.Set("Origin", origin)
+		if origin != "" {
+			req.Header.Set("Origin", origin)
+		}
 		resp, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		resp.Body.Close()
@@ -77,6 +79,8 @@ func TestRegularRpcServerWebsocketOrigin(t *testing.T) {
 	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, nil, "http://localhost:3000"))
 	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"https://dapp.example"}, "https://dapp.example"))
 	require.Equal(t, http.StatusForbidden, handshake(t, []string{"https://dapp.example"}, "https://evil.example"))
+	require.Equal(t, http.StatusForbidden, handshake(t, []string{"https://dapp.example"}, "https://dapp.example:8443"))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"https://dapp.example"}, ""))
 	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"*"}, "https://evil.example"))
 }
 
