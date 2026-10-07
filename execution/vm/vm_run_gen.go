@@ -226,11 +226,7 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
 					x, y := callContext.Stack.pop1Peek1()
-					if x.Lt(y) {
-						y.SetOne()
-					} else {
-						y.Clear()
-					}
+					y.SetUint64(b2u(x.Lt(y)))
 					pc++
 					continue run
 				}
@@ -238,11 +234,7 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
 					x, y := callContext.Stack.pop1Peek1()
-					if x.Gt(y) {
-						y.SetOne()
-					} else {
-						y.Clear()
-					}
+					y.SetUint64(b2u(x.Gt(y)))
 					pc++
 					continue run
 				}
@@ -250,11 +242,7 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
 					x, y := callContext.Stack.pop1Peek1()
-					if x.Eq(y) {
-						y.SetOne()
-					} else {
-						y.Clear()
-					}
+					y.SetUint64(b2u(x.Eq(y)))
 					pc++
 					continue run
 				}
@@ -270,11 +258,7 @@ run:
 				if sLen >= 1 && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
 					x := callContext.Stack.peek()
-					if x.IsZero() {
-						x.SetOne()
-					} else {
-						x.Clear()
-					}
+					x.SetUint64(b2u(x.IsZero()))
 					pc++
 					continue run
 				}

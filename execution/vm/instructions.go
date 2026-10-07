@@ -162,11 +162,7 @@ func stNot(_ uint64, scope *CallContext) string {
 
 func opLt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
-	if x.Lt(y) {
-		y.SetOne()
-	} else {
-		y.Clear()
-	}
+	y.SetUint64(b2u(x.Lt(y)))
 	return pc, nil, nil
 }
 
@@ -177,11 +173,7 @@ func stLt(_ uint64, scope *CallContext) string {
 
 func opGt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
-	if x.Gt(y) {
-		y.SetOne()
-	} else {
-		y.Clear()
-	}
+	y.SetUint64(b2u(x.Gt(y)))
 	return pc, nil, nil
 }
 
@@ -192,11 +184,7 @@ func stGt(_ uint64, scope *CallContext) string {
 
 func opSlt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
-	if x.Slt(y) {
-		y.SetOne()
-	} else {
-		y.Clear()
-	}
+	y.SetUint64(b2u(x.Slt(y)))
 	return pc, nil, nil
 }
 
@@ -207,11 +195,7 @@ func stSlt(_ uint64, scope *CallContext) string {
 
 func opSgt(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
-	if x.Sgt(y) {
-		y.SetOne()
-	} else {
-		y.Clear()
-	}
+	y.SetUint64(b2u(x.Sgt(y)))
 	return pc, nil, nil
 }
 
@@ -222,11 +206,7 @@ func stSgt(_ uint64, scope *CallContext) string {
 
 func opEq(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
-	if x.Eq(y) {
-		y.SetOne()
-	} else {
-		y.Clear()
-	}
+	y.SetUint64(b2u(x.Eq(y)))
 	return pc, nil, nil
 }
 
@@ -237,11 +217,7 @@ func stEq(_ uint64, scope *CallContext) string {
 
 func opIszero(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x := scope.Stack.peek()
-	if x.IsZero() {
-		x.SetOne()
-	} else {
-		x.Clear()
-	}
+	x.SetUint64(b2u(x.IsZero()))
 	return pc, nil, nil
 }
 

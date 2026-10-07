@@ -116,3 +116,10 @@ func CheckMaxInitCodeSize(size uint64, eip3860, eip7954 bool) error {
 	}
 	return nil
 }
+
+func b2u(b bool) uint64 {
+	if b {
+		return 1
+	}
+	return 0
+}
