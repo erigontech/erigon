@@ -407,29 +407,31 @@ run:
 		callContext.cacheGen++
 		switch op {
 		case SLOAD:
-			if o := &jt[SLOAD]; o.gasExecute != nil && uint(stack.len()-o.numPop) <= uint(o.maxStack-o.numPop) && gasLeft >= o.constantGas {
-				gasLeft -= o.constantGas
-				if callContext.slots.on {
-					if i := callContext.lookupSlot(evm); i >= 0 {
-						if gasLeft < params.WarmStorageReadCostEIP2929 {
-							res, err = nil, ErrOutOfGas
-							break run
-						}
-						gasLeft -= params.WarmStorageReadCostEIP2929
-						*callContext.Stack.peek() = callContext.slots.val[i]
-						pc++
-						continue run
-					}
-				}
-				callContext.gas = gasLeft
-				pc, res, err = opSloadEIP2929Miss(pc, evm, callContext, nil)
-				gasLeft = callContext.gas
-				if err != nil {
-					break run
-				}
-				pc++
-				continue run
+			o := &jt[SLOAD]
+			if o.gasExecute == nil || uint(stack.len()-o.numPop) > uint(o.maxStack-o.numPop) || gasLeft < o.constantGas {
+				break
 			}
+			gasLeft -= o.constantGas
+			if callContext.slots.on {
+				if i := callContext.lookupSlot(evm); i >= 0 {
+					if gasLeft < params.WarmStorageReadCostEIP2929 {
+						res, err = nil, ErrOutOfGas
+						break run
+					}
+					gasLeft -= params.WarmStorageReadCostEIP2929
+					*callContext.Stack.peek() = callContext.slots.val[i]
+					pc++
+					continue run
+				}
+			}
+			callContext.gas = gasLeft
+			pc, res, err = opSloadEIP2929Miss(pc, evm, callContext, nil)
+			gasLeft = callContext.gas
+			if err != nil {
+				break run
+			}
+			pc++
+			continue run
 		}
 		if false && debug {
 			// Capture pre-execution values for tracing.
