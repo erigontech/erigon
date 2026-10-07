@@ -19,7 +19,10 @@
 
 package rpc
 
-import "bytes"
+import (
+	"bytes"
+	"encoding/binary"
+)
 
 // Helpers for finding the bounds of JSON values without parsing them, so a
 // request is not walked by encoding/json once per layer. They require input
@@ -167,4 +170,207 @@ func forEachJSONElement(data []byte, fn func(value []byte) bool) {
 			return
 		}
 	}
+}
+
+// maxJSONDepth matches the nesting limit encoding/json enforces.
+const maxJSONDepth = 10000
+
+// validJSON reports whether data holds exactly one JSON value. It accepts and
+// rejects exactly what json.Valid does, but walks string contents a word at a
+// time instead of a byte at a time, which is most of the cost of a body whose
+// bulk is one long string.
+func validJSON(data []byte) bool {
+	i, ok := scanValidJSON(data, skipJSONSpace(data, 0), 1)
+	return ok && skipJSONSpace(data, i) == len(data)
+}
+
+// scanValidJSON validates the value beginning at data[i] and returns the offset
+// just past it.
+func scanValidJSON(data []byte, i, depth int) (int, bool) {
+	if i >= len(data) {
+		return i, false
+	}
+	switch data[i] {
+	case '"':
+		return scanValidJSONString(data, i)
+	case '{':
+		return scanValidJSONComposite(data, i, depth, '}')
+	case '[':
+		return scanValidJSONComposite(data, i, depth, ']')
+	case 't':
+		return scanJSONLiteral(data, i, "true")
+	case 'f':
+		return scanJSONLiteral(data, i, "false")
+	case 'n':
+		return scanJSONLiteral(data, i, "null")
+	default:
+		return scanValidJSONNumber(data, i)
+	}
+}
+
+func scanJSONLiteral(data []byte, i int, lit string) (int, bool) {
+	if len(data)-i < len(lit) || string(data[i:i+len(lit)]) != lit {
+		return i, false
+	}
+	return i + len(lit), true
+}
+
+// Invalid UTF-8 counts as string content below: json.Valid accepts it, because
+// the v1 decoder substitutes U+FFFD rather than failing.
+const (
+	lowBits  = 0x0101010101010101
+	highBits = 0x8080808080808080
+)
+
+// wordInteresting reports whether any of the eight bytes in v needs a closer
+// look. The three masks are joined before the test so the loop branches once.
+func wordInteresting(v uint64) bool {
+	q := v ^ ('"' * lowBits)
+	b := v ^ ('\\' * lowBits)
+	return ((v-0x20*lowBits)&^v|(q-lowBits)&^q|(b-lowBits)&^b)&highBits != 0
+}
+
+// scanValidJSONString validates the string whose opening quote is at data[i] and
+// returns the offset just past its closing quote.
+func scanValidJSONString(data []byte, i int) (int, bool) {
+	i++ // opening quote
+	for i < len(data) {
+		if i+8 <= len(data) {
+			if !wordInteresting(binary.NativeEndian.Uint64(data[i:])) {
+				i += 8
+				continue
+			}
+		}
+		switch c := data[i]; {
+		case c == '"':
+			return i + 1, true
+		case c < 0x20:
+			return i, false
+		case c == '\\':
+			var ok bool
+			if i, ok = scanJSONEscape(data, i); !ok {
+				return i, false
+			}
+		default:
+			i++
+		}
+	}
+	return len(data), false
+}
+
+// scanJSONEscape validates the escape sequence starting at the backslash at
+// data[i] and returns the offset just past it.
+func scanJSONEscape(data []byte, i int) (int, bool) {
+	i++ // backslash
+	if i >= len(data) {
+		return i, false
+	}
+	switch data[i] {
+	case '"', '\\', '/', 'b', 'f', 'n', 'r', 't':
+		return i + 1, true
+	case 'u':
+		if i+5 > len(data) {
+			return i, false
+		}
+		for _, c := range data[i+1 : i+5] {
+			if !isHexDigit(c) {
+				return i, false
+			}
+		}
+		return i + 5, true
+	default:
+		return i, false
+	}
+}
+
+func isHexDigit(c byte) bool {
+	return isJSONDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+// scanValidJSONComposite validates the object or array whose opening bracket is
+// at data[i] and returns the offset just past close. Members carry a quoted key
+// and a colon, elements do not.
+func scanValidJSONComposite(data []byte, i, depth int, close byte) (int, bool) {
+	// Only a composite is a level of nesting, so only it is counted.
+	if depth > maxJSONDepth {
+		return i, false
+	}
+	i = skipJSONSpace(data, i+1)
+	if i < len(data) && data[i] == close {
+		return i + 1, true
+	}
+	for {
+		var ok bool
+		if close == '}' {
+			if i >= len(data) || data[i] != '"' {
+				return i, false
+			}
+			if i, ok = scanValidJSONString(data, i); !ok {
+				return i, false
+			}
+			i = skipJSONSpace(data, i)
+			if i >= len(data) || data[i] != ':' {
+				return i, false
+			}
+			i = skipJSONSpace(data, i+1)
+		}
+		if i, ok = scanValidJSON(data, i, depth+1); !ok {
+			return i, false
+		}
+		i = skipJSONSpace(data, i)
+		if i >= len(data) {
+			return i, false
+		}
+		switch data[i] {
+		case close:
+			return i + 1, true
+		case ',':
+			i = skipJSONSpace(data, i+1)
+		default:
+			return i, false
+		}
+	}
+}
+
+// scanValidJSONNumber validates the number grammar of RFC 8259, section 6.
+func scanValidJSONNumber(data []byte, i int) (int, bool) {
+	if i < len(data) && data[i] == '-' {
+		i++
+	}
+	switch {
+	case i >= len(data):
+		return i, false
+	case data[i] == '0':
+		i++
+	case data[i] >= '1' && data[i] <= '9':
+		i = skipJSONDigits(data, i)
+	default:
+		return i, false
+	}
+	if i < len(data) && data[i] == '.' {
+		if i+1 >= len(data) || !isJSONDigit(data[i+1]) {
+			return i, false
+		}
+		i = skipJSONDigits(data, i+1)
+	}
+	if i < len(data) && (data[i] == 'e' || data[i] == 'E') {
+		i++
+		if i < len(data) && (data[i] == '+' || data[i] == '-') {
+			i++
+		}
+		if i >= len(data) || !isJSONDigit(data[i]) {
+			return i, false
+		}
+		i = skipJSONDigits(data, i)
+	}
+	return i, true
+}
+
+func isJSONDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+func skipJSONDigits(data []byte, i int) int {
+	for i < len(data) && isJSONDigit(data[i]) {
+		i++
+	}
+	return i
 }
