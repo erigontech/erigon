@@ -617,8 +617,20 @@ func crashRecoveryExitError(err error) error {
 	return fmt.Errorf("child exited without the expected kill: %w", err)
 }
 
+func (request crashRecoveryRequest) validateMode() error {
+	if request.CatchupCycle > 0 {
+		if request.Point != execmodule.StateTransitionFCUCatchupCommitReady && request.Point != execmodule.StateTransitionFCUCatchupCommitComplete {
+			return fmt.Errorf("catch-up mode requires a catch-up commit boundary, got %d", request.Point)
+		}
+	} else if len(request.Downloaded) > 0 {
+		return errors.New("tip-mode crash requests must not include downloaded blocks")
+	}
+	return nil
+}
+
 func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	t.Helper()
+	require.NoError(t, request.validateMode())
 	require.NotEmpty(t, request.Canonical)
 	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
 	if request.CatchupCycle > 0 {

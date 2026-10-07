@@ -35,6 +35,27 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+func TestCrashRecoveryRequestMode(t *testing.T) {
+	t.Run("tip", func(t *testing.T) {
+		request := crashRecoveryRequest{Point: execmodule.StateTransitionCommitReady}
+		require.NoError(t, request.validateMode())
+		request.Downloaded = []crashRecoveryBlock{{}}
+		require.ErrorContains(t, request.validateMode(), "tip-mode crash requests must not include downloaded blocks")
+	})
+	t.Run("catchup", func(t *testing.T) {
+		request := crashRecoveryRequest{CatchupCycle: 1}
+		for _, point := range []execmodule.StateTransitionPoint{
+			execmodule.StateTransitionFCUCatchupCommitReady,
+			execmodule.StateTransitionFCUCatchupCommitComplete,
+		} {
+			request.Point = point
+			require.NoError(t, request.validateMode())
+		}
+		request.Point = execmodule.StateTransitionCommitReady
+		require.ErrorContains(t, request.validateMode(), "catch-up mode requires a catch-up commit boundary")
+	})
+}
+
 func TestCrashRecoveryBlocksRequireBAL(t *testing.T) {
 	bal := types.NewBlockAccessListSidecar(types.BlockAccessList{})
 	hash, err := bal.Hash()

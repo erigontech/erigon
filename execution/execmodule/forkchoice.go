@@ -372,8 +372,8 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 	}() // closure: CommitCycle may reassign roTx, and leaves it nil if the reopen fails
 
-	// Check if InsertBlocks already created a block overlay with data
-	// (headers, bodies, TDs, canonical hashes).
+	// InsertBlocks may have staged block data, but it does not change
+	// canonical hashes, forkchoice markers, or stage progress.
 	var hasOverlay bool
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		hasOverlay = true
@@ -499,6 +499,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 		finalisedBlockNum = *bn
 	}
+	// A valid ancestor of the stored finalized block may return VALID without
+	// updating forkchoice (Engine API, point 2):
+	// https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1
 	belowFinality := fcuHeader.Number.Uint64() < finalisedBlockNum
 	sameExecutedBlockNum := fcuHeader.Number.Uint64() == finishProgressBefore
 	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash && (belowFinality || sameExecutedBlockNum) {
