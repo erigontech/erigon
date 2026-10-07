@@ -700,11 +700,7 @@ func (f *fakeBalGetter) GetBlockAccessListBytes(_ context.Context, _ *chain.Conf
 }
 
 func TestAnswerGetBlockAccessListsQuery_CancelledRegeneration(t *testing.T) {
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRw(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
+	_, tx := temporaltest.NewTestTx(t)
 	defer tx.Rollback()
 	storedHash, prunedHash, nextHash := common.Hash{1}, common.Hash{2}, common.Hash{3}
 	storedBAL := []byte{0xc0}
@@ -740,15 +736,9 @@ func (r cancellingBALHeaderReader) HeaderNumber(context.Context, kv.Getter, comm
 }
 
 func TestAnswerGetBlockAccessListsQuery_CancelledLookup(t *testing.T) {
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRo(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	result := AnswerGetBlockAccessListsQuery(ctx, chain.AllProtocolChanges, tx,
+	result := AnswerGetBlockAccessListsQuery(ctx, chain.AllProtocolChanges, nil,
 		GetBlockAccessListsPacket{{1}}, cancellingBALHeaderReader{cancel: cancel}, nil, nil)
 	if len(result) != 0 {
 		t.Errorf("cancelled lookup must leave the block retryable, got %x", result)

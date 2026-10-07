@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -523,25 +524,13 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 
 			eg.Go(func() error {
 				var (
-					bodiesResponse FetcherResponse[[]*types.Body]
-					balsResponse   map[common.Hash]*types.BlockAccessListSidecar
-					balReqs        []BALRequest
+					balWg        sync.WaitGroup
+					balsResponse map[common.Hash]*types.BlockAccessListSidecar
+					balReqs      []BALRequest
 				)
 				balPrimary := peerId
-				batchEg, batchCtx := errgroup.WithContext(ctx)
-				balCtx, cancelBALs := context.WithCancel(batchCtx)
+				balCtx, cancelBALs := context.WithCancel(ctx)
 				defer cancelBALs()
-				var balTimer *time.Timer
-				batchEg.Go(func() error {
-					var err error
-					bodiesResponse, err = bbd.fetcher.FetchBodies(batchCtx, headerBatch, &peerId, fetcherOpts...)
-					if err == nil && bbd.balFetcher != nil {
-						// BALs are optional: partial progress must not extend the
-						// wait once bodies are ready for execution.
-						balTimer = time.AfterFunc(balFetchGracePeriod, cancelBALs)
-					}
-					return err
-				})
 				if bbd.balFetcher != nil {
 					balReqs = balRequestsForHeaders(headerBatch)
 					// Bodies stream from peerId concurrently; lead the BAL fetch
@@ -553,15 +542,19 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 						balPeers = append(balPeers[:lead], balPeers[lead+1:]...)
 						balPeers = append(balPeers, peerId)
 					}
-					batchEg.Go(func() error {
+					balWg.Go(func() {
 						balsResponse = bbd.balFetcher.Fetch(balCtx, balReqs, &balPrimary, balPeers, config.balsBatchFetchTimeout, config.balsRequestTimeout)
-						return nil
 					})
 				}
-				err := batchEg.Wait()
-				if balTimer != nil {
-					balTimer.Stop()
+				bodiesResponse, err := bbd.fetcher.FetchBodies(ctx, headerBatch, &peerId, fetcherOpts...)
+				if err != nil {
+					cancelBALs()
 				}
+				// BALs are optional: partial progress must not extend the
+				// wait once bodies are ready for execution.
+				balTimer := time.AfterFunc(balFetchGracePeriod, cancelBALs)
+				balWg.Wait()
+				balTimer.Stop()
 				if err != nil {
 					bbd.logger.Debug(
 						"[backward-block-downloader] could not fetch bodies batch",
