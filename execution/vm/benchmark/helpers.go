@@ -81,6 +81,7 @@ func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 		state.NewVersionMap(nil),
 	)
 	statedb.SetNoMaterialize(noMaterialize)
+	statedb.SetNoConflictDetection()
 	return envFor(statedb, gasLimit)
 }
 

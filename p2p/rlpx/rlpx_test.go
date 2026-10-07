@@ -32,6 +32,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/ecies"
@@ -52,18 +53,25 @@ func TestHandshake(t *testing.T) {
 
 // This test checks that messages can be sent and received through WriteMsg/ReadMsg.
 func TestReadWriteMsg(t *testing.T) {
-	peer1, peer2 := createPeers(t)
-	defer peer1.Close()
-	defer peer2.Close()
+	for _, size := range []int{4, 4096, 1 << 20, maxUint24 - 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			peer1, peer2 := createPeers(t)
+			defer peer1.Close()
+			defer peer2.Close()
 
-	testCode := uint64(23)
-	testData := []byte("test")
-	checkMsgReadWrite(t, peer1, peer2, testCode, testData)
+			testCode := uint64(23)
+			testData := make([]byte, size)
+			for i := range testData {
+				testData[i] = byte(i)
+			}
+			checkMsgReadWrite(t, peer1, peer2, testCode, testData)
 
-	t.Log("enabling snappy")
-	peer1.SetSnappy(true)
-	peer2.SetSnappy(true)
-	checkMsgReadWrite(t, peer1, peer2, testCode, testData)
+			t.Log("enabling snappy")
+			peer1.SetSnappy(true)
+			peer2.SetSnappy(true)
+			checkMsgReadWrite(t, peer1, peer2, testCode, testData)
+		})
+	}
 }
 
 func checkMsgReadWrite(t *testing.T, p1, p2 *Conn, msgCode uint64, msgData []byte) {
@@ -83,6 +91,7 @@ func checkMsgReadWrite(t *testing.T, p1, p2 *Conn, msgCode uint64, msgData []byt
 
 	// Check it was received correctly.
 	msg := <-ch
+	assert.NoError(t, msg.err)
 	assert.Equal(t, msgCode, msg.code, "wrong message code returned from ReadMsg")
 	assert.Equal(t, msgData, msg.data, "wrong message data returned from ReadMsg")
 }
@@ -158,6 +167,41 @@ func TestFrameReadWrite(t *testing.T) {
 	if !bytes.Equal(content, wantContent) {
 		t.Errorf("frame content mismatch:\ngot  %x\nwant %x", content, wantContent)
 	}
+}
+
+func TestFrameReadHeaderOnly(t *testing.T) {
+	sender, receiver := createPeers(t)
+	defer sender.Close()
+	defer receiver.Close()
+
+	header := make([]byte, 32)
+	putUint24(uint32(maxUint24), header)
+	copy(header[3:], zeroHeader)
+	sender.session.enc.XORKeyStream(header[:16], header[:16])
+	copy(header[16:], sender.session.egressMAC.computeHeader(header[:16]))
+
+	input := bytes.NewReader(header)
+	_, err := receiver.session.readFrame(readerFunc(func(p []byte) (int, error) {
+		require.LessOrEqual(t, cap(receiver.session.rbuf.data), 64*1024)
+		return input.Read(p)
+	}))
+	assert.ErrorIs(t, err, io.EOF)
+}
+
+func TestFrameReadUsesCurrentBuffer(t *testing.T) {
+	sender, receiver := createPeers(t)
+	defer sender.Close()
+	defer receiver.Close()
+
+	data := bytes.Repeat([]byte{1, 2, 3, 4}, 32)
+	var wire bytes.Buffer
+	require.NoError(t, sender.session.writeFrame(&wire, 1, data))
+	receiver.session.rbuf = readBuffer{data: make([]byte, 0, wire.Len()-16)}
+
+	frame, err := receiver.session.readFrame(&wire)
+	require.NoError(t, err)
+	require.Equal(t, append([]byte{1}, data...), frame)
+	require.Same(t, &receiver.session.rbuf.data[32], &frame[0])
 }
 
 type fakeHash []byte
