@@ -315,7 +315,7 @@ func (g *GossipManager) newPubsubValidator(service serviceintf.Service[any], con
 			g.stats.addReject(name)
 			if banner := g.peerBanner; banner != nil {
 				select {
-				case g.peerBanQueue <- peerBan{banner: banner, pid: string(pid)}:
+				case g.peerBanQueue <- peerBan{banner: banner, pid: pid.String()}:
 				default:
 					log.Debug("[GossipManager] peer ban queue full, dropping ban", "peer", pid)
 				}

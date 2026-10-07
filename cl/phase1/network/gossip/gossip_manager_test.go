@@ -84,6 +84,12 @@ func (b *panicOncePeerBanner) BanPeer(pid string) {
 	b.secondCalled <- pid
 }
 
+type recordingPeerBanner chan string
+
+func (b recordingPeerBanner) BanPeer(pid string) {
+	b <- pid
+}
+
 func (m *topicForkDigestMessage) SetTopicForkDigest(digest common.Bytes4) {
 	m.digest = digest
 }
@@ -323,6 +329,33 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_ProcessMessageError
 	s.Equal(pubsub.ValidationReject, result)
 }
 
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorBansEncodedPeerID() {
+	pid, err := peer.Decode("16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA")
+	s.Require().NoError(err)
+	banned := make(recordingPeerBanner, 1)
+	s.gm.SetPeerBanner(banned)
+	service := &mockService{
+		processFunc: func(context.Context, *uint64, any) error {
+			return errors.New("invalid signature")
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/abcd1234/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+
+	s.Equal(pubsub.ValidationReject, validator(context.Background(), pid, msg))
+	select {
+	case got := <-banned:
+		decoded, err := peer.Decode(got)
+		s.Require().NoError(err)
+		s.Equal(pid, decoded)
+	case <-time.After(time.Second):
+		s.T().Fatal("peer ban did not run")
+	}
+}
+
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorRejectsWhilePeerBanBlocks() {
 	banStarted := make(chan struct{})
 	releaseBan := make(chan struct{})
@@ -386,7 +419,7 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorContinuesAfterPeerBa
 	s.Equal(pubsub.ValidationReject, validator(context.Background(), peer.ID("second-peer"), msg))
 	select {
 	case pid := <-banner.secondCalled:
-		s.Equal("second-peer", pid)
+		s.Equal(peer.ID("second-peer").String(), pid)
 	case <-time.After(time.Second):
 		s.T().Fatal("peer ban worker did not continue after panic")
 	}
