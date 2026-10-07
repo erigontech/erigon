@@ -110,7 +110,7 @@ const storageKeyCacheSize = 1024
 // storageKeyCacheMinOps delays the table until interning has cost more than
 // zeroing 40KB: a hit saves ~16ns, so an EVM resolving fewer keys than this
 // cannot win the allocation back however well the keys repeat.
-const storageKeyCacheMinOps = 128
+const storageKeyCacheMinOps = 1 << 30 // probe: never allocate the table
 
 // slotIndex masks rather than divides, so the size has to be a power of two.
 var _ [0]struct{} = [storageKeyCacheSize & (storageKeyCacheSize - 1)]struct{}{}
