@@ -29,8 +29,11 @@ import (
 type (
 	executionFunc    func(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error)
 	gasFunc          func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error)
-	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGasCost, bool, error)
-	statefulGasFunc  func(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error)
+	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, bool, error)
+	// callGasFunc is a call op's gas func, which also returns the gas the call forwards.
+	callGasFunc     func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (cost mdgas.MdGasCost, forwarded uint64, err error)
+	callFunc        func(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error)
+	statefulGasFunc func(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error)
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
 	memorySizeFunc func(*CallContext) (size uint64, overflow bool)
 	stringer       func(pc uint64, callContext *CallContext) string
@@ -91,7 +94,7 @@ func (op *operation) UsesMemory() bool { return op.usesMemory }
 func validateAndFillMaxStack(jt *JumpTable) {
 	for i := range jt {
 		op := &jt[i]
-		if op.execute == nil {
+		if op.execute == nil && op.gasExecute == nil {
 			panic(fmt.Sprintf("op 0x%x is not set", i))
 		}
 		op.maxStack = maxStack(op.numPop, op.numPush)
@@ -227,9 +230,8 @@ func newConstantinopleInstructionSet() JumpTable {
 func newByzantiumInstructionSet() JumpTable {
 	instructionSet := newSpuriousDragonInstructionSet()
 	instructionSet[STATICCALL] = operation{
-		execute:     opStaticCall,
 		constantGas: params.CallGasEIP150,
-		gasExecute:  makeWithGas(memoryStaticCall, gasStaticCall, opStaticCall),
+		gasExecute:  makeCallWithGas(memoryStaticCall, gasStaticCall, opStaticCall),
 		numPop:      6,
 		numPush:     1,
 		usesMemory:  true,
@@ -288,8 +290,7 @@ func newTangerineWhistleInstructionSet() JumpTable {
 func newHomesteadInstructionSet() JumpTable {
 	instructionSet := newFrontierInstructionSet()
 	instructionSet[DELEGATECALL] = operation{
-		execute:     opDelegateCall,
-		gasExecute:  makeWithGas(memoryDelegateCall, gasDelegateCall, opDelegateCall),
+		gasExecute:  makeCallWithGas(memoryDelegateCall, gasDelegateCall, opDelegateCall),
 		constantGas: params.CallGasFrontier,
 		numPop:      6,
 		numPush:     1,
@@ -1173,18 +1174,16 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stCreate,
 		},
 		CALL: {
-			execute:     opCall,
 			constantGas: params.CallGasFrontier,
-			gasExecute:  makeWithGas(memoryCall, gasCall, opCall),
+			gasExecute:  makeCallWithGas(memoryCall, gasCall, opCall),
 			numPop:      7,
 			numPush:     1,
 			usesMemory:  true,
 			string:      stCall,
 		},
 		CALLCODE: {
-			execute:     opCallCode,
 			constantGas: params.CallGasFrontier,
-			gasExecute:  makeWithGas(memoryCall, gasCallCode, opCallCode),
+			gasExecute:  makeCallWithGas(memoryCall, gasCallCode, opCallCode),
 			numPop:      7,
 			numPush:     1,
 			usesMemory:  true,
@@ -1206,7 +1205,7 @@ func newFrontierInstructionSet() JumpTable {
 
 	// Fill all unassigned slots with opUndefined.
 	for i := range tbl {
-		if tbl[i].execute == nil {
+		if tbl[i].execute == nil && tbl[i].gasExecute == nil {
 			tbl[i] = operation{execute: opUndefined}
 		}
 	}

@@ -1097,11 +1097,11 @@ func stCreate2(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.gas)
 }
 
-func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+func opCall(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error) {
 	stack := &scope.Stack
-	// Pop gas. The actual gas in evm.callGasTemp.
+	// Pop gas: the gas func turned it into forwarded.
 	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
+	gas := scope.callGas(forwarded)
 	// Pop other call parameters.
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
@@ -1158,11 +1158,11 @@ func stCall(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %x %x", CALL.String(), toAddr, args)
 }
 
-func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	// Pop gas. The actual gas is in evm.callGasTemp.
+func opCallCode(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error) {
+	// Pop gas: the gas func turned it into forwarded.
 	stack := &scope.Stack
 	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
+	gas := scope.callGas(forwarded)
 	// Pop other call parameters.
 	addr, value := stack.pop2()
 	inOffset, inSize := stack.pop2Uint64()
@@ -1197,11 +1197,11 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	return pc, ret, nil
 }
 
-func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+func opDelegateCall(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error) {
 	stack := &scope.Stack
-	// Pop gas. The actual gas is in evm.callGasTemp.
+	// Pop gas: the gas func turned it into forwarded.
 	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
+	gas := scope.callGas(forwarded)
 	// Pop other call parameters.
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()
@@ -1242,11 +1242,11 @@ func stDelegateCall(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %x %x", DELEGATECALL.String(), toAddr, args)
 }
 
-func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	// Pop gas. The actual gas is in evm.callGasTemp.
+func opStaticCall(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error) {
+	// Pop gas: the gas func turned it into forwarded.
 	stack := &scope.Stack
 	stack.drop() // gas operand, already consumed by the gas phase
-	gas := scope.callGas(evm)
+	gas := scope.callGas(forwarded)
 	// Pop other call parameters.
 	addr := stack.pop()
 	inOffset, inSize := stack.pop2Uint64()

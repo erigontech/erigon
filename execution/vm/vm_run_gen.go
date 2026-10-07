@@ -494,7 +494,7 @@ run:
 		operation := &jt[op]
 		cost := operation.constantGas
 		if false {
-			t.op, t.cost = op, mdgas.MdGasCost{Execution: cost}
+			t.op, t.cost, t.forwarded = op, mdgas.MdGasCost{Execution: cost}, 0
 		}
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.

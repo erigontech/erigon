@@ -319,3 +319,21 @@ func makeWithGas(memorySize memorySizeFunc, gas gasFunc, execute executionFunc) 
 		return execute(pc, evm, scope)
 	}
 }
+
+// makeCallWithGas runs a call op with the gas its gas func sets aside for the callee.
+func makeCallWithGas(memorySize memorySizeFunc, gas callGasFunc, call callFunc) gasExecuteFunc {
+	return func(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+		size, err := wordMemorySize(memorySize(scope))
+		if err != nil {
+			return pc, nil, err
+		}
+		cost, forwarded, err := gas(evm, scope, scope.Gas(), size)
+		if t != nil {
+			t.forwarded = forwarded
+		}
+		if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+			return pc, nil, err
+		}
+		return call(pc, evm, scope, forwarded)
+	}
+}

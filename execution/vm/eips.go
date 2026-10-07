@@ -151,16 +151,16 @@ func enable2929(jt *JumpTable) {
 	jt[BALANCE].gasExecute = opBalanceEIP2929
 
 	jt[CALL].constantGas = params.WarmStorageReadCostEIP2929
-	jt[CALL].gasExecute = makeWithGas(memoryCall, gasCallEIP2929, opCall)
+	jt[CALL].gasExecute = makeCallWithGas(memoryCall, gasCallEIP2929, opCall)
 
 	jt[CALLCODE].constantGas = params.WarmStorageReadCostEIP2929
-	jt[CALLCODE].gasExecute = makeWithGas(memoryCall, gasCallCodeEIP2929, opCallCode)
+	jt[CALLCODE].gasExecute = makeCallWithGas(memoryCall, gasCallCodeEIP2929, opCallCode)
 
 	jt[STATICCALL].constantGas = params.WarmStorageReadCostEIP2929
-	jt[STATICCALL].gasExecute = makeWithGas(memoryStaticCall, gasStaticCallEIP2929, opStaticCall)
+	jt[STATICCALL].gasExecute = makeCallWithGas(memoryStaticCall, gasStaticCallEIP2929, opStaticCall)
 
 	jt[DELEGATECALL].constantGas = params.WarmStorageReadCostEIP2929
-	jt[DELEGATECALL].gasExecute = makeWithGas(memoryDelegateCall, gasDelegateCallEIP2929, opDelegateCall)
+	jt[DELEGATECALL].gasExecute = makeCallWithGas(memoryDelegateCall, gasDelegateCallEIP2929, opDelegateCall)
 
 	// This was previously part of the dynamic cost, but we're using it as a constantGas
 	// factor here
@@ -332,10 +332,10 @@ func enable7516(jt *JumpTable) {
 }
 
 func enable7702(jt *JumpTable) {
-	jt[CALL].gasExecute = makeWithGas(memoryCall, gasCallEIP7702, opCall)
-	jt[CALLCODE].gasExecute = makeWithGas(memoryCall, gasCallCodeEIP7702, opCallCode)
-	jt[STATICCALL].gasExecute = makeWithGas(memoryStaticCall, gasStaticCallEIP7702, opStaticCall)
-	jt[DELEGATECALL].gasExecute = makeWithGas(memoryDelegateCall, gasDelegateCallEIP7702, opDelegateCall)
+	jt[CALL].gasExecute = makeCallWithGas(memoryCall, gasCallEIP7702, opCall)
+	jt[CALLCODE].gasExecute = makeCallWithGas(memoryCall, gasCallCodeEIP7702, opCallCode)
+	jt[STATICCALL].gasExecute = makeCallWithGas(memoryStaticCall, gasStaticCallEIP7702, opStaticCall)
+	jt[DELEGATECALL].gasExecute = makeCallWithGas(memoryDelegateCall, gasDelegateCallEIP7702, opDelegateCall)
 }
 
 func enable7939(jt *JumpTable) {

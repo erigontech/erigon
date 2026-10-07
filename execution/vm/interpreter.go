@@ -377,11 +377,11 @@ func (ctx *CallContext) forwardStateGas(tracer *tracing.Hooks) {
 	tracer.EmitGasChange(old, ctx.Gas(), tracing.GasChangeCallGasForwarded)
 }
 
-// callGas builds the MdGas to pass to a child CALL frame from the
-// pre-computed callGasTemp (63/64 rule) and the current state reservoir.
-func (ctx *CallContext) callGas(evm *EVM) mdgas.MdGas {
+// callGas builds the MdGas to pass to a child CALL frame from the forwarded
+// gas (63/64 rule) and the current state reservoir.
+func (ctx *CallContext) callGas(forwarded uint64) mdgas.MdGas {
 	return mdgas.MdGas{
-		Execution: evm.CallGasTemp(),
+		Execution: forwarded,
 		State:     ctx.stateGas,
 	}
 }
@@ -457,6 +457,7 @@ type opTrace struct {
 	logged       bool // the opcode hook has reported the op
 	op           OpCode
 	pc           uint64
+	forwarded    uint64 // the gas a call op forwards
 	oldGas       mdgas.MdGas
 	cost         mdgas.MdGasCost
 	callGas      mdgas.MdGasCost
@@ -466,7 +467,7 @@ type opTrace struct {
 func (evm *EVM) traceCost(op OpCode, t *opTrace, dynamic mdgas.MdGasCost) {
 	t.cost = t.cost.Plus(dynamic)
 	t.callGas = t.cost
-	t.callGas.Execution -= evm.CallGasTemp()
+	t.callGas.Execution -= t.forwarded
 	if dbg.TraceDynamicGas && dynamic != (mdgas.MdGasCost{}) {
 		gasCost := traceGas(op, t.callGas, t.cost)
 		fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
@@ -645,7 +646,7 @@ run:
 		operation := &jt[op]
 		cost := operation.constantGas
 		if anyTrace {
-			t.op, t.cost = op, mdgas.MdGasCost{Execution: cost}
+			t.op, t.cost, t.forwarded = op, mdgas.MdGasCost{Execution: cost}, 0
 		}
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
