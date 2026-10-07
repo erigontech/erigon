@@ -406,3 +406,19 @@ func TestAccProofResultMarshalFastJSONTo(t *testing.T) {
 		})
 	}
 }
+
+func TestAccountCopyCopiesAllFields(t *testing.T) {
+	t.Parallel()
+	a := Account{
+		Nonce:           1,
+		Balance:         *uint256.NewInt(2),
+		Root:            common.Hash{3},
+		CodeHash:        InternCodeHash(common.Hash{4}),
+		Incarnation:     5,
+		PrevIncarnation: 6,
+	}
+	var b Account
+	b.Copy(&a)
+	require.Equal(t, a, b)
+	require.Equal(t, a, *a.SelfCopy())
+}

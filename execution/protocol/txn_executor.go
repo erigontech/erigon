@@ -483,6 +483,9 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
+	if st.evm.Config().NoBAL {
+		st.state.StopAccessRecording()
+	}
 	var (
 		gasUsed         runtimeGasAccounting
 		runtimeGas      mdgas.MdGas
@@ -644,6 +647,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		createNonce     uint64
 	)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
+	if st.evm.Config().NoBAL {
+		st.state.StopAccessRecording()
+	}
 	if rules.IsAmsterdam {
 		runtimeGas = st.gasRemaining
 		runtimeSnapshot = st.state.PushSnapshot()

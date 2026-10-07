@@ -108,32 +108,9 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 	started := time.Now()
 
 	factoryErrs := make(chan error, workers)
-	factory := func(workerCtx context.Context) (commitment.PatriciaContext, func()) {
-		tx, err := db.BeginRo(kv.WithNonBlockingAcquire(workerCtx)) //nolint:gocritic // The returned cleanup owns Rollback.
-		if err != nil {
-			factoryErrs <- err
-			return nil, nil
-		}
-		txTemporal, ok := tx.(kv.TemporalTx)
-		if !ok {
-			tx.Rollback()
-			factoryErrs <- errors.New("BAL commitment warmup requires a temporal read transaction")
-			return nil, nil
-		}
-		var cache *commitment.BranchCache
-		if provider, ok := txTemporal.AggTx().(commitment.BranchCacheProvider); ok {
-			cache = provider.BranchCache()
-		}
-		return &balCommitmentContext{
-			tx:         txTemporal,
-			cache:      cache,
-			cacheStats: cacheStats,
-		}, tx.Rollback
-	}
-
 	warmuper := commitment.NewWarmuper(ctx, commitment.WarmupConfig{
 		Enabled:    true,
-		CtxFactory: factory,
+		CtxFactory: balCommitmentContextFactory(db, cacheStats, func(err error) { factoryErrs <- err }),
 		NumWorkers: workers,
 		MaxDepth:   commitment.WarmupMaxDepth,
 		LogPrefix:  "BAL",
@@ -167,4 +144,41 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 		"err", err,
 	)
 	return err
+}
+
+func balCommitmentContextFactory(db kv.RoDB, cacheStats *balCommitmentCacheStats, onErr func(error)) commitment.TrieContextFactory {
+	return func(workerCtx context.Context) (commitment.PatriciaContext, func()) {
+		tx, err := db.BeginRo(kv.WithNonBlockingAcquire(workerCtx)) //nolint:gocritic // The returned cleanup owns Rollback.
+		if err != nil {
+			onErr(err)
+			return nil, nil
+		}
+		txTemporal, ok := tx.(kv.TemporalTx)
+		if !ok {
+			tx.Rollback()
+			onErr(errors.New("BAL commitment warmup requires a temporal read transaction"))
+			return nil, nil
+		}
+		var cache *commitment.BranchCache
+		if provider, ok := txTemporal.AggTx().(commitment.BranchCacheProvider); ok {
+			cache = provider.BranchCache()
+		}
+		return &balCommitmentContext{
+			tx:         txTemporal,
+			cache:      cache,
+			cacheStats: cacheStats,
+		}, tx.Rollback
+	}
+}
+
+func StartBranchPrefetch(ctx context.Context, db kv.RoDB, workers int) *commitment.Warmuper {
+	prefetch := commitment.NewWarmuper(ctx, commitment.WarmupConfig{
+		Enabled:    true,
+		CtxFactory: balCommitmentContextFactory(db, new(balCommitmentCacheStats), func(error) {}),
+		NumWorkers: workers,
+		MaxDepth:   commitment.WarmupMaxDepth,
+		LogPrefix:  "prefetch",
+	})
+	prefetch.Start()
+	return prefetch
 }

@@ -228,14 +228,14 @@ func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.E
 
 // Returns an array of execution payload bodies referenced by their block hashes
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1
-func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
+func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) (engine_types.ExecutionPayloadBodies, error) {
 	return e.getPayloadBodiesByHash(ctx, hashes)
 }
 
 // Returns an array of execution payload bodies referenced by their block hashes,
 // including blockAccessList sidecars from DB.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyhashv2
-func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) (engine_types.ExecutionPayloadBodiesV2, error) {
 	if len(hashes) > 1024 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
@@ -245,14 +245,14 @@ func (e *EngineServer) GetPayloadBodiesByHashV2(ctx context.Context, hashes []co
 
 // Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count"
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyrangev1
-func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBody, error) {
+func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) (engine_types.ExecutionPayloadBodies, error) {
 	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count))
 }
 
 // Returns an ordered (as per canonical chain) array of execution payload bodies, with corresponding execution block numbers from "start", up to "count",
 // including blockAccessList sidecars from DB.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_getpayloadbodiesbyrangev2
-func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+func (e *EngineServer) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) (engine_types.ExecutionPayloadBodiesV2, error) {
 	if uint64(start) == 0 || uint64(count) == 0 {
 		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
 	}
