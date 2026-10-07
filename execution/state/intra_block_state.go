@@ -738,11 +738,11 @@ func (ibs *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
-	code, err := ibs.getCode(addr, false)
+	code, err := ibs.getCode(addr)
 	return code.Bytes, err
 }
 
-func (ibs *IntraBlockState) getCode(addr accounts.Address, commited bool) (accounts.Code, error) {
+func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error) {
 	if ibs.versionMap == nil {
 		stateObject, err := ibs.getStateObject(addr, true)
 		if err != nil {
@@ -767,19 +767,7 @@ func (ibs *IntraBlockState) getCode(addr accounts.Address, commited bool) (accou
 		}
 		return accounts.Code{}, nil
 	}
-	// When commited=true (used by ResolveCode for EIP-7702 delegation),
-	// versionedReadCore skips local versionedWrites and may return a stale
-	// ReadSet value. If the CURRENT tx has set this account's code (e.g.,
-	// via EIP-7702 authorization processing), return the dirty code directly.
-	// We must also check hasWrite to ensure the code was set in this tx,
-	// not in a previous tx sharing the same IBS (block generator reuses IBS).
-	if commited {
-		if so, ok := ibs.stateObjects[addr]; ok && so.dirtyCode && ibs.hasWrite(addr, CodePath, accounts.NilKey) {
-			ibs.callCodeAccessHook(addr, so.code.Bytes)
-			return so.code, nil
-		}
-	}
-	code, source, _, err := readCode(ibs, addr, commited)
+	code, source, _, err := readCode(ibs, addr)
 
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 		if err != nil {
@@ -896,10 +884,10 @@ func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, e
 	// list) are visible. With committed=true the parallel executor reads stale
 	// delegation code from the version map instead of the current tx's SetCode.
 	// CodePath exemptions in versionedReadCore already handle SelfDestruct cases.
-	code, err := ibs.getCode(addr, false)
+	code, err := ibs.getCode(addr)
 	// eip-7702
 	if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-		return ibs.getCode(delegation, false)
+		return ibs.getCode(delegation)
 	}
 	if err != nil {
 		return accounts.Code{}, err
@@ -917,7 +905,7 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 		// CodeHashPath and CodePath. Going through getCode would also report a
 		// BAL code access for non-delegated code, so use readCode directly and
 		// preserve the existing hook semantics below.
-		code, _, _, err := readCode(ibs, addr, false)
+		code, _, _, err := readCode(ibs, addr)
 		if err != nil {
 			return accounts.ZeroAddress, false, err
 		}
