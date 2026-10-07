@@ -32,6 +32,8 @@ import (
 	"sync"
 	"time"
 
+	gojson "github.com/goccy/go-json"
+
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -365,10 +367,10 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !validJSON(frame) {
-		// Decode the broken message to report where it went wrong. validJSON
-		// only ever accepts more than Unmarshal, so it fails here too. The
-		// fallback only guards against the two ever disagreeing.
+	if !gojson.Valid(frame) {
+		// Decode the broken message to report where it went wrong. The two
+		// accept the same input, so it fails here too; the fallback only
+		// guards against them ever disagreeing.
 		var rawmsg json.RawMessage
 		if err := json.Unmarshal(frame, &rawmsg); err != nil {
 			return nil, err

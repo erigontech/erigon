@@ -17,6 +17,8 @@
 package rpc
 
 import (
+	gojson "github.com/goccy/go-json"
+
 	"bytes"
 	"context"
 	"encoding/json"
@@ -777,7 +779,7 @@ func TestDecodeStringFieldMatchesUnmarshal(t *testing.T) {
 	}
 }
 
-// FuzzValidJSON pins the fast gate against encoding/json on any input. Plain
+// FuzzValidJSON pins the request gate against encoding/json on any input. Plain
 // `go test` runs the seeds, so they double as the table of cases.
 func FuzzValidJSON(f *testing.F) {
 	for _, s := range append([]string{
@@ -788,13 +790,13 @@ func FuzzValidJSON(f *testing.F) {
 		`{"a":1,}`, `[1,]`, `{,}`, `{"a"}`, `{"a":}`, `{:1}`, `{"a":1"b":2}`,
 		`[1 2]`, `{} {}`, `1 1`, `  {"a" : 1 }  `, "\t\n\r{}\t\n\r",
 		`{"a":"A\n\\\""}`, `{"a":"😀"}`,
-		`{"a":"\q"}`, "\"\x01\"", "\"\xff\"", nest(maxJSONDepth), nest(maxJSONDepth + 1),
+		`{"a":"\q"}`, "\"\x01\"", "\"\xff\"", nest(10000), nest(10001),
 	}, messageCorpus...) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, input string) {
 		data := []byte(input)
-		require.Equal(t, json.Valid(data), validJSON(data), "input %.80q", input)
+		require.Equal(t, json.Valid(data), gojson.Valid(data), "input %.80q", input)
 	})
 }
 
@@ -817,10 +819,10 @@ func BenchmarkValidJSON(b *testing.B) {
 					}
 				}
 			})
-			b.Run("scan", func(b *testing.B) {
+			b.Run("goccy", func(b *testing.B) {
 				b.SetBytes(int64(len(body)))
 				for b.Loop() {
-					if !validJSON(body) {
+					if !gojson.Valid(body) {
 						b.Fatal("invalid")
 					}
 				}
