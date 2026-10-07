@@ -87,6 +87,10 @@ type CallContext struct {
 	create   createGasPreparation
 	slots    frameSlots
 	Stack    Stack
+
+	// SSTORE-only and pointer-free, so placed after Stack to keep Stack.data's alignment.
+	sstoreGen     uint64
+	sstoreCurrent uint256.Int // the current slot value SSTORE's gas func read at sstoreGen
 }
 
 // maxFrameSlotMisses is how many fills a frame makes without a hit before it stops caching.
@@ -223,6 +227,7 @@ func (evm *EVM) putCallContext(ctx *CallContext) {
 	// always a miss rather than returning a stale handle from a prior use.
 	ctx.cachedKeyGen = ^uint64(0)
 	ctx.cachedAddrGen = ^uint64(0)
+	ctx.sstoreGen = ^uint64(0)
 	// Zero the handles to release their canonMap pins while the context is
 	// idle in the pool; unique.Handle values keep interned entries alive.
 	ctx.cachedKey = accounts.NilKey
