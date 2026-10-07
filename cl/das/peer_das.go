@@ -1931,13 +1931,23 @@ func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 }
 
 // deferredColumnSyncDue reports whether gossip has had its share of the slot to deliver a
-// block's columns, after which the missing custody columns are requested from peers.
-func deferredColumnSyncDue(now, slotStart time.Time, slotDuration time.Duration) bool {
-	return !now.Before(slotStart.Add(slotDuration / deferredColumnSyncSlotDivisor))
+// block's columns, after which the missing columns are requested from peers.
+func deferredColumnSyncDue(now, slotStart time.Time, delay time.Duration) bool {
+	return !now.Before(slotStart.Add(delay))
 }
 
 func (d *peerdas) slotDuration() time.Duration {
 	return time.Duration(d.beaconConfig.SecondsPerSlot) * time.Second
+}
+
+// deferredColumnSyncDelay is how long gossip gets before missing columns are requested. A
+// custody node needs every custody column, so it asks early; an archive node recovers from
+// half the columns and gives in-flight gossip a full slot instead of duplicating it.
+func (d *peerdas) deferredColumnSyncDelay() time.Duration {
+	if d.IsArchivedMode() {
+		return d.slotDuration()
+	}
+	return d.slotDuration() / deferredColumnSyncSlotDivisor
 }
 
 // deferredColumnSyncRound bounds one download round and the envelope retry that follows it.
@@ -2002,7 +2012,7 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			skip := e.inFlight || now.Before(e.nextAttempt)
 			exhausted := e.attempts >= deferredColumnSyncMaxAttempts
 			mu.Unlock()
-			if skip || !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), d.slotDuration()) {
+			if skip || !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), d.deferredColumnSyncDelay()) {
 				return true
 			}
 			available, err := d.IsDataAvailable(block.GetSlot(), root)
@@ -2012,7 +2022,11 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				mu.Lock()
 				e.attempts++
 				e.nextAttempt = now.Add(d.slotDuration())
+				dropped := e.attempts >= deferredColumnSyncMaxAttempts
 				mu.Unlock()
+				if dropped {
+					forget(root)
+				}
 			case available:
 				log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
 				forget(root)

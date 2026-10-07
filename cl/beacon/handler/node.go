@@ -53,7 +53,7 @@ func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) 
 	if syncingStatus != nil {
 		syncingCode = int(*syncingStatus)
 	}
-	if a.syncedData.Syncing() {
+	if a.headLagsBehind() {
 		w.WriteHeader(syncingCode)
 		return
 	}

@@ -1193,7 +1193,7 @@ func verifyGloasHeadPayloads(ctx context.Context, cfg *Cfg, attempted map[common
 		return gloasVerificationHeadRoot(cfg.forkChoice)
 	}, func(stepCtx context.Context) bool {
 		// Any recorded verdict, INVALID included, can move the head.
-		root, _ := verifyGloasHeadPayload(stepCtx, cfg)
+		root, _ := verifyGloasHeadPayload(stepCtx, cfg, attempted)
 		if root == (common.Hash{}) {
 			return false
 		}
@@ -1218,9 +1218,12 @@ func advanceWhileHeadMoves(ctx context.Context, head func() (common.Hash, error)
 // verifyGloasHeadPayload verifies the selected head's persisted payload when it has no EL status
 // yet. It returns the root when a verdict was recorded (or the payload was skipped for good),
 // and whether a status was recorded, which can move the head to the next block.
-func verifyGloasHeadPayload(ctx context.Context, cfg *Cfg) (common.Hash, bool) {
+func verifyGloasHeadPayload(ctx context.Context, cfg *Cfg, attempted map[common.Hash]struct{}) (common.Hash, bool) {
 	headRoot, err := gloasVerificationHeadRoot(cfg.forkChoice)
 	if err != nil || headRoot == (common.Hash{}) {
+		return common.Hash{}, false
+	}
+	if _, done := attempted[headRoot]; done {
 		return common.Hash{}, false
 	}
 	if !cfg.forkChoice.HasEnvelope(headRoot) || cfg.forkChoice.IsPayloadVerified(headRoot) {
@@ -1376,7 +1379,7 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg, skip map[commo
 	}
 }
 
-func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
+func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg, attempted map[common.Hash]struct{}) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -1387,6 +1390,9 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	}
 	anchorRoot := cfg.forkChoice.AnchorRoot()
 	if anchorRoot == (common.Hash{}) || cfg.forkChoice.IsPayloadVerified(anchorRoot) || !cfg.forkChoice.HasEnvelope(anchorRoot) {
+		return
+	}
+	if _, done := attempted[anchorRoot]; done {
 		return
 	}
 	if status, ok := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(anchorRoot); ok && status == execution_client.PayloadStatusInvalidated {
@@ -1425,6 +1431,7 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	if !retained {
 		return
 	}
+	attempted[anchorRoot] = struct{}{}
 	if status == execution_client.PayloadStatusInvalidated {
 		log.Warn("[chainTipSync] anchor payload invalidated by EL", "anchorRoot", anchorRoot)
 	}
@@ -1466,7 +1473,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				drainPendingGloasPayloads(retryCtx, cfg, attemptedHeads)
 			},
 			func(retryCtx context.Context) {
-				retryUnverifiedAnchorPayload(retryCtx, cfg)
+				retryUnverifiedAnchorPayload(retryCtx, cfg, attemptedHeads)
 			},
 			// Forward sync applies envelopes without EL validation when the EL supports block
 			// insertion, so those payloads have no status. Until the head's is verified, fork

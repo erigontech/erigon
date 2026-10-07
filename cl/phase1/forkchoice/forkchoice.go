@@ -89,6 +89,7 @@ type preverifiedAppendListsSizes struct {
 type ForkChoiceStore struct {
 	time             atomic.Uint64
 	highestSeen      atomic.Uint64
+	highestImported  atomic.Uint64
 	highestSeenRoot  atomic.Value // common.Hash
 	blocksProcessing atomic.Int64
 	// all of *solid.Checkpoint type
@@ -491,6 +492,7 @@ func NewForkChoiceStore(
 	f.proposerBoostRoot.Store(common.Hash{})
 
 	f.highestSeen.Store(anchorState.Slot())
+	f.highestImported.Store(anchorState.Slot())
 	f.highestSeenRoot.Store(common.Hash(anchorRoot))
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
 
@@ -612,6 +614,12 @@ func (f *ForkChoiceStore) IsBlobDataAvailable(slot uint64, blockRoot common.Hash
 // Highest seen returns highest seen slot
 func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
+}
+
+// HighestImported returns the highest slot of a block the fork graph accepted. Unlike
+// HighestSeen it is not raised by a block that is later rejected.
+func (f *ForkChoiceStore) HighestImported() uint64 {
+	return f.highestImported.Load()
 }
 
 // BlockProcessing reports whether an OnBlock call is waiting for the store lock or is active.

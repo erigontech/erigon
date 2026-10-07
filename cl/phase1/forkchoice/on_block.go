@@ -448,6 +448,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		return nil
 	case fork_graph.Success:
 		f.updateChildren(block.Block.Slot-1, block.Block.ParentRoot, blockRoot) // parent slot can be innacurate
+		if block.Block.Slot > f.highestImported.Load() {
+			f.highestImported.Store(block.Block.Slot)
+		}
 	case fork_graph.BelowAnchor:
 		log.Debug("replay block", "status", status.String())
 		return nil
