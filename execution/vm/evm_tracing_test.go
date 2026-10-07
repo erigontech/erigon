@@ -751,3 +751,48 @@ func TestOpcodeV2Sload(t *testing.T) {
 		require.ErrorIs(t, steps[2].err, ErrOutOfGas)
 	})
 }
+
+// TestOpcodeV2AccountOps pins what a tracer sees for the EIP-2929 account ops: the
+// cold or warm cost before the op runs, with the address still on the stack.
+func TestOpcodeV2AccountOps(t *testing.T) {
+	type step struct {
+		pc   uint64
+		gas  mdgas.MdGas
+		cost mdgas.MdGasCost
+		top  uint64
+		err  error
+	}
+	for _, op := range []OpCode{BALANCE, EXTCODESIZE, EXTCODEHASH} {
+		run := func(t *testing.T, gas uint64) (steps []step, warm, cold uint64) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			hooks := &tracing.Hooks{
+				OnOpcodeV2: func(pc uint64, o byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, _ []byte, _ int, err error) {
+					if OpCode(o) == op {
+						data := scope.StackData()
+						steps = append(steps, step{pc, gas, cost, data[len(data)-1].Uint64(), err})
+					}
+				},
+			}
+			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+			contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			contract.Code = []byte{byte(PUSH1), 0x20, byte(op), byte(POP), byte(PUSH1), 0x20, byte(op)}
+			_, _, _, _ = evm.Run(contract, mdgas.MdGas{Execution: gas}, nil, false)
+			warm = evm.jt[op].constantGas
+			return steps, warm, warm + coldAccountAccessCost(evm.chainRules) - params.WarmStorageReadCostEIP2929
+		}
+		t.Run(op.String(), func(t *testing.T) {
+			steps, warm, cold := run(t, 10_000)
+			require.Equal(t, []step{
+				{pc: 2, gas: mdgas.MdGas{Execution: 10_000 - 3}, cost: mdgas.MdGasCost{Execution: cold}, top: 0x20},
+				{pc: 6, gas: mdgas.MdGas{Execution: 10_000 - 3 - cold - 2 - 3}, cost: mdgas.MdGasCost{Execution: warm}, top: 0x20},
+			}, steps)
+			steps, _, _ = run(t, 3+cold)
+			require.NoError(t, steps[0].err)
+			steps, _, _ = run(t, 3+cold-1)
+			require.Len(t, steps, 1)
+			require.ErrorIs(t, steps[0].err, ErrOutOfGas)
+			require.Equal(t, mdgas.MdGas{Execution: cold - 1}, steps[0].gas)
+		})
+	}
+}

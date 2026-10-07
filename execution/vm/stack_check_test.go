@@ -292,10 +292,10 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// The zero address is warm, 0x20 and 0x21 are cold.
 		"account":     prog(PUSH1, 0x20, BALANCE, PUSH1, 0x20, EXTCODESIZE, PUSH1, 0x21, EXTCODEHASH, PUSH1, 0x21, BALANCE, PUSH1, 0x22, EXTCODESIZE),
 		"accountwarm": prog(PUSH1, 0, BALANCE, PUSH1, 0, EXTCODESIZE, PUSH1, 0, EXTCODEHASH, DUP1),
-		"accountend":  {byte(PUSH1), 0x20, byte(EXTCODEHASH)},
 	}
 	for _, op := range []OpCode{BALANCE, EXTCODESIZE, EXTCODEHASH} {
 		programs["under"+op.String()] = []byte{byte(op)}
+		programs["end"+op.String()] = []byte{byte(PUSH1), 0x20, byte(op)}
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
