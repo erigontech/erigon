@@ -264,11 +264,9 @@ func TestIsValidQuantity(t *testing.T) {
 	}
 }
 
-func TestEncodeHexMatchesStdlib(t *testing.T) { checkEncodeHex(t) }
-
-// checkEncodeHex compares every hex writer with encoding/hex over lengths that cross each vector
-// block boundary and tail size.
-func checkEncodeHex(t *testing.T) {
+// TestEncodeHexMatchesStdlib compares every hex writer with encoding/hex over lengths that cross
+// each vector block boundary and tail size.
+func TestEncodeHexMatchesStdlib(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
 	for n := 0; n <= 300; n++ {
 		src := make([]byte, n)
