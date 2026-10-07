@@ -450,9 +450,6 @@ func stackBoundsErr(sLen int, operation *operation) error {
 	return &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 }
 
-// traceGas picks the figure the dev instruction trace should report: call
-// opcodes forward gas to the callee, so their charged cost is not the
-// interesting number.
 // opTrace is runTraced's record of the op it runs: the hooks report it, and the
 // deferred fault report reads it when the op fails.
 type opTrace struct {
@@ -511,6 +508,9 @@ func (evm *EVM) traceCharged(callContext *CallContext, op OpCode, pc uint64, t *
 	}
 }
 
+// traceGas picks the figure the dev instruction trace should report: call
+// opcodes forward gas to the callee, so their charged cost is not the
+// interesting number.
 func traceGas(op OpCode, callGas mdgas.MdGasCost, cost mdgas.MdGasCost) mdgas.MdGasCost {
 	switch op {
 	case CALL, CALLCODE, DELEGATECALL, STATICCALL:

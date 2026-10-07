@@ -339,45 +339,10 @@ func testTable(ops []fastOp, gasOps [][2]string) []byte {
 const cacheGenStep = "callContext.cacheGen++\n"
 
 // gasExecuteOps returns the ops the jump tables give a gasExecute, with the func:
-// run calls the func's copy without the trace directly.
+// run inlines the func's copy without the trace. TestFastPathMatchesJumpTables
+// fails for a table whose gasExecute is not here.
 func gasExecuteOps() [][2]string {
-	names, err := filepath.Glob("*.go")
-	if err != nil {
-		log.Fatal(err)
-	}
-	funcs := map[string]string{}
-	for _, name := range names {
-		if strings.HasSuffix(name, "_test.go") || strings.HasSuffix(name, "_gen.go") {
-			continue
-		}
-		f, err := parser.ParseFile(token.NewFileSet(), name, read(name), parser.SkipObjectResolution)
-		if err != nil {
-			log.Fatal(err)
-		}
-		ast.Inspect(f, func(n ast.Node) bool {
-			a, ok := n.(*ast.AssignStmt)
-			if !ok || len(a.Lhs) != 1 {
-				return true
-			}
-			sel, ok := a.Lhs[0].(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "gasExecute" {
-				return true
-			}
-			op := types.ExprString(sel.X.(*ast.IndexExpr).Index)
-			fn := types.ExprString(a.Rhs[0])
-			if prev, ok := funcs[op]; ok && prev != fn {
-				log.Fatalf("%s: gasExecute is %s and %s, run can call only one", op, prev, fn)
-			}
-			funcs[op] = fn
-			return true
-		})
-	}
-	var ops [][2]string
-	for op, fn := range funcs {
-		ops = append(ops, [2]string{op, fn})
-	}
-	slices.SortFunc(ops, func(a, b [2]string) int { return cmp.Compare(a[0], b[0]) })
-	return ops
+	return [][2]string{{"SLOAD", "opSloadEIP2929"}}
 }
 
 // directCalls returns run's switch over the gasExecute ops, which runs their copies
