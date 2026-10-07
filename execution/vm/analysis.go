@@ -47,6 +47,18 @@ func codeBitmapGeneric(code []byte) bitvec {
 	return bits
 }
 
+// markJumpdestsTail marks the JUMPDESTs of the code tail of less than 32 bytes starting at pc.
+func markJumpdestsTail(code []byte, bits bitvec, pc int) bitvec {
+	for ; pc < len(code); pc++ {
+		if op := OpCode(code[pc]); int8(op) >= int8(PUSH1) {
+			pc += int(op - PUSH1 + 1)
+		} else if op == JUMPDEST {
+			bits[pc/64] |= 1 << (uint(pc) % 64)
+		}
+	}
+	return bits
+}
+
 // bitvec is a bit vector which maps bytes in a program.
 // A set bit means the byte is a valid jump destination.
 type bitvec []uint64

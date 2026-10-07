@@ -18,6 +18,7 @@ package vm
 
 import (
 	"bytes"
+	"maps"
 	"math/rand"
 	"testing"
 )
@@ -53,13 +54,16 @@ func equalBitvec(a, b bitvec) bool {
 }
 
 func codeBitmapImpls() map[string]func([]byte) bitvec {
-	return map[string]func([]byte) bitvec{"generic": codeBitmapGeneric, "dispatch": codeBitmap}
+	impls := map[string]func([]byte) bitvec{"generic": codeBitmapGeneric}
+	maps.Copy(impls, simdImpls())
+	return impls
 }
 
 // TestCodeBitmapEquivalence fuzzes the codeBitmap implementations against the reference across
 // jumpdest-heavy, push-dense and fully-random code, plus boundary edge cases.
 func TestCodeBitmapEquivalence(t *testing.T) {
 	impls := codeBitmapImpls()
+	impls["dispatched"] = codeBitmap
 	r := rand.New(rand.NewSource(1))
 	gen := func(n, mode int) []byte {
 		c := make([]byte, n)

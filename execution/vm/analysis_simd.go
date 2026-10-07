@@ -23,25 +23,18 @@ import (
 	"simd/archsimd"
 )
 
-// codeBitmap collects valid jump destinations in code: JUMPDEST opcodes outside of push data.
-func codeBitmap(code []byte) bitvec {
-	if !hasAVX2 {
-		return codeBitmapGeneric(code)
+func init() {
+	if archsimd.X86.AVX2() {
+		codeBitmap = codeBitmapAVX2
 	}
+}
+
+func codeBitmapAVX2(code []byte) bitvec {
 	bits := make(bitvec, (len(code)+63)/64)
 	pc := len(code) / 32 * 32
 	pc += jumpdestBitmapSIMD(code[:pc], bits)
-	for ; pc < len(code); pc++ {
-		if op := OpCode(code[pc]); int8(op) >= int8(PUSH1) {
-			pc += int(op - PUSH1 + 1)
-		} else if op == JUMPDEST {
-			bits[pc/64] |= 1 << (uint(pc) % 64)
-		}
-	}
-	return bits
+	return markJumpdestsTail(code, bits, pc)
 }
-
-var hasAVX2 = archsimd.X86.AVX2()
 
 var (
 	jdIota = [32]uint8{0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21,
