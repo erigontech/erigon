@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -611,7 +612,7 @@ func (b *SimulatedBackend) PendingCallContract(ctx context.Context, call bind.Ca
 	if len(res.Revert()) > 0 {
 		return nil, newRevertError(res)
 	}
-	return res.Return(), res.Err
+	return slices.Clone(res.Return()), res.Err
 }
 
 // PendingNonceAt implements PendingStateReader.PendingNonceAt, retrieving
