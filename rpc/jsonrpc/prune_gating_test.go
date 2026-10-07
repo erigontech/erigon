@@ -878,9 +878,23 @@ func dropBodies(t *testing.T, db kv.TemporalRwDB, from, to uint64) {
 	require.NoError(t, rwTx.Commit())
 }
 
+func writeHistoryStart(tx kv.RwTx, startTxNum uint64) error {
+	key := hexutil.EncodeTs(startTxNum)
+	for _, table := range []string{kv.TblAccountHistoryKeys, kv.TblStorageHistoryKeys, kv.TblCodeHistoryKeys} {
+		if err := tx.ClearTable(table); err != nil {
+			return err
+		}
+		if err := tx.Put(table, key, []byte{1}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type historyFloorDB struct {
 	kv.TemporalRoDB
 	startTxNum uint64
+	starts     map[kv.Domain]uint64
 }
 
 func (db historyFloorDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
@@ -888,12 +902,14 @@ func (db historyFloorDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, er
 	if err != nil {
 		return nil, err
 	}
-	return historyFloorTx{TemporalTx: tx, startTxNum: db.startTxNum}, nil
+	return historyFloorTx{TemporalTx: tx, startTxNum: db.startTxNum, starts: db.starts}, nil
 }
 
 type historyFloorTx struct {
 	kv.TemporalTx
 	startTxNum uint64
+	starts     map[kv.Domain]uint64
+	errs       map[kv.Domain]error
 }
 
 func (tx historyFloorTx) BlockFilesRoTx() *blocksnapshots.View {
@@ -901,16 +917,22 @@ func (tx historyFloorTx) BlockFilesRoTx() *blocksnapshots.View {
 }
 
 func (tx historyFloorTx) Debug() kv.TemporalDebugTx {
-	return historyFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), startTxNum: tx.startTxNum}
+	return historyFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), startTxNum: tx.startTxNum, starts: tx.starts, errs: tx.errs}
 }
 
 type historyFloorDebugTx struct {
 	kv.TemporalDebugTx
 	startTxNum uint64
+	starts     map[kv.Domain]uint64
+	errs       map[kv.Domain]error
 }
 
-func (tx historyFloorDebugTx) HistoryStartFrom(kv.Domain) (uint64, error) {
-	return tx.startTxNum, nil
+func (tx historyFloorDebugTx) HistoryStartFrom(domain kv.Domain) (uint64, error) {
+	start, ok := tx.starts[domain]
+	if !ok {
+		start = tx.startTxNum
+	}
+	return start, tx.errs[domain]
 }
 
 // TestGetBlockByTimestampGatesGenesisBranch pins the gate on the branch that answers

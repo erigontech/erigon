@@ -30,7 +30,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -256,21 +255,9 @@ func TestIndexedHistoryGateFollowsRemoteRenewal(t *testing.T) {
 			minTxNum, err := apis.eth._txNumReader.Min(t.Context(), local, block)
 			require.NoError(t, err)
 			start := minTxNum + index + 1
-			setHistoryStart := func(t *testing.T, start uint64) {
-				t.Helper()
-				require.NoError(t, apis.rwDB.Update(t.Context(), func(tx kv.RwTx) error {
-					for _, table := range []string{kv.TblAccountHistoryKeys, kv.TblStorageHistoryKeys, kv.TblCodeHistoryKeys} {
-						if err := tx.ClearTable(table); err != nil {
-							return err
-						}
-						if err := tx.Put(table, hexutil.EncodeTs(start), []byte{1}); err != nil {
-							return err
-						}
-					}
-					return nil
-				}))
-			}
-			setHistoryStart(t, start)
+			require.NoError(t, apis.rwDB.Update(t.Context(), func(tx kv.RwTx) error {
+				return writeHistoryStart(tx, start)
+			}))
 
 			synctest.Test(t, func(t *testing.T) {
 				ctx := t.Context()
@@ -285,7 +272,9 @@ func TestIndexedHistoryGateFollowsRemoteRenewal(t *testing.T) {
 				require.NoError(t, apis.eth.checkPruneTransactionHistoryAtIndex(ctx, tx, block, index))
 				require.EqualValues(t, 3, calls.Load(), "the gate must reuse the cached floor")
 				oldViewID := tx.ViewID()
-				setHistoryStart(t, start+1)
+				require.NoError(t, apis.rwDB.Update(ctx, func(tx kv.RwTx) error {
+					return writeHistoryStart(tx, start+1)
+				}))
 
 				// The head reads must stay on the old view. Expire it only at the
 				// indexed cursor, after reading the cached history floor.

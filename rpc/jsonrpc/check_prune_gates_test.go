@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -43,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapcfg"
-	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -581,8 +579,8 @@ func TestComputedReceiptsNeedCommitmentHistory(t *testing.T) {
 			start, err := apis.eth._txNumReader.Min(ctx, tx, tc.startBlock)
 			require.NoError(t, err)
 			starts := map[kv.Domain]uint64{kv.CommitmentDomain: start + tc.txOffset}
-			view := domainHistoryFloorTx{TemporalTx: tx, starts: starts}
-			apis.eth.db = domainHistoryFloorDB{TemporalRoDB: apis.eth.db, starts: starts}
+			view := historyFloorTx{TemporalTx: tx, starts: starts}
+			apis.eth.db = historyFloorDB{TemporalRoDB: apis.eth.db, starts: starts}
 
 			t.Run("gate", func(t *testing.T) {
 				if tc.oldest > 0 {
@@ -667,7 +665,7 @@ func TestHistoryGateUsesEarliestDomainFloor(t *testing.T) {
 		starts[domain], err = apis.eth._txNumReader.Min(ctx, tx, block)
 		require.NoError(t, err)
 	}
-	view := domainHistoryFloorTx{TemporalTx: tx, starts: starts}
+	view := historyFloorTx{TemporalTx: tx, starts: starts}
 
 	floors, err := apis.eth.readHistoryStartBlocks(ctx, view, chainInfo.head)
 	require.NoError(t, err)
@@ -698,7 +696,7 @@ func TestHistoryGatePropagatesBackendError(t *testing.T) {
 	defer tx.Rollback()
 
 	wantErr := errors.New("history floor unavailable")
-	view := domainHistoryFloorTx{TemporalTx: tx, errs: map[kv.Domain]error{kv.AccountsDomain: wantErr}}
+	view := historyFloorTx{TemporalTx: tx, errs: map[kv.Domain]error{kv.AccountsDomain: wantErr}}
 	_, err = apis.eth.readHistoryStartBlocks(ctx, view, chainInfo.head)
 	require.ErrorIs(t, err, wantErr)
 }
@@ -1070,12 +1068,7 @@ func TestHistoryFloorCacheSeparatesMDBXViewsAtSameHead(t *testing.T) {
 			defer rwTx.Rollback()
 			start, err := apis.eth._txNumReader.Min(ctx, rwTx, block)
 			require.NoError(t, err)
-			var key [8]byte
-			binary.BigEndian.PutUint64(key[:], start)
-			for _, table := range []string{kv.TblAccountHistoryKeys, kv.TblStorageHistoryKeys, kv.TblCodeHistoryKeys} {
-				require.NoError(t, rwTx.ClearTable(table))
-				require.NoError(t, rwTx.Put(table, key[:], []byte{1}))
-			}
+			require.NoError(t, writeHistoryStart(rwTx, start))
 			require.NoError(t, rwTx.Commit())
 			tx, err := apis.eth.db.BeginTemporalRo(ctx)
 			require.NoError(t, err)
@@ -1161,10 +1154,7 @@ func TestHistoryFloorCacheSeparatesBlockFileViews(t *testing.T) {
 	defer rwTx.Rollback()
 	start, err := m.BlockReader.TxnumReader().Min(ctx, rwTx, historyBlock)
 	require.NoError(t, err)
-	for _, table := range []string{kv.TblAccountHistoryKeys, kv.TblStorageHistoryKeys, kv.TblCodeHistoryKeys} {
-		require.NoError(t, rwTx.ClearTable(table))
-		require.NoError(t, rwTx.Put(table, hexutil.EncodeTs(start), []byte{1}))
-	}
+	require.NoError(t, writeHistoryStart(rwTx, start))
 	for block := uint64(1); block < head; block++ {
 		require.NoError(t, rwTx.Delete(kv.MaxTxNum, hexutil.EncodeTs(block)))
 	}
@@ -2836,43 +2826,6 @@ func (tx countingHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) (uint64
 
 func (tx countingHistoryFloorDebugTx) HistoryFilesGeneration() uint64 {
 	return tx.TemporalDebugTx.(interface{ HistoryFilesGeneration() uint64 }).HistoryFilesGeneration()
-}
-
-type domainHistoryFloorDB struct {
-	kv.TemporalRoDB
-	starts map[kv.Domain]uint64
-}
-
-func (db domainHistoryFloorDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
-	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // Ownership passes to the caller.
-	if err != nil {
-		return nil, err
-	}
-	return domainHistoryFloorTx{TemporalTx: tx, starts: db.starts}, nil
-}
-
-type domainHistoryFloorTx struct {
-	kv.TemporalTx
-	starts map[kv.Domain]uint64
-	errs   map[kv.Domain]error
-}
-
-func (tx domainHistoryFloorTx) BlockFilesRoTx() *blocksnapshots.View {
-	return tx.TemporalTx.(freezeblocks.HasBlockFilesRoTx).BlockFilesRoTx()
-}
-
-func (tx domainHistoryFloorTx) Debug() kv.TemporalDebugTx {
-	return domainHistoryFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), starts: tx.starts, errs: tx.errs}
-}
-
-type domainHistoryFloorDebugTx struct {
-	kv.TemporalDebugTx
-	starts map[kv.Domain]uint64
-	errs   map[kv.Domain]error
-}
-
-func (tx domainHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) (uint64, error) {
-	return tx.starts[domain], tx.errs[domain]
 }
 
 type countingMinimumBlockReader struct {

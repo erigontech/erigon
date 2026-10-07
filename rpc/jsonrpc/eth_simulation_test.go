@@ -38,7 +38,7 @@ func TestSimulationSkipsDisabledCommitmentHistory(t *testing.T) {
 	defer tx.Rollback()
 
 	wantErr := errors.New("commitment history unavailable")
-	view := domainHistoryFloorTx{TemporalTx: tx, errs: map[kv.Domain]error{kv.CommitmentDomain: wantErr}}
+	view := historyFloorTx{TemporalTx: tx, errs: map[kv.Domain]error{kv.CommitmentDomain: wantErr}}
 	for _, enabled := range []bool{false, true} {
 		t.Run(fmt.Sprintf("commitment_history_%t", enabled), func(t *testing.T) {
 			sim := simulator{txNumReader: apis.eth._txNumReader, commitmentHistory: enabled}
