@@ -97,6 +97,12 @@ func (a *ApiHandler) awaitPendingParentPayload(
 		if retryCtx.Err() == nil {
 			a.forkchoiceStore.RetryPendingExecutionPayloadEnvelope(retryCtx, baseBlockRoot)
 		}
-		return a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+		source, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+		if err != nil {
+			// The proposal keeps its parent, as it would without the wait; a head change
+			// here is visible but not fatal.
+			a.logger.Warn("BlockProduction: parent payload wait stopped", "slot", targetSlot, "head", baseBlockRoot, "err", err)
+		}
+		return source, err
 	})
 }

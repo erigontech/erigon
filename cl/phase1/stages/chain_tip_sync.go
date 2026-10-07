@@ -1413,6 +1413,9 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg, attempted map[c
 		return
 	}
 	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, envelope)
+	if gloasPayloadRetryInterrupted(ctx, status, err) {
+		return
+	}
 	if err != nil {
 		log.Warn("[chainTipSync] anchor payload NewPayload retry failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 	}
