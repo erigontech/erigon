@@ -60,6 +60,7 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 // but not transients like pc and gas
 type CallContext struct {
 	gas               uint64
+	savedPC           uint64 // run's pc across an out-of-line call
 	stateGas          uint64
 	stateGasSpill     uint64
 	newAccountCharged bool
