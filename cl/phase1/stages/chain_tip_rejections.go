@@ -68,6 +68,7 @@ func (r *chainTipRejections) record(reason string, slot uint64, err error) []any
 	}
 	entry.count++
 	entry.lastSlot = slot
+	entry.lastErr = ""
 	if err != nil {
 		entry.lastErr = err.Error()
 	}
