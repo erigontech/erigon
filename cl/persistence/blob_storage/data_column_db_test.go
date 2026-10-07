@@ -432,6 +432,36 @@ func TestWriteStream(t *testing.T) {
 	assert.Equal(t, sidecar.SignedBlockHeader.Header.Slot, streamedData.SignedBlockHeader.Header.Slot)
 }
 
+func addTestBlob(sidecars ...*cltypes.DataColumnSidecar) {
+	for _, sidecar := range sidecars {
+		sidecar.Column.Append(&cltypes.Cell{1})
+		sidecar.KzgCommitments.Append(&cltypes.KZGCommitment{2})
+		sidecar.KzgProofs.Append(&cltypes.KZGProof{3})
+	}
+}
+
+// A canonical file is served as stored, without decoding it: the junk byte would not survive a re-encode.
+func TestWriteStreamServesCanonicalFileVerbatim(t *testing.T) {
+	storage, fs, _ := setupTestDataColumnStorage(t)
+	blockRoot := common.HexToHash("0x1234567890abcdef")
+	sidecar := createTestDataColumnSidecar(1000, 1)
+	addTestBlob(sidecar)
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), blockRoot, 1, sidecar))
+
+	_, file := storage.(*dataColumnStorageImpl).path(1000, blockRoot, 1)
+	fh, err := fs.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
+	require.NoError(t, err)
+	_, err = fh.Write([]byte{0xff})
+	require.NoError(t, err)
+	require.NoError(t, fh.Close())
+	want, err := afero.ReadFile(fs, file)
+	require.NoError(t, err)
+
+	var got bytes.Buffer
+	require.NoError(t, storage.WriteStream(&got, 1000, blockRoot, 1))
+	require.Equal(t, want, got.Bytes())
+}
+
 // A sidecar stored with a 17-hash inclusion proof must be served with the canonical 4-hash proof, keeping its hashes.
 func TestWriteStreamServesLegacyInclusionProofCanonically(t *testing.T) {
 	storage, _, _ := setupTestDataColumnStorage(t)
@@ -443,6 +473,7 @@ func TestWriteStreamServesLegacyInclusionProofCanonically(t *testing.T) {
 		canonical.KzgCommitmentsInclusionProof.Set(i, common.Hash{byte(i + 1)})
 		legacy.KzgCommitmentsInclusionProof.Set(i, common.Hash{byte(i + 1)})
 	}
+	addTestBlob(canonical, legacy)
 	require.NoError(t, storage.WriteColumnSidecars(t.Context(), blockRoot, 1, legacy))
 
 	var got bytes.Buffer
