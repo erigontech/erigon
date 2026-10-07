@@ -2881,8 +2881,8 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 	}
 
 	if blk.Version() >= clparams.FuluVersion && len(columnsSidecars) > 0 {
-		// A Gloas column carries only the block root, so a peer that receives it before the block requests the block
-		// from us, and penalizes us if we cannot serve it yet.
+		// A Gloas column has no signed block header. Lighthouse requests an unknown block from the column's peer
+		// and penalizes that peer if it cannot serve the block.
 		if blk.Version() >= clparams.GloasVersion && job != nil {
 			storeCtx, cancel := context.WithTimeout(ctx, publishedBlockStoreWaitBeforeColumns)
 			_ = job.Wait(storeCtx) // a failed or slow store must not hold back the columns of an already gossiped block

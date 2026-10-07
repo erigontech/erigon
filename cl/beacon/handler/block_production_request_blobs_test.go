@@ -481,8 +481,6 @@ func (j gatedPublishedBlockJob) Wait(ctx context.Context) error {
 	}
 }
 
-// Gloas column sidecars carry only the block root, so a peer that receives a column before the block asks the
-// publisher for the block. The publisher must be able to serve it by then.
 func TestBroadcastGloasBlockPublishesColumnsAfterLocalStore(t *testing.T) {
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
