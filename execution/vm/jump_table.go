@@ -383,7 +383,6 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stMulmod,
 		},
 		EXP: {
-			execute:    opExp,
 			gasExecute: opExpFrontierWithGas,
 			numPop:     2,
 			numPush:    1,

@@ -114,10 +114,6 @@ func copyGas(callContext *CallContext, memorySize uint64, stackpos int) (mdgas.M
 	return mdgas.MdGasCost{Execution: gas}, nil
 }
 
-func gasExtCodeCopy(_ *EVM, callContext *CallContext, _ mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
-	return copyGas(callContext, memorySize, 3)
-}
-
 func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	if evm.readOnly {
 		return mdgas.MdGasCost{}, ErrWriteProtection
