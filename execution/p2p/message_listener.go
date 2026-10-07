@@ -62,13 +62,27 @@ func applyRegisterOptions(opts []RegisterOpt) *registerOptions {
 	return defaultOptions
 }
 
+// MessageListenerOption customizes a MessageListener.
+type MessageListenerOption func(*MessageListener)
+
+// WithBlockBodiesDecoder replaces the RLP decoding of BLOCK_BODIES_66 payloads.
+func WithBlockBodiesDecoder(decode func(data []byte) (*eth.BlockBodiesPacket66, error)) MessageListenerOption {
+	return func(ml *MessageListener) { ml.decodeBlockBodies = decode }
+}
+
+// WithNewBlockDecoder replaces the RLP decoding of NEW_BLOCK_66 payloads.
+func WithNewBlockDecoder(decode func(data []byte) (*eth.NewBlockPacket, error)) MessageListenerOption {
+	return func(ml *MessageListener) { ml.decodeNewBlock = decode }
+}
+
 func NewMessageListener(
 	logger log.Logger,
 	sentryClient sentryproto.SentryClient,
 	statusDataFactory libsentry.StatusDataFactory,
 	peerPenalizer *PeerPenalizer,
+	opts ...MessageListenerOption,
 ) *MessageListener {
-	return &MessageListener{
+	ml := &MessageListener{
 		logger:                    logger,
 		sentryClient:              sentryClient,
 		statusDataFactory:         statusDataFactory,
@@ -79,7 +93,13 @@ func NewMessageListener(
 		blockBodiesObservers:      event.NewObservers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]](),
 		blockAccessListsObservers: event.NewObservers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]](),
 		peerEventObservers:        event.NewObservers[*sentryproto.PeerEvent](),
+		decodeNewBlock:            decodeRLP[*eth.NewBlockPacket],
+		decodeBlockBodies:         decodeRLP[*eth.BlockBodiesPacket66],
 	}
+	for _, opt := range opts {
+		opt(ml)
+	}
+	return ml
 }
 
 type MessageListener struct {
@@ -93,6 +113,8 @@ type MessageListener struct {
 	blockBodiesObservers      *event.Observers[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]
 	blockAccessListsObservers *event.Observers[*DecodedInboundMessage[*eth.BlockAccessListsPacket66]]
 	peerEventObservers        *event.Observers[*sentryproto.PeerEvent]
+	decodeNewBlock            func(data []byte) (*eth.NewBlockPacket, error)
+	decodeBlockBodies         func(data []byte) (*eth.BlockBodiesPacket66, error)
 	stopWg                    sync.WaitGroup
 }
 
@@ -175,15 +197,15 @@ func (ml *MessageListener) listenInboundMessages(ctx context.Context) {
 	streamMessages(ctx, ml, "InboundMessages", streamFactory, func(message *sentryproto.InboundMessage) error {
 		switch message.Id {
 		case sentryproto.MessageId_NEW_BLOCK_66:
-			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.newBlockObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.newBlockObservers, ml.decodeNewBlock, message)
 		case sentryproto.MessageId_NEW_BLOCK_HASHES_66:
-			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.newBlockHashesObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.newBlockHashesObservers, decodeRLP[*eth.NewBlockHashesPacket], message)
 		case sentryproto.MessageId_BLOCK_HEADERS_66:
-			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockHeadersObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockHeadersObservers, decodeRLP[*eth.BlockHeadersPacket66], message)
 		case sentryproto.MessageId_BLOCK_BODIES_66:
-			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockBodiesObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockBodiesObservers, ml.decodeBlockBodies, message)
 		case sentryproto.MessageId_BLOCK_ACCESS_LISTS_71:
-			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockAccessListsObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockAccessListsObservers, decodeRLP[*eth.BlockAccessListsPacket66], message)
 		default:
 			return nil
 		}
@@ -238,14 +260,15 @@ func notifyInboundMessageObservers[TPacket any](
 	logger log.Logger,
 	peerPenalizer *PeerPenalizer,
 	observers *event.Observers[*DecodedInboundMessage[TPacket]],
+	decode func(data []byte) (TPacket, error),
 	message *sentryproto.InboundMessage,
 ) error {
 	peerId := PeerIdFromH512(message.PeerId)
 
-	var decodedData TPacket
-	if err := rlp.DecodeBytes(message.Data, &decodedData); err != nil {
+	decodedData, err := decode(message.Data)
+	if err != nil {
 		if rlp.IsInvalidRLPError(err) {
-			logger.Debug(messageListenerLogPrefix("penalizing peer - invalid rlp"), "peerId", peerId, "err", err)
+			logger.Debug(messageListenerLogPrefix("penalizing peer - invalid rlp"), "peerId", peerId, "msgId", message.Id, "err", err)
 
 			if penalizeErr := peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
 				err = fmt.Errorf("%w: %w", penalizeErr, err)
@@ -267,4 +290,10 @@ func notifyInboundMessageObservers[TPacket any](
 
 func messageListenerLogPrefix(message string) string {
 	return "[p2p.message.listener] " + message
+}
+
+func decodeRLP[TPacket any](data []byte) (TPacket, error) {
+	var packet TPacket
+	err := rlp.DecodeBytes(data, &packet)
+	return packet, err
 }

@@ -1076,21 +1076,23 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	// decode Transactions
+	if err := bb.DecodeFields(s); err != nil {
+		return err
+	}
+	return s.ListEnd()
+}
+
+// DecodeFields decodes the body fields from a stream positioned inside the
+// body list, leaving the list open for the caller.
+func (bb *Body) DecodeFields(s *rlp.Stream) error {
 	if err := decodeTxns(&bb.Transactions, s); err != nil {
 		return err
 	}
-	// decode Uncles
 	if err := decodeUncles(&bb.Uncles, s); err != nil {
 		return err
 	}
-	// decode Withdrawals
 	bb.Withdrawals = []*Withdrawal{}
-	if err := decodeWithdrawals(&bb.Withdrawals, s); err != nil {
-		return err
-	}
-
-	return s.ListEnd()
+	return decodeWithdrawals(&bb.Withdrawals, s)
 }
 
 // NewBlock creates a new block. Header and body inputs are copied, while the

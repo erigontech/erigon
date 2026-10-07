@@ -35,7 +35,7 @@ import (
 
 func NewService(logger log.Logger, maxPeers int, sc sentryproto.SentryClient, sdf libsentry.StatusDataFactory, tmpDir string) *Service {
 	peerPenalizer := p2p.NewPeerPenalizer(sc)
-	messageListener := p2p.NewMessageListener(logger, sc, sdf, peerPenalizer)
+	messageListener := p2p.NewMessageListener(logger, sc, sdf, peerPenalizer, MessageListenerOptions()...)
 	peerTracker := p2p.NewPeerTracker(logger, messageListener)
 	messageSender := p2p.NewMessageSender(sc)
 	var fetcher p2p.Fetcher
