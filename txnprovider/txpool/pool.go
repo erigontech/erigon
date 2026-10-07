@@ -1430,12 +1430,9 @@ func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]tx
 }
 
 // validateTxns returns per-slot discard reasons and the txns that passed.
-// For a remote (IsLocal=false) batch, validation short-circuits on the first
-// UnmatchedBlobTxExt: trailing txns delivered by the same peer (every trailing
-// remote txn when sources is nil) keep reason NotSet but are not in goodTxns,
-// so callers reading reasons in isolation must also consult goodTxns to
-// distinguish "accepted" from "not validated". sources, when non-nil, is
-// index-aligned with txns.
+// A remote KZG failure skips later txns from that peer; with nil sources,
+// it skips all later remote txns. Skipped txns keep NotSet and are not returned.
+// Non-nil sources must be index-aligned with txns.
 func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
 	// Keep precheck failures; NotSet entries still need validation.
 	if reasons == nil {

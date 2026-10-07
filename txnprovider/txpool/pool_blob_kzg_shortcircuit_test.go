@@ -238,7 +238,7 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 
 	var trailingFromAttacker TxnSlots
 	trailingFromAttacker.Append(&trailing, a2[:], false)
-	pool.AddRemoteTxns(ctx, trailingFromAttacker, attackerPeerID, sentryClient)
+	pool.AddRemoteTxns(ctx, trailingFromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), sentryClient)
 
 	require.NoError(t, pool.processRemoteTxns(ctx))
 
