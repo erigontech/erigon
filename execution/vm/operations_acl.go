@@ -32,12 +32,18 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
-	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
-		return sstoreGasEIP2929(evm, callContext, scopeGas, clearingRefund)
-	}
-}
-
+// sstoreGasEIP2929 implements gas cost for SSTORE according to EIP-2929
+//
+// When calling SSTORE, check if the (address, storage_key) pair is in accessed_storage_keys.
+// If it is not, charge an additional COLD_SLOAD_COST gas, and add the pair to accessed_storage_keys.
+// Additionally, modify the parameters defined in EIP 2200 as follows:
+//
+// Parameter 	Old value 	New value
+// SLOAD_GAS 	800 	= WARM_STORAGE_READ_COST
+// SSTORE_RESET_GAS 	5000 	5000 - COLD_SLOAD_COST
+//
+// The other parameters defined in EIP 2200 are unchanged.
+// see gasSStoreEIP2200(...) in core/vm/gas_table.go for more info about how EIP 2200 is specified
 func sstoreGasEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, clearingRefund uint64) (mdgas.MdGasCost, error) {
 	rules := evm.chainRules
 	if evm.readOnly {
@@ -301,36 +307,9 @@ var (
 	gasDelegateCallEIP2929 = makeCallVariantGasCallEIP2929(gasDelegateCall)
 	gasStaticCallEIP2929   = makeCallVariantGasCallEIP2929(gasStaticCall)
 	gasCallCodeEIP2929     = makeCallVariantGasCallEIP2929(gasCallCode)
-	gasSelfdestructEIP2929 = makeSelfdestructGasFn(true)
-	// gasSelfdestructEIP3529 implements the changes in EIP-2539 (no refunds)
-	gasSelfdestructEIP3529 = makeSelfdestructGasFn(false)
-
-	// gasSStoreEIP2929 implements gas cost for SSTORE according to EIP-2929
-	//
-	// When calling SSTORE, check if the (address, storage_key) pair is in accessed_storage_keys.
-	// If it is not, charge an additional COLD_SLOAD_COST gas, and add the pair to accessed_storage_keys.
-	// Additionally, modify the parameters defined in EIP 2200 as follows:
-	//
-	// Parameter 	Old value 	New value
-	// SLOAD_GAS 	800 	= WARM_STORAGE_READ_COST
-	// SSTORE_RESET_GAS 	5000 	5000 - COLD_SLOAD_COST
-	//
-	//The other parameters defined in EIP 2200 are unchanged.
-	// see gasSStoreEIP2200(...) in core/vm/gas_table.go for more info about how EIP 2200 is specified
-	gasSStoreEIP2929 = makeGasSStoreFunc(params.SstoreClearsScheduleRefundEIP2200)
-
-	// gasSStoreEIP2539 implements gas cost for SSTORE according to EPI-2539
-	// Replace `SSTORE_CLEARS_SCHEDULE` with `SSTORE_RESET_GAS + ACCESS_LIST_STORAGE_KEY_COST` (4,800)
-	gasSStoreEIP3529 = makeGasSStoreFunc(params.SstoreClearsScheduleRefundEIP3529)
 )
 
-// makeSelfdestructGasFn can create the selfdestruct dynamic gas function for EIP-2929 and EIP-2539
-func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
-	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
-		return selfdestructGasEIP2929(evm, callContext, scopeGas, refundsEnabled)
-	}
-}
-
+// selfdestructGasEIP2929 is SELFDESTRUCT's gas from EIP-2929 on; EIP-3529 turns its refund off.
 func selfdestructGasEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, refundsEnabled bool) (mdgas.MdGasCost, error) {
 	var (
 		gas     mdgas.MdGasCost
