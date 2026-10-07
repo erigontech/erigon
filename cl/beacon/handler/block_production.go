@@ -1947,24 +1947,22 @@ func (a *ApiHandler) produceBeaconBody(
 		)
 		beaconBody.Attestations = a.findBestAttestationsForBlockProduction(baseState)
 	})
-	// [New in Gloas:EIP7732] Aggregate PTC votes into PayloadAttestations.
+	wg.Wait()
+	// [New in Gloas:EIP7732] Aggregate PTC votes into PayloadAttestations after the payload
+	// wait: votes for the parent slot keep arriving until shortly after this slot starts, so
+	// a snapshot taken when production begins misses the late ones.
 	// The spec requires data.slot + 1 == state.slot, so we collect PTC votes
 	// for slot targetSlot-1 (= state.slot - 1), NOT baseBlockSlot. When slots
 	// are skipped the two differ and using baseBlockSlot produces invalid blocks.
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		wg.Go(func() {
-			start := time.Now()
-			defer func() {
-				paCount := 0
-				if beaconBody.PayloadAttestations != nil {
-					paCount = beaconBody.PayloadAttestations.Len()
-				}
-				log.Debug("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", paCount)
-			}()
-			beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
-		})
+		start := time.Now()
+		beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
+		paCount := 0
+		if beaconBody.PayloadAttestations != nil {
+			paCount = beaconBody.PayloadAttestations.Len()
+		}
+		log.Debug("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", paCount)
 	}
-	wg.Wait()
 	if syncAggregateErr != nil {
 		return nil, nil, syncAggregateErr
 	}
