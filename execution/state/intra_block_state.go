@@ -1254,10 +1254,7 @@ func (ibs *IntraBlockState) eip8246PreservedAccount(addr accounts.Address) (*acc
 	return &acc, nil
 }
 
-// getVersionedAccount returns the account reconstructed from the base record
-// plus the versionMap field overlays. Whole-account consumers (stateObject
-// construction) need the reconstructed record; field-oriented callers
-// (GetBalance/Empty/Exist) read what they need without it.
+// getVersionedAccount returns the base account record, without the field cells.
 func (ibs *IntraBlockState) getVersionedAccount(addr accounts.Address, readStorage bool) (*accounts.Account, ReadSource, Version, error) {
 	return ibs.versionedAccountBase(addr, readStorage)
 }
@@ -2232,7 +2229,8 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			// value-carrying synthetic incarnation/balance reads below pin every
 			// consequence of the flag, so a stale conclusion still invalidates.
 			destructed := false
-			if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok {
+			sd, ownSD := ibs.versionedWriteSelfDestruct(addr)
+			if ownSD {
 				destructed = sd
 			} else if d, res, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex); ok && res.Status() == MVReadResultDone && d {
 				destructed = true
@@ -2249,16 +2247,12 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 				}
 			}
 
-			// Honour same-block revival (#21319): a prior tx's self-destruct is
-			// overridden by a later tx that revived the account to a non-empty
-			// state (a value transfer leaving balance/nonce/code behind). A value-0
-			// no-op transfer that leaves it empty does NOT revive it (EIP-161
-			// removes it again). account is the version-map-refreshed record, so
-			// its emptiness is the authoritative revival test. Without this,
-			// CreateAccount keeps previous.selfdestructed set and skips the balance
-			// carry below — losing the revived funds.
-			if destructed && ibs.versionMap != nil && !account.Empty() {
-				destructed = false
+			// A later tx that left the account non-empty revived it after a prior
+			// tx's self-destruct. Check the field cells, as the record lags them.
+			if destructed && !ownSD {
+				if destructed, err = ibs.emptyFromVersionedFields(addr, account); err != nil {
+					return err
+				}
 			}
 
 			if previous == nil {
