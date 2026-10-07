@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
@@ -425,30 +424,14 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	return gas, prepared
 }
 
-func gasExpFrontier(callContext *CallContext) (mdgas.MdGasCost, error) {
-	expByteLen := uint64(common.BitLenToByteLen(callContext.Stack.data[callContext.Stack.len()-2].BitLen()))
-
-	var (
-		gas      = expByteLen * params.ExpByteFrontier // no overflow check required. Max is 256 * ExpByte gas
-		overflow bool
-	)
-	if gas, overflow = math.SafeAdd(gas, params.ExpGas); overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	return mdgas.MdGasCost{Execution: gas}, nil
+func gasExpFrontier(callContext *CallContext) mdgas.MdGasCost {
+	expByteLen := uint64(callContext.Stack.back(1).ByteLen())
+	return mdgas.MdGasCost{Execution: params.ExpGas + expByteLen*params.ExpByteFrontier} // at most 32 bytes, so no overflow
 }
 
-func gasExpEIP160(callContext *CallContext) (mdgas.MdGasCost, error) {
-	expByteLen := uint64(common.BitLenToByteLen(callContext.Stack.data[callContext.Stack.len()-2].BitLen()))
-
-	var (
-		gas      = expByteLen * params.ExpByteEIP160 // no overflow check required. Max is 256 * ExpByte gas
-		overflow bool
-	)
-	if gas, overflow = math.SafeAdd(gas, params.ExpGas); overflow {
-		return mdgas.MdGasCost{}, ErrGasUintOverflow
-	}
-	return mdgas.MdGasCost{Execution: gas}, nil
+func gasExpEIP160(callContext *CallContext) mdgas.MdGasCost {
+	expByteLen := uint64(callContext.Stack.back(1).ByteLen())
+	return mdgas.MdGasCost{Execution: params.ExpGas + expByteLen*params.ExpByteEIP160} // at most 32 bytes, so no overflow
 }
 
 func gasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, uint64, error) {
