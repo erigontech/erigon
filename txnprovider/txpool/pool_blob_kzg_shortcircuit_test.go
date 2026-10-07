@@ -115,7 +115,7 @@ func TestValidateTxnsBlobKZGShortCircuit(t *testing.T) {
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
-		reasons, goodTxns, err := pool.validateTxns(&slots, cacheView, nil)
+		reasons, goodTxns, err := pool.validateTxns(&slots, cacheView, nil, nil)
 		require.NoError(t, err)
 		return reasons, goodTxns
 	}
@@ -253,4 +253,40 @@ func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
 	assert.NotContains(t, pool.byHash, string(bad.IDHash[:]))
 	assert.Contains(t, pool.byHash, string(good.IDHash[:]), "valid txn from another peer must not be dropped")
 	assert.NotContains(t, pool.byHash, string(trailing.IDHash[:]), "trailing txn from the KZG offender must be skipped")
+}
+
+func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	a0, a1, a2 := [20]byte{1}, [20]byte{2}, [20]byte{3}
+
+	pooled := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	pooled.IDHash[0] = 0x60
+	var local TxnSlots
+	local.Append(pooled, a2[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	bad := makeBlobSlot(0x61, true)
+	skipped := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	skipped.IDHash[0] = 0x62
+	var fromAttacker TxnSlots
+	fromAttacker.Append(&bad, a0[:], false)
+	fromAttacker.Append(skipped, a1[:], false)
+	pool.AddRemoteTxns(ctx, fromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), nil)
+
+	replacement := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	replacement.IDHash[0] = 0x63
+	var fromHonest TxnSlots
+	fromHonest.Append(replacement, a2[:], false)
+	pool.AddRemoteTxns(ctx, fromHonest, gointerfaces.ConvertHashToH512([64]byte{0x42}), nil)
+
+	reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success, txpoolcfg.NotReplaced,
+	}, reasons)
 }

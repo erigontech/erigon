@@ -344,7 +344,7 @@ func (c *JsonRpcClient) GetPayloadV6(ctx context.Context, payloadID hexutil.Byte
 	}, c.backOff(ctx))
 }
 
-func (c *JsonRpcClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*enginetypes.ExecutionPayloadBody, error) {
+func (c *JsonRpcClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) (enginetypes.ExecutionPayloadBodies, error) {
 	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBody, error) {
 		var result []*enginetypes.ExecutionPayloadBody
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByHashV1", hashes)
@@ -355,7 +355,7 @@ func (c *JsonRpcClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []c
 	}, c.backOff(ctx))
 }
 
-func (c *JsonRpcClient) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) ([]*enginetypes.ExecutionPayloadBodyV2, error) {
+func (c *JsonRpcClient) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) (enginetypes.ExecutionPayloadBodiesV2, error) {
 	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBodyV2, error) {
 		var result []*enginetypes.ExecutionPayloadBodyV2
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByHashV2", hashes)
@@ -366,7 +366,7 @@ func (c *JsonRpcClient) GetPayloadBodiesByHashV2(ctx context.Context, hashes []c
 	}, c.backOff(ctx))
 }
 
-func (c *JsonRpcClient) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*enginetypes.ExecutionPayloadBody, error) {
+func (c *JsonRpcClient) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) (enginetypes.ExecutionPayloadBodies, error) {
 	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBody, error) {
 		var result []*enginetypes.ExecutionPayloadBody
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByRangeV1", start, count)
@@ -377,7 +377,7 @@ func (c *JsonRpcClient) GetPayloadBodiesByRangeV1(ctx context.Context, start, co
 	}, c.backOff(ctx))
 }
 
-func (c *JsonRpcClient) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) ([]*enginetypes.ExecutionPayloadBodyV2, error) {
+func (c *JsonRpcClient) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) (enginetypes.ExecutionPayloadBodiesV2, error) {
 	return backoff.RetryWithData(func() ([]*enginetypes.ExecutionPayloadBodyV2, error) {
 		var result []*enginetypes.ExecutionPayloadBodyV2
 		err := c.rpcClient.CallContext(ctx, &result, "engine_getPayloadBodiesByRangeV2", start, count)
