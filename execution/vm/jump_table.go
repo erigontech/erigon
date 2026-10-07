@@ -33,7 +33,7 @@ type (
 	callGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (cost mdgas.MdGasCost, forwarded uint64, err error)
 	// createGasFunc is a CREATE op's gas func, which also prepares the creation under Amsterdam.
 	createGasFunc   func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, createGasPreparation, error)
-	createFunc      func(pc uint64, evm *EVM, scope *CallContext, prepared *createGasPreparation) (uint64, []byte, error)
+	createFunc      func(pc uint64, evm *EVM, scope *CallContext, prepared createGasPreparation) (uint64, []byte, error)
 	callFunc        func(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error)
 	statefulGasFunc func(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error)
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64

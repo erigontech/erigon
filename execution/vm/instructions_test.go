@@ -398,7 +398,7 @@ func TestCreate2InitCodeAllocations(t *testing.T) {
 				t.Fatal(err)
 			}
 			scope.Memory.Resize(64)
-			if _, _, err := opCreate2(0, evm, scope, &prepared); err != nil {
+			if _, _, err := opCreate2(0, evm, scope, prepared); err != nil {
 				t.Fatal(err)
 			}
 		})
