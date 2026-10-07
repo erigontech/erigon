@@ -808,7 +808,11 @@ func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, errStopToken
 	}
 	pos := scope.Stack.pop()
-	if !scope.Contract.analysedJumpdest(pos) && !scope.Contract.validJumpdest(pos) {
+	valid := scope.Contract.analysedJumpdest(pos)
+	if !valid {
+		valid = scope.Contract.validJumpdest(pos)
+	}
+	if !valid {
 		return pc, nil, ErrInvalidJump
 	}
 	// pc will be increased by the interpreter loop
@@ -828,7 +832,11 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if cond.IsZero() {
 		return pc, nil, nil
 	}
-	if !scope.Contract.analysedJumpdest(pos) && !scope.Contract.validJumpdest(pos) {
+	valid := scope.Contract.analysedJumpdest(pos)
+	if !valid {
+		valid = scope.Contract.validJumpdest(pos)
+	}
+	if !valid {
 		return pc, nil, ErrInvalidJump
 	}
 	return pos.Uint64() - 1, nil, nil // pc will be increased by the interpreter loop
