@@ -20,6 +20,7 @@
 package runtime
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"os"
@@ -197,6 +198,23 @@ func TestCallReusesOutputBufferAcrossTransactions(t *testing.T) {
 	second, _, err := Call(address, nil, cfg)
 	require.NoError(t, err)
 	require.Same(t, unsafe.SliceData(first), unsafe.SliceData(second))
+}
+
+// A system call runs without Prepare and keeps its output, as the EIP-7002 requests do.
+func TestCallWithoutPrepareGetsItsOwnOutput(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	first, second := bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)
+
+	out, _, err := Call(address, first, cfg)
+	require.NoError(t, err)
+	_, _, _, err = NewEnv(cfg).Call(cfg.Origin, address, second, mdgas.MdGas{Execution: cfg.GasLimit}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Equal(t, first, out)
 }
 
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {

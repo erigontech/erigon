@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -159,7 +158,9 @@ type IntraBlockState struct {
 	txIndex  int
 	blockNum uint64
 	logs     logArena
-	txOutput []byte
+
+	txOutput     []byte
+	txOutputFree bool
 
 	// Per-transaction access list
 	accessList accessList
@@ -428,10 +429,15 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	}
 }
 
-// CopyTxOutput copies the transaction's output into a buffer the next transaction reuses.
-func (ibs *IntraBlockState) CopyTxOutput(b []byte) []byte {
-	ibs.txOutput = append(ibs.txOutput[:0], b...)
-	return slices.Clip(ibs.txOutput)
+// TxOutputBuffer gives the first top-level frame after Prepare a buffer for its
+// output that the next transaction reuses, and nil to any other caller. Whoever
+// keeps a transaction's output past the next Prepare must copy it.
+func (ibs *IntraBlockState) TxOutputBuffer() *[]byte {
+	if !ibs.txOutputFree {
+		return nil
+	}
+	ibs.txOutputFree = false
+	return &ibs.txOutput
 }
 
 // AllocLog reserves the next log slot of the current tx and returns it sized for
@@ -2860,6 +2866,7 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	ibs.eip8246 = rules.IsAmsterdam
 	ibs.eip161 = rules.IsEIP161Enabled()
 	ibs.isAura = rules.IsAura
+	ibs.txOutputFree = true
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		ibs.accessList.Reset()
