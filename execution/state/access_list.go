@@ -31,7 +31,11 @@ import (
 // reused across transactions via Reset, eliminating per-tx slot-map allocations.
 type accessList struct {
 	addresses map[accounts.Address]int
-	slots     []map[accounts.StorageKey]struct{}
+	slots     []map[accounts.StorageKey]uint32
+
+	// gen stamps this call's warm marks, so Reset bumps it instead of clearing
+	// every slot map; an entry from an older call reads as absent.
+	gen uint32
 
 	// Memo of the last resolved (address -> slot set) and the last slot known
 	// warm within it: repeated AddSlot on the same addr skips the addresses
@@ -39,7 +43,7 @@ type accessList struct {
 	// lastSlots == nil means no memo — lastAddr alone can't say, since its
 	// zero value NilAddress is a legal argument.
 	lastAddr     accounts.Address
-	lastSlots    map[accounts.StorageKey]struct{}
+	lastSlots    map[accounts.StorageKey]uint32
 	lastWarmSlot accounts.StorageKey
 
 	// inserted counts the keys added since the last Reset, which is what the
@@ -51,6 +55,7 @@ type accessList struct {
 func newAccessList() *accessList {
 	return &accessList{
 		addresses: make(map[accounts.Address]int),
+		gen:       1,
 	}
 }
 
@@ -58,8 +63,12 @@ func newAccessList() *accessList {
 // The slots backing array is retained; cleared inner maps are reused by
 // subsequent AddSlot calls without new allocations.
 func (al *accessList) Reset() {
-	for _, s := range al.slots {
-		clear(s)
+	al.gen++
+	if al.gen == 0 {
+		al.gen = 1
+		for _, m := range al.slots[:cap(al.slots)] {
+			clear(m)
+		}
 	}
 	al.slots = al.slots[:0]
 	clear(al.addresses)
@@ -91,7 +100,8 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 		if slot == al.lastWarmSlot {
 			return true, true
 		}
-		_, slotPresent = al.lastSlots[slot]
+		g, ok := al.lastSlots[slot]
+		slotPresent = ok && g == al.gen
 		return true, slotPresent
 	}
 	idx, ok := al.addresses[address]
@@ -101,7 +111,8 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 	if idx == -1 {
 		return true, false
 	}
-	_, slotPresent = al.slots[idx][slot]
+	g, ok := al.slots[idx][slot]
+	slotPresent = ok && g == al.gen
 	return true, slotPresent
 }
 
@@ -109,7 +120,8 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 func (al *accessList) Copy() *accessList {
 	cp := &accessList{
 		addresses: maps.Clone(al.addresses),
-		slots:     make([]map[accounts.StorageKey]struct{}, len(al.slots)),
+		slots:     make([]map[accounts.StorageKey]uint32, len(al.slots)),
+		gen:       al.gen,
 	}
 	for i, slotMap := range al.slots {
 		cp.slots[i] = maps.Clone(slotMap)
@@ -140,11 +152,11 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		}
 		// Probe-then-insert: a plain read on the warm case beats mapassign's
 		// write bookkeeping, and warm re-reads dominate cold inserts.
-		if _, ok := al.lastSlots[slot]; ok {
+		if g, ok := al.lastSlots[slot]; ok && g == al.gen {
 			al.lastWarmSlot = slot
 			return false, false
 		}
-		al.lastSlots[slot] = struct{}{}
+		al.lastSlots[slot] = al.gen
 		al.lastWarmSlot = slot
 		al.inserted++
 		return false, true
@@ -159,14 +171,14 @@ func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.Storag
 		// Reuse a cleared slot map from the backing array if available.
 		newIdx := len(al.slots)
 		al.addresses[address] = newIdx
-		var slotmap map[accounts.StorageKey]struct{}
+		var slotmap map[accounts.StorageKey]uint32
 		if newIdx < cap(al.slots) {
 			slotmap = al.slots[:cap(al.slots)][newIdx]
 		}
 		if slotmap == nil {
-			slotmap = make(map[accounts.StorageKey]struct{})
+			slotmap = make(map[accounts.StorageKey]uint32)
 		}
-		slotmap[slot] = struct{}{}
+		slotmap[slot] = al.gen
 		al.slots = append(al.slots, slotmap)
 		al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
 		al.inserted++
@@ -177,10 +189,10 @@ func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.Storag
 	}
 	slotmap := al.slots[idx]
 	al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
-	if _, ok := slotmap[slot]; ok {
+	if g, ok := slotmap[slot]; ok && g == al.gen {
 		return false, false
 	}
-	slotmap[slot] = struct{}{}
+	slotmap[slot] = al.gen
 	al.inserted++
 	return false, true
 }
