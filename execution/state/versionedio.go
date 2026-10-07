@@ -170,7 +170,8 @@ func (s *ReadSet) clearForReuse() {
 			clear(inner)
 		}
 	} else {
-		clear(s.storage)
+		// Nil, not cleared: a cleared map keeps the buckets those addresses grew.
+		s.storage = nil
 	}
 	s.access = nil
 }

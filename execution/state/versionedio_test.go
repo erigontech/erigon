@@ -1731,7 +1731,8 @@ func TestReusedReadSetDropsTooManySlotMaps(t *testing.T) {
 		rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
 	}
 	rs.clearForReuse()
-	require.Empty(t, rs.storage, "too many addresses must drop the outer map")
+	// Nil, not empty: clear would keep the buckets the many addresses grew.
+	require.Nil(t, rs.storage, "too many addresses must drop the outer map")
 }
 
 // Slot maps from earlier calls go, so a sequence of calls on different
