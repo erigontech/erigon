@@ -48,8 +48,9 @@ var (
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 	// CallNoMaterialize runs eth_call on the versioned state path, where reads
-	// go straight to the state reader instead of a resident stateObject.
-	CallNoMaterialize = EnvBool("CALL_NO_MATERIALIZE", false)
+	// go straight to the state reader instead of a resident stateObject. Set
+	// CALL_NO_MATERIALIZE=false to serve eth_call from resident objects again.
+	CallNoMaterialize = EnvBool("CALL_NO_MATERIALIZE", true)
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
