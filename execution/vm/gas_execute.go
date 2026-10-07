@@ -102,7 +102,8 @@ func opKeccak256WithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (ui
 		return pc, nil, err
 	}
 	cost, err := gasKeccak256(scope, size)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opKeccak256(pc, evm, scope)
@@ -114,7 +115,8 @@ func opCallDataCopyWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) 
 		return pc, nil, err
 	}
 	cost, err := copyGas(scope, size, 2)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opCallDataCopy(pc, evm, scope)
@@ -126,7 +128,8 @@ func opCodeCopyWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uin
 		return pc, nil, err
 	}
 	cost, err := copyGas(scope, size, 2)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opCodeCopy(pc, evm, scope)
@@ -138,7 +141,8 @@ func opReturnDataCopyWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace
 		return pc, nil, err
 	}
 	cost, err := copyGas(scope, size, 2)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opReturnDataCopy(pc, evm, scope)
@@ -150,7 +154,8 @@ func opMcopyWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64
 		return pc, nil, err
 	}
 	cost, err := copyGas(scope, size, 2)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opMcopy(pc, evm, scope)
@@ -162,7 +167,8 @@ func opMloadWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64
 		return pc, nil, err
 	}
 	cost, err := pureMemoryGascost(scope, size)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opMload(pc, evm, scope)
@@ -174,7 +180,8 @@ func opMstoreWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint6
 		return pc, nil, err
 	}
 	cost, err := pureMemoryGascost(scope, size)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opMstore(pc, evm, scope)
@@ -186,7 +193,8 @@ func opMstore8WithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint
 		return pc, nil, err
 	}
 	cost, err := pureMemoryGascost(scope, size)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opMstore8(pc, evm, scope)
@@ -198,7 +206,8 @@ func opReturnWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint6
 		return pc, nil, err
 	}
 	cost, err := pureMemoryGascost(scope, size)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opReturn(pc, evm, scope)
@@ -210,7 +219,8 @@ func opRevertWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint6
 		return pc, nil, err
 	}
 	cost, err := pureMemoryGascost(scope, size)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opRevert(pc, evm, scope)
@@ -223,7 +233,8 @@ func makeLogWithGas(topics int) gasExecuteFunc {
 			return pc, nil, err
 		}
 		cost, err := logGas(scope, size, uint64(topics))
-		if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+		err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+		if err != nil {
 			return pc, nil, err
 		}
 		return opLog(pc, evm, scope, topics)
@@ -257,7 +268,8 @@ func opExtCodeCopyWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (
 		return pc, nil, err
 	}
 	cost, err := copyGas(scope, size, 3)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opExtCodeCopy(pc, evm, scope)
@@ -269,7 +281,8 @@ func opExtCodeCopyEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (
 		return pc, nil, err
 	}
 	cost, err := gasExtCodeCopyEIP2929(evm, scope, scope.Gas(), size)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opExtCodeCopy(pc, evm, scope)
@@ -277,7 +290,8 @@ func opExtCodeCopyEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (
 
 func opSstoreWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
 	cost, err := gasSStore(evm, scope, scope.Gas(), 0)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, 0); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, 0)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opSstore(pc, evm, scope)
@@ -285,7 +299,8 @@ func opSstoreWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint6
 
 func opSstoreEIP2200(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
 	cost, err := gasSStoreEIP2200(evm, scope, scope.Gas(), 0)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, 0); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, 0)
+	if err != nil {
 		return pc, nil, err
 	}
 	return opSstore(pc, evm, scope)
@@ -294,7 +309,8 @@ func opSstoreEIP2200(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint6
 func makeSstoreEIP2929(clearingRefund uint64) gasExecuteFunc {
 	return func(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
 		cost, err := sstoreGasEIP2929(evm, scope, scope.Gas(), clearingRefund)
-		if err = evm.chargeDynamic(pc, scope, t, cost, err, 0); err != nil {
+		err = evm.chargeDynamic(pc, scope, t, cost, err, 0)
+		if err != nil {
 			return pc, nil, err
 		}
 		return opSstore(pc, evm, scope)
@@ -304,7 +320,8 @@ func makeSstoreEIP2929(clearingRefund uint64) gasExecuteFunc {
 // opSelfdestructWithGas runs the table's op, which EIP-6780 changes apart from the gas.
 func opSelfdestructWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
 	cost, err := gasSelfdestruct(evm, scope, scope.Gas(), 0)
-	if err = evm.chargeDynamic(pc, scope, t, cost, err, 0); err != nil {
+	err = evm.chargeDynamic(pc, scope, t, cost, err, 0)
+	if err != nil {
 		return pc, nil, err
 	}
 	return evm.jt[SELFDESTRUCT].execute(pc, evm, scope)
@@ -314,7 +331,8 @@ func opSelfdestructWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) 
 func makeSelfdestructEIP2929(refundsEnabled bool) gasExecuteFunc {
 	return func(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
 		cost, err := selfdestructGasEIP2929(evm, scope, scope.Gas(), refundsEnabled)
-		if err = evm.chargeDynamic(pc, scope, t, cost, err, 0); err != nil {
+		err = evm.chargeDynamic(pc, scope, t, cost, err, 0)
+		if err != nil {
 			return pc, nil, err
 		}
 		return evm.jt[SELFDESTRUCT].execute(pc, evm, scope)
@@ -329,7 +347,8 @@ func makeCreateWithGas(memorySize memorySizeFunc, gas createGasFunc, create crea
 			return pc, nil, err
 		}
 		cost, prepared, err := gas(evm, scope, scope.Gas(), size)
-		if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+		err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+		if err != nil {
 			return pc, nil, err
 		}
 		return create(pc, evm, scope, prepared)
@@ -347,7 +366,8 @@ func makeCallWithGas(memorySize memorySizeFunc, gas callGasFunc, call callFunc) 
 		if t != nil {
 			t.forwarded = forwarded
 		}
-		if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
+		err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+		if err != nil {
 			return pc, nil, err
 		}
 		return call(pc, evm, scope, forwarded)
