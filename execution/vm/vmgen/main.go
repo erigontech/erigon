@@ -365,10 +365,12 @@ func directCalls(ops [][2]string, copies map[string]string) string {
 	b.WriteString("switch op {\n")
 	for _, o := range ops {
 		fmt.Fprintf(&b, `case %s:
-	if o := &jt[%s]; o.gasExecute != nil && uint(stack.len()-o.numPop) <= uint(o.maxStack-o.numPop) && gasLeft >= o.constantGas {
-		gasLeft -= o.constantGas
-		%s
+	o := &jt[%s]
+	if o.gasExecute == nil || uint(stack.len()-o.numPop) > uint(o.maxStack-o.numPop) || gasLeft < o.constantGas {
+		break
 	}
+	gasLeft -= o.constantGas
+	%s
 `, o[0], o[0], inlineCopy(copies, o[1]+"Run"))
 		delete(copies, o[1]+"Run")
 	}
