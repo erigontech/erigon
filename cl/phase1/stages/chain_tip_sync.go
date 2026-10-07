@@ -1366,10 +1366,6 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				log.Warn("[chainTipSync] blockCollector.Flush failed (EL may still be catching up)", "err", err)
 			}
 		}
-		// Recheck persisted envelopes every cycle because payload verification state is not durable.
-		verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
-		verifyUnverifiedGloasPayloads(verifyCtx, cfg)
-		cancelVerify()
 	}
 
 	if args.seenSlot >= args.targetSlot {
@@ -1389,12 +1385,23 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 					return network.RequestEnvelopesFrantically(requestCtx, cfg.rpc, roots)
 				}, headRoot, 2*time.Second, canValidateGloasPayloads(cfg))
 			}
+			if canValidateGloasPayloads(cfg) {
+				verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
+				verifyUnverifiedGloasPayloads(verifyCtx, cfg)
+				cancelVerify()
+			}
 		}
 		return nil
 	}
 
 	totalRequest := args.targetSlot - args.seenSlot
 	log.Debug("[chainTipSync] totalRequest", "totalRequest", totalRequest, "seenSlot", args.seenSlot, "targetSlot", args.targetSlot)
+	if canValidatePayloads {
+		// Recheck persisted envelopes because payload verification state is not durable.
+		verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
+		verifyUnverifiedGloasPayloads(verifyCtx, cfg)
+		cancelVerify()
+	}
 	// If the execution engine is not ready, wait for it to be ready.
 	ready, err := waitForExecutionEngineToBeFinished(ctx, cfg)
 	if err != nil {

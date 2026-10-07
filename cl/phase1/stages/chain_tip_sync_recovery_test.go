@@ -3,6 +3,8 @@ package stages
 import (
 	"bytes"
 	"context"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -69,6 +71,7 @@ type chainTipBatchForkGraph struct {
 	fork_graph.ForkGraph
 	parents     map[common.Hash]*cltypes.SignedBeaconBlock
 	parentState *state2.CachingBeaconState
+	envelopesMu sync.RWMutex
 	envelopes   map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	added       map[common.Hash]int
 	insertOnAdd bool
@@ -134,11 +137,15 @@ func (g *chainTipBatchForkGraph) GetCurrentJustifiedCheckpoint(root common.Hash)
 }
 
 func (g *chainTipBatchForkGraph) HasEnvelope(root common.Hash) bool {
+	g.envelopesMu.RLock()
+	defer g.envelopesMu.RUnlock()
 	_, ok := g.envelopes[root]
 	return ok || g.ForkGraph.HasEnvelope(root)
 }
 
 func (g *chainTipBatchForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	g.envelopesMu.RLock()
+	defer g.envelopesMu.RUnlock()
 	if envelope, ok := g.envelopes[root]; ok {
 		return envelope, nil
 	}
@@ -146,6 +153,8 @@ func (g *chainTipBatchForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltype
 }
 
 func (g *chainTipBatchForkGraph) DumpEnvelopeOnDisk(root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	g.envelopesMu.Lock()
+	defer g.envelopesMu.Unlock()
 	g.envelopes[root] = envelope
 	return nil
 }
@@ -320,6 +329,37 @@ func TestChainTipSyncVerifiesStoredGloasPayloadWhileBehind(t *testing.T) {
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Equal(t, 1, engine.newPayloadCalls)
+	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
+}
+
+func TestChainTipSyncReverifiesHeadEnvelopeReceivedAtTarget(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	envelope := graph.envelopes[headRoot]
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	delete(graph.envelopes, headRoot)
+	peerRPC, sentinel := newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, envelope)
+	cfg.rpc = peerRPC
+	engine.newPayloadFn = func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		if engine.newPayloadCalls == 1 {
+			return execution_client.PayloadStatusNone, errors.New("engine unavailable")
+		}
+		return execution_client.PayloadStatusValidated, nil
+	}
+
+	selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, headRoot, selectedRoot)
+	require.False(t, cfg.forkChoice.HasEnvelope(headRoot))
+
+	targetSlot := headBlock.Block.Slot
+	err = chainTipSync(t.Context(), log.Root(), cfg, Args{seenSlot: targetSlot, targetSlot: targetSlot})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, sentinel.calls)
+	require.Equal(t, 2, engine.newPayloadCalls)
 	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
 }
 
