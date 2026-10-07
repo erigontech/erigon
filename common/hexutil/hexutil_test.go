@@ -17,8 +17,12 @@
 package hexutil
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"math/rand/v2"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -259,5 +263,56 @@ func TestIsValidQuantity(t *testing.T) {
 			err := IsValidQuantity(test.input)
 			checkError(t, test.input, err, test.wantErr)
 		})
+	}
+}
+
+// TestEncodeHexMatchesStdlib compares every hex writer with encoding/hex over lengths that cross
+// each vector block boundary and tail size.
+func TestEncodeHexMatchesStdlib(t *testing.T) {
+	r := rand.New(rand.NewPCG(1, 2))
+	for n := 0; n <= 300; n++ {
+		src := make([]byte, n)
+		for i := range src {
+			src[i] = byte(r.Uint32())
+		}
+		want := hex.EncodeToString(src)
+		dst := make([]byte, 2*n)
+		encodeHex(dst, src)
+		require.Equal(t, want, string(dst), "len %d", n)
+		require.Equal(t, `x"0x`+want+`"`, string(AppendQuoted([]byte("x"), src)), "len %d", n)
+		text, _ := Bytes(src).AppendText([]byte("x"))
+		require.Equal(t, "x0x"+want, string(text), "len %d", n)
+	}
+}
+
+// TestDecodeHexMatchesStdlib covers the SIMD block path and its fallbacks: every length around a
+// block boundary, both cases, and a bad character at each position.
+func TestDecodeHexMatchesStdlib(t *testing.T) {
+	const digits = "0123456789abcdefABCDEF"
+	for n := 0; n <= 200; n++ {
+		src := make([]byte, 2*n)
+		for i := range src {
+			src[i] = digits[(i*7)%len(digits)]
+		}
+		want := make([]byte, n)
+		wn, werr := hex.Decode(want, src)
+		got := make([]byte, n)
+		gn, gerr := decodeHex(got, src)
+		require.Equal(t, werr, gerr, "len %d", n)
+		require.Equal(t, wn, gn, "len %d", n)
+		require.Equal(t, want, got, "len %d", n)
+	}
+	src := []byte(strings.Repeat("ab", 100))
+	for i := 0; i < len(src); i++ {
+		for b := 0; b < 256; b++ {
+			bad := slices.Clone(src)
+			bad[i] = byte(b)
+			want, got := make([]byte, 100), make([]byte, 100)
+			wn, werr := hex.Decode(want, bad)
+			gn, gerr := decodeHex(got, bad)
+			require.Equal(t, werr, gerr, "byte %#02x at %d", b, i)
+			require.Equal(t, wn, gn, "byte %#02x at %d", b, i)
+			require.Equal(t, want[:wn], got[:gn], "byte %#02x at %d", b, i)
+		}
 	}
 }
