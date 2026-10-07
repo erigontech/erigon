@@ -110,23 +110,38 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream *jsonstream.Stream, result any) error {
 	return writeResultResponse(stream, msg.ID, func(s *jsonstream.Stream) error {
-		if isNilPointer(result) {
-			return json.NewEncoder(encoderWriter{s}).Encode(result)
+		if err := encodeResult(s, result); err != nil {
+			return &internalError{cause: err}
 		}
-		if fm, ok := result.(jsonstream.Marshaler); ok {
-			if err := fm.MarshalFastJSONTo(s); err != nil {
-				return err
-			}
-			return s.Err() // a latched write error left a placeholder in the stream
-		}
-		// A TextAppender's JSON is taken to be its quoted text, so this must stay ahead of the
-		// reflection encoder and must not catch a type whose json.Marshaler writes something else.
-		if ta, ok := result.(encoding.TextAppender); ok {
-			s.WriteQuotedText(ta)
-			return s.Err()
-		}
-		return json.NewEncoder(encoderWriter{s}).Encode(result)
+		return nil
 	})
+}
+
+// internalError is what the client sees when a result fails to encode: code -32603 and a generic
+// message. The real cause stays reachable through Unwrap for the caller's metrics and logs.
+type internalError struct{ cause error }
+
+func (e *internalError) Error() string  { return "internal server error" }
+func (e *internalError) ErrorCode() int { return ErrCodeInternalError }
+func (e *internalError) Unwrap() error  { return e.cause }
+
+func encodeResult(s *jsonstream.Stream, result any) error {
+	if isNilPointer(result) {
+		return json.NewEncoder(encoderWriter{s}).Encode(result)
+	}
+	if fm, ok := result.(jsonstream.Marshaler); ok {
+		if err := fm.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+		return s.Err() // a latched write error left a placeholder in the stream
+	}
+	// A TextAppender's JSON is taken to be its quoted text, so this must stay ahead of the
+	// reflection encoder and must not catch a type whose json.Marshaler writes something else.
+	if ta, ok := result.(encoding.TextAppender); ok {
+		s.WriteQuotedText(ta)
+		return s.Err()
+	}
+	return json.NewEncoder(encoderWriter{s}).Encode(result)
 }
 
 // writeResultResponse writes the response envelope with write filling "result". An error from write
