@@ -17,7 +17,6 @@
 package hexutil
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"reflect"
 	"slices"
@@ -71,7 +70,7 @@ func (b *Bytes) UnmarshalText(input []byte) error {
 		return err
 	}
 	dec := make([]byte, len(raw)/2)
-	if _, err = hex.Decode(dec, raw); err != nil {
+	if _, err = decodeHex(dec, raw); err != nil {
 		err = mapError(err)
 	} else {
 		*b = dec

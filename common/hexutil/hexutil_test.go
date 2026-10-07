@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand/v2"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -280,5 +282,36 @@ func TestEncodeHexMatchesStdlib(t *testing.T) {
 		require.Equal(t, `x"0x`+want+`"`, string(AppendQuoted([]byte("x"), src)), "len %d", n)
 		text, _ := Bytes(src).AppendText([]byte("x"))
 		require.Equal(t, "x0x"+want, string(text), "len %d", n)
+	}
+}
+
+// TestDecodeHexMatchesStdlib covers the SIMD block path and its fallbacks: every length around a
+// block boundary, both cases, and a bad character at each position.
+func TestDecodeHexMatchesStdlib(t *testing.T) {
+	const digits = "0123456789abcdefABCDEF"
+	for n := 0; n <= 200; n++ {
+		src := make([]byte, 2*n)
+		for i := range src {
+			src[i] = digits[(i*7)%len(digits)]
+		}
+		want := make([]byte, n)
+		wn, werr := hex.Decode(want, src)
+		got := make([]byte, n)
+		gn, gerr := decodeHex(got, src)
+		require.Equal(t, werr, gerr, "len %d", n)
+		require.Equal(t, wn, gn, "len %d", n)
+		require.Equal(t, want, got, "len %d", n)
+	}
+	src := []byte(strings.Repeat("ab", 100))
+	for i := range src {
+		bad := slices.Clone(src)
+		bad[i] = 'x'
+		want, got := make([]byte, 100), make([]byte, 100)
+		wn, werr := hex.Decode(want, bad)
+		gn, gerr := decodeHex(got, bad)
+		require.Error(t, gerr, "bad char at %d", i)
+		require.Equal(t, werr.Error(), gerr.Error(), "bad char at %d", i)
+		require.Equal(t, wn, gn, "bad char at %d", i)
+		require.Equal(t, want[:wn], got[:gn], "bad char at %d", i)
 	}
 }
