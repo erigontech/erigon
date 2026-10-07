@@ -22,6 +22,7 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -66,6 +67,9 @@ type EVM struct {
 	depth int
 	// txOutput receives the top-level frame's output; nil means a fresh copy.
 	txOutput *[]byte
+	// outputs[depth] receives a nested frame's output. Only the parent reads it,
+	// and only until its next call, which is the next frame at that depth.
+	outputs *[16][]byte
 
 	// chainConfig contains information about the current chain
 	chainConfig *chain.Config
@@ -759,9 +763,7 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 
 	depth := evm.depth
 	if depth == 0 {
-		// SetCode keeps the output, so it must not land in the reused buffer.
-		evm.intraBlockState.TxOutputBuffer()
-		evm.txOutput = nil
+		evm.txOutput = evm.intraBlockState.TxOutputBuffer()
 	}
 	inputTotal := gas.Total()
 	tracer := evm.Config().Tracer
@@ -881,7 +883,7 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		}
 
 		if gasOK {
-			if err := evm.intraBlockState.SetCode(address, ret, tracing.CodeChangeContractCreation); err != nil {
+			if err := evm.intraBlockState.SetCode(address, slices.Clone(ret), tracing.CodeChangeContractCreation); err != nil {
 				return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 			}
 			// EIP-8037: post-Run code-deposit state charge counts toward this

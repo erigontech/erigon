@@ -246,6 +246,27 @@ func TestCreatedCodeOutlivesNextTransaction(t *testing.T) {
 	require.Equal(t, code, got)
 }
 
+func TestInnerCreatedCodeOutlivesNextCall(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	callee := common.HexToAddress("0xaa")
+	factory := accounts.InternAddress(common.HexToAddress("0xbb"))
+	code := bytes.Repeat([]byte{1}, 32)
+	require.NoError(t, statedb.SetCode(accounts.InternAddress(callee), returnCalldata32, tracing.CodeChangeUnspecified))
+	require.NoError(t, statedb.SetCode(factory, program.New().
+		Create2(program.New().ReturnData(code).Bytes(), 0).
+		Mstore(bytes.Repeat([]byte{2}, 32), 0).
+		Call(nil, callee, 0, 0, 32, 0, 32).Op(vm.POP).
+		Push(0).Op(vm.MSTORE).Return(0, 32).Bytes(), tracing.CodeChangeUnspecified))
+
+	ret, _, err := Call(factory, nil, &Config{State: statedb})
+	require.NoError(t, err)
+	got, err := statedb.GetCode(accounts.InternAddress(common.BytesToAddress(ret)))
+	require.NoError(t, err)
+	require.Equal(t, code, got)
+}
+
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())

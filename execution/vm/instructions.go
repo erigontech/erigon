@@ -24,6 +24,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -1302,11 +1303,26 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 }
 
 func (evm *EVM) output(mem *Memory, offset, size uint64) []byte {
-	if buf := evm.txOutput; buf != nil && evm.depth == 1 && size != 0 {
+	if buf := evm.outputBuffer(size); buf != nil && size != 0 {
 		*buf = append((*buf)[:0], mem.GetPtr(offset, size)...)
 		return slices.Clip(*buf)
 	}
 	return mem.GetCopy(offset, size)
+}
+
+// outputBuffer returns where the current frame's output goes, or nil for a fresh copy.
+// Tracers keep nested outputs, and a buffer that outgrows the cap is not kept.
+func (evm *EVM) outputBuffer(size uint64) *[]byte {
+	if evm.depth == 1 {
+		return evm.txOutput
+	}
+	if evm.depth >= len(evm.outputs) || size > uint64(64*datasize.KB) || evm.config.Tracer != nil {
+		return nil
+	}
+	if evm.outputs == nil {
+		evm.outputs = new([16][]byte)
+	}
+	return &evm.outputs[evm.depth]
 }
 
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
