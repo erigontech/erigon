@@ -81,6 +81,8 @@ func TestRegularRpcServerWebsocketOrigin(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, handshake(t, []string{"https://dapp.example"}, "https://evil.example"))
 	require.Equal(t, http.StatusForbidden, handshake(t, []string{"https://dapp.example"}, "https://dapp.example:8443"))
 	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"https://dapp.example"}, ""))
+	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"https://*.example.com"}, "https://dapp.example.com"))
+	require.Equal(t, http.StatusForbidden, handshake(t, []string{"https://*.example.com"}, "https://evil.example"))
 	require.Equal(t, http.StatusSwitchingProtocols, handshake(t, []string{"*"}, "https://evil.example"))
 }
 
