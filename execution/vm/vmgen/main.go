@@ -280,15 +280,9 @@ func untraced(traced []byte, fast, direct string) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
 	}
-<<<<<<< HEAD
 	src := dropDeadCode(bytes.Replace(traced, []byte(switchHere), []byte(fast), 1))
-	if bytes.Count(src, []byte(cacheGenStep)) != 1 {
-		log.Fatalf("interpreter.go: want one %q", cacheGenStep)
-=======
-	src := bytes.Replace(traced, []byte(switchHere), []byte(fast), 1)
 	if bytes.Count(src, []byte(directHere)) != 1 {
 		log.Fatalf("interpreter.go: want one %q", directHere)
->>>>>>> origin/alex/drop_cache_gen_38
 	}
 	src = bytes.Replace(src, []byte(directHere), []byte(direct), 1)
 	fset := token.NewFileSet()
