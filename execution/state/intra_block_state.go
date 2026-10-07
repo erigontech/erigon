@@ -257,7 +257,6 @@ func New(stateReader StateReader) *IntraBlockState {
 	}
 	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
-	ibs.versionedWrites.UseArena()
 	return ibs
 }
 
@@ -365,7 +364,7 @@ func (ibs *IntraBlockState) Reset() {
 	// originals in ibs.versionedWrites are no longer referenced after the
 	// boundary call.  Walk the per-path maps and return every VW to its
 	// typed pool before resetting.
-	ibs.versionedWrites.ReleaseAndReset()
+	ibs.versionedWrites.recycle()
 	ibs.recordAccess = false
 	ibs.accountReadDuration = 0
 	ibs.accountReadCount = 0
@@ -3495,7 +3494,7 @@ func (ibs *IntraBlockState) VersionedReads() ReadSet {
 
 func (ibs *IntraBlockState) ResetVersionedIO() {
 	ibs.versionedReads = ReadSet{}
-	ibs.versionedWrites.ReleaseAndReset()
+	ibs.versionedWrites.recycle()
 	ibs.dep = UnknownDep
 	ibs.stateReadErr = nil
 	ibs.recordAccess = false

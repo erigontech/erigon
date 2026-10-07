@@ -710,118 +710,134 @@ func releaseVWCodeHash(vw *VersionedWrite[accounts.CodeHash]) { vwPoolCodeHash.P
 func releaseVWCodeSize(vw *VersionedWrite[int])               { vwPoolCodeSize.Put(vw) }
 func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Put(vw) }
 
-// A reusing set keeps its slabs, so the cap is what one outlier may pin on it.
-// Past the cap the caller allocates, which is what every cell did before.
+// Slabs double from a small first one, so a path that writes a handful of cells
+// buys a handful and a path that writes thousands still amortizes. A reusing set
+// keeps its slabs, so the cap is what one outlier may pin on it; past the cap
+// the shared pools serve the cells, as they did before the arena.
 const (
-	vwSlabSize = 64
-	vwMaxSlabs = 16
-	vwMaxCells = vwSlabSize * vwMaxSlabs
+	vwFirstSlab = 4
+	vwMaxCells  = 1024
 )
 
 // vwArena hands out VersionedWrite cells from append-only slabs and recycles
 // them on reset, which costs no atomics and no per-cell Put. A cell stays valid
 // only until that reset, so nothing outside the owning set may hold one. Every
-// cell it hands out is zero: a new slab starts zeroed and reset clears what it
-// rewinds.
+// cell it hands out is zero: a new slab starts zeroed, reset clears what it
+// rewinds, and the pools hand back cleared cells.
 type vwArena[T any] struct {
-	slabs []*[vwSlabSize]VersionedWrite[T]
-	slab  int
-	idx   int
+	slabs    [][]VersionedWrite[T]
+	slab     int
+	idx      int
+	cap      int
+	overflow []*VersionedWrite[T]
 }
 
-func (a *vwArena[T]) alloc() *VersionedWrite[T] {
+func (a *vwArena[T]) alloc(get func() *VersionedWrite[T]) *VersionedWrite[T] {
 	if a.slab == len(a.slabs) {
-		if a.slab == vwMaxSlabs {
-			return &VersionedWrite[T]{}
+		if a.cap == vwMaxCells {
+			vw := get()
+			*vw = VersionedWrite[T]{} // the pools clear only what pins memory
+			a.overflow = append(a.overflow, vw)
+			return vw
 		}
-		a.slabs = append(a.slabs, new([vwSlabSize]VersionedWrite[T]))
+		a.slabs = append(a.slabs, make([]VersionedWrite[T], a.nextSlab()))
+		a.cap += len(a.slabs[a.slab])
 	}
 	vw := &a.slabs[a.slab][a.idx]
 	a.idx++
-	if a.idx == vwSlabSize {
+	if a.idx == len(a.slabs[a.slab]) {
 		a.slab++
 		a.idx = 0
 	}
 	return vw
 }
 
-func (a *vwArena[T]) reset() {
+func (a *vwArena[T]) nextSlab() int {
+	return min(max(a.cap, vwFirstSlab), vwMaxCells-a.cap)
+}
+
+func (a *vwArena[T]) reset(release func(*VersionedWrite[T])) {
 	for s := 0; s <= a.slab && s < len(a.slabs); s++ {
-		used := a.slabs[s][:]
+		used := a.slabs[s]
 		if s == a.slab {
 			used = used[:a.idx]
 		}
 		clear(used)
 	}
 	a.slab, a.idx = 0, 0
+	for _, vw := range a.overflow {
+		release(vw)
+	}
+	clear(a.overflow)
+	a.overflow = a.overflow[:0]
 }
 
 func (ws *WriteSet) newVWAddress() *VersionedWrite[*accounts.Account] {
 	if ws.cells.on {
-		return ws.cells.address.alloc()
+		return ws.cells.address.alloc(getVWAddress)
 	}
 	return getVWAddress()
 }
 
 func (ws *WriteSet) newVWBalance() *VersionedWrite[uint256.Int] {
 	if ws.cells.on {
-		return ws.cells.balance.alloc()
+		return ws.cells.balance.alloc(getVWBalance)
 	}
 	return getVWBalance()
 }
 
 func (ws *WriteSet) newVWNonce() *VersionedWrite[uint64] {
 	if ws.cells.on {
-		return ws.cells.nonce.alloc()
+		return ws.cells.nonce.alloc(getVWNonce)
 	}
 	return getVWNonce()
 }
 
 func (ws *WriteSet) newVWIncarnation() *VersionedWrite[uint64] {
 	if ws.cells.on {
-		return ws.cells.incarnation.alloc()
+		return ws.cells.incarnation.alloc(getVWIncarnation)
 	}
 	return getVWIncarnation()
 }
 
 func (ws *WriteSet) newVWSelfDestruct() *VersionedWrite[bool] {
 	if ws.cells.on {
-		return ws.cells.selfDestruct.alloc()
+		return ws.cells.selfDestruct.alloc(getVWSelfDestruct)
 	}
 	return getVWSelfDestruct()
 }
 
 func (ws *WriteSet) newVWCreateContract() *VersionedWrite[bool] {
 	if ws.cells.on {
-		return ws.cells.createContract.alloc()
+		return ws.cells.createContract.alloc(getVWCreateContract)
 	}
 	return getVWCreateContract()
 }
 
 func (ws *WriteSet) newVWCode() *VersionedWrite[accounts.Code] {
 	if ws.cells.on {
-		return ws.cells.code.alloc()
+		return ws.cells.code.alloc(getVWCode)
 	}
 	return getVWCode()
 }
 
 func (ws *WriteSet) newVWCodeHash() *VersionedWrite[accounts.CodeHash] {
 	if ws.cells.on {
-		return ws.cells.codeHash.alloc()
+		return ws.cells.codeHash.alloc(getVWCodeHash)
 	}
 	return getVWCodeHash()
 }
 
 func (ws *WriteSet) newVWCodeSize() *VersionedWrite[int] {
 	if ws.cells.on {
-		return ws.cells.codeSize.alloc()
+		return ws.cells.codeSize.alloc(getVWCodeSize)
 	}
 	return getVWCodeSize()
 }
 
 func (ws *WriteSet) newVWStorage() *VersionedWrite[uint256.Int] {
 	if ws.cells.on {
-		return ws.cells.storage.alloc()
+		return ws.cells.storage.alloc(getVWStorage)
 	}
 	return getVWStorage()
 }
@@ -863,16 +879,16 @@ type vwArenas struct {
 }
 
 func (a *vwArenas) reset() {
-	a.address.reset()
-	a.balance.reset()
-	a.nonce.reset()
-	a.incarnation.reset()
-	a.selfDestruct.reset()
-	a.createContract.reset()
-	a.code.reset()
-	a.codeHash.reset()
-	a.codeSize.reset()
-	a.storage.reset()
+	a.address.reset(releaseVWAddress)
+	a.balance.reset(releaseVWBalance)
+	a.nonce.reset(releaseVWNonce)
+	a.incarnation.reset(releaseVWIncarnation)
+	a.selfDestruct.reset(releaseVWSelfDestruct)
+	a.createContract.reset(releaseVWCreateContract)
+	a.code.reset(releaseVWCode)
+	a.codeHash.reset(releaseVWCodeHash)
+	a.codeSize.reset(releaseVWCodeSize)
+	a.storage.reset(releaseVWStorage)
 }
 
 func (ws *WriteSet) ArenaBacked() bool { return ws != nil && ws.cells.on }
@@ -886,9 +902,18 @@ func (ws *WriteSet) assertNotArena(op string) {
 	}
 }
 
-// UseArena routes this set's cells to its own slabs. New does it for every
-// state; a set that shares its cells out must not (see assertNotArena).
+// UseArena routes this set's cells to its own slabs. Only a set the state keeps
+// across txs may do it, and a set that shares its cells out must not (see
+// assertNotArena and recycle).
 func (ws *WriteSet) UseArena() { ws.cells.on = true }
+
+// recycle resets the set and takes its cells from its own slabs from here on.
+// Slabs only pay off once the state outlives a tx: a one-shot state would buy
+// a slab per path it touches and throw it away.
+func (ws *WriteSet) recycle() {
+	ws.ReleaseAndReset()
+	ws.UseArena()
+}
 
 // Released reports whether ReleaseMaps pooled this set's maps and no later
 // write revived it.

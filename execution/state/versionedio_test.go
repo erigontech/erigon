@@ -1759,7 +1759,7 @@ func TestSynthesizeWithoutCellsAllocatesNothing(t *testing.T) {
 func TestWriteSetArenaReusesItsCells(t *testing.T) {
 	var ws WriteSet
 	ws.UseArena()
-	addrs := make([]accounts.Address, vwSlabSize+3)
+	addrs := make([]accounts.Address, vwFirstSlab*4+3)
 	for i := range addrs {
 		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
 	}
@@ -1889,13 +1889,62 @@ func TestReleaseMapsKeepsTheArena(t *testing.T) {
 func TestArenaStopsGrowingAtItsCap(t *testing.T) {
 	ws := &WriteSet{}
 	ws.UseArena()
-	for range vwMaxCells + vwSlabSize {
+	for range vwMaxCells + vwFirstSlab {
 		require.NotNil(t, ws.newVWNonce())
 	}
-	require.Len(t, ws.cells.nonce.slabs, vwMaxSlabs, "the arena must not grow past its cap")
+	require.Equal(t, vwMaxCells, ws.cells.nonce.cap, "the arena must not grow past its cap")
 
+	slabs := len(ws.cells.nonce.slabs)
 	ws.ReleaseAndReset()
-	require.Len(t, ws.cells.nonce.slabs, vwMaxSlabs, "a reset keeps the slabs for the next call")
+	require.Len(t, ws.cells.nonce.slabs, slabs, "a reset keeps the slabs for the next call")
+}
+
+func TestArenaOverflowCellsReturnToThePool(t *testing.T) {
+	const overflow = 64
+	var a vwArena[uint64]
+
+	taken := make([]*VersionedWrite[uint64], 0, vwMaxCells+overflow)
+	for range vwMaxCells + overflow {
+		taken = append(taken, a.alloc(getVWNonce))
+	}
+	require.Len(t, a.overflow, overflow, "cells past the cap must be tracked")
+
+	var released []*VersionedWrite[uint64]
+	a.reset(func(vw *VersionedWrite[uint64]) { released = append(released, vw) })
+	require.Equal(t, taken[vwMaxCells:], released, "a reset must hand every overflow cell back")
+	require.Empty(t, a.overflow)
+
+	// The pools clear only what pins memory, so the arena has to finish the job.
+	dirty := &VersionedWrite[uint64]{WriteHeader: WriteHeader{Path: NoncePath}, Val: 7}
+	for range vwMaxCells {
+		a.alloc(getVWNonce)
+	}
+	require.Zero(t, *a.alloc(func() *VersionedWrite[uint64] { return dirty }))
+}
+
+func TestOnlyAReusedStateOwnsItsCells(t *testing.T) {
+	ibs := New(NewNoopReader())
+	require.False(t, ibs.versionedWrites.ArenaBacked(), "a one-shot state buys no slabs")
+
+	ibs.ResetVersionedIO()
+	require.True(t, ibs.versionedWrites.ArenaBacked(), "a state that outlives a tx owns its cells")
+}
+
+// A path that writes a handful of cells must buy a handful: the first slab is
+// what the first tx on a reused state pays for, and it grows as writes keep
+// coming.
+func TestArenaSlabsGrowWithTheWrites(t *testing.T) {
+	ws := &WriteSet{}
+	ws.UseArena()
+
+	require.NotNil(t, ws.newVWNonce())
+	require.Equal(t, vwFirstSlab, ws.cells.nonce.cap, "one write must not buy more than the first slab")
+
+	for range vwMaxCells - 1 {
+		require.NotNil(t, ws.newVWNonce())
+	}
+	require.Equal(t, vwMaxCells, ws.cells.nonce.cap)
+	require.Less(t, len(ws.cells.nonce.slabs), 12, "doubling must reach the cap in a few slabs")
 }
 
 // Slot maps from earlier calls go, so a sequence of calls on different
