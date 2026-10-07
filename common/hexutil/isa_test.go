@@ -40,8 +40,9 @@ func TestNoInstructionBeyondTheFeatureCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("objdump: %v", err)
 	}
-	// A zmm or mask register, or an instruction that exists only with AVX-512.
-	forbidden := regexp.MustCompile(`\b(Z[0-9]+|K[1-7])\b|\bVPMOV[A-Z]*B\b|\bVPERMB\b|\bVPCOMPRESS`)
+	// A zmm or mask register, or one of the instructions that AVX-512 introduced. The names are
+	// spelled out because the AVX2 set has near misses: VPMOVMSKB and VPMOVZXBW are not AVX-512.
+	forbidden := regexp.MustCompile(`\b(Z[0-9]+|K[1-7])\b|\b(VPMOV(S|US)?(WB|DB|QB|DW|QW|QD)|VPERM[BW]|VPCOMPRESS[BWDQ]|VPEXPAND[BWDQ]|VPTERNLOG[DQ])\b`)
 	for _, line := range strings.Split(string(out), "\n") {
 		if m := forbidden.FindString(line); m != "" {
 			t.Errorf("AVX-512 %q reached by a path that only checks AVX2:\n%s", m, strings.TrimSpace(line))
