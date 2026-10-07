@@ -303,7 +303,7 @@ func TestRunMatchesRunTraced(t *testing.T) {
 	}
 	rng := rand.New(rand.NewPCG(1, 2))
 	// GAS, MSIZE and the generic stack ops see whether the fast path stored its registers back.
-	alphabet := append(slices.Sorted(maps.Keys(fastPathOps)), GAS, MSIZE, NOT, OR, CALLDATALOAD, CALLDATALOAD, CALLDATACOPY, CODECOPY, RETURNDATACOPY, MCOPY, MCOPY, MSTORE8, MSTORE8, KECCAK256, KECCAK256)
+	alphabet := append(slices.Sorted(maps.Keys(fastPathOps)), GAS, MSIZE, NOT, OR, CALLDATALOAD, CALLDATALOAD, CALLDATACOPY, CODECOPY, RETURNDATACOPY, MCOPY, MCOPY, MSTORE8, MSTORE8, KECCAK256, KECCAK256, DUP9, DUP12, DUP16, SWAP5, SWAP9, SWAP16)
 	for i := range 300 {
 		b := pushes(8)
 		for range 40 {

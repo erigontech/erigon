@@ -59,6 +59,9 @@ func stSub(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %d %d", SUB, &x, &y)
 }
 
+// opMul and opDiv stay calls in run's fast path, which keeps pc in a register across them.
+//
+//go:noinline
 func opMul(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
 	y.Mul(x, y)
@@ -70,6 +73,7 @@ func stMul(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %d %d", MUL, &x, &y)
 }
 
+//go:noinline
 func opDiv(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	x, y := scope.Stack.pop1Peek1()
 	y.Div(x, y)

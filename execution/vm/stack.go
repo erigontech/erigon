@@ -183,3 +183,28 @@ func (st *Stack) Reset() {
 func (st *Stack) len() int {
 	return st.top
 }
+
+// The *At methods are the stack ops for a top kept outside the Stack, as run's
+// fast path keeps it in a register: they neither read nor write st.top, and
+// the caller moves its top by the op's stack delta. The caller's range check
+// on top lets the prove pass drop their bounds checks.
+
+func (st *Stack) pushRefAt(top int) *uint256.Int { return &st.data[top] }
+
+func (st *Stack) popAt(top int) *uint256.Int { return &st.data[top-1] }
+
+func (st *Stack) peekAt(top int) *uint256.Int { return &st.data[top-1] }
+
+func (st *Stack) pop2At(top int) (x, y *uint256.Int) { return &st.data[top-1], &st.data[top-2] }
+
+func (st *Stack) pop1Peek1At(top int) (x, y *uint256.Int) { return &st.data[top-1], &st.data[top-2] }
+
+func (st *Stack) dupAt(top, n int) { st.data[top] = st.data[top-n-1] }
+
+// swapAt swaps word by word: swapping the uint256.Ints whole goes through a temp on the frame.
+func (st *Stack) swapAt(top, n int) {
+	x, y := &st.data[top-1], &st.data[top-n-1]
+	for i := range x {
+		x[i], y[i] = y[i], x[i]
+	}
+}
