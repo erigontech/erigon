@@ -296,6 +296,10 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"sstore": prog(PUSH1, 0xaa, PUSH1, 1, SSTORE, PUSH1, 0, PUSH1, 2, SSTORE, PUSH1, 7, PUSH1, 3, SSTORE, PUSH1, 0, PUSH1, 3, SSTORE,
 			PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, PUSH1, 3, SLOAD, DUP1),
 		"selfdestruct": {byte(PUSH1), 0x20, byte(SELFDESTRUCT)},
+		// Each call reads 32 bytes past the memory and writes 32 bytes further on.
+		"calls": prog(PUSH1, 32, PUSH1, 64, PUSH1, 32, PUSH1, 0, PUSH1, 4, GAS, STATICCALL, PUSH1, 32, PUSH1, 128, PUSH1, 32, PUSH1, 96, PUSH1, 4, GAS, DELEGATECALL,
+			PUSH1, 32, PUSH1, 192, PUSH1, 32, PUSH1, 160, PUSH1, 0, PUSH1, 4, GAS, CALLCODE, DUP1),
+		"create": prog(PUSH1, 0, PUSH1, 0, PUSH1, 0, CREATE, PUSH1, 7, PUSH1, 0, PUSH1, 0, PUSH1, 0, CREATE2, DUP1, DUP1),
 		// The zero address is warm, 0x20 and 0x21 are cold.
 		"account":     prog(PUSH1, 0x20, BALANCE, PUSH1, 0x20, EXTCODESIZE, PUSH1, 0x21, EXTCODEHASH, PUSH1, 0x21, BALANCE, PUSH1, 0x22, EXTCODESIZE),
 		"accountwarm": prog(PUSH1, 0, BALANCE, PUSH1, 0, EXTCODESIZE, PUSH1, 0, EXTCODEHASH, DUP1),
