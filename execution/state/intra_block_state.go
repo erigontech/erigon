@@ -160,6 +160,9 @@ type IntraBlockState struct {
 	blockNum uint64
 	logs     logArena
 
+	txOutput     []byte
+	txOutputFree bool
+
 	// Per-transaction access list
 	accessList accessList
 
@@ -485,6 +488,17 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 	}
 }
 
+// TxOutputBuffer gives the first top-level frame after Prepare a buffer for its
+// output that the next transaction reuses, and nil to any other caller. Whoever
+// keeps a transaction's output past the next Prepare must copy it.
+func (ibs *IntraBlockState) TxOutputBuffer() *[]byte {
+	if !ibs.txOutputFree {
+		return nil
+	}
+	ibs.txOutputFree = false
+	return &ibs.txOutput
+}
+
 // AllocLog reserves the next log slot of the current tx and returns it sized for
 // numTopics/dataSize. The caller must write every topic and every data byte, then
 // call NotifyLog; whatever it leaves unwritten belongs to whichever transaction
@@ -642,7 +656,7 @@ func (ibs *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 	// self-destruct has already cleared the versioned nonce/code-hash/balance cells,
 	// so recognize the own-tx SelfDestruct write directly. Cross-tx destructs are
 	// handled above by versionedAccountBase returning nil. Only a true write counts:
-	// createObject records SelfDestructPath=false for every account it materializes,
+	// CreateAccount records SelfDestructPath=false for a new or revived account,
 	// which says "created", not "destroyed".
 	if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
 		return false, nil
@@ -738,11 +752,11 @@ func (ibs *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
-	code, err := ibs.getCode(addr, false)
+	code, err := ibs.getCode(addr)
 	return code.Bytes, err
 }
 
-func (ibs *IntraBlockState) getCode(addr accounts.Address, commited bool) (accounts.Code, error) {
+func (ibs *IntraBlockState) getCode(addr accounts.Address) (accounts.Code, error) {
 	if ibs.versionMap == nil {
 		stateObject, err := ibs.getStateObject(addr, true)
 		if err != nil {
@@ -767,19 +781,7 @@ func (ibs *IntraBlockState) getCode(addr accounts.Address, commited bool) (accou
 		}
 		return accounts.Code{}, nil
 	}
-	// When commited=true (used by ResolveCode for EIP-7702 delegation),
-	// versionedReadCore skips local versionedWrites and may return a stale
-	// ReadSet value. If the CURRENT tx has set this account's code (e.g.,
-	// via EIP-7702 authorization processing), return the dirty code directly.
-	// We must also check hasWrite to ensure the code was set in this tx,
-	// not in a previous tx sharing the same IBS (block generator reuses IBS).
-	if commited {
-		if so, ok := ibs.stateObjects[addr]; ok && so.dirtyCode && ibs.hasWrite(addr, CodePath, accounts.NilKey) {
-			ibs.callCodeAccessHook(addr, so.code.Bytes)
-			return so.code, nil
-		}
-	}
-	code, source, _, err := readCode(ibs, addr, commited)
+	code, source, _, err := readCode(ibs, addr)
 
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 		if err != nil {
@@ -896,10 +898,10 @@ func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, e
 	// list) are visible. With committed=true the parallel executor reads stale
 	// delegation code from the version map instead of the current tx's SetCode.
 	// CodePath exemptions in versionedReadCore already handle SelfDestruct cases.
-	code, err := ibs.getCode(addr, false)
+	code, err := ibs.getCode(addr)
 	// eip-7702
 	if delegation, ok := types.ParseDelegation(code.Bytes); ok {
-		return ibs.getCode(delegation, false)
+		return ibs.getCode(delegation)
 	}
 	if err != nil {
 		return accounts.Code{}, err
@@ -917,7 +919,7 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 		// CodeHashPath and CodePath. Going through getCode would also report a
 		// BAL code access for non-delegated code, so use readCode directly and
 		// preserve the existing hook semantics below.
-		code, _, _, err := readCode(ibs, addr, false)
+		code, _, _, err := readCode(ibs, addr)
 		if err != nil {
 			return accounts.ZeroAddress, false, err
 		}
@@ -2929,6 +2931,7 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	ibs.eip8246 = rules.IsAmsterdam
 	ibs.eip161 = rules.IsEIP161Enabled()
 	ibs.isAura = rules.IsAura
+	ibs.txOutputFree = true
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		ibs.accessList.Reset()

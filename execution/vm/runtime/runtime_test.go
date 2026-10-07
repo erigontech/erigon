@@ -20,11 +20,13 @@
 package runtime
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -175,6 +177,73 @@ func TestCallDoesNotCreateOrigin(t *testing.T) {
 	exists, err := statedb.Exist(origin)
 	require.NoError(t, err)
 	require.False(t, exists)
+}
+
+// returnCalldata32 returns the first 32 bytes of its calldata.
+var returnCalldata32 = []byte{
+	byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.CALLDATACOPY),
+	byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN),
+}
+
+func TestCallReusesOutputBufferAcrossTransactions(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+
+	first, _, err := Call(address, nil, cfg)
+	require.NoError(t, err)
+	second, _, err := Call(address, nil, cfg)
+	require.NoError(t, err)
+	require.Same(t, unsafe.SliceData(first), unsafe.SliceData(second))
+}
+
+// A system call runs without Prepare and keeps its output, as the EIP-7002 requests do.
+func TestCallWithoutPrepareGetsItsOwnOutput(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	first, second := bytes.Repeat([]byte{1}, 32), bytes.Repeat([]byte{2}, 32)
+
+	out, _, err := Call(address, first, cfg)
+	require.NoError(t, err)
+	_, _, _, err = NewEnv(cfg).Call(cfg.Origin, address, second, mdgas.MdGas{Execution: cfg.GasLimit}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.Equal(t, first, out)
+}
+
+func TestCreatedCodeOutlivesNextTransaction(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, returnCalldata32, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	setDefaults(cfg)
+	vmenv := NewEnv(cfg)
+	rules := vmenv.ChainRules()
+	gas := mdgas.MdGas{Execution: cfg.GasLimit}
+	code := bytes.Repeat([]byte{1}, 32)
+	initCode := append(append([]byte{byte(vm.PUSH32)}, code...),
+		byte(vm.PUSH1), 0, byte(vm.MSTORE), byte(vm.PUSH1), 32, byte(vm.PUSH1), 0, byte(vm.RETURN))
+
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	_, _, _, err := vmenv.Call(cfg.Origin, address, nil, gas, uint256.Int{}, false)
+	require.NoError(t, err)
+	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
+	_, created, _, _, err := vmenv.Create(cfg.Origin, initCode, gas, uint256.Int{}, nil, false)
+	require.NoError(t, err)
+	_, _, err = Call(address, bytes.Repeat([]byte{2}, 32), cfg)
+	require.NoError(t, err)
+
+	got, err := statedb.GetCode(created)
+	require.NoError(t, err)
+	require.Equal(t, code, got)
 }
 
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {

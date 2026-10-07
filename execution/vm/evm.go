@@ -64,6 +64,8 @@ type EVM struct {
 
 	// depth is the current call stack
 	depth int
+	// txOutput receives the top-level frame's output; nil means a fresh copy.
+	txOutput *[]byte
 
 	// chainConfig contains information about the current chain
 	chainConfig *chain.Config
@@ -341,6 +343,9 @@ func (evm *EVM) Call(caller accounts.Address, addr accounts.Address, input []byt
 	}
 
 	depth := evm.depth
+	if depth == 0 {
+		evm.txOutput = evm.intraBlockState.TxOutputBuffer()
+	}
 	gasRemaining = gas
 	inputTotal := gas.Total()
 	var (
@@ -753,6 +758,11 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	gasRemaining = gas
 
 	depth := evm.depth
+	if depth == 0 {
+		// SetCode keeps the output, so it must not land in the reused buffer.
+		evm.intraBlockState.TxOutputBuffer()
+		evm.txOutput = nil
+	}
 	inputTotal := gas.Total()
 	tracer := evm.Config().Tracer
 	gasTracing := tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook() || dbg.TraceTransactionIO
