@@ -129,6 +129,11 @@ type ReadSet struct {
 	codeSize              map[accounts.Address]VersionedRead[int]
 	storage               map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
 
+	// coldSlots memoizes committed slot reads for an execution nobody validates:
+	// the versioned record would carry a 48-byte header that is UnknownVersion
+	// for every one of them, in a map per address.
+	coldSlots map[slotRef]uint256.Int
+
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
 	// travels with the read-set rather than as a separate IntraBlockState cache.
@@ -143,7 +148,7 @@ func (s *ReadSet) entries() int {
 	for _, inner := range s.storage {
 		n += len(inner)
 	}
-	return n
+	return n + len(s.coldSlots)
 }
 
 func (s *ReadSet) clearForReuse() {
@@ -173,12 +178,43 @@ func (s *ReadSet) clearForReuse() {
 		// Nil, not cleared: a cleared map keeps the buckets those addresses grew.
 		s.storage = nil
 	}
+	clear(s.coldSlots)
 	s.access = nil
 }
 
 // maxReusedStorageAddrs bounds how many per-address slot maps a reused read set
 // keeps; past it the outer map is dropped with them.
 const maxReusedStorageAddrs = 64
+
+// slotRef addresses one slot without a map per account.
+type slotRef struct {
+	addr accounts.Address
+	key  accounts.StorageKey
+}
+
+func (s *ReadSet) SetColdSlot(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
+	if s.coldSlots == nil {
+		s.coldSlots = make(map[slotRef]uint256.Int)
+	}
+	s.coldSlots[slotRef{addr, key}] = val
+}
+
+func (s *ReadSet) GetColdSlot(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
+	v, ok := s.coldSlots[slotRef{addr, key}]
+	return v, ok
+}
+
+// DelColdSlot drops one memoized slot. A write invalidates it here instead of
+// the read checking for one, and dropping too much only costs a re-read.
+func (s *ReadSet) DelColdSlot(addr accounts.Address, key accounts.StorageKey) {
+	if s.coldSlots != nil {
+		delete(s.coldSlots, slotRef{addr, key})
+	}
+}
+
+// DropColdSlots drops the whole memo, for a change that invalidates an
+// account's slots wholesale rather than one of them.
+func (s *ReadSet) DropColdSlots() { clear(s.coldSlots) }
 
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
 	if *m == nil {
@@ -464,7 +500,7 @@ func (s ReadSet) Len() int {
 	for _, inner := range s.storage {
 		n += len(inner)
 	}
-	return n
+	return n + len(s.coldSlots)
 }
 
 // mergeFrom copies every entry of src into s, overwriting on collision.
