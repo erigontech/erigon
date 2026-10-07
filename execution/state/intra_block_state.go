@@ -2063,8 +2063,7 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		}
 	}
 
-	var code refreshedCode
-	var codeSource ReadSource
+	var code accounts.Code
 
 	if ibs.versionMap != nil {
 		account = readAccount
@@ -2100,7 +2099,7 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 			}
 		}
 
-		code, codeSource, _, err = refreshCode(ibs, addr)
+		code, err = refreshCode(ibs, addr)
 		if err != nil {
 			return nil, err
 		}
@@ -2118,11 +2117,10 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	if code.Bytes != nil {
 		// The account record can lag a prior tx's code write, so the resolved
 		// hash wins: SetCode's revert-to-original check would drop the write.
-		codeHash := code.codeHash(codeSource, obj.data.CodeHash)
-		obj.code = accounts.Code{Hash: codeHash, Bytes: code.Bytes}
-		if codeHash != obj.data.CodeHash {
-			obj.data.CodeHash = codeHash
-			obj.original.CodeHash = codeHash
+		obj.code = code
+		if code.Hash != obj.data.CodeHash {
+			obj.data.CodeHash = code.Hash
+			obj.original.CodeHash = code.Hash
 		}
 	}
 	if ibs.noMaterialize {
@@ -3312,14 +3310,13 @@ func (ibs *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	if obj.code.Bytes != nil {
 		return
 	}
-	code, codeSource, _, err := refreshCode(ibs, addr)
+	code, err := refreshCode(ibs, addr)
 	if err != nil || code.Bytes == nil {
 		return
 	}
-	codeHash := code.codeHash(codeSource, obj.data.CodeHash)
-	obj.code = accounts.Code{Hash: codeHash, Bytes: code.Bytes}
-	obj.data.CodeHash = codeHash
-	obj.original.CodeHash = codeHash
+	obj.code = code
+	obj.data.CodeHash = code.Hash
+	obj.original.CodeHash = code.Hash
 }
 
 // versionedWriteHit probes the dirty per-tx write set for a write at
