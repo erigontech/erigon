@@ -97,12 +97,12 @@ func validateAndFillMaxStack(jt *JumpTable) {
 			panic(fmt.Sprintf("op 0x%x is not set", i))
 		}
 		// The interpreter has an assumption that if the memorySize function is
-		// set, then the dynamicGas function is also set. This is a somewhat
+		// set, then the dynamicGas or gasExecute function is also set. This is a somewhat
 		// arbitrary assumption, and can be removed if we need to -- but it
 		// allows us to avoid a condition check. As long as we have that assumption
 		// in there, this little sanity check prevents us from merging in a
 		// change which violates it.
-		if op.memorySize != nil && op.dynamicGas == nil {
+		if op.memorySize != nil && op.dynamicGas == nil && op.gasExecute == nil {
 			panic(fmt.Sprintf("op %v has dynamic memory but not dynamic gas", OpCode(i).String()))
 		}
 		op.maxStack = maxStack(op.numPop, op.numPush)
@@ -255,7 +255,7 @@ func newByzantiumInstructionSet() JumpTable {
 	instructionSet[RETURNDATACOPY] = operation{
 		execute:     opReturnDataCopy,
 		constantGas: GasFastestStep,
-		dynamicGas:  gasReturnDataCopy,
+		gasExecute:  opReturnDataCopyWithGas,
 		numPop:      3,
 		numPush:     0,
 		memorySize:  memoryReturnDataCopy,
@@ -263,7 +263,7 @@ func newByzantiumInstructionSet() JumpTable {
 	}
 	instructionSet[REVERT] = operation{
 		execute:    opRevert,
-		dynamicGas: gasRevert,
+		gasExecute: opRevertWithGas,
 		numPop:     2,
 		numPush:    0,
 		memorySize: memoryRevert,
@@ -475,7 +475,7 @@ func newFrontierInstructionSet() JumpTable {
 		KECCAK256: {
 			execute:     opKeccak256,
 			constantGas: params.Keccak256Gas,
-			dynamicGas:  gasKeccak256,
+			gasExecute:  opKeccak256WithGas,
 			numPop:      2,
 			numPush:     1,
 			memorySize:  memoryKeccak256,
@@ -528,7 +528,7 @@ func newFrontierInstructionSet() JumpTable {
 		CALLDATACOPY: {
 			execute:     opCallDataCopy,
 			constantGas: GasFastestStep,
-			dynamicGas:  gasCallDataCopy,
+			gasExecute:  opCallDataCopyWithGas,
 			numPop:      3,
 			numPush:     0,
 			memorySize:  memoryCallDataCopy,
@@ -543,7 +543,7 @@ func newFrontierInstructionSet() JumpTable {
 		CODECOPY: {
 			execute:     opCodeCopy,
 			constantGas: GasFastestStep,
-			dynamicGas:  gasCodeCopy,
+			gasExecute:  opCodeCopyWithGas,
 			numPop:      3,
 			numPush:     0,
 			memorySize:  memoryCodeCopy,
@@ -614,7 +614,7 @@ func newFrontierInstructionSet() JumpTable {
 		MLOAD: {
 			execute:     opMload,
 			constantGas: GasFastestStep,
-			dynamicGas:  gasMLoad,
+			gasExecute:  opMloadWithGas,
 			numPop:      1,
 			numPush:     1,
 			memorySize:  memoryMLoad,
@@ -623,7 +623,7 @@ func newFrontierInstructionSet() JumpTable {
 		MSTORE: {
 			execute:     opMstore,
 			constantGas: GasFastestStep,
-			dynamicGas:  gasMStore,
+			gasExecute:  opMstoreWithGas,
 			numPop:      2,
 			numPush:     0,
 			memorySize:  memoryMStore,
@@ -632,7 +632,7 @@ func newFrontierInstructionSet() JumpTable {
 		MSTORE8: {
 			execute:     opMstore8,
 			constantGas: GasFastestStep,
-			dynamicGas:  gasMStore8,
+			gasExecute:  opMstore8WithGas,
 			memorySize:  memoryMStore8,
 			numPop:      2,
 			numPush:     0,
@@ -1141,35 +1141,35 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		LOG0: {
 			execute:    makeLog(0),
-			dynamicGas: makeGasLog(0),
+			gasExecute: makeLogWithGas(0),
 			numPop:     2,
 			numPush:    0,
 			memorySize: memoryLog,
 		},
 		LOG1: {
 			execute:    makeLog(1),
-			dynamicGas: makeGasLog(1),
+			gasExecute: makeLogWithGas(1),
 			numPop:     3,
 			numPush:    0,
 			memorySize: memoryLog,
 		},
 		LOG2: {
 			execute:    makeLog(2),
-			dynamicGas: makeGasLog(2),
+			gasExecute: makeLogWithGas(2),
 			numPop:     4,
 			numPush:    0,
 			memorySize: memoryLog,
 		},
 		LOG3: {
 			execute:    makeLog(3),
-			dynamicGas: makeGasLog(3),
+			gasExecute: makeLogWithGas(3),
 			numPop:     5,
 			numPush:    0,
 			memorySize: memoryLog,
 		},
 		LOG4: {
 			execute:    makeLog(4),
-			dynamicGas: makeGasLog(4),
+			gasExecute: makeLogWithGas(4),
 			numPop:     6,
 			numPush:    0,
 			memorySize: memoryLog,
@@ -1202,7 +1202,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		RETURN: {
 			execute:    opReturn,
-			dynamicGas: gasReturn,
+			gasExecute: opReturnWithGas,
 			numPop:     2,
 			numPush:    0,
 			memorySize: memoryReturn,

@@ -25,11 +25,12 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
 		pc     = uint64(0) // program counter
-		t      = &callContext.trace
+		t      *opTrace
 		res    []byte // result of the opcode execution function
 		tracer = evm.config.Tracer
 	)
 	if false {
+		t = &callContext.trace
 		*t = opTrace{debug: debug, trace: trace}
 	}
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
@@ -455,8 +456,7 @@ run:
 		} else {
 			callContext.gas -= cost
 		}
-		// run calls the gasExecute ops before its generic path: one that gets here failed a check above.
-		if false && operation.gasExecute != nil {
+		if operation.gasExecute != nil {
 			pc, res, err = operation.gasExecute(pc, evm, callContext, t)
 			gasLeft = callContext.gas
 			if err != nil {

@@ -125,10 +125,10 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 			require.Equal(t, reflect.ValueOf(opSloadEIP2929).Pointer(), reflect.ValueOf(sload.gasExecute).Pointer(), "table %d SLOAD", i)
 			require.Nil(t, sload.dynamicGas, "table %d SLOAD", i)
 		}
-		// run calls the copy of the func vmgen found for the op, whatever the table holds.
-		for op := range jt {
+		// run inlines the copy of the func vmgen found for the op, whatever the table holds.
+		for op, want := range gasExecuteOps {
 			if jt[op].gasExecute != nil {
-				require.Equal(t, reflect.ValueOf(gasExecuteOps[OpCode(op)]).Pointer(), reflect.ValueOf(jt[op].gasExecute).Pointer(), "table %d %s", i, OpCode(op))
+				require.Equal(t, reflect.ValueOf(want).Pointer(), reflect.ValueOf(jt[op].gasExecute).Pointer(), "table %d %s", i, op)
 			}
 		}
 		for op, w := range fastPathOps {
@@ -158,7 +158,7 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 				continue
 			}
 			// Memory that need not grow costs no dynamic gas.
-			require.Equal(t, reflect.ValueOf(pureMemoryGascost).Pointer(), reflect.ValueOf(got.dynamicGas).Pointer(), "table %d %s dynamicGas", i, op)
+			require.Equal(t, reflect.ValueOf(map[OpCode]gasExecuteFunc{MLOAD: opMloadWithGas, MSTORE: opMstoreWithGas}[op]).Pointer(), reflect.ValueOf(got.gasExecute).Pointer(), "table %d %s gasExecute", i, op)
 			require.Equal(t, reflect.ValueOf(w.memorySize).Pointer(), reflect.ValueOf(got.memorySize).Pointer(), "table %d %s memorySize", i, op)
 		}
 	}
@@ -280,6 +280,15 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"sload":      prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, ADD, PUSH1, 2, SLOAD),
 		"sloadcold":  prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 3, SLOAD),
 		"sloadunder": {byte(SLOAD)},
+		// Each op grows the memory past what the ops before it touched.
+		"memops": prog(PUSH1, 40, PUSH1, 0, KECCAK256, PUSH1, 4, PUSH1, 0, PUSH1, 70, CALLDATACOPY, PUSH1, 8, PUSH1, 2, PUSH1, 110, CODECOPY,
+			PUSH1, 0xaa, PUSH1, 140, MSTORE8, PUSH1, 32, PUSH1, 0, PUSH1, 170, MCOPY, PUSH1, 0, PUSH1, 0, PUSH1, 230, RETURNDATACOPY,
+			PUSH1, 7, PUSH1, 9, PUSH1, 200, LOG1, PUSH1, 250, MLOAD, PUSH1, 0xbb, PUSH2, 1, 0x20, MSTORE, MSIZE, DUP1, DUP1),
+		"memlog":    prog(PUSH1, 1, PUSH1, 2, PUSH1, 3, PUSH1, 4, PUSH1, 50, PUSH1, 100, LOG4, PUSH1, 0, PUSH1, 0, LOG0, MSIZE, DUP1, DUP1, DUP1),
+		"keccakbig": prog(PUSH8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, PUSH1, 0, KECCAK256),
+		"copybig":   prog(PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 0, PUSH1, 0, CALLDATACOPY),
+		"revertmem": {byte(PUSH1), 64, byte(PUSH1), 200, byte(REVERT)},
+		"returnbig": {byte(PUSH8), 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, byte(PUSH1), 0, byte(RETURN)},
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
