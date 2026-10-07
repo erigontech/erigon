@@ -31,6 +31,10 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_RetriesPendingEnvel
 	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
 	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
 
+	// Gloas must be active at testSlot: the sidecar is a Gloas sidecar.
+	t.beaconConfig.ElectraForkEpoch = 0
+	t.beaconConfig.FuluForkEpoch = 0
+	t.beaconConfig.GloasForkEpoch = testSlot / t.beaconConfig.SlotsPerEpoch
 	t.mockSyncedData.EXPECT().Syncing().Return(false)
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
