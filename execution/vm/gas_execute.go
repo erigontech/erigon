@@ -54,11 +54,11 @@ func (evm *EVM) chargeDynamic(pc uint64, scope *CallContext, t *opTrace, cost md
 }
 
 // chargeFast charges cost when no error, trace or state gas needs chargeDynamic, and reports whether it did.
-func (scope *CallContext) chargeFast(t *opTrace, cost mdgas.MdGasCost, err error) bool {
-	if err != nil || t != nil || cost.State != 0 || scope.gas < cost.Execution {
+func (ctx *CallContext) chargeFast(t *opTrace, cost mdgas.MdGasCost, err error) bool {
+	if err != nil || t != nil || cost.State != 0 || ctx.gas < cost.Execution {
 		return false
 	}
-	scope.gas -= cost.Execution
+	ctx.gas -= cost.Execution
 	return true
 }
 
