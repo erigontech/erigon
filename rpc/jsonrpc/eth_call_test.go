@@ -300,10 +300,6 @@ func TestEstimateGasStateOverrideClearedCodeKeepsTransferShortcut(t *testing.T) 
 	require.Equal(t, hexutil.Uint64(params.TxGas), gas)
 }
 
-// TestEstimateGasStateOverrideAppliedToEveryTrial verifies every binary-search
-// trial starts from the same overridden state: writing a fresh slot costs 20000
-// only on clean state, so a write leaking from an earlier trial would let the
-// search settle below the true minimum.
 func TestEstimateGasTransferWithRefundedAuthorization(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -334,6 +330,10 @@ func TestEstimateGasTransferWithRefundedAuthorization(t *testing.T) {
 	require.NoError(t, err, "a call with the estimated gas must pass the intrinsic gas check")
 }
 
+// TestEstimateGasStateOverrideAppliedToEveryTrial verifies every binary-search
+// trial starts from the same overridden state: writing a fresh slot costs 20000
+// only on clean state, so a write leaking from an earlier trial would let the
+// search settle below the true minimum.
 func TestEstimateGasStateOverrideAppliedToEveryTrial(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
