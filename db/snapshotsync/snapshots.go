@@ -449,7 +449,6 @@ func (s *DirtySegment) openIdx(dir string, dirEntries []string) (err error) {
 			return fmt.Errorf("[open index] find files by pattern err %w fname %s", os.ErrNotExist, fName)
 		}
 		index, err := recsplit.OpenIndex(fPath)
-
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
@@ -496,8 +495,8 @@ type BaseRoSnapshots struct {
 	downloadReady atomic.Bool
 	segmentsReady atomic.Bool
 
-	types []snaptype.Type //immutable
-	enums []snaptype.Enum //immutable
+	types []snaptype.Type // immutable
+	enums []snaptype.Enum // immutable
 
 	// baseSegType is the type Ranges reports against — each collection picks the one whose
 	// ranges stand for its coverage. Immutable.
@@ -518,6 +517,7 @@ type BaseRoSnapshots struct {
 	cfg               ethconfig.BlocksFreezing
 	snCfg             *snapcfg.Cfg
 	logger            log.Logger
+	removeFile        func(string) error
 
 	ready     ready
 	operators map[snaptype.Enum]*retireOperators
@@ -592,8 +592,10 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		panic(fmt.Sprintf("baseSegType %s is not in types", baseSegType.Name()))
 	}
 	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
-	s := &BaseRoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
+	s := &BaseRoSnapshots{
+		dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums, baseSegType: baseSegType,
+		removeFile:        dir.RemoveFile,
 		dirty:             make(DirtyFiles, snaptype.MaxEnum),
 		alignMin:          alignMin,
 		operators:         map[snaptype.Enum]*retireOperators{},
@@ -649,6 +651,7 @@ func (s *BaseRoSnapshots) SegmentsMin() (min uint64, complete bool) {
 
 	return min, complete
 }
+
 func (s *BaseRoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {
 		return 0
@@ -734,7 +737,6 @@ func (s *BaseRoSnapshots) SetRangeExtractor(t snaptype.Type, rangeExtractor snap
 		s.operators[t.Enum()] = &retireOperators{
 			rangeExtractor: rangeExtractor,
 		}
-
 	}
 }
 
@@ -806,6 +808,7 @@ func (s *BaseRoSnapshots) EnableReadAhead() *BaseRoSnapshots {
 
 	return s
 }
+
 func (s *BaseRoSnapshots) MadvNormal() *BaseRoSnapshots {
 	v := s.View()
 	defer v.Close()
@@ -851,7 +854,7 @@ func buildVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSeg
 				}
 			}
 
-			//protect from overlaps
+			// protect from overlaps
 			for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
 				newVisibleSegments[len(newVisibleSegments)-1].src = nil
 				newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
@@ -1382,7 +1385,6 @@ func (s *BaseRoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) err
 	defer s.recalcVisibleFiles(alignMin, nil)
 
 	files, err := AllTypedSegments(s.dir, types)
-
 	if err != nil {
 		return err
 	}
@@ -1666,16 +1668,46 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 
 	s.removeOrphanedIdx(supersededIdx)
 
-	// remove .tmp files
-	//TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
+	// The merge is already committed by this point, so a leftover that cannot be unlinked must not
+	// be reported as a failed merge.
+	if err := s.RemoveOwnTmpFiles(); err != nil {
+		s.logger.Warn("[snapshots] could not sweep leftover .tmp files", "err", err)
+	}
+	return nil
+}
+
+// RemoveOwnTmpFiles unlinks leftover .tmp files of this collection's own types, leaving those of
+// any other collection compressing into the same directory. Safe only while this collection has no
+// compression in flight, since its own in-progress .tmp is indistinguishable from a leftover.
+func (s *BaseRoSnapshots) RemoveOwnTmpFiles() error {
 	tmpFiles, err := snaptype.TmpFiles(s.dir)
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, f := range tmpFiles {
-		_ = dir.RemoveFile(f)
+		if !s.ownsTmpFile(f) {
+			continue
+		}
+		if err := s.removeFile(f); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// ownsTmpFile reports whether a .tmp in the snapshot dir could have been produced by this
+// collection. A name that does not parse is attributed to nobody and is left alone.
+//
+// Match on the resolved Type, not TypeString: TypeString is the raw name segment from the
+// filename, which for an index .tmp is the index's own name (e.g. "transactions-to-block"),
+// not its owning type's name (e.g. "transactions") — those two only coincide for segment files.
+func (s *BaseRoSnapshots) ownsTmpFile(path string) bool {
+	fileInfo, _, ok := snaptype.ParseFileName(s.dir, filepath.Base(path))
+	if !ok || fileInfo.Type == nil {
+		return false
+	}
+	return s.HasType(fileInfo.Type)
 }
 
 // removeOrphanedIdx unlinks the superseded index files neither a dirty segment nor a pinned

@@ -155,7 +155,8 @@ func TestCommitGenesisBlockOverrideLeavesTheSpecConfigAlone(t *testing.T) {
 	db := temporaltest.NewTestDB(t, dirs)
 
 	cfg, _, err := genesiswrite.CommitGenesisBlockWithOverride(
-		db, nil, "", common.NewUint64(1765000000), nil, false, dirs, log.New())
+		db, nil, "", common.NewUint64(1765000000), nil, false, dirs, log.New(),
+	)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1765000000), *cfg.OsakaTime, "the override must reach the returned config")
 	require.Equal(t, orig, chainspec.MainnetGenesisBlock().Config.OsakaTime,
@@ -176,7 +177,8 @@ func TestCommitGenesisBlockOverrideLeavesTheSpecGenesisAlone(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		db, spec.Genesis, networkname.Sepolia, common.NewUint64(1760500000), nil, false, dirs, log.New())
+		db, spec.Genesis, networkname.Sepolia, common.NewUint64(1760500000), nil, false, dirs, log.New(),
+	)
 	require.NoError(t, err)
 
 	after, err := chainspec.ChainSpecByName(networkname.Sepolia)
@@ -272,7 +274,8 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
 	// No block snapshots in this datadir either, so the head time is unknowable and the
 	// rescheduled Osaka cannot be cleared.
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		m.DB, nil, "", common.NewUint64(500), nil, true, datadir.New(t.TempDir()), logger)
+		m.DB, nil, "", common.NewUint64(500), nil, true, datadir.New(t.TempDir()), logger,
+	)
 	require.Error(t, err, "an unresolvable head time must not let a rescheduled fork through")
 
 	storedCfg := readStoredChainConfig(t, m.DB)
@@ -298,7 +301,8 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDBUnchangedSchedule(t *testing.T)
 	dropHeadHeader(t, m.DB)
 
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		m.DB, nil, "", nil, nil, true, datadir.New(t.TempDir()), logger)
+		m.DB, nil, "", nil, nil, true, datadir.New(t.TempDir()), logger,
+	)
 	require.NoError(t, err)
 }
 
@@ -331,7 +335,7 @@ func TestAllocConstructor(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	//TODO: support historyV3
+	// TODO: support historyV3
 	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	state := state.New(reader)
@@ -603,7 +607,6 @@ func TestSetupGenesis(t *testing.T) {
 			}
 
 			if genesis.Hash() != test.wantHash {
-
 				t.Errorf("%s: returned hash %s, want %s", test.name, genesis.Hash().Hex(), test.wantHash.Hex())
 			} else if err == nil {
 				if dbErr := db.View(context.Background(), func(tx kv.Tx) error {

@@ -166,15 +166,13 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		cfg.Value,
 		false, /* bailout */
 	)
-	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
-		cfg.EVMConfig.Tracer.OnTxEnd(nil, err)
-	}
+	cfg.EVMConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 
 	return ret, cfg.State, err
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, mdgas.MdGas, error) {
+func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
@@ -262,10 +260,6 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 
 	vmenv := NewEnv(cfg)
 
-	sender, err := cfg.State.GetOrNewStateObject(cfg.Origin)
-	if err != nil {
-		return nil, mdgas.MdGas{}, err
-	}
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
@@ -279,7 +273,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	var ret []byte
 	if err == nil {
 		ret, leftOverGas, _, err = vmenv.Call(
-			sender.Address(),
+			cfg.Origin,
 			address,
 			input,
 			leftOverGas,
@@ -288,11 +282,11 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 		)
 		protocol.RefillTopLevelGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err, cfg.EVMConfig.Tracer)
 	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
-		protocol.HandleRuntimeFailure(vmenv, vm.CALL, sender.Address(), address, input, gas, &leftOverGas, cfg.Value, err)
+		protocol.HandleRuntimeFailure(vmenv, vm.CALL, cfg.Origin, address, input, gas, &leftOverGas, cfg.Value, err)
 	}
 
-	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
-		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Total()}, err)
+	if cfg.EVMConfig.Tracer.HasTxEndHook() {
+		cfg.EVMConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Total()}, mdgas.TxnGasUsage{}, err)
 	}
 
 	return ret, leftOverGas, err

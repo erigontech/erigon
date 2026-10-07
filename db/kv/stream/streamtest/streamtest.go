@@ -30,6 +30,7 @@ func ExpectEqualU64(tb testing.TB, s1, s2 stream.Uno[uint64]) {
 	tb.Helper()
 	ExpectEqual[uint64](tb, s1, s2)
 }
+
 func ExpectEqual[V any](tb testing.TB, s1, s2 stream.Uno[V]) {
 	tb.Helper()
 	for s1.HasNext() && s2.HasNext() {

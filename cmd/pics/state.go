@@ -46,45 +46,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-/*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
-	quadTrie bool, quadColors bool, highlights [][]byte) (*trie.Trie, error) {
-	filename := fmt.Sprintf("state_%d.dot", number)
-	f, err := os.Create(filename)
-	if err != nil {
-		return nil, err
-	}
-	indexColors := visual.HexIndexColors
-	fontColors := visual.HexFontColors
-	if quadTrie {
-		t = trie.HexToQuad(t)
-	}
-	if quadColors {
-		indexColors = visual.QuadIndexColors
-		fontColors = visual.QuadFontColors
-	}
-	visual.StartGraph(f, false)
-	trie.Visual(t, f, &trie.VisualOpts{
-		Highlights:     highlights,
-		IndexColors:    indexColors,
-		FontColors:     fontColors,
-		Values:         true,
-		CutTerminals:   keyCompression,
-		CodeCompressed: codeCompressed,
-		ValCompressed:  valCompressed,
-		ValHex:         true,
-	})
-	visual.EndGraph(f)
-	if err := f.Close(); err != nil {
-		return nil, err
-	}
-	//nolint:gosec
-	cmd := exec.CommandContext(context.Background(), "dot", "-Tpng:gd", "-o"+dot2png(filename), filename)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Printf("error: %v, output: %s\n", err, output)
-	}
-	return t, nil
-}*/
-
 var bucketLabels = map[string]string{
 	kv.Headers:           "Headers",
 	kv.HeaderCanonical:   "Canonical headers",
@@ -95,12 +56,6 @@ var bucketLabels = map[string]string{
 	kv.SyncStageProgress: "Sync Progress",
 	kv.Senders:           "Transaction Senders",
 }
-
-/*dbutils.PlainContractCode,
-dbutils.Code,
-dbutils.AccountsHistory,
-dbutils.StorageHistory,
-dbutils.TxLookup,*/
 
 func hexPalette() error {
 	filename := "hex_palette.dot"

@@ -371,13 +371,7 @@ func getBlobsV4Fixture(t *testing.T, value byte) (common.Hash, txpool.PoolBlobBu
 
 func newGetBlobsV4Client(t *testing.T, getter txpool.BlobGetter) *rpc.Client {
 	t.Helper()
-	logger := log.New()
-	server := rpc.NewServer(1, false, false, false, logger, 0)
-	t.Cleanup(server.Stop)
-	require.NoError(t, server.RegisterName("engine", &EngineServer{logger: logger, blobGetter: getter}))
-	client := rpc.DialInProc(server, logger)
-	t.Cleanup(client.Close)
-	return client
+	return newEngineInProcClient(t, &EngineServer{logger: log.New(), blobGetter: getter})
 }
 
 func TestGetBlobsV4(t *testing.T) {
@@ -421,7 +415,7 @@ func TestGetBlobsV4FastJSON(t *testing.T) {
 	result, err := server.GetBlobsV4(t.Context(), []common.Hash{hash, {}}, hexutil.MustDecodeHex("0x01000000000000000100000000000080"))
 	require.NoError(t, err)
 	marshaler, ok := any(result).(interface {
-		MarshalFastJSONTo(*jsonstream.StackStream) error
+		MarshalFastJSONTo(*jsonstream.Stream) error
 	})
 	require.True(t, ok, "GetBlobsV4 must return a fast JSON result")
 	want, err := json.Marshal(result)

@@ -16,9 +16,11 @@ import (
 
 type statusFlag uint
 
-const FlagDone statusFlag = 0
-const FlagEstimate statusFlag = 1
-const UnknownDep = -2
+const (
+	FlagDone     statusFlag = 0
+	FlagEstimate statusFlag = 1
+	UnknownDep              = -2
+)
 
 type AccountPath int8
 
@@ -924,7 +926,7 @@ func findDoneSelfDestructLocked(e *AddressEntry, lo, hi int, target bool) (Versi
 // FlushVersionedWrites routes a tx's typed write collections into the version
 // map. Each cell is positioned by the write's (txIndex, incarnation), so the
 // per-path loop order does not affect the result.
-func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool, tracePrefix string) {
+func (vm *VersionMap) FlushVersionedWrites(writes *WriteSet, complete bool) {
 	if writes == nil {
 		return
 	}
@@ -1204,7 +1206,8 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	isAbsent func(T) bool,
 	recordField func(*accounts.Account) T,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
-	traceInvalid bool, tracePrefix string) VersionValidity {
+	traceInvalid bool, tracePrefix string,
+) VersionValidity {
 	// One typed read supplies BOTH the status (for the version check) and the
 	// live value (for the rare tiebreaker) — no second lookup, no boxing. The
 	// tiebreaker branch in validateReadImpl only fires when rr is Done, so eq
@@ -1254,25 +1257,31 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 func liveBalance(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
 	return vm.ReadBalance(a, tx)
 }
+
 func liveNonce(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
 	return vm.ReadNonce(a, tx)
 }
+
 func liveIncarnation(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
 	return vm.ReadIncarnation(a, tx)
 }
+
 func liveCodeHash(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (accounts.CodeHash, ReadResult, bool) {
 	return vm.ReadCodeHash(a, tx)
 }
+
 func liveAddress(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (*accounts.Account, ReadResult, bool) {
 	return vm.ReadAddress(a, tx)
 }
+
 func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
 	return vm.ReadStorage(a, k, tx)
 }
-func liveCode(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) ([]byte, ReadResult, bool) {
-	c, res, ok := vm.ReadCode(a, tx)
-	return c.Bytes, res, ok
+
+func liveCode(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (accounts.Code, ReadResult, bool) {
+	return vm.ReadCode(a, tx)
 }
+
 func liveCodeSize(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (int, ReadResult, bool) {
 	return vm.ReadCodeSize(a, tx)
 }
@@ -1282,13 +1291,13 @@ func eqUint256(a, b uint256.Int) bool { return a.Eq(&b) }
 // Typed absence predicates (threaded like eq, so validateRead never boxes the
 // recorded value): a zero/absent value means the read concluded absence.
 func absentAccount(a *accounts.Account) bool { return a == nil }
-func absentBytes(b []byte) bool              { return len(b) == 0 }
+func absentCode(c accounts.Code) bool        { return len(c.Bytes) == 0 }
 func absentUint256(v uint256.Int) bool       { return v.IsZero() }
 func absentUint64(v uint64) bool             { return v == 0 }
 func absentInt(v int) bool                   { return v == 0 }
 func eqUint64(a, b uint64) bool              { return a == b }
 func eqInt(a, b int) bool                    { return a == b }
-func eqCode(a, b []byte) bool                { return bytes.Equal(a, b) }
+func eqCode(a, b accounts.Code) bool         { return bytes.Equal(a.Bytes, b.Bytes) }
 func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
@@ -1359,8 +1368,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	matchesRecord func() bool,
 	absent bool,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
-	traceInvalid bool, tracePrefix string, recursive bool) VersionValidity {
-
+	traceInvalid bool, tracePrefix string, recursive bool,
+) VersionValidity {
 	valid := VersionValid
 	invReason := ""
 	switch rr.Status() {
@@ -1653,7 +1662,7 @@ func (vm *VersionMap) ValidateVersion(txIdx int, lastIO *VersionedIO, checkVersi
 		}
 	}
 	for a, tr := range rs.code {
-		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, absentBytes, nil, checkVersion, traceInvalid, tracePrefix)) {
+		if !ok(validateRead(vm, txIdx, a, CodePath, accounts.NilKey, tr.Source, tr.Version, tr.Val, liveCode, eqCode, absentCode, nil, checkVersion, traceInvalid, tracePrefix)) {
 			return
 		}
 	}
@@ -1717,7 +1726,9 @@ func getCellNonce() *WriteCell[uint64] { return cellPoolNonce.Get().(*WriteCell[
 func getCellIncarnation() *WriteCell[uint64] {
 	return cellPoolIncarnation.Get().(*WriteCell[uint64])
 }
+
 func getCellCode() *WriteCell[accounts.Code] { return cellPoolCode.Get().(*WriteCell[accounts.Code]) }
+
 func getCellCodeHash() *WriteCell[accounts.CodeHash] {
 	return cellPoolCodeHash.Get().(*WriteCell[accounts.CodeHash])
 }
@@ -1725,6 +1736,7 @@ func getCellCodeSize() *WriteCell[int] { return cellPoolCodeSize.Get().(*WriteCe
 func getCellCreateContract() *WriteCell[bool] {
 	return cellPoolCreateContract.Get().(*WriteCell[bool])
 }
+
 func getCellStorage() *WriteCell[uint256.Int] {
 	return cellPoolStorage.Get().(*WriteCell[uint256.Int])
 }
@@ -1794,9 +1806,9 @@ func (res *ReadResult) Version() Version {
 	}
 }
 
-func (mvr ReadResult) Status() int {
-	if mvr.depIdx != UnknownDep {
-		if mvr.incarnation == -1 {
+func (res ReadResult) Status() int {
+	if res.depIdx != UnknownDep {
+		if res.incarnation == -1 {
 			return MVReadResultDependency
 		} else {
 			return MVReadResultDone

@@ -71,8 +71,10 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 	if batchConcurrency == 0 {
 		batchConcurrency = minBatchConcurrency
 	}
-	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
-		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
+	server := &Server{
+		services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
+		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold,
+	}
 	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
@@ -98,7 +100,14 @@ func (s *Server) SetBatchLimit(limit int) {
 // subscription an error is returned. Otherwise a new service is created and added to the
 // service collection this server provides to clients.
 func (s *Server) RegisterName(name string, receiver any) error {
-	return s.services.registerName(name, receiver)
+	return s.services.registerName(name, receiver, nil)
+}
+
+// RegisterAPI registers api.Service under api.Namespace, limited to api.Iface when set.
+// It fails when api.Service does not implement api.Iface, so a renamed or mistyped method
+// is not withheld silently.
+func (s *Server) RegisterAPI(api API) error {
+	return s.services.registerName(api.Namespace, api.Service, api.Iface)
 }
 
 // ServeCodec reads incoming requests from codec, calls the appropriate callback and writes
@@ -148,7 +157,7 @@ func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
 // is used to serve HTTP connections. Subscriptions are not allowed in this mode.
-func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream jsonstream.Stream) *jsonrpcMessage {
+func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream *jsonstream.Stream) *jsonrpcMessage {
 	// Don't serve if server is stopped.
 	if !s.run.Load() {
 		return nil

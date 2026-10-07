@@ -116,8 +116,10 @@ func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
 	c.publishedSD = provider
 }
 
-var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
-var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
+var (
+	_ kvcache.Cache     = (*Cache)(nil)     // compile-time interface check
+	_ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
+)
 
 func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
 	var sd *execctx.SharedDomains
@@ -162,6 +164,7 @@ func (c *CacheView) Get(k []byte) ([]byte, error) {
 	v, _, err := c.getter.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
+
 func (c *CacheView) GetCode(k []byte) ([]byte, error) {
 	v, _, err := c.getter.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err
@@ -384,12 +387,11 @@ func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, b
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
 }
 
-func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
+func (e *ExecModule) getRawBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.RawBody, error) {
 	if e.blockReader == nil {
-		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
-		return body, nil
+		return rawdb.ReadRawBody(tx, blockHash, blockNumber)
 	}
-	return e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+	return e.blockReader.BodyWithRawTransactions(ctx, tx, blockHash, blockNumber)
 }
 
 func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (common.Hash, error) {
@@ -575,7 +577,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
 	// so we Close explicitly only on the early-return error paths below.
 	doms.SetInMemHistoryReads(inMemHistoryReads)
-	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+	if err := doms.InitBlockOverlay(roTx); err != nil {
 		doms.Close()
 		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
 	}
@@ -651,13 +653,14 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			if err := e.purgeBadChain(ctx, purgeTx, lvh, blockHash); err != nil {
 				return ValidationResult{}, err
 			}
+			if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
+				if err := e.purgeBadChain(ctx, e.currentContext.BlockOverlay(), lvh, blockHash); err != nil {
+					return ValidationResult{}, err
+				}
+			}
 		}
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
 		validationStatus = ExecutionStatusBadBlock
-		// Discard the block overlay — it may contain the bad block's data.
-		if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-			e.currentContext.BlockOverlay().Close()
-		}
 		if err := purgeTx.Commit(); err != nil {
 			return ValidationResult{}, err
 		}
@@ -682,7 +685,7 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 		return err
 	}
 	if tip == nil {
-		// Block only existed in the overlay (not yet committed to DB) — nothing to purge.
+		// Block is not in tx — nothing to purge.
 		return nil
 	}
 

@@ -19,12 +19,12 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/holiman/uint256"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
@@ -195,18 +195,18 @@ func TestWitnessCacheStorePublishes(t *testing.T) {
 	defer cache.unsubscribe(ch)
 
 	hash := hashN(0x42)
-	enc := json.RawMessage(`{"state":["0x01"],"codes":[],"keys":[],"headers":[]}`)
-	api.storeWitness(7, hash, enc)
+	result := mkResult()
+	api.storeWitness(7, hash, result)
 
 	cached, ok := cache.Get(hash)
 	require.True(t, ok, "storeWitness must insert into the cache")
-	require.True(t, bytes.Equal(enc, cached.cachedJSON), "cached bytes must be the stored bytes")
+	require.Same(t, result, cached, "the cache must hold the stored result")
 
 	select {
 	case push := <-ch:
 		require.Equal(t, uint64(7), push.num)
 		require.Equal(t, hash, push.hash)
-		require.True(t, bytes.Equal(enc, push.json), "pushed bytes must be the identical cached bytes")
+		require.Same(t, result, push.result, "the push must carry the cached result")
 	case <-time.After(time.Second):
 		t.Fatal("storeWitness must publish to the feed")
 	}
@@ -221,13 +221,13 @@ func TestCacheAddAloneDoesNotPublish(t *testing.T) {
 	defer cache.unsubscribe(ch)
 
 	hash := hashN(0x77)
-	enc := json.RawMessage(`{"state":["0x02"],"codes":[],"keys":[],"headers":[]}`)
+	result := mkResult()
 
-	cache.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
+	cache.Add(hash, result)
 	require.True(t, cache.Contains(hash), "Add caches")
 	require.Empty(t, ch, "Add alone must not publish")
 
-	cache.store(9, hash, enc)
+	cache.store(9, hash, result)
 	require.Len(t, ch, 1, "store caches and publishes")
 }
 
@@ -285,7 +285,7 @@ func TestBuildPathsPublish(t *testing.T) {
 }
 
 // requireBuildPublished asserts a build published (num, hash) exactly once carrying the
-// bytes it cached. A witness that lands in the cache with no push is the bypass this
+// result it cached. A witness that lands in the cache with no push is the bypass this
 // guards: the insert went somewhere other than store.
 func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResultCache, num uint64, hash common.Hash) {
 	t.Helper()
@@ -295,7 +295,7 @@ func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResu
 		require.Equal(t, hash, push.hash)
 		cached, ok := cache.Get(hash)
 		require.True(t, ok, "a published witness must also be cached")
-		require.True(t, bytes.Equal(cached.cachedJSON, push.json), "pushed bytes must be the cached bytes")
+		require.Same(t, cached, push.result, "the push must carry the cached result")
 		require.Empty(t, ch, "one build publishes exactly once")
 	case <-time.After(30 * time.Second):
 		if cache.Contains(hash) {
@@ -506,6 +506,58 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	gotBytes, err := jsonstream.Marshal(cached)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "builder-path witness must be byte-identical to on-demand")
+}
+
+func TestBuildAndCacheJoinsRunningBuild(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	const blockNum = uint64(3)
+	hash, _ := buildTestChainHeader(t, m, blockNum)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, false, false)
+	running := mkResult()
+	registerFinishedBuild(api.witnessCache, hash, running)
+
+	samplesBefore := buildDurationSamples(t)
+	require.True(t, api.buildAndCache(ctx, blockNum, hash))
+	cached, ok := api.witnessCache.Get(hash)
+	require.True(t, ok)
+	require.Same(t, running, cached, "the builder must cache the running build's result, not build again")
+	require.Equal(t, samplesBefore+1, buildDurationSamples(t), "a joined build must still record its duration")
+}
+
+func buildDurationSamples(t *testing.T) uint64 {
+	t.Helper()
+	var m dto.Metric
+	require.NoError(t, witnessCacheBuildDuration.Write(&m))
+	return m.GetHistogram().GetSampleCount()
+}
+
+func TestBuildAndCacheHeadCaptureJoinsRunningBuild(t *testing.T) {
+	ctx := context.Background()
+	const buildNum = uint64(6)
+	m, pin, hash := insertHeadCaptureChain(t, ctx, buildNum)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+	running := mkResult()
+	registerFinishedBuild(api.witnessCache, hash, running)
+
+	samplesBefore := buildDurationSamples(t)
+	next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
+	defer next.close()
+	cached, ok := api.witnessCache.Get(hash)
+	require.True(t, ok)
+	require.Same(t, running, cached, "the head-capture builder must cache the running build's result, not build again")
+	require.Equal(t, samplesBefore+1, buildDurationSamples(t), "a joined build must still record its duration")
 }
 
 // insertHeadCaptureChain enables historical commitment, builds a module with no inserted
@@ -736,4 +788,25 @@ func TestRecoverWitnessBuildContainsPanic(t *testing.T) {
 		defer recoverWitnessBuild(42)
 		panic("simulated build pipeline panic")
 	})
+}
+
+type panicGetTx struct {
+	kv.TemporalTx
+	rolledBack bool
+}
+
+func (tx *panicGetTx) GetOne(string, []byte) ([]byte, error) { panic("boom") }
+func (tx *panicGetTx) Rollback()                             { tx.rolledBack = true }
+
+type panicGetDB struct {
+	kv.TemporalRoDB
+	tx *panicGetTx
+}
+
+func (db panicGetDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) { return db.tx, nil }
+
+func TestWaitCommittedHeadPanicRollsBack(t *testing.T) {
+	tx := &panicGetTx{}
+	require.Panics(t, func() { _, _, _ = waitCommittedHead(context.Background(), panicGetDB{tx: tx}, 1, common.Hash{}) })
+	require.True(t, tx.rolledBack)
 }

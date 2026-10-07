@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -106,6 +107,28 @@ func TestNewRPCTransaction_EIP1559_AllZeroSig(t *testing.T) {
 	require.EqualValues(t, 0, result.V.ToInt().Int64())
 	require.EqualValues(t, 0, result.R.ToInt().Int64())
 	require.EqualValues(t, 0, result.S.ToInt().Int64())
+}
+
+func TestRPCMarshalBlockAllocsPerTransaction(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	blockAllocs := func(n int) float64 {
+		txs := make([]types.Transaction, n)
+		for i := range txs {
+			tx := &types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: uint64(i), GasLimit: 21000, To: &to, V: *uint256.NewInt(1), R: *uint256.NewInt(2), S: *uint256.NewInt(3)},
+				ChainID:  *uint256.NewInt(1),
+				TipCap:   *uint256.NewInt(2),
+				FeeCap:   *uint256.NewInt(100),
+			}
+			tx.SetSender(accounts.InternAddress(to))
+			tx.Hash()
+			txs[i] = tx
+		}
+		block := types.NewBlock(&types.Header{Number: *uint256.NewInt(7), BaseFee: uint256.NewInt(7)}, txs, nil, nil, nil, nil)
+		block.Hash()
+		return testing.AllocsPerRun(100, func() { RPCMarshalBlock(block, true, true) })
+	}
+	require.Equal(t, 1.0, blockAllocs(2)-blockAllocs(1))
 }
 
 func txFields(t *testing.T, r SignTransactionResult) map[string]json.RawMessage {
@@ -327,7 +350,7 @@ func (s *jsonSink) Write(p []byte) (int, error) { *s = append(*s, p...); return 
 
 // fastJSON renders v through MarshalFastJSONTo on a pooled stream, as the server does.
 func fastJSON[T interface {
-	MarshalFastJSONTo(w *jsonstream.StackStream) error
+	MarshalFastJSONTo(w *jsonstream.Stream) error
 }](t *testing.T, v T) string {
 	t.Helper()
 	var b jsonSink
@@ -415,7 +438,7 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 	withTx := types.NewBlock(header, []types.Transaction{txn}, nil, nil, types.Withdrawals{}, nil)
 	empty := types.NewBlock(header, nil, nil, nil, nil, nil)
 
-	count := 1
+	count := uint64(1)
 	for _, tc := range []struct {
 		name string
 		b    *RPCBlock
@@ -456,8 +479,21 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 		}()},
 		{"otterscan shape", func() *RPCBlock {
 			b := RPCMarshalBlock(withTx, true, false)
-			b.TransactionCount = count
+			b.TransactionCount = &count
 			b.LogsBloom = nil
+			return b
+		}()},
+		{"simulate shape", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			b.Calls = []CallResult{
+				{ReturnData: "0x01", Logs: []*types.Log{{Topics: []common.Hash{{1}}, Data: []byte{2}}}, GasUsed: 0x5208, MaxUsedGas: 0x5300, Status: 1},
+				{ReturnData: "0x", Logs: []*types.Log{}, Error: map[string]any{"code": 3, "message": "execution reverted", "data": "0x<&>"}},
+			}
+			return b
+		}()},
+		{"simulate shape, no calls", func() *RPCBlock {
+			b := RPCMarshalBlock(empty, true, false)
+			b.Calls = []CallResult{}
 			return b
 		}()},
 		{"no transactions, full shape", RPCMarshalBlock(empty, true, true)},
@@ -484,7 +520,7 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	base := func() *RPCTransaction {
 		return &RPCTransaction{
 			BlockHash: &hash, BlockNumber: u(0x1234), BlockTimestamp: q(0x64),
-			From: to, Gas: 0x5208, GasPrice: u(0x9), Hash: hash,
+			From: to, Gas: 0x5208, GasPrice: *u(0x9), Hash: hash,
 			Input: hexutil.Bytes{0xde, 0xad}, Nonce: 3, To: &to,
 			TransactionIndex: q(2), Value: u(0x100), Type: 0,
 			V: u(0x1b), R: u(0xaa), S: u(0xbb),
@@ -493,7 +529,7 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	dynamic := base()
 	dynamic.Type, dynamic.MaxPriorityFeePerGas, dynamic.MaxFeePerGas = 2, u(0x1), u(0x2)
 	dynamic.ChainID, dynamic.YParity = u(1), u(0)
-	dynamic.Accesses = &types.AccessList{
+	dynamic.Accesses = types.AccessList{
 		{Address: to, StorageKeys: []common.Hash{hash, {}}},
 		{Address: common.Address{}, StorageKeys: nil},
 		{Address: to, StorageKeys: []common.Hash{}},
@@ -501,11 +537,18 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	blob := base()
 	blob.Type, blob.MaxFeePerBlobGas = 3, u(0x7)
 	blob.BlobVersionedHashes = []common.Hash{hash}
+	// An empty list still writes [], because SetCodeTransaction's decoder requires the key.
+	emptyAuths := base()
+	emptyAuths.Type = 4
+	emptyAuths.Authorizations = types.AuthorizationList{}
+
 	setcode := base()
 	setcode.Type = 4
-	setcode.Authorizations = &[]types.JsonAuthorization{
-		{ChainID: hexutil.U256(*uint256.NewInt(1)), Address: to, Nonce: 1, YParity: 0,
-			R: hexutil.U256(*uint256.NewInt(0xaa)), S: hexutil.U256(*uint256.NewInt(0xbb))},
+	setcode.Authorizations = types.AuthorizationList{
+		{
+			ChainID: hexutil.U256(*uint256.NewInt(1)), Address: to, Nonce: 1, YParity: 0,
+			R: hexutil.U256(*uint256.NewInt(0xaa)), S: hexutil.U256(*uint256.NewInt(0xbb)),
+		},
 		{},
 	}
 	pending := base()
@@ -513,13 +556,13 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	noTo := base()
 	noTo.To, noTo.Input = nil, nil
 	emptyAccesses := base()
-	emptyAccesses.Accesses = &types.AccessList{}
+	emptyAccesses.Accesses = types.AccessList{}
 	emptyBlobs := base()
 	emptyBlobs.BlobVersionedHashes = []common.Hash{}
 
 	for name, txn := range map[string]*RPCTransaction{
 		"zero": {}, "legacy": base(), "dynamic fee": dynamic, "blob": blob,
-		"set code": setcode, "pending": pending, "contract creation": noTo,
+		"set code": setcode, "set code empty list": emptyAuths, "pending": pending, "contract creation": noTo,
 		"empty access list": emptyAccesses, "empty blob hashes": emptyBlobs,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -527,5 +570,58 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, string(want), fastJSON(t, txn))
 		})
+	}
+	require.Contains(t, fastJSON(t, emptyAuths), `"authorizationList":[]`)
+	require.Contains(t, fastJSON(t, emptyAccesses), `"accessList":[]`)
+}
+
+// ots_getBlockDetails and ots_getBlockTransactions write transactionCount as a JSON number.
+func TestRPCBlockTransactionCountIsANumber(t *testing.T) {
+	n := uint64(15)
+	require.Contains(t, fastJSON(t, &RPCBlock{TransactionCount: &n}), `"transactionCount":15`)
+}
+
+// encoding/json names the decoded type in its errors, and RPC clients see them.
+func TestCallArgsUnmarshalErrorNamesCallArgs(t *testing.T) {
+	var args CallArgs
+	require.ErrorContains(t, args.UnmarshalJSON([]byte(`{"blobs":1}`)), "Go struct field callArgs.blobs")
+}
+
+func TestCallArgsUnmarshalMatchesEncodingJSON(t *testing.T) {
+	for _, in := range []string{
+		`{"to":"0x0000000000000000000000000000000000000001","data":"0x0102","gas":"0x10"}`,
+		`{"input":"0x0102","value":"0x1"}`,
+		`{"data":"0x0102","input":"0x0102"}`,
+		`{"data":"0x0102","input":"0x0103"}`,
+		`{"data":null,"input":"0x"}`,
+		`{"data":"0x01","data":"0x02"}`,
+		`{"Data":"0x01"}`,
+		`{"data":"0x0"}`,
+		`{"data":"01"}`,
+		`{"data":1}`,
+		`{"data":"0x01"`,
+		`[]`,
+		`{"accessList":[{"address":"0x0000000000000000000000000000000000000002","storageKeys":[]}],"data":"0xaa"}`,
+		`{"data":"0x01","Data":"0x02"}`,
+		`{"Data":"0x02","data":"0x01"}`,
+		`{"data":"0x\u0030\u0031"}`,
+		`{"from":"0x94fea3ef90b236f6809a8e412cd11ce99fd45933","to":null,"gas":"0x29040","gasPrice":"0x1","maxFeePerGas":"0x2","maxPriorityFeePerGas":"0x3","maxFeePerBlobGas":"0x4","value":"0x0","nonce":"0x7","chainId":"0x1","input":"0xa9059cbb"}`,
+		`{"gas":"0x1","gas":null}`,
+		`{"gas":16}`,
+		`{"value":"0x"}`,
+		`{"unknown":{"a":[1,2]},"data":"0x01"}`,
+		`{"blobVersionedHashes":["0x0100000000000000000000000000000000000000000000000000000000000000"],"blobs":["0x01"],"commitments":[],"proofs":null}`,
+		`{"authorizationList":[{"chainId":"0x1","address":"0x0000000000000000000000000000000000000003","nonce":"0x0","yParity":"0x0","r":"0x1","s":"0x1"}]}`,
+		`null`,
+	} {
+		var got, want CallArgs
+		gotErr := got.UnmarshalJSON([]byte(in))
+		wantErr := want.unmarshalStd([]byte(in))
+		require.Equal(t, wantErr == nil, gotErr == nil, in)
+		if wantErr == nil {
+			require.Equal(t, want, got, in)
+		} else {
+			require.Equal(t, wantErr.Error(), gotErr.Error(), in)
+		}
 	}
 }

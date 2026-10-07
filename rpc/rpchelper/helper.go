@@ -45,6 +45,13 @@ func (e nonCanonicalHashError) Error() string {
 	return fmt.Sprintf("hash %x is not currently canonical", e.hash)
 }
 
+// BlockNotExecutedError reports a block past the execution stage's progress.
+type BlockNotExecutedError struct{ Block, LastExecuted uint64 }
+
+func (e *BlockNotExecutedError) Error() string {
+	return fmt.Sprintf("block %d is not executed (last executed: %d)", e.Block, e.LastExecuted)
+}
+
 func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	lastExecutedBlock, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
@@ -52,7 +59,7 @@ func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	}
 
 	if blockNumber > lastExecutedBlock {
-		return fmt.Errorf("block %d is not executed (last executed: %d)", blockNumber, lastExecutedBlock)
+		return &BlockNotExecutedError{Block: blockNumber, LastExecuted: lastExecutedBlock}
 	}
 
 	return nil
@@ -185,7 +192,7 @@ func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
 	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
 		firstAvailBlock, _, _ := txNumsReader.FindBlockNum(ctx, tx, minHistoryTxNum)
-		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, blockNumber, firstAvailBlock)
+		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.ErrPruned, blockNumber, firstAvailBlock)
 	}
 	return state.NewHistoryReaderV3(tx, txNum), nil
 }
@@ -222,7 +229,7 @@ func CreateHistoryCachedStateReader(ctx context.Context, cache kvcache.CacheView
 	}
 	txNum := uint64(int(minTxNum) + txnIndex + /* 1 system txNum in beginning of block */ 1)
 	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); txNum < minHistoryTxNum {
-		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.PrunedError, txNum, minHistoryTxNum)
+		return nil, fmt.Errorf("%w: block tx: %d, min tx: %d", state.ErrPruned, txNum, minHistoryTxNum)
 	}
 	return &cachedHistoryReaderV3{
 		cache:     asOfView,
@@ -260,7 +267,6 @@ func (hr *cachedHistoryReaderV3) SetTxNum(txNum uint64) {
 func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addressValue := address.Value()
 	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
-
 	if err != nil {
 		return nil, err
 	}

@@ -277,8 +277,8 @@ func EncodeSenderLengthForStorage(nonce uint64, balance uint256.Int) uint {
 
 // Encode the details of txn sender into the given "buffer" byte-slice that should be big enough
 func EncodeSender(nonce uint64, balance uint256.Int, buffer []byte) {
-	var fieldSet = 0 // start with first bit set to 0
-	var pos = 1
+	fieldSet := 0 // start with first bit set to 0
+	pos := 1
 	if nonce > 0 {
 		fieldSet = 1
 		nonceBytes := common.BitLenToByteLen(bits.Len64(nonce))
