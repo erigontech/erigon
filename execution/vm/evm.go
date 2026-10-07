@@ -105,7 +105,7 @@ const evmSizeClass = 480
 
 // storageKeyCacheSize must comfortably exceed a contract's live slot count,
 // or conflict misses dominate.
-const storageKeyCacheSize = 1024
+const storageKeyCacheSize = 8192
 
 // storageKeyCacheMinOps delays the table until interning has cost more than
 // zeroing 40KB: a hit saves ~16ns, so an EVM resolving fewer keys than this
