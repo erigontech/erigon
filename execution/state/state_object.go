@@ -421,10 +421,8 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	if so.db.versionMap != nil {
 		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.Status() == MVReadResultDone {
 			so.code = c
-			if c.Bytes != nil {
-				so.data.CodeHash = c.Hash
-				so.original.CodeHash = c.Hash
-			}
+			so.data.CodeHash = c.Hash
+			so.original.CodeHash = c.Hash
 			return c, nil
 		}
 	}
