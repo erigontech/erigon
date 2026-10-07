@@ -242,7 +242,7 @@ func opExtCodeCopyWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (
 	if err != nil {
 		return pc, nil, err
 	}
-	cost, err := gasExtCodeCopy(evm, scope, scope.Gas(), size)
+	cost, err := copyGas(scope, size, 3)
 	if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
 		return pc, nil, err
 	}
