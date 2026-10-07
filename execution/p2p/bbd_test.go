@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -302,4 +303,92 @@ func TestBackwardBlockDownloader_GapAheadOfCurrentHead_FailsFast(t *testing.T) {
 	require.ErrorIs(t, err, ErrChainLengthExceedsLimit)
 	require.EqualValues(t, 1, fetcher.headersBackwardsCalls.Load(),
 		"should fail-fast at the initial-header check without fetching a header batch")
+}
+
+type partialChainBbdFetcher struct {
+	chainServingBbdFetcher
+	peerHeads    map[PeerId]uint64
+	mu           sync.Mutex
+	bodyRequests map[PeerId][]uint64
+}
+
+func (s *partialChainBbdFetcher) FetchHeadersBackwards(ctx context.Context, hash common.Hash, amount uint64, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	for _, header := range s.headers {
+		if header.Hash() == hash && header.Number.Uint64() > s.peerHeads[*peerId] {
+			return FetcherResponse[[]*types.Header]{}, &ErrMissingHeaderHash{requested: hash}
+		}
+	}
+	return s.chainServingBbdFetcher.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
+}
+
+func (s *partialChainBbdFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Body], error) {
+	s.mu.Lock()
+	for _, header := range headers {
+		s.bodyRequests[*peerId] = append(s.bodyRequests[*peerId], header.Number.Uint64())
+	}
+	s.mu.Unlock()
+	if headers[len(headers)-1].Number.Uint64() > s.peerHeads[*peerId] {
+		return FetcherResponse[[]*types.Body]{}, NewErrMissingBodies(headers)
+	}
+	return s.chainServingBbdFetcher.FetchBodies(ctx, headers, peerId, opts...)
+}
+
+func downloadFromPartialChainPeers(t *testing.T, chainLen int, peerHeads map[PeerId]uint64, opts ...BbdOption) (int, *partialChainBbdFetcher) {
+	headers := make([]*types.Header, chainLen)
+	parentHash := common.Hash{}
+	withdrawalsHash := empty.RootHash
+	for i := range headers {
+		headers[i] = &types.Header{
+			Number:          *uint256.NewInt(uint64(i + 1)),
+			ParentHash:      parentHash,
+			TxHash:          empty.RootHash,
+			UncleHash:       empty.UncleHash,
+			BaseFee:         uint256.NewInt(1),
+			WithdrawalsHash: &withdrawalsHash,
+		}
+		parentHash = headers[i].Hash()
+	}
+	fetcher := &partialChainBbdFetcher{
+		chainServingBbdFetcher: chainServingBbdFetcher{headers: headers},
+		peerHeads:              peerHeads,
+		bodyRequests:           map[PeerId][]uint64{},
+	}
+	logger := testlog.Logger(t, log.LvlCrit)
+	peerTracker := NewPeerTracker(logger, nil)
+	for peerId := range peerHeads {
+		peerTracker.PeerConnected(&peerId)
+	}
+	bbd := NewBackwardBlockDownloader(logger, fetcher, &PeerPenalizer{}, peerTracker, t.TempDir())
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, opts...)
+	require.NoError(t, err)
+	var blocks int
+	for {
+		res, err := feed.Next(ctx)
+		require.NoError(t, err)
+		require.NoError(t, res.Err)
+		if res.Blocks == nil {
+			return blocks, fetcher
+		}
+		blocks += len(res.Blocks)
+	}
+}
+
+func TestBackwardBlockDownloader_PeerWithoutInitialHeaderGetsNoBodyRequests(t *testing.T) {
+	withChain, withoutChain := *PeerIdFromUint64(1), *PeerIdFromUint64(2)
+	blocks, fetcher := downloadFromPartialChainPeers(t, 4, map[PeerId]uint64{withChain: 4, withoutChain: 0})
+	require.Equal(t, 3, blocks)
+	require.NotEmpty(t, fetcher.bodyRequests[withChain])
+	require.Empty(t, fetcher.bodyRequests[withoutChain])
+}
+
+func TestBackwardBlockDownloader_PeerBehindInitialHeaderServesOlderBodies(t *testing.T) {
+	synced, behind := *PeerIdFromUint64(1), *PeerIdFromUint64(2)
+	blocks, fetcher := downloadFromPartialChainPeers(t, 5, map[PeerId]uint64{synced: 5, behind: 3}, WithBlocksBatchSize(2))
+	require.Equal(t, 4, blocks)
+	require.NotEmpty(t, fetcher.bodyRequests[behind])
+	for _, num := range fetcher.bodyRequests[behind] {
+		require.LessOrEqual(t, num, uint64(3))
+	}
 }

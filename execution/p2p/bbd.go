@@ -184,6 +184,7 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 	config bbdRequestConfig,
 ) (*types.Header, error) {
 	peersHeadersResponses := make([][]*types.Header, len(peers.all))
+	peersMissingHash := make([]bool, len(peers.all))
 	eg := errgroup.Group{}
 	fetcherOpts := []FetcherOption{
 		WithResponseTimeout(config.initialHeaderFetchTimeout),
@@ -201,6 +202,7 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 					"err", err,
 				)
 				peers.exhaustedPeers[peerIndex] = true
+				peersMissingHash[peerIndex] = errors.Is(err, &ErrMissingHeaderHash{})
 				return nil
 			}
 			header := resp.Data[0]
@@ -224,6 +226,11 @@ func (bbd *BackwardBlockDownloader) downloadInitialHeader(
 	headerNum := header.Number.Uint64()
 	if headerNum == 0 {
 		return nil, fmt.Errorf("asked to download hash at num 0: %s", hash)
+	}
+	for i, peer := range peers.all {
+		if peersMissingHash[i] {
+			bbd.peerTracker.BlockNumMissing(peer, headerNum)
+		}
 	}
 	currentHead := config.chainLengthCurrentHead
 	if currentHead != nil && math.AbsoluteDifference(*currentHead, headerNum) > config.chainLengthLimit {
@@ -343,6 +350,9 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 				"err", err,
 			)
 			peers.exhaustedPeers[peerIndex] = true
+			if errors.Is(err, &ErrMissingHeaderHash{}) {
+				bbd.peerTracker.BlockNumMissing(&peerId, parentNum)
+			}
 			continue
 		}
 
