@@ -475,6 +475,9 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 	if canValidateGloasPayloads(cfg) {
 		var err error
 		status, err = validateAnchorPayloadWithEL(ctx, cfg, bid, env)
+		if gloasPayloadRetryInterrupted(ctx, status, err) {
+			return nil
+		}
 		if err != nil {
 			log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 		}
