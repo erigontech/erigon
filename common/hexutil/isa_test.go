@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build amd64
+//go:build go1.27 && goexperiment.simd && amd64
 
 package hexutil
 
