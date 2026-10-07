@@ -2010,6 +2010,7 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			case err != nil:
 				log.Warn("failed to check if data is available", "err", err)
 				mu.Lock()
+				e.attempts++
 				e.nextAttempt = now.Add(d.slotDuration())
 				mu.Unlock()
 			case available:

@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -130,4 +131,41 @@ func TestRetryPendingExecutionPayloadEnvelopeAppliesOnceColumnDataIsAvailable(t 
 	require.True(t, ok)
 	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
 	require.False(t, pending.Contains(root))
+}
+
+func TestRetryPendingExecutionPayloadEnvelopeWaitsForInFlightRetry(t *testing.T) {
+	root := common.HexToHash("0x1")
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	release := make(chan struct{})
+	peerDas.EXPECT().IsDataAvailable(uint64(7), root).DoAndReturn(func(uint64, common.Hash) (bool, error) {
+		<-release
+		return false, nil
+	}).Times(1)
+	f, pending := newRetryPendingStore(t, peerDas)
+	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{})
+
+	first := make(chan struct{})
+	go func() {
+		f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
+		close(first)
+	}()
+	for {
+		if _, busy := f.retryingEnvelopes.Load(root); busy {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	second := make(chan struct{})
+	go func() {
+		f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
+		close(second)
+	}()
+	select {
+	case <-second:
+		t.Fatal("second retry returned while the first was still in flight")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	<-first
+	<-second
 }

@@ -784,16 +784,24 @@ func (f *ForkChoiceStore) HasPendingExecutionPayloadEnvelope(blockRoot common.Ha
 
 // RetryPendingExecutionPayloadEnvelope re-applies the envelope queued for blockRoot as soon as
 // its data columns are available, so the payload can be used before the next slot boundary.
-// Concurrent retries of one root collapse into the first; the availability check runs once
-// here, outside the store lock.
+// Concurrent retries of one root collapse into the first and wait for it, so a caller that
+// polls afterwards sees the outcome; the availability check runs once here, outside the store lock.
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) {
 	if !f.HasPendingExecutionPayloadEnvelope(blockRoot) {
 		return
 	}
-	if _, busy := f.retryingEnvelopes.LoadOrStore(blockRoot, struct{}{}); busy {
+	done := make(chan struct{})
+	if inFlight, busy := f.retryingEnvelopes.LoadOrStore(blockRoot, done); busy {
+		select {
+		case <-inFlight.(chan struct{}):
+		case <-ctx.Done():
+		}
 		return
 	}
-	defer f.retryingEnvelopes.Delete(blockRoot)
+	defer func() {
+		f.retryingEnvelopes.Delete(blockRoot)
+		close(done)
+	}()
 	block, ok := f.forkGraph.GetBlock(blockRoot)
 	if !ok || block == nil {
 		return

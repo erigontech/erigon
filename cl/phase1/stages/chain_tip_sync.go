@@ -1192,11 +1192,13 @@ func verifyGloasHeadPayloads(ctx context.Context, cfg *Cfg, attempted map[common
 	advanceWhileHeadMoves(ctx, func() (common.Hash, error) {
 		return gloasVerificationHeadRoot(cfg.forkChoice)
 	}, func(stepCtx context.Context) bool {
-		root, verified := verifyGloasHeadPayload(stepCtx, cfg)
-		if root != (common.Hash{}) {
-			attempted[root] = struct{}{}
+		// Any recorded verdict, INVALID included, can move the head.
+		root, _ := verifyGloasHeadPayload(stepCtx, cfg)
+		if root == (common.Hash{}) {
+			return false
 		}
-		return verified
+		attempted[root] = struct{}{}
+		return true
 	})
 }
 
