@@ -1153,13 +1153,20 @@ func verifyGloasPayload(ctx context.Context, cfg *Cfg, item gloasVerificationIte
 }
 
 // verifyGloasHeadPayloads verifies the selected head's payload and repeats only while that moves
-// the head, so a head the EL cannot validate yet costs one NewPayload per cycle.
-func verifyGloasHeadPayloads(ctx context.Context, cfg *Cfg) {
+// the head, so a head the EL cannot validate yet costs one NewPayload per cycle. It returns the
+// roots it attempted so the ancestor sweep does not retry them in the same cycle.
+func verifyGloasHeadPayloads(ctx context.Context, cfg *Cfg) map[common.Hash]struct{} {
+	attempted := map[common.Hash]struct{}{}
 	advanceWhileHeadMoves(ctx, func() (common.Hash, error) {
 		return gloasVerificationHeadRoot(cfg.forkChoice)
 	}, func(stepCtx context.Context) bool {
-		return verifyGloasHeadPayload(stepCtx, cfg)
+		root, verified := verifyGloasHeadPayload(stepCtx, cfg)
+		if root != (common.Hash{}) {
+			attempted[root] = struct{}{}
+		}
+		return verified
 	})
+	return attempted
 }
 
 func advanceWhileHeadMoves(ctx context.Context, head func() (common.Hash, error), step func(context.Context) bool) {
@@ -1176,21 +1183,22 @@ func advanceWhileHeadMoves(ctx context.Context, head func() (common.Hash, error)
 }
 
 // verifyGloasHeadPayload verifies the selected head's persisted payload when it has no EL status
-// yet. It reports whether a status was recorded, which can move the head to the next block.
-func verifyGloasHeadPayload(ctx context.Context, cfg *Cfg) bool {
+// yet. It returns the root it attempted and whether a status was recorded, which can move the
+// head to the next block.
+func verifyGloasHeadPayload(ctx context.Context, cfg *Cfg) (common.Hash, bool) {
 	headRoot, err := gloasVerificationHeadRoot(cfg.forkChoice)
 	if err != nil || headRoot == (common.Hash{}) {
-		return false
+		return common.Hash{}, false
 	}
 	if !cfg.forkChoice.HasEnvelope(headRoot) || cfg.forkChoice.IsPayloadVerified(headRoot) {
-		return false
+		return common.Hash{}, false
 	}
 	block, ok := cfg.forkChoice.GetBlock(headRoot)
 	if !ok || block == nil {
-		return false
+		return common.Hash{}, false
 	}
 	verified, err := verifyGloasPayload(ctx, cfg, gloasVerificationItem{root: headRoot, block: block})
-	return err == nil && verified
+	return headRoot, err == nil && verified
 }
 
 func continueGloasVerificationAfterItemFailure(ctx context.Context, completeBatch *bool) bool {
@@ -1215,7 +1223,8 @@ func processImmediateGloasVerificationItems(selectedHead, immediateHead *gloasVe
 	}
 }
 
-func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
+// skip holds roots already attempted in this cycle.
+func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg, skip map[common.Hash]struct{}) {
 	headRoot, err := gloasVerificationHeadRoot(cfg.forkChoice)
 	if err != nil {
 		log.Debug("[chainTipSync] failed to select GLOAS verification head", "err", err)
@@ -1300,7 +1309,7 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		if ctx.Err() != nil {
 			return false
 		}
-		if cfg.forkChoice.IsPayloadVerified(item.root) {
+		if _, attempted := skip[item.root]; attempted || cfg.forkChoice.IsPayloadVerified(item.root) {
 			return true
 		}
 		verified, err := verifyGloasPayload(ctx, cfg, item)
@@ -1425,8 +1434,8 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			// head's is re-verified, fork choice sees no FULL variant and cannot advance; each
 			// verified head exposes the next unverified block, so repeat until the head settles.
 			func(retryCtx context.Context) {
-				verifyGloasHeadPayloads(retryCtx, cfg)
-				verifyUnverifiedGloasPayloads(retryCtx, cfg)
+				attempted := verifyGloasHeadPayloads(retryCtx, cfg)
+				verifyUnverifiedGloasPayloads(retryCtx, cfg, attempted)
 			},
 		)
 	}
@@ -1460,7 +1469,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			}
 			if canValidateGloasPayloads(cfg) {
 				verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
-				verifyUnverifiedGloasPayloads(verifyCtx, cfg)
+				verifyUnverifiedGloasPayloads(verifyCtx, cfg, nil)
 				cancelVerify()
 			}
 		}
