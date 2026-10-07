@@ -158,6 +158,18 @@ func (s *ReadSet) GetColdSlot(addr accounts.Address, key accounts.StorageKey) (u
 	return v, ok
 }
 
+// DelColdSlot drops one memoized slot. A write invalidates it here instead of
+// the read checking for one, and dropping too much only costs a re-read.
+func (s *ReadSet) DelColdSlot(addr accounts.Address, key accounts.StorageKey) {
+	if s.coldSlots != nil {
+		delete(s.coldSlots, slotRef{addr, key})
+	}
+}
+
+// DropColdSlots drops the whole memo, for a change that invalidates an
+// account's slots wholesale rather than one of them.
+func (s *ReadSet) DropColdSlots() { clear(s.coldSlots) }
+
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
 	if *m == nil {
 		*m = make(map[accounts.Address]VersionedRead[T])
