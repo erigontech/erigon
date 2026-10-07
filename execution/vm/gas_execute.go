@@ -318,7 +318,7 @@ func makeCreateWithGas(memorySize memorySizeFunc, gas createGasFunc, create crea
 		if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
 			return pc, nil, err
 		}
-		return create(pc, evm, scope, &prepared)
+		return create(pc, evm, scope, prepared)
 	}
 }
 

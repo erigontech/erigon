@@ -947,14 +947,14 @@ func opSwap16(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	return pc, nil, nil
 }
 
-func opCreate(pc uint64, evm *EVM, scope *CallContext, prepared *createGasPreparation) (uint64, []byte, error) {
+func opCreate(pc uint64, evm *EVM, scope *CallContext, prepared createGasPreparation) (uint64, []byte, error) {
 	var (
 		v, o, sz     = scope.Stack.pop3()
 		value        = *v
 		offset, size = o.Uint64(), sz.Uint64()
 		input        = scope.Memory.GetPtr(offset, size)
 	)
-	return execCreate(pc, evm, scope, prepared, value, input, nil)
+	return execCreate(pc, evm, scope, &prepared, value, input, nil)
 }
 
 func stCreate(_ uint64, scope *CallContext) string {
@@ -969,7 +969,7 @@ func stCreate(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %d %x %d", CREATE.String(), &value, input, &scope.gas)
 }
 
-func opCreate2(pc uint64, evm *EVM, scope *CallContext, prepared *createGasPreparation) (uint64, []byte, error) {
+func opCreate2(pc uint64, evm *EVM, scope *CallContext, prepared createGasPreparation) (uint64, []byte, error) {
 	var (
 		v, o, sz     = scope.Stack.pop3()
 		endowment    = *v
@@ -980,7 +980,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext, prepared *createGasPrepa
 	if !evm.chainRules.IsAmsterdam {
 		input = scope.Memory.GetPtr(offset, size)
 	}
-	return execCreate(pc, evm, scope, prepared, endowment, input, &salt)
+	return execCreate(pc, evm, scope, &prepared, endowment, input, &salt)
 }
 
 // execCreate is the shared implementation for opCreate (salt == nil) and opCreate2 (salt != nil).
