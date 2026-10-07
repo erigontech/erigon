@@ -299,7 +299,7 @@ func indexBeaconSnapshots(ctx context.Context, db kv.RwDB, from, to, batchSize u
 		batchTo := nextBatchEnd(batchFrom, to, batchSize)
 		start := time.Now()
 		err := db.Update(ctx, func(tx kv.RwTx) error {
-			if err := indexBeaconSnapshotBatch(ctx, tx, batchFrom, batchTo, readHeader, onProgress); err != nil {
+			if err := indexBeaconSnapshotBatch(tx, batchFrom, batchTo, readHeader, onProgress); err != nil {
 				return err
 			}
 			if err := beacon_indicies.WriteLastBeaconSnapshot(tx, batchTo); err != nil {
@@ -324,7 +324,7 @@ func nextBatchEnd(from, to, batchSize uint64) uint64 {
 	return batchTo
 }
 
-func indexBeaconSnapshotBatch(ctx context.Context, tx kv.RwTx, from, to uint64, readHeader readBeaconSnapshotHeaderFunc, onProgress func(slot uint64)) error {
+func indexBeaconSnapshotBatch(tx kv.RwTx, from, to uint64, readHeader readBeaconSnapshotHeaderFunc, onProgress func(slot uint64)) error {
 	for slot := from; slot < to; slot++ {
 		header, elBlockNumber, elBlockHash, err := readHeader(slot, tx)
 		if err != nil {
@@ -337,7 +337,7 @@ func indexBeaconSnapshotBatch(ctx context.Context, tx kv.RwTx, from, to uint64, 
 		if err != nil {
 			return err
 		}
-		if err := beacon_indicies.MarkRootCanonical(ctx, tx, header.Header.Slot, blockRoot); err != nil {
+		if err := beacon_indicies.MarkRootCanonical(tx, header.Header.Slot, blockRoot); err != nil {
 			return err
 		}
 		if err := beacon_indicies.WriteHeaderSlot(tx, blockRoot, header.Header.Slot); err != nil {
@@ -346,7 +346,7 @@ func indexBeaconSnapshotBatch(ctx context.Context, tx kv.RwTx, from, to uint64, 
 		if err := beacon_indicies.WriteStateRoot(tx, blockRoot, header.Header.Root); err != nil {
 			return err
 		}
-		if err := beacon_indicies.WriteParentBlockRoot(ctx, tx, blockRoot, header.Header.ParentRoot); err != nil {
+		if err := beacon_indicies.WriteParentBlockRoot(tx, blockRoot, header.Header.ParentRoot); err != nil {
 			return err
 		}
 		if err := beacon_indicies.WriteExecutionBlockNumber(tx, blockRoot, elBlockNumber); err != nil {
@@ -372,7 +372,7 @@ func pruneBeaconBlocksAndWriteProgress(ctx context.Context, db kv.RwDB, pruneTo,
 		start := time.Now()
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			if pruneTo != 0 {
-				deleted, more, err := beacon_indicies.PruneBlocksLimit(ctx, tx, pruneTo, int(batchLimit))
+				deleted, more, err := beacon_indicies.PruneBlocksLimit(tx, pruneTo, int(batchLimit))
 				if err != nil {
 					return err
 				}

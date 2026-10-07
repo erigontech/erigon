@@ -296,69 +296,51 @@ func TestCachedTemporalTxStateGetterServesRepeatReadFromCache(t *testing.T) {
 	require.Equal(t, 1, tx.reads)
 }
 
-// A value published after the getter was bound is newer than its tx.
-func TestCachedTemporalTxStateGetterLaterPublicationReadsTx(t *testing.T) {
-	db, stateCache := committedCacheState(t)
-	roTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer roTx.Rollback()
-	stateVersion, err := rawdb.GetStateVersion(roTx)
-	require.NoError(t, err)
-	end, ok := roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
-	require.True(t, ok)
+// A tx reads past the cache when the cache's values are not its own state.
+func TestCachedTemporalTxStateGetterForeignCacheStateReadsTx(t *testing.T) {
+	for name, tc := range map[string]struct {
+		beforeBind bool
+		publish    func(a cache.Applier, stateVersion, end uint64, key []byte)
+	}{
+		// A value published after the getter was bound is newer than its tx.
+		"later publication": {publish: func(a cache.Applier, stateVersion, end uint64, key []byte) {
+			a.Publish(stateVersion, stateVersion+1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte{1}, TxNum: end}})
+		}},
+		// After an unwind, the cache can hold another fork's values at txNums the tx can see.
+		"unwind": {publish: func(a cache.Applier, stateVersion, end uint64, key []byte) {
+			a.Unwind(0)
+			a.Publish(stateVersion, stateVersion+1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte{2}, TxNum: end - 1}})
+		}},
+		// The cache holds a newer durable state version's values, which are not this tx's state.
+		"stale state version": {beforeBind: true, publish: func(a cache.Applier, stateVersion, end uint64, key []byte) {
+			a.PublishUnwind(stateVersion, stateVersion+1, end-1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte{1}, TxNum: end - 1}})
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db, stateCache := committedCacheState(t)
+			roTx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer roTx.Rollback()
+			stateVersion, err := rawdb.GetStateVersion(roTx)
+			require.NoError(t, err)
+			end, ok := roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
+			require.True(t, ok)
+			key := make([]byte, 20)
 
-	tx := &countingLatestTx{TemporalTx: roTx}
-	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
-	key := make([]byte, 20)
-	stateCache.Applier().Publish(stateVersion, stateVersion+1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte{1}, TxNum: end}})
-
-	v, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
-	require.NoError(t, err)
-	require.Empty(t, v)
-	require.Equal(t, 1, tx.reads)
-}
-
-// After an unwind, the cache can hold another fork's values at txNums the tx can see.
-func TestCachedTemporalTxStateGetterUnwindReadsTx(t *testing.T) {
-	db, stateCache := committedCacheState(t)
-	roTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer roTx.Rollback()
-	stateVersion, err := rawdb.GetStateVersion(roTx)
-	require.NoError(t, err)
-	end, ok := roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
-	require.True(t, ok)
-
-	tx := &countingLatestTx{TemporalTx: roTx}
-	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
-	key := make([]byte, 20)
-	stateCache.Applier().Unwind(0)
-	stateCache.Applier().Publish(stateVersion, stateVersion+1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte{2}, TxNum: end - 1}})
-
-	v, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
-	require.NoError(t, err)
-	require.Empty(t, v)
-	require.Equal(t, 1, tx.reads)
-}
-
-// The cache holds a newer durable state version's values, which are not this tx's state.
-func TestCachedTemporalTxStateGetterStaleStateVersionReadsTx(t *testing.T) {
-	db, stateCache := committedCacheState(t)
-	roTx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer roTx.Rollback()
-	stateVersion, err := rawdb.GetStateVersion(roTx)
-	require.NoError(t, err)
-	end, ok := roTx.Debug().DomainVisibleEnd(kv.AccountsDomain)
-	require.True(t, ok)
-	key := make([]byte, 20)
-	stateCache.Applier().PublishUnwind(stateVersion, stateVersion+1, end-1, []cache.StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: []byte{1}, TxNum: end - 1}})
-
-	tx := &countingLatestTx{TemporalTx: roTx}
-	v, _, err := execctx.NewCachedTemporalTxStateGetter(tx, stateCache).GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
-	require.NoError(t, err)
-	require.Empty(t, v)
-	require.Equal(t, 1, tx.reads)
+			tx := &countingLatestTx{TemporalTx: roTx}
+			if tc.beforeBind {
+				tc.publish(stateCache.Applier(), stateVersion, end, key)
+			}
+			getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
+			if !tc.beforeBind {
+				tc.publish(stateCache.Applier(), stateVersion, end, key)
+			}
+			v, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.Empty(t, v)
+			require.Equal(t, 1, tx.reads)
+		})
+	}
 }
 
 func TestCachedTemporalTxStateGetterWithoutCacheReadsEveryTime(t *testing.T) {

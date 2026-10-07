@@ -908,7 +908,7 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	}
 	if !persisted {
 		if err := b.db.Update(ctx, func(tx kv.RwTx) error {
-			return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+			return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 		}); err != nil {
 			if isCallerCancellation(ctx, err) {
 				return err

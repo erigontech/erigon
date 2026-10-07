@@ -1631,7 +1631,11 @@ func TestByteLRU_ByteBoundAndOversizeRejection(t *testing.T) {
 	}
 }
 
-func TestStateCache_GetVisibleMissesWhenUnwindLandsDuringRead(t *testing.T) {
+// An unwind bumps the read-view epoch, so a view bound to the discarded fork
+// misses even when the replacement fork has an entry for the key. This does not
+// cover an unwind that lands between the entry read and the epoch load; that
+// window has no test seam, and the load order in GetVisible is what closes it.
+func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
 	b := 1 * datasize.MB
 	sc := NewStateCache(b, b, b, b)
 	t.Cleanup(sc.Close)
