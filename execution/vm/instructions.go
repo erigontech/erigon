@@ -760,27 +760,47 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	return pc, nil, nil
 }
 
-func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
-	loc := scope.Stack.peek()
-	if !scope.slots.on {
-		*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
-		return pc, nil, err
+func opSload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	if scope.slots.on {
+		if i := scope.lookupSlot(evm); i >= 0 {
+			*scope.Stack.peek() = scope.slots.val[i]
+			return pc, nil, nil
+		}
 	}
-	i := scope.slots.memo
-	if scope.slots.memoGen != scope.cacheGen {
-		i = scope.lookupSlot(evm)
-	}
-	if i >= 0 {
-		*loc = scope.slots.val[i]
-		return pc, nil, nil
-	}
-	ibs := evm.IntraBlockState()
-	word, key := *loc, scope.peekStorageKey(evm)
-	if *loc, err = ibs.GetState(scope.Contract.Address(), key); err == nil {
+	return pc, nil, sloadRead(evm, scope, scope.peekStorageKey(evm))
+}
+
+// sloadRead replaces the top of the stack with the value of its slot, interned as key,
+// and keeps the value in the frame cache.
+func sloadRead(evm *EVM, scope *CallContext, key accounts.StorageKey) (err error) {
+	ibs, loc := evm.IntraBlockState(), scope.Stack.peek()
+	word := *loc
+	if *loc, err = ibs.GetState(scope.Contract.Address(), key); err == nil && scope.slots.on {
 		stamp, _ := ibs.ReadStamp()
 		scope.slots.put(stamp, word, key, *loc)
 	}
-	return pc, nil, err
+	return err
+}
+
+// opSloadEIP2929 is SLOAD with its EIP-2929 gas: one frame-cache lookup serves both.
+func opSloadEIP2929(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	if scope.slots.on {
+		if i := scope.lookupSlot(evm); i >= 0 {
+			if scope.gas < params.WarmStorageReadCostEIP2929 {
+				return pc, nil, ErrOutOfGas
+			}
+			scope.gas -= params.WarmStorageReadCostEIP2929
+			*scope.Stack.peek() = scope.slots.val[i]
+			return pc, nil, nil
+		}
+	}
+	key := scope.peekStorageKey(evm)
+	cost := sloadAccess(evm, scope.Contract.Address(), key)
+	if scope.gas < cost {
+		return pc, nil, ErrOutOfGas
+	}
+	scope.gas -= cost
+	return pc, nil, sloadRead(evm, scope, key)
 }
 
 func stSload(_ uint64, scope *CallContext) string {

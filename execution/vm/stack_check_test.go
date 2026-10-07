@@ -119,6 +119,14 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		}
 	}
 	for i, jt := range tables {
+		// SLOAD's gasExecute stands in for exactly gasSLoadEIP2929 and opSload.
+		sload := &jt[SLOAD]
+		eip2929 := reflect.ValueOf(sload.dynamicGas).Pointer() == reflect.ValueOf(gasSLoadEIP2929).Pointer()
+		require.Equal(t, eip2929, sload.gasExecute != nil, "table %d SLOAD", i)
+		if eip2929 {
+			require.Equal(t, reflect.ValueOf(opSloadEIP2929).Pointer(), reflect.ValueOf(sload.gasExecute).Pointer(), "table %d SLOAD", i)
+			require.Equal(t, reflect.ValueOf(opSload).Pointer(), reflect.ValueOf(sload.execute).Pointer(), "table %d SLOAD", i)
+		}
 		for op, w := range fastPathOps {
 			got := &jt[op]
 			if w.execute != nil {
@@ -215,6 +223,12 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
+		// Warm slots with values, so a frame-cache hit fits in the gas sweep and shows its value.
+		for k, v := range map[uint64]uint64{1: 0xaa, 2: 0xbb} {
+			key := accounts.InternKey(uint256.NewInt(k).Bytes32())
+			require.NoError(t, ibs.SetState(accounts.ZeroAddress, key, *uint256.NewInt(v)))
+			ibs.AddSlotToAccessList(accounts.ZeroAddress, key)
+		}
 		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 		c.Code = code
@@ -258,6 +272,10 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A failed frame returns no data, whatever the last CALL returned.
 		"callthenbadjump": {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(PUSH1), 0, byte(JUMP)},
 		"callthenend":     {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL)},
+		// Slots 1 and 2 are warm and set, slot 3 is cold.
+		"sload":      prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, ADD, PUSH1, 2, SLOAD),
+		"sloadcold":  prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 3, SLOAD),
+		"sloadunder": {byte(SLOAD)},
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
@@ -314,4 +332,24 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			require.Equal(t, want, got, "%s at gas %d", name, gas)
 		}
 	}
+}
+
+// TestRunUsesGasExecute pins that run takes an op's gasExecute in place of its gas func and execute.
+func TestRunUsesGasExecute(t *testing.T) {
+	t.Parallel()
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+	table := *evm.jt
+	called := false
+	table[SLOAD].gasExecute = func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+		called = true
+		return opSloadEIP2929(pc, evm, scope)
+	}
+	evm.jt = &table
+	c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	c.Code = []byte{byte(PUSH1), 1, byte(SLOAD)}
+	_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 10_000}, nil, false, false, false)
+	require.NoError(t, err)
+	require.True(t, called)
 }

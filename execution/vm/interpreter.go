@@ -101,17 +101,14 @@ type frameSlots struct {
 	misses int
 	stamp  state.ReadStamp
 	next   int
-	// The gas function's lookup, for the op that follows it; valid while memoGen == cacheGen.
-	memoGen uint64
-	memo    int
-	ok      [2]bool
-	key     [2]accounts.StorageKey
-	word    [2]uint256.Int
-	val     [2]uint256.Int
+	ok     [2]bool
+	key    [2]accounts.StorageKey
+	word   [2]uint256.Int
+	val    [2]uint256.Int
 }
 
 // lookupSlot returns the frame's entry for the top-of-stack word, or -1; called only when
-// slots.on. It records the result for the op, and a hit's interned key for peekStorageKey.
+// slots.on. It records a hit's interned key for peekStorageKey.
 func (ctx *CallContext) lookupSlot(evm *EVM) int {
 	f := &ctx.slots
 	i := -1
@@ -126,7 +123,6 @@ func (ctx *CallContext) lookupSlot(evm *EVM) int {
 			}
 		}
 	}
-	f.memo, f.memoGen = i, ctx.cacheGen
 	return i
 }
 
@@ -218,7 +214,6 @@ func (evm *EVM) putCallContext(ctx *CallContext) {
 	ctx.create = createGasPreparation{}
 	ctx.slots.ok = [2]bool{}                 // the next frame may have another storage address
 	ctx.slots.key = [2]accounts.StorageKey{} // like cachedKey below: release the canonMap pins
-	ctx.slots.memoGen = ^uint64(0)
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	ctx.cachedKeyGen = ^uint64(0)
@@ -605,6 +600,15 @@ run:
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 		} else {
 			callContext.gas -= cost.Execution
+		}
+		if !anyTrace && operation.gasExecute != nil {
+			pc, res, err = operation.gasExecute(pc, evm, callContext)
+			gasLeft = callContext.gas
+			if err != nil {
+				break run
+			}
+			pc++
+			continue run
 		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
