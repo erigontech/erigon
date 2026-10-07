@@ -441,7 +441,8 @@ run:
 					continue run
 				}
 			case CALLDATACOPY, CODECOPY, RETURNDATACOPY:
-				if op == RETURNDATACOPY && !evm.chainRules.IsByzantium {
+				// An op the table does not have is opUndefined there, which pops nothing.
+				if jt[op].numPop != 3 {
 					break
 				}
 				data := callContext.input
@@ -466,7 +467,7 @@ run:
 					}
 				}
 			case MCOPY:
-				if stack.len() >= 3 && evm.chainRules.IsCancun {
+				if stack.len() >= 3 && jt[MCOPY].numPop == 3 {
 					d, s, n := stack.back3(0, 1, 2)
 					if callContext.Memory.allocated(d, n) && callContext.Memory.allocated(s, n) {
 						if cost := GasFastestStep + params.CopyGas*ToWordSize(n.Uint64()); gasLeft >= cost {
@@ -479,12 +480,14 @@ run:
 					}
 				}
 			case MSTORE8:
-				if off := stack.peek(); stack.len() >= 2 && off.IsUint64() && off.Uint64() < uint64(callContext.Memory.Len()) && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					o, val := stack.pop2Uint64()
-					callContext.Memory.store[o] = byte(val)
-					pc++
-					continue run
+				if stack.len() >= 2 && gasLeft >= GasFastestStep {
+					if off := stack.peek(); off.IsUint64() && off.Uint64() < uint64(callContext.Memory.Len()) {
+						gasLeft -= GasFastestStep
+						o, val := stack.pop2Uint64()
+						callContext.Memory.store[o] = byte(val)
+						pc++
+						continue run
+					}
 				}
 			case KECCAK256:
 				if stack.len() >= 2 {
