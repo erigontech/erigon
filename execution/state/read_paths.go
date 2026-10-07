@@ -1321,10 +1321,8 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 
 // readCode returns the contract code with its hash.
 func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.code, s.versionedReads.code); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
