@@ -119,7 +119,7 @@ type ForkChoiceStore struct {
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
 	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
 	payloadStatusByRoot    *lru.Cache[common.Hash, execution_client.PayloadStatus]
-	retryingEnvelopes      sync.Map // blockRoot -> struct{}: envelope retries in flight
+	retryingEnvelopes      sync.Map // blockRoot -> chan struct{}: envelope retries in flight
 	// [New in Gloas:EIP7732] Track execution payload gas_limit by execution block hash.
 	// Used for the is_gas_limit_target_compatible IGNORE check in bid gossip validation.
 	executionPayloadGasLimit *lru.Cache[common.Hash, uint64]
