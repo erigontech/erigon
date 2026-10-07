@@ -310,9 +310,9 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"fusedjumpdata":   prog(PUSH1, 4, JUMP, PUSH1, JUMPDEST, GAS),
 		"fusedjumpi":      prog(pushes(2), PUSH1, 1, PUSH1, 11, JUMPI, PUSH1, 0xaa, JUMPDEST, GAS, PC),
 		"fusedjumpinot":   prog(pushes(2), PUSH1, 0, PUSH1, 11, JUMPI, PUSH1, 0xaa, JUMPDEST, GAS, PC),
-		"fusedjumpiunder": prog(PUSH1, 3, JUMPI, JUMPDEST),
-		"fusedjumpover":   prog(pushes(stackLimit), PUSH2, (2*stackLimit+4)>>8, (2*stackLimit+4)&0xff, JUMP, JUMPDEST),
-		"fusedjumpiover":  prog(pushes(stackLimit), PUSH2, (2*stackLimit+4)>>8, (2*stackLimit+4)&0xff, JUMPI, JUMPDEST),
+		"fusedjumpiunder": prog(jumpIn, PUSH1, 7, JUMPI, JUMPDEST),
+		"fusedjumpover":   prog(jumpIn, pushes(stackLimit), PUSH2, (2*stackLimit+8)>>8, (2*stackLimit+8)&0xff, JUMP, JUMPDEST),
+		"fusedjumpiover":  prog(jumpIn, pushes(stackLimit), PUSH2, (2*stackLimit+8)>>8, (2*stackLimit+8)&0xff, JUMPI, JUMPDEST),
 		"push4end":        {byte(PUSH1), 1, byte(PUSH4), 0x12},
 		"push32end":       {byte(PUSH1), 1, byte(PUSH32), 1, 2},
 		// EIP-8024: DUPN skips its immediate byte, which is still an op a jump can land on.
