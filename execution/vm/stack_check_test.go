@@ -120,7 +120,7 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		}
 	}
 	for i, jt := range tables {
-		// From EIP-2929 on, opSloadEIP2929 charges SLOAD's dynamic gas and SLOAD has no gas func.
+		// From EIP-2929 on, opSloadEIP2929 charges SLOAD's dynamic gas.
 		if sload := &jt[SLOAD]; sload.gasExecute != nil || sload.constantGas == 0 {
 			require.Equal(t, reflect.ValueOf(opSloadEIP2929).Pointer(), reflect.ValueOf(sload.gasExecute).Pointer(), "table %d SLOAD", i)
 		}

@@ -209,66 +209,6 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 	return gas, nil
 }
 
-// accountSurcharge warms addr and returns what EIP-2929 charges for it on top of
-// the warm cost, which the op's constant gas covers.
-func accountSurcharge(evm *EVM, addr accounts.Address) uint64 {
-	if evm.IntraBlockState().AddAddressToAccessList(addr) {
-		return coldAccountAccessCost(evm.chainRules) - params.WarmStorageReadCostEIP2929
-	}
-	return 0
-}
-
-// opBalanceEIP2929 is BALANCE with its EIP-2929 gas charged in place.
-func opBalanceEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	addr := evm.internAddress(scope.Stack.peek())
-	cost := accountSurcharge(evm, addr)
-	if t != nil {
-		evm.traceCost(BALANCE, t, mdgas.MdGasCost{Execution: cost})
-	}
-	if scope.gas < cost {
-		return pc, nil, ErrOutOfGas
-	}
-	scope.gas -= cost
-	if t != nil {
-		evm.traceCharged(scope, BALANCE, pc, t)
-	}
-	return opBalanceOf(pc, evm, scope, addr)
-}
-
-// opExtCodeSizeEIP2929 is EXTCODESIZE with its EIP-2929 gas charged in place.
-func opExtCodeSizeEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	addr := evm.internAddress(scope.Stack.peek())
-	cost := accountSurcharge(evm, addr)
-	if t != nil {
-		evm.traceCost(EXTCODESIZE, t, mdgas.MdGasCost{Execution: cost})
-	}
-	if scope.gas < cost {
-		return pc, nil, ErrOutOfGas
-	}
-	scope.gas -= cost
-	if t != nil {
-		evm.traceCharged(scope, EXTCODESIZE, pc, t)
-	}
-	return opExtCodeSizeOf(pc, evm, scope, addr)
-}
-
-// opExtCodeHashEIP2929 is EXTCODEHASH with its EIP-2929 gas charged in place.
-func opExtCodeHashEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	addr := evm.internAddress(scope.Stack.peek())
-	cost := accountSurcharge(evm, addr)
-	if t != nil {
-		evm.traceCost(EXTCODEHASH, t, mdgas.MdGasCost{Execution: cost})
-	}
-	if scope.gas < cost {
-		return pc, nil, ErrOutOfGas
-	}
-	scope.gas -= cost
-	if t != nil {
-		evm.traceCharged(scope, EXTCODEHASH, pc, t)
-	}
-	return opExtCodeHashOf(pc, evm, scope, addr)
-}
-
 func makeCallVariantGasCallEIP2929(oldCalculator callGasFunc) callGasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, uint64, error) {
 		addr := evm.internAddress(callContext.Stack.back(1))
