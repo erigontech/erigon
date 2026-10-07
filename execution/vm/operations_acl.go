@@ -34,101 +34,105 @@ import (
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
-		rules := evm.chainRules
-		if evm.readOnly {
-			return mdgas.MdGasCost{}, ErrWriteProtection
-		}
-		// If we fail the minimum gas availability invariant, fail (0)
-		if scopeGas.Execution <= params.SstoreSentryGasEIP2200 {
-			return mdgas.MdGasCost{}, errors.New("not enough gas for reentrancy sentry")
-		}
-		var coldAccess, writeCreate, writeExisting, clearRefund, stateCreate uint64
-		if rules.IsAmsterdam {
-			coldAccess = params.ColdStorageAccessCostEIP8038
-			writeCreate = params.StorageWriteCostEIP8038
-			writeExisting = params.StorageWriteCostEIP8038
-			clearRefund = params.SstoreClearsScheduleRefundEIP8038
-			stateCreate = params.StateGasPerStorageSet
-		} else {
-			coldAccess = params.SstoreColdAccessEIP2929
-			writeCreate = params.SstoreWriteCreateEIP2929
-			writeExisting = params.SstoreWriteExistingEIP2929
-			clearRefund = clearingRefund
-			stateCreate = 0
-		}
-
-		ibs := evm.IntraBlockState()
-		cached := -1
-		if callContext.slots.on {
-			cached = callContext.lookupSlot(evm)
-		}
-		var slot accounts.StorageKey
-		access := params.WarmStorageReadCostEIP2929
-		slotPresent := cached >= 0
-		if slotPresent {
-			slot = callContext.slots.key[cached]
-		} else {
-			slot = callContext.peekStorageKey(evm)
-			slotPresent = ibs.SlotKnownWarm(callContext.Address(), slot)
-			if !slotPresent {
-				_, slotPresent = ibs.SlotInAccessList(callContext.Address(), slot)
-			}
-		}
-		if !slotPresent {
-			access = coldAccess
-		}
-		if scopeGas.Execution < access {
-			return mdgas.MdGasCost{}, ErrOutOfGas
-		}
-		if !slotPresent {
-			ibs.AddSlotToAccessList(callContext.Address(), slot)
-		}
-		var value uint256.Int
-		value.Set(callContext.Stack.back(1))
-		var current uint256.Int
-		if cached >= 0 {
-			current = callContext.slots.val[cached]
-		} else {
-			word := *callContext.Stack.peek()
-			current, _ = ibs.GetState(callContext.Address(), slot)
-			if callContext.slots.on {
-				stamp, _ := ibs.ReadStamp()
-				callContext.slots.put(stamp, word, slot, current)
-			}
-		}
-
-		if current.Eq(&value) { // noop (1)
-			return mdgas.MdGasCost{Execution: access}, nil
-		}
-		original, _ := evm.IntraBlockState().GetCommittedState(callContext.Address(), slot)
-		if original.Eq(&current) {
-			if original.IsZero() { // create slot (2.1.1)
-				return mdgas.MdGasCost{Execution: access + writeCreate, State: int64(stateCreate)}, nil
-			}
-			if value.IsZero() { // delete slot (2.1.2b)
-				evm.IntraBlockState().AddRefund(clearRefund)
-			}
-			return mdgas.MdGasCost{Execution: access + writeExisting}, nil // write existing slot (2.1.2)
-		}
-		if !original.IsZero() {
-			if current.IsZero() { // recreate slot (2.2.1.1)
-				if err := evm.IntraBlockState().SubRefund(clearRefund); err != nil {
-					return mdgas.MdGasCost{}, err
-				}
-			} else if value.IsZero() { // delete slot (2.2.1.2)
-				evm.IntraBlockState().AddRefund(clearRefund)
-			}
-		}
-		if original.Eq(&value) {
-			if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
-				evm.IntraBlockState().AddRefund(writeCreate)
-				return mdgas.MdGasCost{Execution: access, State: -int64(stateCreate)}, nil
-			} else { // reset to original existing slot (2.2.2.2)
-				evm.IntraBlockState().AddRefund(writeExisting)
-			}
-		}
-		return mdgas.MdGasCost{Execution: access}, nil // dirty update (2.2)
+		return sstoreGasEIP2929(evm, callContext, scopeGas, clearingRefund)
 	}
+}
+
+func sstoreGasEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, clearingRefund uint64) (mdgas.MdGasCost, error) {
+	rules := evm.chainRules
+	if evm.readOnly {
+		return mdgas.MdGasCost{}, ErrWriteProtection
+	}
+	// If we fail the minimum gas availability invariant, fail (0)
+	if scopeGas.Execution <= params.SstoreSentryGasEIP2200 {
+		return mdgas.MdGasCost{}, errors.New("not enough gas for reentrancy sentry")
+	}
+	var coldAccess, writeCreate, writeExisting, clearRefund, stateCreate uint64
+	if rules.IsAmsterdam {
+		coldAccess = params.ColdStorageAccessCostEIP8038
+		writeCreate = params.StorageWriteCostEIP8038
+		writeExisting = params.StorageWriteCostEIP8038
+		clearRefund = params.SstoreClearsScheduleRefundEIP8038
+		stateCreate = params.StateGasPerStorageSet
+	} else {
+		coldAccess = params.SstoreColdAccessEIP2929
+		writeCreate = params.SstoreWriteCreateEIP2929
+		writeExisting = params.SstoreWriteExistingEIP2929
+		clearRefund = clearingRefund
+		stateCreate = 0
+	}
+
+	ibs := evm.IntraBlockState()
+	cached := -1
+	if callContext.slots.on {
+		cached = callContext.lookupSlot(evm)
+	}
+	var slot accounts.StorageKey
+	access := params.WarmStorageReadCostEIP2929
+	slotPresent := cached >= 0
+	if slotPresent {
+		slot = callContext.slots.key[cached]
+	} else {
+		slot = callContext.peekStorageKey(evm)
+		slotPresent = ibs.SlotKnownWarm(callContext.Address(), slot)
+		if !slotPresent {
+			_, slotPresent = ibs.SlotInAccessList(callContext.Address(), slot)
+		}
+	}
+	if !slotPresent {
+		access = coldAccess
+	}
+	if scopeGas.Execution < access {
+		return mdgas.MdGasCost{}, ErrOutOfGas
+	}
+	if !slotPresent {
+		ibs.AddSlotToAccessList(callContext.Address(), slot)
+	}
+	var value uint256.Int
+	value.Set(callContext.Stack.back(1))
+	var current uint256.Int
+	if cached >= 0 {
+		current = callContext.slots.val[cached]
+	} else {
+		word := *callContext.Stack.peek()
+		current, _ = ibs.GetState(callContext.Address(), slot)
+		if callContext.slots.on {
+			stamp, _ := ibs.ReadStamp()
+			callContext.slots.put(stamp, word, slot, current)
+		}
+	}
+
+	if current.Eq(&value) { // noop (1)
+		return mdgas.MdGasCost{Execution: access}, nil
+	}
+	original, _ := evm.IntraBlockState().GetCommittedState(callContext.Address(), slot)
+	if original.Eq(&current) {
+		if original.IsZero() { // create slot (2.1.1)
+			return mdgas.MdGasCost{Execution: access + writeCreate, State: int64(stateCreate)}, nil
+		}
+		if value.IsZero() { // delete slot (2.1.2b)
+			evm.IntraBlockState().AddRefund(clearRefund)
+		}
+		return mdgas.MdGasCost{Execution: access + writeExisting}, nil // write existing slot (2.1.2)
+	}
+	if !original.IsZero() {
+		if current.IsZero() { // recreate slot (2.2.1.1)
+			if err := evm.IntraBlockState().SubRefund(clearRefund); err != nil {
+				return mdgas.MdGasCost{}, err
+			}
+		} else if value.IsZero() { // delete slot (2.2.1.2)
+			evm.IntraBlockState().AddRefund(clearRefund)
+		}
+	}
+	if original.Eq(&value) {
+		if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
+			evm.IntraBlockState().AddRefund(writeCreate)
+			return mdgas.MdGasCost{Execution: access, State: -int64(stateCreate)}, nil
+		} else { // reset to original existing slot (2.2.2.2)
+			evm.IntraBlockState().AddRefund(writeExisting)
+		}
+	}
+	return mdgas.MdGasCost{Execution: access}, nil // dirty update (2.2)
 }
 
 // opSloadEIP2929 is SLOAD with its EIP-2929 gas, which one frame-cache lookup serves.
@@ -322,59 +326,62 @@ var (
 
 // makeSelfdestructGasFn can create the selfdestruct dynamic gas function for EIP-2929 and EIP-2539
 func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
-	gasFunc := func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
-		var (
-			gas     mdgas.MdGasCost
-			address = callContext.peekAddress(evm)
-		)
-		if evm.readOnly {
-			return mdgas.MdGasCost{}, ErrWriteProtection
-		}
-		// If the caller cannot afford the cost, this change will be rolled back
-		if !evm.IntraBlockState().AddressInAccessList(address) {
-			gas.Execution = coldAccountAccessCost(evm.chainRules)
-			if scopeGas.Execution < gas.Execution {
-				return mdgas.MdGasCost{}, ErrOutOfGas
-			}
-			evm.IntraBlockState().AddAddressToAccessList(address)
-		}
-
-		// if empty and transfers value
-		empty, err := evm.IntraBlockState().Empty(address)
-		if err != nil {
-			return mdgas.MdGasCost{}, err
-		}
-		balance, err := evm.IntraBlockState().GetBalance(callContext.Address())
-		if err != nil {
-			return mdgas.MdGasCost{}, err
-		}
-		// Per EIP-7928, SELFDESTRUCT is a state access on the beneficiary
-		// independently of any value transfer, so record it unconditionally.
-		evm.IntraBlockState().MarkAddressAccess(address, false)
-		if empty && !balance.IsZero() {
-			if evm.chainRules.IsAmsterdam {
-				gas.Execution += params.AccountWriteCostEIP8038
-				gas.State = params.StateGasNewAccount
-			} else {
-				gas.Execution += params.CreateBySelfdestructGas
-			}
-		}
-
-		// Probe the flag only when the refund can apply: the probe records a
-		// SelfDestructPath read, which under parallel execution races another
-		// tx's SELFDESTRUCT of the same contract for no observable effect.
-		if refundsEnabled {
-			hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
-			if err != nil {
-				return mdgas.MdGasCost{}, err
-			}
-			if !hasSelfdestructed {
-				evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
-			}
-		}
-		return gas, nil
+	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+		return selfdestructGasEIP2929(evm, callContext, scopeGas, refundsEnabled)
 	}
-	return gasFunc
+}
+
+func selfdestructGasEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, refundsEnabled bool) (mdgas.MdGasCost, error) {
+	var (
+		gas     mdgas.MdGasCost
+		address = callContext.peekAddress(evm)
+	)
+	if evm.readOnly {
+		return mdgas.MdGasCost{}, ErrWriteProtection
+	}
+	// If the caller cannot afford the cost, this change will be rolled back
+	if !evm.IntraBlockState().AddressInAccessList(address) {
+		gas.Execution = coldAccountAccessCost(evm.chainRules)
+		if scopeGas.Execution < gas.Execution {
+			return mdgas.MdGasCost{}, ErrOutOfGas
+		}
+		evm.IntraBlockState().AddAddressToAccessList(address)
+	}
+
+	// if empty and transfers value
+	empty, err := evm.IntraBlockState().Empty(address)
+	if err != nil {
+		return mdgas.MdGasCost{}, err
+	}
+	balance, err := evm.IntraBlockState().GetBalance(callContext.Address())
+	if err != nil {
+		return mdgas.MdGasCost{}, err
+	}
+	// Per EIP-7928, SELFDESTRUCT is a state access on the beneficiary
+	// independently of any value transfer, so record it unconditionally.
+	evm.IntraBlockState().MarkAddressAccess(address, false)
+	if empty && !balance.IsZero() {
+		if evm.chainRules.IsAmsterdam {
+			gas.Execution += params.AccountWriteCostEIP8038
+			gas.State = params.StateGasNewAccount
+		} else {
+			gas.Execution += params.CreateBySelfdestructGas
+		}
+	}
+
+	// Probe the flag only when the refund can apply: the probe records a
+	// SelfDestructPath read, which under parallel execution races another
+	// tx's SELFDESTRUCT of the same contract for no observable effect.
+	if refundsEnabled {
+		hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
+		if err != nil {
+			return mdgas.MdGasCost{}, err
+		}
+		if !hasSelfdestructed {
+			evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
+		}
+	}
+	return gas, nil
 }
 
 var (

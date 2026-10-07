@@ -289,6 +289,13 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"copybig":   prog(PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 0, PUSH1, 0, CALLDATACOPY),
 		"revertmem": {byte(PUSH1), 64, byte(PUSH1), 200, byte(REVERT)},
 		"returnbig": {byte(PUSH8), 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, byte(PUSH1), 0, byte(RETURN)},
+		"exp":       prog(PUSH1, 200, PUSH1, 3, EXP, PUSH2, 1, 0, PUSH1, 2, EXP, PUSH1, 0, PUSH1, 5, EXP, DUP1),
+		"extcodecopy": prog(PUSH1, 10, PUSH1, 0, PUSH1, 40, PUSH1, 0x20, EXTCODECOPY, PUSH1, 5, PUSH1, 0, PUSH1, 0, PUSH1, 0, EXTCODECOPY,
+			MSIZE, DUP1, DUP1, DUP1),
+		// Slot 3 is unset: storing to it creates it, and zeroing it again deletes it.
+		"sstore": prog(PUSH1, 0xaa, PUSH1, 1, SSTORE, PUSH1, 0, PUSH1, 2, SSTORE, PUSH1, 7, PUSH1, 3, SSTORE, PUSH1, 0, PUSH1, 3, SSTORE,
+			PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, PUSH1, 3, SLOAD, DUP1),
+		"selfdestruct": {byte(PUSH1), 0x20, byte(SELFDESTRUCT)},
 		// The zero address is warm, 0x20 and 0x21 are cold.
 		"account":     prog(PUSH1, 0x20, BALANCE, PUSH1, 0x20, EXTCODESIZE, PUSH1, 0x21, EXTCODEHASH, PUSH1, 0x21, BALANCE, PUSH1, 0x22, EXTCODESIZE),
 		"accountwarm": prog(PUSH1, 0, BALANCE, PUSH1, 0, EXTCODESIZE, PUSH1, 0, EXTCODEHASH, DUP1),

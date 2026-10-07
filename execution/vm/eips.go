@@ -127,19 +127,19 @@ func opChainID(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, e
 // enable2200 applies EIP-2200 (Rebalance net-metered SSTORE)
 func enable2200(jt *JumpTable) {
 	jt[SLOAD].constantGas = params.SloadGasEIP2200
-	jt[SSTORE].dynamicGas = gasSStoreEIP2200
+	jt[SSTORE].gasExecute = opSstoreEIP2200
 }
 
 // enable2929 enables "EIP-2929: Gas cost increases for state access opcodes"
 // https://eips.ethereum.org/EIPS/eip-2929
 func enable2929(jt *JumpTable) {
-	jt[SSTORE].dynamicGas = gasSStoreEIP2929
+	jt[SSTORE].gasExecute = makeSstoreEIP2929(params.SstoreClearsScheduleRefundEIP2200)
 
 	jt[SLOAD].constantGas = 0
 	jt[SLOAD].gasExecute = opSloadEIP2929
 
 	jt[EXTCODECOPY].constantGas = params.WarmStorageReadCostEIP2929
-	jt[EXTCODECOPY].dynamicGas = gasExtCodeCopyEIP2929
+	jt[EXTCODECOPY].gasExecute = opExtCodeCopyEIP2929
 
 	jt[EXTCODESIZE].constantGas = params.WarmStorageReadCostEIP2929
 	jt[EXTCODESIZE].gasExecute = opExtCodeSizeEIP2929
@@ -165,12 +165,12 @@ func enable2929(jt *JumpTable) {
 	// This was previously part of the dynamic cost, but we're using it as a constantGas
 	// factor here
 	jt[SELFDESTRUCT].constantGas = params.SelfdestructGasEIP150
-	jt[SELFDESTRUCT].dynamicGas = gasSelfdestructEIP2929
+	jt[SELFDESTRUCT].gasExecute = makeSelfdestructEIP2929(true)
 }
 
 func enable3529(jt *JumpTable) {
-	jt[SSTORE].dynamicGas = gasSStoreEIP3529
-	jt[SELFDESTRUCT].dynamicGas = gasSelfdestructEIP3529
+	jt[SSTORE].gasExecute = makeSstoreEIP2929(params.SstoreClearsScheduleRefundEIP3529)
+	jt[SELFDESTRUCT].gasExecute = makeSelfdestructEIP2929(false)
 }
 
 // enable3198 applies EIP-3198 (BASEFEE Opcode)

@@ -275,7 +275,7 @@ func newByzantiumInstructionSet() JumpTable {
 // EIP 158 a.k.a Spurious Dragon
 func newSpuriousDragonInstructionSet() JumpTable {
 	instructionSet := newTangerineWhistleInstructionSet()
-	instructionSet[EXP].dynamicGas = gasExpEIP160
+	instructionSet[EXP].gasExecute = opExpEIP160WithGas
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
@@ -386,7 +386,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		EXP: {
 			execute:    opExp,
-			dynamicGas: gasExpFrontier,
+			gasExecute: opExpFrontierWithGas,
 			numPop:     2,
 			numPush:    1,
 		},
@@ -563,7 +563,7 @@ func newFrontierInstructionSet() JumpTable {
 		EXTCODECOPY: {
 			execute:     opExtCodeCopy,
 			constantGas: params.ExtcodeCopyBaseFrontier,
-			dynamicGas:  gasExtCodeCopy,
+			gasExecute:  opExtCodeCopyWithGas,
 			numPop:      4,
 			numPush:     0,
 			memorySize:  memoryExtCodeCopy,
@@ -646,7 +646,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		SSTORE: {
 			execute:    opSstore,
-			dynamicGas: gasSStore,
+			gasExecute: opSstoreWithGas,
 			numPop:     2,
 			numPush:    0,
 			string:     stSstore,
@@ -1209,7 +1209,7 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		SELFDESTRUCT: {
 			execute:    opSelfdestruct,
-			dynamicGas: gasSelfdestruct,
+			gasExecute: opSelfdestructWithGas,
 			numPop:     1,
 			numPush:    0,
 		},

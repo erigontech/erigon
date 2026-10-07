@@ -219,3 +219,89 @@ func makeLogWithGas(topics int) gasExecuteFunc {
 		return opLog(pc, evm, scope, topics)
 	}
 }
+
+func opExpFrontierWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	cost, err := gasExpFrontier(evm, scope, scope.Gas(), 0)
+	if err = evm.chargeDynamic(EXP, pc, scope, t, cost, err, 0); err != nil {
+		return pc, nil, err
+	}
+	return opExp(pc, evm, scope)
+}
+
+func opExpEIP160WithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	cost, err := gasExpEIP160(evm, scope, scope.Gas(), 0)
+	if err = evm.chargeDynamic(EXP, pc, scope, t, cost, err, 0); err != nil {
+		return pc, nil, err
+	}
+	return opExp(pc, evm, scope)
+}
+
+func opExtCodeCopyWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	size, err := wordMemorySize(memoryExtCodeCopy(scope))
+	if err != nil {
+		return pc, nil, err
+	}
+	cost, err := gasExtCodeCopy(evm, scope, scope.Gas(), size)
+	if err = evm.chargeDynamic(EXTCODECOPY, pc, scope, t, cost, err, size); err != nil {
+		return pc, nil, err
+	}
+	return opExtCodeCopy(pc, evm, scope)
+}
+
+func opExtCodeCopyEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	size, err := wordMemorySize(memoryExtCodeCopy(scope))
+	if err != nil {
+		return pc, nil, err
+	}
+	cost, err := gasExtCodeCopyEIP2929(evm, scope, scope.Gas(), size)
+	if err = evm.chargeDynamic(EXTCODECOPY, pc, scope, t, cost, err, size); err != nil {
+		return pc, nil, err
+	}
+	return opExtCodeCopy(pc, evm, scope)
+}
+
+func opSstoreWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	cost, err := gasSStore(evm, scope, scope.Gas(), 0)
+	if err = evm.chargeDynamic(SSTORE, pc, scope, t, cost, err, 0); err != nil {
+		return pc, nil, err
+	}
+	return opSstore(pc, evm, scope)
+}
+
+func opSstoreEIP2200(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	cost, err := gasSStoreEIP2200(evm, scope, scope.Gas(), 0)
+	if err = evm.chargeDynamic(SSTORE, pc, scope, t, cost, err, 0); err != nil {
+		return pc, nil, err
+	}
+	return opSstore(pc, evm, scope)
+}
+
+func makeSstoreEIP2929(clearingRefund uint64) gasExecuteFunc {
+	return func(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+		cost, err := sstoreGasEIP2929(evm, scope, scope.Gas(), clearingRefund)
+		if err = evm.chargeDynamic(SSTORE, pc, scope, t, cost, err, 0); err != nil {
+			return pc, nil, err
+		}
+		return opSstore(pc, evm, scope)
+	}
+}
+
+// opSelfdestructWithGas runs the table's op, which EIP-6780 changes apart from the gas.
+func opSelfdestructWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	cost, err := gasSelfdestruct(evm, scope, scope.Gas(), 0)
+	if err = evm.chargeDynamic(SELFDESTRUCT, pc, scope, t, cost, err, 0); err != nil {
+		return pc, nil, err
+	}
+	return evm.jt[SELFDESTRUCT].execute(pc, evm, scope)
+}
+
+// makeSelfdestructEIP2929 runs the table's op, like opSelfdestructWithGas.
+func makeSelfdestructEIP2929(refundsEnabled bool) gasExecuteFunc {
+	return func(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+		cost, err := selfdestructGasEIP2929(evm, scope, scope.Gas(), refundsEnabled)
+		if err = evm.chargeDynamic(SELFDESTRUCT, pc, scope, t, cost, err, 0); err != nil {
+			return pc, nil, err
+		}
+		return evm.jt[SELFDESTRUCT].execute(pc, evm, scope)
+	}
+}
