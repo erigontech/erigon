@@ -40,6 +40,19 @@ func wordMemorySize(size uint64, overflow bool) (uint64, error) {
 // chargeDynamic charges an op's dynamic cost, or fails with the error of its gas func,
 // and grows the memory to memorySize.
 func (evm *EVM) chargeDynamic(op OpCode, pc uint64, scope *CallContext, t *opTrace, cost mdgas.MdGasCost, err error, memorySize uint64) error {
+	if err != nil || t != nil || cost.State != 0 {
+		return evm.chargeDynamicSlow(op, pc, scope, t, cost, err, memorySize)
+	}
+	if scope.gas < cost.Execution {
+		return ErrOutOfGas
+	}
+	scope.gas -= cost.Execution
+	scope.Memory.Resize(memorySize)
+	return nil
+}
+
+// chargeDynamicSlow is chargeDynamic for a gas func error, a trace or state gas.
+func (evm *EVM) chargeDynamicSlow(op OpCode, pc uint64, scope *CallContext, t *opTrace, cost mdgas.MdGasCost, err error, memorySize uint64) error {
 	if err != nil {
 		if !errors.Is(err, ErrOutOfGas) {
 			err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
