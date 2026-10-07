@@ -189,7 +189,7 @@ func validJSON(data []byte) bool {
 // scanValidJSON validates the value beginning at data[i] and returns the offset
 // just past it.
 func scanValidJSON(data []byte, i, depth int) (int, bool) {
-	if i >= len(data) || depth > maxJSONDepth {
+	if i >= len(data) {
 		return i, false
 	}
 	switch data[i] {
@@ -308,6 +308,10 @@ func isHexDigit(c byte) bool {
 // at data[i] and returns the offset just past close. Members carry a quoted key
 // and a colon, elements do not.
 func scanValidJSONComposite(data []byte, i, depth int, close byte) (int, bool) {
+	// Only a composite is a level of nesting, so only it is counted.
+	if depth > maxJSONDepth {
+		return i, false
+	}
 	i = skipJSONSpace(data, i+1)
 	if i < len(data) && data[i] == close {
 		return i + 1, true
