@@ -83,7 +83,6 @@ type CallContext struct {
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
 	Contract Contract
-	create   createGasPreparation
 	slots    frameSlots
 	trace    opTrace
 	Stack    Stack
@@ -211,7 +210,6 @@ func (evm *EVM) putCallContext(ctx *CallContext) {
 	ctx.cacheGen = 0
 	ctx.stateGasSpill = 0
 	ctx.newAccountCharged = false
-	ctx.create = createGasPreparation{}
 	ctx.slots.ok = [2]bool{}                 // the next frame may have another storage address
 	ctx.slots.key = [2]accounts.StorageKey{} // like cachedKey below: release the canonMap pins
 	// Use sentinel values so that a peek call before the first cacheGen++ is

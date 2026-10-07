@@ -252,8 +252,8 @@ func opPush0(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // EIP-3860: Limit and meter initcode
 // https://eips.ethereum.org/EIPS/eip-3860
 func enable3860(jt *JumpTable) {
-	jt[CREATE].gasExecute = makeWithGas(memoryCreate, gasCreateEip3860, opCreate)
-	jt[CREATE2].gasExecute = makeWithGas(memoryCreate2, gasCreate2Eip3860, opCreate2)
+	jt[CREATE].gasExecute = makeCreateWithGas(memoryCreate, gasCreateEip3860, opCreate)
+	jt[CREATE2].gasExecute = makeCreateWithGas(memoryCreate2, gasCreate2Eip3860, opCreate2)
 }
 
 // enable4844 applies mini-danksharding (BLOBHASH opcode)

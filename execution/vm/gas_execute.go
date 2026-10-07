@@ -305,18 +305,18 @@ func makeSelfdestructEIP2929(refundsEnabled bool) gasExecuteFunc {
 	}
 }
 
-// makeWithGas runs op with its memory size, gas and execute funcs.
-func makeWithGas(memorySize memorySizeFunc, gas gasFunc, execute executionFunc) gasExecuteFunc {
+// makeCreateWithGas runs a CREATE op with what its gas func prepared for it.
+func makeCreateWithGas(memorySize memorySizeFunc, gas createGasFunc, create createFunc) gasExecuteFunc {
 	return func(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
 		size, err := wordMemorySize(memorySize(scope))
 		if err != nil {
 			return pc, nil, err
 		}
-		cost, err := gas(evm, scope, scope.Gas(), size)
+		cost, prepared, err := gas(evm, scope, scope.Gas(), size)
 		if err = evm.chargeDynamic(pc, scope, t, cost, err, size); err != nil {
 			return pc, nil, err
 		}
-		return execute(pc, evm, scope)
+		return create(pc, evm, scope, &prepared)
 	}
 }
 

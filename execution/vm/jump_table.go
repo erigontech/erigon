@@ -28,10 +28,12 @@ import (
 
 type (
 	executionFunc    func(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error)
-	gasFunc          func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error)
 	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, bool, error)
 	// callGasFunc is a call op's gas func, which also returns the gas the call forwards.
-	callGasFunc     func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (cost mdgas.MdGasCost, forwarded uint64, err error)
+	callGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (cost mdgas.MdGasCost, forwarded uint64, err error)
+	// createGasFunc is a CREATE op's gas func, which also prepares the creation under Amsterdam.
+	createGasFunc   func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, createGasPreparation, error)
+	createFunc      func(pc uint64, evm *EVM, scope *CallContext, prepared *createGasPreparation) (uint64, []byte, error)
 	callFunc        func(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error)
 	statefulGasFunc func(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error)
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
@@ -213,9 +215,8 @@ func newConstantinopleInstructionSet() JumpTable {
 		numPush:     1,
 	}
 	instructionSet[CREATE2] = operation{
-		execute:     opCreate2,
 		constantGas: params.Create2Gas,
-		gasExecute:  makeWithGas(memoryCreate2, gasCreate2, opCreate2),
+		gasExecute:  makeCreateWithGas(memoryCreate2, gasCreate2, opCreate2),
 		numPop:      4,
 		numPush:     1,
 		usesMemory:  true,
@@ -1165,9 +1166,8 @@ func newFrontierInstructionSet() JumpTable {
 			usesMemory: true,
 		},
 		CREATE: {
-			execute:     opCreate,
 			constantGas: params.CreateGas,
-			gasExecute:  makeWithGas(memoryCreate, gasCreate, opCreate),
+			gasExecute:  makeCreateWithGas(memoryCreate, gasCreate, opCreate),
 			numPop:      3,
 			numPush:     1,
 			usesMemory:  true,
