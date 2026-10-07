@@ -146,7 +146,8 @@ func sstoreGasEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, 
 // 2100 gas and adds the pair to accessed_storage_keys; otherwise it charges 100 gas.
 func opSloadEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
 	if scope.slots.on {
-		if i := scope.lookupSlot(evm); i >= 0 {
+		i := scope.lookupSlot(evm)
+		if i >= 0 {
 			if t != nil {
 				evm.traceCost(SLOAD, t, mdgas.MdGasCost{Execution: params.WarmStorageReadCostEIP2929})
 			}

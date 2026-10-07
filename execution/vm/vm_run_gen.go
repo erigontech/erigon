@@ -431,7 +431,10 @@ run:
 				}
 				gasLeft -= o.constantGas
 				if callContext.slots.on {
-					if i := callContext.lookupSlot(evm); i >= 0 {
+					callContext.gas, callContext.savedPC = gasLeft, pc
+					i := callContext.lookupSlot(evm)
+					gasLeft, pc = callContext.gas, callContext.savedPC
+					if i >= 0 {
 						if gasLeft < params.WarmStorageReadCostEIP2929 {
 							res, err = nil, ErrOutOfGas
 							break run
