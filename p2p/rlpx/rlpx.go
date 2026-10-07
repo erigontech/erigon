@@ -191,17 +191,14 @@ func (h *sessionState) readFrame(conn io.Reader) ([]byte, error) {
 		rsize += 16 - padding
 	}
 
-	// Read the frame content.
-	frame, err := h.rbuf.read(conn, int(rsize))
+	// Read the frame content and MAC together so frame uses the current buffer.
+	frame, err := h.rbuf.read(conn, int(rsize)+16)
 	if err != nil {
 		return nil, err
 	}
+	frame, frameMAC := frame[:rsize], frame[rsize:]
 
 	// Validate frame MAC.
-	frameMAC, err := h.rbuf.read(conn, 16)
-	if err != nil {
-		return nil, err
-	}
 	wantFrameMAC := h.ingressMAC.computeFrame(frame)
 	if !hmac.Equal(wantFrameMAC, frameMAC) {
 		return nil, errors.New("bad frame MAC")
