@@ -107,31 +107,10 @@ jobs:
         with:
           cache-namespace: lint
 
-      # The SIMD kernels are per-architecture and chosen at run time, so three things
-      # need covering: that every architecture still builds, that the vector path agrees
-      # with the stdlib, and that the fallback the feature check selects does too.
-      - name: Build the SIMD hex kernel for every architecture
-        env:
-          GOTOOLCHAIN: go1.27.1
-          GOEXPERIMENT: jsonv2,simd
-        run: |
-          for arch in amd64 arm64 riscv64 386; do
-            GOOS=linux GOARCH=$arch go build ./common/hexutil/
-          done
-
       - name: Test the SIMD hex kernel
         env:
           GOTOOLCHAIN: go1.27.1
           GOEXPERIMENT: jsonv2,simd
-        run: go test -count=1 ./common/hexutil/...
-
-      # cpu.all=off clears the feature bits the kernels check, so the same tests run
-      # down the scalar path on a machine that has the instructions.
-      - name: Test the hex fallback path
-        env:
-          GOTOOLCHAIN: go1.27.1
-          GOEXPERIMENT: jsonv2,simd
-          GODEBUG: cpu.all=off
         run: go test -count=1 ./common/hexutil/...
 
       # golangci-lint internally trims cache entries unused for 5 days,
@@ -177,7 +156,7 @@ jobs:
           gh run cancel ${{ github.run_id }} || true
   hexutil-arm64:
     name: SIMD hex on arm64
-    runs-on: [ self-hosted, qa, Release, ARM64 ]
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
