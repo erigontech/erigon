@@ -575,6 +575,27 @@ func ReadBodyWithTransactions(db kv.Getter, hash common.Hash, number uint64) (*t
 	return body, nil
 }
 
+// ReadRawBody is ReadBodyWithTransactions without decoding the transactions: each is returned in
+// its binary (canonical EIP-2718) encoding, copied out of the database.
+func ReadRawBody(db kv.Getter, hash common.Hash, number uint64) (*types.RawBody, error) {
+	body, firstTxId, txCount := ReadBody(db, hash, number)
+	if body == nil {
+		return nil, nil
+	}
+	txs := make([][]byte, 0, txCount)
+	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(firstTxId), txCount, func(_, v []byte) error {
+		txn, err := types.BinaryFromStoredTxn(v)
+		if err != nil {
+			return err
+		}
+		txs = append(txs, bytes.Clone(txn))
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return &types.RawBody{Transactions: txs, Uncles: body.Uncles, Withdrawals: body.Withdrawals}, nil
+}
+
 func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err error) {
 	blockKey := make([]byte, dbutils.NumberLength+length.Hash)
 	encNum := make([]byte, 8)
