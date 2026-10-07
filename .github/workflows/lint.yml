@@ -102,6 +102,9 @@ jobs:
       - name: Test Kurtosis setup
         run: make test-kurtosis-setup
 
+      - name: Test QA reference checks
+        run: make test-qa-reference
+
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:
