@@ -657,12 +657,9 @@ run:
 		} else {
 			callContext.gas -= cost
 		}
-		if operation.gasExecute != nil {
-			if anyTrace {
-				pc, res, err = operation.gasExecute(pc, evm, callContext, &t)
-			} else {
-				pc, res, err = operation.gasExecuteRun(pc, evm, callContext)
-			}
+		// run calls the gasExecute ops before its generic path: one that gets here failed a check above.
+		if anyTrace && operation.gasExecute != nil {
+			pc, res, err = operation.gasExecute(pc, evm, callContext, &t)
 			gasLeft = callContext.gas
 			if err != nil {
 				break run

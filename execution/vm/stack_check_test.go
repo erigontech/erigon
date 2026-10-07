@@ -122,11 +122,13 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		// From EIP-2929 on, opSloadEIP2929 charges SLOAD's dynamic gas and SLOAD has no gas func.
 		if sload := &jt[SLOAD]; sload.gasExecute != nil || sload.constantGas == 0 {
 			require.Equal(t, reflect.ValueOf(opSloadEIP2929).Pointer(), reflect.ValueOf(sload.gasExecute).Pointer(), "table %d SLOAD", i)
-			require.Equal(t, reflect.ValueOf(opSloadEIP2929Run).Pointer(), reflect.ValueOf(sload.gasExecuteRun).Pointer(), "table %d SLOAD", i)
 			require.Nil(t, sload.dynamicGas, "table %d SLOAD", i)
 		}
+		// run calls the copy of the func vmgen found for the op, whatever the table holds.
 		for op := range jt {
-			require.Equal(t, jt[op].gasExecute == nil, jt[op].gasExecuteRun == nil, "table %d %s gasExecuteRun", i, OpCode(op))
+			if jt[op].gasExecute != nil {
+				require.Equal(t, reflect.ValueOf(gasExecuteOps[OpCode(op)]).Pointer(), reflect.ValueOf(jt[op].gasExecute).Pointer(), "table %d %s", i, OpCode(op))
+			}
 		}
 		for op, w := range fastPathOps {
 			got := &jt[op]
@@ -335,8 +337,8 @@ func TestRunMatchesRunTraced(t *testing.T) {
 	}
 }
 
-// TestRunUsesGasExecute pins that run takes an op's gasExecuteRun, and runTraced its
-// gasExecute with the trace, in place of the gas func and execute.
+// TestRunUsesGasExecute pins that runTraced runs an op's gasExecute with the trace,
+// and run the generated copy without it, in place of the gas func and execute.
 func TestRunUsesGasExecute(t *testing.T) {
 	t.Parallel()
 	for _, traced := range []bool{false, true} {
@@ -346,12 +348,8 @@ func TestRunUsesGasExecute(t *testing.T) {
 		table := *evm.jt
 		called := false
 		table[SLOAD].gasExecute = func(pc uint64, evm *EVM, scope *CallContext, tr *opTrace) (uint64, []byte, error) {
-			called = traced && tr != nil
+			called = tr != nil
 			return opSloadEIP2929(pc, evm, scope, tr)
-		}
-		table[SLOAD].gasExecuteRun = func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-			called = !traced
-			return opSloadEIP2929Run(pc, evm, scope)
 		}
 		evm.jt = &table
 		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
@@ -360,8 +358,9 @@ func TestRunUsesGasExecute(t *testing.T) {
 		if traced {
 			f = evm.runTraced
 		}
-		_, _, _, err := f(*c, mdgas.MdGas{Execution: 10_000}, nil, false, false, false)
+		_, left, _, err := f(*c, mdgas.MdGas{Execution: 10_000}, nil, false, false, false)
 		require.NoError(t, err)
-		require.True(t, called, "traced=%v", traced)
+		require.Equal(t, traced, called)
+		require.Equal(t, 10_000-3-coldStorageAccessCost(evm.chainRules), left.Execution, "traced=%v", traced)
 	}
 }

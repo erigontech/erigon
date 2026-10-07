@@ -48,8 +48,6 @@ type operation struct {
 	// gasExecute, when set, runs the op in place of dynamicGas and execute: it charges
 	// the dynamic gas itself, so what the gas needs is derived once.
 	gasExecute gasExecuteFunc
-	// gasExecuteRun is gasExecute's copy without the trace, which vmgen writes for run.
-	gasExecuteRun executionFunc
 	// maxStack specifies the max length the stack can have for this operation
 	// to not overflow the stack.
 	maxStack int

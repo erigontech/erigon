@@ -402,6 +402,32 @@ run:
 			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
+		switch op {
+		case SLOAD:
+			if o := &jt[SLOAD]; o.gasExecute != nil && uint(stack.len()-o.numPop) <= uint(o.maxStack-o.numPop) && gasLeft >= o.constantGas {
+				gasLeft -= o.constantGas
+				if callContext.slots.on {
+					if i := callContext.lookupSlot(evm); i >= 0 {
+						if gasLeft < params.WarmStorageReadCostEIP2929 {
+							res, err = nil, ErrOutOfGas
+							break run
+						}
+						gasLeft -= params.WarmStorageReadCostEIP2929
+						*callContext.Stack.peek() = callContext.slots.val[i]
+						pc++
+						continue run
+					}
+				}
+				callContext.gas = gasLeft
+				pc, res, err = opSloadEIP2929MissRun(pc, evm, callContext)
+				gasLeft = callContext.gas
+				if err != nil {
+					break run
+				}
+				pc++
+				continue run
+			}
+		}
 		if false && debug {
 			// Capture pre-execution values for tracing.
 			t.logged = false
@@ -426,12 +452,9 @@ run:
 		} else {
 			callContext.gas -= cost
 		}
-		if operation.gasExecute != nil {
-			if false {
-				pc, res, err = operation.gasExecute(pc, evm, callContext, &t)
-			} else {
-				pc, res, err = operation.gasExecuteRun(pc, evm, callContext)
-			}
+		// run calls the gasExecute ops before its generic path: one that gets here failed a check above.
+		if false && operation.gasExecute != nil {
+			pc, res, err = operation.gasExecute(pc, evm, callContext, &t)
 			gasLeft = callContext.gas
 			if err != nil {
 				break run
@@ -517,21 +540,6 @@ run:
 	}
 
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
-}
-
-// opSloadEIP2929Run is opSloadEIP2929 without the trace.
-func opSloadEIP2929Run(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if scope.slots.on {
-		if i := scope.lookupSlot(evm); i >= 0 {
-			if scope.gas < params.WarmStorageReadCostEIP2929 {
-				return pc, nil, ErrOutOfGas
-			}
-			scope.gas -= params.WarmStorageReadCostEIP2929
-			*scope.Stack.peek() = scope.slots.val[i]
-			return pc, nil, nil
-		}
-	}
-	return opSloadEIP2929MissRun(pc, evm, scope)
 }
 
 // opSloadEIP2929MissRun is opSloadEIP2929Miss without the trace.
