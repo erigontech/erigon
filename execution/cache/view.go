@@ -104,7 +104,9 @@ type ReadView struct {
 // View creates a ReadView vouched for by f. If the cache has a durable state
 // version, f must report the same version when it is bound. A stale or
 // versionless frontier is not retried automatically. A nil frontier,
-// publication in progress, or a cache behind f may be retried later.
+// publication in progress, or a cache behind f may be retried later. A cache
+// without a version counts as behind any versioned f: it missed the commits
+// before its first initialization.
 func (c *StateCache) View(f Frontier) ReadView {
 	if c == nil {
 		return ReadView{}
@@ -142,10 +144,13 @@ func (c *StateCache) bindFrontierLocked(frontier Frontier) Frontier {
 	if frontier == nil || c.publishing {
 		return nil
 	}
+	versioned, ok := frontier.(stateVersionFrontier)
 	if !c.stateVersionKnown {
+		if ok {
+			return nil
+		}
 		return frontier
 	}
-	versioned, ok := frontier.(stateVersionFrontier)
 	if !ok {
 		return rejectedFrontier{}
 	}
@@ -176,6 +181,26 @@ func (v ReadView) GetWithTxNum(domain kv.Domain, key []byte) ([]byte, uint64, bo
 		return nil, 0, false
 	}
 	return v.c.getWithTxNum(domain, key)
+}
+
+// GetVisible is GetWithTxNum limited to the bound view's own state: a value
+// written at or above its frontier, or any value once an unwind revoked the
+// view, is a miss.
+func (v ReadView) GetVisible(domain kv.Domain, key []byte) ([]byte, uint64, bool) {
+	if v.c == nil || v.frontier == nil {
+		return nil, 0, false
+	}
+	end, ok := v.frontier.DomainVisibleEnd(domain)
+	if !ok {
+		return nil, 0, false
+	}
+	val, txNum, hit := v.c.getWithTxNum(domain, key)
+	// The epoch is loaded after the entry: an unwind bumps it before it installs
+	// the replacement fork's entries.
+	if !hit || txNum >= end || v.readViewEpoch != v.c.readViewEpoch.Load() {
+		return nil, 0, false
+	}
+	return val, txNum, true
 }
 
 // GetCodeByHash retrieves code bytes by their Ethereum codeHash (keccak256),
