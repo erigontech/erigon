@@ -46,7 +46,6 @@ require (
 	github.com/go-quicktest/qt v1.102.0
 	github.com/go-stack/stack v1.8.1
 	github.com/go-viper/mapstructure/v2 v2.5.0
-	github.com/goccy/go-json v0.11.2
 	github.com/gofrs/flock v0.13.0
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/golang/snappy v1.0.0
