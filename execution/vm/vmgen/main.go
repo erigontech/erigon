@@ -32,7 +32,6 @@ import (
 	"go/token"
 	"go/types"
 	"log"
-	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -276,7 +275,7 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 
 // untraced returns runTraced as run in a file of its own, with anyTrace set
 // to false and fast in place of the switchHere comment.
-func untraced(traced []byte, fast, direct, traceFreeFuncs string) []byte {
+func untraced(traced []byte, fast, direct string) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
 	}
@@ -320,7 +319,6 @@ func untraced(traced []byte, fast, direct, traceFreeFuncs string) []byte {
 			b.WriteString("// run is runTraced without the tracing code and with the fast path.\n" + text(fset, &printer.CommentedNode{Node: d, Comments: f.Comments}) + "\n")
 		}
 	}
-	b.WriteString(traceFreeFuncs)
 	out, err := format.Source(b.Bytes())
 	if err != nil {
 		log.Fatal(err)
@@ -357,12 +355,7 @@ const cacheGenStep = "callContext.cacheGen++\n"
 // run inlines the func's copy without the trace. TestFastPathMatchesJumpTables
 // fails for a table whose gasExecute is not here.
 func gasExecuteOps() [][2]string {
-	return [][2]string{
-		{"BALANCE", "opBalanceEIP2929"},
-		{"EXTCODEHASH", "opExtCodeHashEIP2929"},
-		{"EXTCODESIZE", "opExtCodeSizeEIP2929"},
-		{"SLOAD", "opSloadEIP2929"},
-	}
+	return [][2]string{{"SLOAD", "opSloadEIP2929"}}
 }
 
 // directCalls returns run's switch over the gasExecute ops, which runs their copies
@@ -405,7 +398,7 @@ func inlineCopy(copies map[string]string, name string) string {
 
 // traceFree returns, by name, for each func of operations_acl.go that takes a t *opTrace,
 // its copy for run: named with a Run suffix, without t and its `if t != nil`
-// statements, calling the copies of the other such funcs.
+// statements. Only the copies run inlines are used; the rest are dropped.
 func traceFree() map[string]string {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "operations_acl.go", read("operations_acl.go"), parser.SkipObjectResolution)
@@ -418,10 +411,6 @@ func traceFree() map[string]string {
 			funcs = append(funcs, fn)
 		}
 	}
-	traced := map[string]bool{}
-	for _, fn := range funcs {
-		traced[fn.Name.Name] = true
-	}
 	copies := map[string]string{}
 	for _, fn := range funcs {
 		name := fn.Name.Name
@@ -433,9 +422,12 @@ func traceFree() map[string]string {
 			case *ast.CaseClause:
 				n.Body = slices.DeleteFunc(n.Body, isTraceIf)
 			case *ast.CallExpr:
-				if id, ok := n.Fun.(*ast.Ident); ok && traced[id.Name] {
-					id.Name += "Run"
-					n.Args = slices.DeleteFunc(n.Args, isT)
+				// A call that outlived the trace statements passes t on: it goes
+				// to the traced func itself, which skips its own trace on nil.
+				for i, a := range n.Args {
+					if isT(a) {
+						n.Args[i] = ast.NewIdent("nil")
+					}
 				}
 			}
 			return true
@@ -497,15 +489,11 @@ func main() {
 	ops := fastOps()
 	gasOps, copies := gasExecuteOps(), traceFree()
 	direct := directCalls(gasOps, copies)
-	var called strings.Builder
-	for _, name := range slices.Sorted(maps.Keys(copies)) {
-		called.WriteString(copies[name])
-	}
 	files := []struct {
 		name string
 		data []byte
 	}{
-		{"vm_run_gen.go", untraced(read("interpreter.go"), fastSwitch(read("instructions.go"), ops), direct, called.String())},
+		{"vm_run_gen.go", untraced(read("interpreter.go"), fastSwitch(read("instructions.go"), ops), direct)},
 		{"fast_path_gen_test.go", testTable(ops, gasOps)},
 	}
 	var stale []string

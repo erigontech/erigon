@@ -22,7 +22,9 @@ import (
 
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // wordMemorySize rounds a memory size up to whole words, in which memory grows and is charged.
@@ -336,4 +338,37 @@ func makeCallWithGas(memorySize memorySizeFunc, gas callGasFunc, call callFunc) 
 		}
 		return call(pc, evm, scope, forwarded)
 	}
+}
+
+// accountSurcharge warms addr and returns what EIP-2929 charges for it on top of
+// the warm cost, which the op's constant gas covers.
+func accountSurcharge(evm *EVM, addr accounts.Address) uint64 {
+	if evm.IntraBlockState().AddAddressToAccessList(addr) {
+		return coldAccountAccessCost(evm.chainRules) - params.WarmStorageReadCostEIP2929
+	}
+	return 0
+}
+
+func opBalanceEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	cost := mdgas.MdGasCost{Execution: accountSurcharge(evm, scope.peekAddress(evm))}
+	if err := evm.chargeDynamic(pc, scope, t, cost, nil, 0); err != nil {
+		return pc, nil, err
+	}
+	return opBalance(pc, evm, scope)
+}
+
+func opExtCodeSizeEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	cost := mdgas.MdGasCost{Execution: accountSurcharge(evm, scope.peekAddress(evm))}
+	if err := evm.chargeDynamic(pc, scope, t, cost, nil, 0); err != nil {
+		return pc, nil, err
+	}
+	return opExtCodeSize(pc, evm, scope)
+}
+
+func opExtCodeHashEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	cost := mdgas.MdGasCost{Execution: accountSurcharge(evm, scope.peekAddress(evm))}
+	if err := evm.chargeDynamic(pc, scope, t, cost, nil, 0); err != nil {
+		return pc, nil, err
+	}
+	return opExtCodeHash(pc, evm, scope)
 }

@@ -404,60 +404,6 @@ run:
 		}
 		callContext.cacheGen++
 		switch op {
-		case BALANCE:
-			if o := &jt[BALANCE]; o.gasExecute != nil && uint(stack.len()-o.numPop) <= uint(o.maxStack-o.numPop) && gasLeft >= o.constantGas {
-				gasLeft -= o.constantGas
-				cost := accountSurcharge(evm, callContext.peekAddress(evm))
-				if gasLeft < cost {
-					res, err = nil, ErrOutOfGas
-					break run
-				}
-				gasLeft -= cost
-				callContext.gas = gasLeft
-				pc, res, err = opBalance(pc, evm, callContext)
-				gasLeft = callContext.gas
-				if err != nil {
-					break run
-				}
-				pc++
-				continue run
-			}
-		case EXTCODEHASH:
-			if o := &jt[EXTCODEHASH]; o.gasExecute != nil && uint(stack.len()-o.numPop) <= uint(o.maxStack-o.numPop) && gasLeft >= o.constantGas {
-				gasLeft -= o.constantGas
-				cost := accountSurcharge(evm, callContext.peekAddress(evm))
-				if gasLeft < cost {
-					res, err = nil, ErrOutOfGas
-					break run
-				}
-				gasLeft -= cost
-				callContext.gas = gasLeft
-				pc, res, err = opExtCodeHash(pc, evm, callContext)
-				gasLeft = callContext.gas
-				if err != nil {
-					break run
-				}
-				pc++
-				continue run
-			}
-		case EXTCODESIZE:
-			if o := &jt[EXTCODESIZE]; o.gasExecute != nil && uint(stack.len()-o.numPop) <= uint(o.maxStack-o.numPop) && gasLeft >= o.constantGas {
-				gasLeft -= o.constantGas
-				cost := accountSurcharge(evm, callContext.peekAddress(evm))
-				if gasLeft < cost {
-					res, err = nil, ErrOutOfGas
-					break run
-				}
-				gasLeft -= cost
-				callContext.gas = gasLeft
-				pc, res, err = opExtCodeSize(pc, evm, callContext)
-				gasLeft = callContext.gas
-				if err != nil {
-					break run
-				}
-				pc++
-				continue run
-			}
 		case SLOAD:
 			if o := &jt[SLOAD]; o.gasExecute != nil && uint(stack.len()-o.numPop) <= uint(o.maxStack-o.numPop) && gasLeft >= o.constantGas {
 				gasLeft -= o.constantGas
@@ -474,7 +420,7 @@ run:
 					}
 				}
 				callContext.gas = gasLeft
-				pc, res, err = opSloadEIP2929MissRun(pc, evm, callContext)
+				pc, res, err = opSloadEIP2929Miss(pc, evm, callContext, nil)
 				gasLeft = callContext.gas
 				if err != nil {
 					break run
@@ -542,20 +488,4 @@ run:
 	}
 
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
-}
-
-// opSloadEIP2929MissRun is opSloadEIP2929Miss without the trace.
-func opSloadEIP2929MissRun(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	ibs, addr, key := evm.IntraBlockState(), scope.Contract.Address(), scope.peekStorageKey(evm)
-	cost := params.WarmStorageReadCostEIP2929
-	if !ibs.SlotKnownWarm(addr, key) {
-		if _, slotMod := ibs.AddSlotToAccessList(addr, key); slotMod {
-			cost = coldStorageAccessCost(evm.chainRules)
-		}
-	}
-	if scope.gas < cost {
-		return pc, nil, ErrOutOfGas
-	}
-	scope.gas -= cost
-	return pc, nil, sloadRead(evm, scope, key)
 }
