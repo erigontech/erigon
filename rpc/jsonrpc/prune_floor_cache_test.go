@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -34,6 +35,95 @@ type pruneFloorCacheResult struct {
 
 func (c *pruneFloorCache[T]) get(ctx context.Context, head uint64, read func() (T, error)) (T, error) {
 	return c.getForKey(ctx, pruneFloorCacheKey{head: head}, read)
+}
+
+func TestPruneFloorCacheHitsDoNotWaitForWriter(t *testing.T) {
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
+	keys := []pruneFloorCacheKey{{head: 1, dbViewID: 1}, {head: 1, dbViewID: 2}}
+	for _, key := range keys {
+		_, err := cache.getForKey(t.Context(), key, func() (uint64, error) { return key.dbViewID, nil })
+		require.NoError(t, err)
+	}
+
+	results := make(chan pruneFloorCacheResult, len(keys))
+	done := make(chan struct{})
+	blocked := false
+	func() {
+		cache.mu.Lock()
+		defer cache.mu.Unlock()
+		go func() {
+			defer close(done)
+			for _, key := range keys {
+				floor, err := cache.getForKey(t.Context(), key, func() (uint64, error) {
+					return 0, errors.New("unexpected cache miss")
+				})
+				results <- pruneFloorCacheResult{floor: floor, err: err}
+			}
+		}()
+		for _, key := range keys {
+			select {
+			case got := <-results:
+				require.NoError(t, got.err)
+				require.Equal(t, key.dbViewID, got.floor)
+			case <-time.After(time.Second):
+				blocked = true
+				return
+			}
+		}
+	}()
+	<-done
+	require.False(t, blocked, "fresh cache hit waited for the write lock")
+}
+
+func TestPruneFloorCacheEvictsOldEntries(t *testing.T) {
+	t.Parallel()
+
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
+	var reads uint64
+	read := func() (uint64, error) {
+		reads++
+		return reads, nil
+	}
+	for head := uint64(0); head <= pruneFloorCacheSize; head++ {
+		floor, err := cache.get(t.Context(), head, read)
+		require.NoError(t, err)
+		require.Equal(t, head+1, floor)
+	}
+	for head := uint64(1); head <= pruneFloorCacheSize; head++ {
+		floor, err := cache.get(t.Context(), head, read)
+		require.NoError(t, err)
+		require.Equal(t, head+1, floor)
+	}
+	require.Equal(t, uint64(pruneFloorCacheSize+1), reads)
+	floor, err := cache.get(t.Context(), 0, read)
+	require.NoError(t, err)
+	require.Equal(t, uint64(pruneFloorCacheSize+2), floor)
+}
+
+func TestPruneFloorCacheConcurrentEviction(t *testing.T) {
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
+	var workers sync.WaitGroup
+	for view := range uint64(8) {
+		workers.Go(func() {
+			for head := range uint64(2 * pruneFloorCacheSize) {
+				key := pruneFloorCacheKey{head: head, dbViewID: view}
+				want := head*8 + view
+				floor, err := cache.getForKey(t.Context(), key, func() (uint64, error) { return want, nil })
+				if err != nil || floor != want {
+					t.Errorf("key %v: got floor %d, error %v; want %d", key, floor, err, want)
+					return
+				}
+			}
+		})
+	}
+	workers.Wait()
+
+	entries := 0
+	cache.values.Range(func(_, _ any) bool {
+		entries++
+		return true
+	})
+	require.Equal(t, pruneFloorCacheSize, entries)
 }
 
 func TestPruneFloorCacheRefreshesAtNewHead(t *testing.T) {
