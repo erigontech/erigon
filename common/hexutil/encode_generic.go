@@ -14,10 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !(go1.27 && goexperiment.simd && amd64)
+//go:build !(go1.27 && goexperiment.simd && (amd64 || arm64))
 
 package hexutil
 
 import "encoding/hex"
 
-func encodeHex(dst, src []byte) { hex.Encode(dst, src) }
+func encodeHex(dst, src []byte)              { hex.Encode(dst, src) }
+func decodeHex(dst, src []byte) (int, error) { return hex.Decode(dst, src) }

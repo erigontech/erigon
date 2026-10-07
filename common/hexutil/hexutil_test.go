@@ -303,6 +303,23 @@ func TestDecodeHexMatchesStdlib(t *testing.T) {
 		require.Equal(t, want, got, "len %d", n)
 	}
 	src := []byte(strings.Repeat("ab", 100))
+	for i := 0; i < len(src); i++ {
+		for b := 0; b < 256; b++ {
+			bad := slices.Clone(src)
+			bad[i] = byte(b)
+			want, got := make([]byte, 100), make([]byte, 100)
+			wn, werr := hex.Decode(want, bad)
+			gn, gerr := decodeHex(got, bad)
+			if werr == nil {
+				require.NoError(t, gerr, "byte %#02x at %d", b, i)
+			} else {
+				require.Error(t, gerr, "byte %#02x at %d", b, i)
+				require.Equal(t, werr.Error(), gerr.Error(), "byte %#02x at %d", b, i)
+			}
+			require.Equal(t, wn, gn, "byte %#02x at %d", b, i)
+			require.Equal(t, want[:wn], got[:gn], "byte %#02x at %d", b, i)
+		}
+	}
 	for i := range src {
 		bad := slices.Clone(src)
 		bad[i] = 'x'

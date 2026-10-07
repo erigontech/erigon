@@ -45,3 +45,48 @@ func encodeHex(dst, src []byte) {
 	}
 	hex.Encode(dst, src)
 }
+
+// evenBytes gathers the even byte of each uint16 of a lane into its low half, which is how the
+// decoded bytes are packed without VPMOVWB, an AVX-512 instruction.
+var evenBytes = [32]int8{0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1,
+	0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1}
+
+// decodeHex is hex.Decode with whole 32-character blocks done by AVX2. A pair of characters is one
+// uint16, so both nibbles are computed in place: (c & 0x0f) + 9*(c >> 6) is the value of every hex
+// digit, upper or lower case. A block holding anything else is left to hex.Decode, which reports
+// it: the nibbles are mapped back to digits and compared, and 0x10-0x19 would map to '0'-'9' once
+// the case bit is set, so those are excluded by the bit the digits and the letters share.
+func decodeHex(dst, src []byte) (int, error) {
+	n := 0
+	if hasAVX2 {
+		digits := archsimd.LoadUint8x32Array(&hexDigits32)
+		gather := archsimd.LoadInt8x32Array(&evenBytes)
+		lowNib := archsimd.BroadcastUint16x16(0x000f)
+		loByte := archsimd.BroadcastUint16x16(0x00ff)
+		nine := archsimd.BroadcastUint16x16(9)
+		lower := archsimd.BroadcastUint8x32(0x20)
+		letterOrDigit := archsimd.BroadcastUint8x32(0x60)
+		zero := archsimd.BroadcastUint8x32(0)
+		for len(src) >= 32 && len(dst) >= 16 {
+			chars := archsimd.LoadUint8x32Array((*[32]uint8)(src))
+			pairs := chars.AsUint16x16()
+			hi, lo := pairs.And(loByte), pairs.ShiftAllRight(8)
+			hiNib := hi.And(lowNib).Add(nine.Mul(hi.ShiftAllRight(6)))
+			loNib := lo.And(lowNib).Add(nine.Mul(lo.ShiftAllRight(6)))
+			// Both nibbles back to digits at once: the low byte of each uint16 holds the first
+			// character's digit and the high byte the second's, which is the input order.
+			back := digits.PermuteOrZeroGrouped(hiNib.Or(loNib.ShiftAllLeft(8)).AsUint8x32().AsInt8x32())
+			roundTrips := back.Equal(chars.Or(lower)).ToBits()
+			notControl := chars.And(letterOrDigit).Equal(zero).ToBits()
+			if roundTrips != 0xffffffff || notControl != 0 {
+				break
+			}
+			packed := hiNib.ShiftAllLeft(4).Or(loNib).AsUint8x32().PermuteOrZeroGrouped(gather)
+			packed.GetLo().StorePart(dst[:8])
+			packed.GetHi().StorePart(dst[8:16])
+			src, dst, n = src[32:], dst[16:], n+16
+		}
+	}
+	m, err := hex.Decode(dst, src)
+	return n + m, err
+}
