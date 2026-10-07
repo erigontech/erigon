@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/99designs/gqlgen/graphql/handler"
@@ -1139,4 +1140,64 @@ func TestLogResolver_TransactionIsTheEmittingTransaction(t *testing.T) {
 	require.JSONEq(t,
 		`{"data":{"block":{"logs":[{"transaction":`+tx+`}]}}}`,
 		query(`{block(number:7){logs(filter:{}){transaction{hash gasUsed to{address}}}}}`))
+}
+
+type countingByHashAPI struct {
+	*mockGraphQLAPI
+	byHash atomic.Int32
+}
+
+func (m *countingByHashAPI) GetBlockDetailsByHash(ctx context.Context, hash common.Hash, withTxs *bool) (map[string]any, error) {
+	m.byHash.Add(1)
+	return m.mockGraphQLAPI.GetBlockDetailsByHash(ctx, hash, withTxs)
+}
+
+func TestLogResolver_TransactionLoadsEachBlockOnce(t *testing.T) {
+	t.Parallel()
+
+	to := common.HexToAddress("0xAbCdEf0123456789aBcDeF0123456789AbCdEf04")
+	header := &types.Header{Number: *uint256.NewInt(7), BaseFee: uint256.NewInt(50)}
+	txns := []types.Transaction{
+		&types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, GasLimit: 50000, To: &to}, GasPrice: *uint256.NewInt(60)},
+		&types.LegacyTx{CommonTx: types.CommonTx{Nonce: 2, GasLimit: 50000, To: &to}, GasPrice: *uint256.NewInt(60)},
+	}
+	block := types.NewBlockFromStorage(header.Hash(), header, txns, nil, nil, nil)
+	var logs types.Logs
+	var receipts []*jsonrpc.GraphQLReceipt
+	for i, txn := range txns {
+		txLogs := types.Logs{
+			{Address: to, BlockNumber: 7, BlockHash: block.Hash(), TxHash: txn.Hash(), TxIndex: hexutil.Uint(i)},
+			{Address: to, BlockNumber: 7, BlockHash: block.Hash(), TxHash: txn.Hash(), TxIndex: hexutil.Uint(i)},
+		}
+		logs = append(logs, txLogs...)
+		gasUsed := uint64(21000 * (i + 1))
+		receipt := &types.Receipt{Status: types.ReceiptStatusSuccessful, TxHash: txn.Hash(), TransactionIndex: uint(i), GasUsed: gasUsed, CumulativeGasUsed: gasUsed, BlockNumber: uint256.NewInt(7), Logs: txLogs}
+		receipts = append(receipts, jsonrpc.NewGraphQLReceipt(receipt, txn, chain.TestChainOsakaConfig, header))
+	}
+	mock := &countingByHashAPI{mockGraphQLAPI: &mockGraphQLAPI{
+		blockDetails:  map[string]any{"block": ethapi.RPCMarshalBlock(block, false, false), "receipts": receipts},
+		getLogsResult: logs,
+	}}
+	srv := handler.New(NewExecutableSchema(Config{Resolvers: &Resolver{GraphQLAPI: mock}}))
+	srv.AddTransport(transport.POST{})
+	query := func(q string) string {
+		body, err := json.Marshal(map[string]string{"query": q})
+		require.NoError(t, err)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+
+	tx0 := `{"hash":"` + txns[0].Hash().Hex() + `","gasUsed":"0x5208"}`
+	tx1 := `{"hash":"` + txns[1].Hash().Hex() + `","gasUsed":"0xa410"}`
+	require.JSONEq(t,
+		`{"data":{"logs":[{"transaction":`+tx0+`},{"transaction":`+tx0+`},{"transaction":`+tx1+`},{"transaction":`+tx1+`}]}}`,
+		query(`{logs(filter:{}){transaction{hash gasUsed}}}`))
+	require.EqualValues(t, 1, mock.byHash.Load())
+
+	mock.byHash.Store(0)
+	require.Contains(t, query(`{logs(filter:{}){transaction{hash}}}`), txns[1].Hash().Hex())
+	require.Zero(t, mock.byHash.Load())
 }

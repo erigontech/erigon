@@ -73,7 +73,11 @@ func (r *blockResolver) Logs(ctx context.Context, obj *model.Block, filter model
 	if err != nil {
 		return nil, err
 	}
-	return rpcLogsToModel(logs), nil
+	result := rpcLogsToModel(logs)
+	if err := r.attachLogTransactions(ctx, result, obj); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // Account is the resolver for the account field.
@@ -119,28 +123,6 @@ func (r *logResolver) Account(ctx context.Context, obj *model.Log, block *uint64
 		return nil, fmt.Errorf("log has no account address")
 	}
 	return r.resolveAccountAtBlock(ctx, obj.Account.Address, obj.Account.BlockNum, block)
-}
-
-// Transaction is the resolver for the transaction field.
-func (r *logResolver) Transaction(ctx context.Context, obj *model.Log) (*model.Transaction, error) {
-	if obj.Transaction == nil {
-		return nil, fmt.Errorf("log has no transaction")
-	}
-	if obj.Transaction.From != nil || obj.Transaction.Block == nil {
-		return obj.Transaction, nil
-	}
-	block, err := (&queryResolver{r.Resolver}).block(ctx, nil, &obj.Transaction.Block.Hash, true)
-	if err != nil {
-		return nil, err
-	}
-	if block != nil {
-		for _, txn := range block.Transactions {
-			if txn.Hash == obj.Transaction.Hash {
-				return txn, nil
-			}
-		}
-	}
-	return nil, fmt.Errorf("transaction %s not found", obj.Transaction.Hash)
 }
 
 // SendRawTransaction is the resolver for the sendRawTransaction field.
@@ -322,7 +304,11 @@ func (r *queryResolver) Logs(ctx context.Context, filter model.FilterCriteria) (
 	if err != nil {
 		return nil, err
 	}
-	return rpcLogsToModel(logs), nil
+	result := rpcLogsToModel(logs)
+	if err := r.attachLogTransactions(ctx, result, nil); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // GasPrice is the resolver for the gasPrice field.

@@ -116,7 +116,5 @@ models:
     fields:
       account:
         resolver: true
-      transaction:
-        resolver: true
 
 omit_getters: true
