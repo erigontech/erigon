@@ -245,7 +245,6 @@ func newByzantiumInstructionSet() JumpTable {
 		numPush:     1,
 	}
 	instructionSet[RETURNDATACOPY] = operation{
-		execute:     opReturnDataCopy,
 		constantGas: GasFastestStep,
 		gasExecute:  opReturnDataCopyWithGas,
 		numPop:      3,
@@ -254,7 +253,6 @@ func newByzantiumInstructionSet() JumpTable {
 		string:      stReturnDataCopy,
 	}
 	instructionSet[REVERT] = operation{
-		execute:    opRevert,
 		gasExecute: opRevertWithGas,
 		numPop:     2,
 		numPush:    0,
@@ -376,7 +374,6 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stMulmod,
 		},
 		EXP: {
-			execute:    opExp,
 			gasExecute: opExpFrontierWithGas,
 			numPop:     2,
 			numPush:    1,
@@ -464,7 +461,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     1,
 		},
 		KECCAK256: {
-			execute:     opKeccak256,
 			constantGas: params.Keccak256Gas,
 			gasExecute:  opKeccak256WithGas,
 			numPop:      2,
@@ -517,7 +513,6 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stCallDataSize,
 		},
 		CALLDATACOPY: {
-			execute:     opCallDataCopy,
 			constantGas: GasFastestStep,
 			gasExecute:  opCallDataCopyWithGas,
 			numPop:      3,
@@ -532,7 +527,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     1,
 		},
 		CODECOPY: {
-			execute:     opCodeCopy,
 			constantGas: GasFastestStep,
 			gasExecute:  opCodeCopyWithGas,
 			numPop:      3,
@@ -620,7 +614,6 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stMstore,
 		},
 		MSTORE8: {
-			execute:     opMstore8,
 			constantGas: GasFastestStep,
 			gasExecute:  opMstore8WithGas,
 			usesMemory:  true,
@@ -1129,35 +1122,30 @@ func newFrontierInstructionSet() JumpTable {
 			string:      makeSwapStringer(16),
 		},
 		LOG0: {
-			execute:    makeLog(0),
 			gasExecute: makeLogWithGas(0),
 			numPop:     2,
 			numPush:    0,
 			usesMemory: true,
 		},
 		LOG1: {
-			execute:    makeLog(1),
 			gasExecute: makeLogWithGas(1),
 			numPop:     3,
 			numPush:    0,
 			usesMemory: true,
 		},
 		LOG2: {
-			execute:    makeLog(2),
 			gasExecute: makeLogWithGas(2),
 			numPop:     4,
 			numPush:    0,
 			usesMemory: true,
 		},
 		LOG3: {
-			execute:    makeLog(3),
 			gasExecute: makeLogWithGas(3),
 			numPop:     5,
 			numPush:    0,
 			usesMemory: true,
 		},
 		LOG4: {
-			execute:    makeLog(4),
 			gasExecute: makeLogWithGas(4),
 			numPop:     6,
 			numPush:    0,
@@ -1187,7 +1175,6 @@ func newFrontierInstructionSet() JumpTable {
 			usesMemory:  true,
 		},
 		RETURN: {
-			execute:    opReturn,
 			gasExecute: opReturnWithGas,
 			numPop:     2,
 			numPush:    0,

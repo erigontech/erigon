@@ -193,7 +193,7 @@ func opSloadEIP2929Miss(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (ui
 // > Otherwise, charge WARM_STORAGE_READ_COST gas.
 func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64, addr accounts.Address) (mdgas.MdGasCost, error) {
 	// memory expansion first (dynamic part of pre-2929 implementation)
-	gas, err := gasExtCodeCopy(evm, callContext, scopeGas, memorySize)
+	gas, err := copyGas(callContext, memorySize, 3)
 	if err != nil {
 		return mdgas.MdGasCost{}, err
 	}
@@ -394,7 +394,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		}
 
 		// 63/64ths rule with the reduced gas (after base + state + delegation).
-		callGas, err := calcCallGas(evm, callContext, availableGas.Execution, 0)
+		forwarded, err := callGas(evm.chainRules.IsTangerineWhistle, availableGas.Execution, 0, callContext.Stack.back(0))
 		if err != nil {
 			return mdgas.MdGasCost{}, 0, err
 		}
@@ -402,16 +402,16 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 			fmt.Printf("%d (%d.%d) Variant Gas: base %d, access: %d, delegation: %d, call: %d\n",
 				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(),
-				statefulBaseGas, accessGas, delegationGas, callGas)
+				statefulBaseGas, accessGas, delegationGas, forwarded)
 		}
 		gas := statefulBaseGas
 		var overflow bool
 		if gas.Execution, overflow = math.SafeAdd(gas.Execution, accessGas+delegationGas); overflow {
 			return mdgas.MdGasCost{}, 0, ErrGasUintOverflow
 		}
-		if gas.Execution, overflow = math.SafeAdd(gas.Execution, callGas); overflow {
+		if gas.Execution, overflow = math.SafeAdd(gas.Execution, forwarded); overflow {
 			return mdgas.MdGasCost{}, 0, ErrGasUintOverflow
 		}
-		return gas, callGas, nil
+		return gas, forwarded, nil
 	}
 }
