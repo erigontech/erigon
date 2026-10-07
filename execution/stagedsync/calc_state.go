@@ -137,6 +137,8 @@ type calcState struct {
 
 	logger    log.Logger
 	logPrefix string
+
+	prefetch func(plainKey []byte)
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -267,6 +269,10 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			cs.storageState[addr] = slots
 		}
 		for key, vw := range inner {
+			if cs.prefetch != nil && !cs.storageDirty[addr][key].dirty {
+				address, slot := addr.Value(), key.Value()
+				cs.prefetch(append(address[:], slot[:]...))
+			}
 			slots[key] = vw.Val
 			cs.markSlotWritten(addr, key)
 		}
@@ -292,6 +298,10 @@ func (cs *calcState) markWritten(addr accounts.Address, acc *calcAccountState) {
 	if !acc.dirty {
 		acc.dirty = true
 		cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+		if cs.prefetch != nil {
+			address := addr.Value()
+			cs.prefetch(address[:])
+		}
 	}
 	if !acc.queued {
 		acc.queued = true

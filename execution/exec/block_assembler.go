@@ -399,7 +399,7 @@ LOOP:
 	return coalescedLogs, done, nil
 }
 
-func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) (block *types.Block, err error) {
+func (ba *BlockAssembler) AssembleBlock(ibs *state.IntraBlockState, tx kv.TemporalTx, logger log.Logger) (block *types.Block, err error) {
 	chainReader := NewChainReader(ba.cfg.ChainConfig, tx, ba.cfg.BlockReader, logger)
 
 	if err := ba.cfg.Engine.Prepare(chainReader, ba.Header, ibs); err != nil {
@@ -413,8 +413,8 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		ibs.SetTxContext(ba.Header.Number.Uint64(), len(ba.Txns))
 		ibs.ResetVersionedIO()
 	}
-	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, stateReader, ba.Header, ba.Txns, ba.Uncles,
-		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger, nil)
+	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, ba.Header, ba.Txns, ba.Uncles,
+		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger)
 	if err != nil {
 		return nil, fmt.Errorf("cannot finalize block execution: %w", err)
 	}
