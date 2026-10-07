@@ -27,6 +27,8 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 )
@@ -313,4 +315,39 @@ func (tft *trackingFetcherTest) run(f func(ctx context.Context, t *testing.T)) {
 		tft.ctxCancel()
 		require.Eventually(t, done.Load, time.Second, 5*time.Millisecond)
 	})
+}
+
+type hashServingFetcher struct {
+	Fetcher
+	header  *types.Header
+	lacking map[PeerId]bool
+}
+
+func (f hashServingFetcher) FetchHeadersBackwards(_ context.Context, hash common.Hash, _ uint64, peerId *PeerId, _ ...FetcherOption) (FetcherResponse[[]*types.Header], error) {
+	if f.lacking[*peerId] {
+		return FetcherResponse[[]*types.Header]{}, &ErrMissingHeaderHash{requested: hash}
+	}
+	return FetcherResponse[[]*types.Header]{Data: []*types.Header{f.header}}, nil
+}
+
+func TestTrackingFetcherFetchHeadersBackwardsMarksPeerMissingHash(t *testing.T) {
+	t.Parallel()
+
+	header := &types.Header{Number: *uint256.NewInt(7)}
+	hash := header.Hash()
+	serving, lacking := PeerIdFromUint64(1), PeerIdFromUint64(2)
+	for _, lackingFirst := range []bool{true, false} {
+		peerTracker := NewPeerTracker(testlog.Logger(t, log.LvlCrit), nil)
+		peerTracker.PeerConnected(serving)
+		peerTracker.PeerConnected(lacking)
+		fetcher := NewTrackingFetcher(hashServingFetcher{header: header, lacking: map[PeerId]bool{*lacking: true}}, peerTracker)
+		order := []*PeerId{serving, lacking}
+		if lackingFirst {
+			order = []*PeerId{lacking, serving}
+		}
+		for _, peerId := range order {
+			_, _ = fetcher.FetchHeadersBackwards(t.Context(), hash, 1, peerId)
+		}
+		require.Equal(t, []*PeerId{serving}, peerTracker.ListPeersMayHaveBlockNum(7), "lackingFirst=%v", lackingFirst)
+	}
 }

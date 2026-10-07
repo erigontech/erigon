@@ -358,7 +358,7 @@ func downloadFromPartialChainPeers(t *testing.T, chainLen int, peerHeads map[Pee
 	for peerId := range peerHeads {
 		peerTracker.PeerConnected(&peerId)
 	}
-	bbd := NewBackwardBlockDownloader(logger, fetcher, &PeerPenalizer{}, peerTracker, t.TempDir())
+	bbd := NewBackwardBlockDownloader(logger, NewTrackingFetcher(fetcher, peerTracker), &PeerPenalizer{}, peerTracker, t.TempDir())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	feed, err := bbd.DownloadBlocksBackwards(ctx, headers[len(headers)-1].Hash(), fixedHeaderReader{headers[0]}, opts...)

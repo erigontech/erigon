@@ -19,21 +19,42 @@ package p2p
 import (
 	"context"
 	"errors"
+	"sync"
+
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
+const trackedHeaderHashes = 1024
+
 func NewTrackingFetcher(fetcher Fetcher, peerTracker *PeerTracker) *TrackingFetcher {
+	headerNums, err := simplelru.NewLRU[common.Hash, uint64](trackedHeaderHashes, nil)
+	if err != nil {
+		panic(err)
+	}
+	peersMissingHash, err := simplelru.NewLRU[common.Hash, []*PeerId](trackedHeaderHashes, nil)
+	if err != nil {
+		panic(err)
+	}
 	return &TrackingFetcher{
-		Fetcher:     fetcher,
-		peerTracker: peerTracker,
+		Fetcher:          fetcher,
+		peerTracker:      peerTracker,
+		headerNums:       headerNums,
+		peersMissingHash: peersMissingHash,
 	}
 }
 
 type TrackingFetcher struct {
 	Fetcher
 	peerTracker *PeerTracker
+
+	// A peer that lacks a header hash lacks that block number, but a hash request does not say
+	// which number it is. The number is learned from whichever peer serves the hash, before or after.
+	mu               sync.Mutex
+	headerNums       *simplelru.LRU[common.Hash, uint64]
+	peersMissingHash *simplelru.LRU[common.Hash, []*PeerId]
 }
 
 func (tf *TrackingFetcher) FetchHeaders(
@@ -67,11 +88,40 @@ func (tf *TrackingFetcher) FetchHeadersBackwards(
 ) (FetcherResponse[[]*types.Header], error) {
 	res, err := tf.Fetcher.FetchHeadersBackwards(ctx, hash, amount, peerId, opts...)
 	if err != nil {
+		if errors.Is(err, &ErrMissingHeaderHash{}) {
+			tf.headerHashMissing(peerId, hash)
+		}
 		return FetcherResponse[[]*types.Header]{}, err
 	}
 
-	tf.peerTracker.BlockNumPresent(peerId, res.Data[len(res.Data)-1].Number.Uint64())
+	blockNum := res.Data[len(res.Data)-1].Number.Uint64()
+	tf.peerTracker.BlockNumPresent(peerId, blockNum)
+	tf.headerHashServed(hash, blockNum)
 	return res, nil
+}
+
+func (tf *TrackingFetcher) headerHashMissing(peerId *PeerId, hash common.Hash) {
+	tf.mu.Lock()
+	blockNum, known := tf.headerNums.Get(hash)
+	if !known {
+		peers, _ := tf.peersMissingHash.Get(hash)
+		tf.peersMissingHash.Add(hash, append(peers, peerId))
+	}
+	tf.mu.Unlock()
+	if known {
+		tf.peerTracker.BlockNumMissing(peerId, blockNum)
+	}
+}
+
+func (tf *TrackingFetcher) headerHashServed(hash common.Hash, blockNum uint64) {
+	tf.mu.Lock()
+	tf.headerNums.Add(hash, blockNum)
+	peers, _ := tf.peersMissingHash.Peek(hash)
+	tf.peersMissingHash.Remove(hash)
+	tf.mu.Unlock()
+	for _, peerId := range peers {
+		tf.peerTracker.BlockNumMissing(peerId, blockNum)
+	}
 }
 
 func (tf *TrackingFetcher) FetchBodies(
