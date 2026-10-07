@@ -456,6 +456,7 @@ func stackBoundsErr(sLen int, operation *operation) error {
 type opTrace struct {
 	debug, trace bool
 	logged       bool // the opcode hook has reported the op
+	op           OpCode
 	pc           uint64
 	oldGas       mdgas.MdGas
 	cost         mdgas.MdGasCost
@@ -553,11 +554,12 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
 		pc     = uint64(0) // program counter
-		t      = &callContext.trace
+		t      *opTrace
 		res    []byte // result of the opcode execution function
 		tracer = evm.config.Tracer
 	)
 	if anyTrace {
+		t = &callContext.trace
 		*t = opTrace{debug: debug, trace: trace}
 	}
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
@@ -644,7 +646,7 @@ run:
 		operation := &jt[op]
 		cost := operation.constantGas
 		if anyTrace {
-			t.cost = mdgas.MdGasCost{Execution: cost}
+			t.op, t.cost = op, mdgas.MdGasCost{Execution: cost}
 		}
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
@@ -657,8 +659,7 @@ run:
 		} else {
 			callContext.gas -= cost
 		}
-		// run calls the gasExecute ops before its generic path: one that gets here failed a check above.
-		if anyTrace && operation.gasExecute != nil {
+		if operation.gasExecute != nil {
 			pc, res, err = operation.gasExecute(pc, evm, callContext, t)
 			gasLeft = callContext.gas
 			if err != nil {

@@ -1495,31 +1495,29 @@ func opExchange(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 // following functions are used by the instruction jump  table
 
 // make log instruction function
-func makeLog(size int) executionFunc {
-	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-		if evm.readOnly {
-			return pc, nil, ErrWriteProtection
+func opLog(pc uint64, evm *EVM, scope *CallContext, size int) (uint64, []byte, error) {
+	if evm.readOnly {
+		return pc, nil, ErrWriteProtection
+	}
+	stack, ibs := &scope.Stack, evm.IntraBlockState()
+	mStart, mSize := stack.pop2Uint64()
+	if evm.config.NoReceipts && (evm.config.Tracer == nil || evm.config.Tracer.OnLog == nil) {
+		for range size {
+			stack.pop()
 		}
-		stack, ibs := &scope.Stack, evm.IntraBlockState()
-		mStart, mSize := stack.pop2Uint64()
-		if evm.config.NoReceipts && (evm.config.Tracer == nil || evm.config.Tracer.OnLog == nil) {
-			for range size {
-				stack.pop()
-			}
-			return pc, nil, nil
-		}
-		mem := scope.Memory.GetPtr(mStart, mSize)
-		log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
-		// This is a non-consensus field, but assigned here because
-		// execution/state doesn't know the current block number.
-		log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
-		for i := range size {
-			log.Topics[i] = stack.pop().Bytes32()
-		}
-		copy(log.Data, mem)
-		ibs.NotifyLog(log)
 		return pc, nil, nil
 	}
+	mem := scope.Memory.GetPtr(mStart, mSize)
+	log := ibs.AllocLog(scope.Contract.Address().Value(), size, len(mem))
+	// This is a non-consensus field, but assigned here because
+	// execution/state doesn't know the current block number.
+	log.BlockNumber = hexutil.Uint64(evm.Context.BlockNumber)
+	for i := range size {
+		log.Topics[i] = stack.pop().Bytes32()
+	}
+	copy(log.Data, mem)
+	ibs.NotifyLog(log)
+	return pc, nil, nil
 }
 
 // opPush1 is a specialized version of pushN
