@@ -231,7 +231,9 @@ func makeLogWithGas(topics int) gasExecuteFunc {
 }
 
 func opExpFrontierWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	if cost := gasExpFrontier(scope); !scope.chargeFast(t, cost, nil) {
+	// The exponent has at most 32 bytes, so the cost cannot overflow.
+	cost := mdgas.MdGasCost{Execution: params.ExpGas + uint64(scope.Stack.back(1).ByteLen())*params.ExpByteFrontier}
+	if !scope.chargeFast(t, cost, nil) {
 		if err := evm.chargeDynamic(pc, scope, t, cost, nil, 0); err != nil {
 			return pc, nil, err
 		}
@@ -240,7 +242,8 @@ func opExpFrontierWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (
 }
 
 func opExpEIP160WithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	if cost := gasExpEIP160(scope); !scope.chargeFast(t, cost, nil) {
+	cost := mdgas.MdGasCost{Execution: params.ExpGas + uint64(scope.Stack.back(1).ByteLen())*params.ExpByteEIP160}
+	if !scope.chargeFast(t, cost, nil) {
 		if err := evm.chargeDynamic(pc, scope, t, cost, nil, 0); err != nil {
 			return pc, nil, err
 		}
