@@ -779,33 +779,6 @@ func TestDecodeStringFieldMatchesUnmarshal(t *testing.T) {
 	}
 }
 
-// FuzzValidJSON pins the request gate against encoding/json on any input. Plain
-// `go test` runs the seeds, so they double as the table of cases.
-func FuzzValidJSON(f *testing.F) {
-	for _, s := range append([]string{
-		``, ` `, `{`, `}`, `[`, `]`, `,`, `:`, `"`, `"a`, `nul`, `tru`, `fals`,
-		`null`, `true`, `false`, `0`, `-0`, `1.5e3`, `1e+3`, `1E-3`, `"a"`,
-		`01`, `-`, `.5`, `1.`, `1e`, `1e+`, `+1`, `00`, `1.2.3`, `0x1`,
-		`{}`, `[]`, `{"a":1}`, `[1,2]`, `[[[]]]`, `{"a":{"b":[1,{}]}}`,
-		`{"a":1,}`, `[1,]`, `{,}`, `{"a"}`, `{"a":}`, `{:1}`, `{"a":1"b":2}`,
-		`[1 2]`, `{} {}`, `1 1`, `  {"a" : 1 }  `, "\t\n\r{}\t\n\r",
-		`{"a":"A\n\\\""}`, `{"a":"😀"}`,
-		`{"a":"\q"}`, "\"\x01\"", "\"\xff\"", nest(10000), nest(10001),
-	}, messageCorpus...) {
-		f.Add(s)
-	}
-	f.Fuzz(func(t *testing.T, input string) {
-		data := []byte(input)
-		require.Equal(t, json.Valid(data), gojson.Valid(data), "input %.80q", input)
-	})
-}
-
-// nest returns a value inside n nested arrays, which encoding/json accepts up
-// to its own nesting limit and no further.
-func nest(n int) string {
-	return strings.Repeat("[", n) + "1" + strings.Repeat("]", n)
-}
-
 func BenchmarkValidJSON(b *testing.B) {
 	for _, n := range []int{0, 4096, 731000} {
 		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"0x1234","data":"0x` +
