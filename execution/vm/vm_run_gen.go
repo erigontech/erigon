@@ -5,7 +5,9 @@ package vm
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -25,15 +27,10 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc   = uint64(0) // program counter
-		cost mdgas.MdGasCost
-		// copies used by tracer
-		pcCopy  uint64 // needed for the deferred Tracer
-		oldGas  mdgas.MdGas
-		callGas mdgas.MdGasCost
-		logged  bool   // deferred Tracer should ignore already logged steps
-		res     []byte // result of the opcode execution function
-		tracer  = evm.config.Tracer
+		pc     = uint64(0) // program counter
+		t      *stepTrace
+		res    []byte // result of the opcode execution function
+		tracer = evm.config.Tracer
 	)
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
@@ -66,15 +63,16 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
 	// the stacks before callContext.put() returns them to the pool.
 	if false && debug {
+		t = new(stepTrace)
 		defer func() {
 			if err == nil {
 				return
 			}
 			switch {
-			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
-				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+			case !t.logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
+				tracer.EmitOpcode(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
 			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
-				tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
+				tracer.EmitFault(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}()
 	}
@@ -85,45 +83,59 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 	// parent context.
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
-	stack := &callContext.Stack
-	jt := evm.jt
-	// The fast path keeps gas in a register. It is stored back before the generic
-	// path and after the loop, and reloaded after each generic op.
+	code := contract.Code
+	// The fast path keeps gas and the stack top in registers. They are stored back
+	// before the generic path and after the loop, and reloaded after each generic op.
 	gasLeft := callContext.gas
+	top := callContext.Stack.top
 
 run:
 	for {
 		// Past the end of the code is STOP. Exiting here, out of line, spares
 		// every op a taken jump in GetOp.
-		if !false && pc >= uint64(len(contract.Code)) {
+		if !false && pc >= uint64(len(code)) {
 			res, err = nil, errStopToken
 			break run
 		}
-		op = contract.GetOp(pc)
+		op = STOP
+		if pc < uint64(len(code)) {
+			op = OpCode(code[pc])
+		}
 		// The hottest constant-gas opcodes run inline, without the jump table and
 		// its indirect call. A failed check falls through to the generic path,
 		// which reports the error.
 		if !false {
-			sLen := stack.len()
+			sLen := top
 			switch op {
+			case PUSH0:
+				if left, borrow := bits.Sub64(gasLeft, GasQuickStep, 0); borrow == 0 && uint(sLen) < stackLimit && evm.jt[PUSH0].numPush == 1 {
+					gasLeft = left
+					callContext.Stack.pushRefAt(top).Clear()
+					top += 1
+					pc++
+					continue run
+				}
 			case PUSH1:
-				if sLen < stackLimit && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && uint(sLen) < stackLimit {
+					gasLeft = left
 					codeLen := uint64(len(callContext.Contract.Code))
 					pc++
 					if pc < codeLen {
-						callContext.Stack.pushRef().SetUint64(uint64(callContext.Contract.Code[pc]))
+						callContext.Stack.pushRefAt(top).SetUint64(uint64(callContext.Contract.Code[pc]))
+						top += 1
 					} else {
-						callContext.Stack.pushRef().Clear()
+						callContext.Stack.pushRefAt(top).Clear()
+						top += 1
 					}
 					pc++
 					continue run
 				}
 			case PUSH2:
-				if sLen < stackLimit && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && uint(sLen) < stackLimit {
+					gasLeft = left
 					codeLen := uint64(len(callContext.Contract.Code))
-					integer := callContext.Stack.pushRef()
+					integer := callContext.Stack.pushRefAt(top)
+					top += 1
 					switch {
 					case pc+2 < codeLen:
 						integer.SetBytes2(callContext.Contract.Code[pc+1 : pc+3])
@@ -137,34 +149,42 @@ run:
 					continue run
 				}
 			case ADD:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					x, y := callContext.Stack.pop1Peek1()
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+					gasLeft = left
+					x, y := callContext.Stack.pop1Peek1At(top)
+					top -= 1
 					y.Add(x, y)
 					pc++
 					continue run
 				}
 			case POP:
-				if sLen >= 1 && gasLeft >= GasQuickStep {
-					gasLeft -= GasQuickStep
-					callContext.Stack.drop()
+				if left, borrow := bits.Sub64(gasLeft, GasQuickStep, 0); borrow == 0 && sLen >= 1 && sLen <= stackLimit {
+					gasLeft = left
+					top -= 1
 					pc++
 					continue run
 				}
 			case JUMPDEST:
-				if gasLeft >= params.JumpdestGas {
-					gasLeft -= params.JumpdestGas
+				if left, borrow := bits.Sub64(gasLeft, params.JumpdestGas, 0); borrow == 0 {
+					gasLeft = left
 					pc++
 					continue run
 				}
 			case JUMP:
-				if sLen >= 1 && gasLeft >= GasMidStep {
-					gasLeft -= GasMidStep
+				if callContext.Contract.decodable() {
+					callContext.gas, callContext.Stack.top = gasLeft, top
+					res, err = evm.runDecoded(callContext, pc)
+					gasLeft, top = callContext.gas, callContext.Stack.top
+					break run
+				}
+				if left, borrow := bits.Sub64(gasLeft, GasMidStep, 0); borrow == 0 && sLen >= 1 && sLen <= stackLimit {
+					gasLeft = left
 					if evm.Cancelled() {
 						res, err = nil, errStopToken
 						break run
 					}
-					pos := callContext.Stack.pop()
+					pos := callContext.Stack.popAt(top)
+					top -= 1
 					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
 						res, err = nil, ErrInvalidJump
 						break run
@@ -177,13 +197,20 @@ run:
 					continue run
 				}
 			case JUMPI:
-				if sLen >= 2 && gasLeft >= GasSlowStep {
-					gasLeft -= GasSlowStep
+				if callContext.Contract.decodable() {
+					callContext.gas, callContext.Stack.top = gasLeft, top
+					res, err = evm.runDecoded(callContext, pc)
+					gasLeft, top = callContext.gas, callContext.Stack.top
+					break run
+				}
+				if left, borrow := bits.Sub64(gasLeft, GasSlowStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+					gasLeft = left
 					if evm.Cancelled() {
 						res, err = nil, errStopToken
 						break run
 					}
-					pos, cond := callContext.Stack.pop2()
+					pos, cond := callContext.Stack.pop2At(top)
+					top -= 2
 					if cond.IsZero() {
 						pc++
 						continue run
@@ -199,33 +226,37 @@ run:
 					continue run
 				}
 			case SUB:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					x, y := callContext.Stack.pop1Peek1()
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+					gasLeft = left
+					x, y := callContext.Stack.pop1Peek1At(top)
+					top -= 1
 					y.Sub(x, y)
 					pc++
 					continue run
 				}
 			case MUL:
-				if sLen >= 2 && gasLeft >= GasFastStep {
-					gasLeft -= GasFastStep
-					x, y := callContext.Stack.pop1Peek1()
-					y.Mul(x, y)
+				if left, borrow := bits.Sub64(gasLeft, GasFastStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+					gasLeft = left
+					callContext.Stack.top = top
+					pc, _, _ = opMul(pc, evm, callContext)
+					top = callContext.Stack.top
 					pc++
 					continue run
 				}
 			case DIV:
-				if sLen >= 2 && gasLeft >= GasFastStep {
-					gasLeft -= GasFastStep
-					x, y := callContext.Stack.pop1Peek1()
-					y.Div(x, y)
+				if left, borrow := bits.Sub64(gasLeft, GasFastStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+					gasLeft = left
+					callContext.Stack.top = top
+					pc, _, _ = opDiv(pc, evm, callContext)
+					top = callContext.Stack.top
 					pc++
 					continue run
 				}
 			case LT:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					x, y := callContext.Stack.pop1Peek1()
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+					gasLeft = left
+					x, y := callContext.Stack.pop1Peek1At(top)
+					top -= 1
 					if x.Lt(y) {
 						y.SetOne()
 					} else {
@@ -235,9 +266,10 @@ run:
 					continue run
 				}
 			case GT:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					x, y := callContext.Stack.pop1Peek1()
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+					gasLeft = left
+					x, y := callContext.Stack.pop1Peek1At(top)
+					top -= 1
 					if x.Gt(y) {
 						y.SetOne()
 					} else {
@@ -247,9 +279,10 @@ run:
 					continue run
 				}
 			case EQ:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					x, y := callContext.Stack.pop1Peek1()
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+					gasLeft = left
+					x, y := callContext.Stack.pop1Peek1At(top)
+					top -= 1
 					if x.Eq(y) {
 						y.SetOne()
 					} else {
@@ -259,17 +292,18 @@ run:
 					continue run
 				}
 			case AND:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					x, y := callContext.Stack.pop1Peek1()
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+					gasLeft = left
+					x, y := callContext.Stack.pop1Peek1At(top)
+					top -= 1
 					y.And(x, y)
 					pc++
 					continue run
 				}
 			case ISZERO:
-				if sLen >= 1 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					x := callContext.Stack.peek()
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 1 && sLen <= stackLimit {
+					gasLeft = left
+					x := callContext.Stack.peekAt(top)
 					if x.IsZero() {
 						x.SetOne()
 					} else {
@@ -279,27 +313,29 @@ run:
 					continue run
 				}
 			case MLOAD:
-				if sLen >= 1 && callContext.Memory.allocated32(stack.peek()) && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					v := callContext.Stack.peek()
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 1 && sLen <= stackLimit && callContext.Memory.allocated32(callContext.Stack.peekAt(top)) {
+					gasLeft = left
+					v := callContext.Stack.peekAt(top)
 					offset := v.Uint64()
 					v.SetBytes32(callContext.Memory.GetPtr(offset, 32))
 					pc++
 					continue run
 				}
 			case MSTORE:
-				if sLen >= 2 && callContext.Memory.allocated32(stack.peek()) && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					mStart, val := callContext.Stack.pop2()
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit && callContext.Memory.allocated32(callContext.Stack.peekAt(top)) {
+					gasLeft = left
+					mStart, val := callContext.Stack.pop2At(top)
+					top -= 2
 					callContext.Memory.Set32(mStart.Uint64(), val)
 					pc++
 					continue run
 				}
 			case PUSH3, PUSH4, PUSH5, PUSH6, PUSH7, PUSH8, PUSH9, PUSH10, PUSH11, PUSH12, PUSH13, PUSH14, PUSH15, PUSH16, PUSH17, PUSH18, PUSH19, PUSH20, PUSH21, PUSH22, PUSH23, PUSH24, PUSH25, PUSH26, PUSH27, PUSH28, PUSH29, PUSH30, PUSH31, PUSH32:
-				if sLen < stackLimit && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && uint(sLen) < stackLimit {
+					gasLeft = left
 					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(callContext.Contract.Code)) {
-						callContext.Stack.pushRef().SetBytes(callContext.Contract.Code[pc+1 : end])
+						callContext.Stack.pushRefAt(top).SetBytes(callContext.Contract.Code[pc+1 : end])
+						top += 1
 						pc = pc + uint64(op-PUSH0)
 						pc++
 						continue run
@@ -309,7 +345,8 @@ run:
 					startMin := min(int(pc+1), codeLen)
 					endMin := min(startMin+int(op-PUSH0), codeLen)
 
-					integer := callContext.Stack.pushRef()
+					integer := callContext.Stack.pushRefAt(top)
+					top += 1
 					integer.SetBytes(callContext.Contract.Code[startMin:endMin])
 
 					if missing := int(op-PUSH0) - (endMin - startMin); missing > 0 {
@@ -321,210 +358,734 @@ run:
 					continue run
 				}
 			case DUP1:
-				if sLen >= 1 && sLen < stackLimit && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.dup(0)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 1 && sLen < stackLimit {
+					gasLeft = left
+					callContext.Stack.dupAt(top, 0)
+					top += 1
 					pc++
 					continue run
 				}
 			case DUP2:
-				if sLen >= 2 && sLen < stackLimit && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.dup(1)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen < stackLimit {
+					gasLeft = left
+					callContext.Stack.dupAt(top, 1)
+					top += 1
 					pc++
 					continue run
 				}
 			case DUP3:
-				if sLen >= 3 && sLen < stackLimit && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.dup(2)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 3 && sLen < stackLimit {
+					gasLeft = left
+					callContext.Stack.dupAt(top, 2)
+					top += 1
 					pc++
 					continue run
 				}
 			case DUP4:
-				if sLen >= 4 && sLen < stackLimit && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.dup(3)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 4 && sLen < stackLimit {
+					gasLeft = left
+					callContext.Stack.dupAt(top, 3)
+					top += 1
 					pc++
 					continue run
 				}
 			case DUP5:
-				if sLen >= 5 && sLen < stackLimit && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.dup(4)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 5 && sLen < stackLimit {
+					gasLeft = left
+					callContext.Stack.dupAt(top, 4)
+					top += 1
 					pc++
 					continue run
 				}
 			case DUP6:
-				if sLen >= 6 && sLen < stackLimit && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.dup(5)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 6 && sLen < stackLimit {
+					gasLeft = left
+					callContext.Stack.dupAt(top, 5)
+					top += 1
 					pc++
 					continue run
 				}
 			case DUP7:
-				if sLen >= 7 && sLen < stackLimit && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.dup(6)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 7 && sLen < stackLimit {
+					gasLeft = left
+					callContext.Stack.dupAt(top, 6)
+					top += 1
 					pc++
 					continue run
 				}
 			case DUP8:
-				if sLen >= 8 && sLen < stackLimit && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.dup(7)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 8 && sLen < stackLimit {
+					gasLeft = left
+					callContext.Stack.dupAt(top, 7)
+					top += 1
 					pc++
 					continue run
 				}
 			case SWAP1:
-				if sLen >= 2 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.swap(1)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+					gasLeft = left
+					callContext.Stack.swapAt(top, 1)
 					pc++
 					continue run
 				}
 			case SWAP2:
-				if sLen >= 3 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.swap(2)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 3 && sLen <= stackLimit {
+					gasLeft = left
+					callContext.Stack.swapAt(top, 2)
 					pc++
 					continue run
 				}
 			case SWAP3:
-				if sLen >= 4 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.swap(3)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 4 && sLen <= stackLimit {
+					gasLeft = left
+					callContext.Stack.swapAt(top, 3)
 					pc++
 					continue run
 				}
 			case SWAP4:
-				if sLen >= 5 && gasLeft >= GasFastestStep {
-					gasLeft -= GasFastestStep
-					callContext.Stack.swap(4)
+				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 5 && sLen <= stackLimit {
+					gasLeft = left
+					callContext.Stack.swapAt(top, 4)
 					pc++
 					continue run
 				}
 			}
 			callContext.gas = gasLeft
+			callContext.Stack.top = top
 		}
-		callContext.cacheGen++
-		if false && debug {
-			// Capture pre-execution values for tracing.
-			logged = false
-			pcCopy = pc
-			oldGas = callContext.Gas()
-		}
-		// Get the operation from the jump table and validate the stack to ensure there are
-		// enough stack items available to perform the operation.
-		operation := &jt[op]
-		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
-		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
-		// a stack shallower than numPop wraps negative and fails the compare.
-		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
-		}
-		// for tracing: this gas consumption event is emitted below in the debug section.
-		if callContext.gas < cost.Execution {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-		} else {
-			callContext.gas -= cost.Execution
-		}
-
-		// All ops with a dynamic memory usage also has a dynamic gas cost.
-		var memorySize uint64
-		if operation.dynamicGas != nil {
-			// calculate the new memory size and expand the memory to fit
-			// the operation
-			// Memory check needs to be done prior to evaluating the dynamic gas portion,
-			// to detect calculation overflows
-			if operation.memorySize != nil {
-				memSize, overflow := operation.memorySize(callContext)
-				if overflow {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
-				}
-				// memory is expanded in words of 32 bytes. Gas
-				// is also calculated in words.
-				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
-				}
-			}
-			// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
-			evm.callGasTemp = 0
-			// Consume the gas and return an error if not enough gas is available.
-			// cost is explicitly set so that the capture state defer method can get the proper cost
-			var dynamicCost mdgas.MdGasCost
-			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
-			if err != nil {
-				if !errors.Is(err, ErrOutOfGas) {
-					err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
-				}
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
-			}
-			if false {
-				cost = cost.Plus(dynamicCost)
-				callGas = cost
-				callGas.Execution -= evm.CallGasTemp()
-				if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGasCost{}) {
-					gasCost := traceGas(op, callGas, cost)
-					fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
-				}
-			}
-			if callContext.gas < dynamicCost.Execution {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-			}
-			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			} else if dynamicCost.State < 0 {
-				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
-			}
-		}
-
-		// Do gas tracing before memory expansion
-		if false && debug {
-			if tracer.HasGasChangeHook() {
-				tracer.EmitGasChange(oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
-			}
-			if tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)) {
-				tracer.EmitOpcode(pc, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-				logged = true
-			}
-		}
-
-		if memorySize > 0 {
-			callContext.Memory.Resize(memorySize)
-		}
-
-		// TODO - move this to a trace & set in the worker
-
-		if false && trace {
-			var opstr string
-			if operation.string != nil {
-				opstr = operation.string(pc, callContext)
-			} else {
-				opstr = op.String()
-			}
-
-			gasCost := traceGas(op, callGas, cost)
-			fmt.Printf("%d (%d.%d) %5d %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, gasCost.Execution, gasCost.State, opstr)
-		}
-
-		// execute the operation
-		pc, res, err = operation.execute(pc, evm, callContext)
+		// The generic path takes pc and returns it, so the loop holds no value
+		// across this call and the fast path can keep pc and gasLeft in registers.
+		pc, res, err = evm.step(callContext, op, pc, debug, trace, t)
 		gasLeft = callContext.gas
+		top = callContext.Stack.top
 		if err != nil {
 			break run
 		}
 		pc++
 	}
 	callContext.gas = gasLeft
+	callContext.Stack.top = top
 
 	if errors.Is(err, errStopToken) {
 		err = nil // clear stop token error
 	}
 
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
+}
+
+// step is stepTraced without the tracing code.
+//
+//go:noinline
+func (evm *EVM) step(callContext *CallContext, op OpCode, pc uint64, debug, trace bool, t *stepTrace) (uint64, []byte, error) {
+	var callGas mdgas.MdGasCost
+	tracer := evm.config.Tracer
+	callContext.cacheGen++
+	// Ops handled here skip the jump table but add no code to run.
+	if !false {
+		// A frame-cache hit is a warm SLOAD: it needs neither the gas func nor the op.
+		// A zero constant gas marks the EIP-2929 SLOAD; a miss leaves the memo to the gas func.
+		if op == SLOAD && callContext.slots.on && evm.jt[SLOAD].constantGas == 0 &&
+			callContext.Stack.len() > 0 && callContext.gas >= params.WarmStorageReadCostEIP2929 {
+			if i := callContext.lookupSlot(evm); i >= 0 {
+				callContext.gas -= params.WarmStorageReadCostEIP2929
+				*callContext.Stack.peek() = callContext.slots.val[i]
+				return pc, nil, nil
+			}
+		}
+		switch op {
+		case DUP9, DUP10, DUP11, DUP12, DUP13, DUP14, DUP15, DUP16:
+			if n, sLen := int(op-DUP1)+1, callContext.Stack.len(); sLen >= n && sLen < stackLimit && callContext.gas >= GasFastestStep {
+				callContext.gas -= GasFastestStep
+				callContext.Stack.dup(n - 1)
+				return pc, nil, nil
+			}
+		case SWAP5, SWAP6, SWAP7, SWAP8, SWAP9, SWAP10, SWAP11, SWAP12, SWAP13, SWAP14, SWAP15, SWAP16:
+			if n := int(op-SWAP1) + 1; callContext.Stack.len() > n && callContext.gas >= GasFastestStep {
+				callContext.gas -= GasFastestStep
+				callContext.Stack.swap(n)
+				return pc, nil, nil
+			}
+		case CALLDATALOAD:
+			if callContext.Stack.len() >= 1 && callContext.gas >= GasFastestStep {
+				callContext.gas -= GasFastestStep
+				x, input := callContext.Stack.peek(), callContext.input
+				switch off, overflow := x.Uint64WithOverflow(); {
+				case overflow || off >= uint64(len(input)):
+					x.Clear()
+				case uint64(len(input))-off >= 32:
+					x.SetBytes32(input[off:])
+				default:
+					var word [32]byte
+					copy(word[:], input[off:])
+					x.SetBytes32(word[:])
+				}
+				return pc, nil, nil
+			}
+		case CALLDATACOPY, CODECOPY, RETURNDATACOPY:
+			// An op the table does not have is opUndefined there, which pops nothing.
+			if evm.jt[op].numPop != 3 {
+				break
+			}
+			data := callContext.input
+			if op == CODECOPY {
+				data = callContext.Contract.Code
+			} else if op == RETURNDATACOPY {
+				data = evm.returnData
+			}
+			if callContext.Stack.len() >= 3 && callContext.Memory.allocated(callContext.Stack.peek(), callContext.Stack.back(2)) {
+				src, n := uint64(math.MaxUint64), callContext.Stack.back(2).Uint64()
+				if s := callContext.Stack.back(1); s.IsUint64() {
+					src = s.Uint64()
+				}
+				// Out of bounds RETURNDATACOPY fails: the generic path reports it.
+				inBounds := src <= uint64(len(data)) && uint64(len(data))-src >= n
+				if cost := GasFastestStep + params.CopyGas*ToWordSize(n); callContext.gas >= cost && (inBounds || op != RETURNDATACOPY) {
+					callContext.gas -= cost
+					dst, _, _ := callContext.Stack.pop3()
+					callContext.Memory.SetFromData(dst.Uint64(), n, src, data)
+					return pc, nil, nil
+				}
+			}
+		case MCOPY:
+			if callContext.Stack.len() >= 3 && evm.jt[MCOPY].numPop == 3 {
+				d, s, n := callContext.Stack.back3(0, 1, 2)
+				if callContext.Memory.allocated(d, n) && callContext.Memory.allocated(s, n) {
+					if cost := GasFastestStep + params.CopyGas*ToWordSize(n.Uint64()); callContext.gas >= cost {
+						callContext.gas -= cost
+						dst, src, length := callContext.Stack.pop3()
+						callContext.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
+						return pc, nil, nil
+					}
+				}
+			}
+		case MSTORE8:
+			if callContext.Stack.len() >= 2 && callContext.gas >= GasFastestStep {
+				if off := callContext.Stack.peek(); off.IsUint64() && off.Uint64() < uint64(callContext.Memory.Len()) {
+					callContext.gas -= GasFastestStep
+					o, val := callContext.Stack.pop2Uint64()
+					callContext.Memory.store[o] = byte(val)
+					return pc, nil, nil
+				}
+			}
+		case KECCAK256:
+			if callContext.Stack.len() >= 2 {
+				if o, n := callContext.Stack.back2(0, 1); callContext.Memory.allocated(o, n) {
+					if cost := params.Keccak256Gas + params.Keccak256WordGas*ToWordSize(n.Uint64()); callContext.gas >= cost {
+						callContext.gas -= cost
+						offset, size := callContext.Stack.pop1Peek1()
+						hash := crypto.Keccak256Hash(callContext.Memory.GetPtr(offset.Uint64(), size.Uint64()))
+						size.SetBytes(hash[:])
+						return pc, nil, nil
+					}
+				}
+			}
+		}
+	}
+	if false && debug {
+		// Capture pre-execution values for tracing.
+		t.logged = false
+		t.pc = pc
+		t.oldGas = callContext.Gas()
+	}
+	// Get the operation from the jump table and validate the stack to ensure there are
+	// enough stack items available to perform the operation.
+	operation := &evm.jt[op]
+	cost := mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
+	if false && debug {
+		t.cost = cost
+	}
+	// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
+	// a stack shallower than numPop wraps negative and fails the compare.
+	if sLen := callContext.Stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+		return pc, nil, stackBoundsErr(sLen, operation)
+	}
+	// for tracing: this gas consumption event is emitted below in the debug section.
+	if callContext.gas < cost.Execution {
+		return pc, nil, ErrOutOfGas
+	} else {
+		callContext.gas -= cost.Execution
+	}
+
+	// All ops with a dynamic memory usage also has a dynamic gas cost.
+	var memorySize uint64
+	if operation.dynamicGas != nil {
+		// calculate the new memory size and expand the memory to fit
+		// the operation
+		// Memory check needs to be done prior to evaluating the dynamic gas portion,
+		// to detect calculation overflows
+		if operation.memorySize != nil {
+			memSize, overflow := operation.memorySize(callContext)
+			if overflow {
+				return pc, nil, ErrGasUintOverflow
+			}
+			// memory is expanded in words of 32 bytes. Gas
+			// is also calculated in words.
+			if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
+				return pc, nil, ErrGasUintOverflow
+			}
+		}
+		// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
+		evm.callGasTemp = 0
+		// Consume the gas and return an error if not enough gas is available.
+		// cost is explicitly set so that the capture state defer method can get the proper cost
+		dynamicCost, err := operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
+		if err != nil {
+			if !errors.Is(err, ErrOutOfGas) {
+				err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
+			}
+			return pc, nil, err
+		}
+		if false {
+			cost = cost.Plus(dynamicCost)
+			if debug {
+				t.cost = cost
+			}
+			callGas = cost
+			callGas.Execution -= evm.CallGasTemp()
+			if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGasCost{}) {
+				gasCost := traceGas(op, callGas, cost)
+				fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
+			}
+		}
+		if callContext.gas < dynamicCost.Execution {
+			return pc, nil, ErrOutOfGas
+		}
+		callContext.gas -= dynamicCost.Execution
+		if dynamicCost.State > 0 {
+			ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
+			if !ok {
+				return pc, nil, ErrOutOfGas
+			}
+		} else if dynamicCost.State < 0 {
+			callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+		}
+	}
+
+	// Do gas tracing before memory expansion
+	if false && debug {
+		if tracer.HasGasChangeHook() {
+			tracer.EmitGasChange(t.oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
+		}
+		if tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)) {
+			tracer.EmitOpcode(pc, byte(op), t.oldGas, cost, callContext, evm.returnData, evm.depth, nil)
+			t.logged = true
+		}
+	}
+
+	if memorySize > 0 {
+		callContext.Memory.Resize(memorySize)
+	}
+
+	// TODO - move this to a trace & set in the worker
+
+	if false && trace {
+		var opstr string
+		if operation.string != nil {
+			opstr = operation.string(pc, callContext)
+		} else {
+			opstr = op.String()
+		}
+
+		gasCost := traceGas(op, callGas, cost)
+		fmt.Printf("%d (%d.%d) %5d %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, gasCost.Execution, gasCost.State, opstr)
+	}
+
+	// execute the operation
+	return operation.execute(pc, evm, callContext)
+}
+
+// runDecoded is run's loop over the decoded code of callContext.Contract, from the op at start on.
+func (evm *EVM) runDecoded(callContext *CallContext, start uint64) (res []byte, err error) {
+	p := decodedProgram(callContext.Contract.Code, callContext.Contract.CodeHash)
+	ins := p.ins
+	i := uint64(p.idx[start] &^ jumpdestBit)
+	gasLeft := callContext.gas
+	top := callContext.Stack.top
+run:
+	for {
+		if i >= uint64(len(ins)) {
+			res, err = nil, errStopToken
+			break run
+		}
+		in := ins[i]
+		op := in.kind()
+		sLen := top
+		switch op {
+		case pushImm:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && uint(sLen) < stackLimit {
+				gasLeft = left
+				callContext.Stack.pushRefAt(top).SetUint64(uint64(in.arg()))
+				top += 1
+				i++
+				continue run
+			}
+			op = OpCode(callContext.Contract.Code[in.pc()])
+		case pushConst:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && uint(sLen) < stackLimit {
+				gasLeft = left
+				*callContext.Stack.pushRefAt(top) = p.consts[in.arg()]
+				top += 1
+				i++
+				continue run
+			}
+			op = OpCode(callContext.Contract.Code[in.pc()])
+		case jumpTo:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep+GasMidStep, 0); borrow == 0 && uint(sLen) < stackLimit {
+				gasLeft = left
+				if evm.Cancelled() {
+					res, err = nil, errStopToken
+					break run
+				}
+				skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+				gasLeft -= skip * params.JumpdestGas
+				i = uint64(in.arg()) + skip
+				continue run
+			}
+			op = OpCode(callContext.Contract.Code[in.pc()])
+		case jumpiTo:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep+GasSlowStep, 0); borrow == 0 && sLen >= 1 && sLen < stackLimit {
+				gasLeft = left
+				if evm.Cancelled() {
+					res, err = nil, errStopToken
+					break run
+				}
+				cond := callContext.Stack.popAt(top)
+				top -= 1
+				if cond.IsZero() {
+					i += 2
+					continue run
+				}
+				skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+				gasLeft -= skip * params.JumpdestGas
+				i = uint64(in.arg()) + skip
+				continue run
+			}
+			op = OpCode(callContext.Contract.Code[in.pc()])
+		case KECCAK256:
+			if sLen >= 2 && sLen <= stackLimit {
+				offset, size := callContext.Stack.pop1Peek1At(top)
+				if callContext.Memory.allocated(offset, size) {
+					if left, borrow := bits.Sub64(gasLeft, params.Keccak256Gas+params.Keccak256WordGas*ToWordSize(size.Uint64()), 0); borrow == 0 {
+						gasLeft = left
+						hash := crypto.Keccak256Hash(callContext.Memory.GetPtr(offset.Uint64(), size.Uint64()))
+						size.SetBytes(hash[:])
+						top -= 1
+						i++
+						continue run
+					}
+				}
+			}
+		case SHL, SHR, SAR:
+			// An op a table does not have is opUndefined there, which pushes nothing.
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit && evm.jt[op].numPush == 1 {
+				gasLeft = left
+				shift, value := callContext.Stack.pop1Peek1At(top)
+				switch {
+				case op == SAR && shift.GtUint64(255):
+					if value.Sign() >= 0 {
+						value.Clear()
+					} else {
+						value.SetAllOne()
+					}
+				case op == SAR:
+					value.SRsh(value, uint(shift.Uint64()))
+				case !shift.LtUint64(256):
+					value.Clear()
+				case op == SHL:
+					value.Lsh(value, uint(shift.Uint64()))
+				default:
+					value.Rsh(value, uint(shift.Uint64()))
+				}
+				top -= 1
+				i++
+				continue run
+			}
+		case JUMP:
+			if left, borrow := bits.Sub64(gasLeft, GasMidStep, 0); borrow == 0 && sLen >= 1 && sLen <= stackLimit {
+				gasLeft = left
+				if evm.Cancelled() {
+					res, err = nil, errStopToken
+					break run
+				}
+				dest := p.jumpdest(callContext.Stack.popAt(top))
+				top -= 1
+				if dest&jumpdestBit == 0 {
+					res, err = nil, ErrInvalidJump
+					break run
+				}
+				skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+				gasLeft -= skip * params.JumpdestGas
+				i = uint64(dest&^jumpdestBit) + skip
+				continue run
+			}
+		case JUMPI:
+			if left, borrow := bits.Sub64(gasLeft, GasSlowStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+				gasLeft = left
+				if evm.Cancelled() {
+					res, err = nil, errStopToken
+					break run
+				}
+				pos, cond := callContext.Stack.pop2At(top)
+				top -= 2
+				if cond.IsZero() {
+					i++
+					continue run
+				}
+				dest := p.jumpdest(pos)
+				if dest&jumpdestBit == 0 {
+					res, err = nil, ErrInvalidJump
+					break run
+				}
+				skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+				gasLeft -= skip * params.JumpdestGas
+				i = uint64(dest&^jumpdestBit) + skip
+				continue run
+			}
+		case PUSH0:
+			if left, borrow := bits.Sub64(gasLeft, GasQuickStep, 0); borrow == 0 && uint(sLen) < stackLimit && evm.jt[PUSH0].numPush == 1 {
+				gasLeft = left
+				callContext.Stack.pushRefAt(top).Clear()
+				top += 1
+				i++
+				continue run
+			}
+		case ADD:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+				gasLeft = left
+				x, y := callContext.Stack.pop1Peek1At(top)
+				top -= 1
+				y.Add(x, y)
+				i++
+				continue run
+			}
+		case POP:
+			if left, borrow := bits.Sub64(gasLeft, GasQuickStep, 0); borrow == 0 && sLen >= 1 && sLen <= stackLimit {
+				gasLeft = left
+				top -= 1
+				i++
+				continue run
+			}
+		case JUMPDEST:
+			if left, borrow := bits.Sub64(gasLeft, params.JumpdestGas, 0); borrow == 0 {
+				gasLeft = left
+				i++
+				continue run
+			}
+		case SUB:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+				gasLeft = left
+				x, y := callContext.Stack.pop1Peek1At(top)
+				top -= 1
+				y.Sub(x, y)
+				i++
+				continue run
+			}
+		case MUL:
+			if left, borrow := bits.Sub64(gasLeft, GasFastStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+				gasLeft = left
+				callContext.Stack.top = top
+				i, _, _ = opMul(i, evm, callContext)
+				top = callContext.Stack.top
+				i++
+				continue run
+			}
+		case DIV:
+			if left, borrow := bits.Sub64(gasLeft, GasFastStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+				gasLeft = left
+				callContext.Stack.top = top
+				i, _, _ = opDiv(i, evm, callContext)
+				top = callContext.Stack.top
+				i++
+				continue run
+			}
+		case LT:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+				gasLeft = left
+				x, y := callContext.Stack.pop1Peek1At(top)
+				top -= 1
+				if x.Lt(y) {
+					y.SetOne()
+				} else {
+					y.Clear()
+				}
+				i++
+				continue run
+			}
+		case GT:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+				gasLeft = left
+				x, y := callContext.Stack.pop1Peek1At(top)
+				top -= 1
+				if x.Gt(y) {
+					y.SetOne()
+				} else {
+					y.Clear()
+				}
+				i++
+				continue run
+			}
+		case EQ:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+				gasLeft = left
+				x, y := callContext.Stack.pop1Peek1At(top)
+				top -= 1
+				if x.Eq(y) {
+					y.SetOne()
+				} else {
+					y.Clear()
+				}
+				i++
+				continue run
+			}
+		case AND:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+				gasLeft = left
+				x, y := callContext.Stack.pop1Peek1At(top)
+				top -= 1
+				y.And(x, y)
+				i++
+				continue run
+			}
+		case ISZERO:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 1 && sLen <= stackLimit {
+				gasLeft = left
+				x := callContext.Stack.peekAt(top)
+				if x.IsZero() {
+					x.SetOne()
+				} else {
+					x.Clear()
+				}
+				i++
+				continue run
+			}
+		case MLOAD:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 1 && sLen <= stackLimit && callContext.Memory.allocated32(callContext.Stack.peekAt(top)) {
+				gasLeft = left
+				v := callContext.Stack.peekAt(top)
+				offset := v.Uint64()
+				v.SetBytes32(callContext.Memory.GetPtr(offset, 32))
+				i++
+				continue run
+			}
+		case MSTORE:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit && callContext.Memory.allocated32(callContext.Stack.peekAt(top)) {
+				gasLeft = left
+				mStart, val := callContext.Stack.pop2At(top)
+				top -= 2
+				callContext.Memory.Set32(mStart.Uint64(), val)
+				i++
+				continue run
+			}
+		case DUP1:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 1 && sLen < stackLimit {
+				gasLeft = left
+				callContext.Stack.dupAt(top, 0)
+				top += 1
+				i++
+				continue run
+			}
+		case DUP2:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen < stackLimit {
+				gasLeft = left
+				callContext.Stack.dupAt(top, 1)
+				top += 1
+				i++
+				continue run
+			}
+		case DUP3:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 3 && sLen < stackLimit {
+				gasLeft = left
+				callContext.Stack.dupAt(top, 2)
+				top += 1
+				i++
+				continue run
+			}
+		case DUP4:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 4 && sLen < stackLimit {
+				gasLeft = left
+				callContext.Stack.dupAt(top, 3)
+				top += 1
+				i++
+				continue run
+			}
+		case DUP5:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 5 && sLen < stackLimit {
+				gasLeft = left
+				callContext.Stack.dupAt(top, 4)
+				top += 1
+				i++
+				continue run
+			}
+		case DUP6:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 6 && sLen < stackLimit {
+				gasLeft = left
+				callContext.Stack.dupAt(top, 5)
+				top += 1
+				i++
+				continue run
+			}
+		case DUP7:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 7 && sLen < stackLimit {
+				gasLeft = left
+				callContext.Stack.dupAt(top, 6)
+				top += 1
+				i++
+				continue run
+			}
+		case DUP8:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 8 && sLen < stackLimit {
+				gasLeft = left
+				callContext.Stack.dupAt(top, 7)
+				top += 1
+				i++
+				continue run
+			}
+		case SWAP1:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+				gasLeft = left
+				callContext.Stack.swapAt(top, 1)
+				i++
+				continue run
+			}
+		case SWAP2:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 3 && sLen <= stackLimit {
+				gasLeft = left
+				callContext.Stack.swapAt(top, 2)
+				i++
+				continue run
+			}
+		case SWAP3:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 4 && sLen <= stackLimit {
+				gasLeft = left
+				callContext.Stack.swapAt(top, 3)
+				i++
+				continue run
+			}
+		case SWAP4:
+			if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 5 && sLen <= stackLimit {
+				gasLeft = left
+				callContext.Stack.swapAt(top, 4)
+				i++
+				continue run
+			}
+		}
+		callContext.gas = gasLeft
+		callContext.Stack.top = top
+		pc := in.pc()
+		var next uint64
+		next, res, err = evm.step(callContext, op, pc, false, false, nil)
+		gasLeft = callContext.gas
+		top = callContext.Stack.top
+		if err != nil {
+			break run
+		}
+		i++
+		// An op that read immediates goes on where run would; EIP-8024 ops may read past the code end.
+		if next != pc {
+			i = uint64(p.idx[min(next+1, uint64(len(p.idx)-1))] &^ jumpdestBit)
+		}
+	}
+	callContext.gas = gasLeft
+	callContext.Stack.top = top
+	return res, err
 }

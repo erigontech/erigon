@@ -29,11 +29,13 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -486,8 +488,16 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	return evm.run(contract, gas, input, readOnly, false, false)
 }
 
-// anyTrace is true here; execution/vm/vmgen sets it to false in run.
+// anyTrace is true here; execution/vm/vmgen sets it to false in run and step.
 const anyTrace = true
+
+// stepTrace is what runTraced's deferred tracer reads about the current op.
+type stepTrace struct {
+	logged bool // deferred Tracer should ignore already logged steps
+	pc     uint64
+	oldGas mdgas.MdGas
+	cost   mdgas.MdGasCost
+}
 
 // runTraced is Run's loop with the tracing code. execution/vm/vmgen generates
 // run in vm_run_gen.go from it, with anyTrace false and the fast-path switch.
@@ -502,15 +512,10 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc   = uint64(0) // program counter
-		cost mdgas.MdGasCost
-		// copies used by tracer
-		pcCopy  uint64 // needed for the deferred Tracer
-		oldGas  mdgas.MdGas
-		callGas mdgas.MdGasCost
-		logged  bool   // deferred Tracer should ignore already logged steps
-		res     []byte // result of the opcode execution function
-		tracer  = evm.config.Tracer
+		pc     = uint64(0) // program counter
+		t      *stepTrace
+		res    []byte // result of the opcode execution function
+		tracer = evm.config.Tracer
 	)
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
@@ -543,15 +548,16 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
 	// the stacks before callContext.put() returns them to the pool.
 	if anyTrace && debug {
+		t = new(stepTrace)
 		defer func() {
 			if err == nil {
 				return
 			}
 			switch {
-			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
-				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+			case !t.logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
+				tracer.EmitOpcode(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
 			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
-				tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
+				tracer.EmitFault(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}()
 	}
@@ -562,146 +568,271 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 	// parent context.
 
 	// Hoist to locals so the compiler sees them as loop-invariant.
-	stack := &callContext.Stack
-	jt := evm.jt
-	// The fast path keeps gas in a register. It is stored back before the generic
-	// path and after the loop, and reloaded after each generic op.
+	code := contract.Code
+	// The fast path keeps gas and the stack top in registers. They are stored back
+	// before the generic path and after the loop, and reloaded after each generic op.
 	gasLeft := callContext.gas
+	top := callContext.Stack.top
 
 run:
 	for {
 		// Past the end of the code is STOP. Exiting here, out of line, spares
 		// every op a taken jump in GetOp.
-		if !anyTrace && pc >= uint64(len(contract.Code)) {
+		if !anyTrace && pc >= uint64(len(code)) {
 			res, err = nil, errStopToken
 			break run
 		}
-		op = contract.GetOp(pc)
+		op = STOP
+		if pc < uint64(len(code)) {
+			op = OpCode(code[pc])
+		}
 		// The hottest constant-gas opcodes run inline, without the jump table and
 		// its indirect call. A failed check falls through to the generic path,
 		// which reports the error.
 		if !anyTrace {
 			// execution/vm/vmgen inserts the fastOps switch here.
 			callContext.gas = gasLeft
+			callContext.Stack.top = top
 		}
-		callContext.cacheGen++
-		if anyTrace && debug {
-			// Capture pre-execution values for tracing.
-			logged = false
-			pcCopy = pc
-			oldGas = callContext.Gas()
-		}
-		// Get the operation from the jump table and validate the stack to ensure there are
-		// enough stack items available to perform the operation.
-		operation := &jt[op]
-		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
-		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
-		// a stack shallower than numPop wraps negative and fails the compare.
-		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
-		}
-		// for tracing: this gas consumption event is emitted below in the debug section.
-		if callContext.gas < cost.Execution {
-			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-		} else {
-			callContext.gas -= cost.Execution
-		}
-
-		// All ops with a dynamic memory usage also has a dynamic gas cost.
-		var memorySize uint64
-		if operation.dynamicGas != nil {
-			// calculate the new memory size and expand the memory to fit
-			// the operation
-			// Memory check needs to be done prior to evaluating the dynamic gas portion,
-			// to detect calculation overflows
-			if operation.memorySize != nil {
-				memSize, overflow := operation.memorySize(callContext)
-				if overflow {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
-				}
-				// memory is expanded in words of 32 bytes. Gas
-				// is also calculated in words.
-				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
-				}
-			}
-			// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
-			evm.callGasTemp = 0
-			// Consume the gas and return an error if not enough gas is available.
-			// cost is explicitly set so that the capture state defer method can get the proper cost
-			var dynamicCost mdgas.MdGasCost
-			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
-			if err != nil {
-				if !errors.Is(err, ErrOutOfGas) {
-					err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
-				}
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
-			}
-			if anyTrace {
-				cost = cost.Plus(dynamicCost)
-				callGas = cost
-				callGas.Execution -= evm.CallGasTemp()
-				if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGasCost{}) {
-					gasCost := traceGas(op, callGas, cost)
-					fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
-				}
-			}
-			if callContext.gas < dynamicCost.Execution {
-				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-			}
-			callContext.gas -= dynamicCost.Execution
-			if dynamicCost.State > 0 {
-				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
-				if !ok {
-					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
-				}
-			} else if dynamicCost.State < 0 {
-				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
-			}
-		}
-
-		// Do gas tracing before memory expansion
-		if anyTrace && debug {
-			if tracer.HasGasChangeHook() {
-				tracer.EmitGasChange(oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
-			}
-			if tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)) {
-				tracer.EmitOpcode(pc, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-				logged = true
-			}
-		}
-
-		if memorySize > 0 {
-			callContext.Memory.Resize(memorySize)
-		}
-
-		// TODO - move this to a trace & set in the worker
-
-		if anyTrace && trace {
-			var opstr string
-			if operation.string != nil {
-				opstr = operation.string(pc, callContext)
-			} else {
-				opstr = op.String()
-			}
-
-			gasCost := traceGas(op, callGas, cost)
-			fmt.Printf("%d (%d.%d) %5d %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, gasCost.Execution, gasCost.State, opstr)
-		}
-
-		// execute the operation
-		pc, res, err = operation.execute(pc, evm, callContext)
+		// The generic path takes pc and returns it, so the loop holds no value
+		// across this call and the fast path can keep pc and gasLeft in registers.
+		pc, res, err = evm.stepTraced(callContext, op, pc, debug, trace, t)
 		gasLeft = callContext.gas
+		top = callContext.Stack.top
 		if err != nil {
 			break run
 		}
 		pc++
 	}
 	callContext.gas = gasLeft
+	callContext.Stack.top = top
 
 	if errors.Is(err, errStopToken) {
 		err = nil // clear stop token error
 	}
 
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
+}
+
+// stepTraced runs op at pc through the jump table: runTraced runs every op
+// here, run only the ops its fast path does not take. It returns the op's pc,
+// result and error; the gas left is in callContext.gas.
+//
+//go:noinline
+func (evm *EVM) stepTraced(callContext *CallContext, op OpCode, pc uint64, debug, trace bool, t *stepTrace) (uint64, []byte, error) {
+	var callGas mdgas.MdGasCost
+	tracer := evm.config.Tracer
+	callContext.cacheGen++
+	// Ops handled here skip the jump table but add no code to run.
+	if !anyTrace {
+		// A frame-cache hit is a warm SLOAD: it needs neither the gas func nor the op.
+		// A zero constant gas marks the EIP-2929 SLOAD; a miss leaves the memo to the gas func.
+		if op == SLOAD && callContext.slots.on && evm.jt[SLOAD].constantGas == 0 &&
+			callContext.Stack.len() > 0 && callContext.gas >= params.WarmStorageReadCostEIP2929 {
+			if i := callContext.lookupSlot(evm); i >= 0 {
+				callContext.gas -= params.WarmStorageReadCostEIP2929
+				*callContext.Stack.peek() = callContext.slots.val[i]
+				return pc, nil, nil
+			}
+		}
+		switch op {
+		case DUP9, DUP10, DUP11, DUP12, DUP13, DUP14, DUP15, DUP16:
+			if n, sLen := int(op-DUP1)+1, callContext.Stack.len(); sLen >= n && sLen < stackLimit && callContext.gas >= GasFastestStep {
+				callContext.gas -= GasFastestStep
+				callContext.Stack.dup(n - 1)
+				return pc, nil, nil
+			}
+		case SWAP5, SWAP6, SWAP7, SWAP8, SWAP9, SWAP10, SWAP11, SWAP12, SWAP13, SWAP14, SWAP15, SWAP16:
+			if n := int(op-SWAP1) + 1; callContext.Stack.len() > n && callContext.gas >= GasFastestStep {
+				callContext.gas -= GasFastestStep
+				callContext.Stack.swap(n)
+				return pc, nil, nil
+			}
+		case CALLDATALOAD:
+			if callContext.Stack.len() >= 1 && callContext.gas >= GasFastestStep {
+				callContext.gas -= GasFastestStep
+				x, input := callContext.Stack.peek(), callContext.input
+				switch off, overflow := x.Uint64WithOverflow(); {
+				case overflow || off >= uint64(len(input)):
+					x.Clear()
+				case uint64(len(input))-off >= 32:
+					x.SetBytes32(input[off:])
+				default:
+					var word [32]byte
+					copy(word[:], input[off:])
+					x.SetBytes32(word[:])
+				}
+				return pc, nil, nil
+			}
+		case CALLDATACOPY, CODECOPY, RETURNDATACOPY:
+			// An op the table does not have is opUndefined there, which pops nothing.
+			if evm.jt[op].numPop != 3 {
+				break
+			}
+			data := callContext.input
+			if op == CODECOPY {
+				data = callContext.Contract.Code
+			} else if op == RETURNDATACOPY {
+				data = evm.returnData
+			}
+			if callContext.Stack.len() >= 3 && callContext.Memory.allocated(callContext.Stack.peek(), callContext.Stack.back(2)) {
+				src, n := uint64(math.MaxUint64), callContext.Stack.back(2).Uint64()
+				if s := callContext.Stack.back(1); s.IsUint64() {
+					src = s.Uint64()
+				}
+				// Out of bounds RETURNDATACOPY fails: the generic path reports it.
+				inBounds := src <= uint64(len(data)) && uint64(len(data))-src >= n
+				if cost := GasFastestStep + params.CopyGas*ToWordSize(n); callContext.gas >= cost && (inBounds || op != RETURNDATACOPY) {
+					callContext.gas -= cost
+					dst, _, _ := callContext.Stack.pop3()
+					callContext.Memory.SetFromData(dst.Uint64(), n, src, data)
+					return pc, nil, nil
+				}
+			}
+		case MCOPY:
+			if callContext.Stack.len() >= 3 && evm.jt[MCOPY].numPop == 3 {
+				d, s, n := callContext.Stack.back3(0, 1, 2)
+				if callContext.Memory.allocated(d, n) && callContext.Memory.allocated(s, n) {
+					if cost := GasFastestStep + params.CopyGas*ToWordSize(n.Uint64()); callContext.gas >= cost {
+						callContext.gas -= cost
+						dst, src, length := callContext.Stack.pop3()
+						callContext.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
+						return pc, nil, nil
+					}
+				}
+			}
+		case MSTORE8:
+			if callContext.Stack.len() >= 2 && callContext.gas >= GasFastestStep {
+				if off := callContext.Stack.peek(); off.IsUint64() && off.Uint64() < uint64(callContext.Memory.Len()) {
+					callContext.gas -= GasFastestStep
+					o, val := callContext.Stack.pop2Uint64()
+					callContext.Memory.store[o] = byte(val)
+					return pc, nil, nil
+				}
+			}
+		case KECCAK256:
+			if callContext.Stack.len() >= 2 {
+				if o, n := callContext.Stack.back2(0, 1); callContext.Memory.allocated(o, n) {
+					if cost := params.Keccak256Gas + params.Keccak256WordGas*ToWordSize(n.Uint64()); callContext.gas >= cost {
+						callContext.gas -= cost
+						offset, size := callContext.Stack.pop1Peek1()
+						hash := crypto.Keccak256Hash(callContext.Memory.GetPtr(offset.Uint64(), size.Uint64()))
+						size.SetBytes(hash[:])
+						return pc, nil, nil
+					}
+				}
+			}
+		}
+	}
+	if anyTrace && debug {
+		// Capture pre-execution values for tracing.
+		t.logged = false
+		t.pc = pc
+		t.oldGas = callContext.Gas()
+	}
+	// Get the operation from the jump table and validate the stack to ensure there are
+	// enough stack items available to perform the operation.
+	operation := &evm.jt[op]
+	cost := mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
+	if anyTrace && debug {
+		t.cost = cost
+	}
+	// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
+	// a stack shallower than numPop wraps negative and fails the compare.
+	if sLen := callContext.Stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
+		return pc, nil, stackBoundsErr(sLen, operation)
+	}
+	// for tracing: this gas consumption event is emitted below in the debug section.
+	if callContext.gas < cost.Execution {
+		return pc, nil, ErrOutOfGas
+	} else {
+		callContext.gas -= cost.Execution
+	}
+
+	// All ops with a dynamic memory usage also has a dynamic gas cost.
+	var memorySize uint64
+	if operation.dynamicGas != nil {
+		// calculate the new memory size and expand the memory to fit
+		// the operation
+		// Memory check needs to be done prior to evaluating the dynamic gas portion,
+		// to detect calculation overflows
+		if operation.memorySize != nil {
+			memSize, overflow := operation.memorySize(callContext)
+			if overflow {
+				return pc, nil, ErrGasUintOverflow
+			}
+			// memory is expanded in words of 32 bytes. Gas
+			// is also calculated in words.
+			if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
+				return pc, nil, ErrGasUintOverflow
+			}
+		}
+		// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
+		evm.callGasTemp = 0
+		// Consume the gas and return an error if not enough gas is available.
+		// cost is explicitly set so that the capture state defer method can get the proper cost
+		dynamicCost, err := operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
+		if err != nil {
+			if !errors.Is(err, ErrOutOfGas) {
+				err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
+			}
+			return pc, nil, err
+		}
+		if anyTrace {
+			cost = cost.Plus(dynamicCost)
+			if debug {
+				t.cost = cost
+			}
+			callGas = cost
+			callGas.Execution -= evm.CallGasTemp()
+			if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGasCost{}) {
+				gasCost := traceGas(op, callGas, cost)
+				fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
+			}
+		}
+		if callContext.gas < dynamicCost.Execution {
+			return pc, nil, ErrOutOfGas
+		}
+		callContext.gas -= dynamicCost.Execution
+		if dynamicCost.State > 0 {
+			ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
+			if !ok {
+				return pc, nil, ErrOutOfGas
+			}
+		} else if dynamicCost.State < 0 {
+			callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+		}
+	}
+
+	// Do gas tracing before memory expansion
+	if anyTrace && debug {
+		if tracer.HasGasChangeHook() {
+			tracer.EmitGasChange(t.oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
+		}
+		if tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)) {
+			tracer.EmitOpcode(pc, byte(op), t.oldGas, cost, callContext, evm.returnData, evm.depth, nil)
+			t.logged = true
+		}
+	}
+
+	if memorySize > 0 {
+		callContext.Memory.Resize(memorySize)
+	}
+
+	// TODO - move this to a trace & set in the worker
+
+	if anyTrace && trace {
+		var opstr string
+		if operation.string != nil {
+			opstr = operation.string(pc, callContext)
+		} else {
+			opstr = op.String()
+		}
+
+		gasCost := traceGas(op, callGas, cost)
+		fmt.Printf("%d (%d.%d) %5d %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, gasCost.Execution, gasCost.State, opstr)
+	}
+
+	// execute the operation
+	return operation.execute(pc, evm, callContext)
 }
