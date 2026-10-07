@@ -269,7 +269,7 @@ func (s *CaplinStateSnapshots) IndicesMax() uint64 {
 	if minTo == math.MaxUint64 {
 		return 0
 	}
-	return minTo
+	return minTo - 1
 }
 
 func (s *CaplinStateSnapshots) LogStat(str string) {

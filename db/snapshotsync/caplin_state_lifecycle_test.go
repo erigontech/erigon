@@ -129,7 +129,7 @@ func TestCaplinStateBlocksAvailableUsesLowestTable(t *testing.T) {
 	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.PendingDepositsDump, 0, 100_000, logger)
 
 	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
-	require.Equal(t, uint64(50_000), s.BlocksAvailable())
+	require.Equal(t, uint64(49_999), s.BlocksAvailable())
 }
 
 func TestCaplinStateBlocksAvailableZeroWhenTableHasNoSegments(t *testing.T) {
@@ -248,7 +248,7 @@ func TestCaplinStateBlocksAvailableStopsAtGap(t *testing.T) {
 	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
-	require.Equal(t, uint64(50_000), s.IndicesMax(), "index height must come from the visible set, not raw dirty coverage")
+	require.Equal(t, uint64(49_999), s.IndicesMax(), "index height must come from the visible set, not raw dirty coverage")
 	require.Equal(t, uint64(49_999), s.SegmentsMax())
 	require.Equal(t, uint64(49_999), s.BlocksAvailable())
 }
@@ -276,4 +276,24 @@ func TestCaplinStateSegFileNamesIncludesSegmentsPastAGap(t *testing.T) {
 	paths := s.SegFileNames(0, 150_000)
 	require.Contains(t, paths, nearSeg)
 	require.Contains(t, paths, farSeg, "the segment past the gap must still be seedable")
+}
+
+// BlocksAvailable is the last slot every table can serve from files: consumers read slots up to
+// and including it, so each table needs a visible segment covering it.
+func TestCaplinStateBlocksAvailableIsCoveredByEveryTable(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	tables := []string{kv.BlockRoot, kv.PendingDepositsDump}
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.BlockRoot, 0, 50_000, logger)
+	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.PendingDepositsDump, 0, 100_000, logger)
+
+	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
+	view := s.View()
+	defer view.Close()
+	available := s.BlocksAvailable()
+	for _, table := range tables {
+		_, ok := view.VisibleSegment(available, table)
+		require.True(t, ok, "table %s has no segment for BlocksAvailable()=%d", table, available)
+	}
 }
