@@ -86,6 +86,7 @@ type CallContext struct {
 	Contract Contract
 	create   createGasPreparation
 	slots    frameSlots
+	trace    opTrace
 	Stack    Stack
 }
 
@@ -552,10 +553,13 @@ func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, read
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
 		pc     = uint64(0) // program counter
-		t      = opTrace{debug: debug, trace: trace}
+		t      = &callContext.trace
 		res    []byte // result of the opcode execution function
 		tracer = evm.config.Tracer
 	)
+	if anyTrace {
+		*t = opTrace{debug: debug, trace: trace}
+	}
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
 
@@ -655,7 +659,7 @@ run:
 		}
 		// run calls the gasExecute ops before its generic path: one that gets here failed a check above.
 		if anyTrace && operation.gasExecute != nil {
-			pc, res, err = operation.gasExecute(pc, evm, callContext, &t)
+			pc, res, err = operation.gasExecute(pc, evm, callContext, t)
 			gasLeft = callContext.gas
 			if err != nil {
 				break run
@@ -695,7 +699,7 @@ run:
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
 			}
 			if anyTrace {
-				evm.traceCost(op, &t, dynamicCost)
+				evm.traceCost(op, t, dynamicCost)
 			}
 			if callContext.gas < dynamicCost.Execution {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
@@ -713,7 +717,7 @@ run:
 
 		// Do gas tracing before memory expansion
 		if anyTrace && debug {
-			evm.traceOp(callContext, op, &t)
+			evm.traceOp(callContext, op, t)
 		}
 
 		if memorySize > 0 {
@@ -723,7 +727,7 @@ run:
 		// TODO - move this to a trace & set in the worker
 
 		if anyTrace && trace {
-			evm.tracePrint(callContext, op, pc, &t)
+			evm.tracePrint(callContext, op, pc, t)
 		}
 
 		// execute the operation

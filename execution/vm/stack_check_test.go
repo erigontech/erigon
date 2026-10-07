@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -342,25 +343,43 @@ func TestRunMatchesRunTraced(t *testing.T) {
 func TestRunUsesGasExecute(t *testing.T) {
 	t.Parallel()
 	for _, traced := range []bool{false, true} {
-		ibs := state.New(state.NewNoopReader())
-		defer ibs.Close()
-		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-		table := *evm.jt
-		called := false
-		table[SLOAD].gasExecute = func(pc uint64, evm *EVM, scope *CallContext, tr *opTrace) (uint64, []byte, error) {
-			called = tr != nil
-			return opSloadEIP2929(pc, evm, scope, tr)
-		}
-		evm.jt = &table
-		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
-		c.Code = []byte{byte(PUSH1), 1, byte(SLOAD)}
-		f := evm.run
-		if traced {
-			f = evm.runTraced
-		}
-		_, left, _, err := f(*c, mdgas.MdGas{Execution: 10_000}, nil, false, false, false)
-		require.NoError(t, err)
-		require.Equal(t, traced, called)
-		require.Equal(t, 10_000-3-coldStorageAccessCost(evm.chainRules), left.Execution, "traced=%v", traced)
+		t.Run(fmt.Sprintf("traced=%v", traced), func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+			table := *evm.jt
+			called := false
+			table[SLOAD].gasExecute = func(pc uint64, evm *EVM, scope *CallContext, tr *opTrace) (uint64, []byte, error) {
+				called = tr != nil
+				return opSloadEIP2929(pc, evm, scope, tr)
+			}
+			evm.jt = &table
+			c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			c.Code = []byte{byte(PUSH1), 1, byte(SLOAD)}
+			f := evm.run
+			if traced {
+				f = evm.runTraced
+			}
+			_, left, _, err := f(*c, mdgas.MdGas{Execution: 10_000}, nil, false, false, false)
+			require.NoError(t, err)
+			require.Equal(t, traced, called)
+			require.Equal(t, 10_000-3-coldStorageAccessCost(evm.chainRules), left.Execution)
+		})
 	}
+}
+
+// TestRunTracedFrameDoesNotAllocate pins that a traced frame keeps its trace state off the heap.
+func TestRunTracedFrameDoesNotAllocate(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	hooks := &tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {}}
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+	c := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	c.Code = []byte{byte(PUSH1), 1, byte(POP)}
+	var err error
+	allocs := testing.AllocsPerRun(100, func() {
+		_, _, _, err = evm.runTraced(c, mdgas.MdGas{Execution: 10_000}, nil, false, true, false)
+	})
+	require.NoError(t, err)
+	require.Zero(t, allocs)
 }
