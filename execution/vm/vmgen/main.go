@@ -355,12 +355,7 @@ const cacheGenStep = "callContext.cacheGen++\n"
 // run inlines the func's copy without the trace. TestFastPathMatchesJumpTables
 // fails for a table whose gasExecute is not here.
 func gasExecuteOps() [][2]string {
-	return [][2]string{
-		{"BALANCE", "opBalanceEIP2929"},
-		{"EXTCODEHASH", "opExtCodeHashEIP2929"},
-		{"EXTCODESIZE", "opExtCodeSizeEIP2929"},
-		{"SLOAD", "opSloadEIP2929"},
-	}
+	return [][2]string{{"SLOAD", "opSloadEIP2929"}}
 }
 
 // directCalls returns run's switch over the gasExecute ops, which runs their copies
