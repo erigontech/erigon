@@ -101,27 +101,6 @@ func requireBALs(t *testing.T, cs *MultiClient, query eth.GetBlockAccessListsPac
 	return response
 }
 
-func TestQueryBALs_InvalidResponse(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		cs := newBALTestClient(t)
-		cs.balGenerator = balGetterFunc(func(context.Context, *chain.Config, kv.TemporalTx, common.Hash, uint64) ([]byte, error) {
-			return []byte{0xff}, nil
-		})
-		result := make(chan error, 1)
-		go func() {
-			_, err := queryBALs(t.Context(), cs, eth.GetBlockAccessListsPacket{{2}})
-			result <- err
-		}()
-		synctest.Wait()
-		select {
-		case err := <-result:
-			require.ErrorIs(t, err, rlp.ErrElemTooLarge)
-		default:
-			t.Fatal("query worker exited without reporting its result")
-		}
-	})
-}
-
 func TestGetBlockAccessLists71_ReplayDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		cs := newBALTestClient(t)

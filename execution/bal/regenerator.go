@@ -107,6 +107,21 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Check body metadata before admission; loading transactions is part of the limited work.
+	body, err := g.blockReader.CanonicalBodyForStorage(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if body == nil {
+		return nil, nil
+	}
+	reader, err := g.historyStateReader(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if beforeReplay != nil {
 		if err := beforeReplay(); err != nil {
 			return nil, err
@@ -124,10 +139,6 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	}
 	if block == nil {
 		return nil, nil
-	}
-	reader, err := g.historyStateReader(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
 	}
 	ibs := state.New(reader)
 	defer ibs.Close()
