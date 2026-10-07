@@ -180,8 +180,7 @@ const maxJSONDepth = 10000
 // time instead of a byte at a time, which is most of the cost of a body whose
 // bulk is one long string.
 func validJSON(data []byte) bool {
-	i := skipJSONSpace(data, 0)
-	i, ok := scanValidJSON(data, i, 1)
+	i, ok := scanValidJSON(data, skipJSONSpace(data, 0), 1)
 	return ok && skipJSONSpace(data, i) == len(data)
 }
 
@@ -195,9 +194,9 @@ func scanValidJSON(data []byte, i, depth int) (int, bool) {
 	case '"':
 		return scanValidJSONString(data, i)
 	case '{':
-		return scanValidJSONObject(data, i, depth)
+		return scanValidJSONComposite(data, i, depth, '}')
 	case '[':
-		return scanValidJSONArray(data, i, depth)
+		return scanValidJSONComposite(data, i, depth, ']')
 	case 't':
 		return scanJSONLiteral(data, i, "true")
 	case 'f':
@@ -216,10 +215,8 @@ func scanJSONLiteral(data []byte, i int, lit string) (int, bool) {
 	return i + len(lit), true
 }
 
-// Word-at-a-time masks over eight bytes, in the style of Hacker's Delight. A
-// byte is plain string content unless it is below 0x20, so a raw control
-// character, the closing quote, or the start of an escape. Invalid UTF-8 is
-// content: json.Valid accepts it, since the v1 decoder substitutes U+FFFD.
+// Invalid UTF-8 counts as string content below: json.Valid accepts it, because
+// the v1 decoder substitutes U+FFFD rather than failing.
 const (
 	lowBits  = 0x0101010101010101
 	highBits = 0x8080808080808080
@@ -239,7 +236,7 @@ func scanValidJSONString(data []byte, i int) (int, bool) {
 	i++ // opening quote
 	for i < len(data) {
 		if i+8 <= len(data) {
-			if !wordInteresting(binary.LittleEndian.Uint64(data[i:])) {
+			if !wordInteresting(binary.NativeEndian.Uint64(data[i:])) {
 				i += 8
 				continue
 			}
@@ -290,48 +287,29 @@ func isHexDigit(c byte) bool {
 	return isJSONDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
-func scanValidJSONObject(data []byte, i, depth int) (int, bool) {
+// scanValidJSONComposite validates the object or array whose opening bracket is
+// at data[i] and returns the offset just past close. Members carry a quoted key
+// and a colon, elements do not.
+func scanValidJSONComposite(data []byte, i, depth int, close byte) (int, bool) {
 	i = skipJSONSpace(data, i+1)
-	if i < len(data) && data[i] == '}' {
+	if i < len(data) && data[i] == close {
 		return i + 1, true
 	}
 	for {
-		if i >= len(data) || data[i] != '"' {
-			return i, false
-		}
 		var ok bool
-		if i, ok = scanValidJSONString(data, i); !ok {
-			return i, false
-		}
-		i = skipJSONSpace(data, i)
-		if i >= len(data) || data[i] != ':' {
-			return i, false
-		}
-		if i, ok = scanValidJSON(data, skipJSONSpace(data, i+1), depth+1); !ok {
-			return i, false
-		}
-		i = skipJSONSpace(data, i)
-		if i >= len(data) {
-			return i, false
-		}
-		switch data[i] {
-		case '}':
-			return i + 1, true
-		case ',':
+		if close == '}' {
+			if i >= len(data) || data[i] != '"' {
+				return i, false
+			}
+			if i, ok = scanValidJSONString(data, i); !ok {
+				return i, false
+			}
+			i = skipJSONSpace(data, i)
+			if i >= len(data) || data[i] != ':' {
+				return i, false
+			}
 			i = skipJSONSpace(data, i+1)
-		default:
-			return i, false
 		}
-	}
-}
-
-func scanValidJSONArray(data []byte, i, depth int) (int, bool) {
-	i = skipJSONSpace(data, i+1)
-	if i < len(data) && data[i] == ']' {
-		return i + 1, true
-	}
-	for {
-		var ok bool
 		if i, ok = scanValidJSON(data, i, depth+1); !ok {
 			return i, false
 		}
@@ -340,7 +318,7 @@ func scanValidJSONArray(data []byte, i, depth int) (int, bool) {
 			return i, false
 		}
 		switch data[i] {
-		case ']':
+		case close:
 			return i + 1, true
 		case ',':
 			i = skipJSONSpace(data, i+1)
