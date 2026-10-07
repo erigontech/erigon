@@ -274,7 +274,7 @@ func logGas(callContext *CallContext, memorySize, n uint64) (mdgas.MdGasCost, er
 	return mdgas.MdGasCost{Execution: gas}, nil
 }
 
-func gasKeccak256(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+func gasKeccak256(callContext *CallContext, memorySize uint64) (mdgas.MdGasCost, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
 		return mdgas.MdGasCost{}, err
@@ -295,7 +295,7 @@ func gasKeccak256(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, me
 // pureMemoryGascost is used by several operations, which aside from their
 // static cost have a dynamic cost which is solely based on the memory
 // expansion
-func pureMemoryGascost(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+func pureMemoryGascost(callContext *CallContext, memorySize uint64) (mdgas.MdGasCost, error) {
 	g, err := memoryGasCost(callContext, memorySize)
 	return mdgas.MdGasCost{Execution: g}, err
 }
@@ -425,7 +425,7 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	return gas, prepared
 }
 
-func gasExpFrontier(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+func gasExpFrontier(callContext *CallContext) (mdgas.MdGasCost, error) {
 	expByteLen := uint64(common.BitLenToByteLen(callContext.Stack.data[callContext.Stack.len()-2].BitLen()))
 
 	var (
@@ -438,7 +438,7 @@ func gasExpFrontier(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, 
 	return mdgas.MdGasCost{Execution: gas}, nil
 }
 
-func gasExpEIP160(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+func gasExpEIP160(callContext *CallContext) (mdgas.MdGasCost, error) {
 	expByteLen := uint64(common.BitLenToByteLen(callContext.Stack.data[callContext.Stack.len()-2].BitLen()))
 
 	var (
@@ -544,24 +544,20 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, av
 	return gas, nil
 }
 
-func calcCallGas(evm *EVM, callContext *CallContext, availableGas, baseGas uint64) (uint64, error) {
-	return callGas(evm.ChainRules().IsTangerineWhistle, availableGas, baseGas, callContext.Stack.back(0))
-}
-
 // addCallGas adds to a call's base cost the gas it forwards, and returns both.
 func addCallGas(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, gas mdgas.MdGasCost) (mdgas.MdGasCost, uint64, error) {
 	if availableGas.Execution < gas.Execution {
 		return mdgas.MdGasCost{}, 0, ErrOutOfGas
 	}
-	callGas, err := calcCallGas(evm, callContext, availableGas.Execution, gas.Execution)
+	forwarded, err := callGas(evm.chainRules.IsTangerineWhistle, availableGas.Execution, gas.Execution, callContext.Stack.back(0))
 	if err != nil {
 		return mdgas.MdGasCost{}, 0, err
 	}
 	var overflow bool
-	if gas.Execution, overflow = math.SafeAdd(gas.Execution, callGas); overflow {
+	if gas.Execution, overflow = math.SafeAdd(gas.Execution, forwarded); overflow {
 		return mdgas.MdGasCost{}, 0, ErrGasUintOverflow
 	}
-	return gas, callGas, nil
+	return gas, forwarded, nil
 }
 
 func gasCallCode(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, uint64, error) {
