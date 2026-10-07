@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/time/rate"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -86,13 +87,6 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 	}
 	ctx, cancel := context.WithTimeout(ctx, batchTimeout)
 	defer cancel()
-	fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) (map[common.Hash]*types.BlockAccessListSidecar, int) {
-		got, retryFrom, err := f.fetchFromPeer(ctx, rs, p, requestTimeout)
-		if err != nil {
-			f.logger.Debug("[p2p.bal] peer did not serve BALs", "peerId", p, "err", err)
-		}
-		return got, retryFrom
-	}
 	allPeers := append([]PeerId{*peerId}, fallbackPeers...)
 	var maxNum uint64
 	for _, r := range reqs {
@@ -107,6 +101,20 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 	if len(plausible) == 0 {
 		plausible = allPeers
 	}
+	limiters := make(map[PeerId]*rate.Limiter, len(plausible))
+	for _, p := range plausible {
+		limiters[p] = rate.NewLimiter(rate.Every(balFetchRequestInterval), 1)
+	}
+	fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) (map[common.Hash]*types.BlockAccessListSidecar, int) {
+		if err := limiters[*p].Wait(ctx); err != nil {
+			return nil, len(rs)
+		}
+		got, retryFrom, err := f.fetchFromPeer(ctx, rs, p, requestTimeout)
+		if err != nil {
+			f.logger.Debug("[p2p.bal] peer did not serve BALs", "peerId", p, "err", err)
+		}
+		return got, retryFrom
+	}
 	return fetchAcrossPeers(ctx, reqs, plausible, balFetchParallelism, fetch)
 }
 
@@ -115,8 +123,8 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 // terminal failures use len(reqs) to stop retries for that peer.
 type peerFetchFunc func(ctx context.Context, reqs []BALRequest, peerId *PeerId) (bals map[common.Hash]*types.BlockAccessListSidecar, retryFrom int)
 
-// Pace requests across concurrent batches so truncated replies cannot cause
-// a tight retry loop.
+// Pace retries within each fetch so truncated replies cannot cause a tight loop.
+// First requests to each peer are immediate, including across concurrent batches.
 const balFetchRequestInterval = 500 * time.Millisecond
 
 // Allow time for a replay budget to refill, but cap consecutive empty replies
@@ -292,9 +300,6 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 }
 
 func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) ([]rlp.RawValue, error) {
-	if err := f.peerTracker.waitForBALRequest(ctx, peerId); err != nil {
-		return nil, err
-	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	messages := make(chan *DecodedInboundMessage[*eth.BlockAccessListsPacket66])

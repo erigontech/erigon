@@ -173,19 +173,15 @@ func TestBALFetcher_EmptyReplyBudgetResetsOnAnsweredPrefix(t *testing.T) {
 	}
 }
 
-func TestBALFetcher_ConcurrentBatchesRespectPeerRate(t *testing.T) {
+func TestBALFetcher_ConcurrentBatchesStartImmediately(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var mu sync.Mutex
-		sentAt := make([]time.Time, 0, 6)
 		fetcher, tracker := newTestBALFetcher(t, func(context.Context, []common.Hash, *PeerId) ([]rlp.RawValue, error) {
-			mu.Lock()
-			sentAt = append(sentAt, time.Now())
-			mu.Unlock()
 			return []rlp.RawValue{{0xc0}}, nil
 		})
 		peer := PeerIdFromUint64(1)
 		tracker.PeerConnected(peer)
-		results := make([]map[common.Hash]*types.BlockAccessListSidecar, 6)
+		results := make([]map[common.Hash]*types.BlockAccessListSidecar, defaultBbdRequestConfig.maxParallelBodyDownloads)
+		started := time.Now()
 		var wg sync.WaitGroup
 		for i := range results {
 			wg.Go(func() {
@@ -194,13 +190,10 @@ func TestBALFetcher_ConcurrentBatchesRespectPeerRate(t *testing.T) {
 			})
 		}
 		wg.Wait()
-		require.Len(t, sentAt, len(results))
 		for _, got := range results {
 			require.Len(t, got, 1)
 		}
-		for i := 1; i < len(sentAt); i++ {
-			require.GreaterOrEqual(t, sentAt[i].Sub(sentAt[i-1]), balFetchRequestInterval, "concurrent batches must share outgoing request pacing")
-		}
+		require.Zero(t, time.Since(started), "first requests must not wait behind other batches")
 	})
 }
 
