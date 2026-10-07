@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/hashicorp/golang-lru/v2"
 )
@@ -73,13 +74,52 @@ func TestRetryPendingExecutionPayloadEnvelopeWaitsForColumnData(t *testing.T) {
 }
 
 func TestRetryPendingExecutionPayloadEnvelopeAppliesOnceColumnDataIsAvailable(t *testing.T) {
-	root := common.HexToHash("0x1")
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
+	payloadHash, err := envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+	require.NoError(t, err)
+	envelope.Message.Payload.BlockHash = payloadHash
+	parentBid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+	parentBid.BlockHash = payloadHash
+	parentBid.GasLimit = envelope.Message.Payload.GasLimit
+	bodyRoot, err := block.Block.Body.HashSSZ()
+	require.NoError(t, err)
+	blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
+		Slot:          block.Block.Slot,
+		ProposerIndex: block.Block.ProposerIndex,
+		ParentRoot:    block.Block.ParentRoot,
+		BodyRoot:      bodyRoot,
+	})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	root := common.Hash(blockRoot)
+	envelope.Message.BeaconBlockRoot = root
+	resignAdmissionEnvelope(t, cfg, blockState, envelope)
+
+	f := newPayloadVoteTestStore(t, root, false, false)
+	gasLimits, err := lru.New[common.Hash, uint64](1)
+	require.NoError(t, err)
+	f.executionPayloadGasLimit = gasLimits
+	f.beaconCfg = cfg
+	graph := &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
+	f.forkGraph = graph
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](2)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](2)
+	require.NoError(t, err)
+	pending.Add(root, envelope)
+	f.pendingEnvelopes = pending
+	f.pendingLocalSelfBuildEnvelopes = local
 	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
-	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(true, nil)
-	f, pending := newRetryPendingStore(t, peerDas)
-	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{})
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(true, nil).MinTimes(1)
+	f.peerDas = peerDas
 
 	f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
 
+	require.True(t, graph.HasEnvelope(root))
+	require.True(t, f.isPayloadAvailable(root))
+	status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
 	require.False(t, pending.Contains(root))
 }
