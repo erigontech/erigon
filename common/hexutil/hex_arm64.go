@@ -29,7 +29,6 @@ import (
 // 128-bit vector, so a nibble becomes its digit by arithmetic: (nib+6)>>4 is 1 exactly when the
 // nibble is 10 or more, which is the step from '9'+1 to 'a'.
 func encodeHex(dst, src []byte) {
-	nibMask := archsimd.BroadcastUint16x8(0x0f0f)
 	lowNib := archsimd.BroadcastUint16x8(0x000f)
 	six := archsimd.BroadcastUint16x8(0x0606)
 	one := archsimd.BroadcastUint16x8(0x0101)
@@ -40,7 +39,7 @@ func encodeHex(dst, src []byte) {
 		// order the two digits are written in.
 		v, _ := archsimd.LoadUint8x16Part(src[:8])
 		w := v.ExtendLo8ToUint16()
-		nibs := w.ShiftAllRight(4).Or(w.And(lowNib).ShiftAllLeft(8)).And(nibMask)
+		nibs := w.ShiftAllRight(4).Or(w.And(lowNib).ShiftAllLeft(8))
 		step := nibs.Add(six).ShiftAllRight(4).And(one)
 		nibs.Add(zeroDigit).Add(letterStep.Mul(step)).ReshapeToUint8s().StorePart(dst[:16])
 		src, dst = src[8:], dst[16:]
