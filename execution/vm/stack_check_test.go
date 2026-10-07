@@ -214,6 +214,7 @@ func TestRunEmptyCodeReturnsBeforeTraceChoice(t *testing.T) {
 // not in the measured cost, so the full budget is always run as well.
 func TestRunMatchesRunTraced(t *testing.T) {
 	t.Parallel()
+	input := bytes.Repeat([]byte{0xa1, 0xb2, 0xc3}, 23)
 	runOnce := func(code []byte, gas uint64, traced bool) (string, uint64) {
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
@@ -231,10 +232,10 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		if traced {
 			f = evm.runTraced
 		}
-		ret, left, used, err := f(*c, mdgas.MdGas{Execution: gas}, nil, false, false, false)
+		ret, left, used, err := f(*c, mdgas.MdGas{Execution: gas}, input, false, false, false)
 		return fmt.Sprintf("ret=%x left=%d used=%+v err=%v", ret, left.Execution, used, err), gas - left.Execution
 	}
-	prog := func(parts ...any) []byte {
+	code := func(parts ...any) []byte {
 		var b []byte
 		for _, p := range parts {
 			switch p := p.(type) {
@@ -246,10 +247,17 @@ func TestRunMatchesRunTraced(t *testing.T) {
 				b = append(b, p...)
 			}
 		}
-		return append(b, byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 32, byte(MSTORE), byte(PUSH1), 64, byte(MSTORE),
+		return b
+	}
+	prog := func(parts ...any) []byte {
+		return append(code(parts...), byte(PUSH1), 0, byte(MSTORE), byte(PUSH1), 32, byte(MSTORE), byte(PUSH1), 64, byte(MSTORE),
 			byte(PUSH1), 96, byte(MSTORE), byte(PUSH1), 128, byte(PUSH1), 0, byte(RETURN))
 	}
 	pushes := func(n int) []byte { return bytes.Repeat([]byte{byte(PUSH1), 1}, n) }
+	mem128 := code(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH1, 0xbb, PUSH1, 96, MSTORE)
+	mloads := code(PUSH1, 0, MLOAD, PUSH1, 32, MLOAD, PUSH1, 64, MLOAD, PUSH1, 96, MLOAD)
+	// The identity precompile returns 40 bytes of memory.
+	callIdentity := code(PUSH1, 0, PUSH1, 0, PUSH1, 40, PUSH1, 24, PUSH1, 0, PUSH1, 4, GAS, CALL, POP)
 	programs := map[string][]byte{
 		"arith":    prog(PUSH1, 7, PUSH1, 3, SUB, PUSH1, 5, MUL, PUSH1, 2, DIV, PUSH1, 9, LT, PUSH1, 1, GT, PUSH1, 0, EQ, ISZERO, PUSH2, 0xff, 0x0f, AND, PUSH1, 4, ADD, PUSH1, 0, ISZERO, PUSH1, 6, PUSH1, 6, EQ),
 		"loop":     prog(PUSH1, 5, JUMPDEST, PUSH1, 1, SWAP1, SUB, DUP1, PUSH1, 2, JUMPI, PUSH1, 17, JUMP, INVALID, INVALID, INVALID, JUMPDEST, pushes(3)),
@@ -270,6 +278,20 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// Slots 1 and 2 are warm and set, slot 3 is cold.
 		"sload":     prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, ADD, PUSH1, 2, SLOAD),
 		"sloadcold": prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 3, SLOAD),
+		"cdlunder":  prog(CALLDATALOAD),
+		"cdlhuge":   prog(PUSH1, 1, CALLDATALOAD, PUSH8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, CALLDATALOAD, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, CALLDATALOAD, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 5, CALLDATALOAD),
+		"cdcopy":    prog(mem128, PUSH1, 64, PUSH1, 0, PUSH1, 0, CALLDATACOPY, PUSH1, 40, PUSH1, 50, PUSH1, 70, CALLDATACOPY, PUSH1, 8, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 1, CALLDATACOPY, PUSH1, 8, PUSH8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, PUSH1, 40, CALLDATACOPY, PUSH1, 0, PUSH1, 200, PUSH1, 0, CALLDATACOPY, mloads),
+		"cdcgrow":   prog(PUSH1, 64, PUSH1, 0, PUSH1, 0, CALLDATACOPY, PUSH1, 32, PUSH1, 0, PUSH1, 48, CALLDATACOPY, PUSH1, 0, MLOAD, PUSH1, 32, MLOAD, PUSH1, 64, MLOAD, MSIZE),
+		"cdchuge":   prog(mem128, PUSH1, 0, PUSH1, 0, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, CALLDATACOPY, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 0, PUSH1, 0, CALLDATACOPY),
+		"codecopy":  prog(mem128, PUSH1, 64, PUSH1, 0, PUSH1, 0, CODECOPY, PUSH1, 32, PUSH1, 120, PUSH1, 64, CODECOPY, PUSH1, 8, PUSH8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, PUSH1, 100, CODECOPY, mloads),
+		"rdcopy":    prog(mem128, callIdentity, PUSH1, 32, PUSH1, 8, PUSH1, 64, RETURNDATACOPY, PUSH1, 40, PUSH1, 0, PUSH1, 0, RETURNDATACOPY, PUSH1, 0, PUSH1, 40, PUSH1, 0, RETURNDATACOPY, mloads),
+		"rdcoob":    prog(mem128, callIdentity, PUSH1, 32, PUSH1, 9, PUSH1, 64, RETURNDATACOPY),
+		"rdcoob0":   prog(mem128, callIdentity, PUSH1, 0, PUSH1, 41, PUSH1, 64, RETURNDATACOPY),
+		"rdchuge":   prog(mem128, callIdentity, PUSH1, 0, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 64, RETURNDATACOPY),
+		"mcopy":     prog(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH1, 0xbb, PUSH1, 32, MSTORE, PUSH1, 32, PUSH1, 0, PUSH1, 16, MCOPY, PUSH1, 40, PUSH1, 8, PUSH1, 0, MCOPY, PUSH1, 0, PUSH1, 0, PUSH1, 200, MCOPY, PUSH1, 64, PUSH1, 0, PUSH1, 32, MCOPY, PUSH1, 0, MLOAD, PUSH1, 32, MLOAD, PUSH1, 64, MLOAD),
+		"mcopyover": prog(PUSH1, 0, PUSH1, 0, MSTORE, PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 0, PUSH1, 0, MCOPY),
+		"mstore8":   prog(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH1, 0x11, PUSH1, 3, MSTORE8, PUSH2, 0x12, 0x34, PUSH1, 31, MSTORE8, PUSH1, 0x77, PUSH1, 32, MSTORE8, PUSH1, 0, MLOAD, PUSH1, 32, MLOAD),
+		"keccak":    prog(PUSH1, 0xaa, PUSH1, 0, MSTORE, PUSH1, 32, PUSH1, 0, KECCAK256, PUSH1, 0, PUSH1, 0, KECCAK256, PUSH1, 0, PUSH1, 200, KECCAK256, PUSH1, 7, PUSH1, 9, KECCAK256, PUSH1, 64, PUSH1, 0, KECCAK256),
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
@@ -281,7 +303,7 @@ func TestRunMatchesRunTraced(t *testing.T) {
 	}
 	rng := rand.New(rand.NewPCG(1, 2))
 	// GAS, MSIZE and the generic stack ops see whether the fast path stored its registers back.
-	alphabet := append(slices.Sorted(maps.Keys(fastPathOps)), GAS, MSIZE, NOT, OR)
+	alphabet := append(slices.Sorted(maps.Keys(fastPathOps)), GAS, MSIZE, NOT, OR, CALLDATALOAD, CALLDATALOAD, CALLDATACOPY, CODECOPY, RETURNDATACOPY, MCOPY, MCOPY, MSTORE8, MSTORE8, KECCAK256, KECCAK256)
 	for i := range 300 {
 		b := pushes(8)
 		for range 40 {
@@ -325,5 +347,21 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			got, _ := runOnce(code, gas, false)
 			require.Equal(t, want, got, "%s at gas %d", name, gas)
 		}
+	}
+}
+
+// TestRunCopyFastPathsBeforeTheirForks pins that run's RETURNDATACOPY and MCOPY
+// fast paths are off on a Frontier chain, where the opcodes are undefined.
+func TestRunCopyFastPathsBeforeTheirForks(t *testing.T) {
+	t.Parallel()
+	for _, op := range []OpCode{RETURNDATACOPY, MCOPY} {
+		ibs := state.New(state.NewNoopReader())
+		defer ibs.Close()
+		evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, &chain.Config{ChainID: uint256.NewInt(1)}, Config{})
+		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+		c.Code = []byte{byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 0, byte(op)}
+		_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100}, nil, false, false, false)
+		var invalid *ErrInvalidOpCode
+		require.ErrorAs(t, err, &invalid, op.String())
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
@@ -408,15 +409,96 @@ run:
 			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
-		// A frame-cache hit is a warm SLOAD: it needs neither the gas func nor the op.
-		// A zero constant gas marks the EIP-2929 SLOAD; a miss leaves the memo to the gas func.
-		if !false && op == SLOAD && callContext.slots.on && jt[SLOAD].constantGas == 0 &&
-			stack.len() > 0 && gasLeft >= params.WarmStorageReadCostEIP2929 {
-			if i := callContext.lookupSlot(evm); i >= 0 {
-				gasLeft -= params.WarmStorageReadCostEIP2929
-				*stack.peek() = callContext.slots.val[i]
-				pc++
-				continue run
+		// Ops handled here skip the jump table. Outside the fast switch, they cost its ops nothing.
+		if !false {
+			switch op {
+			case SLOAD:
+				// A frame-cache hit is a warm SLOAD: it needs neither the gas func nor the op.
+				// A zero constant gas marks the EIP-2929 SLOAD; a miss leaves the memo to the gas func.
+				if callContext.slots.on && jt[SLOAD].constantGas == 0 && stack.len() > 0 && gasLeft >= params.WarmStorageReadCostEIP2929 {
+					if i := callContext.lookupSlot(evm); i >= 0 {
+						gasLeft -= params.WarmStorageReadCostEIP2929
+						*stack.peek() = callContext.slots.val[i]
+						pc++
+						continue run
+					}
+				}
+			case CALLDATALOAD:
+				if stack.len() >= 1 && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					x, input := stack.peek(), callContext.input
+					switch off, overflow := x.Uint64WithOverflow(); {
+					case overflow || off >= uint64(len(input)):
+						x.Clear()
+					case uint64(len(input))-off >= 32:
+						x.SetBytes32(input[off:])
+					default:
+						var word [32]byte
+						copy(word[:], input[off:])
+						x.SetBytes32(word[:])
+					}
+					pc++
+					continue run
+				}
+			case CALLDATACOPY, CODECOPY, RETURNDATACOPY:
+				if op == RETURNDATACOPY && !evm.chainRules.IsByzantium {
+					break
+				}
+				data := callContext.input
+				if op == CODECOPY {
+					data = contract.Code
+				} else if op == RETURNDATACOPY {
+					data = evm.returnData
+				}
+				if stack.len() >= 3 && callContext.Memory.allocated(stack.peek(), stack.back(2)) {
+					src, n := uint64(math.MaxUint64), stack.back(2).Uint64()
+					if s := stack.back(1); s.IsUint64() {
+						src = s.Uint64()
+					}
+					// Out of bounds RETURNDATACOPY fails: the generic path reports it.
+					inBounds := src <= uint64(len(data)) && uint64(len(data))-src >= n
+					if cost := GasFastestStep + params.CopyGas*ToWordSize(n); gasLeft >= cost && (inBounds || op != RETURNDATACOPY) {
+						gasLeft -= cost
+						dst, _, _ := stack.pop3()
+						callContext.Memory.SetFromData(dst.Uint64(), n, src, data)
+						pc++
+						continue run
+					}
+				}
+			case MCOPY:
+				if stack.len() >= 3 && evm.chainRules.IsCancun {
+					d, s, n := stack.back3(0, 1, 2)
+					if callContext.Memory.allocated(d, n) && callContext.Memory.allocated(s, n) {
+						if cost := GasFastestStep + params.CopyGas*ToWordSize(n.Uint64()); gasLeft >= cost {
+							gasLeft -= cost
+							dst, src, length := stack.pop3()
+							callContext.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
+							pc++
+							continue run
+						}
+					}
+				}
+			case MSTORE8:
+				if off := stack.peek(); stack.len() >= 2 && off.IsUint64() && off.Uint64() < uint64(callContext.Memory.Len()) && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					o, val := stack.pop2Uint64()
+					callContext.Memory.store[o] = byte(val)
+					pc++
+					continue run
+				}
+			case KECCAK256:
+				if stack.len() >= 2 {
+					if o, n := stack.back2(0, 1); callContext.Memory.allocated(o, n) {
+						if cost := params.Keccak256Gas + params.Keccak256WordGas*ToWordSize(n.Uint64()); gasLeft >= cost {
+							gasLeft -= cost
+							offset, size := stack.pop1Peek1()
+							hash := crypto.Keccak256Hash(callContext.Memory.GetPtr(offset.Uint64(), size.Uint64()))
+							size.SetBytes(hash[:])
+							pc++
+							continue run
+						}
+					}
+				}
 			}
 		}
 		if false && debug {
