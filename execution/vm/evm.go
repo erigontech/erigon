@@ -637,6 +637,11 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	gasRemaining = gas
 
 	depth := evm.depth
+	if depth == 0 {
+		// SetCode keeps the output, so it must not land in the reused buffer.
+		evm.intraBlockState.TxOutputBuffer()
+		evm.txOutput = nil
+	}
 	inputTotal := gas.Total()
 	tracer := evm.Config().Tracer
 	gasTracing := tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook() || dbg.TraceTransactionIO
