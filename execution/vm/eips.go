@@ -290,7 +290,6 @@ func opCLZ(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // https://eips.ethereum.org/EIPS/eip-5656
 func enable5656(jt *JumpTable) {
 	jt[MCOPY] = operation{
-		execute:     opMcopy,
 		constantGas: GasFastestStep,
 		gasExecute:  opMcopyWithGas,
 		numPop:      3,

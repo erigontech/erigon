@@ -1495,12 +1495,6 @@ func opExchange(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 // following functions are used by the instruction jump  table
 
 // make log instruction function
-func makeLog(size int) executionFunc {
-	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-		return opLog(pc, evm, scope, size)
-	}
-}
-
 func opLog(pc uint64, evm *EVM, scope *CallContext, size int) (uint64, []byte, error) {
 	if evm.readOnly {
 		return pc, nil, ErrWriteProtection
