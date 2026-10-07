@@ -1576,10 +1576,9 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		return v, StorageRead, UnknownVersion, clean, err
 	}
 	// Only an execution without conflict detection fills coldSlots, so the miss
-	// here is what tells the validated path apart. A contract created over the
-	// slot starts empty, and creation records CreateContractPath rather than
-	// StoragePath, so hasWrite alone would not see it.
-	if v, ok := s.versionedReads.GetColdSlot(addr, key); ok && !s.hasWrite(addr, StoragePath, key) && !createdOverSlot(s, addr) {
+	// here is what tells the validated path apart. A write or a create drops
+	// the entry as it happens, so the hit needs no guard.
+	if v, ok := s.versionedReads.GetColdSlot(addr, key); ok {
 		return v, StorageRead, UnknownVersion, true, nil
 	}
 	if s.versionMap != nil && !s.warmReadable(addr) {
