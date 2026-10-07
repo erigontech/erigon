@@ -22,7 +22,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
@@ -44,7 +46,13 @@ func newRetryPendingStore(t *testing.T, peerDas *das_mock.MockPeerDas) (*ForkCho
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](2)
 	require.NoError(t, err)
-	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 7}}
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 7, Body: &cltypes.BeaconBody{
+		Version: clparams.GloasVersion,
+		SignedExecutionPayloadBid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](4, 48),
+		}},
+	}}}
+	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
 	f := &ForkChoiceStore{
 		forkGraph:                      retryPendingForkGraph{block: block},
 		pendingEnvelopes:               pending,
@@ -111,7 +119,7 @@ func TestRetryPendingExecutionPayloadEnvelopeAppliesOnceColumnDataIsAvailable(t 
 	f.pendingEnvelopes = pending
 	f.pendingLocalSelfBuildEnvelopes = local
 	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
-	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(true, nil).MinTimes(1)
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, root).Return(true, nil).AnyTimes()
 	f.peerDas = peerDas
 
 	f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)

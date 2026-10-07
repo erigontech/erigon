@@ -16,19 +16,20 @@
 
 package handler
 
-// syncToleranceEpochs is how far the head may lag behind a slot before the node treats
-// itself as syncing for that slot: it reports is_syncing and refuses to propose.
+// syncToleranceEpochs is how far the head may trail the highest seen block before the node
+// treats itself as syncing: it reports is_syncing and refuses to propose. A chain-wide gap
+// leaves nothing seen beyond the head, so it never trips the tolerance.
 const syncToleranceEpochs = 1
 
-func headLagExceedsSyncTolerance(slot, headSlot, toleranceSlots uint64) bool {
-	return slot > headSlot+toleranceSlots
+func headLagExceedsSyncTolerance(highestSeen, headSlot, toleranceSlots uint64) bool {
+	return highestSeen > headSlot+toleranceSlots
 }
 
-// headLagsBehind is true without a head state and also when the head is older than the
-// sync tolerance for slot, since a block built on such a head cannot become canonical.
-func (a *ApiHandler) headLagsBehind(slot uint64) bool {
+// headLagsBehind is true without a head state and also when blocks more than the tolerance
+// beyond the head have been seen, since a block built on such a head cannot become canonical.
+func (a *ApiHandler) headLagsBehind() bool {
 	if a.syncedData.Syncing() {
 		return true
 	}
-	return headLagExceedsSyncTolerance(slot, a.syncedData.HeadSlot(), syncToleranceEpochs*a.beaconChainCfg.SlotsPerEpoch)
+	return headLagExceedsSyncTolerance(a.forkchoiceStore.HighestSeen(), a.syncedData.HeadSlot(), syncToleranceEpochs*a.beaconChainCfg.SlotsPerEpoch)
 }

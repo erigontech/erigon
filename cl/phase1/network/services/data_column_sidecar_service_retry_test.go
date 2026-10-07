@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/mock/gomock"
 
@@ -38,12 +39,17 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_RetriesPendingEnvel
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 
-	var retried []common.Hash
+	retried := make(chan common.Hash, 1)
 	t.mockForkChoice.RetryPendingEnvelopeFunc = func(_ context.Context, root common.Hash) {
-		retried = append(retried, root)
+		retried <- root
 	}
 
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot))
 	t.NoError(err)
-	t.Equal([]common.Hash{testBlockRoot}, retried)
+	select {
+	case root := <-retried:
+		t.Equal(testBlockRoot, root)
+	case <-time.After(5 * time.Second):
+		t.Fail("pending envelope retry was not triggered")
+	}
 }
