@@ -1230,3 +1230,124 @@ func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
 	require.Same(t, &stored[0][0], &stored[1][0], "an equal code reuses the previous one")
 	require.NotSame(t, &stored[0][0], &stored[3][0], "a different code in between replaces the memo")
 }
+
+// A pooled IntraBlockState serves call after call: nothing of one call may be
+// visible to the next, while the read set keeps its maps.
+func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	ibs, vm := newNoMaterializeIBS(NewNoopReader())
+	startNoMaterializeTx(ibs, vm, 0)
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeUnspecified))
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(9)))
+	ibs.AddLog(&types.Log{Address: addr.Value()})
+	ibs.AddAddressToAccessList(addr)
+	ibs.readSelfDestructMemo(addr)
+	require.NotEmpty(t, ibs.sdProbe)
+	require.NotNil(t, ibs.versionedReads.address)
+	ibs.SetTxContext(5, 2)
+	ibs.SetVersion(3)
+	ibs.eip8246, ibs.eip161, ibs.isAura = true, true, true
+
+	require.True(t, ibs.resetForPool())
+	require.Nil(t, ibs.stateReader)
+	require.Zero(t, ibs.blockNum)
+	require.Zero(t, ibs.version)
+	require.False(t, ibs.eip8246 || ibs.eip161 || ibs.isAura, "fork flags are the next call's to set")
+	require.Empty(t, ibs.sdProbe)
+	require.NotNil(t, ibs.versionedReads.address, "the read set keeps its maps")
+	require.Empty(t, ibs.versionedReads.address)
+
+	ibs.stateReader = NewNoopReader()
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero())
+	value, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.True(t, value.IsZero())
+	require.Empty(t, ibs.GetRawLogs(0))
+	require.False(t, ibs.AddressInAccessList(addr))
+}
+
+// Maps never shrink, so a call that grew the state past the bound is not pooled.
+func TestResetForPoolDropsAnOversizedState(t *testing.T) {
+	ibs := New(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		require.NoError(t, ibs.AddBalance(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	}
+	require.False(t, ibs.resetForPool())
+
+	reads := New(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		reads.versionedReads.SetCodeSize(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i+1)))), VersionedRead[int]{})
+	}
+	require.False(t, reads.resetForPool(), "any read-set map counts toward the bound")
+
+	warm := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	for i := range maxPooledEntries + 1 {
+		warm.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))))
+	}
+	require.False(t, warm.resetForPool(), "access-list slots count toward the bound")
+
+	absent := New(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		_, err := absent.GetBalance(accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1)))))
+		require.NoError(t, err)
+	}
+	require.False(t, absent.resetForPool(), "absent-account memos count toward the bound")
+}
+
+func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
+	ibs := NewPooled(NewNoopReader())
+	ibs.SetTxContext(5, 2)
+	ReleasePooled(ibs)
+
+	// sync.Pool may drop the entry at any GC, so assert the release handed the
+	// state on rather than that the next Get returns this one: Close would have
+	// dropped the maps.
+	require.NotNil(t, ibs.stateObjects, "a poolable state must be handed on, not closed")
+	require.Nil(t, ibs.stateReader, "and must not keep the last call's reader")
+	require.Zero(t, ibs.blockNum)
+	require.Zero(t, ibs.txIndex)
+
+	reader := NewNoopReader()
+	got := NewPooled(reader)
+	defer ReleasePooled(got)
+	require.Same(t, reader, got.stateReader)
+	require.Zero(t, got.txIndex)
+}
+
+// An oversized state must not reach the pool, so the next call does not inherit
+// its map capacity.
+func TestReleasePooledDropsAnOversizedState(t *testing.T) {
+	big := NewPooled(NewNoopReader())
+	for i := range maxPooledEntries + 1 {
+		require.NoError(t, big.AddBalance(accounts.InternAddress(common.BigToAddress(big2(i+1))), *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+	}
+	ReleasePooled(big)
+
+	fresh := NewPooled(NewNoopReader())
+	defer ReleasePooled(fresh)
+	require.NotSame(t, big, fresh, "an oversized state must not come back from the pool")
+}
+
+// A call that warms slots and then reverts keeps the grown slot maps, so it is
+// not poolable even though nothing is live.
+func TestResetForPoolDropsARevertedWarmUp(t *testing.T) {
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	snap := ibs.PushSnapshot()
+	for i := range maxPooledEntries + 1 {
+		ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(i))))
+	}
+	ibs.RevertToSnapshot(snap, nil)
+	live := len(ibs.accessList.addresses)
+	for _, s := range ibs.accessList.slots {
+		live += len(s)
+	}
+	require.Zero(t, live, "the revert leaves nothing live")
+	require.False(t, ibs.resetForPool(), "the grown slot maps are still retained")
+}
+
+func big2(i int) *big.Int { return big.NewInt(int64(i)) }
