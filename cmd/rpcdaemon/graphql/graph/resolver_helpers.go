@@ -231,6 +231,7 @@ func (r *queryResolver) buildTransaction(block *model.Block, receipt *jsonrpc.Gr
 			Index: uint64(rlog.Index),
 			Data:  hexutil.Encode(rlog.Data),
 		}
+		tlog.Transaction = trans
 		tlog.Account = model.NewAccountAtBlock(block.Number)
 		tlog.Account.Address = hexutil.Encode(rlog.Address[:])
 		tlog.Topics = make([]string, 0, len(rlog.Topics))

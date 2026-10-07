@@ -121,6 +121,28 @@ func (r *logResolver) Account(ctx context.Context, obj *model.Log, block *uint64
 	return r.resolveAccountAtBlock(ctx, obj.Account.Address, obj.Account.BlockNum, block)
 }
 
+// Transaction is the resolver for the transaction field.
+func (r *logResolver) Transaction(ctx context.Context, obj *model.Log) (*model.Transaction, error) {
+	if obj.Transaction == nil {
+		return nil, fmt.Errorf("log has no transaction")
+	}
+	if obj.Transaction.From != nil || obj.Transaction.Block == nil {
+		return obj.Transaction, nil
+	}
+	block, err := (&queryResolver{r.Resolver}).block(ctx, nil, &obj.Transaction.Block.Hash, true)
+	if err != nil {
+		return nil, err
+	}
+	if block != nil {
+		for _, txn := range block.Transactions {
+			if txn.Hash == obj.Transaction.Hash {
+				return txn, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("transaction %s not found", obj.Transaction.Hash)
+}
+
 // SendRawTransaction is the resolver for the sendRawTransaction field.
 func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) (string, error) {
 	encodedTx, err := hexutil.Decode(data)
