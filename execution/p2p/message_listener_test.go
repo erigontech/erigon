@@ -229,7 +229,45 @@ func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 	})
 }
 
-func newMessageListenerTest(t *testing.T) *messageListenerTest {
+func TestMessageListenerUsesInjectedDecoders(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	payload := []byte{'n', 'o', 't', '.', 'r', 'l', 'p'}
+	test := newMessageListenerTest(t,
+		WithBlockBodiesDecoder(func(data []byte) (*eth.BlockBodiesPacket66, error) {
+			require.Equal(t, payload, data)
+			return &eth.BlockBodiesPacket66{RequestId: 42}, nil
+		}),
+		WithNewBlockDecoder(func(data []byte) (*eth.NewBlockPacket, error) {
+			require.Equal(t, payload, data)
+			return &eth.NewBlockPacket{TD: *uint256.NewInt(7)}, nil
+		}),
+	)
+	test.mockSentryStreams()
+	test.run(func(ctx context.Context, t *testing.T) {
+		var bodies, newBlock atomic.Bool
+		t.Cleanup(test.messageListener.RegisterBlockBodiesObserver(func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
+			require.Equal(t, uint64(42), message.Decoded.RequestId)
+			bodies.Store(true)
+		}))
+		t.Cleanup(test.messageListener.RegisterNewBlockObserver(func(message *DecodedInboundMessage[*eth.NewBlockPacket]) {
+			require.Equal(t, uint64(7), message.Decoded.TD.Uint64())
+			newBlock.Store(true)
+		}))
+
+		for _, id := range []sentryproto.MessageId{sentryproto.MessageId_BLOCK_BODIES_66, sentryproto.MessageId_NEW_BLOCK_66} {
+			test.inboundMessagesStream <- &delayedMessage[*sentryproto.InboundMessage]{
+				message: &sentryproto.InboundMessage{Id: id, PeerId: peerId.H512(), Data: payload},
+			}
+		}
+
+		require.Eventually(t, bodies.Load, time.Second, 5*time.Millisecond)
+		require.Eventually(t, newBlock.Load, time.Second, 5*time.Millisecond)
+	})
+}
+
+func newMessageListenerTest(t *testing.T, opts ...MessageListenerOption) *messageListenerTest {
 	ctx, cancel := context.WithCancel(context.Background())
 	logger := testlog.Logger(t, log.LvlCrit)
 	ctrl := gomock.NewController(t)
@@ -246,7 +284,7 @@ func newMessageListenerTest(t *testing.T) *messageListenerTest {
 		t:                     t,
 		logger:                logger,
 		sentryClient:          sentryClient,
-		messageListener:       NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer),
+		messageListener:       NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer, opts...),
 		inboundMessagesStream: inboundMessagesStream,
 		peerEventsStream:      peerEventsStream,
 	}

@@ -43,6 +43,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	bscp2p "github.com/erigontech/erigon/bsc/p2p"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -421,8 +422,12 @@ func (p *Provider) buildStatusAndExecutionP2P() {
 	p.Multiplexer = libsentry.NewSentryMultiplexer(p.Sentries)
 
 	p.ExecutionP2PPeerPenalizer = execp2p.NewPeerPenalizer(p.Multiplexer)
+	var listenerOpts []execp2p.MessageListenerOption
+	if p.cfg.ChainConfig != nil && p.cfg.ChainConfig.Parlia != nil {
+		listenerOpts = bscp2p.MessageListenerOptions()
+	}
 	p.ExecutionP2PMessageListener = execp2p.NewMessageListener(
-		p.logger, p.Multiplexer, p.StatusDataProvider.GetStatusData, p.ExecutionP2PPeerPenalizer,
+		p.logger, p.Multiplexer, p.StatusDataProvider.GetStatusData, p.ExecutionP2PPeerPenalizer, listenerOpts...,
 	)
 	p.ExecutionP2PPeerTracker = execp2p.NewPeerTracker(p.logger, p.ExecutionP2PMessageListener)
 	p.ExecutionP2PMessageSender = execp2p.NewMessageSender(p.Multiplexer)
