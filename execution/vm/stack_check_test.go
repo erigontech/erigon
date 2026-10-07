@@ -152,12 +152,13 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 			require.Equal(t, w.numPop, got.numPop, "table %d %s numPop", i, op)
 			require.Equal(t, w.numPush, got.numPush, "table %d %s numPush", i, op)
 			if w.memorySize == nil {
-				require.Nil(t, got.memorySize, "table %d %s memorySize", i, op)
+				require.Nil(t, got.gasExecute, "table %d %s gasExecute", i, op)
+				require.False(t, got.usesMemory, "table %d %s usesMemory", i, op)
 				continue
 			}
 			// Memory that need not grow costs no dynamic gas.
 			require.Equal(t, reflect.ValueOf(map[OpCode]gasExecuteFunc{MLOAD: opMloadWithGas, MSTORE: opMstoreWithGas}[op]).Pointer(), reflect.ValueOf(got.gasExecute).Pointer(), "table %d %s gasExecute", i, op)
-			require.Equal(t, reflect.ValueOf(w.memorySize).Pointer(), reflect.ValueOf(got.memorySize).Pointer(), "table %d %s memorySize", i, op)
+			require.True(t, got.usesMemory, "table %d %s usesMemory", i, op)
 		}
 	}
 }

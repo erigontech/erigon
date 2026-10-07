@@ -393,11 +393,12 @@ func TestCreate2InitCodeAllocations(t *testing.T) {
 			scope.Stack.push(*uint256.NewInt(64))
 			scope.Stack.push(uint256.Int{})
 			scope.Stack.push(uint256.Int{})
-			if _, err := gasCreate2Eip3860(evm, scope, scope.Gas(), 64); err != nil {
+			_, prepared, err := gasCreate2Eip3860(evm, scope, scope.Gas(), 64)
+			if err != nil {
 				t.Fatal(err)
 			}
 			scope.Memory.Resize(64)
-			if _, _, err := opCreate2(0, evm, scope); err != nil {
+			if _, _, err := opCreate2(0, evm, scope, prepared); err != nil {
 				t.Fatal(err)
 			}
 		})
