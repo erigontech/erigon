@@ -1897,3 +1897,15 @@ func TestArenaStopsGrowingAtItsCap(t *testing.T) {
 	ws.ReleaseAndReset()
 	require.Len(t, ws.cells.nonce.slabs, vwMaxSlabs, "a reset keeps the slabs for the next call")
 }
+
+// Slot maps from earlier calls go, so a sequence of calls on different
+// contracts cannot pin one map each while every entries() count stays small.
+func TestReusedReadSetDropsSlotMapsItNoLongerUses(t *testing.T) {
+	var rs ReadSet
+	for i := range maxReusedStorageAddrs {
+		a := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+		rs.clearForReuse()
+		require.LessOrEqual(t, len(rs.storage), 1, "only the contract this call read stays")
+	}
+}

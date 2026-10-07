@@ -158,9 +158,15 @@ func (s *ReadSet) clearForReuse() {
 	clear(s.codeHash)
 	clear(s.codeSize)
 	// Keep the per-address slot maps: a call that reads one contract's slots
-	// would otherwise regrow its map from scratch on every later call.
+	// would otherwise regrow its map from scratch on every later call. Only
+	// this call's contracts stay, or a run of calls on different contracts
+	// would pin a map each while every entries() count looked small.
 	if len(s.storage) <= maxReusedStorageAddrs {
-		for _, inner := range s.storage {
+		for addr, inner := range s.storage {
+			if len(inner) == 0 {
+				delete(s.storage, addr)
+				continue
+			}
 			clear(inner)
 		}
 	} else {
