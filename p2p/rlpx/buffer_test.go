@@ -21,11 +21,14 @@ package rlpx
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"testing"
 
 	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestReadBufferReset(t *testing.T) {
@@ -53,3 +56,35 @@ func TestReadBufferReset(t *testing.T) {
 	assert.EqualError(t, err, "EOF")
 	assert.Nil(t, s6)
 }
+
+func TestReadBufferTruncated(t *testing.T) {
+	for _, size := range []int{0, 1, 4096, 8192} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			var b readBuffer
+			data, err := b.read(bytes.NewReader(make([]byte, size)), 1<<20)
+			wantErr := io.ErrUnexpectedEOF
+			if size == 0 {
+				wantErr = io.EOF
+			}
+			assert.ErrorIs(t, err, wantErr)
+			assert.Nil(t, data)
+		})
+	}
+}
+
+func TestReadBufferGrowsWithInput(t *testing.T) {
+	input := bytes.Repeat([]byte{1, 2, 3, 4}, 256*1024)
+	r := bytes.NewReader(input)
+	var b readBuffer
+	data, err := b.read(readerFunc(func(p []byte) (int, error) {
+		received := len(input) - r.Len()
+		require.LessOrEqual(t, cap(b.data), 4*max(4096, received))
+		return r.Read(p[:min(len(p), 127)])
+	}), len(input))
+	assert.NoError(t, err)
+	assert.Equal(t, input, data)
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
