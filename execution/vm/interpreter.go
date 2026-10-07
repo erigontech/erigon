@@ -665,7 +665,8 @@ func (evm *EVM) stepTraced(callContext *CallContext, op OpCode, pc uint64, debug
 				return pc, nil, nil
 			}
 		case CALLDATACOPY, CODECOPY, RETURNDATACOPY:
-			if op == RETURNDATACOPY && !evm.chainRules.IsByzantium {
+			// An op the table does not have is opUndefined there, which pops nothing.
+			if evm.jt[op].numPop != 3 {
 				break
 			}
 			data := callContext.input
@@ -689,7 +690,7 @@ func (evm *EVM) stepTraced(callContext *CallContext, op OpCode, pc uint64, debug
 				}
 			}
 		case MCOPY:
-			if callContext.Stack.len() >= 3 && evm.chainRules.IsCancun {
+			if callContext.Stack.len() >= 3 && evm.jt[MCOPY].numPop == 3 {
 				d, s, n := callContext.Stack.back3(0, 1, 2)
 				if callContext.Memory.allocated(d, n) && callContext.Memory.allocated(s, n) {
 					if cost := GasFastestStep + params.CopyGas*ToWordSize(n.Uint64()); callContext.gas >= cost {
@@ -701,11 +702,13 @@ func (evm *EVM) stepTraced(callContext *CallContext, op OpCode, pc uint64, debug
 				}
 			}
 		case MSTORE8:
-			if off := callContext.Stack.peek(); callContext.Stack.len() >= 2 && off.IsUint64() && off.Uint64() < uint64(callContext.Memory.Len()) && callContext.gas >= GasFastestStep {
-				callContext.gas -= GasFastestStep
-				o, val := callContext.Stack.pop2Uint64()
-				callContext.Memory.store[o] = byte(val)
-				return pc, nil, nil
+			if callContext.Stack.len() >= 2 && callContext.gas >= GasFastestStep {
+				if off := callContext.Stack.peek(); off.IsUint64() && off.Uint64() < uint64(callContext.Memory.Len()) {
+					callContext.gas -= GasFastestStep
+					o, val := callContext.Stack.pop2Uint64()
+					callContext.Memory.store[o] = byte(val)
+					return pc, nil, nil
+				}
 			}
 		case KECCAK256:
 			if callContext.Stack.len() >= 2 {

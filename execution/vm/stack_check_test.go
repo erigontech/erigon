@@ -319,7 +319,8 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"dupn":     prog(pushes(17), DUPN, 0x80, PC),
 		"dupnjump": prog(pushes(17), PUSH1, 38, JUMP, DUPN, JUMPDEST, PC),
 		// A missing immediate reads as 0, which is depth 145, and DUPN succeeds past the code end.
-		"dupnend": code(PUSH1, 3, JUMP, JUMPDEST, pushes(145), DUPN),
+		"dupnend":      code(PUSH1, 3, JUMP, JUMPDEST, pushes(145), DUPN),
+		"mstore8empty": {byte(MSTORE8)},
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
