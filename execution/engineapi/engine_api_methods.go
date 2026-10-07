@@ -71,6 +71,7 @@ var ourCapabilities = []string{
 	"POST /engine/v3/payloads",
 	"POST /engine/v4/payloads",
 	"POST /engine/v5/payloads",
+	"POST /engine/v6/payloads",
 	"GET /engine/v1/payloads/{payload_id}",
 	"GET /engine/v2/payloads/{payload_id}",
 	"GET /engine/v3/payloads/{payload_id}",
@@ -84,7 +85,7 @@ var ourCapabilities = []string{
 	"POST /engine/v1/blobs",
 	"POST /engine/v2/blobs",
 	"POST /engine/v3/blobs",
-	"POST /engine/v1/inclusion_list",
+	"GET /engine/v1/inclusion_list",
 	"POST /engine/v1/client/version",
 	"POST /engine/v1/capabilities",
 }

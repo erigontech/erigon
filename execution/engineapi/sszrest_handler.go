@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/rpc"
@@ -62,6 +63,8 @@ func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
 		e.handleSSZForkchoice(w, r, version)
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "blobs":
 		e.handleSSZGetBlobs(w, r, version)
+	case r.Method == http.MethodGet && len(parts) == 3 && parts[2] == "inclusion_list":
+		e.handleSSZGetInclusionList(w, r, version)
 	case r.Method == http.MethodPost && len(parts) == 4 && parts[2] == "client" && parts[3] == "version" && version == 1:
 		e.handleSSZClientVersion(w, r)
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "capabilities" && version == 1:
@@ -83,6 +86,8 @@ func sszNewPayloadVersion(version int) (clparams.StateVersion, bool) {
 		return clparams.ElectraVersion, true
 	case 5:
 		return clparams.GloasVersion, true
+	case 6:
+		return clparams.HezeVersion, true
 	default:
 		return 0, false
 	}
@@ -173,7 +178,7 @@ func writeEngineError(w http.ResponseWriter, err error) {
 }
 
 func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Request, version int) {
-	if version < 1 || version > 5 {
+	if version < 1 || version > 6 {
 		writeSSZError(w, http.StatusNotFound, "unsupported new payload version")
 		return
 	}
@@ -183,12 +188,12 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 		writeSSZError(w, http.StatusRequestEntityTooLarge, err.Error())
 		return
 	}
-	payload, blobHashes, parentRoot, executionRequests, err := decodeNewPayloadRequest(body, sv)
+	payload, blobHashes, parentRoot, executionRequests, inclusionList, err := decodeNewPayloadRequest(body, sv)
 	if err != nil {
 		writeSSZError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var status *engine_types.PayloadStatus
+	var status ssz.Marshaler
 	switch version {
 	case 1:
 		status, err = e.NewPayloadV1(r.Context(), payload)
@@ -200,6 +205,8 @@ func (e *EngineServer) handleSSZNewPayload(w http.ResponseWriter, r *http.Reques
 		status, err = e.NewPayloadV4(r.Context(), payload, hashListValues(blobHashes), &parentRoot, transactionsBytes(executionRequests))
 	case 5:
 		status, err = e.NewPayloadV5(r.Context(), payload, hashListValues(blobHashes), &parentRoot, transactionsBytes(executionRequests))
+	case 6:
+		status, err = e.NewPayloadV6(r.Context(), payload, hashListValues(blobHashes), &parentRoot, transactionsBytes(executionRequests), transactionsBytes(inclusionList))
 	}
 	if err != nil {
 		writeEngineError(w, err)
@@ -378,6 +385,25 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 		writeSSZBytes(w, out)
 		return
 	}
+}
+
+func (e *EngineServer) handleSSZGetInclusionList(w http.ResponseWriter, r *http.Request, version int) {
+	if version != 1 {
+		writeSSZError(w, http.StatusNotFound, "unsupported get inclusion list version")
+		return
+	}
+	resp, err := e.GetInclusionListV1(r.Context())
+	if err != nil {
+		writeEngineError(w, err)
+		return
+	}
+	e.logger.Info("[SSZ-REST] handled get inclusion list", "path", r.URL.Path)
+	out, err := encodeGetInclusionListResponse(resp)
+	if err != nil {
+		writeSSZError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSSZBytes(w, out)
 }
 
 func (e *EngineServer) handleSSZClientVersion(w http.ResponseWriter, r *http.Request) {

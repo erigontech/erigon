@@ -5,12 +5,14 @@ package engineapi
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -52,6 +54,46 @@ func TestSSZRESTPayloadStatusEnumRoundTrip(t *testing.T) {
 	require.Equal(t, "no", out.ValidationError.Error().Error())
 }
 
+func TestSSZRESTPayloadStatusV2InclusionListSatisfiedRoundTrip(t *testing.T) {
+	satisfied, unsatisfied := true, false
+	for _, tc := range []struct {
+		name        string
+		ilSatisfied *bool
+	}{
+		{"satisfied", &satisfied},
+		{"unsatisfied", &unsatisfied},
+		{"null", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			latest := common.HexToHash("0x1234")
+			wire := &engine_types.PayloadStatusV2{
+				Status:                 engine_types.ValidStatus,
+				LatestValidHash:        &latest,
+				InclusionListSatisfied: tc.ilSatisfied,
+			}
+			enc, err := wire.EncodeSSZ(nil)
+			require.NoError(t, err)
+
+			var out engine_types.PayloadStatusV2
+			require.NoError(t, out.DecodeSSZ(enc, 0))
+			require.Equal(t, engine_types.ValidStatus, out.Status)
+			require.NotNil(t, out.LatestValidHash)
+			require.Equal(t, latest, *out.LatestValidHash)
+			require.Equal(t, tc.ilSatisfied, out.InclusionListSatisfied)
+		})
+	}
+}
+
+func TestSSZRESTPayloadStatusV2RejectsNonBooleanInclusionListSatisfied(t *testing.T) {
+	satisfied := true
+	enc, err := (&engine_types.PayloadStatusV2{Status: engine_types.ValidStatus, InclusionListSatisfied: &satisfied}).EncodeSSZ(nil)
+	require.NoError(t, err)
+	enc[len(enc)-1] = 2
+
+	var out engine_types.PayloadStatusV2
+	require.Error(t, out.DecodeSSZ(enc, 0))
+}
+
 func TestSSZRESTRequestCodecsRoundTrip(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -63,6 +105,7 @@ func TestSSZRESTRequestCodecsRoundTrip(t *testing.T) {
 		{"newPayloadV2", clparams.CapellaVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
 		{"newPayloadV3", clparams.DenebVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
 		{"newPayloadV5", clparams.GloasVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
+		{"newPayloadV6", clparams.HezeVersion, encodeEmptyNewPayloadRequest, decodeEmptyNewPayloadRequest},
 		{"forkchoiceV1", clparams.BellatrixVersion, encodeEmptyForkchoiceRequest, decodeEmptyForkchoiceRequest},
 		{"forkchoiceV4", clparams.GloasVersion, encodeEmptyForkchoiceRequest, decodeEmptyForkchoiceRequest},
 	} {
@@ -84,11 +127,11 @@ func TestSSZRESTBeaconChainConfigPrefersRuntimeConfig(t *testing.T) {
 }
 
 func encodeEmptyNewPayloadRequest(version clparams.StateVersion) ([]byte, error) {
-	return encodeNewPayloadRequest(version, engine_types.NewExecutionPayloadSSZ(version), solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{})
+	return encodeNewPayloadRequest(version, engine_types.NewExecutionPayloadSSZ(version), solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{}, &solid.TransactionsSSZ{})
 }
 
 func decodeEmptyNewPayloadRequest(buf []byte, version clparams.StateVersion) error {
-	_, _, _, _, err := decodeNewPayloadRequest(buf, version)
+	_, _, _, _, _, err := decodeNewPayloadRequest(buf, version)
 	return err
 }
 
@@ -169,6 +212,25 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 	require.NotContains(t, resp, "engine_exchangeCapabilities")
 }
 
+func TestSSZRESTGetInclusionListRoute(t *testing.T) {
+	txns := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), nil)}
+	srv := NewEngineServer(log.New(), &chain.Config{}, &stubExecutionModule{
+		inclusionListFunc: func(context.Context) (types.Transactions, error) { return txns, nil },
+	}, nil, false, true, false, false, nil, nil, 0, 0)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/engine/v1/inclusion_list", nil)
+	rec := httptest.NewRecorder()
+	srv.SSZRESTHandler().ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, sszRestContentType, rec.Header().Get("Content-Type"))
+	var resp solid.TransactionsSSZ
+	require.NoError(t, resp.DecodeSSZ(rec.Body.Bytes(), 0))
+	want, err := types.MarshalTransactionsBinary(txns)
+	require.NoError(t, err)
+	require.Equal(t, []hexutil.Bytes{want[0]}, transactionsBytes(&resp))
+}
+
 func TestSSZRESTAdvertisedRoutes(t *testing.T) {
 	srv := NewEngineServer(log.New(), &chain.Config{}, nil, nil, false, true, false, false, nil, nil, 0, 0)
 	for _, route := range []struct {
@@ -181,6 +243,7 @@ func TestSSZRESTAdvertisedRoutes(t *testing.T) {
 		{http.MethodPost, "/engine/v3/payloads", http.StatusBadRequest},
 		{http.MethodPost, "/engine/v4/payloads", http.StatusBadRequest},
 		{http.MethodPost, "/engine/v5/payloads", http.StatusBadRequest},
+		{http.MethodPost, "/engine/v6/payloads", http.StatusBadRequest},
 		{http.MethodGet, "/engine/v1/payloads/not-a-payload-id", http.StatusBadRequest},
 		{http.MethodGet, "/engine/v2/payloads/not-a-payload-id", http.StatusBadRequest},
 		{http.MethodGet, "/engine/v3/payloads/not-a-payload-id", http.StatusBadRequest},
@@ -217,6 +280,7 @@ func TestSSZRESTEndpointVersionMapping(t *testing.T) {
 		{"newPayloadV3", sszNewPayloadVersion, 3, clparams.DenebVersion},
 		{"newPayloadV4", sszNewPayloadVersion, 4, clparams.ElectraVersion},
 		{"newPayloadV5", sszNewPayloadVersion, 5, clparams.GloasVersion},
+		{"newPayloadV6", sszNewPayloadVersion, 6, clparams.HezeVersion},
 		{"getPayloadV1", sszGetPayloadVersion, 1, clparams.BellatrixVersion},
 		{"getPayloadV2", sszGetPayloadVersion, 2, clparams.CapellaVersion},
 		{"getPayloadV3", sszGetPayloadVersion, 3, clparams.DenebVersion},
@@ -243,18 +307,41 @@ func TestSSZRESTNewPayloadV5UsesGloasPayloadSchema(t *testing.T) {
 	bal := hexutil.Bytes{0x01, 0x02, 0x03}
 	payload.BlockAccessList = &bal
 
-	enc, err := encodeNewPayloadRequest(clparams.GloasVersion, payload, solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{})
+	enc, err := encodeNewPayloadRequest(clparams.GloasVersion, payload, solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{}, &solid.TransactionsSSZ{})
 	require.NoError(t, err)
 
 	wireVersion, ok := sszNewPayloadVersion(5)
 	require.True(t, ok)
-	out, _, _, _, err := decodeNewPayloadRequest(enc, wireVersion)
+	out, _, _, _, _, err := decodeNewPayloadRequest(enc, wireVersion)
 	require.NoError(t, err)
 
 	require.NotNil(t, out.SlotNumber)
 	require.Equal(t, hexutil.Uint64(123), *out.SlotNumber)
 	require.NotNil(t, out.BlockAccessList)
 	require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, *out.BlockAccessList)
+}
+
+func TestSSZRESTNewPayloadV6UsesHezeSchema(t *testing.T) {
+	payload := engine_types.NewExecutionPayloadSSZ(clparams.HezeVersion)
+	slot := hexutil.Uint64(123)
+	payload.SlotNumber = &slot
+	bal := hexutil.Bytes{0x01, 0x02, 0x03}
+	payload.BlockAccessList = &bal
+	inclusionList := [][]byte{{0x02, 0xaa}, {0xf8, 0xbb, 0xcc}}
+
+	enc, err := encodeNewPayloadRequest(clparams.HezeVersion, payload, solid.NewHashList(sszMaxBlobHashes), common.Hash{}, &solid.TransactionsSSZ{}, solid.NewTransactionsSSZFromTransactions(inclusionList))
+	require.NoError(t, err)
+
+	wireVersion, ok := sszNewPayloadVersion(6)
+	require.True(t, ok)
+	out, _, _, _, outInclusionList, err := decodeNewPayloadRequest(enc, wireVersion)
+	require.NoError(t, err)
+
+	require.NotNil(t, out.SlotNumber)
+	require.Equal(t, hexutil.Uint64(123), *out.SlotNumber)
+	require.NotNil(t, out.BlockAccessList)
+	require.Equal(t, hexutil.Bytes{0x01, 0x02, 0x03}, *out.BlockAccessList)
+	require.Equal(t, []hexutil.Bytes{{0x02, 0xaa}, {0xf8, 0xbb, 0xcc}}, transactionsBytes(outInclusionList))
 }
 
 func TestSSZRESTForkchoiceV4UsesGloasPayloadAttributesSchema(t *testing.T) {
@@ -371,6 +458,8 @@ func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
 	require.Contains(t, caps, "engine_newPayloadV6")
 	require.Contains(t, caps, "engine_getInclusionListV1")
 	require.Contains(t, caps, "POST /engine/v1/capabilities")
+	require.Contains(t, caps, "POST /engine/v6/payloads")
+	require.Contains(t, caps, "GET /engine/v1/inclusion_list")
 	require.Contains(t, caps, "GET /engine/v6/payloads/{payload_id}")
 	require.NotContains(t, caps, "engine_exchangeCapabilities")
 }

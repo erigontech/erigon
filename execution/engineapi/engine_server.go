@@ -523,12 +523,17 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if possibleStatus != nil {
 		e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
-		return payloadStatusForVersion(&engine_types.PayloadStatusV2{
+		status := &engine_types.PayloadStatusV2{
 			Status:          possibleStatus.Status,
 			ValidationError: possibleStatus.ValidationError,
 			LatestValidHash: possibleStatus.LatestValidHash,
 			CriticalError:   possibleStatus.CriticalError,
-		}, version), nil
+		}
+		if status.Status == engine_types.ValidStatus {
+			ilSatisfied := true
+			status.InclusionListSatisfied = &ilSatisfied
+		}
+		return payloadStatusForVersion(status, version), nil
 	}
 
 	e.lock.Lock()
@@ -1068,7 +1073,7 @@ func (e *EngineServer) HandleNewPayload(
 				e.logger.Debug(fmt.Sprintf("[%s] New payload: Client is still syncing", logPrefix))
 				return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
 			} else {
-				return &engine_types.PayloadStatusV2{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash, InclusionListSatisfied: ilSatisfied}, nil
+				return &engine_types.PayloadStatusV2{Status: engine_types.ValidStatus, LatestValidHash: &latestValidHash, InclusionListSatisfied: inclusionListSatisfiedOrTrue(ilSatisfied)}, nil
 			}
 		} else {
 			return &engine_types.PayloadStatusV2{Status: engine_types.SyncingStatus}, nil
@@ -1116,13 +1121,23 @@ func (e *EngineServer) HandleNewPayload(
 		LatestValidHash: &latestValidHash,
 	}
 	if resp.Status == engine_types.ValidStatus {
-		resp.InclusionListSatisfied = ilSatisfied
+		resp.InclusionListSatisfied = inclusionListSatisfiedOrTrue(ilSatisfied)
 	}
 	if validationErr != nil {
 		resp.ValidationError = engine_types.NewStringifiedErrorFromString(*validationErr)
 	}
 
 	return resp, nil
+}
+
+// inclusionListSatisfiedOrTrue reports a VALID payload as satisfying its inclusion
+// list when validation skipped the check, e.g. because the block was already validated.
+func inclusionListSatisfiedOrTrue(ilSatisfied *bool) *bool {
+	if ilSatisfied != nil {
+		return ilSatisfied
+	}
+	satisfied := true
+	return &satisfied
 }
 
 func convertGrpcStatusToEngineStatus(status execmodule.ExecutionStatus) engine_types.EngineStatus {
@@ -1410,6 +1425,11 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 }
 
 func (e *EngineServer) getInclusionList(ctx context.Context) ([]hexutil.Bytes, error) {
+	if e.caplin {
+		e.logger.Crit(caplinEnabledLog)
+		return nil, errCaplinEnabled
+	}
+
 	txns, err := e.executionService.InclusionList(ctx)
 	if err != nil {
 		return nil, err

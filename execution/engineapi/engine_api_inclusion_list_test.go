@@ -157,6 +157,24 @@ func TestNewPayloadV6InclusionListSatisfied(t *testing.T) {
 	}
 }
 
+func TestNewPayloadV6ValidWithoutInclusionListResultIsSatisfied(t *testing.T) {
+	t.Parallel()
+
+	cfg := bogotaChainConfig()
+	parent := makeParentHeader(1000)
+	srv, _ := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
+		ValidationStatus: execmodule.ExecutionStatusSuccess,
+		LatestValidHash:  common.Hash{0x1},
+	}, ilTestMaxReorgDepth)
+
+	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, engine_types.ValidStatus, status.Status)
+	require.NotNil(t, status.InclusionListSatisfied)
+	require.True(t, *status.InclusionListSatisfied)
+}
+
 func TestNewPayloadV6InclusionListSatisfiedNullUnlessValid(t *testing.T) {
 	t.Parallel()
 
@@ -308,6 +326,28 @@ func TestNewPayloadV6JSONRPC(t *testing.T) {
 	require.True(t, *status.InclusionListSatisfied)
 }
 
+func TestNewPayloadV6JSONRPCClient(t *testing.T) {
+	t.Parallel()
+
+	satisfied := true
+	cfg := bogotaChainConfig()
+	parent := makeParentHeader(1000)
+	srv, inserted := newInclusionListServer(cfg, parent, execmodule.ValidationResult{
+		ValidationStatus:       execmodule.ExecutionStatusSuccess,
+		InclusionListSatisfied: &satisfied,
+	}, ilTestMaxReorgDepth)
+	client := &JsonRpcClient{rpcClient: newEngineInProcClient(t, srv)}
+	inclusionList := signedInclusionList(t, cfg)
+
+	status, err := client.NewPayloadV6(t.Context(), bogotaPayload(t, parent), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, inclusionList)
+	require.NoError(t, err)
+	require.Equal(t, engine_types.ValidStatus, status.Status)
+	require.NotNil(t, status.InclusionListSatisfied)
+	require.True(t, *status.InclusionListSatisfied)
+	require.Len(t, *inserted, 1)
+	require.Len(t, (*inserted)[0].InclusionList(), len(inclusionList))
+}
+
 func newGetInclusionListClient(t *testing.T, inclusionList func(context.Context) (types.Transactions, error)) *rpc.Client {
 	t.Helper()
 	return newEngineInProcClient(t, &EngineServer{logger: log.New(), executionService: &stubExecutionModule{inclusionListFunc: inclusionList}})
@@ -354,6 +394,21 @@ func TestGetInclusionListV1(t *testing.T) {
 			require.LessOrEqual(t, total, int(params.MaxTransactionsBytesPerInclusionListEIP7805))
 		})
 	}
+}
+
+func TestGetInclusionListV1JSONRPCClient(t *testing.T) {
+	t.Parallel()
+
+	txns := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), nil)}
+	client := &JsonRpcClient{rpcClient: newGetInclusionListClient(t, func(context.Context) (types.Transactions, error) {
+		return txns, nil
+	})}
+
+	result, err := client.GetInclusionListV1(t.Context())
+	require.NoError(t, err)
+	want, err := types.MarshalTransactionsBinary(txns)
+	require.NoError(t, err)
+	require.Equal(t, []hexutil.Bytes{want[0]}, result)
 }
 
 func TestGetInclusionListV1PropagatesExecutionError(t *testing.T) {

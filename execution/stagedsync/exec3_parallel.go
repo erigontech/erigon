@@ -3423,7 +3423,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			ibs.StartAccessRecording()
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
-				var ilSatisfied bool
 				if pe.cfg.readAheader != nil {
 					if inclusionList, ok := pe.cfg.readAheader.ReadInclusionList(be.hash()); ok {
 						ilIBS := state.New(reader)
@@ -3432,7 +3431,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						signer := *types.MakeSigner(pe.cfg.chainConfig, be.number(), tt.Header.Time)
 						blockTxns := be.block.Transactions()
 
-						ilSatisfied = protocol.CheckInclusionListTransactions(ilEVM, be.gasPool, signer, blockTxns, inclusionList)
+						ilSatisfied := protocol.CheckInclusionListTransactions(ilEVM, be.gasPool, signer, blockTxns, inclusionList)
 
 						pe.cfg.readAheader.SetInclusionListResult(be.hash(), ilSatisfied)
 					}

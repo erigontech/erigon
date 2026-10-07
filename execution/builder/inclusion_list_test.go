@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 type recordingTxnProvider struct {
@@ -53,4 +54,14 @@ func TestBuildInclusionListRequestsSpecLimits(t *testing.T) {
 	require.Zero(t, provider.opts.GasTarget.Blob, "blob transactions must not be selected")
 	require.Equal(t, uint64(math.MaxUint64), provider.opts.GasTarget.Execution)
 	require.Equal(t, uint64(math.MaxUint64), provider.opts.GasTarget.State)
+}
+
+func TestBuildInclusionListWithoutTxnProviderFails(t *testing.T) {
+	t.Parallel()
+
+	b := &Builder{}
+
+	got, err := b.BuildInclusionList(t.Context())
+	require.ErrorIs(t, err, txpool.ErrPoolDisabled)
+	require.Nil(t, got)
 }
