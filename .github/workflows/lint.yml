@@ -9,12 +9,16 @@ defaults:
 
 permissions:
   contents: read
-  actions: write
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # actions: write is for the self-cancelling step's `gh run cancel`; granting it
+    # workflow-wide would hand it to every other job here as well.
+    permissions:
+      contents: read
+      actions: write
 
     steps:
       - name: Checkout custom actions
