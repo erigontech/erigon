@@ -456,6 +456,7 @@ func stackBoundsErr(sLen int, operation *operation) error {
 type opTrace struct {
 	debug, trace bool
 	logged       bool // the opcode hook has reported the op
+	op           OpCode
 	pc           uint64
 	oldGas       mdgas.MdGas
 	cost         mdgas.MdGasCost
@@ -645,7 +646,7 @@ run:
 		operation := &jt[op]
 		cost := operation.constantGas
 		if anyTrace {
-			t.cost = mdgas.MdGasCost{Execution: cost}
+			t.op, t.cost = op, mdgas.MdGasCost{Execution: cost}
 		}
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
