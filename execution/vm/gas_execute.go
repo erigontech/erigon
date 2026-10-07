@@ -327,6 +327,22 @@ func makeSelfdestructEIP2929(refundsEnabled bool) gasExecuteFunc {
 	}
 }
 
+// makeWithGas runs op with its memory size, gas and execute funcs.
+func makeWithGas(memorySize memorySizeFunc, gas gasFunc, execute executionFunc) gasExecuteFunc {
+	return func(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+		size, err := wordMemorySize(memorySize(scope))
+		if err != nil {
+			return pc, nil, err
+		}
+		cost, err := gas(evm, scope, scope.Gas(), size)
+		err = evm.chargeDynamic(pc, scope, t, cost, err, size)
+		if err != nil {
+			return pc, nil, err
+		}
+		return execute(pc, evm, scope)
+	}
+}
+
 // accountSurcharge warms addr and returns what EIP-2929 charges for it on top of
 // the warm cost, which the op's constant gas covers.
 func accountSurcharge(evm *EVM, addr accounts.Address) uint64 {

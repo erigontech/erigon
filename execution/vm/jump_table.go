@@ -44,7 +44,6 @@ type operation struct {
 	// execute is the operation function
 	execute     executionFunc
 	constantGas uint64
-	dynamicGas  gasFunc
 	// gasExecute, when set, runs the op in place of dynamicGas and execute: it charges
 	// the dynamic gas itself, so what the gas needs is derived once.
 	gasExecute gasExecuteFunc
@@ -97,12 +96,12 @@ func validateAndFillMaxStack(jt *JumpTable) {
 			panic(fmt.Sprintf("op 0x%x is not set", i))
 		}
 		// The interpreter has an assumption that if the memorySize function is
-		// set, then the dynamicGas or gasExecute function is also set. This is a somewhat
+		// set, then the gasExecute function is also set. This is a somewhat
 		// arbitrary assumption, and can be removed if we need to -- but it
 		// allows us to avoid a condition check. As long as we have that assumption
 		// in there, this little sanity check prevents us from merging in a
 		// change which violates it.
-		if op.memorySize != nil && op.dynamicGas == nil && op.gasExecute == nil {
+		if op.memorySize != nil && op.gasExecute == nil {
 			panic(fmt.Sprintf("op %v has dynamic memory but not dynamic gas", OpCode(i).String()))
 		}
 		op.maxStack = maxStack(op.numPop, op.numPush)
@@ -223,7 +222,7 @@ func newConstantinopleInstructionSet() JumpTable {
 	instructionSet[CREATE2] = operation{
 		execute:     opCreate2,
 		constantGas: params.Create2Gas,
-		dynamicGas:  gasCreate2,
+		gasExecute:  makeWithGas(memoryCreate2, gasCreate2, opCreate2),
 		numPop:      4,
 		numPush:     1,
 		memorySize:  memoryCreate2,
@@ -240,7 +239,7 @@ func newByzantiumInstructionSet() JumpTable {
 	instructionSet[STATICCALL] = operation{
 		execute:     opStaticCall,
 		constantGas: params.CallGasEIP150,
-		dynamicGas:  gasStaticCall,
+		gasExecute:  makeWithGas(memoryStaticCall, gasStaticCall, opStaticCall),
 		numPop:      6,
 		numPush:     1,
 		memorySize:  memoryStaticCall,
@@ -298,7 +297,7 @@ func newHomesteadInstructionSet() JumpTable {
 	instructionSet := newFrontierInstructionSet()
 	instructionSet[DELEGATECALL] = operation{
 		execute:     opDelegateCall,
-		dynamicGas:  gasDelegateCall,
+		gasExecute:  makeWithGas(memoryDelegateCall, gasDelegateCall, opDelegateCall),
 		constantGas: params.CallGasFrontier,
 		numPop:      6,
 		numPush:     1,
@@ -1165,7 +1164,7 @@ func newFrontierInstructionSet() JumpTable {
 		CREATE: {
 			execute:     opCreate,
 			constantGas: params.CreateGas,
-			dynamicGas:  gasCreate,
+			gasExecute:  makeWithGas(memoryCreate, gasCreate, opCreate),
 			numPop:      3,
 			numPush:     1,
 			memorySize:  memoryCreate,
@@ -1174,7 +1173,7 @@ func newFrontierInstructionSet() JumpTable {
 		CALL: {
 			execute:     opCall,
 			constantGas: params.CallGasFrontier,
-			dynamicGas:  gasCall,
+			gasExecute:  makeWithGas(memoryCall, gasCall, opCall),
 			numPop:      7,
 			numPush:     1,
 			memorySize:  memoryCall,
@@ -1183,7 +1182,7 @@ func newFrontierInstructionSet() JumpTable {
 		CALLCODE: {
 			execute:     opCallCode,
 			constantGas: params.CallGasFrontier,
-			dynamicGas:  gasCallCode,
+			gasExecute:  makeWithGas(memoryCall, gasCallCode, opCallCode),
 			numPop:      7,
 			numPush:     1,
 			memorySize:  memoryCall,
