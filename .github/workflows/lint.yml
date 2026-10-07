@@ -107,10 +107,31 @@ jobs:
         with:
           cache-namespace: lint
 
+      # The SIMD kernels are per-architecture and chosen at run time, so three things
+      # need covering: that every architecture still builds, that the vector path agrees
+      # with the stdlib, and that the fallback the feature check selects does too.
+      - name: Build the SIMD hex kernel for every architecture
+        env:
+          GOTOOLCHAIN: go1.27.1
+          GOEXPERIMENT: jsonv2,simd
+        run: |
+          for arch in amd64 arm64 riscv64 386; do
+            GOOS=linux GOARCH=$arch go build ./common/hexutil/
+          done
+
       - name: Test the SIMD hex kernel
         env:
           GOTOOLCHAIN: go1.27.1
           GOEXPERIMENT: jsonv2,simd
+        run: go test -count=1 ./common/hexutil/...
+
+      # cpu.all=off clears the feature bits the kernels check, so the same tests run
+      # down the scalar path on a machine that has the instructions.
+      - name: Test the hex fallback path
+        env:
+          GOTOOLCHAIN: go1.27.1
+          GOEXPERIMENT: jsonv2,simd
+          GODEBUG: cpu.all=off
         run: go test -count=1 ./common/hexutil/...
 
       # golangci-lint internally trims cache entries unused for 5 days,
@@ -154,3 +175,21 @@ jobs:
         run: |
           echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
           gh run cancel ${{ github.run_id }} || true
+  hexutil-arm64:
+    name: SIMD hex on arm64
+    runs-on: [ self-hosted, qa, Release, ARM64 ]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-erigon
+        with:
+          cache-namespace: hexutil-arm64
+
+      # NEON is in the arm64 baseline, so this path has no feature check to disable:
+      # the build tag is the guard, and the tests are the only thing that exercises it.
+      - name: Test the SIMD hex kernel
+        env:
+          GOTOOLCHAIN: go1.27.1
+          GOEXPERIMENT: jsonv2,simd
+        run: go test -count=1 ./common/hexutil/...
