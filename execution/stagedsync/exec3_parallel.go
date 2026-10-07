@@ -1808,11 +1808,17 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 		}
 	}
 
+	// The pool runs one worker beyond the configured count, except for a count
+	// of one (--exec.serial), which must run one transaction at a time.
+	poolSize := pe.workerCount + 1
+	if pe.workerCount <= 1 {
+		poolSize = 1
+	}
 	var err error
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
 		workersCtx, workerFaults, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
+		poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
 	)
 
 	executorCancel := func(cause error) error {
