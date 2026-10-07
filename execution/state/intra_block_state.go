@@ -3342,6 +3342,10 @@ func (ibs *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	}
 	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
 		obj.createdContract = true
+	}
+	// An own AddressPath write means this tx created the account: createObject is
+	// the only writer, and reverting a creation drops or restores the write.
+	if _, isDirty := ibs.journal.dirties[addr]; isDirty && ibs.hasWrite(addr, AddressPath, accounts.NilKey) {
 		obj.newlyCreated = true
 	}
 	if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
