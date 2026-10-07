@@ -776,3 +776,56 @@ func TestDecodeStringFieldMatchesUnmarshal(t *testing.T) {
 		require.Equal(t, want, got, in)
 	}
 }
+
+func TestValidJSON(t *testing.T) {
+	for _, s := range append([]string{
+		``, ` `, `{`, `}`, `[`, `]`, `,`, `:`, `"`, `"a`, `nul`, `tru`, `fals`,
+		`null`, `true`, `false`, `0`, `-0`, `1.5e3`, `1e+3`, `1E-3`, `"a"`,
+		`01`, `-`, `.5`, `1.`, `1e`, `1e+`, `+1`, `00`, `1.2.3`, `0x1`,
+		`{}`, `[]`, `{"a":1}`, `[1,2]`, `[[[]]]`, `{"a":{"b":[1,{}]}}`,
+		`{"a":1,}`, `[1,]`, `{,}`, `{"a"}`, `{"a":}`, `{:1}`, `{"a":1"b":2}`,
+		`[1 2]`, `{} {}`, `1 1`, `  {"a" : 1 }  `, "\t\n\r{}\t\n\r",
+		`{"a":"A\n\\\""}`, `{"a":"😀"}`,
+	}, messageCorpus...) {
+		require.Equal(t, json.Valid([]byte(s)), validJSON([]byte(s)), "input %q", s)
+	}
+}
+
+// FuzzValidJSON pins the fast gate against encoding/json on any input.
+func FuzzValidJSON(f *testing.F) {
+	for _, s := range messageCorpus {
+		f.Add(s)
+	}
+	for _, s := range []string{`[1,]`, `{"a":1}`, `1e+3`, `"\q"`, "\"\x01\"", "\"\xff\"", `[[[[0]]]]`} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		data := []byte(input)
+		require.Equal(t, json.Valid(data), validJSON(data), "input %q", input)
+	})
+}
+
+func BenchmarkValidJSON(b *testing.B) {
+	for _, n := range []int{0, 4096, 731000} {
+		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"0x1234","data":"0x` +
+			strings.Repeat("ab", n) + `"},"latest"]}`)
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			b.Run("stdlib", func(b *testing.B) {
+				b.SetBytes(int64(len(body)))
+				for b.Loop() {
+					if !json.Valid(body) {
+						b.Fatal("invalid")
+					}
+				}
+			})
+			b.Run("scan", func(b *testing.B) {
+				b.SetBytes(int64(len(body)))
+				for b.Loop() {
+					if !validJSON(body) {
+						b.Fatal("invalid")
+					}
+				}
+			})
+		})
+	}
+}
