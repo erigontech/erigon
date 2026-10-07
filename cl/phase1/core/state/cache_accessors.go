@@ -94,7 +94,7 @@ func (b *CachingBeaconState) ComputeCommittee(
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconAttester)
+	seed := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainBeaconAttester)
 
 	if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok {
 		shuffledIndicies = shuffledIndicesInterface
@@ -140,7 +140,7 @@ func (b *CachingBeaconState) GetBeaconProposerIndices(epoch uint64) ([]uint64, e
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	seed := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 
 	// Write the seed to an array.
 	seedArray := [32]byte{}
@@ -168,7 +168,7 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	input := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	input := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, slot)
 
@@ -373,7 +373,7 @@ func (b *CachingBeaconState) ComputeNextSyncCommittee() (*solid.SyncCommittee, e
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	seed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, beaconConfig.DomainSyncCommittee)
+	seed := shuffling.GetSeed(mix, epoch, beaconConfig.DomainSyncCommittee)
 	i := uint64(0)
 	syncCommitteeSize := int(beaconConfig.SyncCommitteeSize)
 	syncCommitteePubKeys := make([]common.Bytes48, 0, syncCommitteeSize)
@@ -606,7 +606,7 @@ func (b *CachingBeaconState) ComputePTC(slot uint64) ([]uint64, error) {
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
 	mix := b.GetRandaoMix(int(mixPosition))
-	baseSeed := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainPtcAttester)
+	baseSeed := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainPtcAttester)
 
 	// seed = hash(get_seed(state, epoch, DOMAIN_PTC_ATTESTER) + uint_to_bytes(slot))
 	slotBytes := make([]byte, 8)

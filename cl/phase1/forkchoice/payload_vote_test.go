@@ -66,7 +66,6 @@ type payloadVoteForkGraph struct {
 	fork_graph.ForkGraph
 	hasEnvelope        bool
 	dumpedEnvelope     *common.Hash
-	dumpEnvelopeErr    error
 	invalidatedHeader  *common.Hash
 	unavailablePayload *common.Hash
 	acceptedPayloads   map[common.Hash]bool
@@ -77,11 +76,11 @@ func (g payloadVoteForkGraph) IsBlockRetained(common.Hash) bool {
 	return g.retained == nil || *g.retained
 }
 
-func (g payloadVoteForkGraph) WithRetainedBlock(_ common.Hash, fn func()) bool {
+func (g payloadVoteForkGraph) WithRetainedBlock(_ common.Hash, fn func(func(common.Hash) bool)) bool {
 	if !g.IsBlockRetained(common.Hash{}) {
 		return false
 	}
-	fn()
+	fn(g.IsBlockRetained)
 	return true
 }
 

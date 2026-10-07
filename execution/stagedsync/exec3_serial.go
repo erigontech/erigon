@@ -174,7 +174,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		}
 
 		start := time.Now()
-		continueLoop, err := se.executeBlock(ctx, b, txTasks, execStage.CurrentSyncCycle.IsInitialCycle, false)
+		continueLoop, err := se.executeBlock(ctx, b, txTasks, execStage.CurrentSyncCycle.IsInitialCycle)
 
 		if took := time.Since(start); took > 50*time.Millisecond { // prevent logs spamming
 			log.Debug(fmt.Sprintf("[%s] executed block %d in %s", se.logPrefix, blockNum, took))
@@ -340,7 +340,7 @@ func (se *serialExecutor) resetWorkers(ctx context.Context, rs *state.StateV3Buf
 	return se.worker.ResetState(rs, se.applyTx, nil, nil, nil)
 }
 
-func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, tasks []exec.Task, isInitialCycle bool, profile bool) (cont bool, err error) {
+func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, tasks []exec.Task, isInitialCycle bool) (cont bool, err error) {
 	blockReceipts := make([]*types.Receipt, 0, len(tasks))
 	var startTxIndex int
 
