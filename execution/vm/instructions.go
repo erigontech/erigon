@@ -760,12 +760,14 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	return pc, nil, nil
 }
 
-func opSload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
-	if scope.slots.on {
-		if i := scope.lookupSlot(evm); i >= 0 {
-			*scope.Stack.peek() = scope.slots.val[i]
-			return pc, nil, nil
-		}
+func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
+	if !scope.slots.on {
+		*scope.Stack.peek(), err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+		return pc, nil, err
+	}
+	if i := scope.lookupSlot(evm); i >= 0 {
+		*scope.Stack.peek() = scope.slots.val[i]
+		return pc, nil, nil
 	}
 	return pc, nil, sloadRead(evm, scope, scope.peekStorageKey(evm))
 }
