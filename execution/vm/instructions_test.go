@@ -28,6 +28,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 
@@ -301,6 +302,18 @@ func TestJsonTestcases(t *testing.T) {
 		var testcases []TwoOperandTestcase
 		json.Unmarshal(data, &testcases)
 		testTwoOperandOp(t, testcases, twoOpMethods[name], name)
+	}
+}
+
+func TestInnerFrameOutputReusesBuffer(t *testing.T) {
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, Config{})
+	evm.depth = 2
+	var mem Memory
+	mem.Resize(32)
+	first := evm.output(&mem, 0, 32)
+	second := evm.output(&mem, 0, 32)
+	if unsafe.SliceData(first) != unsafe.SliceData(second) {
+		t.Fatal("each inner RETURN got a new buffer")
 	}
 }
 
