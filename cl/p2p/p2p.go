@@ -36,6 +36,7 @@ type P2PConfig struct {
 	Port          int
 	TCPPort       uint
 	QUICPort      uint
+	DisableQUIC   bool
 
 	// Optional
 	LocalIP        string
@@ -126,13 +127,17 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		host.Close()
 		return nil, fmt.Errorf("failed to bind TCP listener on port %d", cfg.TCPPort)
 	}
-	quicPort := hostQUICPort(host)
-	if quicPort == 0 {
-		host.Close()
-		return nil, fmt.Errorf("failed to bind QUIC listener on port %d", cfg.QUICPort)
-	}
 	cfg.TCPPort = tcpPort
-	cfg.QUICPort = quicPort
+	if cfg.DisableQUIC {
+		cfg.QUICPort = 0
+	} else {
+		quicPort := hostQUICPort(host)
+		if quicPort == 0 {
+			host.Close()
+			return nil, fmt.Errorf("failed to bind QUIC listener on port %d", cfg.QUICPort)
+		}
+		cfg.QUICPort = quicPort
+	}
 
 	p := p2pManager{
 		cfg:      cfg,
@@ -187,6 +192,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	}
 	logger.Info("[Caplin] P2P networking started",
 		"tcp_port", cfg.TCPPort,
+		"quic_enabled", !cfg.DisableQUIC,
 		"quic_port", cfg.QUICPort,
 		"enr_quic", enrQUIC,
 		"advertised_addrs", host.Addrs())
@@ -197,6 +203,9 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 }
 
 func discoveryAndQUICPortConflict(cfg *P2PConfig) bool {
+	if cfg.DisableQUIC {
+		return false
+	}
 	if cfg.Port <= 0 || uint(cfg.Port) != cfg.QUICPort {
 		return false
 	}

@@ -30,6 +30,7 @@ var CliFlags = []cli.Flag{
 	&SentinelServerAddr,
 	&SentinelTcpPort,
 	&SentinelQUICPort,
+	&SentinelQUICDisable,
 	&NoDiscovery,
 	&LocalDiscovery,
 	&BootnodesFlag,
@@ -55,7 +56,12 @@ var (
 	SentinelQUICPort = cli.UintFlag{
 		Name:  "sentinel.quic.port",
 		Usage: "sets lightclient QUIC port",
-		Value: 4001,
+		Value: 4002,
+	}
+	SentinelQUICDisable = cli.BoolFlag{
+		Name:  "sentinel.quic.disable",
+		Usage: "Disable the QUIC transport for the lightclient libp2p, falling back to TCP only. Useful when the QUIC UDP port cannot be exposed (e.g. some Docker/Kubernetes setups)",
+		Value: false,
 	}
 	SentinelServerPort = cli.IntFlag{
 		Name:  "sentinel.port",
