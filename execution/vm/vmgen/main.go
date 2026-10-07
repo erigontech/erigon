@@ -53,6 +53,9 @@ type fastOp struct {
 	// call makes the case call execute instead of inlining its body: the body
 	// calls out anyway, and pc would live across that call in memory.
 	call bool
+	// gated ops are missing from older forks, and an EIP in vm.Config can add
+	// them to any fork, so the case first checks that the active table has the op.
+	gated bool
 }
 
 func fastOps() []fastOp {
@@ -60,6 +63,7 @@ func fastOps() []fastOp {
 		return fastOp{name: name, execute: execute, gas: gas, pop: pop, push: push}
 	}
 	ops := []fastOp{
+		{name: "PUSH0", execute: "opPush0", gas: "GasQuickStep", push: 1, gated: true},
 		op("PUSH1", "opPush1", "GasFastestStep", 0, 1),
 		op("PUSH2", "opPush2", "GasFastestStep", 0, 1),
 		op("ADD", "opAdd", "GasFastestStep", 2, 1),
@@ -283,6 +287,10 @@ func text(fset *token.FileSet, n any) string {
 }
 
 func fastSwitch(instructions []byte, ops []fastOp) string {
+	return "sLen := top\nswitch op {\n" + fastCases(instructions, ops) + "}\n"
+}
+
+func fastCases(instructions []byte, ops []fastOp) string {
 	var names, codes []string
 	for _, o := range ops {
 		// The borrow test comes first, so it branches on the flags of the subtraction.
@@ -306,6 +314,10 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 		if o.memorySize != "" {
 			cond = append(cond, "callContext.Memory.allocated32(callContext.Stack.peekAt(top))")
 		}
+		if o.gated {
+			// An op a table does not have is opUndefined there, which pushes nothing.
+			cond = append(cond, fmt.Sprintf("evm.jt[%s].numPush == %d", o.name, o.push))
+		}
 		body := "callContext.Stack.top = top\npc, _, _ = " + o.execute + "(pc, evm, callContext)\ntop = callContext.Stack.top\npc++\ncontinue run"
 		if !o.call {
 			body = inlineBody(instructions, o)
@@ -313,6 +325,9 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 		// Sub64 computes the gas left with the check, before any call in the body,
 		// so the case never needs the old gasLeft after one.
 		code := fmt.Sprintf("if left, borrow := bits.Sub64(gasLeft, %s, 0); %s {\ngasLeft = left\n%s\n}\n", o.gas, strings.Join(cond, " && "), body)
+		if o.jump {
+			code = handoff + code
+		}
 		// Ops with the same code share a case: each case deepens run's compare tree.
 		if n := len(codes); n > 0 && codes[n-1] == code {
 			names[n-1] += ", " + o.name
@@ -321,17 +336,230 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 		names, codes = append(names, o.name), append(codes, code)
 	}
 	var b strings.Builder
-	b.WriteString("sLen := top\nswitch op {\n")
 	for i := range names {
 		fmt.Fprintf(&b, "case %s:\n%s", names[i], codes[i])
 	}
-	b.WriteString("}\n")
 	return b.String()
+}
+
+// handoff moves a frame to runDecoded at its first jump, so a frame that never
+// jumps runs no lookup. It calls nothing on the way to the jump's own case, so the
+// loop keeps its registers there.
+const handoff = `if callContext.Contract.decodable() {
+	callContext.gas, callContext.Stack.top = gasLeft, top
+	res, err = evm.runDecoded(callContext, pc)
+	gasLeft, top = callContext.gas, callContext.Stack.top
+	break run
+}
+`
+
+// decodedRun is runDecoded, run's loop over a decoded program, which keeps the
+// instruction index i in place of pc. Its switch takes decodedCases and the
+// fastOps cases that do not read code or jump, with i for pc.
+const decodedRun = `
+// runDecoded is run's loop over the decoded code of callContext.Contract, from the op at start on.
+func (evm *EVM) runDecoded(callContext *CallContext, start uint64) (res []byte, err error) {
+	p := decodedProgram(callContext.Contract.Code, callContext.Contract.CodeHash)
+	ins := p.ins
+	i := uint64(p.idx[start] &^ jumpdestBit)
+	gasLeft := callContext.gas
+	top := callContext.Stack.top
+run:
+	for {
+		if i >= uint64(len(ins)) {
+			res, err = nil, errStopToken
+			break run
+		}
+		in := ins[i]
+		op := in.kind()
+		sLen := top
+		switch op {
+		%s
+		}
+		callContext.gas = gasLeft
+		callContext.Stack.top = top
+		pc := in.pc()
+		var next uint64
+		next, res, err = evm.step(callContext, op, pc, false, false, nil)
+		gasLeft = callContext.gas
+		top = callContext.Stack.top
+		if err != nil {
+			break run
+		}
+		i++
+		// An op that read immediates goes on where run would; EIP-8024 ops may read past the code end.
+		if next != pc {
+			i = uint64(p.idx[min(next+1, uint64(len(p.idx)-1))] &^ jumpdestBit)
+		}
+	}
+	callContext.gas = gasLeft
+	callContext.Stack.top = top
+	return res, err
+}
+`
+
+// decodedCases are runDecoded's cases for the decoded PUSH kinds and the jumps.
+// A PUSH kind that fails its checks runs its PUSH opcode through step.
+const decodedCases = `
+case pushImm:
+	if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && uint(sLen) < stackLimit {
+		gasLeft = left
+		callContext.Stack.pushRefAt(top).SetUint64(uint64(in.arg()))
+		top += 1
+		i++
+		continue run
+	}
+	op = OpCode(callContext.Contract.Code[in.pc()])
+case pushConst:
+	if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && uint(sLen) < stackLimit {
+		gasLeft = left
+		*callContext.Stack.pushRefAt(top) = p.consts[in.arg()]
+		top += 1
+		i++
+		continue run
+	}
+	op = OpCode(callContext.Contract.Code[in.pc()])
+case jumpTo:
+	if left, borrow := bits.Sub64(gasLeft, GasFastestStep+GasMidStep, 0); borrow == 0 && uint(sLen) < stackLimit {
+		gasLeft = left
+		if evm.Cancelled() {
+			res, err = nil, errStopToken
+			break run
+		}
+		skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+		gasLeft -= skip * params.JumpdestGas
+		i = uint64(in.arg()) + skip
+		continue run
+	}
+	op = OpCode(callContext.Contract.Code[in.pc()])
+case jumpiTo:
+	if left, borrow := bits.Sub64(gasLeft, GasFastestStep+GasSlowStep, 0); borrow == 0 && sLen >= 1 && sLen < stackLimit {
+		gasLeft = left
+		if evm.Cancelled() {
+			res, err = nil, errStopToken
+			break run
+		}
+		cond := callContext.Stack.popAt(top)
+		top -= 1
+		if cond.IsZero() {
+			i += 2
+			continue run
+		}
+		skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+		gasLeft -= skip * params.JumpdestGas
+		i = uint64(in.arg()) + skip
+		continue run
+	}
+	op = OpCode(callContext.Contract.Code[in.pc()])
+case KECCAK256:
+	if sLen >= 2 && sLen <= stackLimit {
+		offset, size := callContext.Stack.pop1Peek1At(top)
+		if callContext.Memory.allocated(offset, size) {
+			if left, borrow := bits.Sub64(gasLeft, params.Keccak256Gas+params.Keccak256WordGas*ToWordSize(size.Uint64()), 0); borrow == 0 {
+				gasLeft = left
+				hash := crypto.Keccak256Hash(callContext.Memory.GetPtr(offset.Uint64(), size.Uint64()))
+				size.SetBytes(hash[:])
+				top -= 1
+				i++
+				continue run
+			}
+		}
+	}
+case SHL, SHR, SAR:
+	// An op a table does not have is opUndefined there, which pushes nothing.
+	if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit && evm.jt[op].numPush == 1 {
+		gasLeft = left
+		shift, value := callContext.Stack.pop1Peek1At(top)
+		switch {
+		case op == SAR && shift.GtUint64(255):
+			if value.Sign() >= 0 {
+				value.Clear()
+			} else {
+				value.SetAllOne()
+			}
+		case op == SAR:
+			value.SRsh(value, uint(shift.Uint64()))
+		case !shift.LtUint64(256):
+			value.Clear()
+		case op == SHL:
+			value.Lsh(value, uint(shift.Uint64()))
+		default:
+			value.Rsh(value, uint(shift.Uint64()))
+		}
+		top -= 1
+		i++
+		continue run
+	}
+case JUMP:
+	if left, borrow := bits.Sub64(gasLeft, GasMidStep, 0); borrow == 0 && sLen >= 1 && sLen <= stackLimit {
+		gasLeft = left
+		if evm.Cancelled() {
+			res, err = nil, errStopToken
+			break run
+		}
+		dest := p.jumpdest(callContext.Stack.popAt(top))
+		top -= 1
+		if dest&jumpdestBit == 0 {
+			res, err = nil, ErrInvalidJump
+			break run
+		}
+		skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+		gasLeft -= skip * params.JumpdestGas
+		i = uint64(dest&^jumpdestBit) + skip
+		continue run
+	}
+case JUMPI:
+	if left, borrow := bits.Sub64(gasLeft, GasSlowStep, 0); borrow == 0 && sLen >= 2 && sLen <= stackLimit {
+		gasLeft = left
+		if evm.Cancelled() {
+			res, err = nil, errStopToken
+			break run
+		}
+		pos, cond := callContext.Stack.pop2At(top)
+		top -= 2
+		if cond.IsZero() {
+			i++
+			continue run
+		}
+		dest := p.jumpdest(pos)
+		if dest&jumpdestBit == 0 {
+			res, err = nil, ErrInvalidJump
+			break run
+		}
+		skip := min(gasLeft, params.JumpdestGas) / params.JumpdestGas
+		gasLeft -= skip * params.JumpdestGas
+		i = uint64(dest&^jumpdestBit) + skip
+		continue run
+	}
+`
+
+// decoded returns runDecoded: decodedRun with decodedCases and the fastOps cases
+// that neither read code nor jump, whose pc it renames to i.
+func decoded(instructions []byte, ops []fastOp) string {
+	ops = slices.DeleteFunc(slices.Clone(ops), func(o fastOp) bool {
+		return o.jump || strings.HasPrefix(o.name, "PUSH") && o.name != "PUSH0"
+	})
+	const prefix = "package p\nfunc _() {\nswitch {\n"
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", prefix+fastCases(instructions, ops)+"}\n}\n", 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for n := range ast.Preorder(f) {
+		if id, ok := n.(*ast.Ident); ok && id.Name == "pc" {
+			id.Name = "i"
+		}
+	}
+	var cases []string
+	for _, c := range f.Decls[0].(*ast.FuncDecl).Body.List[0].(*ast.SwitchStmt).Body.List {
+		cases = append(cases, text(fset, c))
+	}
+	return fmt.Sprintf(decodedRun, strings.TrimSpace(decodedCases)+"\n"+strings.Join(cases, "\n"))
 }
 
 // untraced returns runTraced and stepTraced as run and step in a file of their
 // own, with anyTrace set to false and fast in place of the switchHere comment.
-func untraced(traced []byte, fast string) []byte {
+func untraced(traced []byte, fast, decoded string) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
 	}
@@ -382,6 +610,7 @@ func untraced(traced []byte, fast string) []byte {
 			b.WriteString(doc + text(fset, &printer.CommentedNode{Node: d, Comments: f.Comments}) + "\n")
 		}
 	}
+	b.WriteString(decoded)
 	out, err := format.Source(b.Bytes())
 	if err != nil {
 		log.Fatal(err)
@@ -396,7 +625,7 @@ func testTable(ops []fastOp) []byte {
 	b.WriteString("var fastPathOps = map[OpCode]fastPathWant{\n")
 	for _, o := range ops {
 		execute, memorySize := cmp.Or(o.execute, "nil"), cmp.Or(o.memorySize, "nil")
-		fmt.Fprintf(&b, "%s: {%s, %s, %d, %d, %s},\n", o.name, execute, o.gas, o.pop, o.push, memorySize)
+		fmt.Fprintf(&b, "%s: {%s, %s, %d, %d, %s, %t},\n", o.name, execute, o.gas, o.pop, o.push, memorySize, o.gated)
 	}
 	b.WriteString("}\n")
 	out, err := format.Source([]byte(b.String()))
@@ -422,7 +651,7 @@ func main() {
 		name string
 		data []byte
 	}{
-		{"vm_run_gen.go", untraced(read("interpreter.go"), fastSwitch(read("instructions.go"), ops))},
+		{"vm_run_gen.go", untraced(read("interpreter.go"), fastSwitch(read("instructions.go"), ops), decoded(read("instructions.go"), ops))},
 		{"fast_path_gen_test.go", testTable(ops)},
 	}
 	var stale []string

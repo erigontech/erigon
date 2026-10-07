@@ -1525,6 +1525,12 @@ func makeLog(size int) executionFunc {
 	}
 }
 
+// opPush0 implements the PUSH0 opcode
+func opPush0(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+	scope.Stack.pushRef().Clear()
+	return pc, nil, nil
+}
+
 // opPush1 is a specialized version of pushN
 func opPush1(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	codeLen := uint64(len(scope.Contract.Code))
