@@ -2935,14 +2935,12 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 		// Clear out any leftover from previous executions
 		ibs.accessList.Reset()
 		al := &ibs.accessList
+		al.setPrecompiles(precompiles)
 
 		al.AddAddress(sender)
 		if !dst.IsNil() {
 			al.AddAddress(dst)
 			// If it's a create-tx, the destination will be added inside evm.create
-		}
-		for _, addr := range precompiles {
-			al.AddAddress(addr)
 		}
 		for _, el := range list {
 			address := accounts.InternAddress(el.Address)

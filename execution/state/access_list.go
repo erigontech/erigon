@@ -45,6 +45,29 @@ type accessList struct {
 	// inserted counts the keys added since the last Reset, which is what the
 	// maps keep capacity for.
 	inserted int
+
+	// precompiles are warm from Prepare until Reset, as if Prepare inserted them into
+	// addresses. precompileSet keeps the built set, so Prepare does not insert them per tx.
+	precompiles    map[accounts.Address]struct{}
+	precompileSet  map[accounts.Address]struct{}
+	precompilesSrc []accounts.Address
+}
+
+// setPrecompiles makes addrs warm; it rebuilds the set only when the fork's list changes.
+func (al *accessList) setPrecompiles(addrs []accounts.Address) {
+	if len(addrs) != len(al.precompilesSrc) || (len(addrs) > 0 && &addrs[0] != &al.precompilesSrc[0]) {
+		al.precompileSet = make(map[accounts.Address]struct{}, len(addrs))
+		for _, addr := range addrs {
+			al.precompileSet[addr] = struct{}{}
+		}
+		al.precompilesSrc = addrs
+	}
+	al.precompiles = al.precompileSet
+}
+
+func (al *accessList) isPrecompile(address accounts.Address) bool {
+	_, ok := al.precompiles[address]
+	return ok
 }
 
 // newAccessList creates a new accessList.
@@ -64,6 +87,7 @@ func (al *accessList) Reset() {
 	al.slots = al.slots[:0]
 	clear(al.addresses)
 	al.inserted = 0
+	al.precompiles = nil
 	al.dropMemo()
 }
 
@@ -80,8 +104,20 @@ func (al *accessList) dropMemo() {
 
 // ContainsAddress returns true if the address is in the access list.
 func (al *accessList) ContainsAddress(address accounts.Address) bool {
-	_, ok := al.addresses[address]
-	return ok
+	if _, ok := al.addresses[address]; ok {
+		return true
+	}
+	return al.warmPrecompile(address)
+}
+
+// warmPrecompile reports whether address is a precompile and, if so, adds it to
+// addresses unjournaled, so later lookups in the tx hit on the first map probe.
+func (al *accessList) warmPrecompile(address accounts.Address) bool {
+	if !al.isPrecompile(address) {
+		return false
+	}
+	al.addresses[address] = -1
+	return true
 }
 
 // Contains checks if a slot within an account is present in the access list, returning
@@ -96,7 +132,7 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 	}
 	idx, ok := al.addresses[address]
 	if !ok {
-		return false, false
+		return al.isPrecompile(address), false
 	}
 	if idx == -1 {
 		return true, false
@@ -108,8 +144,11 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 // Copy creates an independent copy of an accessList.
 func (al *accessList) Copy() *accessList {
 	cp := &accessList{
-		addresses: maps.Clone(al.addresses),
-		slots:     make([]map[accounts.StorageKey]struct{}, len(al.slots)),
+		addresses:      maps.Clone(al.addresses),
+		slots:          make([]map[accounts.StorageKey]struct{}, len(al.slots)),
+		precompiles:    al.precompiles,
+		precompileSet:  al.precompileSet,
+		precompilesSrc: al.precompilesSrc,
 	}
 	for i, slotMap := range al.slots {
 		cp.slots[i] = maps.Clone(slotMap)
@@ -120,7 +159,7 @@ func (al *accessList) Copy() *accessList {
 // AddAddress adds an address to the access list, and returns 'true' if the operation
 // caused a change (addr was not previously in the list).
 func (al *accessList) AddAddress(address accounts.Address) bool {
-	if _, present := al.addresses[address]; present {
+	if _, present := al.addresses[address]; present || al.warmPrecompile(address) {
 		return false
 	}
 	al.addresses[address] = -1
@@ -173,7 +212,7 @@ func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.Storag
 		if !addrPresent {
 			al.inserted++
 		}
-		return !addrPresent, true
+		return !addrPresent && !al.isPrecompile(address), true
 	}
 	slotmap := al.slots[idx]
 	al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
