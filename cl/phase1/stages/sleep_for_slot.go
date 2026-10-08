@@ -66,17 +66,12 @@ func waitForNextSlotOrHeadChange(
 	timer := time.NewTimer(time.Until(nextSlotTime))
 	defer timer.Stop()
 
-	if beaconCfg.GetCurrentStateVersion(clock.GetCurrentEpoch()) < clparams.GloasVersion {
-		select {
-		case <-ctx.Done():
-			return sleepForSlotWake{}, false, ctx.Err()
-		case <-timer.C:
-			return sleepForSlotWake{}, false, nil
-		}
+	var tick <-chan time.Time
+	if beaconCfg.GetCurrentStateVersion(clock.GetCurrentEpoch()) >= clparams.GloasVersion {
+		ticker := time.NewTicker(sleepForSlotHeadPollInterval)
+		defer ticker.Stop()
+		tick = ticker.C
 	}
-
-	ticker := time.NewTicker(sleepForSlotHeadPollInterval)
-	defer ticker.Stop()
 
 	for {
 		select {
@@ -84,7 +79,7 @@ func waitForNextSlotOrHeadChange(
 			return sleepForSlotWake{}, false, ctx.Err()
 		case <-timer.C:
 			return sleepForSlotWake{}, false, nil
-		case <-ticker.C:
+		case <-tick:
 			if !time.Now().Before(nextSlotTime) {
 				return sleepForSlotWake{}, false, nil
 			}
