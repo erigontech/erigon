@@ -349,7 +349,7 @@ func TestStatePruneWiredIntoAntiquaryCycle(t *testing.T) {
 
 	run := func(disabled bool) (int64, []uint64) {
 		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-		reader := tests.LoadChain(blocks, postState, db, t)
+		reader := tests.LoadChain(blocks, db, t)
 		seedStateSlots(t, db, kv.BlockRoot, slotRange(0, boundary))
 		sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 		require.NoError(t, sn.OnHeadState(postState))

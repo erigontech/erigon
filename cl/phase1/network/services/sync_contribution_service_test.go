@@ -34,7 +34,7 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-func setupSyncContributionServiceTest(t *testing.T, ctrl *gomock.Controller) (SyncContributionService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock) {
+func setupSyncContributionServiceTest(ctrl *gomock.Controller) (SyncContributionService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock) {
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
@@ -46,7 +46,7 @@ func setupSyncContributionServiceTest(t *testing.T, ctrl *gomock.Controller) (Sy
 	return s, syncedDataManager, ethClock
 }
 
-func getObjectsForSyncContributionServiceTest(t *testing.T, ctrl *gomock.Controller) (*state.CachingBeaconState, *SignedContributionAndProofForGossip) {
+func getObjectsForSyncContributionServiceTest() (*state.CachingBeaconState, *SignedContributionAndProofForGossip) {
 	_, _, state := tests.GetBellatrixRandom()
 	br, _ := state.BlockRoot()
 	aggBits := make([]byte, 16)
@@ -73,8 +73,8 @@ func TestSyncContributionServiceUnsynced(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	s, _, _ := setupSyncContributionServiceTest(t, ctrl)
-	_, msg := getObjectsForSyncContributionServiceTest(t, ctrl)
+	s, _, _ := setupSyncContributionServiceTest(ctrl)
+	_, msg := getObjectsForSyncContributionServiceTest()
 	err := s.ProcessMessage(context.TODO(), nil, msg)
 	require.Error(t, err)
 }
@@ -83,9 +83,9 @@ func TestSyncContributionServiceBadTiming(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	s, sd, clock := setupSyncContributionServiceTest(t, ctrl)
+	s, sd, clock := setupSyncContributionServiceTest(ctrl)
 	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(false).AnyTimes()
-	state, msg := getObjectsForSyncContributionServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncContributionServiceTest()
 	require.NoError(t, sd.OnHeadState(state))
 	err := s.ProcessMessage(context.TODO(), nil, msg)
 	require.Error(t, err)
@@ -95,9 +95,9 @@ func TestSyncContributionServiceBadSubcommitteeIndex(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	s, sd, clock := setupSyncContributionServiceTest(t, ctrl)
+	s, sd, clock := setupSyncContributionServiceTest(ctrl)
 	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
-	state, msg := getObjectsForSyncContributionServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncContributionServiceTest()
 	require.NoError(t, sd.OnHeadState(state))
 	msg.SignedContributionAndProof.Message.Contribution.SubcommitteeIndex = 1000
 	err := s.ProcessMessage(context.TODO(), nil, msg)
@@ -108,9 +108,9 @@ func TestSyncContributionServiceBadAggregationBits(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	s, sd, clock := setupSyncContributionServiceTest(t, ctrl)
+	s, sd, clock := setupSyncContributionServiceTest(ctrl)
 	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
-	state, msg := getObjectsForSyncContributionServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncContributionServiceTest()
 	require.NoError(t, sd.OnHeadState(state))
 	msg.SignedContributionAndProof.Message.Contribution.AggregationBits = make([]byte, 16)
 	err := s.ProcessMessage(context.TODO(), nil, msg)
@@ -121,9 +121,9 @@ func TestSyncContributionServiceBadAggregator(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	s, sd, clock := setupSyncContributionServiceTest(t, ctrl)
+	s, sd, clock := setupSyncContributionServiceTest(ctrl)
 	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
-	state, msg := getObjectsForSyncContributionServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncContributionServiceTest()
 	require.NoError(t, state.SetCurrentSyncCommittee(&solid.SyncCommittee{}))
 	require.NoError(t, state.SetNextSyncCommittee(&solid.SyncCommittee{}))
 	require.NoError(t, sd.OnHeadState(state))
@@ -138,10 +138,10 @@ func TestSyncContributionServiceSuccess(t *testing.T) {
 	mockFuncs := &mockFuncs{ctrl: ctrl}
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
-	s, sd, clock := setupSyncContributionServiceTest(t, ctrl)
+	s, sd, clock := setupSyncContributionServiceTest(ctrl)
 	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
-	state, msg := getObjectsForSyncContributionServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncContributionServiceTest()
 	require.NoError(t, sd.OnHeadState(state))
 	err := s.ProcessMessage(context.TODO(), nil, msg)
 	require.NoError(t, err)
