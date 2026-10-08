@@ -33,7 +33,10 @@ const HexPrefix = `0x`
 
 // MarshalText implements encoding.TextMarshaler
 func (b Bytes) MarshalText() ([]byte, error) {
-	return b.AppendText(nil)
+	result := make([]byte, len(b)*2+2)
+	copy(result, HexPrefix)
+	encodeHex(result[2:], b)
+	return result, nil
 }
 
 // AppendText implements encoding.TextAppender: the alloc-free, byte-identical

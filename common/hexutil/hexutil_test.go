@@ -342,3 +342,17 @@ func TestDecodeHexMatchesStdlib(t *testing.T) {
 		requireDecodeMatchesStdlib(t, bad[:len(bad)-1], "odd length, bad at %d", i)
 	}
 }
+
+var sinkString string
+
+// TestShortEncodingStaysOnStack checks that a short encoding builds its buffer on the stack:
+// Encode allocates only the string it returns, and MarshalText inlined into a caller nothing.
+func TestShortEncodingStaysOnStack(t *testing.T) {
+	b := bytes.Repeat([]byte{0xab}, 15)
+	require.InDelta(t, 1, testing.AllocsPerRun(100, func() { sinkString = Encode(b) }), 0)
+	n := 0
+	require.InDelta(t, 0, testing.AllocsPerRun(100, func() {
+		text, _ := Bytes(b).MarshalText()
+		n += len(text)
+	}), 0)
+}
