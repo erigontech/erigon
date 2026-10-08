@@ -21,7 +21,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -168,8 +167,6 @@ func testExecutionPayloadEnvelopesByRangeHandler(
 		Addrs: host1.Addrs(),
 	})
 	require.NoError(t, err)
-
-	peersPool := peers.NewPool(host)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -299,7 +296,6 @@ func testExecutionPayloadEnvelopesByRangeHandler(
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
@@ -371,7 +367,7 @@ func testExecutionPayloadEnvelopesByRangeHandler(
 		require.True(t, version >= clparams.FuluVersion, "expected Fulu+ version for envelope %d, got %d", i, version)
 
 		// Read SSZ-snappy encoded envelope
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
@@ -426,7 +422,6 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -489,7 +484,6 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
@@ -533,7 +527,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, version >= clparams.FuluVersion, "expected Fulu+ version for envelope %d, got %d", i, version)
 
-		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
@@ -575,7 +569,6 @@ func TestExecutionPayloadEnvelopesByRootHandler_PreGloas(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -589,7 +582,6 @@ func TestExecutionPayloadEnvelopesByRootHandler_PreGloas(t *testing.T) {
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
@@ -631,7 +623,6 @@ func TestExecutionPayloadEnvelopesByRootHandlerRejectsOverLimit(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 	ethClock, beaconCfg := getGloasEthClockAndConfig(t)
@@ -643,7 +634,6 @@ func TestExecutionPayloadEnvelopesByRootHandlerRejectsOverLimit(t *testing.T) {
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,
@@ -686,7 +676,6 @@ func TestExecutionPayloadEnvelopesByRangeHandler_PreGloas(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -701,7 +690,6 @@ func TestExecutionPayloadEnvelopesByRangeHandler_PreGloas(t *testing.T) {
 		store,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		nil,
 		beaconCfg,

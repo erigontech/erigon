@@ -72,10 +72,10 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -86,7 +86,7 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	writeBlock(root101b, root100, state101b, 101, false)
 	writeBlock(root102b, root101b, state102b, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102b)
+	reorg := drainReorgEvent(t, tx, 102, root102b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(102), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(2), reorg.Depth, "reorg Depth should be oldHeadSlot - forkPointSlot")
@@ -119,10 +119,10 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -134,7 +134,7 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 	writeBlock(root101b, root100, common.Hash{0xb1}, 101, false)
 	writeBlock(root102b, root101b, state102b, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102b)
+	reorg := drainReorgEvent(t, tx, 102, root102b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(102), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(3), reorg.Depth, "reorg Depth: old tip 103 - fork point 100 = 3")
@@ -166,10 +166,10 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -181,7 +181,7 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 	writeBlock(root102b, root101b, common.Hash{0xb2}, 102, false)
 	writeBlock(root103b, root102b, state103b, 103, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 103, root103b)
+	reorg := drainReorgEvent(t, tx, 103, root103b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(103), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(2), reorg.Depth, "reorg Depth: old tip 102 - fork point 100 = 2")
@@ -207,10 +207,10 @@ func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -219,7 +219,7 @@ func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 
 	writeBlock(root102, root101, common.Hash{0xa2}, 102, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 102, root102)
+	reorg := drainReorgEvent(t, tx, 102, root102)
 	require.Nil(t, reorg, "chain extension should NOT emit a chain_reorg event")
 }
 
@@ -242,10 +242,10 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	writeBlock := func(root, parentRoot, stateRoot common.Hash, slot uint64, canonical bool) {
 		t.Helper()
 		require.NoError(t, beacon_indicies.WriteHeaderSlot(tx, root, slot))
-		require.NoError(t, beacon_indicies.WriteParentBlockRoot(ctx, tx, root, parentRoot))
+		require.NoError(t, beacon_indicies.WriteParentBlockRoot(tx, root, parentRoot))
 		require.NoError(t, beacon_indicies.WriteStateRoot(tx, root, stateRoot))
 		if canonical {
-			require.NoError(t, beacon_indicies.MarkRootCanonical(ctx, tx, slot, root))
+			require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 		}
 	}
 
@@ -253,7 +253,7 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	writeBlock(root101a, root100, state101a, 101, true)
 	writeBlock(root101b, root100, state101b, 101, false)
 
-	reorg := drainReorgEvent(t, ctx, tx, 101, root101b)
+	reorg := drainReorgEvent(t, tx, 101, root101b)
 	require.NotNil(t, reorg, "expected a chain_reorg event to be emitted")
 	require.Equal(t, uint64(101), reorg.Slot, "reorg Slot")
 	require.Equal(t, uint64(1), reorg.Depth, "reorg Depth: old tip 101 - fork point 100 = 1")
@@ -263,7 +263,7 @@ func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
 	require.Equal(t, state101b, reorg.NewHeadState, "NewHeadState")
 }
 
-func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
+func drainReorgEvent(t *testing.T, tx kv.RwTx, headSlot uint64, headRoot common.Hash) *beaconevents.ChainReorgData {
 	t.Helper()
 	emitter := beaconevents.NewEventEmitter()
 	ch := make(chan *beaconevents.EventStream, 16)
@@ -275,7 +275,7 @@ func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uin
 		beaconCfg: &clparams.MainnetBeaconConfig,
 	}
 
-	err := updateCanonicalChainInTheDatabase(ctx, tx, headSlot, headRoot, cfg)
+	err := updateCanonicalChainInTheDatabase(tx, headSlot, headRoot, cfg)
 	require.NoError(t, err)
 
 	for {

@@ -444,7 +444,7 @@ func TestPostEthV2BeaconBlocksPublishesRequestBlobsOnNonProducingNode(t *testing
 func TestPostEthV2BeaconBlocksPublishesRequestColumnsOnNonProducingNode(t *testing.T) {
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	handler, published := newPublishingHandler(t, clparams.FuluVersion, nil)
 	b := newTestBlob(t, 1, clparams.FuluVersion)

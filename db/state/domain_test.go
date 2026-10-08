@@ -3564,7 +3564,7 @@ func collateAndMergeWithCollisionRetry(t *testing.T, tx kv.RwTx, d *Domain, txs 
 	}
 
 	// Now set up collision forcing for merge
-	d._testBuildAccessorHook = func(rs *recsplit.RecSplit) {
+	d._testBuildAccessorHook = func(rs *recsplit.RecSplit, _ *seg.Decompressor) {
 		rs.ForceCollisionOnce()
 	}
 
