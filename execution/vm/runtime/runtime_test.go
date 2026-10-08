@@ -200,6 +200,24 @@ func TestCallReusesOutputBufferAcrossTransactions(t *testing.T) {
 	require.Same(t, unsafe.SliceData(first), unsafe.SliceData(second))
 }
 
+// A transaction that returned a large output does not leave its buffer to the next one.
+func TestCallDropsAnOversizedOutputBuffer(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	returnCalldataSize := []byte{byte(vm.PUSH1), 0, byte(vm.CALLDATALOAD), byte(vm.PUSH1), 0, byte(vm.RETURN)}
+	require.NoError(t, statedb.SetCode(address, returnCalldataSize, tracing.CodeChangeUnspecified))
+	cfg := &Config{State: statedb}
+	size := func(n int) []byte { return common.LeftPadBytes(big.NewInt(int64(n)).Bytes(), 32) }
+
+	large, _, err := Call(address, size(2*1024*1024), cfg)
+	require.NoError(t, err)
+	small, _, err := Call(address, size(32), cfg)
+	require.NoError(t, err)
+	require.NotSame(t, unsafe.SliceData(large), unsafe.SliceData(small))
+}
+
 // A system call runs without Prepare and keeps its output, as the EIP-7002 requests do.
 func TestCallWithoutPrepareGetsItsOwnOutput(t *testing.T) {
 	t.Parallel()
