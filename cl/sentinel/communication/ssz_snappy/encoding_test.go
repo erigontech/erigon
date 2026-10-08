@@ -18,11 +18,14 @@ package ssz_snappy
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"testing"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -133,4 +136,14 @@ func TestDecodeAndReadNoForkDigestExactRejectsWrappedEOF(t *testing.T) {
 	reader := &terminalErrorReader{r: bytes.NewReader(encoded.Bytes()), err: terminalErr}
 	err := DecodeAndReadNoForkDigestExact(reader, &cltypes.Ping{}, clparams.Phase0Version, 8)
 	require.ErrorIs(t, err, terminalErr)
+}
+
+func TestDecodeAndReadNoForkDigestDoesNotPreallocateDeclaredLength(t *testing.T) {
+	header := binary.AppendUvarint(nil, uint64(16*datasize.MB))
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	err := DecodeAndReadNoForkDigest(bytes.NewReader(header), &cltypes.BeaconBlocksByRangeRequest{}, clparams.Phase0Version)
+	runtime.ReadMemStats(&after)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(datasize.MB))
 }

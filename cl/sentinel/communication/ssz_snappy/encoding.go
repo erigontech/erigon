@@ -120,9 +120,11 @@ func decodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	}
 	sr := snappypool.Reader(compressedInput)
 	defer snappypool.PutReader(sr)
-	raw := make([]byte, encodedLn)
-	if _, err := io.ReadFull(sr, raw); err != nil {
-		// fetch struct name of val
+	raw, err := io.ReadAll(io.LimitReader(sr, int64(encodedLn)))
+	if err == nil && uint64(len(raw)) != encodedLn {
+		err = io.ErrUnexpectedEOF
+	}
+	if err != nil {
 		return fmt.Errorf("unable to readPacket: %w", err)
 	}
 	if expectedSize != nil {
