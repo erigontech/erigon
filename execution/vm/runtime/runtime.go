@@ -263,6 +263,14 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	// Without EIP-161 an empty account survives in the post-state, and a
+	// zero-value transfer does not create the sender, so the origin has to
+	// exist for the dump and for CALL gas to match.
+	if !rules.IsEIP161Enabled() {
+		if _, err := statedb.GetOrNewStateObject(cfg.Origin); err != nil {
+			return nil, mdgas.MdGas{}, err
+		}
+	}
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), nil, accounts.ZeroAddress)
