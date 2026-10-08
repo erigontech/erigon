@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,27 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package utils
+package sentinelflags
 
-func IntersectionOfSortedSets(v1, v2 []uint64) []uint64 {
-	intersection := []uint64{}
-	// keep track of v1 and v2 element iteration
-	var i, j int
-	// Note that v1 and v2 are both sorted.
-	for i < len(v1) && j < len(v2) {
-		if v1[i] == v2[j] {
-			intersection = append(intersection, v1[i])
-			// Change both iterators
-			i++
-			j++
-			continue
-		}
-		// increase i and j accordingly
-		if v1[i] > v2[j] {
-			j++
-		} else {
-			i++
-		}
-	}
-	return intersection
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+// The upstream ethereum-package Caplin launcher starts the standalone sentinel with
+// --sentinel.tcp.port=4001 --discovery.port=4001, so the default QUIC port must not
+// collide with either of those, or with the standalone sentinel's own defaults.
+func TestSentinelQUICPortDefaultAvoidsUpstreamLauncherConflict(t *testing.T) {
+	require.Equal(t, uint(4002), SentinelQUICPort.Value)
+	require.NotEqual(t, uint(SentinelDiscoveryPort.Value), SentinelQUICPort.Value)
+	require.NotEqual(t, SentinelTcpPort.Value, SentinelQUICPort.Value)
 }

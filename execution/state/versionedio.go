@@ -1605,13 +1605,9 @@ func valueString(path AccountPath, value any) string {
 	case NoncePath, IncarnationPath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
-		switch v := value.(type) {
-		case accounts.Code:
+		if v, ok := value.(accounts.Code); ok {
 			l := min(v.Len(), 40)
 			return hex.EncodeToString(v.Bytes[0:l])
-		case []byte:
-			l := min(len(v), 40)
-			return hex.EncodeToString(v[0:l])
 		}
 		return "<unknown-code>"
 	}

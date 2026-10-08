@@ -381,8 +381,8 @@ func TestCreate2InitCodeAllocations(t *testing.T) {
 	defer ibs.Close()
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 	evm.depth = int(params.CallCreateDepth) + 1 // exclude child execution from the allocation count.
-	scope := getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 500_000})
-	defer scope.put()
+	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 500_000})
+	defer evm.putCallContext(scope)
 	scope.Memory.Resize(64)
 	clear(scope.Memory.Data())
 	allocations := func(memorySize int) float64 {

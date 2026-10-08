@@ -38,7 +38,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 	if clversion.BeforeOrEqual(clparams.DenebVersion) {
 		// Deneb and earlier
 		aggregationBits := attestation.AggregationBits.Bytes()
-		committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
+		committeesPerSlot := committeeCount(r.cfg, idxs)
 		committeeIndex := attestation.Data.CommitteeIndex
 		index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
 		count := committeesPerSlot * r.cfg.SlotsPerEpoch
@@ -75,7 +75,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation *solid.Attestatio
 	)
 	committeeOffset := 0
 	for _, committeeIndex := range committeeBits.GetOnIndices() {
-		committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
+		committeesPerSlot := committeeCount(r.cfg, idxs)
 		index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + uint64(committeeIndex)
 		count := committeesPerSlot * r.cfg.SlotsPerEpoch
 		committee, err := r.ComputeCommittee(mix, idxs, slot, count, index)
@@ -115,7 +115,7 @@ func (r *HistoricalStatesReader) ComputeCommittee(mix common.Hash, indicies []ui
 	return shuffledIndicies[start:end], nil
 }
 
-func committeeCount(cfg *clparams.BeaconChainConfig, epoch uint64, idxs []uint64) uint64 {
+func committeeCount(cfg *clparams.BeaconChainConfig, idxs []uint64) uint64 {
 	committeCount := max(min(cfg.MaxCommitteesPerSlot, uint64(len(idxs))/cfg.SlotsPerEpoch/cfg.TargetCommitteeSize), 1)
 	return committeCount
 }
@@ -150,7 +150,7 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(kvGetter state_accessor
 	return common.BytesToHash(br), nil
 }
 
-func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, getter state_accessors.GetValFn, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
+func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(getter state_accessors.GetValFn, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
 	currentCheckpoint, previousCheckpoint, _, ok, err := state_accessors.ReadCheckpoints(getter, r.cfg.RoundSlotToEpoch(stateSlot), r.cfg)
 	if err != nil {
 		return nil, err
