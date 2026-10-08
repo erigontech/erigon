@@ -272,7 +272,12 @@ func TestIsValidQuantity(t *testing.T) {
 // each vector block boundary and tail size.
 func TestEncodeHexMatchesStdlib(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
-	for n := 0; n <= 300; n++ {
+	// The long lengths cross the 64 KiB chunks fed to the assembly.
+	lengths := []int{1<<16 - 1, 1 << 16, 1<<16 + 1, 1<<18 + 17}
+	for n := range 301 {
+		lengths = append(lengths, n)
+	}
+	for _, n := range lengths {
 		src := make([]byte, n)
 		for i := range src {
 			src[i] = byte(r.Uint32())
@@ -329,5 +334,11 @@ func TestDecodeHexMatchesStdlib(t *testing.T) {
 				requireDecodeMatchesStdlib(t, bad, "len %d, byte %#02x at %d", n, b, i)
 			}
 		}
+	}
+	for _, i := range []int{0, 1<<16 - 1, 1 << 16, 1<<16 + 31, 1<<17 + 1, len(mixed) - 1} {
+		bad := slices.Clone(mixed)
+		bad[i] = 'g'
+		requireDecodeMatchesStdlib(t, bad, "bad at %d", i)
+		requireDecodeMatchesStdlib(t, bad[:len(bad)-1], "odd length, bad at %d", i)
 	}
 }

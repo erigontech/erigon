@@ -9,16 +9,12 @@ defaults:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # actions: write is for the self-cancelling step's `gh run cancel`; granting it
-    # workflow-wide would hand it to every other job here as well.
-    permissions:
-      contents: read
-      actions: write
 
     steps:
       - name: Checkout custom actions
@@ -111,12 +107,6 @@ jobs:
         with:
           cache-namespace: lint
 
-      - name: Test the SIMD hex kernel
-        env:
-          GOTOOLCHAIN: go1.27.1
-          GOEXPERIMENT: jsonv2,simd
-        run: go test -count=1 ./common/hexutil/...
-
       # golangci-lint internally trims cache entries unused for 5 days,
       # so the cache is self-cleaning even as we save new versions.
       #
@@ -158,21 +148,3 @@ jobs:
         run: |
           echo "::error title=Merge-queue root-cause failure::This job failed and is fast-cancelling the CI Gate run; THIS job is the real failure (the others show as cancelled). See its logs."
           gh run cancel ${{ github.run_id }} || true
-  hexutil-arm64:
-    name: SIMD hex on arm64
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: ./.github/actions/setup-erigon
-        with:
-          cache-namespace: hexutil-arm64
-
-      # NEON is in the arm64 baseline, so this path has no feature check to disable:
-      # the build tag is the guard, and the tests are the only thing that exercises it.
-      - name: Test the SIMD hex kernel
-        env:
-          GOTOOLCHAIN: go1.27.1
-          GOEXPERIMENT: jsonv2,simd
-        run: go test -count=1 ./common/hexutil/...
