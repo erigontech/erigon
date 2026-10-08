@@ -76,10 +76,10 @@ func runEmptiness(t *testing.T, mode emptinessMode, sc emptinessScenario, addr a
 // across the account lifecycle on the versioned (parallel) path.
 //
 // EIP-161 defines empty purely by fields — no code, zero nonce, zero balance —
-// so materializing an account must not change the verdict. createObject records
-// SelfDestructPath=false for every account it materializes, and reading that
-// write as evidence of a self-destruct made every freshly created empty account
-// report non-empty for the rest of the transaction. That suppresses the
+// so materializing an account must not change the verdict. CreateAccount records
+// SelfDestructPath=false for a new or revived account, and reading that write
+// as evidence of a self-destruct made a freshly created empty account report
+// non-empty for the rest of the transaction. That suppresses the
 // EIP-8037 account-creation state gas on a later value-bearing CALL to the
 // same address, so the two clients disagree on gas and diverge (issue #23670).
 //

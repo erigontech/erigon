@@ -83,21 +83,11 @@ type SimulatedBlock struct {
 	Calls          []ethapi.CallArgs      `json:"calls"`
 }
 
-// CallResult represents the result of a single call in the simulation.
-type CallResult struct {
-	ReturnData string          `json:"returnData"`
-	Logs       []*types.RPCLog `json:"logs"`
-	GasUsed    hexutil.Uint64  `json:"gasUsed"`
-	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
-	Status     hexutil.Uint64  `json:"status"`
-	Error      any             `json:"error,omitempty"`
-}
-
 // SimulatedBlockResult represents the result of the simulated calls for a single block (i.e. one SimulatedBlock).
 type SimulatedBlockResult = *ethapi.RPCBlock
 
 // SimulationResult represents the result contained in an eth_simulateV1 response.
-type SimulationResult []SimulatedBlockResult
+type SimulationResult = ethapi.RPCBlocks
 
 // SimulateV1 implements the eth_simulateV1 JSON-RPC method.
 func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, blockParameter rpc.BlockNumberOrHash) (SimulationResult, error) {
@@ -127,7 +117,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	blockNumber, blockHash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockParameter, tx, api._blockReader, nil)
+	blockNumber, blockHash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockParameter, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -135,11 +125,15 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNumber)
+	if err := api.checkPruneHistory(ctx, tx, blockNumber); err != nil {
+		return nil, err
+	}
+
+	header, err := api.headerByHashAndNumber(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
+	if header == nil {
 		return nil, errors.New("header not found")
 	}
 
@@ -152,7 +146,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	}
 
 	// Create a simulator instance to help with input sanitisation and execution of the simulated blocks.
-	sim := newSimulator(&req, block.Header(), chainConfig, api.dirs, api.engine(), api._txNumReader, api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout, commitmentHistory)
+	sim := newSimulator(&req, header, chainConfig, api.dirs, api.engine(), api._txNumReader, api._blockReader, api.logger, api.GasCap, api.ReturnDataLimit, api.evmCallTimeout, commitmentHistory)
 	simulatedBlocks, err := sim.sanitizeSimulatedBlocks(req.BlockStateCalls)
 	if err != nil {
 		return nil, err
@@ -195,7 +189,14 @@ func validateSimulationRequest(blocks []SimulatedBlock) error {
 		return clientLimitExceededError(fmt.Sprintf("too many blocks in request: %d > %d", len(blocks), maxSimulateBlocks))
 	}
 	var totalCalls int
-	for _, block := range blocks {
+	for bi, block := range blocks {
+		if block.BlockOverrides != nil && block.BlockOverrides.Withdrawals != nil {
+			for wi, w := range *block.BlockOverrides.Withdrawals {
+				if w == nil {
+					return &rpc.CustomError{Message: fmt.Sprintf("withdrawal %d of block %d is null", wi, bi), Code: rpc.ErrCodeInvalidParams}
+				}
+			}
+		}
 		if len(block.Calls) > maxSimulateCallsPerBlock {
 			return clientLimitExceededError(fmt.Sprintf("too many calls in block: %d > %d", len(block.Calls), maxSimulateCallsPerBlock))
 		}
@@ -332,25 +333,35 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 		overrides := block.BlockOverrides
 
 		var withdrawalsHash *common.Hash
-		if s.chainConfig.IsShanghai((uint64)(*overrides.Time)) {
+		if s.chainConfig.IsShanghai(uint64(*overrides.Time)) {
 			withdrawalsHash = &empty.WithdrawalsHash
 		}
 		var parentBeaconRoot *common.Hash
-		if s.chainConfig.IsCancun((uint64)(*overrides.Time)) {
+		if s.chainConfig.IsCancun(uint64(*overrides.Time)) {
 			parentBeaconRoot = &common.Hash{}
 			if overrides.BeaconRoot != nil {
 				parentBeaconRoot = overrides.BeaconRoot
 			}
+		}
+		difficulty := header.Difficulty
+		if s.chainConfig.IsPostMerge(overrides.Number.Uint64(), uint64(*overrides.Time)) {
+			difficulty = uint256.Int{}
+		}
+		var slotNumber *uint64
+		if header.SlotNumber != nil {
+			slot := *header.SlotNumber + 1
+			slotNumber = &slot
 		}
 		header = overrides.OverrideHeader(&types.Header{
 			UncleHash:             empty.UncleHash,
 			ReceiptHash:           empty.ReceiptsHash,
 			TxHash:                empty.TxsHash,
 			Coinbase:              header.Coinbase,
-			Difficulty:            header.Difficulty,
+			Difficulty:            difficulty,
 			GasLimit:              header.GasLimit,
 			WithdrawalsHash:       withdrawalsHash,
 			ParentBeaconBlockRoot: parentBeaconRoot,
+			SlotNumber:            slotNumber,
 		})
 		headers[bi] = header
 	}
@@ -392,13 +403,12 @@ func (s *simulator) sanitizeCall(
 		return blockGasLimitReachedError(fmt.Sprintf("block gas limit reached: %d >= %d", gasUsed, blockContext.GasLimit))
 	}
 
+	if err := ethapi.ChainIDMismatch(args.ChainID, s.chainConfig.ChainID); err != nil {
+		return err
+	}
 	if args.ChainID == nil {
 		// Copy the chain ID to avoid aliasing the live chainConfig pointer.
 		args.ChainID = (*hexutil.U256)(new(uint256.Int).Set(s.chainConfig.ChainID))
-	} else {
-		if have := (*uint256.Int)(args.ChainID); !have.Eq(s.chainConfig.ChainID) {
-			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, s.chainConfig.ChainID)
-		}
 	}
 	if baseFee == nil {
 		// If there's no base fee, then it must be a non-1559 execution
@@ -427,8 +437,10 @@ type diffTrackingWriter struct {
 	touchedKeys keysByAccount
 }
 
-type storageKeys []accounts.StorageKey
-type keysByAccount map[accounts.Address]storageKeys
+type (
+	storageKeys   []accounts.StorageKey
+	keysByAccount map[accounts.Address]storageKeys
+)
 
 var _ state.StateWriter = (*diffTrackingWriter)(nil)
 
@@ -529,7 +541,7 @@ func (s *simulator) simulateBlock(
 
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
-	tracer := rpchelper.NewLogTracer(s.traceTransfers, blockNumber, common.Hash{}, common.Hash{}, 0)
+	tracer := rpchelper.NewLogTracer(s.traceTransfers && !s.chainConfig.IsEIPEnabled(7708, header.Time), blockNumber, common.Hash{}, common.Hash{}, 0)
 	cumulativeGasUsed := uint64(0)
 	cumulativeBlobGasUsed := uint64(0)
 
@@ -586,7 +598,7 @@ func (s *simulator) simulateBlock(
 	}
 
 	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum)
-	callResults := make([]CallResult, 0, len(bsc.Calls))
+	callResults := make([]ethapi.CallResult, 0, len(bsc.Calls))
 	for callIndex := range bsc.Calls {
 		call := &bsc.Calls[callIndex]
 		callResult, txn, receipt, err := s.simulateCall(ctx, blockCtx, intraBlockState, callIndex, call, header,
@@ -610,6 +622,9 @@ func (s *simulator) simulateBlock(
 	var withdrawals types.Withdrawals
 	if s.chainConfig.IsShanghai(header.Time) {
 		withdrawals = types.Withdrawals{}
+		if bsc.BlockOverrides != nil && bsc.BlockOverrides.Withdrawals != nil {
+			withdrawals = *bsc.BlockOverrides.Withdrawals
+		}
 	}
 	systemCall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return systemCallCustom(contract, data, intraBlockState, header, false)
@@ -675,11 +690,11 @@ func (s *simulator) newStateReaderForBlock(
 	}
 
 	if minTxNum < state.StateHistoryStartTxNum(tx) {
-		return nil, 0, 0, fmt.Errorf("%w: min tx: %d", state.PrunedError, minTxNum)
+		return nil, 0, 0, fmt.Errorf("%w: min tx: %d", state.ErrPruned, minTxNum)
 	}
 	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
 	if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-		return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.PrunedError, commitmentStartingTxNum, minTxNum)
+		return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.ErrPruned, commitmentStartingTxNum, minTxNum)
 	}
 
 	if len(ancestors) > 0 {
@@ -763,7 +778,7 @@ func (s *simulator) simulateCall(
 	logTracer *rpchelper.LogTracer,
 	vmConfig vm.Config,
 	precompiles vm.PrecompiledContracts,
-) (*CallResult, types.Transaction, *types.Receipt, error) {
+) (*ethapi.CallResult, types.Transaction, *types.Receipt, error) {
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, s.evmCallTimeout)
 	defer cleanup()
 
@@ -779,6 +794,10 @@ func (s *simulator) simulateCall(
 	}
 	msg.SetCheckGas(false) // EIP-7825 gas cap does not apply to simulated calls (matches Geth SkipTransactionChecks)
 	msg.SetCheckNonce(s.validation)
+	// A call that pays no fee must not fund the burnt contract of a chain that has one.
+	if !s.validation && msg.FeeCap().IsZero() {
+		msg.SetIsFree(true)
+	}
 	txCtx := protocol.NewEVMTxContext(msg)
 	txn, err := call.ToTransaction(s.gasPool.Gas(), &blockCtx.BaseFee)
 	if err != nil {
@@ -814,20 +833,17 @@ func (s *simulator) simulateCall(
 		logs = receipt.Logs
 	}
 
-	callResult := CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed), MaxUsedGas: hexutil.Uint64(result.MaxGasUsed)}
-	callResult.Logs = make([]*types.RPCLog, 0, len(logs))
+	callResult := ethapi.CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed), MaxUsedGas: hexutil.Uint64(result.MaxGasUsed)}
+	callResult.Logs = make([]*types.Log, 0, len(logs))
 	for _, l := range logs {
-		rpcLog := &types.RPCLog{
-			Log:            *l,
-			BlockTimestamp: hexutil.Uint64(header.Time),
-		}
-		callResult.Logs = append(callResult.Logs, rpcLog)
+		callResult.Logs = append(callResult.Logs, types.StampedLog(l, header.Time))
 	}
 	if len(result.ReturnData) > s.returnDataLimit {
 		callResult.Status = hexutil.Uint64(types.ReceiptStatusFailed)
 		callResult.ReturnData = "0x"
 		callResult.Error = rpc.NewJsonErrorFromErr(
-			fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), s.returnDataLimit))
+			fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), s.returnDataLimit),
+		)
 	} else {
 		if result.Failed() {
 			callResult.Status = hexutil.Uint64(types.ReceiptStatusFailed)
@@ -885,7 +901,7 @@ func (s *simulator) newSimulatedCanonicalReader(headers []*types.Header) dbservi
 
 // repairLogs updates the block hash in the logs present in the result of a simulated block.
 // This is needed because when logs are collected during execution, the block hash is not known.
-func repairLogs(calls []CallResult, hash common.Hash) {
+func repairLogs(calls []ethapi.CallResult, hash common.Hash) {
 	for i := range calls {
 		for j := range calls[i].Logs {
 			calls[i].Logs[j].BlockHash = hash
@@ -992,6 +1008,8 @@ func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader
 func (r *simulationStateReader) CloneForWorker(_ context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
 	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
 }
+
+func (r *simulationStateReader) BindsWorkerTx() bool { return true }
 
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, commitmentAsOfTxNum uint64, plainStateAsOfTxNum uint64) commitmentdb.StateReader {
 	return &simulationStateReader{sd: sd, roTx: roTx, commitmentAsOfTxNum: commitmentAsOfTxNum, plainStateAsOfTxNum: plainStateAsOfTxNum}

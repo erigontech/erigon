@@ -81,6 +81,27 @@ func TestKeybytesHex(t *testing.T) {
 	}
 }
 
+func TestExpandMatchesBytewise(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	for n := range 70 {
+		src := make([]byte, n)
+		rng.Read(src)
+		want := make([]byte, 0, 2*n)
+		for _, b := range src {
+			want = append(want, b>>4, b&0x0f)
+		}
+		got := make([]byte, 2*n)
+		Expand(src, got)
+		require.Equal(t, want, got, "len %d", n)
+	}
+}
+
+func TestExpandShortDstPanics(t *testing.T) {
+	dst := make([]byte, 8)
+	require.Panics(t, func() { Expand([]byte{0xab, 0xcd, 0xef, 0x12}, dst[:7]) })
+	require.Panics(t, func() { Expand([]byte{0xab}, dst[:1]) })
+}
+
 func TestHexCompactRoundtrip(t *testing.T) {
 	rng := rand.New(rand.NewSource(42))
 

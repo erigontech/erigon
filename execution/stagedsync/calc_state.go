@@ -108,6 +108,8 @@ type calcState struct {
 
 	logger    log.Logger
 	logPrefix string
+
+	prefetch func(plainKey []byte)
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -172,6 +174,10 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	}
 	acc.dirty = true
 	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+	if cs.prefetch != nil {
+		address := addr.Value()
+		cs.prefetch(address[:])
+	}
 }
 
 // ApplyWrites folds a tx's typed write collections into the local state.
@@ -248,6 +254,10 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			cs.storageDirty[addr] = dirty
 		}
 		for key, vw := range inner {
+			if cs.prefetch != nil && !dirty[key] {
+				address, slot := addr.Value(), key.Value()
+				cs.prefetch(append(address[:], slot[:]...))
+			}
 			slots[key] = vw.Val
 			dirty[key] = true
 		}
@@ -311,12 +321,13 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 	// it here, gated exactly as the incremental path (Normalize).
 	for i := range blockAccessList {
 		ac := &blockAccessList[i]
-		acc := cs.accounts[ac.Address]
+		addr := accounts.InternAddress(ac.Address)
+		acc := cs.accounts[addr]
 		if acc == nil || !acc.dirty || acc.Deleted {
 			continue
 		}
 		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash &&
-			state.EIP161EmptyRemoval(emptyRemoval, isAura, ac.Address) {
+			state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) {
 			acc.Deleted = true
 			acc.Incarnation = 0
 		}

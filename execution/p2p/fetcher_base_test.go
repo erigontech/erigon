@@ -548,7 +548,6 @@ func TestFetcherFetchBodies(t *testing.T) {
 						common.BigToAddress(big.NewInt(123)),
 						uint256.NewInt(55),
 						0,
-						uint256.NewInt(666),
 						uint256.NewInt(777),
 						uint256.NewInt(888),
 						nil,
@@ -575,7 +574,6 @@ func TestFetcherFetchBodies(t *testing.T) {
 						common.BigToAddress(big.NewInt(321)),
 						uint256.NewInt(21),
 						0,
-						uint256.NewInt(987),
 						uint256.NewInt(876),
 						uint256.NewInt(765),
 						nil,
@@ -614,7 +612,8 @@ func TestFetcherFetchBodiesRejectsExcessBeforeDecoding(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockRawBlockBodiesPacketBytes(t, requestId,
+			Data: newMockRawBlockBodiesPacketBytes(
+				t, requestId,
 				bodyBytes,
 				rlp.RawValue{0x80},
 			),
@@ -666,7 +665,8 @@ func TestFetcherFetchBodiesDoesNotDecodeUnrelatedResponse(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockRawBlockBodiesPacketBytes(t, requestId+1,
+			Data: newMockRawBlockBodiesPacketBytes(
+				t, requestId+1,
 				rlp.RawValue{0x80},
 			),
 		},
@@ -702,7 +702,8 @@ func TestFetcherFetchBodiesRejectsInvalidMatchingResponse(t *testing.T) {
 		{
 			Id:     sentryproto.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockRawBlockBodiesPacketBytes(t, requestId,
+			Data: newMockRawBlockBodiesPacketBytes(
+				t, requestId,
 				rlp.RawValue{0x80},
 			),
 		},
@@ -804,7 +805,6 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 						common.BigToAddress(big.NewInt(123)),
 						uint256.NewInt(55),
 						0,
-						uint256.NewInt(666),
 						uint256.NewInt(777),
 						uint256.NewInt(888),
 						nil,

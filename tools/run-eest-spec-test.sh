@@ -38,7 +38,7 @@
 #                                              maps to one for_osaka_at_<NNNN>M/
 #                                              directory under the engine_x
 #                                              benchmark fixtures
-#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka}-sequential
+#   blocktests-stable-race-{pre-cancun,cancun,prague,osaka,amsterdam}-sequential
 #                                              race-detector variant of
 #                                              blocktests-stable-sequential, split by
 #                                              fork via the manifest `run` regex so

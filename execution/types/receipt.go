@@ -28,12 +28,14 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -91,7 +93,7 @@ type receiptMarshaling struct {
 	Status            hexutil.Uint64
 	CumulativeGasUsed hexutil.Uint64
 	GasUsed           hexutil.Uint64
-	BlockNumber       *hexutil.Big
+	BlockNumber       *hexutil.U256
 	TransactionIndex  hexutil.Uint
 }
 
@@ -355,17 +357,30 @@ func (r *Receipt) statusEncoding() []byte {
 	return r.PostState
 }
 
-// LogsBloom returns Bloom, or the bloom derived from the logs and cached when Bloom is unset.
-func (r *Receipt) LogsBloom() Bloom {
+// Size returns the approximate memory held by the receipt and its logs.
+func (r *Receipt) Size() int {
+	n := int(unsafe.Sizeof(*r)) + len(r.PostState)
+	if r.BlockNumber != nil {
+		n += int(unsafe.Sizeof(*r.BlockNumber))
+	}
+	for _, l := range r.Logs {
+		n += int(unsafe.Sizeof(l)) + int(unsafe.Sizeof(*l)) + len(l.Topics)*length.Hash + len(l.Data)
+	}
+	return n
+}
+
+// LogsBloom returns a pointer into the receipt, or to the bloom derived from the logs and
+// cached when Bloom is unset, so a caller that only reads it copies nothing.
+func (r *Receipt) LogsBloom() *Bloom {
 	if !r.Bloom.IsEmpty() || len(r.Logs) == 0 {
-		return r.Bloom
+		return &r.Bloom
 	}
 	if b := r.derivedBloom.Load(); b != nil {
-		return *b
+		return b
 	}
 	b := CreateBloom(Receipts{r})
 	r.derivedBloom.Store(&b)
-	return b
+	return &b
 }
 
 // Copy creates a deep copy of the Receipt.
@@ -589,7 +604,7 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 		}
 		logIndex += len(r.Logs)
 
-		//no duplicates
+		// no duplicates
 		if len(r.Logs) <= 1 {
 			continue
 		}

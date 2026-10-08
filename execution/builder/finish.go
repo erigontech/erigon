@@ -124,7 +124,8 @@ func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, lo
 	}
 
 	if block.Transactions().Len() > 0 {
-		logger.Info(fmt.Sprintf("[%s] block ready for seal", logPrefix),
+		logger.Info(
+			fmt.Sprintf("[%s] block ready for seal", logPrefix),
 			"blockNum", block.NumberU64(),
 			"nonce", block.NonceU64(),
 			"hash", block.Hash(),

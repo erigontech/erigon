@@ -51,24 +51,20 @@ func (b *readBuffer) reset() {
 // The returned slice is valid until the next call to reset.
 func (b *readBuffer) read(r io.Reader, n int) ([]byte, error) {
 	offset := len(b.data)
-	have := b.end - len(b.data)
-
-	// If n bytes are available in the buffer, there is no need to read from r at all.
-	if have >= n {
-		b.data = b.data[:offset+n]
-		return b.data[offset : offset+n], nil
+	for b.end-offset < n {
+		need := n - (b.end - offset)
+		if b.end == cap(b.data) {
+			b.grow(min(need, max(4096, cap(b.data))))
+		}
+		rn, err := io.ReadAtLeast(r, b.data[b.end:cap(b.data)], min(need, cap(b.data)-b.end))
+		b.end += rn
+		if err != nil {
+			if err == io.EOF && b.end > offset {
+				err = io.ErrUnexpectedEOF
+			}
+			return nil, err
+		}
 	}
-
-	// Make buffer space available.
-	need := n - have
-	b.grow(need)
-
-	// Read.
-	rn, err := io.ReadAtLeast(r, b.data[b.end:cap(b.data)], need)
-	if err != nil {
-		return nil, err
-	}
-	b.end += rn
 	b.data = b.data[:offset+n]
 	return b.data[offset : offset+n], nil
 }

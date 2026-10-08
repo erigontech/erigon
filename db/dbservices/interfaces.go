@@ -60,7 +60,11 @@ type CanonicalReader interface {
 
 type BodyReader interface {
 	BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error)
+	// BodyWithRawTransactions returns the body with its transactions in their binary (canonical
+	// EIP-2718) encoding, skipping the decode where the storage allows.
+	BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.RawBody, err error)
 	BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error)
+	// Body reads body metadata and the user transaction count without loading transactions.
 	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error)
 	CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error)
 	HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
@@ -70,6 +74,7 @@ type BodyReader interface {
 type TxnReader interface {
 	TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error)
 	TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, ok bool, err error)
+	TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (hash common.Hash, ok bool, err error)
 	RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error)
 	FirstTxnNumNotInSnapshots(tx kv.Getter) uint64
 }

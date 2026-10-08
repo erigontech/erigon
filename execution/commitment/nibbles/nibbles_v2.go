@@ -81,10 +81,7 @@ func DecodeKeyV2(key []byte) ([]byte, error) {
 	}
 
 	out := make([]byte, n)
-	for i := 0; i < n/2; i++ {
-		out[2*i] = packed[i] >> 4
-		out[2*i+1] = packed[i] & 0x0F
-	}
+	Expand(packed[:n/2], out)
 	if parity == 1 {
 		out[n-1] = packed[len(packed)-1] >> 4
 	}
