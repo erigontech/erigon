@@ -443,6 +443,17 @@ func (c *JsonRpcClient) GetBlobsV4(ctx context.Context, blobHashes []common.Hash
 	}, c.backOff(ctx))
 }
 
+func (c *JsonRpcClient) GetInclusionListV1(ctx context.Context) ([]hexutil.Bytes, error) {
+	return backoff.RetryWithData(func() ([]hexutil.Bytes, error) {
+		var result []hexutil.Bytes
+		err := c.rpcClient.CallContext(ctx, &result, "engine_getInclusionListV1")
+		if err != nil {
+			return nil, c.maybeMakePermanent(err)
+		}
+		return result, nil
+	}, c.backOff(ctx))
+}
+
 func (c *JsonRpcClient) backOff(ctx context.Context) backoff.BackOff {
 	var backOff backoff.BackOff
 	backOff = backoff.NewConstantBackOff(c.retryBackOff)
