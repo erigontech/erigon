@@ -310,7 +310,8 @@ func innerOutputsShareBuffer(cfg Config) bool {
 	evm.depth = 2
 	var mem Memory
 	mem.Resize(32)
-	return unsafe.SliceData(evm.output(&mem, 0, 32)) == unsafe.SliceData(evm.output(&mem, 0, 32))
+	a, b := evm.output(&mem, 0, 32), evm.output(&mem, 0, 32)
+	return unsafe.SliceData(a) == unsafe.SliceData(b)
 }
 
 func TestInnerFrameOutputReusesBuffer(t *testing.T) {
