@@ -1630,3 +1630,29 @@ func TestByteLRU_ByteBoundAndOversizeRejection(t *testing.T) {
 		require.Equal(t, wasResident, ok, "key %d: an oversize Add must not evict the resident set", k)
 	}
 }
+
+// An unwind bumps the read-view epoch, so a view bound to the discarded fork
+// misses even when the replacement fork has an entry for the key. This does not
+// cover an unwind that lands between the entry read and the epoch load; that
+// window has no test seam, and the load order in GetVisible is what closes it.
+func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	sc.Applier().Initialize(1)
+	sc.Applier().Publish(1, 2, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(1), TxNum: 5}})
+
+	var unwindOnce sync.Once
+	oldFork := FrontierFunc(func(kv.Domain) (uint64, bool) {
+		unwindOnce.Do(func() {
+			sc.Applier().PublishUnwind(2, 3, 4, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(2), TxNum: 6}})
+		})
+		return 10, true
+	})
+	view := sc.View(FrontierWithStateVersion(oldFork, 2))
+
+	_, _, ok := view.GetVisible(kv.AccountsDomain, key)
+	require.False(t, ok, "an old-fork view must not read the replacement fork's entry")
+}
