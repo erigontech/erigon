@@ -20,10 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var (
-	globalBeaconConfig *clparams.BeaconChainConfig
-	globalCaplinConfig *clparams.CaplinConfig
-)
+var globalBeaconConfig *clparams.BeaconChainConfig
 
 func init() {
 	// Initialize global config once for all tests
@@ -35,8 +32,7 @@ func init() {
 	cfg.MaxBlobCommittmentsPerBlock = 6
 	cfg.GloasForkEpoch = cfg.FarFutureEpoch
 	globalBeaconConfig = &cfg
-	globalCaplinConfig = &clparams.CaplinConfig{}
-	clparams.InitGlobalStaticConfig(globalBeaconConfig, globalCaplinConfig)
+	clparams.InitGlobalStaticConfig(globalBeaconConfig)
 }
 
 func setupTestDataColumnStorage(t *testing.T) (DataColumnStorage, afero.Fs, *clparams.BeaconChainConfig) {

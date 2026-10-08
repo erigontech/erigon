@@ -54,7 +54,6 @@ type blobSidecarService struct {
 
 // NewBlobSidecarService creates a new blob sidecar service
 func NewBlobSidecarService(
-	ctx context.Context,
 	beaconCfg *clparams.BeaconChainConfig,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
 	syncedDataManager *synced_data.SyncedDataManager,
@@ -151,7 +150,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar)
 	kzgCtx := kzg.Ctx()
 
 	if !b.test && !cltypes.VerifyCommitmentInclusionProof(msg.KzgCommitment, msg.CommitmentInclusionProof, msg.Index,
-		clparams.DenebVersion, msg.SignedBlockHeader.Header.BodyRoot) {
+		msg.SignedBlockHeader.Header.BodyRoot) {
 		return ErrCommitmentsInclusionProofFailed
 	}
 

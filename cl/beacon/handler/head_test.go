@@ -147,7 +147,7 @@ func TestHeadBlockIDUsesSelectedHead(t *testing.T) {
 	blockID, err := beaconhttp.BlockIdFromRequest(request)
 	require.NoError(t, err)
 
-	root, err := a.rootFromBlockId(request.Context(), nil, blockID)
+	root, err := a.rootFromBlockId(nil, blockID)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash{0xaa}, root)
 }
