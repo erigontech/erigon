@@ -128,7 +128,7 @@ func (ibs *IntraBlockState) committedCodeDirect(addr accounts.Address) (accounts
 // this lets stateObject.SetCode compare against the current code (matching the
 // cached path) instead of the stale tx-start value.
 func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts.CodeHash) (accounts.Code, error) {
-	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
+	if isDirty := ibs.journal.isDirty(addr); isDirty {
 		if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
 			return vw.Val, nil
 		}
@@ -379,7 +379,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// the probe. Own writes take precedence via the dirty gate (the same gate
 	// versionedWriteHit uses), so a written path never takes this branch.
 	if !commited {
-		if _, dirty := s.journal.dirties[addr]; !dirty {
+		if dirty := s.journal.isDirty(addr); !dirty {
 			if prHeader, ok := s.versionedReads.getHeader(addr, path, key); ok &&
 				(prHeader.Source == MapRead || prHeader.Source == StorageRead) {
 				r.outcome = outcomeReadSetHit
@@ -1067,8 +1067,7 @@ func warmSource(src ReadSource) bool { return src == MapRead || src == StorageRe
 // the read-once fast paths check this tx's write set before the recorded read.
 // Same gate as versionedWriteHit.
 func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
-	_, dirty := ibs.journal.dirties[addr]
-	return !dirty
+	return !ibs.journal.isDirty(addr)
 }
 
 // warmField serves a repeat read of an account field without the version-map
