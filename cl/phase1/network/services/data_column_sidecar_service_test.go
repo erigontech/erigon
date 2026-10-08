@@ -345,26 +345,13 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidInclusionProo
 // TestProcessMessage_WhenSlotAfterFinalizedEpochStart_PassesFinalityCheck checks that only sidecars at or
 // before compute_start_slot_at_epoch(finalized_checkpoint.epoch) are ignored, not the whole finalized epoch.
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotAfterFinalizedEpochStart_PassesFinalityCheck() {
-	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
-	verifyDataColumnSidecarInclusionProof = t.mockFuncs.VerifyDataColumnSidecarInclusionProof
-	blsVerify = t.mockFuncs.BlsVerify
-
-	t.mockSyncedData.EXPECT().Syncing().Return(false)
-	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
-	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(true).AnyTimes()
-	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarInclusionProof", gomock.Any()).Return(false).AnyTimes()
-	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
-	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
+	t.setupFinalizedAncestorTest(testFinalizedRoot)
 	// The sidecar's slot is in the finalized epoch but after its start slot. FinalizedSlot() returns
 	// the last slot of that epoch, as ForkChoiceStore does.
 	finalizedEpoch := testSlot / testSlotsPerEpoch
 	t.Require().Greater(testSlot, finalizedEpoch*testSlotsPerEpoch)
-	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: finalizedEpoch, Root: testFinalizedRoot}
 	t.mockForkChoice.Ancestors[finalizedEpoch*testSlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: testFinalizedRoot}
 	t.mockForkChoice.FinalizedSlotVal = finalizedEpoch*testSlotsPerEpoch + testSlotsPerEpoch - 1
-	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
-		return nil
-	}).Return(nil).AnyTimes()
 
 	sidecar := createMockDataColumnSidecar(testSlot, 0)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
@@ -378,26 +365,14 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotAfterFinalizedEp
 // the finalized-ancestor lookup starts at the anchor slot when the node's history begins after the start slot
 // of the finalized checkpoint epoch.
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAnchorAfterFinalizedEpochStart_ChecksAncestorAtAnchor() {
-	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
-	verifyDataColumnSidecarInclusionProof = t.mockFuncs.VerifyDataColumnSidecarInclusionProof
-	blsVerify = t.mockFuncs.BlsVerify
-
-	t.mockSyncedData.EXPECT().Syncing().Return(false)
-	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
-	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(true).AnyTimes()
-	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarInclusionProof", gomock.Any()).Return(false).AnyTimes()
-	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
-	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
 	finalizedEpoch := testSlot/testSlotsPerEpoch - 1
 	checkpointRoot := common.Hash{0x0f}
+	t.setupFinalizedAncestorTest(checkpointRoot)
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: finalizedEpoch, Root: checkpointRoot}
 	// Fork choice starts mid-epoch, so the epoch start slot is not in its history.
 	anchorSlot := finalizedEpoch*testSlotsPerEpoch + 5
 	t.mockForkChoice.AnchorSlotVal = anchorSlot
 	t.mockForkChoice.Ancestors[anchorSlot] = forkchoice.ForkChoiceNode{Root: checkpointRoot}
-	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
-		return nil
-	}).Return(nil).AnyTimes()
 
 	sidecar := createMockDataColumnSidecar(testSlot, 0)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
@@ -407,32 +382,21 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAnchorAfterFinalized
 	t.Contains(err.Error(), "invalid inclusion proof")
 }
 
-// setupFinalizedAncestorTest prepares a Fulu sidecar that passes every check before the finalized-ancestor
-// check, with the finalized checkpoint in the sidecar's epoch.
+// setupFinalizedAncestorTest prepares a Fulu sidecar that reaches the finalized-ancestor check.
 func (t *dataColumnSidecarTestSuite) setupFinalizedAncestorTest(checkpointRoot common.Hash) {
 	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
+	verifyDataColumnSidecarInclusionProof = t.mockFuncs.VerifyDataColumnSidecarInclusionProof
 	blsVerify = t.mockFuncs.BlsVerify
 	t.mockSyncedData.EXPECT().Syncing().Return(false)
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarInclusionProof", gomock.Any()).Return(false).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: testSlot / testSlotsPerEpoch, Root: checkpointRoot}
 	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(fn synced_data.ViewHeadStateFn) error {
 		return nil
 	}).Return(nil).AnyTimes()
-}
-
-// TestProcessMessage_WhenFinalizedAncestorUnknown_ReturnsErrIgnore checks that a sidecar whose finalized
-// ancestor fork choice cannot resolve (e.g. pruned while finality advances) is ignored, not rejected, so the
-// sender is not penalized for the node's own missing history.
-func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenFinalizedAncestorUnknown_ReturnsErrIgnore() {
-	t.setupFinalizedAncestorTest(common.Hash{0x0f})
-	// No entry in Ancestors: the lookup returns the zero root, as ForkChoiceStore does for a missing header.
-
-	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, createMockDataColumnSidecar(testSlot, 0))
-
-	t.ErrorIs(err, ErrIgnore)
 }
 
 // TestProcessMessage_WhenFinalizedCheckpointIsNotAncestor_ReturnsError checks that a known ancestor other than

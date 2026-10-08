@@ -246,19 +246,8 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 		return fmt.Errorf("data column sidecar should be from a higher slot than the parent block, but got %d <= %d", blockHeader.Slot, parentHeader.Slot)
 	}
 
-	// [REJECT] The finalized checkpoint is an ancestor. Like block gossip, look it up no earlier than the
-	// anchor slot, where fork choice history begins.
-	ancestorSlot := finalizedStartSlot
-	if anchorSlot := s.forkChoice.AnchorSlot(); ancestorSlot < anchorSlot {
-		ancestorSlot = anchorSlot
-	}
-	ancestor := s.forkChoice.Ancestor(blockHeader.ParentRoot, ancestorSlot)
-	if ancestor.Root == (common.Hash{}) {
-		// Fork choice no longer has the path, e.g. it was pruned while finality advanced. That is not the
-		// sender's fault, so ignore the sidecar instead of rejecting it.
-		return ErrIgnore
-	}
-	if ancestor.Root != finalizedCheckpoint.Root {
+	// [REJECT] The finalized checkpoint is an ancestor, clamped to the anchor slot.
+	if s.forkChoice.Ancestor(blockHeader.ParentRoot, max(finalizedStartSlot, s.forkChoice.AnchorSlot())).Root != finalizedCheckpoint.Root {
 		return errors.New("finalized checkpoint is not an ancestor of the sidecar's block")
 	}
 
