@@ -380,6 +380,38 @@ func TestVerifyUnverifiedGloasPayloadsDoesNotRecordTimeoutAsVerdict(t *testing.T
 	require.Zero(t, cfg.gloasVerificationCursor)
 }
 
+func TestVerifyUnverifiedGloasPayloadsChecksDirectExtensionWithEmptyCursor(t *testing.T) {
+	cfg, graph, oldHeadRoot, newHead, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	oldHead := graph.parents[oldHeadRoot]
+	oldEnvelope := graph.envelopes[oldHeadRoot]
+	delete(graph.parents, oldHeadRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), oldHead, false, false, false))
+	cfg.forkChoice.MarkPayloadStatus(oldHeadRoot, oldEnvelope.Message.Payload.BlockHash, execution_client.PayloadStatusValidated)
+
+	newPayloadHash := common.Hash{2}
+	newHead.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = newPayloadHash
+	newHeadRoot, err := newHead.Block.HashSSZ()
+	require.NoError(t, err)
+	encodedEnvelope, err := oldEnvelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	newEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg.beaconCfg)}
+	require.NoError(t, newEnvelope.DecodeSSZ(encodedEnvelope, int(clparams.GloasVersion)))
+	newEnvelope.Message.BeaconBlockRoot = newHeadRoot
+	newEnvelope.Message.Payload.BlockHash = newPayloadHash
+	graph.envelopes[newHeadRoot] = newEnvelope
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), newHead, false, false, false))
+	selectedRoot, _, err := cfg.forkChoice.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(newHeadRoot), selectedRoot)
+
+	cfg.gloasVerificationHead = oldHeadRoot
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.True(t, cfg.forkChoice.IsPayloadVerified(newHeadRoot))
+}
+
 func TestChainTipSyncReverifiesHeadEnvelopeReceivedAtTarget(t *testing.T) {
 	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	headBlock := graph.parents[headRoot]

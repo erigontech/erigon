@@ -1177,7 +1177,8 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		}
 	} else if _, ok := cfg.forkChoice.GetBlock(root); !ok {
 		root = headRoot
-	} else if root != headRoot {
+	}
+	if root != headRoot {
 		headBlock, headOK := cfg.forkChoice.GetBlock(headRoot)
 		if headOK && headBlock != nil && cfg.forkChoice.HasEnvelope(headRoot) && !cfg.forkChoice.IsPayloadVerified(headRoot) {
 			selectedHead = &gloasVerificationItem{root: headRoot, block: headBlock}
