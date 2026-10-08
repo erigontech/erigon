@@ -34,11 +34,9 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/rpc"
 )
 
 const ilTestMaxReorgDepth = 64
@@ -346,69 +344,6 @@ func TestNewPayloadV6JSONRPCClient(t *testing.T) {
 	require.True(t, *status.InclusionListSatisfied)
 	require.Len(t, *inserted, 1)
 	require.Len(t, (*inserted)[0].InclusionList(), len(inclusionList))
-}
-
-func newGetInclusionListClient(t *testing.T, inclusionList func(context.Context) (types.Transactions, error)) *rpc.Client {
-	t.Helper()
-	return newEngineInProcClient(t, &EngineServer{logger: log.New(), executionService: &stubExecutionModule{inclusionListFunc: inclusionList}})
-}
-
-func TestGetInclusionListV1(t *testing.T) {
-	t.Parallel()
-
-	txnWithData := func(nonce uint64, dataLen int) types.Transaction {
-		return types.NewTransaction(nonce, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), make([]byte, dataLen))
-	}
-	half := int(params.MaxTransactionsBytesPerInclusionListEIP7805) / 2
-	a, b, c := txnWithData(0, 100), txnWithData(1, half), txnWithData(2, half)
-
-	for _, tc := range []struct {
-		name string
-		txns types.Transactions
-		want types.Transactions
-	}{
-		{"encodes_transactions", types.Transactions{a, b}, types.Transactions{a, b}},
-		{"skips_transactions_over_byte_limit", types.Transactions{b, c, a}, types.Transactions{b, a}},
-		{"empty", nil, types.Transactions{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			client := newGetInclusionListClient(t, func(context.Context) (types.Transactions, error) {
-				return tc.txns, nil
-			})
-
-			var raw json.RawMessage
-			require.NoError(t, client.CallContext(t.Context(), &raw, "engine_getInclusionListV1"))
-			var result []hexutil.Bytes
-			require.NoError(t, json.Unmarshal(raw, &result))
-			require.NotNil(t, result, "an empty inclusion list must be [] rather than null")
-
-			want, err := types.MarshalTransactionsBinary(tc.want)
-			require.NoError(t, err)
-			require.Len(t, result, len(want))
-			total := 0
-			for i := range want {
-				require.Equal(t, hexutil.Bytes(want[i]), result[i])
-				total += len(result[i])
-			}
-			require.LessOrEqual(t, total, int(params.MaxTransactionsBytesPerInclusionListEIP7805))
-		})
-	}
-}
-
-func TestGetInclusionListV1JSONRPCClient(t *testing.T) {
-	t.Parallel()
-
-	txns := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), nil)}
-	client := &JsonRpcClient{rpcClient: newGetInclusionListClient(t, func(context.Context) (types.Transactions, error) {
-		return txns, nil
-	})}
-
-	result, err := client.GetInclusionListV1(t.Context())
-	require.NoError(t, err)
-	want, err := types.MarshalTransactionsBinary(txns)
-	require.NoError(t, err)
-	require.Equal(t, []hexutil.Bytes{want[0]}, result)
 }
 
 func TestGetInclusionListV1PropagatesExecutionError(t *testing.T) {

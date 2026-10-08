@@ -58,5 +58,3 @@ const (
 const EngineGetInclusionListV1 = "engine_getInclusionListV1"
 
 const EngineGetClientVersionV1 = "engine_getClientVersionV1"
-
-const EngineGetInclusionListV1 = "engine_getInclusionListV1"

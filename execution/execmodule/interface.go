@@ -155,9 +155,6 @@ type ExecutionModule interface {
 	// otherwise PayloadID identifies the new build.
 	AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error)
 
-	// InclusionList builds an inlusion list for EIP-7805 from its view of the mempool.
-	InclusionList(ctx context.Context) (types.Transactions, error)
-
 	// GetAssembledBlock stops and waits for payloadID's builder. Busy reports that the execution
 	// module is occupied; Unknown reports that no builder is held for payloadID.
 	GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error)
