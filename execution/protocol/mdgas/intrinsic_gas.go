@@ -20,6 +20,8 @@
 package mdgas
 
 import (
+	"bytes"
+
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
@@ -50,14 +52,10 @@ type IntrinsicGasCalcResult struct {
 
 // CountNonZeroBytes returns the number of non-zero bytes in data.
 func CountNonZeroBytes(data []byte) int {
-	count := 0
-	for _, b := range data {
-		if b != 0 {
-			count++
-		}
-	}
-	return count
+	return len(data) - bytes.Count(data, zeroByte)
 }
+
+var zeroByte = []byte{0}
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
 // It counts the non-zero bytes in args.Data and then calls CalcIntrinsicGas.
