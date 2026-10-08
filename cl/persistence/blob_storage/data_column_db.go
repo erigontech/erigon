@@ -135,7 +135,7 @@ func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot 
 	defer fh.Close()
 	version := s.beaconChainConfig.GetCurrentStateVersion(slot / s.beaconChainConfig.SlotsPerEpoch)
 	if version < clparams.GloasVersion {
-		length, _, err := ssz_snappy.ReadUvarint(fh)
+		length, err := ssz_snappy.ReadUvarint(fh)
 		if err != nil {
 			return err
 		}
