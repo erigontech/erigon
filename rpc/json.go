@@ -111,19 +111,11 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 func (msg *jsonrpcMessage) writeResponse(stream *jsonstream.Stream, result any) error {
 	return writeResultResponse(stream, msg.ID, func(s *jsonstream.Stream) error {
 		if err := encodeResult(s, result); err != nil {
-			return &internalError{cause: err}
+			return &CustomError{Code: ErrCodeInternalError, Message: err.Error()}
 		}
 		return nil
 	})
 }
-
-// internalError is what the client sees when a result fails to encode: code -32603 and a generic
-// message. The real cause stays reachable through Unwrap for the caller's metrics and logs.
-type internalError struct{ cause error }
-
-func (e *internalError) Error() string  { return "internal server error" }
-func (e *internalError) ErrorCode() int { return ErrCodeInternalError }
-func (e *internalError) Unwrap() error  { return e.cause }
 
 func encodeResult(s *jsonstream.Stream, result any) error {
 	if isNilPointer(result) {

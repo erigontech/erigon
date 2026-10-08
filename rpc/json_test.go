@@ -735,8 +735,8 @@ func TestResponseLatchedErrorKeepsValidJSON(t *testing.T) {
 	err := (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).writeResponse(s, failingMidWrite{})
 
 	require.Error(t, err)
-	require.EqualError(t, errors.Unwrap(err), "append failed")
-	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":{"balance":""},"error":{"code":-32603,"message":"internal server error"}}`, string(s.Buffer()))
+	require.EqualError(t, err, "append failed")
+	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":{"balance":""},"error":{"code":-32603,"message":"append failed"}}`, string(s.Buffer()))
 	require.True(t, json.Valid(s.Buffer()))
 }
 
