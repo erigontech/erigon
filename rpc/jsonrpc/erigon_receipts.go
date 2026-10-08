@@ -235,6 +235,22 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	if rangeErr != nil && !errors.Is(rangeErr, state.ErrPruned) {
 		return nil, rangeErr
 	}
+	if rangeErr != nil && begin > 0 {
+		head, err := rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+		firstAvailable, err := api.blocksAvailableFrom(ctx, tx, head)
+		if err != nil {
+			return nil, err
+		}
+		// Non-zero starts need a txNum mapping, which may be missing below the
+		// retained range. Genesis needs no lookup and keeps its existing scan bound.
+		begin = max(begin, firstAvailable)
+		if begin > end {
+			return nil, rangeErr
+		}
+	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {

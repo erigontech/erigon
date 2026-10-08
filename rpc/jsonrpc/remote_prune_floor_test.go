@@ -30,12 +30,14 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/remotedb"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -286,6 +288,68 @@ func TestIndexedHistoryGateFollowsRemoteRenewal(t *testing.T) {
 				require.NotEqual(t, oldViewID, tx.ViewID(), "the remote transaction must renew during the indexed check")
 				require.ErrorIs(t, err, state.ErrPruned, "the renewed view no longer retains the requested pre-state")
 				require.EqualValues(t, 6, calls.Load(), "renewal must load the floor once for the new view")
+			})
+		})
+	}
+}
+
+func TestReceiptHistoryGateFollowsRemoteRenewal(t *testing.T) {
+	commitmentCfg := statecfg.Schema.CommitmentDomain
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema.CommitmentDomain = commitmentCfg })
+
+	for _, phase := range []string{"open", "close"} {
+		t.Run(phase, func(t *testing.T) {
+			apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+				mode: prune.ArchiveMode, chainConfig: byzantiumChainConfig(pruneGatingChainLen + 1),
+			})
+			apis.eth._txNumReader = rawdbv3.TxNums
+			apis.eth._historyPruneFloor.ttl = time.Hour
+			const block = uint64(8)
+			local, err := apis.eth.db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer local.Rollback()
+			_, err = apis.eth.chainConfig(t.Context(), local)
+			require.NoError(t, err)
+			start, err := apis.eth._txNumReader.Min(t.Context(), local, block)
+			require.NoError(t, err)
+			require.NoError(t, apis.rwDB.Update(t.Context(), func(tx kv.RwTx) error {
+				if err := writeHistoryStart(tx, start); err != nil {
+					return err
+				}
+				if err := tx.ClearTable(kv.TblCommitmentHistoryKeys); err != nil {
+					return err
+				}
+				if err := tx.Put(kv.TblCommitmentHistoryKeys, hexutil.EncodeTs(start), []byte{1}); err != nil {
+					return err
+				}
+				return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+			}))
+
+			synctest.Test(t, func(t *testing.T) {
+				ctx := t.Context()
+				db, _ := remoteHistoryDB(t, apis.eth.db)
+				tx, err := db.BeginTemporalRo(ctx)
+				require.NoError(t, err)
+				defer tx.Rollback()
+				old, err := apis.eth.historyStartBlocks(ctx, tx, chainInfo.head)
+				require.NoError(t, err)
+				require.Equal(t, block, old.wholeBlock)
+				require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, block))
+				oldViewID := tx.ViewID()
+				require.NoError(t, apis.rwDB.Update(ctx, func(tx kv.RwTx) error {
+					return writeHistoryStart(tx, start+1)
+				}))
+
+				// The state floor is cached; only the commitment lookup opens a
+				// cursor. Renewal there must invalidate both parts of the receipt floor.
+				view := &expiringHistoryCursorTx{TemporalTx: tx, onClose: phase == "close", expire: func() {
+					time.Sleep(remotedbserver.MaxTxTTL + time.Nanosecond)
+				}}
+				err = apis.eth.checkReceiptsAvailable(ctx, view, block)
+				require.Nil(t, view.expire)
+				require.NotEqual(t, oldViewID, tx.ViewID())
+				require.ErrorIs(t, err, state.ErrPruned, "the renewed view no longer retains the block's initial system transaction")
 			})
 		})
 	}

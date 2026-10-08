@@ -1050,12 +1050,26 @@ func (api *BaseAPI) checkReceiptAvailableAtIndex(ctx context.Context, tx kv.Tx, 
 		return api.checkReceiptSourceAvailable(ctx, tx, block, txIndex)
 	}
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
-		floors, err := api.historyStartBlocks(ctx, tx, head)
-		if err != nil || !commitmentHistory {
-			return floors.wholeBlock, err
+		for {
+			floors, err := api.historyStartBlocks(ctx, tx, head)
+			if err != nil || !commitmentHistory {
+				return floors.wholeBlock, err
+			}
+			ttx := tx.(kv.TemporalTx)
+			key, hasKey := historyFloorCacheKey(ttx, head)
+			commitmentFloors, err := api.readCommitmentHistoryStartBlocks(ctx, ttx, head)
+			if err != nil {
+				return 0, err
+			}
+			// The commitment lookup can renew the remote view after the state
+			// floor was read. Retry both floors together if that happens.
+			if hasKey {
+				if current, ok := historyFloorCacheKey(ttx, head); !ok || current != key {
+					continue
+				}
+			}
+			return max(floors.wholeBlock, commitmentFloors.wholeBlock), nil
 		}
-		commitmentFloors, err := api.readCommitmentHistoryStartBlocks(ctx, tx.(kv.TemporalTx), head)
-		return max(floors.wholeBlock, commitmentFloors.wholeBlock), err
 	})
 }
 
