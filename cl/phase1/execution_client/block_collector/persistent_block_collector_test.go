@@ -78,9 +78,11 @@ func blockHash(bb *cltypes.BeaconBlock) common.Hash {
 // flushTestHarness wires a PersistentBlockCollector to a gomock ExecutionEngine
 // that records every batch passed to InsertBlocks (and every FCU call).
 type flushTestHarness struct {
-	collector *PersistentBlockCollector
-	inserted  []*types.Block
-	fcuHeads  []common.Hash
+	collector    *PersistentBlockCollector
+	inserted     []*types.Block
+	fcuFinalized []common.Hash
+	fcuSafe      []common.Hash
+	fcuHeads     []common.Hash
 }
 
 // insertedNumbers returns the block numbers of every inserted block in call order.
@@ -107,7 +109,9 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 	).AnyTimes()
 	engine.EXPECT().CurrentHeader(gomock.Any()).Return(nil, nil).AnyTimes()
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, _, _, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+		func(_ context.Context, finalized, safe, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			h.fcuFinalized = append(h.fcuFinalized, finalized)
+			h.fcuSafe = append(h.fcuSafe, safe)
 			h.fcuHeads = append(h.fcuHeads, head)
 			return nil, nil
 		},
@@ -405,6 +409,28 @@ func TestFlushDrivesFCUPerBatch(t *testing.T) {
 	require.Equal(t, blockHash(blocks[2]), h.fcuHeads[0], "first FCU should target the last block of batch 1 (block 3)")
 	require.Equal(t, blockHash(blocks[5]), h.fcuHeads[1], "second FCU should target the last block of batch 2 (block 6)")
 	require.Equal(t, blockHash(blocks[6]), h.fcuHeads[2], "final FCU should target the last inserted block (block 7)")
+}
+
+func TestFlushDoesNotClaimSafeOrFinalized(t *testing.T) {
+	origBatchSize := batchSize
+	batchSize = 3
+	t.Cleanup(func() { batchSize = origBatchSize })
+
+	h := newFlushTestHarness(t, 0)
+
+	prev := common.Hash{}
+	blocks := make([]*cltypes.BeaconBlock, 4)
+	for i := range blocks {
+		blocks[i] = makeBeaconBlock(t, uint64(i+1), 'a', prev)
+		require.NoError(t, h.collector.AddBlock(blocks[i]))
+		prev = blockHash(blocks[i])
+	}
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+
+	require.Equal(t, []common.Hash{blockHash(blocks[2]), blockHash(blocks[3])}, h.fcuHeads)
+	require.Equal(t, []common.Hash{{}, {}}, h.fcuFinalized)
+	require.Equal(t, []common.Hash{{}, {}}, h.fcuSafe)
 }
 
 // TestFlushSingleFCUWhenBelowBatchSize verifies the baseline: when total

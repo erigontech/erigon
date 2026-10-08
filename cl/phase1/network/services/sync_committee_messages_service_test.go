@@ -54,7 +54,7 @@ func setupSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (Sync
 	return s, syncedDataManager, ethClock
 }
 
-func getObjectsForSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controller) (*state.CachingBeaconState, *SyncCommitteeMessageForGossip) {
+func getObjectsForSyncCommitteesServiceTest() (*state.CachingBeaconState, *SyncCommitteeMessageForGossip) {
 	_, _, state := tests.GetBellatrixRandom()
 	br, _ := state.BlockRoot()
 	msg := &SyncCommitteeMessageForGossip{
@@ -69,8 +69,7 @@ func getObjectsForSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controlle
 }
 
 func TestVerifySyncCommitteeMessageSignatureUsesMessageSlotDomain(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	headState, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	headState, msg := getObjectsForSyncCommitteesServiceTest()
 	cfg := headState.BeaconConfig()
 	forkEpoch := state.Epoch(headState) + 1
 	headSlot := forkEpoch * cfg.SlotsPerEpoch
@@ -116,7 +115,7 @@ func TestSyncCommitteesIgnoresForgedSlotThatAliasesToNow(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures // no expectation: any call fails the test
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 	cfg := &clparams.MainnetBeaconConfig
 	midSlotGenesis := uint64(time.Now().Unix()) - state.Slot()*cfg.SecondsPerSlot - cfg.SecondsPerSlot/2
 	ethClock := eth_clock.NewEthereumClock(midSlotGenesis, common.Hash{}, cfg)
@@ -140,7 +139,7 @@ func TestSyncCommitteesBadTiming(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
 	require.NoError(t, synced.OnHeadState(state))
@@ -152,7 +151,7 @@ func TestSyncCommitteesBadSubnet(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 	sn := uint64(1000)
 
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
@@ -169,7 +168,7 @@ func TestSyncCommitteesSuccess(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
 	require.NoError(t, synced.OnHeadState(state))
@@ -194,7 +193,7 @@ func TestSyncCommitteesIgnoresReplacementWithDifferentContent(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 	// Exactly one verification call is ever expected: gomock fails the test
 	// if the replacement below triggers a second one.
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
@@ -233,7 +232,7 @@ func TestSyncCommitteesRetryAfterFailedPublishStillSucceeds(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
 	require.NoError(t, synced.OnHeadState(state))
@@ -256,7 +255,7 @@ func TestSyncCommitteesIgnoresRetryAfterSuccessfulPublish(t *testing.T) {
 	saveSignatureGlobals(t)
 	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
 
-	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	state, msg := getObjectsForSyncCommitteesServiceTest()
 	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
 	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
 	require.NoError(t, synced.OnHeadState(state))

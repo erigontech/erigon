@@ -189,7 +189,14 @@ func validateSimulationRequest(blocks []SimulatedBlock) error {
 		return clientLimitExceededError(fmt.Sprintf("too many blocks in request: %d > %d", len(blocks), maxSimulateBlocks))
 	}
 	var totalCalls int
-	for _, block := range blocks {
+	for bi, block := range blocks {
+		if block.BlockOverrides != nil && block.BlockOverrides.Withdrawals != nil {
+			for wi, w := range *block.BlockOverrides.Withdrawals {
+				if w == nil {
+					return &rpc.CustomError{Message: fmt.Sprintf("withdrawal %d of block %d is null", wi, bi), Code: rpc.ErrCodeInvalidParams}
+				}
+			}
+		}
 		if len(block.Calls) > maxSimulateCallsPerBlock {
 			return clientLimitExceededError(fmt.Sprintf("too many calls in block: %d > %d", len(block.Calls), maxSimulateCallsPerBlock))
 		}
@@ -336,15 +343,25 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 				parentBeaconRoot = overrides.BeaconRoot
 			}
 		}
+		difficulty := header.Difficulty
+		if s.chainConfig.IsPostMerge(overrides.Number.Uint64(), uint64(*overrides.Time)) {
+			difficulty = uint256.Int{}
+		}
+		var slotNumber *uint64
+		if header.SlotNumber != nil {
+			slot := *header.SlotNumber + 1
+			slotNumber = &slot
+		}
 		header = overrides.OverrideHeader(&types.Header{
 			UncleHash:             empty.UncleHash,
 			ReceiptHash:           empty.ReceiptsHash,
 			TxHash:                empty.TxsHash,
 			Coinbase:              header.Coinbase,
-			Difficulty:            header.Difficulty,
+			Difficulty:            difficulty,
 			GasLimit:              header.GasLimit,
 			WithdrawalsHash:       withdrawalsHash,
 			ParentBeaconBlockRoot: parentBeaconRoot,
+			SlotNumber:            slotNumber,
 		})
 		headers[bi] = header
 	}
@@ -524,7 +541,7 @@ func (s *simulator) simulateBlock(
 
 	txnList := make([]types.Transaction, 0, len(bsc.Calls))
 	receiptList := make(types.Receipts, 0, len(bsc.Calls))
-	tracer := rpchelper.NewLogTracer(s.traceTransfers, blockNumber, common.Hash{}, common.Hash{}, 0)
+	tracer := rpchelper.NewLogTracer(s.traceTransfers && !s.chainConfig.IsEIPEnabled(7708, header.Time), blockNumber, common.Hash{}, common.Hash{}, 0)
 	cumulativeGasUsed := uint64(0)
 	cumulativeBlobGasUsed := uint64(0)
 
@@ -605,6 +622,9 @@ func (s *simulator) simulateBlock(
 	var withdrawals types.Withdrawals
 	if s.chainConfig.IsShanghai(header.Time) {
 		withdrawals = types.Withdrawals{}
+		if bsc.BlockOverrides != nil && bsc.BlockOverrides.Withdrawals != nil {
+			withdrawals = *bsc.BlockOverrides.Withdrawals
+		}
 	}
 	systemCall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return systemCallCustom(contract, data, intraBlockState, header, false)
@@ -988,6 +1008,8 @@ func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader
 func (r *simulationStateReader) CloneForWorker(_ context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
 	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
 }
+
+func (r *simulationStateReader) BindsWorkerTx() bool { return true }
 
 func newHistoryCommitmentOnlyReader(roTx kv.TemporalTx, sd *execctx.SharedDomains, commitmentAsOfTxNum uint64, plainStateAsOfTxNum uint64) commitmentdb.StateReader {
 	return &simulationStateReader{sd: sd, roTx: roTx, commitmentAsOfTxNum: commitmentAsOfTxNum, plainStateAsOfTxNum: plainStateAsOfTxNum}
