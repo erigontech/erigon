@@ -636,8 +636,10 @@ func (s *envelopeReadTestStore) ReadEnvelopeFromDisk(common.Hash) (*cltypes.Sign
 }
 
 type gloasCollectorTest struct {
-	calls int
-	err   error
+	calls      int
+	flushCalls int
+	err        error
+	flushErr   error
 }
 
 func (c *gloasCollectorTest) AddGloasBlock(*cltypes.BeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -651,7 +653,8 @@ func (c *gloasCollectorTest) AddBlock(*cltypes.BeaconBlock) error {
 }
 
 func (c *gloasCollectorTest) Flush(context.Context) error {
-	return nil
+	c.flushCalls++
+	return c.flushErr
 }
 
 func (c *gloasCollectorTest) HasBlock(uint64) bool {

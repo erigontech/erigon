@@ -342,6 +342,11 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 		}
 	}
 
+	if shouldInsert && ctx.Err() == nil {
+		if err := cfg.blockCollector.Flush(ctx); err != nil {
+			logger.Warn("[Caplin] Forward sync: failed to flush the block collector", "err", err)
+		}
+	}
 	return nil
 }
 
