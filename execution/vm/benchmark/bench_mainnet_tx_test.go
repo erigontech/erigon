@@ -58,17 +58,18 @@ func BenchmarkMainnetTx(b *testing.B) {
 
 type txFixture struct {
 	Tx struct {
-		From                 common.Address   `json:"from"`
-		To                   *common.Address  `json:"to"`
-		Input                hexutil.Bytes    `json:"input"`
-		Value                hexutil.U256     `json:"value"`
-		Gas                  hexutil.Uint64   `json:"gas"`
-		GasPrice             *hexutil.U256    `json:"gasPrice"`
-		MaxFeePerGas         *hexutil.U256    `json:"maxFeePerGas"`
-		MaxPriorityFeePerGas *hexutil.U256    `json:"maxPriorityFeePerGas"`
-		Nonce                hexutil.Uint64   `json:"nonce"`
-		Type                 hexutil.Uint64   `json:"type"`
-		AccessList           types.AccessList `json:"accessList"`
+		From                 common.Address            `json:"from"`
+		To                   *common.Address           `json:"to"`
+		Input                hexutil.Bytes             `json:"input"`
+		Value                hexutil.U256              `json:"value"`
+		Gas                  hexutil.Uint64            `json:"gas"`
+		GasPrice             *hexutil.U256             `json:"gasPrice"`
+		MaxFeePerGas         *hexutil.U256             `json:"maxFeePerGas"`
+		MaxPriorityFeePerGas *hexutil.U256             `json:"maxPriorityFeePerGas"`
+		Nonce                hexutil.Uint64            `json:"nonce"`
+		Type                 hexutil.Uint64            `json:"type"`
+		AccessList           types.AccessList          `json:"accessList"`
+		AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 	} `json:"tx"`
 	Receipt struct {
 		GasUsed hexutil.Uint64 `json:"gasUsed"`
@@ -99,7 +100,7 @@ func newTxReplay(tb testing.TB, path string) *txReplay {
 	require.NoError(tb, err)
 	f := &txFixture{}
 	require.NoError(tb, json.Unmarshal(raw, f))
-	if f.Tx.Type > types.DynamicFeeTxType {
+	if f.Tx.Type == types.BlobTxType || f.Tx.Type > types.SetCodeTxType {
 		tb.Fatalf("%s: tx type %d is not replayed", path, f.Tx.Type)
 	}
 
@@ -170,20 +171,43 @@ func (r *txReplay) message() *types.Message {
 		feeCap, tipCap = (*uint256.Int)(t.MaxFeePerGas), (*uint256.Int)(t.MaxPriorityFeePerGas)
 	}
 	value := uint256.Int(t.Value)
-	return types.NewMessage(accounts.InternAddress(t.From), to, uint64(t.Nonce), &value, uint64(t.Gas),
+	msg := types.NewMessage(accounts.InternAddress(t.From), to, uint64(t.Nonce), &value, uint64(t.Gas),
 		price, feeCap, tipCap, t.Input, t.AccessList, true, true, true, false, nil)
+	if len(t.AuthorizationList) > 0 {
+		auths := make([]types.Authorization, len(t.AuthorizationList))
+		for i := range t.AuthorizationList {
+			var err error
+			if auths[i], err = t.AuthorizationList[i].ToAuthorization(); err != nil {
+				panic(err)
+			}
+		}
+		msg.SetAuthorizations(auths)
+	}
+	return msg
 }
 
 // The replay runs the prestate's code over its storage on both paths: a call
 // returning a seeded slot proves both reach the state the fixture describes.
 func TestMainnetTxReplayUsesThePrestate(t *testing.T) {
+	const legacy = `"gasPrice": "0x1", "type": "0x0"`
+	// The authorization's signature does not recover, so EIP-7702 skips it and
+	// the call still runs.
+	const setCode = `"maxFeePerGas": "0x1", "maxPriorityFeePerGas": "0x0", "type": "0x4",
+		"authorizationList": [{"chainId": "0x1", "address": "0x00000000000000000000000000000000000000d1",
+			"nonce": "0x0", "yParity": "0x0", "r": "0x1", "s": "0x1"}]`
+	for name, txFields := range map[string]string{"legacy": legacy, "setCode": setCode} {
+		t.Run(name, func(t *testing.T) { testReplayUsesThePrestate(t, txFields) })
+	}
+}
+
+func testReplayUsesThePrestate(t *testing.T, txFields string) {
 	// PUSH1 0 SLOAD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
 	const returnSlot0 = "0x60005460005260206000f3"
 	const slot0 = "0x00000000000000000000000000000000000000000000000000000000000000aa"
 	path := filepath.Join(t.TempDir(), "tx.json")
 	require.NoError(t, os.WriteFile(path, []byte(`{
 		"tx": {"from": "0x00000000000000000000000000000000000000f1", "to": "0x00000000000000000000000000000000000000c1",
-			"input": "0x", "value": "0x0", "gas": "0x10000", "gasPrice": "0x1", "nonce": "0x0", "type": "0x0"},
+			"input": "0x", "value": "0x0", "gas": "0x10000", "nonce": "0x0", `+txFields+`},
 		"receipt": {"gasUsed": "0x0", "status": "0x1"},
 		"block": {"parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
 			"sha3Uncles": "0x0000000000000000000000000000000000000000000000000000000000000000",
