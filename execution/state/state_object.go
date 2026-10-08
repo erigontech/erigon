@@ -382,9 +382,6 @@ func (so *stateObject) setBalance(amount uint256.Int) {
 	so.data.Balance = amount
 }
 
-// Return the gas back to the origin. Used by the Virtual machine or Closures
-func (so *stateObject) ReturnGas(gas *big.Int) {}
-
 func (so *stateObject) setIncarnation(incarnation uint64) {
 	so.data.SetIncarnation(incarnation)
 }
@@ -471,12 +468,7 @@ func (so *stateObject) SetCode(code accounts.Code, wasCommited bool, reason trac
 		return false, nil
 	}
 
-	so.db.journal.codeChange(so.address, prev.Bytes, so.data.CodeHash, wasCommited)
-	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChangeV2 != nil {
-		so.db.tracingHooks.OnCodeChangeV2(so.address, so.data.CodeHash, prev.Bytes, code.Hash, code.Bytes, reason)
-	} else if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
-		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prev.Bytes, code.Hash, code.Bytes)
-	}
+	so.db.journalCodeChange(so.address, so.data.CodeHash, prev.Bytes, code, wasCommited, reason)
 	so.setCode(code)
 	return true, nil
 }

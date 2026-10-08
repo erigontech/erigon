@@ -172,7 +172,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 }
 
 // Create executes the code using the EVM create method
-func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, mdgas.MdGas, error) {
+func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
@@ -260,13 +260,17 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 
 	vmenv := NewEnv(cfg)
 
-	sender, err := cfg.State.GetOrNewStateObject(cfg.Origin)
-	if err != nil {
-		return nil, mdgas.MdGas{}, err
-	}
 	statedb := cfg.State
 	rules := vmenv.ChainRules()
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
+	// Without EIP-161 an empty account survives in the post-state, and a
+	// zero-value transfer does not create the sender, so the origin has to
+	// exist for the dump and for CALL gas to match.
+	if !rules.IsEIP161Enabled() {
+		if _, err := statedb.GetOrNewStateObject(cfg.Origin); err != nil {
+			return nil, mdgas.MdGas{}, err
+		}
+	}
 
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), nil, accounts.ZeroAddress)
@@ -277,7 +281,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	var ret []byte
 	if err == nil {
 		ret, leftOverGas, _, err = vmenv.Call(
-			sender.Address(),
+			cfg.Origin,
 			address,
 			input,
 			leftOverGas,
@@ -286,7 +290,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 		)
 		protocol.RefillTopLevelGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err, cfg.EVMConfig.Tracer)
 	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
-		protocol.HandleRuntimeFailure(vmenv, vm.CALL, sender.Address(), address, input, gas, &leftOverGas, cfg.Value, err)
+		protocol.HandleRuntimeFailure(vmenv, vm.CALL, cfg.Origin, address, input, gas, &leftOverGas, cfg.Value, err)
 	}
 
 	if cfg.EVMConfig.Tracer.HasTxEndHook() {

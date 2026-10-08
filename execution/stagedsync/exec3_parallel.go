@@ -1808,11 +1808,17 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 		}
 	}
 
+	// The pool runs one worker beyond the configured count, except for a count
+	// of one (--exec.serial), which must run one transaction at a time.
+	poolSize := pe.workerCount + 1
+	if pe.workerCount <= 1 {
+		poolSize = 1
+	}
 	var err error
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
 		workersCtx, workerFaults, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
+		poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
 	)
 
 	executorCancel := func(cause error) error {
@@ -3106,7 +3112,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
-		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
+		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid))
 		be.versionMap.SetTrace(false)
 
 		if valid {
@@ -3201,7 +3207,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// finalizations see the full post-tx state (execution
 					// + fees) when reading via the version map fallback
 					// chain.
-					be.versionMap.FlushVersionedWrites(merged, true, "")
+					be.versionMap.FlushVersionedWrites(merged, true)
 				}
 
 				{
@@ -3475,7 +3481,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				writes := ibs.FinalizedWrites(lastResult.Rules())
 				if !writes.IsEmpty() {
 					be.blockIO.RecordWrites(finalVersion, writes)
-					be.versionMap.FlushVersionedWrites(writes, true, "")
+					be.versionMap.FlushVersionedWrites(writes, true)
 				}
 
 				// Commit finalize writes from the versionMap write-set, the

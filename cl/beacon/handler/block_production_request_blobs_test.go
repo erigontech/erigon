@@ -444,7 +444,7 @@ func TestPostEthV2BeaconBlocksPublishesRequestBlobsOnNonProducingNode(t *testing
 func TestPostEthV2BeaconBlocksPublishesRequestColumnsOnNonProducingNode(t *testing.T) {
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	handler, published := newPublishingHandler(t, clparams.FuluVersion, nil)
 	b := newTestBlob(t, 1, clparams.FuluVersion)
@@ -461,6 +461,11 @@ func TestPostEthV2BeaconBlocksPublishesRequestColumnsOnNonProducingNode(t *testi
 		sidecar := cltypes.NewDataColumnSidecar()
 		require.NoError(t, sidecar.DecodeSSZ(data, int(clparams.FuluVersion)))
 		require.True(t, das.VerifyDataColumnSidecarKZGProofs(sidecar), "column %d must carry valid cells and proofs", sidecar.Index)
+		// Caplin's decoder tolerates a wrong fixed-part size, other clients do not: the published
+		// bytes must be the canonical encoding, with a depth-4 commitments inclusion proof.
+		canonical, err := sidecar.EncodeSSZ(nil)
+		require.NoError(t, err)
+		require.Equal(t, canonical, data, "column %d must use the spec SSZ layout", sidecar.Index)
 	}
 	require.Equal(t, int(handler.beaconChainCfg.NumberOfColumns), columns)
 	requireNotCached(t, handler, b)

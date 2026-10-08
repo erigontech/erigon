@@ -79,7 +79,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	fcu = mock_services2.NewForkChoiceStorageMock(t)
 	db = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	reader := tests.LoadChain(blocks, postState, db, t)
+	reader := tests.LoadChain(blocks, db, t)
 	firstBlockRoot, _ := blocks[0].Block.HashSSZ()
 	firstBlockHeader := blocks[0].SignedBeaconBlockHeader()
 

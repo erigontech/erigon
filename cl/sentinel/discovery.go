@@ -423,7 +423,6 @@ func (s *Sentinel) pruneExcessPeers() {
 		// Disconnect the peer
 		s.closePeer(info.pid)
 		s.p2p.Host().Peerstore().RemovePeer(info.pid)
-		s.peers.RemovePeer(info.pid)
 		removed++
 
 		log.Trace("[Sentinel] Pruned excess peer", "peer", info.pid, "subnetsCount", info.subnetsCount)
@@ -609,7 +608,6 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, er
 			log.Trace("[Sentinel] Rejecting peer, at peer limit")
 			s.p2p.Host().Peerstore().RemovePeer(peerId)
 			s.closePeer(peerId)
-			s.peers.RemovePeer(peerId)
 			return false
 		}
 	}
@@ -627,7 +625,6 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, er
 		log.Debug("[Sentinel] Fork mismatch, disconnecting peer", "peer", peerId)
 		s.p2p.Host().Peerstore().RemovePeer(peerId)
 		s.closePeer(peerId)
-		s.peers.RemovePeer(peerId)
 		return false
 	}
 
@@ -636,8 +633,6 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, validate func() (bool, er
 		s.peers.RecordHandshakeFailure(peerId)
 		return true
 	}
-	// we were able to successfully connect, so add this peer to our pool
-	s.peers.AddPeer(peerId)
 	log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
 	return true
 }

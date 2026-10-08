@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -616,6 +617,48 @@ func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", result.String())
+}
+
+// TestEthCallNoMaterializeParity pins that suppressing the stateObject cache
+// does not change what eth_call returns. The override code writes a slot and
+// reads it back in the same call, so the read must come from this call's own
+// write and not from committed state.
+func TestEthCallNoMaterializeParity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, bankAddr, contractAddr, _ := chainWithDeployedContract(t)
+	api := newTestEthAPIWithFilters(t, m)
+
+	// PUSH1 0x2a PUSH1 0 SSTORE PUSH1 0 SLOAD PUSH1 0 MSTORE PUSH1 0x20 PUSH1 0 RETURN
+	writeThenRead := hexutil.Bytes(hexutil.MustDecode("0x602a60005560005460005260206000f3"))
+	storeCall := hexutil.Bytes(contractInvocationData(7))
+
+	for _, noMaterialize := range []bool{false, true} {
+		t.Run(fmt.Sprintf("noMaterialize=%v", noMaterialize), func(t *testing.T) {
+			prev := dbg.CallNoMaterialize
+			dbg.CallNoMaterialize = noMaterialize
+			defer func() { dbg.CallNoMaterialize = prev }()
+
+			result, err := api.Call(context.Background(), ethapi.CallArgs{
+				From: &bankAddr,
+				To:   &contractAddr,
+				Data: &writeThenRead,
+			}, nil, &ethapi.StateOverrides{
+				accounts.InternAddress(contractAddr): {Code: &writeThenRead},
+			}, nil)
+			require.NoError(t, err)
+			require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", result.String())
+
+			result, err = api.Call(context.Background(), ethapi.CallArgs{
+				From: &bankAddr,
+				To:   &contractAddr,
+				Data: &storeCall,
+			}, nil, nil, nil)
+			require.NoError(t, err)
+			require.Equal(t, "0x", result.String())
+		})
+	}
 }
 
 func newTestEthAPIWithFilters(t *testing.T, m *execmoduletester.ExecModuleTester) *APIImpl {

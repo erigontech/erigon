@@ -15,10 +15,6 @@ import (
 
 var errInvalidDataColumnIndex = errors.New("invalid column index")
 
-func writeDataColumnSidecarsEmptySuccess(s network.Stream) error {
-	return nil
-}
-
 func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) error {
 	curEpoch := c.ethClock.GetCurrentEpoch()
 
@@ -29,7 +25,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 	if curEpoch < c.beaconConfig.FuluForkEpoch {
-		return writeDataColumnSidecarsEmptySuccess(s)
+		return nil
 	}
 
 	// check params.
@@ -52,7 +48,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 	if req.Count == 0 || req.Columns.Length() == 0 || endSlot <= fuluStartSlot {
-		return writeDataColumnSidecarsEmptySuccess(s)
+		return nil
 	}
 	startSlot := max(req.StartSlot, fuluStartSlot)
 	if endSlot-startSlot > c.beaconConfig.MinEpochsForDataColumnSidecarsRequests*c.beaconConfig.SlotsPerEpoch {
@@ -66,7 +62,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 
 	curSlot := c.ethClock.GetCurrentSlot()
 	if startSlot > curSlot {
-		return writeDataColumnSidecarsEmptySuccess(s)
+		return nil
 	}
 
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
@@ -148,13 +144,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRangeHandler(s network.Stream) e
 			break
 		}
 	}
-	if responseErr != nil {
-		return responseErr
-	}
-	if count == 0 {
-		return writeDataColumnSidecarsEmptySuccess(s)
-	}
-	return nil
+	return responseErr
 }
 
 func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) error {
@@ -191,7 +181,7 @@ func (c *ConsensusHandlers) dataColumnSidecarsByRootHandler(s network.Stream) er
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
 	if totalColumns == 0 {
-		return writeDataColumnSidecarsEmptySuccess(s)
+		return nil
 	}
 	if cost := dataColumnSidecarsRequestCost(1, uint64(totalColumns), c.beaconConfig.MaxRequestDataColumnSidecars); !c.consumeRateLimit(s, cost) {
 		return nil
