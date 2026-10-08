@@ -1979,8 +1979,9 @@ type deferredColumnSyncEntry struct {
 }
 
 // deferredColumnSyncQueue paces the roots whose columns are still missing. A failed round
-// grows the root's backoff by one slot, up to an epoch; a root is never dropped, because an
-// imported block is not queued again and the custody gap would be permanent.
+// grows the root's backoff by one slot, up to an epoch; a root stays queued until its block
+// leaves the serve range, because an imported block is not queued again and the custody gap
+// would be permanent.
 type deferredColumnSyncQueue struct {
 	mu      sync.Mutex
 	entries map[common.Hash]*deferredColumnSyncEntry
@@ -2058,12 +2059,18 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 		case <-ticker.C:
 		}
 		now := time.Now()
+		serveRangeStart := d.beaconConfig.DataColumnSidecarServeRangeStartSlot(d.ethClock.GetCurrentSlot())
 		// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
 		blocks := []cltypes.ColumnSyncableSignedBlock{}
 		roots := []common.Hash{}
 		d.blocksToCheckSync.Range(func(key, value any) bool {
 			root := key.(common.Hash)
 			block := value.(cltypes.ColumnSyncableSignedBlock)
+			if block.GetSlot() < serveRangeStart {
+				log.Debug("[syncColumnDataWorker] block left the data-column serve range, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
+				forget(root)
+				return true
+			}
 			if !queue.ready(root, now) || !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), d.deferredColumnSyncDelay()) {
 				return true
 			}
