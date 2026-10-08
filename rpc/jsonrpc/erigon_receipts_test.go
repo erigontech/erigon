@@ -214,6 +214,15 @@ func TestGetLatestLogsStopsBeforePrunedBlocks(t *testing.T) {
 			})
 		}
 	}
+	t.Run("range_below_block_floor", func(t *testing.T) {
+		logs, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{
+			FromBlock: big.NewInt(5),
+			ToBlock:   new(big.Int).SetUint64(firstRetained - 1),
+			Topics:    [][]common.Hash{{want[0].Topics[0]}},
+		}, filters.LogFilterOptions{LogCount: 1})
+		require.ErrorIs(t, err, state.ErrPruned)
+		require.Nil(t, logs)
+	})
 	t.Run("unavailable_transactions", func(t *testing.T) {
 		base := newBaseApiForTest(m)
 		base._blockReader = &fixedMinimumBlockReader{FullBlockReader: base._blockReader, floor: firstRetained + 1}

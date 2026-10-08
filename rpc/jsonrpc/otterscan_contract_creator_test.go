@@ -78,7 +78,7 @@ func TestGetContractCreator(t *testing.T) {
 func TestGetContractCreatorAtHistoryBoundary(t *testing.T) {
 	signer := types.LatestSignerForChainID(nil)
 	initCode := common.FromHex("0x60016000f3") // Return a one-byte STOP contract.
-	var creations [2]types.Transaction
+	var creations [3]types.Transaction
 	m := mockWithGenerator(t, 2, func(i int, block *blockgen.BlockGen) {
 		if i != 0 {
 			return
@@ -96,13 +96,13 @@ func TestGetContractCreatorAtHistoryBoundary(t *testing.T) {
 	defer tx.Rollback()
 	minTxNum, err := api._txNumReader.Min(m.Ctx, tx, 1)
 	require.NoError(t, err)
-	api.db = historyFloorDB{TemporalRoDB: m.DB, startTxNum: minTxNum + 2}
+	api.db = historyFloorDB{TemporalRoDB: m.DB, startTxNum: minTxNum + 3}
 
-	creator, err := api.GetContractCreator(m.Ctx, types.CreateAddress(testAddr, 1))
+	creator, err := api.GetContractCreator(m.Ctx, types.CreateAddress(testAddr, 2))
 	require.NoError(t, err, "the creation transaction's pre-state is retained")
-	require.Equal(t, &ContractCreatorData{Creator: testAddr, Tx: creations[1].Hash()}, creator)
+	require.Equal(t, &ContractCreatorData{Creator: testAddr, Tx: creations[2].Hash()}, creator)
 
-	creator, err = api.GetContractCreator(m.Ctx, types.CreateAddress(testAddr, 0))
+	creator, err = api.GetContractCreator(m.Ctx, types.CreateAddress(testAddr, 1))
 	require.ErrorIs(t, err, state.ErrPruned, "the preceding creation's pre-state is pruned")
 	require.Nil(t, creator)
 }
