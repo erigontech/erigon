@@ -227,5 +227,9 @@ func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
 
 func (p *aggregationPoolImpl) slotIsStale(targetSlot uint64) bool {
 	curSlot := p.ethClock.GetCurrentSlot()
+	if curSlot <= targetSlot {
+		// Avoid subtracting unsigned integers
+		return false
+	}
 	return curSlot-targetSlot > p.netConfig.AttestationPropagationSlotRange
 }
