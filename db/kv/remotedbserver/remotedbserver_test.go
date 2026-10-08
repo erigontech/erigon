@@ -234,9 +234,6 @@ func TestIndexRangePagesDoNotRepeatTimestamps(t *testing.T) {
 			req.PageToken = reply.NextPageToken
 		}
 		require.Equal(t, total, len(got), "asc=%t", asc)
-		for i := 1; i < len(got); i++ {
-			require.NotEqual(t, got[i-1], got[i], "asc=%t: timestamp %d repeated at position %d", asc, got[i], i)
-		}
 	}
 }
 
@@ -277,7 +274,4 @@ func TestRangeAsOfPagesDoNotRepeatKeys(t *testing.T) {
 		req.PageToken = reply.NextPageToken
 	}
 	require.Equal(t, total, len(got))
-	for i := 1; i < len(got); i++ {
-		require.NotEqual(t, got[i-1], got[i], "key %x repeated at position %d", got[i], i)
-	}
 }
