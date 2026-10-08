@@ -65,7 +65,3 @@ var fastPathOps = map[OpCode]fastPathWant{
 	SWAP3:    {opSwap3, GasFastestStep, 4, 4, nil},
 	SWAP4:    {opSwap4, GasFastestStep, 5, 5, nil},
 }
-
-var gasExecuteOps = map[OpCode]gasExecuteFunc{
-	SLOAD: opSloadEIP2929,
-}

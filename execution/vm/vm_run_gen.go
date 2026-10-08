@@ -4,9 +4,13 @@ package vm
 
 import (
 	"errors"
+	"fmt"
 
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tracing"
 )
 
 // run is runTraced without the tracing code and with the fast path.
@@ -21,15 +25,16 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc     = uint64(0) // program counter
-		t      *opTrace
-		res    []byte // result of the opcode execution function
-		tracer = evm.config.Tracer
+		pc   = uint64(0) // program counter
+		cost mdgas.MdGasCost
+		// copies used by tracer
+		pcCopy  uint64 // needed for the deferred Tracer
+		oldGas  mdgas.MdGas
+		callGas mdgas.MdGasCost
+		logged  bool   // deferred Tracer should ignore already logged steps
+		res     []byte // result of the opcode execution function
+		tracer  = evm.config.Tracer
 	)
-	if false {
-		t = &callContext.trace
-		*t = opTrace{debug: debug, trace: trace}
-	}
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
 
@@ -66,10 +71,10 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 				return
 			}
 			switch {
-			case !t.logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
-				tracer.EmitOpcode(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
+				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
 			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
-				tracer.EmitFault(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.depth, VMErrorFromErr(err))
+				tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}()
 	}
@@ -423,84 +428,115 @@ run:
 				}
 			}
 			callContext.gas = gasLeft
-			switch op {
-			case SLOAD:
-				o := &jt[SLOAD]
-				if o.gasExecute == nil || uint(stack.len()-o.numPop) > uint(o.maxStack-o.numPop) || gasLeft < o.constantGas {
-					break
-				}
-				gasLeft -= o.constantGas
-				if callContext.slots.on {
-					callContext.gas, callContext.savedPC = gasLeft, pc
-					i := callContext.lookupSlot(evm)
-					gasLeft, pc = callContext.gas, callContext.savedPC
-					if i >= 0 {
-						if gasLeft < params.WarmStorageReadCostEIP2929 {
-							res, err = nil, ErrOutOfGas
-							break run
-						}
-						gasLeft -= params.WarmStorageReadCostEIP2929
-						*callContext.Stack.peek() = callContext.slots.val[i]
-						pc++
-						continue run
-					}
-				}
-				callContext.gas = gasLeft
-				pc, res, err = opSloadEIP2929Miss(pc, evm, callContext, nil)
-				gasLeft = callContext.gas
-				if err != nil {
-					break run
-				}
-				pc++
-				continue run
-			}
 		}
+		callContext.cacheGen++
+		callContext.savedPC = pc
 		if false && debug {
 			// Capture pre-execution values for tracing.
-			t.logged = false
-			t.pc = pc
-			t.oldGas = callContext.Gas()
+			logged = false
+			pcCopy = pc
+			oldGas = callContext.Gas()
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		operation := &jt[op]
-		cost := operation.constantGas
-		if false {
-			t.op, t.cost, t.forwarded = op, mdgas.MdGasCost{Execution: cost}, 0
-		}
+		cost = mdgas.MdGasCost{Execution: operation.constantGas} // For tracing
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
 		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, stackBoundsErr(sLen, operation)
 		}
 		// for tracing: this gas consumption event is emitted below in the debug section.
-		if callContext.gas < cost {
+		if callContext.gas < cost.Execution {
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 		} else {
-			callContext.gas -= cost
-		}
-		if operation.gasExecute != nil {
-			pc, res, err = operation.gasExecute(pc, evm, callContext, t)
-			gasLeft = callContext.gas
-			if err != nil {
-				break run
-			}
-			pc++
-			continue run
+			callContext.gas -= cost.Execution
 		}
 
+		// All ops with a dynamic memory usage also has a dynamic gas cost.
+		var memorySize uint64
+		if operation.dynamicGas != nil {
+			// calculate the new memory size and expand the memory to fit
+			// the operation
+			// Memory check needs to be done prior to evaluating the dynamic gas portion,
+			// to detect calculation overflows
+			if operation.memorySize != nil {
+				memSize, overflow := operation.memorySize(callContext)
+				if overflow {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
+				}
+				// memory is expanded in words of 32 bytes. Gas
+				// is also calculated in words.
+				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrGasUintOverflow
+				}
+			}
+			// Reset callGasTemp so we can detect if dynamicGas sets it (CALL variants)
+			evm.callGasTemp = 0
+			// Consume the gas and return an error if not enough gas is available.
+			// cost is explicitly set so that the capture state defer method can get the proper cost
+			var dynamicCost mdgas.MdGasCost
+			dynamicCost, err = operation.dynamicGas(evm, callContext, callContext.Gas(), memorySize)
+			if err != nil {
+				if !errors.Is(err, ErrOutOfGas) {
+					err = fmt.Errorf("%w: %w", ErrOutOfGas, err)
+				}
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
+			}
+			if false {
+				cost = cost.Plus(dynamicCost)
+				callGas = cost
+				callGas.Execution -= evm.CallGasTemp()
+				if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGasCost{}) {
+					gasCost := traceGas(op, callGas, cost)
+					fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
+				}
+			}
+			if callContext.gas < dynamicCost.Execution {
+				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+			}
+			callContext.gas -= dynamicCost.Execution
+			if dynamicCost.State > 0 {
+				ok := callContext.useMdGas(uint64(dynamicCost.State), mdgas.StateGas, nil, tracing.GasChangeIgnored)
+				if !ok {
+					return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
+				}
+			} else if dynamicCost.State < 0 {
+				callContext.refillStateGas(uint64(-dynamicCost.State), nil, tracing.GasChangeIgnored)
+			}
+		}
+
+		// Do gas tracing before memory expansion
 		if false && debug {
-			evm.traceOp(callContext, op, t)
+			if tracer.HasGasChangeHook() {
+				tracer.EmitGasChange(oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
+			}
+			if tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)) {
+				tracer.EmitOpcode(pc, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+				logged = true
+			}
+		}
+
+		if memorySize > 0 {
+			callContext.Memory.Resize(memorySize)
 		}
 
 		// TODO - move this to a trace & set in the worker
 
 		if false && trace {
-			evm.tracePrint(callContext, op, pc, t)
+			var opstr string
+			if operation.string != nil {
+				opstr = operation.string(pc, callContext)
+			} else {
+				opstr = op.String()
+			}
+
+			gasCost := traceGas(op, callGas, cost)
+			fmt.Printf("%d (%d.%d) %5d %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, gasCost.Execution, gasCost.State, opstr)
 		}
 
 		// execute the operation
-		pc, res, err = operation.execute(pc, evm, callContext)
+		pc, res, err = operation.execute(callContext.savedPC, evm, callContext)
 		gasLeft = callContext.gas
 		if err != nil {
 			break run
