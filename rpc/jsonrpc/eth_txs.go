@@ -128,28 +128,25 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, nil
-	}
-
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
-	if err != nil {
-		return nil, err
-	}
-	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
-	if err != nil {
-		return nil, err
-	}
-
 	if ok {
-		var buf bytes.Buffer
-		err = txn.MarshalBinary(&buf)
-		return buf.Bytes(), err
+		err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
+		if err != nil {
+			return nil, err
+		}
+
+		txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
+		if err != nil {
+			return nil, err
+		}
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			var buf bytes.Buffer
+			err = txn.MarshalBinary(&buf)
+			return buf.Bytes(), err
+		}
 	}
 
 	// No finalized transaction, try to retrieve it from the pool
