@@ -1470,7 +1470,9 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		retryPhases = append(
 			retryPhases,
 			func(retryCtx context.Context) {
-				cfg.forkChoice.RetryPendingExecutionPayloadEnvelopes(retryCtx, maxPendingGloasPayloadsPerCycle)
+				for _, root := range cfg.forkChoice.RetryPendingExecutionPayloadEnvelopes(retryCtx, maxPendingGloasPayloadsPerCycle) {
+					attemptedHeads[root] = struct{}{}
+				}
 			},
 			func(retryCtx context.Context) {
 				drainPendingGloasPayloads(retryCtx, cfg, attemptedHeads)

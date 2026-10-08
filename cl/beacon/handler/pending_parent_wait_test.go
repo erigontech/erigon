@@ -47,8 +47,11 @@ func TestAwaitGloasPayloadSourceGivesUpAtDeadline(t *testing.T) {
 		return executionPayloadSource{gloasPath: gloasPayloadPathPending}, nil
 	}
 	pending := executionPayloadSource{gloasPath: gloasPayloadPathPending}
-	src := awaitGloasPayloadSource(context.Background(), time.Now().Add(20*time.Millisecond), time.Millisecond, pending, resolve)
+	start := time.Now()
+	// A poll interval far longer than the deadline: the cutoff itself must end the wait.
+	src := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Second, pending, resolve)
 	require.Equal(t, gloasPayloadPathPending, src.gloasPath)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
 }
 
 func TestAwaitGloasPayloadSourceKeepsLastSourceOnResolveError(t *testing.T) {
