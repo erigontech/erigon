@@ -880,15 +880,7 @@ func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Accoun
 	if s.versionMap == nil {
 		return nil, UnknownSource, UnknownVersion, false, nil
 	}
-	var readStart time.Time
-	if dbg.KVReadLevelledMetrics {
-		readStart = time.Now()
-	}
-	committed, err := s.stateReader.ReadAccountData(addr)
-	if dbg.KVReadLevelledMetrics {
-		s.accountReadDuration += time.Since(readStart)
-		s.accountReadCount++
-	}
+	committed, err := s.committedAccount(addr)
 	if err != nil {
 		return nil, StorageRead, UnknownVersion, true, err
 	}
