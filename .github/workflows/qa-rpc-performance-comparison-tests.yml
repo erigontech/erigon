@@ -431,6 +431,7 @@ jobs:
                                       --test-report \
                                       --json-report $result_dir/$result_file \
                                       --testing-client $client \
+                                      --more-percentiles \
                                       "${verbose_flag[@]}" 2>&1 | tee -a $output_log
           
             # Capture test runner script exit status (use PIPESTATUS since we're piping to tee)
