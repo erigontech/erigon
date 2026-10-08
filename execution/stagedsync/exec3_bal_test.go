@@ -7,7 +7,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/bal/tempbal"
+	"github.com/erigontech/erigon/execution/bal/offlinebal"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -62,28 +62,28 @@ func TestBlockAccessList(t *testing.T) {
 	}
 }
 
-// TestBlockAccessListTempBAL pins that a stored temp BAL is served for a header
+// TestBlockAccessListOfflineBAL pins that a stored offline BAL is served for a header
 // without a BAL commitment, keyed by block number and hash.
-func TestBlockAccessListTempBAL(t *testing.T) {
+func TestBlockAccessListOfflineBAL(t *testing.T) {
 	dir := t.TempDir()
-	tempBAL := types.BlockAccessList{{Address: common.Address{7}}}
-	tempBALBytes, err := types.EncodeBlockAccessListBytes(tempBAL)
+	offlineBAL := types.BlockAccessList{{Address: common.Address{7}}}
+	offlineBALBytes, err := types.EncodeBlockAccessListBytes(offlineBAL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	blockHash := common.Hash{0xAA}
 
-	w, err := tempbal.NewWriter(dir)
+	w, err := offlinebal.NewWriter(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := w.Append(7, blockHash, tempBALBytes); err != nil {
+	if err := w.Append(7, blockHash, offlineBALBytes); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reader, err := tempbal.OpenReader(dir)
+	reader, err := offlinebal.OpenReader(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +96,8 @@ func TestBlockAccessListTempBAL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, tempBAL) {
-		t.Fatalf("temp BAL = %v, want %v", got, tempBAL)
+	if !reflect.DeepEqual(got, offlineBAL) {
+		t.Fatalf("offline BAL = %v, want %v", got, offlineBAL)
 	}
 	if getter.calls != 0 {
 		t.Fatalf("DB reads = %d, want 0", getter.calls)

@@ -60,8 +60,9 @@ var (
 	dbWriteMap bool
 
 	chainTipMode                    bool
-	generateTempBAL                 bool
-	useTempBAL                      bool
+	generateOfflineBAL              bool
+	useOfflineBAL                   bool
+	offlineBALDir                   string
 	clearCommitment                 bool
 	resume                          bool
 	noHistory                       bool
@@ -249,7 +250,8 @@ func withChainTipMode(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&chainTipMode, "sync.mode.chaintip", false, "Every block does: `CalcCommitment`, `rwtx.Commit()`, generate diffs/changesets. Also can use it to generate diffs before `integration loop_exec`")
 }
 
-func withTempBAL(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&generateTempBAL, "generate-temp-bal", false, "Compute a synthetic block access list per executed block and persist it to the temp-BAL store under <datadir>/temp-bal (for chains whose blocks carry no BAL)")
-	cmd.Flags().BoolVar(&useTempBAL, "use-temp-bal", false, "Feed BALs from the temp-BAL store under <datadir>/temp-bal into execution and commitment")
+func withOfflineBAL(cmd *cobra.Command) {
+	cmd.Flags().BoolVar(&generateOfflineBAL, "generate-offline-bals", false, "Compute a synthetic block access list per executed block and persist it to the offline-BAL store (for chains whose blocks carry no BAL)")
+	cmd.Flags().BoolVar(&useOfflineBAL, "use-offline-bals", false, "Feed BALs from the offline-BAL store into execution and commitment")
+	cmd.Flags().StringVar(&offlineBALDir, "offline-bal.dir", "", "Offline-BAL store directory (default: <datadir>/offline-bal)")
 }

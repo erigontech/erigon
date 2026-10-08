@@ -14,13 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package tempbal is a file-backed store for synthetic ("temp") Block Access
+// Package offlinebal is a file-backed store for synthetic Block Access
 // Lists generated for blocks that carry no BAL of their own. It is optimised
 // for a single forward pass over a contiguous block range: the log is
 // memory-mapped and advised MADV_SEQUENTIAL, so reads are served from OS page
 // cache with kernel readahead and never held on the Go heap — keeping heap
 // small so it doesn't evict the mmapped state-snapshot pages under measurement.
-package tempbal
+package offlinebal
 
 import (
 	"bufio"
@@ -70,7 +70,7 @@ type Writer struct {
 	haveLast bool
 }
 
-// NewWriter opens (creating if needed) the temp-BAL log under dir for append.
+// NewWriter opens (creating if needed) the offline-BAL log under dir for append.
 func NewWriter(dir string) (*Writer, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func (w *Writer) init() error {
 		if err := w.f.Truncate(0); err != nil {
 			return err
 		}
-		_, err := w.f.Write([]byte(magic))
+		_, err := w.f.WriteString(magic)
 		return err
 	}
 	data, err := mmap.OpenRo(w.f, int(fi.Size()))
@@ -147,7 +147,7 @@ func (w *Writer) Close() error {
 	return w.f.Close()
 }
 
-// Reader memory-maps the temp-BAL log and indexes it by block number.
+// Reader memory-maps the offline-BAL log and indexes it by block number.
 type Reader struct {
 	data  mmap.Ro
 	index map[uint64]recLoc
@@ -159,7 +159,7 @@ type recLoc struct {
 	length int
 }
 
-// OpenReader mmaps the temp-BAL log under dir, advises sequential access
+// OpenReader mmaps the offline-BAL log under dir, advises sequential access
 // (kernel readahead) and builds an in-memory offset index by walking record
 // headers. The walk runs at open time — before the measured window — so it
 // warms the mapping without adding random I/O during execution.

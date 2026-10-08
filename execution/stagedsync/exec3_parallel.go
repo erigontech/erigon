@@ -691,8 +691,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// against a full-block BAL.
 					if validateFullBlock && (isAmsterdam || pe.cfg.experimentalBAL) {
 						var sink bal.BALSink
-						if pe.cfg.tempBALWriter != nil {
-							sink = pe.cfg.tempBALWriter
+						if pe.cfg.offlineBALWriter != nil {
+							sink = pe.cfg.offlineBALWriter
 						}
 						if err := bal.Process(header, block.BlockAccessList(), applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, sink, pe.cfg.dirs.DataDir, pe.logger); err != nil {
 							recordApplyFailure(err)

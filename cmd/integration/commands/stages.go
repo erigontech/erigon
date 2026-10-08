@@ -60,7 +60,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/stats"
-	"github.com/erigontech/erigon/execution/bal/tempbal"
+	"github.com/erigontech/erigon/execution/bal/offlinebal"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/cache"
@@ -330,7 +330,7 @@ func init() {
 	withLimit(cmdStageExec)
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
-	withTempBAL(cmdStageExec)
+	withOfflineBAL(cmdStageExec)
 	withErigondbDomainStepsInFrozenFile(cmdStageExec)
 	withExperimentalCommitment(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
@@ -732,33 +732,37 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	genesis := readGenesis(chain)
 	br, _ := blocksIO(db, logger)
 
-	if generateTempBAL && useTempBAL {
-		return errors.New("--generate-temp-bal and --use-temp-bal are mutually exclusive")
+	if generateOfflineBAL && useOfflineBAL {
+		return errors.New("--generate-offline-bals and --use-offline-bals are mutually exclusive")
 	}
 
 	notifications := shards.NewNotifications(nil)
-	// Generating temp BALs requires the experimental-BAL exec path (pre-Amsterdam
+	// Generating offline BALs requires the experimental-BAL exec path (pre-Amsterdam
 	// blocks otherwise skip BAL computation entirely).
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
-		dirs, br, genesis, syncCfg, generateTempBAL /*experimentalBAL*/, exec.NewBlockReadAheader())
+		dirs, br, genesis, syncCfg, generateOfflineBAL /*experimentalBAL*/, exec.NewBlockReadAheader())
 
-	if generateTempBAL {
-		w, err := tempbal.NewWriter(filepath.Join(dirs.DataDir, "temp-bal"))
+	balDir := offlineBALDir
+	if balDir == "" {
+		balDir = filepath.Join(dirs.DataDir, "offline-bal")
+	}
+	if generateOfflineBAL {
+		w, err := offlinebal.NewWriter(balDir)
 		if err != nil {
 			return err
 		}
 		defer w.Close()
-		cfg = cfg.WithTempBAL(w, nil)
+		cfg = cfg.WithOfflineBAL(w, nil)
 	}
-	if useTempBAL {
-		r, err := tempbal.OpenReader(filepath.Join(dirs.DataDir, "temp-bal"))
+	if useOfflineBAL {
+		r, err := offlinebal.OpenReader(balDir)
 		if err != nil {
 			return err
 		}
 		defer r.Close()
-		cfg = cfg.WithTempBAL(nil, r)
+		cfg = cfg.WithOfflineBAL(nil, r)
 	}
 
 	if unwind > 0 {

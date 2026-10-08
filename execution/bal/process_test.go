@@ -126,10 +126,10 @@ func (s *recordingSink) Append(num uint64, hash common.Hash, bal []byte) error {
 	return nil
 }
 
-// TestProcessPersistsTempBAL covers --generate-temp-bal: for a pre-Amsterdam
+// TestProcessPersistsOfflineBAL covers --generate-offline-bals: for a pre-Amsterdam
 // block (isEIP7928=false) with experimental BAL on, Process computes the BAL
 // and hands the encoded bytes to the sink, keyed by block number and hash.
-func TestProcessPersistsTempBAL(t *testing.T) {
+func TestProcessPersistsOfflineBAL(t *testing.T) {
 	addrA := accounts.InternAddress(common.HexToAddress("0x0000000000000000000000000000000000000001"))
 	io := state.NewVersionedIO(1)
 	writeSets := map[int]*state.WriteSet{}
