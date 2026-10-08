@@ -1014,11 +1014,10 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 	}, out.Data)
 }
 
-// A pool submission the node's own validation ignores must not be published: the gossip layer accepts self-published
-// messages without validating them again, so peers would receive (and penalize the node for) what it just ignored.
-// An attestation already seen for the validator and target epoch passed validation earlier, so it is published again:
-// the earlier publish may have failed.
-func TestPoolAttestationsPublishIgnoredOnlyIfAlreadySeen(t *testing.T) {
+// An ignored submission is not published because gossip accepts self-published messages without validating them
+// again. An already-seen attestation succeeds without publishing because the seen check runs before signature
+// validation, so the submitted attestation itself was not validated.
+func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
 	data, err := json.Marshal(&solid.AttestationData{})
 	require.NoError(t, err)
 	single, err := json.Marshal([]*solid.SingleAttestation{{Data: &solid.AttestationData{}}})
@@ -1041,23 +1040,14 @@ func TestPoolAttestationsPublishIgnoredOnlyIfAlreadySeen(t *testing.T) {
 			body:    string(single),
 		},
 	}
-	type post struct {
-		processErr error
-		publish    bool
-		publishErr error
-		status     int
-	}
-	alreadySeen := fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationAlreadySeen)
 	outcomes := []struct {
-		name  string
-		posts []post
+		name   string
+		err    error
+		status int
 	}{
-		{name: "already seen", posts: []post{{processErr: alreadySeen, publish: true, status: http.StatusOK}}},
-		{name: "stale head", posts: []post{{processErr: fmt.Errorf("head epoch 0 too far from attestation epoch 2: %w", services.ErrIgnore), status: http.StatusBadRequest}}},
-		{name: "retry after failed publish", posts: []post{
-			{publish: true, publishErr: errors.New("no peers"), status: http.StatusBadRequest},
-			{processErr: alreadySeen, publish: true, status: http.StatusOK},
-		}},
+		{name: "already seen", err: fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationAlreadySeen), status: http.StatusOK},
+		{name: "stale head", err: fmt.Errorf("head epoch 0 too far from attestation epoch 2: %w", services.ErrIgnore), status: http.StatusBadRequest},
+		{name: "invalid signature", err: errors.New("invalid signature"), status: http.StatusBadRequest},
 	}
 	for _, tt := range requests {
 		for _, outcome := range outcomes {
@@ -1069,32 +1059,24 @@ func TestPoolAttestationsPublishIgnoredOnlyIfAlreadySeen(t *testing.T) {
 
 				ctrl := gomock.NewController(t)
 				attestationService := services_mock.NewMockAttestationService(ctrl)
-				mockGossip := gossip_mock.NewMockGossip(ctrl)
-				calls := make([]any, 0, 2*len(outcome.posts))
-				for _, p := range outcome.posts {
-					calls = append(calls, attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(p.processErr))
-					if p.publish {
-						calls = append(calls, mockGossip.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Return(p.publishErr))
-					}
-				}
-				gomock.InOrder(calls...)
+				attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(outcome.err).Times(1)
 				handler.attestationService = attestationService
+				mockGossip := gossip_mock.NewMockGossip(ctrl)
+				mockGossip.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 				handler.gossipManager = mockGossip
 
-				server := httptest.NewServer(handler.mux)
-				defer server.Close()
-
-				for _, p := range outcome.posts {
-					req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+tt.path, strings.NewReader(tt.body))
-					require.NoError(t, err)
-					req.Header.Set("Content-Type", "application/json")
-					if tt.version != "" {
-						req.Header.Set("Eth-Consensus-Version", tt.version)
-					}
-					resp, err := server.Client().Do(req)
-					require.NoError(t, err)
-					require.NoError(t, resp.Body.Close())
-					require.Equal(t, p.status, resp.StatusCode)
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tt.path, strings.NewReader(tt.body))
+				req.Header.Set("Content-Type", "application/json")
+				if tt.version != "" {
+					req.Header.Set("Eth-Consensus-Version", tt.version)
+				}
+				recorder := httptest.NewRecorder()
+				handler.ServeHTTP(recorder, req)
+				require.Equal(t, outcome.status, recorder.Code, recorder.Body.String())
+				if outcome.status == http.StatusBadRequest {
+					var response poolingError
+					require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+					require.Equal(t, []poolingFailure{{Index: 0, Message: outcome.err.Error()}}, response.Failures)
 				}
 			})
 		}
