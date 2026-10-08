@@ -1242,6 +1242,7 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(9)))
 	ibs.AddLog(&types.Log{Address: addr.Value()})
 	ibs.AddAddressToAccessList(addr)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, uint256.Int{}, true) // only an address with cells is memoized
 	ibs.readSelfDestructMemo(addr)
 	require.NotEmpty(t, ibs.sdProbe)
 	require.NotNil(t, ibs.versionedReads.address)
