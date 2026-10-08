@@ -17,6 +17,7 @@
 package forkchoice
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -177,4 +178,63 @@ func TestRetryPendingExecutionPayloadEnvelopeWaitsForInFlightRetry(t *testing.T)
 	close(release)
 	<-first
 	<-second
+}
+
+func TestEnterPendingEnvelopeApplyAdmitsAWaiterAfterTheHolderLeaves(t *testing.T) {
+	f := &ForkChoiceStore{}
+	root := common.HexToHash("0x1")
+	waited, admitted := f.enterPendingEnvelopeApply(context.Background(), root)
+	require.False(t, waited)
+	require.True(t, admitted)
+
+	waiter := make(chan bool, 1)
+	go func() {
+		waited, admitted := f.enterPendingEnvelopeApply(context.Background(), root)
+		waiter <- waited && admitted
+		f.leavePendingEnvelopeApply(root)
+	}()
+	select {
+	case <-waiter:
+		t.Fatal("a waiter was admitted while the holder was still applying")
+	case <-time.After(50 * time.Millisecond):
+	}
+	f.leavePendingEnvelopeApply(root)
+	require.True(t, <-waiter, "the waiter runs itself after the holder leaves")
+
+	// A waiter whose context ends first is not admitted.
+	_, admitted = f.enterPendingEnvelopeApply(context.Background(), root)
+	require.True(t, admitted)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, admitted = f.enterPendingEnvelopeApply(ctx, root)
+	require.False(t, admitted)
+	f.leavePendingEnvelopeApply(root)
+}
+
+// Every caller of applyPendingEnvelope, block import included, holds the per-root gate.
+func TestApplyPendingEnvelopeHoldsThePerRootGate(t *testing.T) {
+	root := common.HexToHash("0x1")
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(true, nil).AnyTimes()
+	f, pending := newRetryPendingStore(t, peerDas)
+	release := make(chan struct{})
+	f.forkGraph = retryPendingForkGraph{block: f.forkGraph.(retryPendingForkGraph).block, gate: release}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}}
+	pending.Add(root, envelope)
+
+	done := make(chan struct{})
+	go func() {
+		f.applyPendingEnvelope(t.Context(), root, envelope, false, false)
+		close(done)
+	}()
+	for {
+		if _, busy := f.retryingEnvelopes.Load(root); busy {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	<-done
+	_, busy := f.retryingEnvelopes.Load(root)
+	require.False(t, busy)
 }

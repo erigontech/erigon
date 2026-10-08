@@ -1009,7 +1009,7 @@ func ensureStoredParentPayloadAccepted(
 	}
 	// Running out of replay budget is not an EL verdict; recording None would mark a
 	// locally available payload unavailable.
-	if status == execution_client.PayloadStatusNone && ctx.Err() != nil {
+	if execution_client.ValidationInterrupted(ctx, status, err) {
 		return false
 	}
 	status, retained := recordGloasPayloadRetryResult(store, forkchoice.PendingELPayload{Block: block, Envelope: envelope}, status)
@@ -1024,12 +1024,7 @@ func recordGloasPayloadRetryResult(
 	payload forkchoice.PendingELPayload,
 	status execution_client.PayloadStatus,
 ) (execution_client.PayloadStatus, bool) {
-	if !validPendingGloasPayload(payload) {
-		return execution_client.PayloadStatusNone, false
-	}
-	beaconRoot := payload.Envelope.Message.BeaconBlockRoot
-	executionPayload := payload.Envelope.Message.Payload
-	status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(beaconRoot, executionPayload.BlockHash, status, executionPayload.GasLimit)
+	status, retained := recordGloasPayloadVerdict(store, payload, status)
 	if retained && (status == execution_client.PayloadStatusNone || status == execution_client.PayloadStatusNotValidated) {
 		store.RequeuePendingELPayload(payload)
 	}
@@ -1048,12 +1043,6 @@ func recordGloasPayloadVerdict(
 	}
 	executionPayload := payload.Envelope.Message.Payload
 	return store.MarkPayloadStatusAndGasLimitIfRetained(payload.Envelope.Message.BeaconBlockRoot, executionPayload.BlockHash, status, executionPayload.GasLimit)
-}
-
-// gloasPayloadRetryInterrupted reports a NewPayload attempt cut short by the context, which
-// carries no EL verdict. An INVALID verdict returned together with an error is still a verdict.
-func gloasPayloadRetryInterrupted(ctx context.Context, status execution_client.PayloadStatus, err error) bool {
-	return err != nil && status == execution_client.PayloadStatusNone && ctx.Err() != nil
 }
 
 func buildGloasNewPayloadArgs(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
@@ -1085,12 +1074,28 @@ func retryGloasPayloadWithEL(ctx context.Context, cfg *Cfg, block *cltypes.Signe
 	return cfg.gloasPayloadValidator.NewPayloadWithAdmission(ctx, envelope.Message.Payload, &parentRoot, versionedHashes, executionRequestsList)
 }
 
-func isGloasPayloadKnownInvalid(cfg *Cfg, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
+// gloasPayloadVerificationStore is the part of fork choice a payload verification reads and
+// records its verdict on.
+type gloasPayloadVerificationStore interface {
+	gloasPayloadRetryResultStore
+	GetRecentExecutionPayloadStatus(common.Hash) (execution_client.PayloadStatus, bool)
+	ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+}
+
+type gloasHeadVerificationStore interface {
+	gloasHeadReader
+	gloasPayloadVerificationStore
+	HasEnvelope(common.Hash) bool
+	IsPayloadVerified(common.Hash) bool
+	GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool)
+}
+
+func isGloasPayloadKnownInvalid(store gloasPayloadVerificationStore, envelope *cltypes.SignedExecutionPayloadEnvelope) bool {
 	executionBlockHash, ok := gloasEnvelopePayloadHash(envelope)
 	if !ok {
 		return false
 	}
-	status, ok := cfg.forkChoice.GetRecentExecutionPayloadStatus(executionBlockHash)
+	status, ok := store.GetRecentExecutionPayloadStatus(executionBlockHash)
 	return ok && status == execution_client.PayloadStatusInvalidated
 }
 
@@ -1118,7 +1123,7 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg, attempted map[comm
 			continue
 		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, p.Block, p.Envelope)
-		if gloasPayloadRetryInterrupted(ctx, status, err) {
+		if execution_client.ValidationInterrupted(ctx, status, err) {
 			for _, deferred := range pending[i:] {
 				cfg.forkChoice.RequeuePendingELPayload(deferred)
 			}
@@ -1149,8 +1154,8 @@ func gloasVerificationHeadRoot(forkChoice gloasHeadReader) (common.Hash, error) 
 
 // verifyGloasPayload records the EL verdict for a persisted payload. verified is false when the
 // payload was skipped (known invalid or no longer retained); err reports an unreadable envelope.
-func verifyGloasPayload(ctx context.Context, cfg *Cfg, item gloasVerificationItem) (verified bool, err error) {
-	envelope, err := cfg.forkChoice.ReadEnvelopeFromDisk(item.root)
+func verifyGloasPayload(ctx context.Context, cfg *Cfg, store gloasPayloadVerificationStore, item gloasVerificationItem) (verified bool, err error) {
+	envelope, err := store.ReadEnvelopeFromDisk(item.root)
 	if err != nil {
 		log.Debug("[chainTipSync] failed to read GLOAS envelope for verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root, "err", err)
 		return false, err
@@ -1160,19 +1165,19 @@ func verifyGloasPayload(ctx context.Context, cfg *Cfg, item gloasVerificationIte
 		log.Warn("[chainTipSync] missing GLOAS envelope payload during verification sweep", "slot", item.block.Block.Slot, "blockRoot", item.root)
 		return false, errors.New("missing execution payload in persisted envelope")
 	}
-	if isGloasPayloadKnownInvalid(cfg, envelope) {
-		cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(item.root, execHash, execution_client.PayloadStatusInvalidated, envelope.Message.Payload.GasLimit)
+	if isGloasPayloadKnownInvalid(store, envelope) {
+		store.MarkPayloadStatusAndGasLimitIfRetained(item.root, execHash, execution_client.PayloadStatusInvalidated, envelope.Message.Payload.GasLimit)
 		return false, nil
 	}
 	status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
-	if gloasPayloadRetryInterrupted(ctx, status, err) {
+	if execution_client.ValidationInterrupted(ctx, status, err) {
 		return false, err
 	}
 	if err != nil {
 		log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
 	}
 	status, retained := recordGloasPayloadVerdict(
-		cfg.forkChoice,
+		store,
 		forkchoice.PendingELPayload{Block: item.block, Envelope: envelope},
 		status,
 	)
@@ -1188,24 +1193,23 @@ func verifyGloasPayload(ctx context.Context, cfg *Cfg, item gloasVerificationIte
 // verifyGloasHeadPayloads verifies the selected head's payload and repeats only while that moves
 // the head, so a head the EL cannot validate yet costs one NewPayload per cycle. Roots that
 // received a verdict are added to attempted so no other phase retries them in this cycle.
-func verifyGloasHeadPayloads(ctx context.Context, cfg *Cfg, attempted map[common.Hash]struct{}) {
+func verifyGloasHeadPayloads(ctx context.Context, cfg *Cfg, store gloasHeadVerificationStore, attempted map[common.Hash]struct{}) {
 	advanceWhileHeadMoves(ctx, func() (common.Hash, error) {
-		return gloasVerificationHeadRoot(cfg.forkChoice)
-	}, func(stepCtx context.Context) bool {
+		return gloasVerificationHeadRoot(store)
+	}, func(stepCtx context.Context, headRoot common.Hash) bool {
 		// Any recorded verdict, INVALID included, can move the head.
-		root, _ := verifyGloasHeadPayload(stepCtx, cfg, attempted)
-		if root == (common.Hash{}) {
+		if !verifyGloasHeadPayload(stepCtx, cfg, store, headRoot, attempted) {
 			return false
 		}
-		attempted[root] = struct{}{}
+		attempted[headRoot] = struct{}{}
 		return true
 	})
 }
 
-func advanceWhileHeadMoves(ctx context.Context, head func() (common.Hash, error), step func(context.Context) bool) {
+func advanceWhileHeadMoves(ctx context.Context, head func() (common.Hash, error), step func(context.Context, common.Hash) bool) {
 	for ctx.Err() == nil {
 		before, err := head()
-		if err != nil || !step(ctx) {
+		if err != nil || !step(ctx, before) {
 			return
 		}
 		after, err := head()
@@ -1216,28 +1220,24 @@ func advanceWhileHeadMoves(ctx context.Context, head func() (common.Hash, error)
 }
 
 // verifyGloasHeadPayload verifies the selected head's persisted payload when it has no EL status
-// yet. It returns the root when a verdict was recorded (or the payload was skipped for good),
-// and whether a status was recorded, which can move the head to the next block.
-func verifyGloasHeadPayload(ctx context.Context, cfg *Cfg, attempted map[common.Hash]struct{}) (common.Hash, bool) {
-	headRoot, err := gloasVerificationHeadRoot(cfg.forkChoice)
-	if err != nil || headRoot == (common.Hash{}) {
-		return common.Hash{}, false
+// yet. It reports whether a verdict was recorded (or the payload was skipped for good), which
+// can move the head to the next block.
+func verifyGloasHeadPayload(ctx context.Context, cfg *Cfg, store gloasHeadVerificationStore, headRoot common.Hash, attempted map[common.Hash]struct{}) bool {
+	if headRoot == (common.Hash{}) {
+		return false
 	}
 	if _, done := attempted[headRoot]; done {
-		return common.Hash{}, false
+		return false
 	}
-	if !cfg.forkChoice.HasEnvelope(headRoot) || cfg.forkChoice.IsPayloadVerified(headRoot) {
-		return common.Hash{}, false
+	if !store.HasEnvelope(headRoot) || store.IsPayloadVerified(headRoot) {
+		return false
 	}
-	block, ok := cfg.forkChoice.GetBlock(headRoot)
+	block, ok := store.GetBlock(headRoot)
 	if !ok || block == nil {
-		return common.Hash{}, false
+		return false
 	}
-	verified, err := verifyGloasPayload(ctx, cfg, gloasVerificationItem{root: headRoot, block: block})
-	if err != nil {
-		return common.Hash{}, false
-	}
-	return headRoot, verified
+	_, err := verifyGloasPayload(ctx, cfg, store, gloasVerificationItem{root: headRoot, block: block})
+	return err == nil
 }
 
 func continueGloasVerificationAfterItemFailure(ctx context.Context, completeBatch *bool) bool {
@@ -1351,7 +1351,7 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg, skip map[commo
 		if _, attempted := skip[item.root]; attempted || cfg.forkChoice.IsPayloadVerified(item.root) {
 			return true
 		}
-		verified, err := verifyGloasPayload(ctx, cfg, item)
+		verified, err := verifyGloasPayload(ctx, cfg, cfg.forkChoice, item)
 		if err != nil {
 			return continueGloasVerificationAfterItemFailure(ctx, &completeBatch)
 		}
@@ -1417,7 +1417,7 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg, attempted map[c
 		return
 	}
 	status, err := validateAnchorPayloadWithEL(ctx, cfg, bid, envelope)
-	if gloasPayloadRetryInterrupted(ctx, status, err) {
+	if execution_client.ValidationInterrupted(ctx, status, err) {
 		return
 	}
 	if err != nil {
@@ -1485,7 +1485,9 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			// choice sees no FULL variant and cannot advance; each verified head exposes the
 			// next one, so repeat while the head moves.
 			func(retryCtx context.Context) {
-				verifyGloasHeadPayloads(retryCtx, cfg, attemptedHeads)
+				if cfg.beaconCfg.GetCurrentStateVersion(args.targetSlot/cfg.beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion {
+					verifyGloasHeadPayloads(retryCtx, cfg, cfg.forkChoice, attemptedHeads)
+				}
 			},
 		)
 	}

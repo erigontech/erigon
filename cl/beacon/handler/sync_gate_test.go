@@ -80,12 +80,15 @@ func TestBlockProductionRefusesHeadBehindImportedBlocks(t *testing.T) {
 }
 
 // An EMPTY head whose envelope is parked is an open decision, so production waits for it
-// instead of building on the EMPTY variant right away.
-func TestGloasPayloadPathTreatsParkedEnvelopeAsPending(t *testing.T) {
+// instead of building on the EMPTY variant right away. A parked copy of an envelope that is
+// already persisted is stale and does not count.
+func TestGloasPayloadPathAwaitsParkedEnvelope(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	head := forkchoice.ForkChoiceNode{Root: common.Hash{1}, PayloadStatus: cltypes.PayloadStatusEmpty}
 
 	require.Equal(t, gloasPayloadPathEmpty, handler.gloasPayloadPathForHead(head, 10))
 	fcu.PendingEnvelopeRoots = map[common.Hash]struct{}{head.Root: {}}
-	require.Equal(t, gloasPayloadPathPending, handler.gloasPayloadPathForHead(head, 10))
+	require.Equal(t, gloasPayloadPathAwaitingEnvelope, handler.gloasPayloadPathForHead(head, 10))
+	fcu.SetEnvelope(head.Root, &cltypes.SignedExecutionPayloadEnvelope{})
+	require.Equal(t, gloasPayloadPathEmpty, handler.gloasPayloadPathForHead(head, 10))
 }

@@ -22,6 +22,7 @@ import (
 
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -42,17 +43,28 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_RetriesPendingEnvel
 	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	// The suite's service runs under a cancelled context and a config without slot timing;
+	// the hook must get a live context and a real retry budget.
+	t.beaconConfig.SecondsPerSlot = 12
+	service := NewDataColumnSidecarService(
+		t.T().Context(), t.beaconConfig, t.mockEthClock, t.mockForkChoice, t.mockSyncedData, t.mockColumnSidecarStorage, beaconevents.NewEventEmitter(),
+	)
 
-	retried := make(chan common.Hash, 1)
-	t.mockForkChoice.RetryPendingEnvelopeFunc = func(_ context.Context, root common.Hash) {
-		retried <- root
+	type retry struct {
+		root   common.Hash
+		ctxErr error
+	}
+	retried := make(chan retry, 1)
+	t.mockForkChoice.RetryPendingEnvelopeFunc = func(ctx context.Context, root common.Hash) {
+		retried <- retry{root: root, ctxErr: ctx.Err()}
 	}
 
-	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot))
+	err := service.ProcessMessage(context.Background(), nil, createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot))
 	t.NoError(err)
 	select {
-	case root := <-retried:
-		t.Equal(testBlockRoot, root)
+	case got := <-retried:
+		t.Equal(testBlockRoot, got.root)
+		t.NoError(got.ctxErr, "the retry must run with a live context")
 	case <-time.After(5 * time.Second):
 		t.Fail("pending envelope retry was not triggered")
 	}

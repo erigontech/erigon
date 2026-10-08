@@ -34,9 +34,9 @@ import (
 )
 
 const (
-	deferredColumnSyncInterval    = time.Second
-	deferredColumnSyncSlotDivisor = 6
-	deferredColumnSyncMaxAttempts = 16
+	deferredColumnSyncInterval        = time.Second
+	deferredColumnSyncSlotDivisor     = 6
+	deferredColumnSyncMaxBackoffSlots = 32
 )
 
 // BlockGetter is an interface for getting blocks by root.
@@ -1265,7 +1265,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		timeAddColumns := time.Since(beginAddColumns)
 		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin),
 			"timeRecoverMatrix", timeRecoverMatrix, "timeRecoverBlobs", timeRecoverBlobs, "timeRemoveColumns", timeRemoveColumns, "timeAddColumns", timeAddColumns)
-		d.columnDataSynced(ctx, blockRoot)
+		go d.columnDataSynced(ctx, blockRoot)
 		return false
 	}
 
@@ -1950,15 +1950,15 @@ func (d *peerdas) deferredColumnSyncDelay() time.Duration {
 	return d.slotDuration() / deferredColumnSyncSlotDivisor
 }
 
-// deferredColumnSyncRound bounds one download round and the envelope retry that follows it.
+// deferredColumnSyncRound bounds one download round at a slot, which leaves room for the
+// per-request timeout of the by-root fetches.
 func (d *peerdas) deferredColumnSyncRound() time.Duration {
-	return d.slotDuration() / deferredColumnSyncSlotDivisor
+	return d.slotDuration()
 }
 
-type deferredColumnSyncEntry struct {
-	attempts    int
-	nextAttempt time.Time
-	inFlight    bool
+// pendingEnvelopeRetryBudget bounds the envelope retry that follows completed column data.
+func (d *peerdas) pendingEnvelopeRetryBudget() time.Duration {
+	return d.slotDuration() / deferredColumnSyncSlotDivisor
 }
 
 // columnDataSynced notifies fork choice that a block's column data is complete, so an envelope
@@ -1967,32 +1967,89 @@ func (d *peerdas) columnDataSynced(ctx context.Context, blockRoot common.Hash) {
 	if d.forkChoice == nil {
 		return
 	}
-	retryCtx, cancel := context.WithTimeout(ctx, d.deferredColumnSyncRound())
+	retryCtx, cancel := context.WithTimeout(ctx, d.pendingEnvelopeRetryBudget())
 	defer cancel()
 	d.forkChoice.RetryPendingExecutionPayloadEnvelope(retryCtx, blockRoot)
 }
 
+type deferredColumnSyncEntry struct {
+	attempts    int
+	nextAttempt time.Time
+	inFlight    bool
+}
+
+// deferredColumnSyncQueue paces the roots whose columns are still missing. A failed round
+// grows the root's backoff by one slot, up to an epoch; a root is never dropped, because an
+// imported block is not queued again and the custody gap would be permanent.
+type deferredColumnSyncQueue struct {
+	mu      sync.Mutex
+	entries map[common.Hash]*deferredColumnSyncEntry
+}
+
+func newDeferredColumnSyncQueue() *deferredColumnSyncQueue {
+	return &deferredColumnSyncQueue{entries: map[common.Hash]*deferredColumnSyncEntry{}}
+}
+
+func (q *deferredColumnSyncQueue) entry(root common.Hash) *deferredColumnSyncEntry {
+	e := q.entries[root]
+	if e == nil {
+		e = &deferredColumnSyncEntry{}
+		q.entries[root] = e
+	}
+	return e
+}
+
+// ready reports whether root may be checked now: not in a round and past its backoff.
+func (q *deferredColumnSyncQueue) ready(root common.Hash, now time.Time) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e := q.entries[root]
+	return e == nil || (!e.inFlight && !now.Before(e.nextAttempt))
+}
+
+func (q *deferredColumnSyncQueue) start(roots []common.Hash) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, root := range roots {
+		q.entry(root).inFlight = true
+	}
+}
+
+// postpone delays root by one slot without counting an attempt, for rounds that did not run.
+func (q *deferredColumnSyncQueue) postpone(root common.Hash, now time.Time, slot time.Duration) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e := q.entry(root)
+	e.inFlight = false
+	e.nextAttempt = now.Add(slot)
+}
+
+// failed records a round that left columns missing and grows the backoff.
+func (q *deferredColumnSyncQueue) failed(root common.Hash, now time.Time, slot time.Duration) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e := q.entry(root)
+	e.inFlight = false
+	e.attempts++
+	e.nextAttempt = now.Add(slot * time.Duration(min(e.attempts, deferredColumnSyncMaxBackoffSlots)))
+}
+
+func (q *deferredColumnSyncQueue) done(root common.Hash) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	delete(q.entries, root)
+}
+
 // syncColumnDataWorker fetches the custody columns gossip did not deliver. Download rounds run
 // off the ticker with a per-root in-flight marker, so one root nobody serves cannot stall the
-// others; a root is retried with a one-slot backoff and dropped after a fixed number of attempts.
+// others, and the envelope retry runs off the loop as well.
 func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 	ticker := time.NewTicker(deferredColumnSyncInterval)
 	defer ticker.Stop()
-	var mu sync.Mutex
-	entries := map[common.Hash]*deferredColumnSyncEntry{}
-	entry := func(root common.Hash) *deferredColumnSyncEntry {
-		e := entries[root]
-		if e == nil {
-			e = &deferredColumnSyncEntry{}
-			entries[root] = e
-		}
-		return e
-	}
+	queue := newDeferredColumnSyncQueue()
 	forget := func(root common.Hash) {
 		d.blocksToCheckSync.Delete(root)
-		mu.Lock()
-		delete(entries, root)
-		mu.Unlock()
+		queue.done(root)
 	}
 	for {
 		select {
@@ -2007,33 +2064,18 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 		d.blocksToCheckSync.Range(func(key, value any) bool {
 			root := key.(common.Hash)
 			block := value.(cltypes.ColumnSyncableSignedBlock)
-			mu.Lock()
-			e := entry(root)
-			skip := e.inFlight || now.Before(e.nextAttempt)
-			exhausted := e.attempts >= deferredColumnSyncMaxAttempts
-			mu.Unlock()
-			if skip || !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), d.deferredColumnSyncDelay()) {
+			if !queue.ready(root, now) || !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), d.deferredColumnSyncDelay()) {
 				return true
 			}
 			available, err := d.IsDataAvailable(block.GetSlot(), root)
 			switch {
 			case err != nil:
 				log.Warn("failed to check if data is available", "err", err)
-				mu.Lock()
-				e.attempts++
-				e.nextAttempt = now.Add(d.slotDuration())
-				dropped := e.attempts >= deferredColumnSyncMaxAttempts
-				mu.Unlock()
-				if dropped {
-					forget(root)
-				}
+				queue.failed(root, now, d.slotDuration())
 			case available:
 				log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
 				forget(root)
-				d.columnDataSynced(ctx, root)
-			case exhausted:
-				log.Debug("[syncColumnDataWorker] giving up on column data", "slot", block.GetSlot(), "blockRoot", root, "attempts", e.attempts)
-				forget(root)
+				go d.columnDataSynced(ctx, root)
 			default:
 				blocks = append(blocks, block)
 				roots = append(roots, root)
@@ -2047,19 +2089,13 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			peersCount, err := d.rpc.Peers()
 			if err != nil || peersCount == 0 {
 				log.Debug("[syncColumnDataWorker] no peers available, deferring column sync", "err", err)
-				mu.Lock()
 				for _, root := range roots {
-					entry(root).nextAttempt = now.Add(d.slotDuration())
+					queue.postpone(root, now, d.slotDuration())
 				}
-				mu.Unlock()
 				continue
 			}
 		}
-		mu.Lock()
-		for _, root := range roots {
-			entry(root).inFlight = true
-		}
-		mu.Unlock()
+		queue.start(roots)
 		log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))
 		go func() {
 			roundCtx, cancel := context.WithTimeout(ctx, d.deferredColumnSyncRound())
@@ -2075,20 +2111,13 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			}
 			for i, root := range roots {
 				available, err := d.IsDataAvailable(blocks[i].GetSlot(), root)
-				mu.Lock()
-				e := entry(root)
-				e.inFlight = false
 				if err != nil || !available {
-					e.attempts++
-					e.nextAttempt = time.Now().Add(d.slotDuration())
-				}
-				mu.Unlock()
-				if err != nil || !available {
+					queue.failed(root, time.Now(), d.slotDuration())
 					continue
 				}
 				forget(root)
 				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].GetSlot(), "blockRoot", root)
-				d.columnDataSynced(ctx, root)
+				go d.columnDataSynced(ctx, root)
 			}
 		}()
 	}
