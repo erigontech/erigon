@@ -1205,7 +1205,7 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 // existing-empty account is not gas-equivalent to a non-existent one. Non-Done
 // cells (racing worker estimates) and destroyed accounts return ok=false.
 func (ibs *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) (*accounts.Account, bool) {
-	if ibs.versionMap == nil {
+	if ibs.versionMap == nil || ibs.versionMap.load(addr) == nil {
 		return nil, false
 	}
 	// No cell for the address means every probe below misses, so the account
@@ -1303,6 +1303,10 @@ func (ibs *IntraBlockState) readSelfDestructMemo(addr accounts.Address) (bool, R
 		return e.destructed, e.res, e.ok
 	}
 	destructed, res, ok := ibs.versionMap.ReadSelfDestruct(addr, ibs.txIndex)
+	// An address with no cells costs no lock to probe; memoizing it only grows the map.
+	if !ok && ibs.versionMap.load(addr) == nil {
+		return destructed, res, ok
+	}
 	if ibs.sdProbe == nil {
 		ibs.sdProbe = make(map[accounts.Address]sdProbeEntry, 8)
 	}
@@ -1625,15 +1629,19 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		fmt.Printf("%d (%d.%d) SetCode %x, %d: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, addr, lenc, cs)
 	}
 
-	stateObject, err := ibs.GetOrNewStateObject(addr)
-	if err != nil {
-		return err
-	}
 	// Factories deploy the same bytes many times: reuse the last hash instead of re-hashing.
 	canonical := ibs.lastCode
 	if len(code) == 0 || !bytes.Equal(code, canonical.Bytes) {
 		canonical = accounts.NewCode(code)
 		ibs.lastCode = canonical
+	}
+	// A live account this tx created: no own self-destruct, and createObject wrote its AddressPath.
+	if ibs.noMaterialize && !ibs.warmReadable(addr) && ibs.hasWrite(addr, AddressPath, accounts.NilKey) && !ibs.accountLifecycle(addr) {
+		return ibs.setCreatedCode(addr, canonical, reason)
+	}
+	stateObject, err := ibs.GetOrNewStateObject(addr)
+	if err != nil {
+		return err
 	}
 	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
@@ -1680,24 +1688,62 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		// created stateObjects: original holds the pre-creation snapshot,
 		// and deleting CodePath/CodeHashPath writes would corrupt the trie.
 		matchesOriginal := !stateObject.newlyCreated && codeHash == origHash
-		if codeHash == baseCodeHash || matchesOriginal {
-			if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+		unchanged := codeHash == baseCodeHash || matchesOriginal
+		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+			if unchanged {
 				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
 					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, stateObject.original.CodeHash, len(code))
-			}
-			ibs.versionedWrites.DelCode(addr)
-			ibs.versionedWrites.DelCodeHash(addr)
-			ibs.versionedWrites.DelCodeSize(addr)
-		} else {
-			if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+			} else {
 				fmt.Printf("%d (%d.%d) SetCode WRITE %x codeHash=%x baseHash=%x codeLen=%d\n",
 					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, len(code))
 			}
-			ibs.recordWriteCode(addr, canonical)
-			ibs.recordWriteCodeHash(addr, codeHash)
-			ibs.recordWriteCodeSize(addr, canonical.Len())
 		}
+		ibs.writeCode(addr, canonical, unchanged)
 	}
+	return nil
+}
+
+// writeCode records code as this tx's Code, CodeHash and CodeSize writes, or
+// drops those writes when the code is unchanged.
+func (ibs *IntraBlockState) writeCode(addr accounts.Address, code accounts.Code, unchanged bool) {
+	if unchanged {
+		ibs.versionedWrites.DelCode(addr)
+		ibs.versionedWrites.DelCodeHash(addr)
+		ibs.versionedWrites.DelCodeSize(addr)
+		return
+	}
+	ibs.recordWriteCode(addr, code)
+	ibs.recordWriteCodeHash(addr, code.Hash)
+	ibs.recordWriteCodeSize(addr, code.Len())
+}
+
+// journalCodeChange journals a code change and calls the tracing hooks.
+func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash accounts.CodeHash, prevCode []byte, code accounts.Code, wasCommited bool, reason tracing.CodeChangeReason) {
+	ibs.journal.codeChange(addr, prevCode, prevHash, wasCommited)
+	if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChangeV2 != nil {
+		ibs.tracingHooks.OnCodeChangeV2(addr, prevHash, prevCode, code.Hash, code.Bytes, reason)
+	} else if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChange != nil {
+		ibs.tracingHooks.OnCodeChange(addr, prevHash, prevCode, code.Hash, code.Bytes)
+	}
+}
+
+// setCreatedCode is SetCode for an account this tx created, on the noMaterialize
+// path: its prior code is this tx's own cells, so no transient stateObject is
+// rebuilt, and the net-zero check against the tx-start code does not apply.
+func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.Code, reason tracing.CodeChangeReason) error {
+	baseCodeHash, err := ibs.GetCodeHash(addr)
+	if err != nil {
+		return err
+	}
+	prev, err := ibs.codeSeed(addr, baseCodeHash)
+	if err != nil {
+		return err
+	}
+	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
+		return nil
+	}
+	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
+	ibs.writeCode(addr, code, code.Hash == baseCodeHash)
 	return nil
 }
 
@@ -3383,7 +3429,8 @@ func (ibs *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 			return
 		}
 	}
-	if obj.code.Bytes != nil {
+	// An account this tx created has no code until its own Code write.
+	if obj.code.Bytes != nil || obj.newlyCreated {
 		return
 	}
 	code, err := refreshCode(ibs, addr)
