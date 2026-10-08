@@ -134,7 +134,7 @@ func TestNewBeaconStateMainnetPtcWindow(t *testing.T) {
 	require.Equal(t, 96, ptcWindow.Length(), "ptc_window should have 96 slots under mainnet")
 }
 
-func TestValidatorAccessorsRejectNegativeIndex(t *testing.T) {
+func TestValidatorAccessorsRejectInvalidIndex(t *testing.T) {
 	state := GetTestState()
 	accessors := map[string]func(int) error{
 		"ValidatorForValidatorIndex":                       func(i int) error { _, err := state.ValidatorForValidatorIndex(i); return err },
@@ -170,7 +170,7 @@ func TestValidatorAccessorsRejectNegativeIndex(t *testing.T) {
 		"SetActivationEpochForValidatorAtIndex":            func(i int) error { return state.SetActivationEpochForValidatorAtIndex(i, 1) },
 		"SetActivationEligibilityEpochForValidatorAtIndex": func(i int) error { return state.SetActivationEligibilityEpochForValidatorAtIndex(i, 1) },
 	}
-	for _, index := range []int{-1, math.MinInt64} {
+	for _, index := range []int{-1, math.MinInt64, state.ValidatorLength()} {
 		for name, accessor := range accessors {
 			t.Run(fmt.Sprintf("%s(%d)", name, index), func(t *testing.T) {
 				var err error

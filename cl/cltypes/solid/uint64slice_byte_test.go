@@ -62,10 +62,10 @@ func TestUint64SliceCopyTo(t *testing.T) {
 	require.Equal(t, firstHash, secondHash)
 }
 
-func TestUint64SliceRejectsNegativeIndex(t *testing.T) {
+func TestUint64SliceRejectsInvalidIndex(t *testing.T) {
 	slice := solid.NewUint64Slice(8)
 	slice.Append(3)
-	for _, idx := range []int{-1, math.MinInt64 / 4} {
+	for _, idx := range []int{-1, math.MinInt64 / 4, slice.Length()} {
 		require.PanicsWithValue(t, "index out of range", func() { slice.Get(idx) })
 		require.PanicsWithValue(t, "index out of range", func() { slice.Set(idx, 1) })
 	}
