@@ -92,6 +92,29 @@ func TestRepeatedForkchoicePersistsFinality(t *testing.T) {
 	}
 }
 
+func TestRepeatedForkchoiceRepairsHeadHeader(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(4, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks))
+	m.ExecModule.Drain()
+	head, safe, finalized := chain.TopBlock.Hash(), chain.Blocks[2].Hash(), chain.Blocks[1].Hash()
+	result, err := m.ExecModule.UpdateForkChoice(t.Context(), head, safe, finalized)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.Drain()
+	assertPersistedForkchoice(t, m.DB, head, safe, finalized)
+
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteHeadHeaderHash(tx, chain.Blocks[0].Hash())
+	}))
+	result, err = m.ExecModule.UpdateForkChoice(t.Context(), head, safe, finalized)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	m.ExecModule.Drain()
+	assertPersistedForkchoice(t, m.DB, head, safe, finalized)
+}
+
 func TestRepeatedForkchoiceDoesNotWaitForWriter(t *testing.T) {
 	m := execmoduletester.New(t)
 	chain, err := m.GenerateChain(4, nil)
@@ -248,6 +271,7 @@ func assertPersistedForkchoice(t *testing.T, db kv.RoDB, head, safe, finalized c
 	t.Helper()
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		require.Equal(t, head, rawdb.ReadHeadBlockHash(tx), "head block marker")
+		require.Equal(t, head, rawdb.ReadHeadHeaderHash(tx), "head header marker")
 		require.Equal(t, head, rawdb.ReadForkchoiceHead(tx), "forkchoice head marker")
 		require.Equal(t, safe, rawdb.ReadForkchoiceSafe(tx), "safe marker")
 		require.Equal(t, finalized, rawdb.ReadForkchoiceFinalized(tx), "finalized marker")

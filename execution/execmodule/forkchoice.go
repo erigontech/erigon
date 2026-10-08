@@ -155,7 +155,9 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 
 func forkChoiceHashesMatch(tx kv.Getter, blockHash, safeHash, finalizedHash common.Hash) bool {
 	// Match writeForkChoiceHashes: zero safe/finalized hashes are not written.
-	return rawdb.ReadHeadBlockHash(tx) == blockHash && rawdb.ReadForkchoiceHead(tx) == blockHash &&
+	return rawdb.ReadHeadBlockHash(tx) == blockHash &&
+		rawdb.ReadHeadHeaderHash(tx) == blockHash &&
+		rawdb.ReadForkchoiceHead(tx) == blockHash &&
 		(safeHash == (common.Hash{}) || rawdb.ReadForkchoiceSafe(tx) == safeHash) &&
 		(finalizedHash == (common.Hash{}) || rawdb.ReadForkchoiceFinalized(tx) == finalizedHash)
 }
@@ -197,7 +199,7 @@ func (e *ExecModule) shortCircuitForkchoice(
 		// This path skips the execution commit; overlay-only writes would be lost.
 		if err := e.db.Update(ctx, func(rwTx kv.RwTx) error {
 			writeForkChoiceHashes(rwTx, blockHash, safeHash, finalizedHash)
-			return nil
+			return rawdb.WriteHeadHeaderHash(rwTx, blockHash)
 		}); err != nil {
 			return ForkChoiceResult{}, err
 		}

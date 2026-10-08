@@ -37,8 +37,27 @@ import (
 
 func TestCrashRecoveryRequestMode(t *testing.T) {
 	t.Run("tip", func(t *testing.T) {
-		request := crashRecoveryRequest{Point: execmodule.StateTransitionCommitReady}
-		require.NoError(t, request.validateMode())
+		var request crashRecoveryRequest
+		for _, point := range []execmodule.StateTransitionPoint{
+			execmodule.StateTransitionUnwindComplete,
+			execmodule.StateTransitionOverlayPublished,
+			execmodule.StateTransitionCommitReady,
+			execmodule.StateTransitionCommitComplete,
+			execmodule.StateTransitionOverlayCleared,
+		} {
+			request.Point = point
+			require.NoError(t, request.validateMode(), "point %d", point)
+		}
+		for _, point := range []execmodule.StateTransitionPoint{
+			execmodule.StateTransitionRPCViewBound,
+			execmodule.StateTransitionFCUCatchupCommitReady,
+			execmodule.StateTransitionFCUCatchupCommitComplete,
+			255,
+		} {
+			request.Point = point
+			require.ErrorContains(t, request.validateMode(), "tip mode requires a tip FCU boundary", "point %d", point)
+		}
+		request.Point = execmodule.StateTransitionCommitReady
 		request.Downloaded = []crashRecoveryBlock{{}}
 		require.ErrorContains(t, request.validateMode(), "tip-mode crash requests must not include downloaded blocks")
 	})
@@ -53,6 +72,10 @@ func TestCrashRecoveryRequestMode(t *testing.T) {
 		}
 		request.Point = execmodule.StateTransitionCommitReady
 		require.ErrorContains(t, request.validateMode(), "catch-up mode requires a catch-up commit boundary")
+	})
+	t.Run("negative_cycle", func(t *testing.T) {
+		request := crashRecoveryRequest{CatchupCycle: -1, Point: execmodule.StateTransitionCommitReady}
+		require.ErrorContains(t, request.validateMode(), "catch-up cycle must not be negative")
 	})
 }
 
@@ -146,6 +169,38 @@ func TestCrashRecoveryRejectsChildFailure(t *testing.T) {
 }
 
 func TestCrashRecoveryWaitsForTransition(t *testing.T) {
+	t.Run("boundary_and_response_ready", func(t *testing.T) {
+		failed := errors.New("forkchoice failed")
+		for _, tc := range []struct {
+			name              string
+			allowEarlySuccess bool
+			response          error
+		}{
+			{name: "unexpected_success"},
+			{name: "allowed_success", allowEarlySuccess: true},
+			{name: "failure", response: failed},
+			{name: "failure_with_early_success_allowed", allowEarlySuccess: true, response: failed},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				reached := make(chan struct{})
+				close(reached)
+				hold := &stateTransitionHold{point: execmodule.StateTransitionCommitReady, reached: reached}
+				for range 100 {
+					response := make(chan error, 1)
+					response <- tc.response
+					err := waitCrashRecoveryTransition(t.Context(), hold, response, tc.allowEarlySuccess)
+					switch {
+					case tc.response != nil:
+						require.ErrorIs(t, err, tc.response)
+					case !tc.allowEarlySuccess:
+						require.ErrorContains(t, err, "returned before transition")
+					default:
+						require.NoError(t, err)
+					}
+				}
+			})
+		}
+	})
 	t.Run("unexpected_early_valid", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			transitions := newStateTransitionController()

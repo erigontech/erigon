@@ -464,20 +464,26 @@ func insertCrashRecoveryPayloads(ctx context.Context, t *testing.T, eat engineap
 
 func waitCrashRecoveryTransition(ctx context.Context, hold *stateTransitionHold, response <-chan error, allowEarlySuccess bool) error {
 	for {
+		var err error
 		select {
 		case <-hold.reached:
-			return ctx.Err()
-		case err := <-response:
-			if err != nil {
-				return fmt.Errorf("forkchoice before transition %d: %w", hold.point, err)
+			// A reached barrier must not hide an already-queued FCU response.
+			select {
+			case err = <-response:
+			default:
+				return ctx.Err()
 			}
-			if !allowEarlySuccess {
-				return fmt.Errorf("forkchoice returned before transition %d", hold.point)
-			}
-			response = nil
+		case err = <-response:
 		case <-ctx.Done():
 			return fmt.Errorf("waiting for transition %d: %w", hold.point, ctx.Err())
 		}
+		if err != nil {
+			return fmt.Errorf("forkchoice before transition %d: %w", hold.point, err)
+		}
+		if !allowEarlySuccess {
+			return fmt.Errorf("forkchoice returned before transition %d", hold.point)
+		}
+		response = nil
 	}
 }
 
@@ -618,12 +624,23 @@ func crashRecoveryExitError(err error) error {
 }
 
 func (request crashRecoveryRequest) validateMode() error {
+	if request.CatchupCycle < 0 {
+		return errors.New("catch-up cycle must not be negative")
+	}
 	if request.CatchupCycle > 0 {
 		if request.Point != execmodule.StateTransitionFCUCatchupCommitReady && request.Point != execmodule.StateTransitionFCUCatchupCommitComplete {
 			return fmt.Errorf("catch-up mode requires a catch-up commit boundary, got %d", request.Point)
 		}
-	} else if len(request.Downloaded) > 0 {
-		return errors.New("tip-mode crash requests must not include downloaded blocks")
+	} else {
+		switch request.Point {
+		case execmodule.StateTransitionUnwindComplete, execmodule.StateTransitionOverlayPublished,
+			execmodule.StateTransitionCommitReady, execmodule.StateTransitionCommitComplete, execmodule.StateTransitionOverlayCleared:
+		default:
+			return fmt.Errorf("tip mode requires a tip FCU boundary, got %d", request.Point)
+		}
+		if len(request.Downloaded) > 0 {
+			return errors.New("tip-mode crash requests must not include downloaded blocks")
+		}
 	}
 	return nil
 }
