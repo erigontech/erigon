@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
@@ -112,7 +113,7 @@ type blobPeerClient interface {
 
 type blobSnapshotReader interface {
 	FrozenBlobs() uint64
-	BlocksAvailable() uint64
+	VisibleSegmentsMaxTo(snaptype.Enum) uint64
 }
 
 // BlobHistoryDownloader downloads blob history backwards from a head slot
@@ -235,12 +236,16 @@ func (b *BlobHistoryDownloader) SetNotifyBlobBackfilled(notify *BlobBackfilledNo
 	}
 }
 
-func (b *BlobHistoryDownloader) setBackfillCompleted(completed bool) {
+func publishBackfillCompleted(completed bool) {
 	if completed {
 		blobBackfillCompleteGauge().SetUint64(1)
 	} else {
 		blobBackfillCompleteGauge().SetUint64(0)
 	}
+}
+
+func (b *BlobHistoryDownloader) setBackfillCompleted(completed bool) {
+	publishBackfillCompleted(completed)
 	if b.backfillCompleted.Swap(completed) == completed {
 		return
 	}
@@ -309,6 +314,7 @@ func (b *BlobHistoryDownloader) Start() {
 
 func (b *BlobHistoryDownloader) run() {
 	defer b.running.Store(false)
+	publishBackfillCompleted(b.backfillCompleted.Load())
 
 	// Do an initial download immediately
 	if err := b.downloadOnce(true); err != nil {
@@ -332,17 +338,17 @@ func (b *BlobHistoryDownloader) run() {
 			downloadTimer.Reset(blobDownloaderInterval)
 		case <-warningTimer.C:
 			if !b.backfillCompleted.Load() {
-				b.warnBackfillIncomplete(b.sn.FrozenBlobs(), b.sn.BlocksAvailable())
+				b.warnBackfillIncomplete()
 			}
 			warningTimer.Reset(blobBackfillWarningInterval)
 		}
 	}
 }
 
-func (b *BlobHistoryDownloader) warnBackfillIncomplete(frozenBlobs, frozenBlocks uint64) {
+func (b *BlobHistoryDownloader) warnBackfillIncomplete() {
 	logCtx := []any{
 		"currentSlot", b.headSlot.Load(), "highestBackfilled", b.highestBackfilledSlot.Load(),
-		"frozenBlobs", frozenBlobs, "frozenBlocks", frozenBlocks,
+		"frozenBlobsTo", b.sn.FrozenBlobs(), "frozenBlocksTo", b.sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()),
 	}
 	if len(b.retryRanges) > 0 {
 		var unresolved uint64

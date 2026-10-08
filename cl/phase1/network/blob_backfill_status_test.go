@@ -19,21 +19,66 @@ package network
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/db/snaptype"
 )
 
 func TestSetBackfillCompletedSetsCompletionGauge(t *testing.T) {
 	b := &BlobHistoryDownloader{}
 
 	b.setBackfillCompleted(true)
-	require.Equal(t, uint64(1), metrics.GetOrCreateGauge(blobBackfillCompleteMetric).GetValueUint64())
+	require.Equal(t, uint64(1), blobBackfillCompleteGauge().GetValueUint64())
 
 	b.setBackfillCompleted(false)
-	require.Zero(t, metrics.GetOrCreateGauge(blobBackfillCompleteMetric).GetValueUint64(), "a revoked completion must clear the gauge")
+	require.Zero(t, blobBackfillCompleteGauge().GetValueUint64(), "a revoked completion must clear the gauge")
+}
+
+// A fresh downloader starts incomplete, so its first report is an unchanged false. The gauge
+// must still be written for it.
+func TestFirstRetrySlotExportsIncompleteBackfill(t *testing.T) {
+	blobBackfillCompleteGauge().SetUint64(1)
+
+	(&BlobHistoryDownloader{}).addRetrySlot(14_910_740)
+
+	require.Zero(t, blobBackfillCompleteGauge().GetValueUint64())
+}
+
+// The first pass can run for hours, or wait for peers or sync, before reporting anything; the
+// gauge must show the backfill as incomplete from the start.
+func TestStartExportsBackfillStateBeforeTheFirstPass(t *testing.T) {
+	blobBackfillCompleteGauge().SetUint64(1)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	b := &BlobHistoryDownloader{ctx: ctx, archiveBlobs: true, logger: log.New()}
+
+	b.Start()
+
+	require.Eventually(t, func() bool { return !b.running.Load() }, time.Second, time.Millisecond)
+	require.Zero(t, blobBackfillCompleteGauge().GetValueUint64())
+}
+
+func TestStartWithoutBlobBackfillLeavesTheGaugeAlone(t *testing.T) {
+	blobBackfillCompleteGauge().SetUint64(1)
+
+	(&BlobHistoryDownloader{ctx: t.Context(), logger: log.New()}).Start()
+
+	require.Equal(t, uint64(1), blobBackfillCompleteGauge().GetValueUint64())
+}
+
+// snapshotEnds models the snapshot frontiers by where the last blob and block segments end.
+type snapshotEnds struct{ blobsTo, blocksTo uint64 }
+
+func (s snapshotEnds) FrozenBlobs() uint64 { return s.blobsTo }
+
+func (s snapshotEnds) VisibleSegmentsMaxTo(t snaptype.Enum) uint64 {
+	if t == snaptype.BeaconBlocks.Enum() {
+		return s.blocksTo
+	}
+	return s.blobsTo
 }
 
 type backfillLogHandler struct {
@@ -53,7 +98,7 @@ func newBackfillWarningDownloader() (*BlobHistoryDownloader, *backfillLogHandler
 	handler := &backfillLogHandler{}
 	logger := log.New()
 	logger.SetHandler(handler)
-	b := &BlobHistoryDownloader{logger: logger}
+	b := &BlobHistoryDownloader{logger: logger, sn: snapshotEnds{blobsTo: 14_880_000, blocksTo: 15_220_000}}
 	b.headSlot.Store(15_300_001)
 	b.highestBackfilledSlot.Store(15_300_000)
 	return b, handler
@@ -65,13 +110,13 @@ func TestWarnBackfillIncompleteNamesFrontiersAndUnresolvedSlots(t *testing.T) {
 		b.addRetrySlot(slot)
 	}
 
-	b.warnBackfillIncomplete(14_880_000, 15_219_999)
+	b.warnBackfillIncomplete()
 
 	require.Len(t, handler.records, 1)
 	require.Equal(t, log.LvlWarn, handler.records[0].Lvl)
 	require.Equal(t, []any{
 		"currentSlot", uint64(15_300_001), "highestBackfilled", uint64(15_300_000),
-		"frozenBlobs", uint64(14_880_000), "frozenBlocks", uint64(15_219_999),
+		"frozenBlobsTo", uint64(14_880_000), "frozenBlocksTo", uint64(15_220_000),
 		"unresolvedSlots", uint64(3), "lowestUnresolved", uint64(14_910_740), "highestUnresolved", uint64(14_911_999),
 	}, handler.records[0].Ctx)
 }
@@ -80,11 +125,11 @@ func TestWarnBackfillIncompleteNamesFrontiersAndUnresolvedSlots(t *testing.T) {
 func TestWarnBackfillIncompleteWithoutUnresolvedSlots(t *testing.T) {
 	b, handler := newBackfillWarningDownloader()
 
-	b.warnBackfillIncomplete(14_880_000, 15_219_999)
+	b.warnBackfillIncomplete()
 
 	require.Len(t, handler.records, 1)
 	require.Equal(t, []any{
 		"currentSlot", uint64(15_300_001), "highestBackfilled", uint64(15_300_000),
-		"frozenBlobs", uint64(14_880_000), "frozenBlocks", uint64(15_219_999),
+		"frozenBlobsTo", uint64(14_880_000), "frozenBlocksTo", uint64(15_220_000),
 	}, handler.records[0].Ctx)
 }
