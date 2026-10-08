@@ -233,10 +233,10 @@ func TestEstimateGasStateOverrideFundsSender(t *testing.T) {
 	poor := common.HexToAddress("0x00000000000000000000000000000000000000aa")
 	balance := (*hexutil.U256)(uint256.NewInt(1e18))
 	args := &ethapi.CallArgs{
-		From:         &poor,
-		To:           &receiverAddr,
-		Value:        (*hexutil.U256)(uint256.NewInt(1)),
-		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		From:     &poor,
+		To:       &receiverAddr,
+		Value:    (*hexutil.U256)(uint256.NewInt(1)),
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
 	}
 	overrides := &ethapi.StateOverrides{
 		accounts.InternAddress(poor): {Balance: &balance},
@@ -301,6 +301,36 @@ func TestEstimateGasStateOverrideClearedCodeKeepsTransferShortcut(t *testing.T) 
 	require.Equal(t, hexutil.Uint64(params.TxGas), gas)
 }
 
+func TestEstimateGasTransferWithRefundedAuthorization(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	cfg := chain.AllProtocolChanges.Copy()
+	cfg.AmsterdamTime = nil
+	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, cfg)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	receiverKey, err := crypto.HexToECDSA("a71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f292")
+	require.NoError(t, err)
+	require.Equal(t, receiverAddress, crypto.PubkeyToAddress(receiverKey.PublicKey))
+	auth, err := types.SignAuthorization(receiverKey, *uint256.MustFromBig(cfg.ChainID.ToBig()), common.HexToAddress("0x1234"), 0)
+	require.NoError(t, err)
+
+	recipient := common.HexToAddress("0x5678")
+	args := ethapi.CallArgs{
+		From:              &bankAddress,
+		To:                &recipient,
+		AuthorizationList: []types.JsonAuthorization{types.JsonAuthorization{}.FromAuthorization(auth)},
+	}
+	estimate, err := api.EstimateGas(context.Background(), &args, nil, nil, nil)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, uint64(estimate), params.TxGas+params.PerEmptyAccountCost)
+
+	args.Gas = &estimate
+	_, err = api.Call(context.Background(), args, nil, nil, nil)
+	require.NoError(t, err, "a call with the estimated gas must pass the intrinsic gas check")
+}
+
 // TestEstimateGasStateOverrideAppliedToEveryTrial verifies every binary-search
 // trial starts from the same overridden state: writing a fresh slot costs 20000
 // only on clean state, so a write leaking from an earlier trial would let the
@@ -340,10 +370,10 @@ func TestEstimateGasStateOverrideLowersSenderBalance(t *testing.T) {
 	const allowance = 25_000 // below what the contract call needs
 	callData := hexutil.Bytes(contractInvocationData(1))
 	args := &ethapi.CallArgs{
-		From:         &bankAddr,
-		To:           &contractAddr,
-		Data:         &callData,
-		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(feePerGas)),
+		From:     &bankAddr,
+		To:       &contractAddr,
+		Data:     &callData,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(feePerGas)),
 	}
 
 	// Sanity check: the committed balance funds the call.
@@ -372,10 +402,10 @@ func TestEstimateGasStateOverrideErrorPrecedesFundsCheck(t *testing.T) {
 	moveTo := common.HexToAddress("0x00000000000000000000000000000000000000ee")
 
 	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
-		From:         &poor,
-		To:           &receiverAddr,
-		Value:        (*hexutil.U256)(uint256.NewInt(1)),
-		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		From:     &poor,
+		To:       &receiverAddr,
+		Value:    (*hexutil.U256)(uint256.NewInt(1)),
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
 	}, nil, &ethapi.StateOverrides{
 		accounts.InternAddress(notAPrecompile): {MovePrecompileTo: &moveTo},
 	}, nil)
@@ -448,9 +478,9 @@ func TestEstimateGasZeroFundableAllowance(t *testing.T) {
 	poor := common.HexToAddress("0x00000000000000000000000000000000000000ab")
 	dust := (*hexutil.U256)(uint256.NewInt(1000))
 	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
-		From:         &poor,
-		To:           &receiverAddr,
-		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		From:     &poor,
+		To:       &receiverAddr,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
 	}, nil, &ethapi.StateOverrides{
 		accounts.InternAddress(poor): {Balance: &dust},
 	}, nil)
