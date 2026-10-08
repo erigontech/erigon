@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -437,8 +438,14 @@ func (ibs *IntraBlockState) TxOutputBuffer() *[]byte {
 		return nil
 	}
 	ibs.txOutputFree = false
+	if cap(ibs.txOutput) > maxKeptTxOutput {
+		ibs.txOutput = nil
+	}
 	return &ibs.txOutput
 }
+
+// maxKeptTxOutput bounds the output buffer one transaction leaves to the next.
+const maxKeptTxOutput = int(datasize.MB)
 
 // AllocLog reserves the next log slot of the current tx and returns it sized for
 // numTopics/dataSize. The caller must write every topic and every data byte, then
