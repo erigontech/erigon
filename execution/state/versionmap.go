@@ -763,6 +763,13 @@ func (vm *VersionMap) readCodeLive(addr accounts.Address, txIdx int) (accounts.C
 	return readFloorLive(vm, addr, CodePath, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[accounts.Code]] { return e.Code })
 }
 
+// nonceWiped reports whether a committed destruct erased the nonce a reader at
+// txIdx would otherwise take from the version map or the pre-block state.
+func (vm *VersionMap) nonceWiped(addr accounts.Address, txIdx int) bool {
+	_, _, wiped := readFloorLive(vm, addr, NoncePath, txIdx, func(e *AddressEntry) *btree.Map[int, *WriteCell[uint64]] { return e.Nonce })
+	return wiped
+}
+
 // selfDestructWipesLocked applies the per-path floor to the destruct scan and
 // reports the TxIndex the wiping destruct sits at.
 func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int) (int, bool) {
