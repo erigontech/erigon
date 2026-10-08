@@ -586,6 +586,7 @@ run:
 			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
+		callContext.savedPC = pc
 		if anyTrace && debug {
 			// Capture pre-execution values for tracing.
 			logged = false
@@ -691,7 +692,7 @@ run:
 		}
 
 		// execute the operation
-		pc, res, err = operation.execute(pc, evm, callContext)
+		pc, res, err = operation.execute(callContext.savedPC, evm, callContext)
 		gasLeft = callContext.gas
 		if err != nil {
 			break run
