@@ -1647,7 +1647,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 			}
 			// The memo holds the slot as it was before this call, which is what
 			// a committed read wants even after the call wrote it.
-			if v, ok := s.versionedReads.GetColdSlot(addr, key); ok {
+			if v, ok := s.versionedReads.GetCommittedSlot(addr, key); ok {
 				return v, StorageRead, UnknownVersion, nil
 			}
 		}

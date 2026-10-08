@@ -3182,7 +3182,7 @@ func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accoun
 	if ibs.versionMap == nil {
 		return
 	}
-	ibs.versionedReads.DelColdSlot(addr, key)
+	ibs.versionedReads.ColdSlotWritten(addr, key)
 	if vw, ok := ibs.versionedWrites.GetStorage(addr, key); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val

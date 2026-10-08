@@ -132,7 +132,7 @@ type ReadSet struct {
 	// coldSlots memoizes committed slot reads for an execution nobody validates:
 	// the versioned record would carry a 48-byte header that is UnknownVersion
 	// for every one of them, in a map per address.
-	coldSlots map[slotRef]uint256.Int
+	coldSlots map[slotRef]coldSlot
 
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
@@ -146,23 +146,39 @@ type slotRef struct {
 	key  accounts.StorageKey
 }
 
+// coldSlot is one memoized slot. Once this call writes it, the value answers
+// only committed reads: it is the slot before the call, which cannot change.
+type coldSlot struct {
+	val     uint256.Int
+	written bool
+}
+
 func (s *ReadSet) SetColdSlot(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
 	if s.coldSlots == nil {
-		s.coldSlots = make(map[slotRef]uint256.Int)
+		s.coldSlots = make(map[slotRef]coldSlot)
 	}
-	s.coldSlots[slotRef{addr, key}] = val
+	s.coldSlots[slotRef{addr, key}] = coldSlot{val: val}
 }
 
+// GetColdSlot answers a live read, which this call's write outranks.
 func (s *ReadSet) GetColdSlot(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
-	v, ok := s.coldSlots[slotRef{addr, key}]
-	return v, ok
+	c, ok := s.coldSlots[slotRef{addr, key}]
+	return c.val, ok && !c.written
 }
 
-// DelColdSlot drops one memoized slot. A write invalidates it here instead of
-// the read checking for one, and dropping too much only costs a re-read.
-func (s *ReadSet) DelColdSlot(addr accounts.Address, key accounts.StorageKey) {
-	if s.coldSlots != nil {
-		delete(s.coldSlots, slotRef{addr, key})
+// GetCommittedSlot answers a committed read, also after this call wrote the slot.
+func (s *ReadSet) GetCommittedSlot(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
+	c, ok := s.coldSlots[slotRef{addr, key}]
+	return c.val, ok
+}
+
+// ColdSlotWritten takes a memoized slot out of live reads. A write marks it here
+// instead of the read checking for one.
+func (s *ReadSet) ColdSlotWritten(addr accounts.Address, key accounts.StorageKey) {
+	ref := slotRef{addr, key}
+	if c, ok := s.coldSlots[ref]; ok && !c.written {
+		c.written = true
+		s.coldSlots[ref] = c
 	}
 }
 

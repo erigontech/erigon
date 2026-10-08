@@ -1784,6 +1784,21 @@ func TestColdSlotMemoServesTheCommittedRead(t *testing.T) {
 	require.Empty(t, ibs.versionedReads.storage, "no versioned record is kept")
 }
 
+// The committed value outlives this call's write to the slot: SSTORE's gas
+// reads it after every earlier SSTORE, and it cannot change within the call.
+func TestColdSlotMemoServesTheCommittedReadAfterAWrite(t *testing.T) {
+	ibs, rd, addr, key := newColdSlotState(t)
+
+	_, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(0xC0DE)))
+
+	got, err := ibs.GetCommittedState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, got.Uint64())
+	require.Equal(t, 1, rd.reads, "the committed read after a write comes from the memo")
+}
+
 // A contract created over the slot has no committed storage, so the memo must
 // not answer the committed read for it.
 func TestColdSlotMemoYieldsToACreateOverTheSlot(t *testing.T) {
