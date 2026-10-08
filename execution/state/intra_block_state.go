@@ -3250,17 +3250,17 @@ func (ibs *IntraBlockState) VersionedWrites() *WriteSet {
 // recordStorageOrigin / recordAddressOrigin collect a cold committed base cell into the
 // tx-local origin set (at originIndex) instead of writing the shared versionMap mid-read.
 func (ibs *IntraBlockState) recordStorageOrigin(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
-	ibs.versionedOrigins.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
-		WriteHeader: WriteHeader{Address: addr, Key: key, Path: StoragePath, Version: Version{TxIndex: originIndex}},
-		Val:         val,
-	})
+	vw := getVWStorage()
+	vw.WriteHeader = WriteHeader{Address: addr, Key: key, Path: StoragePath, Version: Version{TxIndex: originIndex}}
+	vw.Val = val
+	ibs.versionedOrigins.SetStorage(addr, key, vw)
 }
 
 func (ibs *IntraBlockState) recordAddressOrigin(addr accounts.Address, acc *accounts.Account) {
-	ibs.versionedOrigins.SetAddress(addr, &VersionedWrite[*accounts.Account]{
-		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: originIndex}},
-		Val:         acc,
-	})
+	vw := getVWAddress()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: originIndex}}
+	vw.Val = acc
+	ibs.versionedOrigins.SetAddress(addr, vw)
 }
 
 // PublishOrigins flushes this tx's collected committed-base origins to the shared versionMap
