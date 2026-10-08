@@ -313,7 +313,7 @@ func TestAggregateAndProofGossipDoesNotAcceptBeforeBLSVerification(t *testing.T)
 		return false, nil
 	}
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	setValidAggregateSelectionProof(t, &clparams.MainnetBeaconConfig, agg, s)
 
 	service, syncedDataManager, forkchoiceMock := setupAggregateAndProofGossipTestWithConfig(t, &clparams.MainnetBeaconConfig)
@@ -334,7 +334,7 @@ func TestAggregateAndProofImmediateRetryReturnsAlreadySeenOnlyForSameAggregate(t
 	}
 
 	cfg := clparams.MainnetBeaconConfig
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	epoch := agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot / cfg.SlotsPerEpoch
 	service, _ := setupValidAggregateGossipMessage(t, &cfg, agg, s, cfg.GetCurrentStateVersion(epoch))
 	digest, err := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg).ComputeForkDigest(epoch)
@@ -366,7 +366,7 @@ func setValidAggregateSelectionProof(t *testing.T, cfg *clparams.BeaconChainConf
 	require.NoError(t, err)
 	for i := range 256 {
 		agg.SignedAggregateAndProof.Message.SelectionProof[0] = byte(i)
-		if state.IsAggregator(cfg, uint64(len(committee)), 0, agg.SignedAggregateAndProof.Message.SelectionProof) {
+		if state.IsAggregator(cfg, uint64(len(committee)), agg.SignedAggregateAndProof.Message.SelectionProof) {
 			return
 		}
 	}
