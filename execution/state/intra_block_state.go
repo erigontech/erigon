@@ -3313,28 +3313,22 @@ func (ibs *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	if obj == nil {
 		return
 	}
-	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
-		obj.createdContract = true
-	}
-	// An own AddressPath write means this tx created the account: createObject is
-	// the only writer, and reverting a creation drops or restores the write.
-	if _, isDirty := ibs.journal.dirties[addr]; isDirty && ibs.hasWrite(addr, AddressPath, accounts.NilKey) {
-		obj.newlyCreated = true
-	}
-	if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
-		obj.selfdestructed = true
-	}
-	// The transient is rebuilt from the AddressPath account, whose CodeHash can
-	// lag the CodePath/CodeHashPath cells (e.g. a delegation set by a prior tx
-	// whose AddressPath record was published with an empty code hash). Seed the
-	// code from this tx's own Code write, else the versionMap floor cell, so
-	// object code reads (GetDelegatedDesignation, stateObject.Code()) agree with
-	// the cells — matching the refresh-and-sync the fall-through getStateObject
-	// path performs for accounts it materializes from scratch. An own write is
-	// authoritative even when it clears code to empty (EIP-7702 delegation
-	// clearing writes nil bytes / EmptyCodeHash); falling through to the floor
-	// there would resurrect the prior-tx delegation.
 	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
+		if vw, ok := ibs.versionedWrites.GetCreateContract(addr); ok && vw.Val {
+			obj.createdContract = true
+		}
+		// An own AddressPath write means this tx created the account: createObject is
+		// the only writer, and reverting a creation drops or restores the write.
+		if _, ok := ibs.versionedWrites.GetAddress(addr); ok {
+			obj.newlyCreated = true
+		}
+		if vw, ok := ibs.versionedWrites.GetSelfDestruct(addr); ok && vw.Val {
+			obj.selfdestructed = true
+		}
+		// The AddressPath record's CodeHash can lag the Code cells, so seed the code
+		// from this tx's own Code write; otherwise it is refreshed from the
+		// versionMap below. An own write wins even when it clears code, else a
+		// prior-tx delegation would come back.
 		if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
 			obj.code = vw.Val
 			obj.data.CodeHash = vw.Val.Hash
