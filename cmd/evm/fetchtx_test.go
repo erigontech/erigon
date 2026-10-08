@@ -88,3 +88,26 @@ func TestFetchTxNames(t *testing.T) {
 	_, err = fetchTxNames(nil, list)
 	require.Error(t, err)
 }
+
+// One tx the node cannot serve must not cost the rest of the list.
+func TestFetchTxsWritesTheRestPastAFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Method string `json:"method"`
+			Params []any  `json:"params"`
+		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		res := `{"blockNumber":"0x1"}`
+		if req.Params[0] == "0xbad" {
+			res = "null"
+		}
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":` + res + `}`))
+	}))
+	t.Cleanup(srv.Close)
+	out := t.TempDir()
+
+	err := fetchTxs(t.Context(), &jsonRPC{url: srv.URL}, []txName{{"0xbad", "0xbad"}, {"0xgood", "0xgood"}}, out)
+	require.ErrorContains(t, err, "0xbad")
+	require.FileExists(t, filepath.Join(out, "0xgood.json"))
+	require.NoFileExists(t, filepath.Join(out, "0xbad.json"))
+}

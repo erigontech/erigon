@@ -69,11 +69,17 @@ func fetchTxCmd(ctx context.Context, cmd *cli.Command) error {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return err
 	}
-	c := &jsonRPC{url: cmd.String(FetchRPCFlag.Name)}
+	return fetchTxs(ctx, &jsonRPC{url: cmd.String(FetchRPCFlag.Name)}, names, out)
+}
+
+// fetchTxs writes every tx the node can serve and reports the ones it cannot.
+func fetchTxs(ctx context.Context, c *jsonRPC, names []txName, out string) error {
+	var failed []error
 	for _, n := range names {
 		fixture, err := fetchTx(ctx, c, n.hash)
 		if err != nil {
-			return fmt.Errorf("%s: %w", n.hash, err)
+			failed = append(failed, fmt.Errorf("%s: %w", n.hash, err))
+			continue
 		}
 		path := filepath.Join(out, n.name+".json")
 		if err := os.WriteFile(path, fixture, 0o644); err != nil {
@@ -81,7 +87,7 @@ func fetchTxCmd(ctx context.Context, cmd *cli.Command) error {
 		}
 		fmt.Println(path)
 	}
-	return nil
+	return errors.Join(failed...)
 }
 
 type txName struct{ name, hash string }
