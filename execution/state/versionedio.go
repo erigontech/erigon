@@ -3375,3 +3375,893 @@ func (ws *WriteSet) createdEmpty(addr accounts.Address) bool {
 	_, hasCodeSize := ws.codeSize[addr]
 	return !hasCode && !hasIncarnation && !destroyed && !createdContract && !hasCodeSize && len(ws.storage[addr]) == 0
 }
+
+// vwSlab hands out the writes of one IBS-owned set; reset rewinds it for the
+// next tx, put returns a reverted write for reuse in the same tx.
+type vwSlab[T any] struct {
+	items []*VersionedWrite[T]
+	used  int
+	free  []*VersionedWrite[T]
+}
+
+func (s *vwSlab[T]) get() *VersionedWrite[T] {
+	if n := len(s.free); n > 0 {
+		vw := s.free[n-1]
+		s.free = s.free[:n-1]
+		return vw
+	}
+	if s.used == len(s.items) {
+		s.items = append(s.items, new(VersionedWrite[T]))
+	}
+	vw := s.items[s.used]
+	s.used++
+	return vw
+}
+
+func (s *vwSlab[T]) put(vw *VersionedWrite[T]) { s.free = append(s.free, vw) }
+
+func (s *vwSlab[T]) reset() {
+	s.used = 0
+	s.free = s.free[:0]
+}
+
+// acctIO is one address's in-flight reads and writes, its EIP-7928 access mark
+// and the journal's dirty count for it, so one read-path step finds all of them
+// with a single lookup.
+type acctIO struct {
+	addr     accounts.Address
+	has      uint16 // 1<<path for each recorded non-storage path
+	dirty    int32
+	accessed bool
+	access   accessOptions
+
+	address        VersionedRead[AccountView]
+	balance        VersionedRead[uint256.Int]
+	nonce          VersionedRead[uint64]
+	incarnation    VersionedRead[uint64]
+	selfDestruct   VersionedRead[bool]
+	sdWitnesses    []VersionedRead[bool]
+	createContract VersionedRead[bool]
+	code           VersionedRead[accounts.Code]
+	codeHash       VersionedRead[accounts.CodeHash]
+	codeSize       VersionedRead[int]
+	storage        map[accounts.StorageKey]VersionedRead[uint256.Int]
+
+	wAddress        *VersionedWrite[*accounts.Account]
+	wBalance        *VersionedWrite[uint256.Int]
+	wNonce          *VersionedWrite[uint64]
+	wIncarnation    *VersionedWrite[uint64]
+	wSelfDestruct   *VersionedWrite[bool]
+	wCreateContract *VersionedWrite[bool]
+	wCode           *VersionedWrite[accounts.Code]
+	wCodeHash       *VersionedWrite[accounts.CodeHash]
+	wCodeSize       *VersionedWrite[int]
+	wStorage        map[accounts.StorageKey]*VersionedWrite[uint256.Int]
+}
+
+// ioTable is an IntraBlockState's own read and write set: records in a slice
+// reused across transactions, found through idx or the last-lookup memo. It is
+// copied into a ReadSet / WriteSet only when handed over.
+// ponytail: records past len keep stale pointers until reused; clear them if RSS matters.
+type ioTable struct {
+	idx  map[accounts.Address]int32
+	recs []acctIO
+	last int32
+
+	// coldSlots memoizes committed slot reads for an execution nobody validates:
+	// the versioned record would carry a 48-byte header that is UnknownVersion
+	// for every one of them.
+	coldSlots map[slotRef]uint256.Int
+}
+
+func pathBit(p AccountPath) uint16 { return 1 << p }
+
+func (t *ioTable) find(addr accounts.Address) *acctIO {
+	if int(t.last) < len(t.recs) && t.recs[t.last].addr == addr {
+		return &t.recs[t.last]
+	}
+	i, ok := t.idx[addr]
+	if !ok {
+		return nil
+	}
+	t.last = i
+	return &t.recs[i]
+}
+
+// get returns addr's record, adding an empty one if needed. The pointer is valid
+// only until the next get.
+func (t *ioTable) get(addr accounts.Address) *acctIO {
+	if r := t.find(addr); r != nil {
+		return r
+	}
+	if t.idx == nil {
+		t.idx = make(map[accounts.Address]int32)
+	}
+	i := len(t.recs)
+	if i < cap(t.recs) {
+		t.recs = t.recs[:i+1]
+	} else {
+		t.recs = append(t.recs, acctIO{})
+	}
+	r := &t.recs[i]
+	*r = acctIO{addr: addr, storage: r.storage, sdWitnesses: r.sdWitnesses[:0], wStorage: r.wStorage}
+	t.idx[addr] = int32(i)
+	t.last = int32(i)
+	return r
+}
+
+func (t *ioTable) entries() int {
+	n := len(t.recs)
+	for i := range t.recs {
+		n += len(t.recs[i].storage) + len(t.recs[i].wStorage)
+	}
+	return n + len(t.coldSlots)
+}
+
+func (t *ioTable) SetColdSlot(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
+	if t.coldSlots == nil {
+		t.coldSlots = make(map[slotRef]uint256.Int)
+	}
+	t.coldSlots[slotRef{addr, key}] = val
+}
+
+func (t *ioTable) GetColdSlot(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
+	v, ok := t.coldSlots[slotRef{addr, key}]
+	return v, ok
+}
+
+// DelColdSlot drops one memoized slot. A write invalidates it here instead of
+// the read checking for one, and dropping too much only costs a re-read.
+func (t *ioTable) DelColdSlot(addr accounts.Address, key accounts.StorageKey) {
+	if t.coldSlots != nil {
+		delete(t.coldSlots, slotRef{addr, key})
+	}
+}
+
+// DropColdSlots drops the whole memo, for a change that invalidates an
+// account's slots wholesale rather than one of them.
+func (t *ioTable) DropColdSlots() { clear(t.coldSlots) }
+
+func (t *ioTable) reset() {
+	for i := range t.recs {
+		clear(t.recs[i].storage)
+		clear(t.recs[i].wStorage)
+	}
+	t.recs = t.recs[:0]
+	clear(t.idx)
+	t.last = 0
+	clear(t.coldSlots)
+}
+
+// clearReads drops the reads and access marks but keeps writes and dirty counts.
+func (t *ioTable) clearReads() {
+	for i := range t.recs {
+		r := &t.recs[i]
+		r.has = 0
+		r.sdWitnesses = r.sdWitnesses[:0]
+		clear(r.storage)
+		r.accessed = false
+		r.access = accessOptions{}
+	}
+	clear(t.coldSlots)
+}
+
+func (t *ioTable) isDirty(addr accounts.Address) bool {
+	r := t.find(addr)
+	return r != nil && r.dirty > 0
+}
+
+func (t *ioTable) clearDirty() {
+	for i := range t.recs {
+		t.recs[i].dirty = 0
+	}
+}
+
+func (t *ioTable) markAccess(addr accounts.Address, revertable bool) {
+	r := t.get(addr)
+	if !r.accessed {
+		r.accessed = true
+		r.access = accessOptions{revertable: revertable}
+	} else if !revertable {
+		r.access.revertable = false
+	}
+}
+
+func (t *ioTable) accessed(addr accounts.Address) bool {
+	r := t.find(addr)
+	return r != nil && r.accessed
+}
+
+func (t *ioTable) clearAccess() {
+	for i := range t.recs {
+		t.recs[i].accessed = false
+		t.recs[i].access = accessOptions{}
+	}
+}
+
+func getRead[T any](t *ioTable, addr accounts.Address, path AccountPath, pick func(*acctIO) *VersionedRead[T]) (VersionedRead[T], bool) {
+	if r := t.find(addr); r != nil && r.has&pathBit(path) != 0 {
+		return *pick(r), true
+	}
+	return VersionedRead[T]{}, false
+}
+
+func setRead[T any](t *ioTable, addr accounts.Address, path AccountPath, pick func(*acctIO) *VersionedRead[T], tr VersionedRead[T]) {
+	r := t.get(addr)
+	*pick(r) = tr
+	r.has |= pathBit(path)
+}
+
+func pickAddress(r *acctIO) *VersionedRead[AccountView]        { return &r.address }
+func pickBalance(r *acctIO) *VersionedRead[uint256.Int]        { return &r.balance }
+func pickNonce(r *acctIO) *VersionedRead[uint64]               { return &r.nonce }
+func pickIncarnation(r *acctIO) *VersionedRead[uint64]         { return &r.incarnation }
+func pickSelfDestruct(r *acctIO) *VersionedRead[bool]          { return &r.selfDestruct }
+func pickCreateContract(r *acctIO) *VersionedRead[bool]        { return &r.createContract }
+func pickCode(r *acctIO) *VersionedRead[accounts.Code]         { return &r.code }
+func pickCodeHash(r *acctIO) *VersionedRead[accounts.CodeHash] { return &r.codeHash }
+func pickCodeSize(r *acctIO) *VersionedRead[int]               { return &r.codeSize }
+
+func (t *ioTable) GetAddress(addr accounts.Address) (VersionedRead[AccountView], bool) {
+	return getRead(t, addr, AddressPath, pickAddress)
+}
+func (t *ioTable) GetBalance(addr accounts.Address) (VersionedRead[uint256.Int], bool) {
+	return getRead(t, addr, BalancePath, pickBalance)
+}
+func (t *ioTable) GetNonce(addr accounts.Address) (VersionedRead[uint64], bool) {
+	return getRead(t, addr, NoncePath, pickNonce)
+}
+func (t *ioTable) GetIncarnation(addr accounts.Address) (VersionedRead[uint64], bool) {
+	return getRead(t, addr, IncarnationPath, pickIncarnation)
+}
+func (t *ioTable) GetSelfDestruct(addr accounts.Address) (VersionedRead[bool], bool) {
+	return getRead(t, addr, SelfDestructPath, pickSelfDestruct)
+}
+func (t *ioTable) GetCreateContract(addr accounts.Address) (VersionedRead[bool], bool) {
+	return getRead(t, addr, CreateContractPath, pickCreateContract)
+}
+func (t *ioTable) GetCode(addr accounts.Address) (VersionedRead[accounts.Code], bool) {
+	return getRead(t, addr, CodePath, pickCode)
+}
+func (t *ioTable) GetCodeHash(addr accounts.Address) (VersionedRead[accounts.CodeHash], bool) {
+	return getRead(t, addr, CodeHashPath, pickCodeHash)
+}
+func (t *ioTable) GetCodeSize(addr accounts.Address) (VersionedRead[int], bool) {
+	return getRead(t, addr, CodeSizePath, pickCodeSize)
+}
+
+func (t *ioTable) GetStorage(addr accounts.Address, key accounts.StorageKey) (VersionedRead[uint256.Int], bool) {
+	if r := t.find(addr); r != nil {
+		tr, ok := r.storage[key]
+		return tr, ok
+	}
+	return VersionedRead[uint256.Int]{}, false
+}
+
+func (t *ioTable) SetAddress(addr accounts.Address, tr VersionedRead[AccountView]) {
+	setRead(t, addr, AddressPath, pickAddress, tr)
+}
+func (t *ioTable) SetBalance(addr accounts.Address, tr VersionedRead[uint256.Int]) {
+	setRead(t, addr, BalancePath, pickBalance, tr)
+}
+func (t *ioTable) SetNonce(addr accounts.Address, tr VersionedRead[uint64]) {
+	setRead(t, addr, NoncePath, pickNonce, tr)
+}
+func (t *ioTable) SetIncarnation(addr accounts.Address, tr VersionedRead[uint64]) {
+	setRead(t, addr, IncarnationPath, pickIncarnation, tr)
+}
+func (t *ioTable) SetCreateContract(addr accounts.Address, tr VersionedRead[bool]) {
+	setRead(t, addr, CreateContractPath, pickCreateContract, tr)
+}
+func (t *ioTable) SetCode(addr accounts.Address, tr VersionedRead[accounts.Code]) {
+	setRead(t, addr, CodePath, pickCode, tr)
+}
+func (t *ioTable) SetCodeHash(addr accounts.Address, tr VersionedRead[accounts.CodeHash]) {
+	setRead(t, addr, CodeHashPath, pickCodeHash, tr)
+}
+func (t *ioTable) SetCodeSize(addr accounts.Address, tr VersionedRead[int]) {
+	setRead(t, addr, CodeSizePath, pickCodeSize, tr)
+}
+
+// SetSelfDestruct keeps every distinct destruct version the tx consumed, as
+// ReadSet.SetSelfDestruct does.
+func (t *ioTable) SetSelfDestruct(addr accounts.Address, tr VersionedRead[bool]) {
+	r := t.get(addr)
+	if r.has&pathBit(SelfDestructPath) != 0 && r.selfDestruct.Version != tr.Version {
+		prev := r.selfDestruct
+		if !slices.ContainsFunc(r.sdWitnesses, func(w VersionedRead[bool]) bool { return w.Version == prev.Version }) {
+			r.sdWitnesses = append(r.sdWitnesses, prev)
+		}
+	}
+	r.selfDestruct = tr
+	r.has |= pathBit(SelfDestructPath)
+}
+
+func (t *ioTable) SetStorage(addr accounts.Address, key accounts.StorageKey, tr VersionedRead[uint256.Int]) {
+	r := t.get(addr)
+	if r.storage == nil {
+		r.storage = make(map[accounts.StorageKey]VersionedRead[uint256.Int])
+	}
+	r.storage[key] = tr
+}
+
+func (t *ioTable) getHeader(addr accounts.Address, path AccountPath, key accounts.StorageKey) (ReadHeader, bool) {
+	r := t.find(addr)
+	if r == nil {
+		return ReadHeader{}, false
+	}
+	if path == StoragePath {
+		tr, ok := r.storage[key]
+		return tr.ReadHeader, ok
+	}
+	if r.has&pathBit(path) == 0 {
+		return ReadHeader{}, false
+	}
+	switch path {
+	case AddressPath:
+		return r.address.ReadHeader, true
+	case BalancePath:
+		return r.balance.ReadHeader, true
+	case NoncePath:
+		return r.nonce.ReadHeader, true
+	case IncarnationPath:
+		return r.incarnation.ReadHeader, true
+	case SelfDestructPath:
+		return r.selfDestruct.ReadHeader, true
+	case CreateContractPath:
+		return r.createContract.ReadHeader, true
+	case CodePath:
+		return r.code.ReadHeader, true
+	case CodeHashPath:
+		return r.codeHash.ReadHeader, true
+	case CodeSizePath:
+		return r.codeSize.ReadHeader, true
+	}
+	return ReadHeader{}, false
+}
+
+func (t *ioTable) SetHeader(addr accounts.Address, path AccountPath, key accounts.StorageKey, hdr ReadHeader) {
+	switch path {
+	case AddressPath:
+		t.SetAddress(addr, VersionedRead[AccountView]{hdr, nil})
+	case BalancePath:
+		t.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: hdr})
+	case NoncePath:
+		t.SetNonce(addr, VersionedRead[uint64]{ReadHeader: hdr})
+	case IncarnationPath:
+		t.SetIncarnation(addr, VersionedRead[uint64]{ReadHeader: hdr})
+	case SelfDestructPath:
+		t.SetSelfDestruct(addr, VersionedRead[bool]{ReadHeader: hdr})
+	case CreateContractPath:
+		t.SetCreateContract(addr, VersionedRead[bool]{ReadHeader: hdr})
+	case CodePath:
+		t.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr})
+	case CodeHashPath:
+		t.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: hdr})
+	case CodeSizePath:
+		t.SetCodeSize(addr, VersionedRead[int]{ReadHeader: hdr})
+	case StoragePath:
+		t.SetStorage(addr, key, VersionedRead[uint256.Int]{ReadHeader: hdr})
+	}
+}
+
+// ScanAddr visits every read of addr with a mutable header, as ReadSet.ScanAddr.
+func (t *ioTable) ScanAddr(addr accounts.Address, fn func(path AccountPath, key accounts.StorageKey, hdr *ReadHeader)) int {
+	r := t.find(addr)
+	if r == nil {
+		return 0
+	}
+	n := 0
+	visit := func(path AccountPath, hdr *ReadHeader) {
+		if r.has&pathBit(path) != 0 {
+			fn(path, accounts.NilKey, hdr)
+			n++
+		}
+	}
+	visit(AddressPath, &r.address.ReadHeader)
+	visit(BalancePath, &r.balance.ReadHeader)
+	visit(NoncePath, &r.nonce.ReadHeader)
+	visit(IncarnationPath, &r.incarnation.ReadHeader)
+	visit(SelfDestructPath, &r.selfDestruct.ReadHeader)
+	visit(CreateContractPath, &r.createContract.ReadHeader)
+	visit(CodePath, &r.code.ReadHeader)
+	visit(CodeHashPath, &r.codeHash.ReadHeader)
+	visit(CodeSizePath, &r.codeSize.ReadHeader)
+	for k, tr := range r.storage {
+		fn(StoragePath, k, &tr.ReadHeader)
+		r.storage[k] = tr
+		n++
+	}
+	return n
+}
+
+// toReadSet copies the table into a ReadSet the caller owns.
+func (t *ioTable) toReadSet() ReadSet {
+	var s ReadSet
+	for i := range t.recs {
+		r := &t.recs[i]
+		a := r.addr
+		if r.has&pathBit(AddressPath) != 0 {
+			readSetPut(&s.address, a, r.address)
+		}
+		if r.has&pathBit(BalancePath) != 0 {
+			readSetPut(&s.balance, a, r.balance)
+		}
+		if r.has&pathBit(NoncePath) != 0 {
+			readSetPut(&s.nonce, a, r.nonce)
+		}
+		if r.has&pathBit(IncarnationPath) != 0 {
+			readSetPut(&s.incarnation, a, r.incarnation)
+		}
+		if r.has&pathBit(SelfDestructPath) != 0 {
+			readSetPut(&s.selfDestruct, a, r.selfDestruct)
+		}
+		if len(r.sdWitnesses) > 0 {
+			if s.selfDestructWitnesses == nil {
+				s.selfDestructWitnesses = map[accounts.Address][]VersionedRead[bool]{}
+			}
+			s.selfDestructWitnesses[a] = slices.Clone(r.sdWitnesses)
+		}
+		if r.has&pathBit(CreateContractPath) != 0 {
+			readSetPut(&s.createContract, a, r.createContract)
+		}
+		if r.has&pathBit(CodePath) != 0 {
+			readSetPut(&s.code, a, r.code)
+		}
+		if r.has&pathBit(CodeHashPath) != 0 {
+			readSetPut(&s.codeHash, a, r.codeHash)
+		}
+		if r.has&pathBit(CodeSizePath) != 0 {
+			readSetPut(&s.codeSize, a, r.codeSize)
+		}
+		if len(r.storage) > 0 {
+			if s.storage == nil {
+				s.storage = make(map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int])
+			}
+			s.storage[a] = maps.Clone(r.storage)
+		}
+		if r.accessed {
+			if s.access == nil {
+				s.access = make(AccessSet)
+			}
+			s.access[a] = r.access
+		}
+	}
+	return s
+}
+
+// writeView is the IntraBlockState's write set: the write fields of its ioTable
+// records, with the values drawn from per-path slabs.
+// ponytail: slabs keep the largest tx's writes for the IBS lifetime; cap them if a worker's RSS matters.
+type writeView struct {
+	t     *ioTable
+	slabs wsSlabs
+	tmp   WriteSet
+}
+
+type wsSlabs struct {
+	address        vwSlab[*accounts.Account]
+	balance        vwSlab[uint256.Int]
+	nonce          vwSlab[uint64]
+	incarnation    vwSlab[uint64]
+	selfDestruct   vwSlab[bool]
+	createContract vwSlab[bool]
+	code           vwSlab[accounts.Code]
+	codeHash       vwSlab[accounts.CodeHash]
+	codeSize       vwSlab[int]
+	storage        vwSlab[uint256.Int]
+}
+
+func (v *writeView) recycler() *wsSlabs { return &v.slabs }
+
+func pickWAddress(r *acctIO) **VersionedWrite[*accounts.Account]  { return &r.wAddress }
+func pickWBalance(r *acctIO) **VersionedWrite[uint256.Int]        { return &r.wBalance }
+func pickWNonce(r *acctIO) **VersionedWrite[uint64]               { return &r.wNonce }
+func pickWIncarnation(r *acctIO) **VersionedWrite[uint64]         { return &r.wIncarnation }
+func pickWSelfDestruct(r *acctIO) **VersionedWrite[bool]          { return &r.wSelfDestruct }
+func pickWCreateContract(r *acctIO) **VersionedWrite[bool]        { return &r.wCreateContract }
+func pickWCode(r *acctIO) **VersionedWrite[accounts.Code]         { return &r.wCode }
+func pickWCodeHash(r *acctIO) **VersionedWrite[accounts.CodeHash] { return &r.wCodeHash }
+func pickWCodeSize(r *acctIO) **VersionedWrite[int]               { return &r.wCodeSize }
+
+func getW[T any](v *writeView, addr accounts.Address, pick func(*acctIO) **VersionedWrite[T]) (*VersionedWrite[T], bool) {
+	if r := v.t.find(addr); r != nil {
+		if w := *pick(r); w != nil {
+			return w, true
+		}
+	}
+	return nil, false
+}
+
+func setW[T any](v *writeView, addr accounts.Address, pick func(*acctIO) **VersionedWrite[T], vw *VersionedWrite[T]) {
+	*pick(v.t.get(addr)) = vw
+}
+
+func delW[T any](v *writeView, addr accounts.Address, pick func(*acctIO) **VersionedWrite[T], s *vwSlab[T]) {
+	if r := v.t.find(addr); r != nil {
+		if w := *pick(r); w != nil {
+			s.put(w)
+			*pick(r) = nil
+		}
+	}
+}
+
+func updW[T any](v *writeView, addr accounts.Address, pick func(*acctIO) **VersionedWrite[T], val T) {
+	if w, ok := getW(v, addr, pick); ok {
+		w.Val = val
+	}
+}
+
+func (v *writeView) GetAddress(addr accounts.Address) (*VersionedWrite[*accounts.Account], bool) {
+	return getW(v, addr, pickWAddress)
+}
+func (v *writeView) GetBalance(addr accounts.Address) (*VersionedWrite[uint256.Int], bool) {
+	return getW(v, addr, pickWBalance)
+}
+func (v *writeView) GetNonce(addr accounts.Address) (*VersionedWrite[uint64], bool) {
+	return getW(v, addr, pickWNonce)
+}
+func (v *writeView) GetIncarnation(addr accounts.Address) (*VersionedWrite[uint64], bool) {
+	return getW(v, addr, pickWIncarnation)
+}
+func (v *writeView) GetSelfDestruct(addr accounts.Address) (*VersionedWrite[bool], bool) {
+	return getW(v, addr, pickWSelfDestruct)
+}
+func (v *writeView) GetCreateContract(addr accounts.Address) (*VersionedWrite[bool], bool) {
+	return getW(v, addr, pickWCreateContract)
+}
+func (v *writeView) GetCode(addr accounts.Address) (*VersionedWrite[accounts.Code], bool) {
+	return getW(v, addr, pickWCode)
+}
+func (v *writeView) GetCodeHash(addr accounts.Address) (*VersionedWrite[accounts.CodeHash], bool) {
+	return getW(v, addr, pickWCodeHash)
+}
+func (v *writeView) GetCodeSize(addr accounts.Address) (*VersionedWrite[int], bool) {
+	return getW(v, addr, pickWCodeSize)
+}
+func (v *writeView) GetStorage(addr accounts.Address, key accounts.StorageKey) (*VersionedWrite[uint256.Int], bool) {
+	if r := v.t.find(addr); r != nil {
+		w, ok := r.wStorage[key]
+		return w, ok
+	}
+	return nil, false
+}
+
+func (v *writeView) SetAddress(addr accounts.Address, vw *VersionedWrite[*accounts.Account]) {
+	setW(v, addr, pickWAddress, vw)
+}
+func (v *writeView) SetBalance(addr accounts.Address, vw *VersionedWrite[uint256.Int]) {
+	setW(v, addr, pickWBalance, vw)
+}
+func (v *writeView) SetNonce(addr accounts.Address, vw *VersionedWrite[uint64]) {
+	setW(v, addr, pickWNonce, vw)
+}
+func (v *writeView) SetIncarnation(addr accounts.Address, vw *VersionedWrite[uint64]) {
+	setW(v, addr, pickWIncarnation, vw)
+}
+func (v *writeView) SetSelfDestruct(addr accounts.Address, vw *VersionedWrite[bool]) {
+	setW(v, addr, pickWSelfDestruct, vw)
+}
+func (v *writeView) SetCreateContract(addr accounts.Address, vw *VersionedWrite[bool]) {
+	setW(v, addr, pickWCreateContract, vw)
+}
+func (v *writeView) SetCode(addr accounts.Address, vw *VersionedWrite[accounts.Code]) {
+	setW(v, addr, pickWCode, vw)
+}
+func (v *writeView) SetCodeHash(addr accounts.Address, vw *VersionedWrite[accounts.CodeHash]) {
+	setW(v, addr, pickWCodeHash, vw)
+}
+func (v *writeView) SetCodeSize(addr accounts.Address, vw *VersionedWrite[int]) {
+	setW(v, addr, pickWCodeSize, vw)
+}
+func (v *writeView) SetStorage(addr accounts.Address, key accounts.StorageKey, vw *VersionedWrite[uint256.Int]) {
+	r := v.t.get(addr)
+	if r.wStorage == nil {
+		r.wStorage = make(map[accounts.StorageKey]*VersionedWrite[uint256.Int])
+	}
+	r.wStorage[key] = vw
+}
+
+func (v *writeView) DelBalance(addr accounts.Address) { delW(v, addr, pickWBalance, &v.slabs.balance) }
+func (v *writeView) DelNonce(addr accounts.Address)   { delW(v, addr, pickWNonce, &v.slabs.nonce) }
+func (v *writeView) DelIncarnation(addr accounts.Address) {
+	delW(v, addr, pickWIncarnation, &v.slabs.incarnation)
+}
+func (v *writeView) DelSelfDestruct(addr accounts.Address) {
+	delW(v, addr, pickWSelfDestruct, &v.slabs.selfDestruct)
+}
+func (v *writeView) DelCode(addr accounts.Address) { delW(v, addr, pickWCode, &v.slabs.code) }
+func (v *writeView) DelCodeHash(addr accounts.Address) {
+	delW(v, addr, pickWCodeHash, &v.slabs.codeHash)
+}
+func (v *writeView) DelCodeSize(addr accounts.Address) {
+	delW(v, addr, pickWCodeSize, &v.slabs.codeSize)
+}
+func (v *writeView) DelStorage(addr accounts.Address, key accounts.StorageKey) {
+	if r := v.t.find(addr); r != nil {
+		if w, ok := r.wStorage[key]; ok {
+			v.slabs.storage.put(w)
+			delete(r.wStorage, key)
+			if len(r.wStorage) == 0 {
+				clear(r.wStorage) // drops the tombstones a revert leaves behind
+			}
+		}
+	}
+}
+
+func (v *writeView) updateBalance(addr accounts.Address, val uint256.Int) {
+	updW(v, addr, pickWBalance, val)
+}
+func (v *writeView) updateNonce(addr accounts.Address, val uint64) { updW(v, addr, pickWNonce, val) }
+func (v *writeView) updateIncarnation(addr accounts.Address, val uint64) {
+	updW(v, addr, pickWIncarnation, val)
+}
+func (v *writeView) updateSelfDestruct(addr accounts.Address, val bool) {
+	updW(v, addr, pickWSelfDestruct, val)
+}
+func (v *writeView) updateCode(addr accounts.Address, val accounts.Code) {
+	updW(v, addr, pickWCode, val)
+}
+func (v *writeView) updateCodeHash(addr accounts.Address, val accounts.CodeHash) {
+	updW(v, addr, pickWCodeHash, val)
+}
+func (v *writeView) updateCodeSize(addr accounts.Address, val int) {
+	updW(v, addr, pickWCodeSize, val)
+}
+func (v *writeView) updateStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
+	if w, ok := v.GetStorage(addr, key); ok {
+		w.Val = val
+	}
+}
+
+func (v *writeView) Has(h WriteHeader) bool {
+	r := v.t.find(h.Address)
+	if r == nil {
+		return false
+	}
+	switch h.Path {
+	case AddressPath:
+		return r.wAddress != nil
+	case BalancePath:
+		return r.wBalance != nil
+	case NoncePath:
+		return r.wNonce != nil
+	case IncarnationPath:
+		return r.wIncarnation != nil
+	case SelfDestructPath:
+		return r.wSelfDestruct != nil
+	case CreateContractPath:
+		return r.wCreateContract != nil
+	case CodePath:
+		return r.wCode != nil
+	case CodeHashPath:
+		return r.wCodeHash != nil
+	case CodeSizePath:
+		return r.wCodeSize != nil
+	case StoragePath:
+		_, ok := r.wStorage[h.Key]
+		return ok
+	}
+	return false
+}
+
+func (r *acctIO) hasWrite() bool {
+	return r.wAddress != nil || r.wBalance != nil || r.wNonce != nil || r.wIncarnation != nil ||
+		r.wSelfDestruct != nil || r.wCreateContract != nil || r.wCode != nil || r.wCodeHash != nil ||
+		r.wCodeSize != nil || len(r.wStorage) > 0
+}
+
+func (v *writeView) forEachAddr(f func(accounts.Address)) {
+	for i := range v.t.recs {
+		if v.t.recs[i].hasWrite() {
+			f(v.t.recs[i].addr)
+		}
+	}
+}
+
+func dropW[T any](p **VersionedWrite[T], s *vwSlab[T]) {
+	if *p != nil {
+		s.put(*p)
+		*p = nil
+	}
+}
+
+func (v *writeView) deleteAddr(addr accounts.Address) {
+	r := v.t.find(addr)
+	if r == nil {
+		return
+	}
+	s := &v.slabs
+	dropW(&r.wAddress, &s.address)
+	dropW(&r.wBalance, &s.balance)
+	dropW(&r.wNonce, &s.nonce)
+	dropW(&r.wIncarnation, &s.incarnation)
+	dropW(&r.wSelfDestruct, &s.selfDestruct)
+	dropW(&r.wCreateContract, &s.createContract)
+	dropW(&r.wCode, &s.code)
+	dropW(&r.wCodeHash, &s.codeHash)
+	dropW(&r.wCodeSize, &s.codeSize)
+	for _, w := range r.wStorage {
+		s.storage.put(w)
+	}
+	clear(r.wStorage)
+}
+
+func cloneOrNil[T any](w *VersionedWrite[T]) *VersionedWrite[T] {
+	if w == nil {
+		return nil
+	}
+	return cloneVW(w)
+}
+
+func (v *writeView) snapshotCreateFields(addr accounts.Address) *createWriteSnapshot {
+	snap := &createWriteSnapshot{}
+	if r := v.t.find(addr); r != nil {
+		snap.address = cloneOrNil(r.wAddress)
+		snap.balance = cloneOrNil(r.wBalance)
+		snap.incarnation = cloneOrNil(r.wIncarnation)
+		snap.selfDestruct = cloneOrNil(r.wSelfDestruct)
+		snap.createContract = cloneOrNil(r.wCreateContract)
+		snap.codeHash = cloneOrNil(r.wCodeHash)
+	}
+	return snap
+}
+
+func (v *writeView) restoreCreateFields(addr accounts.Address, snap *createWriteSnapshot) {
+	r := v.t.get(addr)
+	s := &v.slabs
+	dropW(&r.wAddress, &s.address)
+	dropW(&r.wBalance, &s.balance)
+	dropW(&r.wIncarnation, &s.incarnation)
+	dropW(&r.wSelfDestruct, &s.selfDestruct)
+	dropW(&r.wCreateContract, &s.createContract)
+	dropW(&r.wCodeHash, &s.codeHash)
+	if snap == nil {
+		return
+	}
+	r.wAddress = snap.address
+	r.wBalance = snap.balance
+	r.wIncarnation = snap.incarnation
+	r.wSelfDestruct = snap.selfDestruct
+	r.wCreateContract = snap.createContract
+	r.wCodeHash = snap.codeHash
+}
+
+// live fills the reusable tmp set with the live writes, sharing their pointers.
+func (v *writeView) live() *WriteSet {
+	ws := &v.tmp
+	for i := range v.t.recs {
+		r := &v.t.recs[i]
+		a := r.addr
+		if r.wAddress != nil {
+			ws.SetAddress(a, r.wAddress)
+		}
+		if r.wBalance != nil {
+			ws.SetBalance(a, r.wBalance)
+		}
+		if r.wNonce != nil {
+			ws.SetNonce(a, r.wNonce)
+		}
+		if r.wIncarnation != nil {
+			ws.SetIncarnation(a, r.wIncarnation)
+		}
+		if r.wSelfDestruct != nil {
+			ws.SetSelfDestruct(a, r.wSelfDestruct)
+		}
+		if r.wCreateContract != nil {
+			ws.SetCreateContract(a, r.wCreateContract)
+		}
+		if r.wCode != nil {
+			ws.SetCode(a, r.wCode)
+		}
+		if r.wCodeHash != nil {
+			ws.SetCodeHash(a, r.wCodeHash)
+		}
+		if r.wCodeSize != nil {
+			ws.SetCodeSize(a, r.wCodeSize)
+		}
+		for k, w := range r.wStorage {
+			ws.SetStorage(a, k, w)
+		}
+	}
+	return ws
+}
+
+// Snapshot returns a detached copy with WriteSet.Snapshot's self-destruct rules.
+func (v *writeView) Snapshot() *WriteSet {
+	out := &WriteSet{}
+	for i := range v.t.recs {
+		r := &v.t.recs[i]
+		a := r.addr
+		sd := false
+		if r.wSelfDestruct != nil {
+			out.SetSelfDestruct(a, cloneVW(r.wSelfDestruct))
+			sd = r.wSelfDestruct.Val
+		}
+		if r.wBalance != nil {
+			out.SetBalance(a, cloneVW(r.wBalance))
+		}
+		if r.wIncarnation != nil {
+			out.SetIncarnation(a, cloneVW(r.wIncarnation))
+		}
+		for k, w := range r.wStorage {
+			out.SetStorage(a, k, cloneVW(w))
+		}
+		if r.wCreateContract != nil {
+			out.SetCreateContract(a, cloneVW(r.wCreateContract))
+		}
+		if sd {
+			continue
+		}
+		if r.wAddress != nil {
+			out.SetAddress(a, cloneVW(r.wAddress))
+		}
+		if r.wNonce != nil {
+			out.SetNonce(a, cloneVW(r.wNonce))
+		}
+		if r.wCode != nil {
+			out.SetCode(a, cloneVW(r.wCode))
+		}
+		if r.wCodeHash != nil {
+			out.SetCodeHash(a, cloneVW(r.wCodeHash))
+		}
+		if r.wCodeSize != nil {
+			out.SetCodeSize(a, cloneVW(r.wCodeSize))
+		}
+	}
+	return out
+}
+
+// Finalize zeroes the storage of contracts created and destroyed in this tx,
+// then snapshots, as WriteSet.Finalize.
+func (v *writeView) Finalize() *WriteSet {
+	for i := range v.t.recs {
+		r := &v.t.recs[i]
+		if r.wCreateContract != nil && r.wCreateContract.Val && r.wSelfDestruct != nil && r.wSelfDestruct.Val {
+			for _, w := range r.wStorage {
+				w.Val = uint256.Int{}
+			}
+		}
+	}
+	return v.Snapshot()
+}
+
+func (v *writeView) ReleaseAndReset() {
+	for i := range v.t.recs {
+		r := &v.t.recs[i]
+		r.wAddress, r.wBalance, r.wNonce, r.wIncarnation = nil, nil, nil, nil
+		r.wSelfDestruct, r.wCreateContract, r.wCode, r.wCodeHash, r.wCodeSize = nil, nil, nil, nil, nil
+		clear(r.wStorage)
+	}
+	s := &v.slabs
+	s.address.reset()
+	s.balance.reset()
+	s.nonce.reset()
+	s.incarnation.reset()
+	s.selfDestruct.reset()
+	s.createContract.reset()
+	s.code.reset()
+	s.codeHash.reset()
+	s.codeSize.reset()
+	s.storage.reset()
+}
+
+func (v *writeView) Count() int {
+	n := 0
+	for i := range v.t.recs {
+		r := &v.t.recs[i]
+		for _, set := range []bool{r.wAddress != nil, r.wBalance != nil, r.wNonce != nil, r.wIncarnation != nil,
+			r.wSelfDestruct != nil, r.wCreateContract != nil, r.wCode != nil, r.wCodeHash != nil, r.wCodeSize != nil} {
+			if set {
+				n++
+			}
+		}
+		n += len(r.wStorage)
+	}
+	return n
+}
+
+// AllHeaders visits the header of every live write.
+func (v *writeView) AllHeaders() iter.Seq[WriteHeader] {
+	return v.live().AllHeaders()
+}
