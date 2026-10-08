@@ -148,7 +148,10 @@ type IntraBlockState struct {
 	codeAccess  codeAccessTracker // stateReader, if it tracks code access
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
-	stateObjects      map[accounts.Address]*stateObject // used only if `noMaterialize == false`
+	stateObjects map[accounts.Address]*stateObject // used only if `noMaterialize == false`
+	// transients keeps this tx's rebuilt noMaterialize objects; any write to an
+	// account drops its entry, a revert drops them all. They live in the arena.
+	transients        map[accounts.Address]*stateObject
 	stateObjectsDirty map[accounts.Address]struct{}
 
 	nilAccounts map[accounts.Address]struct{} // Remember non-existent account to avoid reading them again
@@ -457,6 +460,7 @@ func (ibs *IntraBlockState) Close() {
 
 	stateObjects, journal := ibs.stateObjects, ibs.journal
 	ibs.stateObjects, ibs.journal = nil, nil
+	ibs.transients = nil
 	ibs.stateObjectArena.release()
 	ibs.logs.release()
 	ibs.revisions.reset()
@@ -2025,6 +2029,7 @@ func (ibs *IntraBlockState) stateObjectForAccount(addr accounts.Address, account
 	obj := newObject(ibs, addr, account, account)
 	if ibs.noMaterialize {
 		ibs.reconstructCellFlags(obj, addr)
+		ibs.keepTransient(addr, obj)
 		return obj
 	}
 	ibs.setStateObject(addr, obj)
@@ -2037,6 +2042,9 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	// cells on every write (the setters mirror recordWrite*); the noMaterialize
 	// path never populates this cache, so it can't serve a stale object there.
 	if so, ok := ibs.stateObjects[addr]; ok {
+		return so, nil
+	}
+	if so, ok := ibs.transients[addr]; ok {
 		return so, nil
 	}
 
@@ -2188,10 +2196,18 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	}
 	if ibs.noMaterialize {
 		ibs.reconstructCellFlags(obj, addr)
+		ibs.keepTransient(addr, obj)
 		return obj, nil
 	}
 	ibs.setStateObject(addr, obj)
 	return obj, nil
+}
+
+func (ibs *IntraBlockState) keepTransient(addr accounts.Address, obj *stateObject) {
+	if ibs.transients == nil {
+		ibs.transients = make(map[accounts.Address]*stateObject)
+	}
+	ibs.transients[addr] = obj
 }
 
 func (ibs *IntraBlockState) setStateObject(addr accounts.Address, object *stateObject) {
@@ -2487,6 +2503,7 @@ func (ibs *IntraBlockState) PopSnapshot(snapshot int) {
 
 // RevertToSnapshot reverts all state changes made since the given revision.
 func (ibs *IntraBlockState) RevertToSnapshot(revid int, err error) {
+	clear(ibs.transients)
 	var traced bool
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TracingAccounts()) {
 		for addr := range ibs.journal.dirties {
@@ -2896,6 +2913,7 @@ func (ibs *IntraBlockState) clearJournalAndRefund() {
 		// may draw them.
 		panic("stateObjectArena not empty with noMaterialize=false")
 	}
+	clear(ibs.transients)
 	ibs.stateObjectArena.reset() // same lifetime with `journal`
 }
 
@@ -3090,6 +3108,7 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 // returns every VW to its pool.
 
 func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint256.Int) {
+	delete(ibs.transients, addr)
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3108,6 +3127,7 @@ func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint25
 }
 
 func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, reason tracing.NonceChangeReason) {
+	delete(ibs.transients, addr)
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3127,6 +3147,7 @@ func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, 
 }
 
 func (ibs *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val uint64) {
+	delete(ibs.transients, addr)
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3145,6 +3166,7 @@ func (ibs *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val ui
 }
 
 func (ibs *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val bool) {
+	delete(ibs.transients, addr)
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3163,6 +3185,7 @@ func (ibs *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val b
 }
 
 func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val bool) {
+	delete(ibs.transients, addr)
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3184,6 +3207,7 @@ func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val
 }
 
 func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.Code) {
+	delete(ibs.transients, addr)
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3202,6 +3226,7 @@ func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.
 }
 
 func (ibs *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accounts.CodeHash) {
+	delete(ibs.transients, addr)
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3220,6 +3245,7 @@ func (ibs *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accou
 }
 
 func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) {
+	delete(ibs.transients, addr)
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
@@ -3238,6 +3264,7 @@ func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) 
 }
 
 func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *accounts.Account) {
+	delete(ibs.transients, addr)
 	ibs.MarkAddressAccess(addr, true)
 	if ibs.versionMap == nil {
 		return
