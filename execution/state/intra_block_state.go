@@ -601,6 +601,10 @@ func (ibs *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 		return s != nil && !s.deleted, nil
 	}
 
+	// A contract this tx created exists until the tx ends (EIP-6780).
+	if created, _ := ibs.versionedWriteCreateContract(addr); created {
+		return true, nil
+	}
 	// Existence needs only the base record + self-destruct gate, not the
 	// per-field overlay.
 	// Same-tx self-destruct: the account is still alive (EIP-6780).
@@ -1154,6 +1158,12 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 		}
 	}
 
+	// A contract this tx created starts at nonce 1, so it is never empty.
+	if ibs.eip161 {
+		if created, _ := ibs.versionedWriteCreateContract(addr); created {
+			return nil
+		}
+	}
 	if ibs.versionMap != nil {
 		// The touch only depends on emptiness. For an existing account compute
 		// it from field reads without materializing/reconstructing the
