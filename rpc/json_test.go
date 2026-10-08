@@ -25,6 +25,7 @@ import (
 	"io"
 	"net"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -33,6 +34,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -796,6 +798,24 @@ func FuzzValidJSON(f *testing.F) {
 		data := []byte(input)
 		require.Equal(t, json.Valid(data), validJSON(data), "input %.80q", input)
 	})
+}
+
+// A body at the nesting limit is ~20 KB; validating it must not grow the
+// request goroutine's stack by a frame per level.
+func TestValidJSONDeepNestingKeepsStackSmall(t *testing.T) {
+	deep := []byte(nest(maxJSONDepth))
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	done := make(chan bool)
+	go func() {
+		ok := validJSON(deep)
+		runtime.ReadMemStats(&after)
+		done <- ok
+	}()
+	require.True(t, <-done)
+	grew := int64(after.StackInuse) - int64(before.StackInuse)
+	require.Less(t, grew, int64(256*datasize.KB), "stack grew %d KB for a %d-byte body", grew/1024, len(deep))
 }
 
 // nest returns a value inside n nested arrays, which encoding/json accepts up

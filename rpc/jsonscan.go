@@ -180,32 +180,103 @@ const maxJSONDepth = 10000
 // time instead of a byte at a time, which is most of the cost of a body whose
 // bulk is one long string.
 func validJSON(data []byte) bool {
-	i, ok := scanValidJSON(data, skipJSONSpace(data, 0), 1)
+	i, ok := scanValidJSON(data, skipJSONSpace(data, 0))
 	return ok && skipJSONSpace(data, i) == len(data)
 }
 
 // scanValidJSON validates the value beginning at data[i] and returns the offset
-// just past it.
-func scanValidJSON(data []byte, i, depth int) (int, bool) {
-	if i >= len(data) {
+// just past it. Open composites are kept as closing brackets in a byte stack, not
+// in call frames: a body at the nesting limit is ~20 KB and would otherwise grow
+// the request goroutine's stack by megabytes.
+func scanValidJSON(data []byte, i int) (int, bool) {
+	var buf [32]byte
+	closers := buf[:0]
+	for {
+		if i >= len(data) {
+			return i, false
+		}
+		var ok bool
+		switch c := data[i]; c {
+		case '{', '[':
+			// Only a composite is a level of nesting, so only it is counted.
+			if len(closers) >= maxJSONDepth {
+				return i, false
+			}
+			closer := byte(']')
+			if c == '{' {
+				closer = '}'
+			}
+			i = skipJSONSpace(data, i+1)
+			if i < len(data) && data[i] == closer {
+				i, ok = i+1, true
+				break
+			}
+			closers = append(closers, closer)
+			if closer == '}' {
+				if i, ok = scanJSONMemberKey(data, i); !ok {
+					return i, false
+				}
+			}
+			continue
+		case '"':
+			i, ok = scanValidJSONString(data, i)
+		case 't':
+			i, ok = scanJSONLiteral(data, i, "true")
+		case 'f':
+			i, ok = scanJSONLiteral(data, i, "false")
+		case 'n':
+			i, ok = scanJSONLiteral(data, i, "null")
+		default:
+			i, ok = scanValidJSONNumber(data, i)
+		}
+		if !ok {
+			return i, false
+		}
+		// A value ended at i: close the composites it completes, or move on to the
+		// next member of the innermost one.
+		for {
+			if len(closers) == 0 {
+				return i, true
+			}
+			i = skipJSONSpace(data, i)
+			if i >= len(data) {
+				return i, false
+			}
+			closer := closers[len(closers)-1]
+			if data[i] == closer {
+				closers = closers[:len(closers)-1]
+				i++
+				continue
+			}
+			if data[i] != ',' {
+				return i, false
+			}
+			i = skipJSONSpace(data, i+1)
+			if closer == '}' {
+				if i, ok = scanJSONMemberKey(data, i); !ok {
+					return i, false
+				}
+			}
+			break
+		}
+	}
+}
+
+// scanJSONMemberKey validates an object member's quoted key and colon at data[i]
+// and returns the offset of its value.
+func scanJSONMemberKey(data []byte, i int) (int, bool) {
+	if i >= len(data) || data[i] != '"' {
 		return i, false
 	}
-	switch data[i] {
-	case '"':
-		return scanValidJSONString(data, i)
-	case '{':
-		return scanValidJSONComposite(data, i, depth, '}')
-	case '[':
-		return scanValidJSONComposite(data, i, depth, ']')
-	case 't':
-		return scanJSONLiteral(data, i, "true")
-	case 'f':
-		return scanJSONLiteral(data, i, "false")
-	case 'n':
-		return scanJSONLiteral(data, i, "null")
-	default:
-		return scanValidJSONNumber(data, i)
+	i, ok := scanValidJSONString(data, i)
+	if !ok {
+		return i, false
 	}
+	i = skipJSONSpace(data, i)
+	if i >= len(data) || data[i] != ':' {
+		return i, false
+	}
+	return skipJSONSpace(data, i+1), true
 }
 
 func scanJSONLiteral(data []byte, i int, lit string) (int, bool) {
@@ -285,51 +356,6 @@ func scanJSONEscape(data []byte, i int) (int, bool) {
 
 func isHexDigit(c byte) bool {
 	return isJSONDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
-}
-
-// scanValidJSONComposite validates the object or array whose opening bracket is
-// at data[i] and returns the offset just past close. Members carry a quoted key
-// and a colon, elements do not.
-func scanValidJSONComposite(data []byte, i, depth int, close byte) (int, bool) {
-	// Only a composite is a level of nesting, so only it is counted.
-	if depth > maxJSONDepth {
-		return i, false
-	}
-	i = skipJSONSpace(data, i+1)
-	if i < len(data) && data[i] == close {
-		return i + 1, true
-	}
-	for {
-		var ok bool
-		if close == '}' {
-			if i >= len(data) || data[i] != '"' {
-				return i, false
-			}
-			if i, ok = scanValidJSONString(data, i); !ok {
-				return i, false
-			}
-			i = skipJSONSpace(data, i)
-			if i >= len(data) || data[i] != ':' {
-				return i, false
-			}
-			i = skipJSONSpace(data, i+1)
-		}
-		if i, ok = scanValidJSON(data, i, depth+1); !ok {
-			return i, false
-		}
-		i = skipJSONSpace(data, i)
-		if i >= len(data) {
-			return i, false
-		}
-		switch data[i] {
-		case close:
-			return i + 1, true
-		case ',':
-			i = skipJSONSpace(data, i+1)
-		default:
-			return i, false
-		}
-	}
 }
 
 // scanValidJSONNumber validates the number grammar of RFC 8259, section 6.
