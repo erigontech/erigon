@@ -656,33 +656,34 @@ func (ibs *IntraBlockState) TxnIndex() int {
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) GetCode(addr accounts.Address) ([]byte, error) {
-	return ibs.getCode(addr, false)
+	code, err := ibs.getCode(addr, false)
+	return code.Bytes, err
 }
 
-func (ibs *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byte, error) {
+func (ibs *IntraBlockState) getCode(addr accounts.Address, commited bool) (accounts.Code, error) {
 	if ibs.versionMap == nil {
 		stateObject, err := ibs.getStateObject(addr, true)
 		if err != nil {
-			return nil, err
+			return accounts.Code{}, err
 		}
 		if stateObject != nil && !stateObject.deleted {
-			code, err := stateObject.Code()
+			code, err := stateObject.CodeTyped()
 			if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 				if err != nil {
 					fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, StorageRead, addr, err)
 				} else {
-					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, StorageRead, addr, len(code))
+					fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, StorageRead, addr, code.Len())
 				}
 			}
 			if err == nil {
-				ibs.callCodeAccessHook(addr, code)
+				ibs.callCodeAccessHook(addr, code.Bytes)
 			}
 			return code, err
 		}
 		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, StorageRead, addr, 0)
 		}
-		return nil, nil
+		return accounts.Code{}, nil
 	}
 	// When commited=true, versionedReadCore skips local versionedWrites and may
 	// return a stale ReadSet value, so return this tx's own dirty code directly.
@@ -690,7 +691,7 @@ func (ibs *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 	if commited {
 		if so, ok := ibs.stateObjects[addr]; ok && so.dirtyCode && ibs.hasWrite(addr, CodePath, accounts.NilKey) {
 			ibs.callCodeAccessHook(addr, so.code.Bytes)
-			return so.code.Bytes, nil
+			return so.code, nil
 		}
 	}
 	code, source, _, err := readCode(ibs, addr, commited)
@@ -699,11 +700,11 @@ func (ibs *IntraBlockState) getCode(addr accounts.Address, commited bool) ([]byt
 		if err != nil {
 			fmt.Printf("%d (%d.%d) GetCode (%s) %x: err: %s\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, err)
 		} else {
-			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, len(code))
+			fmt.Printf("%d (%d.%d) GetCode (%s) %x: size: %d\n", ibs.blockNum, ibs.txIndex, ibs.version, source, addr, code.Len())
 		}
 	}
 	if err == nil {
-		ibs.callCodeAccessHook(addr, code)
+		ibs.callCodeAccessHook(addr, code.Bytes)
 	}
 
 	return code, err
@@ -817,34 +818,20 @@ func (ibs *IntraBlockState) GetCommittedCodeHash(addr accounts.Address) (account
 	return hash, nil
 }
 
-func (ibs *IntraBlockState) ResolveCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
-	// eip-7702
-	dd, ok, err := ibs.GetDelegatedDesignation(addr)
-
-	if ok {
-		return ibs.GetCodeHash(dd)
-	}
-
-	if err != nil {
-		return accounts.NilCodeHash, err
-	}
-
-	return ibs.GetCodeHash(addr)
-}
-
+// ResolveCode returns the code a call to addr executes, following an EIP-7702 delegation. The
+// code hash comes from the same read as the code.
 func (ibs *IntraBlockState) ResolveCode(addr accounts.Address) (accounts.Code, error) {
 	// committed=false so the tx's own writes (e.g. EIP-7702 authorization) are
 	// visible rather than stale delegation code from the version map.
 	code, err := ibs.getCode(addr, false)
 	// eip-7702
-	if delegation, ok := types.ParseDelegation(code); ok {
-		dcode, derr := ibs.getCode(delegation, false)
-		return accounts.NewCode(dcode), derr
+	if delegation, ok := types.ParseDelegation(code.Bytes); ok {
+		return ibs.getCode(delegation, false)
 	}
 	if err != nil {
 		return accounts.Code{}, err
 	}
-	return accounts.NewCode(code), nil
+	return code, nil
 }
 
 func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (accounts.Address, bool, error) {
@@ -859,8 +846,8 @@ func (ibs *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 		if err != nil {
 			return accounts.ZeroAddress, false, err
 		}
-		if delegation, ok := types.ParseDelegation(code); ok {
-			ibs.callCodeAccessHook(addr, code)
+		if delegation, ok := types.ParseDelegation(code.Bytes); ok {
+			ibs.callCodeAccessHook(addr, code.Bytes)
 			return delegation, true, nil
 		}
 		return accounts.ZeroAddress, false, nil
@@ -1841,7 +1828,7 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		}
 	}
 
-	var code []byte
+	var code accounts.Code
 
 	if ibs.versionMap != nil {
 		account = readAccount
@@ -1882,15 +1869,14 @@ func (ibs *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		ibs.accountRead(addr, account, accountSource, accountVersion)
 	}
 	obj := newObject(ibs, addr, account, account)
-	if code != nil {
+	if code.Bytes != nil {
 		// Code loaded from the version map must carry a matching CodeHash: a stale
 		// hash lets SetCode's revert-to-original optimisation wrongly delete code
 		// writes.
-		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
-		obj.code = accounts.Code{Hash: codeHash, Bytes: code}
-		if codeHash != obj.data.CodeHash {
-			obj.data.CodeHash = codeHash
-			obj.original.CodeHash = codeHash
+		obj.code = code
+		if code.Hash != obj.data.CodeHash {
+			obj.data.CodeHash = code.Hash
+			obj.original.CodeHash = code.Hash
 		}
 	}
 	if ibs.noMaterialize {
@@ -3108,13 +3094,12 @@ func (ibs *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 		return
 	}
 	code, _, _, err := refreshCode(ibs, addr)
-	if err != nil || code == nil {
+	if err != nil || code.Bytes == nil {
 		return
 	}
-	codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
-	obj.code = accounts.Code{Hash: codeHash, Bytes: code}
-	obj.data.CodeHash = codeHash
-	obj.original.CodeHash = codeHash
+	obj.code = code
+	obj.data.CodeHash = code.Hash
+	obj.original.CodeHash = code.Hash
 }
 
 // versionedWriteHit probes the dirty per-tx write set for a write at

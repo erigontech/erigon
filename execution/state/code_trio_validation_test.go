@@ -62,7 +62,7 @@ func TestCodeTrio_ValidationClassAsymmetry(t *testing.T) {
 
 	ioCode := NewVersionedIO(4)
 	rsCode := ReadSet{}
-	rsCode.SetCode(addr, VersionedRead[[]byte]{ReadHeader: readStorage, Val: code.Bytes})
+	rsCode.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: readStorage, Val: code})
 	ioCode.RecordReads(Version{TxIndex: 3}, rsCode)
 	require.Equal(t, VersionInvalid, vm.ValidateVersion(3, ioCode, validateEqualVersion, false, ""),
 		"CodePath noValue: the storage/flush collision invalidates (conservative)")
