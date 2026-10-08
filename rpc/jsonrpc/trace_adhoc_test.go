@@ -3157,7 +3157,7 @@ func TestTraceCallFeeEnvironmentMatchesEthCall(t *testing.T) {
 }
 
 // TestTraceCallPreLondonFeesMatchEthCall checks that before London, where eth_call
-// ignores the EIP-1559 fee fields, trace_call ignores them too.
+// rejects the EIP-1559 fee fields, trace_call rejects them too.
 func TestTraceCallPreLondonFeesMatchEthCall(t *testing.T) {
 	c := newBaseFeeTestChain(t, chain.TestChainBerlinConfig)
 	probe := c.deployOpcodeContract(t, opGasprice)
@@ -3165,16 +3165,13 @@ func TestTraceCallPreLondonFeesMatchEthCall(t *testing.T) {
 
 	var ethArgs ethapi.CallArgs
 	require.NoError(t, json.Unmarshal([]byte(call), &ethArgs))
-	ethOutput, err := newEthApiForTest(newBaseApiForTest(c.m), c.m.DB, nil, nil).Call(context.Background(), ethArgs, nil, nil, nil)
-	require.NoError(t, err)
+	_, err := newEthApiForTest(newBaseApiForTest(c.m), c.m.DB, nil, nil).Call(context.Background(), ethArgs, nil, nil, nil)
+	require.ErrorIs(t, err, types.ErrDynamicFeePreLondon)
 
 	var traceArgs TraceCallParam
 	require.NoError(t, json.Unmarshal([]byte(call), &traceArgs))
-	result, err := c.traceAPI().Call(context.Background(), traceArgs, []string{TraceTypeStateDiff}, nil, nil)
-	require.NoError(t, err)
-	require.Equal(t, ethOutput, result.Output)
-	require.Equal(t, common.Hash{}.Hex(), result.Output.String(), "GASPRICE")
-	requireBigEqual(t, big.NewInt(-7), stateDiffBalanceDelta(t, result.StateDiff, c.bankAddress), "the sender pays only the value")
+	_, err = c.traceAPI().Call(context.Background(), traceArgs, []string{TraceTypeStateDiff}, nil, nil)
+	require.ErrorIs(t, err, types.ErrDynamicFeePreLondon)
 }
 
 // TestTraceCallManyChargesEachCall checks that each trace_callMany call runs in its own

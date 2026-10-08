@@ -153,6 +153,7 @@ type Message interface {
 	AccessList() types.AccessList
 	BlobHashes() []common.Hash
 	Authorizations() []types.Authorization
+	DynamicFeeArgs() bool
 
 	IsFree() bool // service transactions on Gnosis are exempt from EIP-1559 mandatory fees
 	SetIsFree(bool)
@@ -333,6 +334,9 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 	// eth_call builds a Message directly, bypassing the per-type AsMessage gates.
 	if st.msg.AccessList() != nil && !rules.IsBerlin {
 		return upfrontTxnFees{}, types.ErrAccessListPreBerlin
+	}
+	if st.msg.DynamicFeeArgs() && !rules.IsLondon {
+		return upfrontTxnFees{}, types.ErrDynamicFeePreLondon
 	}
 	if st.msg.BlobHashes() != nil {
 		if err := types.ValidateBlobPrerequisites(st.msg.BlobHashes(), st.msg.To().IsNil(), rules.IsCancun); err != nil {

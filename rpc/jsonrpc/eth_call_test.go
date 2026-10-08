@@ -233,10 +233,10 @@ func TestEstimateGasStateOverrideFundsSender(t *testing.T) {
 	poor := common.HexToAddress("0x00000000000000000000000000000000000000aa")
 	balance := (*hexutil.U256)(uint256.NewInt(1e18))
 	args := &ethapi.CallArgs{
-		From:         &poor,
-		To:           &receiverAddr,
-		Value:        (*hexutil.U256)(uint256.NewInt(1)),
-		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		From:     &poor,
+		To:       &receiverAddr,
+		Value:    (*hexutil.U256)(uint256.NewInt(1)),
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
 	}
 	overrides := &ethapi.StateOverrides{
 		accounts.InternAddress(poor): {Balance: &balance},
@@ -340,10 +340,10 @@ func TestEstimateGasStateOverrideLowersSenderBalance(t *testing.T) {
 	const allowance = 25_000 // below what the contract call needs
 	callData := hexutil.Bytes(contractInvocationData(1))
 	args := &ethapi.CallArgs{
-		From:         &bankAddr,
-		To:           &contractAddr,
-		Data:         &callData,
-		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(feePerGas)),
+		From:     &bankAddr,
+		To:       &contractAddr,
+		Data:     &callData,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(feePerGas)),
 	}
 
 	// Sanity check: the committed balance funds the call.
@@ -372,10 +372,10 @@ func TestEstimateGasStateOverrideErrorPrecedesFundsCheck(t *testing.T) {
 	moveTo := common.HexToAddress("0x00000000000000000000000000000000000000ee")
 
 	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
-		From:         &poor,
-		To:           &receiverAddr,
-		Value:        (*hexutil.U256)(uint256.NewInt(1)),
-		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		From:     &poor,
+		To:       &receiverAddr,
+		Value:    (*hexutil.U256)(uint256.NewInt(1)),
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
 	}, nil, &ethapi.StateOverrides{
 		accounts.InternAddress(notAPrecompile): {MovePrecompileTo: &moveTo},
 	}, nil)
@@ -448,9 +448,9 @@ func TestEstimateGasZeroFundableAllowance(t *testing.T) {
 	poor := common.HexToAddress("0x00000000000000000000000000000000000000ab")
 	dust := (*hexutil.U256)(uint256.NewInt(1000))
 	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
-		From:         &poor,
-		To:           &receiverAddr,
-		MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		From:     &poor,
+		To:       &receiverAddr,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
 	}, nil, &ethapi.StateOverrides{
 		accounts.InternAddress(poor): {Balance: &dust},
 	}, nil)

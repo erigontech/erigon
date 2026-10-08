@@ -246,22 +246,19 @@ func TestCallMany(t *testing.T) {
 
 	callArgAddr1 := ethapi.CallArgs{
 		From: &address, To: &tokenAddr, Nonce: &nonce,
-		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
-		Data:                 &balanceCallAddr1,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
+		Data:     &balanceCallAddr1,
 	}
 	callArgAddr2 := ethapi.CallArgs{
 		From: &address, To: &tokenAddr, Nonce: &secondNonce,
-		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
-		Data:                 &balanceCallAddr2,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
+		Data:     &balanceCallAddr2,
 	}
 
 	callArgTransferAddr2 := ethapi.CallArgs{
 		From: &address2, To: &tokenAddr, Nonce: &nonce,
-		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
-		Data:                 &transferCallData,
+		GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
+		Data:     &transferCallData,
 	}
 
 	timeout := int64(50000)
@@ -370,8 +367,7 @@ func TestTraceCallManyStreamsEachResult(t *testing.T) {
 		to := address
 		calls[i] = ethapi.CallArgs{
 			From: &address, To: &to, Nonce: &nonce,
-			MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
-			MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
+			GasPrice: (*hexutil.U256)(uint256.NewInt(1e9)),
 		}
 	}
 	bundles := []Bundle{{Transactions: calls}}

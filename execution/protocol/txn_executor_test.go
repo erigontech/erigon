@@ -1482,6 +1482,65 @@ func TestPreCheckAccessListRequiresBerlin(t *testing.T) {
 	})
 }
 
+// TestPreCheckDynamicFeeArgsRequireLondon pins that a message built from call
+// arguments naming maxFeePerGas or maxPriorityFeePerGas is rejected before
+// EIP-1559 activates, even with zero values. DynamicFeeTransaction.AsMessage
+// gates signed transactions, but eth_call builds its Message directly.
+func TestPreCheckDynamicFeeArgsRequireLondon(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	london := chain.TestChainBerlinConfig.Copy()
+	london.LondonBlock = common.NewUint64(0)
+
+	// run executes the message for a funded sender, so a priced message can only
+	// fail on its fee fields.
+	run := func(t *testing.T, cfg *chain.Config, gasPrice, feeCap, tipCap uint64, dynamicFeeArgs bool) error {
+		t.Helper()
+		ibs := state.New(state.NewNoopReader())
+		defer ibs.Close()
+		require.NoError(t, ibs.AddBalance(sender, *uint256.NewInt(1e18), tracing.BalanceChangeUnspecified))
+		msg := types.NewMessage(
+			sender, recipient, 0, uint256.NewInt(0), 100_000,
+			uint256.NewInt(gasPrice), uint256.NewInt(feeCap), uint256.NewInt(tipCap),
+			nil, nil,
+			false, false, false, false, nil,
+		)
+		msg.SetDynamicFeeArgs(dynamicFeeArgs)
+		evm := newTestEVM(ibs, cfg, 30_000_000)
+		_, err := NewTxnExecutor(evm, msg, new(GasPool).AddGas(30_000_000)).Execute(true, false)
+		return err
+	}
+
+	t.Run("priced dynamic fees pre-London are rejected", func(t *testing.T) {
+		err := run(t, chain.TestChainBerlinConfig, 1_000_000_000, 2_000_000_000, 1_000_000_000, true)
+		require.ErrorIs(t, err, types.ErrDynamicFeePreLondon)
+	})
+
+	t.Run("zero dynamic fees pre-London are rejected", func(t *testing.T) {
+		err := run(t, chain.TestChainBerlinConfig, 0, 0, 0, true)
+		require.ErrorIs(t, err, types.ErrDynamicFeePreLondon)
+	})
+
+	t.Run("priced gas price pre-London is accepted", func(t *testing.T) {
+		require.NoError(t, run(t, chain.TestChainBerlinConfig, 1_000_000_000, 1_000_000_000, 1_000_000_000, false))
+	})
+
+	t.Run("zero gas price pre-London is accepted", func(t *testing.T) {
+		require.NoError(t, run(t, chain.TestChainBerlinConfig, 0, 0, 0, false))
+	})
+
+	t.Run("priced dynamic fees from London on are accepted", func(t *testing.T) {
+		require.NoError(t, run(t, london, 1_000_000_000, 2_000_000_000, 1_000_000_000, true))
+	})
+
+	t.Run("zero dynamic fees from London on are accepted", func(t *testing.T) {
+		require.NoError(t, run(t, london, 0, 0, 0, true))
+	})
+}
+
 // TestPreCheckBlobPrerequisites pins the EIP-4844 structural rules for messages
 // that carry blob hashes without having been decoded as a BlobTx.
 func TestPreCheckBlobPrerequisites(t *testing.T) {
