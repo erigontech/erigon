@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -79,4 +80,41 @@ func TestEIP8246_SelfdestructVersioned_PreservesBumpedNonce(t *testing.T) {
 	n, err = ibs.GetNonce(addr)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), n, "reverting the self-destruct leaves the bumped nonce intact")
+}
+
+// An account bumps its nonce and SELFDESTRUCTs; a later frame bumps the nonce
+// again (e.g. a CREATE) and reverts. On a versioned IBS the revert must restore
+// the nonce from before the frame.
+func TestSelfdestructVersioned_RevertedNonceBumpAfterDestruct(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x5DBA2"))
+	for _, noMaterialize := range []bool{true, false} {
+		for _, created := range []bool{true, false} {
+			t.Run(fmt.Sprintf("noMaterialize=%v/created=%v", noMaterialize, created), func(t *testing.T) {
+				reader := newAccountStateReader(addr)
+				if created {
+					reader = newAccountStateReader()
+				}
+				ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+				defer ibs.Close()
+				ibs.SetNoMaterialize(noMaterialize)
+				ibs.SetTxContext(0, 0)
+
+				if created {
+					require.NoError(t, ibs.CreateAccount(addr, true))
+				}
+				require.NoError(t, ibs.SetNonce(addr, 2, tracing.NonceChangeUnspecified))
+				_, err := ibs.Selfdestruct(addr, false)
+				require.NoError(t, err)
+
+				snap := ibs.PushSnapshot()
+				require.NoError(t, ibs.SetNonce(addr, 3, tracing.NonceChangeUnspecified))
+				ibs.RevertToSnapshot(snap, nil)
+
+				n, err := ibs.GetNonce(addr)
+				require.NoError(t, err)
+				require.Equal(t, uint64(2), n)
+			})
+		}
+	}
 }
