@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -119,6 +120,17 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		}
 	}
 	for i, jt := range tables {
+		// From EIP-2929 on, opSloadEIP2929 charges SLOAD's dynamic gas and SLOAD has no gas func.
+		if sload := &jt[SLOAD]; sload.gasExecute != nil || sload.constantGas == 0 {
+			require.Equal(t, reflect.ValueOf(opSloadEIP2929).Pointer(), reflect.ValueOf(sload.gasExecute).Pointer(), "table %d SLOAD", i)
+			require.Nil(t, sload.dynamicGas, "table %d SLOAD", i)
+		}
+		// run calls the copy of the func vmgen found for the op, whatever the table holds.
+		for op := range jt {
+			if jt[op].gasExecute != nil {
+				require.Equal(t, reflect.ValueOf(gasExecuteOps[OpCode(op)]).Pointer(), reflect.ValueOf(jt[op].gasExecute).Pointer(), "table %d %s", i, OpCode(op))
+			}
+		}
 		for op, w := range fastPathOps {
 			got := &jt[op]
 			if w.execute != nil {
@@ -215,6 +227,12 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
+		// Warm slots with values, so a frame-cache hit fits in the gas sweep and shows its value.
+		for k, v := range map[uint64]uint64{1: 0xaa, 2: 0xbb} {
+			key := accounts.InternKey(uint256.NewInt(k).Bytes32())
+			require.NoError(t, ibs.SetState(accounts.ZeroAddress, key, *uint256.NewInt(v)))
+			ibs.AddSlotToAccessList(accounts.ZeroAddress, key)
+		}
 		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 		c.Code = code
@@ -258,6 +276,10 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A failed frame returns no data, whatever the last CALL returned.
 		"callthenbadjump": {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(PUSH1), 0, byte(JUMP)},
 		"callthenend":     {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL)},
+		// Slots 1 and 2 are warm and set, slot 3 is cold.
+		"sload":      prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, ADD, PUSH1, 2, SLOAD),
+		"sloadcold":  prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 3, SLOAD),
+		"sloadunder": {byte(SLOAD)},
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
@@ -314,4 +336,50 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			require.Equal(t, want, got, "%s at gas %d", name, gas)
 		}
 	}
+}
+
+// TestRunUsesGasExecute pins that runTraced runs an op's gasExecute with the trace,
+// and run the generated copy without it, in place of the gas func and execute.
+func TestRunUsesGasExecute(t *testing.T) {
+	t.Parallel()
+	for _, traced := range []bool{false, true} {
+		t.Run(fmt.Sprintf("traced=%v", traced), func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+			table := *evm.jt
+			called := false
+			table[SLOAD].gasExecute = func(pc uint64, evm *EVM, scope *CallContext, tr *opTrace) (uint64, []byte, error) {
+				called = tr != nil
+				return opSloadEIP2929(pc, evm, scope, tr)
+			}
+			evm.jt = &table
+			c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			c.Code = []byte{byte(PUSH1), 1, byte(SLOAD)}
+			f := evm.run
+			if traced {
+				f = evm.runTraced
+			}
+			_, left, _, err := f(*c, mdgas.MdGas{Execution: 10_000}, nil, false, false, false)
+			require.NoError(t, err)
+			require.Equal(t, traced, called)
+			require.Equal(t, 10_000-3-coldStorageAccessCost(evm.chainRules), left.Execution)
+		})
+	}
+}
+
+// TestRunTracedFrameDoesNotAllocate pins that a traced frame keeps its trace state off the heap.
+func TestRunTracedFrameDoesNotAllocate(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	hooks := &tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {}}
+	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+	c := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+	c.Code = []byte{byte(PUSH1), 1, byte(POP)}
+	var err error
+	allocs := testing.AllocsPerRun(100, func() {
+		_, _, _, err = evm.runTraced(c, mdgas.MdGas{Execution: 10_000}, nil, false, true, false)
+	})
+	require.NoError(t, err)
+	require.Zero(t, allocs)
 }
