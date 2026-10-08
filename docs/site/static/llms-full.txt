@@ -453,7 +453,7 @@ docker pull erigontech/erigon:<version_tag>
 For example:
 
 ```sh
-docker pull erigontech/erigon:v3.7.0
+docker pull erigontech/erigon:v3.7.1
 ```
 
 **3. Start the Erigon container**
@@ -467,7 +467,7 @@ docker run -it erigontech/erigon:<version_tag> <flags>
 For example:
 
 ```sh
-docker run -it erigontech/erigon:v3.7.0 --chain=hoodi --prune.mode=minimal --datadir /erigon-data
+docker run -it erigontech/erigon:v3.7.1 --chain=hoodi --prune.mode=minimal --datadir /erigon-data
 ```
 
 - `-v` connects a folder on your computer to the container (must have authorization)
@@ -482,16 +482,16 @@ docker run -it erigontech/erigon:v3.7.0 --chain=hoodi --prune.mode=minimal --dat
 
 **1. Select Your Processor Architecture and Download**
 
-Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., v3.7.0) or whichever version you prefer.
+Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., v3.7.1) or whichever version you prefer.
 
 Download the appropriate binary file for your processor architecture:
 
 | Processor Type | Binary File Type | Example File Name |
 | --- | --- | --- |
-| 64-bit Intel/AMD | Debian Package (.deb) | erigon_3.7.0_amd64.deb |
-| 64-bit ARM | Debian Package (.deb) | erigon_3.7.0_arm64.deb |
-| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v3.7.0_linux_amd64.tar.gz |
-| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v3.7.0_linux_arm64.tar.gz |
+| 64-bit Intel/AMD | Debian Package (.deb) | erigon_3.7.1_amd64.deb |
+| 64-bit ARM | Debian Package (.deb) | erigon_3.7.1_arm64.deb |
+| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v3.7.1_linux_amd64.tar.gz |
+| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v3.7.1_linux_arm64.tar.gz |
 
 The amd64 artifacts are compiled for the `x86-64-v2` baseline (SSE4.2, POPCNT). Intel Nehalem (2008) and AMD Bulldozer (2011) or newer qualify; older hardware is not supported.
 
@@ -512,7 +512,7 @@ sha256sum <DOWNLOADED_FILE_NAME>
 Example with a `tar.gz` file:
 
 ```sh
-sha256sum erigon_v3.7.0_linux_amd64.tar.gz
+sha256sum erigon_v3.7.1_linux_amd64.tar.gz
 ```
 
 This command will output a long string (the computed checksum) followed by the file name.
@@ -632,7 +632,7 @@ git fetch --tags
 Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```sh
-git checkout v3.7.0
+git checkout v3.7.1
 ```
 
 **2.3 Compile the Software**
@@ -741,7 +741,7 @@ git fetch --tags
 Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```bash
-git checkout v3.7.0
+git checkout v3.7.1
 ```
 
 You might need to change the `ExecutionPolicy` to allow scripts created locally or signed by a trusted publisher to run. Open a **Powershell session as Administrator** and type:
@@ -981,7 +981,7 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.7.0
+    image: erigontech/erigon:v3.7.1
     container_name: erigon-node
     restart: always
     command:
@@ -1071,7 +1071,7 @@ Publishing each port individually is explicit, but Docker's NAT is also what mak
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.7.0
+    image: erigontech/erigon:v3.7.1
     network_mode: host
     command:
       - --chain=mainnet
@@ -1197,7 +1197,7 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.7.0
+    image: erigontech/erigon:v3.7.1
     container_name: erigon-node
     restart: always
     command:
@@ -1287,7 +1287,7 @@ Publishing each port individually is explicit, but Docker's NAT is also what mak
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.7.0
+    image: erigontech/erigon:v3.7.1
     network_mode: host
     command:
       - --chain=gnosis
@@ -1432,7 +1432,7 @@ erigon [options]
 
 - Alternatively you can use the Docker syntax, for example:
 
-  `docker run -it erigontech/erigon:v3.7.0 [options]`
+  `docker run -it erigontech/erigon:v3.7.1 [options]`
 
 **Built from Source**
 
