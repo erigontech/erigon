@@ -5,12 +5,14 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/metrics"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 //go:generate mockgen -destination=./mock_services/p2p_manager_mock.go -package=mock_services . P2PManager
 type P2PManager interface {
 	Pubsub() *pubsub.PubSub
 	Host() host.Host
+	SetDialPolicy(func(peer.ID) bool)
 	BandwidthCounter() *metrics.BandwidthCounter
 	UDPv5Listener() *discover.UDPv5
 	UpdateENRAttSubnets(subnetIndex int, on bool)

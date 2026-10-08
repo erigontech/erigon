@@ -29,11 +29,14 @@ import (
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common/log/v3"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p/discover"
 )
 
@@ -42,6 +45,7 @@ type stubP2P struct{ host host.Host }
 
 func (s stubP2P) Pubsub() *pubsub.PubSub                       { return nil }
 func (s stubP2P) Host() host.Host                              { return s.host }
+func (s stubP2P) SetDialPolicy(func(peer.ID) bool)             {}
 func (s stubP2P) BandwidthCounter() *metrics.BandwidthCounter  { return nil }
 func (s stubP2P) UDPv5Listener() *discover.UDPv5               { return nil }
 func (s stubP2P) UpdateENRAttSubnets(subnetIndex int, on bool) {}
@@ -168,6 +172,33 @@ func TestRepeatedHandshakeFailuresStopOutboundDials(t *testing.T) {
 	err := s.ConnectWithPeer(t.Context(), peer.AddrInfo{ID: remote.ID(), Addrs: remote.Addrs()}, nil)
 	require.EqualError(t, err, "peer is not dialable")
 	require.Equal(t, network.NotConnected, local.Network().Connectedness(remote.ID()))
+}
+
+func TestNewInstallsDialPolicy(t *testing.T) {
+	ethClock := getEthClock(t)
+	networkConfig, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
+	manager := newTestP2PManager(t, ethClock)
+	sentinel, err := New(t.Context(), &SentinelConfig{
+		P2PConfig: p2p.P2PConfig{
+			NetworkConfig: networkConfig,
+			BeaconConfig:  beaconConfig,
+			MaxPeerCount:  100,
+		},
+	}, ethClock, nil, nil, nil, log.New(), nil, nil, nil, manager)
+	require.NoError(t, err)
+	t.Cleanup(sentinel.cancel)
+
+	remote, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, remote.Close()) })
+	for range 3 {
+		sentinel.peers.RecordHandshakeFailure(remote.ID())
+	}
+	require.False(t, sentinel.peers.Dialable(remote.ID()))
+
+	err = sentinel.Host().Connect(t.Context(), peer.AddrInfo{ID: remote.ID(), Addrs: remote.Addrs()})
+	require.ErrorIs(t, err, swarm.ErrGaterDisallowedConnection)
+	require.Equal(t, network.NotConnected, sentinel.Host().Network().Connectedness(remote.ID()))
 }
 
 func TestHandshakeFailuresDoNotRefuseThePeersLaterConnection(t *testing.T) {

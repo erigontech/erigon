@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 
@@ -232,7 +231,7 @@ func (w *captureWriter) result() *http.Response {
 }
 
 // Handles a request
-func NewRequestHandler(host host.Host, dialable func(peer.ID) bool) http.HandlerFunc {
+func NewRequestHandler(host host.Host) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// get the peer parameters
 		peerIdBase58 := r.Header.Get("REQRESP-PEER-ID")
@@ -262,12 +261,8 @@ func NewRequestHandler(host host.Host, dialable func(peer.ID) bool) http.Handler
 				protocolIDs = append(protocolIDs, protocol.ID(t))
 			}
 		}
-		streamCtx := r.Context()
-		if !dialable(peerId) {
-			streamCtx = network.WithNoDial(streamCtx, "peer not dialable")
-		}
 		//  we can't connect to the peer - so we should disconnect them. send a code 4xx
-		stream, err := host.NewStream(streamCtx, peerId, protocolIDs...)
+		stream, err := host.NewStream(r.Context(), peerId, protocolIDs...)
 		if err != nil {
 			http.Error(w, "can't Connect to Peer: "+err.Error(), http.StatusBadRequest)
 			return

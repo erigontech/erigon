@@ -142,9 +142,10 @@ func New(
 
 	signal.Reset(syscall.SIGINT)
 	s.peers = peers.NewPool(s.p2p.Host())
+	s.p2p.SetDialPolicy(s.peers.Dialable)
 
 	mux := chi.NewRouter()
-	mux.Get("/", httpreqresp.NewRequestHandler(s.p2p.Host(), s.peers.Dialable))
+	mux.Get("/", httpreqresp.NewRequestHandler(s.p2p.Host()))
 	s.httpApi = mux
 
 	s.handshaker = handshake.New(ctx, s.ethClock, cfg.BeaconConfig, s.httpApi, peerDasStateReader)

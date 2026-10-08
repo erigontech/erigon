@@ -29,15 +29,12 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/common/snappypool"
 )
-
-func alwaysDialable(peer.ID) bool { return true }
 
 func TestMaxResponseBodySize(t *testing.T) {
 	// Drive the cap off communication.AllProtocols, the single source of truth for response-size
@@ -220,7 +217,7 @@ func TestRequestContextCancelClosesEstablishedStream(t *testing.T) {
 	req.Header.Set(TopicHeader, string(topic))
 	errCh := make(chan error, 1)
 	go func() {
-		resp, doErr := Do(NewRequestHandler(victim, alwaysDialable), req)
+		resp, doErr := Do(NewRequestHandler(victim), req)
 		if resp != nil {
 			resp.Body.Close()
 		}
@@ -242,59 +239,6 @@ func TestRequestContextCancelClosesEstablishedStream(t *testing.T) {
 		}
 		return true
 	}, time.Second, 10*time.Millisecond, "request cancellation left the underlying libp2p stream active")
-}
-
-func TestRequestHandlerDoesNotDialUndialablePeer(t *testing.T) {
-	const topic = protocol.ID("/erigon/test/no-dial/1")
-	victim, err := libp2p.New(libp2p.NoListenAddrs)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, victim.Close()) })
-	peerHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, peerHost.Close()) })
-	victim.Peerstore().AddAddrs(peerHost.ID(), peerHost.Addrs(), peerstore.PermanentAddrTTL)
-	peerHost.SetStreamHandler(topic, serveSuccessfulEmptyResponse)
-
-	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://service.internal/", http.NoBody)
-	require.NoError(t, err)
-	req.Header.Set(PeerIdHeader, peerHost.ID().String())
-	req.Header.Set(TopicHeader, string(topic))
-	resp, err := Do(NewRequestHandler(victim, func(peer.ID) bool { return false }), req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-	require.Equal(t, network.NotConnected, victim.Network().Connectedness(peerHost.ID()))
-}
-
-func TestRequestHandlerUsesExistingConnectionForUndialablePeer(t *testing.T) {
-	const topic = protocol.ID("/erigon/test/no-dial/1")
-	victim, err := libp2p.New(libp2p.NoListenAddrs)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, victim.Close()) })
-	peerHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, peerHost.Close()) })
-	peerHost.SetStreamHandler(topic, serveSuccessfulEmptyResponse)
-	require.NoError(t, victim.Connect(t.Context(), peer.AddrInfo{ID: peerHost.ID(), Addrs: peerHost.Addrs()}))
-
-	req, err := http.NewRequestWithContext(t.Context(), "GET", "http://service.internal/", http.NoBody)
-	require.NoError(t, err)
-	req.Header.Set(PeerIdHeader, peerHost.ID().String())
-	req.Header.Set(TopicHeader, string(topic))
-	resp, err := Do(NewRequestHandler(victim, func(peer.ID) bool { return false }), req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Equal(t, "0", resp.Header.Get("REQRESP-RESPONSE-CODE"))
-	require.Equal(t, network.Connected, victim.Network().Connectedness(peerHost.ID()))
-}
-
-func serveSuccessfulEmptyResponse(stream network.Stream) {
-	defer stream.Close()
-	_, _ = io.Copy(io.Discard, stream)
-	_, _ = stream.Write([]byte{0})
 }
 
 type signalCloser struct{ closed chan struct{} }
@@ -399,7 +343,7 @@ func fetchPeerResponse(t *testing.T, topic string, payloadSize int, maxResponseB
 	// Mirror production wiring (sentinel.go): the handler is reached through a chi router, not
 	// called directly, so these flood/budget assertions exercise the real Do->chi->handler path.
 	mux := chi.NewRouter()
-	mux.Get("/", NewRequestHandler(victim, alwaysDialable))
+	mux.Get("/", NewRequestHandler(victim))
 	resp, err := Do(mux, req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -435,7 +379,7 @@ func fetchPeerEmptyCloseResponse(t *testing.T, topic string) (int, string, strin
 	req.Header.Set("REQRESP-TOPIC", topic)
 
 	mux := chi.NewRouter()
-	mux.Get("/", NewRequestHandler(victim, alwaysDialable))
+	mux.Get("/", NewRequestHandler(victim))
 	resp, err := Do(mux, req)
 	require.NoError(t, err)
 	defer resp.Body.Close()

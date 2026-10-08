@@ -16,6 +16,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	host "github.com/libp2p/go-libp2p/core/host"
 	metrics "github.com/libp2p/go-libp2p/core/metrics"
+	peer "github.com/libp2p/go-libp2p/core/peer"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -83,6 +84,18 @@ func (m *MockP2PManager) Pubsub() *pubsub.PubSub {
 func (mr *MockP2PManagerMockRecorder) Pubsub() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Pubsub", reflect.TypeOf((*MockP2PManager)(nil).Pubsub))
+}
+
+// SetDialPolicy mocks base method.
+func (m *MockP2PManager) SetDialPolicy(arg0 func(peer.ID) bool) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetDialPolicy", arg0)
+}
+
+// SetDialPolicy indicates an expected call of SetDialPolicy.
+func (mr *MockP2PManagerMockRecorder) SetDialPolicy(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetDialPolicy", reflect.TypeOf((*MockP2PManager)(nil).SetDialPolicy), arg0)
 }
 
 // UDPv5Listener mocks base method.
