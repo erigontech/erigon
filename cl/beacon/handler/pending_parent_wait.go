@@ -58,6 +58,8 @@ func awaitGloasPayloadSource(
 ) executionPayloadSource {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	cutoff := time.NewTimer(time.Until(deadline))
+	defer cutoff.Stop()
 	for {
 		source, err := resolve()
 		if err != nil {
@@ -69,6 +71,8 @@ func awaitGloasPayloadSource(
 		}
 		select {
 		case <-ctx.Done():
+			return source
+		case <-cutoff.C:
 			return source
 		case <-ticker.C:
 		}

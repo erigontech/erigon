@@ -35,10 +35,21 @@ import (
 type retryPendingForkGraph struct {
 	payloadVoteForkGraph
 	block *cltypes.SignedBeaconBlock
+	gate  chan struct{} // HasEnvelope blocks on it, inside the coordinated section
 }
 
 func (g retryPendingForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	return g.block, g.block != nil
+}
+
+// With a gate, HasEnvelope blocks until it opens and then reports the envelope as present, so
+// the apply ends on the already-persisted path without touching a config the stub lacks.
+func (g retryPendingForkGraph) HasEnvelope(common.Hash) bool {
+	if g.gate != nil {
+		<-g.gate
+		return true
+	}
+	return false
 }
 
 func newRetryPendingStore(t *testing.T, peerDas *das_mock.MockPeerDas) (*ForkChoiceStore, *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]) {
@@ -136,13 +147,11 @@ func TestRetryPendingExecutionPayloadEnvelopeAppliesOnceColumnDataIsAvailable(t 
 func TestRetryPendingExecutionPayloadEnvelopeWaitsForInFlightRetry(t *testing.T) {
 	root := common.HexToHash("0x1")
 	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
-	release := make(chan struct{})
-	peerDas.EXPECT().IsDataAvailable(uint64(7), root).DoAndReturn(func(uint64, common.Hash) (bool, error) {
-		<-release
-		return false, nil
-	}).Times(1)
+	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(true, nil).AnyTimes()
 	f, pending := newRetryPendingStore(t, peerDas)
-	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{})
+	release := make(chan struct{})
+	f.forkGraph = retryPendingForkGraph{block: f.forkGraph.(retryPendingForkGraph).block, gate: release}
+	pending.Add(root, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}})
 
 	first := make(chan struct{})
 	go func() {
