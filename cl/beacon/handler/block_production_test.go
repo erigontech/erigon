@@ -4725,7 +4725,8 @@ func TestProcessProducedBlockConfiguredBidPreservesSelfBuildFallback(t *testing.
 }
 
 type cachedAttestationDataProducer struct {
-	data solid.AttestationData
+	data   solid.AttestationData
+	cached bool
 }
 
 func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *state.CachingBeaconState, common.Hash, uint64) (solid.AttestationData, error) {
@@ -4733,29 +4734,31 @@ func (p cachedAttestationDataProducer) ProduceAndCacheAttestationData(kv.Tx, *st
 }
 
 func (p cachedAttestationDataProducer) CachedAttestationData(uint64) (solid.AttestationData, bool, error) {
-	return p.data, true, nil
+	return p.data, p.cached, nil
 }
 
-// In Gloas, attestation_data.index is 1 only when the head's chain has the block FULL and its payload is verified.
-// A block from the attestation slot always has index 0.
+// Gloas attestation data uses index 1 for FULL blocks in the head's chain, 0 for EMPTY blocks or blocks from the
+// attestation slot, and returns 503 for a FULL block whose payload is not verified.
 func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 	const attestationSlot = uint64(10)
 	root := common.HexToHash("0xabcd")
 	for _, tt := range []struct {
-		name      string
-		blockSlot uint64
-		status    cltypes.PayloadStatus
-		verified  bool
-		childHead bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
-		wantIndex string
+		name       string
+		blockSlot  uint64
+		status     cltypes.PayloadStatus
+		verified   bool
+		childHead  bool // the head is a child of the served root, as when attestation data was cached earlier in the slot
+		cached     bool
+		wantStatus int
+		wantIndex  string
 	}{
-		{name: "older FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, wantIndex: "1"},
-		{name: "older EMPTY head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, wantIndex: "0"},
-		{name: "block of the attestation slot", blockSlot: attestationSlot, status: cltypes.PayloadStatusFull, verified: true, wantIndex: "0"},
-		{name: "FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, childHead: true, wantIndex: "1"},
-		{name: "EMPTY in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, childHead: true, wantIndex: "0"},
-		{name: "optimistic FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, wantIndex: "0"},
-		{name: "optimistic FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, childHead: true, wantIndex: "0"},
+		{name: "older FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, cached: true, wantStatus: http.StatusOK, wantIndex: "1"},
+		{name: "older EMPTY head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, cached: true, wantStatus: http.StatusOK, wantIndex: "0"},
+		{name: "block of the attestation slot", blockSlot: attestationSlot, status: cltypes.PayloadStatusFull, verified: true, cached: true, wantStatus: http.StatusOK, wantIndex: "0"},
+		{name: "FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, verified: true, childHead: true, cached: true, wantStatus: http.StatusOK, wantIndex: "1"},
+		{name: "EMPTY in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusEmpty, childHead: true, cached: true, wantStatus: http.StatusOK, wantIndex: "0"},
+		{name: "optimistic FULL head", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, cached: true, wantStatus: http.StatusServiceUnavailable},
+		{name: "optimistic FULL in the head's chain", blockSlot: attestationSlot - 2, status: cltypes.PayloadStatusFull, childHead: true, wantStatus: http.StatusServiceUnavailable},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -4765,7 +4768,10 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 			clock.EXPECT().GetCurrentSlot().Return(attestationSlot).AnyTimes()
 			handler.ethClock = clock
-			handler.attestationProducer = cachedAttestationDataProducer{data: solid.AttestationData{Slot: attestationSlot, BeaconBlockRoot: root}}
+			handler.attestationProducer = cachedAttestationDataProducer{
+				data:   solid.AttestationData{Slot: attestationSlot, BeaconBlockRoot: root},
+				cached: tt.cached,
+			}
 			fcu.Headers[root] = &cltypes.BeaconBlockHeader{Slot: tt.blockSlot}
 			fcu.VerifiedPayloads = map[common.Hash]bool{root: tt.verified}
 			fcu.HeadVal = root
@@ -4777,14 +4783,17 @@ func TestGetEthV1ValidatorAttestationDataGloasPayloadIndex(t *testing.T) {
 				fcu.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 				fcu.Ancestors = map[uint64]forkchoice.ForkChoiceNode{tt.blockSlot: {Root: root, PayloadStatus: tt.status}}
 			}
-
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 				fmt.Sprintf("/eth/v1/validator/attestation_data?slot=%d&committee_index=3", attestationSlot), http.NoBody)
 			recorder := httptest.NewRecorder()
 			handler.ServeHTTP(recorder, request)
 
-			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-			require.Contains(t, recorder.Body.String(), `"index":"`+tt.wantIndex+`"`)
+			require.Equal(t, tt.wantStatus, recorder.Code, recorder.Body.String())
+			if tt.wantStatus == http.StatusOK {
+				require.Contains(t, recorder.Body.String(), `"index":"`+tt.wantIndex+`"`)
+			} else {
+				require.Contains(t, recorder.Body.String(), "payload of the beacon block root is not verified")
+			}
 		})
 	}
 }
