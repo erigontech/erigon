@@ -21,7 +21,7 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 
 	var (
 		op          OpCode // current opcode
-		callContext = getCallContext(contract, input, gas)
+		callContext = evm.getCallContext(contract, input, gas)
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
@@ -56,7 +56,7 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// gasRemaining (covers precompile/no-code paths and the revert burn).
 		gasUsed.StateSpill = callContext.stateGasSpill
 		gasUsed.State = int64(gas.State) - int64(callContext.stateGas) + int64(callContext.stateGasSpill)
-		callContext.put()
+		evm.putCallContext(callContext)
 		if restoreReadonly {
 			evm.readOnly = false
 		}
@@ -292,6 +292,31 @@ run:
 					gasLeft -= GasFastestStep
 					mStart, val := callContext.Stack.pop2()
 					callContext.Memory.Set32(mStart.Uint64(), val)
+					pc++
+					continue run
+				}
+			case PUSH3, PUSH4, PUSH5, PUSH6, PUSH7, PUSH8, PUSH9, PUSH10, PUSH11, PUSH12, PUSH13, PUSH14, PUSH15, PUSH16, PUSH17, PUSH18, PUSH19, PUSH20, PUSH21, PUSH22, PUSH23, PUSH24, PUSH25, PUSH26, PUSH27, PUSH28, PUSH29, PUSH30, PUSH31, PUSH32:
+				if sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(callContext.Contract.Code)) {
+						callContext.Stack.pushRef().SetBytes(callContext.Contract.Code[pc+1 : end])
+						pc = pc + uint64(op-PUSH0)
+						pc++
+						continue run
+					}
+					codeLen := len(callContext.Contract.Code)
+
+					startMin := min(int(pc+1), codeLen)
+					endMin := min(startMin+int(op-PUSH0), codeLen)
+
+					integer := callContext.Stack.pushRef()
+					integer.SetBytes(callContext.Contract.Code[startMin:endMin])
+
+					if missing := int(op-PUSH0) - (endMin - startMin); missing > 0 {
+						integer.ILsh(uint(8 * missing))
+					}
+
+					pc += uint64(op - PUSH0)
 					pc++
 					continue run
 				}

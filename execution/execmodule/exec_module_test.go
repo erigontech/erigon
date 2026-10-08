@@ -431,12 +431,193 @@ func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
 	// Validating fork.Blocks[0] (height 3, parent = block 2) must unwind canonical
 	// block 3 back to block 2; fork.Blocks[1] then head-extends and the FCU reorgs
 	// onto the longer fork.
-	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), fork.Blocks))
+	insertStatus, err := m.InsertBlocks(t.Context(), fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	validation, err := m.ValidateChain(t.Context(), fork.Blocks[0].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	extendingHash, extendingNumber, extendingDomains := m.ForkValidator.ExtendingFork()
+	require.Equal(t, fork.Blocks[0].Hash(), extendingHash)
+	require.Equal(t, fork.Blocks[0].NumberU64(), extendingNumber)
+	require.NotNil(t, extendingDomains)
+	fcuResult, err := m.UpdateForkChoice(t.Context(), fork.Blocks[0].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
+	validation, err = m.ValidateChain(t.Context(), fork.Blocks[1].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	fcuResult, err = m.UpdateForkChoice(t.Context(), fork.Blocks[1].Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
 
 	// Reorg back onto the original canonical block 3 (same common ancestor,
 	// block 2) to exercise the BranchCache masking in the other direction:
 	// unwind the fork blocks and re-validate canonical block 3 off block 2.
 	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), canonicalTip.Blocks))
+}
+
+func TestValidateChainAlreadyCanonicalExecutedAfterPrune(t *testing.T) {
+	ctx := t.Context()
+	m, chainPack := newChainPrunedBelowFinalizedTip(t)
+	tip := chainPack.Blocks[3]
+
+	canonical := chainPack.Blocks[1]
+	var headBefore common.Hash
+	var executionBefore uint64
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		lowestUnwindable, err := changeset.ReadLowestUnwindableBlock(tx)
+		require.NoError(t, err)
+		require.Greater(t, lowestUnwindable, canonical.NumberU64())
+		headBefore = rawdb.ReadHeadBlockHash(tx)
+		executionBefore, err = stages.GetStageProgress(tx, stages.Execution)
+		return err
+	}))
+	require.Equal(t, tip.Hash(), headBefore)
+	require.Equal(t, tip.NumberU64(), executionBefore)
+
+	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{canonical})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	validation, err := m.ValidateChain(ctx, canonical.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Equal(t, canonical.Hash(), validation.LatestValidHash)
+
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		require.Equal(t, headBefore, rawdb.ReadHeadBlockHash(tx))
+		executionAfter, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, executionBefore, executionAfter)
+		return nil
+	}))
+
+	later := chainPack.Blocks[4]
+	insertStatus, err = m.InsertBlocks(ctx, []*types.Block{later})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	validation, err = m.ValidateChain(ctx, later.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	fcuResult, err := m.UpdateForkChoice(ctx, later.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
+	m.ExecModule.WaitIdle(ctx)
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		require.Equal(t, later.Hash(), rawdb.ReadHeadBlockHash(tx))
+		executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, later.NumberU64(), executionProgress)
+		return nil
+	}))
+}
+
+func TestValidateChainCanonicalNotExecutedAfterPrune(t *testing.T) {
+	ctx := t.Context()
+	m, chainPack := newChainPrunedBelowFinalizedTip(t)
+	canonical := chainPack.Blocks[1]
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, canonical.NumberU64()-1)
+	}))
+
+	insertStatus, err := m.InsertBlocks(ctx, []*types.Block{canonical})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	_, err = m.ValidateChain(ctx, canonical.Header())
+	require.ErrorContains(t, err, "too far unwind")
+}
+
+// newChainPrunedBelowFinalizedTip executes blocks 1-4, finalizes block 4 and
+// waits for the background prune, after which an unwind to block 2 fails with
+// "too far unwind".
+func newChainPrunedBelowFinalizedTip(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
+	t.Helper()
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithKey(privKey),
+		execmoduletester.WithAlwaysGenerateChangesets(false),
+		execmoduletester.WithFcuBackgroundPrune(),
+	)
+
+	chainPack, err := m.GenerateChain(5, transferGen(t, privKey, common.Address{0x42}, 1_000))
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks[:2]))
+
+	insertStatus, err := m.InsertBlocks(ctx, chainPack.Blocks[2:4])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	tip := chainPack.Blocks[3]
+	fcuResult, err := m.UpdateForkChoice(
+		ctx,
+		tip.Header(),
+		execmoduletester.WithSafeHash(tip.Hash()),
+		execmoduletester.WithFinalisedHash(tip.Hash()),
+	)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
+	m.ExecModule.WaitIdle(ctx)
+	return m, chainPack
+}
+
+func TestValidateChainDoesNotTrustCanonicalMarkerAboveFinalized(t *testing.T) {
+	ctx := t.Context()
+	privKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	m := execmoduletester.New(t, execmoduletester.WithKey(privKey))
+
+	canonicalGen := transferGen(t, privKey, common.Address{0x42}, 1_000)
+	forkGen := transferGen(t, privKey, common.Address{0x43}, 1_000)
+	canonicalChain, err := m.GenerateChain(10, canonicalGen)
+	require.NoError(t, err)
+	forkChain, err := m.GenerateChain(10, func(i int, b *blockgen.BlockGen) {
+		if i < 5 {
+			canonicalGen(i, b)
+			return
+		}
+		forkGen(i, b)
+	})
+	require.NoError(t, err)
+	require.Equal(t, canonicalChain.Blocks[4].Hash(), forkChain.Blocks[4].Hash())
+	require.NotEqual(t, canonicalChain.Blocks[5].Hash(), forkChain.Blocks[5].Hash())
+
+	insertStatus, err := m.InsertBlocks(ctx, canonicalChain.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	finalized := canonicalChain.Blocks[4]
+	fcuResult, err := m.UpdateForkChoice(ctx, canonicalChain.TopBlock.Header(), execmoduletester.WithFinalisedHash(finalized.Hash()))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcuResult.Status)
+
+	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
+		require.NoError(t, rawdbv3.TxNums.Truncate(tx, finalized.NumberU64()+1))
+		require.NoError(t, rawdb.TruncateCanonicalHash(tx, finalized.NumberU64()+1, false))
+		return tx.ClearTable(kv.ChangeSets3)
+	}))
+
+	insertStatus, err = m.InsertBlocks(ctx, forkChain.Blocks[5:])
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertStatus)
+	fcuResult, err = m.UpdateForkChoice(ctx, forkChain.TopBlock.Header(), execmoduletester.WithFinalisedHash(finalized.Hash()))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusTooFarAway, fcuResult.Status)
+
+	canonicalButUnexecuted := forkChain.Blocks[7]
+	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
+		canonicalHash, err := rawdb.ReadCanonicalHash(tx, canonicalButUnexecuted.NumberU64())
+		require.NoError(t, err)
+		require.Equal(t, canonicalButUnexecuted.Hash(), canonicalHash)
+		executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
+		require.NoError(t, err)
+		require.Equal(t, canonicalChain.TopBlock.NumberU64(), executionProgress)
+		require.Equal(t, finalized.Hash(), rawdb.ReadForkchoiceFinalized(tx))
+		return nil
+	}))
+
+	_, err = m.ValidateChain(ctx, canonicalButUnexecuted.Header())
+	require.ErrorContains(t, err, "too far unwind")
 }
 
 // Regression for PR #21415: when state's commitBlock is ahead of TxNums.Last
@@ -1740,6 +1921,44 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	}
 }
 
+// The payload bodies serve each transaction in its binary (canonical EIP-2718) encoding, so a
+// typed transaction must lose the RLP string header it is stored under.
+func TestGetPayloadBodiesServeBinaryTransactions(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	to := common.Address{1}
+	gasPrice := *uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		commonTx := func() types.CommonTx {
+			return types.CommonTx{Nonce: b.TxNonce(m.Address), To: &to, GasLimit: params.TxGas, Value: *uint256.NewInt(1)}
+		}
+		var txn types.Transaction = &types.LegacyTx{CommonTx: commonTx(), GasPrice: gasPrice}
+		if i == 1 {
+			txn = &types.DynamicFeeTransaction{CommonTx: commonTx(), ChainID: *m.ChainConfig.ChainID, TipCap: gasPrice, FeeCap: gasPrice}
+		}
+		signed, signErr := types.SignTx(txn, *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, signErr)
+		b.AddTx(signed)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	require.Equal(t, byte(types.DynamicFeeTxType), chainPack.Blocks[1].Transactions()[0].Type(),
+		"fixture: the typed branch is only exercised by a typed transaction")
+
+	for _, block := range chainPack.Blocks {
+		want, err := block.Body().BinaryRawBody()
+		require.NoError(t, err)
+		byHash, err := m.ExecModule.GetPayloadBodiesByHash(t.Context(), []common.Hash{block.Hash()})
+		require.NoError(t, err)
+		require.Len(t, byHash, 1)
+		require.Equal(t, want.Transactions, byHash[0].Transactions, "byHash block %d", block.NumberU64())
+		byRange, err := m.ExecModule.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
+		require.NoError(t, err)
+		require.Len(t, byRange, 1)
+		require.Equal(t, want.Transactions, byRange[0].Transactions, "byRange block %d", block.NumberU64())
+	}
+}
+
 func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
 	t.Parallel()
 	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)
@@ -2732,6 +2951,71 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 		require.NotNil(t, td)
 		return nil
 	}))
+}
+
+// A block that fails validation while it only exists in the InsertBlocks
+// overlay must not stay readable: purgeBadChain cannot reach it in the DB.
+func TestValidateChainBadBlockIsDroppedFromOverlay(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	badHeader := types.CopyHeader(chainPack.Blocks[0].HeaderNoCopy())
+	badHeader.Root = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	badBlock := types.NewBlockFromNetwork(badHeader, chainPack.Blocks[0].Body(), chainPack.Blocks[0].BlockAccessListSidecar())
+	badHash, badNum := badBlock.Hash(), badBlock.NumberU64()
+
+	insRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	inserted, err := m.ExecModule.GetHeader(ctx, &badHash, &badNum)
+	require.NoError(t, err)
+	require.NotNil(t, inserted, "InsertBlocks must make the header readable through the overlay")
+
+	validation, err := m.ValidateChain(ctx, badBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+
+	afterBad, err := m.ExecModule.GetHeader(ctx, &badHash, &badNum)
+	require.NoError(t, err)
+	require.Nil(t, afterBad, "header of a block that failed validation must not be readable")
+}
+
+// Rejecting a block must not discard valid siblings that are still only in
+// the overlay, waiting for the next forkchoice update.
+func TestValidateChainBadBlockKeepsValidSiblingInOverlay(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	valid := chainPack.Blocks[0]
+	validHash, validNum := valid.Hash(), valid.NumberU64()
+
+	badHeader := types.CopyHeader(valid.HeaderNoCopy())
+	badHeader.Root = common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	badBlock := types.NewBlockFromNetwork(badHeader, valid.Body(), valid.BlockAccessListSidecar())
+
+	_, err = m.InsertBlocks(ctx, []*types.Block{valid})
+	require.NoError(t, err)
+	validation, err := m.ValidateChain(ctx, valid.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+	_, err = m.InsertBlocks(ctx, []*types.Block{badBlock})
+	require.NoError(t, err)
+	validation, err = m.ValidateChain(ctx, badBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBadBlock, validation.ValidationStatus)
+
+	kept, err := m.ExecModule.GetHeader(ctx, &validHash, &validNum)
+	require.NoError(t, err)
+	require.NotNil(t, kept, "valid sibling must stay readable after a bad block is rejected")
+
+	result, err := m.ExecModule.UpdateForkChoice(ctx, validHash, validHash, validHash)
+	require.NoError(t, err)
+	m.ExecModule.WaitIdle(ctx)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
 }
 
 // transferGen returns a deterministic per-block tx generator so tests can
