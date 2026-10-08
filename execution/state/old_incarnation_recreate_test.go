@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -55,4 +56,33 @@ func TestOldIncarnationStorageMaskedAfterRecreate(t *testing.T) {
 	v, err := ibs3.GetState(addr, key)
 	require.NoError(t, err)
 	require.True(t, v.IsZero(), "recreated contract's unwritten slot must read 0, got %s", v.String())
+}
+
+// tx0 creates and self-destructs the address; tx1 credits it, which revives it;
+// tx2 recreates it and must carry the credit.
+func TestRecreateAfterCreditRevivalCarriesBalance(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	vm := NewVersionMap(nil)
+	runTx := func(txIdx int, f func(ibs *IntraBlockState)) {
+		ibs := NewWithVersionMap(&emptyReader{}, vm)
+		ibs.SetTxContext(100, txIdx)
+		ibs.SetNoMaterialize(true)
+		f(ibs)
+		vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{}), true)
+	}
+
+	runTx(0, func(ibs *IntraBlockState) {
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		_, err := ibs.Selfdestruct(addr, false)
+		require.NoError(t, err)
+	})
+	runTx(1, func(ibs *IntraBlockState) {
+		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	})
+	runTx(2, func(ibs *IntraBlockState) {
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		balance, err := ibs.GetBalance(addr)
+		require.NoError(t, err)
+		require.Equal(t, uint64(5), balance.Uint64())
+	})
 }
