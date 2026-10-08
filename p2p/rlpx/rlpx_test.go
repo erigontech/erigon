@@ -22,6 +22,7 @@ package rlpx
 import (
 	"bytes"
 	"crypto/ecdsa"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -31,6 +32,7 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/golang/snappy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -428,4 +430,29 @@ func newkey() *ecdsa.PrivateKey {
 		panic("couldn't generate key: " + err.Error())
 	}
 	return key
+}
+
+func TestReadSnappyRejectsImpossibleDecodedLength(t *testing.T) {
+	sender, receiver := createPeers(t)
+	defer sender.Close()
+	defer receiver.Close()
+	receiver.SetSnappy(true)
+
+	errc := make(chan error, 1)
+	go func() {
+		errc <- sender.session.writeFrame(sender.conn, 1, binary.AppendUvarint(nil, uint64(maxUint24)))
+	}()
+	_, _, _, err := receiver.Read()
+	assert.NoError(t, <-errc)
+	assert.ErrorIs(t, err, snappy.ErrCorrupt)
+	assert.Zero(t, cap(receiver.snappyReadBuffer))
+}
+
+func TestReadSnappyMaxCompressedMessage(t *testing.T) {
+	peer1, peer2 := createPeers(t)
+	defer peer1.Close()
+	defer peer2.Close()
+	peer1.SetSnappy(true)
+	peer2.SetSnappy(true)
+	checkMsgReadWrite(t, peer1, peer2, 1, make([]byte, maxUint24))
 }
