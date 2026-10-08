@@ -127,12 +127,6 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
 	blocks, pid, err := cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	for err != nil {
-		// Respect context cancellation to avoid infinite loops.
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
 		retryInterval := chainTipRequestRetryInterval
 		if errors.Is(err, peers.ErrNoPeers) {
 			retryInterval = chainTipNoPeersRetryInterval
