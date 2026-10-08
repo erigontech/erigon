@@ -1323,6 +1323,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
+	msg.SetSkipExecutionGasCap(true)
 	txn, err := args.ToTransaction(api.gasCap, baseFee)
 	if err != nil {
 		return nil, err
@@ -1526,6 +1527,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		if err != nil {
 			return nil, fmt.Errorf("convert callParam to msg: %w", err)
 		}
+		msgs[i].SetSkipExecutionGasCap(true)
 
 		txns[i], err = args.ToTransaction(api.gasCap, baseFee)
 		if err != nil {
