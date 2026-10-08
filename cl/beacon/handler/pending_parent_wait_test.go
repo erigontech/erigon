@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,7 +38,7 @@ func TestAwaitGloasPayloadSourceReturnsOnceDecided(t *testing.T) {
 		return executionPayloadSource{gloasPath: gloasPayloadPathFull}, nil
 	}
 	pending := executionPayloadSource{gloasPath: gloasPayloadPathPending}
-	src := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, pending, resolve)
+	src := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, pending, func() {}, resolve)
 	require.Equal(t, gloasPayloadPathFull, src.gloasPath)
 	require.Equal(t, 3, calls)
 }
@@ -49,7 +50,7 @@ func TestAwaitGloasPayloadSourceGivesUpAtDeadline(t *testing.T) {
 	pending := executionPayloadSource{gloasPath: gloasPayloadPathPending}
 	start := time.Now()
 	// A poll interval far longer than the deadline: the cutoff itself must end the wait.
-	src := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Second, pending, resolve)
+	src := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Second, pending, func() {}, resolve)
 	require.Equal(t, gloasPayloadPathPending, src.gloasPath)
 	require.Less(t, time.Since(start), 500*time.Millisecond)
 }
@@ -59,7 +60,7 @@ func TestAwaitGloasPayloadSourceKeepsLastSourceOnResolveError(t *testing.T) {
 	resolve := func() (executionPayloadSource, error) {
 		return executionPayloadSource{}, errors.New("head changed")
 	}
-	src := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, last, resolve)
+	src := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, last, func() {}, resolve)
 	require.Equal(t, last, src)
 }
 
@@ -77,18 +78,31 @@ func TestGloasPendingParentDeadline(t *testing.T) {
 	require.Equal(t, slotStart.Add(time.Second), gloasPendingParentDeadline(slotStart.Add(500*time.Millisecond), slotStart, shortSlot))
 }
 
-func TestAwaitGloasPayloadSourceDoesNotWaitForABlockedResolve(t *testing.T) {
+func TestAwaitGloasPayloadSourceDoesNotWaitForABlockedRetry(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
-	resolve := func() (executionPayloadSource, error) {
-		<-release
-		return executionPayloadSource{gloasPath: gloasPayloadPathFull}, nil
-	}
+	retry := func() { <-release }
 	last := executionPayloadSource{gloasPath: gloasPayloadPathAwaitingEnvelope}
+	resolve := func() (executionPayloadSource, error) { return last, nil }
 	start := time.Now()
-	src := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Millisecond, last, resolve)
+	src := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Millisecond, last, retry, resolve)
 	require.Equal(t, last, src)
 	require.Less(t, time.Since(start), 500*time.Millisecond)
+}
+
+func TestAwaitGloasPayloadSourceRunsOneRetryAtATime(t *testing.T) {
+	var running, maxRunning atomic.Int32
+	retry := func() {
+		if n := running.Add(1); n > maxRunning.Load() {
+			maxRunning.Store(n)
+		}
+		time.Sleep(5 * time.Millisecond)
+		running.Add(-1)
+	}
+	pending := executionPayloadSource{gloasPath: gloasPayloadPathPending}
+	resolve := func() (executionPayloadSource, error) { return pending, nil }
+	awaitGloasPayloadSource(context.Background(), time.Now().Add(30*time.Millisecond), time.Millisecond, pending, retry, resolve)
+	require.Equal(t, int32(1), maxRunning.Load())
 }
 
 // Preparation treats an EMPTY head with a parked envelope as EMPTY and primes that fallback;
