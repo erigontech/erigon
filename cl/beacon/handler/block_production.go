@@ -2814,7 +2814,7 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 				if err != nil {
 					return err
 				}
-				commitmentInclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
+				commitmentInclusionProof := solid.NewHashVector(cltypes.KzgCommitmentsInclusionProofDepth)
 				for i, h := range inclusionProofRaw {
 					commitmentInclusionProof.Set(i, h)
 				}
