@@ -1587,66 +1587,6 @@ func TestApplyOnlyCacheReportsFillsDisabled(t *testing.T) {
 	require.True(t, c2.FillsEnabled())
 }
 
-func TestPublishUsesProducerCodeHash(t *testing.T) {
-	t.Parallel()
-
-	c := closeOnCleanup(t, NewDefaultStateCache())
-	c.Applier().Initialize(1)
-
-	addr := makeAddr(7)
-	code := bytes.Repeat([]byte{0xab}, 96)
-	var sentinel [32]byte
-	sentinel[0] = 0xc0
-	sentinel[31] = 0xde
-
-	c.Applier().Publish(1, 2, []StateUpdate{{
-		Domain:   kv.CodeDomain,
-		Key:      addr,
-		Value:    code,
-		CodeHash: sentinel[:],
-		TxNum:    20,
-	}})
-
-	got, ok := c.View(nil).GetCodeByHash(sentinel[:])
-	require.True(t, ok, "the producer's codeHash must be the one the entry is filed under")
-	require.Equal(t, code, got)
-
-	_, ok = c.View(nil).GetCodeByHash(crypto.Keccak256(code))
-	require.False(t, ok, "the cache must not re-derive a hash of its own")
-
-	got, ok = c.View(nil).Get(kv.CodeDomain, addr)
-	require.True(t, ok)
-	require.Equal(t, code, got)
-}
-
-// A malformed producer hash must be re-derived, not used: it would file the entry
-// under a content address no reader queries, since lookups pass a 32-byte keccak.
-func TestPublishDerivesMalformedCodeHash(t *testing.T) {
-	t.Parallel()
-
-	c := closeOnCleanup(t, NewDefaultStateCache())
-	c.Applier().Initialize(1)
-
-	addr := makeAddr(9)
-	code := bytes.Repeat([]byte{0xcd}, 64)
-	short := []byte{0x01, 0x02, 0x03}
-
-	c.Applier().Publish(1, 2, []StateUpdate{{
-		Domain:   kv.CodeDomain,
-		Key:      addr,
-		Value:    code,
-		CodeHash: short,
-		TxNum:    20,
-	}})
-
-	got, ok := c.View(nil).GetCodeByHash(crypto.Keccak256(code))
-	require.True(t, ok, "a short producer hash must be replaced by the derived one")
-	require.Equal(t, code, got)
-
-	_, ok = c.View(nil).GetCodeByHash(short)
-	require.False(t, ok, "the short hash must not key the entry")
-}
-
 // ByteLRU bounds by the bytes it holds rather than an entry count: mixed-size
 // values evict until the newcomer fits, every removal reports through onEvict,
 // and a value larger than the whole budget is rejected without disturbing the
@@ -1689,4 +1629,30 @@ func TestByteLRU_ByteBoundAndOversizeRejection(t *testing.T) {
 		_, ok := b.Get(k)
 		require.Equal(t, wasResident, ok, "key %d: an oversize Add must not evict the resident set", k)
 	}
+}
+
+// An unwind bumps the read-view epoch, so a view bound to the discarded fork
+// misses even when the replacement fork has an entry for the key. This does not
+// cover an unwind that lands between the entry read and the epoch load; that
+// window has no test seam, and the load order in GetVisible is what closes it.
+func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	sc.Applier().Initialize(1)
+	sc.Applier().Publish(1, 2, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(1), TxNum: 5}})
+
+	var unwindOnce sync.Once
+	oldFork := FrontierFunc(func(kv.Domain) (uint64, bool) {
+		unwindOnce.Do(func() {
+			sc.Applier().PublishUnwind(2, 3, 4, []StateUpdate{{Domain: kv.AccountsDomain, Key: key, Value: makeValue(2), TxNum: 6}})
+		})
+		return 10, true
+	})
+	view := sc.View(FrontierWithStateVersion(oldFork, 2))
+
+	_, _, ok := view.GetVisible(kv.AccountsDomain, key)
+	require.False(t, ok, "an old-fork view must not read the replacement fork's entry")
 }

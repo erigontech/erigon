@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -37,10 +36,9 @@ import (
 
 func CreateTestBlockAccessListExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 	t.Helper()
-	var config chain.Config
-	require.NoError(t, copier.CopyWithOption(&config, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	config := chain.AllProtocolChanges.Copy()
 	config.AmsterdamTime = common.NewUint64(20)
-	m := execmoduletester.New(t, execmoduletester.WithChainConfig(&config))
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(config))
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64())
 	var nonce uint64

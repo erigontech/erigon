@@ -131,7 +131,7 @@ func TestBALAbsenceRemainsValidAfterEmptyDestruct(t *testing.T) {
 	creator.MergeTxIOInto(creatorIO, writes)
 	changes := creatorIO.AsBlockAccessList()
 	require.Len(t, changes, 1)
-	require.Equal(t, addr, changes[0].Address)
+	require.Equal(t, addr.Value(), changes[0].Address)
 	require.Empty(t, changes[0].BalanceChanges)
 	require.Empty(t, changes[0].NonceChanges)
 	require.Empty(t, changes[0].CodeChanges)
@@ -150,7 +150,7 @@ func TestBALAbsenceRemainsValidAfterEmptyDestruct(t *testing.T) {
 	require.True(t, empty)
 	require.True(t, ibs.consumedAddressAbsence(addr))
 
-	vm.FlushVersionedWrites(writes, true, "")
+	vm.FlushVersionedWrites(writes, true)
 	require.True(t, vm.destroyedAndUnrevived(addr, 1))
 
 	require.NotPanics(t, func() {

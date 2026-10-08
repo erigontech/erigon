@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -204,6 +205,35 @@ func TestFilters_SingleSubscription_WildcardOnlyTopicRowMatches(t *testing.T) {
 	}
 }
 
+func TestFilters_WildcardOnlyTopicsRequestAllTopicsFromRemote(t *testing.T) {
+	t.Parallel()
+	var lastFilterRequest *remoteproto.LogsFilterRequest
+	f := New(t.Context(), FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+	f.logsRequestor.Store(func(r *remoteproto.LogsFilterRequest) error {
+		lastFilterRequest = r
+		return nil
+	})
+
+	outChan, _, err := f.SubscribeLogs(10, filters.FilterCriteria{
+		Addresses: []common.Address{address1},
+		Topics:    [][]common.Hash{nil, {}},
+	}, "")
+	require.NoError(t, err)
+
+	require.True(t, lastFilterRequest.AllTopics, "a filter with only wildcard topic positions must not narrow the remote topic set to nothing")
+
+	withTwoTopics := createLog()
+	withTwoTopics.Address = address1H160
+	withTwoTopics.Topics = append(withTwoTopics.Topics, gointerfaces.ConvertHashToH256(topic1))
+	f.OnNewLogs(withTwoTopics)
+	require.Len(t, outChan, 1)
+
+	withOneTopic := createLog()
+	withOneTopic.Address = address1H160
+	f.OnNewLogs(withOneTopic)
+	require.Len(t, outChan, 1, "two topic positions still require at least two topics")
+}
+
 func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 	t.Parallel()
 	config := FiltersConfig{}
@@ -312,7 +342,6 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 	if len(chan3) != 1 {
 		t.Error("expected the third channel to still have 1 as the address didn't match in the third log")
 	}
-
 }
 
 func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
@@ -451,7 +480,7 @@ func TestFilters_AddLogs(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxLogs: tt.maxLogs}
 			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 			_, logID, _ := f.SubscribeLogs(8, filters.FilterCriteria{}, "")
-			logEntry := &types.RPCLog{Log: types.Log{Address: common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")}}
+			logEntry := &types.Log{Address: common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")}
 
 			for i := 0; i < tt.numToAdd; i++ {
 				f.AddLogs(logID, logEntry)

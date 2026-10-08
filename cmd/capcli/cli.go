@@ -159,7 +159,8 @@ func (c *Chain) Run(ctx context.Context) error {
 		ethClock.GenesisValidatorsRoot(),
 		beaconConfig.GenesisEpoch,
 		ethClock.GenesisValidatorsRoot(),
-		beaconConfig.GenesisSlot)
+		beaconConfig.GenesisSlot,
+	)
 	if err != nil {
 		return err
 	}
@@ -322,7 +323,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 
 	log.Info("Starting with", "root", common.Hash(currentRoot), "slot", currentBlock.Block.Slot)
 	currentRoot = currentBlock.Block.ParentRoot
-	if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
+	if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 		return err
 	}
 	if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
@@ -354,7 +355,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 		if err != nil {
 			return false, err
 		}
-		if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, currentBlock, true); err != nil {
 			return false, err
 		}
 		if err := c.storeBlobsForBlock(ctx, blobDB, beaconConfig, baseUriBlob, currentBlock); err != nil {
@@ -374,7 +375,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 				break
 			}
 
-			if err := beacon_indicies.MarkRootCanonical(ctx, tx, *slot, currentRoot); err != nil {
+			if err := beacon_indicies.MarkRootCanonical(tx, *slot, currentRoot); err != nil {
 				return false, err
 			}
 			if c.Blobs {
@@ -404,7 +405,7 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 				}
 
 			}
-			currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot)
+			currentRoot, err = beacon_indicies.ReadParentBlockRoot(tx, currentRoot)
 			if err != nil {
 				return false, err
 			}
@@ -469,7 +470,6 @@ func (c *DumpSnapshots) Run(ctx context.Context) error {
 	}
 
 	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
-
 	if err != nil {
 		return err
 	}
@@ -694,11 +694,11 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	}
 
 	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
-	if _, err := antiquary.FillStaticValidatorsTableIfNeeded(ctx, log.Root(), stateSn, vt); err != nil {
+	if _, err := antiquary.FillStaticValidatorsTableIfNeeded(log.Root(), stateSn, vt); err != nil {
 		return err
 	}
 
@@ -741,7 +741,7 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 	}
 	if r.Out != "" {
 		// create file
-		if err := os.WriteFile(r.Out, enc, 0644); err != nil {
+		if err := os.WriteFile(r.Out, enc, 0o644); err != nil {
 			return err
 		}
 	}
@@ -938,7 +938,7 @@ func (a *ArchiveSanitizer) Run(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
-				if err := os.WriteFile(a.FaultOut, enc, 0644); err != nil {
+				if err := os.WriteFile(a.FaultOut, enc, 0o644); err != nil {
 					return err
 				}
 			}
@@ -1043,7 +1043,6 @@ type BlobArchiveStoreCheck struct {
 }
 
 func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
-
 	_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(b.Chain)
 	if err != nil {
 		return err
@@ -1189,7 +1188,6 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
 
 	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
-
 	if err != nil {
 		return err
 	}
@@ -1429,12 +1427,11 @@ func (c *DumpStateSnapshots) Run(ctx context.Context) error {
 	freezingCfg.ChainName = c.Chain
 
 	salt, err := snaptype.GetIndexSalt(dirs.Snap, log.Root())
-
 	if err != nil {
 		return err
 	}
 	snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(db)
-	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, beaconConfig, dirs, snTypes, log.Root())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(freezingCfg, dirs, snTypes, log.Root())
 	if err := stateSn.OpenFolder(); err != nil {
 		return err
 	}
@@ -1462,7 +1459,6 @@ type MakeDepositArgs struct {
 }
 
 func (m *MakeDepositArgs) Run(ctx context.Context) error {
-
 	var privateKeyBls *bls.PrivateKey
 	if m.PrivateKey == "" {
 		var err error
@@ -1523,7 +1519,6 @@ func (m *MakeDepositArgs) Run(ctx context.Context) error {
 		utils.Uint32ToBytes4(uint32(genesisForkVersion)),
 		[32]byte{},
 	)
-
 	if err != nil {
 		return fmt.Errorf("failed to compute domain: %w", err)
 	}

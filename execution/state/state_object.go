@@ -83,7 +83,7 @@ type stateObject struct {
 	db       *IntraBlockState
 
 	// Write caches.
-	//trie Trie // storage trie, which becomes non-nil on first access
+	// trie Trie // storage trie, which becomes non-nil on first access
 	code accounts.Code // contract bytecode, hash + canonical bytes
 
 	originStorage Storage // Storage cache of original entries to dedup rewrites
@@ -381,9 +381,6 @@ func (so *stateObject) SetBalance(amount uint256.Int, wasCommited bool, reason t
 func (so *stateObject) setBalance(amount uint256.Int) {
 	so.data.Balance = amount
 }
-
-// Return the gas back to the origin. Used by the Virtual machine or Closures
-func (so *stateObject) ReturnGas(gas *big.Int) {}
 
 func (so *stateObject) setIncarnation(incarnation uint64) {
 	so.data.SetIncarnation(incarnation)

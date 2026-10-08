@@ -17,7 +17,6 @@
 package attestation_producer
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -49,7 +48,7 @@ type attestationProducer struct {
 	blockRootsUsedForSlotCache *lru.Cache[uint64, common.Hash]                  // Slot => BlockRoot
 }
 
-func New(ctx context.Context, beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
+func New(beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
 	ttl := time.Duration(beaconCfg.SecondsPerSlot) * time.Second / 2
 	attestationsCache := lru.NewWithTTL[uint64, solid.AttestationData]("attestations", attestationsCacheSize, ttl)
 	blockRootsUsedForSlotCache, err := lru.New[uint64, common.Hash]("blockRootsUsedForSlot", attestationsCacheSize)

@@ -21,10 +21,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"reflect"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -41,9 +39,6 @@ import (
 // Config is stored in the database on a per block basis. This means
 // that any network, identified by its genesis block, can have its own
 // set of configuration options.
-//
-// Config holds a sync.Once, so it must never be copied by assignment. Use Copy, which
-// leaves that Once zeroed and shares every pointer, map and slice with the source.
 type Config struct {
 	ChainName string       `json:"chainName"` // chain name, eg: mainnet, sepolia, gnosis
 	ChainID   *uint256.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
@@ -83,17 +78,16 @@ type Config struct {
 	PragueTime    *uint64 `json:"pragueTime,omitempty"`
 	OsakaTime     *uint64 `json:"osakaTime,omitempty"`
 	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
+	BogotaTime    *uint64 `json:"bogotaTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
-	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
-	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
-	Bpo1Time              *uint64                       `json:"bpo1Time,omitempty"`
-	Bpo2Time              *uint64                       `json:"bpo2Time,omitempty"`
-	Bpo3Time              *uint64                       `json:"bpo3Time,omitempty"`
-	Bpo4Time              *uint64                       `json:"bpo4Time,omitempty"`
-	Bpo5Time              *uint64                       `json:"bpo5Time,omitempty"`
-	parseBlobScheduleOnce sync.Once                     `copier:"-"`
-	parsedBlobSchedule    map[uint64]*params.BlobConfig
+	MinBlobGasPrice *uint64                       `json:"minBlobGasPrice,omitempty"`
+	BlobSchedule    map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
+	Bpo1Time        *uint64                       `json:"bpo1Time,omitempty"`
+	Bpo2Time        *uint64                       `json:"bpo2Time,omitempty"`
+	Bpo3Time        *uint64                       `json:"bpo3Time,omitempty"`
+	Bpo4Time        *uint64                       `json:"bpo4Time,omitempty"`
+	Bpo5Time        *uint64                       `json:"bpo5Time,omitempty"`
 
 	// Balancer fork (Gnosis Chain). See https://hackmd.io/@filoozom/rycoQITlWl
 	BalancerTime            *uint64                          `json:"balancerTime,omitempty"`
@@ -409,6 +403,11 @@ func (c *Config) IsAmsterdam(time uint64) bool {
 	return isForked(c.AmsterdamTime, time)
 }
 
+// IsBogota returns whether time is either equal to the Bogota fork time or greater.
+func (c *Config) IsBogota(time uint64) bool {
+	return isForked(c.BogotaTime, time)
+}
+
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
 func (c *Config) IsPrague(time uint64) bool {
 	return isForked(c.PragueTime, time)
@@ -435,56 +434,31 @@ func (c *Config) GetMinBlobGasPrice() uint64 {
 }
 
 func (c *Config) GetBlobConfig(time uint64) *params.BlobConfig {
-	c.parseBlobScheduleOnce.Do(func() {
-		// Populate with default values
-		c.parsedBlobSchedule = make(map[uint64]*params.BlobConfig)
-		if c.CancunTime != nil {
-			c.parsedBlobSchedule[*c.CancunTime] = &params.DefaultCancunBlobConfig
+	var cfg *params.BlobConfig
+	var cfgTime uint64
+	// The latest activation at or before time wins; on a tie, the entry considered last.
+	consider := func(activation *uint64, v *params.BlobConfig) {
+		if activation != nil && *activation <= time && *activation >= cfgTime {
+			cfg, cfgTime = v, *activation
 		}
-		if c.PragueTime != nil {
-			c.parsedBlobSchedule[*c.PragueTime] = &params.DefaultPragueBlobConfig
+	}
+	override := func(activation *uint64, fork string) {
+		if v, ok := c.BlobSchedule[fork]; ok {
+			consider(activation, v)
 		}
-
-		// Override with supplied values
-		val, ok := c.BlobSchedule["cancun"]
-		if ok && c.CancunTime != nil {
-			c.parsedBlobSchedule[*c.CancunTime] = val
-		}
-		val, ok = c.BlobSchedule["prague"]
-		if ok && c.PragueTime != nil {
-			c.parsedBlobSchedule[*c.PragueTime] = val
-		}
-		val, ok = c.BlobSchedule["osaka"]
-		if ok && c.OsakaTime != nil {
-			c.parsedBlobSchedule[*c.OsakaTime] = val
-		}
-		val, ok = c.BlobSchedule["gloas"]
-		if ok && c.AmsterdamTime != nil {
-			c.parsedBlobSchedule[*c.AmsterdamTime] = val
-		}
-		val, ok = c.BlobSchedule["bpo1"]
-		if ok && c.Bpo1Time != nil {
-			c.parsedBlobSchedule[*c.Bpo1Time] = val
-		}
-		val, ok = c.BlobSchedule["bpo2"]
-		if ok && c.Bpo2Time != nil {
-			c.parsedBlobSchedule[*c.Bpo2Time] = val
-		}
-		val, ok = c.BlobSchedule["bpo3"]
-		if ok && c.Bpo3Time != nil {
-			c.parsedBlobSchedule[*c.Bpo3Time] = val
-		}
-		val, ok = c.BlobSchedule["bpo4"]
-		if ok && c.Bpo4Time != nil {
-			c.parsedBlobSchedule[*c.Bpo4Time] = val
-		}
-		val, ok = c.BlobSchedule["bpo5"]
-		if ok && c.Bpo5Time != nil {
-			c.parsedBlobSchedule[*c.Bpo5Time] = val
-		}
-	})
-
-	return ConfigValueLookup(c.parsedBlobSchedule, time)
+	}
+	consider(c.CancunTime, &params.DefaultCancunBlobConfig)
+	consider(c.PragueTime, &params.DefaultPragueBlobConfig)
+	override(c.CancunTime, "cancun")
+	override(c.PragueTime, "prague")
+	override(c.OsakaTime, "osaka")
+	override(c.AmsterdamTime, "gloas")
+	override(c.Bpo1Time, "bpo1")
+	override(c.Bpo2Time, "bpo2")
+	override(c.Bpo3Time, "bpo3")
+	override(c.Bpo4Time, "bpo4")
+	override(c.Bpo5Time, "bpo5")
+	return cfg
 }
 
 func (c *Config) GetMaxBlobsPerBlock(time uint64) uint64 {
@@ -667,6 +641,7 @@ func (c *Config) forkTimestamps() []forkTimestamp {
 		{name: "bpo4Time", what: "BPO4 fork timestamp", timestamp: c.Bpo4Time},
 		{name: "bpo5Time", what: "BPO5 fork timestamp", timestamp: c.Bpo5Time},
 		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime, outOfOrder: true},
+		{name: "bogotaTime", what: "Bogota fork timestamp", timestamp: c.BogotaTime, outOfOrder: true},
 		{name: "balancerTime", what: "Balancer fork timestamp", timestamp: c.BalancerTime, outOfOrder: true},
 	}
 }
@@ -882,17 +857,10 @@ func rewindTarget(stored, scheduled *uint64) *uint64 {
 // Deliberately not a deep copy. jinzhu/copier's DeepCopy turns a nil map or slice into an
 // empty one at every nesting depth, and Aura.Validators tells the two apart: a nil List
 // with Multi set is a multi validator set, an empty non-nil List is a set with no
-// validators at all. Only parseBlobScheduleOnce and its cache are left zeroed, so the
-// copy parses its own blob schedule.
+// validators at all.
 func (c *Config) Copy() *Config {
-	cp := new(Config)
-	src, dst := reflect.ValueOf(c).Elem(), reflect.ValueOf(cp).Elem()
-	for i := range src.NumField() {
-		if dst.Field(i).CanSet() {
-			dst.Field(i).Set(src.Field(i))
-		}
-	}
-	return cp
+	cp := *c
+	return &cp
 }
 
 func uint64PtrStr(p *uint64) string {
@@ -1013,4 +981,11 @@ func isForked(s *uint64, head uint64) bool {
 
 func (c *Config) IsPreMerge(blockNumber uint64) bool {
 	return c.MergeHeight != nil && blockNumber < *c.MergeHeight
+}
+
+func (c *Config) IsPostMerge(number, time uint64) bool {
+	return (c.TerminalTotalDifficulty != nil && c.TerminalTotalDifficulty.IsZero()) ||
+		(c.MergeHeight != nil && number >= *c.MergeHeight) ||
+		(c.MergeNetsplitBlock != nil && number >= *c.MergeNetsplitBlock) ||
+		c.IsShanghai(time)
 }

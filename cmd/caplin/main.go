@@ -71,6 +71,7 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		AllowedOrigins:   cfg.AllowedOrigins,
 		AllowedMethods:   cfg.AllowedMethods,
 		AllowCredentials: cfg.AllowCredentials,
+		PreserveGraffiti: cfg.PreserveGraffiti,
 	}
 	if err := rcfg.UnwrapEndpointsList(cfg.AllowedEndpoints); err != nil {
 		return err
@@ -111,6 +112,8 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		CaplinDiscoveryAddr:       cfg.Addr,
 		CaplinDiscoveryPort:       uint64(cfg.Port),
 		CaplinDiscoveryTCPPort:    uint64(cfg.ServerTcpPort),
+		CaplinDiscoveryQUICPort:   uint64(cfg.ServerQUICPort),
+		CaplinDisableQUIC:         cfg.ServerQUICDisable,
 		BeaconAPIRouter:           rcfg,
 		NetworkId:                 networkId,
 		LocalDiscovery:            cfg.LocalDiscovery,

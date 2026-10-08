@@ -17,10 +17,14 @@
 package cache
 
 import (
+	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"weak"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/maypok86/otter/v2"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -38,6 +42,16 @@ func TestNewByteLRUOutsideBudget(t *testing.T) {
 	require.LessOrEqual(t, b.Len(), 8)
 	b.Close()
 	require.Equal(t, used, cachebudget.Global.Used())
+}
+
+func TestNewByteLRUDroppedIsCollectable(t *testing.T) {
+	dropped := func() weak.Pointer[otter.Cache[uint64, []byte]] {
+		b := NewByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
+		b.Add(1, make([]byte, 64))
+		return weak.Make(b.c)
+	}()
+	runtime.GC()
+	require.Nil(t, dropped.Value(), "an unbudgeted cache dropped without Close must be collected")
 }
 
 func TestHashByteLRUMissesForeignHash(t *testing.T) {
@@ -60,4 +74,49 @@ func TestHashByteLRUWeighsAnEntryOnce(t *testing.T) {
 	_, ok := l.Get(common.Hash{1})
 	require.True(t, ok)
 	require.Equal(t, int32(1), calls.Load())
+}
+
+// otter drops a replacement node written before the first write drains.
+func TestByteLRUConcurrentSameKeyStaysBounded(t *testing.T) {
+	b := NewByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
+	value := make([]byte, 64*1024)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Go(func() {
+			for key := range uint64(2000) {
+				b.Add(key, value)
+			}
+		})
+	}
+	wg.Wait()
+	b.c.CleanUp()
+	require.LessOrEqual(t, b.Len(), 16, "a 1MB cache of 64KB entries holds 16")
+}
+
+func TestByteLRUAddKeepsLiveKey(t *testing.T) {
+	b := NewByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
+	b.Add(1, []byte("first"))
+	require.False(t, b.Add(1, []byte("second")))
+	v, ok := b.Get(1)
+	require.True(t, ok)
+	require.Equal(t, []byte("first"), v)
+}
+
+// A budgeted layer refunds through onEvict, so its charge must match what otter holds.
+func TestByteLRUBudgetedConcurrentSameKeyAccounting(t *testing.T) {
+	b := newByteLRU(8*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+	value := make([]byte, 64*1024)
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Go(func() {
+			for key := range uint64(2000) {
+				b.Add(key, value)
+			}
+		})
+	}
+	wg.Wait()
+	b.c.CleanUp()
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
+	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
 }

@@ -175,15 +175,11 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 
 		senderBalanceChange := findBalanceChange(senderChanges, balIndex)
 		require.NotNilf(t, senderBalanceChange, "missing sender balance change at index %d\n%s", balIndex, bal.DebugString())
-		expectedSenderBalance, overflow := uint256.FromBig(senderBalance)
-		require.False(t, overflow)
-		require.True(t, senderBalanceChange.Value.Eq(expectedSenderBalance))
+		require.True(t, senderBalanceChange.Value.Eq(senderBalance))
 
 		receiverBalanceChange := findBalanceChange(receiverChanges, balIndex)
 		require.NotNilf(t, receiverBalanceChange, "missing receiver balance change at index %d\n%s", balIndex, bal.DebugString())
-		expectedReceiverBalance, overflow := uint256.FromBig(receiverBalance)
-		require.False(t, overflow)
-		require.True(t, receiverBalanceChange.Value.Eq(expectedReceiverBalance))
+		require.True(t, receiverBalanceChange.Value.Eq(receiverBalance))
 
 		senderNonceChange := findNonceChange(senderChanges, balIndex)
 		require.NotNilf(t, senderNonceChange, "missing sender nonce change at index %d\n%s", balIndex, bal.DebugString())
@@ -336,8 +332,6 @@ func TestEngineApiBALStorageNoOpWriteOmitted(t *testing.T) {
 		coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 		gasPrice, err := eat.RpcApiClient.GasPrice()
 		require.NoError(t, err)
-		gasPriceU256, overflow := uint256.FromBig(gasPrice)
-		require.False(t, overflow)
 
 		// init: 600b600c600039600b6000f3   -> return the 11-byte runtime
 		// code: 6002600055 6001600055 00   -> SSTORE(0,2); SSTORE(0,1); STOP
@@ -346,7 +340,7 @@ func TestEngineApiBALStorageNoOpWriteOmitted(t *testing.T) {
 		signTx := func(nonce uint64, to *common.Address, data []byte, gas uint64) types.Transaction {
 			tx, err := types.SignTx(&types.LegacyTx{
 				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: gas, To: to, Value: uint256.Int{}, Data: data},
-				GasPrice: *gasPriceU256,
+				GasPrice: *gasPrice,
 			}, *signer, eat.CoinbaseKey)
 			require.NoError(t, err)
 			return tx
@@ -485,10 +479,8 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 			"expected contract storage change at mint index %d\n%s", mintIdx, bal.DebugString())
 
 		// Verify final balances match BAL entries
-		senderBalance, err := eat.RpcApiClient.GetBalance(sender, rpc.LatestBlock)
+		expectedSenderBal, err := eat.RpcApiClient.GetBalance(sender, rpc.LatestBlock)
 		require.NoError(t, err)
-		expectedSenderBal, overflow := uint256.FromBig(senderBalance)
-		require.False(t, overflow)
 
 		// The last BAL entry for the sender should reflect the final balance
 		lastSenderBalChange := findBalanceChange(senderChanges, mintIdx)
@@ -624,7 +616,7 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 
 		withdrawalBalance, err := eat.RpcApiClient.GetBalance(withdrawalReceiver, rpc.LatestBlock)
 		require.NoError(t, err)
-		expectedWithdrawalWei := new(big.Int).Mul(big.NewInt(1000), big.NewInt(1e9))
+		expectedWithdrawalWei := uint256.NewInt(1000 * 1e9)
 		require.Equal(t, expectedWithdrawalWei, withdrawalBalance)
 
 		// --- Verify system contracts appear in BAL ---
@@ -801,8 +793,6 @@ func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
 		require.NoError(t, err)
 		gasPrice, err := eat.RpcApiClient.GasPrice()
 		require.NoError(t, err)
-		gasPriceU256, overflow := uint256.FromBig(gasPrice)
-		require.False(t, overflow, "gas price overflows uint256")
 
 		// SSTORE-then-SELFDESTRUCT init code. See the docstring above for
 		// the bytecode breakdown.
@@ -822,7 +812,7 @@ func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
 				Value:    uint256.Int{},
 				Data:     initCode,
 			},
-			GasPrice: *gasPriceU256,
+			GasPrice: *gasPrice,
 		}
 		signedCreateTx, err := types.SignTx(createTx, *signer, eat.CoinbaseKey)
 		require.NoError(t, err)
@@ -900,9 +890,9 @@ func TestEngineApiBALSelfDestruct(t *testing.T) {
 
 // TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance asserts
 // the EIP-7928 rule that a zero-value SELFDESTRUCT to SystemAddress is still
-// recorded in the BAL: the SELFDESTRUCT is itself the state access that
-// satisfies the SystemAddress carve-out, so the entry survives even with no
-// value transferred and every change-set empty.
+// recorded in the BAL: the SELFDESTRUCT is a state access on the beneficiary,
+// so the entry is present even with no value transferred and every change-set
+// empty.
 func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
@@ -936,7 +926,7 @@ func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance(t *t
 
 		sysEntry := findAccountChanges(bal, params.SystemAddress)
 		require.NotNilf(t, sysEntry,
-			"BAL must include a SystemAddress entry: EIP-7928 records SELFDESTRUCT as an access on the beneficiary even when no value is transferred, and the SystemAddress carve-out is satisfied because the SELFDESTRUCT is the access itself\n%s",
+			"BAL must include a SystemAddress entry: EIP-7928 records SELFDESTRUCT as an access on the beneficiary even when no value is transferred\n%s",
 			bal.DebugString())
 
 		require.Empty(t, sysEntry.StorageChanges, "SystemAddress entry should have no storage changes")
@@ -986,9 +976,106 @@ func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithNonZeroBalance(t
 	})
 }
 
+// TestEngineApiBALIncludesSystemAddressOnZeroAmountWithdrawal asserts the
+// EIP-7928 rule that a withdrawal to SystemAddress records it in the BAL even
+// when the amount is zero: the withdrawal is a state access, and SystemAddress
+// is excluded only as the caller of system calls (ethereum/execution-specs#3681).
+func TestEngineApiBALIncludesSystemAddressOnZeroAmountWithdrawal(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	eat := newSelfdestructBALTester(ctx, t, logger, crypto.PubkeyToAddress(senderKey.PublicKey))
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		withdrawals := []*types.Withdrawal{
+			{Index: 0, Validator: 0, Address: params.SystemAddress.Value(), Amount: 0},
+		}
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithWithdrawals(withdrawals))
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		sysEntry := findAccountChanges(bal, params.SystemAddress)
+		require.NotNilf(t, sysEntry,
+			"BAL must include SystemAddress when it is a withdrawal recipient, even with a zero amount\n%s",
+			bal.DebugString())
+		require.Empty(t, sysEntry.StorageChanges, "SystemAddress entry should have no storage changes")
+		require.Empty(t, sysEntry.StorageReads, "SystemAddress entry should have no storage reads")
+		require.Empty(t, sysEntry.BalanceChanges, "SystemAddress entry should have no balance changes (zero amount)")
+		require.Empty(t, sysEntry.NonceChanges, "SystemAddress entry should have no nonce changes")
+		require.Empty(t, sysEntry.CodeChanges, "SystemAddress entry should have no code changes")
+	})
+}
+
+// TestEngineApiBALIncludesSystemAddressAsDelegationTarget asserts the EIP-7928
+// rule that calling an EOA delegated (EIP-7702) to SystemAddress records
+// SystemAddress in the BAL: resolving the delegation loads the target's code,
+// which is a state access (ethereum/execution-specs#3681).
+func TestEngineApiBALIncludesSystemAddressAsDelegationTarget(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	eat := newSelfdestructBALTester(ctx, t, logger, senderAddr)
+
+	authorityKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		signer := types.LatestSignerForChainID(chainID)
+		feeCap := uint256.NewInt(1_000_000_000)
+		nonce, err := eat.RpcApiClient.GetTransactionCount(senderAddr, rpc.PendingBlock)
+		require.NoError(t, err)
+
+		auth, err := types.SignAuthorization(authorityKey, *chainID, params.SystemAddress.Value(), 0)
+		require.NoError(t, err)
+		tx, err := types.SignTx(&types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: nonce.Uint64(), GasLimit: 500_000, To: &authority},
+				ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+			},
+			Authorizations: []types.Authorization{auth},
+		}, *signer, senderKey)
+		require.NoError(t, err)
+		_, err = eat.RpcApiClient.SendTransaction(tx)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, tx.Hash()))
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		authorityEntry := findAccountChanges(bal, accounts.InternAddress(authority))
+		require.NotNilf(t, authorityEntry, "BAL must include the authority\n%s", bal.DebugString())
+		require.NotEmptyf(t, authorityEntry.CodeChanges, "authority must record the delegation code change\n%s", bal.DebugString())
+
+		sysEntry := findAccountChanges(bal, params.SystemAddress)
+		require.NotNilf(t, sysEntry,
+			"BAL must include SystemAddress when a called EOA delegates to it\n%s", bal.DebugString())
+		require.Empty(t, sysEntry.StorageChanges, "SystemAddress entry should have no storage changes")
+		require.Empty(t, sysEntry.StorageReads, "SystemAddress entry should have no storage reads")
+		require.Empty(t, sysEntry.BalanceChanges, "SystemAddress entry should have no balance changes")
+		require.Empty(t, sysEntry.NonceChanges, "SystemAddress entry should have no nonce changes")
+		require.Empty(t, sysEntry.CodeChanges, "SystemAddress entry should have no code changes")
+	})
+}
+
 // TestEngineApiBALIncludesOrdinaryBeneficiaryOnSelfdestructWithZeroBalance
-// guards that ordinary EOA beneficiaries (where the SystemAddress carve-out
-// does not apply) still appear in the BAL on a zero-balance SELFDESTRUCT.
+// guards that ordinary EOA beneficiaries also appear in the BAL on a
+// zero-balance SELFDESTRUCT.
 func TestEngineApiBALIncludesOrdinaryBeneficiaryOnSelfdestructWithZeroBalance(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
@@ -1054,11 +1141,9 @@ func signCreateTx(t *testing.T, eat engineapitester.EngineApiTester, key *ecdsa.
 	require.NoError(t, err)
 	gasPrice, err := eat.RpcApiClient.GasPrice()
 	require.NoError(t, err)
-	gasPriceU256, overflow := uint256.FromBig(gasPrice)
-	require.False(t, overflow, "gas price overflows uint256")
 	tx, err := types.SignTx(&types.LegacyTx{
 		CommonTx: types.CommonTx{Nonce: nonce.Uint64(), GasLimit: 1_000_000, To: nil, Value: value, Data: initCode},
-		GasPrice: *gasPriceU256,
+		GasPrice: *gasPrice,
 	}, *signer, key)
 	require.NoError(t, err)
 	return tx
@@ -1089,7 +1174,7 @@ func decodeAndValidateBAL(t *testing.T, payload *engineapitester.MockClPayload) 
 
 func findAccountChanges(bal types.BlockAccessList, addr accounts.Address) *types.AccountChanges {
 	for i := range bal {
-		if bal[i].Address == addr {
+		if bal[i].Address == addr.Value() {
 			return &bal[i]
 		}
 	}
@@ -1220,7 +1305,7 @@ func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 		require.ErrorContains(t, status.ValidationError.Error(), "access list")
 
 		oversized, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
-			Address: accounts.InternAddress(common.Address{1}),
+			Address: common.Address{1},
 		}})
 		require.NoError(t, err)
 		oversizedBytes := hexutil.Bytes(oversized)
