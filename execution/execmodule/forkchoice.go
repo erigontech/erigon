@@ -170,6 +170,44 @@ func (e *ExecModule) currentFinalisedBlockNum(ctx context.Context, tx kv.Getter)
 	return e.blockReader.HeaderNumber(ctx, tx, finalisedHash)
 }
 
+// shortCircuitForkchoice may close the overlay and roTx; the caller must return afterward.
+func (e *ExecModule) shortCircuitForkchoice(
+	ctx context.Context,
+	tx, roTx kv.Tx,
+	blockHash, safeHash, finalizedHash common.Hash,
+	belowFinality bool,
+	teardownOverlay func(),
+) (ForkChoiceResult, error) {
+	valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+	if err != nil {
+		return ForkChoiceResult{}, err
+	}
+	if !valid {
+		return ForkChoiceResult{
+			LatestValidHash: common.Hash{},
+			Status:          ExecutionStatusInvalidForkchoice,
+		}, nil
+	}
+	// Compare committed data so unchanged requests do not take the MDBX writer lock.
+	if !belowFinality && !forkChoiceHashesMatch(roTx, blockHash, safeHash, finalizedHash) {
+		// Close the overlay before its backing read view, then release the view
+		// before committing so it cannot pin pages freed by the write.
+		teardownOverlay()
+		roTx.Rollback()
+		// This path skips the execution commit; overlay-only writes would be lost.
+		if err := e.db.Update(ctx, func(rwTx kv.RwTx) error {
+			writeForkChoiceHashes(rwTx, blockHash, safeHash, finalizedHash)
+			return nil
+		}); err != nil {
+			return ForkChoiceResult{}, err
+		}
+	}
+	return ForkChoiceResult{
+		LatestValidHash: blockHash,
+		Status:          ExecutionStatusSuccess,
+	}, nil
+}
+
 type canonicalEntry struct {
 	hash   common.Hash
 	number uint64
@@ -511,36 +549,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	belowFinality := fcuHeader.Number.Uint64() < *finalisedBlockNum
 	sameExecutedBlockNum := fcuHeader.Number.Uint64() == finishProgressBefore
 	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash && (belowFinality || sameExecutedBlockNum) {
-		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+		result, err := e.shortCircuitForkchoice(ctx, tx, roTx, blockHash, safeHash, finalizedHash, belowFinality, teardownOverlay)
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 		}
-		if !valid {
-			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-				LatestValidHash: common.Hash{},
-				Status:          ExecutionStatusInvalidForkchoice,
-			}, false)
-			return nil
-		}
-		// Compare committed data so unchanged requests do not take the MDBX writer lock.
-		if !belowFinality && !forkChoiceHashesMatch(roTx, blockHash, safeHash, finalizedHash) {
-			// Close the overlay before its backing read view, then release the view
-			// before committing so it cannot pin pages freed by the write.
-			teardownOverlay()
-			roTx.Rollback()
-			roTx = nil
-			// This path skips the execution commit; overlay-only writes would be lost.
-			if err := e.db.Update(ctx, func(rwTx kv.RwTx) error {
-				writeForkChoiceHashes(rwTx, blockHash, safeHash, finalizedHash)
-				return nil
-			}); err != nil {
-				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-			}
-		}
-		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-			LatestValidHash: blockHash,
-			Status:          ExecutionStatusSuccess,
-		}, false)
+		sendForkchoiceResultWithoutWaiting(outcomeCh, result, false)
 		return nil
 	}
 
