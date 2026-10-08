@@ -249,12 +249,13 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 }
 
 // untraced returns runTraced as run in a file of its own, with anyTrace set
-// to false and fast in place of the switchHere comment.
+// to false, without the code this makes dead, and with fast in place of the
+// switchHere comment.
 func untraced(traced []byte, fast string) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
 	}
-	src := bytes.Replace(traced, []byte(switchHere), []byte(fast), 1)
+	src := dropDeadCode(bytes.Replace(traced, []byte(switchHere), []byte(fast), 1))
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "interpreter.go", src, parser.ParseComments)
 	if err != nil {
@@ -295,6 +296,67 @@ func untraced(traced []byte, fast string) []byte {
 		log.Fatal(err)
 	}
 	return out
+}
+
+// dropDeadCode returns src without runTraced's statements that run with
+// anyTrace false never executes, the locals only they use, and their comments.
+// It edits the text, not the AST, so the printer leaves no gaps in their place.
+func dropDeadCode(src []byte) []byte {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "interpreter.go", src, parser.ParseComments)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var body *ast.BlockStmt
+	for _, d := range f.Decls {
+		if fn, ok := d.(*ast.FuncDecl); ok && fn.Name.Name == "runTraced" {
+			body = fn.Body
+		}
+	}
+	var dead []ast.Node
+	isDead := func(p token.Pos) bool {
+		return slices.ContainsFunc(dead, func(n ast.Node) bool { return n.Pos() <= p && p < n.End() })
+	}
+	for n := range ast.Preorder(body) {
+		if s, ok := n.(*ast.IfStmt); ok && s.Init == nil && s.Else == nil && traceOnly(s.Cond) && !isDead(s.Pos()) {
+			dead = append(dead, s)
+		}
+	}
+	uses := map[string]int{}
+	for n := range ast.Preorder(body) {
+		if id, ok := n.(*ast.Ident); ok && !isDead(id.Pos()) {
+			uses[id.Name]++
+		}
+	}
+	for n := range ast.Preorder(body) {
+		if s, ok := n.(*ast.ValueSpec); ok && !isDead(s.Pos()) &&
+			!slices.ContainsFunc(s.Names, func(id *ast.Ident) bool { return uses[id.Name] > 1 }) {
+			dead = append(dead, s)
+		}
+	}
+	cmap := ast.NewCommentMap(fset, f, f.Comments)
+	slices.SortFunc(dead, func(a, b ast.Node) int { return cmp.Compare(b.Pos(), a.Pos()) })
+	for _, n := range dead {
+		from, to := fset.Position(n.Pos()).Offset, fset.Position(n.End()).Offset
+		for _, g := range cmap[n] {
+			from, to = min(from, fset.Position(g.Pos()).Offset), max(to, fset.Position(g.End()).Offset)
+		}
+		from = bytes.LastIndexByte(src[:from], '\n') + 1
+		to += bytes.IndexByte(src[to:], '\n') + 1
+		src = append(src[:from:from], src[to:]...)
+	}
+	return src
+}
+
+// traceOnly reports whether cond is anyTrace or anyTrace && x, so is false in run.
+func traceOnly(cond ast.Expr) bool {
+	switch c := cond.(type) {
+	case *ast.Ident:
+		return c.Name == "anyTrace"
+	case *ast.BinaryExpr:
+		return c.Op == token.LAND && traceOnly(c.X)
+	}
+	return false
 }
 
 func testTable(ops []fastOp) []byte {
