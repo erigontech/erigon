@@ -207,7 +207,7 @@ func (a *ApiHandler) PostEthV1BeaconStatesBuilders(w http.ResponseWriter, r *htt
 		return nil, err
 	}
 	defer tx.Rollback()
-	root, statusCode, err := a.blockRootFromStateId(r.Context(), tx, stateID)
+	root, statusCode, err := a.blockRootFromStateId(tx, stateID)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
@@ -271,7 +271,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		}
 		return response, nil
 	}
-	root, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	root, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}

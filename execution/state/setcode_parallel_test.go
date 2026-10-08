@@ -170,6 +170,46 @@ func TestSetCodeParallel_NoMaterialize_DelegateThenRevoke(t *testing.T) {
 	assert.Empty(t, ibs.stateObjects, "noMaterialize SetCode must not cache a stateObject")
 }
 
+// Authorization processing reads an absent authority's code hash before the
+// first delegation creates it. The revoke is not net-zero for an account created
+// in this tx: folding its code writes away would expose that read.
+func TestSetCodeParallel_NoMaterialize_DelegateThenRevokeAbsentAccount(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	delegation := types.AddressToDelegation(accounts.InternAddress([20]byte{0x01}))
+	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+
+	_, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.NoError(t, ibs.SetCode(addr, delegation, tracing.CodeChangeAuthorization))
+	require.NoError(t, ibs.SetCode(addr, nil, tracing.CodeChangeAuthorizationClear))
+
+	codeHash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	assert.Equal(t, accounts.EmptyCodeHash, codeHash)
+}
+
+// An account created by an earlier tx exists at tx start only through the BAL
+// cells until that tx flushes. Delegating and revoking it is net-zero, so no
+// code write may remain: it would become a spurious BAL code change.
+func TestSetCodeParallel_NoMaterialize_DelegateThenRevokeBALCreatedAccount(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	delegation := types.AddressToDelegation(accounts.InternAddress([20]byte{0x01}))
+	bal := types.BlockAccessList{{
+		Address:      addr.Value(),
+		NonceChanges: []*types.NonceChange{{Index: 1, Value: 1}},
+	}}
+	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(bal))
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(100, 1)
+
+	require.NoError(t, ibs.SetCode(addr, delegation, tracing.CodeChangeAuthorization))
+	require.NoError(t, ibs.SetCode(addr, nil, tracing.CodeChangeAuthorizationClear))
+
+	_, hasCodeWrite := ibs.VersionedWrites().GetCode(addr)
+	assert.False(t, hasCodeWrite)
+}
+
 // TestGetDelegatedDesignationParallel_NoMaterialize_OwnWrite pins the multi-hop
 // EIP-7702 case: a delegation set earlier in the same tx must be visible to
 // GetDelegatedDesignation (used for the auth state-gas refund). On the

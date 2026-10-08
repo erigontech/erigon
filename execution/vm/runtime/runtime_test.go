@@ -162,6 +162,21 @@ func TestCall(t *testing.T) {
 	}
 }
 
+func TestCallDoesNotCreateOrigin(t *testing.T) {
+	t.Parallel()
+	statedb := state.New(state.NewNoopReader())
+	defer statedb.Close()
+	origin := accounts.InternAddress(common.HexToAddress("0xbb"))
+	address := accounts.InternAddress(common.HexToAddress("0xaa"))
+	require.NoError(t, statedb.SetCode(address, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+	_, _, err := Call(address, nil, &Config{State: statedb, Origin: origin})
+	require.NoError(t, err)
+	exists, err := statedb.Exist(origin)
+	require.NoError(t, err)
+	require.False(t, exists)
+}
+
 func TestCreateInsufficientBalanceLeavesGasUntouched(t *testing.T) {
 	t.Parallel()
 	statedb := state.New(state.NewNoopReader())
@@ -1054,4 +1069,37 @@ func TestStorageCacheIsPerFrame(t *testing.T) {
 	ret, _, err := Call(top, nil, &Config{State: statedb, GasLimit: 1_000_000})
 	require.NoError(t, err)
 	require.Equal(t, []uint64{11, 22}, []uint64{new(uint256.Int).SetBytes(ret[:32]).Uint64(), new(uint256.Int).SetBytes(ret[32:]).Uint64()})
+}
+
+// Without EIP-161 an empty account survives in the post-state, so a zero-value
+// call has to leave its origin existing even though nothing transfers. A chain
+// past Spurious Dragon that disables EIP-161 keeps that behaviour.
+func TestCallCreatesItsOriginWithoutEIP161(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		cfg  *chain.Config
+	}{
+		{"pre-spurious-dragon", &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0)}},
+		{"eip161-disabled", &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(0), SpuriousDragonBlock: common.NewUint64(0), DisabledEIPs: []int{161}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			tx, domains := temporaltest.NewTestTxSD(t, db)
+
+			ibs := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+			defer ibs.Close()
+			address := accounts.InternAddress(common.HexToAddress("0xaa"))
+			require.NoError(t, ibs.SetCode(address, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+
+			origin := accounts.InternAddress(common.HexToAddress("0xf00d"))
+			_, _, err := Call(address, nil, &Config{State: ibs, Origin: origin, ChainConfig: tc.cfg})
+			require.NoError(t, err)
+
+			exists, err := ibs.Exist(origin)
+			require.NoError(t, err)
+			require.True(t, exists, "the origin must exist in the post-state")
+		})
+	}
 }
