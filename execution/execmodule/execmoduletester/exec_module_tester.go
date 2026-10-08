@@ -821,6 +821,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		1, // currentBlockNumber
 		mock.ChainConfig,
 		blkBuilder.Build,
+		blkBuilder.BuildInclusionList,
 		hook,
 		accum,
 		mock.StateCache,
