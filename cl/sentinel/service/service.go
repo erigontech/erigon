@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -40,17 +41,17 @@ import (
 
 const gracePeerCount = 32
 
-// maxConcurrentRequests is the consensus spec's MAX_CONCURRENT_REQUESTS: a requester must not have more open streams
-// with one peer for one protocol, and peers penalize the extra streams (Lighthouse bans a peer that keeps opening them).
+// maxConcurrentRequests is the consensus spec's MAX_CONCURRENT_REQUESTS. Responders may penalise more open streams
+// with one peer for one request type, so the cap counts all versions of a request together.
 const maxConcurrentRequests = 2
 
 // ErrPeerBusy reports that a request was not sent because the peer already has maxConcurrentRequests open streams
-// for the protocol. It is not the peer's fault.
-var ErrPeerBusy = errors.New("peer already has the maximum number of concurrent requests for this protocol")
+// for the request type. It is not the peer's fault.
+var ErrPeerBusy = errors.New("peer already has the maximum number of concurrent requests for this request type")
 
 type peerStream struct {
-	pid   peer.ID
-	topic string
+	pid         peer.ID
+	requestType string
 }
 
 var _ sentinelproto.SentinelServer = (*SentinelServer)(nil)
@@ -149,7 +150,12 @@ func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, s
 }
 
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
-	stream := peerStream{pid: pid, topic: req.Topic}
+	protocolID, _, _ := strings.Cut(req.Topic, ",")
+	requestType := strings.TrimSpace(protocolID)
+	if rest, ok := strings.CutPrefix(requestType, communication.ProtocolPrefix+"/"); ok {
+		requestType, _, _ = strings.Cut(rest, "/")
+	}
+	stream := peerStream{pid: pid, requestType: requestType}
 	if !s.claimStream(stream) {
 		return nil, ErrPeerBusy
 	}

@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
@@ -112,9 +113,8 @@ func receivePeerRequestTestValue[T any](t *testing.T, values <-chan T) T {
 	}
 }
 
-// A requester must not have more than MAX_CONCURRENT_REQUESTS open streams with one peer for one protocol; Lighthouse
-// rejects the extra streams and bans a peer that keeps opening them.
-func TestPeerRequestLimitsConcurrentStreamsPerPeerAndProtocol(t *testing.T) {
+// Requests to one peer share MAX_CONCURRENT_REQUESTS open streams per request type, across protocol versions and alternatives lists.
+func TestPeerRequestLimitsConcurrentStreamsPerPeerAndRequestType(t *testing.T) {
 	release := make(chan struct{})
 	reached := make(chan string, 8)
 	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
@@ -132,18 +132,20 @@ func TestPeerRequestLimitsConcurrentStreamsPerPeerAndProtocol(t *testing.T) {
 		return done
 	}
 
-	first, second := request("a", "columns"), request("a", "columns")
+	blocksByRange := communication.BeaconBlocksByRangeProtocolV2 + "," + communication.BeaconBlocksByRangeProtocolV1
+	first, second := request("a", blocksByRange), request("a", blocksByRange)
 	receivePeerRequestTestValue(t, reached)
 	receivePeerRequestTestValue(t, reached)
 
-	require.ErrorIs(t, receivePeerRequestTestValue(t, request("a", "columns")), ErrPeerBusy)
-	otherPeer, otherTopic := request("b", "columns"), request("a", "blocks")
+	require.ErrorIs(t, receivePeerRequestTestValue(t, request("a", communication.BeaconBlocksByRangeProtocolV2)), ErrPeerBusy)
+	otherPeer := request("b", communication.BeaconBlocksByRangeProtocolV1)
+	otherRequestType := request("a", communication.DataColumnSidecarsByRootProtocolV1)
 	receivePeerRequestTestValue(t, reached)
 	receivePeerRequestTestValue(t, reached)
 
 	close(release)
-	for _, done := range []<-chan error{first, second, otherPeer, otherTopic} {
+	for _, done := range []<-chan error{first, second, otherPeer, otherRequestType} {
 		require.NotErrorIs(t, receivePeerRequestTestValue(t, done), ErrPeerBusy)
 	}
-	require.NotErrorIs(t, receivePeerRequestTestValue(t, request("a", "columns")), ErrPeerBusy, "finished streams free their slots")
+	require.NotErrorIs(t, receivePeerRequestTestValue(t, request("a", communication.BeaconBlocksByRangeProtocolV2)), ErrPeerBusy, "finished streams free their slots")
 }
