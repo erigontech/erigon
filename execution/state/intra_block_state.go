@@ -1956,6 +1956,13 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 	}
 
 	ibs.recordWriteSelfDestruct(addr, true)
+	// UPPER-BOUND PROTOTYPE, not revert-safe: a contract created and destroyed in
+	// this tx has dead code cells, so drop them to keep the write maps small.
+	if created, _ := ibs.versionedWriteCreateContract(addr); created {
+		ibs.versionedWrites.DelCode(addr)
+		ibs.versionedWrites.DelCodeHash(addr)
+		ibs.versionedWrites.DelCodeSize(addr)
+	}
 	if !preserveBalance {
 		// Pre-EIP-8246: SELFDESTRUCT burns the balance and the account is deleted;
 		// keep the pre-destruct incarnation for the storage-delete cascade.
