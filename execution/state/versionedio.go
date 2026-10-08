@@ -729,70 +729,70 @@ func (a *vwArena[T]) reset(release func(*VersionedWrite[T])) {
 }
 
 func (ws *WriteSet) newVWAddress() *VersionedWrite[*accounts.Account] {
-	if ws.cells.on {
+	if ws.cells != nil {
 		return ws.cells.address.alloc(getVWAddress)
 	}
 	return getVWAddress()
 }
 
 func (ws *WriteSet) newVWBalance() *VersionedWrite[uint256.Int] {
-	if ws.cells.on {
+	if ws.cells != nil {
 		return ws.cells.balance.alloc(getVWBalance)
 	}
 	return getVWBalance()
 }
 
 func (ws *WriteSet) newVWNonce() *VersionedWrite[uint64] {
-	if ws.cells.on {
+	if ws.cells != nil {
 		return ws.cells.nonce.alloc(getVWNonce)
 	}
 	return getVWNonce()
 }
 
 func (ws *WriteSet) newVWIncarnation() *VersionedWrite[uint64] {
-	if ws.cells.on {
+	if ws.cells != nil {
 		return ws.cells.incarnation.alloc(getVWIncarnation)
 	}
 	return getVWIncarnation()
 }
 
 func (ws *WriteSet) newVWSelfDestruct() *VersionedWrite[bool] {
-	if ws.cells.on {
+	if ws.cells != nil {
 		return ws.cells.selfDestruct.alloc(getVWSelfDestruct)
 	}
 	return getVWSelfDestruct()
 }
 
 func (ws *WriteSet) newVWCreateContract() *VersionedWrite[bool] {
-	if ws.cells.on {
+	if ws.cells != nil {
 		return ws.cells.createContract.alloc(getVWCreateContract)
 	}
 	return getVWCreateContract()
 }
 
 func (ws *WriteSet) newVWCode() *VersionedWrite[accounts.Code] {
-	if ws.cells.on {
+	if ws.cells != nil {
 		return ws.cells.code.alloc(getVWCode)
 	}
 	return getVWCode()
 }
 
 func (ws *WriteSet) newVWCodeHash() *VersionedWrite[accounts.CodeHash] {
-	if ws.cells.on {
+	if ws.cells != nil {
 		return ws.cells.codeHash.alloc(getVWCodeHash)
 	}
 	return getVWCodeHash()
 }
 
 func (ws *WriteSet) newVWCodeSize() *VersionedWrite[int] {
-	if ws.cells.on {
+	if ws.cells != nil {
 		return ws.cells.codeSize.alloc(getVWCodeSize)
 	}
 	return getVWCodeSize()
 }
 
 func (ws *WriteSet) newVWStorage() *VersionedWrite[uint256.Int] {
-	if ws.cells.on {
+	if ws.cells != nil {
 		return ws.cells.storage.alloc(getVWStorage)
 	}
 	return getVWStorage()
@@ -817,11 +817,10 @@ type WriteSet struct {
 	// instead.
 	released bool
 
-	cells vwArenas
+	cells *vwArenas // nil until UseArena
 }
 
 type vwArenas struct {
-	on             bool
 	address        vwArena[*accounts.Account]
 	balance        vwArena[uint256.Int]
 	nonce          vwArena[uint64]
@@ -847,7 +846,7 @@ func (a *vwArenas) reset() {
 	a.storage.reset(releaseVWStorage)
 }
 
-func (ws *WriteSet) ArenaBacked() bool { return ws != nil && ws.cells.on }
+func (ws *WriteSet) ArenaBacked() bool { return ws != nil && ws.cells != nil }
 
 // assertNotArena trips when a set that recycles its cells would hand one out.
 // Unreachable while every consumer takes a Snapshot clone; it is here so a
@@ -861,7 +860,11 @@ func (ws *WriteSet) assertNotArena(op string) {
 // UseArena routes this set's cells to its own slabs. Only a set the state keeps
 // across txs may do it, and a set that shares its cells out must not (see
 // assertNotArena and recycle).
-func (ws *WriteSet) UseArena() { ws.cells.on = true }
+func (ws *WriteSet) UseArena() {
+	if ws.cells == nil {
+		ws.cells = &vwArenas{}
+	}
+}
 
 // recycle resets the set and takes its cells from its own slabs from here on.
 // Slabs only pay off once the state outlives a tx: a one-shot state would buy
@@ -1596,7 +1599,7 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 // through pools rather than getting GC'd. The values must go back before
 // ReleaseMaps clears the maps that hold them.
 func (ws *WriteSet) ReleaseAndReset() {
-	if ws.cells.on {
+	if ws.cells != nil {
 		ws.ReleaseMaps()
 		ws.cells.reset()
 		ws.revive() // a reset hands the set back for reuse
@@ -1677,7 +1680,7 @@ func delCell[T any](ws *WriteSet, m map[accounts.Address]*VersionedWrite[T], add
 	if !ok {
 		return
 	}
-	if !ws.cells.on {
+	if ws.cells == nil {
 		release(vw)
 	}
 	delete(m, addr)
@@ -1717,7 +1720,7 @@ func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 		return
 	}
 	if vw, ok := inner[key]; ok {
-		if !ws.cells.on {
+		if ws.cells == nil {
 			releaseVWStorage(vw)
 		}
 		delete(inner, key)

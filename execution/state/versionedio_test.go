@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"sort"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -1695,6 +1696,12 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 		Slot:    slot,
 		Changes: []*types.StorageChange{{Index: idx, Value: val}},
 	})
+}
+
+// Fresh states and the sets Snapshot returns never use an arena, so they must
+// not carry its metadata.
+func TestWriteSetKeepsTheArenaOutOfLine(t *testing.T) {
+	require.Less(t, unsafe.Sizeof(WriteSet{}), unsafe.Sizeof(vwArenas{}))
 }
 
 // An arena-backed write set hands out distinct cells and keeps its slabs across
