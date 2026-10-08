@@ -5,6 +5,7 @@ import (
 	"unsafe"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -141,4 +142,34 @@ func TestJournalRevertDropsTheEntriesItTruncates(t *testing.T) {
 				i, len(e.extra.prevcode))
 		}
 	}
+}
+
+// isDirty answers repeat questions from a memo; a change, a revert and a reset
+// must each move the answer, for the memoized address and for another one.
+func TestJournalIsDirtyFollowsChangesRevertAndReset(t *testing.T) {
+	ibs := New(NewVersionedStateReader(0, ReadSet{}, nil, nil))
+	a := accounts.InternAddress(common.Address{1})
+	b := accounts.InternAddress(common.Address{2})
+	ibs.stateObjects[a] = newObject(ibs, a, &accounts.Account{}, &accounts.Account{})
+	ibs.stateObjects[b] = newObject(ibs, b, &accounts.Account{}, &accounts.Account{})
+	j := ibs.journal
+
+	require.False(t, j.isDirty(a))
+	j.nonceChange(a, 0, false)
+	require.True(t, j.isDirty(a), "a change to the memoized address")
+	require.False(t, j.isDirty(b))
+	j.nonceChange(b, 0, false)
+	require.True(t, j.isDirty(b), "a change to the memoized address")
+	require.True(t, j.isDirty(a))
+
+	j.revert(ibs, 1)
+	require.False(t, j.isDirty(b), "a revert of the memoized address")
+	require.True(t, j.isDirty(a), "a revert past b's change only")
+	j.revert(ibs, 0)
+	require.False(t, j.isDirty(a), "a revert of the memoized address")
+
+	j.nonceChange(a, 0, false)
+	require.True(t, j.isDirty(a))
+	j.Reset()
+	require.False(t, j.isDirty(a), "a reset")
 }

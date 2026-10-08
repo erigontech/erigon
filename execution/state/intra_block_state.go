@@ -1076,7 +1076,7 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			return
 		}
 		ibs.recordWriteBalance(addr, uint256.Int{})
-		if _, ok := ibs.journal.dirties[addr]; !ok {
+		if ok := ibs.journal.isDirty(addr); !ok {
 			ibs.touchAccount(addr)
 		}
 	}
@@ -3230,7 +3230,7 @@ func (ibs *IntraBlockState) versionedWriteSelfDestruct(addr accounts.Address) (b
 	if !ok {
 		return false, false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+	if isDirty := ibs.journal.isDirty(addr); !isDirty {
 		return false, false
 	}
 	return vw.Val, true
@@ -3243,7 +3243,7 @@ func (ibs *IntraBlockState) versionedWriteCreateContract(addr accounts.Address) 
 	if ibs.versionMap == nil {
 		return false, false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+	if isDirty := ibs.journal.isDirty(addr); !isDirty {
 		return false, false
 	}
 	vw, ok := ibs.versionedWrites.GetCreateContract(addr)
@@ -3267,7 +3267,7 @@ func (ibs *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	}
 	// An own AddressPath write means this tx created the account: createObject is
 	// the only writer, and reverting a creation drops or restores the write.
-	if _, isDirty := ibs.journal.dirties[addr]; isDirty && ibs.hasWrite(addr, AddressPath, accounts.NilKey) {
+	if isDirty := ibs.journal.isDirty(addr); isDirty && ibs.hasWrite(addr, AddressPath, accounts.NilKey) {
 		obj.newlyCreated = true
 	}
 	if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
@@ -3283,7 +3283,7 @@ func (ibs *IntraBlockState) reconstructCellFlags(obj *stateObject, addr accounts
 	// authoritative even when it clears code to empty (EIP-7702 delegation
 	// clearing writes nil bytes / EmptyCodeHash); falling through to the floor
 	// there would resurrect the prior-tx delegation.
-	if _, isDirty := ibs.journal.dirties[addr]; isDirty {
+	if isDirty := ibs.journal.isDirty(addr); isDirty {
 		if vw, ok := ibs.versionedWrites.GetCode(addr); ok {
 			obj.code = vw.Val
 			obj.data.CodeHash = vw.Val.Hash
@@ -3311,7 +3311,7 @@ func (ibs *IntraBlockState) versionedWriteHit(addr accounts.Address, path Accoun
 	if ibs.versionMap == nil {
 		return false
 	}
-	if _, isDirty := ibs.journal.dirties[addr]; !isDirty {
+	if isDirty := ibs.journal.isDirty(addr); !isDirty {
 		return false
 	}
 	switch path {
