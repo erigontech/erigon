@@ -17,7 +17,6 @@
 package hexutil
 
 import (
-	"encoding/hex"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -58,15 +57,7 @@ func BenchmarkDecodeHex(b *testing.B) {
 	for _, n := range []int{20, 32, 64, 256, 1024, 110820} {
 		src := []byte(strings.Repeat("ab", n))
 		dst := make([]byte, n)
-		b.Run(strconv.Itoa(n)+"B/stdlib", func(b *testing.B) {
-			b.SetBytes(int64(len(src)))
-			for i := 0; i < b.N; i++ {
-				if _, err := hex.Decode(dst, src); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-		b.Run(strconv.Itoa(n)+"B/simd", func(b *testing.B) {
+		b.Run(strconv.Itoa(n)+"B", func(b *testing.B) {
 			b.SetBytes(int64(len(src)))
 			for i := 0; i < b.N; i++ {
 				if _, err := decodeHex(dst, src); err != nil {

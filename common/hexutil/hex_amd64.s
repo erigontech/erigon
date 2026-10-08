@@ -32,12 +32,6 @@ DATA pairWeights<>+16(SB)/8, $0x0110011001100110
 DATA pairWeights<>+24(SB)/8, $0x0110011001100110
 GLOBL pairWeights<>(SB), RODATA|NOPTR, $32
 
-DATA packBytes<>+0(SB)/8, $0x0e0c0a0806040200
-DATA packBytes<>+8(SB)/8, $0xffffffffffffffff
-DATA packBytes<>+16(SB)/8, $0xffffffffffffffff
-DATA packBytes<>+24(SB)/8, $0x0e0c0a0806040200
-GLOBL packBytes<>(SB), RODATA|NOPTR, $32
-
 // The 128-byte frames are unused. With a smaller frame the assembler drops the stack check of a
 // leaf function, and that check is where a pending preemption stops the goroutine between the
 // chunks of hex_asm.go.
@@ -80,7 +74,6 @@ TEXT ·decodeBlocks(SB), 0, $128-32
 	VPBROADCASTB decodeBytes<>+5(SB), Y13
 	VPBROADCASTB decodeBytes<>+6(SB), Y14
 	VMOVDQU pairWeights<>(SB), Y15
-	VMOVDQU packBytes<>(SB), Y7
 
 loop:
 	VMOVDQU (SI)(AX*1), Y0
@@ -96,9 +89,8 @@ loop:
 	TESTL BX, BX
 	JNZ done
 	VPMADDUBSW Y15, Y1, Y1
-	VPSHUFB Y7, Y1, Y1
-	VEXTRACTI128 $1, Y1, X2
-	VPOR X2, X1, X1
+	VPACKUSWB Y1, Y1, Y1
+	VPERMQ $0x08, Y1, Y1
 	VMOVDQU X1, (DI)
 	ADDQ $16, DI
 	ADDQ $32, AX
