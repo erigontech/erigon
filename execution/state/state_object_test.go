@@ -47,3 +47,16 @@ func BenchmarkCutCustomTrim(b *testing.B) {
 		common.TrimLeftZeroes(value[:])
 	}
 }
+
+var stateObjectSink *stateObject
+
+// Most state objects never write storage, so a new one allocates its storage
+// maps only on the first write.
+func TestNewStateObjectAllocatesOnlyItself(t *testing.T) {
+	allocs := testing.AllocsPerRun(100, func() {
+		stateObjectSink = stateObjectPool.New().(*stateObject)
+	})
+	if allocs != 1 {
+		t.Fatalf("a new state object made %v allocations, want 1", allocs)
+	}
+}
