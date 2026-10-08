@@ -740,7 +740,7 @@ func TestGasRefundWithCalldataFloor(t *testing.T) {
 // TestEIP8037IntrinsicGasCapWithoutCheckGas verifies that the EIP-8037 cap on
 // max(intrinsic gas, calldata floor) also applies to messages that skip the gas
 // limit caps (CheckGas false, as in eth_estimateGas), but not to read-only calls
-// that lift the execution gas cap (eth_call), as in geth.
+// that lift the execution gas cap (eth_call).
 func TestEIP8037IntrinsicGasCapWithoutCheckGas(t *testing.T) {
 	t.Parallel()
 	const gasLimit = 30_000_000

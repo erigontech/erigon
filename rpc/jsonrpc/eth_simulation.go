@@ -794,7 +794,7 @@ func (s *simulator) simulateCall(
 	}
 	msg.SetCheckGas(false) // EIP-7825 gas cap does not apply to simulated calls (matches Geth SkipTransactionChecks)
 	msg.SetCheckNonce(s.validation)
-	// Without validation the whole gas limit is available for execution, like eth_call (matches Geth).
+	// Without validation the whole gas limit is available for execution, like eth_call.
 	msg.SetSkipExecutionGasCap(!s.validation)
 	// A call that pays no fee must not fund the burnt contract of a chain that has one.
 	if !s.validation && msg.FeeCap().IsZero() {

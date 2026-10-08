@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -317,11 +316,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 
 	gas := st.msg.Gas()
 	blobGas := st.msg.BlobGas()
-	executionContribution, stateContribution := InclusionContributions(gas, rules.IsAmsterdam)
-	if rules.IsAmsterdam && st.msg.SkipExecutionGasCap() {
-		// The execution gas is not capped (see splitGas), so the whole gas limit is reserved in that dimension too.
-		executionContribution = gas
-	}
+	executionContribution, stateContribution := InclusionContributions(gas, rules.IsAmsterdam, st.msg.SkipExecutionGasCap())
 	if err := CheckBlockGasInclusion(st.gp, executionContribution, stateContribution, blobGas); err != nil {
 		return upfrontTxnFees{}, err
 	}
@@ -372,10 +367,7 @@ func (st *TxnExecutor) preCheck(gasBailout bool, intrinsicGasResult mdgas.Intrin
 			return upfrontTxnFees{}, fmt.Errorf("%w: address %v, gas limit %d", ErrGasLimitTooHigh, from, gas)
 		}
 	}
-	// EIP-8037: TX_MAX_GAS_LIMIT applies to the execution gas dimension only. Unlike the
-	// gas limit caps above, it doesn't depend on the gas a call is given, so it also
-	// applies to calls that skip them (eth_estimateGas, eth_createAccessList, ...). Read-only
-	// calls that lift the execution gas cap skip it, like geth.
+	// EIP-8037: TX_MAX_GAS_LIMIT applies to the execution gas dimension only.
 	if rules.IsAmsterdam && !st.msg.SkipExecutionGasCap() && requiredIntrinsicGas > params.MaxTxnGasLimit {
 		return upfrontTxnFees{}, fmt.Errorf("%w: execution gas cap %d exceeds TX_MAX_GAS_LIMIT %d",
 			ErrIntrinsicGas, requiredIntrinsicGas, params.MaxTxnGasLimit)
@@ -490,7 +482,7 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	if err := validateSetCodePrerequisites(auths, contractCreation, rules.IsPrague); err != nil {
 		return nil, err
 	}
-	st.gasRemaining = st.splitGas(intrinsicGas, rules)
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules, st.msg.SkipExecutionGasCap())
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
 	if st.evm.Config().NoBAL {
 		st.state.StopAccessRecording()
@@ -628,7 +620,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	intrinsicGas := intrinsicGasResult.ExecutionGas
-	st.gasRemaining = st.splitGas(intrinsicGas, rules)
+	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules, st.msg.SkipExecutionGasCap())
 
 	if tracer := st.evm.Config().Tracer; tracer.HasGasChangeHook() {
 		tracer.EmitGasChange(mdgas.MdGas{Execution: st.msg.Gas()}, st.gasRemaining, tracing.GasChangeTxIntrinsicGas)
@@ -862,15 +854,6 @@ func validateSetCodePrerequisites(auths []types.Authorization, contractCreation,
 
 func (st *TxnExecutor) handleRuntimeFailure(typ vm.OpCode, destination accounts.Address, startGas mdgas.MdGas, err error) mdgas.MdGasUsage {
 	return HandleRuntimeFailure(st.evm, typ, st.msg.From(), destination, st.data, startGas, &st.gasRemaining, st.value, err)
-}
-
-// splitGas splits the gas limit into execution gas and the EIP-8037 state gas reservoir. Read-only RPC calls that
-// skip the execution gas cap get the whole gas limit as execution gas.
-func (st *TxnExecutor) splitGas(intrinsicGas uint64, rules *chain.Rules) mdgas.MdGas {
-	if rules.IsAmsterdam && st.msg.SkipExecutionGasCap() {
-		return mdgas.MdGas{Execution: st.msg.Gas() - intrinsicGas}
-	}
-	return mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
 }
 
 func (st *TxnExecutor) handleRuntimeCall(gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {

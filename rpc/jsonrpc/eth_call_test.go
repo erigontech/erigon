@@ -2399,7 +2399,7 @@ func TestCallArgsRejectOtherChainID(t *testing.T) {
 // TestExecutionGasCapAmsterdam checks that after Amsterdam (EIP-8037) the read-only calls (eth_call,
 // debug_traceCall, trace_call and eth_simulateV1 without validation) may spend more than
 // params.MaxTxnGasLimit on execution, while eth_estimateGas, eth_createAccessList and eth_simulateV1
-// with validation are still bound by it, as in geth.
+// with validation are still bound by it.
 func TestExecutionGasCapAmsterdam(t *testing.T) {
 	const (
 		threshold = 20_000_000 // Execution gas the contract requires, above params.MaxTxnGasLimit
