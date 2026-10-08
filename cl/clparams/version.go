@@ -50,8 +50,8 @@ func (v StateVersion) String() string {
 		return "fulu"
 	case GloasVersion:
 		return "gloas"
-	// case HezeVersion:
-	// 	return "heze"
+	case HezeVersion:
+		return "heze"
 	default:
 		panic("unsupported fork version")
 	}
@@ -96,8 +96,8 @@ func StringToClVersion(s string) (StateVersion, error) {
 		return FuluVersion, nil
 	case "gloas":
 		return GloasVersion, nil
-	// case "heze":
-	// 	return HezeVersion, nil
+	case "heze":
+		return HezeVersion, nil
 	default:
 		return 0, fmt.Errorf("unsupported fork version %s", s)
 	}

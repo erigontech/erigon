@@ -255,7 +255,7 @@ func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltyp
 		return nil, nil, nil, err
 	}
 	cfg := s.BeaconConfig()
-	domain, err := s.GetDomain(cfg.DomainSyncCommittee, state.Epoch(s))
+	domain, err := s.GetDomain(cfg.DomainSyncCommittee, state.GetEpochAtSlot(cfg, msg.Slot))
 	if err != nil {
 		return nil, nil, nil, err
 	}

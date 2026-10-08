@@ -373,7 +373,7 @@ func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contribu
 
 // verifySyncContributionProof verifies the contribution aggregated signature.
 func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []common.Bytes48) ([]byte, []byte, []byte, error) {
-	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.Epoch(s))
+	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.GetEpochAtSlot(s.BeaconConfig(), contribution.Slot))
 	if err != nil {
 		return nil, nil, nil, err
 	}
