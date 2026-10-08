@@ -411,10 +411,10 @@ type Message struct {
 	checkTransaction bool
 	checkGas         bool
 	isFree           bool
-	// skipExecutionGasCap lifts the EIP-8037 execution gas cap for read-only RPC calls.
+	blobHashes       []common.Hash
+	authorizations   []Authorization
+
 	skipExecutionGasCap bool
-	blobHashes          []common.Hash
-	authorizations      []Authorization
 }
 
 func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -479,11 +479,7 @@ func (m *Message) CheckGas() bool { return m.checkGas }
 func (m *Message) SetCheckGas(checkGas bool) {
 	m.checkGas = checkGas
 }
-
-// SkipExecutionGasCap reports whether the whole gas limit is available for execution after Amsterdam, instead of
-// TX_MAX_GAS_LIMIT with the rest in the EIP-8037 state gas reservoir. Only read-only RPC calls set it.
 func (m *Message) SkipExecutionGasCap() bool { return m.skipExecutionGasCap }
-
 func (m *Message) SetSkipExecutionGasCap(skip bool) {
 	m.skipExecutionGasCap = skip
 }
