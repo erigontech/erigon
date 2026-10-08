@@ -71,7 +71,6 @@ type txReplay struct {
 	reader   state.StateReader
 	txn      types.Transaction
 	signer   types.Signer
-	gasLimit uint64
 	gasUsed  uint64
 	failed   bool
 }
@@ -108,7 +107,6 @@ func newTxReplay(tb testing.TB, path string) *txReplay {
 		reader:   state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})),
 		txn:      txn,
 		signer:   *types.MakeSigner(cfg, f.Block.Number.Uint64(), f.Block.Time),
-		gasLimit: f.Block.GasLimit,
 		gasUsed:  uint64(f.Receipt.GasUsed),
 		failed:   f.Receipt.Status == 0,
 	}
@@ -126,8 +124,14 @@ func (r *txReplay) run(tb testing.TB, noMaterialize bool) *evmtypes.ExecutionRes
 	}
 	msg, err := r.txn.AsMessage(r.signer, &r.blockCtx.BaseFee, r.rules)
 	require.NoError(tb, err)
-	evm := vm.NewEVM(r.blockCtx, protocol.NewEVMTxContext(msg), ibs, r.cfg, vm.Config{NoReceipts: true, NoBAL: true})
-	res, err := protocol.ApplyMessage(evm, msg, protocol.NewGasPool(r.gasLimit, 0), true, false, nil)
+	msg.SetCheckNonce(false)
+	msg.SetCheckTransaction(false)
+	msg.SetCheckGas(false)
+	txCtx := protocol.NewEVMTxContext(msg)
+	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(r.blockCtx, txCtx, vmConfig), txCtx, ibs, r.cfg, vmConfig)
+	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
+	res, err := protocol.ApplyMessage(evm, msg, gp, true, false, nil)
 	require.NoError(tb, err)
 	return res
 }
