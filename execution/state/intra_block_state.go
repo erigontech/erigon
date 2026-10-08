@@ -431,6 +431,8 @@ func (ibs *IntraBlockState) resetForReuse() {
 	clear(ibs.sdProbe)
 	ibs.tracingHooks = nil
 	ibs.trace = false
+	// The caller reads this call's output after the ibs goes back to the pool.
+	ibs.txOutput = nil
 	ibs.stateReader, ibs.codeAccess = nil, nil
 	// Reset keeps the tx context and fork flags; New starts them at zero.
 	ibs.blockNum, ibs.version = 0, 0
