@@ -56,8 +56,7 @@ func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	return slices.Contains(vmConfig.ExtraEips, 3860) || rules.IsShanghai
 }
 
-// CallContext contains the things that are per-call, such as stack and memory,
-// but not transients like pc and gas
+// CallContext contains the things that are per-call, such as stack and memory.
 type CallContext struct {
 	gas               uint64
 	savedPC           uint64 // run's pc across an out-of-line call
