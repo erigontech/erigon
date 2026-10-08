@@ -50,6 +50,10 @@ var ErrInvalidSignature = errors.New("invalid signature")
 var ErrPublishedBlockJobExpired = errors.New("published block integration expired")
 var ErrPublishedBlockJobStopped = errors.New("block service stopped")
 
+// errUnverifiedProposer is ignored like any ErrIgnore, but its block is never scheduled: its
+// signature could not be checked.
+var errUnverifiedProposer = fmt.Errorf("%w: proposer is not in the head state and the parent is unknown", ErrIgnore)
+
 var publishedBlockJobSequence atomic.Uint64
 
 const maxConcurrentBlockValidationContexts = 4
@@ -496,7 +500,7 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		if ok, err := eth2.VerifyBlockSignature(headState, msg); err != nil {
 			// The head state can predate the proposer, which only the parent's state is sure to know.
 			if _, parentKnown := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot); errors.Is(err, raw.ErrInvalidValidatorIndex) && !parentKnown {
-				return fmt.Errorf("%w: proposer %d is not in the head state and parent %v is unknown", ErrIgnore, msg.Block.ProposerIndex, msg.Block.ParentRoot)
+				return fmt.Errorf("%w: proposer %d, parent %v", errUnverifiedProposer, msg.Block.ProposerIndex, msg.Block.ParentRoot)
 			}
 			return err
 		} else if !ok {
@@ -504,7 +508,7 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, ErrIgnore) && schedule != nil {
+		if errors.Is(err, ErrIgnore) && !errors.Is(err, errUnverifiedProposer) && schedule != nil {
 			schedule()
 		}
 		return err
