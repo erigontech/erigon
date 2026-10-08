@@ -22,17 +22,25 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
@@ -150,22 +158,19 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 					if committedCycles > 0 {
 						want = catchupRecoveryCheckpoint(checkpoints[committedCycles-1], canonical.state, replacement.state)
 					}
+					// Inspect persisted state before node initialization can change it.
+					checkpoint, blocks := readCrashRecoveryDataDir(t, request.DataDir, replacement.payloads)
+					assertCatchupRecoveryState(t, want, checkpoint)
+					require.Equal(t, downloaded, blocks, "bulk-imported blocks and BALs must survive every crash")
+
 					args := baseArgs
 					// Without the artificial batch cap, startup can finish catch-up
 					// before the CL repeats the interrupted forkchoice request.
 					args.EthConfigTweaker = configureCrashRecovery
 					args.Logger, args.DataDir = testlog.Logger(t, log.LvlError), request.DataDir
-					inspected := false
-					// Inspect persisted state before startup execution can hide partial writes.
-					args.BeforeNodeStart = func(db kv.TemporalRoDB) {
-						assertCatchupRecoveryState(t, want, readCrashRecoveryCheckpoint(t, db))
-						require.Equal(t, downloaded, readCrashRecoveryBlocks(t, db, replacement.payloads), "bulk-imported blocks and BALs must survive every crash")
-						inspected = true
-					}
 					eat, initErr := engineapitester.InitialiseEngineApiTester(t.Context(), args)
 					require.NoError(t, initErr)
 					t.Cleanup(func() { require.NoError(t, eat.Close()) })
-					require.True(t, inspected, "the crash oracle must run before startup execution")
 					if committedCycles > 0 {
 						require.NoError(t, waitCrashRecoveryExecution(t.Context(), eat.ChainDB, replacement.state.CommitmentBlock))
 					}
@@ -187,6 +192,34 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 			}
 		})
 	}
+}
+
+func readCrashRecoveryDataDir(t *testing.T, dataDir string, payloads []*engineapitester.MockClPayload) (crashRecoveryState, []crashRecoveryBlock) {
+	t.Helper()
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlError)
+	dirs := datadir.New(dataDir)
+	require.FileExists(t, filepath.Join(dirs.Chaindata, "mdbx.dat"))
+	require.FileExists(t, filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE))
+	// MDBX needs a writable open for crash recovery. The inspection itself
+	// uses only read transactions, without node initialization or execution.
+	rawDB, err := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MapSize(datasize.GB).Open(ctx)
+	require.NoError(t, err)
+	defer rawDB.Close()
+
+	settings, err := state.ResolveErigonDBSettings(dirs, logger, false)
+	require.NoError(t, err)
+	agg, err := state.New(dirs).Logger(logger).WithErigonDBSettings(settings).Open(ctx)
+	require.NoError(t, err)
+	defer agg.Close()
+	require.NoError(t, agg.OpenFolder(rawDB))
+
+	blockSnapshots := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
+	defer blockSnapshots.Close()
+	require.NoError(t, blockSnapshots.OpenFolder())
+	db, err := temporal.New(rawDB, agg, blockSnapshots)
+	require.NoError(t, err)
+	return readCrashRecoveryCheckpoint(t, db), readCrashRecoveryBlocks(t, db, payloads)
 }
 
 func waitCrashRecoveryExecution(ctx context.Context, db kv.TemporalRoDB, head uint64) error {
