@@ -56,6 +56,10 @@ func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, 
 	if currentSlot/slotsPerEpoch > headEpoch {
 		currEpoch = headEpoch + 1
 	}
+	// Shuffling for headEpoch+2 uses the head epoch's final RANDAO mix, provided no later block has been seen.
+	if currentSlot/slotsPerEpoch > headEpoch+1 && highestSeenSlot <= headState.Slot() {
+		currEpoch = headEpoch + 2
+	}
 	return state.PreviousEpoch(headState), currEpoch
 }
 
