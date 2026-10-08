@@ -183,7 +183,6 @@ func TestBlockServiceDoesNotIgnoreLateBlockAsFuture(t *testing.T) {
 	block := blocks[0]
 	block.Block.Slot = post.Slot() + 1
 	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
-	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(block.Block.Slot).Return(false).AnyTimes()
 
 	err := blockService.ProcessMessage(context.Background(), nil, block)
 

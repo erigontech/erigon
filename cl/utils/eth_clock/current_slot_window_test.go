@@ -37,7 +37,6 @@ func testSlotStart(slot uint64) time.Time {
 	return time.Unix(int64(testGenesisTime+testSecondsPerSlot*slot), 0)
 }
 
-// clockAt returns a clock whose current time is fixed at now.
 func clockAt(now time.Time) EthereumClock {
 	clock := NewEthereumClock(testGenesisTime, common.Hash{}, &clparams.BeaconChainConfig{SecondsPerSlot: testSecondsPerSlot, SlotsPerEpoch: 32})
 	clock.(*ethereumClockImpl).now = func() time.Time { return now }
