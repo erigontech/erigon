@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
@@ -176,4 +177,50 @@ func TestProcessFrozenBlocksPublishesDropAfterUncommittedBumpPublished(t *testin
 	last := lastPublished(ch)
 	require.NotNil(t, last, "the drop must be published to subscribers")
 	require.Zero(t, last.CurrentBlock, "the last published reply must not claim the rolled-back bump")
+}
+
+type countingLatestTx struct {
+	kv.TemporalTx
+	reads int
+}
+
+func (tx *countingLatestTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	tx.reads++
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func TestStartupSyncLeavesStateCacheBoundForReadOnlyTxs(t *testing.T) {
+	pe, hook, _ := newPinTestExecutor(t, func(bool, *stagedsync.StageState, stagedsync.Unwinder, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
+		return nil
+	})
+	ctx := t.Context()
+	key := make([]byte, 20)
+	key[0] = 0xcc
+	rwTx, err := pe.db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.SetTxNum(5)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, []byte{1}, 5, nil))
+	require.NoError(t, rawdbv3.TxNums.Append(rwTx, 1, 20))
+	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Execution, 1))
+	require.NoError(t, sd.Commit(ctx, rwTx))
+
+	stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+	defer stateCache.Close()
+	e := &ExecModule{pipelineExecutor: pe, db: pe.db, stateCache: stateCache, logger: log.New()}
+	require.NoError(t, e.processFrozenBlocks(ctx, hook))
+
+	roTx, err := pe.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	counting := &countingLatestTx{TemporalTx: roTx}
+	for range 2 {
+		v, _, err := execctx.NewCachedTemporalTxStateGetter(counting, stateCache).GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Equal(t, []byte{1}, v)
+	}
+	require.Equal(t, 1, counting.reads, "the repeat read is served from the cache")
 }

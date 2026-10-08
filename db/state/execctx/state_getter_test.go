@@ -26,11 +26,13 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -425,4 +427,90 @@ func TestCachedTemporalTxStateGetterServesRepeatPositiveReadFromCache(t *testing
 		require.Equal(t, encAccount(2), v)
 	}
 	require.Equal(t, 1, tx.reads)
+}
+
+// indexBlock1 maps block 1 to the txNums the tests commit at.
+func indexBlock1(t *testing.T, db kv.TemporalRwDB, execProgress uint64) {
+	t.Helper()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		if err := rawdbv3.TxNums.Append(tx, 1, 20); err != nil {
+			return err
+		}
+		return stages.SaveStageProgress(tx, stages.Execution, execProgress)
+	}))
+}
+
+// readTwice reads key through two getters on one read-only tx and returns the
+// value and how many reads reached the tx.
+func readTwice(t *testing.T, db kv.TemporalRwDB, stateCache *cache.StateCache, key []byte) ([]byte, int) {
+	t.Helper()
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	tx := &countingLatestTx{TemporalTx: roTx}
+	var v []byte
+	for range 2 {
+		v, _, err = execctx.NewCachedTemporalTxStateGetter(tx, stateCache).GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+		require.NoError(t, err)
+	}
+	return v, tx.reads
+}
+
+func TestInitStateCacheVersionLetsReadOnlyTxsUseTheCache(t *testing.T) {
+	db := newTestDb(t, 16)
+	stateCache := newSmallStateCache()
+	defer stateCache.Close()
+	key := bytes.Repeat([]byte{0xcc}, 20)
+	commitAccount(t, db, nil, key, encAccount(1), 5)
+	indexBlock1(t, db, 1)
+
+	_, reads := readTwice(t, db, stateCache, key)
+	require.Equal(t, 2, reads, "a cache without a state version serves nothing")
+
+	require.NoError(t, execctx.InitStateCacheVersion(t.Context(), db, stateCache))
+	v, reads := readTwice(t, db, stateCache, key)
+	require.Equal(t, encAccount(1), v)
+	require.Equal(t, 1, reads, "the repeat read is served from the cache")
+}
+
+func TestInitStateCacheVersionSkipsANodeWithoutExecutedBlocks(t *testing.T) {
+	db := newTestDb(t, 16)
+	stateCache := newSmallStateCache()
+	defer stateCache.Close()
+	key := bytes.Repeat([]byte{0xcc}, 20)
+	commitAccount(t, db, nil, key, encAccount(1), 5)
+	indexBlock1(t, db, 0)
+
+	require.NoError(t, execctx.InitStateCacheVersion(t.Context(), db, stateCache))
+	_, reads := readTwice(t, db, stateCache, key)
+	require.Equal(t, 2, reads)
+}
+
+// A commit after the startup bind must replace the absent read it cached,
+// whether or not the commit is published to the cache.
+func TestInitStateCacheVersionThenCommitServesTheNewValue(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		published bool
+	}{{"published", true}, {"missed", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDb(t, 16)
+			stateCache := newSmallStateCache()
+			defer stateCache.Close()
+			commitAccount(t, db, nil, bytes.Repeat([]byte{0xcc}, 20), encAccount(1), 5)
+			indexBlock1(t, db, 1)
+			require.NoError(t, execctx.InitStateCacheVersion(t.Context(), db, stateCache))
+			key := bytes.Repeat([]byte{0xdd}, 20)
+			v, _ := readTwice(t, db, stateCache, key)
+			require.Empty(t, v)
+
+			publishTo := stateCache
+			if !tc.published {
+				publishTo = nil
+			}
+			commitAccount(t, db, publishTo, key, encAccount(2), 10)
+			v, _ = readTwice(t, db, stateCache, key)
+			require.Equal(t, encAccount(2), v)
+		})
+	}
 }
