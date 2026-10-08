@@ -1232,6 +1232,9 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		if err != nil {
 			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
 		}
+		if status == execution_client.PayloadStatusNone && ctx.Err() != nil {
+			return false
+		}
 		status, retained := recordGloasPayloadRetryResult(
 			cfg.forkChoice,
 			forkchoice.PendingELPayload{Block: item.block, Envelope: envelope},
@@ -1396,12 +1399,6 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 
 	totalRequest := args.targetSlot - args.seenSlot
 	log.Debug("[chainTipSync] totalRequest", "totalRequest", totalRequest, "seenSlot", args.seenSlot, "targetSlot", args.targetSlot)
-	if canValidatePayloads {
-		// Recheck persisted envelopes because payload verification state is not durable.
-		verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
-		verifyUnverifiedGloasPayloads(verifyCtx, cfg)
-		cancelVerify()
-	}
 	// If the execution engine is not ready, wait for it to be ready.
 	ready, err := waitForExecutionEngineToBeFinished(ctx, cfg)
 	if err != nil {
@@ -1414,6 +1411,12 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	}
 
 	log.Debug("[chainTipSync] execution engine is ready")
+	if canValidatePayloads && shouldRecoverMissingEnvelopes(cfg.beaconCfg, args.targetSlot) {
+		// Recheck persisted envelopes because payload verification state is not durable.
+		verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
+		verifyUnverifiedGloasPayloads(verifyCtx, cfg)
+		cancelVerify()
+	}
 
 	logger.Debug(
 		"waiting for blocks...",

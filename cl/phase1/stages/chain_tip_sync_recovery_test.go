@@ -332,6 +332,54 @@ func TestChainTipSyncVerifiesStoredGloasPayloadWhileBehind(t *testing.T) {
 	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
 }
 
+func TestChainTipSyncDoesNotVerifyStoredGloasPayloadWhileExecutionEngineIsBusy(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	engine.notReady = true
+
+	targetSlot := headBlock.Block.Slot + 1
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	err := chainTipSync(ctx, log.Root(), cfg, Args{seenSlot: targetSlot - 1, targetSlot: targetSlot})
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Zero(t, engine.newPayloadCalls)
+}
+
+func TestVerifyUnverifiedGloasPayloadsDoesNotRecordTimeoutAsVerdict(t *testing.T) {
+	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
+	headBlock := graph.parents[headRoot]
+	delete(graph.parents, headRoot)
+	graph.insertOnAdd = true
+	require.NoError(t, cfg.forkChoice.OnBlock(t.Context(), headBlock, false, false, false))
+	engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		<-ctx.Done()
+		return execution_client.PayloadStatusNone, ctx.Err()
+	}
+	cfg.gloasVerificationCursor = headRoot
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	verifyUnverifiedGloasPayloads(ctx, cfg)
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	_, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(headRoot)
+	require.False(t, found)
+	require.False(t, graph.IsPayloadUnavailable(headRoot))
+	require.Empty(t, cfg.forkChoice.DrainPendingELPayloads())
+	require.Equal(t, headRoot, cfg.gloasVerificationCursor)
+
+	engine.newPayloadFn = nil
+	verifyUnverifiedGloasPayloads(t.Context(), cfg)
+
+	require.Equal(t, 2, engine.newPayloadCalls)
+	require.True(t, cfg.forkChoice.IsPayloadVerified(headRoot))
+	require.Zero(t, cfg.gloasVerificationCursor)
+}
+
 func TestChainTipSyncReverifiesHeadEnvelopeReceivedAtTarget(t *testing.T) {
 	cfg, graph, headRoot, _, _, engine := newChainTipBatchFixtureWithRecordedStatus(t, execution_client.PayloadStatusValidated, false)
 	headBlock := graph.parents[headRoot]

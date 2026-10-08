@@ -1365,6 +1365,7 @@ func anchorPayloadHeaderHash(t *testing.T, payload *cltypes.Eth1Block, parentRoo
 
 type testExecutionEngine struct {
 	supportInsertion bool
+	notReady         bool
 	payloadStatus    execution_client.PayloadStatus
 	newPayloadCalls  int
 	newPayloadFn     func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error)
@@ -1400,7 +1401,7 @@ func (t *testExecutionEngine) IsCanonicalHash(context.Context, common.Hash) (boo
 	return false, nil
 }
 
-func (t *testExecutionEngine) Ready(context.Context) (bool, error) { return true, nil }
+func (t *testExecutionEngine) Ready(context.Context) (bool, error) { return !t.notReady, nil }
 
 func (t *testExecutionEngine) GetBodiesByRange(context.Context, uint64, uint64) ([]*types.RawBody, error) {
 	return nil, nil
