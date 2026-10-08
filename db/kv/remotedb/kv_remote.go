@@ -213,7 +213,8 @@ type txViewStream struct {
 
 func (s *txViewStream) Recv() (*remoteproto.Pair, error) {
 	pair, err := s.KV_TxClient.Recv()
-	if err == nil && (s.tx.historyFilesGeneration != nil || pair.HistoryFilesGeneration != nil) {
+	// Legacy replies omit both fields; do not replace their initial view ID with zero.
+	if err == nil && (pair.ViewId != 0 || s.tx.historyFilesGeneration != nil || pair.HistoryFilesGeneration != nil) {
 		s.tx.viewID = pair.ViewId
 		s.tx.historyFilesGeneration = pair.HistoryFilesGeneration
 	}

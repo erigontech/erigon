@@ -81,24 +81,41 @@ func TestHistoryFilesGenerationMetadata(t *testing.T) {
 }
 
 func TestCursorReplyUpdatesTransactionView(t *testing.T) {
-	client := remoteproto.NewMockKVClient(gomock.NewController(t))
-	client.EXPECT().Tx(gomock.Any()).Return(&txReplyStream{replies: []*remoteproto.Pair{
-		{TxId: 7, ViewId: 5, HistoryFilesGeneration: new(uint64(42))},
-		{CursorId: 1, ViewId: 6, HistoryFilesGeneration: new(uint64(43))},
-	}}, nil)
-	db, err := NewRemote(gointerfaces.Version{}, log.New(), client).Open()
-	require.NoError(t, err)
-	t.Cleanup(db.Close)
-	tx, err := db.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	cursor, err := tx.Cursor(kv.MaxTxNum)
-	require.NoError(t, err)
-	defer cursor.Close()
-	require.Equal(t, uint64(6), tx.ViewID())
-	files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 })
-	require.True(t, ok)
-	require.Equal(t, uint64(43), files.HistoryFilesGeneration())
+	for _, tc := range []struct {
+		name              string
+		initialGeneration *uint64
+		replyViewID       uint64
+		replyGeneration   *uint64
+		wantViewID        uint64
+	}{
+		{"identified_view", new(uint64(42)), 6, new(uint64(43)), 6},
+		{"view_id_only", nil, 6, nil, 6},
+		{"legacy_server", nil, 0, nil, 5},
+		{"generation_removed", new(uint64(42)), 6, nil, 6},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := remoteproto.NewMockKVClient(gomock.NewController(t))
+			client.EXPECT().Tx(gomock.Any()).Return(&txReplyStream{replies: []*remoteproto.Pair{
+				{TxId: 7, ViewId: 5, HistoryFilesGeneration: tc.initialGeneration},
+				{CursorId: 1, ViewId: tc.replyViewID, HistoryFilesGeneration: tc.replyGeneration},
+			}}, nil)
+			db, err := NewRemote(gointerfaces.Version{}, log.New(), client).Open()
+			require.NoError(t, err)
+			t.Cleanup(db.Close)
+			tx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			cursor, err := tx.Cursor(kv.MaxTxNum)
+			require.NoError(t, err)
+			defer cursor.Close()
+			require.Equal(t, tc.wantViewID, tx.ViewID())
+			files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 })
+			require.Equal(t, tc.replyGeneration != nil, ok)
+			if ok {
+				require.Equal(t, *tc.replyGeneration, files.HistoryFilesGeneration())
+			}
+		})
+	}
 }
 
 func TestMaxPrunableStepsBacklog(t *testing.T) {
