@@ -17,7 +17,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -1606,13 +1605,9 @@ func valueString(path AccountPath, value any) string {
 	case NoncePath, IncarnationPath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
-		switch v := value.(type) {
-		case accounts.Code:
+		if v, ok := value.(accounts.Code); ok {
 			l := min(v.Len(), 40)
 			return hex.EncodeToString(v.Bytes[0:l])
-		case []byte:
-			l := min(len(v), 40)
-			return hex.EncodeToString(v[0:l])
 		}
 		return "<unknown-code>"
 	}
@@ -2567,22 +2562,11 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 			}
 		}
 
-		isUserTx := txIndex >= 0
-		for addr, opts := range io.ReadSet(txIndex).access {
+		for addr := range io.ReadSet(txIndex).access {
 			if addr.IsNil() {
 				continue
 			}
-
-			account := ensureAccountState(ac, addr)
-			// A non-revertable access means the address was the target of
-			// an actual EVM operation (evm.Call, evm.Create, SELFDESTRUCT
-			// with non-zero balance, BALANCE, EXTCODESIZE, etc.) — not just
-			// a gas-calculation read. This is used to distinguish real state
-			// access from incidental reads (e.g. Empty() in gas calc) for
-			// the system address filter.
-			if isUserTx && !opts.revertable {
-				account.nonRevertableUserAccess = true
-			}
+			ensureAccountState(ac, addr)
 		}
 	}
 
@@ -2590,17 +2574,6 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	for _, account := range ac {
 		account.finalize()
 		account.changes.Normalize()
-		// The system address (0xff...fe) is touched during every block's system
-		// call (EIP-4788 beacon root) because it is msg.sender. Per EIP-7928,
-		// "SYSTEM_ADDRESS MUST NOT be included unless it experiences state access
-		// itself." We use the non-revertable access flag from MarkAddressAccess
-		// to distinguish real state access (evm.Call target, SELFDESTRUCT
-		// beneficiary, BALANCE opcode, etc.) from incidental gas-calculation
-		// reads (Empty() in statefulGasCall). Keep it when it has actual state
-		// changes or when a user tx performed a non-revertable access to it.
-		if account.changes.Address == params.SystemAddress.Value() && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
-			continue
-		}
 		bal = append(bal, *account.changes)
 	}
 
@@ -2611,26 +2584,17 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 	return bal
 }
 
-// hasAccountChanges returns true if the account has any state changes
-// (storage, balance, nonce, or code) that belong in the BAL.
-func hasAccountChanges(ac *types.AccountChanges) bool {
-	return len(ac.StorageChanges) > 0 || len(ac.StorageReads) > 0 ||
-		len(ac.BalanceChanges) > 0 || len(ac.NonceChanges) > 0 ||
-		len(ac.CodeChanges) > 0
-}
-
 type accountState struct {
-	changes                 *types.AccountChanges
-	balance                 *fieldTracker[uint256.Int]
-	nonce                   *fieldTracker[uint64]
-	code                    *fieldTracker[accounts.Code]
-	balanceValue            *uint256.Int                        // tracks latest seen balance
-	initialBalanceValue     *uint256.Int                        // tracks pre-block balance for net-zero detection
-	storageReadValues       map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
-	slotWrites              map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
-	slotReads               map[accounts.StorageKey]int         // slot -> index into changes.StorageReads, built with slotWrites
-	nonRevertableUserAccess bool                                // true if a user tx (txIndex >= 0) has non-revertable access
-	initialCodeEmpty        bool                                // pre-block code was empty (created contract or empty-codehash read)
+	changes             *types.AccountChanges
+	balance             *fieldTracker[uint256.Int]
+	nonce               *fieldTracker[uint64]
+	code                *fieldTracker[accounts.Code]
+	balanceValue        *uint256.Int                        // tracks latest seen balance
+	initialBalanceValue *uint256.Int                        // tracks pre-block balance for net-zero detection
+	storageReadValues   map[accounts.StorageKey]uint256.Int // original read values for net-zero detection
+	slotWrites          map[accounts.StorageKey]int         // slot -> index into changes.StorageChanges, built past slotIndexMin
+	slotReads           map[accounts.StorageKey]int         // slot -> index into changes.StorageReads, built with slotWrites
+	initialCodeEmpty    bool                                // pre-block code was empty (created contract or empty-codehash read)
 }
 
 // check pre- and post-values, add to BAL if different

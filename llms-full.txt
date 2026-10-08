@@ -988,7 +988,7 @@ services:
       - "42069:42069/udp"
       - "4000:4000/udp"       # Caplin consensus-layer discovery
       - "4001:4001/tcp"       # Caplin consensus-layer p2p over TCP
-      - "4001:4001/udp"       # Caplin consensus-layer p2p over QUIC
+      - "4002:4002/udp"       # Caplin consensus-layer p2p over QUIC (see note below)
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
       # Replace the path below with an actual directory on your machine
@@ -1002,7 +1002,9 @@ Set `EXTERNAL_IP` before starting, either in a `.env` file next to `docker-compo
 echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 ```
 
-or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001` ports on your router as well, otherwise peers still cannot reach you.
+or by exporting it in your shell. Forward the `30303`, `42069`, `4000`, `4001` and `4002` ports on your router as well, otherwise peers still cannot reach you.
+
+If only the QUIC port (`4002/udp`) cannot be published, drop the `4002:4002/udp` line above and add `--caplin.quic.disable` to the `command` block instead. Caplin then falls back to TCP-only peering. This does not help if `4000/udp` cannot be published either: Caplin needs that port for discovery whether or not QUIC is enabled.
 
 :::warning
 ⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
@@ -1202,7 +1204,7 @@ services:
       - "42069:42069/udp"
       - "4000:4000/udp"       # Caplin consensus-layer discovery
       - "4001:4001/tcp"       # Caplin consensus-layer p2p over TCP
-      - "4001:4001/udp"       # Caplin consensus-layer p2p over QUIC
+      - "4002:4002/udp"       # Caplin consensus-layer p2p over QUIC (see note below)
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
       # Replace the path below with an actual directory on your machine
@@ -1216,7 +1218,9 @@ Set `EXTERNAL_IP` before starting, either in a `.env` file next to `docker-compo
 echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 ```
 
-or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001` ports on your router as well, otherwise peers still cannot reach you.
+or by exporting it in your shell. Forward the `30303`, `42069`, `4000`, `4001` and `4002` ports on your router as well, otherwise peers still cannot reach you.
+
+If only the QUIC port (`4002/udp`) cannot be published, drop the `4002:4002/udp` line above and add `--caplin.quic.disable` to the `command` block instead. Caplin then falls back to TCP-only peering. This does not help if `4000/udp` cannot be published either: Caplin needs that port for discovery whether or not QUIC is enabled.
 
 :::warning
 ⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
@@ -1833,7 +1837,9 @@ MDBX reuses free pages instead of returning them to the filesystem, so `mdbx.dat
 
 Erigon must be stopped. The command takes the datadir lock and opens each database exclusively, so it fails instead of touching a database still in use. The copy is written inside the database's own directory, so each database needs free space for a second copy of itself on the volume it already lives on, and a big `chaindata/` can take hours.
 
-This is a manual defragmentation pass, not the background compaction of an LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
+Erigon also compacts at startup, before the node opens its databases: any database whose free pages are at least 10 GB **and** more than four times its live data is rewritten the same way (`[compact] auto-compact` in the log). It needs the same free space for a second copy, delays startup while it runs, and cannot be turned off. A database that fails to compact is left as it was, and startup continues. It skips the step if another process holds the datadir lock.
+
+`erigon db compact` is a manual defragmentation pass, not the background compaction of an LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
 ## Where to go next
 
@@ -2407,7 +2413,7 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   - Default: `8551`
 
 - `--authrpc.jwtsecret value`: The path to the [JWT secret](https://docs.erigon.tech/fundamentals/jwt) file for the consensus layer.
-- `--http.compression`: Enables compression over HTTP-RPC.
+- `--http.compression`: Compresses HTTP-RPC responses of 1 KiB or more with the encoding the client's `Accept-Encoding` allows: Zstandard (preferred) or gzip. A client that accepts neither gets an uncompressed response.
   - Default: `true`
 
 - `--http.corsdomain value`: A comma-separated list of domains for cross-origin requests.
@@ -2850,7 +2856,10 @@ Flags for configuring the [Caplin](https://docs.erigon.tech/fundamentals/caplin)
   - Default: `4001`
 
 - `--caplin.discovery.quicport value`: The QUIC UDP port for Caplin libp2p.
-  - Default: `4001`
+  - Default: `4002`
+
+- `--caplin.quic.disable`: Disables the QUIC transport for Caplin libp2p, falling back to TCP only. Useful when the QUIC UDP port cannot be exposed, for example in some Docker or Kubernetes setups.
+  - Default: `false`
 
 - `--caplin.checkpoint-sync-url value`: The checkpoint sync endpoint.
 - `--caplin.subscribe-all-topics`: Subscribes to all gossip topics.
@@ -2905,6 +2914,9 @@ Flags for configuring the [Caplin](https://docs.erigon.tech/fundamentals/caplin)
   - Default: `false`
 
 - `--caplin.mev-relay-url value`: The MEV relay endpoint.
+- `--caplin.builder.allow-private-urls`: Lets the builder URLs that validators submit as builder preferences resolve to private or loopback addresses, for a builder on the same host or LAN. Other non-public ranges stay blocked. Does not apply to `--caplin.mev-relay-url`.
+  - Default: `false`
+
 - `--caplin.validator-monitor`: Enables Caplin validator monitoring metrics.
   - Default: `false`
 
@@ -3000,7 +3012,7 @@ Erigon's own variables — everything below except the [Docker](https://docs.eri
 - `NO_PRUNE` - Disables pruning when set to true (flag equivalent: `--exec.no-prune`)
 - `NO_MERGE` - Disables merging operations (flag equivalent: `--exec.no-merge`)
 - `PRUNE_TOTAL_DIFFICULTY` - Controls total difficulty pruning (default: `true`)
-- `MAX_REORG_DEPTH` - Sets maximum reorganization depth (default: `96`)
+- `MAX_REORG_DEPTH` - Sets how many blocks behind the head Erigon keeps reorg data while no finalized block is known, and during the initial sync cycle (default: `96`). After that, once the consensus layer reports a finalized block, Erigon keeps changesets and holds snapshot retirement back to that block instead: during non-finality it can reorg deeper than this value — down to, but not below, the finalized block — and with normal finality it may keep fewer than 96 blocks. The value still caps how far a new payload's missing ancestors are downloaded and how far from the head a side fork is validated.
 - `CAPLIN_STATE_PRUNE_DISABLE` - Disables pruning of Caplin's state indexing DB after ranges are frozen into snapshots (default: `false`)
 - `CAPLIN_STATE_PRUNE_TIMEOUT` - Overrides the per-pass time budget for Caplin state pruning (a duration, e.g. `500ms`; default derived from the chain's slot time)
 
@@ -3223,7 +3235,8 @@ Here is a comprehensive list of port-related options:
 
 - `--caplin.discovery.port [value]`: Port for Caplin DISCV5 protocol (default: `4000`)
 - `--caplin.discovery.tcpport [value]`: TCP port for Caplin libp2p (default: `4001`)
-- `--caplin.discovery.quicport [value]`: QUIC UDP port for Caplin libp2p (default: `4001`)
+- `--caplin.discovery.quicport [value]`: QUIC UDP port for Caplin libp2p (default: `4002`)
+- `--caplin.quic.disable`: Disables the QUIC transport for Caplin libp2p, falling back to TCP only (default: `false`)
 - `--sentinel.port [value]`: Port the Caplin sentinel gRPC service listens on (default: `7777`)
 
 ### BeaconAPI
@@ -4778,6 +4791,10 @@ On each of the other hosts, point the same flag at Erigon rather than at themsel
 ./build/bin/rpcdaemon --private.api.addr=localhost:9090 --datadir=<your datadir> --txpool.api.addr=localhost:9094
 ```
 
+## Delegated (EIP-7702) senders
+
+An account with code — in practice one with an active EIP-7702 delegation — may have only one transaction in the pool, and it must use the account's current nonce. A further transaction, or one with a nonce gap, is rejected with `in-flight transaction limit reached for delegated account` or `gapped-nonce transaction from delegated account`. Replacing the pooled transaction at the same nonce is still allowed, subject to the usual price bump (`--txpool.pricebump`, and `--txpool.blobpricebump` for blob transactions). When an account becomes delegated, its pooled transactions are cut back to at most one on the next block. No flag changes the one-transaction limit.
+
 ## Flags explanation
 
 - `--txpool.disable`: This flag disables the internal transaction pool (TxPool) and block producer (default: `false`). When running the TxPool as a separate process, this flag is used to prevent the internal TxPool from interfering with the external one.
@@ -5326,7 +5343,29 @@ The sections below cover only the places where Erigon adds a method that is not 
 
 ### Pending state
 
-Erigon does not support the `pending` block tag for `eth_call`, `eth_createAccessList`, `eth_getProof`, `eth_getWitness`, `eth_getTxWitness`, or `eth_simulateV1`. These methods need a block header and state from the same view, and Erigon cannot currently acquire a matching pending-state view. They return `pending state is not supported` instead of executing against a different block. Other `eth` methods keep their existing pending behavior.
+Erigon does not support the `pending` block tag for `eth_call`, `eth_callMany`, `eth_createAccessList`, `eth_getProof`, `eth_getWitness`, `eth_getTxWitness`, or `eth_simulateV1`. These methods need a block header and state from the same view, and Erigon cannot currently acquire a matching pending-state view. They return `pending state is not supported` instead of executing against a different block. Other `eth` methods keep their existing pending behavior.
+
+### Fork-gated call fields
+
+Methods that execute a call object — among them `eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_simulateV1`, `eth_callMany`, `debug_traceCall` and the `trace_call` family — validate it against the fork active at the effective execution block, as a transaction would be. For `eth_simulateV1` that is each simulated block, which runs after the selected parent, and block overrides can move it to a different fork than the parent's:
+
+| Call carries | Rejected when | Error |
+| --- | --- | --- |
+| `accessList` | the block is before Berlin | `eip-2930 transactions require Berlin` |
+| `blobVersionedHashes` | the block is before Cancun | `BlobTx transactions require Cancun` |
+| `blobVersionedHashes` and no `to` | from Cancun on | `txn: field 'To' can not be 'nil'` |
+| an empty `blobVersionedHashes` list | from Cancun on | `blob txn must contain at least one blob versioned hash` |
+| a blob versioned hash with the wrong version byte | from Cancun on | `blob txn versioned hash has invalid version byte` |
+
+`eth_createAccessList` therefore rejects every request on a block before Berlin, including a plain transfer.
+
+A call object whose `chainId` is not the node's is rejected with `-32602` (`chainId does not match node's`) by `eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_callMany`, `debug_traceCall`, `debug_traceCallMany`, `trace_call` and `trace_callMany`. `eth_simulateV1` and `eth_fillTransaction` reject it with `-32000`.
+
+### eth_syncing and eth_subscribe("syncing")
+
+`eth_syncing` returns `false` when the current block is fewer than 8 blocks from the highest block seen, in either direction; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). A node 8 or more blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. Both report `startingBlock` as the block where the current sync session began.
+
+`eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
 
 ### eth_getProof
 
@@ -5523,6 +5562,8 @@ So `{"blockNumber": "null"}` is the only way to reach `latest` by that spelling 
 
 The standard spec does not say how long a filter lives. In Erigon, a filter created by `eth_newFilter`, `eth_newBlockFilter`, or `eth_newPendingTransactionFilter` is evicted once it has gone **5 minutes** without being polled. Only `eth_getFilterChanges` counts as a poll: it calls `TouchSubscription`, which resets the clock, so a filter stays alive on a quiet chain as long as the client keeps calling it. `eth_getFilterLogs` does **not** — it reads the stored criteria and serves them through the same path as `eth_getLogs`, without touching the deadline — so a client that only ever calls `eth_getFilterLogs` loses its filter after five idle minutes. A call against an evicted filter returns `filter not found`.
 
+Logs returned by `eth_getFilterChanges` for a log filter, and logs pushed by `eth_subscribe("logs")`, carry the block time as `blockTimestamp`, as `eth_getLogs` does.
+
 Change the window, or turn eviction off entirely, with:
 
 ```text
@@ -5554,7 +5595,7 @@ These methods must be explicitly enabled using the `--http.api` flag when starti
 ### Enhanced Features
 
 - `erigon_getLatestLogs` supports `ignoreTopicsOrder` for flexible topic matching
-- `erigon_getLogs` returns enhanced RPCLog objects with additional metadata like timestamps
+- `erigon_getLogs`, `erigon_getLatestLogs` and `erigon_getLogsByHash` return each log's block time as `blockTimestamp`, the same field as `eth_getLogs`
 - `erigon_getBlockByTimestamp` uses binary search for efficient timestamp-based block lookup
 
 See more details [here](https://github.com/erigontech/erigon/blob/main/cmd/rpcdaemon/README.md#rpc-implementation-status) about implementation status.
@@ -5713,7 +5754,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLogsByHash","params":["0x1d
 
 | Type | Description |
 | --- | --- |
-| Array | Array of arrays of log objects, one array per transaction |
+| Array | Array of arrays of log objects, one array per transaction; each log carries `blockTimestamp` |
 
 ## **erigon_getLogs**
 
@@ -5735,7 +5776,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLogs","params":[{"fromBlock
 
 | Type | Description |
 | --- | --- |
-| Array | Array of RPCLog objects with enhanced metadata |
+| Array | Array of RPCLog objects; each carries the block time as `blockTimestamp` |
 
 :::note
 The number of logs returned is capped by [`--rpc.logs.maxresults`](https://docs.erigon.tech/fundamentals/configuring-erigon#rpc--api) (default `20000`). Set to `0` to remove the limit. The block range of the query is independently capped by `--rpc.blockrange.limit` (default `1000`).
@@ -5762,7 +5803,7 @@ curl -s --data '{"jsonrpc":"2.0","method":"erigon_getLatestLogs","params":[{"add
 
 | Type | Description |
 | --- | --- |
-| Array | Array of RPCLog objects in descending chronological order |
+| Array | Array of RPCLog objects in descending chronological order; each carries `blockTimestamp` |
 
 :::note
 The number of logs returned is capped by [`--rpc.logs.maxresults`](https://docs.erigon.tech/fundamentals/configuring-erigon#rpc--api) (default `20000`). Set to `0` to remove the limit.
@@ -6220,6 +6261,10 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCallMany","params":[[{"tra
 | Type | Description |
 | --- | --- |
 | Array | Array of trace results for each bundle |
+
+:::note callTracer output
+With `{"tracer": "callTracer", "tracerConfig": {"withLog": true}}`, each entry in `logs` has an `index` that is the log's index **within the block**, matching `eth_getLogs` and the receipts, for `debug_traceTransaction` and `debug_traceBlockByNumber`/`ByHash`. `debug_traceCall` counts from `0x0`, and `debug_traceCallMany` counts within each bundle. A failed `CREATE` or `CREATE2` frame, including one that reverts, has no `to` field.
+:::
 
 ### debug_setMemoryLimit
 
@@ -6923,6 +6968,7 @@ Returns traces matching given filter
 
    - `fromBlock`: `Quantity` or `Tag` - (optional) From this block. Defaults to the latest executed block; send `"earliest"` to scan from genesis.
    - `toBlock`: `Quantity` or `Tag` - (optional) To this block. Defaults to the latest executed block. A `toBlock` below `fromBlock`, including the default start, returns `-32602`.
+   - `blockHash`: `Data`, 32 Bytes - (optional) Selects exactly the block with this hash, as in `eth_getLogs`, instead of a range. The result, including `[]`, is for that block, and address matching, `mode`, `after` and `count` apply as for a single-block range. Setting it together with `fromBlock` or `toBlock` returns `-32602`. A hash that does not name a canonical, executed block, including one reorganized out of the chain, returns `-32001`, even with `count` 0; a block below the prune boundary returns an error naming the boundary instead.
    - `fromAddress`: `Array` - (optional) Sent from these addresses.
    - `toAddress`: `Array` - (optional) Sent to these addresses.
    - `after`: `Quantity` - (optional) The offset trace number
@@ -6931,7 +6977,7 @@ Returns traces matching given filter
 
    The `'pending'` tag is not supported for either block bound and returns `-32602`: `trace_filter` scans committed trace history, which has no pending block.
 
-   A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. A block hash that names no known block returns an error.
+   A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. As in `eth_getLogs`, a bound is a block number or tag: a block hash or an EIP-1898 object returns `-32602`; use `blockHash` to select a block by hash. An explicit `null` for `blockHash`, `fromBlock` or `toBlock` is the same as omitting it.
 
 ```js
 params: [{
@@ -7833,7 +7879,7 @@ erigon \
   --caplin.discovery.addr=0.0.0.0 \
   --caplin.discovery.port=4000 \
   --caplin.discovery.tcpport=4001 \
-  --caplin.discovery.quicport=4001 \
+  --caplin.discovery.quicport=4002 \
   --beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse 
 ```
 
@@ -8251,9 +8297,9 @@ This list addresses the most common inquiries from the Erigon community, offerin
 
 27. **What is the difference between deleting `chaindata` and deleting the whole `datadir`?** `chaindata` is Erigon's small, mutable MDBX database (typically 15–20 GB, even on an archive node) holding recent state and sync progress. The `snapshots` directory holds the immutable historical data — roughly 95% of the total footprint. Deleting `chaindata` is recoverable but not free: Erigon re-derives state from the snapshots (re-downloading them if needed) and resyncs the post-snapshot tip from the consensus layer — a chain-tip resync, not an instant rebuild. Deleting the entire `datadir` also discards the snapshots and forces a full re-sync. When in doubt, delete only `chaindata`. See [Database](https://docs.erigon.tech/fundamentals/database).
 
-28. **My node has no peers or won't sync. Which ports do I need to open?** Erigon needs several ports reachable (both TCP and UDP where applicable): `30303`/`30304` (execution-layer P2P), `4000` and `4001` (Caplin consensus peering), and `42069` (BitTorrent snapshot download). Keep the RPC port (`8545`) bound to localhost and never expose it publicly. If your node is behind NAT, set `--nat` and `--caplin.nat` to `stun` or `upnp` and forward those ports on your router. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports) and [NAT](https://docs.erigon.tech/fundamentals/nat).
+28. **My node has no peers or won't sync. Which ports do I need to open?** Erigon needs several ports reachable (both TCP and UDP where applicable): `30303`/`30304` (execution-layer P2P), `4000`, `4001` and `4002` (Caplin consensus peering — discovery, TCP and QUIC respectively), and `42069` (BitTorrent snapshot download). Keep the RPC port (`8545`) bound to localhost and never expose it publicly. If your node is behind NAT, set `--nat` and `--caplin.nat` to `stun` or `upnp` and forward those ports on your router. If you can't open the QUIC port specifically, pass `--caplin.quic.disable` to fall back to TCP-only Caplin peering instead. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports) and [NAT](https://docs.erigon.tech/fundamentals/nat).
 
-29. **How do I reduce Erigon's memory use or stop it from being OOM-killed?** Erigon and the Go runtime size their memory and CPU use from the resources they can see, so on a shared or memory-constrained host you can make them more conservative: set `GOMEMLIMIT` (e.g. `GOMEMLIMIT=26GiB`), lower `GOGC` (e.g. `GOGC=80`), cap `GOMAXPROCS` (e.g. to half your cores), and reduce `--batchSize` (e.g. `--batchSize=256m`). See [Common Errors and Solutions](https://docs.erigon.tech/help-center/common-errors-and-solutions) and [Performance Tricks](https://docs.erigon.tech/fundamentals/performance-tricks).
+29. **How do I reduce Erigon's memory use or stop it from being OOM-killed?** Erigon and the Go runtime size their memory and CPU use from the resources they can see, so on a shared or memory-constrained host you can make them more conservative. Since 3.7 Erigon sets `GOMEMLIMIT` itself to 80% of the lower of RAM and the container memory limit, unless you set it (`GOMEMLIMIT=off` leaves the heap unbounded); set it explicitly to go lower (e.g. `GOMEMLIMIT=20GiB` on a 32 GB host), lower `GOGC` (e.g. `GOGC=80`), cap `GOMAXPROCS` (e.g. to half your cores), and reduce `--batchSize` (e.g. `--batchSize=256m`). See [Common Errors and Solutions](https://docs.erigon.tech/help-center/common-errors-and-solutions) and [Performance Tricks](https://docs.erigon.tech/fundamentals/performance-tricks).
 
 30. **Where do I report a security vulnerability?** Erigon is covered by the Ethereum Foundation's [Bug Bounty Program](https://ethereum.org/bug-bounty). Report security issues there so they can be handled responsibly — not via public Discord or GitHub issues. For non-security bugs, open a GitHub issue with logs and version info.
 
@@ -8333,11 +8379,14 @@ The ports to allow inbound:
 | P2P (execution layer) | 30303 | TCP+UDP |
 | Snapshot downloader (BitTorrent) | 42069 | TCP+UDP |
 | Caplin DISCV5 discovery | 4000 | UDP |
-| Caplin libp2p peering | 4001 | TCP+UDP |
+| Caplin libp2p peering (TCP) | 4001 | TCP |
+| Caplin libp2p peering (QUIC) | 4002 | UDP |
 
 This table is not exhaustive — it lists what a default node needs. See [Default ports](https://docs.erigon.tech/fundamentals/default-ports) for every port Erigon can open, including the opt-in Shutter port.
 
-The Caplin ports are its defaults (`--caplin.discovery.port`, `--caplin.discovery.tcpport`, and `--caplin.discovery.quicport`); change the rules to match if you override them. DISCV5 is UDP-only and runs on `4000`, while TCP and QUIC/UDP peering both default to the numeric port `4001`. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+The Caplin ports are its defaults (`--caplin.discovery.port`, `--caplin.discovery.tcpport`, and `--caplin.discovery.quicport`); change the rules to match if you override them. DISCV5 is UDP-only and runs on `4000`, TCP peering defaults to `4001`, and QUIC/UDP peering defaults to `4002`. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+
+If specifically the QUIC port (`4002`) cannot be opened — for example a Docker or Kubernetes setup where only the TCP peering port was published — pass `--caplin.quic.disable` to fall back to TCP-only peering instead of leaving it unreachable. This does not help if DISCV5 discovery's UDP port (`4000`) is also blocked: Caplin needs that port regardless of whether QUIC is enabled.
 
 Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure Cloud firewalls in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`; for dedicated servers the equivalent lives in the Robot panel under **Server → Firewall**.
 
@@ -8561,11 +8610,11 @@ This section details common error messages and provides clear, actionable steps 
 
 - **Cause:** This can be a genuine memory leak or, more commonly, a symptom of a disk I/O bottleneck. When the disk can't keep up with processing, memory usage can balloon as the system tries to buffer data. Erigon and the Go runtime also size their memory and CPU use from the resources they can *see*, so on a shared or memory-constrained host they may reserve more than is safe.
 
-- **Solution:** Ensure your system meets the recommended RAM requirements in [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements). To make Erigon more conservative on constrained hosts, set a hard memory ceiling and throttle the runtime:
+- **Solution:** Ensure your system meets the recommended RAM requirements in [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements). Since 3.7 Erigon already sets `GOMEMLIMIT` to 80% of the lower of RAM and the container memory limit unless you set it yourself. To make Erigon more conservative on constrained hosts, set a lower memory ceiling and throttle the runtime:
 
   ```bash
   # Export the runtime tunables, then pass --batchSize as an Erigon flag:
-  export GOMEMLIMIT=26GiB               # cap total Go heap (set below your physical/container limit)
+  export GOMEMLIMIT=20GiB               # cap total Go heap (e.g. below the 80% default on a 32 GB host)
   export GOGC=80                        # collect garbage more aggressively
   export GOMAXPROCS=$(( $(nproc) / 2 )) # show Erigon fewer cores → smaller RAM estimates
 

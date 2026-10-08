@@ -50,7 +50,7 @@ func Epoch(b abstract.BeaconStateBasic) uint64 {
 	return GetEpochAtSlot(b.BeaconConfig(), b.Slot())
 }
 
-func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, committeeIndex uint64, slotSignature common.Bytes96) bool {
+func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength uint64, slotSignature common.Bytes96) bool {
 	modulo := max(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
 	hashSlotSignatue := crypto.Sha256(slotSignature[:])
 	return binary.LittleEndian.Uint64(hashSlotSignatue[:8])%modulo == 0
@@ -553,7 +553,7 @@ func GetNextSyncCommitteeIndices(b *CachingBeaconState) ([]uint64, error) {
 	mixPosition := (epoch + conf.EpochsPerHistoricalVector - conf.MinSeedLookahead - 1) %
 		conf.EpochsPerHistoricalVector
 	mix := b.GetRandaoMix(int(mixPosition))
-	seed := shuffling.GetSeed(conf, mix, epoch, conf.DomainSyncCommittee)
+	seed := shuffling.GetSeed(mix, epoch, conf.DomainSyncCommittee)
 
 	indices := b.GetActiveValidatorsIndices(epoch)
 	return shuffling.ComputeBalanceWeightedSelection(b.BeaconState, indices, seed, conf.SyncCommitteeSize, true)

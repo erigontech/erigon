@@ -176,9 +176,8 @@ func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic s
 }
 
 func (c *columnDataPeers) pickPeerRoundRobin(
-	ctx context.Context,
 	req *solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier],
-) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], string, uint64, error) {
+) (*solid.ListSSZ[*cltypes.DataColumnsByRootIdentifier], string, error) {
 	c.peersMutex.Lock()
 	defer c.peersMutex.Unlock()
 
@@ -214,9 +213,9 @@ func (c *columnDataPeers) pickPeerRoundRobin(
 			// no matching columns
 			continue
 		}
-		return newReq, peer.pid, uint64(len(peer.mask)), nil
+		return newReq, peer.pid, nil
 	}
 
 	log.Trace("no good peer found", "peerCount", len(c.peersQueue))
-	return nil, "", 0, ErrNoGoodPeer
+	return nil, "", ErrNoGoodPeer
 }
