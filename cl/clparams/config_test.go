@@ -17,6 +17,7 @@
 package clparams
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -68,6 +69,31 @@ func TestCustomConfigUsesConfiguredBlockRequestWindow(t *testing.T) {
 	beaconCfg, _, err := CustomConfig(configPath)
 	require.NoError(t, err)
 	require.Equal(t, uint64(12_345), beaconCfg.MinEpochsForBlockRequests())
+}
+
+func TestCustomConfigBoundsMaxCommitteesPerSlot(t *testing.T) {
+	for _, test := range []struct {
+		committees uint64
+		wantErr    bool
+	}{
+		{committees: 64},
+		{committees: 65, wantErr: true},
+		{committees: 72, wantErr: true},
+	} {
+		t.Run(fmt.Sprint(test.committees), func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			yamlContent := fmt.Sprintf("MAX_COMMITTEES_PER_SLOT: %d\n", test.committees)
+			require.NoError(t, os.WriteFile(configPath, []byte(yamlContent), 0o644))
+
+			beaconCfg, _, err := CustomConfig(configPath)
+			if test.wantErr {
+				require.EqualError(t, err, fmt.Sprintf("MAX_COMMITTEES_PER_SLOT exceeds supported limit: %d > 64", test.committees))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.committees, beaconCfg.MaxCommitteesPerSlot)
+		})
+	}
 }
 
 func TestCustomConfigGasLimitSchedule(t *testing.T) {

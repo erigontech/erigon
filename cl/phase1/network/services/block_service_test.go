@@ -169,6 +169,100 @@ func TestBlockServiceIgnoreSlot(t *testing.T) {
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
 }
 
+// TestBlockServiceDoesNotIgnoreLateBlockAsFuture proves the future-slot check compares against the
+// wall-clock slot, not the head: a block for a slot that has already passed, arriving while the
+// head is still behind it, is not from the future.
+func TestBlockServiceDoesNotIgnoreLateBlockAsFuture(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.ErrorIs(t, err, ErrInvalidSignature)
+}
+
+func scheduledBlockCount(t *testing.T, service BlockService) int {
+	t.Helper()
+	count := 0
+	service.(*blockService).blocksScheduledForLaterExecution.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
+}
+
+// A late block whose proposer is past the head state's registry can only be checked against its
+// parent's state. While the parent is unknown it must be ignored, and not queued unverified.
+func TestBlockServiceIgnoresUnknownProposerWhileParentIsUnknown(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	block.Block.ProposerIndex = uint64(post.ValidatorLength())
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, scheduledBlockCount(t, blockService))
+}
+
+func TestBlockServiceRejectsUnknownProposerWhenParentIsKnown(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, forkchoiceMock := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	block.Block.ProposerIndex = uint64(post.ValidatorLength())
+	forkchoiceMock.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{block.Block.ParentRoot: {Slot: post.Slot()}}
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+// Only the unknown proposer is excused while the parent is unknown: a malformed signature is
+// still rejected.
+func TestBlockServiceRejectsMalformedSignatureWhileParentIsUnknown(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	for i := range block.Signature {
+		block.Signature[i] = 0xff
+	}
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
 func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
