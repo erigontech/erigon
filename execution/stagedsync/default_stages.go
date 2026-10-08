@@ -112,7 +112,7 @@ func DefaultStages(
 			Description: "Execute blocks w/o hash checks",
 			Disabled:    dbg.StagesOnlyBlocks,
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger)
+				return SpawnExecuteBlocksStage(s, u, sd, tx, exec.syncCfg.ExecStopAtBlock, ctx, exec, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)
@@ -216,7 +216,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 			ID:          stages.Execution,
 			Description: "Execute blocks w/o hash checks",
 			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
-				return SpawnExecuteBlocksStage(s, u, sd, tx, 0, ctx, exec, logger)
+				return SpawnExecuteBlocksStage(s, u, sd, tx, exec.syncCfg.ExecStopAtBlock, ctx, exec, logger)
 			},
 			Unwind: func(u *UnwindState, s *StageState, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
 				return UnwindExecutionStage(u, s, sd, tx, ctx, exec, logger)

@@ -265,6 +265,8 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.TxPoolGossipDisableFlag,
 	&SyncLoopBlockLimitFlag,
+	&SyncChainTipModeFlag,
+	&ExecStopAtBlockFlag,
 	&SyncLoopBreakAfterFlag,
 	&SyncParallelStateFlushing,
 

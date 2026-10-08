@@ -120,6 +120,16 @@ var (
 		Value: 5_000,
 	}
 
+	SyncChainTipModeFlag = cli.BoolFlag{
+		Name:  "sync.mode.chaintip",
+		Usage: "Execute frozen blocks like at the chain tip: one block per sync cycle, with per-block commitment and changesets",
+	}
+
+	ExecStopAtBlockFlag = cli.Uint64Flag{
+		Name:  "exec.stop-at-block",
+		Usage: "Stop the node after frozen-block execution reaches and commits this block (0 = off)",
+	}
+
 	SyncParallelStateFlushing = cli.BoolFlag{
 		Name:  "sync.parallel-state-flushing",
 		Usage: "Enables parallel state flushing",
@@ -300,6 +310,12 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	if limit := ctx.Uint(SyncLoopBlockLimitFlag.Name); limit > 0 {
 		cfg.Sync.LoopBlockLimit = limit
 	}
+	if ctx.Bool(SyncChainTipModeFlag.Name) {
+		cfg.Sync.ChainTipMode = true
+		cfg.Sync.LoopBlockLimit = 1
+		cfg.Sync.AlwaysGenerateChangesets = true
+	}
+	cfg.Sync.ExecStopAtBlock = ctx.Uint64(ExecStopAtBlockFlag.Name)
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 	if d := ctx.Duration(utils.SlowBlockThresholdFlag.Name); d >= 0 {
 		cfg.Sync.SlowBlockThreshold = &d

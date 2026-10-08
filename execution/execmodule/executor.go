@@ -111,8 +111,8 @@ func (pe *PipelineExecutor) RunUnwind(sd *execctx.SharedDomains, tx kv.TemporalR
 }
 
 // RunPrune executes pruning on the main pipeline.
-func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) (kv.FinalityContext, error) {
-	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader())
+func (pe *PipelineExecutor) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration, options ...execfinality.ResolveOption) (kv.FinalityContext, error) {
+	finalityCtx, err := execfinality.Resolve(tx, pe.sync.Cfg().MaxReorgDepth, initialCycle, pe.blockReader.TxnumReader(), options...)
 	if err != nil {
 		return nil, err
 	}
@@ -261,12 +261,18 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		}
 	}
 
+	chainTipMode := pe.sync.Cfg().ChainTipMode
 	var finalityCtx kv.FinalityContext
 	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
-		InitialCycle: true,
+		InitialCycle: !chainTipMode,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
+			var options []execfinality.ResolveOption
+			if chainTipMode {
+				// The stored finalized block can be far above the frozen blocks being replayed.
+				options = append(options, execfinality.WithoutFinalisedBlock())
+			}
 			var err error
-			finalityCtx, err = pe.RunPrune(ctx, rwtx, initialCycle, 0)
+			finalityCtx, err = pe.RunPrune(ctx, rwtx, initialCycle, 0, options...)
 			return err
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
@@ -295,6 +301,15 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			return newTx, newSD, nil
 		},
 		ShouldBreak: func(curTx kv.TemporalRwTx) (bool, error) {
+			if stopAt := pe.sync.Cfg().ExecStopAtBlock; stopAt > 0 {
+				p, err := stages.GetStageProgress(curTx, stages.Execution)
+				if err != nil {
+					return false, err
+				}
+				if p >= stopAt {
+					return true, nil
+				}
+			}
 			if pe.blockReader.FrozenBlocks() > 0 {
 				p, err := stages.GetStageProgress(curTx, stages.Finish)
 				if err != nil {
