@@ -17,6 +17,8 @@
 package hexutil
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -276,43 +278,56 @@ func TestEncodeHexMatchesStdlib(t *testing.T) {
 			src[i] = byte(r.Uint32())
 		}
 		want := hex.EncodeToString(src)
-		dst := make([]byte, 2*n)
+		dst := bytes.Repeat([]byte{0xa5}, 2*n+8)
 		encodeHex(dst, src)
-		require.Equal(t, want, string(dst), "len %d", n)
+		require.Equal(t, want+strings.Repeat("\xa5", 8), string(dst), "len %d", n)
 		require.Equal(t, `x"0x`+want+`"`, string(AppendQuoted([]byte("x"), src)), "len %d", n)
 		text, _ := Bytes(src).AppendText([]byte("x"))
 		require.Equal(t, "x0x"+want, string(text), "len %d", n)
 	}
 }
 
-// TestDecodeHexMatchesStdlib covers the SIMD block path and its fallbacks: every length around a
-// block boundary, both cases, and a bad character at each position.
+// requireDecodeMatchesStdlib compares the whole of an oversized dst, so a write past the decoded
+// prefix fails too.
+func requireDecodeMatchesStdlib(t *testing.T, src []byte, msgAndArgs ...any) {
+	t.Helper()
+	want, got := bytes.Repeat([]byte{0xa5}, len(src)/2+8), bytes.Repeat([]byte{0xa5}, len(src)/2+8)
+	wn, werr := hex.Decode(want, src)
+	gn, gerr := decodeHex(got, src)
+	require.Equal(t, werr, gerr, msgAndArgs...)
+	require.Equal(t, wn, gn, msgAndArgs...)
+	require.Equal(t, want, got, msgAndArgs...)
+}
+
+// TestDecodeHexMatchesStdlib covers the SIMD block path and its fallbacks: every pair of digits in
+// lower, upper and mixed case at both byte offsets, every length around a block boundary of both
+// parities, and a bad character at each position.
 func TestDecodeHexMatchesStdlib(t *testing.T) {
-	const digits = "0123456789abcdefABCDEF"
-	for n := 0; n <= 200; n++ {
-		src := make([]byte, 2*n)
-		for i := range src {
-			src[i] = digits[(i*7)%len(digits)]
-		}
-		want := make([]byte, n)
-		wn, werr := hex.Decode(want, src)
-		got := make([]byte, n)
-		gn, gerr := decodeHex(got, src)
-		require.Equal(t, werr, gerr, "len %d", n)
-		require.Equal(t, wn, gn, "len %d", n)
-		require.Equal(t, want, got, "len %d", n)
+	words := make([]byte, 0, 2<<16)
+	for v := range 1 << 16 {
+		words = binary.BigEndian.AppendUint16(words, uint16(v))
 	}
-	src := []byte(strings.Repeat("ab", 100))
-	for i := range src {
-		for b := range 256 {
-			bad := slices.Clone(src)
-			bad[i] = byte(b)
-			want, got := make([]byte, 100), make([]byte, 100)
-			wn, werr := hex.Decode(want, bad)
-			gn, gerr := decodeHex(got, bad)
-			require.Equal(t, werr, gerr, "byte %#02x at %d", b, i)
-			require.Equal(t, wn, gn, "byte %#02x at %d", b, i)
-			require.Equal(t, want[:wn], got[:gn], "byte %#02x at %d", b, i)
+	lower := []byte(hex.EncodeToString(words))
+	upper := bytes.ToUpper(lower)
+	mixed := slices.Clone(lower)
+	for i := 1; i < len(mixed); i += 2 {
+		mixed[i] = upper[i]
+	}
+	for _, src := range [][]byte{lower, upper, mixed} {
+		requireDecodeMatchesStdlib(t, src)
+		requireDecodeMatchesStdlib(t, append([]byte("00"), src...))
+		for n := 0; n <= 401; n++ {
+			requireDecodeMatchesStdlib(t, src[:n], "len %d", n)
+		}
+	}
+	for _, n := range []int{64, 65, 66, 67, 200, 201} {
+		src := []byte(strings.Repeat("ab", n)[:n])
+		for i := range src {
+			for b := range 256 {
+				bad := slices.Clone(src)
+				bad[i] = byte(b)
+				requireDecodeMatchesStdlib(t, bad, "len %d, byte %#02x at %d", n, b, i)
+			}
 		}
 	}
 }
