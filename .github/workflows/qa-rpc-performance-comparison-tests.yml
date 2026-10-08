@@ -407,6 +407,12 @@ jobs:
             sequence=$5
             client=$6
             label=${7:-$method} # names the results; set it to run the same method with another pattern
+            verbose=${8:-false}
+
+            verbose_flag=()
+            if [ "$verbose" == "true" ]; then
+              verbose_flag=(--verbose)
+            fi
 
             result_file=$client-$label-result.json
           
@@ -425,7 +431,7 @@ jobs:
                                       --test-report \
                                       --json-report $result_dir/$result_file \
                                       --testing-client $client \
-                                      --verbose 2>&1 | tee -a $output_log
+                                      "${verbose_flag[@]}" 2>&1 | tee -a $output_log
           
             # Capture test runner script exit status (use PIPESTATUS since we're piping to tee)
             perf_exit_status=${PIPESTATUS[0]}
@@ -508,11 +514,11 @@ jobs:
 
           # Launch the RPC performance test runner
 
-          #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client>
+          #run_perf <workspace> <chain> <method> <pattern> <load-sequence> <client> [label] [verbose]
           #run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
-          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_gen_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT eth_call_gen
-          run_perf "$RUNNER_WS" $CHAIN mixed stress_test_mixed_gen_latest 1:1,100:30,1000:20,3000:20 $CLIENT
-          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
+          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_gen_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT eth_call_gen false
+          run_perf "$RUNNER_WS" $CHAIN mixed stress_test_mixed_gen_latest 1:1,100:30,1000:20,3000:20 $CLIENT mixed true
+          run_perf "$RUNNER_WS" $CHAIN eth_call stress_test_eth_call_002_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT eth_call false
           #run_perf "$RUNNER_WS" $CHAIN eth_getProof stress_test_eth_getProof_001_latest 1:1,100:30,1000:20,10000:20,20000:20 $CLIENT
           
           # Move output.log to result_dir after all tests
