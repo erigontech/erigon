@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,6 +41,7 @@ import (
 	libkzg "github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
@@ -105,8 +107,6 @@ type remoteSource struct {
 // txpool doesn't start any goroutines - "leave concurrency to user" design
 // txpool has no DB-TX fields - "leave db transactions management to user" design
 // txpool has _chainDB field - but it must maximize local state cache hit-rate - and perform minimum _chainDB transactions
-//
-// It preserve TxnSlot objects immutable
 type TxPool struct {
 	_chainDB               kv.TemporalRoDB // remote db - use it wisely
 	_stateCache            kvcache.Cache
@@ -121,7 +121,7 @@ type TxPool struct {
 	//   - and as a result reducing lock contention
 	unprocessedRemoteTxns   *TxnSlots
 	unprocessedRemotePeers  []remoteSource                                  // per-slot peer source for KZG-fail kick
-	unprocessedRemoteByHash map[string]int                                  // to reject duplicates
+	unprocessedRemoteByHash map[string]*TxnSlot                             // to reject duplicates
 	byHash                  map[string]*metaTxn                             // txn_hash => txn : only those records not committed to db yet
 	discardReasonsLRU       *simplelru.LRU[string, txpoolcfg.DiscardReason] // txn_hash => discard_reason : non-persisted
 	pending                 *PendingPool
@@ -137,6 +137,7 @@ type TxPool struct {
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	chainConfig             *chain.Config
+	stateGeneration         uint64
 	lastSeenBlock           atomic.Uint64
 	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
@@ -246,7 +247,7 @@ func New(
 		chainID:                 *configChainID,
 		chainConfig:             chainConfig,
 		unprocessedRemoteTxns:   &TxnSlots{},
-		unprocessedRemoteByHash: map[string]int{},
+		unprocessedRemoteByHash: map[string]*TxnSlot{},
 		minedBlobTxnsByBlock:    map[uint64][]*metaTxn{},
 		minedBlobTxnsByHash:     map[string]*metaTxn{},
 		feeCalculator:           options.feeCalculator,
@@ -302,6 +303,9 @@ func (p *TxPool) start(ctx context.Context) error {
 
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.StateChangeBatch, unwindTxns, unwindBlobTxns, minedTxns TxnSlots) (err error) {
 	defer newBlockTimer.ObserveDuration(time.Now())
+	for _, txn := range unwindTxns.Txns {
+		p.recoverAuthorizations(txn)
+	}
 
 	coreDB, cache := p.chainDB()
 	cache.OnNewBlock(stateChanges)
@@ -348,6 +352,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 
 	p.lock.Lock()
+	p.stateGeneration++
 	defer func() {
 		if err == nil {
 			p.lastSeenBlock.Store(block)
@@ -406,7 +411,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView)
+	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -508,63 +513,29 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}()
 
 	defer processBatchTxnsTimer.ObserveDuration(time.Now())
-	coreDB, cache := p.chainDB()
-	coreTx, err := coreDB.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer coreTx.Rollback()
-	cacheView, err := cache.View(ctx, coreTx)
-	if err != nil {
-		return err
-	}
-
 	p.lock.Lock()
-	defer p.lock.Unlock()
+	batch := *p.unprocessedRemoteTxns
+	p.lock.Unlock()
 
-	l := len(p.unprocessedRemoteTxns.Txns)
-	if l == 0 {
-		p.hasUnprocessedRemoteTxns.Store(false)
-		return nil
-	}
+	// The main loop is the only consumer. Keep this prefix in the queue during
+	// recovery so duplicate detection still covers it and new arrivals can append.
+	_, err = p.addNewTxns(ctx, batch, true)
+	return err
+}
 
-	err = p.senders.registerNewSenders(p.unprocessedRemoteTxns, p.logger)
-	if err != nil {
-		return err
-	}
-	defer p.forgetUnusedSenders(senderIDsOf(p.unprocessedRemoteTxns))
-
-	validateReasons, newTxns, err := p.validateTxns(p.unprocessedRemoteTxns, cacheView)
-	if err != nil {
-		return err
-	}
-	p.kickKZGOffenders(ctx, validateReasons)
-
-	announcements, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
-		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
-	if err != nil {
-		return err
-	}
-
-	p.promoted.Reset()
-	p.promoted.AppendOther(announcements)
-
-	if p.promoted.Len() > 0 {
-		copied := p.promoted.Copy()
-		select {
-		case <-ctx.Done():
-			return nil
-		case p.newPendingTxns <- copied:
-		default:
+func (p *TxPool) removeProcessedRemoteTxns(n int) {
+	if n == len(p.unprocessedRemoteTxns.Txns) {
+		p.unprocessedRemoteByHash = make(map[string]*TxnSlot)
+	} else {
+		for _, txn := range p.unprocessedRemoteTxns.Txns[:n] {
+			delete(p.unprocessedRemoteByHash, string(txn.IDHash[:]))
 		}
 	}
-
-	p.unprocessedRemoteTxns.Resize(0)
-	p.hasUnprocessedRemoteTxns.Store(false)
-	p.unprocessedRemotePeers = p.unprocessedRemotePeers[:0]
-	p.unprocessedRemoteByHash = map[string]int{}
-
-	return nil
+	p.unprocessedRemoteTxns.Txns = slices.Delete(p.unprocessedRemoteTxns.Txns, 0, n)
+	p.unprocessedRemoteTxns.Senders = slices.Delete(p.unprocessedRemoteTxns.Senders, 0, n*length.Addr)
+	p.unprocessedRemoteTxns.IsLocal = slices.Delete(p.unprocessedRemoteTxns.IsLocal, 0, n)
+	p.unprocessedRemotePeers = slices.Delete(p.unprocessedRemotePeers, 0, n)
+	p.hasUnprocessedRemoteTxns.Store(len(p.unprocessedRemoteTxns.Txns) > 0)
 }
 
 // kickKZGOffenders drops the devp2p peer that delivered each KZG-failed blob txn.
@@ -631,8 +602,7 @@ func (p *TxPool) AppendAllAnnouncements(types []byte, sizes []uint32, hashes []b
 		sizes = append(sizes, txn.TxnSlot.Size)
 		hashes = append(hashes, hash...)
 	}
-	for hash, txIdx := range p.unprocessedRemoteByHash {
-		txnSlot := p.unprocessedRemoteTxns.Txns[txIdx]
+	for hash, txnSlot := range p.unprocessedRemoteByHash {
 		types = append(types, txnSlot.TxType())
 		sizes = append(sizes, txnSlot.Size)
 		hashes = append(hashes, hash...)
@@ -678,22 +648,14 @@ func (p *TxPool) FilterKnownIdHashes(tx kv.Tx, hashes Hashes) (unknownHashes Has
 	return unknownHashes, err
 }
 
-func (p *TxPool) getUnprocessedTxn(hashS string) (*TxnSlot, bool) {
-	if i, ok := p.unprocessedRemoteByHash[hashS]; ok {
-		return p.unprocessedRemoteTxns.Txns[i], true
-	}
-	return nil, false
-}
-
 func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTxn, error) {
-	hashS := string(hash)
-	if mt, ok := p.minedBlobTxnsByHash[hashS]; ok {
+	if mt, ok := p.minedBlobTxnsByHash[string(hash)]; ok {
 		return mt, nil
 	}
-	if txn, ok := p.getUnprocessedTxn(hashS); ok {
+	if txn, ok := p.unprocessedRemoteByHash[string(hash)]; ok {
 		return newMetaTxn(txn, false, 0), nil
 	}
-	if mt, ok := p.byHash[hashS]; ok {
+	if mt, ok := p.byHash[string(hash)]; ok {
 		return mt, nil
 	}
 	v, err := tx.GetOne(kv.PoolTransaction, hash)
@@ -997,7 +959,7 @@ func (p *TxPool) AddRemoteTxns(_ context.Context, newTxns TxnSlots, peerID PeerI
 		if ok {
 			continue
 		}
-		p.unprocessedRemoteByHash[hashS] = len(p.unprocessedRemoteTxns.Txns)
+		p.unprocessedRemoteByHash[hashS] = txn
 		p.unprocessedRemoteTxns.Append(txn, newTxns.Senders.At(i), false)
 		p.unprocessedRemotePeers = append(p.unprocessedRemotePeers, src)
 	}
@@ -1376,23 +1338,127 @@ func ValidateSerializedTxn(serializedTxn []byte) error {
 	return nil
 }
 
+func (p *TxPool) recoverAuthorizations(tx *TxnSlot) {
+	if tx.TxType() != SetCodeTxnType || tx.AuthAndNonces != nil {
+		return
+	}
+	auths := tx.Txn.GetAuthorizations()
+	authorities := make([]AuthAndNonce, 0, len(auths))
+	for i := range auths {
+		auth := &auths[i]
+		if !auth.ChainID.IsZero() && !auth.ChainID.Eq(&p.chainID) {
+			continue
+		}
+		authority, err := auth.RecoverSigner()
+		if err != nil {
+			continue
+		}
+		authorities = append(authorities, AuthAndNonce{authority, auth.Nonce})
+	}
+	tx.AuthAndNonces = authorities
+}
+
+func (p *TxPool) withLockedState(ctx context.Context, txns *TxnSlots, f func(kvcache.CacheView) error) error {
+	for {
+		p.lock.Lock()
+		coreDB, cache, generation := p._chainDB, p._stateCache, p.stateGeneration
+		p.lock.Unlock()
+
+		var retry bool
+		// The cache may wait for a block update, so open the view outside the pool lock.
+		err := coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
+			view, err := cache.View(ctx, coreTx)
+			if err != nil {
+				return err
+			}
+			p.lock.Lock()
+			defer p.lock.Unlock()
+			if generation != p.stateGeneration {
+				retry = true
+				return nil
+			}
+			if err := p.senders.registerNewSenders(txns, p.logger); err != nil {
+				return err
+			}
+			defer p.forgetUnusedSenders(senderIDsOf(txns))
+			return f(view)
+		})
+		if err != nil || !retry {
+			return err
+		}
+	}
+}
+
+// Precheck SetCode transactions under the pool lock, then recover their
+// authorization signers without it. The caller must validate the surviving
+// transactions again with a fresh state view before inserting them.
+func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
+	if err := txns.Valid(); err != nil {
+		return nil, err
+	}
+	var setCode TxnSlots
+	var indices []int
+	for i, txn := range txns.Txns {
+		if txn.TxType() == SetCodeTxnType {
+			setCode.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
+			indices = append(indices, i)
+		}
+	}
+	if len(indices) == 0 {
+		return nil, nil
+	}
+
+	var precheckReasons []txpoolcfg.DiscardReason
+	var goodTxns TxnSlots
+	err := p.withLockedState(ctx, &setCode, func(view kvcache.CacheView) error {
+		var err error
+		precheckReasons, goodTxns, err = p.validateTxns(&setCode, view, nil, nil)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	reasons := make([]txpoolcfg.DiscardReason, len(txns.Txns))
+	for i, index := range indices {
+		reasons[index] = precheckReasons[i]
+	}
+	for _, txn := range goodTxns.Txns {
+		p.recoverAuthorizations(txn)
+	}
+	return reasons, nil
+}
+
 // validateTxns returns per-slot discard reasons and the txns that passed.
-// For a remote (IsLocal=false) batch, validation short-circuits on the first
-// UnmatchedBlobTxExt: trailing reasons stay NotSet but those txns are not in
-// goodTxns, so callers reading reasons in isolation must also consult goodTxns
-// to distinguish "accepted" from "not validated".
-func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (reasons []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
-	// reasons is pre-sized for direct indexing, with the default zero
-	// value DiscardReason of NotSet
-	reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
+// A remote KZG failure skips later txns from that peer; with nil sources,
+// it skips all later remote txns. Skipped txns keep NotSet and are not returned.
+// Non-nil sources must be index-aligned with txns.
+func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
+	// Keep precheck failures; NotSet entries still need validation.
+	if reasons == nil {
+		reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
+	}
 
 	if err := txns.Valid(); err != nil {
 		return reasons, goodTxns, err
 	}
 
-	goodCount := 0
-	checkedCount := len(txns.Txns)
+	skipAllRemote := false
+	var kzgOffenders [][64]byte
+	isKZGOffender := func(i int) bool {
+		if skipAllRemote {
+			return true
+		}
+		if i >= len(sources) || sources[i].peerID == nil {
+			return false
+		}
+		return slices.Contains(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
+	}
+
 	for i, txn := range txns.Txns {
+		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && isKZGOffender(i)) {
+			continue
+		}
 		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache)
 		if err != nil {
 			if reason == txpoolcfg.ErrGetSenderInfo {
@@ -1403,7 +1469,7 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (rea
 			return reasons, goodTxns, err
 		}
 		if reason == txpoolcfg.Success {
-			goodCount++
+			goodTxns.Append(txn, txns.Senders.At(i), txns.IsLocal[i])
 			// Success here means no DiscardReason yet, so leave it NotSet
 			continue
 		}
@@ -1411,22 +1477,13 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView) (rea
 			p.punishSpammer(txn.SenderID)
 		}
 		reasons[i] = reason
-		// On first KZG-verify failure in a remote batch, drop the rest without re-verifying.
+		// On a KZG-verify failure in a remote batch, drop the rest from the same peer without re-verifying.
 		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
-			checkedCount = i + 1
-			break
-		}
-	}
-
-	goodTxns.Resize(uint(goodCount))
-
-	j := 0
-	for i := 0; i < checkedCount; i++ {
-		if reasons[i] == txpoolcfg.NotSet {
-			goodTxns.Txns[j] = txns.Txns[i]
-			goodTxns.IsLocal[j] = txns.IsLocal[i]
-			copy(goodTxns.Senders.At(j), txns.Senders.At(i))
-			j++
+			if i < len(sources) && sources[i].peerID != nil {
+				kzgOffenders = append(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
+			} else {
+				skipAllRemote = true
+			}
 		}
 	}
 	return reasons, goodTxns, nil
@@ -1466,58 +1523,59 @@ func fillDiscardReasons(reasons []txpoolcfg.DiscardReason, newTxns TxnSlots, dis
 }
 
 func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error) {
-	coreDb, cache := p.chainDB()
-	coreTx, err := coreDb.BeginTemporalRo(ctx)
+	return p.addNewTxns(ctx, newTxns, false)
+}
+
+func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQueue bool) ([]txpoolcfg.DiscardReason, error) {
+	reasons, err := p.prepareAuthorizations(ctx, newTxns)
 	if err != nil {
 		return nil, err
 	}
-	defer coreTx.Rollback()
-
-	cacheView, err := cache.View(ctx, coreTx)
-	if err != nil {
-		return nil, err
-	}
-
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	if err := p.senders.registerNewSenders(&newTxns, p.logger); err != nil {
-		return nil, err
-	}
-	defer p.forgetUnusedSenders(senderIDsOf(&newTxns))
-
-	originalTxns := newTxns
-
-	reasons, goodTxns, err := p.validateTxns(&newTxns, cacheView)
-	if err != nil {
-		return nil, err
-	}
-
-	announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns,
-		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
-	if err != nil {
-		return nil, err
-	}
-	// reasons is indexed by originalTxns; addReasons is indexed by goodTxns.
-	// Walk reasons and advance j only on slots that survived validation.
-	for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
-		if reasons[i] != txpoolcfg.NotSet {
-			continue
+	err = p.withLockedState(ctx, &newTxns, func(cacheView kvcache.CacheView) error {
+		var sources []remoteSource
+		if fromRemoteQueue {
+			sources = p.unprocessedRemotePeers[:len(newTxns.Txns)]
 		}
-		if addReasons[j] != txpoolcfg.NotSet {
+		validatedReasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, reasons, sources)
+		if err != nil {
+			return err
+		}
+		reasons = validatedReasons
+		if fromRemoteQueue {
+			p.kickKZGOffenders(ctx, reasons)
+		}
+
+		announcements, addReasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, goodTxns,
+			p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
+		if err != nil {
+			return err
+		}
+		// reasons is indexed by newTxns; addReasons is indexed by goodTxns.
+		// Walk reasons and advance j only on slots that survived validation.
+		for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
+			if reasons[i] != txpoolcfg.NotSet || newTxns.Txns[i] != goodTxns.Txns[j] {
+				continue
+			}
 			reasons[i] = addReasons[j]
+			j++
 		}
-		j++
-	}
-	p.promoted.Reset()
-	p.promoted.AppendOther(announcements)
+		p.promoted.Reset()
+		p.promoted.AppendOther(announcements)
 
-	reasons = fillDiscardReasons(reasons, originalTxns, p.discardReasonsLRU)
-	if p.promoted.Len() > 0 {
-		select {
-		case p.newPendingTxns <- p.promoted.Copy():
-		default:
+		reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
+		if p.promoted.Len() > 0 {
+			select {
+			case p.newPendingTxns <- p.promoted.Copy():
+			default:
+			}
 		}
+		if fromRemoteQueue {
+			p.removeProcessedRemoteTxns(len(newTxns.Txns))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return reasons, nil
 }
@@ -1622,7 +1680,6 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 		mt := newMetaTxn(txn, newTxns.IsLocal[i], blockNum)
 		if reason := p.addLocked(mt, &announcements); reason != txpoolcfg.NotSet {
 			p.deletedTxns = append(p.deletedTxns, mt)
-			p.discardReasonsLRU.Add(string(mt.TxnSlot.IDHash[:]), reason)
 			continue
 		}
 		sendersWithChangedState[mt.TxnSlot.SenderID] = struct{}{}
@@ -1804,6 +1861,9 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			// Self authorization nonce should be senderNonce + 1
 			if a.authority == senderAddr && a.nonce != mt.TxnSlot.Nonce+1 {
 				p.logger.Debug("Self authorization nonce should be senderNonce + 1", "authority", a.authority, "txn", fmt.Sprintf("%x", mt.TxnSlot.IDHash))
+				// This pool rule is stricter than execution. Its rejection depends only on
+				// the transaction, so cache it to avoid repeating authorization recovery.
+				p.discardReasonsLRU.Add(string(mt.TxnSlot.IDHash[:]), txpoolcfg.NonceTooLow)
 				return txpoolcfg.NonceTooLow
 			}
 			if owner, ok := p.auths[AuthAndNonce{a.authority, a.nonce}]; ok && owner != found {
@@ -1825,6 +1885,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 
 	hashStr := string(mt.TxnSlot.IDHash[:])
 	p.byHash[hashStr] = mt
+	p.discardReasonsLRU.Remove(hashStr)
 
 	if replaced := p.all.replaceOrInsert(mt, p.logger); replaced != nil {
 		if dbg.AssertEnabled {
@@ -2746,6 +2807,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) err
 		if reason != txpoolcfg.NotSet && reason != txpoolcfg.Success {
 			continue
 		}
+		p.recoverAuthorizations(txn)
 		txns.Resize(uint(i + 1))
 		txns.Txns[i] = txn
 		txns.IsLocal[i] = isLocalTx
