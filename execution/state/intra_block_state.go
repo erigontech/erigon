@@ -1601,25 +1601,43 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		// created stateObjects: original holds the pre-creation snapshot,
 		// and deleting CodePath/CodeHashPath writes would corrupt the trie.
 		matchesOriginal := !stateObject.newlyCreated && codeHash == origHash
-		if codeHash == baseCodeHash || matchesOriginal {
-			if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+		unchanged := codeHash == baseCodeHash || matchesOriginal
+		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+			if unchanged {
 				fmt.Printf("%d (%d.%d) SetCode SKIP (matches base) %x codeHash=%x baseHash=%x originalHash=%x codeLen=%d\n",
 					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, stateObject.original.CodeHash, len(code))
-			}
-			ibs.versionedWrites.DelCode(addr)
-			ibs.versionedWrites.DelCodeHash(addr)
-			ibs.versionedWrites.DelCodeSize(addr)
-		} else {
-			if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
+			} else {
 				fmt.Printf("%d (%d.%d) SetCode WRITE %x codeHash=%x baseHash=%x codeLen=%d\n",
 					ibs.blockNum, ibs.txIndex, ibs.version, addr, codeHash, baseCodeHash, len(code))
 			}
-			ibs.recordWriteCode(addr, canonical)
-			ibs.recordWriteCodeHash(addr, codeHash)
-			ibs.recordWriteCodeSize(addr, canonical.Len())
 		}
+		ibs.writeCode(addr, canonical, unchanged)
 	}
 	return nil
+}
+
+// writeCode records code as this tx's Code, CodeHash and CodeSize writes, or
+// drops those writes when the code is unchanged.
+func (ibs *IntraBlockState) writeCode(addr accounts.Address, code accounts.Code, unchanged bool) {
+	if unchanged {
+		ibs.versionedWrites.DelCode(addr)
+		ibs.versionedWrites.DelCodeHash(addr)
+		ibs.versionedWrites.DelCodeSize(addr)
+		return
+	}
+	ibs.recordWriteCode(addr, code)
+	ibs.recordWriteCodeHash(addr, code.Hash)
+	ibs.recordWriteCodeSize(addr, code.Len())
+}
+
+// journalCodeChange journals a code change and calls the tracing hooks.
+func (ibs *IntraBlockState) journalCodeChange(addr accounts.Address, prevHash accounts.CodeHash, prevCode []byte, code accounts.Code, wasCommited bool, reason tracing.CodeChangeReason) {
+	ibs.journal.codeChange(addr, prevCode, prevHash, wasCommited)
+	if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChangeV2 != nil {
+		ibs.tracingHooks.OnCodeChangeV2(addr, prevHash, prevCode, code.Hash, code.Bytes, reason)
+	} else if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChange != nil {
+		ibs.tracingHooks.OnCodeChange(addr, prevHash, prevCode, code.Hash, code.Bytes)
+	}
 }
 
 // setCreatedCode is SetCode for an account this tx created, on the noMaterialize
@@ -1637,21 +1655,8 @@ func (ibs *IntraBlockState) setCreatedCode(addr accounts.Address, code accounts.
 	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
 		return nil
 	}
-	ibs.journal.codeChange(addr, prev.Bytes, prev.Hash, !ibs.hasWrite(addr, CodePath, accounts.NilKey))
-	if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChangeV2 != nil {
-		ibs.tracingHooks.OnCodeChangeV2(addr, prev.Hash, prev.Bytes, code.Hash, code.Bytes, reason)
-	} else if ibs.tracingHooks != nil && ibs.tracingHooks.OnCodeChange != nil {
-		ibs.tracingHooks.OnCodeChange(addr, prev.Hash, prev.Bytes, code.Hash, code.Bytes)
-	}
-	if code.Hash == baseCodeHash {
-		ibs.versionedWrites.DelCode(addr)
-		ibs.versionedWrites.DelCodeHash(addr)
-		ibs.versionedWrites.DelCodeSize(addr)
-		return nil
-	}
-	ibs.recordWriteCode(addr, code)
-	ibs.recordWriteCodeHash(addr, code.Hash)
-	ibs.recordWriteCodeSize(addr, code.Len())
+	ibs.journalCodeChange(addr, prev.Hash, prev.Bytes, code, !ibs.hasWrite(addr, CodePath, accounts.NilKey), reason)
+	ibs.writeCode(addr, code, code.Hash == baseCodeHash)
 	return nil
 }
 
