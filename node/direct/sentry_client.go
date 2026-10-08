@@ -214,23 +214,21 @@ func (c *SentryClientDirect) Messages(ctx context.Context, in *sentryproto.Messa
 	in = &sentryproto.MessagesRequest{
 		Ids: filterIds(in.Ids, c.protocol),
 	}
-	ch := make(chan libsentry.StreamReply[*sentryproto.InboundMessage], libsentry.MessagesQueueSize)
-	streamServer := &libsentry.SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}
+	streamServer, streamClient := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
 	go func() {
-		defer close(ch)
+		defer streamServer.Close()
 		streamServer.Err(c.server.Messages(in, streamServer))
 	}()
-	return &libsentry.SentryStreamC[*sentryproto.InboundMessage]{Ch: ch, Ctx: ctx}, nil
+	return streamClient, nil
 }
 
 func (c *SentryClientDirect) PeerEvents(ctx context.Context, in *sentryproto.PeerEventsRequest, opts ...grpc.CallOption) (sentryproto.Sentry_PeerEventsClient, error) {
-	ch := make(chan libsentry.StreamReply[*sentryproto.PeerEvent], libsentry.MessagesQueueSize)
-	streamServer := &libsentry.SentryStreamS[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}
+	streamServer, streamClient := libsentry.NewSentryStream[*sentryproto.PeerEvent](ctx)
 	go func() {
-		defer close(ch)
+		defer streamServer.Close()
 		streamServer.Err(c.server.PeerEvents(in, streamServer))
 	}()
-	return &libsentry.SentryStreamC[*sentryproto.PeerEvent]{Ch: ch, Ctx: ctx}, nil
+	return streamClient, nil
 }
 
 func (c *SentryClientDirect) AddPeer(ctx context.Context, in *sentryproto.AddPeerRequest, opts ...grpc.CallOption) (*sentryproto.AddPeerReply, error) {
