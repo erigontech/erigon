@@ -134,7 +134,7 @@ but miss these real-world patterns:
 `debug_traceTransaction` for their blocks (they stay out of the repo):
 
 ```bash
-go run ./cmd/evm txfixture --rpc http://127.0.0.1:8545 --list execution/vm/benchmark/testdata/mainnet_txs.txt
+go run ./cmd/evm fixture --rpc http://127.0.0.1:8545 --list execution/vm/benchmark/testdata/mainnet_txs.txt
 go test -run '^$' -bench BenchmarkMainnetTx -count 10 ./execution/vm/benchmark/
 ```
 

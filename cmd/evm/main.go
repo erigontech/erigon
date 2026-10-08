@@ -218,7 +218,7 @@ func init() {
 		&transactionTestCommand,
 		&difficultyTestCommand,
 		&stateTransitionCommand,
-		&txFixtureCommand,
+		&fixtureCommand,
 	}
 }
 

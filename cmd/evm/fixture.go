@@ -49,9 +49,9 @@ var (
 	}
 )
 
-var txFixtureCommand = cli.Command{
+var fixtureCommand = cli.Command{
 	Action:    fetchTxCmd,
-	Name:      "txfixture",
+	Name:      "fixture",
 	Usage:     "downloads what replaying a transaction needs (tx, receipt, block header, prestate) for the vm benchmarks",
 	ArgsUsage: "<txhash>...",
 	Flags:     []cli.Flag{&FetchRPCFlag, &FetchOutFlag, &FetchListFlag},
