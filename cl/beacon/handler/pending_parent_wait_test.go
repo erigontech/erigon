@@ -69,9 +69,33 @@ func TestGloasPendingParentDeadline(t *testing.T) {
 	require.Equal(t, slotStart.Add(1500*time.Millisecond), gloasPendingParentDeadline(slotStart, slotStart, slot))
 	require.Equal(t, slotStart.Add(1000*time.Millisecond), gloasPendingParentDeadline(slotStart.Add(-500*time.Millisecond), slotStart, slot))
 	require.Equal(t, slotStart.Add(2*time.Second), gloasPendingParentDeadline(slotStart.Add(time.Second), slotStart, slot))
-	require.Equal(t, slotStart.Add(3*time.Second), gloasPendingParentDeadline(slotStart.Add(3*time.Second), slotStart, slot))
+	// Past the cutoff the wait still allows one retry.
+	require.Equal(t, slotStart.Add(3500*time.Millisecond), gloasPendingParentDeadline(slotStart.Add(3*time.Second), slotStart, slot))
 
 	shortSlot := 6 * time.Second
 	require.Equal(t, slotStart.Add(750*time.Millisecond), gloasPendingParentDeadline(slotStart, slotStart, shortSlot))
 	require.Equal(t, slotStart.Add(time.Second), gloasPendingParentDeadline(slotStart.Add(500*time.Millisecond), slotStart, shortSlot))
+}
+
+func TestAwaitGloasPayloadSourceDoesNotWaitForABlockedResolve(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	resolve := func() (executionPayloadSource, error) {
+		<-release
+		return executionPayloadSource{gloasPath: gloasPayloadPathFull}, nil
+	}
+	last := executionPayloadSource{gloasPath: gloasPayloadPathAwaitingEnvelope}
+	start := time.Now()
+	src := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Millisecond, last, resolve)
+	require.Equal(t, last, src)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
+}
+
+// Preparation treats an EMPTY head with a parked envelope as EMPTY and primes that fallback;
+// only production waits on it.
+func TestAwaitingEnvelopePathIsUndecidedOnlyForProduction(t *testing.T) {
+	require.True(t, gloasPayloadPathAwaitingEnvelope.undecided())
+	require.True(t, gloasPayloadPathPending.undecided())
+	require.False(t, gloasPayloadPathEmpty.undecided())
+	require.False(t, gloasPathRequiresForkChoiceUpdate(gloasPayloadPathAwaitingEnvelope))
 }
