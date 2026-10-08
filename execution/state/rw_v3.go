@@ -1217,21 +1217,11 @@ func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 }
 
 func (c *BlockStateCache) GetCurrentAccountDecoded(addr accounts.Address) (*accounts.Account, bool) {
-	c.mu.RLock()
-	cur, written := c.currentAccounts[addr]
-	c.mu.RUnlock()
-	if written {
-		if cur == deletedAccount {
-			return nil, true
-		}
-		result := cur
-		return &result, true
-	}
-	acc, ok := c.GetCommittedAccount(addr)
-	if !ok || acc == nil {
+	acc, ok := c.GetCurrentAccount(addr)
+	if !ok || acc == deletedAccount {
 		return nil, ok
 	}
-	result := *acc
+	result := acc
 	return &result, true
 }
 

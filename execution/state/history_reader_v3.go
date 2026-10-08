@@ -154,20 +154,11 @@ func StateHistoryStartTxNum(ttx kv.TemporalTx) uint64 {
 
 func (hr *HistoryReaderV3) DiscardReadList() {}
 
-func (hr *HistoryReaderV3) cachedAccount(address accounts.Address) (accounts.Account, bool) {
-	if hr.blockCache == nil {
-		return accounts.Account{}, false
-	}
-	return hr.blockCache.GetCurrentAccount(address)
-}
-
 func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	if acc, hit := hr.cachedAccount(address); hit {
-		if acc == deletedAccount {
-			return nil, nil
+	if hr.blockCache != nil {
+		if acc, hit := hr.blockCache.GetCurrentAccountDecoded(address); hit {
+			return acc, nil
 		}
-		result := acc
-		return &result, nil
 	}
 	hr.addr = address.Value()
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
@@ -188,8 +179,10 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 }
 
 func (hr *HistoryReaderV3) HasAccount(address accounts.Address) (bool, error) {
-	if acc, hit := hr.cachedAccount(address); hit {
-		return acc != deletedAccount, nil
+	if hr.blockCache != nil {
+		if acc, hit := hr.blockCache.GetCurrentAccount(address); hit {
+			return acc != deletedAccount, nil
+		}
 	}
 	hr.addr = address.Value()
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
