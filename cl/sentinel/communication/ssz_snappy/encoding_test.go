@@ -144,6 +144,6 @@ func TestDecodeAndReadNoForkDigestDoesNotPreallocateDeclaredLength(t *testing.T)
 	runtime.ReadMemStats(&before)
 	err := DecodeAndReadNoForkDigest(bytes.NewReader(header), &cltypes.BeaconBlocksByRangeRequest{}, clparams.Phase0Version)
 	runtime.ReadMemStats(&after)
-	require.Error(t, err)
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
 	require.Less(t, after.TotalAlloc-before.TotalAlloc, uint64(datasize.MB))
 }
