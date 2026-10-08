@@ -1548,7 +1548,8 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		canonical = accounts.NewCode(code)
 		ibs.lastCode = canonical
 	}
-	if ibs.noMaterialize && ibs.createdLiveThisTx(addr) {
+	// A live account this tx created: no own self-destruct, and createObject wrote its AddressPath.
+	if ibs.noMaterialize && !ibs.warmReadable(addr) && ibs.hasWrite(addr, AddressPath, accounts.NilKey) && !ibs.accountLifecycle(addr) {
 		return ibs.setCreatedCode(addr, canonical, reason)
 	}
 	stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -1619,11 +1620,6 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 		}
 	}
 	return nil
-}
-
-// createdLiveThisTx reports whether this tx created addr and has not self-destructed it.
-func (ibs *IntraBlockState) createdLiveThisTx(addr accounts.Address) bool {
-	return !ibs.warmReadable(addr) && ibs.hasWrite(addr, AddressPath, accounts.NilKey) && !ibs.accountLifecycle(addr)
 }
 
 // setCreatedCode is SetCode for an account this tx created, on the noMaterialize
