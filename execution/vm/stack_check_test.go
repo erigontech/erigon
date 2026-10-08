@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -121,16 +120,6 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 		}
 	}
 	for i, jt := range tables {
-		// From EIP-2929 on, opSloadEIP2929 charges SLOAD's dynamic gas.
-		if sload := &jt[SLOAD]; sload.gasExecute != nil || sload.constantGas == 0 {
-			require.Equal(t, reflect.ValueOf(opSloadEIP2929).Pointer(), reflect.ValueOf(sload.gasExecute).Pointer(), "table %d SLOAD", i)
-		}
-		// run inlines the copy of the func vmgen found for the op, whatever the table holds.
-		for op, want := range gasExecuteOps {
-			if jt[op].gasExecute != nil {
-				require.Equal(t, reflect.ValueOf(want).Pointer(), reflect.ValueOf(jt[op].gasExecute).Pointer(), "table %d %s", i, op)
-			}
-		}
 		for op, w := range fastPathOps {
 			got := &jt[op]
 			if w.execute != nil {
@@ -153,13 +142,13 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 			require.Equal(t, w.numPop, got.numPop, "table %d %s numPop", i, op)
 			require.Equal(t, w.numPush, got.numPush, "table %d %s numPush", i, op)
 			if w.memorySize == nil {
-				require.Nil(t, got.gasExecute, "table %d %s gasExecute", i, op)
-				require.False(t, got.usesMemory, "table %d %s usesMemory", i, op)
+				require.Nil(t, got.dynamicGas, "table %d %s dynamicGas", i, op)
+				require.Nil(t, got.memorySize, "table %d %s memorySize", i, op)
 				continue
 			}
 			// Memory that need not grow costs no dynamic gas.
-			require.Equal(t, reflect.ValueOf(map[OpCode]gasExecuteFunc{MLOAD: opMloadWithGas, MSTORE: opMstoreWithGas}[op]).Pointer(), reflect.ValueOf(got.gasExecute).Pointer(), "table %d %s gasExecute", i, op)
-			require.True(t, got.usesMemory, "table %d %s usesMemory", i, op)
+			require.Equal(t, reflect.ValueOf(pureMemoryGascost).Pointer(), reflect.ValueOf(got.dynamicGas).Pointer(), "table %d %s dynamicGas", i, op)
+			require.Equal(t, reflect.ValueOf(w.memorySize).Pointer(), reflect.ValueOf(got.memorySize).Pointer(), "table %d %s memorySize", i, op)
 		}
 	}
 }
@@ -257,12 +246,6 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
-		// Warm slots with values, so a frame-cache hit fits in the gas sweep and shows its value.
-		for k, v := range map[uint64]uint64{1: 0xaa, 2: 0xbb} {
-			key := accounts.InternKey(uint256.NewInt(k).Bytes32())
-			require.NoError(t, ibs.SetState(accounts.ZeroAddress, key, *uint256.NewInt(v)))
-			ibs.AddSlotToAccessList(accounts.ZeroAddress, key)
-		}
 		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 		c.Code = code
@@ -306,37 +289,6 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		// A failed frame returns no data, whatever the last CALL returned.
 		"callthenbadjump": {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL), byte(PUSH1), 0, byte(JUMP)},
 		"callthenend":     {byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 32, byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 4, byte(GAS), byte(CALL)},
-		// Slots 1 and 2 are warm and set, slot 3 is cold.
-		"sload":      prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, ADD, PUSH1, 2, SLOAD),
-		"sloadcold":  prog(PUSH1, 1, SLOAD, PUSH1, 1, SLOAD, PUSH1, 3, SLOAD),
-		"sloadunder": {byte(SLOAD)},
-		// Each op grows the memory past what the ops before it touched.
-		"memops": prog(PUSH1, 40, PUSH1, 0, KECCAK256, PUSH1, 4, PUSH1, 0, PUSH1, 70, CALLDATACOPY, PUSH1, 8, PUSH1, 2, PUSH1, 110, CODECOPY,
-			PUSH1, 0xaa, PUSH1, 140, MSTORE8, PUSH1, 32, PUSH1, 0, PUSH1, 170, MCOPY, PUSH1, 0, PUSH1, 0, PUSH1, 230, RETURNDATACOPY,
-			PUSH1, 7, PUSH1, 9, PUSH1, 200, LOG1, PUSH1, 250, MLOAD, PUSH1, 0xbb, PUSH2, 1, 0x20, MSTORE, MSIZE, DUP1, DUP1),
-		"memlog":    prog(PUSH1, 1, PUSH1, 2, PUSH1, 3, PUSH1, 4, PUSH1, 50, PUSH1, 100, LOG4, PUSH1, 0, PUSH1, 0, LOG0, MSIZE, DUP1, DUP1, DUP1),
-		"keccakbig": prog(PUSH8, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, PUSH1, 0, KECCAK256),
-		"copybig":   prog(PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 0, PUSH1, 0, CALLDATACOPY),
-		"revertmem": {byte(PUSH1), 64, byte(PUSH1), 200, byte(REVERT)},
-		"returnbig": {byte(PUSH8), 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, byte(PUSH1), 0, byte(RETURN)},
-		"exp":       prog(PUSH1, 200, PUSH1, 3, EXP, PUSH2, 1, 0, PUSH1, 2, EXP, PUSH1, 0, PUSH1, 5, EXP, DUP1),
-		"extcodecopy": prog(PUSH1, 10, PUSH1, 0, PUSH1, 40, PUSH1, 0x20, EXTCODECOPY, PUSH1, 5, PUSH1, 0, PUSH1, 0, PUSH1, 0, EXTCODECOPY,
-			MSIZE, DUP1, DUP1, DUP1),
-		// Slot 3 is unset: storing to it creates it, and zeroing it again deletes it.
-		"sstore": prog(PUSH1, 0xaa, PUSH1, 1, SSTORE, PUSH1, 0, PUSH1, 2, SSTORE, PUSH1, 7, PUSH1, 3, SSTORE, PUSH1, 0, PUSH1, 3, SSTORE,
-			PUSH1, 1, SLOAD, PUSH1, 2, SLOAD, PUSH1, 3, SLOAD, DUP1),
-		"selfdestruct": {byte(PUSH1), 0x20, byte(SELFDESTRUCT)},
-		// Each call reads 32 bytes past the memory and writes 32 bytes further on.
-		"calls": prog(PUSH1, 32, PUSH1, 64, PUSH1, 32, PUSH1, 0, PUSH1, 4, GAS, STATICCALL, PUSH1, 32, PUSH1, 128, PUSH1, 32, PUSH1, 96, PUSH1, 4, GAS, DELEGATECALL,
-			PUSH1, 32, PUSH1, 192, PUSH1, 32, PUSH1, 160, PUSH1, 0, PUSH1, 4, GAS, CALLCODE, DUP1),
-		"create": prog(PUSH1, 0, PUSH1, 0, PUSH1, 0, CREATE, PUSH1, 7, PUSH1, 0, PUSH1, 0, PUSH1, 0, CREATE2, DUP1, DUP1),
-		// The zero address is warm, 0x20 and 0x21 are cold.
-		"account":     prog(PUSH1, 0x20, BALANCE, PUSH1, 0x20, EXTCODESIZE, PUSH1, 0x21, EXTCODEHASH, PUSH1, 0x21, BALANCE, PUSH1, 0x22, EXTCODESIZE),
-		"accountwarm": prog(PUSH1, 0, BALANCE, PUSH1, 0, EXTCODESIZE, PUSH1, 0, EXTCODEHASH, DUP1),
-	}
-	for _, op := range []OpCode{BALANCE, EXTCODESIZE, EXTCODEHASH} {
-		programs["under"+op.String()] = []byte{byte(op)}
-		programs["end"+op.String()] = []byte{byte(PUSH1), 0x20, byte(op)}
 	}
 	for op, w := range fastPathOps {
 		if w.numPop > 0 {
@@ -392,70 +344,5 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			got, _ := runOnce(code, gas, false)
 			require.Equal(t, want, got, "%s at gas %d", name, gas)
 		}
-	}
-}
-
-// TestRunUsesGasExecute pins that runTraced runs an op's gasExecute with the trace,
-// and run the generated copy without it, in place of the gas func and execute.
-func TestRunUsesGasExecute(t *testing.T) {
-	t.Parallel()
-	for _, traced := range []bool{false, true} {
-		t.Run(fmt.Sprintf("traced=%v", traced), func(t *testing.T) {
-			ibs := state.New(state.NewNoopReader())
-			defer ibs.Close()
-			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-			table := *evm.jt
-			called := false
-			table[SLOAD].gasExecute = func(pc uint64, evm *EVM, scope *CallContext, tr *opTrace) (uint64, []byte, error) {
-				called = tr != nil
-				return opSloadEIP2929(pc, evm, scope, tr)
-			}
-			evm.jt = &table
-			c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
-			c.Code = []byte{byte(PUSH1), 1, byte(SLOAD)}
-			f := evm.run
-			if traced {
-				f = evm.runTraced
-			}
-			_, left, _, err := f(*c, mdgas.MdGas{Execution: 10_000}, nil, false, false, false)
-			require.NoError(t, err)
-			require.Equal(t, traced, called)
-			require.Equal(t, 10_000-3-coldStorageAccessCost(evm.chainRules), left.Execution)
-		})
-	}
-}
-
-// TestRunTracedFrameDoesNotAllocate pins that a traced frame keeps its trace state off the heap.
-func TestRunTracedFrameDoesNotAllocate(t *testing.T) {
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Close()
-	hooks := &tracing.Hooks{OnOpcode: func(uint64, byte, uint64, uint64, tracing.OpContext, []byte, int, error) {}}
-	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
-	c := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
-	c.Code = []byte{byte(PUSH1), 1, byte(POP)}
-	var err error
-	allocs := testing.AllocsPerRun(100, func() {
-		_, _, _, err = evm.runTraced(c, mdgas.MdGas{Execution: 10_000}, nil, false, true, false)
-	})
-	require.NoError(t, err)
-	require.Zero(t, allocs)
-}
-
-// TestGasFuncErrorIsOutOfGas pins that an op whose gas func fails runs out of gas, keeping the cause.
-func TestGasFuncErrorIsOutOfGas(t *testing.T) {
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Close()
-	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-	c := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
-	// The memory gas overflows past 0x1FFFFFFFE0 bytes.
-	c.Code = []byte{byte(PUSH5), 0x20, 0, 0, 0, 0, byte(MLOAD)}
-	for _, traced := range []bool{false, true} {
-		f := evm.run
-		if traced {
-			f = evm.runTraced
-		}
-		_, _, _, err := f(c, mdgas.MdGas{Execution: 1_000_000}, nil, false, false, false)
-		require.ErrorIs(t, err, ErrOutOfGas, "traced=%v", traced)
-		require.ErrorIs(t, err, ErrGasUintOverflow, "traced=%v", traced)
 	}
 }

@@ -16,8 +16,7 @@
 
 // vmgen writes run in vm_run_gen.go from runTraced in interpreter.go: the
 // same loop with anyTrace false and the fast-path switch, whose cases inline
-// the fastOps' execute funcs from instructions.go. Next to run it writes a copy
-// without the trace of each func that takes one. It also writes
+// the fastOps' execute funcs from instructions.go. It also writes
 // fast_path_gen_test.go. With -check it reports stale files instead of writing them.
 package main
 
@@ -30,11 +29,9 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
-	"go/types"
 	"log"
 	"os"
 	"reflect"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -127,19 +124,10 @@ func inlineBody(instructions []byte, o fastOp) string {
 	if body == nil {
 		log.Fatalf("%s: execute func %q not found in instructions.go", o.name, o.execute)
 	}
-	toRunLocals(o.name, typ, body, rename, "")
-	saveAroundCalls(body)
-	return inlineReturns(text(fset, body), o)
-}
-
-// toRunLocals renames, in body, the params of typ to run's locals and the other
-// names to their rename entries. With gas set, callContext.gas becomes gas, where
-// run keeps the gas; without it, a body that reads the gas is an error.
-func toRunLocals(name string, typ *ast.FuncType, body *ast.BlockStmt, rename map[string]string, gas string) {
 	i := 0
 	for _, field := range typ.Params.List {
-		for _, n := range field.Names {
-			rename[n.Name] = runLocals[i]
+		for _, name := range field.Names {
+			rename[name.Name] = runLocals[i]
 			i++
 		}
 	}
@@ -147,34 +135,92 @@ func toRunLocals(name string, typ *ast.FuncType, body *ast.BlockStmt, rename map
 	for n := range ast.Preorder(body) {
 		switch n := n.(type) {
 		case *ast.FuncLit:
-			log.Fatalf("%s: a closure in the body would take the inlined returns", name)
+			log.Fatalf("%s: a closure in the body would take the inlined returns", o.name)
 		case *ast.SelectorExpr:
 			fields[n.Sel] = true
+			if x, ok := n.X.(*ast.Ident); ok && rename[x.Name] == "callContext" && n.Sel.Name == "gas" {
+				log.Fatalf("%s: the body reads gas, which run keeps in gasLeft", o.name)
+			}
 		case *ast.AssignStmt:
 			for _, l := range n.Lhs {
-				if id, ok := l.(*ast.Ident); ok && n.Tok == token.DEFINE && (slices.Contains(runLocals, id.Name) || id.Name == "o") {
-					log.Fatalf("%s: the body declares %s, which shadows run's", name, id.Name)
+				if id, ok := l.(*ast.Ident); ok && n.Tok == token.DEFINE && slices.Contains(runLocals, id.Name) {
+					log.Fatalf("%s: the body declares %s, which shadows run's", o.name, id.Name)
 				}
 			}
 		}
 	}
-	astutil.Apply(body, func(c *astutil.Cursor) bool {
-		switch n := c.Node().(type) {
-		case *ast.SelectorExpr:
-			if x, ok := n.X.(*ast.Ident); ok && rename[x.Name] == "callContext" && n.Sel.Name == "gas" {
-				if gas == "" {
-					log.Fatalf("%s: the body reads gas, which run keeps in gasLeft", name)
+	for n := range ast.Preorder(body) {
+		if id, ok := n.(*ast.Ident); ok && !fields[id] && rename[id.Name] != "" {
+			id.Name = rename[id.Name]
+		}
+	}
+	saveAroundCalls(body)
+	return inlineReturns(text(fset, body), o)
+}
+
+// outOfLine are the funcs run's inlined bodies call that Go does not inline.
+var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest"}
+
+// saveAroundCalls stores gasLeft and pc in callContext before each statement of body
+// that calls an outOfLine func, and loads them back after it. Neither is then live
+// across a call, so Go does not spill them at the top of run's loop, on every op.
+func saveAroundCalls(body *ast.BlockStmt) {
+	save := mustStmt("callContext.gas, callContext.savedPC = gasLeft, pc")
+	load := mustStmt("gasLeft, pc = callContext.gas, callContext.savedPC")
+	ast.Inspect(body, func(n ast.Node) bool {
+		block, ok := n.(*ast.BlockStmt)
+		if !ok {
+			return true
+		}
+		var list []ast.Stmt
+		for _, s := range block.List {
+			switch s.(type) {
+			case *ast.ExprStmt, *ast.AssignStmt:
+				if callsOutOfLine(s) {
+					list = append(list, save, s, load)
+					continue
 				}
-				c.Replace(ast.NewIdent(gas))
-				return false
 			}
-		case *ast.Ident:
-			if !fields[n] && rename[n.Name] != "" {
-				n.Name = rename[n.Name]
+			list = append(list, s)
+		}
+		block.List = list
+		return true
+	})
+}
+
+func callsOutOfLine(s ast.Stmt) (found bool) {
+	ast.Inspect(s, func(n ast.Node) bool {
+		if c, ok := n.(*ast.CallExpr); ok {
+			if sel, ok := c.Fun.(*ast.SelectorExpr); ok && slices.Contains(outOfLine, sel.Sel.Name) {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+// mustStmt parses src as a statement without positions, so the printer lays it
+// out on its own line wherever it lands.
+func mustStmt(src string) ast.Stmt {
+	f, err := parser.ParseFile(token.NewFileSet(), "", "package p\nfunc _() {\n"+src+"\n}", 0)
+	if err != nil {
+		log.Fatal(err)
+	}
+	s := f.Decls[0].(*ast.FuncDecl).Body.List[0]
+	ast.Inspect(s, func(n ast.Node) bool {
+		if n == nil {
+			return false
+		}
+		v := reflect.ValueOf(n).Elem()
+		for _, f := range v.Fields() {
+			if f.Type() == reflect.TypeFor[token.Pos]() {
+				f.SetInt(int64(token.NoPos))
 			}
 		}
 		return true
-	}, nil)
+	})
+	return s
 }
 
 // closure returns the type and body of the func literal that fn returns.
@@ -205,12 +251,6 @@ func inlineReturns(body string, o fastOp) string {
 		}
 	}
 	for _, r := range slices.Backward(rets) {
-		if len(r.Results) == 1 {
-			// A tail call to another op func, which keeps the gas in callContext.
-			step := "callContext.gas = gasLeft\npc, res, err = " + src(r.Results[0]) + "\ngasLeft = callContext.gas\nif err != nil {\nbreak run\n}\npc++\ncontinue run"
-			body = body[:int(r.Pos())-1-len(prefix)] + step + body[int(r.End())-1-len(prefix):]
-			continue
-		}
 		next, res, err := src(r.Results[0]), src(r.Results[1]), src(r.Results[2])
 		var step string
 		switch {
@@ -276,17 +316,13 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 }
 
 // untraced returns runTraced as run in a file of its own, with anyTrace set
-// to false, without the code this makes dead, with fast in place of the
-// switchHere comment and with direct after the generation step.
-func untraced(traced []byte, fast, direct string) []byte {
+// to false, without the code this makes dead, and with fast in place of the
+// switchHere comment.
+func untraced(traced []byte, fast string) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
 	}
 	src := dropDeadCode(bytes.Replace(traced, []byte(switchHere), []byte(fast), 1))
-	if bytes.Count(src, []byte(directHere)) != 1 {
-		log.Fatalf("interpreter.go: want one %q", directHere)
-	}
-	src = bytes.Replace(src, []byte(directHere), []byte(direct), 1)
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "interpreter.go", src, parser.ParseComments)
 	if err != nil {
@@ -390,7 +426,7 @@ func traceOnly(cond ast.Expr) bool {
 	return false
 }
 
-func testTable(ops []fastOp, gasOps [][2]string) []byte {
+func testTable(ops []fastOp) []byte {
 	var b strings.Builder
 	b.WriteString("// Code generated by execution/vm/vmgen. DO NOT EDIT.\n\npackage vm\n\n")
 	b.WriteString("import \"github.com/erigontech/erigon/execution/protocol/params\"\n\n")
@@ -399,210 +435,12 @@ func testTable(ops []fastOp, gasOps [][2]string) []byte {
 		execute, memorySize := cmp.Or(o.execute, "nil"), cmp.Or(o.memorySize, "nil")
 		fmt.Fprintf(&b, "%s: {%s, %s, %d, %d, %s},\n", o.name, execute, o.gas, o.pop, o.push, memorySize)
 	}
-	b.WriteString("}\n\nvar gasExecuteOps = map[OpCode]gasExecuteFunc{\n")
-	for _, o := range gasOps {
-		fmt.Fprintf(&b, "%s: %s,\n", o[0], o[1])
-	}
 	b.WriteString("}\n")
 	out, err := format.Source([]byte(b.String()))
 	if err != nil {
 		log.Fatal(err)
 	}
 	return out
-}
-
-const directHere = "// execution/vm/vmgen inserts the gasExecute switch here.\n"
-
-// gasExecuteOps returns the ops the jump tables give a gasExecute, with the func:
-// run inlines the func's copy without the trace. TestFastPathMatchesJumpTables
-// fails for a table whose gasExecute is not here.
-func gasExecuteOps() [][2]string {
-	return [][2]string{{"SLOAD", "opSloadEIP2929"}}
-}
-
-// directCalls returns run's switch over the gasExecute ops, which runs their copies
-// without the trace, inlined, after the generic path's stack and constant-gas checks.
-// An op that fails a check goes on to the generic path, which reports it. It takes
-// the inlined copies out of copies.
-func directCalls(ops [][2]string, copies map[string]string) string {
-	var b strings.Builder
-	b.WriteString("switch op {\n")
-	for _, o := range ops {
-		fmt.Fprintf(&b, `case %s:
-	o := &jt[%s]
-	if o.gasExecute == nil || uint(stack.len()-o.numPop) > uint(o.maxStack-o.numPop) || gasLeft < o.constantGas {
-		break
-	}
-	gasLeft -= o.constantGas
-	%s
-`, o[0], o[0], inlineCopy(copies, o[1]+"Run"))
-		delete(copies, o[1]+"Run")
-	}
-	b.WriteString("}\n")
-	return b.String()
-}
-
-// inlineCopy returns the body of the copy name as statements of run's loop: its
-// parameters renamed to run's pc, evm and callContext, its gas to gasLeft, and each
-// return turned into a step to the next op or a break out of the loop.
-func inlineCopy(copies map[string]string, name string) string {
-	code, ok := copies[name]
-	if !ok {
-		log.Fatalf("%s: not among the copies without the trace", name)
-	}
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "", "package p\n"+code, parser.SkipObjectResolution)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fn := f.Decls[0].(*ast.FuncDecl)
-	toRunLocals(name, fn.Type, fn.Body, map[string]string{}, "gasLeft")
-	saveAroundCalls(fn.Body)
-	return inlineReturns(text(fset, fn.Body), fastOp{name: name})
-}
-
-// outOfLine are the funcs run's inlined bodies call that Go does not inline.
-var outOfLine = []string{"Mul", "Div", "SetBytes", "ILsh", "validJumpdest", "lookupSlot"}
-
-// saveAroundCalls stores gasLeft and pc in callContext before each statement of body
-// that calls an outOfLine func, and loads them back after it. Neither is then live
-// across a call, so Go does not spill them at the top of run's loop, on every op.
-func saveAroundCalls(body *ast.BlockStmt) {
-	save := mustStmt("callContext.gas, callContext.savedPC = gasLeft, pc")
-	load := mustStmt("gasLeft, pc = callContext.gas, callContext.savedPC")
-	ast.Inspect(body, func(n ast.Node) bool {
-		block, ok := n.(*ast.BlockStmt)
-		if !ok {
-			return true
-		}
-		var list []ast.Stmt
-		for _, s := range block.List {
-			switch s.(type) {
-			case *ast.ExprStmt, *ast.AssignStmt:
-				if callsOutOfLine(s) {
-					list = append(list, save, s, load)
-					continue
-				}
-			}
-			list = append(list, s)
-		}
-		block.List = list
-		return true
-	})
-}
-
-func callsOutOfLine(s ast.Stmt) (found bool) {
-	ast.Inspect(s, func(n ast.Node) bool {
-		if c, ok := n.(*ast.CallExpr); ok {
-			if sel, ok := c.Fun.(*ast.SelectorExpr); ok && slices.Contains(outOfLine, sel.Sel.Name) {
-				found = true
-			}
-		}
-		return !found
-	})
-	return found
-}
-
-// mustStmt parses src as a statement without positions, so the printer lays it
-// out on its own line wherever it lands.
-func mustStmt(src string) ast.Stmt {
-	f, err := parser.ParseFile(token.NewFileSet(), "", "package p\nfunc _() {\n"+src+"\n}", 0)
-	if err != nil {
-		log.Fatal(err)
-	}
-	s := f.Decls[0].(*ast.FuncDecl).Body.List[0]
-	ast.Inspect(s, func(n ast.Node) bool {
-		if n == nil {
-			return false
-		}
-		v := reflect.ValueOf(n).Elem()
-		for i := range v.NumField() {
-			if v.Field(i).Type() == reflect.TypeFor[token.Pos]() {
-				v.Field(i).SetInt(int64(token.NoPos))
-			}
-		}
-		return true
-	})
-	return s
-}
-
-// traceFree returns, by name, for each func of operations_acl.go that takes a t *opTrace,
-// its copy for run: named with a Run suffix, without t and its `if t != nil`
-// statements. Only the copies run inlines are used; the rest are dropped.
-func traceFree() map[string]string {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "operations_acl.go", read("operations_acl.go"), parser.SkipObjectResolution)
-	if err != nil {
-		log.Fatal(err)
-	}
-	var funcs []*ast.FuncDecl
-	for _, d := range f.Decls {
-		if fn, ok := d.(*ast.FuncDecl); ok && fn.Recv == nil && traceParam(fn) >= 0 {
-			funcs = append(funcs, fn)
-		}
-	}
-	copies := map[string]string{}
-	for _, fn := range funcs {
-		name := fn.Name.Name
-		fn.Type.Params.List = slices.Delete(fn.Type.Params.List, traceParam(fn), traceParam(fn)+1)
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.BlockStmt:
-				n.List = slices.DeleteFunc(n.List, isTraceIf)
-			case *ast.CaseClause:
-				n.Body = slices.DeleteFunc(n.Body, isTraceIf)
-			case *ast.CallExpr:
-				// A call that outlived the trace statements passes t on: it goes
-				// to the traced func itself, which skips its own trace on nil.
-				for i, a := range n.Args {
-					if isT(a) {
-						n.Args[i] = ast.NewIdent("nil")
-					}
-				}
-			}
-			return true
-		})
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			if e, ok := n.(ast.Expr); ok && isT(e) {
-				log.Fatalf("%s: t is used outside an `if t != nil` statement", name)
-			}
-			return true
-		})
-		fn.Doc, fn.Name.Name = nil, name+"Run"
-		// The copy has no comments, so its blank lines are where the trace was.
-		code := regexp.MustCompile(`\n\s*\n`).ReplaceAllString(text(fset, fn), "\n")
-		copies[name+"Run"] = fmt.Sprintf("\n// %sRun is %s without the trace.\n%s\n", name, name, code)
-	}
-	return copies
-}
-
-// traceParam returns the index of fn's t *opTrace parameter, or -1.
-func traceParam(fn *ast.FuncDecl) int {
-	return slices.IndexFunc(fn.Type.Params.List, func(p *ast.Field) bool {
-		star, ok := p.Type.(*ast.StarExpr)
-		if !ok || types.ExprString(star.X) != "opTrace" {
-			return false
-		}
-		if len(p.Names) != 1 || p.Names[0].Name != "t" {
-			log.Fatalf("%s: the *opTrace parameter must be t of its own", fn.Name.Name)
-		}
-		return true
-	})
-}
-
-func isT(e ast.Expr) bool {
-	id, ok := e.(*ast.Ident)
-	return ok && id.Name == "t"
-}
-
-// isTraceIf reports whether s is `if t != nil { ... }`.
-func isTraceIf(s ast.Stmt) bool {
-	is, ok := s.(*ast.IfStmt)
-	if !ok || is.Init != nil || is.Else != nil {
-		return false
-	}
-	c, ok := is.Cond.(*ast.BinaryExpr)
-	return ok && c.Op == token.NEQ && isT(c.X) && types.ExprString(c.Y) == "nil"
 }
 
 // read returns the file with LF line endings: Git checks it out with CRLF on Windows.
@@ -617,14 +455,12 @@ func read(name string) []byte {
 func main() {
 	check := len(os.Args) > 1 && os.Args[1] == "-check"
 	ops := fastOps()
-	gasOps, copies := gasExecuteOps(), traceFree()
-	direct := directCalls(gasOps, copies)
 	files := []struct {
 		name string
 		data []byte
 	}{
-		{"vm_run_gen.go", untraced(read("interpreter.go"), fastSwitch(read("instructions.go"), ops), direct)},
-		{"fast_path_gen_test.go", testTable(ops, gasOps)},
+		{"vm_run_gen.go", untraced(read("interpreter.go"), fastSwitch(read("instructions.go"), ops))},
+		{"fast_path_gen_test.go", testTable(ops)},
 	}
 	var stale []string
 	for _, f := range files {

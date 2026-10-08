@@ -28,30 +28,19 @@ import (
 
 type (
 	executionFunc    func(pc uint64, evm *EVM, callContext *CallContext) (uint64, []byte, error)
-	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, bool, error)
-	// callGasFunc is a call op's gas func, which also returns the gas the call forwards.
-	callGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (cost mdgas.MdGasCost, forwarded uint64, err error)
-	// createGasFunc is a CREATE op's gas func, which also prepares the creation under Amsterdam.
-	createGasFunc   func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, createGasPreparation, error)
-	createFunc      func(pc uint64, evm *EVM, scope *CallContext, prepared createGasPreparation) (uint64, []byte, error)
-	callFunc        func(pc uint64, evm *EVM, scope *CallContext, forwarded uint64) (uint64, []byte, error)
-	statefulGasFunc func(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error)
+	gasFunc          func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error)
+	statelessGasFunc func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGasCost, bool, error)
+	statefulGasFunc  func(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error)
 	// memorySizeFunc returns the required size, and whether the operation overflowed a uint64
 	memorySizeFunc func(*CallContext) (size uint64, overflow bool)
 	stringer       func(pc uint64, callContext *CallContext) string
 )
 
-// gasExecuteFunc is an op that charges its dynamic gas itself. With t set, it adds the
-// cost to t and calls traceCharged after charging and before it changes anything else.
-type gasExecuteFunc func(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error)
-
 type operation struct {
 	// execute is the operation function
 	execute     executionFunc
 	constantGas uint64
-	// gasExecute, when set, runs the op in place of execute: it charges the op's
-	// dynamic gas itself, so what the gas needs is derived once.
-	gasExecute gasExecuteFunc
+	dynamicGas  gasFunc
 	// maxStack specifies the max length the stack can have for this operation
 	// to not overflow the stack.
 	maxStack int
@@ -60,7 +49,8 @@ type operation struct {
 	numPop  int // δ in the Yellow Paper
 	numPush int // α in the Yellow Paper
 
-	usesMemory bool
+	// memorySize returns the memory size required for the operation
+	memorySize memorySizeFunc
 	string     stringer
 }
 
@@ -91,13 +81,22 @@ type JumpTable [256]operation
 func (op *operation) NumPush() int { return op.numPush }
 
 // UsesMemory reports whether the operation reads or writes memory.
-func (op *operation) UsesMemory() bool { return op.usesMemory }
+func (op *operation) UsesMemory() bool { return op.memorySize != nil }
 
 func validateAndFillMaxStack(jt *JumpTable) {
 	for i := range jt {
 		op := &jt[i]
-		if op.execute == nil && op.gasExecute == nil {
+		if op.execute == nil {
 			panic(fmt.Sprintf("op 0x%x is not set", i))
+		}
+		// The interpreter has an assumption that if the memorySize function is
+		// set, then the dynamicGas function is also set. This is a somewhat
+		// arbitrary assumption, and can be removed if we need to -- but it
+		// allows us to avoid a condition check. As long as we have that assumption
+		// in there, this little sanity check prevents us from merging in a
+		// change which violates it.
+		if op.memorySize != nil && op.dynamicGas == nil {
+			panic(fmt.Sprintf("op %v has dynamic memory but not dynamic gas", OpCode(i).String()))
 		}
 		op.maxStack = maxStack(op.numPop, op.numPush)
 	}
@@ -215,11 +214,12 @@ func newConstantinopleInstructionSet() JumpTable {
 		numPush:     1,
 	}
 	instructionSet[CREATE2] = operation{
+		execute:     opCreate2,
 		constantGas: params.Create2Gas,
-		gasExecute:  makeCreateWithGas(memoryCreate2, gasCreate2, opCreate2),
+		dynamicGas:  gasCreate2,
 		numPop:      4,
 		numPush:     1,
-		usesMemory:  true,
+		memorySize:  memoryCreate2,
 		string:      stCreate2,
 	}
 	validateAndFillMaxStack(&instructionSet)
@@ -231,11 +231,12 @@ func newConstantinopleInstructionSet() JumpTable {
 func newByzantiumInstructionSet() JumpTable {
 	instructionSet := newSpuriousDragonInstructionSet()
 	instructionSet[STATICCALL] = operation{
+		execute:     opStaticCall,
 		constantGas: params.CallGasEIP150,
-		gasExecute:  makeCallWithGas(memoryStaticCall, gasStaticCall, opStaticCall),
+		dynamicGas:  gasStaticCall,
 		numPop:      6,
 		numPush:     1,
-		usesMemory:  true,
+		memorySize:  memoryStaticCall,
 		string:      stStaticCall,
 	}
 	instructionSet[RETURNDATASIZE] = operation{
@@ -245,18 +246,20 @@ func newByzantiumInstructionSet() JumpTable {
 		numPush:     1,
 	}
 	instructionSet[RETURNDATACOPY] = operation{
+		execute:     opReturnDataCopy,
 		constantGas: GasFastestStep,
-		gasExecute:  opReturnDataCopyWithGas,
+		dynamicGas:  gasReturnDataCopy,
 		numPop:      3,
 		numPush:     0,
-		usesMemory:  true,
+		memorySize:  memoryReturnDataCopy,
 		string:      stReturnDataCopy,
 	}
 	instructionSet[REVERT] = operation{
-		gasExecute: opRevertWithGas,
+		execute:    opRevert,
+		dynamicGas: gasRevert,
 		numPop:     2,
 		numPush:    0,
-		usesMemory: true,
+		memorySize: memoryRevert,
 	}
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
@@ -265,7 +268,7 @@ func newByzantiumInstructionSet() JumpTable {
 // EIP 158 a.k.a Spurious Dragon
 func newSpuriousDragonInstructionSet() JumpTable {
 	instructionSet := newTangerineWhistleInstructionSet()
-	instructionSet[EXP].gasExecute = opExpEIP160WithGas
+	instructionSet[EXP].dynamicGas = gasExpEIP160
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
@@ -289,11 +292,12 @@ func newTangerineWhistleInstructionSet() JumpTable {
 func newHomesteadInstructionSet() JumpTable {
 	instructionSet := newFrontierInstructionSet()
 	instructionSet[DELEGATECALL] = operation{
-		gasExecute:  makeCallWithGas(memoryDelegateCall, gasDelegateCall, opDelegateCall),
+		execute:     opDelegateCall,
+		dynamicGas:  gasDelegateCall,
 		constantGas: params.CallGasFrontier,
 		numPop:      6,
 		numPush:     1,
-		usesMemory:  true,
+		memorySize:  memoryDelegateCall,
 		string:      stDelegateCall,
 	}
 	validateAndFillMaxStack(&instructionSet)
@@ -374,7 +378,8 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stMulmod,
 		},
 		EXP: {
-			gasExecute: opExpFrontierWithGas,
+			execute:    opExp,
+			dynamicGas: gasExpFrontier,
 			numPop:     2,
 			numPush:    1,
 		},
@@ -461,11 +466,12 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     1,
 		},
 		KECCAK256: {
+			execute:     opKeccak256,
 			constantGas: params.Keccak256Gas,
-			gasExecute:  opKeccak256WithGas,
+			dynamicGas:  gasKeccak256,
 			numPop:      2,
 			numPush:     1,
-			usesMemory:  true,
+			memorySize:  memoryKeccak256,
 		},
 		ADDRESS: {
 			execute:     opAddress,
@@ -513,11 +519,12 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stCallDataSize,
 		},
 		CALLDATACOPY: {
+			execute:     opCallDataCopy,
 			constantGas: GasFastestStep,
-			gasExecute:  opCallDataCopyWithGas,
+			dynamicGas:  gasCallDataCopy,
 			numPop:      3,
 			numPush:     0,
-			usesMemory:  true,
+			memorySize:  memoryCallDataCopy,
 			string:      stCallDataCopy,
 		},
 		CODESIZE: {
@@ -527,11 +534,12 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     1,
 		},
 		CODECOPY: {
+			execute:     opCodeCopy,
 			constantGas: GasFastestStep,
-			gasExecute:  opCodeCopyWithGas,
+			dynamicGas:  gasCodeCopy,
 			numPop:      3,
 			numPush:     0,
-			usesMemory:  true,
+			memorySize:  memoryCodeCopy,
 		},
 		GASPRICE: {
 			execute:     opGasprice,
@@ -546,11 +554,12 @@ func newFrontierInstructionSet() JumpTable {
 			numPush:     1,
 		},
 		EXTCODECOPY: {
+			execute:     opExtCodeCopy,
 			constantGas: params.ExtcodeCopyBaseFrontier,
-			gasExecute:  opExtCodeCopyWithGas,
+			dynamicGas:  gasExtCodeCopy,
 			numPop:      4,
 			numPush:     0,
-			usesMemory:  true,
+			memorySize:  memoryExtCodeCopy,
 		},
 		BLOCKHASH: {
 			execute:     opBlockhash,
@@ -598,25 +607,26 @@ func newFrontierInstructionSet() JumpTable {
 		MLOAD: {
 			execute:     opMload,
 			constantGas: GasFastestStep,
-			gasExecute:  opMloadWithGas,
+			dynamicGas:  gasMLoad,
 			numPop:      1,
 			numPush:     1,
-			usesMemory:  true,
+			memorySize:  memoryMLoad,
 			string:      stMload,
 		},
 		MSTORE: {
 			execute:     opMstore,
 			constantGas: GasFastestStep,
-			gasExecute:  opMstoreWithGas,
+			dynamicGas:  gasMStore,
 			numPop:      2,
 			numPush:     0,
-			usesMemory:  true,
+			memorySize:  memoryMStore,
 			string:      stMstore,
 		},
 		MSTORE8: {
+			execute:     opMstore8,
 			constantGas: GasFastestStep,
-			gasExecute:  opMstore8WithGas,
-			usesMemory:  true,
+			dynamicGas:  gasMStore8,
+			memorySize:  memoryMStore8,
 			numPop:      2,
 			numPush:     0,
 		},
@@ -628,7 +638,8 @@ func newFrontierInstructionSet() JumpTable {
 			string:      stSload,
 		},
 		SSTORE: {
-			gasExecute: opSstoreWithGas,
+			execute:    opSstore,
+			dynamicGas: gasSStore,
 			numPop:     2,
 			numPush:    0,
 			string:     stSstore,
@@ -1122,67 +1133,76 @@ func newFrontierInstructionSet() JumpTable {
 			string:      makeSwapStringer(16),
 		},
 		LOG0: {
-			gasExecute: makeLogWithGas(0),
+			execute:    makeLog(0),
+			dynamicGas: makeGasLog(0),
 			numPop:     2,
 			numPush:    0,
-			usesMemory: true,
+			memorySize: memoryLog,
 		},
 		LOG1: {
-			gasExecute: makeLogWithGas(1),
+			execute:    makeLog(1),
+			dynamicGas: makeGasLog(1),
 			numPop:     3,
 			numPush:    0,
-			usesMemory: true,
+			memorySize: memoryLog,
 		},
 		LOG2: {
-			gasExecute: makeLogWithGas(2),
+			execute:    makeLog(2),
+			dynamicGas: makeGasLog(2),
 			numPop:     4,
 			numPush:    0,
-			usesMemory: true,
+			memorySize: memoryLog,
 		},
 		LOG3: {
-			gasExecute: makeLogWithGas(3),
+			execute:    makeLog(3),
+			dynamicGas: makeGasLog(3),
 			numPop:     5,
 			numPush:    0,
-			usesMemory: true,
+			memorySize: memoryLog,
 		},
 		LOG4: {
-			gasExecute: makeLogWithGas(4),
+			execute:    makeLog(4),
+			dynamicGas: makeGasLog(4),
 			numPop:     6,
 			numPush:    0,
-			usesMemory: true,
+			memorySize: memoryLog,
 		},
 		CREATE: {
+			execute:     opCreate,
 			constantGas: params.CreateGas,
-			gasExecute:  makeCreateWithGas(memoryCreate, gasCreate, opCreate),
+			dynamicGas:  gasCreate,
 			numPop:      3,
 			numPush:     1,
-			usesMemory:  true,
+			memorySize:  memoryCreate,
 			string:      stCreate,
 		},
 		CALL: {
+			execute:     opCall,
 			constantGas: params.CallGasFrontier,
-			gasExecute:  makeCallWithGas(memoryCall, gasCall, opCall),
+			dynamicGas:  gasCall,
 			numPop:      7,
 			numPush:     1,
-			usesMemory:  true,
+			memorySize:  memoryCall,
 			string:      stCall,
 		},
 		CALLCODE: {
+			execute:     opCallCode,
 			constantGas: params.CallGasFrontier,
-			gasExecute:  makeCallWithGas(memoryCall, gasCallCode, opCallCode),
+			dynamicGas:  gasCallCode,
 			numPop:      7,
 			numPush:     1,
-			usesMemory:  true,
+			memorySize:  memoryCall,
 		},
 		RETURN: {
-			gasExecute: opReturnWithGas,
+			execute:    opReturn,
+			dynamicGas: gasReturn,
 			numPop:     2,
 			numPush:    0,
-			usesMemory: true,
+			memorySize: memoryReturn,
 		},
 		SELFDESTRUCT: {
 			execute:    opSelfdestruct,
-			gasExecute: opSelfdestructWithGas,
+			dynamicGas: gasSelfdestruct,
 			numPop:     1,
 			numPush:    0,
 		},
@@ -1190,7 +1210,7 @@ func newFrontierInstructionSet() JumpTable {
 
 	// Fill all unassigned slots with opUndefined.
 	for i := range tbl {
-		if tbl[i].execute == nil && tbl[i].gasExecute == nil {
+		if tbl[i].execute == nil {
 			tbl[i] = operation{execute: opUndefined}
 		}
 	}
