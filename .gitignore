@@ -144,6 +144,3 @@ _artifacts
 gocache
 .claude/scheduled_tasks.lock
 test-fixtures-cache
-
-# mainnet tx fixtures written by `evm fetchtx`
-/execution/vm/benchmark/testdata/txs/
