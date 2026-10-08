@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -830,6 +831,13 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			// Skip transactions with very large gas limit
 			continue
 		}
+		executionGas, stateGas := protocol.InclusionContributions(mt.TxnSlot.GetGas(), isAmsterdam)
+		if executionGas > availableGas.Execution {
+			continue
+		}
+		if stateGas > availableGas.State {
+			continue
+		}
 
 		if int64(mt.TxnSlot.Size) > int64(availableRlpSpace) {
 			p.logger.Debug("[txpool] skipping txn bigger than available rlp space", "size", int64(mt.TxnSlot.Size), "available", int64(availableRlpSpace))
@@ -890,9 +898,6 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		}
 		if intrinsicGas > availableGas.Execution {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
-			continue
-		}
-		if isAmsterdam && mt.TxnSlot.GetGas() > availableGas.State {
 			continue
 		}
 		availableGas.Execution -= intrinsicGas
