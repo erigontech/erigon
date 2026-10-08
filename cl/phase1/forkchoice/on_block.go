@@ -714,17 +714,13 @@ func (f *ForkChoiceStore) writePendingEnvelopeIndices(ctx context.Context, block
 	log.Warn("OnBlock: failed to write execution payload indices for pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
 }
 
-// RetryPendingExecutionPayloadEnvelopes re-applies up to limit queued envelopes and returns
-// the roots whose envelope is no longer pending, so a caller can keep later retries in the same
-// cycle away from them.
-func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Context, limit int) []common.Hash {
+func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Context, limit int) {
 	if limit <= 0 || f.pendingLocalSelfBuildEnvelopes == nil || f.pendingEnvelopes == nil {
-		return nil
+		return
 	}
 	localRoots := f.pendingLocalSelfBuildEnvelopes.Keys()
 	gossipRoots := f.pendingEnvelopes.Keys()
 	seen := make(map[common.Hash]struct{}, len(localRoots)+len(gossipRoots))
-	processed := make([]common.Hash, 0, limit)
 	for i := 0; limit > 0 && (i < len(localRoots) || i < len(gossipRoots)); i++ {
 		for _, roots := range [][]common.Hash{localRoots, gossipRoots} {
 			if i >= len(roots) {
@@ -736,9 +732,6 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 			}
 			seen[root] = struct{}{}
 			f.processPendingEnvelopeAfterBlock(ctx, root, true)
-			if !f.HasPendingExecutionPayloadEnvelope(root) {
-				processed = append(processed, root)
-			}
 			if f.pendingLocalSelfBuildEnvelopes.Contains(root) {
 				f.pendingLocalSelfBuildEnvelopes.Get(root)
 			}
@@ -747,11 +740,10 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 			}
 			limit--
 			if limit == 0 || ctx.Err() != nil {
-				return processed
+				return
 			}
 		}
 	}
-	return processed
 }
 
 const (
@@ -872,12 +864,34 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx contex
 	}
 }
 
+// settlePendingEnvelopeError keeps a parked envelope for a later retry, or drops it when the
+// error says the copy is stale.
+func (f *ForkChoiceStore) settlePendingEnvelopeError(blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local bool, err error) {
+	log.Warn("OnBlock: failed to process pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
+	if f.retryPendingEnvelopeError(err, pending) {
+		return
+	}
+	if !local {
+		f.forgetPendingEnvelopeArrival(pending)
+	}
+	if local {
+		if current, ok := f.pendingLocalSelfBuildEnvelopes.Peek(blockRoot); ok && current == pending {
+			f.pendingLocalSelfBuildEnvelopes.Remove(blockRoot)
+		}
+	} else if current, ok := f.pendingEnvelopes.Peek(blockRoot); ok && current == pending {
+		f.pendingEnvelopes.Remove(blockRoot)
+	}
+}
+
 // enterPendingEnvelopeApply admits one apply per root at a time. Block import and every retry
 // path go through it, so no two of them reach NewPayload for one envelope. A later caller waits
 // for the holder and then runs itself, because the holder may have stopped without a verdict.
 func (f *ForkChoiceStore) enterPendingEnvelopeApply(ctx context.Context, blockRoot common.Hash) (waited, admitted bool) {
 	done := make(chan struct{})
 	for {
+		if ctx.Err() != nil {
+			return waited, false
+		}
 		inFlight, busy := f.retryingEnvelopes.LoadOrStore(blockRoot, done)
 		if !busy {
 			return waited, true
@@ -910,6 +924,9 @@ func (f *ForkChoiceStore) holdsPendingEnvelope(blockRoot common.Hash, pending *c
 func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local, checkDataAvailability bool) (*cltypes.ExecutionPayloadEnvelope, bool) {
 	waited, admitted := f.enterPendingEnvelopeApply(ctx, blockRoot)
 	if !admitted {
+		if ctx.Err() != nil && pending != nil {
+			f.settlePendingEnvelopeError(blockRoot, pending, local, fmt.Errorf("%w: execution payload validation interrupted for beacon_block_root %v: %w", ErrIgnore, blockRoot, ctx.Err()))
+		}
 		return nil, false
 	}
 	defer f.leavePendingEnvelopeApply(blockRoot)
@@ -959,19 +976,7 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 		}
 	}
 	if err != nil {
-		log.Warn("OnBlock: failed to process pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
-		if !f.retryPendingEnvelopeError(err, pending) {
-			if !local {
-				f.forgetPendingEnvelopeArrival(pending)
-			}
-			if local {
-				if current, ok := f.pendingLocalSelfBuildEnvelopes.Peek(blockRoot); ok && current == pending {
-					f.pendingLocalSelfBuildEnvelopes.Remove(blockRoot)
-				}
-			} else if current, ok := f.pendingEnvelopes.Peek(blockRoot); ok && current == pending {
-				f.pendingEnvelopes.Remove(blockRoot)
-			}
-		}
+		f.settlePendingEnvelopeError(blockRoot, pending, local, err)
 		return nil, false
 	}
 	completedByAnother := !applied && f.forkGraph.HasEnvelope(blockRoot)

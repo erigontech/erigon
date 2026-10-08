@@ -43,6 +43,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_RetriesPendingEnvel
 	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	t.mockForkChoice.PendingEnvelopeRoots = map[common.Hash]struct{}{testBlockRoot: {}}
 	// The suite's service runs under a cancelled context and a config without slot timing;
 	// the hook must get a live context and a real retry budget.
 	t.beaconConfig.SecondsPerSlot = 12
@@ -67,5 +68,34 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_RetriesPendingEnvel
 		t.NoError(got.ctxErr, "the retry must run with a live context")
 	case <-time.After(5 * time.Second):
 		t.Fail("pending envelope retry was not triggered")
+	}
+}
+
+// Without a parked envelope there is nothing to retry, so a stored sidecar must not start one.
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_DoesNotRetryWithoutParkedEnvelope() {
+	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
+	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
+	t.beaconConfig.ElectraForkEpoch = 0
+	t.beaconConfig.FuluForkEpoch = 0
+	t.beaconConfig.GloasForkEpoch = testSlot / t.beaconConfig.SlotsPerEpoch
+	t.beaconConfig.SecondsPerSlot = 12
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
+	service := NewDataColumnSidecarService(
+		t.T().Context(), t.beaconConfig, t.mockEthClock, t.mockForkChoice, t.mockSyncedData, t.mockColumnSidecarStorage, beaconevents.NewEventEmitter(),
+	)
+	retried := make(chan common.Hash, 1)
+	t.mockForkChoice.RetryPendingEnvelopeFunc = func(_ context.Context, root common.Hash) { retried <- root }
+
+	t.NoError(service.ProcessMessage(context.Background(), nil, createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)))
+	select {
+	case <-retried:
+		t.Fail("a retry was started although no envelope is parked")
+	case <-time.After(100 * time.Millisecond):
 	}
 }

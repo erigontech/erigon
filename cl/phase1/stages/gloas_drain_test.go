@@ -32,43 +32,6 @@ import (
 
 // A root that received a verdict in this cycle is requeued by a later drain pass without
 // another NewPayload, so the retry phases share one attempt per root per cycle.
-func TestDrainPendingGloasPayloadsSkipsRootsAttemptedThisCycle(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	clparams.ApplyMinimalPreset(&cfg)
-	blockRoot := common.HexToHash("0x1234")
-	fc := &forkchoice.ForkChoiceStore{}
-	engine := &testExecutionEngine{supportInsertion: true, payloadStatus: execution_client.PayloadStatusNotValidated}
-	payload := cltypes.NewEth1Block(clparams.GloasVersion, &cfg)
-	payload.BlockHash = common.HexToHash("0x9abc")
-	pending := forkchoice.PendingELPayload{
-		Block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{
-			Slot:       1,
-			ParentRoot: common.HexToHash("0x5678"),
-			Body: &cltypes.BeaconBody{
-				Version: clparams.GloasVersion,
-				SignedExecutionPayloadBid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
-					BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
-				}},
-			},
-		}},
-		Envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-			BeaconBlockRoot: blockRoot,
-			Payload:         payload,
-		}},
-	}
-	fc.RequeuePendingELPayload(pending)
-	stageCfg := &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc}
-	attempted := map[common.Hash]struct{}{}
-
-	drainPendingGloasPayloads(context.Background(), stageCfg, attempted)
-	require.Equal(t, 1, engine.newPayloadCalls)
-	require.Contains(t, attempted, blockRoot)
-
-	// The NotValidated result was requeued; the same cycle must not retry it.
-	drainPendingGloasPayloads(context.Background(), stageCfg, attempted)
-	require.Equal(t, 1, engine.newPayloadCalls)
-	require.Len(t, fc.DrainPendingELPayloadsLimit(10), 1)
-}
 
 func TestDrainPendingGloasPayloadsRequeuesWithoutVerdictWhenNewPayloadIsInterrupted(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
@@ -100,13 +63,21 @@ func TestDrainPendingGloasPayloadsRequeuesWithoutVerdictWhenNewPayloadIsInterrup
 		}},
 	})
 	stageCfg := &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc}
-	attempted := map[common.Hash]struct{}{}
+	store := &verdictRecordingStore{ForkChoiceStore: fc, verdicts: map[common.Hash]execution_client.PayloadStatus{}}
 
-	drainPendingGloasPayloads(ctx, stageCfg, attempted)
+	drainPendingGloasPayloads(ctx, stageCfg, store)
 
 	require.Equal(t, 1, engine.newPayloadCalls)
-	require.Empty(t, attempted)
-	_, recorded := fc.GetRecentExecutionPayloadStatusByRoot(blockRoot)
-	require.False(t, recorded)
+	require.Empty(t, store.verdicts, "an interrupted NewPayload is not a verdict")
 	require.Len(t, fc.DrainPendingELPayloadsLimit(10), 1)
+}
+
+type verdictRecordingStore struct {
+	*forkchoice.ForkChoiceStore
+	verdicts map[common.Hash]execution_client.PayloadStatus
+}
+
+func (s *verdictRecordingStore) MarkPayloadStatusAndGasLimitIfRetained(root, _ common.Hash, status execution_client.PayloadStatus, _ uint64) (execution_client.PayloadStatus, bool) {
+	s.verdicts[root] = status
+	return status, true
 }

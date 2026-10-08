@@ -472,15 +472,7 @@ const (
 	gloasPayloadPathEmpty
 	gloasPayloadPathFull
 	gloasPayloadPathReorgToEmpty
-	// EMPTY head with a parked envelope: preparation primes the EMPTY fallback, production
-	// waits for the decision.
-	gloasPayloadPathAwaitingEnvelope
 )
-
-// undecided reports a path production waits on before it falls back to the EMPTY parent.
-func (p gloasPayloadPath) undecided() bool {
-	return p == gloasPayloadPathPending || p == gloasPayloadPathAwaitingEnvelope
-}
 
 func (p gloasPayloadPath) String() string {
 	switch p {
@@ -494,8 +486,6 @@ func (p gloasPayloadPath) String() string {
 		return "full"
 	case gloasPayloadPathReorgToEmpty:
 		return "full-to-empty"
-	case gloasPayloadPathAwaitingEnvelope:
-		return "awaiting-envelope"
 	default:
 		return "unknown"
 	}
@@ -795,6 +785,9 @@ type executionPayloadSource struct {
 	parentExecutionRequests *cltypes.ExecutionRequests
 	gloasPath               gloasPayloadPath
 	fallbackCause           error
+	// envelopeParked: the EMPTY head has an envelope waiting for its data, which can still make
+	// it FULL. Preparation primes the EMPTY fallback; production waits for the decision.
+	envelopeParked bool
 }
 
 func withdrawalsStateForExecutionPayloadSource(
@@ -842,7 +835,15 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 	if baseState.GetLatestExecutionPayloadBid() != nil && !a.isPreGloasParent(baseState) {
 		path = a.gloasPayloadPathForHead(head, targetSlot)
 	}
-	return a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path), nil
+	source := a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path)
+	source.envelopeParked = path == gloasPayloadPathEmpty && a.envelopeParked(head.Root)
+	return source, nil
+}
+
+// envelopeParked reports an EMPTY head whose envelope waits for its data; a parked copy of an
+// envelope that is already persisted is stale and does not count.
+func (a *ApiHandler) envelopeParked(root common.Hash) bool {
+	return !a.forkchoiceStore.HasEnvelope(root) && a.forkchoiceStore.HasPendingExecutionPayloadEnvelope(root)
 }
 
 func (a *ApiHandler) executionPayloadSourceForGloasPath(
@@ -912,10 +913,6 @@ func (a *ApiHandler) gloasPayloadPathForHead(head forkchoice.ForkChoiceNode, tar
 	case cltypes.PayloadStatusPending:
 		return gloasPayloadPathPending
 	case cltypes.PayloadStatusEmpty:
-		// A parked envelope can still turn this head FULL once its data arrives.
-		if !a.forkchoiceStore.HasEnvelope(head.Root) && a.forkchoiceStore.HasPendingExecutionPayloadEnvelope(head.Root) {
-			return gloasPayloadPathAwaitingEnvelope
-		}
 		return gloasPayloadPathEmpty
 	case cltypes.PayloadStatusFull:
 		if !a.forkchoiceStore.ShouldBuildOnFull(head, targetSlot) {

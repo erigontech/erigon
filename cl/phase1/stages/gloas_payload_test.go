@@ -625,6 +625,26 @@ type envelopeReadTestStore struct {
 	onErr     error
 	persisted *cltypes.SignedExecutionPayloadEnvelope
 	readErr   error
+	known     map[common.Hash]execution_client.PayloadStatus
+	recorded  map[common.Hash]execution_client.PayloadStatus
+	requeued  []forkchoice.PendingELPayload
+}
+
+func (s *envelopeReadTestStore) GetRecentExecutionPayloadStatusByRoot(root common.Hash) (execution_client.PayloadStatus, bool) {
+	status, ok := s.known[root]
+	return status, ok
+}
+
+func (s *envelopeReadTestStore) MarkPayloadStatusAndGasLimitIfRetained(root, _ common.Hash, status execution_client.PayloadStatus, _ uint64) (execution_client.PayloadStatus, bool) {
+	if s.recorded == nil {
+		s.recorded = map[common.Hash]execution_client.PayloadStatus{}
+	}
+	s.recorded[root] = status
+	return status, true
+}
+
+func (s *envelopeReadTestStore) RequeuePendingELPayload(p forkchoice.PendingELPayload) {
+	s.requeued = append(s.requeued, p)
 }
 
 func (s *envelopeReadTestStore) OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
@@ -665,7 +685,7 @@ func TestProcessDownloadedGloasEnvelopeCollectorReconciliation(t *testing.T) {
 	root := common.HexToHash("0x1234")
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 	envelope.Message.BeaconBlockRoot = root
-	block := &cltypes.BeaconBlock{Slot: 64}
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 64}}
 
 	t.Run("exact persisted duplicate", func(t *testing.T) {
 		store := &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, persisted: envelope}
@@ -1183,7 +1203,7 @@ func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 		executionClient:       engine,
 		gloasPayloadValidator: engine,
 		forkChoice:            fc,
-	}, map[common.Hash]struct{}{})
+	}, fc)
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	queued := fc.DrainPendingELPayloads()
@@ -1218,7 +1238,7 @@ func TestDrainPendingGloasPayloadsStopsAfterCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc}, map[common.Hash]struct{}{})
+	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc}, fc)
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.Len(t, fc.DrainPendingELPayloads(), 3)
@@ -1433,3 +1453,37 @@ func (t *testExecutionEngine) GetClientVersionV1(context.Context, *engine_types.
 }
 
 var _ execution_client.ExecutionEngine = (*testExecutionEngine)(nil)
+
+// Forward sync persists an envelope without an EL verdict when the EL inserts the block itself.
+// The payload is then recorded as NotValidated, so fork choice sees the FULL variant right away.
+// It is not queued for the drain: an embedded EL answers NotValidated for any block well below
+// its head, so the queue would never empty; the at-tip sweep verifies the head region instead.
+func TestProcessDownloadedGloasEnvelopeRecordsNotValidatedWhenNotValidating(t *testing.T) {
+	root := common.HexToHash("0x1")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = root
+	envelope.Message.Payload.BlockHash = common.HexToHash("0xe1")
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 9, Body: &cltypes.BeaconBody{Version: clparams.GloasVersion}}}
+
+	store := &envelopeReadTestStore{}
+	require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, &gloasCollectorTest{}, block, root, envelope, true, false))
+	require.Equal(t, map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNotValidated}, store.recorded)
+	require.Empty(t, store.requeued)
+
+	// An already persisted copy is recorded the same way, so a resumed sync is not left without a status.
+	store = &envelopeReadTestStore{onErr: forkchoice.ErrIgnore, persisted: envelope}
+	require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, &gloasCollectorTest{}, block, root, envelope, true, false))
+	require.Equal(t, map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNotValidated}, store.recorded)
+
+	// A verdict already on record is kept.
+	store = &envelopeReadTestStore{known: map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusValidated}}
+	require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, &gloasCollectorTest{}, block, root, envelope, true, false))
+	require.Empty(t, store.recorded)
+	require.Empty(t, store.requeued)
+
+	// When the apply validated with the EL, the verdict is already recorded; nothing is added.
+	store = &envelopeReadTestStore{}
+	require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, &gloasCollectorTest{}, block, root, envelope, false, true))
+	require.Empty(t, store.recorded)
+	require.Empty(t, store.requeued)
+}

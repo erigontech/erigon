@@ -1666,12 +1666,12 @@ func (a *ApiHandler) produceBeaconBody(
 	if err != nil {
 		return nil, nil, err
 	}
-	if payloadSource.gloasPath.undecided() {
+	if payloadSource.envelopeParked {
 		payloadSource = a.awaitPendingParentPayload(ctx, baseState, baseBlockRoot, targetSlot, stateVersion, payloadSource)
 	}
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		switch payloadSource.gloasPath {
-		case gloasPayloadPathPending, gloasPayloadPathAwaitingEnvelope, gloasPayloadPathEmpty, gloasPayloadPathReorgToEmpty:
+		case gloasPayloadPathPending, gloasPayloadPathEmpty, gloasPayloadPathReorgToEmpty:
 			fields := []any{
 				"slot", targetSlot,
 				"head", baseBlockRoot,

@@ -34,9 +34,8 @@ import (
 )
 
 const (
-	deferredColumnSyncInterval        = time.Second
-	deferredColumnSyncSlotDivisor     = 6
-	deferredColumnSyncMaxBackoffSlots = 32
+	deferredColumnSyncInterval    = time.Second
+	deferredColumnSyncSlotDivisor = 6
 )
 
 // BlockGetter is an interface for getting blocks by root.
@@ -1931,9 +1930,14 @@ func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 }
 
 // deferredColumnSyncDue reports whether gossip has had its share of the slot to deliver a
-// block's columns, after which the missing columns are requested from peers.
-func deferredColumnSyncDue(now, slotStart time.Time, delay time.Duration) bool {
-	return !now.Before(slotStart.Add(delay))
+// block's columns, counted from the later of the slot start and the moment the root was
+// queued, after which the missing columns are requested from peers.
+func deferredColumnSyncDue(now, slotStart, queuedAt time.Time, delay time.Duration) bool {
+	start := slotStart
+	if queuedAt.After(start) {
+		start = queuedAt
+	}
+	return !now.Before(start.Add(delay))
 }
 
 func (d *peerdas) slotDuration() time.Duration {
@@ -1973,15 +1977,15 @@ func (d *peerdas) columnDataSynced(ctx context.Context, blockRoot common.Hash) {
 }
 
 type deferredColumnSyncEntry struct {
+	queuedAt    time.Time
 	attempts    int
 	nextAttempt time.Time
 	inFlight    bool
 }
 
-// deferredColumnSyncQueue paces the roots whose columns are still missing. A failed round
-// grows the root's backoff by one slot, up to an epoch; a root stays queued until its block
-// leaves the serve range, because an imported block is not queued again and the custody gap
-// would be permanent.
+// deferredColumnSyncQueue paces the queued roots whose columns are still missing. A failed
+// round grows the root's backoff by one slot, up to an epoch; a queued root is kept until its
+// block leaves the serve range, because it is not queued again and the custody gap would stay.
 type deferredColumnSyncQueue struct {
 	mu      sync.Mutex
 	entries map[common.Hash]*deferredColumnSyncEntry
@@ -1991,48 +1995,50 @@ func newDeferredColumnSyncQueue() *deferredColumnSyncQueue {
 	return &deferredColumnSyncQueue{entries: map[common.Hash]*deferredColumnSyncEntry{}}
 }
 
-func (q *deferredColumnSyncQueue) entry(root common.Hash) *deferredColumnSyncEntry {
-	e := q.entries[root]
-	if e == nil {
-		e = &deferredColumnSyncEntry{}
-		q.entries[root] = e
-	}
-	return e
-}
-
-// ready reports whether root may be checked now: not in a round and past its backoff.
+// ready reports whether root may be checked now: not in a round and past its backoff. A root
+// seen for the first time is recorded as queued now.
 func (q *deferredColumnSyncQueue) ready(root common.Hash, now time.Time) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	e := q.entries[root]
-	return e == nil || (!e.inFlight && !now.Before(e.nextAttempt))
+	if e == nil {
+		q.entries[root] = &deferredColumnSyncEntry{queuedAt: now}
+		return true
+	}
+	return !e.inFlight && !now.Before(e.nextAttempt)
+}
+
+func (q *deferredColumnSyncQueue) queuedAt(root common.Hash) time.Time {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if e := q.entries[root]; e != nil {
+		return e.queuedAt
+	}
+	return time.Time{}
 }
 
 func (q *deferredColumnSyncQueue) start(roots []common.Hash) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for _, root := range roots {
-		q.entry(root).inFlight = true
+		if e := q.entries[root]; e != nil {
+			e.inFlight = true
+		}
 	}
 }
 
-// postpone delays root by one slot without counting an attempt, for rounds that did not run.
-func (q *deferredColumnSyncQueue) postpone(root common.Hash, now time.Time, slot time.Duration) {
+// failed records a round that left columns missing and grows the backoff, capped at
+// maxBackoffSlots. A root dropped meanwhile stays dropped.
+func (q *deferredColumnSyncQueue) failed(root common.Hash, now time.Time, slot time.Duration, maxBackoffSlots uint64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	e := q.entry(root)
-	e.inFlight = false
-	e.nextAttempt = now.Add(slot)
-}
-
-// failed records a round that left columns missing and grows the backoff.
-func (q *deferredColumnSyncQueue) failed(root common.Hash, now time.Time, slot time.Duration) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	e := q.entry(root)
+	e := q.entries[root]
+	if e == nil {
+		return
+	}
 	e.inFlight = false
 	e.attempts++
-	e.nextAttempt = now.Add(slot * time.Duration(min(e.attempts, deferredColumnSyncMaxBackoffSlots)))
+	e.nextAttempt = now.Add(slot * time.Duration(min(uint64(e.attempts), maxBackoffSlots)))
 }
 
 func (q *deferredColumnSyncQueue) done(root common.Hash) {
@@ -2071,14 +2077,14 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				forget(root)
 				return true
 			}
-			if !queue.ready(root, now) || !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), d.deferredColumnSyncDelay()) {
+			if !queue.ready(root, now) || !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), queue.queuedAt(root), d.deferredColumnSyncDelay()) {
 				return true
 			}
 			available, err := d.IsDataAvailable(block.GetSlot(), root)
 			switch {
 			case err != nil:
 				log.Warn("failed to check if data is available", "err", err)
-				queue.failed(root, now, d.slotDuration())
+				queue.failed(root, now, d.slotDuration(), d.beaconConfig.SlotsPerEpoch)
 			case available:
 				log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
 				forget(root)
@@ -2096,9 +2102,6 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			peersCount, err := d.rpc.Peers()
 			if err != nil || peersCount == 0 {
 				log.Debug("[syncColumnDataWorker] no peers available, deferring column sync", "err", err)
-				for _, root := range roots {
-					queue.postpone(root, now, d.slotDuration())
-				}
 				continue
 			}
 		}
@@ -2119,7 +2122,7 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 			for i, root := range roots {
 				available, err := d.IsDataAvailable(blocks[i].GetSlot(), root)
 				if err != nil || !available {
-					queue.failed(root, time.Now(), d.slotDuration())
+					queue.failed(root, time.Now(), d.slotDuration(), d.beaconConfig.SlotsPerEpoch)
 					continue
 				}
 				forget(root)

@@ -3313,6 +3313,7 @@ func TestExecutionPayloadAdmissionCancellationTransfersPendingOwnership(t *testi
 			}
 			require.ErrorIs(t, err, errPayloadValidationAdmission)
 			require.ErrorIs(t, err, context.Canceled)
+			require.ErrorIs(t, err, ErrIgnore, "an interrupted apply is not a verdict and must not be treated as a rejection")
 			origin := pending
 			if local {
 				origin = pendingLocal
