@@ -29,63 +29,70 @@ var (
 	hasAVX2 = archsimd.X86.AVX2()
 )
 
-// encodeHex is hex.Encode with whole 16-byte blocks done by AVX2. Each byte is widened to a
-// uint16 holding its high nibble in the low byte and its low nibble in the high byte, so one
-// in-lane byte shuffle turns the nibbles into digits in output order.
+// encodeHex is hex.Encode with whole 16-byte blocks done by AVX2, two blocks per iteration.
 func encodeHex(dst, src []byte) {
 	if hasAVX2 {
 		digits := archsimd.LoadUint8x32Array(&hexDigits32)
-		low := archsimd.BroadcastUint16x16(0x0f)
-		for len(src) >= 16 && len(dst) >= 32 {
-			w := archsimd.LoadUint8x16Array((*[16]uint8)(src)).ExtendToUint16()
-			w = w.ShiftAllRight(4).Or(w.And(low).ShiftAllLeft(8))
-			digits.PermuteOrZeroGrouped(w.AsUint8x32().AsInt8x32()).StoreArray((*[32]uint8)(dst))
+		lowNib := archsimd.BroadcastUint16x16(0x0f)
+		for len(src) >= 32 && len(dst) >= 64 {
+			encodeBlock(digits, lowNib, (*[16]uint8)(src), (*[32]uint8)(dst))
+			encodeBlock(digits, lowNib, (*[16]uint8)(src[16:]), (*[32]uint8)(dst[32:]))
+			src, dst = src[32:], dst[64:]
+		}
+		if len(src) >= 16 && len(dst) >= 32 {
+			encodeBlock(digits, lowNib, (*[16]uint8)(src), (*[32]uint8)(dst))
 			src, dst = src[16:], dst[32:]
 		}
+		// The Go code after this uses SSE, which pays a false dependency on Intel while the upper
+		// halves of the Y registers are dirty.
+		archsimd.ClearAVXUpperBits()
 	}
 	hex.Encode(dst, src)
 }
 
-// evenBytes gathers the even byte of each uint16 of a lane into its low half, which is how the
-// decoded bytes are packed without VPMOVWB, an AVX-512 instruction.
-var evenBytes = [32]int8{0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1,
-	0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1}
+// encodeBlock widens each byte to a uint16 holding its high nibble in the low byte and its low
+// nibble in the high byte, so one in-lane byte shuffle turns the nibbles into digits in output order.
+func encodeBlock(digits archsimd.Uint8x32, lowNib archsimd.Uint16x16, src *[16]uint8, dst *[32]uint8) {
+	w := archsimd.LoadUint8x16Array(src).ExtendToUint16()
+	w = w.ShiftAllRight(4).Or(w.And(lowNib).ShiftAllLeft(8))
+	digits.PermuteOrZeroGrouped(w.AsUint8x32().AsInt8x32()).StoreArray(dst)
+}
 
-// decodeHex is hex.Decode with whole 32-character blocks done by AVX2. A pair of characters is one
-// uint16, so both nibbles are computed in place: (c & 0x0f) + 9*(c >> 6) is the value of every hex
-// digit, upper or lower case. A block holding anything else is left to hex.Decode, which reports
-// it: the nibbles are mapped back to digits and compared, and 0x10-0x19 would map to '0'-'9' once
-// the case bit is set, so those are excluded by the bit the digits and the letters share.
+// pairWeights makes VPMADDUBSW compute 16*first + second for each pair of nibbles.
+var pairWeights = [32]int8{16, 1, 16, 1, 16, 1, 16, 1, 16, 1, 16, 1, 16, 1, 16, 1,
+	16, 1, 16, 1, 16, 1, 16, 1, 16, 1, 16, 1, 16, 1, 16, 1}
+
+// packBytes moves the low byte of each uint16 of lane 0 to bytes 0-7 and of lane 1 to bytes 8-15.
+var packBytes = [32]int8{0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1,
+	-1, -1, -1, -1, -1, -1, -1, -1, 0, 2, 4, 6, 8, 10, 12, 14}
+
+// decodeHex is hex.Decode with whole 32-character blocks done by AVX2, by algorithm 3 of
+// http://0x80.pl/notesen/2022-01-17-validating-hex-parse.html: a digit maps to 0-9 and a letter of
+// either case to 10-15, anything else to more than 15 on both paths, so the smaller of the two is
+// the nibble. A block holding a non-hex character is left to hex.Decode, which reports it.
 func decodeHex(dst, src []byte) (int, error) {
 	n := 0
 	if hasAVX2 {
-		digits := archsimd.LoadUint8x32Array(&hexDigits32)
-		gather := archsimd.LoadInt8x32Array(&evenBytes)
-		lowNib := archsimd.BroadcastUint16x16(0x000f)
-		loByte := archsimd.BroadcastUint16x16(0x00ff)
-		nine := archsimd.BroadcastUint16x16(9)
-		lower := archsimd.BroadcastUint8x32(0x20)
-		letterOrDigit := archsimd.BroadcastUint8x32(0x60)
-		zero := archsimd.BroadcastUint8x32(0)
+		c6 := archsimd.BroadcastUint8x32(0xc6)
+		six := archsimd.BroadcastUint8x32(6)
+		f0 := archsimd.BroadcastUint8x32(0xf0)
+		upper := archsimd.BroadcastUint8x32(0xdf)
+		bigA := archsimd.BroadcastUint8x32('A')
+		ten := archsimd.BroadcastUint8x32(10)
+		fifteen := archsimd.BroadcastUint8x32(15)
+		weights := archsimd.LoadInt8x32Array(&pairWeights)
+		pack := archsimd.LoadInt8x32Array(&packBytes)
 		for len(src) >= 32 && len(dst) >= 16 {
-			chars := archsimd.LoadUint8x32Array((*[32]uint8)(src))
-			pairs := chars.AsUint16x16()
-			hi, lo := pairs.And(loByte), pairs.ShiftAllRight(8)
-			hiNib := hi.And(lowNib).Add(nine.Mul(hi.ShiftAllRight(6)))
-			loNib := lo.And(lowNib).Add(nine.Mul(lo.ShiftAllRight(6)))
-			// Both nibbles back to digits at once: the low byte of each uint16 holds the first
-			// character's digit and the high byte the second's, which is the input order.
-			back := digits.PermuteOrZeroGrouped(hiNib.Or(loNib.ShiftAllLeft(8)).AsUint8x32().AsInt8x32())
-			roundTrips := back.Equal(chars.Or(lower)).ToBits()
-			notControl := chars.And(letterOrDigit).Equal(zero).ToBits()
-			if roundTrips != 0xffffffff || notControl != 0 {
+			c := archsimd.LoadUint8x32Array((*[32]uint8)(src))
+			nib := c.Add(c6).SubSaturated(six).Sub(f0).Min(c.And(upper).Sub(bigA).AddSaturated(ten))
+			if nib.Max(fifteen).Equal(fifteen).ToBits() != 0xffffffff {
 				break
 			}
-			packed := hiNib.ShiftAllLeft(4).Or(loNib).AsUint8x32().PermuteOrZeroGrouped(gather)
-			packed.GetLo().StorePart(dst[:8])
-			packed.GetHi().StorePart(dst[8:16])
+			b := nib.DotProductPairsSaturated(weights).AsUint8x32().PermuteOrZeroGrouped(pack)
+			b.GetLo().Or(b.GetHi()).StoreArray((*[16]uint8)(dst))
 			src, dst, n = src[32:], dst[16:], n+16
 		}
+		archsimd.ClearAVXUpperBits()
 	}
 	m, err := hex.Decode(dst, src)
 	return n + m, err
