@@ -2086,3 +2086,34 @@ func TestColdSlotMemoYieldsToACreateOnTheLiveRead(t *testing.T) {
 func TestWriteSetKeepsTheArenaOutOfLine(t *testing.T) {
 	require.Less(t, unsafe.Sizeof(WriteSet{}), unsafe.Sizeof(vwArenas{}))
 }
+
+// A cleared slot map keeps the buckets it grew, so reading one slot of every
+// kept contract while another one grows must not pile up their capacities.
+func TestReusedReadSetBoundsTheSlotsItsMapsHeld(t *testing.T) {
+	var rs ReadSet
+	addrs := make([]accounts.Address, 4)
+	for i := range addrs {
+		addrs[i] = accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+	}
+	held := map[accounts.Address]int{}
+	for call := range addrs {
+		for _, a := range addrs {
+			if _, kept := rs.storage[a]; !kept {
+				held[a] = 0
+			}
+			rs.SetStorage(a, accounts.InternKey(common.HexToHash("0x01")), VersionedRead[uint256.Int]{})
+		}
+		for j := range maxPooledEntries / 2 {
+			rs.SetStorage(addrs[call], accounts.InternKey(common.BigToHash(big.NewInt(int64(j+2)))), VersionedRead[uint256.Int]{})
+		}
+		for _, a := range addrs {
+			held[a] = max(held[a], len(rs.storage[a]))
+		}
+		rs.clearForReuse()
+		kept := 0
+		for a := range rs.storage {
+			kept += held[a]
+		}
+		require.LessOrEqual(t, kept, maxPooledEntries, "call %d: kept slot maps once held too many slots", call)
+	}
+}
