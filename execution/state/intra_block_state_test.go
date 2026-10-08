@@ -1298,6 +1298,20 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 	require.False(t, absent.resetForPool(), "absent-account memos count toward the bound")
 }
 
+// sync.Pool may drop any one entry, so the reuse shows over a few round trips.
+func TestReleasePooledHandsTheStateToNewPooled(t *testing.T) {
+	for range 100 {
+		ibs := NewPooled(NewNoopReader())
+		ReleasePooled(ibs)
+		got := NewPooled(NewNoopReader())
+		ReleasePooled(got)
+		if got == ibs {
+			return
+		}
+	}
+	t.Fatal("NewPooled never got the released state back")
+}
+
 func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
 	ibs := NewPooled(NewNoopReader())
 	ibs.SetTxContext(5, 2)
