@@ -913,9 +913,57 @@ type vwArenas struct {
 	codeHash       vwArena[accounts.CodeHash]
 	codeSize       vwArena[int]
 	storage        vwArena[uint256.Int]
+	accounts       acctSlab
+}
+
+// acctSlab holds the account copies of the address cells, with the cells'
+// lifetime. Past vwMaxCells the copies come from the heap.
+type acctSlab struct {
+	slabs [][]accounts.Account
+	slab  int
+	idx   int
+	cap   int
+}
+
+func (a *acctSlab) copyOf(src *accounts.Account) *accounts.Account {
+	if a.slab == len(a.slabs) {
+		if a.cap == vwMaxCells {
+			return src.SelfCopy()
+		}
+		n := min(max(a.cap, vwFirstSlab), vwMaxCells-a.cap)
+		a.slabs = append(a.slabs, make([]accounts.Account, n))
+		a.cap += n
+	}
+	c := &a.slabs[a.slab][a.idx]
+	*c = *src
+	if a.idx++; a.idx == len(a.slabs[a.slab]) {
+		a.slab, a.idx = a.slab+1, 0
+	}
+	return c
+}
+
+func (a *acctSlab) reset() {
+	for s := 0; s <= a.slab && s < len(a.slabs); s++ {
+		used := a.slabs[s]
+		if s == a.slab {
+			used = used[:a.idx]
+		}
+		clear(used)
+	}
+	a.slab, a.idx = 0, 0
+}
+
+// accountCopy copies an address cell's value; an arena-backed set takes the
+// copy from its slab, which Snapshot copies out again.
+func (ws *WriteSet) accountCopy(a *accounts.Account) *accounts.Account {
+	if ws.cells.on {
+		return ws.cells.accounts.copyOf(a)
+	}
+	return a.SelfCopy()
 }
 
 func (a *vwArenas) reset() {
+	a.accounts.reset()
 	a.address.reset(releaseVWAddress)
 	a.balance.reset(releaseVWBalance)
 	a.nonce.reset(releaseVWNonce)
@@ -1248,7 +1296,11 @@ func (ws *WriteSet) Snapshot() *WriteSet {
 		}
 		if !sd {
 			if vw, ok := ws.address[addr]; ok {
-				out.SetAddress(addr, cloneVW(vw))
+				c := cloneVW(vw)
+				if ws.cells.on && c.Val != nil {
+					c.Val = c.Val.SelfCopy()
+				}
+				out.SetAddress(addr, c)
 			}
 			if vw, ok := ws.nonce[addr]; ok {
 				out.SetNonce(addr, cloneVW(vw))
