@@ -167,8 +167,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if messageForkDigest != *att.TopicForkDigest {
 			return fmt.Errorf("%w: attestation fork digest does not match topic", ErrIgnore)
 		}
-	} else if att.Receiver != nil {
-		return fmt.Errorf("%w: attestation topic fork digest is missing", ErrIgnore)
 	}
 
 	var err error

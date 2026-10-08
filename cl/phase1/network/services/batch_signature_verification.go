@@ -236,7 +236,6 @@ func (b *BatchSignatureVerifier) processSignatureVerification(aggregateVerificat
 func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerificationData []*AggregateVerificationData) []func() {
 	callbacks := make([]func(), 0, len(aggregateVerificationData))
 	var peerToBan *sentinelproto.Peer
-	logInvalidPeer := false
 	for _, v := range aggregateVerificationData {
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
@@ -252,16 +251,13 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 			reported := v.report(ErrInvalidBlsSignature)
 			if peerToBan == nil && !reported && v.SendingPeer != nil {
 				peerToBan = v.SendingPeer
-				logInvalidPeer = true
+				log.Debug("[BatchVerifier] received invalid signature on the gossip", "peer", peerToBan.Pid)
 			}
 			continue
 		}
 
 		v.report(nil)
 		callbacks = append(callbacks, v.F)
-	}
-	if peerToBan != nil && logInvalidPeer {
-		log.Debug("[BatchVerifier] received invalid signature on the gossip", "peer", peerToBan.Pid)
 	}
 	if b.peerBanQueue != nil && peerToBan != nil {
 		select {

@@ -212,8 +212,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		if messageForkDigest != *aggregateAndProof.TopicForkDigest {
 			return fmt.Errorf("%w: aggregate fork digest does not match topic", ErrIgnore)
 		}
-	} else if aggregateAndProof.Receiver != nil {
-		return fmt.Errorf("%w: aggregate topic fork digest is missing", ErrIgnore)
 	}
 	aggregateAndProof.SignedAggregateAndProof.SetVersion(clversion)
 	if err := aggregate.ValidateForConfig(a.beaconCfg, clversion); err != nil {

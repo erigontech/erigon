@@ -1580,7 +1580,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishAcceptedAndOutcomeCounters
 	}
 	s.Require().NoError(s.gm.subscriptions.Add(okTopic, okTopicHandle, validator))
 
-	const errTopicName = "invariant_error_topic"       // never joined: publishToDigest fails
+	const errTopicName = "invariant_error_topic"       // never joined: PublishToForkDigest fails
 	const expiredTopicName = "invariant_expired_topic" // stale by the time the worker gets to it
 	const panicTopicName = "invariant_panic_topic"     // hook panics for this one
 	topics := []string{okTopicName, errTopicName, expiredTopicName, panicTopicName}

@@ -425,14 +425,10 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	if err != nil {
 		return err
 	}
-	return g.publishToDigest(ctx, forkDigest, name, data)
+	return g.PublishToForkDigest(ctx, forkDigest, name, data)
 }
 
 func (g *GossipManager) PublishToForkDigest(ctx context.Context, forkDigest common.Bytes4, name string, data []byte) error {
-	return g.publishToDigest(ctx, forkDigest, name, data)
-}
-
-func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.Bytes4, name string, data []byte) error {
 	compressedData := utils.CompressSnappy(data)
 	topic := composeTopic(forkDigest, name)
 	topicHandle := g.subscriptions.GetTopic(topic)
@@ -535,7 +531,7 @@ func (g *GossipManager) runPublishJob(ctx context.Context, job publishJob) {
 		publishOutcomeCounter.WithLabelValues(job.name, "expired").Inc()
 		return
 	}
-	if err := g.publishToDigest(ctx, job.forkDigest, job.name, job.data); err != nil {
+	if err := g.PublishToForkDigest(ctx, job.forkDigest, job.name, job.data); err != nil {
 		fields := append([]any{"topic", job.name, "err", err}, job.logCtx...)
 		log.Warn("[GossipManager] failed to publish message to gossip", fields...)
 		publishOutcomeCounter.WithLabelValues(job.name, "publish_error").Inc()
