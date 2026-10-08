@@ -128,6 +128,9 @@ type ReadSet struct {
 	codeHash              map[accounts.Address]VersionedRead[accounts.CodeHash]
 	codeSize              map[accounts.Address]VersionedRead[int]
 	storage               map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
+	// slotMapPeak is the most slots each kept storage map has held: a cleared
+	// map keeps the buckets it grew.
+	slotMapPeak map[accounts.Address]int
 
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
@@ -162,16 +165,27 @@ func (s *ReadSet) clearForReuse() {
 	// this call's contracts stay, or a run of calls on different contracts
 	// would pin a map each while every entries() count looked small.
 	if len(s.storage) <= maxReusedStorageAddrs {
+		held := 0
 		for addr, inner := range s.storage {
 			if len(inner) == 0 {
 				delete(s.storage, addr)
+				delete(s.slotMapPeak, addr)
 				continue
 			}
+			if s.slotMapPeak == nil {
+				s.slotMapPeak = make(map[accounts.Address]int, len(s.storage))
+			}
+			peak := max(s.slotMapPeak[addr], len(inner))
+			s.slotMapPeak[addr] = peak
+			held += peak
 			clear(inner)
+		}
+		if held > maxPooledEntries {
+			s.storage, s.slotMapPeak = nil, nil
 		}
 	} else {
 		// Nil, not cleared: a cleared map keeps the buckets those addresses grew.
-		s.storage = nil
+		s.storage, s.slotMapPeak = nil, nil
 	}
 	s.access = nil
 }
