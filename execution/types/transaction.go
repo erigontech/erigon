@@ -482,7 +482,9 @@ func (m *Message) SetCheckGas(checkGas bool) {
 
 // SkipExecutionGasCap reports whether the whole gas limit is available for execution after Amsterdam, instead of
 // TX_MAX_GAS_LIMIT with the rest in the EIP-8037 state gas reservoir. Only read-only RPC calls set it.
-func (m *Message) SkipExecutionGasCap() bool { return m.skipExecutionGasCap }
+func (m *Message) SkipExecutionGasCap() bool { 
+	return m.skipExecutionGasCap 
+}
 func (m *Message) SetSkipExecutionGasCap(skip bool) {
 	m.skipExecutionGasCap = skip
 }
