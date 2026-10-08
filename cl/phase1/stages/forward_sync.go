@@ -475,7 +475,7 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 	if canValidateGloasPayloads(cfg) {
 		var err error
 		status, err = validateAnchorPayloadWithEL(ctx, cfg, bid, env)
-		if gloasPayloadRetryInterrupted(ctx, status, err) {
+		if execution_client.ValidationInterrupted(ctx, status, err) {
 			return nil
 		}
 		if err != nil {

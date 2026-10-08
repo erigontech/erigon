@@ -38,7 +38,7 @@ func headSequence(heads ...common.Hash) func() (common.Hash, error) {
 
 func TestAdvanceWhileHeadMovesRepeatsWhileEachStepMovesTheHead(t *testing.T) {
 	steps := 0
-	advanceWhileHeadMoves(context.Background(), headSequence(common.Hash{1}, common.Hash{2}, common.Hash{2}, common.Hash{3}, common.Hash{3}, common.Hash{3}), func(context.Context) bool {
+	advanceWhileHeadMoves(context.Background(), headSequence(common.Hash{1}, common.Hash{2}, common.Hash{2}, common.Hash{3}, common.Hash{3}, common.Hash{3}), func(context.Context, common.Hash) bool {
 		steps++
 		return true
 	})
@@ -47,7 +47,7 @@ func TestAdvanceWhileHeadMovesRepeatsWhileEachStepMovesTheHead(t *testing.T) {
 
 func TestAdvanceWhileHeadMovesStopsWhenTheHeadStaysPut(t *testing.T) {
 	steps := 0
-	advanceWhileHeadMoves(context.Background(), headSequence(common.Hash{1}), func(context.Context) bool {
+	advanceWhileHeadMoves(context.Background(), headSequence(common.Hash{1}), func(context.Context, common.Hash) bool {
 		steps++
 		return true
 	})
@@ -56,7 +56,7 @@ func TestAdvanceWhileHeadMovesStopsWhenTheHeadStaysPut(t *testing.T) {
 
 func TestAdvanceWhileHeadMovesStopsWhenAStepDoesNothing(t *testing.T) {
 	steps := 0
-	advanceWhileHeadMoves(context.Background(), headSequence(common.Hash{1}, common.Hash{2}), func(context.Context) bool {
+	advanceWhileHeadMoves(context.Background(), headSequence(common.Hash{1}, common.Hash{2}), func(context.Context, common.Hash) bool {
 		steps++
 		return false
 	})
@@ -67,7 +67,7 @@ func TestAdvanceWhileHeadMovesStopsOnCancelledContextOrHeadError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	steps := 0
-	advanceWhileHeadMoves(ctx, headSequence(common.Hash{1}), func(context.Context) bool { steps++; return true })
-	advanceWhileHeadMoves(context.Background(), func() (common.Hash, error) { return common.Hash{}, errors.New("no head") }, func(context.Context) bool { steps++; return true })
+	advanceWhileHeadMoves(ctx, headSequence(common.Hash{1}), func(context.Context, common.Hash) bool { steps++; return true })
+	advanceWhileHeadMoves(context.Background(), func() (common.Hash, error) { return common.Hash{}, errors.New("no head") }, func(context.Context, common.Hash) bool { steps++; return true })
 	require.Equal(t, 0, steps)
 }

@@ -69,3 +69,44 @@ func TestDrainPendingGloasPayloadsSkipsRootsAttemptedThisCycle(t *testing.T) {
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.Len(t, fc.DrainPendingELPayloadsLimit(10), 1)
 }
+
+func TestDrainPendingGloasPayloadsRequeuesWithoutVerdictWhenNewPayloadIsInterrupted(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	blockRoot := common.HexToHash("0x1234")
+	fc := &forkchoice.ForkChoiceStore{}
+	ctx, cancel := context.WithCancel(context.Background())
+	engine := &testExecutionEngine{supportInsertion: true}
+	engine.newPayloadFn = func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		cancel()
+		return execution_client.PayloadStatusNone, ctx.Err()
+	}
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, &cfg)
+	payload.BlockHash = common.HexToHash("0x9abc")
+	fc.RequeuePendingELPayload(forkchoice.PendingELPayload{
+		Block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{
+			Slot:       1,
+			ParentRoot: common.HexToHash("0x5678"),
+			Body: &cltypes.BeaconBody{
+				Version: clparams.GloasVersion,
+				SignedExecutionPayloadBid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+					BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+				}},
+			},
+		}},
+		Envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+			BeaconBlockRoot: blockRoot,
+			Payload:         payload,
+		}},
+	})
+	stageCfg := &Cfg{beaconCfg: &cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc}
+	attempted := map[common.Hash]struct{}{}
+
+	drainPendingGloasPayloads(ctx, stageCfg, attempted)
+
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.Empty(t, attempted)
+	_, recorded := fc.GetRecentExecutionPayloadStatusByRoot(blockRoot)
+	require.False(t, recorded)
+	require.Len(t, fc.DrainPendingELPayloadsLimit(10), 1)
+}

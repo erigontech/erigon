@@ -663,21 +663,8 @@ func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context
 	return nil
 }
 
-// processPendingEnvelopeAfterBlock applies the envelope queued for blockRoot. Concurrent calls
-// for one root collapse into the first and wait for it, so no two of them reach NewPayload.
+// processPendingEnvelopeAfterBlock applies the envelope queued for blockRoot.
 func (f *ForkChoiceStore) processPendingEnvelopeAfterBlock(ctx context.Context, blockRoot common.Hash, checkDataAvailability bool) {
-	done := make(chan struct{})
-	if inFlight, busy := f.retryingEnvelopes.LoadOrStore(blockRoot, done); busy {
-		select {
-		case <-inFlight.(chan struct{}):
-		case <-ctx.Done():
-		}
-		return
-	}
-	defer func() {
-		f.retryingEnvelopes.Delete(blockRoot)
-		close(done)
-	}()
 	var pending *cltypes.SignedExecutionPayloadEnvelope
 	local := false
 	found := false
@@ -728,7 +715,8 @@ func (f *ForkChoiceStore) writePendingEnvelopeIndices(ctx context.Context, block
 }
 
 // RetryPendingExecutionPayloadEnvelopes re-applies up to limit queued envelopes and returns
-// the roots it processed, so a caller can keep later retries in the same cycle away from them.
+// the roots whose envelope is no longer pending, so a caller can keep later retries in the same
+// cycle away from them.
 func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Context, limit int) []common.Hash {
 	if limit <= 0 || f.pendingLocalSelfBuildEnvelopes == nil || f.pendingEnvelopes == nil {
 		return nil
@@ -748,7 +736,9 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 			}
 			seen[root] = struct{}{}
 			f.processPendingEnvelopeAfterBlock(ctx, root, true)
-			processed = append(processed, root)
+			if !f.HasPendingExecutionPayloadEnvelope(root) {
+				processed = append(processed, root)
+			}
 			if f.pendingLocalSelfBuildEnvelopes.Contains(root) {
 				f.pendingLocalSelfBuildEnvelopes.Get(root)
 			}
@@ -882,7 +872,51 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx contex
 	}
 }
 
+// enterPendingEnvelopeApply admits one apply per root at a time. Block import and every retry
+// path go through it, so no two of them reach NewPayload for one envelope. A later caller waits
+// for the holder and then runs itself, because the holder may have stopped without a verdict.
+func (f *ForkChoiceStore) enterPendingEnvelopeApply(ctx context.Context, blockRoot common.Hash) (waited, admitted bool) {
+	done := make(chan struct{})
+	for {
+		inFlight, busy := f.retryingEnvelopes.LoadOrStore(blockRoot, done)
+		if !busy {
+			return waited, true
+		}
+		waited = true
+		select {
+		case <-inFlight.(chan struct{}):
+		case <-ctx.Done():
+			return waited, false
+		}
+	}
+}
+
+func (f *ForkChoiceStore) leavePendingEnvelopeApply(blockRoot common.Hash) {
+	if done, ok := f.retryingEnvelopes.LoadAndDelete(blockRoot); ok {
+		close(done.(chan struct{}))
+	}
+}
+
+// holdsPendingEnvelope reports whether pending is still the parked copy for blockRoot.
+func (f *ForkChoiceStore) holdsPendingEnvelope(blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local bool) bool {
+	cache := f.pendingEnvelopes
+	if local {
+		cache = f.pendingLocalSelfBuildEnvelopes
+	}
+	current, ok := cache.Peek(blockRoot)
+	return ok && current == pending
+}
+
 func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local, checkDataAvailability bool) (*cltypes.ExecutionPayloadEnvelope, bool) {
+	waited, admitted := f.enterPendingEnvelopeApply(ctx, blockRoot)
+	if !admitted {
+		return nil, false
+	}
+	defer f.leavePendingEnvelopeApply(blockRoot)
+	if waited && !f.holdsPendingEnvelope(blockRoot, pending, local) {
+		// The holder settled this envelope.
+		return nil, false
+	}
 	if pending == nil {
 		if !f.forkGraph.HasEnvelope(blockRoot) {
 			if local {

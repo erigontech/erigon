@@ -27,7 +27,7 @@ import (
 
 const (
 	// Fractions of the slot: the wait budget, the point in the slot after which a proposal
-	// must not wait any longer, and the budget of the first retry, which always runs.
+	// must not wait any longer, and the budget of one retry, which the wait always allows.
 	gloasPendingParentMaxWaitDivisor     = 8
 	gloasPendingParentSlotCutoffDivisor  = 6
 	gloasPendingParentRetryBudgetDivisor = 24
@@ -35,20 +35,22 @@ const (
 )
 
 // gloasPendingParentDeadline bounds how long a proposal may wait for the parent payload
-// decision: at most the wait budget, and never past the in-slot cutoff.
+// decision: at most the wait budget, never past the in-slot cutoff, and always long enough
+// for one retry.
 func gloasPendingParentDeadline(now, slotStart time.Time, slotDuration time.Duration) time.Time {
 	deadline := now.Add(slotDuration / gloasPendingParentMaxWaitDivisor)
 	if cutoff := slotStart.Add(slotDuration / gloasPendingParentSlotCutoffDivisor); cutoff.Before(deadline) {
 		deadline = cutoff
 	}
-	if deadline.Before(now) {
-		return now
+	if floor := now.Add(slotDuration / gloasPendingParentRetryBudgetDivisor); deadline.Before(floor) {
+		return floor
 	}
 	return deadline
 }
 
-// awaitGloasPayloadSource re-resolves the payload source until it is no longer pending or the
-// deadline passes. A resolve error keeps the last successfully resolved source.
+// awaitGloasPayloadSource re-resolves the payload source until it is decided or the deadline
+// passes. Each resolve runs on its own goroutine, so one that blocks cannot hold the wait past
+// the cutoff. A resolve error keeps the last successfully resolved source.
 func awaitGloasPayloadSource(
 	ctx context.Context,
 	deadline time.Time,
@@ -56,24 +58,39 @@ func awaitGloasPayloadSource(
 	last executionPayloadSource,
 	resolve func() (executionPayloadSource, error),
 ) executionPayloadSource {
+	type resolved struct {
+		source executionPayloadSource
+		err    error
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	cutoff := time.NewTimer(time.Until(deadline))
 	defer cutoff.Stop()
 	for {
-		source, err := resolve()
-		if err != nil {
+		result := make(chan resolved, 1)
+		go func() {
+			source, err := resolve()
+			result <- resolved{source: source, err: err}
+		}()
+		select {
+		case r := <-result:
+			if r.err != nil {
+				return last
+			}
+			last = r.source
+			if !last.gloasPath.undecided() || !time.Now().Before(deadline) {
+				return last
+			}
+		case <-ctx.Done():
 			return last
-		}
-		last = source
-		if source.gloasPath != gloasPayloadPathPending || !time.Now().Before(deadline) {
-			return source
+		case <-cutoff.C:
+			return last
 		}
 		select {
 		case <-ctx.Done():
-			return source
+			return last
 		case <-cutoff.C:
-			return source
+			return last
 		case <-ticker.C:
 		}
 	}
@@ -81,8 +98,8 @@ func awaitGloasPayloadSource(
 
 // awaitPendingParentPayload gives the parent's payload a bounded chance to be applied before
 // the proposal falls back to the EMPTY parent. A pending envelope is only re-applied by an
-// explicit retry, so each poll triggers one; the first retry always runs, with its own small
-// budget, even when production starts after the cutoff.
+// explicit retry, so each poll triggers one; the retry budget outlives the deadline by one
+// retry, so a retry started late in the wait is not cut short.
 func (a *ApiHandler) awaitPendingParentPayload(
 	ctx context.Context,
 	baseState *state.CachingBeaconState,
@@ -93,8 +110,7 @@ func (a *ApiHandler) awaitPendingParentPayload(
 ) executionPayloadSource {
 	slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
 	deadline := gloasPendingParentDeadline(time.Now(), a.ethClock.GetSlotTime(targetSlot), slotDuration)
-	retryBudget := max(time.Until(deadline), slotDuration/gloasPendingParentRetryBudgetDivisor)
-	retryCtx, cancelRetry := context.WithTimeout(ctx, retryBudget)
+	retryCtx, cancelRetry := context.WithTimeout(ctx, time.Until(deadline)+slotDuration/gloasPendingParentRetryBudgetDivisor)
 	defer cancelRetry()
 	a.logger.Info("BlockProduction: waiting for parent payload decision", "slot", targetSlot, "head", baseBlockRoot, "budget", time.Until(deadline).Round(time.Millisecond))
 	return awaitGloasPayloadSource(ctx, deadline, gloasPendingParentPollInterval, current, func() (executionPayloadSource, error) {

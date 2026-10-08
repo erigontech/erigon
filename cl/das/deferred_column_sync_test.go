@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 func TestDeferredColumnSyncDue(t *testing.T) {
@@ -30,4 +32,29 @@ func TestDeferredColumnSyncDue(t *testing.T) {
 	require.False(t, deferredColumnSyncDue(slotStart.Add(1999*time.Millisecond), slotStart, delay))
 	require.True(t, deferredColumnSyncDue(slotStart.Add(2*time.Second), slotStart, delay))
 	require.True(t, deferredColumnSyncDue(slotStart.Add(time.Minute), slotStart, delay))
+}
+
+func TestDeferredColumnSyncQueueGrowsTheBackoffAndKeepsTheRoot(t *testing.T) {
+	queue := newDeferredColumnSyncQueue()
+	root := common.Hash{1}
+	now := time.Unix(1000, 0)
+	slot := 12 * time.Second
+
+	require.True(t, queue.ready(root, now))
+	queue.start([]common.Hash{root})
+	require.False(t, queue.ready(root, now.Add(time.Hour)), "a root in a round is not picked again")
+
+	for attempt := 1; attempt <= deferredColumnSyncMaxBackoffSlots+4; attempt++ {
+		queue.failed(root, now, slot)
+		wait := slot * time.Duration(min(attempt, deferredColumnSyncMaxBackoffSlots))
+		require.False(t, queue.ready(root, now.Add(wait-time.Millisecond)), "attempt %d", attempt)
+		require.True(t, queue.ready(root, now.Add(wait)), "attempt %d", attempt)
+	}
+
+	queue.postpone(root, now, slot)
+	require.False(t, queue.ready(root, now.Add(slot-time.Millisecond)))
+	require.True(t, queue.ready(root, now.Add(slot)))
+
+	queue.done(root)
+	require.True(t, queue.ready(root, now))
 }
