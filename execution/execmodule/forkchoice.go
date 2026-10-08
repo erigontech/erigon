@@ -499,9 +499,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 		finalisedBlockNum = *bn
 	}
-	// A valid ancestor of the stored finalized block may return VALID without
-	// updating forkchoice (Engine API, point 2):
-	// https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#specification-1
+	// as per https://github.com/ethereum/execution-apis/pull/786
+	// we short circuit reorgs if:
+	//   1. the head is an ancestor of the last finalised block
+	//   2. the head matches the executed canonical tip (safe/finalized hashes may still change)
 	belowFinality := fcuHeader.Number.Uint64() < finalisedBlockNum
 	sameExecutedBlockNum := fcuHeader.Number.Uint64() == finishProgressBefore
 	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash && (belowFinality || sameExecutedBlockNum) {
