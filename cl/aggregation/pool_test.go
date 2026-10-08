@@ -251,6 +251,32 @@ func (t *PoolTestSuite) TestElectraAggregationErrorIsReturned() {
 	t.ErrorIs(pool.AddAttestation(att.Copy()), ErrIsSuperset)
 }
 
+func (t *PoolTestSuite) TestSlotIsStale() {
+	netConfig := &clparams.NetworkConfig{AttestationPropagationSlotRange: 32}
+	const curSlot = uint64(100)
+
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(curSlot).AnyTimes()
+	pool := &aggregationPoolImpl{ethClock: t.mockEthClock, netConfig: netConfig}
+
+	testcases := []struct {
+		name       string
+		targetSlot uint64
+		expect     bool
+	}{
+		{name: "future slot (target > current)", targetSlot: 101, expect: false},
+		{name: "current slot", targetSlot: 100, expect: false},
+		{name: "one slot behind", targetSlot: 99, expect: false},
+		{name: "at range boundary", targetSlot: 68, expect: false},
+		{name: "past range boundary", targetSlot: 67, expect: true},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func() {
+			t.Equal(tc.expect, pool.slotIsStale(tc.targetSlot))
+		})
+	}
+}
+
 func (t *PoolTestSuite) TestAddAttestation() {
 	testcases := []struct {
 		name     string
