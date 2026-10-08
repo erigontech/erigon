@@ -120,7 +120,7 @@ func TestSleepForSlotGloasHeadChangeWakesEarlyAndTransitionsToForkChoice(t *test
 
 func TestSleepForSlotGloasEqualHeadsWaitsAndTransitionsToChainTipSync(t *testing.T) {
 	head := common.Hash{1}
-	wait := 2 * sleepForSlotHeadPollInterval
+	wait := 5 * sleepForSlotHeadPollInterval
 	calls := 0
 	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(wait)}
 	started := time.Now()
@@ -153,7 +153,7 @@ func TestSleepForSlotGloasRetriesDataAvailableEnvelopesFromHeadOrPreviousSlot(t 
 			head := common.Hash{1}
 			var retryMinSlots []uint64
 			var retryDeadlines []time.Time
-			clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(2 * sleepForSlotHeadPollInterval)}
+			clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)}
 
 			_, headChanged, err := waitForNextSlotOrHeadChange(
 				t.Context(), 11, sleepForSlotConfig(10),
@@ -202,7 +202,7 @@ func TestSleepForSlotPreGloasHeadChangeWaitsAndTransitionsToChainTipSync(t *test
 func TestSleepForSlotRewakesForSameHeadAfterInterval(t *testing.T) {
 	materializedHead := common.Hash{1}
 	forkChoiceHead := common.Hash{2}
-	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(3 * sleepForSlotHeadPollInterval)}
+	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)}
 
 	// The earlier wake did not materialize the head (ForkChoice failed, or the head moved away and back).
 	_, headChanged, err := waitForNextSlotOrHeadChange(
@@ -220,7 +220,7 @@ func TestSleepForSlotRewakesForSameHeadAfterInterval(t *testing.T) {
 func TestSleepForSlotDoesNotWakeTwiceForSameHeadWithinRewakeInterval(t *testing.T) {
 	materializedHead := common.Hash{1}
 	forkChoiceHead := common.Hash{2}
-	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(3 * sleepForSlotHeadPollInterval)}
+	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: time.Now().Add(5 * sleepForSlotHeadPollInterval)}
 
 	wake, headChanged, err := waitForNextSlotOrHeadChange(
 		t.Context(), 11, sleepForSlotConfig(10),
@@ -251,7 +251,7 @@ func TestSleepForSlotDoesNotWakeTwiceForSameHeadWithinRewakeInterval(t *testing.
 func TestSleepForSlotPollCompletingAfterNextSlotDoesNotWakeEarly(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
-	nextSlot := time.Now().Add(2 * sleepForSlotHeadPollInterval)
+	nextSlot := time.Now().Add(5 * sleepForSlotHeadPollInterval)
 	clock := sleepForSlotClockFake{currentEpoch: 10, currentSlot: 10, nextSlot: nextSlot}
 	releaseTimer := time.AfterFunc(time.Until(nextSlot)+20*time.Millisecond, func() {
 		close(release)
