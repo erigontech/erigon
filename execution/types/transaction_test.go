@@ -1157,6 +1157,50 @@ func TestTransactionHashFromEncoding(t *testing.T) {
 			got, err := TransactionHashFromEncoding(enc)
 			require.NoError(t, err)
 			require.Equal(t, txn.Hash(), got, "type %d, encoding %x", txn.Type(), enc[:1])
+			bin, err := BinaryFromStoredTxn(enc)
+			require.NoError(t, err)
+			require.Equal(t, binary.Bytes(), bin, "type %d, encoding %x", txn.Type(), enc[:1])
 		}
+	}
+}
+
+// A stored record whose framing is not one transaction's is rejected, not handed out as one.
+func TestBinaryFromStoredTxnRejectsMalformed(t *testing.T) {
+	wrap := func(b []byte) []byte {
+		out := make([]byte, rlp.StringLen(b))
+		rlp.EncodeStringToBuf(b, out)
+		return out
+	}
+	binaryOf := func(txn Transaction) []byte {
+		var buf bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&buf))
+		return bytes.Clone(buf.Bytes())
+	}
+	legacyBinary, typedBinary := binaryOf(rightvrsTx), binaryOf(signedDynFeeTx)
+	// The trailing-byte cases must be a valid encoding plus one byte: anything shorter
+	// is already rejected on the field count, leaving the trailing checks untested.
+	withTrailing := func(b []byte) []byte { return append(bytes.Clone(b), 0x80) }
+
+	for name, stored := range map[string][]byte{
+		"empty":                  {},
+		"legacy empty list":      {0xc0},
+		"legacy not a list":      {0x01, 0x02},
+		"legacy trailing bytes":  withTrailing(legacyBinary),
+		"typed empty list":       wrap([]byte{0x02, 0xc0}),
+		"typed without fields":   wrap([]byte{0x02}),
+		"typed trailing bytes":   wrap(withTrailing(typedBinary)),
+		"wrapped trailing bytes": withTrailing(wrap(typedBinary)),
+		"wrapped empty":          {0x80},
+		"legacy one field":       {0xc1, 0x80},
+		"typed one field":        {0x02, 0xc1, 0x80},
+		"unknown type byte":      {0x7f, 0xc1, 0x80},
+		"non-canonical field":    {0xc2, 0x81, 0x00},
+		"wrapped one field":      {0x82, 0xc1, 0x80},
+		"legacy field count":     append([]byte{0xf8, 0x39}, bytes.Repeat([]byte{0x80}, 57)...),
+		"zero type byte":         append([]byte{0x00}, legacyBinary...),
+		"wrapped legacy list":    wrap(legacyBinary),
+	} {
+		_, err := BinaryFromStoredTxn(stored)
+		require.Error(t, err, name)
 	}
 }
