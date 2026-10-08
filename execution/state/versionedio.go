@@ -133,6 +133,9 @@ type ReadSet struct {
 	// the versioned record would carry a 48-byte header that is UnknownVersion
 	// for every one of them, in a map per address.
 	coldSlots map[slotRef]uint256.Int
+	// writtenSlots keeps a cold slot's pre-call value once a write drops it from
+	// coldSlots: a committed read still wants it, and it cannot change in a call.
+	writtenSlots map[slotRef]uint256.Int
 
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
@@ -148,7 +151,7 @@ func (s *ReadSet) entries() int {
 	for _, inner := range s.storage {
 		n += len(inner)
 	}
-	return n + len(s.coldSlots)
+	return n + len(s.coldSlots) + len(s.writtenSlots)
 }
 
 func (s *ReadSet) clearForReuse() {
@@ -179,6 +182,7 @@ func (s *ReadSet) clearForReuse() {
 		s.storage = nil
 	}
 	clear(s.coldSlots)
+	clear(s.writtenSlots)
 	s.access = nil
 }
 
@@ -207,14 +211,32 @@ func (s *ReadSet) GetColdSlot(addr accounts.Address, key accounts.StorageKey) (u
 // DelColdSlot drops one memoized slot. A write invalidates it here instead of
 // the read checking for one, and dropping too much only costs a re-read.
 func (s *ReadSet) DelColdSlot(addr accounts.Address, key accounts.StorageKey) {
-	if s.coldSlots != nil {
-		delete(s.coldSlots, slotRef{addr, key})
+	ref := slotRef{addr, key}
+	if v, ok := s.coldSlots[ref]; ok {
+		if s.writtenSlots == nil {
+			s.writtenSlots = make(map[slotRef]uint256.Int)
+		}
+		s.writtenSlots[ref] = v
+		delete(s.coldSlots, ref)
 	}
+}
+
+// GetCommittedSlot returns the slot's pre-call value from either memo.
+func (s *ReadSet) GetCommittedSlot(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
+	ref := slotRef{addr, key}
+	if v, ok := s.coldSlots[ref]; ok {
+		return v, true
+	}
+	v, ok := s.writtenSlots[ref]
+	return v, ok
 }
 
 // DropColdSlots drops the whole memo, for a change that invalidates an
 // account's slots wholesale rather than one of them.
-func (s *ReadSet) DropColdSlots() { clear(s.coldSlots) }
+func (s *ReadSet) DropColdSlots() {
+	clear(s.coldSlots)
+	clear(s.writtenSlots)
+}
 
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
 	if *m == nil {
