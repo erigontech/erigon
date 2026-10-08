@@ -8,20 +8,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -57,38 +55,23 @@ func BenchmarkTxReplay(b *testing.B) {
 }
 
 type txFixture struct {
-	Tx struct {
-		From                 common.Address            `json:"from"`
-		To                   *common.Address           `json:"to"`
-		Input                hexutil.Bytes             `json:"input"`
-		Value                hexutil.U256              `json:"value"`
-		Gas                  hexutil.Uint64            `json:"gas"`
-		GasPrice             *hexutil.U256             `json:"gasPrice"`
-		MaxFeePerGas         *hexutil.U256             `json:"maxFeePerGas"`
-		MaxPriorityFeePerGas *hexutil.U256             `json:"maxPriorityFeePerGas"`
-		Nonce                hexutil.Uint64            `json:"nonce"`
-		Type                 hexutil.Uint64            `json:"type"`
-		AccessList           types.AccessList          `json:"accessList"`
-		AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
-	} `json:"tx"`
+	Tx      json.RawMessage `json:"tx"`
 	Receipt struct {
 		GasUsed hexutil.Uint64 `json:"gasUsed"`
 		Status  hexutil.Uint64 `json:"status"`
 	} `json:"receipt"`
-	Block    types.Header `json:"block"`
-	Prestate map[common.Address]struct {
-		Balance *hexutil.U256               `json:"balance"`
-		Nonce   uint64                      `json:"nonce"`
-		Code    hexutil.Bytes               `json:"code"`
-		Storage map[common.Hash]common.Hash `json:"storage"`
-	} `json:"prestate"`
+	Block    types.Header       `json:"block"`
+	Prestate types.GenesisAlloc `json:"prestate"`
 }
 
 type txReplay struct {
 	cfg      *chain.Config
+	rules    *chain.Rules
 	blockCtx evmtypes.BlockContext
 	reader   state.StateReader
-	fixture  *txFixture
+	txn      types.Transaction
+	signer   types.Signer
+	gasLimit uint64
 	gasUsed  uint64
 	failed   bool
 }
@@ -100,42 +83,32 @@ func newTxReplay(tb testing.TB, path string) *txReplay {
 	require.NoError(tb, err)
 	f := &txFixture{}
 	require.NoError(tb, json.Unmarshal(raw, f))
-	if f.Tx.Type == types.BlobTxType || f.Tx.Type > types.SetCodeTxType {
-		tb.Fatalf("%s: tx type %d is not replayed", path, f.Tx.Type)
+	txn, err := types.UnmarshalTransactionFromJSON(f.Tx)
+	require.NoError(tb, err)
+	var sender struct {
+		From common.Address `json:"from"`
 	}
+	require.NoError(tb, json.Unmarshal(f.Tx, &sender))
+	txn.SetSender(accounts.InternAddress(sender.From))
 
 	cfg := chainspec.Mainnet.Config
 	noHashes := func(uint64) (common.Hash, error) { return common.Hash{}, nil }
 	blockCtx := protocol.NewEVMBlockContext(&f.Block, noHashes, nil, accounts.InternAddress(f.Block.Coinbase), cfg)
+	rules := blockCtx.Rules(cfg)
 
 	db := temporaltest.NewTestDB(tb, datadir.New(tb.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(tb, db)
-	require.NoError(tb, rawdbv3.TxNums.Append(tx, 1, 1))
-	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	seeded := state.New(reader)
-	for a, acc := range f.Prestate {
-		addr := accounts.InternAddress(a)
-		require.NoError(tb, seeded.CreateAccount(addr, len(acc.Code) > 0))
-		if acc.Balance != nil {
-			require.NoError(tb, seeded.SetBalance(addr, uint256.Int(*acc.Balance), tracing.BalanceChangeUnspecified))
-		}
-		require.NoError(tb, seeded.SetNonce(addr, acc.Nonce, tracing.NonceChangeUnspecified))
-		if len(acc.Code) > 0 {
-			require.NoError(tb, seeded.SetCode(addr, acc.Code, tracing.CodeChangeUnspecified))
-		}
-		for k, v := range acc.Storage {
-			var val uint256.Int
-			val.SetBytes32(v[:])
-			require.NoError(tb, seeded.SetState(addr, accounts.InternKey(k), val))
-		}
-	}
-	require.NoError(tb, seeded.CommitBlock(blockCtx.Rules(cfg), state.NewWriter(domains.AsPutDel(tx), nil, 1)))
+	_, err = testutil.MakePreStateInto(rules, domains, tx, f.Prestate, 1)
+	require.NoError(tb, err)
 
 	return &txReplay{
 		cfg:      cfg,
+		rules:    rules,
 		blockCtx: blockCtx,
-		reader:   reader,
-		fixture:  f,
+		reader:   state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})),
+		txn:      txn,
+		signer:   *types.MakeSigner(cfg, f.Block.Number.Uint64(), f.Block.Time),
+		gasLimit: f.Block.GasLimit,
 		gasUsed:  uint64(f.Receipt.GasUsed),
 		failed:   f.Receipt.Status == 0,
 	}
@@ -144,63 +117,37 @@ func newTxReplay(tb testing.TB, path string) *txReplay {
 // run executes the tx once on a fresh state, as DoCall sets one up.
 func (r *txReplay) run(tb testing.TB, noMaterialize bool) *evmtypes.ExecutionResult {
 	ibs := state.New(r.reader)
+	defer ibs.Close()
 	if noMaterialize {
 		ibs.SetVersionMap(state.NewVersionMap(nil))
 		ibs.SetNoMaterialize(true)
 		ibs.SetTxContext(0, 0)
 		ibs.SetNoConflictDetection()
 	}
-	msg := r.message()
-	evm := vm.NewEVM(r.blockCtx, protocol.NewEVMTxContext(msg), ibs, r.cfg, vm.Config{})
-	res, err := protocol.ApplyMessage(evm, msg, protocol.NewGasPool(r.fixture.Block.GasLimit, 0), true, false, nil)
-	if err != nil {
-		tb.Fatal(err)
-	}
+	msg, err := r.txn.AsMessage(r.signer, &r.blockCtx.BaseFee, r.rules)
+	require.NoError(tb, err)
+	evm := vm.NewEVM(r.blockCtx, protocol.NewEVMTxContext(msg), ibs, r.cfg, vm.Config{NoReceipts: true, NoBAL: true})
+	res, err := protocol.ApplyMessage(evm, msg, protocol.NewGasPool(r.gasLimit, 0), true, false, nil)
+	require.NoError(tb, err)
 	return res
-}
-
-func (r *txReplay) message() *types.Message {
-	t := &r.fixture.Tx
-	to := accounts.NilAddress
-	if t.To != nil {
-		to = accounts.InternAddress(*t.To)
-	}
-	price := (*uint256.Int)(t.GasPrice)
-	feeCap, tipCap := price, price
-	if t.MaxFeePerGas != nil {
-		feeCap, tipCap = (*uint256.Int)(t.MaxFeePerGas), (*uint256.Int)(t.MaxPriorityFeePerGas)
-	}
-	value := uint256.Int(t.Value)
-	msg := types.NewMessage(accounts.InternAddress(t.From), to, uint64(t.Nonce), &value, uint64(t.Gas),
-		price, feeCap, tipCap, t.Input, t.AccessList, true, true, true, false, nil)
-	if len(t.AuthorizationList) > 0 {
-		auths := make([]types.Authorization, len(t.AuthorizationList))
-		for i := range t.AuthorizationList {
-			var err error
-			if auths[i], err = t.AuthorizationList[i].ToAuthorization(); err != nil {
-				panic(err)
-			}
-		}
-		msg.SetAuthorizations(auths)
-	}
-	return msg
 }
 
 // The replay runs the prestate's code over its storage on both paths: a call
 // returning a seeded slot proves both reach the state the fixture describes.
 func TestTxReplayUsesThePrestate(t *testing.T) {
-	const legacy = `"gasPrice": "0x1", "type": "0x0"`
+	const legacy = `"gasPrice": "0x1", "type": "0x0", "v": "0x0", "r": "0x0", "s": "0x0"`
 	// The authorization's signature does not recover, so EIP-7702 skips it and
 	// the call still runs.
-	const setCode = `"maxFeePerGas": "0x1", "maxPriorityFeePerGas": "0x0", "type": "0x4",
-		"authorizationList": [{"chainId": "0x1", "address": "0x00000000000000000000000000000000000000d1",
-			"nonce": "0x0", "yParity": "0x0", "r": "0x1", "s": "0x1"}]`
-	for name, txFields := range map[string]string{"legacy": legacy, "setCode": setCode} {
-		t.Run(name, func(t *testing.T) { testReplayUsesThePrestate(t, txFields) })
-	}
+	const setCode = `"chainId": "0x1", "maxFeePerGas": "0x1", "maxPriorityFeePerGas": "0x0", "type": "0x4",
+		"accessList": [], "authorizationList": [{"chainId": "0x1", "address": "0x00000000000000000000000000000000000000d1",
+			"nonce": "0x0", "yParity": "0x0", "r": "0x1", "s": "0x1"}], "yParity": "0x0", "v": "0x0", "r": "0x0", "s": "0x0"`
+	// 21000 + PUSH1 SLOAD(cold) PUSH1 MSTORE(+1 word) PUSH1 PUSH1 RETURN = 23118,
+	// plus 25000 per authorization.
+	t.Run("legacy", func(t *testing.T) { testReplayUsesThePrestate(t, legacy, 23118) })
+	t.Run("setCode", func(t *testing.T) { testReplayUsesThePrestate(t, setCode, 48118) })
 }
 
-func testReplayUsesThePrestate(t *testing.T, txFields string) {
+func testReplayUsesThePrestate(t *testing.T, txFields string, gasUsed uint64) {
 	// PUSH1 0 SLOAD PUSH1 0 MSTORE PUSH1 32 PUSH1 0 RETURN
 	const returnSlot0 = "0x60005460005260206000f3"
 	const slot0 = "0x00000000000000000000000000000000000000000000000000000000000000aa"
@@ -222,7 +169,7 @@ func testReplayUsesThePrestate(t *testing.T, txFields string) {
 			"nonce": "0x0000000000000000"},
 		"prestate": {
 			"0x00000000000000000000000000000000000000f1": {"balance": "0x10000000000"},
-			"0x00000000000000000000000000000000000000c1": {"code": "`+returnSlot0+`", "nonce": 1,
+			"0x00000000000000000000000000000000000000c1": {"balance": "0x0", "code": "`+returnSlot0+`", "nonce": 1,
 				"storage": {"0x0000000000000000000000000000000000000000000000000000000000000000": "`+slot0+`"}}}
 	}`), 0o644))
 
@@ -231,6 +178,6 @@ func testReplayUsesThePrestate(t *testing.T, txFields string) {
 		res := r.run(t, noMaterialize)
 		require.False(t, res.Failed(), "noMaterialize=%v: %v", noMaterialize, res.Err)
 		require.Equal(t, common.FromHex(slot0), res.ReturnData, "noMaterialize=%v", noMaterialize)
-		require.Greater(t, res.ReceiptGasUsed, uint64(21000), "noMaterialize=%v", noMaterialize)
+		require.Equal(t, gasUsed, res.ReceiptGasUsed, "noMaterialize=%v", noMaterialize)
 	}
 }

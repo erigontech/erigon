@@ -18,18 +18,18 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/urfave/cli/v3"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc"
 )
 
 var (
@@ -45,7 +45,7 @@ var (
 	}
 	FetchListFlag = cli.StringFlag{
 		Name:  "list",
-		Usage: "file with one `hash` or `name hash` per line; # starts a comment",
+		Usage: `file with one "hash" or "name hash" per line; # starts a comment`,
 	}
 )
 
@@ -69,11 +69,16 @@ func fetchTxCmd(ctx context.Context, cmd *cli.Command) error {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return err
 	}
-	return fetchTxs(ctx, &jsonRPC{url: cmd.String(FetchRPCFlag.Name)}, names, out)
+	c, err := rpc.DialHTTP(cmd.String(FetchRPCFlag.Name), log.Root())
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return fetchTxs(ctx, c, names, out)
 }
 
 // fetchTxs writes every tx the node can serve and reports the ones it cannot.
-func fetchTxs(ctx context.Context, c *jsonRPC, names []txName, out string) error {
+func fetchTxs(ctx context.Context, c *rpc.Client, names []txName, out string) error {
 	var failed []error
 	for _, n := range names {
 		fixture, err := fetchTx(ctx, c, n.hash)
@@ -123,8 +128,8 @@ func fetchTxNames(args []string, list string) ([]txName, error) {
 }
 
 // fetchTx keeps the RPC results as they came: the benchmark decodes what it needs.
-func fetchTx(ctx context.Context, c *jsonRPC, hash string) ([]byte, error) {
-	tx, err := c.call(ctx, "eth_getTransactionByHash", hash)
+func fetchTx(ctx context.Context, c *rpc.Client, hash string) ([]byte, error) {
+	tx, err := call(ctx, c, "eth_getTransactionByHash", hash)
 	if err != nil {
 		return nil, err
 	}
@@ -134,56 +139,28 @@ func fetchTx(ctx context.Context, c *jsonRPC, hash string) ([]byte, error) {
 	if err := json.Unmarshal(tx, &where); err != nil {
 		return nil, err
 	}
-	receipt, err := c.call(ctx, "eth_getTransactionReceipt", hash)
+	receipt, err := call(ctx, c, "eth_getTransactionReceipt", hash)
 	if err != nil {
 		return nil, err
 	}
-	block, err := c.call(ctx, "eth_getBlockByNumber", where.BlockNumber, false)
+	block, err := call(ctx, c, "eth_getBlockByNumber", where.BlockNumber, false)
 	if err != nil {
 		return nil, err
 	}
-	prestate, err := c.call(ctx, "debug_traceTransaction", hash, map[string]string{"tracer": "prestateTracer"})
+	prestate, err := call(ctx, c, "debug_traceTransaction", hash, map[string]string{"tracer": "prestateTracer"})
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(map[string]json.RawMessage{"tx": tx, "receipt": receipt, "block": block, "prestate": prestate})
 }
 
-type jsonRPC struct{ url string }
-
-func (c *jsonRPC) call(ctx context.Context, method string, params ...any) (json.RawMessage, error) {
-	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
-	if err != nil {
-		return nil, err
+func call(ctx context.Context, c *rpc.Client, method string, params ...any) (json.RawMessage, error) {
+	var res json.RawMessage
+	if err := c.CallContext(ctx, &res, method, params...); err != nil {
+		return nil, fmt.Errorf("%s: %w", method, err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	var out struct {
-		Result json.RawMessage `json:"result"`
-		Error  *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("%s: HTTP %d: %.200s", method, resp.StatusCode, raw)
-	}
-	if out.Error != nil {
-		return nil, fmt.Errorf("%s: %s", method, out.Error.Message)
-	}
-	if len(out.Result) == 0 || string(out.Result) == "null" {
+	if len(res) == 0 || string(res) == "null" {
 		return nil, fmt.Errorf("%s: not found", method)
 	}
-	return out.Result, nil
+	return res, nil
 }

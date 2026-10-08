@@ -25,6 +25,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // fakeNode answers the four calls fetchTx makes and records their params.
@@ -48,6 +51,13 @@ func fakeNode(t *testing.T, results map[string]string) (*httptest.Server, map[st
 	return srv, params
 }
 
+func dial(t *testing.T, url string) *rpc.Client {
+	c, err := rpc.DialHTTP(url, log.Root())
+	require.NoError(t, err)
+	t.Cleanup(c.Close)
+	return c
+}
+
 func TestFetchTxKeepsTheFourResults(t *testing.T) {
 	const hash = "0xabc"
 	srv, params := fakeNode(t, map[string]string{
@@ -57,7 +67,7 @@ func TestFetchTxKeepsTheFourResults(t *testing.T) {
 		"debug_traceTransaction":    `{"0x01":{"balance":"0x1"}}`,
 	})
 
-	raw, err := fetchTx(t.Context(), &jsonRPC{url: srv.URL}, hash)
+	raw, err := fetchTx(t.Context(), dial(t, srv.URL), hash)
 	require.NoError(t, err)
 	var got map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(raw, &got))
@@ -72,7 +82,7 @@ func TestFetchTxKeepsTheFourResults(t *testing.T) {
 
 func TestFetchTxFailsOnAMissingTx(t *testing.T) {
 	srv, _ := fakeNode(t, map[string]string{})
-	_, err := fetchTx(t.Context(), &jsonRPC{url: srv.URL}, "0xabc")
+	_, err := fetchTx(t.Context(), dial(t, srv.URL), "0xabc")
 	require.ErrorContains(t, err, "eth_getTransactionByHash: not found")
 }
 
@@ -106,7 +116,7 @@ func TestFetchTxsWritesTheRestPastAFailure(t *testing.T) {
 	t.Cleanup(srv.Close)
 	out := t.TempDir()
 
-	err := fetchTxs(t.Context(), &jsonRPC{url: srv.URL}, []txName{{"0xbad", "0xbad"}, {"0xgood", "0xgood"}}, out)
+	err := fetchTxs(t.Context(), dial(t, srv.URL), []txName{{"0xbad", "0xbad"}, {"0xgood", "0xgood"}}, out)
 	require.ErrorContains(t, err, "0xbad")
 	require.FileExists(t, filepath.Join(out, "0xgood.json"))
 	require.NoFileExists(t, filepath.Join(out, "0xbad.json"))
