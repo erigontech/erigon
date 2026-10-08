@@ -821,3 +821,11 @@ func TestEvictionKeepsTheBuilderCacheBounded(t *testing.T) {
 	require.LessOrEqual(t, len(module.builders), engine_helpers.MaxBuilders)
 	require.LessOrEqual(t, len(module.buildersByTimestamp), engine_helpers.MaxBuilders)
 }
+
+func TestInclusionListWithoutBuilderFails(t *testing.T) {
+	module := newTestModule(t, nil)
+
+	txns, err := module.InclusionList(t.Context())
+	require.Error(t, err)
+	require.Nil(t, txns)
+}

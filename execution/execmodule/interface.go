@@ -219,4 +219,7 @@ type ExecutionModule interface {
 	// and whether there is a gap between the snapshot tip and the live
 	// database.
 	FrozenBlocks(ctx context.Context) (frozenBlocks uint64, hasGap bool, err error)
+
+	// InclusionList builds an inclusion list for EIP-7805 from its view of the mempool.
+	InclusionList(ctx context.Context) (types.Transactions, error)
 }
