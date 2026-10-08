@@ -31,10 +31,10 @@ import (
 // txFixturesDir holds what `evm fixture` writes; it is gitignored.
 const txFixturesDir = "testdata/txs"
 
-// BenchmarkMainnetTx replays each mainnet tx fetched into testdata/txs, as
+// BenchmarkTxReplay replays each tx fetched into testdata/txs, as
 // eth_call runs it: a fresh state over the tx's prestate per iteration, on the
 // materializing and the noMaterialize path.
-func BenchmarkMainnetTx(b *testing.B) {
+func BenchmarkTxReplay(b *testing.B) {
 	paths, err := filepath.Glob(filepath.Join(txFixturesDir, "*.json"))
 	require.NoError(b, err)
 	for _, path := range paths {
@@ -188,7 +188,7 @@ func (r *txReplay) message() *types.Message {
 
 // The replay runs the prestate's code over its storage on both paths: a call
 // returning a seeded slot proves both reach the state the fixture describes.
-func TestMainnetTxReplayUsesThePrestate(t *testing.T) {
+func TestTxReplayUsesThePrestate(t *testing.T) {
 	const legacy = `"gasPrice": "0x1", "type": "0x0"`
 	// The authorization's signature does not recover, so EIP-7702 skips it and
 	// the call still runs.

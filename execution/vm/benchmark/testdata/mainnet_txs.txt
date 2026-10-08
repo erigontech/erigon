@@ -1,4 +1,4 @@
-# Mainnet txs for BenchmarkMainnetTx: `name hash` per line, for `evm fixture --list`.
+# Mainnet txs for BenchmarkTxReplay: `name hash` per line, for `evm fixture --list`.
 # Named rows of the RPC rps dataset; row 1 (ab9b469f, keccak-gasburn-xociety) has no recorded hash.
 2-5a158d08-div-loop-28M 0x5a158d08067feeffe06fb1930c50c9f82b0c9175a22d6d110c190fe0dd47d1aa
 3-36e4e351-dispatch-oog-51KB 0x36e4e351f083a78f821f6142867210148caf8b4a23bf064325f8a119f6aedac0
