@@ -1255,6 +1255,9 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	if err := beaconCfg.ValidateExecutionRequestTypeConstants(); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
 	}
+	if beaconCfg.MaxCommitteesPerSlot > MaxSupportedCommitteesPerSlot {
+		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("MAX_COMMITTEES_PER_SLOT exceeds supported limit: %d > %d", beaconCfg.MaxCommitteesPerSlot, MaxSupportedCommitteesPerSlot)
+	}
 
 	// setup network config
 	if err := yaml.Unmarshal(b, &networkConfig); err != nil {
