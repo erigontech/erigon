@@ -23,6 +23,7 @@ import (
 	"math/rand"
 	"sort"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -2078,4 +2079,10 @@ func TestColdSlotMemoYieldsToACreateOnTheLiveRead(t *testing.T) {
 	got, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	require.True(t, got.IsZero(), "a created contract starts with empty storage")
+}
+
+// Fresh states and the sets Snapshot returns never use an arena, so they must
+// not carry its metadata.
+func TestWriteSetKeepsTheArenaOutOfLine(t *testing.T) {
+	require.Less(t, unsafe.Sizeof(WriteSet{}), unsafe.Sizeof(vwArenas{}))
 }
