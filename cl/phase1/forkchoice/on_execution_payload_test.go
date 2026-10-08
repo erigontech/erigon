@@ -825,6 +825,38 @@ func (*failingEnvelopeDumpForkGraph) DumpEnvelopeOnDisk(common.Hash, *cltypes.Si
 	return errors.New("disk full")
 }
 
+func TestRetryDataAvailablePendingExecutionPayloadEnvelopesAppliesZeroBlobEnvelope(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	retryAt, err := lru.New[common.Hash, time.Time](queueCacheSize)
+	require.NoError(t, err)
+	dataGraph := dataAvailabilityForkGraph{state: blockState, block: block}
+	f := newPayloadVoteTestStore(t, blockRoot, false, false)
+	f.beaconCfg = cfg
+	f.forkGraph = &failingEnvelopeDumpForkGraph{persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataGraph}}
+	f.syncedDataManager = synced_data.NewSyncedDataManager(cfg, true)
+	f.pendingEnvelopes = pending
+	f.pendingLocalSelfBuildEnvelopes = local
+	f.dataAvailableEnvelopeRetryAt = retryAt
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, blockRoot).Return(false, nil).AnyTimes()
+	f.peerDas = peerDas
+
+	require.ErrorIs(t, f.OnExecutionPayload(t.Context(), envelope, true, true), ErrExecutionPayloadEnvelopePersistenceFailed)
+	require.True(t, pending.Contains(blockRoot))
+
+	graph := &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataGraph}
+	f.forkGraph = graph
+	f.RetryDataAvailablePendingExecutionPayloadEnvelopes(t.Context(), block.Block.Slot)
+	require.True(t, graph.HasEnvelope(blockRoot))
+	require.False(t, pending.Contains(blockRoot))
+}
+
 // newColumnWaitingEnvelopeStore queues a valid envelope whose block has one blob commitment and no stored columns yet.
 // Setting *available makes the columns appear; *probes counts data availability checks.
 func newColumnWaitingEnvelopeStore(t *testing.T, newGraph func(dataAvailabilityForkGraph) fork_graph.ForkGraph) (f *ForkChoiceStore, block *cltypes.SignedBeaconBlock, available *bool, probes *int) {
