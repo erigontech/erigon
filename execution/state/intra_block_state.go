@@ -3087,6 +3087,9 @@ func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val
 	if ibs.versionMap == nil {
 		return
 	}
+	// A contract created over the slots starts them empty; which slots the memo
+	// holds for addr is not tracked, so the whole memo goes.
+	ibs.versionedReads.DropColdSlots()
 	if vw, ok := ibs.versionedWrites.GetCreateContract(addr); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val
@@ -3179,6 +3182,7 @@ func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accoun
 	if ibs.versionMap == nil {
 		return
 	}
+	ibs.versionedReads.ColdSlotWritten(addr, key)
 	if vw, ok := ibs.versionedWrites.GetStorage(addr, key); ok {
 		vw.Version = ibs.Version()
 		vw.Val = val

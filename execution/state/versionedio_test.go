@@ -1695,3 +1695,138 @@ func (a *referenceAccount) write(slot accounts.StorageKey, val uint256.Int, idx 
 		Changes: []*types.StorageChange{{Index: idx, Value: val}},
 	})
 }
+
+// oneSlotReader serves one committed slot and counts the reads of it.
+type oneSlotReader struct {
+	NoopReader
+	addr  accounts.Address
+	key   accounts.StorageKey
+	val   uint256.Int
+	reads int
+}
+
+func (r *oneSlotReader) ReadAccountStorage(a accounts.Address, k accounts.StorageKey) (uint256.Int, bool, error) {
+	if a == r.addr && k == r.key {
+		r.reads++
+		return r.val, true, nil
+	}
+	return uint256.Int{}, false, nil
+}
+
+func (r *oneSlotReader) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
+	if a == r.addr {
+		return &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}, nil
+	}
+	return nil, nil
+}
+
+func (r *oneSlotReader) ReadAccountDataForDebug(a accounts.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(a)
+}
+
+func newColdSlotState(t *testing.T) (*IntraBlockState, *oneSlotReader, accounts.Address, accounts.StorageKey) {
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	rd := &oneSlotReader{addr: addr, key: key, val: *uint256.NewInt(0xAAAA)}
+	ibs, vm := newNoMaterializeIBS(rd)
+	startNoMaterializeTx(ibs, vm, 0)
+	ibs.SetNoConflictDetection()
+	return ibs, rd, addr, key
+}
+
+// A committed slot read by an execution nobody validates is memoized without a
+// versioned record: the record's header would be UnknownVersion for every one.
+func TestColdSlotMemoServesTheRepeatRead(t *testing.T) {
+	ibs, rd, addr, key := newColdSlotState(t)
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, v.Uint64())
+	require.Equal(t, 1, rd.reads)
+	require.Len(t, ibs.versionedReads.coldSlots, 1, "the slot is memoized")
+	require.Empty(t, ibs.versionedReads.storage, "no versioned record is kept")
+
+	v, err = ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, v.Uint64())
+	require.Equal(t, 1, rd.reads, "the repeat read comes from the memo")
+}
+
+// This call's own write outranks the memo, or an SSTORE after a cold read would
+// read back the committed value.
+func TestColdSlotMemoYieldsToThisCallsWrite(t *testing.T) {
+	ibs, _, addr, key := newColdSlotState(t)
+
+	_, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.Len(t, ibs.versionedReads.coldSlots, 1)
+
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(0xC0DE)))
+	got, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xC0DE, got.Uint64(), "the write must outrank the memo")
+}
+
+// The committed value of a memoized slot comes from the memo too: SSTORE's gas
+// needs it, so a miss here reads the slot from the state reader a second time.
+func TestColdSlotMemoServesTheCommittedRead(t *testing.T) {
+	ibs, rd, addr, key := newColdSlotState(t)
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, v.Uint64())
+	require.Equal(t, 1, rd.reads)
+
+	got, err := ibs.GetCommittedState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, got.Uint64())
+	require.Equal(t, 1, rd.reads, "the committed read comes from the memo")
+	require.Empty(t, ibs.versionedReads.storage, "no versioned record is kept")
+}
+
+// The committed value outlives this call's write to the slot: SSTORE's gas
+// reads it after every earlier SSTORE, and it cannot change within the call.
+func TestColdSlotMemoServesTheCommittedReadAfterAWrite(t *testing.T) {
+	ibs, rd, addr, key := newColdSlotState(t)
+
+	_, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(0xC0DE)))
+
+	got, err := ibs.GetCommittedState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, got.Uint64())
+	require.Equal(t, 1, rd.reads, "the committed read after a write comes from the memo")
+}
+
+// A contract created over the slot has no committed storage, so the memo must
+// not answer the committed read for it.
+func TestColdSlotMemoYieldsToACreateOverTheSlot(t *testing.T) {
+	ibs, _, addr, key := newColdSlotState(t)
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, v.Uint64())
+	require.Len(t, ibs.versionedReads.coldSlots, 1)
+
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	got, err := ibs.GetCommittedState(addr, key)
+	require.NoError(t, err)
+	require.True(t, got.IsZero(), "a created contract has no committed slot")
+}
+
+// A contract created over the slot starts with empty storage, so a live read
+// must not see the memoized pre-creation value either.
+func TestColdSlotMemoYieldsToACreateOnTheLiveRead(t *testing.T) {
+	ibs, _, addr, key := newColdSlotState(t)
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 0xAAAA, v.Uint64())
+	require.Len(t, ibs.versionedReads.coldSlots, 1)
+
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	got, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.True(t, got.IsZero(), "a created contract starts with empty storage")
+}
