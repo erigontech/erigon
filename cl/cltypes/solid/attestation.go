@@ -34,10 +34,9 @@ import (
 
 const (
 	maxValidatorsPerCommittee  = 2048
-	maxCommitteesPerSlot       = 64 // mainnet MAX_COMMITTEES_PER_SLOT, the widest preset
 	aggregationBitsSizeDeneb   = maxValidatorsPerCommittee
-	aggregationBitsSizeElectra = maxCommitteesPerSlot * maxValidatorsPerCommittee
-	committeeBitsBytesElectra  = (maxCommitteesPerSlot + 7) / 8
+	aggregationBitsSizeElectra = clparams.MaxSupportedCommitteesPerSlot * maxValidatorsPerCommittee
+	committeeBitsBytesElectra  = (clparams.MaxSupportedCommitteesPerSlot + 7) / 8
 )
 
 var errCommitteeBitsTooWide = errors.New("committee bits wider than the mainnet preset")
