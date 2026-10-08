@@ -160,6 +160,16 @@ func forkChoiceHashesMatch(tx kv.Getter, blockHash, safeHash, finalizedHash comm
 		(finalizedHash == (common.Hash{}) || rawdb.ReadForkchoiceFinalized(tx) == finalizedHash)
 }
 
+// currentFinalisedBlockNum returns zero when finality is unset,
+// or nil when the stored finalized hash has no known block number.
+func (e *ExecModule) currentFinalisedBlockNum(ctx context.Context, tx kv.Getter) (*uint64, error) {
+	finalisedHash := rawdb.ReadForkchoiceFinalized(tx)
+	if finalisedHash == (common.Hash{}) {
+		return new(uint64), nil
+	}
+	return e.blockReader.HeaderNumber(ctx, tx, finalisedHash)
+}
+
 type canonicalEntry struct {
 	hash   common.Hash
 	number uint64
@@ -483,27 +493,22 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	var finalisedBlockNum uint64
-	lastKnownFinalisedHash := rawdb.ReadForkchoiceFinalized(tx)
-	if lastKnownFinalisedHash != (common.Hash{}) {
-		bn, err := e.blockReader.HeaderNumber(ctx, tx, lastKnownFinalisedHash)
-		if err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
-		}
-		if bn == nil {
-			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
-				LatestValidHash: common.Hash{},
-				Status:          ExecutionStatusInvalidForkchoice,
-			}, false)
-			return nil
-		}
-		finalisedBlockNum = *bn
+	finalisedBlockNum, err := e.currentFinalisedBlockNum(ctx, tx)
+	if err != nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+	}
+	if finalisedBlockNum == nil {
+		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+			LatestValidHash: common.Hash{},
+			Status:          ExecutionStatusInvalidForkchoice,
+		}, false)
+		return nil
 	}
 	// as per https://github.com/ethereum/execution-apis/pull/786
 	// we short circuit reorgs if:
 	//   1. the head is an ancestor of the last finalised block
 	//   2. the head matches the executed canonical tip (safe/finalized hashes may still change)
-	belowFinality := fcuHeader.Number.Uint64() < finalisedBlockNum
+	belowFinality := fcuHeader.Number.Uint64() < *finalisedBlockNum
 	sameExecutedBlockNum := fcuHeader.Number.Uint64() == finishProgressBefore
 	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash && (belowFinality || sameExecutedBlockNum) {
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
@@ -539,7 +544,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return nil
 	}
 
-	result, err := e.unwindIfNeeded(ctx, tx, currentContext, fcuHeader, blockHash, canonicalHash, finalisedBlockNum, isSynced)
+	result, err := e.unwindIfNeeded(ctx, tx, currentContext, fcuHeader, blockHash, canonicalHash, *finalisedBlockNum, isSynced)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
