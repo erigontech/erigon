@@ -1900,15 +1900,20 @@ var zeroBalance uint256.Int
 
 // Used for EIP-6780
 func (ibs *IntraBlockState) IsNewContract(addr accounts.Address) (bool, error) {
-	stateObject, err := ibs.getStateObject(addr, true)
-	if err != nil {
-		return false, err
-	}
-	if stateObject == nil {
-		return false, nil
-	}
-	if !stateObject.newlyCreated {
-		return false, nil
+	if ibs.noMaterialize {
+		// A rebuilt transient's newlyCreated is this tx's CreateContract cell
+		// (reconstructCellFlags), so read the cell instead of rebuilding.
+		if created, _ := ibs.versionedWriteCreateContract(addr); !created {
+			return false, nil
+		}
+	} else {
+		stateObject, err := ibs.getStateObject(addr, true)
+		if err != nil {
+			return false, err
+		}
+		if stateObject == nil || !stateObject.newlyCreated {
+			return false, nil
+		}
 	}
 	code, err := ibs.GetCode(addr)
 	if err != nil {

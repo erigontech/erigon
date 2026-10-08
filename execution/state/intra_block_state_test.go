@@ -1230,3 +1230,55 @@ func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
 	require.Same(t, &stored[0][0], &stored[1][0], "an equal code reuses the previous one")
 	require.NotSame(t, &stored[0][0], &stored[3][0], "a different code in between replaces the memo")
 }
+
+// oneAccountReader knows one existing account and nothing else.
+type oneAccountReader struct {
+	NoopReader
+	addr accounts.Address
+}
+
+func (r *oneAccountReader) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
+	if a == r.addr {
+		return &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}, nil
+	}
+	return nil, nil
+}
+
+func (r *oneAccountReader) ReadAccountDataForDebug(a accounts.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(a)
+}
+
+// The noMaterialize path answers IsNewContract from the create cell instead of
+// rebuilding the account; it must agree with the materialized path.
+func TestIsNewContractMatchesAcrossPaths(t *testing.T) {
+	created := accounts.InternAddress(common.HexToAddress("0xc1"))
+	delegated := accounts.InternAddress(common.HexToAddress("0xc2"))
+	reverted := accounts.InternAddress(common.HexToAddress("0xc3"))
+	existing := accounts.InternAddress(common.HexToAddress("0xc4"))
+	want := map[accounts.Address]bool{created: true, delegated: false, reverted: false, existing: false}
+
+	for _, noMaterialize := range []bool{false, true} {
+		t.Run(fmt.Sprintf("noMaterialize=%v", noMaterialize), func(t *testing.T) {
+			rd := &oneAccountReader{addr: existing}
+			ibs := New(rd)
+			if noMaterialize {
+				var vm *VersionMap
+				ibs, vm = newNoMaterializeIBS(rd)
+				startNoMaterializeTx(ibs, vm, 0)
+			}
+			require.NoError(t, ibs.CreateAccount(created, true))
+			require.NoError(t, ibs.SetCode(created, []byte{0x60, 0x00}, tracing.CodeChangeContractCreation))
+			require.NoError(t, ibs.CreateAccount(delegated, true))
+			require.NoError(t, ibs.SetCode(delegated, types.AddressToDelegation(existing), tracing.CodeChangeContractCreation))
+			snap := ibs.PushSnapshot()
+			require.NoError(t, ibs.CreateAccount(reverted, true))
+			ibs.RevertToSnapshot(snap, nil)
+
+			for addr, w := range want {
+				got, err := ibs.IsNewContract(addr)
+				require.NoError(t, err)
+				require.Equal(t, w, got, "%x", addr)
+			}
+		})
+	}
+}
