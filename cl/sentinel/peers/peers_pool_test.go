@@ -23,14 +23,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAddPeerClearsHandshakeFailuresAndUndialableStatus(t *testing.T) {
+func TestRecordHandshakeSuccessClearsHandshakeFailuresAndUndialableStatus(t *testing.T) {
 	t.Run("failure count", func(t *testing.T) {
 		pool := NewPool(nil)
 		pid := peer.ID("failure-count")
 		pool.RecordHandshakeFailure(pid)
 		pool.RecordHandshakeFailure(pid)
 
-		pool.AddPeer(pid)
+		pool.RecordHandshakeSuccess(pid)
 		pool.RecordHandshakeFailure(pid)
 
 		require.True(t, pool.Dialable(pid))
@@ -44,7 +44,7 @@ func TestAddPeerClearsHandshakeFailuresAndUndialableStatus(t *testing.T) {
 		}
 		require.False(t, pool.Dialable(pid))
 
-		pool.AddPeer(pid)
+		pool.RecordHandshakeSuccess(pid)
 
 		require.True(t, pool.Dialable(pid))
 	})
@@ -57,7 +57,7 @@ func TestAddPeerClearsHandshakeFailuresAndUndialableStatus(t *testing.T) {
 		}
 		require.True(t, pool.RefuseConnections(pid))
 
-		pool.AddPeer(pid)
+		pool.RecordHandshakeSuccess(pid)
 
 		require.False(t, pool.RefuseConnections(pid))
 		require.True(t, pool.Dialable(pid))
@@ -76,4 +76,17 @@ func TestHandshakeFailureThresholds(t *testing.T) {
 		require.Equal(t, failure >= 10, pool.RefuseConnections(pid))
 		require.Equal(t, failure < 3, pool.Dialable(pid))
 	}
+}
+
+func TestHandshakeFailureRenewsUndialableMark(t *testing.T) {
+	pool := NewPool(nil)
+	pid := peer.ID("undialable-renewal")
+	for range 3 {
+		pool.RecordHandshakeFailure(pid)
+	}
+	pool.undialable.Remove(pid)
+
+	pool.RecordHandshakeFailure(pid)
+
+	require.False(t, pool.Dialable(pid))
 }

@@ -634,7 +634,7 @@ func (s *Sentinel) handleNewConnection(peerId peer.ID, direction network.Directi
 		return false
 	}
 
-	s.peers.AddPeer(peerId)
+	s.peers.RecordHandshakeSuccess(peerId)
 	log.Trace("[Sentinel] Peer validated and added", "peer", peerId)
 	return true
 }

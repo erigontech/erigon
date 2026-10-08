@@ -81,7 +81,7 @@ func NewPool(h host.Host) *Pool {
 		host:              h,
 		bannedPeers:       lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 100_000, 30*time.Minute),
 		undialable:        lru.NewWithTTL[peer.ID, struct{}]("undialable", 100_000, 30*time.Minute),
-		handshakeFailures: lru.NewWithTTL[peer.ID, int]("handshakeFailures", 10_000, 10*time.Minute),
+		handshakeFailures: lru.NewWithTTL[peer.ID, int]("handshakeFailures", 100_000, 10*time.Minute),
 	}
 }
 
@@ -93,7 +93,7 @@ func (p *Pool) RecordHandshakeFailure(pid peer.ID) (count int, becameUndialable 
 	defer p.mu.Unlock()
 	count, _ = p.handshakeFailures.Get(pid)
 	count++
-	if count == handshakeFailureUndialableThreshold {
+	if count >= handshakeFailureUndialableThreshold {
 		p.undialable.Add(pid, struct{}{})
 	}
 	p.handshakeFailures.Add(pid, count)
@@ -125,7 +125,7 @@ func (p *Pool) LenBannedPeers() int {
 	return p.bannedPeers.Len()
 }
 
-func (p *Pool) AddPeer(pid peer.ID) {
+func (p *Pool) RecordHandshakeSuccess(pid peer.ID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.handshakeFailures.Remove(pid)

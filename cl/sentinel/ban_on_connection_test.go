@@ -188,6 +188,7 @@ func TestHandshakeFailuresDoNotRefuseThePeersLaterConnection(t *testing.T) {
 	}))
 	require.True(t, validated)
 	require.Equal(t, network.Connected, local.Network().Connectedness(remote.ID()))
+	require.True(t, s.peers.Dialable(remote.ID()))
 }
 
 func TestHandshakeFailuresRefuseConnectionsAtLimit(t *testing.T) {
