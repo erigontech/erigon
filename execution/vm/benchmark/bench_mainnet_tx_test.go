@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-// txFixturesDir holds what `evm fetchtx` writes; it is gitignored.
+// txFixturesDir holds what `evm txfixture` writes; it is gitignored.
 const txFixturesDir = "testdata/txs"
 
 // BenchmarkMainnetTx replays each mainnet tx fetched into testdata/txs, as
