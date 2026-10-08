@@ -52,7 +52,7 @@ var (
 var txFixtureCommand = cli.Command{
 	Action:    fetchTxCmd,
 	Name:      "txfixture",
-	Usage:     "saves a tx with the state it ran on, so BenchmarkMainnetTx can replay it offline",
+	Usage:     "downloads what replaying a transaction needs (tx, receipt, block header, prestate) for the vm benchmarks",
 	ArgsUsage: "<txhash>...",
 	Flags:     []cli.Flag{&FetchRPCFlag, &FetchOutFlag, &FetchListFlag},
 }
