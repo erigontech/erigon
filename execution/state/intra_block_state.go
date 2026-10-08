@@ -908,12 +908,13 @@ func (ibs *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 
 // writeBalanceVersioned records a balance change on the versionMap write-set and
 // the journal without materializing the stateObject on the common existing-alive
-// path. An absent or destroyed-no-revival account is materialized via
-// GetOrNewStateObject so createObject records the AddressPath write OCC needs; the
-// create path never reads balance (matching the old stateObject path). The journal
-// prev is read only in the existing branch so a create does not widen the OCC
-// read-set with a spurious BalancePath read.
-// writeBalanceVersioned takes prev from a caller that already read the balance; nil reads it here.
+// path; an already-materialized one is kept in step. An absent or
+// destroyed-no-revival account is materialized via GetOrNewStateObject so
+// createObject records the AddressPath write OCC needs; the create path never
+// reads balance (matching the old stateObject path). The journal prev comes from a
+// caller that already read the balance, or, when nil, is read only in the existing
+// branch so a create does not widen the OCC read-set with a spurious BalancePath
+// read.
 func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *uint256.Int, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
 	base, _, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
@@ -946,6 +947,9 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *u
 	ibs.journal.balanceChange(addr, *prev, wasCommited)
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
 		ibs.tracingHooks.OnBalanceChange(addr, *prev, update, reason)
+	}
+	if so, ok := ibs.stateObjects[addr]; ok {
+		so.setBalance(update)
 	}
 	ibs.recordWriteBalance(addr, update)
 	return nil
