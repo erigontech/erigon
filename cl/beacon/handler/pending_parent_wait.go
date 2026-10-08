@@ -72,6 +72,13 @@ func awaitGloasPayloadSource(
 			retry()
 		}(retryDone)
 	}
+	// A decision that landed during the last poll window is still picked up.
+	resolveLast := func() executionPayloadSource {
+		if source, err := resolve(); err == nil {
+			return source
+		}
+		return last
+	}
 	startRetry()
 	for {
 		select {
@@ -82,16 +89,16 @@ func awaitGloasPayloadSource(
 				startRetry()
 			}
 		case <-ctx.Done():
-			return last
+			return resolveLast()
 		case <-cutoff.C:
-			return last
+			return resolveLast()
 		}
 		source, err := resolve()
 		if err != nil {
 			return last
 		}
 		last = source
-		if !last.gloasPath.undecided() || !time.Now().Before(deadline) {
+		if !last.envelopeParked || !time.Now().Before(deadline) {
 			return last
 		}
 	}
@@ -99,8 +106,8 @@ func awaitGloasPayloadSource(
 
 // awaitPendingParentPayload gives the parent's payload a bounded chance to be applied before
 // the proposal falls back to the EMPTY parent. A pending envelope is only re-applied by an
-// explicit retry, so each poll triggers one; the retry budget outlives the deadline by one
-// retry, so a retry started late in the wait is not cut short.
+// explicit retry, so the wait keeps one running; each retry owns a context that outlives the
+// deadline by one retry budget, so one in flight at the cutoff is not cut short.
 func (a *ApiHandler) awaitPendingParentPayload(
 	ctx context.Context,
 	baseState *state.CachingBeaconState,
@@ -111,13 +118,12 @@ func (a *ApiHandler) awaitPendingParentPayload(
 ) executionPayloadSource {
 	slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
 	deadline := gloasPendingParentDeadline(time.Now(), a.ethClock.GetSlotTime(targetSlot), slotDuration)
-	retryCtx, cancelRetry := context.WithTimeout(ctx, time.Until(deadline)+slotDuration/gloasPendingParentRetryBudgetDivisor)
-	defer cancelRetry()
 	a.logger.Info("BlockProduction: waiting for parent payload decision", "slot", targetSlot, "head", baseBlockRoot, "budget", time.Until(deadline).Round(time.Millisecond))
 	retry := func() {
-		if retryCtx.Err() == nil {
-			a.forkchoiceStore.RetryPendingExecutionPayloadEnvelope(retryCtx, baseBlockRoot)
-		}
+		budget := max(time.Until(deadline), 0) + slotDuration/gloasPendingParentRetryBudgetDivisor
+		retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+		defer cancel()
+		a.forkchoiceStore.RetryPendingExecutionPayloadEnvelope(retryCtx, baseBlockRoot)
 	}
 	return awaitGloasPayloadSource(ctx, deadline, gloasPendingParentPollInterval, current, retry, func() (executionPayloadSource, error) {
 		source, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)

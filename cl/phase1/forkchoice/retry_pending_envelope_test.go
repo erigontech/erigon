@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -211,6 +212,21 @@ func TestEnterPendingEnvelopeApplyAdmitsAWaiterAfterTheHolderLeaves(t *testing.T
 	f.leavePendingEnvelopeApply(root)
 }
 
+// A caller whose budget already expired must not take the gate even when it is idle: the apply
+// would run commitments, BLS and the state transition before the EL rejects the dead context.
+func TestEnterPendingEnvelopeApplyRefusesADeadContextAtAnIdleGate(t *testing.T) {
+	f := &ForkChoiceStore{}
+	root := common.HexToHash("0x1")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, admitted := f.enterPendingEnvelopeApply(ctx, root)
+
+	require.False(t, admitted)
+	_, busy := f.retryingEnvelopes.Load(root)
+	require.False(t, busy)
+}
+
 // Every caller of applyPendingEnvelope, block import included, holds the per-root gate.
 func TestApplyPendingEnvelopeHoldsThePerRootGate(t *testing.T) {
 	root := common.HexToHash("0x1")
@@ -237,4 +253,40 @@ func TestApplyPendingEnvelopeHoldsThePerRootGate(t *testing.T) {
 	<-done
 	_, busy := f.retryingEnvelopes.Load(root)
 	require.False(t, busy)
+}
+
+type countingForkGraph struct {
+	retryPendingForkGraph
+	hasEnvelopeCalls *atomic.Int32
+}
+
+func (g countingForkGraph) HasEnvelope(root common.Hash) bool {
+	g.hasEnvelopeCalls.Add(1)
+	return g.retryPendingForkGraph.HasEnvelope(root)
+}
+
+// A waiter admitted after the holder settled the same parked copy must not apply it again.
+func TestApplyPendingEnvelopeSkipsACopyTheHolderSettled(t *testing.T) {
+	root := common.HexToHash("0x1")
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(true, nil).AnyTimes()
+	f, pending := newRetryPendingStore(t, peerDas)
+	calls := &atomic.Int32{}
+	f.forkGraph = countingForkGraph{retryPendingForkGraph: f.forkGraph.(retryPendingForkGraph), hasEnvelopeCalls: calls}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}}
+	pending.Add(root, envelope)
+
+	_, admitted := f.enterPendingEnvelopeApply(t.Context(), root)
+	require.True(t, admitted)
+	done := make(chan struct{})
+	go func() {
+		f.applyPendingEnvelope(t.Context(), root, envelope, false, false)
+		close(done)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	pending.Remove(root) // the holder settled the copy
+	f.leavePendingEnvelopeApply(root)
+	<-done
+
+	require.Zero(t, calls.Load(), "the waiter must return without touching the envelope")
 }

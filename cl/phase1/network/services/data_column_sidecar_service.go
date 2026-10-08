@@ -378,6 +378,9 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 // retryPendingEnvelope hands a completed root to fork choice off the gossip validator. The
 // store admits one apply per root at a time, so the last two columns cannot both apply.
 func (s *dataColumnSidecarService) retryPendingEnvelope(blockRoot common.Hash) {
+	if !s.forkChoice.HasPendingExecutionPayloadEnvelope(blockRoot) {
+		return
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, time.Duration(s.cfg.SecondsPerSlot)*time.Second/pendingEnvelopeRetryBudgetDivisor)
 		defer cancel()
