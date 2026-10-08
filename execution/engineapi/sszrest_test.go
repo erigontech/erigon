@@ -218,7 +218,7 @@ func TestSSZRESTGetInclusionListRoute(t *testing.T) {
 		inclusionListFunc: func(context.Context) (types.Transactions, error) { return txns, nil },
 	}, nil, false, true, false, false, nil, nil, 0, 0)
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/engine/v1/inclusion_list", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/engine/v1/inclusion-list", nil)
 	rec := httptest.NewRecorder()
 	srv.SSZRESTHandler().ServeHTTP(rec, req)
 
@@ -459,7 +459,7 @@ func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
 	require.Contains(t, caps, "engine_getInclusionListV1")
 	require.Contains(t, caps, "POST /engine/v1/capabilities")
 	require.Contains(t, caps, "POST /engine/v6/payloads")
-	require.Contains(t, caps, "GET /engine/v1/inclusion_list")
+	require.Contains(t, caps, "GET /engine/v1/inclusion-list")
 	require.Contains(t, caps, "GET /engine/v6/payloads/{payload_id}")
 	require.NotContains(t, caps, "engine_exchangeCapabilities")
 }

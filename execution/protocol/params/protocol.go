@@ -255,9 +255,7 @@ const (
 	ColdAccountAccessEIP2780 uint64 = 3_000  // COLD_ACCOUNT_ACCESS: recipient account touch
 	CreateAccessEIP2780      uint64 = CreateAccessEIP8038
 
-	// 	EIP-7805: Max Inclusion List size in bytes
-	//	MAX_TRANSACTIONS_BYTES_PER_INCLUSION_LIST = 8192
-	MaxTransactionsBytesPerInclusionListEIP7805 uint64 = 8192
+	MaxTransactionsBytesPerInclusionListEIP7805 uint64 = 8192 // MAX_TRANSACTIONS_BYTES_PER_INCLUSION_LIST
 )
 
 // EIP-7702: Set EOA account code

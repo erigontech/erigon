@@ -63,7 +63,7 @@ func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
 		e.handleSSZForkchoice(w, r, version)
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "blobs":
 		e.handleSSZGetBlobs(w, r, version)
-	case r.Method == http.MethodGet && len(parts) == 3 && parts[2] == "inclusion_list":
+	case r.Method == http.MethodGet && len(parts) == 3 && parts[2] == "inclusion-list":
 		e.handleSSZGetInclusionList(w, r, version)
 	case r.Method == http.MethodPost && len(parts) == 4 && parts[2] == "client" && parts[3] == "version" && version == 1:
 		e.handleSSZClientVersion(w, r)

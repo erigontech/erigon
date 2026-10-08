@@ -1421,8 +1421,8 @@ func (e *EngineServer) getInclusionList(ctx context.Context) ([]hexutil.Bytes, e
 	}
 	list := make([]hexutil.Bytes, 0, len(encodedTxns))
 	total := 0
-	for _, tx := range encodedTxns {
-		if total+len(tx) > int(params.MaxTransactionsBytesPerInclusionListEIP7805) {
+	for i, tx := range encodedTxns {
+		if txns[i].Type() == types.BlobTxType || total+len(tx) > int(params.MaxTransactionsBytesPerInclusionListEIP7805) {
 			continue
 		}
 		list = append(list, tx)
