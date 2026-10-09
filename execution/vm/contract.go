@@ -20,11 +20,15 @@
 package vm
 
 import (
+	"encoding/binary"
+	"sync/atomic"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -68,6 +72,40 @@ var jumpDestCache = newJumpDestCache()
 
 func newJumpDestCache() *cache.GenericCache[bitvec] {
 	return cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) * 8 }, cache.ModeEvictLRU)
+}
+
+// avgProgramBytes sets how many programs programCache's budget holds: the cache
+// bounds its entry count, not its bytes, and a program takes about 7 bytes per code byte.
+const avgProgramBytes = 48 * 1024
+
+var programCache = cache.NewGenericCacheWithAvg[*program](64*datasize.MB, avgProgramBytes, (*program).size, cache.ModeEvictLRU)
+
+// programSlots is a direct-mapped table in front of programCache: a hit is a load
+// and a compare, without programCache's hashing, locking and counters. It keeps up
+// to 256 programs alive past programCache's budget.
+var programSlots [256]atomic.Pointer[program]
+
+// decodable reports whether runDecoded can run the code: its program is cached by
+// the code hash, and its pcs are 16 bits.
+func (c *Contract) decodable() bool {
+	return !c.CodeHash.IsZero() && len(c.Code) <= params.MaxCodeSize
+}
+
+// decodedProgram returns the decoded code, from the cache if it is there. The code must be decodable.
+func decodedProgram(code []byte, hash accounts.CodeHash) *program {
+	h := hash.Value()
+	slot := &programSlots[binary.LittleEndian.Uint64(h[:])%uint64(len(programSlots))]
+	if p := slot.Load(); p != nil && p.hash == hash {
+		return p
+	}
+	p, ok := programCache.Get(h[:])
+	if !ok {
+		p = decode(code)
+		p.hash = hash
+		programCache.Put(common.Copy(h[:]), p, 0)
+	}
+	slot.Store(p)
+	return p
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
