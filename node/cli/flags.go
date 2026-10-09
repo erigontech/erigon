@@ -89,7 +89,7 @@ var (
 	}
 	PruneBlocksDistanceFlag = cli.StringFlag{
 		Name:  "prune.distance.blocks",
-		Usage: `Keep block history for the latest N blocks, or a named policy: "keep-post-merge" (prune pre-merge blocks only) or "keep-all" (keep every block). If unset: 2500000 for --prune.mode=full/minimal, otherwise retention follows --prune.mode`,
+		Usage: `Keep block history for the latest N blocks, or a named policy: "keep-post-merge" (prune pre-merge blocks only) or "keep-all" (keep every block). If unset: 10000000 for --prune.mode=full/minimal, otherwise retention follows --prune.mode`,
 	}
 	StateStreamDisableFlag = cli.BoolFlag{
 		Name:  "state.stream.disable",
@@ -243,7 +243,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 
 // defaultReplayBlocksDistance keeps the transaction segments that a multi-month
 // replay below the tip needs; the stock full/minimal distances would prune them.
-const defaultReplayBlocksDistance = 2_500_000
+const defaultReplayBlocksDistance = 10_000_000
 
 func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID

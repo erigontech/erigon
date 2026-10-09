@@ -43,7 +43,7 @@ func TestExecStopAtBlockFlag(t *testing.T) {
 }
 
 func TestPruneBlocksDistanceDefaultKeepsReplayRange(t *testing.T) {
-	const replayRange = 2_500_000
+	const replayRange = 10_000_000
 	head := uint64(30_000_000)
 	for _, mode := range []string{"full", "minimal"} {
 		t.Run(mode+" defaults to the replay range", func(t *testing.T) {
