@@ -30,7 +30,7 @@ func TestChainTipModeFlag(t *testing.T) {
 	})
 
 	t.Run("one block per cycle with changesets", func(t *testing.T) {
-		cfg := buildEthCfg(t, []string{"--sync.mode.chaintip", "--sync.loop.block.limit", "500"})
+		cfg := buildEthCfg(t, []string{"--pfb.sync.mode.chaintip", "--sync.loop.block.limit", "500"})
 		require.True(t, cfg.Sync.ChainTipMode)
 		require.EqualValues(t, 1, cfg.Sync.LoopBlockLimit)
 		require.True(t, cfg.Sync.AlwaysGenerateChangesets)
@@ -39,7 +39,7 @@ func TestChainTipModeFlag(t *testing.T) {
 
 func TestExecStopAtBlockFlag(t *testing.T) {
 	require.Zero(t, buildEthCfg(t, nil).Sync.ExecStopAtBlock)
-	require.EqualValues(t, 25_640_187, buildEthCfg(t, []string{"--exec.stop-at-block", "25640187"}).Sync.ExecStopAtBlock)
+	require.EqualValues(t, 25_640_187, buildEthCfg(t, []string{"--pfb.exec.stop-at-block", "25640187"}).Sync.ExecStopAtBlock)
 }
 
 func TestPruneBlocksDistanceDefaultKeepsReplayRange(t *testing.T) {

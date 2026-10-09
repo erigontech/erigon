@@ -121,12 +121,12 @@ var (
 	}
 
 	SyncChainTipModeFlag = cli.BoolFlag{
-		Name:  "sync.mode.chaintip",
+		Name:  "pfb.sync.mode.chaintip",
 		Usage: "Execute frozen blocks like at the chain tip: one block per sync cycle, with per-block commitment and changesets",
 	}
 
 	ExecStopAtBlockFlag = cli.Uint64Flag{
-		Name:  "exec.stop-at-block",
+		Name:  "pfb.exec.stop-at-block",
 		Usage: "Stop the node after frozen-block execution reaches and commits this block (0 = off)",
 	}
 

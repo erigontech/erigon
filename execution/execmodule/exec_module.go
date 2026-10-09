@@ -812,10 +812,10 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		e.logger.Warn("Could not notify fork validator of current height", "err", err)
 	}
 	if stopAt := e.syncCfg.ExecStopAtBlock; stopAt > 0 && progress >= stopAt {
-		e.logger.Info("[exec] reached --exec.stop-at-block, stopping node", "block", progress, "stopAt", stopAt)
+		e.logger.Info("[exec] reached --pfb.exec.stop-at-block, stopping node", "block", progress, "stopAt", stopAt)
 		go func() {
 			if stopErr := e.stopNode(); stopErr != nil {
-				e.logger.Error("Could not stop node at --exec.stop-at-block", "err", stopErr)
+				e.logger.Error("Could not stop node at --pfb.exec.stop-at-block", "err", stopErr)
 			}
 		}()
 	}
