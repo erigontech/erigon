@@ -1173,3 +1173,9 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 		require.Equal(t, roots[i], rh)
 	}
 }
+
+func TestMergeCommitmentV3RecordsWithReferencesEnabled(t *testing.T) {
+	useCommitmentSchema(t, true)
+	_, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10})
+	require.NoError(t, agg.MergeLoop(t.Context()))
+}

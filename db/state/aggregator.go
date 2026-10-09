@@ -292,7 +292,8 @@ func (a *Aggregator) ForTestReferencesInCommitmentBranches(domain kv.Domain, v b
 func (a *Aggregator) referencesInCommitmentBranches() bool {
 	a.commitmentRefsMu.RLock()
 	defer a.commitmentRefsMu.RUnlock()
-	return a.d[kv.CommitmentDomain].ReferencesInCommitmentBranches
+	d := a.d[kv.CommitmentDomain]
+	return d.ReferencesInCommitmentBranches && !d.CommitmentV3Records
 }
 
 // applyReferencesInCommitmentBranches stores the resolved flag pre-configure (ConfigureDomains
