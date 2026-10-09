@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -274,7 +275,7 @@ func (s *proposerPreferencesService) validateProposerPreferencesWithState(msg *c
 		return fmt.Errorf("validator index %d not found: %w", validatorIndex, err)
 	}
 	pk := val.PublicKey()
-	domain, err := depState.GetDomain(s.beaconCfg.DomainProposerPreferences, proposalEpoch)
+	domain, err := fork.ComputeDomainAtEpoch(s.beaconCfg, s.beaconCfg.DomainProposerPreferences, proposalEpoch, depState.GenesisValidatorsRoot())
 	if err != nil {
 		return fmt.Errorf("failed to get domain: %w", err)
 	}

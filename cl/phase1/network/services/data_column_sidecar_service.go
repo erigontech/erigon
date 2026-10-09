@@ -11,6 +11,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	st "github.com/erigontech/erigon/cl/phase1/core/state"
@@ -379,7 +380,7 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 			return fmt.Errorf("unable to retrieve state: %w", err)
 		}
 
-		domain, err := state.GetDomain(s.cfg.DomainBeaconProposer, st.GetEpochAtSlot(s.cfg, signedBlockHeader.Header.Slot))
+		domain, err := fork.ComputeDomainAtEpoch(s.cfg, s.cfg.DomainBeaconProposer, st.GetEpochAtSlot(s.cfg, signedBlockHeader.Header.Slot), state.GenesisValidatorsRoot())
 		if err != nil {
 			return fmt.Errorf("unable to get domain: %w", err)
 		}

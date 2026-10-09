@@ -448,10 +448,8 @@ func AggregateAndProofSignature(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	domain, err := state.GetDomain(
-		state.BeaconConfig().DomainSelectionProof,
-		slot*state.BeaconConfig().SlotsPerEpoch,
-	)
+	cfg := state.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainSelectionProof, slot/cfg.SlotsPerEpoch, state.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -468,7 +466,8 @@ func AggregatorSignature(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	domain, err := state.GetDomain(state.BeaconConfig().DomainAggregateAndProof, state.Slot())
+	cfg := state.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainAggregateAndProof, aggregate.Message.Aggregate.Data.Slot/cfg.SlotsPerEpoch, state.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -507,7 +506,7 @@ func AggregateMessageSignature(
 		return nil, nil, nil, err
 	}
 
-	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, indexedAttestation.Data.Target.Epoch)
+	domain, err := fork.ComputeDomainAtEpoch(s.BeaconConfig(), s.BeaconConfig().DomainBeaconAttester, indexedAttestation.Data.Target.Epoch, s.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("unable to get the domain: %w", err)
 	}

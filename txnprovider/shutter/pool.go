@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
@@ -296,6 +297,31 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		if txnsIdFilter != nil && txnsIdFilter.Contains(txn.Hash()) {
 			continue
 		}
+		executionGas, stateGas := protocol.InclusionContributions(txn.GetGasLimit(), isAmsterdam, false)
+		if executionGas > availableGas.Execution {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn: insufficient execution gas",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+				"executionGas", executionGas,
+				"availableExecution", availableGas.Execution,
+			)
+			continue
+		}
+		if stateGas > availableGas.State {
+			sender, _ := txn.GetSender()
+			p.logger.Warn(
+				"skipping decrypted txn: insufficient state gas",
+				"hash", txn.Hash(),
+				"type", txn.Type(),
+				"sender", sender,
+				"gasLimit", stateGas,
+				"availableState", availableGas.State,
+			)
+			continue
+		}
 		accessList := txn.GetAccessList()
 		isAATxn := txn.Type() == types.AccountAbstractionTxType
 		to := txn.GetTo()
@@ -331,7 +357,6 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		if isEIP7623 && intrinsicGasResult.FloorGasCost > intrinsicGas {
 			intrinsicGas = intrinsicGasResult.FloorGasCost
 		}
-		blobGas := txn.GetBlobGas()
 		if intrinsicGas > availableGas.Execution {
 			sender, _ := txn.GetSender()
 			p.logger.Warn(
@@ -344,32 +369,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			)
 			continue
 		}
-		if isAmsterdam && txn.GetGasLimit() > availableGas.State {
-			sender, _ := txn.GetSender()
-			p.logger.Warn(
-				"skipping decrypted txn: insufficient state gas",
-				"hash", txn.Hash(),
-				"type", txn.Type(),
-				"sender", sender,
-				"gasLimit", txn.GetGasLimit(),
-				"availableState", availableGas.State,
-			)
-			continue
-		}
-		if blobGas > availableGas.Blob {
-			sender, _ := txn.GetSender()
-			p.logger.Warn(
-				"skipping decrypted txn: insufficient blob gas",
-				"hash", txn.Hash(),
-				"type", txn.Type(),
-				"sender", sender,
-				"blobGas", blobGas,
-				"availableBlob", availableGas.Blob,
-			)
-			continue
-		}
 		availableGas.Execution -= intrinsicGas
-		availableGas.Blob -= blobGas
 		decryptedTxnsGas += txn.GetGasLimit()
 		txns = append(txns, txn)
 		if txnsIdFilter != nil {

@@ -1230,3 +1230,26 @@ func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
 	require.Same(t, &stored[0][0], &stored[1][0], "an equal code reuses the previous one")
 	require.NotSame(t, &stored[0][0], &stored[3][0], "a different code in between replaces the memo")
 }
+
+// On a versioned IBS that caches state objects, an account touched and then
+// credited in the same tx is not empty and must survive FinalizeTx.
+func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x161A"))
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(newAccountStateReader(), vm)
+	defer ibs.Close()
+
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true)
+	ibs.ResetVersionedIO()
+
+	ibs.SetTxContext(1, 1)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(5), bal)
+}

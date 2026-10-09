@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -55,6 +56,10 @@ func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, 
 	}
 	if currentSlot/slotsPerEpoch > headEpoch {
 		currEpoch = headEpoch + 1
+	}
+	// Shuffling for headEpoch+2 uses the head epoch's final RANDAO mix, provided no later block has been seen.
+	if currentSlot/slotsPerEpoch > headEpoch+1 && highestSeenSlot <= headState.Slot() {
+		currEpoch = headEpoch + 2
 	}
 	return state.PreviousEpoch(headState), currEpoch
 }
@@ -305,7 +310,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
-			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+			return fmt.Errorf("%w: %w", ErrIgnore, ErrAttestationAlreadySeen)
 		}
 
 		// [REJECT] The signature of attestation is valid.
@@ -313,7 +318,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if err != nil {
 			return fmt.Errorf("unable to get public key: %w", err)
 		}
-		domain, err = headState.GetDomain(s.beaconCfg.DomainBeaconAttester, targetEpoch)
+		domain, err = fork.ComputeDomainAtEpoch(s.beaconCfg, s.beaconCfg.DomainBeaconAttester, targetEpoch, headState.GenesisValidatorsRoot())
 		if err != nil {
 			return fmt.Errorf("unable to get the domain: %w", err)
 		}

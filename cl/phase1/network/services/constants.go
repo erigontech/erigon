@@ -45,6 +45,7 @@ var (
 	ErrAggregatorAlreadySeen           = errors.New("aggregator already seen")
 	ErrProposerPreferenceAlreadySeen   = errors.New("already seen proposer preferences")
 	ErrAttestationQueued               = errors.New("attestation queued")
+	ErrAttestationAlreadySeen          = errors.New("validator already seen in target epoch") // Returned before signature validation, so it does not prove the submitted attestation is valid.
 	ErrBlockYoungerThanParent          = errors.New("block is younger than parent")
 	ErrInvalidCommitmentsCount         = errors.New("invalid commitments count")
 	ErrCommitmentsInclusionProofFailed = errors.New("commitments inclusion proof failed")
