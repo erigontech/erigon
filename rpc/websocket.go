@@ -454,26 +454,33 @@ func (a *wsConnAdapter) readFrame() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return readCharged(r, a.budget)
+	data, err := readCharged(r, a.budget)
+	if errors.Is(err, errWSReadBudgetExceeded) {
+		// A graceful close drains the rest of the declared frame with no read
+		// deadline, which a peer withholding it can stall; drop the socket instead.
+		_ = a.conn.CloseNow()
+	}
+	return data, err
 }
 
 // readCharged reads r to EOF into one buffer, charging budget for the buffer's
-// capacity as it grows and releasing that charge before returning. The heap holds
-// the capacity, not just the bytes read, so capacity is what is charged, before
-// each allocation; a growth the budget cannot cover drops the read with
-// errWSReadBudgetExceeded instead of allocating past the limit.
+// capacity as it grows, before each allocation, and releasing it before returning:
+// the heap holds the capacity, not just the bytes read. A growth the budget cannot
+// cover returns errWSReadBudgetExceeded. The buffer keeps one byte past the charged
+// capacity so a message that exactly fills the budget still reaches EOF, rather than
+// forcing another growth the budget would then wrongly reject.
 func readCharged(r io.Reader, budget *wsReadBudget) ([]byte, error) {
 	var charged int64
 	defer func() { budget.release(charged) }()
 	var buf []byte
 	for {
 		if len(buf) == cap(buf) {
-			next := max(2*cap(buf), wsReadBufMinCap)
-			if !budget.acquire(int64(next - cap(buf))) {
+			next := max(2*charged, wsReadBufMinCap)
+			if !budget.acquire(next - charged) {
 				return nil, errWSReadBudgetExceeded
 			}
-			charged += int64(next - cap(buf))
-			grown := make([]byte, len(buf), next)
+			charged = next
+			grown := make([]byte, len(buf), int(next)+1)
 			copy(grown, buf)
 			buf = grown
 		}

@@ -102,3 +102,18 @@ func TestWSReadChargedRespectsSharedBudget(t *testing.T) {
 	require.Len(t, got, len(msg))
 	require.Zero(t, budget.inUse.Load())
 }
+
+// A message whose bytes exactly reach the budget is served, not rejected: the read
+// buffer keeps a byte of slack so EOF is seen without a growth the budget can't cover.
+func TestWSReadChargedExactBudget(t *testing.T) {
+	t.Parallel()
+
+	const n = wsReadBufMinCap // a size the buffer reaches exactly
+
+	got, err := readCharged(bytes.NewReader(make([]byte, n)), &wsReadBudget{limit: n})
+	require.NoError(t, err)
+	require.Len(t, got, n)
+
+	_, err = readCharged(bytes.NewReader(make([]byte, n+1)), &wsReadBudget{limit: n})
+	require.ErrorIs(t, err, errWSReadBudgetExceeded)
+}
