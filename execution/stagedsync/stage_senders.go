@@ -127,7 +127,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	var pendingMu sync.Mutex
 	var lastBlockIndex int
 
-	errCh := make(chan senderRecoveryError)
+	errCh := make(chan senderRecoveryError, 1)
 	go func() {
 		defer dbg.LogPanic()
 		defer close(errCh)
@@ -386,7 +386,11 @@ func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, confi
 		} else if err = common.Stopped(ctx.Done()); err != nil {
 			job.err = err
 		}
-		out <- job
+		select {
+		case out <- job:
+		case <-ctx.Done():
+			return
+		}
 
 		if errors.Is(job.err, common.ErrStopped) {
 			return

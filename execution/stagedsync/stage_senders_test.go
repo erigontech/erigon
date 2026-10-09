@@ -17,8 +17,11 @@
 package stagedsync_test
 
 import (
+	"slices"
 	"testing"
+	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -183,5 +186,51 @@ func TestSenders(t *testing.T) {
 		txs, err = rawdb.CanonicalTransactions(tx, 5, 1024)
 		require.NoError(err)
 		assert.Len(t, txs, 3)
+	}
+}
+
+func TestSendersRecoveryErrorDoesNotDeadlock(t *testing.T) {
+	m := execmoduletester.New(t)
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	to := crypto.PubkeyToAddress(key.PublicKey)
+	signer := types.MakeSigner(chain.TestChainBerlinConfig, 1, 0)
+	const total = 2500
+	txs := make([]types.Transaction, total)
+	for i := range txs {
+		tx, err := types.SignTx(&types.LegacyTx{CommonTx: types.CommonTx{Nonce: uint64(i), To: &to, Value: u256.Num1, GasLimit: 21000}, GasPrice: u256.Num1}, *signer, key)
+		require.NoError(t, err)
+		txs[i] = tx
+	}
+	bad := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1 << 40, To: &to, Value: u256.Num1, GasLimit: 21000}, GasPrice: u256.Num1}
+	bad.V.SetUint64(27)
+	bad.R.Set(uint256.NewInt(0))
+	bad.S.Set(uint256.NewInt(1))
+	for it := range 60 {
+		body := slices.Clone(txs)
+		body[total-1000-30+it] = bad
+		recoverSendersOfBlock(t, m, body, byte(it))
+	}
+}
+
+func recoverSendersOfBlock(t *testing.T, m *execmoduletester.ExecModuleTester, body []types.Transaction, salt byte) {
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	header := &types.Header{Number: *common.Num1, Extra: []byte{salt}}
+	hash := header.Hash()
+	require.NoError(t, rawdb.WriteHeader(tx, header))
+	require.NoError(t, rawdb.WriteBody(tx, hash, 1, &types.Body{Transactions: body}))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, hash, 1))
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Bodies, 1))
+	cfg := stagedsync.StageSendersCfg(chain.TestChainBerlinConfig, true, t.TempDir(), m.BlockReader, exec.NewBlockReadAheader())
+	done := make(chan error, 1)
+	go func() {
+		done <- stagedsync.SpawnRecoverSendersStage(cfg, &stagedsync.StageState{ID: stages.Senders}, nil, tx, 1, m.Ctx, log.New())
+	}()
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("senders stage hung after a sender recovery error")
 	}
 }
