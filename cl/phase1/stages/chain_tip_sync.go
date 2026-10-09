@@ -1014,13 +1014,13 @@ func ensureStoredParentPayloadAccepted(
 		return fmt.Errorf("replay budget exhausted: %w", ctx.Err())
 	}
 	status, err := retryGloasPayloadWithEL(ctx, cfg, block, envelope)
-	if err != nil {
-		log.Warn("[chainTipSync] persisted parent GLOAS NewPayload failed", "slot", block.Block.Slot, "blockRoot", root, "status", status, "err", err)
-	}
 	// Running out of replay budget is not an EL verdict; recording None would mark a
 	// locally available payload unavailable.
 	if execution_client.ValidationInterrupted(ctx, status, err) {
 		return fmt.Errorf("replay interrupted: %w", err)
+	}
+	if err != nil {
+		log.Warn("[chainTipSync] persisted parent GLOAS NewPayload failed", "slot", block.Block.Slot, "blockRoot", root, "status", status, "err", err)
 	}
 	return acceptedStatus(recordGloasPayloadRetryResult(store, forkchoice.PendingELPayload{Block: block, Envelope: envelope}, status))
 }

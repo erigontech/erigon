@@ -883,9 +883,10 @@ func (f *ForkChoiceStore) settlePendingEnvelopeError(blockRoot common.Hash, pend
 	}
 }
 
-// enterPendingEnvelopeApply admits one apply per root at a time. Block import and every retry
-// path go through it, so no two of them reach NewPayload for one envelope. A later caller waits
-// for the holder and then runs itself, because the holder may have stopped without a verdict.
+// enterPendingEnvelopeApply admits one apply of a parked envelope per root at a time, at block
+// import and on every retry, so no two of them reach NewPayload for one parked copy. A later
+// caller waits for the holder and then runs itself, because the holder may have stopped
+// without a verdict.
 func (f *ForkChoiceStore) enterPendingEnvelopeApply(ctx context.Context, blockRoot common.Hash) bool {
 	done := make(chan struct{})
 	for {
