@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -60,6 +61,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -435,6 +437,149 @@ func TestEstimateGasStateOverrideMovedPrecompile(t *testing.T) {
 	}, nil)
 	require.NoError(t, err)
 	require.Greater(t, uint64(gas), params.TxGas+params.EcrecoverGas)
+}
+
+// identityEchoChecker returns code that reverts unless identity (0x04) echoes 0xdeadbeef.
+func identityEchoChecker() hexutil.Bytes {
+	code := []byte{
+		byte(vm.PUSH4), 0xde, 0xad, 0xbe, 0xef, byte(vm.PUSH1), 0, byte(vm.MSTORE),
+		// STATICCALL(gas, 0x04, in=mem[28:32], out=mem[64:96])
+		byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0x40, byte(vm.PUSH1), 4, byte(vm.PUSH1), 28,
+		byte(vm.PUSH1), 4, byte(vm.GAS), byte(vm.STATICCALL),
+		byte(vm.RETURNDATASIZE), byte(vm.PUSH1), 4, byte(vm.EQ), byte(vm.AND),
+		byte(vm.PUSH1), 0x40, byte(vm.MLOAD), byte(vm.PUSH1), 0xe0, byte(vm.SHR),
+		byte(vm.PUSH4), 0xde, 0xad, 0xbe, 0xef, byte(vm.EQ), byte(vm.AND),
+	}
+	dest := byte(len(code) + 7)
+	return append(code,
+		byte(vm.PUSH1), dest, byte(vm.JUMPI),
+		byte(vm.PUSH1), 0, byte(vm.DUP1), byte(vm.REVERT),
+		byte(vm.JUMPDEST), byte(vm.PUSH1), 0x20, byte(vm.PUSH1), 0x40, byte(vm.RETURN),
+	)
+}
+
+// A precompile keeps running on every call method unless its override sets code or a move.
+func TestStateOverridePrecompileKeptWithoutCodeOrMove(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, bank := fundedBankGenesis(t, chain.AllProtocolChanges)
+	ethAPI := newTestEthAPIWithFilters(t, m)
+	debugAPI := newDebugApiForTest(m)
+	traceAPI := newTraceApiForTest(m)
+
+	identity := common.BytesToAddress([]byte{4})
+	checker := common.HexToAddress("0x000000000000000000000000000000000000c0de")
+	checkerCode := identityEchoChecker()
+	echo := hexutil.Bytes{0xde, 0xad, 0xbe, 0xef}
+	echoWord := hexutil.Bytes(common.RightPadBytes(echo, 32))
+	gas := hexutil.Uint64(100_000)
+	one := (*hexutil.U256)(uint256.NewInt(1))
+	nonce := hexutil.Uint64(1)
+	storage := map[common.Hash]common.Hash{common.HexToHash("0x01"): common.HexToHash("0x02")}
+	revertCode := hexutil.Bytes{byte(vm.PUSH1), 0, byte(vm.DUP1), byte(vm.REVERT)}
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	for _, tc := range []struct {
+		name     string
+		override ethapi.Account
+		replaced bool
+	}{
+		{name: "balance", override: ethapi.Account{Balance: &one}},
+		{name: "nonce", override: ethapi.Account{Nonce: &nonce}},
+		{name: "state", override: ethapi.Account{State: &storage}},
+		{name: "stateDiff", override: ethapi.Account{StateDiff: &storage}},
+		{name: "empty", override: ethapi.Account{}},
+		{name: "code", override: ethapi.Account{Code: &revertCode}, replaced: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			overrides := &ethapi.StateOverrides{
+				accounts.InternAddress(identity): tc.override,
+				accounts.InternAddress(checker):  {Code: &checkerCode},
+			}
+			args := ethapi.CallArgs{From: &bank, To: &checker, Gas: &gas}
+
+			t.Run("eth_call", func(t *testing.T) {
+				out, err := ethAPI.Call(context.Background(), ethapi.CallArgs{From: &bank, To: &identity, Gas: &gas, Data: &echo}, &latest, overrides, nil)
+				if tc.replaced {
+					require.ErrorContains(t, err, "execution reverted")
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, echo, out)
+				}
+
+				out, err = ethAPI.Call(context.Background(), args, &latest, overrides, nil)
+				if tc.replaced {
+					require.ErrorContains(t, err, "execution reverted")
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, echoWord, out)
+				}
+			})
+
+			t.Run("eth_estimateGas", func(t *testing.T) {
+				_, err := ethAPI.EstimateGas(context.Background(), &args, &latest, overrides, nil)
+				if tc.replaced {
+					require.ErrorContains(t, err, "execution reverted")
+				} else {
+					require.NoError(t, err)
+				}
+			})
+
+			t.Run("debug_traceCall", func(t *testing.T) {
+				var buf bytes.Buffer
+				s := jsonstream.New(&buf)
+				require.NoError(t, debugAPI.TraceCall(context.Background(), args, &latest, &tracersConfig.TraceConfig{StateOverrides: overrides}, s))
+				require.NoError(t, s.Flush())
+				var res ethapi.ExecutionResult
+				require.NoError(t, json.Unmarshal(buf.Bytes(), &res))
+				require.Equal(t, tc.replaced, res.Failed)
+			})
+
+			t.Run("eth_simulateV1", func(t *testing.T) {
+				res, err := ethAPI.SimulateV1(context.Background(), SimulationRequest{
+					BlockStateCalls: []SimulatedBlock{{StateOverrides: overrides, Calls: []ethapi.CallArgs{args}}},
+				}, latest)
+				require.NoError(t, err)
+				require.Len(t, res, 1)
+				require.Len(t, res[0].Calls, 1)
+				status := uint64(types.ReceiptStatusSuccessful)
+				if tc.replaced {
+					status = types.ReceiptStatusFailed
+				}
+				require.Equal(t, status, uint64(res[0].Calls[0].Status))
+			})
+
+			t.Run("trace_callMany", func(t *testing.T) {
+				call := fmt.Sprintf(`{"from":%q,"to":%q,"gas":"0x30000","input":"0xdeadbeef"}`, bank, identity)
+				res, err := traceAPI.CallMany(context.Background(), json.RawMessage(`[[`+call+`,["trace"]]]`), &latest, &tracersConfig.TraceConfig{StateOverrides: overrides})
+				require.NoError(t, err)
+				require.Len(t, res, 1)
+				require.Equal(t, !tc.replaced, res[0].Output.String() == echo.String())
+			})
+
+			// These two methods ignore precompile overrides, so the code case does not apply.
+			if !tc.replaced {
+				t.Run("eth_createAccessList", func(t *testing.T) {
+					res, err := ethAPI.CreateAccessList(context.Background(), args, &latest, overrides, nil)
+					require.NoError(t, err)
+					require.Empty(t, res.Error)
+				})
+
+				t.Run("eth_callMany", func(t *testing.T) {
+					callArgs := args
+					callArgs.MaxFeePerGas = (*hexutil.U256)(uint256.NewInt(2e9))
+					res, err := ethAPI.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{callArgs}}},
+						StateContext{BlockNumber: latest}, overrides, nil)
+					require.NoError(t, err)
+					require.Len(t, res, 1)
+					require.Len(t, res[0], 1)
+					require.NotContains(t, res[0][0], "error")
+					require.Equal(t, hex.EncodeToString(echoWord), res[0][0]["value"])
+				})
+			}
+		})
+	}
 }
 
 // TestEstimateGasCallDataFieldDoesNotChangeEstimate verifies that the same
