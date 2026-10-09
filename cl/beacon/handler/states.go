@@ -199,7 +199,7 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("could not read canonical block root: %x", blockRoot))
 	}
 
-	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
+	state, err := a.forkchoiceStateAtBlockSlot(blockRoot, *slot)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
