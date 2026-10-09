@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -803,9 +802,8 @@ func (e *ExecModule) logTimings(msg string, timings []any) {
 	if len(timings) == 0 {
 		return
 	}
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	alloc, sys := dbg.MemUsage()
+	timings = append(timings, "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 	e.logger.Info(msg, timings...)
 }
 
@@ -946,8 +944,7 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 		return
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 	blockTimings := e.forkValidator.GetTimings(blockHash)
 
 	logArgs := []any{"hash", blockHash, "number", fcuHeader.Number.Uint64()}
@@ -980,7 +977,7 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 		}
 	}
 
-	logArgs = append(logArgs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	logArgs = append(logArgs, "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	dbgLevel := log.LvlInfo
 	if debug {
