@@ -616,7 +616,12 @@ func TestReadYieldConnKeepAlive(t *testing.T) {
 	for range 8 {
 		wg.Go(func() {
 			for range 500 {
-				resp, err := client.Post("http://"+addr.String(), "application/json", strings.NewReader(`{"id":1}`))
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+addr.String(), strings.NewReader(`{"id":1}`))
+				if err != nil {
+					errs <- err
+					return
+				}
+				resp, err := client.Do(req)
 				if err != nil {
 					errs <- err
 					return
