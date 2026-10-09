@@ -310,8 +310,9 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 
 		// Missing fields of an account destroyed earlier in this block must not take
 		// their pre-destruct values. A CREATE resets every field; a revival by a
-		// credit writes no nonce, so the nonce follows the readers: zero when a
-		// committed destruct follows its last write, else the map or state reader.
+		// credit writes no nonce, and one by a fee credit no code hash either, so
+		// both follow the readers: zero when a committed destruct follows their last
+		// write, else the map or state reader.
 		sdEarlier := false
 		if v, sd, _ := vm.ReadSelfDestruct(addr, txIndex); sd.Status() == MVReadResultDone && v {
 			sdEarlier = true
@@ -333,11 +334,11 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 			if filtered.Has(WriteHeader{Address: addr, Path: path}) {
 				continue // already in output
 			}
-			if (sdEarlier && hasCreateContract) || (path == NoncePath && vm.nonceWiped(addr, txIndex+1)) {
+			if sdEarlier && hasCreateContract {
 				SetAccountFieldZero(filtered, addr, path, ver)
 				continue
 			}
-			if SetAccountFieldFromMap(filtered, vm, addr, path, ver, txIndex+1) {
+			if setAccountFieldLive(filtered, vm, addr, path, ver, txIndex+1) {
 				continue
 			}
 			// Fall back to stateReader for pre-block account

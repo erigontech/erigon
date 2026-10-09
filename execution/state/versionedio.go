@@ -1866,6 +1866,30 @@ func SetAccountFieldFromMap(out *WriteSet, vm *VersionMap, addr accounts.Address
 	return false
 }
 
+// setAccountFieldLive is SetAccountFieldFromMap with the readers' destruct wipe
+// for the nonce and the code hash: a committed destruct after the last write
+// sets the zero value.
+func setAccountFieldLive(out *WriteSet, vm *VersionMap, addr accounts.Address, path AccountPath, ver Version, txIdx int) bool {
+	switch path {
+	case NoncePath:
+		v, found, wiped := vm.readNonceLive(addr, txIdx)
+		if found || wiped {
+			out.SetNonce(addr, &VersionedWrite[uint64]{WriteHeader: WriteHeader{Address: addr, Path: NoncePath, Version: ver}, Val: v})
+		}
+		return found || wiped
+	case CodeHashPath:
+		v, found, wiped := vm.readCodeHashLive(addr, txIdx)
+		if wiped {
+			v = accounts.EmptyCodeHash
+		}
+		if found || wiped {
+			out.SetCodeHash(addr, &VersionedWrite[accounts.CodeHash]{WriteHeader: WriteHeader{Address: addr, Path: CodeHashPath, Version: ver}, Val: v})
+		}
+		return found || wiped
+	}
+	return SetAccountFieldFromMap(out, vm, addr, path, ver, txIdx)
+}
+
 // NewAccountFieldZeroWrite returns a typed *VersionedWrite[T] for path
 // holding the zero value (used by the SD-earlier fallback that emits
 // post-destruction defaults).  Path must be Balance/Nonce/Incarnation/CodeHash.
