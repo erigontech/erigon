@@ -89,6 +89,27 @@ func TestSelfdestructParallel_RepeatedSameTx(t *testing.T) {
 	assert.True(t, bal.Val.IsZero(), "balance credited between the two SELFDESTRUCTs must be re-cleared")
 }
 
+// A second SELFDESTRUCT with nothing credited in between changes no cell, so it
+// leaves the journal as it was.
+func TestSelfdestructParallel_RepeatWithNothingChangedJournalsNothing(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	acc := accounts.NewAccount()
+	acc.Balance = *uint256.NewInt(100)
+
+	reader := &sdAccountReader{addr: addr, account: &acc}
+	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
+	ibs.SetTxContext(100, 5)
+
+	_, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	entries := ibs.journal.length()
+
+	destroyed, err := ibs.Selfdestruct(addr, false)
+	require.NoError(t, err)
+	assert.True(t, destroyed)
+	assert.Equal(t, entries, ibs.journal.length())
+}
+
 // TestSelfdestructParallel_AbsentAccount verifies that self-destructing an
 // account that does not exist returns false and records nothing.
 func TestSelfdestructParallel_AbsentAccount(t *testing.T) {
