@@ -87,16 +87,16 @@ func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accou
 // originCodeDirect reads an account's pre-block origin code bytes straight from the
 // state reader, no stateObject. A contract this tx created has no code until SetCode
 // runs, so it reads empty rather than a prior incarnation's bytes.
-func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) ([]byte, error) {
+func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) (accounts.Code, error) {
 	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
-		return nil, nil
+		return accounts.EmptyCode, nil
 	}
 	codeHash, err := ibs.originCodeHash(addr)
 	if err != nil {
-		return nil, err
+		return accounts.Code{}, err
 	}
 	if codeHash.IsEmpty() {
-		return nil, nil
+		return accounts.EmptyCode, nil
 	}
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle()))) {
 		ibs.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", ibs.blockNum, ibs.txIndex, ibs.version))
@@ -112,7 +112,10 @@ func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) ([]byte, err
 	}
 	ibs.stateReader.SetTrace(false, "")
 	ibs.recordStateReadError(err)
-	return code, err
+	if len(code) == 0 {
+		return accounts.EmptyCode, err
+	}
+	return accounts.Code{Hash: codeHash, Bytes: code}, err
 }
 
 // codeSeed returns the code this tx currently sees at addr — its own Code write cell
@@ -127,11 +130,11 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 	if currentHash == accounts.EmptyCodeHash {
 		return accounts.Code{Hash: accounts.EmptyCodeHash}, nil
 	}
-	bytes, err := ibs.originCodeDirect(addr)
+	code, err := ibs.originCodeDirect(addr)
 	if err != nil {
 		return accounts.Code{}, err
 	}
-	return accounts.Code{Hash: currentHash, Bytes: bytes}, nil
+	return accounts.Code{Hash: currentHash, Bytes: code.Bytes}, nil
 }
 
 // originCodeHash returns the pre-block origin code hash from the state reader
@@ -232,7 +235,7 @@ type readPathResult struct {
 	mapIncarnationVal    uint64
 	mapSelfDestructVal   bool
 	mapCreateContractVal bool
-	mapCodeVal           []byte
+	mapCodeVal           accounts.Code
 	mapCodeHashVal       accounts.CodeHash
 	mapCodeSizeVal       int
 	mapStorageVal        uint256.Int
@@ -410,7 +413,7 @@ reread:
 	case CodePath:
 		var mc accounts.Code
 		mc, res, _, r.life = s.versionMap.ReadCodeLife(addr, s.txIndex)
-		r.mapCodeVal = mc.Bytes
+		r.mapCodeVal = mc
 	case CodeHashPath:
 		r.mapCodeHashVal, res, _ = s.versionMap.ReadCodeHash(addr, s.txIndex)
 	case CodeSizePath:
@@ -1165,9 +1168,9 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 	}
 }
 
-// readCode returns the contract code. The commited flag selects whether
+// readCode returns the contract code with its hash. The commited flag selects whether
 // the version-aware lookup honours the committed-only contract.
-func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte, ReadSource, Version, error) {
+func readCode(s *IntraBlockState, addr accounts.Address, commited bool) (accounts.Code, ReadSource, Version, error) {
 	if s.warmReadable(addr) {
 		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
 			return tr.Val, tr.Source, tr.Version, nil
@@ -1177,27 +1180,27 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, commited, false, &r)
 	if r.err != nil {
 		s.recordStateReadError(r.err)
-		return nil, r.source, r.version, r.err
+		return accounts.Code{}, r.source, r.version, r.err
 	}
 	switch r.outcome {
 	case outcomeWriteSetHit:
-		return r.vwCode.Val.Bytes, r.source, r.version, nil
+		return r.vwCode.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		v := r.mapCodeVal
 		if r.recordVR {
-			s.versionedReads.SetCode(addr, VersionedRead[[]byte]{r.hdr, v})
+			s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
-		var v []byte
+		var v accounts.Code
 		if r.so != nil {
 			if !r.so.deleted {
-				code, err := r.so.Code()
+				code, err := r.so.CodeTyped()
 				if err != nil {
-					return nil, StorageRead, UnknownVersion, err
+					return accounts.Code{}, StorageRead, UnknownVersion, err
 				}
 				v = code
 			}
@@ -1205,17 +1208,17 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 			v = r.mapCodeVal
 		}
 		if r.recordVR {
-			s.versionedReads.SetCode(addr, VersionedRead[[]byte]{r.hdr, v})
+			s.versionedReads.SetCode(addr, VersionedRead[accounts.Code]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
 	case outcomeLegacyStorage:
 		if r.so == nil || r.so.deleted {
-			return nil, StorageRead, UnknownVersion, nil
+			return accounts.Code{}, StorageRead, UnknownVersion, nil
 		}
-		code, err := r.so.Code()
+		code, err := r.so.CodeTyped()
 		return code, StorageRead, UnknownVersion, err
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
-		return nil, r.source, r.version, nil
+		return accounts.Code{}, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("readCode: unexpected outcome %d for %x", r.outcome, addr))
 	}
@@ -1223,22 +1226,22 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) ([]byte,
 
 // refreshCode is the in-memory-only variant for CodePath. CodePath is never recorded
 // via the skipStorage branch (the `path != CodePath` guard), so the default case records nothing.
-func refreshCode(s *IntraBlockState, addr accounts.Address) ([]byte, ReadSource, Version, error) {
+func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSource, Version, error) {
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
-		return nil, r.source, r.version, r.err
+		return accounts.Code{}, r.source, r.version, r.err
 	}
 	switch r.outcome {
 	case outcomeWriteSetHit:
-		return r.vwCode.Val.Bytes, r.source, r.version, nil
+		return r.vwCode.Val, r.source, r.version, nil
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
 		return tr.Val, r.source, r.version, nil
 	case outcomeMapDone:
 		return r.mapCodeVal, r.source, r.version, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
-		return nil, r.source, r.version, nil
+		return accounts.Code{}, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("refreshCode: unexpected outcome %d for %x", r.outcome, addr))
 	}
@@ -1403,6 +1406,22 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
+	if s.versionMap == nil {
+		so, err := s.getStateObject(addr, true)
+		if err != nil || so == nil || so.deleted {
+			return uint256.Int{}, StorageRead, UnknownVersion, false, err
+		}
+		v, clean, err := so.GetState(key)
+		return v, StorageRead, UnknownVersion, clean, err
+	}
+	if s.versionMap != nil && s.warmReadable(addr) {
+		// A resident deleted object outranks the read set, as in versionedReadCore.
+		if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
+			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
+				return tr.Val, tr.Source, tr.Version, false, nil
+			}
+		}
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {
@@ -1442,15 +1461,6 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, clean, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, false, nil
-		}
-		v, clean, err := r.so.GetState(key)
-		if err != nil {
-			return uint256.Int{}, StorageRead, UnknownVersion, false, err
-		}
-		return v, StorageRead, UnknownVersion, clean, nil
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, false, nil
 	default:
@@ -1460,6 +1470,14 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 
 // readCommittedState reads a storage slot with committed-view semantics.
 func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
+	if s.versionMap == nil {
+		so, err := s.getStateObject(addr, true)
+		if err != nil || so == nil || so.deleted {
+			return uint256.Int{}, StorageRead, UnknownVersion, err
+		}
+		v, err := so.GetCommittedState(key)
+		return v, StorageRead, UnknownVersion, err
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, true, false, &r)
 	if r.err != nil {
@@ -1495,12 +1513,6 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, nil
-		}
-		v, err := r.so.GetCommittedState(key)
-		return v, StorageRead, UnknownVersion, err
 	case outcomeReturnZero, outcomeReturnEmpty, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, nil
 	default:

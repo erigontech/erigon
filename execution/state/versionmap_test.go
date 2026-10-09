@@ -923,7 +923,7 @@ func TestValidateRead_CodeReadMustSeeLaterSD(t *testing.T) {
 	newIO := func(readVer Version) *VersionedIO {
 		io := NewVersionedIO(6)
 		rs := ReadSet{}
-		rs.SetCode(addr, VersionedRead[[]byte]{ReadHeader: ReadHeader{Source: MapRead, Version: readVer}, Val: code})
+		rs.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: ReadHeader{Source: MapRead, Version: readVer}, Val: accounts.NewCode(code)})
 		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
 		return io
 	}

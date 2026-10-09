@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -75,6 +77,124 @@ func TestVersionedRead_B_DeletedStateObjectReturnsDefault(t *testing.T) {
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.True(t, bal.IsZero(), "balance after selfdestruct is zero")
+}
+
+// warmReadIBS builds a materialized versioned IBS over one committed account,
+// so a later selfdestruct in the version map makes getStateObject park a
+// deleted resident object for addr — the state the read-once fast path must
+// not read through.
+func warmReadIBS(t *testing.T, addr accounts.Address) (*IntraBlockState, *VersionMap) {
+	t.Helper()
+	_, tx, domains := NewTestRwTx(t)
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+	acc.Balance = *uint256.NewInt(1234)
+	addrValue := addr.Value()
+	domains.SetTxNum(10)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+
+	mvhm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), mvhm)
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(1, 5)
+	return ibs, mvhm
+}
+
+// B: a deleted stateObject wins over a slot this tx already read. The read-once
+// fast path must not serve the pre-destruct value.
+func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xb2})
+	ibs, mvhm := warmReadIBS(t, addr)
+
+	key := accounts.InternKey([32]byte{0x01})
+	prior := Version{TxIndex: 1, Incarnation: 0}
+	mvhm.WriteStorage(addr, key, prior, *uint256.NewInt(99), true)
+
+	v, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.EqualValues(t, 99, v.Uint64(), "first read resolves from the version map")
+
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	so, err := ibs.getStateObject(addr, true)
+	require.NoError(t, err)
+	require.Nil(t, so, "destructed account resolves to no object")
+	parked, ok := ibs.stateObjects[addr]
+	require.True(t, ok && parked.deleted, "getStateObject must park a deleted object")
+
+	v, err = ibs.GetState(addr, key)
+	require.NoError(t, err)
+	assert.True(t, v.IsZero(), "slot of a destructed account reads as zero, not as the recorded value")
+}
+
+// The read-once fast path must return exactly what the read-set-hit branch it
+// replaces returns: same value, source, version and clean flag.
+func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xb3})
+	ibs, mvhm := warmReadIBS(t, addr)
+
+	key := accounts.InternKey([32]byte{0x01})
+	version := Version{TxIndex: 1, Incarnation: 0}
+	mvhm.WriteStorage(addr, key, version, *uint256.NewInt(99), true)
+
+	_, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.True(t, ibs.warmReadable(addr), "fast path is armed")
+
+	v, source, gotVersion, clean, err := readStateForSet(ibs, addr, key)
+	require.NoError(t, err)
+	assert.EqualValues(t, 99, v.Uint64())
+	assert.Equal(t, MapRead, source)
+	assert.Equal(t, version, gotVersion)
+	assert.False(t, clean, "a read-set hit is never clean: it carries no dirty value to keep on revert")
+}
+
+func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, noMaterialize bool) *IntraBlockState {
+	_, tx, domains := NewTestRwTx(t)
+	addrValue := addr.Value()
+	domains.SetTxNum(10)
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
+	t.Cleanup(ibs.Close)
+	ibs.SetNoMaterialize(noMaterialize)
+	ibs.SetTxContext(1, 5)
+	return ibs
+}
+
+func TestVersionedTouch_RepeatedTouchIsNoop(t *testing.T) {
+	t.Parallel()
+	for _, noMaterialize := range []bool{false, true} {
+		addr := accounts.InternAddress([20]byte{0xb6})
+		acc := accounts.NewAccount()
+		acc.Incarnation = 1
+		ibs := newTouchTestIBS(t, addr, acc, noMaterialize)
+
+		require.NoError(t, ibs.TouchAccount(addr))
+		n := ibs.journal.length()
+		require.Positive(t, n)
+		require.NoError(t, ibs.TouchAccount(addr))
+		assert.Equal(t, n, ibs.journal.length(), "noMaterialize=%v", noMaterialize)
+	}
+}
+
+// The touch result does not depend on the other fields once the tx wrote the balance.
+func TestVersionedTouch_OwnBalanceWriteReadsNoFields(t *testing.T) {
+	t.Parallel()
+	for _, noMaterialize := range []bool{false, true} {
+		addr := accounts.InternAddress([20]byte{0xb7})
+		acc := accounts.NewAccount()
+		acc.Incarnation = 1
+		acc.Nonce = 1
+		acc.Balance = *uint256.NewInt(5)
+		ibs := newTouchTestIBS(t, addr, acc, noMaterialize)
+
+		require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
+		require.NoError(t, ibs.TouchAccount(addr))
+		_, ok := ibs.versionedReads.GetNonce(addr)
+		assert.False(t, ok, "nonce read, noMaterialize=%v", noMaterialize)
+	}
 }
 
 // ------------------------------------------------------------------
