@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -2717,10 +2718,11 @@ func TestBackwardGloasSuccessorFromPartialHTTPRange(t *testing.T) {
 	successorEncoded, err := successor.EncodeSSZ(nil)
 	require.NoError(t, err)
 	successorServed := make(chan struct{})
+	closeSuccessorServed := sync.OnceFunc(func() { close(successorServed) })
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/eth/v2/beacon/blocks/11":
-			defer close(successorServed)
+			defer closeSuccessorServed()
 			w.Header().Set("Eth-Consensus-Version", "gloas")
 			_, _ = w.Write(successorEncoded)
 		default:
@@ -2746,6 +2748,78 @@ func TestBackwardGloasSuccessorFromPartialHTTPRange(t *testing.T) {
 
 	require.NoError(t, d.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{anchor}))
 	require.Equal(t, 1, processed)
+}
+
+func TestBackwardGloasAnchorClassifiedWhenLaterSlotFailureCancelsChild(t *testing.T) {
+	anchor := makeGloasBlock(10, hash(0xaa), hash(0x42))
+	child := makeGloasBlock(12, hash(0xbb), hash(0xcc))
+	linkBeaconBlocks(t, anchor, child)
+	childEncoded, err := child.EncodeSSZ(nil)
+	require.NoError(t, err)
+	childStarted := make(chan struct{})
+	var childRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/eth/v2/beacon/blocks/12":
+			if childRequests.Add(1) == 1 {
+				close(childStarted)
+				<-r.Context().Done()
+				return
+			}
+			w.Header().Set("Eth-Consensus-Version", "gloas")
+			_, _ = w.Write(childEncoded)
+		case "/eth/v2/beacon/blocks/13":
+			select {
+			case <-childStarted:
+				writeCheckpointzBlockNotFound(w)
+			case <-r.Context().Done():
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	d := newInitialGloasAnchorDownloader(t, anchor, server.URL, 14, func(*cltypes.SignedBeaconBlock) error {
+		t.Fatal("anchor must be classified by the source that serves its child")
+		return nil
+	})
+	processed := 0
+	d.SetOnNewBlock(func(block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+		processed++
+		require.Same(t, anchor, block)
+		require.Nil(t, envelope)
+		return true, nil
+	})
+
+	require.NoError(t, d.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{anchor}))
+	require.Equal(t, 1, processed)
+	require.True(t, d.Finished())
+	require.Equal(t, int32(2), childRequests.Load())
+}
+
+func TestBackwardGloasSuccessorRangeRetryOfOnly404sIsEmpty(t *testing.T) {
+	anchor := makeGloasBlock(10, hash(0xaa), hash(0x42))
+	anchorRoot, err := anchor.Block.HashSSZ()
+	require.NoError(t, err)
+	var slot12Requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/eth/v2/beacon/blocks/12" && slot12Requests.Add(1) == 1 {
+			writeCheckpointzBlockNotFound(w)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	d := newInitialGloasAnchorDownloader(t, anchor, server.URL, 100, func(*cltypes.SignedBeaconBlock) error {
+		t.Fatal("anchor must not be persisted")
+		return nil
+	})
+	require.NoError(t, d.processResponses(t.Context(), []*cltypes.SignedBeaconBlock{anchor}))
+	require.Equal(t, uint64(75), d.gloasSuccessorNext)
+	require.Equal(t, common.Hash(anchorRoot), d.expectedRoot)
+	require.Equal(t, int32(2), slot12Requests.Load())
 }
 
 func TestBackwardRootFallbackDoesNotAdvanceWhenEnvelopeFetchFails(t *testing.T) {

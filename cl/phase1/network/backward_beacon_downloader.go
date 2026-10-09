@@ -789,11 +789,20 @@ func (b *BackwardBeaconDownloader) fetchGloasSuccessorRange(ctx context.Context,
 	if b.httpFallbackURL == "" {
 		return nil, errCanonicalGloasSuccessorUnavailable
 	}
-	// On error the fetcher still returns the blocks of the slots answered before the failing one.
+	// On error the fetcher returns only blocks before the first failing or cancelled slot.
 	blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
 	if err != nil && len(blocks) == 0 {
-		b.gloasSuccessorSourceFailures++
-		return nil, err
+		// Retry in order so a later failure cannot cancel an earlier child.
+		for i := range count {
+			blocks, err = fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start+i, 1, b.beaconCfg)
+			if err != nil {
+				b.gloasSuccessorSourceFailures++
+				return nil, err
+			}
+			if len(blocks) > 0 {
+				break
+			}
+		}
 	}
 	successor, err := linkedGloasSuccessor(blocks, start, count, parentRoot)
 	if errors.Is(err, errGloasSuccessorNotServed) {
