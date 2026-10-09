@@ -129,7 +129,9 @@ func (c *readWaitConn) Read(b []byte) (int, error) {
 		_ = c.raw.Read(c.waitReadableFn) // a deadline or close error repeats in the Read below
 	}
 	n, err := c.TCPConn.Read(b)
-	c.drained = err == nil && n < len(b)
+	if err == nil {
+		c.drained = n < len(b)
+	}
 	return n, err
 }
 
