@@ -464,7 +464,7 @@ func TestWebsocketWriteTimeoutClosesStalledConn(t *testing.T) {
 		if err != nil {
 			return
 		}
-		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
+		wc := newWebsocketCodec(conn, hw.conn, nil, r.Host, r.Header, r.RemoteAddr)
 		defer wc.Close()
 		codecs <- wc
 		// A hijacked request's context never ends, so wait for the connection itself.
@@ -648,7 +648,7 @@ func TestWebsocketPingDuringSlowWriteKeepsConn(t *testing.T) {
 		if err != nil {
 			return
 		}
-		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
+		wc := newWebsocketCodec(conn, hw.conn, nil, r.Host, r.Header, r.RemoteAddr)
 		defer wc.Close()
 		codecs <- wc
 		for {
@@ -711,7 +711,7 @@ func TestWebsocketCoalescedMessagesLeaveInOneWrite(t *testing.T) {
 			return
 		}
 		hw.conn.Conn = writeCountingConn{hw.conn.Conn, &writes}
-		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
+		wc := newWebsocketCodec(conn, hw.conn, nil, r.Host, r.Header, r.RemoteAddr)
 		defer wc.Close()
 		codecs <- wc
 		for {
