@@ -571,6 +571,17 @@ func (s *simulator) simulateBlock(
 		// Snapshot and clear dirty set so CommitBlock won't apply EIP-161 to
 		// override-only accounts (they were not "touched" by any transaction).
 		overrideDirtyAccounts = intraBlockState.ExtractAndClearDirty()
+		for addr, account := range *stateOverrides {
+			if account.State == nil {
+				continue
+			}
+			// An empty storage replacement journals nothing, but must still clear the stored slots.
+			overrideDirtyAccounts[addr] = struct{}{}
+			// Load the code before a commit of the full storage replacement deletes it from the DB.
+			if _, err := intraBlockState.GetCode(addr); err != nil {
+				return nil, nil, err
+			}
+		}
 	}
 
 	vmConfig := vm.Config{NoBaseFee: !s.validation}
@@ -645,6 +656,17 @@ func (s *simulator) simulateBlock(
 			return nil, nil, fmt.Errorf("committing override accounts: %w", err)
 		}
 	}
+	// Committing a full storage replacement deletes the account, and with it the code.
+	if stateOverrides != nil {
+		for addr, account := range *stateOverrides {
+			if account.State == nil {
+				continue
+			}
+			if err := rewriteOverrideCode(intraBlockState, stateWriter, addr); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
 
 	if err := s.computeSimulatedStateRoot(ctx, tx, sharedDomains, bsc, block, parent, minTxNum, firstMinTxNum, stateWriter.touchedKeys, ancestors, latest); err != nil {
 		return nil, nil, err
@@ -655,6 +677,22 @@ func (s *simulator) simulateBlock(
 	repairLogs(callResults, block.Hash())
 	blockResult.Calls = callResults
 	return blockResult, block, nil
+}
+
+func rewriteOverrideCode(ibs *state.IntraBlockState, stateWriter state.StateWriter, addr accounts.Address) error {
+	code, err := ibs.GetCode(addr)
+	if err != nil || len(code) == 0 {
+		return err
+	}
+	codeHash, err := ibs.GetCodeHash(addr)
+	if err != nil {
+		return err
+	}
+	incarnation, err := ibs.GetIncarnation(addr)
+	if err != nil {
+		return err
+	}
+	return stateWriter.UpdateAccountCode(addr, incarnation, codeHash, code)
 }
 
 // newStateReaderForBlock returns the appropriate StateReader for a simulated block, along with
