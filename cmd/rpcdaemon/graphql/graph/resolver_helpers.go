@@ -231,6 +231,7 @@ func (r *queryResolver) buildTransaction(block *model.Block, receipt *jsonrpc.Gr
 			Index: uint64(rlog.Index),
 			Data:  hexutil.Encode(rlog.Data),
 		}
+		tlog.Transaction = trans
 		tlog.Account = model.NewAccountAtBlock(block.Number)
 		tlog.Account.Address = hexutil.Encode(rlog.Address[:])
 		tlog.Topics = make([]string, 0, len(rlog.Topics))
@@ -294,6 +295,67 @@ func topicsFromModel(topicSets [][]string) ([][]common.Hash, error) {
 		}
 	}
 	return result, nil
+}
+
+func logTransactionFieldsRequested(ctx context.Context) bool {
+	if !graphql.HasOperationContext(ctx) || graphql.GetFieldContext(ctx) == nil {
+		return false
+	}
+	opCtx := graphql.GetOperationContext(ctx)
+	for _, field := range graphql.CollectFieldsCtx(ctx, nil) {
+		if field.Name != "transaction" {
+			continue
+		}
+		for _, sub := range graphql.CollectFields(opCtx, field.Selections, nil) {
+			if sub.Name != "hash" && sub.Name != "__typename" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// attachLogTransactions replaces the hash-only transaction stubs of logs with full transactions, loading each block once.
+func (r *Resolver) attachLogTransactions(ctx context.Context, logs []*model.Log, known *model.Block) error {
+	if len(logs) == 0 || !logTransactionFieldsRequested(ctx) {
+		return nil
+	}
+	byBlock := make(map[string]map[string]*model.Transaction)
+	index := func(block *model.Block) map[string]*model.Transaction {
+		txns := make(map[string]*model.Transaction, len(block.Transactions))
+		for _, txn := range block.Transactions {
+			txns[txn.Hash] = txn
+		}
+		return txns
+	}
+	if known != nil && len(known.Transactions) > 0 {
+		byBlock[known.Hash] = index(known)
+	}
+	for _, l := range logs {
+		stub := l.Transaction
+		if stub == nil || stub.Block == nil {
+			continue
+		}
+		txns, ok := byBlock[stub.Block.Hash]
+		if !ok {
+			blockHash := stub.Block.Hash
+			block, err := (&queryResolver{r}).block(ctx, nil, &blockHash, true)
+			if err != nil {
+				return err
+			}
+			if block == nil {
+				return fmt.Errorf("block %s not found", blockHash)
+			}
+			txns = index(block)
+			byBlock[blockHash] = txns
+		}
+		txn, ok := txns[stub.Hash]
+		if !ok {
+			return fmt.Errorf("transaction %s not found in block %s", stub.Hash, stub.Block.Hash)
+		}
+		l.Transaction = txn
+	}
+	return nil
 }
 
 func rpcLogsToModel(logs types.Logs) []*model.Log {
