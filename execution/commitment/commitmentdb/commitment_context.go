@@ -1027,6 +1027,15 @@ func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, t
 		}
 		return txNum, blockNum, nil
 	}
+	if sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV3 {
+		legacy, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
+		if err != nil {
+			return 0, 0, err
+		}
+		if len(legacy) > 0 {
+			return 0, 0, errors.New("commitment v3 is enabled, but the datadir holds legacy commitment: convert it with `integration commitment convert --v3` first")
+		}
+	}
 	// handle case when we have no commitment, but have executed blocks
 	bnBytes, err := tx.GetOne(kv.SyncStageProgress, []byte("Execution"))
 	if err != nil {

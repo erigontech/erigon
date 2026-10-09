@@ -1989,3 +1989,24 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 	require.Equal(t, txNum2, storedTx2)
 	require.Equal(t, trieState1, state2[16:])
 }
+
+func TestSeekCommitmentV3RejectsLegacyCommitmentState(t *testing.T) {
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.ExperimentalCommitmentV3 = previousV3 })
+
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	legacy, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	require.NoError(t, legacy.DomainPut(kv.CommitmentDomain, rwTx, commitmentdb.KeyCommitmentState, make([]byte, 32), 1, nil))
+	require.NoError(t, legacy.Flush(ctx, rwTx))
+	legacy.Close()
+
+	statecfg.ExperimentalCommitmentV3 = true
+	_, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.ErrorContains(t, err, "legacy commitment")
+}
