@@ -134,19 +134,19 @@ func (c *EngineAPIRPCClient) GetPayloadV6(ctx context.Context, payloadID hexutil
 	return call[engine_types.GetPayloadResponse](ctx, c.client, rpc_helper.EngineGetPayloadV6, payloadID)
 }
 
-func (c *EngineAPIRPCClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
+func (c *EngineAPIRPCClient) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) (engine_types.ExecutionPayloadBodies, error) {
 	return callValue[[]*engine_types.ExecutionPayloadBody](ctx, c.client, rpc_helper.GetPayloadBodiesByHashV1, hashes)
 }
 
-func (c *EngineAPIRPCClient) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+func (c *EngineAPIRPCClient) GetPayloadBodiesByHashV2(ctx context.Context, hashes []common.Hash) (engine_types.ExecutionPayloadBodiesV2, error) {
 	return callValue[[]*engine_types.ExecutionPayloadBodyV2](ctx, c.client, rpc_helper.GetPayloadBodiesByHashV2, hashes)
 }
 
-func (c *EngineAPIRPCClient) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBody, error) {
+func (c *EngineAPIRPCClient) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) (engine_types.ExecutionPayloadBodies, error) {
 	return callValue[[]*engine_types.ExecutionPayloadBody](ctx, c.client, rpc_helper.GetPayloadBodiesByRangeV1, start, count)
 }
 
-func (c *EngineAPIRPCClient) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) ([]*engine_types.ExecutionPayloadBodyV2, error) {
+func (c *EngineAPIRPCClient) GetPayloadBodiesByRangeV2(ctx context.Context, start, count hexutil.Uint64) (engine_types.ExecutionPayloadBodiesV2, error) {
 	return callValue[[]*engine_types.ExecutionPayloadBodyV2](ctx, c.client, rpc_helper.GetPayloadBodiesByRangeV2, start, count)
 }
 

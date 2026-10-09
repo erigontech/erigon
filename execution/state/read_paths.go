@@ -54,10 +54,10 @@ func codeSizeFromStateObject(ibs *IntraBlockState, so *stateObject, addr account
 	return size, err
 }
 
-// committedStorageDirect reads a storage slot's committed value straight from the
+// originStorageDirect reads a storage slot's pre-block origin value straight from the
 // state reader, no stateObject. A contract this tx created (own CreateContract cell)
 // has fresh storage, so a cold slot reads zero rather than a prior incarnation's value.
-func (ibs *IntraBlockState) committedStorageDirect(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
+func (ibs *IntraBlockState) originStorageDirect(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
 	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
 		return uint256.Int{}, nil
 	}
@@ -84,14 +84,14 @@ func (ibs *IntraBlockState) committedStorageDirect(addr accounts.Address, key ac
 	return res, nil
 }
 
-// committedCodeDirect reads an account's committed code bytes straight from the
+// originCodeDirect reads an account's pre-block origin code bytes straight from the
 // state reader, no stateObject. A contract this tx created has no code until SetCode
 // runs, so it reads empty rather than a prior incarnation's bytes.
-func (ibs *IntraBlockState) committedCodeDirect(addr accounts.Address) ([]byte, error) {
+func (ibs *IntraBlockState) originCodeDirect(addr accounts.Address) ([]byte, error) {
 	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
 		return nil, nil
 	}
-	codeHash, err := ibs.committedCodeHash(addr)
+	codeHash, err := ibs.originCodeHash(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -127,17 +127,17 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 	if currentHash == accounts.EmptyCodeHash {
 		return accounts.Code{Hash: accounts.EmptyCodeHash}, nil
 	}
-	bytes, err := ibs.committedCodeDirect(addr)
+	bytes, err := ibs.originCodeDirect(addr)
 	if err != nil {
 		return accounts.Code{}, err
 	}
 	return accounts.Code{Hash: currentHash, Bytes: bytes}, nil
 }
 
-// committedCodeHash returns the tx-start code hash from the committed reader
+// originCodeHash returns the pre-block origin code hash from the state reader
 // (normalised to EmptyCodeHash for an absent or code-less account), without
 // recording an OCC read.
-func (ibs *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
+func (ibs *IntraBlockState) originCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
 	acc, err := ibs.stateReader.ReadAccountData(addr)
 	ibs.recordStateReadError(err)
 	if err != nil {
@@ -149,14 +149,14 @@ func (ibs *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.C
 	return acc.CodeHash, nil
 }
 
-// committedCodeSizeDirect reads an account's committed code size straight from the
+// originCodeSizeDirect reads an account's pre-block origin code size straight from the
 // state reader, no stateObject. Size-only for stateless-witness correctness (a witness
 // node carries the size but not the bytes).
-func (ibs *IntraBlockState) committedCodeSizeDirect(addr accounts.Address) (int, error) {
+func (ibs *IntraBlockState) originCodeSizeDirect(addr accounts.Address) (int, error) {
 	if cc, ok := ibs.versionedWriteCreateContract(addr); ok && cc {
 		return 0, nil
 	}
-	codeHash, err := ibs.committedCodeHash(addr)
+	codeHash, err := ibs.originCodeHash(addr)
 	if err != nil {
 		return 0, err
 	}
@@ -240,6 +240,11 @@ type readPathResult struct {
 	// hdr is the skeleton header the wrapper records (with its typed value) when recordVR is true.
 	hdr      ReadHeader
 	recordVR bool
+
+	// life is the account lifecycle verdict resolved under the same RLock as the
+	// storage/code floor read (Live default for every other path), so the Done-case
+	// wipe check consumes it instead of taking e.mu a second time.
+	life lifecycleVerdict
 
 	source  ReadSource
 	version Version
@@ -404,18 +409,18 @@ reread:
 		r.mapIncarnationVal, res, _ = s.versionMap.ReadIncarnation(addr, s.txIndex)
 	case CodePath:
 		var mc accounts.Code
-		mc, res, _ = s.versionMap.ReadCode(addr, s.txIndex)
+		mc, res, _, r.life = s.versionMap.ReadCodeLife(addr, s.txIndex)
 		r.mapCodeVal = mc.Bytes
 	case CodeHashPath:
 		r.mapCodeHashVal, res, _ = s.versionMap.ReadCodeHash(addr, s.txIndex)
 	case CodeSizePath:
-		r.mapCodeSizeVal, res, _ = s.versionMap.ReadCodeSize(addr, s.txIndex)
+		r.mapCodeSizeVal, res, _, r.life = s.versionMap.ReadCodeSizeLife(addr, s.txIndex)
 	case SelfDestructPath:
 		r.mapSelfDestructVal, res, _ = s.versionMap.ReadSelfDestruct(addr, s.txIndex)
 	case CreateContractPath:
 		r.mapCreateContractVal, res, _ = s.versionMap.ReadCreateContract(addr, s.txIndex)
 	case StoragePath:
-		r.mapStorageVal, res, _ = s.versionMap.ReadStorage(addr, key, s.txIndex)
+		r.mapStorageVal, res, _, r.life = s.versionMap.ReadStorageLife(addr, key, s.txIndex)
 	default:
 		panic(fmt.Errorf("readPaths: unknown path %v", path))
 	}
@@ -482,16 +487,16 @@ reread:
 		// canonicalVer like the storage path so a revival above the wipe does not
 		// livelock validation.
 		if path == CodePath || path == CodeSizePath {
-			if state, canonicalVer, destroyedAt := s.versionMap.AccountLifecycleAt(addr, s.txIndex); state != LifecycleLive && hdr.Version.TxIndex <= destroyedAt {
+			if r.life.state != LifecycleLive && hdr.Version.TxIndex <= r.life.destroyedAt {
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-						ReadHeader: ReadHeader{Source: MapRead, Version: canonicalVer},
+						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
 						Val:        true,
 					})
 				}
 				r.outcome = outcomeReturnDefault
 				r.source = MapRead
-				r.version = canonicalVer
+				r.version = r.life.canonicalVer
 				return
 			}
 		}
@@ -501,10 +506,10 @@ reread:
 		// validator resolves), never the wipe — a revival sitting above the wipe would
 		// otherwise make validation disagree forever and livelock.
 		if path == StoragePath {
-			if state, canonicalVer, destroyedAt := s.versionMap.AccountLifecycleAt(addr, s.txIndex); state != LifecycleLive && hdr.Version.TxIndex <= destroyedAt {
+			if r.life.state != LifecycleLive && hdr.Version.TxIndex <= r.life.destroyedAt {
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-						ReadHeader: ReadHeader{Source: MapRead, Version: canonicalVer},
+						ReadHeader: ReadHeader{Source: MapRead, Version: r.life.canonicalVer},
 						Val:        true,
 					})
 					// Not recorded as a storage read: for a revived account canonicalVer
@@ -514,7 +519,7 @@ reread:
 				}
 				r.outcome = outcomeReturnZero
 				r.source = MapRead
-				r.version = canonicalVer
+				r.version = r.life.canonicalVer
 				return
 			}
 		}
@@ -671,7 +676,7 @@ reread:
 				r.account = readAccount
 			}
 		}
-		// Cold committed storage read: resolve directly from the state reader without
+		// Cold origin storage read: resolve directly from the state reader without
 		// materializing a stateObject, reusing one only if a write this tx already made it.
 		if path == StoragePath {
 			hdr.Source = StorageRead
@@ -679,8 +684,10 @@ reread:
 				so = cached
 			} else {
 				// A cold slot depends only on its own StoragePath cell — recording an
-				// AddressPath dependency would be a false dep.
-				val, err := s.committedStorageDirect(addr, key)
+				// AddressPath dependency would be a false dep. The origin is resolved by
+				// ReadStorage's origin fallback; this cold path is the first reader (not yet
+				// published), which reads the origin base from the state reader.
+				val, err := s.originStorageDirect(addr, key)
 				if err != nil {
 					r.err = err
 					r.outcome = outcomeReturnDefault
@@ -706,7 +713,7 @@ reread:
 				so = cached
 			} else {
 				if path == CodePath {
-					code, err := s.committedCodeDirect(addr)
+					code, err := s.originCodeDirect(addr)
 					if err != nil {
 						r.err = err
 						r.outcome = outcomeReturnDefault
@@ -716,7 +723,7 @@ reread:
 					}
 					r.mapCodeVal = code
 				} else {
-					size, err := s.committedCodeSizeDirect(addr)
+					size, err := s.originCodeSizeDirect(addr)
 					if err != nil {
 						r.err = err
 						r.outcome = outcomeReturnDefault
@@ -832,16 +839,7 @@ func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
 		return
 	}
 	origin := *acc
-	e := vm.entryOrCreate(addr)
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	// Write-once: never overwrite an origin already seeded at originIndex.
-	if e.Address != nil {
-		if _, ok := e.Address.Get(originIndex); ok {
-			return
-		}
-	}
-	e.Address = putCell(vm, e.Address, addr, AddressPath, originIndex, 0, flagFor(true), &origin, getCellAccount)
+	vm.StoreOriginAccount(addr, &origin) // write-once lock-free origin layer
 }
 
 // seedStorageOrigin records a cold slot's committed value as its versionMap origin
@@ -880,6 +878,9 @@ func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Accoun
 	if s.versionMap == nil {
 		return nil, UnknownSource, UnknownVersion, false, nil
 	}
+	// The origin is resolved by ReadAddress's origin fallback once published; this is the first
+	// reader (not yet published), which reads the committed base from the state reader and records
+	// it for publish to the origin map at flush.
 	committed, err := s.committedAccount(addr)
 	if err != nil {
 		return nil, StorageRead, UnknownVersion, true, err
@@ -888,7 +889,7 @@ func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Accoun
 		return nil, UnknownSource, UnknownVersion, false, nil
 	}
 	origin := *committed
-	s.recordAddressOrigin(addr, &origin) // origin write-set, published at flush (not a mid-read versionMap write)
+	s.recordAddressOrigin(addr, &origin) // origin write-set, published to the origin map at flush
 	ver = Version{TxIndex: originIndex}
 	// A destructed origin reads absent and is NOT recorded as an AddressPath read (its
 	// SD dependency travels on the field reads). Only an alive origin is recorded, so its
@@ -1422,7 +1423,7 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 				}
 			}
 		} else {
-			// Cold committed read resolved by committedStorageDirect: no dirty
+			// Cold origin read resolved by originStorageDirect: no dirty
 			// value exists on the parallel path, so it is always clean.
 			v, clean = r.mapStorageVal, true
 		}

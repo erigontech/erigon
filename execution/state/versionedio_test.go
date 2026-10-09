@@ -1425,7 +1425,7 @@ func TestVersionedIO_mergeTxEquivalentToMerge(t *testing.T) {
 	}
 	type txIO struct {
 		txIdx int
-		inc   int
+		inc   Incarnation
 		addr  accounts.Address
 		slot  accounts.StorageKey
 		val   uint64

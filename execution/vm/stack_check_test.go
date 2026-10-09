@@ -102,7 +102,7 @@ func TestStackBoundsInvariant(t *testing.T) {
 // interpreter's fast path to every jump table it can run with.
 func TestFastPathMatchesJumpTables(t *testing.T) {
 	t.Parallel()
-	// DUPs are makeDup closures, whose code pointers differ by inlining site,
+	// DUPs and PUSH3+ are closures, whose code pointers differ by inlining site,
 	// so they are checked by behaviour instead of by function identity.
 	tables := []*JumpTable{
 		&frontierInstructionSet, &homesteadInstructionSet, &tangerineWhistleInstructionSet,
@@ -127,6 +127,10 @@ func TestFastPathMatchesJumpTables(t *testing.T) {
 				scope := new(CallContext)
 				for v := range uint64(16) {
 					scope.Stack.pushRef().SetUint64(v)
+				}
+				if op.IsPushWithImmediateArgs() {
+					// The immediate is 16, the top the check below wants.
+					scope.Contract.Code = append(make([]byte, op-PUSH0), 16)
 				}
 				_, _, err := got.execute(0, nil, scope)
 				require.NoError(t, err)
@@ -245,6 +249,7 @@ func TestRunMatchesRunTraced(t *testing.T) {
 		"memover":  prog(PUSH9, 1, 0, 0, 0, 0, 0, 0, 0, 0, PUSH1, 1, SWAP1, MSTORE),
 		"push1end": {byte(PUSH1)},
 		"push2end": {byte(PUSH1), 1, byte(PUSH2), 0x12},
+		"push9end": {byte(PUSH1), 1, byte(PUSH9), 1, 2, 3},
 		"badjump":  prog(PUSH1, 0, JUMP),
 		"jumpdata": prog(PUSH2, 0x5b, 0x00, PUSH1, 1, JUMP),
 		"jumpinot": prog(PUSH1, 0, PUSH1, 0xff, JUMPI, pushes(4)),
@@ -284,6 +289,11 @@ func TestRunMatchesRunTraced(t *testing.T) {
 					b = append(b, byte(PUSH1), byte(rng.IntN(2)), byte(PUSH2), byte(dest>>8), byte(dest), byte(JUMPI), byte(JUMPDEST))
 				default:
 					b = append(b, byte(op))
+					if op.IsPushWithImmediateArgs() {
+						for range op - PUSH0 {
+							b = append(b, byte(rng.IntN(256)))
+						}
+					}
 				}
 			}
 		}
