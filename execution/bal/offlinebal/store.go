@@ -25,6 +25,7 @@ package offlinebal
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -211,4 +212,35 @@ func (r *Reader) Close() error {
 		return nil
 	}
 	return r.data.Unmap()
+}
+
+// Store is the offline-BAL store opened for one mode: a Writer to generate, a
+// Reader to use, or neither.
+type Store struct {
+	Writer *Writer
+	Reader *Reader
+}
+
+func Open(generate, use bool, dir string) (Store, error) {
+	switch {
+	case generate && use:
+		return Store{}, errors.New("offline BALs: generate and use are mutually exclusive")
+	case generate:
+		w, err := NewWriter(dir)
+		return Store{Writer: w}, err
+	case use:
+		r, err := OpenReader(dir)
+		return Store{Reader: r}, err
+	}
+	return Store{}, nil
+}
+
+func (s Store) Close() error {
+	if s.Writer != nil {
+		return s.Writer.Close()
+	}
+	if s.Reader != nil {
+		return s.Reader.Close()
+	}
+	return nil
 }

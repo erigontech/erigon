@@ -72,6 +72,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
+	"github.com/erigontech/erigon/execution/bal/offlinebal"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
@@ -201,6 +202,7 @@ type Ethereum struct {
 	stopNode       func() error
 	bgComponentsEg errgroup.Group
 	readAheader    *exec.BlockReadAheader
+	offlineBAL     offlinebal.Store
 	kzgWarmupDone  chan struct{}
 }
 
@@ -883,19 +885,22 @@ func New(
 		}
 	}
 
+	if backend.offlineBAL, err = offlinebal.Open(config.Sync.GenerateOfflineBALs, config.Sync.UseOfflineBALs, config.Sync.OfflineBALDir); err != nil {
+		return nil, err
+	}
 	backend.syncStages = stageloop.NewDefaultStages(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient,
-		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
+		blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader, backend.offlineBAL)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger, stages.ModeApplyingBlocks)
 
-	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader)
+	pipelineStages := stageloop.NewPipelineStages(ctx, backend.chainDB, config, backend.sentryProvider.Client, backend.notifications, backend.downloaderClient, blockReader, blockRetire, tracer, afterSnapshotDownload, backend.readAheader, backend.offlineBAL)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger, stages.ModeApplyingBlocks)
 
 	validationNotifications := shards.NewNotifications(nil)
 	validationSync := stageloop.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryProvider.Client,
-		validationNotifications, blockReader, blockWriter, logger, backend.readAheader)
+		validationNotifications, blockReader, blockWriter, logger, backend.readAheader, backend.offlineBAL)
 	dispatcher := execmodule.NewDispatcher(chainConfig, backend.notifications.Events, backend.notifications.StateChangesConsumer, logger)
 	pipelineExecutor := execmodule.NewPipelineExecutor(backend.pipelineStagedSync, backend.chainDB, blockReader, chainConfig, backend.engine, validationSync, validationNotifications, dispatcher, logger)
 
@@ -1508,6 +1513,10 @@ func (s *Ethereum) Stop() error {
 
 	if s.execModule != nil {
 		s.execModule.Close()
+	}
+
+	if err := s.offlineBAL.Close(); err != nil {
+		s.logger.Error("offline BAL store close", "err", err)
 	}
 
 	if s.config.Downloader != nil {

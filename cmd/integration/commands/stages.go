@@ -732,38 +732,24 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	genesis := readGenesis(chain)
 	br, _ := blocksIO(db, logger)
 
-	if generateOfflineBAL && useOfflineBAL {
-		return errors.New("--generate-offline-bals and --use-offline-bals are mutually exclusive")
-	}
-
 	notifications := shards.NewNotifications(nil)
 	// Generating offline BALs requires the experimental-BAL exec path (pre-Amsterdam
 	// blocks otherwise skip BAL computation entirely).
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, chainConfig, engine, vmConfig, notifications,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ true,
-		dirs, br, genesis, syncCfg, generateOfflineBAL /*experimentalBAL*/, exec.NewBlockReadAheader())
+		dirs, br, genesis, syncCfg, syncCfg.GenerateOfflineBALs /*experimentalBAL*/, exec.NewBlockReadAheader())
 
-	balDir := offlineBALDir
+	balDir := syncCfg.OfflineBALDir
 	if balDir == "" {
 		balDir = filepath.Join(dirs.DataDir, "offline-bal")
 	}
-	if generateOfflineBAL {
-		w, err := offlinebal.NewWriter(balDir)
-		if err != nil {
-			return err
-		}
-		defer w.Close()
-		cfg = cfg.WithOfflineBAL(w, nil)
+	offlineBAL, err := offlinebal.Open(syncCfg.GenerateOfflineBALs, syncCfg.UseOfflineBALs, balDir)
+	if err != nil {
+		return err
 	}
-	if useOfflineBAL {
-		r, err := offlinebal.OpenReader(balDir)
-		if err != nil {
-			return err
-		}
-		defer r.Close()
-		cfg = cfg.WithOfflineBAL(nil, r)
-	}
+	defer offlineBAL.Close()
+	cfg = cfg.WithOfflineBAL(offlineBAL)
 
 	if unwind > 0 {
 		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
@@ -1361,7 +1347,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	}
 	notifications := shards.NewNotifications(nil)
 	blockRetire := freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
-	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
+	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader(), offlinebal.Store{})
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 	return blockRetire, blockRetire.Close, engine, vmConfig, sync
 }

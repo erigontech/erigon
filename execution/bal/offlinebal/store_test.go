@@ -158,3 +158,36 @@ func TestReopenWriterAppends(t *testing.T) {
 		t.Fatalf("Get(11) = %q,%v", got, ok)
 	}
 }
+
+func TestOpen(t *testing.T) {
+	dir := t.TempDir()
+
+	s, err := Open(false, false, dir)
+	if err != nil || s.Writer != nil || s.Reader != nil {
+		t.Fatalf("Open(off) = %+v,%v, want empty store", s, err)
+	}
+
+	if _, err := Open(true, true, dir); err == nil {
+		t.Fatal("Open(generate, use) succeeded, want error")
+	}
+
+	s, err = Open(true, false, dir)
+	if err != nil || s.Writer == nil || s.Reader != nil {
+		t.Fatalf("Open(generate) = %+v,%v, want writer only", s, err)
+	}
+	if err := s.Writer.Append(7, hashOf(7), []byte("bal-of-7")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err = Open(false, true, dir)
+	if err != nil || s.Writer != nil || s.Reader == nil {
+		t.Fatalf("Open(use) = %+v,%v, want reader only", s, err)
+	}
+	defer s.Close()
+	if got, ok := s.Reader.Get(7, hashOf(7)); !ok || string(got) != "bal-of-7" {
+		t.Fatalf("Get(7) = %q,%v, want bal-of-7", got, ok)
+	}
+}

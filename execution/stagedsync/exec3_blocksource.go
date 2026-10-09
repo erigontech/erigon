@@ -62,7 +62,7 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 		return nil, nil, fmt.Errorf("nil block %d", blockNum)
 	}
 
-	blockBAL, err := blockAccessList(s.blockTx, b, blockNum, s.cfg.offlineBALReader)
+	blockBAL, err := blockAccessList(s.blockTx, b, blockNum, s.cfg.offlineBAL.Reader)
 	if err != nil {
 		return nil, nil, err
 	}
