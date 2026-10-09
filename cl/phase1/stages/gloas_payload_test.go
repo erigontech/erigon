@@ -642,7 +642,6 @@ func (s *envelopeReadTestStore) MarkPayloadStatusAndGasLimitIfRetained(root, _ c
 	return status, true
 }
 
-
 func (s *envelopeReadTestStore) OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
 	return s.onErr
 }

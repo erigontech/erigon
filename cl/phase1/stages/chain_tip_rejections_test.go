@@ -18,10 +18,13 @@ package stages
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 )
 
 func TestChainTipRejectionsReportsFirstThenPerInterval(t *testing.T) {
@@ -51,4 +54,17 @@ func TestChainTipRejectionsReportsFirstThenPerInterval(t *testing.T) {
 func TestLogChainTipRejectionTolerantOfNilCfg(t *testing.T) {
 	logChainTipRejection(nil, "process block failed", 1, nil)
 	logChainTipRejection(&Cfg{}, "process block failed", 1, nil)
+}
+
+// A block that arrives early or ahead of its parent's envelope is imported moments later by
+// gossip, so it does not count as a rejection.
+func TestLogChainTipRejectionSkipsTransientErrors(t *testing.T) {
+	cfg := &Cfg{chainTipRejections: newChainTipRejections(time.Hour, nil)}
+	logChainTipRejection(cfg, "process block failed", 1, fmt.Errorf("on block: %w", forkchoice.ErrBlockTooEarly))
+	logChainTipRejection(cfg, "process block failed", 2, fmt.Errorf("on block: %w", forkchoice.ErrParentEnvelopePending))
+	require.Empty(t, cfg.chainTipRejections.reasons)
+
+	logChainTipRejection(cfg, "process block failed", 3, errors.New("invalid block"))
+	require.Len(t, cfg.chainTipRejections.reasons, 0, "the first real rejection is reported and flushed")
+	require.False(t, cfg.chainTipRejections.lastLog.IsZero())
 }

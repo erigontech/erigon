@@ -17,12 +17,14 @@
 package stages
 
 import (
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -107,10 +109,12 @@ func (r *chainTipRejections) flushLocked() []any {
 	return fields
 }
 
-// logChainTipRejection records a rejection and emits the periodic Warn summary when due.
+// logChainTipRejection records a rejection and emits the periodic Warn summary when due. A
+// block that is early or waits for its parent's envelope is retried by gossip and not counted.
 func logChainTipRejection(cfg *Cfg, reason string, slot uint64, err error) {
 	log.Debug("[chainTipSync] block not imported", "reason", reason, "slot", slot, "err", err)
-	if cfg == nil || cfg.chainTipRejections == nil {
+	if cfg == nil || cfg.chainTipRejections == nil ||
+		errors.Is(err, forkchoice.ErrBlockTooEarly) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
 		return
 	}
 	if fields := cfg.chainTipRejections.record(reason, slot, err); fields != nil {
