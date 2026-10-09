@@ -22,6 +22,7 @@ package misc
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 	"reflect"
 
 	"github.com/holiman/uint256"
@@ -80,6 +81,40 @@ func CalcExcessBlobGas(config *chain.Config, parent *types.Header, currentHeader
 // FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
 // as described in the EIP-4844 spec.
 func FakeExponential(factor, denom *uint256.Int, excessBlobGas uint64) (uint256.Int, error) {
+	if factor.IsUint64() && denom.IsUint64() {
+		if v, ok := fakeExponential64(factor.Uint64(), denom.Uint64(), excessBlobGas); ok {
+			return *uint256.NewInt(v), nil
+		}
+	}
+	return fakeExponential256(factor, denom, excessBlobGas)
+}
+
+// fakeExponential64 runs the same series in 64-bit words; ok is false as soon as a step
+// does not fit, and the caller redoes it in 256 bits, which also reports real overflows.
+func fakeExponential64(factor, denom, excessBlobGas uint64) (uint64, bool) {
+	hi, acc := bits.Mul64(factor, denom)
+	if hi != 0 || denom == 0 {
+		return 0, false
+	}
+	var output, carry uint64
+	for i := uint64(1); acc > 0; i++ {
+		if output, carry = bits.Add64(output, acc, 0); carry != 0 {
+			return 0, false
+		}
+		divHi, divisor := bits.Mul64(denom, i)
+		if divHi != 0 {
+			return 0, false
+		}
+		hi, lo := bits.Mul64(acc, excessBlobGas)
+		if hi >= divisor {
+			return 0, false
+		}
+		acc, _ = bits.Div64(hi, lo, divisor)
+	}
+	return output / denom, true
+}
+
+func fakeExponential256(factor, denom *uint256.Int, excessBlobGas uint64) (uint256.Int, error) {
 	numerator := uint256.NewInt(excessBlobGas)
 	output := uint256.NewInt(0)
 	numeratorAccum := new(uint256.Int)
