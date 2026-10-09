@@ -109,7 +109,7 @@ type ReadSet struct {
 	incarnation    map[accounts.Address]VersionedRead[uint64]
 	selfDestruct   map[accounts.Address]VersionedRead[bool]
 	createContract map[accounts.Address]VersionedRead[bool]
-	code           map[accounts.Address]VersionedRead[[]byte]
+	code           map[accounts.Address]VersionedRead[accounts.Code]
 	codeHash       map[accounts.Address]VersionedRead[accounts.CodeHash]
 	codeSize       map[accounts.Address]VersionedRead[int]
 	storage        map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
@@ -151,7 +151,7 @@ func (s *ReadSet) SetCreateContract(addr accounts.Address, tr VersionedRead[bool
 	readSetPut(&s.createContract, addr, tr)
 }
 
-func (s *ReadSet) SetCode(addr accounts.Address, tr VersionedRead[[]byte]) {
+func (s *ReadSet) SetCode(addr accounts.Address, tr VersionedRead[accounts.Code]) {
 	readSetPut(&s.code, addr, tr)
 }
 
@@ -205,7 +205,7 @@ func (s *ReadSet) GetCreateContract(addr accounts.Address) (VersionedRead[bool],
 	return tr, ok
 }
 
-func (s *ReadSet) GetCode(addr accounts.Address) (VersionedRead[[]byte], bool) {
+func (s *ReadSet) GetCode(addr accounts.Address) (VersionedRead[accounts.Code], bool) {
 	tr, ok := s.code[addr]
 	return tr, ok
 }
@@ -329,7 +329,7 @@ func (s *ReadSet) SetHeader(addr accounts.Address, path AccountPath, key account
 	case CreateContractPath:
 		s.SetCreateContract(addr, VersionedRead[bool]{ReadHeader: hdr})
 	case CodePath:
-		s.SetCode(addr, VersionedRead[[]byte]{ReadHeader: hdr})
+		s.SetCode(addr, VersionedRead[accounts.Code]{ReadHeader: hdr})
 	case CodeHashPath:
 		s.SetCodeHash(addr, VersionedRead[accounts.CodeHash]{ReadHeader: hdr})
 	case CodeSizePath:
@@ -1620,13 +1620,9 @@ func valueString(path AccountPath, value any) string {
 	case NoncePath, IncarnationPath:
 		return strconv.FormatUint(value.(uint64), 10)
 	case CodePath:
-		switch v := value.(type) {
-		case accounts.Code:
+		if v, ok := value.(accounts.Code); ok {
 			l := min(v.Len(), 40)
 			return hex.EncodeToString(v.Bytes[0:l])
-		case []byte:
-			l := min(len(v), 40)
-			return hex.EncodeToString(v[0:l])
 		}
 		return "<unknown-code>"
 	}
@@ -1843,8 +1839,8 @@ func (vr versionedStateReader) ReadAccountStorage(address accounts.Address, key 
 }
 
 func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
-	if r, ok := vr.reads.GetCode(address); ok && r.Val != nil {
-		return r.Val, nil
+	if r, ok := vr.reads.GetCode(address); ok && r.Val.Bytes != nil {
+		return r.Val.Bytes, nil
 	}
 
 	// Check version map for CodePath entries written by prior transactions
@@ -1870,8 +1866,8 @@ func (vr versionedStateReader) ReadAccountCode(address accounts.Address) ([]byte
 }
 
 func (vr versionedStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
-	if r, ok := vr.reads.GetCode(address); ok && r.Val != nil {
-		return len(r.Val), nil
+	if r, ok := vr.reads.GetCode(address); ok && r.Val.Bytes != nil {
+		return len(r.Val.Bytes), nil
 	}
 
 	if vr.versionMap != nil {
