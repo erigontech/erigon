@@ -66,7 +66,8 @@ func TestSendRawTransaction(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)
-	txsCh, id := ff.SubscribePendingTxs(1, "")
+	txsCh, id, err := ff.SubscribePendingTxs(1, "")
+	require.NoError(err)
 	defer ff.UnsubscribePendingTxs(id)
 	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
@@ -109,7 +110,8 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)
-	txsCh, id := ff.SubscribePendingTxs(1, "")
+	txsCh, id, err := ff.SubscribePendingTxs(1, "")
+	require.NoError(err)
 	defer ff.UnsubscribePendingTxs(id)
 	txHash, err := api.SendRawTransaction(ctx, buf.Bytes())
 	require.NoError(err)
@@ -327,4 +329,47 @@ func TestWaitForReceiptOfExhaustedTimeout(t *testing.T) {
 	_, err := api.waitForReceipt(t.Context(), common.Hash{1}, time.Nanosecond)
 	var timeoutErr *rpc.TxSyncTimeoutError
 	require.ErrorAs(err, &timeoutErr)
+}
+
+// Pins that a full subscription budget degrades the wait to polling instead of failing a transaction the
+// pool has already accepted.
+func TestWaitForReceiptWithoutSubscriptionBudget(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	require := require.New(t)
+
+	var txnHash common.Hash
+	chain, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(
+			types.NewTransaction(0, m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(err)
+		b.AddTx(txn)
+		txnHash = txn.Hash()
+	})
+	require.NoError(err)
+
+	config := rpchelper.FiltersConfig{RpcSubscriptionFiltersMaxSubscriptions: 1}
+	ff := rpchelper.New(ctx, config, nil, nil, nil, func() {}, m.Log, nil)
+	_, _, err = ff.SubscribeNewHeads(8, rpchelper.ProtocolWS) // takes the only slot
+	require.NoError(err)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, m.StateCache, m), m.DB, nil, nil)
+
+	type result struct {
+		receipt *ethutils.RPCReceipt
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		receipt, err := api.waitForReceipt(ctx, txnHash, 5*time.Second)
+		done <- result{receipt, err}
+	}()
+
+	time.Sleep(200 * time.Millisecond) // let the initial lookup miss
+	require.NoError(m.InsertChain(chain))
+
+	res := <-done
+	require.NoError(res.err)
+	require.NotNil(res.receipt)
+	require.Equal(txnHash, res.receipt.TransactionHash)
 }
