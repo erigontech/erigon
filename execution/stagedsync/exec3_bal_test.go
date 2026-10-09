@@ -1,11 +1,13 @@
 package stagedsync
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/bal/offlinebal"
 	"github.com/erigontech/erigon/execution/types"
@@ -16,6 +18,17 @@ type countingBlockAccessListGetter struct {
 	data  []byte
 	calls int
 }
+
+type warnCounter struct{ warns int }
+
+func (h *warnCounter) Log(r *log.Record) error {
+	if r.Lvl == log.LvlWarn {
+		h.warns++
+	}
+	return nil
+}
+
+func (h *warnCounter) Enabled(context.Context, log.Lvl) bool { return true }
 
 func (g *countingBlockAccessListGetter) GetOne(string, []byte) ([]byte, error) {
 	g.calls++
@@ -48,7 +61,7 @@ func TestBlockAccessList(t *testing.T) {
 			getter := &countingBlockAccessListGetter{data: test.storedBAL}
 			block := types.NewBlockFromStorage(common.Hash{}, &types.Header{BlockAccessListHash: test.hash}, nil, nil, nil, types.NewBlockAccessListSidecar(test.blockBAL))
 
-			got, err := blockAccessList(getter, block, 1, nil)
+			got, err := blockAccessList(getter, block, 1, nil, log.New())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,7 +105,11 @@ func TestBlockAccessListOfflineBAL(t *testing.T) {
 	block := types.NewBlockFromStorage(blockHash, &types.Header{}, nil, nil, nil, nil)
 	getter := &countingBlockAccessListGetter{}
 
-	got, err := blockAccessList(getter, block, 7, reader)
+	warns := &warnCounter{}
+	logger := log.New()
+	logger.SetHandler(warns)
+
+	got, err := blockAccessList(getter, block, 7, reader, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,8 +119,14 @@ func TestBlockAccessListOfflineBAL(t *testing.T) {
 	if getter.calls != 0 {
 		t.Fatalf("DB reads = %d, want 0", getter.calls)
 	}
+	if warns.warns != 0 {
+		t.Fatalf("warnings for a stored block = %d, want 0", warns.warns)
+	}
 
-	if got, err := blockAccessList(getter, block, 8, reader); err != nil || got != nil {
+	if got, err := blockAccessList(getter, block, 8, reader, logger); err != nil || got != nil {
 		t.Fatalf("block 8 = %v,%v, want nil,nil", got, err)
+	}
+	if warns.warns != 1 {
+		t.Fatalf("warnings for a block missing from the store = %d, want 1", warns.warns)
 	}
 }
