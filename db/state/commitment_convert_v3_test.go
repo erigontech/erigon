@@ -299,3 +299,20 @@ func testConvertCommitmentFilesV3CollapsedStorageBranch(t *testing.T, keysV2 boo
 	require.NoError(t, err)
 	require.Zero(t, c.Orphans)
 }
+
+func TestConvertCommitmentFiles_V3StateRecordInEveryFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	db, agg := testDbAggregatorWithFiles(t, &testAggConfig{stepSize: 10, disableCommitmentBranchTransform: true})
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+
+	kvs, err := filepath.Glob(filepath.Join(agg.Dirs().SnapDomain, "*-commitment.*.kv"))
+	require.NoError(t, err)
+	require.Greater(t, len(kvs), 1)
+	for _, p := range kvs {
+		keys, _ := readKVFile(t, agg, p)
+		has := slices.ContainsFunc(keys, func(k []byte) bool { return bytes.Equal(k, commitment.KeyCommitmentV3State) })
+		require.Truef(t, has, "%s has no v3 state record", filepath.Base(p))
+	}
+}

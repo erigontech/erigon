@@ -189,7 +189,7 @@ func convertCommitmentFileV3(
 				return fmt.Errorf("truncated at key %x", k)
 			}
 			n := read.Add(1)
-			if newer.contains(k) {
+			if !commitment.IsCommitmentStateKey(k) && newer.contains(k) {
 				reader.Skip()
 				batch.buf = batch.buf[:mark]
 				shadowed++
