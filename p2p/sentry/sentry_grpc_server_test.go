@@ -825,6 +825,31 @@ func TestRunPeer_NewBlockHashesFloodKicksPeer(t *testing.T) {
 	}
 }
 
+func TestRunPeer_BALRequestsForwarded(t *testing.T) {
+	peerInfo, peerID := newTestPeerInfoWithEth(t)
+	peerInfo.SetEthProtocol(direct.ETH71)
+	rw := NewRLPReadWriter()
+	t.Cleanup(rw.Close)
+	for i := range 6 {
+		b, err := rlp.EncodeToBytes(eth.GetBlockAccessListsPacket66{
+			RequestId: uint64(i), GetBlockAccessListsPacket: eth.GetBlockAccessListsPacket{{1}},
+		})
+		require.NoError(t, err)
+		rw.readCh <- p2p.Msg{Code: eth.GetBlockAccessListsMsg, Size: uint32(len(b)), Payload: bytes.NewReader(b)}
+	}
+	// A second Status ends the loop if the requests are all accepted.
+	rw.readCh <- p2p.Msg{Code: eth.StatusMsg, Payload: bytes.NewReader(nil)}
+	forwarded := 0
+	peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH71}, rw, peerInfo,
+		func(id sentryproto.MessageId, _ [64]byte, _ []byte) {
+			require.Equal(t, sentryproto.MessageId_GET_BLOCK_ACCESS_LISTS_71, id)
+			forwarded++
+		}, func(sentryproto.MessageId) bool { return true }, log.New())
+	require.NotNil(t, peerErr)
+	require.Equal(t, 6, forwarded)
+	require.Equal(t, p2p.PeerErrorStatusUnexpected, peerErr.Code)
+}
+
 // TestRunPeer_NormalNewBlockHashesForwarded verifies compliant NewBlockHashes
 // traffic is forwarded to subscribers and not penalized.
 func TestRunPeer_NormalNewBlockHashesForwarded(t *testing.T) {
