@@ -17,7 +17,6 @@
 package commitmenttest
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 )
@@ -104,18 +103,11 @@ func Keys(seed Seed, spec KeySpec) ([][]byte, error) {
 }
 
 type Shape struct {
-	Paths    [][]byte
 	Prefixes [][]byte
 }
 
 func Paths(spec Shape) ([][]byte, error) {
-	paths := make([][]byte, 0, len(spec.Paths)+len(spec.Prefixes))
-	for _, path := range spec.Paths {
-		if len(path) != 64 {
-			return nil, fmt.Errorf("path length %d", len(path))
-		}
-		paths = append(paths, bytes.Clone(path))
-	}
+	paths := make([][]byte, 0, len(spec.Prefixes))
 	for _, prefix := range spec.Prefixes {
 		if len(prefix) > 64 {
 			return nil, fmt.Errorf("prefix length %d", len(prefix))

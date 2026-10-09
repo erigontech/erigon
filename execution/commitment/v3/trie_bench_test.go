@@ -52,8 +52,6 @@ func benchEntries(shape string, n int) []parityUpdate {
 	case "accounts", "storage":
 	case "whale":
 		seed = 424242
-	case "whale_mixed":
-		seed = 99
 	default:
 		shape = "storage"
 	}

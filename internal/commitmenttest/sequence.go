@@ -116,26 +116,14 @@ func Generate(seed Seed, spec SequenceSpec) (Case, error) {
 				ops = append(ops, Op{Key: append(address(i), Key(KeySpec{Kind: "bench-slot", Size: 32}, i)...), Storage: Storage(StorageSpec{Number: i})})
 			}
 		}
-	case "whale", "whale_mixed":
-		accountNumber := 1
-		if spec.Kind == "whale_mixed" {
-			accountNumber = 7
-			for i := range 1000 {
-				addAccount(address(i), i)
-			}
-		}
+	case "whale":
 		addr := make([]byte, 20)
 		_, _ = rng.Read(addr)
-		addAccount(addr, accountNumber)
+		addAccount(addr, 1)
 		for i := range spec.Count {
 			slot := make([]byte, 32)
 			_, _ = rng.Read(slot)
 			ops = append(ops, Op{Key: append(bytes.Clone(addr), slot...), Storage: Storage(StorageSpec{Number: i})})
-		}
-		if spec.Kind == "whale_mixed" {
-			for i := range 1000 {
-				addAccount(address(500000+i), i)
-			}
 		}
 	default:
 		return c, fmt.Errorf("unknown sequence kind: %s", spec.Kind)
