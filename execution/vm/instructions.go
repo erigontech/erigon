@@ -22,11 +22,14 @@ package vm
 import (
 	"fmt"
 	"math"
+	"slices"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -732,7 +735,7 @@ func opPop(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 func opMload(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	v := scope.Stack.peek()
 	offset := v.Uint64()
-	v.SetBytes(scope.Memory.GetPtr(offset, 32))
+	v.SetBytes32(scope.Memory.GetPtr(offset, 32))
 	return pc, nil, nil
 }
 
@@ -761,7 +764,24 @@ func opMstore8(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 
 func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err error) {
 	loc := scope.Stack.peek()
-	*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+	if !scope.slots.on {
+		*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
+		return pc, nil, err
+	}
+	i := scope.slots.memo
+	if scope.slots.memoGen != scope.cacheGen {
+		i = scope.lookupSlot(evm)
+	}
+	if i >= 0 {
+		*loc = scope.slots.val[i]
+		return pc, nil, nil
+	}
+	ibs := evm.IntraBlockState()
+	word, key := *loc, scope.peekStorageKey(evm)
+	if *loc, err = ibs.GetState(scope.Contract.Address(), key); err == nil {
+		stamp, _ := ibs.ReadStamp()
+		scope.slots.put(stamp, word, key, *loc)
+	}
 	return pc, nil, err
 }
 
@@ -790,7 +810,11 @@ func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, errStopToken
 	}
 	pos := scope.Stack.pop()
-	if !scope.Contract.validJumpdest(pos) {
+	valid := scope.Contract.analysedJumpdest(pos)
+	if !valid {
+		valid = scope.Contract.validJumpdest(pos)
+	}
+	if !valid {
 		return pc, nil, ErrInvalidJump
 	}
 	// pc will be increased by the interpreter loop
@@ -807,13 +831,17 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, errStopToken
 	}
 	pos, cond := scope.Stack.pop2()
-	if !cond.IsZero() {
-		if !scope.Contract.validJumpdest(pos) {
-			return pc, nil, ErrInvalidJump
-		}
-		pc = pos.Uint64() - 1 // pc will be increased by the interpreter loop
+	if cond.IsZero() {
+		return pc, nil, nil
 	}
-	return pc, nil, nil
+	valid := scope.Contract.analysedJumpdest(pos)
+	if !valid {
+		valid = scope.Contract.validJumpdest(pos)
+	}
+	if !valid {
+		return pc, nil, ErrInvalidJump
+	}
+	return pos.Uint64() - 1, nil, nil // pc will be increased by the interpreter loop
 }
 
 func stJumpi(_ uint64, scope *CallContext) string {
@@ -933,7 +961,7 @@ func opCreate(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		v, o, sz     = scope.Stack.pop3()
 		value        = *v
 		offset, size = o.Uint64(), sz.Uint64()
-		input        = scope.Memory.GetCopy(offset, size)
+		input        = scope.Memory.GetPtr(offset, size)
 	)
 	return execCreate(pc, evm, scope, value, input, nil)
 }
@@ -944,7 +972,7 @@ func stCreate(_ uint64, scope *CallContext) string {
 		value  = stack.data[stack.top-1]
 		offset = stack.data[stack.top-2]
 		size   = stack.data[stack.top-3]
-		input  = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		input  = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 	)
 
 	return fmt.Sprintf("%s %d %x %d", CREATE.String(), &value, input, &scope.gas)
@@ -960,7 +988,7 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 	)
 	scope.create.initCode = nil
 	if !evm.chainRules.IsAmsterdam {
-		input = scope.Memory.GetCopy(offset, size)
+		input = scope.Memory.GetPtr(offset, size)
 	}
 	return execCreate(pc, evm, scope, endowment, input, &salt)
 }
@@ -1030,9 +1058,9 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var addr accounts.Address
 	if suberr == nil {
 		res, addr, returnGas, childGasUsed, suberr = evm.createPrepared(scope.Contract.Address(), codeAndHash, gas, value, address, typ, preparation)
-	} else if forwarded && evm.Config().Tracer != nil {
+	} else if tracer := evm.Config().Tracer; forwarded && (tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook() || dbg.TraceTransactionIO) {
 		evm.captureBegin(evm.depth, typ, scope.Contract.Address(), address, false, codeAndHash.code, gas, value, nil)
-		evm.captureEnd(evm.depth, returnGas, childGasUsed, nil, suberr)
+		evm.captureEnd(evm.depth, typ, scope.Contract.Address(), address, returnGas, childGasUsed, nil, suberr)
 	}
 	scope.Contract.selfBalanceCached = false
 	if forwarded {
@@ -1072,7 +1100,7 @@ func stCreate2(_ uint64, scope *CallContext) string {
 		endowment    = stack.data[stack.top-1]
 		offset, size = stack.data[stack.top-2], stack.data[stack.top-3]
 		salt         = stack.data[stack.top-4]
-		input        = scope.Memory.GetCopy(offset.Uint64(), size.Uint64())
+		input        = scope.Memory.GetPtr(offset.Uint64(), size.Uint64())
 	)
 
 	return fmt.Sprintf("%s %d %d %x %d", CREATE2.String(), &endowment, &salt, input, &scope.gas)
@@ -1267,15 +1295,37 @@ func stStaticCall(_ uint64, scope *CallContext) string {
 	return fmt.Sprintf("%s %x %x", STATICCALL.String(), toAddr, args)
 }
 
+func (evm *EVM) output(mem *Memory, offset, size uint64) []byte {
+	if buf := evm.outputBuffer(size); buf != nil && size != 0 {
+		*buf = append((*buf)[:0], mem.GetPtr(offset, size)...)
+		return slices.Clip(*buf)
+	}
+	return mem.GetCopy(offset, size)
+}
+
+// outputBuffer returns where the current frame's output goes, or nil for a fresh copy.
+// Tracers keep nested outputs, and a buffer that outgrows the cap is not kept.
+func (evm *EVM) outputBuffer(size uint64) *[]byte {
+	if evm.depth == 1 {
+		return evm.txOutput
+	}
+	if evm.depth >= len(evm.outputs) || size > uint64(64*datasize.KB) || evm.config.Tracer != nil {
+		return nil
+	}
+	if evm.outputs == nil {
+		evm.outputs = new([16][]byte)
+	}
+	return &evm.outputs[evm.depth]
+}
+
 func opReturn(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop2Uint64()
-	ret := scope.Memory.GetCopy(offset, size)
-	return pc, ret, errStopToken
+	return pc, evm.output(&scope.Memory, offset, size), errStopToken
 }
 
 func opRevert(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	offset, size := scope.Stack.pop2Uint64()
-	ret := scope.Memory.GetCopy(offset, size)
+	ret := evm.output(&scope.Memory, offset, size)
 	evm.returnData = ret
 	return pc, ret, ErrExecutionReverted
 }
@@ -1547,6 +1597,10 @@ func opPush2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+		if end := pc + 1 + size; end <= uint64(len(scope.Contract.Code)) {
+			scope.Stack.pushRef().SetBytes(scope.Contract.Code[pc+1 : end])
+			return pc + size, nil, nil
+		}
 		codeLen := len(scope.Contract.Code)
 
 		startMin := min(int(pc+1), codeLen)

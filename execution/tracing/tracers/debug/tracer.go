@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -173,7 +174,7 @@ func (t *Tracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, er
 	t.traces.Append(Trace{
 		OnExitV2: &OnExitTraceV2{
 			Depth:    depth,
-			Output:   output,
+			Output:   slices.Clone(output),
 			GasUsed:  gasUsed,
 			Error:    errStr,
 			Reverted: reverted,

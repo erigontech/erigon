@@ -17,7 +17,6 @@
 package handlers
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -52,11 +51,10 @@ func populateDatabaseWithBlocks(t *testing.T, store *tests.MockBlockReader, tx k
 		canonical := true
 
 		store.U[block.Block.Slot] = block
-		require.NoError(t, beacon_indicies.WriteBeaconBlock(context.Background(), tx, block))
+		require.NoError(t, beacon_indicies.WriteBeaconBlock(tx, block))
 
 		// Populate indiciesDB
 		require.NoError(t, beacon_indicies.WriteBeaconBlockHeaderAndIndicies(
-			context.Background(),
 			tx,
 			&cltypes.SignedBeaconBlockHeader{
 				Signature: block.Signature,

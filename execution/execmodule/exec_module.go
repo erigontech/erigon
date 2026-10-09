@@ -123,7 +123,9 @@ var (
 
 func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
 	var sd *execctx.SharedDomains
+	var stateCache *cache.StateCache
 	if c.execModule != nil {
+		stateCache = c.execModule.stateCache
 		c.execModule.lock.RLock()
 		sd = c.execModule.currentContext
 		c.execModule.lock.RUnlock()
@@ -138,7 +140,7 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 	if sd != nil {
 		view = &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
 	} else {
-		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
+		view = &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}
 	}
 	return view, nil
 }
@@ -199,6 +201,7 @@ type ExecModule struct {
 	// Block building
 	nextPayloadId       uint64
 	builderFunc         builder.BlockBuilderFunc
+	inclusionListFunc   builder.InclusionListFunc
 	builders            map[uint64]*builderEntry
 	buildersByTimestamp map[uint64]uint64
 
@@ -255,6 +258,7 @@ func NewExecModule(
 	currentBlockNumber uint64,
 	config *chain.Config,
 	builderFunc builder.BlockBuilderFunc,
+	inclusionListFunc builder.InclusionListFunc,
 	hook *stageloop.Hook,
 	accum *Accumulation,
 	stateCache *Cache,
@@ -282,6 +286,7 @@ func NewExecModule(
 		builders:                make(map[uint64]*builderEntry),
 		buildersByTimestamp:     make(map[uint64]uint64),
 		builderFunc:             builderFunc,
+		inclusionListFunc:       inclusionListFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
 		hook:                    hook,
@@ -387,12 +392,11 @@ func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, b
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
 }
 
-func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
+func (e *ExecModule) getRawBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.RawBody, error) {
 	if e.blockReader == nil {
-		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
-		return body, nil
+		return rawdb.ReadRawBody(tx, blockHash, blockNumber)
 	}
-	return e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+	return e.blockReader.BodyWithRawTransactions(ctx, tx, blockHash, blockNumber)
 }
 
 func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (common.Hash, error) {
@@ -505,8 +509,20 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		header             *types.Header
 		body               *types.Body
 		currentBlockNumber *uint64
+		payloadExecuted    bool
 		err                error
 	)
+	alreadyExecuted := func(tx kv.Getter) (bool, error) {
+		canonical, err := e.blockReader.IsCanonical(ctx, tx, blockHash, blockNumber)
+		if err != nil || !canonical {
+			return false, err
+		}
+		if blockNumber > rawdb.ReadForkchoiceFinalizedNum(tx) {
+			return false, nil
+		}
+		progress, err := stages.GetStageProgress(tx, stages.Execution)
+		return progress >= blockNumber, err
+	}
 	// Read header/body from the block overlay on currentContext if available
 	// (block data written by InsertBlocks hasn't been flushed to DB yet),
 	// falling back to a plain DB read otherwise.
@@ -528,6 +544,10 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 		e.readAheader.AddHeaderAndBody(ctx, e.db, overlay, header, body)
 		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
+		payloadExecuted, err = alreadyExecuted(overlay)
+		if err != nil {
+			return ValidationResult{}, err
+		}
 	} else {
 		if err := e.db.View(ctx, func(tx kv.Tx) error {
 			header, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
@@ -540,7 +560,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			}
 			e.readAheader.AddHeaderAndBody(ctx, e.db, tx, header, body)
 			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
-			return nil
+			payloadExecuted, err = alreadyExecuted(tx)
+			return err
 		}); err != nil {
 			return ValidationResult{}, err
 		}
@@ -555,6 +576,13 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusTooFarAway,
 			LatestValidHash:  common.Hash{},
+		}, nil
+	}
+	// Finality fixes canonical hashes even after their unwind history is pruned.
+	if payloadExecuted {
+		return ValidationResult{
+			ValidationStatus: ExecutionStatusSuccess,
+			LatestValidHash:  blockHash,
 		}, nil
 	}
 	// Use the overlay-as-rwTx pattern: the validation pipeline writes through
@@ -654,13 +682,14 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			if err := e.purgeBadChain(ctx, purgeTx, lvh, blockHash); err != nil {
 				return ValidationResult{}, err
 			}
+			if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
+				if err := e.purgeBadChain(ctx, e.currentContext.BlockOverlay(), lvh, blockHash); err != nil {
+					return ValidationResult{}, err
+				}
+			}
 		}
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", blockHash)
 		validationStatus = ExecutionStatusBadBlock
-		// Discard the block overlay — it may contain the bad block's data.
-		if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
-			e.currentContext.BlockOverlay().Close()
-		}
 		if err := purgeTx.Commit(); err != nil {
 			return ValidationResult{}, err
 		}
@@ -685,7 +714,7 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 		return err
 	}
 	if tip == nil {
-		// Block only existed in the overlay (not yet committed to DB) — nothing to purge.
+		// Block is not in tx — nothing to purge.
 		return nil
 	}
 
@@ -733,6 +762,19 @@ func isInitialSyncPublicationError(err error) bool {
 	return errors.As(err, &publicationErr)
 }
 
+// processFrozenBlocks binds the state cache after the startup sync: its commit
+// advances the state version without publishing to the cache.
+func (e *ExecModule) processFrozenBlocks(ctx context.Context, hook *stageloop.Hook) error {
+	err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart)
+	if e.stateCache != nil {
+		initErr := execctx.InitStateCacheVersion(ctx, e.db, e.stateCache)
+		if initErr != nil && !commonerrors.IsOnlyCanceled(initErr) {
+			e.logger.Warn("[exec] state cache serves RPC only after the first executed block", "err", initErr)
+		}
+	}
+	return err
+}
+
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !commonerrors.IsOnlyCanceled(err) {
@@ -742,7 +784,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}
 	defer e.semaphore.Release(1)
 
-	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
+	if err := e.processFrozenBlocks(ctx, hook); err != nil {
 		if !isRoutineInitialSyncStop(err) {
 			if isInitialSyncPublicationError(err) {
 				e.logger.Error("Could not publish initial sync updates", "err", err)

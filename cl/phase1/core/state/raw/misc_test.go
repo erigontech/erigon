@@ -18,6 +18,8 @@ package raw
 
 import (
 	_ "embed"
+	"fmt"
+	"math"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -130,4 +132,51 @@ func TestNewBeaconStateMainnetPtcWindow(t *testing.T) {
 	// Mainnet: (2 + 1) * 32 = 96 slots
 	ptcWindow := state.GetPtcWindow()
 	require.Equal(t, 96, ptcWindow.Length(), "ptc_window should have 96 slots under mainnet")
+}
+
+func TestValidatorAccessorsRejectInvalidIndex(t *testing.T) {
+	state := GetTestState()
+	accessors := map[string]func(int) error{
+		"ValidatorForValidatorIndex":                       func(i int) error { _, err := state.ValidatorForValidatorIndex(i); return err },
+		"ValidatorBalance":                                 func(i int) error { _, err := state.ValidatorBalance(i); return err },
+		"ValidatorPublicKey":                               func(i int) error { _, err := state.ValidatorPublicKey(i); return err },
+		"ValidatorExitEpoch":                               func(i int) error { _, err := state.ValidatorExitEpoch(i); return err },
+		"ValidatorWithdrawableEpoch":                       func(i int) error { _, err := state.ValidatorWithdrawableEpoch(i); return err },
+		"ValidatorEffectiveBalance":                        func(i int) error { _, err := state.ValidatorEffectiveBalance(i); return err },
+		"ValidatorMinCurrentInclusionDelayAttestation":     func(i int) error { _, err := state.ValidatorMinCurrentInclusionDelayAttestation(i); return err },
+		"ValidatorMinPreviousInclusionDelayAttestation":    func(i int) error { _, err := state.ValidatorMinPreviousInclusionDelayAttestation(i); return err },
+		"ValidatorIsCurrentMatchingSourceAttester":         func(i int) error { _, err := state.ValidatorIsCurrentMatchingSourceAttester(i); return err },
+		"ValidatorIsCurrentMatchingTargetAttester":         func(i int) error { _, err := state.ValidatorIsCurrentMatchingTargetAttester(i); return err },
+		"ValidatorIsCurrentMatchingHeadAttester":           func(i int) error { _, err := state.ValidatorIsCurrentMatchingHeadAttester(i); return err },
+		"ValidatorIsPreviousMatchingSourceAttester":        func(i int) error { _, err := state.ValidatorIsPreviousMatchingSourceAttester(i); return err },
+		"ValidatorIsPreviousMatchingTargetAttester":        func(i int) error { _, err := state.ValidatorIsPreviousMatchingTargetAttester(i); return err },
+		"ValidatorIsPreviousMatchingHeadAttester":          func(i int) error { _, err := state.ValidatorIsPreviousMatchingHeadAttester(i); return err },
+		"ValidatorInactivityScore":                         func(i int) error { _, err := state.ValidatorInactivityScore(i); return err },
+		"SetWithdrawableEpochForValidatorAtIndex":          func(i int) error { return state.SetWithdrawableEpochForValidatorAtIndex(i, 1) },
+		"SetValidatorSlashed":                              func(i int) error { return state.SetValidatorSlashed(i, true) },
+		"SetValidatorMinCurrentInclusionDelayAttestation":  func(i int) error { return state.SetValidatorMinCurrentInclusionDelayAttestation(i, nil) },
+		"SetValidatorIsCurrentMatchingSourceAttester":      func(i int) error { return state.SetValidatorIsCurrentMatchingSourceAttester(i, true) },
+		"SetValidatorIsCurrentMatchingTargetAttester":      func(i int) error { return state.SetValidatorIsCurrentMatchingTargetAttester(i, true) },
+		"SetValidatorIsCurrentMatchingHeadAttester":        func(i int) error { return state.SetValidatorIsCurrentMatchingHeadAttester(i, true) },
+		"SetValidatorMinPreviousInclusionDelayAttestation": func(i int) error { return state.SetValidatorMinPreviousInclusionDelayAttestation(i, nil) },
+		"SetValidatorIsPreviousMatchingSourceAttester":     func(i int) error { return state.SetValidatorIsPreviousMatchingSourceAttester(i, true) },
+		"SetValidatorIsPreviousMatchingTargetAttester":     func(i int) error { return state.SetValidatorIsPreviousMatchingTargetAttester(i, true) },
+		"SetValidatorIsPreviousMatchingHeadAttester":       func(i int) error { return state.SetValidatorIsPreviousMatchingHeadAttester(i, true) },
+		"SetValidatorBalance":                              func(i int) error { return state.SetValidatorBalance(i, 1) },
+		"SetValidatorInactivityScore":                      func(i int) error { return state.SetValidatorInactivityScore(i, 1) },
+		"SetWithdrawalCredentialForValidatorAtIndex":       func(i int) error { return state.SetWithdrawalCredentialForValidatorAtIndex(i, common.Hash{}) },
+		"SetExitEpochForValidatorAtIndex":                  func(i int) error { return state.SetExitEpochForValidatorAtIndex(i, 1) },
+		"SetEffectiveBalanceForValidatorAtIndex":           func(i int) error { return state.SetEffectiveBalanceForValidatorAtIndex(i, 1) },
+		"SetActivationEpochForValidatorAtIndex":            func(i int) error { return state.SetActivationEpochForValidatorAtIndex(i, 1) },
+		"SetActivationEligibilityEpochForValidatorAtIndex": func(i int) error { return state.SetActivationEligibilityEpochForValidatorAtIndex(i, 1) },
+	}
+	for _, index := range []int{-1, math.MinInt64, state.ValidatorLength()} {
+		for name, accessor := range accessors {
+			t.Run(fmt.Sprintf("%s(%d)", name, index), func(t *testing.T) {
+				var err error
+				require.NotPanics(t, func() { err = accessor(index) })
+				require.ErrorIs(t, err, ErrInvalidValidatorIndex)
+			})
+		}
+	}
 }

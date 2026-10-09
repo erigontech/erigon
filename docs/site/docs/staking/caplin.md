@@ -27,7 +27,7 @@ erigon \
   --caplin.discovery.addr=0.0.0.0 \
   --caplin.discovery.port=4000 \
   --caplin.discovery.tcpport=4001 \
-  --caplin.discovery.quicport=4001 \
+  --caplin.discovery.quicport=4002 \
   --beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse 
 ```
 

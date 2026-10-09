@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"cmp"
+	"container/heap"
 	"context"
 	"encoding/json"
 	"errors"
@@ -969,7 +970,7 @@ func (a *ApiHandler) produceBlock(
 		defer func() {
 			a.logger.Debug("Produced BeaconBody", "slot", targetSlot, "duration", time.Since(start))
 		}()
-		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, 3, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
+		beaconBody, localExecValue, localErr = a.produceBeaconBody(ctx, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 		// collect blobs
 		if beaconBody != nil {
 			if options := gloasBlockOptionsFromContext(ctx); options != nil && options.selfBuildPayload != nil {
@@ -1607,7 +1608,6 @@ func validateBuilderExecutionRequests(cfg *clparams.BeaconChainConfig, version c
 
 func (a *ApiHandler) produceBeaconBody(
 	ctx context.Context,
-	apiVersion int,
 	baseBlockSlot uint64,
 	baseBlockRoot common.Hash,
 	baseState *state.CachingBeaconState,
@@ -1951,26 +1951,20 @@ func (a *ApiHandler) produceBeaconBody(
 		)
 		beaconBody.Attestations = a.findBestAttestationsForBlockProduction(baseState)
 	})
-	// [New in Gloas:EIP7732] Aggregate PTC votes into PayloadAttestations.
+	wg.Wait()
+	if syncAggregateErr != nil {
+		return nil, nil, syncAggregateErr
+	}
+	// [New in Gloas:EIP7732] Aggregate PTC votes into PayloadAttestations after the payload
+	// wait: votes for the parent slot keep arriving until shortly after this slot starts, so
+	// a snapshot taken when production begins misses the late ones.
 	// The spec requires data.slot + 1 == state.slot, so we collect PTC votes
 	// for slot targetSlot-1 (= state.slot - 1), NOT baseBlockSlot. When slots
 	// are skipped the two differ and using baseBlockSlot produces invalid blocks.
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		wg.Go(func() {
-			start := time.Now()
-			defer func() {
-				paCount := 0
-				if beaconBody.PayloadAttestations != nil {
-					paCount = beaconBody.PayloadAttestations.Len()
-				}
-				log.Debug("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", paCount)
-			}()
-			beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
-		})
-	}
-	wg.Wait()
-	if syncAggregateErr != nil {
-		return nil, nil, syncAggregateErr
+		start := time.Now()
+		beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
+		log.Debug("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", beaconBody.PayloadAttestations.Len())
 	}
 	if executionErr != nil {
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
@@ -2156,7 +2150,7 @@ func (a *ApiHandler) setupHeaderReponseForBlockProduction(
 }
 
 func (a *ApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	resp, err := a.postBeaconBlocks(w, r, 1)
+	resp, err := a.postBeaconBlocks(r, 1)
 	if err != nil {
 		log.Warn("Failed to post beacon block in v1 path", "err", err)
 	}
@@ -2164,14 +2158,14 @@ func (a *ApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Reques
 }
 
 func (a *ApiHandler) PostEthV2BeaconBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	resp, err := a.postBeaconBlocks(w, r, 2)
+	resp, err := a.postBeaconBlocks(r, 2)
 	if err != nil {
 		log.Warn("Failed to post beacon block in v2 path", "err", err)
 	}
 	return resp, err
 }
 
-func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) postBeaconBlocks(r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	version, err := a.parseEthConsensusVersion(r.Header.Get("Eth-Consensus-Version"), apiVersion)
 	if err != nil {
@@ -2365,7 +2359,7 @@ func (a *ApiHandler) builderHandoffDeadline(slot uint64) time.Time {
 }
 
 func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	resp, err := a.publishBlindedBlocks(w, r, 1)
+	resp, err := a.publishBlindedBlocks(r, 1)
 	if err != nil {
 		log.Warn("Failed to publish blinded block in v1 path", "err", err)
 	}
@@ -2373,7 +2367,7 @@ func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Reque
 }
 
 func (a *ApiHandler) PostEthV2BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	resp, err := a.publishBlindedBlocks(w, r, 2)
+	resp, err := a.publishBlindedBlocks(r, 2)
 	if err != nil {
 		log.Warn("Failed to publish blinded block in v2 path", "err", err)
 	}
@@ -2418,7 +2412,7 @@ func validateBuilderPayload(blockPayload *cltypes.Eth1Block, executionRequests *
 	return nil
 }
 
-func (a *ApiHandler) publishBlindedBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) publishBlindedBlocks(r *http.Request, apiVersion int) (*beaconhttp.BeaconResponse, error) {
 	ethVersion := r.Header.Get("Eth-Consensus-Version")
 	version, err := a.parseEthConsensusVersion(ethVersion, apiVersion)
 	if err != nil {
@@ -2821,7 +2815,7 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 				if err != nil {
 					return err
 				}
-				commitmentInclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
+				commitmentInclusionProof := solid.NewHashVector(cltypes.KzgCommitmentsInclusionProofDepth)
 				for i, h := range inclusionProofRaw {
 					commitmentInclusionProof.Set(i, h)
 				}
@@ -3045,7 +3039,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		if err := beacon_indicies.WriteHighestFinalized(tx, a.forkchoiceStore.FinalizedSlot()); err != nil {
 			return err
 		}
-		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 	}); err != nil {
 		return err
 	}
@@ -3130,9 +3124,13 @@ func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, 
 	return headRoot, headSlot, headState, nil
 }
 
+// attestationCandidate holds, per attester, the participation flags the attestation would newly set.
 type attestationCandidate struct {
-	attestation *solid.Attestation
-	reward      uint64
+	attestation  *solid.Attestation
+	currentEpoch bool
+	attesters    []uint64
+	baseRewards  []uint64
+	newFlags     []uint8
 }
 
 func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) (map[common.Hash][]*solid.Attestation, error) {
@@ -3426,23 +3424,14 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 	attestationCandidates := []attestationCandidate{}
 	for _, atts := range hashToAtts {
 		for _, att := range atts {
-			expectedReward, err := computeAttestationReward(s, att)
+			candidate, err := newAttestationCandidate(s, att)
 			if err != nil {
 				log.Debug("[Block Production] Could not compute expected attestation reward", "reason", err)
 				continue
 			}
-			if expectedReward == 0 {
-				continue
-			}
-			attestationCandidates = append(attestationCandidates, attestationCandidate{
-				attestation: att,
-				reward:      expectedReward,
-			})
+			attestationCandidates = append(attestationCandidates, candidate)
 		}
 	}
-	slices.SortFunc(attestationCandidates, func(a, b attestationCandidate) int {
-		return cmp.Compare(b.reward, a.reward)
-	})
 
 	// decide the max attestation length based on the version
 	var maxAttLen int
@@ -3452,13 +3441,94 @@ func (a *ApiHandler) findBestAttestationsForBlockProduction(
 		maxAttLen = int(a.beaconChainCfg.MaxAttestationsElectra)
 	}
 	ret := solid.NewDynamicListSSZ[*solid.Attestation](maxAttLen)
-	for _, candidate := range attestationCandidates {
-		ret.Append(candidate.attestation)
-		if ret.Len() >= maxAttLen {
-			break
-		}
+	for _, att := range selectAttestations(attestationCandidates, s.BeaconConfig().ParticipationWeights(), proposerRewardDenominator(s.BeaconConfig()), maxAttLen) {
+		ret.Append(att)
 	}
 	return ret
+}
+
+type scoredCandidate struct {
+	candidate *attestationCandidate
+	numerator uint64
+	round     int
+}
+
+// candidateHeap orders by remaining reward, then by signature so ties do not depend on input order.
+type candidateHeap []scoredCandidate
+
+func (h candidateHeap) Len() int { return len(h) }
+func (h candidateHeap) Less(i, j int) bool {
+	if h[i].numerator != h[j].numerator {
+		return h[i].numerator > h[j].numerator
+	}
+	return bytes.Compare(h[i].candidate.attestation.Signature[:], h[j].candidate.attestation.Signature[:]) < 0
+}
+func (h candidateHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *candidateHeap) Push(x any)   { *h = append(*h, x.(scoredCandidate)) }
+func (h *candidateHeap) Pop() any {
+	old := *h
+	last := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return last
+}
+
+// selectAttestations greedily picks up to limit attestations by the proposer reward
+// of participation flags not already set by attestations picked before them.
+func selectAttestations(candidates []attestationCandidate, weights []uint64, denominator uint64, limit int) []*solid.Attestation {
+	var maxValidatorIndex uint64
+	for _, c := range candidates {
+		for _, v := range c.attesters {
+			maxValidatorIndex = max(maxValidatorIndex, v)
+		}
+	}
+	var covered [2][]uint8 // indexed by candidate.currentEpoch
+	covered[0], covered[1] = make([]uint8, maxValidatorIndex+1), make([]uint8, maxValidatorIndex+1)
+	epochCovered := func(c *attestationCandidate) []uint8 {
+		if c.currentEpoch {
+			return covered[1]
+		}
+		return covered[0]
+	}
+	remaining := func(c *attestationCandidate) uint64 {
+		flagsCovered := epochCovered(c)
+		var numerator uint64
+		for i, v := range c.attesters {
+			fresh := c.newFlags[i] &^ flagsCovered[v]
+			for flagIndex, weight := range weights {
+				if fresh&(1<<flagIndex) != 0 {
+					numerator += c.baseRewards[i] * weight
+				}
+			}
+		}
+		return numerator
+	}
+
+	// A candidate's remaining reward only shrinks as flags get covered, so a score from an
+	// earlier round is an upper bound and only the leader needs re-scoring (lazy greedy).
+	h := make(candidateHeap, 0, len(candidates))
+	for i := range candidates {
+		h = append(h, scoredCandidate{candidate: &candidates[i], numerator: remaining(&candidates[i])})
+	}
+	heap.Init(&h)
+	selected := make([]*solid.Attestation, 0, min(limit, len(candidates)))
+	for round := 0; len(selected) < limit && h.Len() > 0; {
+		if h[0].round != round {
+			h[0].numerator, h[0].round = remaining(h[0].candidate), round
+			heap.Fix(&h, 0)
+			continue
+		}
+		if h[0].numerator/denominator == 0 {
+			break
+		}
+		best := heap.Pop(&h).(scoredCandidate).candidate
+		flagsCovered := epochCovered(best)
+		for i, v := range best.attesters {
+			flagsCovered[v] |= best.newFlags[i]
+		}
+		selected = append(selected, best.attestation)
+		round++
+	}
+	return selected
 }
 
 func (a *ApiHandler) aggregatePayloadAttestations(
@@ -3500,14 +3570,13 @@ func (a *ApiHandler) aggregatePayloadAttestations(
 	return aggregated
 }
 
-// computeAttestationReward computes the reward for a specific attestation.
-func computeAttestationReward(
+// newAttestationCandidate records, for every attester, the participation flags the attestation would newly set.
+func newAttestationCandidate(
 	s abstract.BeaconState,
 	attestation *solid.Attestation,
-) (uint64, error) {
+) (attestationCandidate, error) {
 	baseRewardPerIncrement := s.BaseRewardPerIncrement()
 	data := attestation.Data
-	currentEpoch := state.Epoch(s)
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 	var parentSlot uint64
@@ -3522,38 +3591,41 @@ func computeAttestationReward(
 		false,
 	)
 	if err != nil {
-		return 0, err
+		return attestationCandidate{}, err
+	}
+	var attestationFlags uint8
+	for _, flagIndex := range participationFlagsIndicies {
+		attestationFlags |= 1 << flagIndex
 	}
 	attestingIndicies, err := s.GetAttestingIndicies(attestation, true)
 	if err != nil {
-		return 0, err
+		return attestationCandidate{}, err
 	}
-	var proposerRewardNumerator uint64
-
-	isCurrentEpoch := data.Target.Epoch == currentEpoch
-
+	candidate := attestationCandidate{
+		attestation:  attestation,
+		currentEpoch: data.Target.Epoch == state.Epoch(s),
+		attesters:    make([]uint64, 0, len(attestingIndicies)),
+		baseRewards:  make([]uint64, 0, len(attestingIndicies)),
+		newFlags:     make([]uint8, 0, len(attestingIndicies)),
+	}
 	for _, attesterIndex := range attestingIndicies {
+		newFlags := attestationFlags &^ uint8(s.EpochParticipationForValidatorIndex(candidate.currentEpoch, int(attesterIndex)))
+		if newFlags == 0 {
+			continue
+		}
 		val, err := s.ValidatorEffectiveBalance(int(attesterIndex))
 		if err != nil {
-			return 0, err
+			return attestationCandidate{}, err
 		}
-
-		baseReward := (val / beaconConfig.EffectiveBalanceIncrement) * baseRewardPerIncrement
-		for flagIndex, weight := range beaconConfig.ParticipationWeights() {
-			flagParticipation := s.EpochParticipationForValidatorIndex(
-				isCurrentEpoch,
-				int(attesterIndex),
-			)
-			if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) ||
-				flagParticipation.HasFlag(flagIndex) {
-				continue
-			}
-			proposerRewardNumerator += baseReward * weight
-		}
+		candidate.attesters = append(candidate.attesters, attesterIndex)
+		candidate.baseRewards = append(candidate.baseRewards, (val/beaconConfig.EffectiveBalanceIncrement)*baseRewardPerIncrement)
+		candidate.newFlags = append(candidate.newFlags, newFlags)
 	}
-	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
-	reward := proposerRewardNumerator / proposerRewardDenominator
-	return reward, nil
+	return candidate, nil
+}
+
+func proposerRewardDenominator(beaconConfig *clparams.BeaconChainConfig) uint64 {
+	return (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 }
 
 // cacheExecutionBody caches the execution payload body so the beacon API

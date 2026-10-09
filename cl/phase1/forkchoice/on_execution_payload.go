@@ -305,7 +305,6 @@ func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
 // For GLOAS, blob_kzg_commitments are in the committed bid, not directly in BeaconBlock.
 // Returns nil if data is available, ErrEIP7594ColumnDataNotAvailable if not available yet.
 func (f *ForkChoiceStore) checkDataAvailability(
-	ctx context.Context,
 	block *cltypes.SignedBeaconBlock,
 	beaconBlockRoot common.Hash,
 ) error {
@@ -910,7 +909,7 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx conte
 	if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState); err != nil {
 		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
 	}
-	if err := f.checkDataAvailability(ctx, block, root); err != nil {
+	if err := f.checkDataAvailability(block, root); err != nil {
 		return err
 	}
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
@@ -1074,7 +1073,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 
 	// Check blob data availability
 	if checkBlobData {
-		if err := f.checkDataAvailability(ctx, block, common.Hash(beaconBlockRoot)); err != nil {
+		if err := f.checkDataAvailability(block, common.Hash(beaconBlockRoot)); err != nil {
 			if missingMode == queueMissingEnvelope && errors.Is(err, ErrEIP7594ColumnDataNotAvailable) {
 				f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 			}

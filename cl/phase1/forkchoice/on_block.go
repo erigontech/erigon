@@ -294,40 +294,9 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 		}
 
-		// Check if EL has blobs
-		elHasBlobs := false
-		if f.engine != nil && f.peerDas != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
-			blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
-			if err != nil {
-				log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
-			}
-			elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
-			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
-		}
-
-		// Check if blob data is available (skip if blobs are in txpool)
-		if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
-			if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
-				available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
-				if err != nil {
-					return err
-				}
-				if !available {
-					if f.syncedDataManager.Syncing() {
-						return ErrEIP7594ColumnDataNotAvailable
-					} else {
-						if err := f.peerDas.SyncColumnDataLater(block); err != nil {
-							log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
-						}
-					}
-				}
-			} else if block.Version() >= clparams.DenebVersion {
-				if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
-					if errors.Is(err, ErrEIP4844DataNotAvailable) {
-						return err
-					}
-					return fmt.Errorf("OnBlock: data is not available for block %x: %w", common.Hash(blockRoot), err)
-				}
+		if checkDataAvaiability {
+			if err := f.checkPreGloasBlockDataAvailability(ctx, block, common.Hash(blockRoot), versionedHashes); err != nil {
+				return err
 			}
 		}
 
@@ -646,6 +615,48 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 		f.writePendingEnvelopeIndices(ctx, common.Hash(blockRoot), pendingEnvelope, appliedEnvelope, pendingEnvelopeLocal, envelopeApplied)
 	}
 
+	return nil
+}
+
+// checkPreGloasBlockDataAvailability checks that a pre-Gloas block's blob data is available before the block enters
+// fork choice.
+func (f *ForkChoiceStore) checkPreGloasBlockDataAvailability(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash, versionedHashes []common.Hash) error {
+	// Before Fulu, blobs in the EL's pool are enough. From Fulu the node must hold its custody columns: peers that see
+	// it treat the block as known ask it for them, and score it down for a partial answer.
+	elHasBlobs := false
+	if block.Version() < clparams.FuluVersion && f.engine != nil && f.peerDas != nil && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
+		blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
+		if err != nil {
+			log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
+		}
+		elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
+		log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
+	}
+
+	// Check if blob data is available (skip if blobs are in txpool)
+	if block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
+		if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
+			available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
+			if err != nil {
+				return err
+			}
+			if !available {
+				if !f.syncedDataManager.Syncing() {
+					if err := f.peerDas.SyncColumnDataLater(block); err != nil {
+						log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
+					}
+				}
+				return ErrEIP7594ColumnDataNotAvailable
+			}
+		} else if block.Version() >= clparams.DenebVersion {
+			if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
+				if errors.Is(err, ErrEIP4844DataNotAvailable) {
+					return err
+				}
+				return fmt.Errorf("OnBlock: data is not available for block %x: %w", common.Hash(blockRoot), err)
+			}
+		}
+	}
 	return nil
 }
 

@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -464,7 +463,7 @@ func setupDataColumnSidecarHandlerTestWithStore(t *testing.T, fuluForkEpoch uint
 	_, mainnetCfg := clparams.GetConfigsByNetwork(1)
 	initDataColumnSidecarTestConfig.Do(func() {
 		if clparams.GetBeaconConfig() == nil {
-			clparams.InitGlobalStaticConfig(mainnetCfg, &clparams.CaplinConfig{})
+			clparams.InitGlobalStaticConfig(mainnetCfg)
 		}
 	})
 	beaconCfg := *mainnetCfg
@@ -476,7 +475,6 @@ func setupDataColumnSidecarHandlerTestWithStore(t *testing.T, fuluForkEpoch uint
 		tests.NewMockBlockReader(),
 		indiciesDB,
 		server,
-		peers.NewPool(server),
 		&clparams.NetworkConfig{},
 		nil,
 		&beaconCfg,

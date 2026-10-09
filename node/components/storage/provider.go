@@ -40,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
@@ -128,16 +127,6 @@ func (p *Provider) Initialize(deps Deps) error {
 	}
 
 	p.BlockRetire = freezeblocks.NewBlockRetire(ctx, 1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
-
-	// Serialize retirement's chain-DB reads against Aggregator commit+prune.
-	// Without this, retirement's db.View RO txs can overlap a commit and pin
-	// MDBX freelist pages, preventing reclamation (observed as openTxs>1 at
-	// commit time).
-	if hasAgg, ok := p.ChainDB.(dbstate.HasAgg); ok {
-		if agg, ok := hasAgg.Agg().(*dbstate.Aggregator); ok && agg != nil {
-			p.BlockRetire.(*freezeblocks.BlockRetire).SetCommitGate(agg.CommitGate())
-		}
-	}
 
 	// Wire file-change callbacks so completed snapshots are seeded and
 	// deleted snapshots are removed from the swarm.

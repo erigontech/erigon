@@ -826,7 +826,10 @@ func (ot *OeTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.Md
 	if ot.r.VmTrace == nil || ot.lastVmOp == nil || errors.Is(err, vm.ErrExecutionReverted) {
 		return
 	}
-	if rejectedBeforeExecution(err) {
+	// Stack bounds are checked before the opcode hook, so an undefined opcode is the only fault
+	// here for an operation that did not execute.
+	var invalid *vm.ErrInvalidOpCode
+	if errors.As(err, &invalid) && invalid.Undefined() {
 		vmTrace := ot.r.VmTrace
 		if len(ot.vmOpStack) > 0 {
 			vmTrace = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
@@ -839,12 +842,11 @@ func (ot *OeTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.Md
 }
 
 // rejectedBeforeExecution reports whether err rejects an operation before it executes:
-// an undefined opcode (including the designated INVALID, 0xFE) or a stack underflow or overflow.
+// a stack underflow or overflow.
 func rejectedBeforeExecution(err error) bool {
 	var underflow *vm.ErrStackUnderflow
 	var overflow *vm.ErrStackOverflow
-	var invalid *vm.ErrInvalidOpCode
-	return errors.As(err, &underflow) || errors.As(err, &overflow) || errors.As(err, &invalid)
+	return errors.As(err, &underflow) || errors.As(err, &overflow)
 }
 
 func (ot *OeTracer) GetResult() (json.RawMessage, error) {
@@ -1109,7 +1111,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 
 	blockNumber, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
-		return nil, err
+		return nil, unknownBlockAsResourceNotFound(err)
 	}
 
 	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNumber)
@@ -1321,6 +1323,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
+	msg.SetSkipExecutionGasCap(true)
 	txn, err := args.ToTransaction(api.gasCap, baseFee)
 	if err != nil {
 		return nil, err
@@ -1398,6 +1401,36 @@ func applyStateOverrides(ibs *state.IntraBlockState, overrides *ethapi.StateOver
 		return nil, err
 	}
 	return precompiles, nil
+}
+
+// overriddenStorageReader serves the storage of accounts with a full `state`
+// override, so slots missing from the override read as zero instead of falling
+// through to the database.
+type overriddenStorageReader struct {
+	state.StateReader
+	storage map[accounts.Address]map[common.Hash]common.Hash
+}
+
+func withOverriddenStorage(r state.StateReader, overrides *ethapi.StateOverrides) state.StateReader {
+	storage := make(map[accounts.Address]map[common.Hash]common.Hash)
+	for addr, account := range *overrides {
+		if account.State != nil {
+			storage[addr] = *account.State
+		}
+	}
+	if len(storage) == 0 {
+		return r
+	}
+	return &overriddenStorageReader{StateReader: r, storage: storage}
+}
+
+func (r *overriddenStorageReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	slots, ok := r.storage[address]
+	if !ok {
+		return r.StateReader.ReadAccountStorage(address, key)
+	}
+	value, ok := slots[key.Value()]
+	return *new(uint256.Int).SetBytes32(value[:]), ok, nil
 }
 
 // CallMany implements trace_callMany.
@@ -1494,6 +1527,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		if err != nil {
 			return nil, fmt.Errorf("convert callParam to msg: %w", err)
 		}
+		msgs[i].SetSkipExecutionGasCap(true)
 
 		txns[i], err = args.ToTransaction(api.gasCap, baseFee)
 		if err != nil {
@@ -1510,6 +1544,11 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if err != nil {
 		return nil, err
 	}
+	var overrides *ethapi.StateOverrides
+	if traceConfig != nil && traceConfig.StateOverrides != nil {
+		overrides = traceConfig.StateOverrides
+		stateReader = withOverriddenStorage(stateReader, overrides)
+	}
 	stateCache := shards.NewStateCache(
 		32, 0, /* no limit */
 	) // this cache living only during current RPC call, but required to store state writes
@@ -1520,7 +1559,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig)
+		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig, overrides)
 	if err != nil {
 		return nil, callError(err)
 	}
@@ -1534,7 +1573,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
 	header *types.Header, requireCanonical, gasBailout, advanceTxNum, noBaseFee bool,
-	traceConfig *config.TraceConfig,
+	traceConfig *config.TraceConfig, overrides *ethapi.StateOverrides,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
@@ -1565,6 +1604,19 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	blockCtx := transactions.NewEVMBlockContext(engine, header, requireCanonical, dbtx, api._blockReader, chainConfig)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 		return nil, nil, err
+	}
+	var precompiles vm.PrecompiledContracts
+	if overrides != nil {
+		rules := blockCtx.Rules(chainConfig)
+		if precompiles, err = applyStateOverrides(ibs, overrides, rules); err != nil {
+			return nil, nil, err
+		}
+		// Committed to the cache because a stateDiff call resets ibs. The reset
+		// here drops the fake storage, whose committed value tracks every write.
+		if err := ibs.CommitOverrideDirtyAccounts(rules, cachedWriter, ibs.ExtractAndClearDirty()); err != nil {
+			return nil, nil, err
+		}
+		ibs.Reset()
 	}
 	var tracer *tracers.Tracer
 	var tracingHooks *tracing.Hooks
@@ -1638,6 +1690,9 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			args.zeroUnpricedBlobBaseFee(&txBlockCtx)
 		}
 		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(txBlockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
+		if precompiles != nil {
+			evm.SetPrecompiles(precompiles)
+		}
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
 		if tracer != nil && tracer.Hooks.OnTxStart != nil {
@@ -1849,6 +1904,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
 		return nil, err
+	}
+	if api.gasCap != 0 && txn.GetGasLimit() > api.gasCap {
+		return nil, clientLimitExceededError(fmt.Sprintf("transaction gas limit %d exceeds the RPC gas cap %d", txn.GetGasLimit(), api.gasCap))
 	}
 
 	dbtx, err := api.kv.BeginTemporalRo(ctx)
