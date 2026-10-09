@@ -113,6 +113,32 @@ func TestEIP8246_FinalizeTx_PreservedBalanceCarriesToLaterTxCreate(t *testing.T)
 	require.Equal(t, *uint256.NewInt(100), bal, "EIP-8246: preserved balance must carry into a later-tx CREATE2 on the assembler's shared IBS")
 }
 
+// On a versioned IBS that caches state objects, the balance written before an
+// EIP-8246 SELFDESTRUCT must survive FinalizeTx.
+func TestEIP8246_FinalizeTx_PreservesSameTxCredit(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x8246C1"))
+	rules := &chain.Rules{IsAmsterdam: true}
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(newAccountStateReader(), vm)
+	defer ibs.Close()
+	ibs.eip8246 = true
+
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(7), tracing.BalanceChangeTransfer))
+	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
+	require.NoError(t, err)
+	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true)
+	ibs.ResetVersionedIO()
+
+	ibs.SetTxContext(1, 1)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(7), bal)
+}
+
 // getVersionedAccount must not treat a later Balance/Nonce/CodeHash write
 // as a revival. An in-block-created account that self-destructs (preserving
 // balance) and is then funded by a later tx must still be reconstructed — with
