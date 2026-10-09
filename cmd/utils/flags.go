@@ -1948,7 +1948,11 @@ func setParallelCommitment(ctx *cli.Command) {
 		statecfg.ExperimentalParallelCommitment = ctx.Bool(ExperimentalParallelCommitmentFlag.Name)
 	}
 	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
-		statecfg.ExperimentalCommitmentV3 = ctx.Bool(ExperimentalCommitmentV3Flag.Name)
+		v3 := ctx.Bool(ExperimentalCommitmentV3Flag.Name)
+		if !v3 && statecfg.ExperimentalCommitmentV3 {
+			Fatalf("--%s=false conflicts with COMMITMENT_V3=true", ExperimentalCommitmentV3Flag.Name)
+		}
+		statecfg.ExperimentalCommitmentV3 = v3
 		if statecfg.ExperimentalCommitmentV3 {
 			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 		}
