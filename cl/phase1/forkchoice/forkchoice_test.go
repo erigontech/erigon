@@ -47,6 +47,39 @@ type embeddedPtcVoteForkGraph struct {
 	*getFinalizedExecutionHashForkGraph
 	postState *state.CachingBeaconState
 	envelopes map[common.Hash]bool
+	invalid   map[common.Hash]bool
+}
+
+func (g *embeddedPtcVoteForkGraph) MarkHeaderAsInvalid(root common.Hash) {
+	if g.invalid == nil {
+		g.invalid = map[common.Hash]bool{}
+	}
+	g.invalid[root] = true
+}
+
+func (g *embeddedPtcVoteForkGraph) IsBlockInvalid(root common.Hash) bool {
+	return g.invalid[root]
+}
+
+func TestHighestImportedDropsBlocksCutOffByAnInvalidPayload(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	require.Equal(t, cltypes.PayloadStatusFull, store.getParentPayloadStatus(child.Block))
+	require.Equal(t, child.Block.Slot, store.HighestImported())
+
+	// The child builds on the anchor's payload, so an INVALID verdict leaves no path to it.
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+	require.Equal(t, uint64(1), store.HighestImported())
+}
+
+func TestHighestImportedKeepsBlocksOnTheEmptyVariantOfAnInvalidPayload(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
+	require.True(t, ok)
+	anchorBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0xe1}
+	require.Equal(t, cltypes.PayloadStatusEmpty, store.getParentPayloadStatus(child.Block))
+
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+	require.Equal(t, child.Block.Slot, store.HighestImported())
 }
 
 func TestGloasAnchorStartsWithoutPtcVotes(t *testing.T) {
