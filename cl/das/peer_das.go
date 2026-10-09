@@ -2062,8 +2062,8 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 		now := time.Now()
 		serveRangeStart := d.beaconConfig.DataColumnSidecarServeRangeStartSlot(d.ethClock.GetCurrentSlot())
 		// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
-		blocks := []cltypes.ColumnSyncableSignedBlock{}
-		roots := []common.Hash{}
+		var due []cltypes.ColumnSyncableSignedBlock
+		var dueRoots []common.Hash
 		d.blocksToCheckSync.Range(func(key, value any) bool {
 			root := key.(common.Hash)
 			queued := value.(deferredColumnSync)
@@ -2073,9 +2073,27 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				forget(root)
 				return true
 			}
-			if !queue.ready(root, now) || !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), queued.queuedAt, d.deferredColumnSyncDelay()) {
-				return true
+			if queue.ready(root, now) && deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), queued.queuedAt, d.deferredColumnSyncDelay()) {
+				due = append(due, block)
+				dueRoots = append(dueRoots, root)
 			}
+			return true
+		})
+		if len(due) == 0 {
+			continue
+		}
+		// Without peers nothing can be downloaded, so the availability scan waits as well.
+		if d.rpc != nil {
+			peersCount, err := d.rpc.Peers()
+			if err != nil || peersCount == 0 {
+				log.Debug("[syncColumnDataWorker] no peers available, deferring column sync", "err", err)
+				continue
+			}
+		}
+		blocks := []cltypes.ColumnSyncableSignedBlock{}
+		roots := []common.Hash{}
+		for i, root := range dueRoots {
+			block := due[i]
 			available, err := d.IsDataAvailable(block.GetSlot(), root)
 			switch {
 			case err != nil:
@@ -2089,17 +2107,9 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 				blocks = append(blocks, block)
 				roots = append(roots, root)
 			}
-			return true
-		})
+		}
 		if len(blocks) == 0 {
 			continue
-		}
-		if d.rpc != nil {
-			peersCount, err := d.rpc.Peers()
-			if err != nil || peersCount == 0 {
-				log.Debug("[syncColumnDataWorker] no peers available, deferring column sync", "err", err)
-				continue
-			}
 		}
 		queue.start(roots)
 		log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))

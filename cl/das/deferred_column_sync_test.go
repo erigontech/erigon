@@ -18,17 +18,21 @@ package das
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 func TestDeferredColumnSyncDue(t *testing.T) {
@@ -184,4 +188,55 @@ func TestSyncColumnDataWorkerRetriesTheEnvelopeOfAnAvailableRoot(t *testing.T) {
 	}
 	_, queued := d.blocksToCheckSync.Load(common.Hash(root))
 	require.False(t, queued)
+}
+
+type peerlessSentinel struct {
+	sentinelproto.SentinelClient
+}
+
+func (peerlessSentinel) GetPeers(context.Context, *sentinelproto.EmptyMessage, ...grpc.CallOption) (*sentinelproto.PeerCount, error) {
+	return &sentinelproto.PeerCount{}, nil
+}
+
+// Without peers no download can run, so the worker does not scan the stored columns either.
+func TestSyncColumnDataWorkerSkipsTheAvailabilityScanWithoutPeers(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.SecondsPerSlot = 1
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = 1
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(uint64(2)).AnyTimes()
+	// The RPC's column-peer refresher stays idle before Fulu.
+	clock.EXPECT().GetCurrentEpoch().Return(uint64(0)).AnyTimes()
+	clock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.DenebVersion).AnyTimes()
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
+	var scans atomic.Int32
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(context.Context, uint64, common.Hash) ([]uint64, error) {
+			scans.Add(1)
+			return nil, nil
+		}).AnyTimes()
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	d := &peerdas{
+		beaconConfig:  &cfg,
+		ethClock:      clock,
+		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
+		columnStorage: columnStorage,
+		blobStorage:   blobStorage,
+		rpc:           rpc.NewBeaconRpcP2P(t.Context(), peerlessSentinel{}, &cfg, clock, nil),
+	}
+	require.NoError(t, d.SyncColumnDataLater(block))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go d.syncColumnDataWorker(ctx)
+	// The root is due after one slot; two more ticks pass without peers.
+	time.Sleep(3 * time.Second)
+	require.Zero(t, scans.Load())
 }
