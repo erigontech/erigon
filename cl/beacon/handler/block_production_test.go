@@ -4722,3 +4722,77 @@ func TestProcessProducedBlockConfiguredBidPreservesSelfBuildFallback(t *testing.
 		})
 	}
 }
+
+func TestProduceBeaconBodyIncludesPTCVotesReceivedDuringPayloadWait(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	// The state needs the Gloas fork epoch in its own config for GetPTC.
+	baseState := state.New(handler.beaconChainCfg)
+	require.NoError(t, postState.CopyInto(baseState))
+	handler.epbsPool = pool.NewEpbsPool()
+	handler.elClientVersion.Store(elClientVersionUnavailable)
+	handler.selfBuildPayloads = evictingSelfBuildPayloadCache{}
+	handler.blobBundles = evictingBlobBundleCache{}
+
+	parentHash := common.HexToHash("0x1111")
+	emptyRequests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
+	emptyRequestsRoot, err := emptyRequests.HashSSZ()
+	require.NoError(t, err)
+	baseState.SetLatestBlockHash(parentHash)
+	baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		BlockHash:             parentHash,
+		ParentBlockHash:       parentHash,
+		GasLimit:              30_000_000,
+		ExecutionRequestsRoot: common.Hash(emptyRequestsRoot),
+	})
+	targetSlot := baseState.Slot() + 1
+	root, err := baseState.BlockRoot()
+	require.NoError(t, err)
+	baseBlockRoot := common.Hash(root)
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadSlotVal = baseState.Slot()
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	forkchoiceStore.ExecutionPayloadGasLimitMap[parentHash] = 30_000_000
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now()).AnyTimes()
+	handler.ethClock = clock
+
+	ptc, err := baseState.GetPTC(targetSlot - 1)
+	require.NoError(t, err)
+	require.NotEmpty(t, ptc)
+	vote := newTestPayloadAttestationMessage(t, ptc[0], baseBlockRoot)
+	vote.Data.Slot = targetSlot - 1
+
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
+	payload.ParentHash = parentHash
+	payload.BlockHash = common.HexToHash("0x2222")
+	payload.PrevRandao = baseState.GetRandaoMixes(targetSlot / handler.beaconChainCfg.SlotsPerEpoch)
+	payload.GasLimit = 30_000_000
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), parentHash, gomock.Any(), clparams.GloasVersion).
+		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+			// The vote lands while the payload is being built.
+			time.Sleep(20 * time.Millisecond)
+			handler.epbsPool.PayloadAttestations.Add(pool.PayloadAttestationKey{Slot: vote.Data.Slot, ValidatorIndex: vote.ValidatorIndex}, vote)
+			return []byte{1}, nil
+		})
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil)
+	handler.engine = engine
+
+	body, _, err := handler.produceBeaconBody(t.Context(), 3, baseState.Slot(), baseBlockRoot, baseState,
+		targetSlot, common.Bytes96{0xc0}, common.Hash{})
+
+	require.NoError(t, err)
+	require.NotNil(t, body)
+	require.Equal(t, 1, body.PayloadAttestations.Len())
+	attestation := body.PayloadAttestations.Get(0)
+	require.Equal(t, baseBlockRoot, attestation.Data.BeaconBlockRoot)
+	require.Equal(t, targetSlot-1, attestation.Data.Slot)
+	require.Contains(t, attestation.AggregationBits.GetOnIndices(), 0)
+}
