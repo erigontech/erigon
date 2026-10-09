@@ -142,6 +142,7 @@ type HttpCfg struct {
 	LogDirPath      string
 
 	BatchLimit                  int  // Maximum number of requests in a batch
+	SubscriptionLimit           int  // Maximum number of concurrent subscriptions per connection; 0 = unlimited
 	ReturnDataLimit             int  // Maximum number of bytes returned from calls (like eth_call)
 	AllowUnprotectedTxs         bool // Whether to allow non EIP-155 protected transactions  txs over RPC
 	MaxGetProofRewindBlockCount int  // Max GetProof rewind block count

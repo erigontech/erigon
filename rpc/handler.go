@@ -80,6 +80,8 @@ type handler struct {
 
 	subLock             sync.Mutex
 	serverSubs          map[ID]*Subscription
+	subscriptionLimit   int // concurrent subscriptions a connection may hold; 0 = unlimited
+	pendingSubs         int // subscribe calls in flight, each holding one slot of subscriptionLimit
 	maxBatchConcurrency uint
 	traceRequests       bool
 
@@ -124,6 +126,7 @@ func newHandler(
 	idgen func() ID,
 	reg *serviceRegistry,
 	batchLimit int,
+	subscriptionLimit int,
 	allowList AllowList,
 	maxBatchConcurrency uint,
 	traceRequests bool,
@@ -148,6 +151,7 @@ func newHandler(
 		allowList:      allowList,
 		forbiddenList:  forbiddenList,
 
+		subscriptionLimit:   subscriptionLimit,
 		maxBatchConcurrency: maxBatchConcurrency,
 		traceRequests:       traceRequests,
 
@@ -462,10 +466,24 @@ func (h *handler) cancelAllRequests(err error, inflightReq *requestOp) {
 	}
 }
 
+// reserveSubscription takes a slot for a subscribe call about to run. addSubscriptions settles
+// the slot once the call has returned, whether or not it created a subscription.
+func (h *handler) reserveSubscription() bool {
+	h.subLock.Lock()
+	defer h.subLock.Unlock()
+
+	if h.subscriptionLimit > 0 && len(h.serverSubs)+h.pendingSubs >= h.subscriptionLimit {
+		return false
+	}
+	h.pendingSubs++
+	return true
+}
+
 func (h *handler) addSubscriptions(nn []*RemoteNotifier) {
 	h.subLock.Lock()
 	defer h.subLock.Unlock()
 
+	h.pendingSubs -= len(nn)
 	for _, n := range nn {
 		if sub := n.takeSubscription(); sub != nil {
 			h.serverSubs[sub.ID] = sub
@@ -689,6 +707,10 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 	}
 	args = args[1:]
 
+	if !h.reserveSubscription() {
+		reason := fmt.Sprintf("subscription limit %d per connection exceeded (can increase by --rpc.subscription.limit)", h.subscriptionLimit)
+		return msg.errorResponse(&CustomError{Code: ErrCodeServerOverloaded, Message: reason}), nil
+	}
 	// Install notifier in context so the subscription handler can find it.
 	n := &RemoteNotifier{h: h, namespace: namespace}
 	cp.notifiers = append(cp.notifiers, n)

@@ -437,3 +437,107 @@ func TestNotifySendDoesNotAllocateResult(t *testing.T) {
 		t.Fatalf("a send allocates %d bytes for a %d-byte result", perSend, len(result))
 	}
 }
+
+const subscribeRequest = `{"jsonrpc":"2.0","id":1,"method":"nftest_subscribe","params":["someSubscription",0,0]}`
+
+// limitedServerCall serves one connection on a server with the given subscription limit and
+// returns a function that sends a request over it and reads the reply.
+func limitedServerCall(t *testing.T, limit int) func(request string) *jsonrpcMessage {
+	t.Helper()
+	server := newTestServer(log.New())
+	server.SetSubscriptionLimit(limit)
+	clientConn, serverConn := net.Pipe()
+	go server.ServeCodec(NewCodec(serverConn), 0)
+	t.Cleanup(server.Stop)
+	if err := clientConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	in := json.NewDecoder(clientConn)
+	return func(request string) *jsonrpcMessage {
+		t.Helper()
+		if _, err := clientConn.Write([]byte(request)); err != nil {
+			t.Fatal(err)
+		}
+		var resp jsonrpcMessage
+		if err := in.Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		return &resp
+	}
+}
+
+// A connection holds at most the server's subscription limit; an unsubscribe frees a slot.
+func TestSubscriptionLimit(t *testing.T) {
+	t.Parallel()
+	call := limitedServerCall(t, 2)
+
+	first := call(subscribeRequest)
+	if first.Error != nil {
+		t.Fatalf("first subscription rejected: %v", first.Error)
+	}
+	if second := call(subscribeRequest); second.Error != nil {
+		t.Fatalf("second subscription rejected: %v", second.Error)
+	}
+	third := call(subscribeRequest)
+	if third.Error == nil {
+		t.Fatal("third subscription accepted above the limit of 2")
+	}
+	if third.Error.Code != ErrCodeServerOverloaded {
+		t.Fatalf("error code %d, want %d", third.Error.Code, ErrCodeServerOverloaded)
+	}
+
+	if resp := call(`{"jsonrpc":"2.0","id":2,"method":"nftest_unsubscribe","params":[` + string(first.Result) + `]}`); resp.Error != nil {
+		t.Fatalf("unsubscribe failed: %v", resp.Error)
+	}
+	if again := call(subscribeRequest); again.Error != nil {
+		t.Fatalf("subscription rejected after a slot was freed: %v", again.Error)
+	}
+}
+
+// A subscribe call that fails holds no slot afterwards.
+func TestSubscriptionLimitFreesSlotOfFailedSubscribe(t *testing.T) {
+	t.Parallel()
+	call := limitedServerCall(t, 1)
+
+	if failed := call(`{"jsonrpc":"2.0","id":1,"method":"nftest_subscribe","params":["failingSubscription"]}`); failed.Error == nil {
+		t.Fatal("failingSubscription did not fail")
+	}
+	if resp := call(subscribeRequest); resp.Error != nil {
+		t.Fatalf("subscription rejected after a failed subscribe call: %v", resp.Error)
+	}
+}
+
+// The subscribe calls of one batch count against the limit as the batch runs, before any of
+// them is registered, so a batch cannot take the connection past it.
+func TestSubscriptionLimitAppliesWithinBatch(t *testing.T) {
+	t.Parallel()
+	const limit = 3
+	server := newTestServer(log.New())
+	server.SetSubscriptionLimit(limit)
+	clientConn, serverConn := net.Pipe()
+	go server.ServeCodec(NewCodec(serverConn), 0)
+	defer server.Stop()
+	if err := clientConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	batch := make([]map[string]any, limit+2)
+	for i := range batch {
+		batch[i] = map[string]any{"jsonrpc": "2.0", "id": i, "method": "nftest_subscribe", "params": []any{"someSubscription", 0, 0}}
+	}
+	if err := json.NewEncoder(clientConn).Encode(batch); err != nil {
+		t.Fatal(err)
+	}
+	var answers []jsonrpcMessage
+	if err := json.NewDecoder(clientConn).Decode(&answers); err != nil {
+		t.Fatal(err)
+	}
+	if len(answers) != len(batch) {
+		t.Fatalf("%d answers for %d calls", len(answers), len(batch))
+	}
+	for i, answer := range answers {
+		if accepted := answer.Error == nil; accepted != (i < limit) {
+			t.Errorf("call %d accepted: %v, want %v with limit %d", i, accepted, i < limit, limit)
+		}
+	}
+}
