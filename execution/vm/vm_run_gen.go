@@ -464,16 +464,6 @@ func (evm *EVM) step(callContext *CallContext, op OpCode, pc uint64, debug, trac
 	callContext.cacheGen++
 	// Ops handled here skip the jump table but add no code to run.
 	if !false {
-		// A frame-cache hit is a warm SLOAD: it needs neither the gas func nor the op.
-		// A zero constant gas marks the EIP-2929 SLOAD; a miss leaves the memo to the gas func.
-		if op == SLOAD && callContext.slots.on && evm.jt[SLOAD].constantGas == 0 &&
-			callContext.Stack.len() > 0 && callContext.gas >= params.WarmStorageReadCostEIP2929 {
-			if i := callContext.lookupSlot(evm); i >= 0 {
-				callContext.gas -= params.WarmStorageReadCostEIP2929
-				*callContext.Stack.peek() = callContext.slots.val[i]
-				return pc, nil, nil
-			}
-		}
 		switch op {
 		case DUP9, DUP10, DUP11, DUP12, DUP13, DUP14, DUP15, DUP16:
 			if n, sLen := int(op-DUP1)+1, callContext.Stack.len(); sLen >= n && sLen < stackLimit && callContext.gas >= GasFastestStep {
@@ -486,80 +476,6 @@ func (evm *EVM) step(callContext *CallContext, op OpCode, pc uint64, debug, trac
 				callContext.gas -= GasFastestStep
 				callContext.Stack.swap(n)
 				return pc, nil, nil
-			}
-		case CALLDATALOAD:
-			if callContext.Stack.len() >= 1 && callContext.gas >= GasFastestStep {
-				callContext.gas -= GasFastestStep
-				x, input := callContext.Stack.peek(), callContext.input
-				switch off, overflow := x.Uint64WithOverflow(); {
-				case overflow || off >= uint64(len(input)):
-					x.Clear()
-				case uint64(len(input))-off >= 32:
-					x.SetBytes32(input[off:])
-				default:
-					var word [32]byte
-					copy(word[:], input[off:])
-					x.SetBytes32(word[:])
-				}
-				return pc, nil, nil
-			}
-		case CALLDATACOPY, CODECOPY, RETURNDATACOPY:
-			// An op the table does not have is opUndefined there, which pops nothing.
-			if evm.jt[op].numPop != 3 {
-				break
-			}
-			data := callContext.input
-			if op == CODECOPY {
-				data = callContext.Contract.Code
-			} else if op == RETURNDATACOPY {
-				data = evm.returnData
-			}
-			if callContext.Stack.len() >= 3 && callContext.Memory.allocated(callContext.Stack.peek(), callContext.Stack.back(2)) {
-				src, n := uint64(math.MaxUint64), callContext.Stack.back(2).Uint64()
-				if s := callContext.Stack.back(1); s.IsUint64() {
-					src = s.Uint64()
-				}
-				// Out of bounds RETURNDATACOPY fails: the generic path reports it.
-				inBounds := src <= uint64(len(data)) && uint64(len(data))-src >= n
-				if cost := GasFastestStep + params.CopyGas*ToWordSize(n); callContext.gas >= cost && (inBounds || op != RETURNDATACOPY) {
-					callContext.gas -= cost
-					dst, _, _ := callContext.Stack.pop3()
-					callContext.Memory.SetFromData(dst.Uint64(), n, src, data)
-					return pc, nil, nil
-				}
-			}
-		case MCOPY:
-			if callContext.Stack.len() >= 3 && evm.jt[MCOPY].numPop == 3 {
-				d, s, n := callContext.Stack.back3(0, 1, 2)
-				if callContext.Memory.allocated(d, n) && callContext.Memory.allocated(s, n) {
-					if cost := GasFastestStep + params.CopyGas*ToWordSize(n.Uint64()); callContext.gas >= cost {
-						callContext.gas -= cost
-						dst, src, length := callContext.Stack.pop3()
-						callContext.Memory.Copy(dst.Uint64(), src.Uint64(), length.Uint64())
-						return pc, nil, nil
-					}
-				}
-			}
-		case MSTORE8:
-			if callContext.Stack.len() >= 2 && callContext.gas >= GasFastestStep {
-				if off := callContext.Stack.peek(); off.IsUint64() && off.Uint64() < uint64(callContext.Memory.Len()) {
-					callContext.gas -= GasFastestStep
-					o, val := callContext.Stack.pop2Uint64()
-					callContext.Memory.store[o] = byte(val)
-					return pc, nil, nil
-				}
-			}
-		case KECCAK256:
-			if callContext.Stack.len() >= 2 {
-				if o, n := callContext.Stack.back2(0, 1); callContext.Memory.allocated(o, n) {
-					if cost := params.Keccak256Gas + params.Keccak256WordGas*ToWordSize(n.Uint64()); callContext.gas >= cost {
-						callContext.gas -= cost
-						offset, size := callContext.Stack.pop1Peek1()
-						hash := crypto.Keccak256Hash(callContext.Memory.GetPtr(offset.Uint64(), size.Uint64()))
-						size.SetBytes(hash[:])
-						return pc, nil, nil
-					}
-				}
 			}
 		}
 	}

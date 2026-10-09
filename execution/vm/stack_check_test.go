@@ -422,19 +422,3 @@ func TestRunDecodedShiftsBeforeConstantinople(t *testing.T) {
 		require.ErrorAs(t, err, &invalid, "%s", op)
 	}
 }
-
-// TestRunCopyFastPathsBeforeTheirForks pins that run's RETURNDATACOPY and MCOPY
-// fast paths are off on a Frontier chain, where the opcodes are undefined.
-func TestRunCopyFastPathsBeforeTheirForks(t *testing.T) {
-	t.Parallel()
-	for _, op := range []OpCode{RETURNDATACOPY, MCOPY} {
-		ibs := state.New(state.NewNoopReader())
-		defer ibs.Close()
-		evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, &chain.Config{ChainID: uint256.NewInt(1)}, Config{})
-		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
-		c.Code = []byte{byte(PUSH1), 0, byte(PUSH1), 0, byte(PUSH1), 0, byte(op)}
-		_, _, _, err := evm.run(*c, mdgas.MdGas{Execution: 100}, nil, false, false, false)
-		var invalid *ErrInvalidOpCode
-		require.ErrorAs(t, err, &invalid, op.String())
-	}
-}
