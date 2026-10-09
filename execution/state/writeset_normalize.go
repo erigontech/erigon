@@ -65,6 +65,7 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 	if ws == nil {
 		return filtered, nil
 	}
+	ws.assertNotArena("normalize")
 
 	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
 	// domainStorageKeys (committed before this batch), deduped — the complete
