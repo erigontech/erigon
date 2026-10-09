@@ -886,21 +886,20 @@ func (f *ForkChoiceStore) settlePendingEnvelopeError(blockRoot common.Hash, pend
 // enterPendingEnvelopeApply admits one apply per root at a time. Block import and every retry
 // path go through it, so no two of them reach NewPayload for one envelope. A later caller waits
 // for the holder and then runs itself, because the holder may have stopped without a verdict.
-func (f *ForkChoiceStore) enterPendingEnvelopeApply(ctx context.Context, blockRoot common.Hash) (waited, admitted bool) {
+func (f *ForkChoiceStore) enterPendingEnvelopeApply(ctx context.Context, blockRoot common.Hash) bool {
 	done := make(chan struct{})
 	for {
 		if ctx.Err() != nil {
-			return waited, false
+			return false
 		}
 		inFlight, busy := f.retryingEnvelopes.LoadOrStore(blockRoot, done)
 		if !busy {
-			return waited, true
+			return true
 		}
-		waited = true
 		select {
 		case <-inFlight.(chan struct{}):
 		case <-ctx.Done():
-			return waited, false
+			return false
 		}
 	}
 }
@@ -922,16 +921,15 @@ func (f *ForkChoiceStore) holdsPendingEnvelope(blockRoot common.Hash, pending *c
 }
 
 func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local, checkDataAvailability bool) (*cltypes.ExecutionPayloadEnvelope, bool) {
-	waited, admitted := f.enterPendingEnvelopeApply(ctx, blockRoot)
-	if !admitted {
+	if !f.enterPendingEnvelopeApply(ctx, blockRoot) {
 		if ctx.Err() != nil && pending != nil {
 			f.settlePendingEnvelopeError(blockRoot, pending, local, fmt.Errorf("%w: execution payload validation interrupted for beacon_block_root %v: %w", ErrIgnore, blockRoot, ctx.Err()))
 		}
 		return nil, false
 	}
 	defer f.leavePendingEnvelopeApply(blockRoot)
-	if waited && !f.holdsPendingEnvelope(blockRoot, pending, local) {
-		// The holder settled this envelope.
+	if !f.holdsPendingEnvelope(blockRoot, pending, local) {
+		// An earlier holder of the gate settled this copy.
 		return nil, false
 	}
 	if pending == nil {
