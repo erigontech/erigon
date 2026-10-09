@@ -153,6 +153,10 @@ type Downloader struct {
 	// failure (peer ENR carries no Content UCAN hash).
 	lastEmittedENRChainToml enr.ChainToml
 
+	// lastServableCount is the torrent count the last advertisement was
+	// built from; growth past it means there is more to say.
+	lastServableCount int
+
 	// Single-flight + pending-follow-up for PublishLocalChainToml so
 	// concurrent DownloadSnapshots completions coalesce onto one publish;
 	// a pending flag makes the running publish loop once more if another
@@ -1015,6 +1019,31 @@ func (d *Downloader) publishLocalChainTomlInner() error {
 // on a restart — the same files on disk produce identical output — so
 // gating the first V2 publish on V1 contentChanged alone would never
 // produce an initial chain.v2.<seq>.toml.
+// republishOnServableGrowth advertises the set once the torrent client can
+// serve more of it than last time.
+//
+// Only servable files are advertised, and a node that bootstrapped from
+// preverified holds a complete set for minutes before the client finishes
+// registering it — after the startup publishes have already run. Without this
+// the node stays silent until it builds a file of its own, which is a step
+// boundary away and unrelated to when it became able to serve.
+func (d *Downloader) republishOnServableGrowth() {
+	if d.torrentClient == nil {
+		return
+	}
+	servable := len(d.torrentClient.Torrents())
+	d.lock.Lock()
+	grew := servable > d.lastServableCount
+	d.lastServableCount = servable
+	d.lock.Unlock()
+	if !grew {
+		return
+	}
+	if err := d.PublishLocalChainToml(); err != nil {
+		d.logger.Debug("[chaintoml] publish after servable set grew", "servable", servable, "err", err)
+	}
+}
+
 func shouldEmitV2Generation(v1ContentChanged bool, lastV2InfoHash [20]byte) bool {
 	return v1ContentChanged || lastV2InfoHash == ([20]byte{})
 }

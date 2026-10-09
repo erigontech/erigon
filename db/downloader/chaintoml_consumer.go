@@ -650,6 +650,11 @@ func (d *Downloader) chainTomlDiscoveryLoop(ctx context.Context, networkName str
 	defer ticker.Stop()
 
 	for {
+		// The startup publishes above both run before the torrent client has
+		// registered a bootstrapped set, so the node would otherwise advertise
+		// nothing until it built a file of its own.
+		d.republishOnServableGrowth()
+
 		d.lock.RLock()
 		fn := d.nodeSourceFn
 		d.lock.RUnlock()
