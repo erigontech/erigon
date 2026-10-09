@@ -348,7 +348,7 @@ func newCommitmentCalculator(
 		done:                 make(chan struct{}),
 		processedWake:        make(chan struct{}),
 	}
-	if dbg.BALCommitmentWarmupReaders() > 0 && calc.branchPrefetch == nil {
+	if dbg.BALCommitmentWarmupReaders() > 0 && !doms.GetCommitmentContext().AcceptsFeed() {
 		cc.state.prefetch = func(plainKey []byte) {
 			if !cc.balBlock {
 				cc.prefetchKey(workCtx, plainKey)
