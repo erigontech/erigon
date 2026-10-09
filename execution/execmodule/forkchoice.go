@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -614,6 +615,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			// fresh SD built below (no reuse).
 			if err := sd.Commit(ctx, commitRwTx); err != nil {
 				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
+			}
+			if err := backup.CompactIfBloated(ctx, e.db, time.Minute, e.logger); err != nil {
+				return nil, nil, fmt.Errorf("updateForkChoice: compact chaindata: %w", err)
 			}
 			// Fresh RO snapshot + SharedDomains + block overlay on the committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
