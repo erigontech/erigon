@@ -239,7 +239,7 @@ func (b *BatchSignatureVerifier) handleIncorrectSignatures(aggregateVerification
 	for _, v := range aggregateVerificationData {
 		valid, err := blsVerifyMultipleSignatures(v.Signatures, v.SignRoots, v.Pks)
 		if err != nil {
-			log.Crit("[BatchVerifier] signature verification failed with the error: " + err.Error())
+			log.Debug("[BatchVerifier] signature verification failed", "err", err)
 			reported := v.report(err)
 			if peerToBan == nil && !reported {
 				peerToBan = v.SendingPeer
