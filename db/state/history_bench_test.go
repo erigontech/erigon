@@ -151,7 +151,9 @@ func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 // BenchmarkHistorySeekInFiles measures a point lookup against merged (page-compressed)
 // history files. The `warm` arm reuses one HistoryRoTx, so its paged readers keep the page
 // they decoded; `coldReaders` drops those readers before every seek; `coldTx` opens a fresh
-// HistoryRoTx per seek, which is what an rpcdaemon request does.
+// HistoryRoTx per seek, which is what an rpcdaemon request does. `noCache` reads without the
+// page cache and `missEveryPage` through a cache that admits no page, so their difference is
+// what a cache miss adds.
 func BenchmarkHistorySeekInFiles(b *testing.B) {
 	logger := log.New()
 	db, h, txs := filledHistory(b, true, logger)
@@ -203,6 +205,27 @@ func BenchmarkHistorySeekInFiles(b *testing.B) {
 			fresh := h.beginForTests()
 			seek(b, fresh, i)
 			fresh.Close()
+			i++
+		}
+	})
+
+	b.Run("noCache", func(b *testing.B) {
+		h.pages = nil
+		b.ReportAllocs()
+		i := 0
+		for b.Loop() {
+			seek(b, ht, i)
+			i++
+		}
+	})
+
+	b.Run("missEveryPage", func(b *testing.B) {
+		h.pages = newHistoryPageCache(1)
+		defer h.pages.Close()
+		b.ReportAllocs()
+		i := 0
+		for b.Loop() {
+			seek(b, ht, i)
 			i++
 		}
 	})
