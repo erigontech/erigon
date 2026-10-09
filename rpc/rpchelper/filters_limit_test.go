@@ -117,3 +117,20 @@ func TestSubscriptionLimitZeroDisablesTheLimit(t *testing.T) {
 		require.NoError(t, err)
 	}
 }
+
+// The gauge follows the budget, not the per-kind metrics: a rejected creation leaves it unchanged.
+func TestSubscriptionLimitGaugeTracksBudgetUse(t *testing.T) {
+	f := newLimitedFilters(t, 1)
+	base := subscriptionsBudgetUsedGauge.GetValue()
+
+	_, id, err := f.SubscribeNewHeads(8, ProtocolHTTP)
+	require.NoError(t, err)
+	require.Equal(t, base+1, subscriptionsBudgetUsedGauge.GetValue())
+
+	_, _, err = f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	require.ErrorIs(t, err, ErrTooManySubscriptions)
+	require.Equal(t, base+1, subscriptionsBudgetUsedGauge.GetValue())
+
+	require.True(t, f.UnsubscribeHeads(id))
+	require.Equal(t, base, subscriptionsBudgetUsedGauge.GetValue())
+}

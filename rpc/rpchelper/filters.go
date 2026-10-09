@@ -437,11 +437,13 @@ func (ff *Filters) reserveSubscription() error {
 		ff.liveSubscriptions.Add(-1)
 		return ErrTooManySubscriptions
 	}
+	subscriptionsBudgetUsedGauge.Inc()
 	return nil
 }
 
 func (ff *Filters) releaseSubscription() {
 	ff.liveSubscriptions.Add(-1)
+	subscriptionsBudgetUsedGauge.Dec()
 }
 
 func (ff *Filters) registerSubscription(id SubscriptionID, ft FilterType, tracker SubTracker) {
