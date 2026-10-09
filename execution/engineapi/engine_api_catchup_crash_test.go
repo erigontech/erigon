@@ -101,7 +101,7 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 			chain.sum = sums[len(sums)-1]
 			chain.state = readCrashRecoveryState(t, eat.ChainDB)
 			assertCrashRecoveryReference(t, chain)
-			require.Positive(t, chain.state.CommitmentTx/eat.ChainDB.StepSize(), "the batch limit needs at least one domain step")
+			require.GreaterOrEqual(t, chain.state.CommitmentTx, eat.ChainDB.StepSize(), "the batch limit needs at least one domain step")
 			checkpoints = append(checkpoints, chain.state)
 		}
 		if replacement {
