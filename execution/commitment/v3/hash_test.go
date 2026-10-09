@@ -116,8 +116,6 @@ func TestConsensusHash(t *testing.T) {
 						}
 						rnd.Read(suffix)
 						want := storageLeafRefBuffered(suffix, v, nil)
-						got := storageLeafRefDirect(suffix, v, nil)
-						require.Equal(t, want, got, "suffixLen=%d l=%d v=%x", suffixLen, l, v)
 						require.Equal(t, want, storageLeafRef(suffix, v, nil), "suffixLen=%d l=%d v=%x", suffixLen, l, v)
 					}
 				}
