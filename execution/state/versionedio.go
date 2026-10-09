@@ -671,15 +671,16 @@ func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Pu
 // keeps its slabs, so the cap is what one outlier may pin on it; past the cap
 // the shared pools serve the cells, as they did before the arena.
 const (
-	vwFirstSlab = 4
-	vwMaxCells  = 1024
+	vwFirstSlab   = 4
+	vwMaxCells    = 1024
+	vwMaxOverflow = 4 * vwMaxCells
 )
 
 // vwArena hands out VersionedWrite cells from append-only slabs and recycles
 // them on reset, which costs no atomics and no per-cell Put. A cell stays valid
 // only until that reset, so nothing outside the owning set may hold one. Every
 // cell it hands out is zero: a new slab starts zeroed, reset clears what it
-// rewinds, and the pools hand back cleared cells.
+// rewinds, and alloc clears a pooled cell.
 type vwArena[T any] struct {
 	slabs    [][]VersionedWrite[T]
 	slab     int
@@ -726,6 +727,9 @@ func (a *vwArena[T]) reset(release func(*VersionedWrite[T])) {
 	}
 	clear(a.overflow)
 	a.overflow = a.overflow[:0]
+	if cap(a.overflow) > vwMaxOverflow {
+		a.overflow = nil
+	}
 }
 
 func (ws *WriteSet) newVWAddress() *VersionedWrite[*accounts.Account] {
@@ -1594,7 +1598,8 @@ func (ws *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 }
 
 // ReleaseAndReset returns every *VersionedWrite[T] held by the set to its
-// typed sync.Pool, then returns the per-path maps to their map-pools.
+// typed sync.Pool, or rewinds the set's arena, then returns the per-path maps
+// to their map-pools.
 // Called at tx-finalize so both the VW values and the map buckets cycle
 // through pools rather than getting GC'd. The values must go back before
 // ReleaseMaps clears the maps that hold them.
@@ -1668,22 +1673,17 @@ func (ws *WriteSet) ReleaseMaps() {
 	ws.released = true
 }
 
-// Per-path typed delete methods.  Direct map access, no internal switch
-// (mirrors the Set/Get/update* shape).  Each Del* releases the displaced
-// *VersionedWrite[T] back to its pool — keeps the pool cycle closed so
-// allocs land on Get and end at Del/ReleaseAndReset.
-
 // delCell drops addr's cell, returning it to its pool unless the set recycles
 // its own cells.
-func delCell[T any](ws *WriteSet, m map[accounts.Address]*VersionedWrite[T], addr accounts.Address, release func(*VersionedWrite[T])) {
-	vw, ok := m[addr]
+func delCell[K comparable, T any](ws *WriteSet, m map[K]*VersionedWrite[T], k K, release func(*VersionedWrite[T])) {
+	vw, ok := m[k]
 	if !ok {
 		return
 	}
 	if ws.cells == nil {
 		release(vw)
 	}
-	delete(m, addr)
+	delete(m, k)
 }
 
 func (ws *WriteSet) DelBalance(addr accounts.Address) {
@@ -1719,12 +1719,7 @@ func (ws *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 	if inner == nil {
 		return
 	}
-	if vw, ok := inner[key]; ok {
-		if ws.cells == nil {
-			releaseVWStorage(vw)
-		}
-		delete(inner, key)
-	}
+	delCell(ws, inner, key, releaseVWStorage)
 	if len(inner) == 0 {
 		delete(ws.storage, addr)
 	}

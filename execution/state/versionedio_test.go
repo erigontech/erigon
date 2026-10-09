@@ -1767,27 +1767,13 @@ func TestArenaDeleteKeepsItsCellOutOfThePool(t *testing.T) {
 
 	var arena WriteSet
 	arena.UseArena()
-	nonce := arena.newVWNonce()
-	nonce.WriteHeader = WriteHeader{Address: addr, Path: NoncePath}
-	arena.SetNonce(addr, nonce)
-	arena.DelNonce(addr)
+	arena.SetNonce(addr, arena.newVWNonce())
+	arena.SetStorage(addr, key, arena.newVWStorage())
 
-	code := arena.newVWCode()
-	code.WriteHeader = WriteHeader{Address: addr, Path: CodePath}
-	arena.SetCode(addr, code)
-	arena.DelCode(addr)
-
-	storage := arena.newVWStorage()
-	storage.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key}
-	arena.SetStorage(addr, key, storage)
-	arena.DelStorage(addr, key)
-
-	var shared WriteSet
-	for range 8 {
-		require.NotSame(t, nonce, shared.newVWNonce(), "a deleted arena cell reached the shared pool")
-		require.NotSame(t, code, shared.newVWCode(), "a deleted arena cell reached the shared pool")
-		require.NotSame(t, storage, shared.newVWStorage(), "a deleted arena cell reached the shared pool")
-	}
+	delCell(&arena, arena.nonce, addr, func(*VersionedWrite[uint64]) { t.Fatal("a deleted arena cell reached the shared pool") })
+	delCell(&arena, arena.storage[addr], key, func(*VersionedWrite[uint256.Int]) { t.Fatal("a deleted arena cell reached the shared pool") })
+	require.Empty(t, arena.nonce)
+	require.Empty(t, arena.storage[addr])
 }
 
 // An arena-backed set must not hand its cells to another set: the arena reuses
@@ -1870,6 +1856,27 @@ func TestArenaOverflowCellsReturnToThePool(t *testing.T) {
 		a.alloc(getVWNonce)
 	}
 	require.Zero(t, *a.alloc(func() *VersionedWrite[uint64] { return dirty }))
+}
+
+// One outlier call must not pin its overflow index on a set that keeps its
+// slabs across resets.
+func TestArenaResetBoundsTheOverflowIndex(t *testing.T) {
+	var a vwArena[uint64]
+	for range vwMaxCells + vwMaxOverflow + 1 {
+		a.alloc(getVWNonce)
+	}
+	a.reset(releaseVWNonce)
+	require.LessOrEqual(t, cap(a.overflow), vwMaxOverflow)
+}
+
+// One outlier tx must not pin its overflow list on a set that keeps its slabs.
+func TestArenaBoundsTheOverflowListItKeeps(t *testing.T) {
+	var a vwArena[uint64]
+	for range vwMaxCells + vwMaxOverflow + 1 {
+		a.alloc(getVWNonce)
+	}
+	a.reset(releaseVWNonce)
+	require.LessOrEqual(t, cap(a.overflow), vwMaxOverflow)
 }
 
 func TestOnlyAReusedStateOwnsItsCells(t *testing.T) {
