@@ -619,8 +619,9 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 		block, isSegmentPresent := f.GetBlock(currentIteratorRoot)
 		if !isSegmentPresent {
 			// check if it is in the header
+			// The anchor state is dumped at startup whatever its slot.
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
-			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
+			if ok && (bHeader.Slot%dumpSlotFrequency == 0 || currentIteratorRoot == f.anchorRoot) {
 				copyReferencedState, err = f.readBeaconStateFromDisk(currentIteratorRoot)
 				if err != nil {
 					log.Trace("Could not retrieve state", "missing", currentIteratorRoot, "err", err)
