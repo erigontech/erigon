@@ -19,7 +19,9 @@ package accounts
 import (
 	"fmt"
 	"io"
+	"sync/atomic"
 	"testing"
+	"unique"
 
 	"github.com/holiman/uint256"
 
@@ -449,6 +451,41 @@ func BenchmarkIsEmptyRoot(b *testing.B) {
 	b.StopTimer()
 
 	fmt.Fprint(io.Discard, isEmpty)
+}
+
+// BenchmarkInternKeyParallel compares the memo with unique.Make under
+// concurrency: one key shared by all goroutines, and a 1024-key working set.
+func BenchmarkInternKeyParallel(b *testing.B) {
+	for _, n := range []int{1, 1024} {
+		keys := make([]common.Hash, n)
+		for i := range keys {
+			keys[i] = common.BigToHash(uint256.NewInt(uint64(i) + 1).ToBig())
+		}
+		for _, f := range []struct {
+			name   string
+			intern func(common.Hash) StorageKey
+		}{
+			{"memo", InternKey},
+			{"unique", func(k common.Hash) StorageKey { return StorageKey(unique.Make(k)) }},
+		} {
+			b.Run(fmt.Sprintf("keys=%d/%s", n, f.name), func(b *testing.B) {
+				live := make([]StorageKey, n)
+				for i, k := range keys {
+					f.intern(k) // the memo keeps a handle from the second sighting on
+					live[i] = f.intern(k)
+				}
+				var start atomic.Uint64
+				b.RunParallel(func(pb *testing.PB) {
+					i := int(start.Add(7919))
+					for pb.Next() {
+						f.intern(keys[i&(n-1)])
+						i++
+					}
+				})
+				_ = live
+			})
+		}
+	}
 }
 
 func BenchmarkAccountCopy(b *testing.B) {

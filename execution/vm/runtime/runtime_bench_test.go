@@ -424,3 +424,31 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 		}
 	})
 }
+
+// BenchmarkEVM_TSTORE_UniqueKeys writes 100k never-repeated transient keys per
+// call, the workload where interned keys that stay alive slow down unique.Make.
+func BenchmarkEVM_TSTORE_UniqueKeys(b *testing.B) {
+	// base := calldata[0:32]; for i := 0; i < 100000; i++ { tstore(base+i, 1) }
+	code := common.FromHex("5f355f5b60018282015d600101806201" + "86a011600357" + "00")
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(b, db)
+	require.NoError(b, rawdbv3.TxNums.Append(tx, 1, 1))
+	statedb := benchState(b, state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer statedb.Close()
+	sender := accounts.InternAddress(common.BytesToAddress([]byte("sender")))
+	receiver := accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
+	require.NoError(b, statedb.CreateAccount(sender, true))
+	require.NoError(b, statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified))
+	cfg := Config{Origin: sender, State: statedb, GasLimit: 30_000_000, Difficulty: uint256.NewInt(0x200000), BlockNumber: 1}
+	input := make([]byte, 32)
+	var call uint64
+	for b.Loop() {
+		call++
+		binary.BigEndian.PutUint64(input[16:], call)
+		snap := statedb.PushSnapshot()
+		_, _, err := Call(receiver, input, &cfg)
+		require.NoError(b, err)
+		statedb.RevertToSnapshot(snap, nil)
+		statedb.PopSnapshot(snap)
+	}
+}

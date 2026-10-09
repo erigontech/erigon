@@ -19,7 +19,9 @@ package accounts
 import (
 	"bytes"
 	"encoding/json"
+	"hash/maphash"
 	"testing"
+	"unique"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -405,6 +407,42 @@ func TestAccProofResultMarshalFastJSONTo(t *testing.T) {
 			require.Equal(t, string(want), string(s.Buffer()))
 		})
 	}
+}
+
+// Handles are compared by identity: maps and access lists key on the pointer
+// inside, so a value-equal handle from another allocation is a different slot.
+func TestInternKeyMatchesUniqueMake(t *testing.T) {
+	for range 3 {
+		for _, k := range []common.Hash{{1}, {2}, {}} {
+			require.True(t, StorageKey(unique.Make(k)) == InternKey(k), "key %x", k)
+		}
+	}
+	require.True(t, ZeroKey == InternKey(common.Hash{}))
+}
+
+// A 64-bit hash collision leaves a matching tag on another key's entry; only the
+// key compare keeps it from being served.
+func TestInternKeyComparesKeyBehindMatchingTag(t *testing.T) {
+	k, other := common.Hash{0xaa}, common.Hash{0xbb}
+	hash := maphash.Comparable(keyCacheSeed, k)
+	b := &keyCacheBuckets[hash&(uint64(len(keyCacheBuckets))-1)]
+	b.k, b.h = other, InternKey(other)
+	b.tag.Store((hash | keyBucketAlive) &^ keyBucketLocked)
+
+	require.True(t, StorageKey(unique.Make(k)) == InternKey(k))
+}
+
+// A retained handle keeps its unique entry, and the runtime specials behind it,
+// alive; a one-off key must not be pinned by the memo.
+func TestInternKeyRetainsOnlyRepeatedKeys(t *testing.T) {
+	k := common.Hash{0xcc, 0x01}
+	b := &keyCacheBuckets[maphash.Comparable(keyCacheSeed, k)&(uint64(len(keyCacheBuckets))-1)]
+
+	InternKey(k)
+	require.True(t, b.h == NilKey, "first sighting must not retain the handle")
+
+	InternKey(k)
+	require.True(t, b.h == StorageKey(unique.Make(k)), "a repeated key must be retained")
 }
 
 func TestAccountCopyCopiesAllFields(t *testing.T) {
