@@ -301,21 +301,15 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 			return newTx, newSD, nil
 		},
 		ShouldBreak: func(curTx kv.TemporalRwTx) (bool, error) {
-			if stopAt := pe.sync.Cfg().ExecStopAtBlock; stopAt > 0 {
-				p, err := stages.GetStageProgress(curTx, stages.Execution)
-				if err != nil {
-					return false, err
-				}
-				if p >= stopAt {
-					return true, nil
-				}
+			execProgress, err := stages.GetStageProgress(curTx, stages.Execution)
+			if err != nil {
+				return false, err
+			}
+			if stopAt := pe.sync.Cfg().ExecStopAtBlock; stopAt > 0 && execProgress >= stopAt {
+				return true, nil
 			}
 			if pe.blockReader.FrozenBlocks() > 0 {
-				p, err := stages.GetStageProgress(curTx, stages.Finish)
-				if err != nil {
-					return false, err
-				}
-				return p >= pe.blockReader.FrozenBlocks(), nil
+				return execProgress >= pe.blockReader.FrozenBlocks(), nil
 			}
 			sawZeroBlocksTimes++
 			return sawZeroBlocksTimes > 2, nil

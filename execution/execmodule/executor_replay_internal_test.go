@@ -123,8 +123,11 @@ type frozenTo100BlockReader struct{ pinTestBlockReader }
 
 func (frozenTo100BlockReader) FrozenBlocks() uint64 { return 100 }
 
-func TestProcessFrozenBlocksStopsAtExecStopAtBlock(t *testing.T) {
-	const stopAt = 5
+// runOneBlockPerCycle runs ProcessFrozenBlocks over a pipeline whose single
+// stage advances Execution by one block per cycle, and returns the committed
+// Execution progress.
+func runOneBlockPerCycle(t *testing.T, syncCfg ethconfig.Sync, finishProgress uint64) uint64 {
+	t.Helper()
 	logger := log.New()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
@@ -133,7 +136,7 @@ func TestProcessFrozenBlocksStopsAtExecStopAtBlock(t *testing.T) {
 				return err
 			}
 		}
-		return nil
+		return stages.SaveStageProgress(tx, stages.Finish, finishProgress)
 	}))
 	runsInPipeline := false
 	stage := &stagedsync.Stage{
@@ -147,10 +150,8 @@ func TestProcessFrozenBlocksStopsAtExecStopAtBlock(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			for _, id := range []stages.SyncStage{stages.Execution, stages.Finish} {
-				if err := stages.SaveStageProgress(tx, id, progress+1); err != nil {
-					return err
-				}
+			if err := stages.SaveStageProgress(tx, stages.Execution, progress+1); err != nil {
+				return err
 			}
 			return &stagedsync.ErrLoopExhausted{}
 		},
@@ -160,7 +161,7 @@ func TestProcessFrozenBlocksStopsAtExecStopAtBlock(t *testing.T) {
 	}
 	chainConfig := &chain.Config{ChainName: "test"}
 	notifications := shards.NewNotifications(nil)
-	sync := stagedsync.New(ethconfig.Sync{ExecStopAtBlock: stopAt}, []*stagedsync.Stage{stage}, nil, nil, logger, stages.ModeApplyingBlocks)
+	sync := stagedsync.New(syncCfg, []*stagedsync.Stage{stage}, nil, nil, logger, stages.ModeApplyingBlocks)
 	dispatcher := NewDispatcher(chainConfig, notifications.Events, notifications.StateChangesConsumer, logger)
 	pe := NewPipelineExecutor(sync, db, frozenTo100BlockReader{}, chainConfig, nil, nil, nil, dispatcher, logger)
 	hook := stageloop.NewHook(t.Context(), notifications, sync, chainConfig, logger, dispatcher, nil, nil, nil, frozenTo100BlockReader{})
@@ -172,5 +173,15 @@ func TestProcessFrozenBlocksStopsAtExecStopAtBlock(t *testing.T) {
 		progress, err = stages.GetStageProgress(tx, stages.Execution)
 		return err
 	}))
-	require.EqualValues(t, stopAt, progress)
+	return progress
+}
+
+func TestProcessFrozenBlocksStopsAtExecStopAtBlock(t *testing.T) {
+	require.EqualValues(t, 5, runOneBlockPerCycle(t, ethconfig.Sync{ExecStopAtBlock: 5}, 0))
+}
+
+// After an exec reset, Finish keeps its old value, which can already be at or
+// above the frozen blocks.
+func TestProcessFrozenBlocksRunsToFrozenBlocksWithStaleFinish(t *testing.T) {
+	require.EqualValues(t, 100, runOneBlockPerCycle(t, ethconfig.Sync{}, 200))
 }
