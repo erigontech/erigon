@@ -831,7 +831,7 @@ func runZeroValueSystemCall(t *testing.T, aura bool) (*state.IntraBlockState, ty
 		systemAddr,
 		target,
 		nil,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false),
 		uint256.Int{}, // value = 0
 		false,
 	)
