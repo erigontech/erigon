@@ -22,6 +22,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -81,4 +83,28 @@ func TestDeferredColumnSyncDueCountsTheGraceFromEnqueue(t *testing.T) {
 	require.True(t, deferredColumnSyncDue(queuedAt.Add(delay), slotStart, queuedAt, delay))
 	// A root queued before its slot started waits from the slot start.
 	require.True(t, deferredColumnSyncDue(slotStart.Add(delay), slotStart, slotStart.Add(-time.Second), delay))
+}
+
+func TestSyncColumnDataLaterRecordsTheEnqueueTime(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = 100
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	d := &peerdas{beaconConfig: &cfg}
+
+	before := time.Now()
+	require.NoError(t, d.SyncColumnDataLater(block))
+	after := time.Now()
+	queued, ok := d.blocksToCheckSync.Load(common.Hash(root))
+	require.True(t, ok)
+	require.WithinRange(t, queued.(deferredColumnSync).queuedAt, before, after)
+
+	// Queuing the root again keeps the first enqueue time.
+	require.NoError(t, d.SyncColumnDataLater(block))
+	requeued, _ := d.blocksToCheckSync.Load(common.Hash(root))
+	require.Equal(t, queued.(deferredColumnSync).queuedAt, requeued.(deferredColumnSync).queuedAt)
 }
