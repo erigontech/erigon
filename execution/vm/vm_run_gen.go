@@ -142,7 +142,13 @@ run:
 						break run
 					}
 					pos := callContext.Stack.pop()
-					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
+					valid := callContext.Contract.analysedJumpdest(pos)
+					if !valid {
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						valid = callContext.Contract.validJumpdest(pos)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+					}
+					if !valid {
 						res, err = nil, ErrInvalidJump
 						break run
 					}
@@ -165,7 +171,13 @@ run:
 						pc++
 						continue run
 					}
-					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
+					valid := callContext.Contract.analysedJumpdest(pos)
+					if !valid {
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						valid = callContext.Contract.validJumpdest(pos)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+					}
+					if !valid {
 						res, err = nil, ErrInvalidJump
 						break run
 					}
@@ -187,7 +199,9 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastStep {
 					gasLeft -= GasFastStep
 					x, y := callContext.Stack.pop1Peek1()
+					callContext.gas, callContext.savedPC = gasLeft, pc
 					y.Mul(x, y)
+					gasLeft, pc = callContext.gas, callContext.savedPC
 					pc++
 					continue run
 				}
@@ -195,7 +209,9 @@ run:
 				if sLen >= 2 && gasLeft >= GasFastStep {
 					gasLeft -= GasFastStep
 					x, y := callContext.Stack.pop1Peek1()
+					callContext.gas, callContext.savedPC = gasLeft, pc
 					y.Div(x, y)
+					gasLeft, pc = callContext.gas, callContext.savedPC
 					pc++
 					continue run
 				}
@@ -276,7 +292,9 @@ run:
 				if sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep
 					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(callContext.Contract.Code)) {
+						callContext.gas, callContext.savedPC = gasLeft, pc
 						callContext.Stack.pushRef().SetBytes(callContext.Contract.Code[pc+1 : end])
+						gasLeft, pc = callContext.gas, callContext.savedPC
 						pc = pc + uint64(op-PUSH0)
 						pc++
 						continue run
@@ -287,10 +305,14 @@ run:
 					endMin := min(startMin+int(op-PUSH0), codeLen)
 
 					integer := callContext.Stack.pushRef()
+					callContext.gas, callContext.savedPC = gasLeft, pc
 					integer.SetBytes(callContext.Contract.Code[startMin:endMin])
+					gasLeft, pc = callContext.gas, callContext.savedPC
 
 					if missing := int(op-PUSH0) - (endMin - startMin); missing > 0 {
+						callContext.gas, callContext.savedPC = gasLeft, pc
 						integer.ILsh(uint(8 * missing))
+						gasLeft, pc = callContext.gas, callContext.savedPC
 					}
 
 					pc += uint64(op - PUSH0)
@@ -385,6 +407,7 @@ run:
 			callContext.gas = gasLeft
 		}
 		callContext.cacheGen++
+		callContext.savedPC = pc
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		operation := &jt[op]
@@ -450,7 +473,7 @@ run:
 		}
 
 		// execute the operation
-		pc, res, err = operation.execute(pc, evm, callContext)
+		pc, res, err = operation.execute(callContext.savedPC, evm, callContext)
 		gasLeft = callContext.gas
 		if err != nil {
 			break run
