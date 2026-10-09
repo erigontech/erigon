@@ -17,13 +17,17 @@
 package das
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -107,4 +111,77 @@ func TestSyncColumnDataLaterRecordsTheEnqueueTime(t *testing.T) {
 	require.NoError(t, d.SyncColumnDataLater(block))
 	requeued, _ := d.blocksToCheckSync.Load(common.Hash(root))
 	require.Equal(t, queued.(deferredColumnSync).queuedAt, requeued.(deferredColumnSync).queuedAt)
+}
+
+func TestSyncColumnDataWorkerDropsRootsThatLeftTheServeRange(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = 1
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	currentSlot := (cfg.MinEpochsForDataColumnSidecarsRequests + 1) * cfg.SlotsPerEpoch
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	// A root still in range would wait for its grace and stay queued.
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(time.Hour)).AnyTimes()
+	d := &peerdas{beaconConfig: &cfg, ethClock: clock, caplinConfig: &clparams.CaplinConfig{}}
+	require.NoError(t, d.SyncColumnDataLater(block))
+
+	go d.syncColumnDataWorker(t.Context())
+	require.Eventually(t, func() bool {
+		_, queued := d.blocksToCheckSync.Load(common.Hash(root))
+		return !queued
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+type retryRecordingForkChoice struct {
+	BlockGetter
+	retried chan common.Hash
+}
+
+func (f retryRecordingForkChoice) RetryPendingExecutionPayloadEnvelope(_ context.Context, root common.Hash) {
+	f.retried <- root
+}
+
+func TestSyncColumnDataWorkerRetriesTheEnvelopeOfAnAvailableRoot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.FuluForkEpoch = 0
+	cfg.SecondsPerSlot = 1 // an archive node gives gossip one slot from enqueue
+	cfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = 1
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(uint64(2)).AnyTimes()
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
+	columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), uint64(1), common.Hash(root)).Return(nil, nil).AnyTimes()
+	blobStorage := blob_storage_mock_services.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), common.Hash(root)).Return(uint32(1), nil).AnyTimes()
+	forkChoice := retryRecordingForkChoice{retried: make(chan common.Hash, 1)}
+	d := &peerdas{
+		beaconConfig:  &cfg,
+		ethClock:      clock,
+		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
+		columnStorage: columnStorage,
+		blobStorage:   blobStorage,
+		forkChoice:    forkChoice,
+	}
+	require.NoError(t, d.SyncColumnDataLater(block))
+
+	go d.syncColumnDataWorker(t.Context())
+	select {
+	case retried := <-forkChoice.retried:
+		require.Equal(t, common.Hash(root), retried)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the envelope of an available root was not retried")
+	}
+	_, queued := d.blocksToCheckSync.Load(common.Hash(root))
+	require.False(t, queued)
 }

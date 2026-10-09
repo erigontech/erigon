@@ -62,6 +62,15 @@ func TestNodeSyncingReportsHeadBehindImportedBlocks(t *testing.T) {
 	require.Equal(t, true, resp.Data.(map[string]any)["is_syncing"])
 }
 
+func TestNodeHealthReportsHeadBehindImportedBlocks(t *testing.T) {
+	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.HighestImportedVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
+
+	recorder := httptest.NewRecorder()
+	handler.GetEthV1NodeHealth(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/node/health?syncing_status=206", http.NoBody))
+	require.Equal(t, http.StatusPartialContent, recorder.Code)
+}
+
 func TestBlockProductionRefusesHeadBehindImportedBlocks(t *testing.T) {
 	_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.HighestImportedVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1

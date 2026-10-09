@@ -48,6 +48,16 @@ func gloasPendingParentDeadline(now, slotStart time.Time, slotDuration time.Dura
 	return deadline
 }
 
+// resolveProductionPayloadSource resolves the payload source for a proposal and, when the EMPTY
+// head has a parked envelope, waits for its decision.
+func (a *ApiHandler) resolveProductionPayloadSource(ctx context.Context, baseState *state.CachingBeaconState, baseBlockRoot common.Hash, targetSlot uint64, stateVersion clparams.StateVersion) (executionPayloadSource, error) {
+	source, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+	if err != nil || !source.envelopeParked {
+		return source, err
+	}
+	return a.awaitPendingParentPayload(ctx, baseState, baseBlockRoot, targetSlot, stateVersion, source), nil
+}
+
 // awaitGloasPayloadSource re-resolves the payload source until it is decided or the deadline
 // passes. The retry runs on its own goroutine, one at a time, so a retry that blocks cannot
 // hold the wait past the cutoff; the source is resolved on the caller's goroutine, which the
