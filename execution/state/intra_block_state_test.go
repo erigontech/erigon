@@ -1242,6 +1242,7 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	require.NoError(t, ibs.SetState(addr, key, *uint256.NewInt(9)))
 	ibs.AddLog(&types.Log{Address: addr.Value()})
 	ibs.AddAddressToAccessList(addr)
+	vm.FlushVersionedWrites(ibs.VersionedWrites(), true) // an address with no cell is not memoized
 	ibs.readSelfDestructMemo(addr)
 	require.NotEmpty(t, ibs.sdProbe)
 	require.NotNil(t, ibs.versionedReads.address)
@@ -1297,6 +1298,20 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 		require.NoError(t, err)
 	}
 	require.False(t, absent.poolable(), "absent-account memos count toward the bound")
+}
+
+// sync.Pool may drop any one entry, so the reuse shows over a few round trips.
+func TestReleasePooledHandsTheStateToNewPooled(t *testing.T) {
+	for range 100 {
+		ibs := NewPooled(NewNoopReader())
+		ReleasePooled(ibs)
+		got := NewPooled(NewNoopReader())
+		ReleasePooled(got)
+		if got == ibs {
+			return
+		}
+	}
+	t.Fatal("NewPooled never got the released state back")
 }
 
 func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
@@ -1362,4 +1377,27 @@ func TestResetForPoolDropsAStateWithTooManySlots(t *testing.T) {
 		ibs.versionedReads.SetStorage(addr, accounts.InternKey(common.BigToHash(big.NewInt(int64(i)))), VersionedRead[uint256.Int]{})
 	}
 	require.False(t, ibs.poolable(), "one address with that many slots must not be pooled")
+}
+
+// On a versioned IBS that caches state objects, an account touched and then
+// credited in the same tx is not empty and must survive FinalizeTx.
+func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x161A"))
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(newAccountStateReader(), vm)
+	defer ibs.Close()
+
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true)
+	ibs.ResetVersionedIO()
+
+	ibs.SetTxContext(1, 1)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(5), bal)
 }

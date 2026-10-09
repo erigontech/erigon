@@ -1949,6 +1949,9 @@ func (a *ApiHandler) produceBeaconBody(
 		beaconBody.Attestations = a.findBestAttestationsForBlockProduction(baseState)
 	})
 	wg.Wait()
+	if syncAggregateErr != nil {
+		return nil, nil, syncAggregateErr
+	}
 	// [New in Gloas:EIP7732] Aggregate PTC votes into PayloadAttestations after the payload
 	// wait: votes for the parent slot keep arriving until shortly after this slot starts, so
 	// a snapshot taken when production begins misses the late ones.
@@ -1958,14 +1961,7 @@ func (a *ApiHandler) produceBeaconBody(
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		start := time.Now()
 		beaconBody.PayloadAttestations = a.aggregatePayloadAttestations(baseState, targetSlot-1, baseBlockRoot)
-		paCount := 0
-		if beaconBody.PayloadAttestations != nil {
-			paCount = beaconBody.PayloadAttestations.Len()
-		}
-		log.Debug("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", paCount)
-	}
-	if syncAggregateErr != nil {
-		return nil, nil, syncAggregateErr
+		log.Debug("BlockProduction: aggregatePayloadAttestations took", "duration", time.Since(start), "selectedPAs", beaconBody.PayloadAttestations.Len())
 	}
 	if executionErr != nil {
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
@@ -2816,7 +2812,7 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 				if err != nil {
 					return err
 				}
-				commitmentInclusionProof := solid.NewHashVector(cltypes.CommitmentBranchSize)
+				commitmentInclusionProof := solid.NewHashVector(cltypes.KzgCommitmentsInclusionProofDepth)
 				for i, h := range inclusionProofRaw {
 					commitmentInclusionProof.Set(i, h)
 				}

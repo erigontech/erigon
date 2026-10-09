@@ -334,6 +334,10 @@ func (s *getPayloadStubModule) AssembleBlock(_ context.Context, _ *builder.Param
 	panic("not implemented")
 }
 
+func (s *getPayloadStubModule) InclusionList(_ context.Context) (types.Transactions, error) {
+	panic("not implemented")
+}
+
 func (s *getPayloadStubModule) CurrentHeader(_ context.Context) (*types.Header, error) {
 	panic("not implemented")
 }

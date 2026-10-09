@@ -201,6 +201,7 @@ type ExecModule struct {
 	// Block building
 	nextPayloadId       uint64
 	builderFunc         builder.BlockBuilderFunc
+	inclusionListFunc   builder.InclusionListFunc
 	builders            map[uint64]*builderEntry
 	buildersByTimestamp map[uint64]uint64
 
@@ -257,6 +258,7 @@ func NewExecModule(
 	currentBlockNumber uint64,
 	config *chain.Config,
 	builderFunc builder.BlockBuilderFunc,
+	inclusionListFunc builder.InclusionListFunc,
 	hook *stageloop.Hook,
 	accum *Accumulation,
 	stateCache *Cache,
@@ -284,6 +286,7 @@ func NewExecModule(
 		builders:                make(map[uint64]*builderEntry),
 		buildersByTimestamp:     make(map[uint64]uint64),
 		builderFunc:             builderFunc,
+		inclusionListFunc:       inclusionListFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
 		hook:                    hook,
@@ -759,6 +762,19 @@ func isInitialSyncPublicationError(err error) bool {
 	return errors.As(err, &publicationErr)
 }
 
+// processFrozenBlocks binds the state cache after the startup sync: its commit
+// advances the state version without publishing to the cache.
+func (e *ExecModule) processFrozenBlocks(ctx context.Context, hook *stageloop.Hook) error {
+	err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart)
+	if e.stateCache != nil {
+		initErr := execctx.InitStateCacheVersion(ctx, e.db, e.stateCache)
+		if initErr != nil && !commonerrors.IsOnlyCanceled(initErr) {
+			e.logger.Warn("[exec] state cache serves RPC only after the first executed block", "err", initErr)
+		}
+	}
+	return err
+}
+
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		if !commonerrors.IsOnlyCanceled(err) {
@@ -768,7 +784,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}
 	defer e.semaphore.Release(1)
 
-	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
+	if err := e.processFrozenBlocks(ctx, hook); err != nil {
 		if !isRoutineInitialSyncStop(err) {
 			if isInitialSyncPublicationError(err) {
 				e.logger.Error("Could not publish initial sync updates", "err", err)

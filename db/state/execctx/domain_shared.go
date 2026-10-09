@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -970,6 +971,25 @@ func GuardAggregatorForCache(db any, sc *cache.StateCache) {
 		panic(fmt.Sprintf("assert: aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
 	}
 	f.ForbidVisibilityLowering()
+}
+
+// InitStateCacheVersion lets read-only txs use the state cache before the first
+// executed block binds it. Only a node with executed blocks qualifies: snapshot
+// downloads add state without advancing the state version, and Execution
+// progress is raised only after the initial download completes.
+func InitStateCacheVersion(ctx context.Context, db kv.RoDB, sc *cache.StateCache) error {
+	return db.View(ctx, func(tx kv.Tx) error {
+		progress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil || progress == 0 {
+			return err
+		}
+		stateVersion, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			return err
+		}
+		sc.Applier().Initialize(stateVersion)
+		return nil
+	})
 }
 
 // PrintCacheStats logs the state cache hit/miss counters and resets them.
