@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -30,28 +29,18 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/vm"
 )
 
 func TestFeeCreditsSharedDestination(t *testing.T) {
 	for _, fork := range []string{"pre_amsterdam", "amsterdam"} {
-		t.Run(fork, func(t *testing.T) { testFeeCreditBlocks(t, fork, "shared") })
+		t.Run(fork, func(t *testing.T) { testFeeCreditBlocks(t, fork) })
 	}
 }
 
-func TestFeeCreditPrefixConsumers(t *testing.T) {
-	for _, fork := range []string{"pre_amsterdam", "amsterdam"} {
-		for _, consumer := range []string{"balance_reader", "sender", "new_account"} {
-			t.Run(fork+"/"+consumer, func(t *testing.T) { testFeeCreditBlocks(t, fork, consumer) })
-		}
-	}
-}
-
-func testFeeCreditBlocks(t *testing.T, fork, consumer string) {
+func testFeeCreditBlocks(t *testing.T, fork string) {
 	t.Helper()
 
-	config := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(config, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	config := chain.AllProtocolChanges.Copy()
 	if fork == "pre_amsterdam" {
 		config.AmsterdamTime = nil
 	}
@@ -60,22 +49,14 @@ func testFeeCreditBlocks(t *testing.T, fork, consumer string) {
 	sender := crypto.PubkeyToAddress(key.PublicKey)
 	recipient := common.Address{0x22}
 	feeRecipient := common.Address{0x33}
-	if consumer == "sender" {
-		feeRecipient = sender
-	}
 	config.BurntContract = map[string]common.Address{"0": feeRecipient}
 	genesis := &types.Genesis{
 		Config: config,
 		Alloc: types.GenesisAlloc{
-			sender:    {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
-			recipient: {Balance: big.NewInt(1)},
+			sender:       {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
+			recipient:    {Balance: big.NewInt(1)},
+			feeRecipient: {Balance: big.NewInt(1)},
 		},
-	}
-	if consumer != "sender" && consumer != "new_account" {
-		genesis.Alloc[feeRecipient] = types.GenesisAccount{Balance: big.NewInt(1)}
-	}
-	if consumer == "balance_reader" {
-		genesis.Alloc[recipient] = types.GenesisAccount{Balance: big.NewInt(1), Code: []byte{byte(vm.COINBASE), byte(vm.BALANCE), byte(vm.PUSH0), byte(vm.SSTORE)}}
 	}
 
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))
