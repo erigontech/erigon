@@ -17,6 +17,7 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
 	"net/http/httptest"
 	"strings"
@@ -76,4 +77,28 @@ func TestWebsocketReadBudgetDropsOversizedMessage(t *testing.T) {
 	defer over.Close()
 	bigArg := strings.Repeat("x", 2*budget)
 	require.Error(t, over.Call(&result, "test_echo", bigArg, 1))
+}
+
+// Every connection on a server reads through one shared budget, so a charge held by
+// one constrains the others. Holding the budget directly stands in for a
+// concurrently stalled read, keeping the assertion deterministic.
+func TestWSReadChargedRespectsSharedBudget(t *testing.T) {
+	t.Parallel()
+
+	budget := &wsReadBudget{limit: 1 << 20}
+	msg := make([]byte, 64<<10) // individually far within the budget
+
+	// With the budget already fully held elsewhere, the read is refused rather than
+	// allocating past the shared limit.
+	require.True(t, budget.acquire(budget.limit))
+	_, err := readCharged(bytes.NewReader(msg), budget)
+	require.ErrorIs(t, err, errWSReadBudgetExceeded)
+
+	// Releasing that charge lets the same read through, and the read frees its own
+	// charge on the way out.
+	budget.release(budget.limit)
+	got, err := readCharged(bytes.NewReader(msg), budget)
+	require.NoError(t, err)
+	require.Len(t, got, len(msg))
+	require.Zero(t, budget.inUse.Load())
 }

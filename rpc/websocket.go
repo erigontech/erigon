@@ -57,6 +57,7 @@ const (
 	// WebSocket reads on a server, so concurrent connections cannot each hold a
 	// near-wsMessageSizeLimit partial frame and exhaust memory together. 0 disables it.
 	defaultWSReadBudget = 512 * 1024 * 1024
+	wsReadBufMinCap     = 4 * 1024 // initial read-buffer capacity, doubled as a frame fills
 )
 
 // WebsocketHandler returns a handler that serves JSON-RPC to WebSocket connections.
@@ -446,30 +447,38 @@ func (a *wsConnAdapter) encode(v any) error {
 	return err
 }
 
-// readFrame returns the next message, charging its bytes against the shared read
-// budget as they arrive so that concurrent partial frames stay bounded. A frame
-// that would push the budget past its limit drops the connection rather than
-// buffering on.
+// readFrame returns the next message, read through the shared budget so concurrent
+// partial frames stay bounded.
 func (a *wsConnAdapter) readFrame() ([]byte, error) {
 	_, r, err := a.conn.Reader(context.Background())
 	if err != nil {
 		return nil, err
 	}
+	return readCharged(r, a.budget)
+}
+
+// readCharged reads r to EOF into one buffer, charging budget for the buffer's
+// capacity as it grows and releasing that charge before returning. The heap holds
+// the capacity, not just the bytes read, so capacity is what is charged, before
+// each allocation; a growth the budget cannot cover drops the read with
+// errWSReadBudgetExceeded instead of allocating past the limit.
+func readCharged(r io.Reader, budget *wsReadBudget) ([]byte, error) {
 	var charged int64
-	defer func() { a.budget.release(charged) }()
-	buf := make([]byte, 0, 512)
+	defer func() { budget.release(charged) }()
+	var buf []byte
 	for {
 		if len(buf) == cap(buf) {
-			buf = append(buf, 0)[:len(buf)]
-		}
-		n, err := r.Read(buf[len(buf):cap(buf)])
-		if n > 0 {
-			if !a.budget.acquire(int64(n)) {
+			next := max(2*cap(buf), wsReadBufMinCap)
+			if !budget.acquire(int64(next - cap(buf))) {
 				return nil, errWSReadBudgetExceeded
 			}
-			charged += int64(n)
-			buf = buf[:len(buf)+n]
+			charged += int64(next - cap(buf))
+			grown := make([]byte, len(buf), next)
+			copy(grown, buf)
+			buf = grown
 		}
+		n, err := r.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return buf, nil
