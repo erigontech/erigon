@@ -770,7 +770,11 @@ func opSload(pc uint64, evm *EVM, scope *CallContext) (_ uint64, _ []byte, err e
 		*loc, err = evm.IntraBlockState().GetState(scope.Contract.Address(), scope.peekStorageKey(evm))
 		return pc, nil, err
 	}
-	if i := scope.slotIndex(evm); i >= 0 {
+	i := scope.slots.memo
+	if scope.slots.memoGen != scope.cacheGen {
+		i = scope.lookupSlot(evm)
+	}
+	if i >= 0 {
 		*loc = scope.slots.val[i]
 		return pc, nil, nil
 	}
