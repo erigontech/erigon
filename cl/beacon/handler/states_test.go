@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,10 +31,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/persistence/base_encoding"
+	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestGetStateFork(t *testing.T) {
@@ -611,4 +616,70 @@ func TestResponseValidatorsDoesNotParkResponseInPool(t *testing.T) {
 	responseValidators(httptest.NewRecorder(), nil, nil, 0, balances, validators, true, false)
 
 	require.Zero(t, seed.Len(), "pooled builder still holds the whole response")
+}
+
+func TestGetProposerLookaheadHistoricalReadsEpochData(t *testing.T) {
+	db, blocks, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	cfg := h.beaconChainCfg
+	cfg.FuluForkEpoch = 0
+
+	slot := blocks[len(blocks)-1].Block.Slot
+	epoch := slot / cfg.SlotsPerEpoch
+	require.NotZero(t, epoch%cfg.SlotsPerEpoch)
+
+	lookahead := solid.NewUint64VectorSSZ(int((1 + cfg.MinSeedLookahead) * cfg.SlotsPerEpoch))
+	for i := 0; i < lookahead.Length(); i++ {
+		lookahead.Set(i, uint64(1000+i))
+	}
+	epochData := &state_accessors.EpochData{
+		JustificationBits: &cltypes.JustificationBits{},
+		ProposerLookahead: lookahead,
+		BeaconConfig:      cfg,
+		Version:           clparams.FuluVersion,
+	}
+	var buf bytes.Buffer
+	require.NoError(t, epochData.WriteTo(&buf))
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, tx.Put(kv.EpochData, base_encoding.Encode64ToBytes4(epoch*cfg.SlotsPerEpoch), buf.Bytes()))
+	require.NoError(t, tx.Commit())
+
+	resp := getProposerLookahead(t, h, slot)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var out struct {
+		Data []string `json:"data"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out))
+	require.Len(t, out.Data, lookahead.Length())
+	require.Equal(t, "1000", out.Data[0])
+}
+
+func TestGetProposerLookaheadHistoricalWithoutEpochData(t *testing.T) {
+	db, blocks, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	cfg := h.beaconChainCfg
+	cfg.FuluForkEpoch = 0
+	slot := blocks[len(blocks)-1].Block.Slot
+
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, tx.Delete(kv.EpochData, base_encoding.Encode64ToBytes4(cfg.RoundSlotToEpoch(slot))))
+	require.NoError(t, tx.Commit())
+
+	resp := getProposerLookahead(t, h, slot)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func getProposerLookahead(t *testing.T, h *ApiHandler, slot uint64) *http.Response {
+	server := httptest.NewServer(h.mux)
+	t.Cleanup(server.Close)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/eth/v1/beacon/states/"+strconv.FormatUint(slot, 10)+"/proposer_lookahead", nil)
+	require.NoError(t, err)
+	resp, err := server.Client().Do(req)
+	require.NoError(t, err)
+	return resp
 }
