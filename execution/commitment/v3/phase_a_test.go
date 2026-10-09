@@ -52,7 +52,7 @@ func TestPartition(t *testing.T) {
 		}, []accountEntry{{hashedKey: path(1), update: &commitment.Update{Flags: commitment.NonceUpdate, Nonce: 7}, storageDirty: true}, {hashedKey: path(2)}}, 2, false},
 		{"E34/PhaseAStorageOnlyUpdateKeepsAccountEntrySeparate", []phaseAInput{{hashedKey: append(path(9), path(2)...), update: phaseAStorageUpdate([]byte{0xaa})}}, []accountEntry{{hashedKey: path(9), storageDirty: true}}, 1, false},
 		{"E35/PartitionAccountDeleteCreatesWipeJob", []phaseAInput{{hashedKey: path(3), plainKey: bytes.Repeat([]byte{0x11}, 20), update: deleted}}, []accountEntry{{hashedKey: path(3), update: &commitment.Update{Flags: commitment.DeleteUpdate}}}, 0, true},
-		{"E35/PartitionLaterStorageWriteSuppressesWipe", []phaseAInput{{hashedKey: path(4), update: deleted}, {hashedKey: append(path(4), path(5)...), update: phaseAStorageUpdate([]byte{1})}}, []accountEntry{{hashedKey: path(4), update: &commitment.Update{Flags: commitment.DeleteUpdate}, storageDirty: true}}, 1, false},
+		{"E35/PartitionDeleteWithStorageWriteStillWipes", []phaseAInput{{hashedKey: path(4), update: deleted}, {hashedKey: append(path(4), path(5)...), update: phaseAStorageUpdate([]byte{1})}}, []accountEntry{{hashedKey: path(4), update: &commitment.Update{Flags: commitment.DeleteUpdate}, storageDirty: true}}, 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			storage, accounts := partition(tc.stream)
@@ -337,4 +337,18 @@ func TestStorageWipe(t *testing.T) {
 		_, err := runStorageTask(ctx, storageTask{addrHash: address, wipe: true})
 		require.ErrorIs(t, err, ErrRecordTruncated)
 	})
+}
+
+func TestDeletedAccountWipesStorageWrittenInTheSameBatch(t *testing.T) {
+	addr := parityAddress(7)
+	slotA, slotB := slotKey(addr, paritySlot(8)), slotKey(addr, paritySlot(9))
+	differential(t, commitmenttest.Case{
+		ID: "delete-with-slot-write",
+		Rounds: [][]commitmenttest.Op{
+			{accountOp(addr, commitmenttest.AccountSpec{Kind: "parity", Number: 7}), slotOp(slotA, 8), slotOp(slotB, 9)},
+			{slotOp(slotA, 80), {Key: addr, Delete: true}},
+			{accountOp(addr, commitmenttest.AccountSpec{Kind: "parity", Number: 70})},
+		},
+		Assertions: commitmenttest.Assertions{TolerateHPHDrift: true},
+	}, []runner.RunSpec{{Name: "v3", Mode: commitment.ModeCollect, Workers: 1}})
 }
