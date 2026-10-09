@@ -19,6 +19,7 @@ package engineapi
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -99,4 +100,25 @@ func TestGetInclusionListV1JSONRPCClient(t *testing.T) {
 	want, err := types.MarshalTransactionsBinary(txns)
 	require.NoError(t, err)
 	require.Equal(t, []hexutil.Bytes{want[0]}, result)
+}
+
+func TestGetInclusionListV1RejectsBeforeBogota(t *testing.T) {
+	t.Parallel()
+
+	called := false
+	srv := &EngineServer{
+		logger: log.New(),
+		config: &chain.Config{BogotaTime: common.NewUint64(math.MaxUint64)},
+		executionService: &stubExecutionModule{inclusionListFunc: func(context.Context) (types.Transactions, error) {
+			called = true
+			return nil, nil
+		}},
+	}
+
+	result, err := srv.GetInclusionListV1(t.Context())
+
+	require.Nil(t, result)
+	var unsupported *rpc.UnsupportedForkError
+	require.ErrorAs(t, err, &unsupported)
+	require.False(t, called)
 }
