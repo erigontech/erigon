@@ -638,6 +638,34 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 				}
 				return root, nil
 			}
+			reach := &legacyReach{keysV2: keysV2}
+			reachableAsOf := func(legacyKey, value []byte, txNum uint64) (bool, error) {
+				if len(value) < 4 || binary.BigEndian.Uint16(value[2:4]) == 0 {
+					return true, nil
+				}
+				path, err := decodeLegacyPrefix(legacyKey, keysV2)
+				if err != nil || len(path) == 0 {
+					return err == nil, err
+				}
+				branch, err := legacyCommitmentAsOf(wdt, rootLegacyKey, txNum)
+				if err != nil {
+					return false, err
+				}
+				for depth := 0; depth < len(path); {
+					next, ok, err := reach.childDepth(branch, path, depth)
+					if err != nil || !ok || next > len(path) {
+						return false, err
+					}
+					if next == len(path) {
+						return true, nil
+					}
+					if branch, err = legacyCommitmentAsOf(wdt, encodeLegacyPrefix(path[:next], keysV2), txNum); err != nil {
+						return false, err
+					}
+					depth = next
+				}
+				return true, nil
+			}
 			emitBoundary := func(txNum uint64, cur, next *historyVersion) error {
 				for _, e := range cur.ents {
 					if e.kind == v3.LegacySynthesized {
@@ -809,7 +837,15 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 						if err != nil {
 							return err
 						}
-						if err := convert(legacyKey, value(i), leavesAsOf(txNum), &cur); err != nil {
+						before := value(i)
+						live, err := reachableAsOf(legacyKey, before, txNum)
+						if err != nil {
+							return err
+						}
+						if !live {
+							before = nil
+						}
+						if err := convert(legacyKey, before, leavesAsOf(txNum), &cur); err != nil {
 							return err
 						}
 						if err := convert(legacyKey, next, txNum+1, &nextVersion); err != nil {
@@ -818,7 +854,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 						if err := emitBoundary(txNum, &cur, &nextVersion); err != nil {
 							return err
 						}
-						if err := childrenChanged(prefix, value(i), next, txNum); err != nil {
+						if err := childrenChanged(prefix, before, next, txNum); err != nil {
 							return err
 						}
 					}
