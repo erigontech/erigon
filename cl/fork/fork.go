@@ -19,7 +19,9 @@ package fork
 import (
 	"errors"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/ssz"
@@ -39,6 +41,14 @@ func ComputeDomain(
 	copy(currentVersion32[:], currentVersion[:])
 	forkDataRoot := crypto.Sha256(currentVersion32[:], genesisValidatorsRoot[:])
 	return append(domainType, forkDataRoot[:28]...), nil
+}
+
+// ComputeDomainAtEpoch returns the domain for a message of epoch, using the fork version the config schedules for that
+// epoch. Gossip validation uses it instead of a state's fork field: the state it checks against can predate a fork
+// boundary, for example when the first slot of the fork has no block yet.
+func ComputeDomainAtEpoch(cfg *clparams.BeaconChainConfig, domainType [4]byte, epoch uint64, genesisValidatorsRoot common.Hash) ([]byte, error) {
+	forkVersion := cfg.GetForkVersionByVersion(cfg.GetCurrentStateVersion(epoch))
+	return ComputeDomain(domainType[:], utils.Uint32ToBytes4(forkVersion), genesisValidatorsRoot)
 }
 
 func ComputeSigningRoot(

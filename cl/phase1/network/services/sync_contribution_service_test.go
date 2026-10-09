@@ -26,13 +26,10 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -70,45 +67,6 @@ func getObjectsForSyncContributionServiceTest() (*state.CachingBeaconState, *Sig
 	}
 
 	return state, msg
-}
-
-func TestVerifySyncContributionAggregatedSignatureUsesContributionSlotDomain(t *testing.T) {
-	headState, msg := getObjectsForSyncContributionServiceTest()
-	cfg := headState.BeaconConfig()
-	forkEpoch := state.Epoch(headState) + 1
-	headSlot := forkEpoch * cfg.SlotsPerEpoch
-	require.NoError(t, headState.SetSlot(headSlot))
-
-	previousVersion := common.Bytes4{0x01}
-	currentVersion := common.Bytes4{0x02}
-	headState.SetFork(&cltypes.Fork{
-		PreviousVersion: previousVersion,
-		CurrentVersion:  currentVersion,
-		Epoch:           forkEpoch,
-	})
-	publicKey, err := headState.ValidatorPublicKey(0)
-	require.NoError(t, err)
-	contribution := msg.SignedContributionAndProof.Message.Contribution
-
-	for _, tc := range []struct {
-		name        string
-		slot        uint64
-		forkVersion common.Bytes4
-	}{
-		{name: "previous epoch", slot: headSlot - 1, forkVersion: previousVersion},
-		{name: "same epoch", slot: headSlot, forkVersion: currentVersion},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			contribution.Slot = tc.slot
-			_, signingRoot, _, err := verifySyncContributionProofAggregatedSignature(headState, contribution, []common.Bytes48{publicKey})
-			require.NoError(t, err)
-
-			domain, err := fork.ComputeDomain(cfg.DomainSyncCommittee[:], tc.forkVersion, headState.GenesisValidatorsRoot())
-			require.NoError(t, err)
-			expected := crypto.Sha256(contribution.BeaconBlockRoot[:], domain)
-			require.Equal(t, expected[:], signingRoot)
-		})
-	}
 }
 
 func TestSyncContributionServiceUnsynced(t *testing.T) {

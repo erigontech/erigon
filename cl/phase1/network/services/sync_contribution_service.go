@@ -358,7 +358,8 @@ func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contribu
 		return nil, nil, nil, err
 	}
 
-	domain, err := st.GetDomain(st.BeaconConfig().DomainSyncCommitteeSelectionProof, state.GetEpochAtSlot(st.BeaconConfig(), contributionAndProof.Contribution.Slot))
+	cfg := st.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainSyncCommitteeSelectionProof, state.GetEpochAtSlot(cfg, contributionAndProof.Contribution.Slot), st.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -373,7 +374,8 @@ func verifySyncContributionSelectionProof(st *state.CachingBeaconState, contribu
 
 // verifySyncContributionProof verifies the contribution aggregated signature.
 func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState, contribution *cltypes.Contribution, subCommitteeKeys []common.Bytes48) ([]byte, []byte, []byte, error) {
-	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.GetEpochAtSlot(s.BeaconConfig(), contribution.Slot))
+	cfg := s.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainSyncCommittee, state.GetEpochAtSlot(cfg, contribution.Slot), s.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -397,7 +399,8 @@ func verifySyncContributionProofAggregatedSignature(s *state.CachingBeaconState,
 
 func verifyAggregatorSignatureForSyncContribution(s *state.CachingBeaconState, signedContributionAndProof *cltypes.SignedContributionAndProof) ([]byte, []byte, []byte, error) {
 	contribution := signedContributionAndProof.Message.Contribution
-	domain, err := s.GetDomain(s.BeaconConfig().DomainContributionAndProof, contribution.Slot/s.BeaconConfig().SlotsPerEpoch)
+	cfg := s.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainContributionAndProof, state.GetEpochAtSlot(cfg, contribution.Slot), s.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}
