@@ -639,7 +639,6 @@ func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64, off
 	bal := block.BlockAccessList()
 	if bal == nil && offlineBAL != nil {
 		if data, ok := offlineBAL.Get(blockNum, block.Hash()); ok {
-			defer offlineBAL.Release(data)
 			return types.DecodeBlockAccessListBytes(data)
 		}
 		logger.Warn("[exec] offline BAL store has no record for block", "block", blockNum, "hash", block.Hash())

@@ -66,27 +66,3 @@ func TestResidencyProbe(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, res, "all pages should be resident after touching them")
 }
-
-func TestPageOutDropsWholePagesOnly(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "f")
-	pg := os.Getpagesize()
-	require.NoError(t, os.WriteFile(p, make([]byte, pg*8), 0o644))
-	f, err := os.Open(p)
-	require.NoError(t, err)
-	defer f.Close()
-	require.NoError(t, f.Sync())
-	m, err := OpenRo(f, pg*8)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, m.Unmap()) })
-	for i := 0; i < len(m); i += pg {
-		residencySink += int(m[i])
-	}
-
-	require.NoError(t, PageOut(m[pg/2:6*pg+pg/2]))
-
-	for page, want := range []bool{true, false, false, false, false, false, true, true} {
-		res, err := Resident(m[page*pg : (page+1)*pg])
-		require.NoError(t, err)
-		require.Equal(t, want, res, "page %d", page)
-	}
-}

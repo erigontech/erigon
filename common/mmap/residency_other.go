@@ -21,6 +21,3 @@ package mmap
 // Resident is a no-op on platforms without mincore: it reports pages as
 // resident so callers skip the residency gate and fall back to plain mmap.
 func Resident(m []byte) (bool, error) { return true, nil }
-
-// PageOut is a no-op on platforms without MADV_PAGEOUT.
-func PageOut(m []byte) error { return nil }

@@ -48,20 +48,3 @@ func Resident(m []byte) (bool, error) {
 	}
 	return true, nil
 }
-
-// PageOut asks the kernel to reclaim the pages that lie wholly inside m, so a
-// one-pass reader does not keep them in the page cache. Pages that m only
-// partly covers are kept.
-func PageOut(m []byte) error {
-	if len(m) == 0 {
-		return nil
-	}
-	pageSize := uintptr(os.Getpagesize())
-	start := uintptr(unsafe.Pointer(&m[0]))
-	first := (start + pageSize - 1) &^ (pageSize - 1)
-	end := (start + uintptr(len(m))) &^ (pageSize - 1)
-	if end <= first {
-		return nil
-	}
-	return unix.Madvise(m[first-start:end-start], unix.MADV_PAGEOUT)
-}

@@ -30,7 +30,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"unsafe"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
@@ -344,19 +343,6 @@ func (r *Reader) Get(blockNum uint64, hash common.Hash) ([]byte, bool) {
 		return nil, false
 	}
 	return r.data[payloadOff : payloadOff+payloadLen], true
-}
-
-// Release drops the page-cache pages of a record returned by Get once it is
-// decoded: the store is read once, front to back, and must not crowd out state
-// pages. It also drops the page shared with the previous record, which a
-// forward reader has already decoded. Reading data afterwards faults it in again.
-func (r *Reader) Release(data []byte) {
-	if len(data) == 0 {
-		return
-	}
-	end := int(uintptr(unsafe.Pointer(&data[0]))-uintptr(unsafe.Pointer(&r.data[0]))) + len(data)
-	start := (end - len(data)) &^ (os.Getpagesize() - 1)
-	_ = mmap.PageOut(r.data[start:end])
 }
 
 func (r *Reader) Len() int { return r.count }
