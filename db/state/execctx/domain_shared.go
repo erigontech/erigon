@@ -534,7 +534,7 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 }
 
 func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
-	if batch, ok := sd.mem.(commitmentBranchBatchWriter); ok && commitmentDeltasResolved(parts) {
+	if batch, ok := sd.mem.(commitmentBranchBatchWriter); ok {
 		return batch.PutOwnedCommitmentBranches(parts, txNum, diff)
 	}
 	for _, part := range parts {
@@ -545,17 +545,6 @@ func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]com
 		}
 	}
 	return nil
-}
-
-func commitmentDeltasResolved(parts [][]commitment.BranchDelta) bool {
-	for _, part := range parts {
-		for i := range part {
-			if part[i].Data == nil || part[i].Prev == nil {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func (sd *SharedDomains) flushPendingUpdates(tx kv.TemporalTx, lockHeld bool) error {
