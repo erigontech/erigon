@@ -184,6 +184,23 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 	return emit(c.key, c.out, LegacyDirect)
 }
 
+func (c *LegacyConverter) ConvertShadowed(legacyKey, value []byte, emit LegacyEmitFunc) error {
+	if !c.incremental || len(value) == 0 || len(value) >= 4 && binary.BigEndian.Uint16(value[2:4]) == 0 {
+		return nil
+	}
+	prefix, err := c.decodePrefix(legacyKey)
+	if err != nil || len(prefix) >= 64 {
+		return err
+	}
+	return commitment.BranchData(value).ForEachCell(func(_ int, cell commitment.BranchCell) error {
+		if len(cell.AccountAddr) == 0 || len(cell.StorageAddr) != 0 || len(cell.Extension) != 0 || len(cell.Hash) != length.Hash {
+			return nil
+		}
+		c.rootKey = StorageNodeKey(keccak.Sum256(cell.AccountAddr), nil, c.rootKey[:0])
+		return emit(c.rootKey, nil, LegacyKeep)
+	})
+}
+
 func (c *LegacyConverter) decodePrefix(key []byte) ([]byte, error) {
 	if c.keysV2 {
 		return nibbles.DecodeKeyV2(key)

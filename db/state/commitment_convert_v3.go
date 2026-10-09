@@ -51,13 +51,14 @@ import (
 const commitmentV3Batch = 1024
 
 type kvBatch struct {
-	seq   uint64
-	buf   []byte
-	pairs [][2][]byte
+	seq      uint64
+	buf      []byte
+	pairs    [][2][]byte
+	shadowed []bool
 }
 
 func (b *kvBatch) reset() {
-	b.buf, b.pairs = b.buf[:0], b.pairs[:0]
+	b.buf, b.pairs, b.shadowed = b.buf[:0], b.pairs[:0], b.shadowed[:0]
 }
 
 func (b *kvBatch) own(word []byte) []byte {
@@ -183,23 +184,21 @@ func convertCommitmentFileV3(
 			}
 		}
 		for reader.HasNext() {
-			mark := len(batch.buf)
 			k := readOwned(reader, batch, keysCompressed)
 			if !reader.HasNext() {
 				return fmt.Errorf("truncated at key %x", k)
 			}
 			n := read.Add(1)
-			if !commitment.IsCommitmentStateKey(k) && newer.contains(k) {
-				reader.Skip()
-				batch.buf = batch.buf[:mark]
+			isShadowed := !commitment.IsCommitmentStateKey(k) && newer.contains(k)
+			if isShadowed {
 				shadowed++
-			} else {
-				v := readOwned(reader, batch, valsCompressed)
-				batch.pairs = append(batch.pairs, [2][]byte{k, v})
-				if len(batch.pairs) == commitmentV3Batch {
-					if sendErr := send(); sendErr != nil {
-						return sendErr
-					}
+			}
+			v := readOwned(reader, batch, valsCompressed)
+			batch.pairs = append(batch.pairs, [2][]byte{k, v})
+			batch.shadowed = append(batch.shadowed, isShadowed)
+			if len(batch.pairs) == commitmentV3Batch {
+				if sendErr := send(); sendErr != nil {
+					return sendErr
 				}
 			}
 			select {
@@ -231,8 +230,8 @@ func convertCommitmentFileV3(
 			for batch := range in {
 				res := convertedBatchPool.Get().(*convertedBatch)
 				res.buf, res.ents = res.buf[:0], res.ents[:0]
-				for _, p := range batch.pairs {
-					if convErr := convertLegacyPairV3(p[0], p[1], incremental, stepFrom, prevs, conv, reach, res.emit); convErr != nil {
+				for i, p := range batch.pairs {
+					if convErr := convertLegacyPairV3(p[0], p[1], batch.shadowed[i], incremental, stepFrom, prevs, conv, reach, res.emit); convErr != nil {
 						return convErr
 					}
 				}
@@ -394,7 +393,7 @@ func readOwned(reader *seg.Reader, batch *kvBatch, compressed bool) []byte {
 	return batch.buf[start:]
 }
 
-func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs *DomainRoTx, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
+func convertLegacyPairV3(k, v []byte, shadowed, incremental bool, stepFrom kv.Step, prevs *DomainRoTx, conv *v3.LegacyConverter, reach *legacyReach, emit v3.LegacyEmitFunc) error {
 	if commitment.IsCommitmentStateKey(k) {
 		if !bytes.Equal(k, commitment.KeyCommitmentState) {
 			return fmt.Errorf("unexpected state key %x in a legacy file", k)
@@ -404,6 +403,9 @@ func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs 
 			return err
 		}
 		return emit(commitment.KeyCommitmentV3State, state, v3.LegacyDirect)
+	}
+	if shadowed {
+		return conv.ConvertShadowed(k, v, emit)
 	}
 	if len(v) >= 4 && binary.BigEndian.Uint16(v[2:4]) != 0 {
 		if live, err := reach.reachable(k, v); err != nil || !live {

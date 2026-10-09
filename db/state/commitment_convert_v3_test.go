@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -177,14 +178,23 @@ func TestConvertCommitmentFiles_V3BranchNotRewrittenAfterLeafChange(t *testing.T
 
 func storageSlotWithHashPrefix(tb testing.TB, prefix []byte, next *uint64) []byte {
 	tb.Helper()
+	return keyWithHashPrefix(length.Hash, prefix, next)
+}
+
+func addressWithHashPrefix(tb testing.TB, prefix []byte, next *uint64) []byte {
+	tb.Helper()
+	return keyWithHashPrefix(length.Addr, prefix, next)
+}
+
+func keyWithHashPrefix(size int, prefix []byte, next *uint64) []byte {
 	for ; ; *next++ {
-		slot := make([]byte, length.Hash)
-		binary.BigEndian.PutUint64(slot[length.Hash-8:], *next)
+		key := make([]byte, size)
+		binary.BigEndian.PutUint64(key[size-8:], *next)
 		path := make([]byte, 2*length.Hash)
-		nibbles.Expand(crypto.Keccak256(slot), path)
+		nibbles.Expand(crypto.Keccak256(key), path)
 		if bytes.HasPrefix(path, prefix) {
 			*next++
-			return slot
+			return key
 		}
 	}
 }
@@ -315,4 +325,48 @@ func TestConvertCommitmentFiles_V3StateRecordInEveryFile(t *testing.T) {
 		has := slices.ContainsFunc(keys, func(k []byte) bool { return bytes.Equal(k, commitment.KeyCommitmentV3State) })
 		require.Truef(t, has, "%s has no v3 state record", filepath.Base(p))
 	}
+}
+
+func TestConvertCommitmentFiles_V3StorageRootSurvivesBranchCollapseAcrossSteps(t *testing.T) {
+	const stepSize, steps = 1, 4
+	db, agg, rwTx, domains := convertTestDomains(t, stepSize)
+	put, del, putAccount := domainWriter(t, domains, rwTx)
+	ctx := t.Context()
+
+	nextA := uint64(1)
+	a := addressWithHashPrefix(t, []byte{0x1, 0x1}, &nextA)
+	b := addressWithHashPrefix(t, []byte{0x1, 0x2}, &nextA)
+	c := addressWithHashPrefix(t, []byte{0x5}, &nextA)
+	nextS := uint64(1)
+	slots := [][]byte{
+		storageSlotWithHashPrefix(t, []byte{0x1}, &nextS),
+		storageSlotWithHashPrefix(t, []byte{0x9}, &nextS),
+		storageSlotWithHashPrefix(t, []byte{0xc}, &nextS),
+	}
+	for txNum := range uint64(stepSize * steps) {
+		switch txNum {
+		case 0:
+			for _, x := range [][]byte{a, b, c} {
+				putAccount(x, txNum)
+			}
+			for _, s := range slots {
+				put(kv.StorageDomain, append(bytes.Clone(a), s...), []byte{1}, txNum)
+			}
+		case 1:
+			del(kv.AccountsDomain, b, txNum)
+		default:
+			putAccount(c, txNum)
+		}
+		_, err := domains.ComputeCommitment(ctx, rwTx, true, txNum, txNum, "", nil)
+		require.NoError(t, err)
+	}
+	require.NoError(t, domains.Flush(ctx, rwTx))
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles2(ctx, db, 0, steps-1, unboundedFinalityCtx, false))
+	require.Eventually(t, func() bool { return agg.EndTxNumMinimax() >= stepSize*(steps-1) }, 30*time.Second, 50*time.Millisecond)
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+	cnt, err := state.FoldCommitmentV3(ctx, agg, math.MaxUint64)
+	require.NoError(t, err)
+	require.Zero(t, cnt.Orphans)
 }
