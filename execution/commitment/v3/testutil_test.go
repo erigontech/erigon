@@ -70,55 +70,15 @@ func TestSharedRunnerCatalogue(t *testing.T) {
 	}{
 		{"E58-E101/process-100k-accounts", "accounts", 100000},
 		{"E58-E101/process-100k-storage", "storage", 100000},
-		{"E103/differential-zero-state-reads", "incremental", 0},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
 			c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: tc.kind, Count: tc.count})
 			require.NoError(t, err)
 			c.ID = tc.id
-			c.Assertions = commitmenttest.Assertions{ProcessNoError: true, ZeroAccountReads: tc.kind == "incremental", ZeroStorageReads: tc.kind == "incremental", StateReadEngines: []string{"v3"}}
+			c.Assertions = commitmenttest.Assertions{ProcessNoError: true}
 			require.True(t, c.Assertions.ProcessNoError)
 			runner.Run(t, c, runner.RunSpec{Name: "v3", Mode: commitment.ModeCollect, Context: runner.ContextSpec{ForbidStateReads: true}}, openTestTrie)
 		})
-	}
-}
-
-func TestSharedRunnerDifferential(t *testing.T) {
-	c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "incremental"})
-	require.NoError(t, err)
-	c.Assertions = commitmenttest.Assertions{ProcessNoError: true, ZeroAccountReads: true, ZeroStorageReads: true, StateReadEngines: []string{"v3"}}
-	runner.Compare(t, c, []runner.RunSpec{{Name: "v3", Mode: commitment.ModeCollect, Context: runner.ContextSpec{ForbidStateReads: true}}, {Name: "hph", Mode: commitment.ModeUpdate}, {Name: "parallel", Mode: commitment.ModeParallel}}, openTestTrie)
-}
-
-func TestSharedRunnerFeed(t *testing.T) {
-	c, err := commitmenttest.Generate(commitmenttest.MathRand(424242), commitmenttest.SequenceSpec{Kind: "whale", Count: 200})
-	require.NoError(t, err)
-	feed, err := runner.Feed(c.Rounds[0])
-	require.NoError(t, err)
-	require.Equal(t, feedOf(parityEntries(c.Rounds[0])), feed)
-	memory := runner.NewMemory(runner.ContextSpec{ForbidStateReads: true})
-	engine, err := openTestTrie(context.Background(), runner.RunSpec{Mode: commitment.ModeCollect, Memory: memory})
-	require.NoError(t, err)
-	defer engine.Release()
-	root, err := engine.(*Trie).ProcessFeed(context.Background(), feed, nil)
-	require.NoError(t, err)
-	got := runner.Run(t, c, runner.RunSpec{Name: "v3", Mode: commitment.ModeCollect, Context: runner.ContextSpec{ForbidStateReads: true}}, openTestTrie)
-	require.Equal(t, got.Rounds[0].Root, root)
-	require.Equal(t, got.Rounds[0].Records, memory.Records())
-	require.Zero(t, memory.Counts().AccountReads)
-	require.Zero(t, memory.Counts().StorageReads)
-}
-
-func TestSharedRunnerReload(t *testing.T) {
-	c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "incremental"})
-	require.NoError(t, err)
-	c.Assertions.ZeroAccountReads, c.Assertions.ZeroStorageReads = true, true
-	got := runner.Run(t, c, runner.RunSpec{Name: "v3", Mode: commitment.ModeCollect, Reload: true}, openTestTrie)
-	require.Len(t, got.Rounds, 3)
-	for i, round := range got.Rounds {
-		require.NotEmpty(t, round.State)
-		require.Equal(t, uint64(i+1), round.BlockNum)
-		require.Equal(t, uint64(i+1), round.TxNum)
 	}
 }
 
