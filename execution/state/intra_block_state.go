@@ -1479,6 +1479,11 @@ func (sdb *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 		if err != nil {
 			return err
 		}
+		// The object is built from the base record and can lag this tx's own
+		// nonce write: seed it so a revert restores the live nonce.
+		if vw, ok := sdb.versionedWrites.GetNonce(addr); ok {
+			stateObject.setNonce(vw.Val)
+		}
 		stateObject.SetNonce(nonce, wasCommited, reason)
 		sdb.recordWriteNonce(addr, nonce, reason)
 		return nil
