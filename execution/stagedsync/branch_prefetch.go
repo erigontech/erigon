@@ -25,14 +25,11 @@ import (
 
 	keccak "github.com/erigontech/fastkeccak"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types"
 )
-
-var branchPrefetchEnabled = dbg.EnvBool("COMMITMENT_V3_PREFETCH", true)
 
 const (
 	branchPrefetchWorkers  = 8
