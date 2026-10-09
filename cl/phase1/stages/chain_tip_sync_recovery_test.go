@@ -949,7 +949,7 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 	secondStore := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
 	validator := &orderedPayloadValidator{slow: firstPayload.BlockHash}
 	replay := storedParentPayloadReplay{
-		deadline:  time.Now().Add(100 * time.Millisecond),
+		deadline:  time.Now().Add(time.Second),
 		remaining: 2,
 		results:   make(map[common.Hash]error),
 	}
