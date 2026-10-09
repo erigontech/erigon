@@ -319,7 +319,8 @@ func newCommitmentCalculator(
 	// (written sequentially by this calculator).
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
 	calc := newCalcState(asOfReader, logger, logPrefix)
-	if branchPrefetchEnabled && doms.GetCommitmentContext().AcceptsFeed() {
+	calc.hashKeys = doms.GetCommitmentContext().AcceptsFeed()
+	if branchPrefetchEnabled && calc.hashKeys {
 		calc.branchPrefetch = newBranchPrefetcher(workCtx, db)
 		asOfReader.prefetched = calc.branchPrefetch
 	}

@@ -1072,6 +1072,7 @@ func TestFlushToUpdates_MidBlockFlushKeepsTheListUntilReset(t *testing.T) {
 
 func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
 	cs := newTestCalcState()
+	cs.hashKeys = true
 	a := accounts.InternAddress(common.Address{0xa1})
 	b := accounts.InternAddress(common.Address{0xb2})
 	c := accounts.InternAddress(common.Address{0xc3})

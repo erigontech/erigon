@@ -129,6 +129,7 @@ type calcState struct {
 
 	prefetch       func(plainKey []byte)
 	branchPrefetch *branchPrefetcher
+	hashKeys       bool
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -163,10 +164,10 @@ func (cs *calcState) ensureAccount(addr accounts.Address, writes *state.WriteSet
 		return acc
 	}
 
-	address := addr.Value()
-	acc := &calcAccountState{
-		CodeHash: empty.CodeHash,
-		hash:     keccak.Sum256(address[:]),
+	acc := &calcAccountState{CodeHash: empty.CodeHash}
+	if cs.hashKeys {
+		address := addr.Value()
+		acc.hash = keccak.Sum256(address[:])
 	}
 	if cs.domainReader != nil && !writesCoverBaseline(writes, addr) {
 		dbAcc, err := cs.domainReader.ReadAccountData(addr)
@@ -267,8 +268,11 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		// GetAsOf seek it would cost is wasted.
 		st := cs.storageState[addr]
 		if st == nil {
-			address := addr.Value()
-			st = &calcStorage{hash: keccak.Sum256(address[:]), slots: make(map[accounts.StorageKey]calcSlot)}
+			st = &calcStorage{slots: make(map[accounts.StorageKey]calcSlot)}
+			if cs.hashKeys {
+				address := addr.Value()
+				st.hash = keccak.Sum256(address[:])
+			}
 			cs.storageState[addr] = st
 		}
 		dirty := cs.storageDirty[addr]
@@ -279,7 +283,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		}
 		for key, vw := range inner {
 			slot, ok := st.slots[key]
-			if !ok {
+			if !ok && cs.hashKeys {
 				k := key.Value()
 				slot.hash = keccak.Sum256(k[:])
 			}
