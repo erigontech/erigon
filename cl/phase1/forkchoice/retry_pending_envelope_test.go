@@ -160,12 +160,10 @@ func TestRetryPendingExecutionPayloadEnvelopeWaitsForInFlightRetry(t *testing.T)
 		f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
 		close(first)
 	}()
-	for {
-		if _, busy := f.retryingEnvelopes.Load(root); busy {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
+	require.Eventually(t, func() bool {
+		_, busy := f.retryingEnvelopes.Load(root)
+		return busy
+	}, 5*time.Second, time.Millisecond)
 	second := make(chan struct{})
 	go func() {
 		f.RetryPendingExecutionPayloadEnvelope(t.Context(), root)
@@ -177,21 +175,28 @@ func TestRetryPendingExecutionPayloadEnvelopeWaitsForInFlightRetry(t *testing.T)
 	case <-time.After(50 * time.Millisecond):
 	}
 	close(release)
-	<-first
-	<-second
+	requireClosed(t, first)
+	requireClosed(t, second)
+}
+
+func requireClosed(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out")
+	}
 }
 
 func TestEnterPendingEnvelopeApplyAdmitsAWaiterAfterTheHolderLeaves(t *testing.T) {
 	f := &ForkChoiceStore{}
 	root := common.HexToHash("0x1")
-	waited, admitted := f.enterPendingEnvelopeApply(context.Background(), root)
-	require.False(t, waited)
-	require.True(t, admitted)
+	require.True(t, f.enterPendingEnvelopeApply(context.Background(), root))
 
 	waiter := make(chan bool, 1)
 	go func() {
-		waited, admitted := f.enterPendingEnvelopeApply(context.Background(), root)
-		waiter <- waited && admitted
+		admitted := f.enterPendingEnvelopeApply(context.Background(), root)
+		waiter <- admitted
 		f.leavePendingEnvelopeApply(root)
 	}()
 	select {
@@ -200,15 +205,18 @@ func TestEnterPendingEnvelopeApplyAdmitsAWaiterAfterTheHolderLeaves(t *testing.T
 	case <-time.After(50 * time.Millisecond):
 	}
 	f.leavePendingEnvelopeApply(root)
-	require.True(t, <-waiter, "the waiter runs itself after the holder leaves")
+	select {
+	case admitted := <-waiter:
+		require.True(t, admitted, "the waiter runs itself after the holder leaves")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiter was not admitted after the holder left")
+	}
 
 	// A waiter whose context ends first is not admitted.
-	_, admitted = f.enterPendingEnvelopeApply(context.Background(), root)
-	require.True(t, admitted)
+	require.True(t, f.enterPendingEnvelopeApply(context.Background(), root))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, admitted = f.enterPendingEnvelopeApply(ctx, root)
-	require.False(t, admitted)
+	require.False(t, f.enterPendingEnvelopeApply(ctx, root))
 	f.leavePendingEnvelopeApply(root)
 }
 
@@ -220,9 +228,7 @@ func TestEnterPendingEnvelopeApplyRefusesADeadContextAtAnIdleGate(t *testing.T) 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, admitted := f.enterPendingEnvelopeApply(ctx, root)
-
-	require.False(t, admitted)
+	require.False(t, f.enterPendingEnvelopeApply(ctx, root))
 	_, busy := f.retryingEnvelopes.Load(root)
 	require.False(t, busy)
 }
@@ -243,14 +249,12 @@ func TestApplyPendingEnvelopeHoldsThePerRootGate(t *testing.T) {
 		f.applyPendingEnvelope(t.Context(), root, envelope, false, false)
 		close(done)
 	}()
-	for {
-		if _, busy := f.retryingEnvelopes.Load(root); busy {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
+	require.Eventually(t, func() bool {
+		_, busy := f.retryingEnvelopes.Load(root)
+		return busy
+	}, 5*time.Second, time.Millisecond)
 	close(release)
-	<-done
+	requireClosed(t, done)
 	_, busy := f.retryingEnvelopes.Load(root)
 	require.False(t, busy)
 }
@@ -272,21 +276,21 @@ func TestApplyPendingEnvelopeSkipsACopyTheHolderSettled(t *testing.T) {
 	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(true, nil).AnyTimes()
 	f, pending := newRetryPendingStore(t, peerDas)
 	calls := &atomic.Int32{}
-	f.forkGraph = countingForkGraph{retryPendingForkGraph: f.forkGraph.(retryPendingForkGraph), hasEnvelopeCalls: calls}
+	opened := make(chan struct{})
+	close(opened) // an unexpected apply ends on the persisted path instead of the stub's missing config
+	f.forkGraph = countingForkGraph{retryPendingForkGraph: retryPendingForkGraph{block: f.forkGraph.(retryPendingForkGraph).block, gate: opened}, hasEnvelopeCalls: calls}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}}
 	pending.Add(root, envelope)
 
-	_, admitted := f.enterPendingEnvelopeApply(t.Context(), root)
-	require.True(t, admitted)
+	require.True(t, f.enterPendingEnvelopeApply(t.Context(), root))
 	done := make(chan struct{})
 	go func() {
 		f.applyPendingEnvelope(t.Context(), root, envelope, false, false)
 		close(done)
 	}()
-	time.Sleep(20 * time.Millisecond)
 	pending.Remove(root) // the holder settled the copy
 	f.leavePendingEnvelopeApply(root)
-	<-done
+	requireClosed(t, done)
 
 	require.Zero(t, calls.Load(), "the waiter must return without touching the envelope")
 }

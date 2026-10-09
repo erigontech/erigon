@@ -135,7 +135,8 @@ func TestAwaitPendingParentPayloadLetsTheRetryOutliveTheWait(t *testing.T) {
 	forkchoiceStore.PendingEnvelopeRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
 	postState.SetLatestBlockHash(common.Hash{0xa1})
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: common.Hash{0xb2}, Slot: postState.Slot()})
-	handler.beaconChainCfg.SecondsPerSlot = 1
+	// Past the cutoff the wait lasts one retry budget (slot/24, 500 ms), and the retry keeps as much again.
+	handler.beaconChainCfg.SecondsPerSlot = 12
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
 	handler.ethClock = clock
@@ -153,5 +154,10 @@ func TestAwaitPendingParentPayloadLetsTheRetryOutliveTheWait(t *testing.T) {
 	handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion, source)
 	close(release)
 
-	require.NoError(t, <-retryCtxErr, "the wait's return must not cancel the retry")
+	select {
+	case err := <-retryCtxErr:
+		require.NoError(t, err, "the wait's return must not cancel the retry")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the retry did not finish")
+	}
 }
