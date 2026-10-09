@@ -44,7 +44,7 @@ func TestPutCommitmentBranchesMatchesPerRecordPuts(t *testing.T) {
 		case 1:
 			next = append(next, commitment.BranchDelta{Key: d.Key, Data: d.Data, Prev: d.Data})
 		case 2:
-			next = append(next, commitment.BranchDelta{Key: d.Key, Data: append(bytes.Clone(d.Data), 7), Prev: nil})
+			next = append(next, commitment.BranchDelta{Key: d.Key, Data: append(bytes.Clone(d.Data), 7), Prev: d.Data})
 		default:
 			next = append(next, commitment.BranchDelta{Key: d.Key, Data: []byte{byte(i)}, Prev: d.Data})
 		}
