@@ -264,6 +264,7 @@ type SharedDomains struct {
 	cacheApplier     cache.Applier
 	cacheUnwind      cacheUnwindState
 	localCacheUnwind bool
+	commitmentV3     bool
 
 	// Backing frontiers stay fixed while writes and staged unwinds remain in
 	// mem; both reach the transaction during flush, which resets the memo.
@@ -359,6 +360,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		baseTxWritable:   baseTxWritable,
 		baseStateVersion: stateVersion,
 		localCacheUnwind: o.localCacheUnwind,
+		commitmentV3:     trieCfg.Variant == commitment.VariantCommitmentV3,
 	}
 
 	if o.mem != nil {
@@ -1515,7 +1517,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache && !sd.hasLocalCacheUnwind() {
 		getOpts = getOpts.WithBranchCache()
 	}
-	if domain == kv.CommitmentDomain {
+	if domain == kv.CommitmentDomain && (sd.commitmentV3 || getOpts.BranchCache() && maxStep == kv.NoStepBound) {
 		getOpts = getOpts.WithOwned()
 	}
 	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
