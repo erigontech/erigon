@@ -429,7 +429,7 @@ func TestExecutionPayloadServiceDoesNotEmitGossipWhenValidationFails(t *testing.
 
 	blockRoot := common.Hash{1}
 	forkchoiceMock.Blocks[blockRoot] = newTestGloasBlock(100, 7)
-	forkchoiceMock.OnExecutionPayloadErr = errors.New("invalid envelope signature")
+	forkchoiceMock.OnExecutionPayloadErr = fmt.Errorf("%w: invalid envelope signature", forkchoice.ErrInvalidExecutionPayloadEnvelope)
 
 	require.Error(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 7)))
 	select {
@@ -907,7 +907,7 @@ func TestExecutionPayloadServiceRejectsKnownFinalizedBlockWithForgedEnvelopeSlot
 		require.Same(t, envelope, got)
 		require.True(t, checkBlobData)
 		require.True(t, validatePayload)
-		return errors.New("block slot 63 != envelope.payload.slot_number 100")
+		return fmt.Errorf("%w: block slot 63 != envelope.payload.slot_number 100", forkchoice.ErrInvalidExecutionPayloadEnvelope)
 	}
 
 	err := service.ProcessMessage(t.Context(), nil, envelope)
@@ -1017,6 +1017,29 @@ func TestExecutionPayloadServiceIgnoresLocalCancellation(t *testing.T) {
 			require.ErrorIs(t, err, ErrIgnore)
 		})
 	}
+}
+
+func TestExecutionPayloadServiceIgnoresLocalProcessingFailure(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	fcu.OnExecutionPayloadErr = errors.New("engine unavailable")
+
+	err := service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 1))
+
+	require.ErrorIs(t, err, ErrIgnore)
+}
+
+func TestExecutionPayloadServiceRejectsInvalidEnvelopeProcessingFailure(t *testing.T) {
+	service, fcu := setupExecutionPayloadService(t)
+	blockRoot := common.HexToHash("0x1234")
+	fcu.Blocks[blockRoot] = newTestGloasBlock(100, 1)
+	fcu.OnExecutionPayloadErr = fmt.Errorf("%w: invalid envelope signature", forkchoice.ErrInvalidExecutionPayloadEnvelope)
+
+	err := service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 1))
+
+	require.ErrorIs(t, err, forkchoice.ErrInvalidExecutionPayloadEnvelope)
+	require.NotErrorIs(t, err, ErrIgnore)
 }
 
 func TestExecutionPayloadServiceAcceptsValidatedEnvelopeWithIndicesPending(t *testing.T) {

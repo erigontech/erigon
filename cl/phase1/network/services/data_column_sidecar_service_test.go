@@ -85,7 +85,9 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 	t.beaconConfig = &clparams.BeaconChainConfig{
 		SlotsPerEpoch:           testSlotsPerEpoch,
 		NumberOfColumns:         4,
-		ElectraForkEpoch:        100000,
+		ElectraForkEpoch:        0,
+		FuluForkEpoch:           0,
+		GloasForkEpoch:          100000,
 		MaxBlobsPerBlockElectra: 9,
 	}
 
@@ -122,19 +124,18 @@ func (t *dataColumnSidecarTestSuite) activateGloas() {
 	t.beaconConfig.GloasForkEpoch = testEpoch
 }
 
-func createMockDataColumnSidecar(slot uint64, index uint64) *cltypes.DataColumnSidecar {
+func createMockDataColumnSidecar(slot uint64, index uint64, version clparams.StateVersion) *cltypes.DataColumnSidecar {
 	// Create a minimal but valid data column sidecar
-	sidecar := &cltypes.DataColumnSidecar{
-		Index: index,
-		SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{
-			Header: &cltypes.BeaconBlockHeader{
-				Slot:          slot,
-				ParentRoot:    testParentRoot,
-				ProposerIndex: 1,
-				BodyRoot:      common.Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-			},
-			Signature: [96]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95},
+	sidecar := cltypes.NewDataColumnSidecarWithVersion(version)
+	sidecar.Index = index
+	sidecar.SignedBlockHeader = &cltypes.SignedBeaconBlockHeader{
+		Header: &cltypes.BeaconBlockHeader{
+			Slot:          slot,
+			ParentRoot:    testParentRoot,
+			ProposerIndex: 1,
+			BodyRoot:      common.Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
 		},
+		Signature: [96]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95},
 	}
 
 	// Initialize the sidecar with proper data structures manually
@@ -173,7 +174,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSyncing_ReturnsErrIg
 	t.mockSyncedData.EXPECT().Syncing().Return(true)
 
 	// Execute
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
@@ -182,6 +183,26 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSyncing_ReturnsErrIg
 
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_IgnoresPreGloasSchemaAtGloasSlotBeforeStorage() {
 	t.activateGloas()
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
+	t.False(t.beaconConfig.ForkSchemaMatchesSlot(sidecar.SignedBlockHeader.Header.Slot, sidecar.Version()))
+
+	t.assertProcessMessageIgnoredBeforeStorage(sidecar)
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_IgnoresExactForkVersionMismatchBeforeStorage() {
+	t.beaconConfig.ElectraForkEpoch = 0
+	t.beaconConfig.FuluForkEpoch = 0
+	t.beaconConfig.GloasForkEpoch = testEpoch + 1
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.ElectraVersion)
+	t.Equal(clparams.FuluVersion, t.beaconConfig.GetCurrentStateVersion(testEpoch))
+	t.Equal(clparams.ElectraVersion, sidecar.Version())
+	t.True(t.beaconConfig.ForkSchemaMatchesSlot(sidecar.SignedBlockHeader.Header.Slot, sidecar.Version()))
+
+	t.assertProcessMessageIgnoredBeforeStorage(sidecar)
+}
+
+func (t *dataColumnSidecarTestSuite) assertProcessMessageIgnoredBeforeStorage(sidecar *cltypes.DataColumnSidecar) {
+	t.T().Helper()
 	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
 	verifyDataColumnSidecarInclusionProof = t.mockFuncs.VerifyDataColumnSidecarInclusionProof
 	verifyDataColumnSidecarKZGProofs = t.mockFuncs.VerifyDataColumnSidecarKZGProofs
@@ -196,9 +217,6 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_IgnoresPreGloasSchemaAtG
 	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
-
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
-	t.False(t.beaconConfig.ForkSchemaMatchesSlot(sidecar.SignedBlockHeader.Header.Slot, sidecar.Version()))
 
 	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, sidecar)
 
@@ -234,7 +252,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAlreadySeen_ReturnsE
 	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 
 	// First call should succeed
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 	t.NoError(err)
 
@@ -253,7 +271,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidDataColumnSid
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(false).AnyTimes()
 
 	// Execute
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
@@ -269,7 +287,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenIncorrectSubnet_Retu
 	t.mockSyncedData.EXPECT().Syncing().Return(false)
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(true)
 
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), &incorrectSubnet, sidecar)
 
 	t.Error(err)
@@ -288,7 +306,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenFutureSlot_ReturnsEr
 	t.mockEthClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(testSlot + 100).Return(false)
 
 	// Execute
-	sidecar := createMockDataColumnSidecar(testSlot+100, 0)
+	sidecar := createMockDataColumnSidecar(testSlot+100, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
@@ -321,7 +339,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotTooOld_ReturnsEr
 	//t.mockForkChoice.Ancestors[(testSlot+100)/32*32] = [32]byte{1}
 
 	// Execute
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
@@ -358,7 +376,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidInclusionProo
 	}).Return(nil)
 
 	// Execute
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
@@ -398,7 +416,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenInvalidKZGProofs_Ret
 	}).Return(nil)
 
 	// Execute
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
@@ -432,7 +450,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenValidSidecar_StoresS
 
 	t.mockPeerDas.EXPECT().TryScheduleRecover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	// Execute
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
@@ -464,12 +482,27 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenStorageFails_Returns
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage error"))
 
 	// Execute
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// Assert
 	t.Error(err)
+	t.ErrorIs(err, ErrIgnore)
 	t.Contains(err.Error(), "failed to write data column sidecar")
+}
+
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenCustodyLookupFails_ReturnsErrIgnore() {
+	peerDas := das_mock.NewMockPeerDas(t.gomockCtrl)
+	stateReader := das_state_mock.NewMockPeerDasStateReader(t.gomockCtrl)
+	t.mockForkChoice.MockPeerDas = peerDas
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	peerDas.EXPECT().IsArchivedMode().Return(false)
+	peerDas.EXPECT().StateReader().Return(stateReader)
+	stateReader.EXPECT().GetMyCustodyColumns().Return(nil, errors.New("custody unavailable"))
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion))
+
+	t.ErrorIs(err, ErrIgnore)
 }
 
 // ============================================
@@ -921,5 +954,22 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenStorageFails_Re
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	t.Error(err)
+	t.ErrorIs(err, ErrIgnore)
 	t.Contains(err.Error(), "failed to write data column sidecar")
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenCustodyLookupFails_ReturnsErrIgnore() {
+	t.activateGloas()
+	peerDas := das_mock.NewMockPeerDas(t.gomockCtrl)
+	stateReader := das_state_mock.NewMockPeerDasStateReader(t.gomockCtrl)
+	t.mockForkChoice.MockPeerDas = peerDas
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot)
+	peerDas.EXPECT().IsArchivedMode().Return(false)
+	peerDas.EXPECT().StateReader().Return(stateReader)
+	stateReader.EXPECT().GetMyCustodyColumns().Return(nil, errors.New("custody unavailable"))
+
+	err := t.dataColumnSidecarService.ProcessMessage(t.T().Context(), nil, createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot))
+
+	t.ErrorIs(err, ErrIgnore)
 }

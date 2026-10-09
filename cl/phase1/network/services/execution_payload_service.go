@@ -69,7 +69,10 @@ const (
 	maxPendingEnvelopeBytes            = 4 * clparams.MaxChunkSize
 )
 
-var errEnvelopeBlockUnavailable = errors.New("execution payload envelope block unavailable")
+var (
+	errEnvelopeBlockUnavailable         = errors.New("execution payload envelope block unavailable")
+	errExecutionPayloadProcessingFailed = errors.New("failed to process execution payload")
+)
 
 type executionPayloadService struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
@@ -182,7 +185,8 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		receivedAt = s.now()
 	}
 	err := s.processMessage(ctx, signedEnvelope, receivedAt, nil)
-	if errors.Is(err, errEnvelopeBlockUnavailable) || errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
+	if errors.Is(err, errEnvelopeBlockUnavailable) || errors.Is(err, errExecutionPayloadProcessingFailed) ||
+		errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
 		errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeAdmissionBusy) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
@@ -321,7 +325,10 @@ func (s *executionPayloadService) processMessage(
 		}
 		if !errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) &&
 			!errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
-			return fmt.Errorf("failed to process execution payload: %w", err)
+			if errors.Is(err, forkchoice.ErrInvalidExecutionPayloadEnvelope) {
+				return fmt.Errorf("failed to process execution payload: %w", err)
+			}
+			return fmt.Errorf("%w: %w", errExecutionPayloadProcessingFailed, err)
 		}
 	}
 	finalizedSlot = s.forkchoiceStore.FinalizedCheckpoint().Epoch * s.beaconCfg.SlotsPerEpoch
