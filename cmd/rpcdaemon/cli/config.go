@@ -710,8 +710,15 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	httpHandler := node.NewHTTPHandlerStack(srv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, cfg.HttpCompression, rpcConcurrencyLimit, true)
 	var wsHandler http.Handler
 	if cfg.WebsocketEnabled {
+		// With a CORS list, NewWSOriginHandler checks origins; the handshake validator only keeps
+		// its localhost default for an empty list.
+		wsOrigins := cfg.HttpCORSDomain
+		if len(wsOrigins) > 0 {
+			wsOrigins = []string{"*"}
+		}
 		wsHandler = node.NewWSConnectionLimiter(int64(cfg.WsMaxConnections),
-			srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression, logger))
+			node.NewWSOriginHandler(cfg.HttpCORSDomain,
+				srv.WebsocketHandler(wsOrigins, nil, cfg.WebsocketCompression, logger)))
 	}
 	graphQLHandler := node.NewHTTPHandlerStack(graphql.CreateHandler(defaultAPIList), cfg.HttpCORSDomain, cfg.HttpVirtualHost, false, 0, false)
 	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
