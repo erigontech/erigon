@@ -413,23 +413,26 @@ func (a *wsConnAdapter) encode(v any) error {
 
 // readFrame returns the next message. Every websocket frame is one message, so
 // it can be read in one go and checked once. On the server a message is charged to
-// the ingress budget while it is read; one that does not fit closes the connection.
-func (a *wsConnAdapter) readFrame() ([]byte, error) {
+// the ingress budget until its handler is done; one that does not fit closes the connection.
+func (a *wsConnAdapter) readFrame() ([]byte, func(), error) {
 	if a.budget == nil {
 		_, data, err := a.conn.Read(context.Background())
-		return data, err
+		return data, nil, err
 	}
 	_, r, err := a.conn.Reader(context.Background())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	body, _ := a.budget.admit(r, -1)
-	defer body.release()
 	data, err := readAllBody(body, 0)
-	if errors.Is(err, errServerOverloaded) {
-		_ = a.conn.Close(websocket.StatusTryAgainLater, ErrMsgServerOverloaded)
+	if err != nil {
+		body.release()
+		if errors.Is(err, errServerOverloaded) {
+			_ = a.conn.Close(websocket.StatusTryAgainLater, ErrMsgServerOverloaded)
+		}
+		return nil, nil, err
 	}
-	return data, err
+	return data, body.release, nil
 }
 
 type websocketCodec struct {

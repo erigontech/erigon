@@ -83,6 +83,8 @@ func (hc *httpConn) ReadBatch() ([]*jsonrpcMessage, bool, error) {
 	return nil, false, io.EOF
 }
 
+func (hc *httpConn) takeRelease() func() { return nil }
+
 func (hc *httpConn) Close() {
 	hc.closeOnce.Do(func() { close(hc.closeCh) })
 }
@@ -226,21 +228,22 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) S
 		conn.Reader = io.LimitReader(body, maxRequestContentLength)
 	}
 	// The body holds one message, so it can be read in one go and checked once.
-	readFrame := func() ([]byte, error) {
+	// ServeHTTP holds the body's budget charge for the whole request.
+	readFrame := func() ([]byte, func(), error) {
 		hint := 0
 		if r.ContentLength > 0 {
 			hint = int(r.ContentLength)
 		}
 		frame, err := readAllBody(conn, hint)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if skipJSONSpace(frame, 0) == len(frame) {
 			// An empty body carries no message, which is not an error. The decoder
 			// used to report this as EOF and callers rely on that.
-			return nil, io.EOF
+			return nil, nil, io.EOF
 		}
-		return frame, nil
+		return frame, nil, nil
 	}
 	return newFuncCodec(conn, newJSONEncoder(conn), nil, readFrame)
 }

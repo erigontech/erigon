@@ -247,8 +247,10 @@ type jsonCodec struct {
 	decode  func(v any) error // decoder to allow multiple transports
 	// readFrame is set only by transports that delimit messages themselves. Each
 	// call must return bytes it does not reuse: parsed messages point into them
-	// and are handled asynchronously, so they outlive the call that read them.
-	readFrame    func() ([]byte, error)
+	// and are handled asynchronously, so they outlive the call that read them. A
+	// frame that holds resources comes with what releases them, nil otherwise.
+	readFrame    func() ([]byte, func(), error)
+	release      func()            // releases the last frame read, until taken
 	encMu        sync.Mutex        // guards the encoder
 	encode       func(v any) error // encoder to allow multiple transports
 	conn         deadlineCloser
@@ -260,7 +262,7 @@ type jsonCodec struct {
 // implements ConnRemoteAddr, log messages include the remote address. decode must reject
 // invalid JSON, reading a message relies on it. A transport with a frame reader never calls
 // decode, so it may be nil.
-func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, error)) *jsonCodec {
+func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, func(), error)) *jsonCodec {
 	codec := &jsonCodec{
 		closeCh:      make(chan any),
 		encode:       encode,
@@ -337,6 +339,7 @@ func (c *jsonCodec) ReadBatch() (messages []*jsonrpcMessage, batch bool, err err
 	}
 	messages, batch, err = parseMessage(rawmsg)
 	if err != nil {
+		c.releaseFrame()
 		return nil, false, err
 	}
 	for i, msg := range messages {
@@ -361,11 +364,13 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 	}
 	// The transport delimits the message, so one read and one check will do.
 	// Decoding into a json.RawMessage would scan twice and copy.
-	frame, err := c.readFrame()
+	frame, release, err := c.readFrame()
 	if err != nil {
 		return nil, err
 	}
+	c.release = release
 	if !validJSON(frame) {
+		c.releaseFrame()
 		// Decode the broken message to report where it went wrong. validJSON
 		// only ever accepts more than Unmarshal, so it fails here too. The
 		// fallback only guards against the two ever disagreeing.
@@ -376,6 +381,18 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 		return nil, errors.New("invalid JSON request")
 	}
 	return frame, nil
+}
+
+func (c *jsonCodec) takeRelease() func() {
+	release := c.release
+	c.release = nil
+	return release
+}
+
+func (c *jsonCodec) releaseFrame() {
+	if release := c.takeRelease(); release != nil {
+		release()
+	}
 }
 
 func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {

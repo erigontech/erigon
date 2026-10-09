@@ -143,10 +143,11 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 			h.close(err, nil)
 			return
 		}
+		release := codec.takeRelease()
 		if batch {
-			h.handleBatch(msgs)
+			h.handleBatch(msgs, release)
 		} else {
-			h.handleMsg(msgs[0], nil)
+			h.handleMsg(msgs[0], nil, release)
 		}
 	}
 }
@@ -182,9 +183,9 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		return errorMessage(&invalidMessageError{"parse error"})
 	}
 	if batch {
-		h.handleBatch(reqs)
+		h.handleBatch(reqs, nil)
 	} else {
-		h.handleMsg(reqs[0], stream)
+		h.handleMsg(reqs[0], stream, nil)
 	}
 	return nil
 }

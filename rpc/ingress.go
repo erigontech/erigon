@@ -17,6 +17,7 @@
 package rpc
 
 import (
+	"errors"
 	"io"
 	"sync/atomic"
 
@@ -89,6 +90,11 @@ func (r *budgetedReader) Read(p []byte) (int, error) {
 			return n, errServerOverloaded
 		}
 		r.charged, r.pending = r.pending, 0
+	}
+	if errors.Is(err, io.EOF) && r.charged > r.read {
+		// The body is complete, so a charge at the cap settles to the body's size.
+		r.budget.release(r.charged - r.read)
+		r.charged = r.read
 	}
 	return n, err
 }

@@ -919,5 +919,47 @@ func TestWebsocketMessageBudget(t *testing.T) {
 	resp, err = call(int(smallBodyLimit) + 1)
 	require.NoError(t, err)
 	require.Contains(t, resp, `"result"`)
-	require.Zero(t, srv.ingress.used.Load())
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() == 0 }, 5*time.Second, time.Millisecond)
+}
+
+// holdService keeps a call running until the test releases it.
+type holdService struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *holdService) Hold(string) {
+	close(s.started)
+	<-s.release
+}
+
+// TestWebsocketMessageBudgetHeldUntilServed pins that a large message stays charged, at its
+// own size, while its call runs, and is released once the call is done.
+func TestWebsocketMessageBudgetHeldUntilServed(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	hold := &holdService{started: make(chan struct{}), release: make(chan struct{})}
+	require.NoError(t, srv.RegisterName("hold", hold))
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	msg := `{"jsonrpc":"2.0","id":1,"method":"hold_hold","params":["` + strings.Repeat("x", int(smallBodyLimit)) + `"]}`
+	require.NoError(t, conn.Write(t.Context(), websocket.MessageText, []byte(msg)))
+
+	<-hold.started
+	require.Equal(t, int64(len(msg)), srv.ingress.used.Load())
+
+	close(hold.release)
+	_, _, err = conn.Read(t.Context())
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return srv.ingress.used.Load() == 0 }, 5*time.Second, time.Millisecond)
 }
