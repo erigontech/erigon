@@ -44,7 +44,9 @@ func TestDeferredColumnSyncDue(t *testing.T) {
 	require.True(t, deferredColumnSyncDue(slotStart.Add(time.Minute), slotStart, slotStart, delay))
 }
 
-func TestDeferredColumnSyncQueueGrowsTheBackoffUpToAnEpoch(t *testing.T) {
+// The backoff grows by a slot per failed round; once it would reach an epoch the root is given
+// up, which also releases a block that was orphaned and is never served.
+func TestDeferredColumnSyncQueueGivesUpOnceTheBackoffReachesAnEpoch(t *testing.T) {
 	const slotsPerEpoch = 8
 	queue := newDeferredColumnSyncQueue()
 	root := common.Hash{1}
@@ -55,15 +57,13 @@ func TestDeferredColumnSyncQueueGrowsTheBackoffUpToAnEpoch(t *testing.T) {
 	queue.start([]common.Hash{root})
 	require.False(t, queue.ready(root, now.Add(time.Hour)), "a root in a round is not picked again")
 
-	for attempt := 1; attempt <= slotsPerEpoch+4; attempt++ {
-		queue.failed(root, now, slot, slotsPerEpoch)
-		wait := slot * time.Duration(min(attempt, slotsPerEpoch))
+	for attempt := 1; attempt < slotsPerEpoch; attempt++ {
+		require.False(t, queue.failed(root, now, slot, slotsPerEpoch), "attempt %d", attempt)
+		wait := slot * time.Duration(attempt)
 		require.False(t, queue.ready(root, now.Add(wait-time.Millisecond)), "attempt %d", attempt)
 		require.True(t, queue.ready(root, now.Add(wait)), "attempt %d", attempt)
 	}
-
-	queue.done(root)
-	require.True(t, queue.ready(root, now))
+	require.True(t, queue.failed(root, now, slot, slotsPerEpoch))
 }
 
 // A round that ends after its root was dropped must not bring the root back.
