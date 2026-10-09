@@ -161,3 +161,27 @@ func TestAwaitPendingParentPayloadLetsTheRetryOutliveTheWait(t *testing.T) {
 		t.Fatal("the retry did not finish")
 	}
 }
+
+func TestResolveProductionPayloadSourceWaitsOnlyForAParkedEnvelope(t *testing.T) {
+	for _, parked := range []bool{false, true} {
+		postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+		baseBlockRoot := common.Hash{0x41}
+		forkchoiceStore.HeadVal = baseBlockRoot
+		forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+		if parked {
+			forkchoiceStore.PendingEnvelopeRoots = map[common.Hash]struct{}{baseBlockRoot: {}}
+		}
+		postState.SetLatestBlockHash(common.Hash{0xa1})
+		postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: common.Hash{0xb2}, Slot: postState.Slot()})
+		clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+		clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Hour)).AnyTimes()
+		handler.ethClock = clock
+		var retries atomic.Int32
+		forkchoiceStore.RetryPendingEnvelopeFunc = func(context.Context, common.Hash) { retries.Add(1) }
+
+		source, err := handler.resolveProductionPayloadSource(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion)
+		require.NoError(t, err)
+		require.Equal(t, parked, source.envelopeParked)
+		require.Equal(t, parked, retries.Load() > 0, "parked=%v", parked)
+	}
+}

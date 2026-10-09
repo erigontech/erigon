@@ -1662,12 +1662,9 @@ func (a *ApiHandler) produceBeaconBody(
 	beaconBody.Graffiti = graffiti
 	beaconBody.Version = stateVersion
 
-	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+	payloadSource, err := a.resolveProductionPayloadSource(ctx, baseState, baseBlockRoot, targetSlot, stateVersion)
 	if err != nil {
 		return nil, nil, err
-	}
-	if payloadSource.envelopeParked {
-		payloadSource = a.awaitPendingParentPayload(ctx, baseState, baseBlockRoot, targetSlot, stateVersion, payloadSource)
 	}
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		switch payloadSource.gloasPath {

@@ -1161,6 +1161,38 @@ func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 	}
 }
 
+func newAnchorForkChoiceStore(t *testing.T, cfg *clparams.BeaconChainConfig, st *state2.CachingBeaconState) *forkchoice.ForkChoiceStore {
+	t.Helper()
+	forkGraph, err := fork_graph.NewForkGraphDisk(st, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	store, err := forkchoice.NewForkChoiceStore(nil, st, nil, pool.NewOperationsPool(cfg), forkGraph, beaconevents.NewEventEmitter(), nil, nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
+	require.NoError(t, err)
+	return store
+}
+
+// interruptingEngine cancels the caller's context inside NewPayload, as a budget expiry would.
+func interruptingEngine(cancel context.CancelFunc) *testExecutionEngine {
+	return &testExecutionEngine{newPayloadFn: func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		cancel()
+		return execution_client.PayloadStatusNone, ctx.Err()
+	}}
+}
+
+func TestValidateAnchorPayloadRecordsNoVerdictWhenInterrupted(t *testing.T) {
+	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	anchorRoot, err := st.BlockRoot()
+	require.NoError(t, err)
+	store := newAnchorForkChoiceStore(t, cfg, st)
+	ctx, cancel := context.WithCancel(t.Context())
+	engine := interruptingEngine(cancel)
+
+	require.NoError(t, validateAnchorPayloadWithExecutionClient(ctx, &Cfg{beaconCfg: cfg, forkChoice: store, executionClient: engine, gloasPayloadValidator: engine}, anchorRoot, bid, env))
+	require.Equal(t, 1, engine.newPayloadCalls)
+	_, recorded := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
+	require.False(t, recorded)
+}
+
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
