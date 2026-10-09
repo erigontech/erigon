@@ -602,17 +602,17 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 	}, 2*time.Second, time.Millisecond)
 }
 
-func TestReadWaitConn(t *testing.T) {
+func TestReadYieldConn(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
 	require.NoError(t, err)
 	defer ln.Close()
 	client, err := net.Dial("tcp", ln.Addr().String()) //nolint:noctx
 	require.NoError(t, err)
 	defer client.Close()
-	server, err := readWaitListener{ln}.Accept()
+	server, err := readYieldListener{ln}.Accept()
 	require.NoError(t, err)
 	defer server.Close()
-	require.IsType(t, &readWaitConn{}, server)
+	require.IsType(t, &readYieldConn{}, server)
 
 	buf := make([]byte, 16)
 	_, err = client.Write([]byte("abc"))
@@ -634,10 +634,44 @@ func TestReadWaitConn(t *testing.T) {
 	var netErr net.Error
 	require.ErrorAs(t, err, &netErr)
 	require.True(t, netErr.Timeout())
-	require.True(t, server.(*readWaitConn).drained, "a timeout reads nothing, so the next read must still wait for readiness")
 	require.NoError(t, server.SetReadDeadline(time.Time{}))
 
 	require.NoError(t, client.Close())
 	_, err = server.Read(buf)
 	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestReadYieldConnKeepAlive(t *testing.T) {
+	srv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_, _ = w.Write(body)
+	}))
+	require.NoError(t, err)
+	defer srv.Close()
+	client := &http.Client{Timeout: 2 * time.Second}
+	defer client.CloseIdleConnections()
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Go(func() {
+			for range 500 {
+				resp, err := client.Post("http://"+addr.String(), "application/json", strings.NewReader(`{"id":1}`))
+				if err != nil {
+					errs <- err
+					return
+				}
+				body, err := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if err != nil || string(body) != `{"id":1}` {
+					errs <- fmt.Errorf("body %q: %w", body, err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
 }
