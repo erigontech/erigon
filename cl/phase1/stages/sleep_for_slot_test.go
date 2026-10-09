@@ -115,7 +115,7 @@ func TestSleepForSlotGloasHeadChangeWakesEarlyAndTransitionsToForkChoice(t *test
 	require.Less(t, time.Since(started), 3*sleepForSlotHeadPollInterval)
 	require.Equal(t, 1, calls)
 	require.Empty(t, retryMinSlots, "a pending head change is materialized before envelope retries")
-	require.Equal(t, ForkChoice, sleepForSlotNextStage(t.Context(), headChanged, readySleepForSlotArgs()))
+	require.Equal(t, ForkChoice, sleepForSlotNextStage(headChanged, readySleepForSlotArgs()))
 }
 
 func TestSleepForSlotGloasEqualHeadsWaitsAndTransitionsToChainTipSync(t *testing.T) {
@@ -137,7 +137,7 @@ func TestSleepForSlotGloasEqualHeadsWaitsAndTransitionsToChainTipSync(t *testing
 	require.False(t, headChanged)
 	require.GreaterOrEqual(t, time.Since(started), wait-25*time.Millisecond)
 	require.Positive(t, calls)
-	require.Equal(t, ChainTipSync, sleepForSlotNextStage(t.Context(), headChanged, readySleepForSlotArgs()))
+	require.Equal(t, ChainTipSync, sleepForSlotNextStage(headChanged, readySleepForSlotArgs()))
 }
 
 func TestSleepForSlotGloasRetriesDataAvailableEnvelopesFromHeadOrPreviousSlot(t *testing.T) {
@@ -196,7 +196,7 @@ func TestSleepForSlotPreGloasHeadChangeWaitsAndTransitionsToChainTipSync(t *test
 	require.GreaterOrEqual(t, time.Since(started), wait-25*time.Millisecond)
 	require.Zero(t, calls)
 	require.Empty(t, retryMinSlots)
-	require.Equal(t, ChainTipSync, sleepForSlotNextStage(t.Context(), headChanged, readySleepForSlotArgs()))
+	require.Equal(t, ChainTipSync, sleepForSlotNextStage(headChanged, readySleepForSlotArgs()))
 }
 
 func TestSleepForSlotRewakesForSameHeadAfterInterval(t *testing.T) {
@@ -299,12 +299,12 @@ func TestSleepForSlotCatchingUpPrecedesHeadChange(t *testing.T) {
 	args.seenEpoch = 1
 	args.targetEpoch = 2
 
-	require.Equal(t, ForwardSync, sleepForSlotNextStage(t.Context(), true, args))
+	require.Equal(t, ForwardSync, sleepForSlotNextStage(true, args))
 }
 
-func sleepForSlotNextStage(ctx context.Context, headChanged bool, args Args) StageName {
+func sleepForSlotNextStage(headChanged bool, args Args) StageName {
 	cfg := &Cfg{sleepForSlotHeadChanged: headChanged}
-	return ConsensusClStages(ctx, cfg).Stages[SleepForSlot].TransitionFunc(cfg, args, nil)
+	return ConsensusClStages().Stages[SleepForSlot].TransitionFunc(cfg, args, nil)
 }
 
 func readySleepForSlotArgs() Args {

@@ -489,7 +489,7 @@ func (j gatedPublishedBlockJob) Wait(ctx context.Context) error {
 func TestBroadcastGloasBlockPublishesColumnsAfterLocalStore(t *testing.T) {
 	if clparams.GetBeaconConfig() == nil {
 		cfg := clparams.MainnetBeaconConfig
-		clparams.InitGlobalStaticConfig(&cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&cfg)
 	}
 	handler, published := newPublishingHandler(t, clparams.FuluVersion, nil)
 	handler.beaconChainCfg.GloasForkEpoch = 1
