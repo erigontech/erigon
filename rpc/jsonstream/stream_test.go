@@ -1320,6 +1320,81 @@ func TestWriteHexBytes(t *testing.T) {
 	}
 }
 
+// Large hex values and hex arrays stream through a buffer of about FlushThreshold when the stream
+// has a writer, and the bytes match encoding/json at every chunk boundary, with or without one.
+func TestLargeHexWritesInChunks(t *testing.T) {
+	blob := func(n int) []byte {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = byte(i * 7)
+		}
+		return b
+	}
+	hashes := func(n int) [][32]byte {
+		hs := make([][32]byte, n)
+		for i := range hs {
+			hs[i][0], hs[i][31] = byte(i), byte(i>>8)
+		}
+		return hs
+	}
+	type doc struct {
+		A      int             `json:"a"`
+		Blob   hexutil.Bytes   `json:"blob"`
+		Hashes []hexutil.Bytes `json:"hashes"` // [32]byte would marshal as numbers
+		Nodes  []hexutil.Bytes `json:"nodes"`
+		B      int             `json:"b"`
+	}
+	for _, size := range []int{0, 1, hexChunk - 1, hexChunk, hexChunk + 1, 5*hexChunk + 7, 128 << 10} {
+		for _, withWriter := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%d/writer=%v", size, withWriter), func(t *testing.T) {
+				hs := hashes(size / 64)
+				d := doc{A: 1, Blob: blob(size), Hashes: make([]hexutil.Bytes, len(hs)), B: 2}
+				for i := range hs {
+					d.Hashes[i] = hs[i][:]
+				}
+				if size > 0 { // one element as large as the blob, then small ones
+					d.Nodes = append(d.Nodes, blob(size))
+				}
+				for i := 0; i < size/512; i++ {
+					d.Nodes = append(d.Nodes, blob(300+i))
+				}
+				want, err := json.Marshal(d)
+				require.NoError(t, err)
+
+				var out bytes.Buffer
+				var s *Stream
+				if withWriter {
+					s = newStream(&out, InitialBufferSize)
+				} else {
+					s = newStream(nil, InitialBufferSize)
+				}
+				s.WriteObjectStart()
+				s.Field("a")
+				s.Int(int64(d.A))
+				s.Field("blob")
+				s.WriteHex(d.Blob)
+				HexesField(s, "hashes", hs)
+				s.Field("nodes")
+				if d.Nodes == nil {
+					s.WriteNil()
+				} else {
+					WriteHexBytes(s, d.Nodes)
+				}
+				s.Field("b")
+				s.Int(int64(d.B))
+				s.WriteObjectEnd()
+				require.NoError(t, s.Flush())
+				got := s.Buffer()
+				if withWriter {
+					got = out.Bytes()
+					require.Less(t, cap(s.Buffer()), 3*FlushThreshold, "a large value must not grow the buffer to its own size")
+				}
+				require.Equal(t, string(want), string(got))
+			})
+		}
+	}
+}
+
 // RewindField takes back a field name only while no value has followed it and the name is still
 // in the buffer; anything else must stay, so the caller closes it instead.
 func TestRewindField(t *testing.T) {
