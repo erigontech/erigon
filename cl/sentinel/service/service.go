@@ -88,13 +88,15 @@ func (s *SentinelServer) closePeer(pid peer.ID) {
 func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelproto.Peer) (*sentinelproto.EmptyMessage, error) {
 	active, _, _ := s.sentinel.GetPeersCount()
 	if active < gracePeerCount {
+		s.logger.Debug("[Sentinel] Skipping peer ban", "peer", p.GetPid(), "active", active)
 		return &sentinelproto.EmptyMessage{}, nil
 	}
 
 	var pid peer.ID
-	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {
+	if err := pid.UnmarshalText([]byte(p.GetPid())); err != nil {
 		return nil, err
 	}
+	s.logger.Debug("[Sentinel] Banning peer", "peer", pid)
 	s.sentinel.Peers().SetBanStatus(pid, true)
 	s.sentinel.Host().Peerstore().RemovePeer(pid)
 	s.closePeer(pid)
