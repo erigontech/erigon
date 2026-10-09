@@ -2081,7 +2081,9 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 			return changes, err
 		}
 		if !sd.disableInlineTouchKey {
-			sd.GetCommitmentContext().TouchKey(d, string(k), nil)
+			if err := sd.GetCommitmentContext().TouchChangedKey(tx, d, k); err != nil {
+				return changes, err
+			}
 		}
 		changes++
 	}

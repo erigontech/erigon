@@ -335,6 +335,14 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	}
 }
 
+func (sdc *SharedDomainsCommitmentContext) TouchChangedKey(tx kv.TemporalTx, d kv.Domain, plainKey []byte) error {
+	if sdc.updates.Mode() != commitment.ModeCollect {
+		sdc.TouchKey(d, string(plainKey), nil)
+		return nil
+	}
+	return sdc.TouchKeyFromState(tx, plainKey)
+}
+
 func (sdc *SharedDomainsCommitmentContext) TouchKeyFromState(tx kv.TemporalTx, plainKey []byte) error {
 	d := kv.AccountsDomain
 	switch len(plainKey) {

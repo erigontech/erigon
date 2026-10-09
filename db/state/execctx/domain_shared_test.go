@@ -2010,3 +2010,51 @@ func TestSeekCommitmentV3RejectsLegacyCommitmentState(t *testing.T) {
 	_, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.ErrorContains(t, err, "legacy commitment")
 }
+
+func TestTouchChangedKeysFromHistoryRestoresTheStoredRoot(t *testing.T) {
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
+			schema, enabled := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+			t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = schema, enabled })
+			if v3 {
+				statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+				statecfg.ExperimentalCommitmentV3 = true
+			}
+			ctx := t.Context()
+			db1 := newTestDb(t, 1)
+			rw, err := db1.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			t.Cleanup(rw.Rollback)
+			sd1, err := execctx.NewSharedDomains(ctx, rw, log.New())
+			require.NoError(t, err)
+			t.Cleanup(sd1.Close)
+			for i, a := range []common.Address{common.HexToAddress("0x01"), common.HexToAddress("0x8000000000000000000000000000000000000002")} {
+				acc := accounts.NewAccount()
+				acc.Balance = *uint256.NewInt(uint64(i + 1))
+				require.NoError(t, sd1.DomainPut(kv.AccountsDomain, rw, a[:], accounts.SerialiseV3(&acc), uint64(i+1), nil))
+			}
+			want, err := sd1.ComputeCommitment(ctx, rw, true, 1, 2, "", nil)
+			require.NoError(t, err)
+			require.NotEqual(t, empty.RootHash[:], want)
+			require.NoError(t, sd1.Flush(ctx, rw))
+			require.NoError(t, rw.Commit())
+
+			ro, err := db1.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			t.Cleanup(ro.Rollback)
+			ro2, err := newTestDb(t, 1).BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			t.Cleanup(ro2.Rollback)
+			sd2, err := execctx.NewSharedDomains(ctx, ro2, log.New())
+			require.NoError(t, err)
+			t.Cleanup(sd2.Close)
+			sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewLatestStateReader(ro, sd1, commitmentdb.LatestStateReaderOptions{}))
+			n, _, err := sd2.TouchChangedKeysFromHistory(ro, 0, 3)
+			require.NoError(t, err)
+			require.Equal(t, 2, n)
+			got, err := sd2.ComputeCommitment(ctx, ro2, false, 1, 2, "", nil)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+}
