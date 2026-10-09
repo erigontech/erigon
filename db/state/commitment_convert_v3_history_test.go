@@ -247,3 +247,27 @@ func TestConvertCommitmentFiles_V3History(t *testing.T) {
 	}
 	require.Greater(t, checked, 90)
 }
+
+func TestRestoreCommitmentFiles_V3RestoresHistory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 32)
+	dirs := agg.Dirs()
+	legacyHistory, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+	require.NotEmpty(t, legacyHistory)
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+	agg.CloseFilesNoReopen()
+	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), dirs, log.New()))
+
+	history, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+	require.ElementsMatch(t, legacyHistory, history)
+	domain, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "*-commitment.*.kv"))
+	require.NoError(t, err)
+	for _, p := range domain {
+		require.Falsef(t, strings.HasPrefix(filepath.Base(p), "v3.0-"), "%s left after restore", filepath.Base(p))
+	}
+}

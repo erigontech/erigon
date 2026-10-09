@@ -822,13 +822,27 @@ const restoreManifestTmpName = ".restore_manifest.tmp"
 // when the on-disk state is broken enough that the aggregator can't open it —
 // which is exactly when restore is most needed.
 func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
-	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
-	snapDomain := dirs.SnapDomain
+	backupRoot := filepath.Join(dirs.Snap, "backup")
+	if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, "domains"), dirs.SnapDomain, true, logger); err != nil {
+		return err
+	}
+	for _, pair := range [][2]string{{"history", dirs.SnapHistory}, {"idx", dirs.SnapIdx}, {"accessor", dirs.SnapAccessors}} {
+		if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, pair[0]), pair[1], false, logger); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func restoreCommitmentBackup(ctx context.Context, backupDir, liveDir string, required bool, logger log.Logger) error {
 	manifestPath := filepath.Join(backupDir, restoreManifestName)
 
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			if !required {
+				return nil
+			}
 			return fmt.Errorf("[commitment_convert] no backup to restore from at %s", backupDir)
 		}
 		return fmt.Errorf("[commitment_convert] restore: read backup dir %s: %w", backupDir, err)
@@ -844,6 +858,9 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 			return err
 		}
 		if len(manifest) == 0 {
+			if !required {
+				return dir.RemoveFile(backupDir)
+			}
 			return fmt.Errorf("[commitment_convert] no backup to restore from at %s (empty)", backupDir)
 		}
 		if wErr := writeRestoreManifestAtomic(manifestPath, manifest); wErr != nil {
@@ -874,7 +891,7 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
-		pattern := filepath.Join(snapDomain, fmt.Sprintf("*-commitment.%s-%s.*", r.from, r.to))
+		pattern := filepath.Join(liveDir, fmt.Sprintf("*-commitment.%s-%s.*", r.from, r.to))
 		matches, globErr := filepath.Glob(pattern)
 		if globErr != nil {
 			return fmt.Errorf("[commitment_convert] restore: glob %s: %w", pattern, globErr)
@@ -896,7 +913,7 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 			return ctxErr
 		}
 		src := filepath.Join(backupDir, name)
-		dst := filepath.Join(snapDomain, name)
+		dst := filepath.Join(liveDir, name)
 		if _, statErr := os.Stat(src); statErr != nil {
 			if !errors.Is(statErr, os.ErrNotExist) {
 				return fmt.Errorf("[commitment_convert] restore: stat backup %s: %w", src, statErr)
@@ -937,7 +954,7 @@ func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.L
 	cleanupParentIfEmpty(filepath.Dir(backupDir), logger)
 
 	logger.Info(fmt.Sprintf("[commitment_convert] restore complete: %d files at %s (%d moved this run, %d already in place, swept %d orphans); restart erigon",
-		len(manifest), snapDomain, movedThisRun, alreadyInPlace, swept))
+		len(manifest), liveDir, movedThisRun, alreadyInPlace, swept))
 	return nil
 }
 
