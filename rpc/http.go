@@ -36,7 +36,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/golang-jwt/jwt/v4"
 
 	"github.com/erigontech/erigon/common"
@@ -47,12 +46,8 @@ import (
 
 const (
 	maxRequestContentLength = 1024 * 1024 * 32 // 32MB
-	// maxBodySizeHint bounds the buffer sized from Content-Length, so a request
-	// that declares a large body and sends none cannot make the server allocate
-	// it up front. A body above this just grows into.
-	maxBodySizeHint = int64(1 * datasize.MB)
-	contentType     = "application/json"
-	jwtTokenExpiry  = 60 * time.Second
+	contentType             = "application/json"
+	jwtTokenExpiry          = 60 * time.Second
 )
 
 // https://www.jsonrpc.org/historical/json-rpc-over-http.html#id13
@@ -201,7 +196,7 @@ type httpServerConn struct {
 	r *http.Request
 }
 
-func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
+func newHTTPServerConn(r *http.Request, w http.ResponseWriter, body io.Reader) ServerCodec {
 	conn := &httpServerConn{Writer: w, r: r}
 	// if the request is a GET request, and the body is empty, we turn the request into fake json rpc request, see below
 	// https://www.jsonrpc.org/historical/json-rpc-over-http.html#encoded-parameters
@@ -228,13 +223,13 @@ func newHTTPServerConn(r *http.Request, w http.ResponseWriter) ServerCodec {
 		conn.Reader = buf
 	} else {
 		// it's a post request or whatever, so just process it like normal
-		conn.Reader = io.LimitReader(r.Body, maxRequestContentLength)
+		conn.Reader = io.LimitReader(body, maxRequestContentLength)
 	}
 	// The body holds one message, so it can be read in one go and checked once.
 	readFrame := func() ([]byte, error) {
 		hint := 0
 		if r.ContentLength > 0 {
-			hint = int(min(r.ContentLength, maxBodySizeHint))
+			hint = int(r.ContentLength)
 		}
 		frame, err := readAllBody(conn, hint)
 		if err != nil {
@@ -301,7 +296,7 @@ func SetOverloadedFlag(ctx context.Context) {
 // overloadedBody is precomputed; id is null because the request has not been parsed yet.
 var overloadedBody = []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32005,"message":"` + ErrMsgServerOverloaded + `"}}` + "\n")
 
-// WriteOverloadedResponse writes HTTP 503 + JSON-RPC -32005 for the outer admission gate.
+// WriteOverloadedResponse writes HTTP 503 + JSON-RPC -32005 for a request refused before it is read.
 func WriteOverloadedResponse(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Retry-After", "1")
@@ -326,6 +321,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
+
+	body, ok := s.ingress.admit(r.Body, r.ContentLength)
+	if !ok {
+		WriteOverloadedResponse(w)
+		return
+	}
+	defer body.release()
 
 	// Create request-scoped context.
 	connInfo := PeerInfo{Transport: "http", RemoteAddr: r.RemoteAddr}
@@ -356,7 +358,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("content-type", contentType)
-	codec := newHTTPServerConn(r, w)
+	codec := newHTTPServerConn(r, w, body)
 	defer codec.Close()
 	var stream *jsonstream.Stream
 	var sent *sentWriter
@@ -368,7 +370,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	errorMsg := s.serveSingleRequest(ctx, codec, stream)
 	if errorMsg != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		if *overloaded {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusServiceUnavailable)
+		} else {
+			w.WriteHeader(http.StatusBadRequest)
+		}
 		if err := codec.WriteJSON(ctx, errorMsg); err != nil {
 			s.logger.Warn("rpc: response not delivered", "url", r.URL.String(), "err", err)
 		}

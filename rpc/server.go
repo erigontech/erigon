@@ -64,6 +64,7 @@ type Server struct {
 	batchLimit          int  // Maximum number of requests in a batch
 	logger              log.Logger
 	rpcSlowLogThreshold time.Duration
+	ingress             ingressBudget
 }
 
 // NewServer creates a new server instance with no registered handlers.
@@ -74,6 +75,7 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 	server := &Server{
 		services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold,
+		ingress: ingressBudget{limit: defaultIngressBudget},
 	}
 	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
@@ -170,10 +172,14 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 
 	reqs, batch, err := codec.ReadBatch()
 	if err != nil {
-		if !errors.Is(err, io.EOF) {
-			return errorMessage(&invalidMessageError{"parse error"})
+		switch {
+		case errors.Is(err, io.EOF):
+			return nil
+		case errors.Is(err, errServerOverloaded):
+			SetOverloadedFlag(ctx)
+			return errorMessage(err)
 		}
-		return nil
+		return errorMessage(&invalidMessageError{"parse error"})
 	}
 	if batch {
 		h.handleBatch(reqs)

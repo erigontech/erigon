@@ -702,7 +702,7 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 func remapDBOverload(ctx context.Context, err error) error {
 	if errors.Is(err, kv.ErrReadTxLimitExceeded) {
 		SetOverloadedFlag(ctx)
-		return &CustomError{Code: ErrCodeServerOverloaded, Message: ErrMsgServerOverloaded}
+		return errServerOverloaded
 	}
 	return err
 }
