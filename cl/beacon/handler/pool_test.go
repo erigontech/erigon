@@ -1382,7 +1382,7 @@ func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
 				attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(outcome.err).Times(1)
 				handler.attestationService = attestationService
 				mockGossip := gossip_mock.NewMockGossip(ctrl)
-				mockGossip.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+				mockGossip.EXPECT().PublishToForkDigest(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 				handler.gossipManager = mockGossip
 
 				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tt.path, strings.NewReader(tt.body))
