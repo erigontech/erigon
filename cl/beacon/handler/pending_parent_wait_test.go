@@ -94,19 +94,14 @@ func TestAwaitGloasPayloadSourceDoesNotWaitForABlockedRetry(t *testing.T) {
 	require.Less(t, time.Since(start), 500*time.Millisecond)
 }
 
-func TestAwaitGloasPayloadSourceRunsOneRetryAtATime(t *testing.T) {
-	var running, maxRunning atomic.Int32
-	retry := func() {
-		if n := running.Add(1); n > maxRunning.Load() {
-			maxRunning.Store(n)
-		}
-		time.Sleep(5 * time.Millisecond)
-		running.Add(-1)
-	}
+// Availability changes trigger their own retries, so the wait starts one retry and then only
+// re-resolves.
+func TestAwaitGloasPayloadSourceStartsOneRetry(t *testing.T) {
+	var retries atomic.Int32
 	pending := executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}
 	resolve := func() (executionPayloadSource, error) { return pending, nil }
-	awaitGloasPayloadSource(context.Background(), time.Now().Add(30*time.Millisecond), time.Millisecond, pending, retry, resolve)
-	require.Equal(t, int32(1), maxRunning.Load())
+	awaitGloasPayloadSource(context.Background(), time.Now().Add(30*time.Millisecond), time.Millisecond, pending, func() { retries.Add(1) }, resolve)
+	require.Equal(t, int32(1), retries.Load())
 }
 
 // A decision that lands in the last poll window must not be lost: the wait resolves once more
