@@ -304,6 +304,9 @@ func CheckCommitmentKvi(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, 
 }
 
 func CheckCommitmentKvDeref(ctx context.Context, db kv.TemporalRoDB, cache *IntegrityCache, failFast bool, logger log.Logger) error {
+	if skipsCommitmentV3Records("CommitmentKvDeref", logger) {
+		return nil
+	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -845,6 +848,9 @@ func deriveDecompForOtherDomain(baseFile string, oldDomain, newDomain kv.Domain)
 }
 
 func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, br dbservices.FullBlockReader, failFast bool, logger log.Logger) error {
+	if skipsCommitmentV3Records("CommitmentHistVal", logger) {
+		return nil
+	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1266,6 +1272,9 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 }
 
 func CheckStateVerify(ctx context.Context, db kv.TemporalRoDB, failFast bool, fromStep uint64, logger log.Logger) error {
+	if skipsCommitmentV3Records("StateVerify", logger) {
+		return nil
+	}
 	start := time.Now()
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -2413,4 +2422,12 @@ func touchHistoricalKeys(sd *execctx.SharedDomains, tx kv.TemporalTx, d kv.Domai
 		touches++
 	}
 	return touches, nil
+}
+
+func skipsCommitmentV3Records(check string, logger log.Logger) bool {
+	if !statecfg.Schema.GetDomainCfg(kv.CommitmentDomain).CommitmentV3Records {
+		return false
+	}
+	logger.Info("[integrity] " + check + " skipped: commitment v3 records carry no legacy branch data")
+	return true
 }

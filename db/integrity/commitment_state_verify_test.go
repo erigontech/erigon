@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -340,4 +341,48 @@ func TestVerifyBranchHashesFromDB(t *testing.T) {
 
 	t.Logf("Checked %d branches: %d passed, %d failed", checked, passed, failed)
 	require.Zero(t, failed, "expected all branch hashes to verify")
+}
+
+func TestCheckStateVerifyOnCommitmentV3Records(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+	schema, enabled := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = schema, enabled })
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.ExperimentalCommitmentV3 = true
+
+	logger := log.New()
+	ctx := t.Context()
+	stepSize := uint64(100)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(stepSize))
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger)
+	require.NoError(t, err)
+	defer domains.Close()
+
+	txs := stepSize * 3
+	rnd := rand.New(rand.NewSource(42))
+	for txNum := uint64(1); txNum <= txs; txNum++ {
+		addr := make([]byte, length.Addr)
+		loc := make([]byte, length.Hash)
+		rnd.Read(addr)
+		rnd.Read(loc)
+		acc := accounts.Account{Nonce: txNum, Balance: *uint256.NewInt(txNum * 1000), CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, nil))
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, append(bytes.Clone(addr), loc...), []byte{addr[0], loc[0]}, txNum, nil))
+		_, err = domains.ComputeCommitment(ctx, tx, true, txNum, txNum, "test", nil)
+		require.NoError(t, err)
+	}
+	require.NoError(t, domains.Flush(ctx, tx))
+	require.NoError(t, tx.Commit())
+	require.NoError(t, agg.BuildFiles(db, txs, unboundedFinalityCtx))
+	require.Greater(t, agg.EndTxNumMinimax(), uint64(0))
+
+	require.NoError(t, integrity.CheckStateVerify(ctx, db, true, 0, logger))
+	require.NoError(t, integrity.CheckCommitmentKvDeref(ctx, db, nil, true, logger))
 }
