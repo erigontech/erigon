@@ -9,6 +9,8 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -68,7 +70,9 @@ type testExecTask struct {
 	writeMap     *state.WriteSet
 	sender       accounts.Address
 	nonce        int
+	strictNonce  bool
 	dependencies []int
+	before       func()
 }
 
 type PathGenerator func(i int, j int, total int) opkey
@@ -201,6 +205,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	dirs datadir.Dirs,
 	calcFees bool,
 ) *exec.TxResult {
+	if t.before != nil {
+		t.before()
+	}
 	// Sleep for 50 microsecond to simulate setup time
 	sleepWithContext(t.ctx, time.Microsecond*50) //nolint:errcheck
 
@@ -227,7 +234,7 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 			// extra recorded read) and abort on a nonce mismatch.
 			if i == 0 {
 				if vm := ibs.VersionMap(); vm != nil {
-					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
+					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); (ok && int(nonce) != t.nonce) || (!ok && t.strictNonce && t.nonce != 0) {
 						return &exec.TxResult{Err: protocol.ErrExecAbortError{
 							DependencyTxIndex: -1,
 							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce),
@@ -266,6 +273,9 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 		return &exec.TxResult{Err: protocol.ErrExecAbortError{DependencyTxIndex: dep, OriginError: fmt.Errorf("Dependency error")}}
 	}
 
+	if t.strictNonce {
+		return &exec.TxResult{TxOut: t.writeMap}
+	}
 	return &exec.TxResult{}
 }
 
@@ -279,6 +289,13 @@ func (t *testExecTask) VersionedReads(_ *state.IntraBlockState) state.ReadSet {
 
 func (t *testExecTask) Sender() accounts.Address {
 	return t.sender
+}
+
+func (t *testExecTask) TxSender() (accounts.Address, error) {
+	if t.strictNonce {
+		return t.sender, nil
+	}
+	return t.TxTask.TxSender()
 }
 
 func (t *testExecTask) Hash() common.Hash {
@@ -575,6 +592,11 @@ func checkNoDroppedTx(pe *parallelExecutor) error {
 
 func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger) time.Duration {
 	tb.Helper()
+	return runParallelWorkers(tb, tasks, validation, metadata, logger, runtime.NumCPU()-1)
+}
+
+func runParallelWorkers(tb testing.TB, tasks []exec.Task, validation propertyCheck, metadata bool, logger log.Logger, workerCount int) time.Duration {
+	tb.Helper()
 	ctx := tb.Context()
 
 	dirs := datadir.New(tb.TempDir())
@@ -602,7 +624,7 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 			rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, logger)),
 			logger: logger,
 		},
-		workerCount: runtime.NumCPU() - 1,
+		workerCount: workerCount,
 	}
 
 	executorContext, executorCancel, err := pe.run(ctx)
@@ -621,9 +643,12 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	}
 
 	start := time.Now()
-	_, err = executeParallelWithCheck(tb, pe, tasks, false, validation, metadata)
+	result, err := executeParallelWithCheck(tb, pe, tasks, false, validation, metadata)
 
 	assert.NoError(tb, err, "error occur during parallel execution")
+	if result != nil {
+		assert.NoError(tb, result.Err, "block rejected")
+	}
 
 	// Need to apply the final write set to storage
 
@@ -1983,4 +2008,92 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 
 	assert.Equal(t, syscalls, indexes.adds[kv.LogAddrIdx])
 	assert.Equal(t, syscalls, indexes.adds[kv.LogTopicIdx])
+}
+
+func TestSameSenderSuccessorWaitsForPredecessorValidation(t *testing.T) {
+	slow := accounts.InternAddress(common.HexToAddress("0x5101"))
+	sender := accounts.InternAddress(common.HexToAddress("0x5e4d"))
+	other := accounts.InternAddress(common.HexToAddress("0x07e7"))
+	task := func(txIdx int, from accounts.Address, nonce int) *testExecTask {
+		ops := []Op{
+			{opType: readType, key: opkey{addr: from, path: state.NoncePath}, val: nonce},
+			{opType: writeType, key: opkey{addr: from, path: state.NoncePath}, val: nonce + 1},
+		}
+		task := NewTestExecTask(txIdx, ops, from, nonce)
+		task.strictNonce = true
+		return task
+	}
+	t0, t1, t2, t3 := task(0, slow, 0), task(1, sender, 0), task(2, sender, 1), task(3, other, 0)
+	t3.dependencies = []int{0}
+	t3Started := make(chan struct{})
+	var once sync.Once
+	var timedOut atomic.Bool
+	t0.before = func() {
+		select {
+		case <-t3Started:
+		case <-time.After(10 * time.Second):
+			timedOut.Store(true)
+		}
+	}
+	t3.before = func() { once.Do(func() { close(t3Started) }) }
+	runParallelWorkers(t, []exec.Task{t0, t1, t2, t3}, func(pe *parallelExecutor) error {
+		if timedOut.Load() {
+			return errors.New("t3 never started while t0 was held")
+		}
+		if aborts := pe.abortCount.Load(); aborts != 0 {
+			return fmt.Errorf("same-sender successor re-executed: abortCount=%d execCount=%d", aborts, pe.execCount.Load())
+		}
+		return nil
+	}, false, logger(true), 1)
+}
+
+func TestFrontierRetryDispatchedBeforeBatchTail(t *testing.T) {
+	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+	raced := accounts.InternAddress([20]byte{0xfa, 0xde})
+	db := newResumeTestDB(t)
+	signedTx := signSelfSendTx(t, 0, 0, 1, 21000, chainSpec.Config, 0)
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	pe, roTx := newResumeTestExec(t, db, chainSpec.Config)
+	pe.in = exec.NewQueueWithRetry(16)
+	t.Cleanup(pe.in.Close)
+	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
+	be.versionMap.WriteAddress(raced, state.Version{TxIndex: -1}, &accounts.Account{CodeHash: accounts.EmptyCodeHash}, true)
+	reads := state.ReadSet{}
+	reads.SetAddress(raced, state.VersionedRead[state.AccountView]{
+		ReadHeader: state.ReadHeader{Source: state.StorageRead, Version: state.UnknownVersion},
+	})
+	results := make([]*exec.TxResult, 2)
+	for i := range results {
+		eTask := &execTask{Task: &exec.TxTask{
+			Header:          header,
+			EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			TxNum:           uint64(i + 1),
+			TxIndex:         i,
+			Config:          chainSpec.Config,
+			Txs:             []types.Transaction{signedTx, signedTx},
+		}, index: i}
+		be.tasks = append(be.tasks, eTask)
+		be.estimateDeps[i] = []int{}
+		results[i] = &exec.TxResult{
+			Task:            &taskVersion{execTask: eTask, version: state.Version{BlockNum: 1, TxIndex: i, Incarnation: 2 * i, TxNum: uint64(i + 1)}},
+			TxIn:            reads,
+			ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 10000},
+		}
+	}
+	be.results = []*execResult{nil, {TxResult: results[1]}}
+	be.txIncarnations = []int{0, 2}
+	be.execFailed = []int{0, 0}
+	be.execAborted = []int{0, 0}
+	be.blockIO.RecordReads(results[1].Version(), reads)
+	be.execTasks.setInProgress(1)
+	be.execTasks.markComplete(1)
+	be.validateTasks.pushPending(1)
+	be.execTasks.setInProgress(0)
+
+	res, err := be.nextResult(context.Background(), pe, results[0], roTx)
+
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.ErrorContains(t, res.Err, "too many validator-invalid retries")
+	require.Equal(t, 1, be.cntExec, "frontier tx 0 must be dispatched before the tail's retry limit ends the batch")
 }
