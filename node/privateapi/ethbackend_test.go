@@ -17,6 +17,7 @@
 package privateapi
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,6 +25,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -51,4 +53,14 @@ func TestBlockBodyRejectsInvalidHash(t *testing.T) {
 			require.Equal(t, codes.InvalidArgument, status.Code(err))
 		})
 	}
+}
+
+func TestClientVersionIncludesCommit(t *testing.T) {
+	origCommit := version.GitCommit
+	t.Cleanup(func() { version.GitCommit = origCommit })
+	version.GitCommit = "a53e954520442aa91a92f111eb23b213ffc800b7"
+
+	reply, err := (&EthBackendServer{}).ClientVersion(t.Context(), &remoteproto.ClientVersionRequest{})
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(reply.NodeName, "erigon/"+version.VersionWithMeta+"-a53e9545/"), reply.NodeName)
 }
