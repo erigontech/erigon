@@ -125,7 +125,7 @@ func (b *BeaconState) ForEachValidator(fn func(v solid.Validator, idx int, total
 }
 
 func (b *BeaconState) ValidatorForValidatorIndex(index int) (solid.Validator, error) {
-	if index >= b.validators.Length() {
+	if index < 0 || index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
 	return b.validators.Get(index), nil
@@ -138,91 +138,91 @@ func (b *BeaconState) ForEachBalance(fn func(v uint64, idx int, total int) bool)
 }
 
 func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
-	if index >= b.balances.Length() {
+	if index < 0 || index >= b.balances.Length() {
 		return 0, ErrInvalidValidatorIndex
 	}
 	return b.balances.Get(index), nil
 }
 
 func (b *BeaconState) ValidatorPublicKey(index int) (common.Bytes48, error) {
-	if index >= b.validators.Length() {
+	if index < 0 || index >= b.validators.Length() {
 		return common.Bytes48{}, ErrInvalidValidatorIndex
 	}
 	return b.validators.Get(index).PublicKey(), nil
 }
 
 func (b *BeaconState) ValidatorExitEpoch(index int) (uint64, error) {
-	if index >= b.validators.Length() {
+	if index < 0 || index >= b.validators.Length() {
 		return 0, ErrInvalidValidatorIndex
 	}
 	return b.validators.Get(index).ExitEpoch(), nil
 }
 
 func (b *BeaconState) ValidatorWithdrawableEpoch(index int) (uint64, error) {
-	if index >= b.validators.Length() {
+	if index < 0 || index >= b.validators.Length() {
 		return 0, ErrInvalidValidatorIndex
 	}
 	return b.validators.Get(index).WithdrawableEpoch(), nil
 }
 
 func (b *BeaconState) ValidatorEffectiveBalance(index int) (uint64, error) {
-	if index >= b.validators.Length() {
+	if index < 0 || index >= b.validators.Length() {
 		return 0, ErrInvalidValidatorIndex
 	}
 	return b.validators.Get(index).EffectiveBalance(), nil
 }
 
 func (b *BeaconState) ValidatorMinCurrentInclusionDelayAttestation(index int) (*solid.PendingAttestation, error) {
-	if index >= b.validators.Length() {
+	if index < 0 || index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
 	return b.validators.MinCurrentInclusionDelayAttestation(index), nil
 }
 
 func (b *BeaconState) ValidatorMinPreviousInclusionDelayAttestation(index int) (*solid.PendingAttestation, error) {
-	if index >= b.validators.Length() {
+	if index < 0 || index >= b.validators.Length() {
 		return nil, ErrInvalidValidatorIndex
 	}
 	return b.validators.MinPreviousInclusionDelayAttestation(index), nil
 }
 
 func (b *BeaconState) ValidatorIsCurrentMatchingSourceAttester(idx int) (bool, error) {
-	if idx >= b.validators.Length() {
+	if idx < 0 || idx >= b.validators.Length() {
 		return false, ErrInvalidValidatorIndex
 	}
 	return b.validators.IsCurrentMatchingSourceAttester(idx), nil
 }
 
 func (b *BeaconState) ValidatorIsCurrentMatchingTargetAttester(idx int) (bool, error) {
-	if idx >= b.validators.Length() {
+	if idx < 0 || idx >= b.validators.Length() {
 		return false, ErrInvalidValidatorIndex
 	}
 	return b.validators.IsCurrentMatchingTargetAttester(idx), nil
 }
 
 func (b *BeaconState) ValidatorIsCurrentMatchingHeadAttester(idx int) (bool, error) {
-	if idx >= b.validators.Length() {
+	if idx < 0 || idx >= b.validators.Length() {
 		return false, ErrInvalidValidatorIndex
 	}
 	return b.validators.IsCurrentMatchingHeadAttester(idx), nil
 }
 
 func (b *BeaconState) ValidatorIsPreviousMatchingSourceAttester(idx int) (bool, error) {
-	if idx >= b.validators.Length() {
+	if idx < 0 || idx >= b.validators.Length() {
 		return false, ErrInvalidValidatorIndex
 	}
 	return b.validators.IsPreviousMatchingSourceAttester(idx), nil
 }
 
 func (b *BeaconState) ValidatorIsPreviousMatchingTargetAttester(idx int) (bool, error) {
-	if idx >= b.validators.Length() {
+	if idx < 0 || idx >= b.validators.Length() {
 		return false, ErrInvalidValidatorIndex
 	}
 	return b.validators.IsPreviousMatchingTargetAttester(idx), nil
 }
 
 func (b *BeaconState) ValidatorIsPreviousMatchingHeadAttester(idx int) (bool, error) {
-	if idx >= b.validators.Length() {
+	if idx < 0 || idx >= b.validators.Length() {
 		return false, ErrInvalidValidatorIndex
 	}
 	return b.validators.IsPreviousMatchingHeadAttester(idx), nil
@@ -275,7 +275,7 @@ func (b *BeaconState) CurrentJustifiedCheckpoint() solid.Checkpoint {
 }
 
 func (b *BeaconState) ValidatorInactivityScore(index int) (uint64, error) {
-	if b.inactivityScores.Length() <= index {
+	if index < 0 || index >= b.inactivityScores.Length() {
 		return 0, ErrInvalidValidatorIndex
 	}
 	return b.inactivityScores.Get(index), nil
