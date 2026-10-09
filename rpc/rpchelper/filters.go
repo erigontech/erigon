@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
@@ -59,6 +60,9 @@ const (
 	FilterTypePendingTxs FilterType = "pendingTxs"
 	FilterTypeSyncing    FilterType = "syncing"
 )
+
+// ErrTooManySubscriptions rejects a new filter or subscription while RpcSubscriptionFiltersMaxSubscriptions live ones exist.
+var ErrTooManySubscriptions = &rpc.CustomError{Code: rpc.ErrCodeServerOverloaded, Message: "too many filters and subscriptions"}
 
 // trackedSub indexes a pollable subscription for O(1) id lookup: polls resolve the
 // filter type and reset the eviction deadline in one step, and the eviction loop
@@ -103,6 +107,7 @@ type Filters struct {
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
 	trackedSubs        *concurrent.SyncMap[SubscriptionID, trackedSub]
+	liveSubscriptions  atomic.Int64
 	logger             log.Logger
 
 	// latestSD is the local fallback for the most recent SharedDomains.
@@ -424,6 +429,21 @@ func (ff *Filters) TouchSubscription(id SubscriptionID) (FilterType, bool) {
 	return sub.ft, true
 }
 
+// reserveSubscription claims a slot in the node-wide subscription budget before anything is
+// allocated for the new subscription; every removal path gives the slot back.
+func (ff *Filters) reserveSubscription() error {
+	limit := int64(ff.config.RpcSubscriptionFiltersMaxSubscriptions)
+	if live := ff.liveSubscriptions.Add(1); limit > 0 && live > limit {
+		ff.liveSubscriptions.Add(-1)
+		return ErrTooManySubscriptions
+	}
+	return nil
+}
+
+func (ff *Filters) releaseSubscription() {
+	ff.liveSubscriptions.Add(-1)
+}
+
 func (ff *Filters) registerSubscription(id SubscriptionID, ft FilterType, tracker SubTracker) {
 	ff.trackedSubs.Put(id, trackedSub{ft: ft, tracker: tracker})
 	ff.logger.Debug("[rpc] [filters] registered subscription", "type", ft, "id", id, "protocol", tracker.Protocol())
@@ -547,12 +567,15 @@ func (ff *Filters) HandlePendingLogs(reply *txpoolproto.OnPendingLogsReply) {
 
 // SubscribeNewHeads subscribes to new block headers and returns a channel to receive the headers
 // and a subscription ID to manage the subscription.
-func (ff *Filters) SubscribeNewHeads(size int, protocol SubProtocol) (<-chan *Shared[*types.Header], HeadsSubID) {
+func (ff *Filters) SubscribeNewHeads(size int, protocol SubProtocol) (<-chan *Shared[*types.Header], HeadsSubID, error) {
+	if err := ff.reserveSubscription(); err != nil {
+		return nil, "", err
+	}
 	id := HeadsSubID(generateSubscriptionID())
 	sub := newChanSub[*Shared[*types.Header]](size, protocol)
 	ff.headsSubs.Put(id, sub)
 	ff.registerSubscription(SubscriptionID(id), FilterTypeHeads, sub)
-	return sub.ch, id
+	return sub.ch, id, nil
 }
 
 // UnsubscribeHeads unsubscribes from new block headers using the given subscription ID.
@@ -577,6 +600,7 @@ func (ff *Filters) unsubscribeHeadsInternal(id HeadsSubID) bool {
 		return false
 	}
 	ff.trackedSubs.Delete(SubscriptionID(id))
+	ff.releaseSubscription()
 	return true
 }
 
@@ -641,7 +665,10 @@ func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) bool {
 // SubscribeSyncing subscribes to sync status changes and returns a channel to receive
 // the updates and a subscription ID to manage the subscription. The last state seen
 // on the event stream, if any, is delivered on the channel as first message.
-func (ff *Filters) SubscribeSyncing(size int, protocol SubProtocol) (<-chan *remoteproto.SyncingReply, SyncingSubID) {
+func (ff *Filters) SubscribeSyncing(size int, protocol SubProtocol) (<-chan *remoteproto.SyncingReply, SyncingSubID, error) {
+	if err := ff.reserveSubscription(); err != nil {
+		return nil, "", err
+	}
 	id := SyncingSubID(generateSubscriptionID())
 	sub := newChanSub[*remoteproto.SyncingReply](size, protocol)
 	ff.syncingLock.Lock()
@@ -651,7 +678,7 @@ func (ff *Filters) SubscribeSyncing(size int, protocol SubProtocol) (<-chan *rem
 	if ff.lastSyncing != nil {
 		sub.SendLatest(ff.lastSyncing)
 	}
-	return sub.ch, id
+	return sub.ch, id, nil
 }
 
 // UnsubscribeSyncing unsubscribes from sync status changes using the given subscription ID.
@@ -681,17 +708,21 @@ func (ff *Filters) unsubscribeSyncingInternal(id SyncingSubID) bool {
 		return false
 	}
 	ff.trackedSubs.Delete(SubscriptionID(id))
+	ff.releaseSubscription()
 	return true
 }
 
 // SubscribePendingTxs subscribes to pending transactions and returns a channel to receive the transactions
 // and a subscription ID to manage the subscription.
-func (ff *Filters) SubscribePendingTxs(size int, protocol SubProtocol) (<-chan []types.Transaction, PendingTxsSubID) {
+func (ff *Filters) SubscribePendingTxs(size int, protocol SubProtocol) (<-chan []types.Transaction, PendingTxsSubID, error) {
+	if err := ff.reserveSubscription(); err != nil {
+		return nil, "", err
+	}
 	id := PendingTxsSubID(generateSubscriptionID())
 	sub := newChanSub[[]types.Transaction](size, protocol)
 	ff.pendingTxsSubs.Put(id, sub)
 	ff.registerSubscription(SubscriptionID(id), FilterTypePendingTxs, sub)
-	return sub.ch, id
+	return sub.ch, id, nil
 }
 
 // UnsubscribePendingTxs unsubscribes from pending transactions using the given subscription ID.
@@ -716,6 +747,7 @@ func (ff *Filters) unsubscribePendingTxsInternal(id PendingTxsSubID) bool {
 		return false
 	}
 	ff.trackedSubs.Delete(SubscriptionID(id))
+	ff.releaseSubscription()
 	return true
 }
 
@@ -723,10 +755,14 @@ func (ff *Filters) unsubscribePendingTxsInternal(id PendingTxsSubID) bool {
 // and a subscription ID to manage the subscription. When the remote filter update fails, no subscription
 // is installed and the error is returned.
 func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *Shared[[]*remoteproto.SubscribeReceiptsReply], ReceiptsSubID, error) {
+	if err := ff.reserveSubscription(); err != nil {
+		return nil, "", err
+	}
 	sub := newChanSub[*Shared[[]*remoteproto.SubscribeReceiptsReply]](size, "")
 	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
 	if err := ff.sendReceiptsFilterUpdate(); err != nil {
 		ff.receiptsSubs.removeReceiptsFilter(id)
+		ff.releaseSubscription()
 		return nil, "", fmt.Errorf("could not update remote receipts filter: %w", err)
 	}
 	return sub.ch, id, nil
@@ -739,6 +775,7 @@ func (ff *Filters) UnsubscribeReceipts(id ReceiptsSubID) bool {
 	if !removed {
 		return false
 	}
+	ff.releaseSubscription()
 	if err := ff.sendReceiptsFilterUpdate(); err != nil {
 		ff.logger.Warn("Could not update remote receipts filter after unsubscribe", "err", err)
 	}
@@ -776,6 +813,9 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 	if err := limits.Validate(criteria); err != nil {
 		return nil, "", err
 	}
+	if err := ff.reserveSubscription(); err != nil {
+		return nil, "", err
+	}
 	var pollingCriteria *filters.FilterCriteria
 	if protocol == ProtocolHTTP {
 		criteria = criteria.Clone()
@@ -791,7 +831,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 	id := ff.logsSubs.insertLogsFilter(f)
 
 	if err := ff.pushRemoteLogsFilter(); err != nil {
-		ff.logsSubs.removeLogsFilter(id)
+		ff.removeLogsSubscription(id, false)
 		return nil, "", fmt.Errorf("could not update remote logs filter: %w", err)
 	}
 
@@ -842,6 +882,7 @@ func (ff *Filters) removeLogsSubscription(id LogsSubID, pushRemote bool) bool {
 	}
 	ff.deleteLogStore(id)
 	ff.trackedSubs.Delete(SubscriptionID(id))
+	ff.releaseSubscription()
 	return true
 }
 
