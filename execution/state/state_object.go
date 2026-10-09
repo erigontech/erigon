@@ -58,6 +58,19 @@ func (s *Storage) set(key accounts.StorageKey, value uint256.Int) {
 	(*s)[key] = value
 }
 
+// maxReusedEntries caps the maps kept for reuse: clear walks the whole capacity,
+// so a map grown once would tax every later reuse.
+const maxReusedEntries = 256
+
+// clearOrDrop clears m for reuse, or returns nil when m grew past maxReusedEntries.
+func clearOrDrop[M ~map[K]V, K comparable, V any](m M) M {
+	if len(m) > maxReusedEntries {
+		return nil
+	}
+	clear(m)
+	return m
+}
+
 func (s Storage) String() string {
 	var str strings.Builder
 	for key, value := range s {
@@ -124,16 +137,16 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 	return so
 }
 
-// reset clears every per-use field, keeping any storage map already allocated.
+// reset clears every per-use field, keeping small storage maps allocated.
 func (so *stateObject) reset() {
 	so.db = nil
 	so.address = accounts.NilAddress
 	so.data = accounts.Account{}
 	so.original = accounts.Account{}
 	so.code = accounts.Code{}
-	clear(so.originStorage)
-	clear(so.blockOriginStorage)
-	clear(so.dirtyStorage)
+	so.originStorage = clearOrDrop(so.originStorage)
+	so.blockOriginStorage = clearOrDrop(so.blockOriginStorage)
+	so.dirtyStorage = clearOrDrop(so.dirtyStorage)
 	so.fakeStorage = nil
 	so.dirtyCode = false
 	so.selfdestructed = false
