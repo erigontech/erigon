@@ -253,6 +253,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			if err != nil {
 				return nil, err
 			}
+			msg.SetSkipExecutionGasCap(true)
 			txCtx = protocol.NewEVMTxContext(msg)
 			evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
 			storeEVM(evm)

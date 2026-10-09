@@ -95,6 +95,7 @@ func DoCall(
 	if err != nil {
 		return nil, err
 	}
+	msg.SetSkipExecutionGasCap(true)
 	blockCtx := NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, headerReader, chainConfig)
 	if blockOverrides != nil {
 		if err := blockOverrides.Override(&blockCtx); err != nil {

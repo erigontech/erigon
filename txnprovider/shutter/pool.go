@@ -297,7 +297,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 		if txnsIdFilter != nil && txnsIdFilter.Contains(txn.Hash()) {
 			continue
 		}
-		executionGas, stateGas := protocol.InclusionContributions(txn.GetGasLimit(), isAmsterdam)
+		executionGas, stateGas := protocol.InclusionContributions(txn.GetGasLimit(), isAmsterdam, false)
 		if executionGas > availableGas.Execution {
 			sender, _ := txn.GetSender()
 			p.logger.Warn(
