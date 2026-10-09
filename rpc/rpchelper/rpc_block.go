@@ -36,22 +36,7 @@ func unknownBlockErr(requested string, latestBlock uint64) *rpc.CustomError {
 }
 
 func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
-	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return 0, fmt.Errorf("getting latest block number: %w", err)
-	}
-
-	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
-	if forkchoiceHeadHash != (common.Hash{}) {
-		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
-		if forkchoiceHeadNum != nil {
-			// A forkchoice head left behind by an interrupted sync or a node without
-			// a consensus client can trail execution; latest is the executed block then.
-			return max(*forkchoiceHeadNum, blockNum), nil
-		}
-	}
-
-	return blockNum, nil
+	return GetLatestExecutedBlockNumber(tx)
 }
 
 func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
