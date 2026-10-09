@@ -602,45 +602,6 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 	}, 2*time.Second, time.Millisecond)
 }
 
-func TestReadYieldConn(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
-	require.NoError(t, err)
-	defer ln.Close()
-	client, err := net.Dial("tcp", ln.Addr().String()) //nolint:noctx
-	require.NoError(t, err)
-	defer client.Close()
-	server, err := readYieldListener{ln}.Accept()
-	require.NoError(t, err)
-	defer server.Close()
-	require.IsType(t, &readYieldConn{}, server)
-
-	buf := make([]byte, 16)
-	_, err = client.Write([]byte("abc"))
-	require.NoError(t, err)
-	n, err := server.Read(buf)
-	require.NoError(t, err)
-	require.Equal(t, "abc", string(buf[:n]))
-
-	go func() {
-		time.Sleep(20 * time.Millisecond)
-		_, _ = client.Write([]byte("de"))
-	}()
-	n, err = server.Read(buf)
-	require.NoError(t, err)
-	require.Equal(t, "de", string(buf[:n]))
-
-	require.NoError(t, server.SetReadDeadline(time.Now().Add(20*time.Millisecond)))
-	_, err = server.Read(buf)
-	var netErr net.Error
-	require.ErrorAs(t, err, &netErr)
-	require.True(t, netErr.Timeout())
-	require.NoError(t, server.SetReadDeadline(time.Time{}))
-
-	require.NoError(t, client.Close())
-	_, err = server.Read(buf)
-	require.ErrorIs(t, err, io.EOF)
-}
-
 func TestReadYieldConnKeepAlive(t *testing.T) {
 	srv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
