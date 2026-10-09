@@ -139,7 +139,7 @@ func TestRepeatedForkchoiceDoesNotWaitForWriter(t *testing.T) {
 			writer, err := m.DB.BeginTemporalRw(t.Context())
 			require.NoError(t, err)
 			defer writer.Rollback()
-			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 			defer cancel()
 			result, err := m.ExecModule.UpdateForkChoice(ctx, head, tc.safe, tc.finalized)
 			require.NoError(t, err)

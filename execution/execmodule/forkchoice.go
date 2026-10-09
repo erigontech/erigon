@@ -142,7 +142,7 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 	}
 }
 
-func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common.Hash) {
+func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common.Hash) error {
 	if finalizedHash != (common.Hash{}) {
 		rawdb.WriteForkchoiceFinalized(tx, finalizedHash)
 	}
@@ -151,6 +151,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 	}
 	rawdb.WriteHeadBlockHash(tx, blockHash)
 	rawdb.WriteForkchoiceHead(tx, blockHash)
+	return rawdb.WriteHeadHeaderHash(tx, blockHash)
 }
 
 func forkChoiceHashesMatch(tx kv.Getter, blockHash, safeHash, finalizedHash common.Hash) bool {
@@ -198,8 +199,7 @@ func (e *ExecModule) shortCircuitForkchoice(
 		roTx.Rollback()
 		// This path skips the execution commit; overlay-only writes would be lost.
 		if err := e.db.Update(ctx, func(rwTx kv.RwTx) error {
-			writeForkChoiceHashes(rwTx, blockHash, safeHash, finalizedHash)
-			return rawdb.WriteHeadHeaderHash(rwTx, blockHash)
+			return writeForkChoiceHashes(rwTx, blockHash, safeHash, finalizedHash)
 		}); err != nil {
 			return ForkChoiceResult{}, err
 		}
@@ -595,6 +595,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if err := stages.SaveStageProgress(tx, stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
+	// The pipeline needs the target header head before the final marker update.
 	if err = rawdb.WriteHeadHeaderHash(tx, blockHash); err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
@@ -739,7 +740,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	} else {
 		status = ExecutionStatusSuccess
 		// Update forks...
-		writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
+		if err := writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash); err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		}
 
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 		if err != nil {
