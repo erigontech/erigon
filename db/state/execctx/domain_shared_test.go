@@ -1810,37 +1810,49 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 }
 
 func TestCommitmentGetAsOfBeforeKeyCreation(t *testing.T) {
-	previousSchema := statecfg.Schema
-	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	for _, v3 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("v3=%t", v3), func(t *testing.T) {
+			previousSchema, previousV3 := statecfg.Schema, statecfg.ExperimentalCommitmentV3
+			t.Cleanup(func() { statecfg.Schema, statecfg.ExperimentalCommitmentV3 = previousSchema, previousV3 })
+			if v3 {
+				statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+				statecfg.ExperimentalCommitmentV3 = true
+			}
+			statecfg.EnableHistoricalCommitment()
 
-	ctx := t.Context()
-	db := newTestDb(t, 1000)
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
+			ctx := t.Context()
+			db := newTestDb(t, 1000)
+			rwTx, err := db.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
 
-	key, first, second := []byte{0x40, 0x01, 0x02}, []byte("first"), []byte("second")
-	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, first, 5, nil))
-	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, second, 9, first))
-	require.NoError(t, domains.Flush(ctx, rwTx))
+			key, first, second := []byte{0x40, 0x01, 0x02}, []byte("first"), []byte("second")
+			require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, first, 5, nil))
+			require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, second, 9, first))
+			require.NoError(t, domains.Flush(ctx, rwTx))
 
-	for _, tc := range []struct {
-		ts   uint64
-		want []byte
-	}{{3, nil}, {5, nil}, {6, first}, {9, first}, {10, second}} {
-		got, ok, err := rwTx.GetAsOf(kv.CommitmentDomain, key, tc.ts)
-		require.NoError(t, err)
-		if tc.want == nil {
-			require.False(t, ok, "ts=%d: key not created yet, got %x", tc.ts, got)
-			require.Nil(t, got, "ts=%d", tc.ts)
-			continue
-		}
-		require.True(t, ok, "ts=%d", tc.ts)
-		require.Equal(t, tc.want, got, "ts=%d", tc.ts)
+			beforeCreation := second
+			if v3 {
+				beforeCreation = nil
+			}
+			for _, tc := range []struct {
+				ts   uint64
+				want []byte
+			}{{3, beforeCreation}, {5, beforeCreation}, {6, first}, {9, first}, {10, second}} {
+				got, ok, err := rwTx.GetAsOf(kv.CommitmentDomain, key, tc.ts)
+				require.NoError(t, err)
+				if tc.want == nil {
+					require.False(t, ok, "ts=%d: key not created yet, got %x", tc.ts, got)
+					require.Nil(t, got, "ts=%d", tc.ts)
+					continue
+				}
+				require.True(t, ok, "ts=%d", tc.ts)
+				require.Equal(t, tc.want, got, "ts=%d", tc.ts)
+			}
+		})
 	}
 }
 
