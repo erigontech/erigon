@@ -292,7 +292,7 @@ func (s *EthBackendServer) ProtocolVersion(_ context.Context, _ *remoteproto.Pro
 }
 
 func (s *EthBackendServer) ClientVersion(_ context.Context, _ *remoteproto.ClientVersionRequest) (*remoteproto.ClientVersionReply, error) {
-	return &remoteproto.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionNoMeta)}, nil
+	return &remoteproto.ClientVersionReply{NodeName: common.MakeName("erigon", version.VersionWithCommit(version.GitCommit))}, nil
 }
 
 func (s *EthBackendServer) TxnLookup(ctx context.Context, req *remoteproto.TxnLookupRequest) (*remoteproto.TxnLookupReply, error) {
