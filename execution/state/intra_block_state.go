@@ -2872,6 +2872,14 @@ func (ibs *IntraBlockState) clearJournalAndRefund() {
 	ibs.stateObjectArena.reset() // same lifetime with `journal`
 }
 
+// SetForkRules sets the fork flags that the versioned read paths use. Prepare sets them for
+// each transaction; a caller that runs system calls before any transaction sets them here.
+func (ibs *IntraBlockState) SetForkRules(rules *chain.Rules) {
+	ibs.eip8246 = rules.IsAmsterdam
+	ibs.eip161 = rules.IsEIP161Enabled()
+	ibs.isAura = rules.IsAura
+}
+
 // Prepare handles the preparatory steps for executing a state transition.
 // This method must be invoked before state transition.
 //
@@ -2892,9 +2900,7 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", ibs.blockNum, ibs.txIndex, ibs.version, sender, coinbase, dst, precompiles, list, rules)
 	}
-	ibs.eip8246 = rules.IsAmsterdam
-	ibs.eip161 = rules.IsEIP161Enabled()
-	ibs.isAura = rules.IsAura
+	ibs.SetForkRules(rules)
 	ibs.txOutputFree = true
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions

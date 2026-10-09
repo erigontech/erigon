@@ -508,6 +508,109 @@ func (w diffTrackingWriter) CreateContract(address accounts.Address) error {
 	return nil
 }
 
+func (w diffTrackingWriter) trackWrites(writes *state.WriteSet) {
+	for h := range writes.AllHeaders() {
+		if _, ok := w.touchedKeys[h.Address]; !ok {
+			w.touchedKeys[h.Address] = storageKeys{}
+		}
+		if h.Path == state.StoragePath {
+			w.touchedKeys[h.Address] = append(w.touchedKeys[h.Address], h.Key)
+		}
+	}
+}
+
+// simOverrideReader serves overridden accounts from a separate state that holds the
+// overrides, so a versioned state sees them as pre-state: the version map cannot hold
+// writes below the system-call index, and versioned reads skip cached state objects.
+type simOverrideReader struct {
+	state.StateReader
+	overrides  *state.IntraBlockState
+	overridden map[accounts.Address]struct{}
+}
+
+var _ state.StateReader = (*simOverrideReader)(nil)
+
+func commitSimOverrides(stateOverrides *ethapi.StateOverrides, base state.StateReader, precompiles vm.PrecompiledContracts, rules *chain.Rules, stateWriter state.StateWriter) (*simOverrideReader, error) {
+	overrides := state.New(base)
+	if err := stateOverrides.Override(overrides, precompiles, rules); err != nil {
+		overrides.Close()
+		return nil, err
+	}
+	overridden := make(map[accounts.Address]struct{}, len(*stateOverrides))
+	for addr := range *stateOverrides {
+		overridden[addr] = struct{}{}
+	}
+	dirty := overrides.ExtractAndClearDirty()
+	for addr, account := range *stateOverrides {
+		// An empty storage replacement journals nothing, but must still clear the stored slots.
+		if account.State != nil {
+			dirty[addr] = struct{}{}
+		}
+	}
+	if err := overrides.CommitOverrideDirtyAccounts(rules, stateWriter, dirty); err != nil {
+		overrides.Close()
+		return nil, fmt.Errorf("committing override accounts: %w", err)
+	}
+	return &simOverrideReader{StateReader: base, overrides: overrides, overridden: overridden}, nil
+}
+
+func (r *simOverrideReader) Close() { r.overrides.Close() }
+
+func (r *simOverrideReader) isOverridden(address accounts.Address) bool {
+	_, ok := r.overridden[address]
+	return ok
+}
+
+func (r *simOverrideReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	if !r.isOverridden(address) {
+		return r.StateReader.ReadAccountData(address)
+	}
+	exists, err := r.overrides.Exist(address)
+	if err != nil || !exists {
+		return nil, err
+	}
+	account := accounts.NewAccount()
+	if account.Balance, err = r.overrides.GetBalance(address); err != nil {
+		return nil, err
+	}
+	if account.Nonce, err = r.overrides.GetNonce(address); err != nil {
+		return nil, err
+	}
+	if account.CodeHash, err = r.overrides.GetCodeHash(address); err != nil {
+		return nil, err
+	}
+	if account.Incarnation, err = r.overrides.GetIncarnation(address); err != nil {
+		return nil, err
+	}
+	return &account, nil
+}
+
+func (r *simOverrideReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(address)
+}
+
+func (r *simOverrideReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	if !r.isOverridden(address) {
+		return r.StateReader.ReadAccountStorage(address, key)
+	}
+	value, err := r.overrides.GetState(address, key)
+	return value, !value.IsZero(), err
+}
+
+func (r *simOverrideReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
+	if !r.isOverridden(address) {
+		return r.StateReader.ReadAccountCode(address)
+	}
+	return r.overrides.GetCode(address)
+}
+
+func (r *simOverrideReader) ReadAccountCodeSize(address accounts.Address) (int, error) {
+	if !r.isOverridden(address) {
+		return r.StateReader.ReadAccountCodeSize(address)
+	}
+	return r.overrides.GetCodeSize(address)
+}
+
 func (s *simulator) simulateBlock(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -550,9 +653,6 @@ func (s *simulator) simulateBlock(
 	if err != nil {
 		return nil, nil, err
 	}
-	intraBlockState := state.New(stateReader)
-	defer intraBlockState.Close()
-
 	// Create a custom block context and apply any custom block overrides
 	blockCtx := transactions.NewEVMBlockContextWithOverrides(ctx, s.engine, header, tx, s.newSimulatedCanonicalReader(ancestors), s.chainConfig,
 		bsc.BlockOverrides, blockHashOverrides)
@@ -561,21 +661,73 @@ func (s *simulator) simulateBlock(
 	// Determine the active precompiled contracts for this block.
 	activePrecompiles := vm.ActivePrecompiledContracts(rules)
 
+	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum)
+	balMode := s.chainConfig.IsEIPEnabled(7928, header.Time)
+
 	// Override the state before block execution.
 	stateOverrides := bsc.StateOverrides
 	var overrideDirtyAccounts map[accounts.Address]struct{}
-	if stateOverrides != nil {
-		if err := stateOverrides.Override(intraBlockState, activePrecompiles, rules); err != nil {
-			return nil, nil, err
-		}
-		// Snapshot and clear dirty set so CommitBlock won't apply EIP-161 to
-		// override-only accounts (they were not "touched" by any transaction).
-		overrideDirtyAccounts = intraBlockState.ExtractAndClearDirty()
-		for addr, account := range *stateOverrides {
-			// An empty storage replacement journals nothing, but must still clear the stored slots.
-			if account.State != nil {
-				overrideDirtyAccounts[addr] = struct{}{}
+	var intraBlockState *state.IntraBlockState
+	if balMode {
+		if stateOverrides != nil {
+			overrideReader, err := commitSimOverrides(stateOverrides, stateReader, activePrecompiles, rules, stateWriter)
+			if err != nil {
+				return nil, nil, err
 			}
+			defer overrideReader.Close()
+			stateReader = overrideReader
+		}
+		intraBlockState = state.New(stateReader)
+		intraBlockState.SetVersionMap(state.NewVersionMap(nil))
+		intraBlockState.SetForkRules(rules)
+		intraBlockState.SetTxContext(blockNumber, -1)
+	} else {
+		intraBlockState = state.New(stateReader)
+		if stateOverrides != nil {
+			if err := stateOverrides.Override(intraBlockState, activePrecompiles, rules); err != nil {
+				intraBlockState.Close()
+				return nil, nil, err
+			}
+			// Snapshot and clear dirty set so CommitBlock won't apply EIP-161 to
+			// override-only accounts (they were not "touched" by any transaction).
+			overrideDirtyAccounts = intraBlockState.ExtractAndClearDirty()
+			for addr, account := range *stateOverrides {
+				// An empty storage replacement journals nothing, but must still clear the stored slots.
+				if account.State != nil {
+					overrideDirtyAccounts[addr] = struct{}{}
+				}
+			}
+		}
+	}
+	defer intraBlockState.Close()
+
+	var balIO *state.VersionedIO
+	recordPhase := func() error { return nil }
+	if balMode {
+		balIO = &state.VersionedIO{}
+		committedStorageKeys := state.CommittedStorageKeysFn(sharedDomains, tx)
+		emptyRemoval := blockNumber != 0 && s.chainConfig.IsEIP161Enabled(blockNumber)
+		recordPhase = func() error {
+			writes := intraBlockState.FinalizedWrites(rules)
+			intraBlockState.MergeTxIOInto(balIO, writes)
+			intraBlockState.FlushWritesToVersionMap(writes)
+			normalized, err := writes.Normalize(intraBlockState.VersionMap(), intraBlockState.TxnIndex(), 0, stateReader, committedStorageKeys, emptyRemoval, s.chainConfig.Aura != nil, rules.IsAmsterdam)
+			if err != nil {
+				return fmt.Errorf("normalize simulated writes: %w", err)
+			}
+			// A touched empty account produces no write of its own, so the EIP-161 removal that
+			// Normalize derives must reach the version map before the next call reads it.
+			for addr, removal := range normalized.SelfDestructs() {
+				if raw, ok := writes.GetSelfDestruct(addr); removal.Val && (!ok || !raw.Val) {
+					intraBlockState.VersionMap().WriteSelfDestruct(addr, removal.Version, true, true)
+				}
+			}
+			stateWriter.trackWrites(normalized)
+			if err := normalized.Apply(sharedDomains, tx, blockNumber, minTxNum, nil, rules, nil, false); err != nil {
+				return fmt.Errorf("apply simulated writes: %w", err)
+			}
+			intraBlockState.ResetVersionedIO()
+			return nil
 		}
 	}
 
@@ -603,8 +755,14 @@ func (s *simulator) simulateBlock(
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := recordPhase(); err != nil {
+		return nil, nil, err
+	}
 
-	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum)
+	callWriter := state.StateWriter(stateWriter)
+	if balMode {
+		callWriter = state.NewNoopWriter()
+	}
 	callResults := make([]ethapi.CallResult, 0, len(bsc.Calls))
 	for callIndex := range bsc.Calls {
 		call := &bsc.Calls[callIndex]
@@ -616,8 +774,11 @@ func (s *simulator) simulateBlock(
 		txnList = append(txnList, txn)
 		receiptList = append(receiptList, receipt)
 		callResults = append(callResults, *callResult)
-		err = intraBlockState.FinalizeTx(rules, stateWriter)
+		err = intraBlockState.FinalizeTx(rules, callWriter)
 		if err != nil {
+			return nil, nil, err
+		}
+		if err := recordPhase(); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -636,19 +797,34 @@ func (s *simulator) simulateBlock(
 	systemCall := func(contract accounts.Address, data []byte) ([]byte, error) {
 		return systemCallCustom(contract, data, intraBlockState, header, false)
 	}
+	if balMode {
+		intraBlockState.SetTxContext(blockNumber, len(bsc.Calls))
+		intraBlockState.ResetVersionedIO()
+		// Withdrawal recipients left absent still belong in the BAL as accessed.
+		intraBlockState.StartAccessRecording()
+	}
 	block, _, err := engine.FinalizeAndAssemble(s.chainConfig, header, intraBlockState, txnList, nil,
 		receiptList, withdrawals, nil, systemCall, nil, s.logger)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	if err := intraBlockState.CommitBlock(rules, stateWriter); err != nil {
-		return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
-	}
-	// Write override-only accounts that CommitBlock skipped (EIP-161 disabled for these).
-	if len(overrideDirtyAccounts) > 0 {
-		if err := intraBlockState.CommitOverrideDirtyAccounts(rules, stateWriter, overrideDirtyAccounts); err != nil {
-			return nil, nil, fmt.Errorf("committing override accounts: %w", err)
+	if balMode {
+		if err := recordPhase(); err != nil {
+			return nil, nil, err
+		}
+		// FinalizeAndAssemble copied the header, so the hash must go on the block's own header.
+		balHash := balIO.AsBlockAccessList().Hash()
+		block.HeaderNoCopy().BlockAccessListHash = &balHash
+	} else {
+		if err := intraBlockState.CommitBlock(rules, stateWriter); err != nil {
+			return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
+		}
+		// Write override-only accounts that CommitBlock skipped (EIP-161 disabled for these).
+		if len(overrideDirtyAccounts) > 0 {
+			if err := intraBlockState.CommitOverrideDirtyAccounts(rules, stateWriter, overrideDirtyAccounts); err != nil {
+				return nil, nil, fmt.Errorf("committing override accounts: %w", err)
+			}
 		}
 	}
 
@@ -792,6 +968,8 @@ func (s *simulator) simulateCall(
 	// sanitizeCall fills zero dynamic fees when the block has a base fee, even one overridden
 	// before London; only the fields the caller named make a dynamic fee call.
 	dynamicFeeArgs := call.MaxFeePerGas != nil || call.MaxPriorityFeePerGas != nil
+	// sanitizeCall reads the nonce, which a versioned state resolves at the current index.
+	intraBlockState.SetTxContext(header.Number.Uint64(), callIndex)
 	err := s.sanitizeCall(call, intraBlockState, &blockCtx, header.BaseFee, *cumulativeGasUsed, s.gasPool.Gas())
 	if err != nil {
 		return nil, nil, nil, err
@@ -816,7 +994,6 @@ func (s *simulator) simulateCall(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	intraBlockState.SetTxContext(header.Number.Uint64(), callIndex)
 	logTracer.Reset(txn.Hash(), uint(callIndex))
 
 	// Create a new instance of the EVM with necessary configuration options
