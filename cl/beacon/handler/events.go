@@ -30,6 +30,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+const (
+	eventStreamWriteQueueSize = 1024
+	eventStreamWriteTimeout   = 30 * time.Second
+)
+
 var validTopics = map[event.EventTopic]struct{}{
 	// operation events
 	event.OpAttestation:               {},
@@ -86,8 +91,30 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 	eventCh := make(chan *event.EventStream, 128)
 	opSub := a.emitters.Operation().Subscribe(eventCh)
 	stateSub := a.emitters.State().Subscribe(eventCh)
-	defer opSub.Unsubscribe()
-	defer stateSub.Unsubscribe()
+	// Emitters block until every subscriber takes an event, so network writes must not happen on this goroutine.
+	writeCh := make(chan []byte, eventStreamWriteQueueSize)
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		if err := writeEventStream(w, writeCh); err != nil {
+			log.Warn("failed to write event", "err", err, "remote", r.RemoteAddr)
+		}
+	}()
+	defer func() {
+		opSub.Unsubscribe()
+		stateSub.Unsubscribe()
+		close(writeCh)
+		<-writerDone
+	}()
+	enqueue := func(msg []byte) bool {
+		select {
+		case writeCh <- msg:
+			return true
+		default:
+			log.Warn("event stream client is not keeping up, closing stream", "remote", r.RemoteAddr, "topics", subscribeTopics)
+			return false
+		}
+	}
 
 	ticker := time.NewTicker(time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
 	defer ticker.Stop()
@@ -108,28 +135,52 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 				log.Warn("failed to encode data", "err", err, "topic", e.Event)
 				continue
 			}
-			if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Event, string(buf)); err != nil {
-				log.Warn("failed to write event", "err", err)
-				continue
+			if !enqueue(fmt.Appendf(nil, "event: %s\ndata: %s\n\n", e.Event, buf)) {
+				return
 			}
-			w.(http.Flusher).Flush()
 		case <-ticker.C:
 			// keep connection alive
-			if _, err := w.Write([]byte(":\n\n")); err != nil {
-				log.Warn("failed to write keep alive", "err", err)
-				continue
+			if !enqueue([]byte(":\n\n")) {
+				return
 			}
-			w.(http.Flusher).Flush()
+		case <-writerDone:
+			return
 		case err := <-stateSub.Err():
 			log.Warn("event error", "err", err)
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %w", err)).WriteTo(w)
+			return
 		case err := <-opSub.Err():
 			log.Warn("event error", "err", err)
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %w", err)).WriteTo(w)
 			return
 		case <-r.Context().Done():
 			log.Info("Client disconnected from event stream")
 			return
 		}
 	}
+}
+
+func writeEventStream(w http.ResponseWriter, writeCh <-chan []byte) error {
+	rc := http.NewResponseController(w)
+	for msg := range writeCh {
+		if err := setWriteDeadline(rc, time.Now().Add(eventStreamWriteTimeout)); err != nil {
+			return err
+		}
+		if _, err := w.Write(msg); err != nil {
+			return err
+		}
+		if err := rc.Flush(); err != nil {
+			return err
+		}
+		// A passed deadline cannot be extended, so leaving it armed would cut a healthy stream that is idle between keepalives.
+		if err := setWriteDeadline(rc, time.Time{}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func setWriteDeadline(rc *http.ResponseController, deadline time.Time) error {
+	if err := rc.SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	return nil
 }
