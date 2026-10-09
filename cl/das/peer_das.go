@@ -112,7 +112,7 @@ type peerdas struct {
 	recoverySlots       map[uint64]*blobRecoverySlot
 	recoverySlotQueue   blobRecoverySlotHeap
 	recoveryPruneFloor  uint64
-	blocksToCheckSync   sync.Map // blockRoot -> ColumnSyncableSignedBlock (SignedBeaconBlock or SignedBlindedBeaconBlock)
+	blocksToCheckSync   sync.Map // blockRoot -> deferredColumnSync
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
 	forkChoice     BlockGetter
@@ -1925,8 +1925,14 @@ func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 	}
 	// [Modified in Gloas:EIP7732] Store SignedBeaconBlock directly via ColumnSyncableSignedBlock interface
 	// instead of calling Blinded() which fails for GLOAS blocks
-	d.blocksToCheckSync.Store(common.Hash(blockRoot), block)
+	d.blocksToCheckSync.LoadOrStore(common.Hash(blockRoot), deferredColumnSync{block: block, queuedAt: time.Now()})
 	return nil
+}
+
+// deferredColumnSync is a block queued for the column sync worker and when it was queued.
+type deferredColumnSync struct {
+	block    cltypes.ColumnSyncableSignedBlock
+	queuedAt time.Time
 }
 
 // deferredColumnSyncDue reports whether gossip has had its share of the slot to deliver a
@@ -1977,7 +1983,6 @@ func (d *peerdas) columnDataSynced(ctx context.Context, blockRoot common.Hash) {
 }
 
 type deferredColumnSyncEntry struct {
-	queuedAt    time.Time
 	attempts    int
 	nextAttempt time.Time
 	inFlight    bool
@@ -1995,26 +2000,16 @@ func newDeferredColumnSyncQueue() *deferredColumnSyncQueue {
 	return &deferredColumnSyncQueue{entries: map[common.Hash]*deferredColumnSyncEntry{}}
 }
 
-// ready reports whether root may be checked now: not in a round and past its backoff. A root
-// seen for the first time is recorded as queued now.
+// ready reports whether root may be checked now: not in a round and past its backoff.
 func (q *deferredColumnSyncQueue) ready(root common.Hash, now time.Time) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	e := q.entries[root]
 	if e == nil {
-		q.entries[root] = &deferredColumnSyncEntry{queuedAt: now}
+		q.entries[root] = &deferredColumnSyncEntry{}
 		return true
 	}
 	return !e.inFlight && !now.Before(e.nextAttempt)
-}
-
-func (q *deferredColumnSyncQueue) queuedAt(root common.Hash) time.Time {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if e := q.entries[root]; e != nil {
-		return e.queuedAt
-	}
-	return time.Time{}
 }
 
 func (q *deferredColumnSyncQueue) start(roots []common.Hash) {
@@ -2071,13 +2066,14 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 		roots := []common.Hash{}
 		d.blocksToCheckSync.Range(func(key, value any) bool {
 			root := key.(common.Hash)
-			block := value.(cltypes.ColumnSyncableSignedBlock)
+			queued := value.(deferredColumnSync)
+			block := queued.block
 			if block.GetSlot() < serveRangeStart {
 				log.Debug("[syncColumnDataWorker] block left the data-column serve range, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
 				forget(root)
 				return true
 			}
-			if !queue.ready(root, now) || !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), queue.queuedAt(root), d.deferredColumnSyncDelay()) {
+			if !queue.ready(root, now) || !deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), queued.queuedAt, d.deferredColumnSyncDelay()) {
 				return true
 			}
 			available, err := d.IsDataAvailable(block.GetSlot(), root)

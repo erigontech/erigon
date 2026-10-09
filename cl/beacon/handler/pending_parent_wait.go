@@ -35,8 +35,8 @@ const (
 )
 
 // gloasPendingParentDeadline bounds how long a proposal may wait for the parent payload
-// decision: at most the wait budget, never past the in-slot cutoff, and always long enough
-// for one retry.
+// decision: at most the wait budget and not past the in-slot cutoff, but always long enough
+// for one retry, so a request that arrives near or after the cutoff waits past it.
 func gloasPendingParentDeadline(now, slotStart time.Time, slotDuration time.Duration) time.Time {
 	deadline := now.Add(slotDuration / gloasPendingParentMaxWaitDivisor)
 	if cutoff := slotStart.Add(slotDuration / gloasPendingParentSlotCutoffDivisor); cutoff.Before(deadline) {
