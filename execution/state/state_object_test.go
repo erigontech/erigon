@@ -23,7 +23,10 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func BenchmarkCutOriginal(b *testing.B) {
@@ -45,5 +48,30 @@ func BenchmarkCutCustomTrim(b *testing.B) {
 	value := common.HexToHash("0x01")
 	for b.Loop() {
 		common.TrimLeftZeroes(value[:])
+	}
+}
+
+var stateObjectSink *stateObject
+
+// Most state objects never write storage, so a new one allocates its storage
+// maps only on the first write.
+func TestNewStateObjectAllocatesOnlyItself(t *testing.T) {
+	allocs := testing.AllocsPerRun(100, func() {
+		stateObjectSink = stateObjectPool.New().(*stateObject)
+	})
+	if allocs != 1 {
+		t.Fatalf("a new state object made %v allocations, want 1", allocs)
+	}
+}
+
+// Close hands back everything a call collected, origin cells included, so the
+// next state takes them from the pools instead of the heap.
+func TestCloseReleasesOriginCells(t *testing.T) {
+	ibs := New(NewNoopReader())
+	ibs.SetVersionMap(NewVersionMap(nil))
+	ibs.recordStorageOrigin(accounts.InternAddress([20]byte{0xc0, 0xde}), accounts.InternKey([32]byte{1}), uint256.Int{})
+	ibs.Close()
+	if !ibs.versionedOrigins.IsEmpty() {
+		t.Fatal("Close kept the origin cells")
 	}
 }

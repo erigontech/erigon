@@ -40,16 +40,19 @@ import (
 )
 
 var stateObjectPool = sync.Pool{
-	New: func() any {
-		return &stateObject{
-			originStorage:      make(Storage),
-			blockOriginStorage: make(Storage),
-			dirtyStorage:       make(Storage),
-		}
-	},
+	New: func() any { return &stateObject{} },
 }
 
 type Storage map[accounts.StorageKey]uint256.Int
+
+// set allocates the map on first write, so an object that never writes keeps a
+// nil Storage.
+func (s *Storage) set(key accounts.StorageKey, value uint256.Int) {
+	if *s == nil {
+		*s = make(Storage)
+	}
+	(*s)[key] = value
+}
 
 func (s Storage) String() string {
 	var str strings.Builder
@@ -209,8 +212,8 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 		res.Clear()
 	}
 
-	so.originStorage[key] = res
-	so.blockOriginStorage[key] = res
+	so.originStorage.set(key, res)
+	so.blockOriginStorage.set(key, res)
 
 	return res, err
 }
@@ -280,7 +283,7 @@ func (so *stateObject) SetStorage(storage Storage) {
 }
 
 func (so *stateObject) setState(key accounts.StorageKey, value uint256.Int) {
-	so.dirtyStorage[key] = value
+	so.dirtyStorage.set(key, value)
 }
 
 // updateStorage writes cached storage modifications into the object's storage trie.
@@ -340,7 +343,7 @@ func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStora
 		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), key, originValue, value); err != nil {
 			return err
 		}
-		so.originStorage[key] = value
+		so.originStorage.set(key, value)
 	}
 	return nil
 }

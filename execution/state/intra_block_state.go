@@ -21,6 +21,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -140,6 +141,7 @@ func (aa AccessSet) Merge(other AccessSet) AccessSet {
 // NOT THREAD SAFE!
 type IntraBlockState struct {
 	stateReader StateReader
+	codeAccess  codeAccessTracker // stateReader, if it tracks code access
 
 	// This map holds 'live' objects, which will get modified while processing a state transition.
 	stateObjects      map[accounts.Address]*stateObject
@@ -214,6 +216,8 @@ type IntraBlockState struct {
 	eip8246 bool
 
 	revisions revisions
+
+	lastCode accounts.Code // last code stored by SetCode
 }
 
 type sdProbeEntry struct {
@@ -239,6 +243,7 @@ func New(stateReader StateReader) *IntraBlockState {
 		trace:             false,
 		dep:               UnknownDep,
 	}
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
 	ibs.revisions.init()
 	return ibs
 }
@@ -326,6 +331,7 @@ func (ibs *IntraBlockState) hasWrite(addr accounts.Address, path AccountPath, ke
 // the underlying state trie to avoid reloading data for the next operations.
 func (ibs *IntraBlockState) Reset() {
 	clear(ibs.nilAccounts)
+	ibs.lastCode = accounts.Code{}
 	for _, so := range ibs.stateObjects {
 		so.release()
 	}
@@ -387,6 +393,7 @@ func (ibs *IntraBlockState) Close() {
 	// Safe to pool: VersionedWrites/FinalizedWrites hand out deep clones, and the
 	// set is unexported, so nothing outside holds a raw VersionedWrite.
 	ibs.versionedWrites.ReleaseAndReset()
+	ibs.versionedOrigins.ReleaseAndReset()
 
 	releaseResources(stateObjects, journal)
 }
@@ -756,8 +763,8 @@ type codeAccessTracker interface {
 }
 
 func (ibs *IntraBlockState) callCodeAccessHook(addr accounts.Address, code []byte) {
-	if hook, ok := ibs.stateReader.(codeAccessTracker); ok {
-		hook.OnCodeAccess(addr, code)
+	if ibs.codeAccess != nil {
+		ibs.codeAccess.OnCodeAccess(addr, code)
 	}
 }
 
@@ -1041,6 +1048,12 @@ func (ibs *IntraBlockState) touchAccount(addr accounts.Address) {
 // TouchAccount materializes an empty account and records the zero-balance touch
 // needed for state clearing and trie consistency.
 func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
+	// An own balance write settles the touch: zero already is the touch, non-zero is a non-empty account.
+	if ibs.versionMap != nil && addr != ripemd {
+		if _, ok := ibs.versionedWrites.GetBalance(addr); ok {
+			return nil
+		}
+	}
 	markTouched := func() {
 		if dbg.TraceTransactionIO && (ibs.trace || dbg.TraceAccount(addr.Handle())) {
 			fmt.Printf("%d (%d.%d) Touch %x\n", ibs.blockNum, ibs.txIndex, ibs.version, addr)
@@ -1366,6 +1379,8 @@ func printCode(c []byte) (int, string) {
 	return lenc, fmt.Sprintf("%x...", c)
 }
 
+// SetCode keeps code, also after a revert or Reset: the caller must not modify it afterwards.
+//
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason tracing.CodeChangeReason) error {
@@ -1378,7 +1393,12 @@ func (ibs *IntraBlockState) SetCode(addr accounts.Address, code []byte, reason t
 	if err != nil {
 		return err
 	}
-	canonical := accounts.NewCode(code)
+	// Factories deploy the same bytes many times: reuse the last hash instead of re-hashing.
+	canonical := ibs.lastCode
+	if len(code) == 0 || !bytes.Equal(code, canonical.Bytes) {
+		canonical = accounts.NewCode(code)
+		ibs.lastCode = canonical
+	}
 	codeHash := canonical.Hash
 	baseCodeHash := stateObject.data.CodeHash
 	origHash := stateObject.original.CodeHash
@@ -3258,17 +3278,17 @@ func (ibs *IntraBlockState) VersionedWrites() *WriteSet {
 // recordStorageOrigin / recordAddressOrigin collect a cold committed base cell into the
 // tx-local origin set (at originIndex) instead of writing the shared versionMap mid-read.
 func (ibs *IntraBlockState) recordStorageOrigin(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
-	ibs.versionedOrigins.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
-		WriteHeader: WriteHeader{Address: addr, Key: key, Path: StoragePath, Version: Version{TxIndex: originIndex}},
-		Val:         val,
-	})
+	vw := getVWStorage()
+	vw.WriteHeader = WriteHeader{Address: addr, Key: key, Path: StoragePath, Version: Version{TxIndex: originIndex}}
+	vw.Val = val
+	ibs.versionedOrigins.SetStorage(addr, key, vw)
 }
 
 func (ibs *IntraBlockState) recordAddressOrigin(addr accounts.Address, acc *accounts.Account) {
-	ibs.versionedOrigins.SetAddress(addr, &VersionedWrite[*accounts.Account]{
-		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: originIndex}},
-		Val:         acc,
-	})
+	vw := getVWAddress()
+	vw.WriteHeader = WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: originIndex}}
+	vw.Val = acc
+	ibs.versionedOrigins.SetAddress(addr, vw)
 }
 
 // PublishOrigins publishes this tx's collected committed-base origins into the versionMap's
