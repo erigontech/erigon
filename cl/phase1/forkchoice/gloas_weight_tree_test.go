@@ -473,15 +473,12 @@ func TestGloasConcurrentHeadReadsShareRecomputation(t *testing.T) {
 	}
 	// Park every reader after its cache miss. Once released, only the first
 	// reader needs to walk the tree; the others must reuse that result.
-	timeout := time.NewTimer(5 * time.Second)
-	defer timeout.Stop()
-	for range readers {
-		select {
-		case <-graph.getStateStarted:
-		case <-timeout.C:
-			t.Fatal("head readers did not reach checkpoint lookup")
-		}
+	select {
+	case <-graph.getStateStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("head readers did not reach checkpoint lookup")
 	}
+	require.Never(t, func() bool { return len(graph.getStateStarted) > 0 }, 300*time.Millisecond, 5*time.Millisecond)
 	release()
 	wg.Wait()
 	for range readers {
