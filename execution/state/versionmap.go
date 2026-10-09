@@ -1404,13 +1404,13 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
-			if matchesLive != nil && (valid == VersionInvalid || path == BalancePath) {
+			if valid == VersionInvalid && matchesLive != nil && matchesLive() {
 				// Value tiebreaker: the writer version churned (a lower tx
 				// re-executed) but the read's value is unchanged — not a real
 				// conflict, so the read stays valid and does not re-execute.
-				if matchesLive() {
-					valid = VersionValid
-				} else if valid == VersionValid && path == BalancePath {
+				valid = VersionValid
+			} else if valid == VersionValid && path == BalancePath && matchesLive != nil && !matchesLive() {
+				if _, wiped := vm.FindDoneSelfDestructInRange(addr, rr.Version().TxIndex+1, txIndex, true); !absent || !wiped {
 					valid = VersionInvalid
 					invReason = "done-balance"
 				}

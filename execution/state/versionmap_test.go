@@ -2153,3 +2153,28 @@ func TestVersionMapLatchesWhenTheEntryAlreadyExists(t *testing.T) {
 	m.WriteNonce(addr, Version{TxIndex: 0}, 7, true)
 	require.NotNil(t, m.load(addr), "a completed write must be visible")
 }
+
+func TestValidateRead_WipedBalanceRead(t *testing.T) {
+	addr := getAddress(212)
+	bal := *uint256.NewInt(100)
+	newVM := func() *VersionMap {
+		vm := NewVersionMap(nil)
+		vm.WriteBalance(addr, Version{TxIndex: 1}, bal, true)
+		vm.WriteSelfDestruct(addr, Version{TxIndex: 2}, true, true)
+		vm.WriteIncarnation(addr, Version{TxIndex: 2}, 1, true)
+		return vm
+	}
+	newIO := func(readVal uint256.Int) *VersionedIO {
+		io := NewVersionedIO(6)
+		rs := ReadSet{}
+		rs.SetBalance(addr, VersionedRead[uint256.Int]{ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1}}, Val: readVal})
+		io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, rs)
+		return io
+	}
+	t.Run("stale non-zero read invalidates", func(t *testing.T) {
+		require.Equal(t, VersionInvalid, newVM().ValidateVersion(5, newIO(bal), validateEqualVersion, true, false, false, ""))
+	})
+	t.Run("wiped zero read at the cell version stays valid", func(t *testing.T) {
+		require.Equal(t, VersionValid, newVM().ValidateVersion(5, newIO(uint256.Int{}), validateEqualVersion, true, false, false, ""))
+	})
+}
