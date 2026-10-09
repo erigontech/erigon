@@ -40,7 +40,7 @@ func TestApplyWritesPrefetchesFirstWritePerBlock(t *testing.T) {
 	cs := &calcState{
 		accounts:     map[accounts.Address]*calcAccountState{},
 		storageState: map[accounts.Address]map[accounts.StorageKey]uint256.Int{},
-		storageDirty: map[accounts.Address]map[accounts.StorageKey]bool{},
+		storageDirty: map[accounts.Address]map[accounts.StorageKey]slotFlags{},
 		prefetch:     func(plainKey []byte) { got = append(got, plainKey) },
 	}
 	payer, contract := common.Address{19: 1}, common.Address{19: 2}
