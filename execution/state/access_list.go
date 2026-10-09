@@ -50,15 +50,17 @@ func newAccessList() *accessList {
 	}
 }
 
-// Reset clears the access list for reuse, keeping allocated memory.
+// Reset clears the access list for reuse, keeping small maps allocated.
 // The slots backing array is retained; cleared inner maps are reused by
 // subsequent AddSlot calls without new allocations.
 func (al *accessList) Reset() {
-	for _, s := range al.slots {
-		clear(s)
+	for i, s := range al.slots {
+		al.slots[i] = clearOrDrop(s)
 	}
 	al.slots = al.slots[:0]
-	clear(al.addresses)
+	if al.addresses = clearOrDrop(al.addresses); al.addresses == nil {
+		al.addresses = make(map[accounts.Address]int)
+	}
 	al.dropMemo()
 }
 
