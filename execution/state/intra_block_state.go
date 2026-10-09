@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -158,6 +159,9 @@ type IntraBlockState struct {
 	txIndex  int
 	blockNum uint64
 	logs     logArena
+
+	txOutput     []byte
+	txOutputFree bool
 
 	// Per-transaction access list
 	accessList accessList
@@ -425,6 +429,23 @@ func releaseResources(stateObjects map[accounts.Address]*stateObject, journal *j
 		journal.release()
 	}
 }
+
+// TxOutputBuffer gives the first top-level frame after Prepare a buffer for its
+// output that the next transaction reuses, and nil to any other caller. Whoever
+// keeps a transaction's output past the next Prepare must copy it.
+func (ibs *IntraBlockState) TxOutputBuffer() *[]byte {
+	if !ibs.txOutputFree {
+		return nil
+	}
+	ibs.txOutputFree = false
+	if cap(ibs.txOutput) > maxKeptTxOutput {
+		ibs.txOutput = nil
+	}
+	return &ibs.txOutput
+}
+
+// maxKeptTxOutput bounds the output buffer one transaction leaves to the next.
+const maxKeptTxOutput = int(datasize.MB)
 
 // AllocLog reserves the next log slot of the current tx and returns it sized for
 // numTopics/dataSize. The caller must write every topic and every data byte, then
@@ -2903,6 +2924,7 @@ func (ibs *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase account
 	ibs.eip8246 = rules.IsAmsterdam
 	ibs.eip161 = rules.IsEIP161Enabled()
 	ibs.isAura = rules.IsAura
+	ibs.txOutputFree = true
 	if rules.IsBerlin {
 		// Clear out any leftover from previous executions
 		ibs.accessList.Reset()
