@@ -593,3 +593,36 @@ func TestSubscriptionLimitCountsPendingSubscribe(t *testing.T) {
 		return
 	}
 }
+
+// A subscribe call that fails gives its slot back at once, so the later calls of the same
+// batch can still take it.
+func TestSubscriptionLimitFreesSlotOfFailedSubscribeWithinBatch(t *testing.T) {
+	t.Parallel()
+	server := newTestServer(log.New())
+	server.SetSubscriptionLimit(1)
+	clientConn, serverConn := net.Pipe()
+	go server.ServeCodec(NewCodec(serverConn), 0)
+	defer server.Stop()
+	if err := clientConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+
+	batch := `[{"jsonrpc":"2.0","id":1,"method":"nftest_subscribe","params":["failingSubscription"]},` +
+		`{"jsonrpc":"2.0","id":2,"method":"nftest_subscribe","params":["someSubscription",0,0]}]`
+	if _, err := clientConn.Write([]byte(batch)); err != nil {
+		t.Fatal(err)
+	}
+	var answers []jsonrpcMessage
+	if err := json.NewDecoder(clientConn).Decode(&answers); err != nil {
+		t.Fatal(err)
+	}
+	if len(answers) != 2 {
+		t.Fatalf("%d answers for 2 calls", len(answers))
+	}
+	if answers[0].Error == nil {
+		t.Fatal("failingSubscription did not fail")
+	}
+	if answers[1].Error != nil {
+		t.Fatalf("subscription after a failed one in the same batch rejected: %v", answers[1].Error)
+	}
+}

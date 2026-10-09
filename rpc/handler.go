@@ -466,8 +466,9 @@ func (h *handler) cancelAllRequests(err error, inflightReq *requestOp) {
 	}
 }
 
-// reserveSubscription takes a slot for a subscribe call about to run. addSubscriptions settles
-// the slot once the call has returned, whether or not it created a subscription.
+// reserveSubscription takes a slot for a subscribe call about to run. Once the call has
+// returned, releaseSubscription gives the slot back when no subscription was created, and
+// addSubscriptions turns it into a registered subscription otherwise.
 func (h *handler) reserveSubscription() bool {
 	h.subLock.Lock()
 	defer h.subLock.Unlock()
@@ -477,6 +478,12 @@ func (h *handler) reserveSubscription() bool {
 	}
 	h.pendingSubs++
 	return true
+}
+
+func (h *handler) releaseSubscription() {
+	h.subLock.Lock()
+	h.pendingSubs--
+	h.subLock.Unlock()
 }
 
 func (h *handler) addSubscriptions(nn []*RemoteNotifier) {
@@ -713,10 +720,14 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 	}
 	// Install notifier in context so the subscription handler can find it.
 	n := &RemoteNotifier{h: h, namespace: namespace}
-	cp.notifiers = append(cp.notifiers, n)
 	ctx := ContextWithNotifier(cp.ctx, n)
-
-	return h.runMethod(ctx, msg, callb, args, stream)
+	answer, answered := h.runMethod(ctx, msg, callb, args, stream)
+	if n.takeSubscription() == nil {
+		h.releaseSubscription()
+		return answer, answered
+	}
+	cp.notifiers = append(cp.notifiers, n)
+	return answer, answered
 }
 
 // remapDBOverload converts kv.ErrReadTxLimitExceeded into a JSON-RPC -32005 error and sets
