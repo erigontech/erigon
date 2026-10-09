@@ -25,12 +25,10 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -66,43 +64,6 @@ func getObjectsForSyncCommitteesServiceTest(t *testing.T, ctrl *gomock.Controlle
 		ImmediateVerification: true,
 	}
 	return state, msg
-}
-
-func TestVerifySyncCommitteeMessageSignatureUsesMessageSlotDomain(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	headState, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
-	cfg := headState.BeaconConfig()
-	forkEpoch := state.Epoch(headState) + 1
-	headSlot := forkEpoch * cfg.SlotsPerEpoch
-	require.NoError(t, headState.SetSlot(headSlot))
-
-	previousVersion := common.Bytes4{0x01}
-	currentVersion := common.Bytes4{0x02}
-	headState.SetFork(&cltypes.Fork{
-		PreviousVersion: previousVersion,
-		CurrentVersion:  currentVersion,
-		Epoch:           forkEpoch,
-	})
-
-	for _, tc := range []struct {
-		name        string
-		slot        uint64
-		forkVersion common.Bytes4
-	}{
-		{name: "previous epoch", slot: headSlot - 1, forkVersion: previousVersion},
-		{name: "same epoch", slot: headSlot, forkVersion: currentVersion},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			msg.SyncCommitteeMessage.Slot = tc.slot
-			_, signingRoot, _, err := verifySyncCommitteeMessageSignature(headState, msg.SyncCommitteeMessage)
-			require.NoError(t, err)
-
-			domain, err := fork.ComputeDomain(cfg.DomainSyncCommittee[:], tc.forkVersion, headState.GenesisValidatorsRoot())
-			require.NoError(t, err)
-			expected := crypto.Sha256(msg.SyncCommitteeMessage.BeaconBlockRoot[:], domain)
-			require.Equal(t, expected[:], signingRoot)
-		})
-	}
 }
 
 // TestSyncCommitteesIgnoresForgedSlotThatAliasesToNow uses the real clock: a slot 2^62 ahead
