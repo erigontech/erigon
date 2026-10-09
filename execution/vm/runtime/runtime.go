@@ -162,7 +162,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		sender,
 		contractAsAddress,
 		input,
-		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules),
+		mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false),
 		cfg.Value,
 		false, /* bailout */
 	)
@@ -206,7 +206,7 @@ func Create(input []byte, cfg *Config) ([]byte, common.Address, mdgas.MdGas, err
 		vmenv  = NewEnv(cfg)
 		sender = cfg.Origin
 		rules  = vmenv.ChainRules()
-		gas    = mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
+		gas    = mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false)
 	)
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, accounts.NilAddress, vm.ActivePrecompiles(rules), nil)
 	if !rules.IsAmsterdam {
@@ -276,7 +276,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 		cfg.EVMConfig.Tracer.OnTxStart(vmenv.GetVMContext(), nil, accounts.ZeroAddress)
 	}
 
-	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
+	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules, false)
 	leftOverGas, topLevelCallGasUsed, err := protocol.HandleRuntimeCall(vmenv, address, cfg.Value, gas)
 	var ret []byte
 	if err == nil {

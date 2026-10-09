@@ -414,6 +414,8 @@ type Message struct {
 	blobHashes       []common.Hash
 	authorizations   []Authorization
 	dynamicFeeArgs   bool
+
+	skipExecutionGasCap bool
 }
 
 func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -477,6 +479,10 @@ func (m *Message) SetCheckTransaction(checkTransaction bool) {
 func (m *Message) CheckGas() bool { return m.checkGas }
 func (m *Message) SetCheckGas(checkGas bool) {
 	m.checkGas = checkGas
+}
+func (m *Message) SkipExecutionGasCap() bool { return m.skipExecutionGasCap }
+func (m *Message) SetSkipExecutionGasCap(skip bool) {
+	m.skipExecutionGasCap = skip
 }
 
 // DynamicFeeArgs reports whether the message was built from call arguments that name
