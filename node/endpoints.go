@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"syscall"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -61,6 +62,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 			return nil, nil, err
 		}
 	}
+	listener = readWaitListener{listener}
 	// make sure timeout values are meaningful
 	CheckTimeouts(&cfg.Timeouts)
 	// Bundle the http server. Server.Protocols is left nil, so the default applies: HTTP/1 plus
@@ -88,6 +90,54 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 		}
 	}()
 	return httpSrv, listener.Addr(), err
+}
+
+// readWaitListener hands out connections that wait for readiness after a short
+// read. Go's poller calls read() before parking, so on a request-response
+// connection every read for the next request first returns EAGAIN.
+type readWaitListener struct{ net.Listener }
+
+func (l readWaitListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return conn, err
+	}
+	tcpConn, ok := conn.(*net.TCPConn)
+	if !ok {
+		return conn, nil
+	}
+	raw, err := tcpConn.SyscallConn()
+	if err != nil {
+		return conn, nil
+	}
+	c := &readWaitConn{TCPConn: tcpConn, raw: raw}
+	c.waitReadableFn = c.waitReadable
+	return c, nil
+}
+
+type readWaitConn struct {
+	*net.TCPConn
+	raw            syscall.RawConn
+	waitReadableFn func(uintptr) bool
+	drained        bool // the last read returned less than asked, so the socket was empty
+	waited         bool
+}
+
+func (c *readWaitConn) Read(b []byte) (int, error) {
+	if c.drained {
+		c.waited = false
+		_ = c.raw.Read(c.waitReadableFn) // a deadline or close error repeats in the Read below
+	}
+	n, err := c.TCPConn.Read(b)
+	c.drained = err == nil && n < len(b)
+	return n, err
+}
+
+// waitReadable makes RawConn.Read park until the socket is readable, without a read().
+func (c *readWaitConn) waitReadable(uintptr) bool {
+	done := c.waited
+	c.waited = true
+	return done
 }
 
 func isIgnoredHttpServerError(serveErr error) bool {
