@@ -510,6 +510,53 @@ func TestPoolAggregatesAndProofsDoesNotPublishIgnoredAggregate(t *testing.T) {
 
 	handler.PostEthV1ValidatorAggregatesAndProof(recorder, request)
 
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	var response poolingError
+	require.NoError(t, json.NewDecoder(recorder.Body).Decode(&response))
+	require.Equal(t, []poolingFailure{{Index: 0, Message: services.ErrIgnore.Error()}}, response.Failures)
+}
+
+func TestPoolAggregatesAndProofsDoesNotPublishKnownAggregate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service := services_mock.NewMockAggregateAndProofService(ctrl)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	committeeBits := solid.NewBitVector(int(cfg.MaxCommitteesPerSlot))
+	require.NoError(t, committeeBits.SetBitAt(0, true))
+	requestBody, err := json.Marshal([]*cltypes.SignedAggregateAndProof{{
+		Message: &cltypes.AggregateAndProof{
+			Aggregate: &solid.Attestation{
+				AggregationBits: solid.BitlistFromBytes([]byte{1}, int(cfg.MaxValidatorsPerCommittee*cfg.MaxCommitteesPerSlot)),
+				Data:            &solid.AttestationData{},
+				CommitteeBits:   committeeBits,
+			},
+		},
+	}})
+	require.NoError(t, err)
+
+	service.EXPECT().ProcessMessage(gomock.Any(), nil, gomock.Any()).Return(
+		fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAggregatorAlreadyKnown),
+	)
+	handler := &ApiHandler{
+		logger:                    log.Root(),
+		ethClock:                  clock,
+		beaconChainCfg:            &cfg,
+		aggregateAndProofsService: service,
+		gossipManager:             gossipManager,
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/aggregate_and_proofs", bytes.NewReader(requestBody))
+
+	handler.PostEthV1ValidatorAggregatesAndProof(recorder, request)
+
 	require.Equal(t, http.StatusOK, recorder.Code)
 }
 

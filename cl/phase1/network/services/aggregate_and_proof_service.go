@@ -318,7 +318,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 				// ErrAggregatorAlreadySeen means this exact signed aggregate was validated before.
 				return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadySeen)
 			}
-			return fmt.Errorf("%w: aggregator already seen", ErrIgnore)
+			return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadyKnown)
 		}
 
 		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)

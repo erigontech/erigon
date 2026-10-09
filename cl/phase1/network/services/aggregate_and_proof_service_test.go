@@ -354,6 +354,7 @@ func TestAggregateAndProofImmediateRetryReturnsAlreadySeenOnlyForSameAggregate(t
 	differentAggregate.SignedAggregateAndProof = &differentSignedAggregate
 	err = service.ProcessMessage(context.Background(), nil, &differentAggregate)
 	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAggregatorAlreadyKnown)
 	require.NotErrorIs(t, err, ErrAggregatorAlreadySeen)
 }
 

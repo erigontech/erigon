@@ -42,6 +42,7 @@ const (
 
 var (
 	ErrIgnore                          = errors.New("ignore") // ErrIgnore is used to indicate that the message should be ignored.
+	ErrAggregatorAlreadyKnown          = errors.New("aggregator already known")
 	ErrAggregatorAlreadySeen           = errors.New("aggregator already seen")
 	ErrProposerPreferenceAlreadySeen   = errors.New("already seen proposer preferences")
 	ErrAttestationQueued               = errors.New("attestation queued")
