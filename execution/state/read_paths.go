@@ -884,15 +884,7 @@ func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Accoun
 	// The origin is resolved by ReadAddress's origin fallback once published; this is the first
 	// reader (not yet published), which reads the committed base from the state reader and records
 	// it for publish to the origin map at flush.
-	var readStart time.Time
-	if dbg.KVReadLevelledMetrics {
-		readStart = time.Now()
-	}
-	committed, err := s.stateReader.ReadAccountData(addr)
-	if dbg.KVReadLevelledMetrics {
-		s.accountReadDuration += time.Since(readStart)
-		s.accountReadCount++
-	}
+	committed, err := s.committedAccount(addr)
 	if err != nil {
 		return nil, StorageRead, UnknownVersion, true, err
 	}

@@ -40,7 +40,11 @@ import (
 )
 
 var stateObjectPool = sync.Pool{
-	New: func() any { return &stateObject{} },
+	New: func() any { return newHeapObject() },
+}
+
+func newHeapObject() *stateObject {
+	return &stateObject{}
 }
 
 type Storage map[accounts.StorageKey]uint256.Int
@@ -97,11 +101,14 @@ type stateObject struct {
 	deleted         bool // true if account was deleted during the lifetime of this object
 	newlyCreated    bool // true if this object was created in the current transaction
 	createdContract bool // true if this object represents a newly created contract
+
+	// Set by stateObjectArena.alloc; keeps release from pooling a slot the arena owns.
+	arena bool
 }
 
-// newObject creates a state object from the pool.
+// newObject creates a state object from the arena or the pool.
 func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
-	so := stateObjectPool.Get().(*stateObject)
+	so := db.allocStateObject()
 	so.db = db
 	so.address = address
 	so.data.Copy(data)
@@ -116,8 +123,8 @@ func newObject(db *IntraBlockState, address accounts.Address, data, original *ac
 	return so
 }
 
-// release returns the stateObject to the pool after resetting it.
-func (so *stateObject) release() {
+// reset clears every per-use field, keeping any storage map already allocated.
+func (so *stateObject) reset() {
 	so.db = nil
 	so.address = accounts.NilAddress
 	so.data = accounts.Account{}
@@ -132,6 +139,14 @@ func (so *stateObject) release() {
 	so.deleted = false
 	so.newlyCreated = false
 	so.createdContract = false
+}
+
+// release resets the object and pools it, unless the arena owns the slot.
+func (so *stateObject) release() {
+	so.reset()
+	if so.arena {
+		return
+	}
 	stateObjectPool.Put(so)
 }
 
