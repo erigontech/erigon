@@ -621,23 +621,6 @@ func (evm *EVM) stepTraced(callContext *CallContext, op OpCode, pc uint64, debug
 	var callGas mdgas.MdGasCost
 	tracer := evm.config.Tracer
 	callContext.cacheGen++
-	// Ops handled here skip the jump table but add no code to run.
-	if !anyTrace {
-		switch op {
-		case DUP9, DUP10, DUP11, DUP12, DUP13, DUP14, DUP15, DUP16:
-			if n, sLen := int(op-DUP1)+1, callContext.Stack.len(); sLen >= n && sLen < stackLimit && callContext.gas >= GasFastestStep {
-				callContext.gas -= GasFastestStep
-				callContext.Stack.dup(n - 1)
-				return pc, nil, nil
-			}
-		case SWAP5, SWAP6, SWAP7, SWAP8, SWAP9, SWAP10, SWAP11, SWAP12, SWAP13, SWAP14, SWAP15, SWAP16:
-			if n := int(op-SWAP1) + 1; callContext.Stack.len() > n && callContext.gas >= GasFastestStep {
-				callContext.gas -= GasFastestStep
-				callContext.Stack.swap(n)
-				return pc, nil, nil
-			}
-		}
-	}
 	if anyTrace && debug {
 		// Capture pre-execution values for tracing.
 		t.logged = false
