@@ -33,7 +33,7 @@ func TestHistoryConvertTxNumLookups(t *testing.T) {
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	for step := kv.Step(0); step < kv.Step(txs/stepSize)-1; step++ {
+	for step := range kv.Step(txs/stepSize - 1) {
 		require.NoError(t, ii.collateBuildIntegrate(t.Context(), step, tx, background.NewProgressSet()))
 	}
 	require.NoError(t, tx.Commit())

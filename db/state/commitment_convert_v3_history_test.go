@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -356,7 +357,7 @@ func TestRestoreCommitmentFiles_V3ResumesHistoryAfterDomains(t *testing.T) {
 	converted, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.0-commitment.*"))
 	require.NoError(t, err)
 	for _, p := range converted {
-		require.NoError(t, os.Remove(p))
+		require.NoError(t, dir.RemoveFile(p))
 	}
 	domainBackup := filepath.Join(dirs.Snap, "backup", "domains")
 	backups, err := os.ReadDir(domainBackup)
@@ -364,7 +365,7 @@ func TestRestoreCommitmentFiles_V3ResumesHistoryAfterDomains(t *testing.T) {
 	for _, e := range backups {
 		require.NoError(t, os.Rename(filepath.Join(domainBackup, e.Name()), filepath.Join(dirs.SnapDomain, e.Name())))
 	}
-	require.NoError(t, os.Remove(domainBackup))
+	require.NoError(t, dir.RemoveFile(domainBackup))
 
 	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), dirs, log.New()))
 	history, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
