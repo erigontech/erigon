@@ -634,6 +634,7 @@ func TestReadWaitConn(t *testing.T) {
 	var netErr net.Error
 	require.ErrorAs(t, err, &netErr)
 	require.True(t, netErr.Timeout())
+	require.True(t, server.(*readWaitConn).drained, "a timeout reads nothing, so the next read must still wait for readiness")
 	require.NoError(t, server.SetReadDeadline(time.Time{}))
 
 	require.NoError(t, client.Close())
