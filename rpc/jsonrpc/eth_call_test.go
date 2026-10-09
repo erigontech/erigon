@@ -22,6 +22,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -844,6 +845,119 @@ func TestCreateAccessList(t *testing.T) {
 		require.NoError(t, err)
 		require.Empty(t, *res.Accesslist)
 		require.Equal(t, hexutil.Uint64(params.TxGas), res.GasUsed)
+	})
+}
+
+// Init code that reads slot 0 of the contract being created and returns that contract's
+// address, so the access list and eth_call both reveal the nonce the creation used.
+const createdAddressProbe = "0x600054503060005260206000f3"
+
+type nonceTxPool struct {
+	txpoolproto.TxpoolClient
+	reply *txpoolproto.NonceReply
+	err   error
+}
+
+func (p nonceTxPool) Nonce(context.Context, *txpoolproto.NonceRequest, ...grpc.CallOption) (*txpoolproto.NonceReply, error) {
+	return p.reply, p.err
+}
+
+// A contract creation without a nonce runs on the state the call executes on: overrides
+// included, a sender missing from it at nonce 0, and the txpool not consulted.
+func TestCreateAccessListContractCreationNonce(t *testing.T) {
+	m, bank, _, receiver := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	base := newBaseApiForTest(m)
+	dial := func(t *testing.T, txPool txpoolproto.TxpoolClient) *rpc.Client {
+		server := rpc.NewServer(50, false, false, true, log.New(), 100)
+		require.NoError(t, server.RegisterName("eth", EthAPI(newEthApiForTest(base, m.DB, txPool, nil))))
+		client := rpc.DialInProc(server, log.New())
+		t.Cleanup(func() { client.Close(); server.Stop() })
+		return client
+	}
+	client := dial(t, stubTxPoolClient{})
+
+	var bankNonce hexutil.Uint64
+	require.NoError(t, client.CallContext(t.Context(), &bankNonce, "eth_getTransactionCount", bank, "latest"))
+	require.NotZero(t, bankNonce)
+
+	absent := common.HexToAddress("0x000000000000000000000000000000000000f00d")
+	const funds = "0x1bc16d674ec80000"
+	params := func(call map[string]any, overrides map[common.Address]map[string]any) []any {
+		if overrides == nil {
+			return []any{call, "latest"}
+		}
+		return []any{call, "latest", overrides}
+	}
+	createdAt := func(t *testing.T, client *rpc.Client, call map[string]any, overrides map[common.Address]map[string]any, want common.Address) {
+		t.Helper()
+		var res accessListResult
+		require.NoError(t, client.CallContext(t.Context(), &res, "eth_createAccessList", params(call, overrides)...))
+		require.Empty(t, res.Error)
+		require.Equal(t, types.AccessList{{Address: want, StorageKeys: []common.Hash{{}}}}, *res.Accesslist)
+
+		var ret hexutil.Bytes
+		require.NoError(t, client.CallContext(t.Context(), &ret, "eth_call", params(call, overrides)...))
+		require.Equal(t, want, common.BytesToAddress(ret))
+	}
+
+	for _, tc := range []struct {
+		name      string
+		from      common.Address
+		nonce     string
+		overrides map[common.Address]map[string]any
+		wantNonce uint64
+	}{
+		{"absent sender, balance and nonce override", absent, "", map[common.Address]map[string]any{absent: {"balance": funds, "nonce": "0x10"}}, 0x10},
+		{"absent sender, nonce-only override", absent, "", map[common.Address]map[string]any{absent: {"nonce": "0x10"}}, 0x10},
+		{"absent sender, balance-only override", absent, "", map[common.Address]map[string]any{absent: {"balance": funds}}, 0},
+		{"absent sender, no override", absent, "", nil, 0},
+		{"request nonce does not move the address", absent, "0x5", map[common.Address]map[string]any{absent: {"balance": funds, "nonce": "0x10"}}, 0x10},
+		{"existing sender at nonce zero", receiver, "", nil, 0},
+		{"existing sender", bank, "", nil, uint64(bankNonce)},
+		{"existing sender, nonce override", bank, "", map[common.Address]map[string]any{bank: {"nonce": "0x10"}}, 0x10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call := map[string]any{"from": tc.from, "data": createdAddressProbe}
+			if tc.nonce != "" {
+				call["nonce"] = tc.nonce
+			}
+			createdAt(t, client, call, tc.overrides, types.CreateAddress(tc.from, tc.wantNonce))
+		})
+	}
+
+	t.Run("txpool is not consulted", func(t *testing.T) {
+		call := map[string]any{"from": bank, "data": createdAddressProbe}
+		want := types.CreateAddress(bank, uint64(bankNonce))
+		for name, txPool := range map[string]txpoolproto.TxpoolClient{
+			"unavailable":   nonceTxPool{err: errors.New("txpool unavailable")},
+			"pending nonce": nonceTxPool{reply: &txpoolproto.NonceReply{Found: true, Nonce: uint64(bankNonce) + 5}},
+		} {
+			t.Run(name, func(t *testing.T) {
+				createdAt(t, dial(t, txPool), call, nil, want)
+			})
+		}
+	})
+
+	// Init code that returns if it runs at CREATE(sender, 0x10) and reverts otherwise.
+	// A revert is an execution result, not an RPC error.
+	t.Run("init code checking its own address", func(t *testing.T) {
+		call := map[string]any{"from": absent, "data": "0x30806000527345e8238be639099d2590ab39d9457959cc789631146100245760206000fd5b60206000f3"}
+		require.Equal(t, common.HexToAddress("0x45e8238be639099d2590ab39d9457959cc789631"), types.CreateAddress(absent, 0x10))
+		for _, tc := range []struct {
+			name      string
+			overrides map[common.Address]map[string]any
+			wantError string
+		}{
+			{"runs at the override nonce", map[common.Address]map[string]any{absent: {"balance": funds, "nonce": "0x10"}}, ""},
+			{"reverts at nonce zero", map[common.Address]map[string]any{absent: {"balance": funds}}, "execution reverted"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				var res accessListResult
+				require.NoError(t, client.CallContext(t.Context(), &res, "eth_createAccessList", call, "latest", tc.overrides))
+				require.Equal(t, tc.wantError, res.Error)
+				require.Empty(t, *res.Accesslist)
+			})
+		}
 	})
 }
 
