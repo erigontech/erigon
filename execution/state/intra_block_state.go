@@ -1125,6 +1125,12 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			}
 			return nil
 		}
+		// No cell and no committed record: getStateObject would resolve the same absence again.
+		if ibs.noMaterialize && ibs.versionMap.load(addr) == nil {
+			ibs.createObject(addr, nil)
+			markTouched()
+			return nil
+		}
 	}
 
 	stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -1903,6 +1909,13 @@ func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 // stateObject is kept in step for the so.data-based commit paths (genesis
 // FinalizeTx, RPC).
 func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserveBalance bool) (bool, error) {
+	sdW, hadSD := ibs.versionedWrites.GetSelfDestruct(addr)
+	balW, hadBalance := ibs.versionedWrites.GetBalance(addr)
+	incW, hadIncarnation := ibs.versionedWrites.GetIncarnation(addr)
+	// Destructed earlier in this tx and sent nothing since: every cell below already holds its value.
+	if !preserveBalance && hadSD && sdW.Val && hadBalance && balW.Val.IsZero() && hadIncarnation {
+		return true, nil
+	}
 	base, _, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
 		return false, err
@@ -1915,32 +1928,18 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 		return false, nil
 	}
 
-	prev := false
-	if vw, ok := ibs.versionedWrites.GetSelfDestruct(addr); ok {
-		prev = vw.Val
-	}
-	prevBalance := base.Balance
-	if vw, ok := ibs.versionedWrites.GetBalance(addr); ok {
-		prevBalance = vw.Val
-	}
-	inc := base.Incarnation
-	if vw, ok := ibs.versionedWrites.GetIncarnation(addr); ok {
-		inc = vw.Val
-	}
-
-	// Capture the pre-destruct versioned incarnation write, which the self-destruct
-	// clears below, so a revert restores it rather than the cleared value.
-	hadIncarnation, prevIncarnation := false, uint64(0)
-	if vw, ok := ibs.versionedWrites.GetIncarnation(addr); ok {
-		hadIncarnation, prevIncarnation = true, vw.Val
-	}
-	// Same for the balance write: the self-destruct records BalancePath=0 below,
-	// so a revert must restore the pre-destruct write (which may predate the
-	// snapshot) rather than delete the cell.
-	hadBalance := false
+	prev := hadSD && sdW.Val
+	prevBalance, inc := base.Balance, base.Incarnation
+	// The self-destruct clears the incarnation and balance writes below; capture
+	// them so a revert restores them (a balance write may predate the snapshot)
+	// rather than the cleared values.
+	var prevIncarnation uint64
 	var prevBalanceVersioned uint256.Int
-	if vw, ok := ibs.versionedWrites.GetBalance(addr); ok {
-		hadBalance, prevBalanceVersioned = true, vw.Val
+	if hadIncarnation {
+		inc, prevIncarnation = incW.Val, incW.Val
+	}
+	if hadBalance {
+		prevBalance, prevBalanceVersioned = balW.Val, balW.Val
 	}
 	ibs.journal.selfdestructChangeVersioned(addr, prev, prevBalance,
 		!ibs.hasWrite(addr, SelfDestructPath, accounts.NilKey),
