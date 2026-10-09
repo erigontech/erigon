@@ -341,9 +341,6 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	cfg.Sync.ExecStopAtBlock = ctx.Uint64(ExecStopAtBlockFlag.Name)
 	cfg.Sync.GenerateOfflineBALs = ctx.Bool(GenerateOfflineBALsFlag.Name)
 	cfg.Sync.UseOfflineBALs = ctx.Bool(UseOfflineBALsFlag.Name)
-	if cfg.Sync.GenerateOfflineBALs && cfg.Sync.UseOfflineBALs {
-		utils.Fatalf("--%s and --%s are mutually exclusive", GenerateOfflineBALsFlag.Name, UseOfflineBALsFlag.Name)
-	}
 	if cfg.Sync.GenerateOfflineBALs {
 		cfg.ExperimentalBAL = true
 	}
