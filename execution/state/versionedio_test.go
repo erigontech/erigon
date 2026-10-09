@@ -1858,17 +1858,6 @@ func TestArenaOverflowCellsReturnToThePool(t *testing.T) {
 	require.Zero(t, *a.alloc(func() *VersionedWrite[uint64] { return dirty }))
 }
 
-// One outlier call must not pin its overflow index on a set that keeps its
-// slabs across resets.
-func TestArenaResetBoundsTheOverflowIndex(t *testing.T) {
-	var a vwArena[uint64]
-	for range vwMaxCells + vwMaxOverflow + 1 {
-		a.alloc(getVWNonce)
-	}
-	a.reset(releaseVWNonce)
-	require.LessOrEqual(t, cap(a.overflow), vwMaxOverflow)
-}
-
 // One outlier tx must not pin its overflow list on a set that keeps its slabs.
 func TestArenaBoundsTheOverflowListItKeeps(t *testing.T) {
 	var a vwArena[uint64]

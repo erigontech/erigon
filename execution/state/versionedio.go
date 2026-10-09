@@ -669,7 +669,8 @@ func releaseVWStorage(vw *VersionedWrite[uint256.Int])        { vwPoolStorage.Pu
 // Slabs double from a small first one, so a path that writes a handful of cells
 // buys a handful and a path that writes thousands still amortizes. A reusing set
 // keeps its slabs, so the cap is what one outlier may pin on it; past the cap
-// the shared pools serve the cells, as they did before the arena.
+// the shared pools serve the cells, as they did before the arena, and the set
+// keeps its list of those cells only up to vwMaxOverflow.
 const (
 	vwFirstSlab   = 4
 	vwMaxCells    = 1024
