@@ -85,9 +85,9 @@ func insertOverlayRaceChain(t *testing.T, m *execmoduletester.ExecModuleTester) 
 
 // writeHeadBlockMarkers writes the minimal subset of what InsertBlocks and
 // updateForkChoice persist for a new head — header, canonical marker, body,
-// head-header and forkchoice markers. The forkchoice marker is what
-// rpchelper.GetLatestBlockNumber resolves the head from, so reader paths under
-// test (the gas oracle, "latest" tag resolution) see this block as current.
+// head-header and forkchoice markers, and Execution progress. Execution progress
+// is what rpchelper.GetLatestBlockNumber resolves the head from, so reader paths
+// under test (the gas oracle, "latest" tag resolution) see this block as current.
 func writeHeadBlockMarkers(t *testing.T, tx kv.RwTx, header *types.Header, body *types.Body) {
 	t.Helper()
 	require.NoError(t, writeHeadBlockMarkersE(tx, header, body))
@@ -111,7 +111,7 @@ func writeHeadBlockMarkersE(tx kv.RwTx, header *types.Header, body *types.Body) 
 		return err
 	}
 	rawdb.WriteForkchoiceHead(tx, hash)
-	return nil
+	return stages.SaveStageProgress(tx, stages.Execution, num)
 }
 
 type overlayAheadHarness struct {
@@ -1487,7 +1487,6 @@ func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
 
 	for name, to := range map[string]rpc.BlockNumber{
 		"number": rpc.BlockNumber(overlayRaceChainSize + 1),
-		"latest": rpc.LatestBlockNumber,
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.New(nil))
@@ -1503,7 +1502,6 @@ func TestTraceFilter_FutureFromBlockErrors(t *testing.T) {
 
 	for name, from := range map[string]rpc.BlockNumber{
 		"number": rpc.BlockNumber(overlayRaceChainSize + 1),
-		"latest": rpc.LatestBlockNumber,
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from}, new(bool), nil, jsonstream.New(nil))
