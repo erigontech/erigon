@@ -413,9 +413,9 @@ type Message struct {
 	isFree           bool
 	blobHashes       []common.Hash
 	authorizations   []Authorization
+	dynamicFeeArgs   bool
 
 	skipExecutionGasCap bool
-	dynamicFeeArgs   bool
 }
 
 func NewMessage(from accounts.Address, to accounts.Address, nonce uint64, amount *uint256.Int, gasLimit uint64,
@@ -489,6 +489,7 @@ func (m *Message) SetSkipExecutionGasCap(skip bool) {
 // maxFeePerGas or maxPriorityFeePerGas, even as zero. A transaction is checked against
 // its fork by AsMessage instead.
 func (m *Message) DynamicFeeArgs() bool { return m.dynamicFeeArgs }
+
 func (m *Message) SetDynamicFeeArgs(dynamicFeeArgs bool) {
 	m.dynamicFeeArgs = dynamicFeeArgs
 }
