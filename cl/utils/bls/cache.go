@@ -19,10 +19,6 @@ func SetEnabledCaching(caching bool) {
 	enabledCache = caching
 }
 
-func ClearCache() {
-	pkCache = maphash.NewMap[*blst.P1Affine]()
-}
-
 func LoadPublicKeyIntoCache(publicKey []byte, validate bool) error {
 	if !enabledCache {
 		return ErrCacheNotEnabled

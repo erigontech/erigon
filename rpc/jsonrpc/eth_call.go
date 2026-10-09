@@ -268,7 +268,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	defer caller.Close()
 
 	msg := caller.Message()
-	plainTransfer := len(msg.Data()) == 0 && !msg.To().IsNil()
+	plainTransfer := len(msg.Data()) == 0 && !msg.To().IsNil() && len(msg.Authorizations()) == 0
 
 	var initialState *state.IntraBlockState
 	if feeCap.Sign() != 0 || plainTransfer {
@@ -671,6 +671,11 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, err
 	}
 
+	if err := api.checkPruneBlocks(ctx, tx, blockNr); err != nil {
+		return nil, err
+	}
+	// Witness generation needs history before the initial system transaction,
+	// not only the pre-state of the first user transaction.
 	if err := api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
 	}

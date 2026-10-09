@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -209,4 +210,27 @@ func TestPriorTxCodeWriteHashSurvivesReadSetHit(t *testing.T) {
 	require.Equal(t, priorCode, so.code.Bytes)
 	require.Equal(t, cellHash, so.code.Hash, "the cell's hash must win, not keccak(bytes)")
 	require.Equal(t, cellHash, so.data.CodeHash)
+}
+
+// refreshCode no longer derives a missing hash from the bytes, so a producer
+// storing code without its hash must trip the assertion instead of leaving a
+// nil code hash in the account record.
+func TestRefreshCodeAssertsHashPresent(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
+	acc := accounts.NewAccount()
+	acc.Nonce = 1
+	acc.Incarnation = 1
+
+	vm := NewVersionMap(nil)
+	vm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.Code{Bytes: []byte{0x60, 0x00}}, true)
+
+	ibs := NewWithVersionMap(&codeReader{addr: addr, account: &acc, code: nil}, vm)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(100, 7)
+	ibs.SetVersion(0)
+
+	assert.Panics(t, func() { _, _ = refreshCode(ibs, addr) })
 }

@@ -510,7 +510,8 @@ func (p *PersistentBlockCollector) doForkChoiceUpdate(ctx context.Context, lastB
 	if lastBlock.HeaderNoCopy().SlotNumber != nil {
 		fcuVersion = clparams.GloasVersion
 	}
-	if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil, fcuVersion); err != nil {
+	// Only consensus checkpoints may set safe and finalized; zero hashes leave the EL's markers unchanged.
+	if _, err := p.engine.ForkChoiceUpdate(ctx, common.Hash{}, common.Hash{}, lastBlockHash, nil, fcuVersion); err != nil {
 		p.logger.Warn("[BlockCollector] Failed to update fork choice", "err", err)
 	}
 }

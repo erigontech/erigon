@@ -36,12 +36,14 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_block_downloader"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -56,6 +58,77 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
+
+func TestNewPayloadV2WithdrawalsValidation(t *testing.T) {
+	t.Parallel()
+
+	const withdrawal = `{"index":"0x0","validatorIndex":"0x1","address":"0x1111111111111111111111111111111111111111","amount":"0x1"}`
+	for _, test := range []struct {
+		name        string
+		withdrawals string
+		wantError   string
+	}{
+		{"null entry", `[null]`, "null withdrawal at index 0"},
+		{"null after valid entry", `[` + withdrawal + `,null]`, "null withdrawal at index 1"},
+		{"missing list", `null`, "missing withdrawals list"},
+		{"empty list", `[]`, ""},
+		{"valid entry", `[` + withdrawal + `]`, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var decoded engine_types.ExecutionPayload
+			require.NoError(t, json.Unmarshal([]byte(`{"withdrawals":`+test.withdrawals+`}`), &decoded))
+			header := makeParentHeader(1001)
+			header.ParentHash = common.Hash{0x1}
+			header.UncleHash = empty.UncleHash
+			header.TxHash = empty.RootHash
+			if decoded.Withdrawals != nil {
+				root := types.DeriveSha(types.Withdrawals(decoded.Withdrawals))
+				header.WithdrawalsHash = &root
+			}
+			block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, decoded.Withdrawals, nil)
+			payload, err := engine_types.ExecutionPayloadFromBlock(block)
+			require.NoError(t, err)
+
+			cfg := preCancunChainConfig()
+			stub := &stubExecutionModule{}
+			downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+			srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+			srv.test = true
+
+			status, err := srv.NewPayloadV2(t.Context(), payload)
+			if test.wantError != "" {
+				require.Nil(t, status)
+				var invalidParams *rpc.InvalidParamsError
+				require.ErrorAs(t, err, &invalidParams)
+				require.Equal(t, -32602, invalidParams.ErrorCode())
+				require.Equal(t, test.wantError, invalidParams.Message)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, engine_types.SyncingStatus, status.Status)
+		})
+	}
+}
+
+func TestForkchoiceUpdatedV2RejectsNullWithdrawalWhenSyncing(t *testing.T) {
+	t.Parallel()
+
+	var attributes engine_types.PayloadAttributes
+	require.NoError(t, json.Unmarshal([]byte(`{"timestamp":"0x3e9","withdrawals":[null]}`), &attributes))
+	cfg := preCancunChainConfig()
+	stub := &stubExecutionModule{}
+	downloader := engine_block_downloader.NewEngineBlockDownloader(t.Context(), log.New(), stub, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, stub, downloader, false, false, false, true, nil, nil, 0, 0)
+	srv.test = true
+
+	response, err := srv.ForkchoiceUpdatedV2(t.Context(), &engine_types.ForkChoiceState{HeadHash: common.Hash{0x1}}, &attributes)
+	require.Nil(t, response)
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, -38003, rpcErr.ErrorCode())
+}
 
 // Do 1 step to start txPool
 func oneBlockSteps(m *execmoduletester.ExecModuleTester, require *require.Assertions, blocks int) {

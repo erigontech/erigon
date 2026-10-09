@@ -18,12 +18,16 @@ package graphql
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 
+	gqlgen "github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/playground"
+	"github.com/vektah/gqlparser/v2/ast"
+	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph"
 	"github.com/erigontech/erigon/rpc"
@@ -32,6 +36,10 @@ import (
 
 const (
 	urlPath = "/graphql"
+
+	// maxQueryDepth bounds field nesting, as geth does, so a chain of block.parent
+	// selections cannot fan out into an unbounded number of block reads.
+	maxQueryDepth = 20
 
 	maxRequestBodySize = 32 * 1024 * 1024
 )
@@ -53,6 +61,7 @@ func CreateHandler(api []rpc.API) http.Handler {
 	resolver.GraphQLAPI = graphqlAPI
 
 	srv := handler.NewDefaultServer(graph.NewExecutableSchema(graph.Config{Resolvers: &resolver}))
+	srv.Use(depthLimit(maxQueryDepth))
 	return bodyLimitMiddleware(statusFixMiddleware(srv))
 }
 
@@ -65,6 +74,46 @@ func bodyLimitMiddleware(next http.Handler) http.Handler {
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 		next.ServeHTTP(w, r)
 	})
+}
+
+type depthLimit int
+
+var _ gqlgen.OperationContextMutator = depthLimit(0)
+
+func (depthLimit) ExtensionName() string { return "DepthLimit" }
+
+func (depthLimit) Validate(gqlgen.ExecutableSchema) error { return nil }
+
+func (d depthLimit) MutateOperationContext(_ context.Context, rc *gqlgen.OperationContext) *gqlerror.Error {
+	if rc.Operation == nil {
+		return nil
+	}
+	if depth := selectionDepth(rc.Operation.SelectionSet, map[string]int{}); depth > int(d) {
+		return gqlerror.Errorf("query depth %d exceeds the limit of %d", depth, int(d))
+	}
+	return nil
+}
+
+func selectionDepth(set ast.SelectionSet, fragments map[string]int) int {
+	depth := 0
+	for _, sel := range set {
+		var d int
+		switch sel := sel.(type) {
+		case *ast.Field:
+			d = 1 + selectionDepth(sel.SelectionSet, fragments)
+		case *ast.InlineFragment:
+			d = selectionDepth(sel.SelectionSet, fragments)
+		case *ast.FragmentSpread:
+			cached, ok := fragments[sel.Name]
+			if !ok && sel.Definition != nil {
+				cached = selectionDepth(sel.Definition.SelectionSet, fragments)
+				fragments[sel.Name] = cached
+			}
+			d = cached
+		}
+		depth = max(depth, d)
+	}
+	return depth
 }
 
 // statusFixMiddleware adjusts HTTP status codes to match the GraphQL test expectations:

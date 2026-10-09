@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -821,5 +822,61 @@ func TestWebsocketBatchUsesServerConcurrency(t *testing.T) {
 	}
 	if peak := svc.peak.Load(); peak > 2 {
 		t.Fatalf("websocket batch ran %d calls at once, server allows 2", peak)
+	}
+}
+
+func TestWebsocketNotificationGetsNoReply(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	hs := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer hs.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, resp, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(hs.URL, "http"), nil)
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	require.NoError(t, err)
+	defer func() { _ = conn.CloseNow() }()
+
+	for _, msg := range []string{
+		`{"jsonrpc":"2.0","method":"test_echo","params":["x",1]}`,
+		`{"jsonrpc":"2.0","method":"test_streamEcho","params":["x"]}`,
+		`{"jsonrpc":"2.0","method":"test_nosuch","params":[]}`,
+		`{"jsonrpc":"2.0","id":7,"method":"test_echo","params":["y",2]}`,
+	} {
+		require.NoError(t, conn.Write(ctx, websocket.MessageText, []byte(msg)))
+	}
+	_, frame, err := conn.Read(ctx)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"jsonrpc":"2.0","id":7,"result":{"String":"y","Int":2,"Args":null}}`, string(frame))
+}
+
+func TestWebsocketClientNotifyKeepsConnection(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	hs := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer hs.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	client, err := DialWebsocket(ctx, "ws"+strings.TrimPrefix(hs.URL, "http"), "", logger)
+	require.NoError(t, err)
+	defer client.Close()
+
+	sub, err := client.Subscribe(ctx, "nftest", make(chan int, 1), "someSubscription", 100, 0)
+	require.NoError(t, err)
+	require.NoError(t, client.Notify(ctx, "test_echo", "x", 1))
+
+	var result echoResult
+	require.NoError(t, client.CallContext(ctx, &result, "test_echo", "y", 2))
+	require.Equal(t, echoResult{"y", 2, nil}, result)
+	select {
+	case err := <-sub.Err():
+		t.Fatalf("subscription ended: %v", err)
+	default:
 	}
 }

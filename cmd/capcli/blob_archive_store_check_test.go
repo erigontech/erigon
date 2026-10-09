@@ -66,7 +66,7 @@ func storeCheckFixture(t *testing.T, slot uint64, commitments int) (kv.RwDB, *st
 	canonical := common.HexToHash("0xc0ffee")
 	require.NotEqual(t, common.Hash(strippedRoot), canonical, "fixture must keep the two roots distinct")
 	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, canonical)
+		return beacon_indicies.MarkRootCanonical(tx, slot, canonical)
 	}))
 
 	return db, &storeCheckReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{slot: block}}, canonical
@@ -183,7 +183,7 @@ func TestBlobArchiveStoreCheckFlagsCountEqualSlotsWithNoFiles(t *testing.T) {
 
 	canonical := common.HexToHash("0xc0ffee")
 	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, canonical)
+		return beacon_indicies.MarkRootCanonical(tx, slot, canonical)
 	}))
 
 	sidecar := &cltypes.BlobSidecar{

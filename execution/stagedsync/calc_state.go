@@ -127,7 +127,8 @@ type calcState struct {
 	feedSlots   []commitment.FeedSlot
 	feedValues  []byte
 
-	prefetch *branchPrefetcher
+	prefetch       func(plainKey []byte)
+	branchPrefetch *branchPrefetcher
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -194,7 +195,11 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	}
 	acc.dirty = true
 	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
-	cs.prefetch.add(prefetchItem{account: acc.hash})
+	cs.branchPrefetch.add(prefetchItem{account: acc.hash})
+	if cs.prefetch != nil {
+		address := addr.Value()
+		cs.prefetch(address[:])
+	}
 }
 
 // ApplyWrites folds a tx's typed write collections into the local state.
@@ -270,7 +275,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		if dirty == nil {
 			dirty = make(map[accounts.StorageKey]bool)
 			cs.storageDirty[addr] = dirty
-			cs.prefetch.add(prefetchItem{account: st.hash})
+			cs.branchPrefetch.add(prefetchItem{account: st.hash})
 		}
 		for key, vw := range inner {
 			slot, ok := st.slots[key]
@@ -282,7 +287,11 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			st.slots[key] = slot
 			if !dirty[key] {
 				dirty[key] = true
-				cs.prefetch.add(prefetchItem{account: st.hash, slot: slot.hash, storage: true})
+				cs.branchPrefetch.add(prefetchItem{account: st.hash, slot: slot.hash, storage: true})
+				if cs.prefetch != nil {
+					address, slotKey := addr.Value(), key.Value()
+					cs.prefetch(append(address[:], slotKey[:]...))
+				}
 			}
 		}
 	}

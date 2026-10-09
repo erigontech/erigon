@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -167,24 +168,10 @@ func (f sdFrontier) DomainVisibleEnd(domain kv.Domain) (uint64, bool) {
 	return f.sd.domainVisibleEnd(f.tx, domain)
 }
 
-// cacheGenerationTx unwraps table overlays because their sequence metadata
-// belongs to the overlay, while cache fills read temporal domains from the
-// backing transaction.
-func cacheGenerationTx(tx kv.TemporalTx) kv.TemporalTx {
-	for tx != nil {
-		wrapper, ok := tx.(interface{ UnderlyingTx() kv.TemporalTx })
-		if !ok {
-			return tx
-		}
-		tx = wrapper.UnderlyingTx()
-	}
-	return nil
-}
-
 // cacheFrontierFor binds fill authority to the transaction's durable state
 // version. StateCache admits it only while that version is current.
 func (sd *SharedDomains) cacheFrontierFor(tx kv.TemporalTx) cache.Frontier {
-	generationTx := cacheGenerationTx(tx)
+	generationTx := kv.UnderlyingTx(tx)
 	if generationTx == nil {
 		return nil
 	}
@@ -354,7 +341,7 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	}
 	trieCfg := o.trieCfg
 
-	generationTx := cacheGenerationTx(tx)
+	generationTx := kv.UnderlyingTx(tx)
 	if generationTx == nil {
 		return nil, errors.New("state version transaction is nil")
 	}
@@ -1024,6 +1011,25 @@ func GuardAggregatorForCache(db any, sc *cache.StateCache) {
 		panic(fmt.Sprintf("assert: aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
 	}
 	f.ForbidVisibilityLowering()
+}
+
+// InitStateCacheVersion lets read-only txs use the state cache before the first
+// executed block binds it. Only a node with executed blocks qualifies: snapshot
+// downloads add state without advancing the state version, and Execution
+// progress is raised only after the initial download completes.
+func InitStateCacheVersion(ctx context.Context, db kv.RoDB, sc *cache.StateCache) error {
+	return db.View(ctx, func(tx kv.Tx) error {
+		progress, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil || progress == 0 {
+			return err
+		}
+		stateVersion, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			return err
+		}
+		sc.Applier().Initialize(stateVersion)
+		return nil
+	})
 }
 
 // PrintCacheStats logs the state cache hit/miss counters and resets them.

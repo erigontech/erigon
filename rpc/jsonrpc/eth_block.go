@@ -448,11 +448,6 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
 	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return nil, err
@@ -488,11 +483,6 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		// (Compatibility) Every other node just return `null` for when the block does not exist.
 		log.Debug("eth_getBlockTransactionCountByHash GetBlockNumber failed", "err", err)
 		return nil, nil
-	}
-
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
 	}
 
 	body, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)

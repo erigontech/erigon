@@ -100,7 +100,7 @@ General advise: for deeper understanding read `mdbx.h`
 
 /*
 RoDB low-level interface - main target is - to provide common abstraction over top of MDBX and RemoteKV.
-Warning: can't move `tx` between goroutines. ReadOnly transactions do not lock goroutine to thread, RwTx does.
+See Tx and RwTx for transaction and cursor ownership rules.
 Lifetime: read data valid until end of transaction.
 Example:
 
@@ -143,19 +143,15 @@ type RwDB interface {
 	Update(ctx context.Context, f func(tx RwTx) error) error
 	UpdateNosync(ctx context.Context, f func(tx RwTx) error) error
 
-	// BeginRw - creates transaction
-	// A transaction and its cursors must only be used by a single
-	// 	thread (not goroutine), and a thread may only have a single transaction at a time.
-	//  It happens automatically by - because this method calls runtime.LockOSThread() inside (Rollback/Commit releases it)
-	//  By this reason application code can't call runtime.UnlockOSThread() - it leads to undefined behavior.
+	// BeginRw creates a write transaction. MDBX pins the creating goroutine to
+	// an OS thread; see RwTx for access and completion rules.
 	BeginRw(ctx context.Context) (RwTx, error)
 	BeginRwNosync(ctx context.Context) (RwTx, error)
 }
 
-// Tx
-// WARNING:
-//   - Tx is not threadsafe and may only be used in the goroutine that created it
-//   - ReadOnly transactions do not lock goroutine to thread, RwTx does
+// Tx and all of its cursors require serialized access. MDBX allows access
+// from different goroutines in turn (MDBX_NOSTICKYTHREADS); see RwTx for
+// write transaction ownership.
 type Tx interface {
 	Getter
 
@@ -204,12 +200,9 @@ type Tx interface {
 	Apply(ctx context.Context, f func(tx Tx) error) error
 }
 
-// RwTx
-//
-// WARNING:
-//   - RwTx is not threadsafe and may only be used in the goroutine that created it.
-//   - ReadOnly transactions do not lock goroutine to thread, RwTx does
-//   - User Can't call runtime.LockOSThread/runtime.UnlockOSThread in same goroutine until RwTx Commit/Rollback
+// RwTx follows Tx's serialization rules. For MDBX, BeginRw pins the creating
+// goroutine to its OS thread, and Commit or Rollback must run on that goroutine.
+// Do not change that goroutine's OS-thread lock while the transaction is open.
 type RwTx interface {
 	Tx
 	Putter
@@ -528,6 +521,20 @@ func (opts GetLatestOptions) BranchCache() bool {
 type TemporalGetter interface {
 	GetLatest(name Domain, k []byte, opts GetLatestOptions) (v []byte, step Step, err error)
 	StepsInFiles(entitySet ...Domain) Step
+}
+
+// UnderlyingTx peels table overlays off tx down to the transaction they are
+// layered on. An overlay owns its own sequence metadata, but snapshot identity
+// and temporal domain reads belong to the tx underneath it.
+func UnderlyingTx(tx TemporalTx) TemporalTx {
+	for tx != nil {
+		wrapper, ok := tx.(interface{ UnderlyingTx() TemporalTx })
+		if !ok {
+			return tx
+		}
+		tx = wrapper.UnderlyingTx()
+	}
+	return nil
 }
 
 type TemporalTx interface {

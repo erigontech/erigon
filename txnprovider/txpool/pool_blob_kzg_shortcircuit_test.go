@@ -115,7 +115,7 @@ func TestValidateTxnsBlobKZGShortCircuit(t *testing.T) {
 		pool.lock.Lock()
 		defer pool.lock.Unlock()
 		require.NoError(t, pool.senders.registerNewSenders(&slots, pool.logger))
-		reasons, goodTxns, err := pool.validateTxns(&slots, cacheView)
+		reasons, goodTxns, err := pool.validateTxns(&slots, cacheView, nil, nil)
 		require.NoError(t, err)
 		return reasons, goodTxns
 	}
@@ -197,4 +197,96 @@ func TestProcessRemoteTxnsKicksKZGOffender(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("PenalizePeer was not called within 5s")
 	}
+}
+
+func TestProcessRemoteTxnsKZGOffenderDoesNotDropOtherPeersTxns(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ctrl := gomock.NewController(t)
+
+	attackerPeerID := gointerfaces.ConvertHashToH512([64]byte{0x41})
+	honestPeerID := gointerfaces.ConvertHashToH512([64]byte{0x42})
+
+	kicked := make(chan struct{}, 1)
+	sentryServer := sentryproto.NewMockSentryServer(ctrl)
+	sentryServer.EXPECT().
+		PenalizePeer(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, req *sentryproto.PenalizePeerRequest) (*emptypb.Empty, error) {
+			assert.Equal(t, attackerPeerID, req.PeerId)
+			kicked <- struct{}{}
+			return &emptypb.Empty{}, nil
+		}).
+		Times(1)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, NewMockSentry(ctx, sentryServer))
+	require.NoError(t, err)
+
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+
+	bad := makeBlobSlot(0x50, true)
+	good := makeBlobSlot(0x51, false)
+	trailing := makeBlobSlot(0x52, false)
+	a0, a1, a2 := [20]byte{1}, [20]byte{2}, [20]byte{3}
+
+	var fromAttacker TxnSlots
+	fromAttacker.Append(&bad, a0[:], false)
+	pool.AddRemoteTxns(ctx, fromAttacker, attackerPeerID, sentryClient)
+
+	var fromHonest TxnSlots
+	fromHonest.Append(&good, a1[:], false)
+	pool.AddRemoteTxns(ctx, fromHonest, honestPeerID, sentryClient)
+
+	var trailingFromAttacker TxnSlots
+	trailingFromAttacker.Append(&trailing, a2[:], false)
+	pool.AddRemoteTxns(ctx, trailingFromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), sentryClient)
+
+	require.NoError(t, pool.processRemoteTxns(ctx))
+
+	select {
+	case <-kicked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("PenalizePeer was not called within 5s")
+	}
+
+	pool.lock.Lock()
+	defer pool.lock.Unlock()
+	assert.NotContains(t, pool.byHash, string(bad.IDHash[:]))
+	assert.Contains(t, pool.byHash, string(good.IDHash[:]), "valid txn from another peer must not be dropped")
+	assert.NotContains(t, pool.byHash, string(trailing.IDHash[:]), "trailing txn from the KZG offender must be skipped")
+}
+
+func TestRemoteKZGSkipPreservesAdmissionReasons(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	pool := seedBlobKZGTestPool(t, ctx)
+	require.NoError(t, pool.start(ctx))
+	a0, a1, a2 := [20]byte{1}, [20]byte{2}, [20]byte{3}
+
+	pooled := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	pooled.IDHash[0] = 0x60
+	var local TxnSlots
+	local.Append(pooled, a2[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, local)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	bad := makeBlobSlot(0x61, true)
+	skipped := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	skipped.IDHash[0] = 0x62
+	var fromAttacker TxnSlots
+	fromAttacker.Append(&bad, a0[:], false)
+	fromAttacker.Append(skipped, a1[:], false)
+	pool.AddRemoteTxns(ctx, fromAttacker, gointerfaces.ConvertHashToH512([64]byte{0x41}), nil)
+
+	replacement := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
+	replacement.IDHash[0] = 0x63
+	var fromHonest TxnSlots
+	fromHonest.Append(replacement, a2[:], false)
+	pool.AddRemoteTxns(ctx, fromHonest, gointerfaces.ConvertHashToH512([64]byte{0x42}), nil)
+
+	reasons, err = pool.addNewTxns(ctx, *pool.unprocessedRemoteTxns, true)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{
+		txpoolcfg.UnmatchedBlobTxExt, txpoolcfg.Success, txpoolcfg.NotReplaced,
+	}, reasons)
 }

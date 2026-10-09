@@ -55,7 +55,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		var hasSignedHeaderInDB bool
 
 		if err = cfg.indiciesDB.View(ctx, func(tx kv.Tx) error {
-			_, hasSignedHeaderInDB, err = beacon_indicies.ReadSignedHeaderByBlockRoot(ctx, tx, blockRoot)
+			_, hasSignedHeaderInDB, err = beacon_indicies.ReadSignedHeaderByBlockRoot(tx, blockRoot)
 			return err
 		}); err != nil {
 			err = fmt.Errorf("failed to read signed header: %w", err)
