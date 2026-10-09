@@ -87,11 +87,13 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	time             atomic.Uint64
-	highestSeen      atomic.Uint64
-	highestImported  atomic.Uint64
-	highestSeenRoot  atomic.Value // common.Hash
-	blocksProcessing atomic.Int64
+	time            atomic.Uint64
+	highestSeen     atomic.Uint64
+	highestImported atomic.Uint64
+	// highestImportedStale is set by an invalidation, which can leave imported blocks unreachable.
+	highestImportedStale atomic.Bool
+	highestSeenRoot      atomic.Value // common.Hash
+	blocksProcessing     atomic.Int64
 	// all of *solid.Checkpoint type
 	justifiedCheckpoint           atomic.Value
 	finalizedCheckpoint           atomic.Value
@@ -619,6 +621,11 @@ func (f *ForkChoiceStore) HighestSeen() uint64 {
 // HighestImported returns the highest slot of a block the fork graph accepted. Unlike
 // HighestSeen it is not raised by a block that is later rejected.
 func (f *ForkChoiceStore) HighestImported() uint64 {
+	if f.highestImportedStale.CompareAndSwap(true, false) {
+		f.mu.Lock()
+		f.recomputeHighestImported()
+		f.mu.Unlock()
+	}
 	return f.highestImported.Load()
 }
 
@@ -1164,8 +1171,51 @@ func (f *ForkChoiceStore) markPayloadStatus(
 	if !known || current != effective {
 		f.headHash = common.Hash{}
 		f.headPayloadStatus = cltypes.PayloadStatusPending
+		if effective == execution_client.PayloadStatusInvalidated {
+			f.highestImportedStale.Store(true)
+		}
 	}
 	return effective
+}
+
+// recomputeHighestImported lowers the import watermark to the blocks an invalidation left
+// reachable. A block whose payload is unknown still counts, since its verdict may yet arrive.
+func (f *ForkChoiceStore) recomputeHighestImported() {
+	root := f.justifiedCheckpoint.Load().(solid.Checkpoint).Root
+	header, ok := f.forkGraph.GetHeader(root)
+	if !ok {
+		root = f.forkGraph.AnchorRoot()
+		if header, ok = f.forkGraph.GetHeader(root); !ok {
+			return
+		}
+	}
+	highest := header.Slot
+	for stack := []common.Hash{root}; len(stack) > 0; {
+		parent := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		for _, child := range f.children(parent) {
+			header, ok := f.forkGraph.GetHeader(child)
+			if !ok || f.cutOffByInvalidation(child) {
+				continue
+			}
+			highest = max(highest, header.Slot)
+			stack = append(stack, child)
+		}
+	}
+	f.highestImported.Store(highest)
+}
+
+// cutOffByInvalidation reports whether no fork-choice node of root survives the recorded
+// invalidations: an invalid pre-Gloas block, or a Gloas block built on an invalid parent payload.
+func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil || block.Block == nil {
+		return false
+	}
+	if block.Version() < clparams.GloasVersion {
+		return f.forkGraph.IsBlockInvalid(root)
+	}
+	return f.forkGraph.IsBlockInvalid(block.Block.ParentRoot) && f.getParentPayloadStatus(block.Block) == cltypes.PayloadStatusFull
 }
 
 func (f *ForkChoiceStore) payloadStatusAuthority(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {
