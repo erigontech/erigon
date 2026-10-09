@@ -27,10 +27,9 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc     = uint64(0) // program counter
-		t      *stepTrace
-		res    []byte // result of the opcode execution function
-		tracer = evm.config.Tracer
+		pc  = uint64(0) // program counter
+		t   *stepTrace
+		res []byte // result of the opcode execution function
 	)
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
@@ -59,23 +58,6 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		}
 		evm.depth--
 	}()
-
-	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
-	// the stacks before callContext.put() returns them to the pool.
-	if false && debug {
-		t = new(stepTrace)
-		defer func() {
-			if err == nil {
-				return
-			}
-			switch {
-			case !t.logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
-				tracer.EmitOpcode(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
-				tracer.EmitFault(t.pc, byte(op), t.oldGas, t.cost, callContext, evm.depth, VMErrorFromErr(err))
-			}
-		}()
-	}
 
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during

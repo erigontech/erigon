@@ -28,6 +28,7 @@ DISABLED_TEST_LIST=(
    debug_traceCallMany
    erigon_
    eth_callBundle
+   eth_fillTransaction/test_13.json # Geth returns -32000 for differing data/input, Erigon -32602 (invalid params)
    ots_
    parity_
    trace_

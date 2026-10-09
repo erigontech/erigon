@@ -233,7 +233,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toS
 		if err != nil {
 			return err
 		}
-		parentRoot, err := beacon_indicies.ReadParentBlockRoot(ctx, tx, blockRoot)
+		parentRoot, err := beacon_indicies.ReadParentBlockRoot(tx, blockRoot)
 		if err != nil {
 			return err
 		}
