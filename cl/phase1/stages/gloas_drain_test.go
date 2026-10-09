@@ -30,9 +30,6 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// A root that received a verdict in this cycle is requeued by a later drain pass without
-// another NewPayload, so the retry phases share one attempt per root per cycle.
-
 func TestDrainPendingGloasPayloadsRequeuesWithoutVerdictWhenNewPayloadIsInterrupted(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)

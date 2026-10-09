@@ -619,7 +619,8 @@ func (f *ForkChoiceStore) HighestSeen() uint64 {
 }
 
 // HighestImported returns the highest slot of a block the fork graph accepted. Unlike
-// HighestSeen it is not raised by a block that is later rejected.
+// HighestSeen it is not raised by a block that is later rejected, and an invalidation lowers
+// it to the blocks that stay reachable.
 func (f *ForkChoiceStore) HighestImported() uint64 {
 	if f.highestImportedStale.CompareAndSwap(true, false) {
 		f.mu.Lock()

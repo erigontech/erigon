@@ -118,7 +118,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 		// the payload is delivered separately via a SignedExecutionPayloadEnvelope.
 		if block.Version() >= clparams.GloasVersion {
 			if env, ok := envelopes[blockRoot]; ok {
-				if err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, block, blockRoot, env, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert)); err != nil {
+				if err = processDownloadedGloasEnvelope(ctx, logger, cfg.forkChoice, cfg.blockCollector, block.Block, blockRoot, env, shouldInsert, shouldValidateForwardSyncPayload(cfg, shouldInsert)); err != nil {
 					return highestBlockProcessed, fmt.Errorf("%w: %w", network2.ErrUnattributableProcess, err)
 				}
 			}
@@ -174,26 +174,25 @@ type gloasBlockCollector interface {
 	AddGloasBlock(*cltypes.BeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) error
 }
 
-// forwardSyncEnvelopeStore is fork choice as forward sync sees it: the envelope apply plus the
-// verdict recording of the chain-tip retries.
+// forwardSyncEnvelopeStore is fork choice plus the status recording forward sync needs.
 type forwardSyncEnvelopeStore interface {
 	forkchoice.ForkChoiceStorage
-	gloasPayloadRetryResultStore
+	MarkPayloadStatusAndGasLimitIfRetained(common.Hash, common.Hash, execution_client.PayloadStatus, uint64) (execution_client.PayloadStatus, bool)
 }
 
-func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forwardSyncEnvelopeStore, collector gloasBlockCollector, block *cltypes.SignedBeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate bool) error {
+func processDownloadedGloasEnvelope(ctx context.Context, logger log.Logger, store forwardSyncEnvelopeStore, collector gloasBlockCollector, block *cltypes.BeaconBlock, blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, shouldInsert, validate bool) error {
 	err := store.OnExecutionPayload(ctx, envelope, false, validate)
 	persisted := errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) ||
 		(errors.Is(err, forkchoice.ErrIgnore) && persistedEnvelopeMatches(store, blockRoot, envelope))
 	if err != nil && !persisted {
-		logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Block.Slot, "err", err)
+		logger.Warn("[Caplin] forward sync: failed to process GLOAS envelope", "slot", block.Slot, "err", err)
 		return err
 	}
 	if !validate {
 		recordUnvalidatedForwardSyncPayload(store, blockRoot, envelope)
 	}
 	if shouldInsert {
-		if err := collector.AddGloasBlock(block.Block, envelope); err != nil {
+		if err := collector.AddGloasBlock(block, envelope); err != nil {
 			return fmt.Errorf("failed to add gloas block to collector: %w", err)
 		}
 	}
