@@ -17,8 +17,10 @@
 package types
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -83,4 +85,56 @@ func TestReceiptForStorage_RoundTrip(t *testing.T) {
 		require.Equal(t, want.Logs[i].Topics, l.Topics)
 		require.Equal(t, []byte(want.Logs[i].Data), []byte(l.Data))
 	}
+}
+
+func encodeStorageReceiptWithLogs(t *testing.T, nLogs int) []byte {
+	t.Helper()
+	r := storageReceiptFixture()
+	base := r.Logs
+	r.Logs = nil
+	for len(r.Logs) < nLogs {
+		r.Logs = append(r.Logs, base[len(r.Logs)%len(base)])
+	}
+	enc, err := rlp.EncodeToBytes(r)
+	require.NoError(t, err)
+	return enc
+}
+
+// One arena backs every Log, but only on a slice-backed stream. Both paths must
+// decode to the same thing.
+func TestDecodeLogsForStorageBothPaths(t *testing.T) {
+	t.Parallel()
+	for _, n := range []int{0, 1, 2, 5, 130} {
+		enc := encodeStorageReceiptWithLogs(t, n)
+		var arenaed, grown ReceiptForStorage
+		require.NoError(t, rlp.DecodeBytes(enc, &arenaed))
+		require.NoError(t, rlp.Decode(bytes.NewReader(enc), &grown))
+		require.Equal(t, &arenaed, &grown, "%d logs", n)
+		require.Len(t, arenaed.Logs, n)
+	}
+}
+
+// The arena is sized from attacker-controlled bytes: a payload of one-byte items
+// must not allocate a Log for each, since a stored log needs at least 24 bytes.
+func TestDecodeLogsForStorageArenaBounded(t *testing.T) {
+	// No t.Parallel: TotalAlloc is process-wide, so a parallel sibling's
+	// allocations would land inside the measured window.
+	items := 40000
+	logList := append([]byte{0xf9, byte(items >> 8), byte(items)}, make([]byte, items)...)
+
+	s := rlp.NewBytesStream(logList)
+	defer rlp.PutStream(s)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err := decodeLogsForStorage(s) // malformed: must error, not balloon
+	runtime.ReadMemStats(&after)
+	require.Error(t, err)
+
+	grew := after.TotalAlloc - before.TotalAlloc
+	// The cap holds this near 300KB and its absence pushes it past 6MB, so the
+	// limit sits between them with room for background allocation.
+	require.Less(t, grew, uint64(32*len(logList)),
+		"decoding %d bytes allocated %d", len(logList), grew)
 }
