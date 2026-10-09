@@ -139,6 +139,9 @@ func (a *ApiHandler) getHistoricalAttesterDependentRoot(tx kv.Tx, stateGetter st
 }
 
 func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, err

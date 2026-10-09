@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -102,4 +103,31 @@ func TestEnvelopeParkedFlagsOnlyAnUnpersistedParkedEnvelope(t *testing.T) {
 	require.Equal(t, gloasPayloadPathEmpty, handler.gloasPayloadPathForHead(head, 10), "the path stays EMPTY so preparation primes the fallback")
 	fcu.SetEnvelope(head.Root, &cltypes.SignedExecutionPayloadEnvelope{})
 	require.False(t, handler.envelopeParked(head.Root))
+}
+
+// Validator endpoints refuse to serve a head that trails the imported blocks, as block
+// production does: data built on it cannot become canonical.
+func TestValidatorEndpointsRefuseHeadBehindImportedBlocks(t *testing.T) {
+	for _, tc := range []struct {
+		method, path, body string
+	}{
+		{http.MethodGet, "/eth/v1/validator/attestation_data?slot=1&committee_index=0", ""},
+		{http.MethodGet, "/eth/v1/validator/payload_attestation_data/1", ""},
+		{http.MethodPost, "/eth/v1/beacon/pool/attestations", "[]"},
+		{http.MethodPost, "/eth/v2/beacon/pool/attestations", "[]"},
+		{http.MethodPost, "/eth/v1/validator/duties/attester/0", `["1"]`},
+		{http.MethodGet, "/eth/v1/validator/duties/proposer/0", ""},
+		{http.MethodGet, "/eth/v2/validator/duties/proposer/0", ""},
+		{http.MethodPost, "/eth/v1/validator/duties/sync/0", `["1"]`},
+		{http.MethodPost, "/eth/v1/validator/duties/ptc/0", `["1"]`},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			_, _, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+			fcu.HighestImportedVal = postState.Slot() + handler.beaconChainCfg.SlotsPerEpoch + 1
+
+			recorder := httptest.NewRecorder()
+			handler.mux.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, strings.NewReader(tc.body)))
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+		})
+	}
 }

@@ -593,6 +593,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
 ) (*beaconhttp.BeaconResponse, error) {
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
 	slot, err := beaconhttp.Uint64FromQueryParams(r, "slot")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -755,8 +758,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
-	if a.headLagsBehind() {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, synced_data.ErrNotSynced)
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
 	}
 	builderBoostFactor := uint64(100)
 	if options := gloasBlockOptionsFromContext(ctx); options != nil {

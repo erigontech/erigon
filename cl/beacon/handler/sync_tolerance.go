@@ -16,13 +16,29 @@
 
 package handler
 
+import (
+	"net/http"
+
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
+)
+
 // syncToleranceEpochs is how far the head may trail the highest imported block before the
-// node treats itself as syncing: it reports is_syncing and refuses to propose. Only accepted
-// blocks count, so neither a chain-wide gap nor a rejected block trips the tolerance.
+// node treats itself as syncing: it reports is_syncing and refuses blocks, attestation data,
+// duties and pool attestations. Only accepted blocks count, so neither a chain-wide gap nor a
+// rejected block trips the tolerance.
 const syncToleranceEpochs = 1
 
 func headLagExceedsSyncTolerance(highestImported, headSlot, toleranceSlots uint64) bool {
 	return highestImported > headSlot+toleranceSlots
+}
+
+// refuseLaggingHead is the 503 a validator endpoint returns while headLagsBehind holds.
+func (a *ApiHandler) refuseLaggingHead() error {
+	if a.headLagsBehind() {
+		return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, synced_data.ErrNotSynced)
+	}
+	return nil
 }
 
 // headLagsBehind is true without a head state and also when blocks more than the tolerance

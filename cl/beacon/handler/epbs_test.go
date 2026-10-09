@@ -489,6 +489,7 @@ func TestGetPayloadAttestationDataPreservesUnavailableHeadStatus(t *testing.T) {
 	handler.enableMemoizedHeadState = true
 	mockSyncedData := syncedData.(*sync_mock_services.MockSyncedData)
 	mockSyncedData.EXPECT().Syncing().Return(false)
+	mockSyncedData.EXPECT().HeadSlot().Return(uint64(0))
 	mockSyncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=64", http.NoBody)
