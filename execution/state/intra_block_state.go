@@ -1100,6 +1100,12 @@ func (ibs *IntraBlockState) TouchAccount(addr accounts.Address) error {
 			}
 			return nil
 		}
+		// No cell and no committed record: getStateObject would resolve the same absence again.
+		if ibs.noMaterialize && ibs.versionMap.load(addr) == nil {
+			ibs.createObject(addr, nil)
+			markTouched()
+			return nil
+		}
 	}
 
 	stateObject, err := ibs.GetOrNewStateObject(addr)
@@ -1873,6 +1879,15 @@ func (ibs *IntraBlockState) Selfdestruct(addr accounts.Address, preserveBalance 
 // stateObject is kept in step for the so.data-based commit paths (genesis
 // FinalizeTx, RPC).
 func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserveBalance bool) (bool, error) {
+	// Destructed earlier in this tx and sent nothing since: every cell below already holds its value.
+	if !preserveBalance {
+		sd, sdOK := ibs.versionedWrites.GetSelfDestruct(addr)
+		bal, balOK := ibs.versionedWrites.GetBalance(addr)
+		_, incOK := ibs.versionedWrites.GetIncarnation(addr)
+		if sdOK && sd.Val && balOK && bal.Val.IsZero() && incOK {
+			return true, nil
+		}
+	}
 	base, _, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
 		return false, err
