@@ -736,7 +736,7 @@ func TestCollectUpdate_HonoursSuppliedPrev(t *testing.T) {
 	beNew := NewBranchEncoder(1024)
 	require.NoError(t, beNew.CollectUpdate(ctxNew, prefix, bm, bm, bm, &cells, nil))
 	require.Len(t, ctxNew.puts, 1)
-	require.Nil(t, ctxNew.puts[0].prev)
+	require.Empty(t, ctxNew.puts[0].prev)
 
 	beSame := NewBranchEncoder(1024)
 	encoded, err := beSame.EncodeBranch(bm, bm, bm, &cells)
@@ -1228,7 +1228,7 @@ func TestCollectDeferredUpdate_InlineFlushesAtCapacity(t *testing.T) {
 	require.Len(t, be.deferred, 1)
 }
 
-func TestCollectDeferredUpdate_NewBranchLeavesPrevToTheDomain(t *testing.T) {
+func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
 	t.Parallel()
 	row, bm := generateCellRow(t, 4)
 	cells := generateCellEncodeDataRow(t, row, bm)
@@ -1237,7 +1237,8 @@ func TestCollectDeferredUpdate_NewBranchLeavesPrevToTheDomain(t *testing.T) {
 	be.setDeferUpdates(true)
 	require.NoError(t, be.CollectDeferredUpdate(&recordingCtx{}, []byte{0x33, 0x44}, bm, bm, bm, &cells, nil))
 	require.Len(t, be.deferred, 1)
-	require.Nil(t, be.deferred[0].prev, "a new branch can land on a stale record the trie never read; a nil prev makes the domain record that record as history")
+	require.NotNil(t, be.deferred[0].prev, "a new branch must carry an empty prev, or the domain reads the previous value again on apply")
+	require.Empty(t, be.deferred[0].prev)
 	be.ClearDeferred()
 }
 
