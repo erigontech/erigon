@@ -375,8 +375,9 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	return nil
 }
 
-// retryPendingEnvelope hands a completed root to fork choice off the gossip validator. The
-// store admits one apply per root at a time, so the last two columns cannot both apply.
+// retryPendingEnvelope hands a completed root to fork choice off the gossip validator. Fork
+// choice serialises the parked-envelope applies of one root, so two columns completing it
+// together do not apply the parked envelope twice.
 func (s *dataColumnSidecarService) retryPendingEnvelope(blockRoot common.Hash) {
 	if !s.forkChoice.HasPendingExecutionPayloadEnvelope(blockRoot) {
 		return
