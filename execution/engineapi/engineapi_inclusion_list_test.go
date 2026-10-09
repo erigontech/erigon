@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -34,7 +35,7 @@ import (
 
 func newGetInclusionListClient(t *testing.T, inclusionList func(context.Context) (types.Transactions, error)) *rpc.Client {
 	t.Helper()
-	return newEngineInProcClient(t, &EngineServer{logger: log.New(), executionService: &stubExecutionModule{inclusionListFunc: inclusionList}})
+	return newEngineInProcClient(t, &EngineServer{logger: log.New(), config: &chain.Config{BogotaTime: common.NewUint64(0)}, executionService: &stubExecutionModule{inclusionListFunc: inclusionList}})
 }
 
 func TestGetInclusionListV1(t *testing.T) {

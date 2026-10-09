@@ -1353,6 +1353,10 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 }
 
 func (e *EngineServer) getInclusionList(ctx context.Context) ([]hexutil.Bytes, error) {
+	if !e.config.IsBogota(uint64(time.Now().Unix())) {
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+
 	if e.caplin {
 		e.logger.Crit(caplinEnabledLog)
 		return nil, errCaplinEnabled

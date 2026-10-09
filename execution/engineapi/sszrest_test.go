@@ -173,7 +173,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 
 func TestSSZRESTGetInclusionListRoute(t *testing.T) {
 	txns := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(0), 21_000, uint256.NewInt(1), nil)}
-	srv := NewEngineServer(log.New(), &chain.Config{}, &stubExecutionModule{
+	srv := NewEngineServer(log.New(), &chain.Config{BogotaTime: common.NewUint64(0)}, &stubExecutionModule{
 		inclusionListFunc: func(context.Context) (types.Transactions, error) { return txns, nil },
 	}, nil, false, true, false, false, nil, nil, 0, 0)
 
