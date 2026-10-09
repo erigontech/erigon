@@ -308,6 +308,9 @@ type Sync struct {
 	ParallelStateFlushing      bool
 	ChainTipMode               bool
 	ExecStopAtBlock            uint64
+	GenerateOfflineBALs        bool
+	UseOfflineBALs             bool
+	OfflineBALDir              string
 
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
