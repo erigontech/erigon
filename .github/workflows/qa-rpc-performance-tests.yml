@@ -136,13 +136,22 @@ jobs:
           fetch-depth: "0"
           filter: blob:none
 
+      - name: Checkout the rpc-tests version file
+        if: matrix.client != 'erigon' && needs.setup.outputs.run_geth == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts/rpc_version.env
+          sparse-checkout-cone-mode: false
+
       - name: Checkout RPC Tests Repository
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         env:
           RUNNER_WS: ${{ runner.workspace }}
         run: |
+          source .github/workflows/scripts/rpc_version.env
           rm -rf "$RUNNER_WS/rpc-tests"
-          git -c advice.detachedHead=false clone --depth 1 --branch v2.4.0 https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
+          git -c advice.detachedHead=false clone --depth 1 --branch "$RPC_VERSION" https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
           cd "$RUNNER_WS/rpc-tests"
           make rpc_perf
 

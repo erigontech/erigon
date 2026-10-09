@@ -28,6 +28,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -304,6 +306,28 @@ func TestJsonTestcases(t *testing.T) {
 	}
 }
 
+func innerOutputsShareBuffer(cfg Config) bool {
+	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chain.AllProtocolChanges, cfg)
+	evm.depth = 2
+	var mem Memory
+	mem.Resize(32)
+	a, b := evm.output(&mem, 0, 32), evm.output(&mem, 0, 32)
+	return unsafe.SliceData(a) == unsafe.SliceData(b)
+}
+
+func TestInnerFrameOutputReusesBuffer(t *testing.T) {
+	if !innerOutputsShareBuffer(Config{}) {
+		t.Fatal("each inner RETURN got a new buffer")
+	}
+}
+
+// Tracers such as callTracer keep every frame's output.
+func TestTracedInnerFrameOutputIsCopied(t *testing.T) {
+	if innerOutputsShareBuffer(Config{Tracer: &tracing.Hooks{}}) {
+		t.Fatal("a traced inner RETURN reused the buffer")
+	}
+}
+
 func TestOpMstore(t *testing.T) {
 	t.Parallel()
 	var (
@@ -381,8 +405,8 @@ func TestCreate2InitCodeAllocations(t *testing.T) {
 	defer ibs.Close()
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 	evm.depth = int(params.CallCreateDepth) + 1 // exclude child execution from the allocation count.
-	scope := getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 500_000})
-	defer scope.put()
+	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 500_000})
+	defer evm.putCallContext(scope)
 	scope.Memory.Resize(64)
 	clear(scope.Memory.Data())
 	allocations := func(memorySize int) float64 {

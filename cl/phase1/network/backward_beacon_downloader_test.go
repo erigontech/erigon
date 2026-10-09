@@ -1328,7 +1328,7 @@ func TestBackwardBeaconDownloaderRequestMoreUsesStoredGloasBlockWithoutCanonical
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	t.Cleanup(db.Close)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		if err := beacon_indicies.WriteBeaconBlockAndIndicies(t.Context(), tx, target, false); err != nil {
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, target, false); err != nil {
 			return err
 		}
 		return beacon_indicies.WriteExecutionBlockHash(tx, targetRoot, hash(0xaa))
@@ -1924,7 +1924,7 @@ func TestBackwardBeaconDownloaderSkipsGloasPayloadProvenEmptyBySuccessor(t *test
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	t.Cleanup(db.Close)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.WriteBeaconBlockAndIndicies(t.Context(), tx, stored, false)
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, stored, false)
 	}))
 	downloader := &BackwardBeaconDownloader{
 		ctx:               t.Context(),
@@ -1969,7 +1969,7 @@ func TestBackwardBeaconDownloaderSkipRetainsDirectGloasSuccessor(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	t.Cleanup(db.Close)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		if err := beacon_indicies.WriteBeaconBlockAndIndicies(t.Context(), tx, storedChild, false); err != nil {
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, storedChild, false); err != nil {
 			return err
 		}
 		if err := beacon_indicies.WriteExecutionBlockNumber(tx, storedChildRoot, 11); err != nil {
@@ -2040,7 +2040,7 @@ func TestBackwardBeaconDownloaderDoesNotSkipGloasWithoutReadableBlock(t *testing
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	t.Cleanup(db.Close)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		if err := beacon_indicies.WriteBeaconBlockAndIndicies(t.Context(), tx, stored, false); err != nil {
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, stored, false); err != nil {
 			return err
 		}
 		if err := beacon_indicies.WriteExecutionBlockNumber(tx, storedRoot, 11); err != nil {
@@ -2175,7 +2175,7 @@ func TestBackwardGloasInitialAnchorRestartUsesPersistedBlock(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	persist := func(block *cltypes.SignedBeaconBlock) error {
 		return db.Update(t.Context(), func(tx kv.RwTx) error {
-			return beacon_indicies.WriteBeaconBlockAndIndicies(t.Context(), tx, block, true)
+			return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true)
 		})
 	}
 	first := &BackwardBeaconDownloader{beaconCfg: gloasFromGenesisConfig(), expectedRoot: anchorRoot}

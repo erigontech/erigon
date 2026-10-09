@@ -580,17 +580,9 @@ func TestParseTransactionsRejectsTrailingBlobWrapperBytes(t *testing.T) {
 	require.ErrorContains(t, err, "trailing bytes after blobs wrapper")
 }
 
-func TestSetCodeAuthSignatureRecover(t *testing.T) {
+func TestSetCodeAuthRecoveryDeferred(t *testing.T) {
 	txnRlpHex := testdata.ValidSetCodeTxn1
-	// For authorizationList[0] in the above :-
-	// expectedAddress := common.HexToAddress("0x0e2dadd8081919cd0534c4144a74204f2db229ec")
-	// expectedNonce := 0x17
-	// expectedYParity := 0x1
-	// expectedR := "0x837da79f8b17c1db2371cdc4b2b134cd5aef1b588f811a5e3b4f2329c2107116"
-	// expectedS := "0x66aab6e4baa71dd601f4211e1bbf27c297e47dc845e73b9147ab1823064df2b9"
-
 	expectedChainId := 11155111 // Sepolia
-	expectedSigner := common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3")
 
 	var txn TxnSlot
 
@@ -603,8 +595,16 @@ func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	setCodeTx := types.SetCodeTransaction{}
 	rlpStream := rlp.NewStream(bytes.NewBuffer(txnRlpBytes[1:]), uint64(len(txnRlpBytes)))
 	require.NoError(t, setCodeTx.DecodeRLP(rlpStream))
+	require.Equal(t, setCodeTx.Authorizations, txn.Txn.GetAuthorizations())
+	require.Empty(t, txn.AuthAndNonces)
+	pool := &TxPool{chainID: ctx.chainID}
+	pool.recoverAuthorizations(&txn)
 	require.Len(t, txn.AuthAndNonces, 1)
-	require.Equal(t, expectedSigner, txn.AuthAndNonces[0].authority)
+	require.Equal(t, common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3"), txn.AuthAndNonces[0].authority)
+
+	_, err = ctx.ParseTransaction(hexutil.MustDecodeHex(testdata.ValidSetCodeTxn2), 0, &txn, nil, false, false, nil)
+	require.NoError(t, err)
+	require.Nil(t, txn.AuthAndNonces, "parsing a new transaction must clear the previous recovery")
 }
 
 func TestSetCodeTxnParsing(t *testing.T) {
@@ -622,7 +622,8 @@ func TestSetCodeTxnParsing(t *testing.T) {
 
 	_, err = ctx.ParseTransaction(bodyRlx, 0, &txn, nil, hasEnvelope, false, nil)
 	require.NoError(t, err)
-	assert.Len(t, txn.AuthAndNonces, 2)
+	assert.Len(t, txn.Txn.GetAuthorizations(), 2)
+	assert.Empty(t, txn.AuthAndNonces)
 	assert.Equal(t, SetCodeTxnType, txn.TxType())
 
 	// test empty authorizations

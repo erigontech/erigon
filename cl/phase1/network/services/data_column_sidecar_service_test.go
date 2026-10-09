@@ -41,7 +41,7 @@ func init() {
 			NumberOfColumns:             128,
 			SlotsPerEpoch:               32,
 		}
-		clparams.InitGlobalStaticConfig(cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(cfg)
 	})
 }
 
@@ -539,7 +539,7 @@ func createMockGloasDataColumnSidecar(slot uint64, index uint64, blockRoot commo
 }
 
 // createMockGloasBlock creates a mock GLOAS block with SignedExecutionPayloadBid
-func createMockGloasBlock(slot uint64, blockRoot common.Hash) *cltypes.SignedBeaconBlock {
+func createMockGloasBlock(slot uint64) *cltypes.SignedBeaconBlock {
 	block := &cltypes.SignedBeaconBlock{
 		Block: &cltypes.BeaconBlock{
 			Slot: slot,
@@ -581,7 +581,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenAlreadySeen_Ret
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 
 	// Setup block in forkChoice
-	block := createMockGloasBlock(testSlot, testBlockRoot)
+	block := createMockGloasBlock(testSlot)
 	t.mockForkChoice.Blocks[testBlockRoot] = block
 
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).Times(1)
@@ -736,7 +736,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueKeepsOriginalAgeWhenBl
 	rejectionsBeforeRetry := service.pendingGloasSidecars.fullCounter.GetValueUint64()
 
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot, testBlockRoot)
+	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
 	service.forkChoice = &disappearingEnvelopeBlockStore{ForkChoiceStorage: t.mockForkChoice}
 	service.pendingGloasSidecars.processPending(t.T().Context())
 
@@ -766,7 +766,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsSeenSidecar() {
 	service.scheduleSidecarForLaterProcessing(sidecar)
 	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
 	service.seenGloasSidecar.Add(seenGloasSidecarKey{testBlockRoot, sidecar.Index}, struct{}{})
-	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot, testBlockRoot)
+	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot)
 
 	service.pendingGloasSidecars.processPending(t.T().Context())
 
@@ -803,7 +803,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueProcessesSidecarAtBlob
 	t.ErrorIs(service.ProcessMessage(t.T().Context(), nil, sidecar), ErrIgnore)
 	t.Require().Equal(int32(1), service.pendingGloasSidecars.count.Load())
 
-	block := createMockGloasBlock(testSlot, testBlockRoot)
+	block := createMockGloasBlock(testSlot)
 	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
 	t.mockForkChoice.Blocks[testBlockRoot] = block
 	service.pendingGloasSidecars.processPending(t.T().Context())
@@ -822,7 +822,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenSlotMismatch_Re
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
 
 	// Block has different slot than sidecar
-	block := createMockGloasBlock(testSlot+10, testBlockRoot)
+	block := createMockGloasBlock(testSlot + 10)
 	t.mockForkChoice.Blocks[testBlockRoot] = block
 
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
@@ -840,7 +840,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidSidecar_
 	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(false).AnyTimes()
 
-	block := createMockGloasBlock(testSlot, testBlockRoot)
+	block := createMockGloasBlock(testSlot)
 	t.mockForkChoice.Blocks[testBlockRoot] = block
 
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
@@ -877,7 +877,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenInvalidKZGProof
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(false).AnyTimes()
 
-	block := createMockGloasBlock(testSlot, testBlockRoot)
+	block := createMockGloasBlock(testSlot)
 	t.mockForkChoice.Blocks[testBlockRoot] = block
 
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
@@ -897,7 +897,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenValid_StoresSuc
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 
-	block := createMockGloasBlock(testSlot, testBlockRoot)
+	block := createMockGloasBlock(testSlot)
 	t.mockForkChoice.Blocks[testBlockRoot] = block
 
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), testBlockRoot, int64(0), gomock.Any()).Return(nil).Times(1)
@@ -919,7 +919,7 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenStorageFails_Re
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
 
-	block := createMockGloasBlock(testSlot, testBlockRoot)
+	block := createMockGloasBlock(testSlot)
 	t.mockForkChoice.Blocks[testBlockRoot] = block
 
 	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage error"))

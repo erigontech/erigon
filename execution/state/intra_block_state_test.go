@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -1181,4 +1182,74 @@ func TestPropagatesBalanceIncGetStateObjectError(t *testing.T) {
 			require.ErrorIs(t, tc.call(sdb), wantErr)
 		})
 	}
+}
+
+// TestRevertSetCodeOnCodelessAccount pins the revert of a code change whose
+// previous code was empty on an account that outlives the revert, e.g. an EOA.
+func TestRevertSetCodeOnCodelessAccount(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+
+	snapshot := ibs.PushSnapshot()
+	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+	ibs.RevertToSnapshot(snapshot, nil)
+
+	code, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Empty(t, code)
+	codeHash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.EmptyCodeHash, codeHash)
+}
+
+// TestSetCodeReusesTheLastEqualCode pins the SetCode memo: an equal code from a
+// separate allocation gets the previous code's bytes and hash, a different code
+// gets its own.
+func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	codeA := []byte{0x60, 0x01, 0x60, 0x00, 0xf3}
+	codeB := []byte{0x60, 0x02, 0x60, 0x00, 0xf3}
+	var stored [][]byte
+	for i, code := range [][]byte{codeA, bytes.Clone(codeA), codeB, bytes.Clone(codeA)} {
+		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeContractCreation))
+
+		got, err := ibs.GetCode(addr)
+		require.NoError(t, err)
+		require.Equal(t, code, got)
+		codeHash, err := ibs.GetCodeHash(addr)
+		require.NoError(t, err)
+		require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(code)), codeHash)
+		stored = append(stored, got)
+	}
+	require.Same(t, &stored[0][0], &stored[1][0], "an equal code reuses the previous one")
+	require.NotSame(t, &stored[0][0], &stored[3][0], "a different code in between replaces the memo")
+}
+
+// On a versioned IBS that caches state objects, an account touched and then
+// credited in the same tx is not empty and must survive FinalizeTx.
+func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress(common.HexToAddress("0x161A"))
+	rules := &chain.Rules{IsSpuriousDragon: true}
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(newAccountStateReader(), vm)
+	defer ibs.Close()
+
+	ibs.SetTxContext(1, 0)
+	require.NoError(t, ibs.TouchAccount(addr))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
+	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
+	vm.FlushVersionedWrites(ibs.FinalizedWrites(rules), true)
+	ibs.ResetVersionedIO()
+
+	ibs.SetTxContext(1, 1)
+	bal, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(5), bal)
 }

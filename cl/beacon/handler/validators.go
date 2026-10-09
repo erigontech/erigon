@@ -224,7 +224,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 		return
 	}
 
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		beaconhttp.NewEndpointError(httpStatus, err).WriteTo(w)
 		return
@@ -242,7 +242,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 		return
 	}
 
-	a.writeValidatorsResponse(w, r, tx, blockId, blockRoot, validatorIds, queryFilters)
+	a.writeValidatorsResponse(w, tx, blockId, blockRoot, validatorIds, queryFilters)
 }
 
 type validatorsRequest struct {
@@ -266,7 +266,7 @@ func (a *ApiHandler) PostEthV1BeaconStatesValidators(w http.ResponseWriter, r *h
 		return
 	}
 
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		beaconhttp.NewEndpointError(httpStatus, err).WriteTo(w)
 		return
@@ -278,12 +278,11 @@ func (a *ApiHandler) PostEthV1BeaconStatesValidators(w http.ResponseWriter, r *h
 		return
 	}
 
-	a.writeValidatorsResponse(w, r, tx, blockId, blockRoot, req.Ids, req.Statuses)
+	a.writeValidatorsResponse(w, tx, blockId, blockRoot, req.Ids, req.Statuses)
 }
 
 func (a *ApiHandler) writeValidatorsResponse(
 	w http.ResponseWriter,
-	r *http.Request,
 	tx kv.Tx,
 	blockId *beaconhttp.SegmentID,
 	blockRoot common.Hash,
@@ -420,7 +419,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -517,7 +516,7 @@ func (a *ApiHandler) PostEthV1BeaconValidatorsBalances(w http.ResponseWriter, r 
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	return a.getValidatorBalances(r.Context(), w, blockId, validatorIds)
+	return a.getValidatorBalances(r.Context(), blockId, validatorIds)
 }
 
 // https://ethereum.github.io/beacon-APIs/#/Beacon/getStateValidatorBalances
@@ -532,17 +531,17 @@ func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	return a.getValidatorBalances(r.Context(), w, blockId, validatorIds)
+	return a.getValidatorBalances(r.Context(), blockId, validatorIds)
 }
 
-func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWriter, blockId *beaconhttp.SegmentID, validatorIds []string) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) getValidatorBalances(ctx context.Context, blockId *beaconhttp.SegmentID, validatorIds []string) (*beaconhttp.BeaconResponse, error) {
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback()
 
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
@@ -555,7 +554,7 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		var response *beaconhttp.BeaconResponse
 		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
-			response = responseValidatorsBalances(w, filterIndicies, s.Balances(), false, a.forkchoiceStore.IsRootOptimistic(root))
+			response = responseValidatorsBalances(filterIndicies, s.Balances(), false, a.forkchoiceStore.IsRootOptimistic(root))
 			return nil
 		}); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is not synced"))
@@ -585,7 +584,7 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 		if balances == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found, node may node be running in archivial node"))
 		}
-		return responseValidatorsBalances(w, filterIndicies, balances, true, isOptimistic), nil
+		return responseValidatorsBalances(filterIndicies, balances, true, isOptimistic), nil
 	}
 	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
 	if err != nil {
@@ -594,7 +593,7 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 	if balances == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("balances not found"))
 	}
-	return responseValidatorsBalances(w, filterIndicies, balances, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic), nil
+	return responseValidatorsBalances(filterIndicies, balances, *slot <= a.forkchoiceStore.FinalizedSlot(), isOptimistic), nil
 }
 
 type directString string
@@ -690,7 +689,7 @@ func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListS
 	return newBeaconResponse(directString(b.String())).WithFinalized(finalized).WithOptimistic(optimistic), err
 }
 
-func responseValidatorsBalances(w http.ResponseWriter, filterIndicies []uint64, balances solid.Uint64ListSSZ, finalized bool, optimistic bool) *beaconhttp.BeaconResponse {
+func responseValidatorsBalances(filterIndicies []uint64, balances solid.Uint64ListSSZ, finalized, optimistic bool) *beaconhttp.BeaconResponse {
 	type BalanceResponse struct {
 		Index   string `json:"index"`
 		Balance string `json:"balance"`
@@ -810,7 +809,7 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	defer tx.Rollback()
-	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}

@@ -3,6 +3,8 @@ package clparams
 import "math"
 
 const (
+	MaxSupportedCommitteesPerSlot = 64
+
 	// non-configurable constants
 	// For Gloas
 	BuilderIndexFlag                   = uint64(1 << 40) // 2^40

@@ -49,3 +49,31 @@ func TestSetupSentinelCliUsesIndependentQUICPort(t *testing.T) {
 		"--sentinel.quic.port=9001",
 	}))
 }
+
+func TestSetupSentinelCliReadsQUICDisableFlag(t *testing.T) {
+	quicDisable := sentinelflags.SentinelQUICDisable
+	verbosity := logging.LogVerbosityFlag
+	cmd := &cli.Command{Flags: []cli.Flag{&quicDisable, &verbosity}}
+	cmd.Action = func(_ context.Context, cmd *cli.Command) error {
+		cfg, err := SetupSentinelCli(cmd)
+		require.NoError(t, err)
+		require.True(t, cfg.ServerQUICDisable)
+		return nil
+	}
+
+	require.NoError(t, cmd.Run(t.Context(), []string{"caplin", "--sentinel.quic.disable"}))
+}
+
+func TestSetupSentinelCliQUICDisableDefaultsFalse(t *testing.T) {
+	quicDisable := sentinelflags.SentinelQUICDisable
+	verbosity := logging.LogVerbosityFlag
+	cmd := &cli.Command{Flags: []cli.Flag{&quicDisable, &verbosity}}
+	cmd.Action = func(_ context.Context, cmd *cli.Command) error {
+		cfg, err := SetupSentinelCli(cmd)
+		require.NoError(t, err)
+		require.False(t, cfg.ServerQUICDisable)
+		return nil
+	}
+
+	require.NoError(t, cmd.Run(t.Context(), []string{"caplin"}))
+}

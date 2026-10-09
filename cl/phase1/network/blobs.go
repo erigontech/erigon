@@ -25,7 +25,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -292,14 +291,4 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 			return nil, ErrTimeout
 		}
 	}
-}
-
-// RequestBlobsFrantically requests blobs until a peer returns a non-empty response.
-func RequestBlobsFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
-	return requestBlobsForBackfill(ctx, r, func() *solid.ListSSZ[*cltypes.BlobIdentifier] {
-		return req
-	}, func(_ context.Context, candidate *PeerAndSidecars) (bool, bool, error) {
-		complete := len(candidate.Responses) > 0
-		return complete, complete, nil
-	})
 }

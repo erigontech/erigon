@@ -86,6 +86,7 @@ type CaplinConfig struct {
 	CaplinDiscoveryPort         uint64
 	CaplinDiscoveryTCPPort      uint64
 	CaplinDiscoveryQUICPort     uint64
+	CaplinDisableQUIC           bool
 	SentinelAddr                string
 	SentinelPort                uint64
 	SubscribeAllTopics          bool
@@ -1253,6 +1254,9 @@ func CustomConfig(configFile string) (BeaconChainConfig, NetworkConfig, error) {
 	beaconCfg.InitializeForkSchedule()
 	if err := beaconCfg.ValidateExecutionRequestTypeConstants(); err != nil {
 		return BeaconChainConfig{}, NetworkConfig{}, err
+	}
+	if beaconCfg.MaxCommitteesPerSlot > MaxSupportedCommitteesPerSlot {
+		return BeaconChainConfig{}, NetworkConfig{}, fmt.Errorf("MAX_COMMITTEES_PER_SLOT exceeds supported limit: %d > %d", beaconCfg.MaxCommitteesPerSlot, MaxSupportedCommitteesPerSlot)
 	}
 
 	// setup network config
