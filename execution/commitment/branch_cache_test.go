@@ -647,3 +647,18 @@ func TestBranchCache_GetBeforeDoesNotEvict(t *testing.T) {
 	_, _, ok = c.GetBefore(key, 101)
 	require.False(t, ok, "a local bound must still honor canonical invalidation")
 }
+
+func TestBranchCache_FillDropsViewsOlderThanCommittedUnwind(t *testing.T) {
+	c := NewBranchCache(100)
+	key := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
+	c.UnwindCommitted(10, 7)
+
+	c.Fill(key, []byte("old-view"), 1, 20, 6)
+	_, _, ok := c.Get(key)
+	require.False(t, ok)
+
+	c.Fill(key, []byte("new-view"), 1, 20, 7)
+	got, _, ok := c.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("new-view"), got)
+}
