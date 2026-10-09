@@ -1564,6 +1564,48 @@ func TestNormalizeWriteSet_ValueTransferRevivalDropsPreDestructNonce(t *testing.
 	assert.Equal(t, uint64(0), n.Val, "value-transfer revival gets zero nonce, not the pre-SD 9")
 }
 
+// A fee credit revives a destroyed coinbase with only a balance and an account
+// record write: it must not take the pre-SD code hash from the versionMap.
+func TestNormalizeWriteSet_FeeCreditRevivalDropsPreDestructCodeHash(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x38})
+	staleHash := accounts.InternCodeHash(common.HexToHash("0x11223344"))
+	vm.FlushVersionedWrites(newWS().codeHash(addr, state.Version{TxIndex: 1, Incarnation: 0}, staleHash).build(), true)
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(100)
+	credit := newWS().
+		addr(addr, state.Version{TxIndex: 5, Incarnation: 0}, &account).
+		bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, account.Balance).
+		build()
+	res, _ := credit.Normalize(vm, 5, 0, nil, nil, true, false, false)
+	ch, ok := res.GetCodeHash(addr)
+	require.True(t, ok)
+	assert.Equal(t, accounts.EmptyCodeHash, ch.Val, "fee-credit revival gets empty codeHash, not the pre-SD hash")
+}
+
+// The fee-credit revival must not take the pre-block code hash from a state
+// reader that has not applied the destruct.
+func TestNormalizeWriteSet_FeeCreditRevivalDropsPreBlockCodeHash(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x39})
+	reader := newMapStateReader()
+	reader.accounts[addr] = &accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(common.HexToHash("0x11223344"))}
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(100)
+	credit := newWS().
+		addr(addr, state.Version{TxIndex: 5, Incarnation: 0}, &account).
+		bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, account.Balance).
+		build()
+	res, _ := credit.Normalize(vm, 5, 0, reader, nil, true, false, false)
+	ch, ok := res.GetCodeHash(addr)
+	require.True(t, ok)
+	assert.Equal(t, accounts.EmptyCodeHash, ch.Val, "fee-credit revival gets empty codeHash, not the pre-block hash")
+}
+
 // A later credit must not take the pre-SD nonce either: the revival
 // (SelfDestructPath=false) wrote no nonce.
 func TestNormalizeWriteSet_CreditAfterRevivalDropsPreDestructNonce(t *testing.T) {
