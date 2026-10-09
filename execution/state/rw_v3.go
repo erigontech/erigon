@@ -248,8 +248,8 @@ func (ws *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, bl
 				acc := accounts.NewAccount()
 				if !d.selfDestruct {
 					if blockCache != nil {
-						if enc, ok := blockCache.GetCurrentAccount(addr); ok && len(enc) > 0 {
-							_ = accounts.DeserialiseV3(&acc, enc)
+						if cur, ok := blockCache.GetCurrentAccount(addr); ok && cur != deletedAccount {
+							acc = cur
 						} else if enc0, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:]); err == nil && len(enc0) > 0 {
 							_ = accounts.DeserialiseV3(&acc, enc0)
 						}
@@ -274,14 +274,13 @@ func (ws *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, bl
 				if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
 					fmt.Printf("%d apply:put account: %x balance:%s,nonce:%d,codehash:%x\n", blockNum, addr, acc.Balance.String(), acc.Nonce, acc.CodeHash)
 				}
-				enc := accounts.SerialiseV3(&acc)
 				if blockCache != nil {
-					blockCache.WriteAccount(addr, enc, txNum)
+					blockCache.WriteAccount(addr, &acc, txNum)
 					if !domains.InlineTouchKeyDisabled() {
-						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), enc)
+						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), accounts.SerialiseV3(&acc))
 					}
 				} else {
-					if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], enc, txNum, nil); err != nil {
+					if err := domains.DomainPut(kv.AccountsDomain, roTx, address[:], accounts.SerialiseV3(&acc), txNum, nil); err != nil {
 						return err
 					}
 				}
@@ -356,28 +355,21 @@ func (ws *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, bl
 		addrValue := addr.Value()
 		// Read current account — from blockCache if available, otherwise domain.
 		var enc0 []byte
+		cached := false
 		if blockCache != nil {
-			if enc, ok := blockCache.GetCurrentAccount(addr); ok {
-				enc0 = enc
-			} else {
-				// Not in cache yet — read from domain (pre-block state).
-				var err error
-				enc0, _, err = domains.GetLatest(kv.AccountsDomain, roTx, addrValue[:])
-				if err != nil {
-					return err
-				}
-			}
-		} else {
+			acc, cached = blockCache.GetCurrentAccount(addr)
+		}
+		if !cached {
 			var err error
 			enc0, _, err = domains.GetLatest(kv.AccountsDomain, roTx, addrValue[:])
 			if err != nil {
 				return err
 			}
-		}
-		acc.Reset()
-		if len(enc0) > 0 {
-			if err := accounts.DeserialiseV3(&acc, enc0); err != nil {
-				return err
+			acc.Reset()
+			if len(enc0) > 0 {
+				if err := accounts.DeserialiseV3(&acc, enc0); err != nil {
+					return err
+				}
 			}
 		}
 		acc.Balance.Add(&acc.Balance, &increase)
@@ -393,14 +385,13 @@ func (ws *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, bl
 				}
 			}
 		} else {
-			enc1 := accounts.SerialiseV3(&acc)
 			if blockCache != nil {
-				blockCache.WriteAccount(addr, enc1, txNum)
+				blockCache.WriteAccount(addr, &acc, txNum)
 				if !domains.InlineTouchKeyDisabled() {
-					domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(addrValue[:]), enc1)
+					domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(addrValue[:]), accounts.SerialiseV3(&acc))
 				}
 			} else {
-				if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], enc1, txNum, enc0); err != nil {
+				if err := domains.DomainPut(kv.AccountsDomain, roTx, addrValue[:], accounts.SerialiseV3(&acc), txNum, enc0); err != nil {
 					return err
 				}
 			}
@@ -1056,13 +1047,13 @@ type BlockStateCache struct {
 	// Both are write-once-per-key (an immutable pre-block view), so they are
 	// sync.Maps for lock-free reads off the shared mu hot path.
 	committedAccounts sync.Map // accounts.Address -> *accounts.Account (nil ptr = absent)
-	committedStorage  sync.Map // committedStorageKey -> []byte (nil slice = cached empty slot)
+	committedStorage  sync.Map
 
 	// current holds the latest state including intra-block writes.
 	// Updated by WriteAccount/WriteStorage. Read by block finalize.
 	// At block boundary, dirty entries are flushed to SharedDomains.
-	currentAccounts map[accounts.Address][]byte // serialized account blobs
-	currentStorage  map[accounts.Address]map[accounts.StorageKey][]byte
+	currentAccounts map[accounts.Address]accounts.Account
+	currentStorage  map[accounts.Address]map[accounts.StorageKey]uint256.Int
 
 	// currentCode is the latest code per address (for fast read access via
 	// GetCurrentCode-style fallback if added; today only currentAccounts /
@@ -1117,8 +1108,8 @@ type bcWriteOp struct {
 
 func NewBlockStateCache() *BlockStateCache {
 	return &BlockStateCache{
-		currentAccounts: make(map[accounts.Address][]byte),
-		currentStorage:  make(map[accounts.Address]map[accounts.StorageKey][]byte),
+		currentAccounts: make(map[accounts.Address]accounts.Account),
+		currentStorage:  make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		currentCode:     make(map[accounts.Address][]byte),
 	}
 }
@@ -1139,17 +1130,15 @@ func (c *BlockStateCache) PutCommittedAccount(addr accounts.Address, acc *accoun
 	c.committedAccounts.Store(addr, acc)
 }
 
-// GetCommittedStorage returns the pre-block storage value, or (nil, false) if not cached.
-func (c *BlockStateCache) GetCommittedStorage(addr accounts.Address, key accounts.StorageKey) ([]byte, bool) {
+func (c *BlockStateCache) GetCommittedStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
 	v, ok := c.committedStorage.Load(committedStorageKey{addr: addr, key: key})
 	if !ok {
-		return nil, false
+		return uint256.Int{}, false
 	}
-	return v.([]byte), true
+	return v.(uint256.Int), true
 }
 
-// PutCommittedStorage caches a pre-block storage value. nil = empty slot.
-func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key accounts.StorageKey, val []byte) {
+func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
 	c.committedStorage.Store(committedStorageKey{addr: addr, key: key}, val)
 }
 
@@ -1165,22 +1154,38 @@ func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key account
 // Multiple writes to the same address in one block produce multiple
 // log entries — Flush emits a DomainPut for each, building per-tx
 // AccountsDomain history.
-func (c *BlockStateCache) WriteAccount(addr accounts.Address, enc []byte, txNum uint64) {
+func (c *BlockStateCache) WriteAccount(addr accounts.Address, acc *accounts.Account, txNum uint64) {
+	stored := v3RoundTrip(acc)
+	enc := accounts.SerialiseV3(&stored)
 	c.mu.Lock()
-	c.currentAccounts[addr] = enc
+	c.currentAccounts[addr] = stored
 	c.writeLog = append(c.writeLog, bcWriteOp{kind: bcOpPutAccount, addr: addr, val: enc, txNum: txNum})
 	c.mu.Unlock()
 }
 
+var deletedAccount accounts.Account
+
+func v3RoundTrip(a *accounts.Account) accounts.Account {
+	r := accounts.NewAccount()
+	r.Nonce = a.Nonce
+	r.Balance = a.Balance
+	if !a.IsEmptyCodeHash() {
+		r.CodeHash = a.CodeHash
+	}
+	r.Incarnation = a.Incarnation
+	return r
+}
+
 // WriteStorage records a storage write at txNum. val=nil means delete.
 func (c *BlockStateCache) WriteStorage(addr accounts.Address, key accounts.StorageKey, val []byte, txNum uint64) {
+	v := *new(uint256.Int).SetBytes(val)
 	c.mu.Lock()
 	slots, ok := c.currentStorage[addr]
 	if !ok {
-		slots = make(map[accounts.StorageKey][]byte)
+		slots = make(map[accounts.StorageKey]uint256.Int)
 		c.currentStorage[addr] = slots
 	}
-	slots[key] = val
+	slots[key] = v
 	c.writeLog = append(c.writeLog, bcWriteOp{kind: bcOpPutStorage, addr: addr, key: key, val: val, txNum: txNum})
 	c.mu.Unlock()
 }
@@ -1198,55 +1203,33 @@ func (c *BlockStateCache) WriteCode(addr accounts.Address, code []byte, txNum ui
 // recorded txNum.
 func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	c.mu.Lock()
-	// Mark deleted in the current view so subsequent in-block reads / puts
-	// see the destruction immediately. nil (not absent) so GetCurrentAccount
-	// reports "present but empty" rather than falling back to committed state.
-	if v, present := c.currentAccounts[addr]; present && v == nil {
+	if v, present := c.currentAccounts[addr]; present && v == deletedAccount {
 		// Already deleted by an earlier tx in this block — match serial's
 		// IBS short-circuit so Flush emits a single DomainDel per address.
 		c.mu.Unlock()
 		return
 	}
-	c.currentAccounts[addr] = nil
+	c.currentAccounts[addr] = deletedAccount
 	delete(c.currentCode, addr)
 	delete(c.currentStorage, addr)
 	c.writeLog = append(c.writeLog, bcWriteOp{kind: bcOpDeleteAccount, addr: addr, txNum: txNum})
 	c.mu.Unlock()
 }
 
-// GetCurrentAccountDecoded returns the latest account (including intra-block
-// writes), avoiding GetCurrentAccount's re-encode of the committed entry.
-func (c *BlockStateCache) GetCurrentAccountDecoded(addr accounts.Address) (*accounts.Account, bool, error) {
-	c.mu.RLock()
-	enc, written := c.currentAccounts[addr]
-	c.mu.RUnlock()
-	if written {
-		if enc == nil {
-			return nil, true, nil
-		}
-		acc := new(accounts.Account)
-		if err := accounts.DeserialiseV3(acc, enc); err != nil {
-			return nil, true, err
-		}
-		return acc, true, nil
+func (c *BlockStateCache) GetCurrentAccountDecoded(addr accounts.Address) (*accounts.Account, bool) {
+	acc, ok := c.GetCurrentAccount(addr)
+	if !ok || acc == deletedAccount {
+		return nil, ok
 	}
-	if acc, ok := c.GetCommittedAccount(addr); ok {
-		if acc == nil {
-			return nil, true, nil
-		}
-		result := *acc
-		return &result, true, nil
-	}
-	return nil, false, nil
+	result := acc
+	return &result, true
 }
 
-// GetCurrentAccount returns the latest account blob (including intra-block writes).
-// Falls back to committed state if no write exists. Returns (nil, false) if not cached.
-func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) ([]byte, bool) {
+func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) (accounts.Account, bool) {
 	c.mu.RLock()
-	if enc, ok := c.currentAccounts[addr]; ok {
+	if cur, ok := c.currentAccounts[addr]; ok {
 		c.mu.RUnlock()
-		return enc, true
+		return cur, true
 	}
 	c.mu.RUnlock()
 	// The committed fallback runs after releasing mu, so the two reads are not one
@@ -1255,19 +1238,14 @@ func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) ([]byte, bool
 	// concurrent WriteAccount can only add a currentAccounts entry we'd miss —
 	// which the RLock-then-fallback ordering can't prevent regardless — never tear
 	// a committed value.
-	if v, ok := c.committedAccounts.Load(addr); ok {
-		acc := v.(*accounts.Account)
-		if acc == nil {
-			return nil, true
-		}
-		return accounts.SerialiseV3(acc), true
+	acc, ok := c.GetCommittedAccount(addr)
+	if !ok || acc == nil {
+		return deletedAccount, ok
 	}
-	return nil, false
+	return v3RoundTrip(acc), true
 }
 
-// GetCurrentStorage returns the latest storage value (including intra-block writes).
-// Falls back to committed state if no write exists. Returns (nil, false) if not cached.
-func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.StorageKey) ([]byte, bool) {
+func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
 	c.mu.RLock()
 	if slots, ok := c.currentStorage[addr]; ok {
 		if val, ok := slots[key]; ok {
@@ -1276,10 +1254,7 @@ func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.
 		}
 	}
 	c.mu.RUnlock()
-	if v, ok := c.committedStorage.Load(committedStorageKey{addr: addr, key: key}); ok {
-		return v.([]byte), true
-	}
-	return nil, false
+	return c.GetCommittedStorage(addr, key)
 }
 
 func (c *BlockStateCache) GetCurrentCode(addr accounts.Address) ([]byte, bool) {
@@ -1390,11 +1365,7 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 	if r.blockCache != nil {
 		if r.readCurrent {
 			// Sees accumulated per-TX writes.
-			acc, ok, err := r.blockCache.GetCurrentAccountDecoded(address)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
+			if acc, ok := r.blockCache.GetCurrentAccountDecoded(address); ok {
 				return acc, nil
 			}
 		} else {
@@ -1450,20 +1421,12 @@ func (r *CachedReaderV3) ReadAccountCodeSize(address accounts.Address) (int, err
 func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	if r.blockCache != nil {
 		if r.readCurrent {
-			if val, ok := r.blockCache.GetCurrentStorage(address, key); ok {
-				var v uint256.Int
-				if len(val) > 0 {
-					v.SetBytes(val)
-				}
-				return v, len(val) > 0, nil
+			if v, ok := r.blockCache.GetCurrentStorage(address, key); ok {
+				return v, !v.IsZero(), nil
 			}
 		}
-		if val, ok := r.blockCache.GetCommittedStorage(address, key); ok {
-			var v uint256.Int
-			if len(val) > 0 {
-				v.SetBytes(val)
-			}
-			return v, len(val) > 0, nil
+		if v, ok := r.blockCache.GetCommittedStorage(address, key); ok {
+			return v, !v.IsZero(), nil
 		}
 	}
 	v, ok, err := r.ReaderV3.ReadAccountStorage(address, key)
@@ -1471,11 +1434,7 @@ func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accoun
 		return v, ok, err
 	}
 	if r.blockCache != nil {
-		if ok {
-			r.blockCache.PutCommittedStorage(address, key, v.Bytes())
-		} else {
-			r.blockCache.PutCommittedStorage(address, key, nil)
-		}
+		r.blockCache.PutCommittedStorage(address, key, v)
 	}
 	return v, ok, nil
 }

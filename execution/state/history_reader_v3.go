@@ -100,49 +100,13 @@ func (hr *HistoryReaderV3) SetBlockStateCache(cache *BlockStateCache) {
 // disabled (e.g. the serial executor path), sd.GetAsOf returns an error —
 // we silently fall through to ttx so the same reader type is usable in
 // both modes.
-//
-// blockCache is consulted for the AccountsDomain and StorageDomain only;
-// CodeDomain is not currently cached per block, so for code reads we fall
-// straight through to sd/ttx. For storage we use the full 52-byte
-// composite key (addr||slot) like the rest of the state domain.
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
-	if hr.blockCache != nil {
-		switch domain {
-		case kv.AccountsDomain:
-			if len(key) == 20 {
-				var raw common.Address
-				copy(raw[:], key)
-				addr := accounts.InternAddress(raw)
-				if cached, hit := hr.blockCache.GetCurrentAccount(addr); hit {
-					// hit==true is authoritative for the in-flight block, including the
-					// deletion case (cached==nil). Return immediately rather than falling
-					// through to sd/ttx, which would surface the pre-deletion value from
-					// history. Downstream callers (ReadAccountData) treat enc=nil as
-					// "no account" regardless of ok, so emitting ok=true here just
-					// reflects the cache's authoritative status.
-					if cached == nil {
-						return nil, false, nil
-					}
-					return cached, true, nil
-				}
+	if hr.blockCache != nil && domain == kv.AccountsDomain && len(key) == 20 {
+		if cached, hit := hr.blockCache.GetCurrentAccount(accounts.InternAddress(common.Address(key))); hit {
+			if cached == deletedAccount {
+				return nil, false, nil
 			}
-		case kv.StorageDomain:
-			if len(key) == 20+32 {
-				var rawAddr common.Address
-				var rawSlot common.Hash
-				copy(rawAddr[:], key[:20])
-				copy(rawSlot[:], key[20:])
-				addr := accounts.InternAddress(rawAddr)
-				slot := accounts.InternKey(rawSlot)
-				if cached, hit := hr.blockCache.GetCurrentStorage(addr, slot); hit {
-					// Same as the account case above: hit==true is authoritative even
-					// when the slot was cleared (len(cached)==0), so do not fall through.
-					if len(cached) == 0 {
-						return nil, false, nil
-					}
-					return cached, true, nil
-				}
-			}
+			return accounts.SerialiseV3(&cached), true, nil
 		}
 	}
 	if hr.sd != nil {
@@ -191,6 +155,11 @@ func StateHistoryStartTxNum(ttx kv.TemporalTx) uint64 {
 func (hr *HistoryReaderV3) DiscardReadList() {}
 
 func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	if hr.blockCache != nil {
+		if acc, hit := hr.blockCache.GetCurrentAccountDecoded(address); hit {
+			return acc, nil
+		}
+	}
 	hr.addr = address.Value()
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	if err != nil || !ok || len(enc) == 0 {
@@ -210,6 +179,11 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 }
 
 func (hr *HistoryReaderV3) HasAccount(address accounts.Address) (bool, error) {
+	if hr.blockCache != nil {
+		if acc, hit := hr.blockCache.GetCurrentAccount(address); hit {
+			return acc != deletedAccount, nil
+		}
+	}
 	hr.addr = address.Value()
 	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
 	return ok && len(enc) > 0, err
@@ -222,6 +196,11 @@ func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*a
 }
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	if hr.blockCache != nil {
+		if v, hit := hr.blockCache.GetCurrentStorage(address, key); hit {
+			return v, !v.IsZero(), nil
+		}
+	}
 	addressValue := address.Value()
 	keyValue := key.Value()
 	copy(hr.composite[:length.Addr], addressValue[:])

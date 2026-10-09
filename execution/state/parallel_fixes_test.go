@@ -341,16 +341,15 @@ func TestBlockStateCacheWriteAccount_NilCommitted(t *testing.T) {
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(1000)
 	acc.Nonce = 1
-	enc := accounts.SerialiseV3(&acc)
 
 	assert.NotPanics(t, func() {
-		cache.WriteAccount(addr, enc, 1)
+		cache.WriteAccount(addr, &acc, 1)
 	}, "WriteAccount should not panic with nil committed account")
 
 	// Verify the write is recorded.
 	current, ok := cache.GetCurrentAccount(addr)
 	assert.True(t, ok, "Should have current account")
-	assert.Equal(t, enc, current, "Current account should match written value")
+	assert.Equal(t, acc, current, "Current account should match written value")
 }
 
 // TestBlockStateCacheWriteAccountUpdatesCurrent verifies that successive
@@ -368,18 +367,16 @@ func TestBlockStateCacheWriteAccountUpdatesCurrent(t *testing.T) {
 	acc.Nonce = 3
 	cache.PutCommittedAccount(addr, &acc)
 
-	enc := accounts.SerialiseV3(&acc)
-	cache.WriteAccount(addr, enc, 3)
+	cache.WriteAccount(addr, &acc, 3)
 
 	acc2 := accounts.NewAccount()
 	acc2.Balance = *uint256.NewInt(600)
 	acc2.Nonce = 3
-	enc2 := accounts.SerialiseV3(&acc2)
-	cache.WriteAccount(addr, enc2, 5)
+	cache.WriteAccount(addr, &acc2, 5)
 
 	current, ok := cache.GetCurrentAccount(addr)
 	assert.True(t, ok)
-	assert.Equal(t, enc2, current, "GetCurrentAccount should return the latest write")
+	assert.Equal(t, acc2, current, "GetCurrentAccount should return the latest write")
 }
 
 // Pins that a second DeleteAccount in the same block is a writeLog no-op —
@@ -402,9 +399,9 @@ func TestBlockStateCacheDeleteAccount_IdempotentInBlock(t *testing.T) {
 	}
 	assert.Equal(t, 1, deletes, "second DeleteAccount in the same block must not append a second writeLog entry")
 
-	enc, present := cache.GetCurrentAccount(addr)
+	current, present := cache.GetCurrentAccount(addr)
 	assert.True(t, present, "current view must still report addr as present-and-empty")
-	assert.Nil(t, enc, "current view value must remain nil")
+	assert.Equal(t, deletedAccount, current, "current view value must remain deleted")
 }
 
 // Pins the recreate-then-redelete pattern: an intervening WriteAccount
@@ -416,10 +413,9 @@ func TestBlockStateCacheDeleteAccount_RecreateThenDeleteRecords(t *testing.T) {
 
 	acc := accounts.NewAccount()
 	acc.Balance = *uint256.NewInt(1)
-	enc := accounts.SerialiseV3(&acc)
 
 	cache.DeleteAccount(addr, 1)
-	cache.WriteAccount(addr, enc, 2)
+	cache.WriteAccount(addr, &acc, 2)
 	cache.DeleteAccount(addr, 3)
 
 	deletes := 0
