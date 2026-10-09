@@ -89,7 +89,7 @@ var (
 	}
 	PruneBlocksDistanceFlag = cli.StringFlag{
 		Name:  "prune.distance.blocks",
-		Usage: `Keep block history for the latest N blocks, or a named policy: "keep-post-merge" (prune pre-merge blocks only) or "keep-all" (keep every block). If unset, retention follows --prune.mode`,
+		Usage: `Keep block history for the latest N blocks, or a named policy: "keep-post-merge" (prune pre-merge blocks only) or "keep-all" (keep every block). If unset: 10000000 for --prune.mode=full/minimal, otherwise retention follows --prune.mode`,
 	}
 	StateStreamDisableFlag = cli.BoolFlag{
 		Name:  "state.stream.disable",
@@ -118,6 +118,16 @@ var (
 		Name:  "sync.loop.block.limit",
 		Usage: "Sets the maximum number of blocks to process per loop iteration",
 		Value: 5_000,
+	}
+
+	SyncChainTipModeFlag = cli.BoolFlag{
+		Name:  "pfb.sync.mode.chaintip",
+		Usage: "Execute frozen blocks like at the chain tip: one block per sync cycle, with per-block commitment and changesets",
+	}
+
+	ExecStopAtBlockFlag = cli.Uint64Flag{
+		Name:  "pfb.exec.stop-at-block",
+		Usage: "Stop the node after frozen-block execution reaches and commits this block (0 = off)",
 	}
 
 	SyncParallelStateFlushing = cli.BoolFlag{
@@ -231,6 +241,10 @@ func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	applyRemainingEthFlags(ctx, cfg, logger)
 }
 
+// defaultReplayBlocksDistance keeps the transaction segments that a multi-month
+// replay below the tip needs; the stock full/minimal distances would prune them.
+const defaultReplayBlocksDistance = 10_000_000
+
 func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
@@ -239,6 +253,9 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	_ = chainId
 
 	blockDistance := mustDistance(prune.ParseBlocksDistance(ctx.String(PruneBlocksDistanceFlag.Name), PruneBlocksDistanceFlag.Name))
+	if pruneMode := ctx.String(PruneModeFlag.Name); !ctx.IsSet(PruneBlocksDistanceFlag.Name) && (pruneMode == "full" || pruneMode == "minimal") {
+		blockDistance = defaultReplayBlocksDistance
+	}
 	distance := mustDistance(prune.ParseHistoryDistance(ctx.String(PruneDistanceFlag.Name), PruneDistanceFlag.Name))
 
 	cfg.PersistReceiptsCacheV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)
@@ -300,6 +317,12 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	if limit := ctx.Uint(SyncLoopBlockLimitFlag.Name); limit > 0 {
 		cfg.Sync.LoopBlockLimit = limit
 	}
+	if ctx.Bool(SyncChainTipModeFlag.Name) {
+		cfg.Sync.ChainTipMode = true
+		cfg.Sync.LoopBlockLimit = 1
+		cfg.Sync.AlwaysGenerateChangesets = true
+	}
+	cfg.Sync.ExecStopAtBlock = ctx.Uint64(ExecStopAtBlockFlag.Name)
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 	if d := ctx.Duration(utils.SlowBlockThresholdFlag.Name); d >= 0 {
 		cfg.Sync.SlowBlockThreshold = &d

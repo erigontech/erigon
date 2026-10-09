@@ -306,6 +306,8 @@ type Sync struct {
 	BreakAfterStage            string
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
+	ChainTipMode               bool
+	ExecStopAtBlock            uint64
 
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool

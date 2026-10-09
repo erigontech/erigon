@@ -800,8 +800,9 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		}
 	}
 	// Notify the fork validator of the current execution height after startup sync.
-	if err := e.db.View(ctx, func(tx kv.Tx) error {
-		progress, err := stages.GetStageProgress(tx, stages.Execution)
+	var progress uint64
+	if err := e.db.View(ctx, func(tx kv.Tx) (err error) {
+		progress, err = stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
 			return err
 		}
@@ -809,6 +810,14 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 		return nil
 	}); err != nil && !commonerrors.IsOnlyCanceled(err) {
 		e.logger.Warn("Could not notify fork validator of current height", "err", err)
+	}
+	if stopAt := e.syncCfg.ExecStopAtBlock; stopAt > 0 && progress >= stopAt {
+		e.logger.Info("[exec] reached --pfb.exec.stop-at-block, stopping node", "block", progress, "stopAt", stopAt)
+		go func() {
+			if stopErr := e.stopNode(); stopErr != nil {
+				e.logger.Error("Could not stop node at --pfb.exec.stop-at-block", "err", stopErr)
+			}
+		}()
 	}
 }
 
