@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -339,4 +340,34 @@ func testV3HistoryStaleStorageBranch(t *testing.T, accounts int) {
 		_, err := state.DebugCommitmentV3RootAsOf(ctx, agg, txNum)
 		require.NoErrorf(t, err, "records as of txNum %d", txNum)
 	}
+}
+
+func TestRestoreCommitmentFiles_V3ResumesHistoryAfterDomains(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	db, agg, _ := testDbAggregatorWithCommitmentHistory(t, 10, 32)
+	dirs := agg.Dirs()
+	legacyHistory, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+	agg.CloseFilesNoReopen()
+	converted, err := filepath.Glob(filepath.Join(dirs.SnapDomain, "v3.0-commitment.*"))
+	require.NoError(t, err)
+	for _, p := range converted {
+		require.NoError(t, os.Remove(p))
+	}
+	domainBackup := filepath.Join(dirs.Snap, "backup", "domains")
+	backups, err := os.ReadDir(domainBackup)
+	require.NoError(t, err)
+	for _, e := range backups {
+		require.NoError(t, os.Rename(filepath.Join(domainBackup, e.Name()), filepath.Join(dirs.SnapDomain, e.Name())))
+	}
+	require.NoError(t, os.Remove(domainBackup))
+
+	require.NoError(t, state.RestoreCommitmentFiles(t.Context(), dirs, log.New()))
+	history, err := filepath.Glob(filepath.Join(dirs.SnapHistory, "*-commitment.*.v"))
+	require.NoError(t, err)
+	require.ElementsMatch(t, legacyHistory, history)
 }

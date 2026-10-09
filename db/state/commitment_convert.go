@@ -823,10 +823,17 @@ const restoreManifestTmpName = ".restore_manifest.tmp"
 // which is exactly when restore is most needed.
 func RestoreCommitmentFiles(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	backupRoot := filepath.Join(dirs.Snap, "backup")
-	if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, "domains"), dirs.SnapDomain, true, logger); err != nil {
+	historyDirs := [][2]string{{"history", dirs.SnapHistory}, {"idx", dirs.SnapIdx}, {"accessor", dirs.SnapAccessors}}
+	historyPending := false
+	for _, pair := range historyDirs {
+		if _, err := os.Stat(filepath.Join(backupRoot, pair[0])); err == nil {
+			historyPending = true
+		}
+	}
+	if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, "domains"), dirs.SnapDomain, !historyPending, logger); err != nil {
 		return err
 	}
-	for _, pair := range [][2]string{{"history", dirs.SnapHistory}, {"idx", dirs.SnapIdx}, {"accessor", dirs.SnapAccessors}} {
+	for _, pair := range historyDirs {
 		if err := restoreCommitmentBackup(ctx, filepath.Join(backupRoot, pair[0]), pair[1], false, logger); err != nil {
 			return err
 		}
