@@ -789,6 +789,22 @@ func TestVersionedRead_B_CommittedCodeHashReusesCommittedBase(t *testing.T) {
 	assert.Equal(t, reads, r.accountReads, "the committed account is read once per tx")
 }
 
+func TestVersionedRead_B_TouchReadsAnAbsentAccountOnce(t *testing.T) {
+	t.Parallel()
+	r := &refreshReader{}
+	ibs := NewWithVersionMap(r, NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 5)
+	addr := accounts.InternAddress([20]byte{0xb9})
+
+	require.NoError(t, ibs.TouchAccount(addr))
+	exists, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.Equal(t, 1, r.accountReads)
+}
+
 // revival via NoncePath rewrite at a higher TxIdx than the SD.
 func TestVersionedRead_C2_RevivalViaNonce(t *testing.T) {
 	t.Parallel()
