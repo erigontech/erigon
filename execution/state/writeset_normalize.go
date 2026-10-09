@@ -178,8 +178,9 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 			// First check versionMap floor (prior TX's write in this block).
 			// Then fall back to stateReader (pre-block value from domain).
 			originVal, origin, originOK := vm.ReadStorage(h.Address, h.Key, txIndex)
+			// A destruct also wipes the slots its own tx wrote.
 			originValid := originOK && origin.Status() == MVReadResultDone &&
-				!(sdOk && sdTxIdx > origin.Version().TxIndex)
+				!(sdOk && sdTxIdx >= origin.Version().TxIndex)
 			switch {
 			case originValid:
 				if writeVal.Eq(&originVal) {
