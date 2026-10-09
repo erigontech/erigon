@@ -867,7 +867,6 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopeIndices(ctx contex
 // settlePendingEnvelopeError keeps a parked envelope for a later retry, or drops it when the
 // error says the copy is stale.
 func (f *ForkChoiceStore) settlePendingEnvelopeError(blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local bool, err error) {
-	log.Warn("OnBlock: failed to process pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
 	if f.retryPendingEnvelopeError(err, pending) {
 		return
 	}
@@ -924,6 +923,7 @@ func (f *ForkChoiceStore) holdsPendingEnvelope(blockRoot common.Hash, pending *c
 func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local, checkDataAvailability bool) (*cltypes.ExecutionPayloadEnvelope, bool) {
 	if !f.enterPendingEnvelopeApply(ctx, blockRoot) {
 		if ctx.Err() != nil && pending != nil {
+			log.Debug("OnBlock: pending envelope apply not admitted before the context ended", "blockRoot", blockRoot, "local", local, "err", ctx.Err())
 			f.settlePendingEnvelopeError(blockRoot, pending, local, fmt.Errorf("%w: execution payload validation interrupted for beacon_block_root %v: %w", ErrIgnore, blockRoot, ctx.Err()))
 		}
 		return nil, false
@@ -975,6 +975,7 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 		}
 	}
 	if err != nil {
+		log.Warn("OnBlock: failed to process pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
 		f.settlePendingEnvelopeError(blockRoot, pending, local, err)
 		return nil, false
 	}
