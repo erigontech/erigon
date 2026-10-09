@@ -94,17 +94,11 @@ func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stat
 		return out, nil
 	}
 
-	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 3 writes for the
-	// SD'd account (IncarnationPath=preInc, SelfDestructPath=true, BalancePath=0).
-	// If we forward all 3 to applyVersionedWrites, it sees d.balance != nil ||
-	// d.incarnation != nil and routes into the "cleanup-before-recreate"
-	// branch — which writes the account back with {Bal=0, Inc=preInc} encoding
-	// instead of taking the pure-delete branch (DomainDel(Accounts)). The
-	// account stays in sd.mem with non-zero incarnation, and a subsequent
-	// block's CREATE2 at the same address sees a phantom existing account,
-	// producing wrong execution / wrong trie root in TestRecreateAndRewind.
-	// Drop the BalancePath/NoncePath/IncarnationPath/CodeHashPath writes for
-	// SD'd addresses so applyVersionedWrites reaches the pure-delete branch.
+	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits IncarnationPath=0 and
+	// SelfDestructPath=true for the SD'd account, and BalancePath=0 unless
+	// EIP-8246 keeps the balance. Drop its account-field writes, except a kept
+	// balance, so the account is deleted (DomainDel(Accounts)), not written back
+	// as an empty record, which would change the state root.
 	//
 	// Two filters applied here:
 	//   1. Validated-incarnation: mirror the `w.Version.Incarnation != incarnation`

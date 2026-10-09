@@ -364,11 +364,7 @@ func TestSelfdestructWriteSetShape(t *testing.T) {
 			}
 			inc, hasIncarnation := writes.GetIncarnation(addr)
 			require.True(t, hasIncarnation, "the destruct always writes an incarnation of its own")
-			if preserveBalance {
-				require.Zero(t, inc.Val, "EIP-8246 leaves a balance-only account a re-creation bumps from 0")
-			} else {
-				require.Equal(t, uint64(3), inc.Val, "the storage-delete cascade needs the pre-destruct incarnation")
-			}
+			require.Zero(t, inc.Val, "the destroyed account's incarnation resets to 0")
 		})
 	}
 }
