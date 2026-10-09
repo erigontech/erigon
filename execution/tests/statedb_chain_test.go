@@ -180,9 +180,9 @@ func TestSelfDestructReceive(t *testing.T) {
 func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
-		parallel       bool
+		parallelImport bool
 		preBlockDeploy bool
-		genParallel    bool
+		parallelGen    bool
 	}{
 		{"serial/same-block-deploy", false, false, false},
 		{"parallel/same-block-deploy", true, false, false},
@@ -192,7 +192,7 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prev := dbg.Exec3Parallel
-			dbg.Exec3Parallel = tc.genParallel
+			dbg.Exec3Parallel = tc.parallelGen
 			t.Cleanup(func() { dbg.Exec3Parallel = prev })
 			var (
 				key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -249,7 +249,7 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 				contractBackend.Commit()
 			})
 			require.NoError(t, err)
-			dbg.Exec3Parallel = tc.parallel
+			dbg.Exec3Parallel = tc.parallelImport
 			require.NoError(t, m.InsertChain(chain.Slice(0, 3)))
 
 			require.NoError(t, m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
