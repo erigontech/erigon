@@ -541,3 +541,55 @@ func TestSubscriptionLimitAppliesWithinBatch(t *testing.T) {
 		}
 	}
 }
+
+// A subscribe call holds its slot while it runs, so a second request on the connection cannot
+// take the connection past the limit while the first is still pending.
+func TestSubscriptionLimitCountsPendingSubscribe(t *testing.T) {
+	t.Parallel()
+	server := newTestServer(log.New())
+	server.SetSubscriptionLimit(1)
+	service := &notificationTestService{gotHangSubscriptionReq: make(chan struct{}), unblockHangSubscription: make(chan struct{})}
+	if err := server.RegisterName("nftest2", service); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	go server.ServeCodec(NewCodec(serverConn), 0)
+	defer server.Stop()
+	if err := clientConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	in := json.NewDecoder(clientConn)
+
+	if _, err := clientConn.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"nftest2_subscribe","params":["hangSubscription",1]}`)); err != nil {
+		t.Fatal(err)
+	}
+	<-service.gotHangSubscriptionReq
+	if _, err := clientConn.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"nftest2_subscribe","params":["someSubscription",0,0]}`)); err != nil {
+		t.Fatal(err)
+	}
+	var second jsonrpcMessage
+	if err := in.Decode(&second); err != nil {
+		t.Fatal(err)
+	}
+	if string(second.ID) != "2" {
+		t.Fatalf("answer to request %s arrived before the pending subscribe returned", second.ID)
+	}
+	if second.Error == nil || second.Error.Code != ErrCodeServerOverloaded {
+		t.Fatalf("second subscription accepted while the first held the only slot: %v", second.Error)
+	}
+
+	close(service.unblockHangSubscription)
+	for {
+		var msg jsonrpcMessage
+		if err := in.Decode(&msg); err != nil {
+			t.Fatal(err)
+		}
+		if msg.isNotification() {
+			continue
+		}
+		if msg.Error != nil || len(msg.Result) == 0 {
+			t.Fatalf("pending subscription failed: %v", msg.Error)
+		}
+		return
+	}
+}
