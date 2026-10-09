@@ -75,7 +75,6 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger 
 // dropPeer disconnects pid and forgets it, so the same failing peer is not
 // picked again for the next request.
 func (s *SentinelServer) dropPeer(pid peer.ID) {
-	s.sentinel.Peers().RemovePeer(pid)
 	s.sentinel.Host().Peerstore().RemovePeer(pid)
 	s.closePeer(pid)
 }

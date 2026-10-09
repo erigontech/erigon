@@ -14,7 +14,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -149,10 +148,18 @@ func (ibs *IntraBlockState) codeSeed(addr accounts.Address, currentHash accounts
 // recording an OCC read. Used on the noMaterialize path where the rebuilt
 // transient's original reflects this tx's own code cell rather than tx start.
 func (ibs *IntraBlockState) committedCodeHash(addr accounts.Address) (accounts.CodeHash, error) {
-	acc, err := ibs.stateReader.ReadAccountData(addr)
-	ibs.recordStateReadError(err)
-	if err != nil {
-		return accounts.EmptyCodeHash, err
+	acc, ok := ibs.committedBase[addr]
+	if !ok {
+		var err error
+		acc, err = ibs.stateReader.ReadAccountData(addr)
+		ibs.recordStateReadError(err)
+		if err != nil {
+			return accounts.EmptyCodeHash, err
+		}
+		if ibs.committedBase == nil {
+			ibs.committedBase = make(map[accounts.Address]*accounts.Account)
+		}
+		ibs.committedBase[addr] = acc
 	}
 	if acc == nil || acc.CodeHash.IsEmpty() {
 		return accounts.EmptyCodeHash, nil
@@ -947,13 +954,16 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 // extraction of *accounts.Account.  Used internally by versionedReadCore
 // to resolve sibling-account reads without taking a typed callback.
 func readAccountInternal(s *IntraBlockState, addr accounts.Address) (*accounts.Account, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetAddress(addr); ok && warmSource(tr.Source) {
-			if tr.Val != nil {
-				return tr.Val.Account(), tr.Source, tr.Version, nil
-			}
-			return nil, tr.Source, tr.Version, nil
+	if !s.warmReadable(addr) {
+		if vw, ok := s.versionedWrites.address[addr]; ok {
+			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, nil
 		}
+	}
+	if tr, ok := s.versionedReads.GetAddress(addr); ok && warmSource(tr.Source) {
+		if tr.Val != nil {
+			return tr.Val.Account(), tr.Source, tr.Version, nil
+		}
+		return nil, tr.Source, tr.Version, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, AddressPath, accounts.NilKey, false, true, &r)
@@ -1053,21 +1063,34 @@ func (ibs *IntraBlockState) recordWipedRead(addr accounts.Address, path AccountP
 // read that the wrapper-level read-once fast path can return directly.
 func warmSource(src ReadSource) bool { return src == MapRead || src == StorageRead }
 
-// warmReadable reports whether addr has no own write this tx, so a recorded read
-// of it is a stable snapshot the read-once fast path can serve (own writes take
-// precedence and must go through the full path). Same gate as versionedWriteHit.
+// warmReadable reports whether addr has no own write this tx. When it has one,
+// the read-once fast paths check this tx's write set before the recorded read.
+// Same gate as versionedWriteHit.
 func (ibs *IntraBlockState) warmReadable(addr accounts.Address) bool {
 	_, dirty := ibs.journal.dirties[addr]
 	return !dirty
 }
 
+// warmField serves a repeat read of an account field without the version-map
+// probe: this tx's own write on a dirty address, else the recorded read.
+func warmField[T any](s *IntraBlockState, addr accounts.Address, writes map[accounts.Address]*VersionedWrite[T], reads map[accounts.Address]VersionedRead[T]) (T, ReadSource, Version, bool) {
+	if !s.warmReadable(addr) {
+		if vw, ok := writes[addr]; ok {
+			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, true
+		}
+	}
+	if tr, ok := reads[addr]; ok && warmSource(tr.Source) {
+		return tr.Val, tr.Source, tr.Version, true
+	}
+	var zero T
+	return zero, UnknownSource, UnknownVersion, false
+}
+
 // readBalance returns the address's balance using the version-aware
 // read pipeline.  Inlines the storage-read fallback.
 func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetBalance(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.balance, s.versionedReads.balance); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, false, &r)
@@ -1111,10 +1134,8 @@ func readBalance(s *IntraBlockState, addr accounts.Address) (uint256.Int, ReadSo
 // miss and does not perform a storage fallback.  When the core signals
 // recordVR, records the read with currentBalance as the typed default.
 func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance uint256.Int) (uint256.Int, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetBalance(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.balance, s.versionedReads.balance); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, BalancePath, accounts.NilKey, false, true, &r)
@@ -1152,10 +1173,8 @@ func refreshBalance(s *IntraBlockState, addr accounts.Address, currentBalance ui
 
 // readNonce returns the nonce using the version-aware read pipeline.
 func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.nonce, s.versionedReads.nonce); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, false, &r)
@@ -1196,10 +1215,8 @@ func readNonce(s *IntraBlockState, addr accounts.Address) (uint64, ReadSource, V
 }
 
 func refreshNonce(s *IntraBlockState, addr accounts.Address, currentNonce uint64) (uint64, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetNonce(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.nonce, s.versionedReads.nonce); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, NoncePath, accounts.NilKey, false, true, &r)
@@ -1302,16 +1319,13 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 	}
 }
 
-// readCode returns the contract code with its hash. The commited flag selects whether
-// the version-aware lookup honours the committed-only contract.
-func readCode(s *IntraBlockState, addr accounts.Address, commited bool) (accounts.Code, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+// readCode returns the contract code with its hash.
+func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSource, Version, error) {
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.code, s.versionedReads.code); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodePath, accounts.NilKey, commited, false, &r)
+	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
 		return accounts.Code{}, r.source, r.version, r.err
 	}
@@ -1357,47 +1371,32 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) (account
 	}
 }
 
-// refreshedCode is refreshCode's result. Unlike accounts.Code it promises no
-// Hash == Keccak256(Bytes): KnownHash is Nil when the source stored bytes only.
-type refreshedCode struct {
-	Bytes     []byte
-	KnownHash accounts.CodeHash
-}
-
 // refreshCode is the in-memory-only variant for CodePath.
 // CodePath is never recorded via the skipStorage branch in legacy
 // (the `path != CodePath` guard), so no recording on the default case.
-func refreshCode(s *IntraBlockState, addr accounts.Address) (refreshedCode, ReadSource, Version, error) {
+func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, error) {
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
-		return refreshedCode{}, r.source, r.version, r.err
+		return accounts.Code{}, r.err
 	}
+	var code accounts.Code
 	switch r.outcome {
 	case outcomeWriteSetHit:
-		return refreshedCode{r.vwCode.Val.Bytes, r.vwCode.Val.Hash}, r.source, r.version, nil
+		code = r.vwCode.Val
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		return refreshedCode{tr.Val.Bytes, tr.Val.Hash}, r.source, r.version, nil
+		code = tr.Val
 	case outcomeMapDone:
-		return refreshedCode{r.mapCodeVal.Bytes, r.mapCodeVal.Hash}, r.source, r.version, nil
+		code = r.mapCodeVal
 	case outcomeReturnZero, outcomeReturnDefault:
-		return refreshedCode{}, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("refreshCode: unexpected outcome %d for %x", r.outcome, addr))
 	}
-}
-
-// codeHash avoids re-hashing when the source knew the hash. For committed bytes
-// the account record is authoritative; a prior tx's write can outrun it.
-func (c refreshedCode) codeHash(source ReadSource, accountHash accounts.CodeHash) accounts.CodeHash {
-	if c.KnownHash != accounts.NilCodeHash {
-		return c.KnownHash
+	if dbg.AssertEnabled && code.Bytes != nil && code.Hash == accounts.NilCodeHash {
+		panic(fmt.Sprintf("refreshCode: code without hash for %x", addr))
 	}
-	if source == StorageRead {
-		return accountHash
-	}
-	return accounts.InternCodeHash(crypto.Keccak256Hash(c.Bytes))
+	return code, nil
 }
 
 // readCodeSize returns the contract code size.
@@ -1457,10 +1456,8 @@ func readCodeSize(s *IntraBlockState, addr accounts.Address) (int, ReadSource, V
 
 // readCodeHash returns the contract code hash.
 func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCodeHash(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.codeHash, s.versionedReads.codeHash); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, false, false, &r)
@@ -1504,10 +1501,8 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash,
 
 // refreshCodeHash is the in-memory-only variant for CodeHashPath.
 func refreshCodeHash(s *IntraBlockState, addr accounts.Address, currentHash accounts.CodeHash) (accounts.CodeHash, ReadSource, Version, error) {
-	if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCodeHash(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.codeHash, s.versionedReads.codeHash); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
 	versionedReadCore(s, addr, CodeHashPath, accounts.NilKey, false, true, &r)
@@ -1549,6 +1544,27 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
+	if s.versionMap == nil {
+		so, err := s.getStateObject(addr, true)
+		if err != nil || so == nil || so.deleted {
+			return uint256.Int{}, StorageRead, UnknownVersion, false, err
+		}
+		v, clean, err := so.GetState(key)
+		return v, StorageRead, UnknownVersion, clean, err
+	}
+	if s.versionMap != nil && !s.warmReadable(addr) {
+		if vw, ok := s.versionedWrites.GetStorage(addr, key); ok {
+			return vw.Val, WriteSetRead, Version{TxIndex: s.txIndex, Incarnation: s.version}, false, nil
+		}
+	}
+	if s.versionMap != nil && s.warmReadable(addr) {
+		// A resident deleted object outranks the read set, as in versionedReadCore.
+		if so, ok := s.stateObjects[addr]; !ok || !so.deleted {
+			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
+				return tr.Val, tr.Source, tr.Version, false, nil
+			}
+		}
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {
@@ -1585,15 +1601,6 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, clean, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, false, nil
-		}
-		v, clean, err := r.so.GetState(key)
-		if err != nil {
-			return uint256.Int{}, StorageRead, UnknownVersion, false, err
-		}
-		return v, StorageRead, UnknownVersion, clean, nil
 	case outcomeReturnZero, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, false, nil
 	default:
@@ -1603,6 +1610,25 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 
 // readCommittedState reads a storage slot with committed-view semantics.
 func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, error) {
+	if s.versionMap == nil {
+		so, err := s.getStateObject(addr, true)
+		if err != nil || so == nil || so.deleted {
+			return uint256.Int{}, StorageRead, UnknownVersion, err
+		}
+		v, err := so.GetCommittedState(key)
+		return v, StorageRead, UnknownVersion, err
+	}
+	// A recorded read of the slot is its value before this tx, whatever the tx wrote
+	// since, unless the tx created the contract over it.
+	if s.versionMap != nil {
+		so, resident := s.stateObjects[addr]
+		created, _ := s.versionedWriteCreateContract(addr)
+		if (!resident || !so.deleted) && !created {
+			if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
+				return tr.Val, tr.Source, tr.Version, nil
+			}
+		}
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, true, false, &r)
 	if r.err != nil {
@@ -1637,12 +1663,6 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
 		return v, r.source, r.version, nil
-	case outcomeLegacyStorage:
-		if r.so == nil || r.so.deleted {
-			return uint256.Int{}, StorageRead, UnknownVersion, nil
-		}
-		v, err := r.so.GetCommittedState(key)
-		return v, StorageRead, UnknownVersion, err
 	case outcomeReturnZero, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, nil
 	default:
@@ -1765,4 +1785,20 @@ func refreshAccount(s *IntraBlockState, addr accounts.Address) (*accounts.Accoun
 	default:
 		panic(fmt.Sprintf("refreshAccount: unexpected outcome %d for %x", r.outcome, addr))
 	}
+}
+
+// ReadStamp identifies the state a serial-path read sees: every state change adds a journal
+// entry, and reverts, resets and the unjournalled changes move its epoch.
+type ReadStamp struct {
+	journalLen int
+	epoch      uint64
+}
+
+// ReadStamp is ok unless reads are traced. On the versioned path a repeated read returns
+// the value the first read recorded in the read set, so a cached value stays consistent.
+func (ibs *IntraBlockState) ReadStamp() (ReadStamp, bool) {
+	if ibs == nil || dbg.TraceTransactionIO {
+		return ReadStamp{}, false
+	}
+	return ReadStamp{len(ibs.journal.entries), ibs.journal.epoch}, true
 }

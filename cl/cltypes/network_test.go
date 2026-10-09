@@ -48,14 +48,6 @@ var testStatus = &cltypes.Status{
 	FinalizedRoot:  common.HexToHash("bbba"),
 }
 
-var testHeader = &cltypes.BeaconBlockHeader{
-	Slot:          2,
-	ProposerIndex: 24,
-	ParentRoot:    common.HexToHash("a"),
-	Root:          common.HexToHash("d"),
-	BodyRoot:      common.HexToHash("ad"),
-}
-
 var testBlockRoot = &cltypes.Root{
 	Root: common.HexToHash("a"),
 }

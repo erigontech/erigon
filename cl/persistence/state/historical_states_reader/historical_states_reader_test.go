@@ -40,7 +40,7 @@ import (
 
 func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	reader := tests.LoadChain(blocks, postState, db, t)
+	reader := tests.LoadChain(blocks, db, t)
 
 	sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	require.NoError(t, sn.OnHeadState(postState))

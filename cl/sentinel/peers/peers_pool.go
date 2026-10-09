@@ -101,9 +101,6 @@ func (p *Pool) LenBannedPeers() int {
 	return p.bannedPeers.Len()
 }
 
-func (p *Pool) AddPeer(pid peer.ID) {
-}
-
 func (p *Pool) SetBanStatus(pid peer.ID, banned bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -112,9 +109,6 @@ func (p *Pool) SetBanStatus(pid peer.ID, banned bool) {
 	} else {
 		p.bannedPeers.Remove(pid)
 	}
-}
-
-func (p *Pool) RemovePeer(pid peer.ID) {
 }
 
 // Request a peer from the pool

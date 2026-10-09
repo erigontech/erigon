@@ -152,6 +152,12 @@ func (m *Memory) GetPtr(offset, size uint64) []byte {
 	return m.store[offset : offset+size]
 }
 
+// allocated32 reports whether the 32 bytes at off are already allocated, so
+// accessing them costs no expansion gas.
+func (m *Memory) allocated32(off *uint256.Int) bool {
+	return off.IsUint64() && off.Uint64() < uint64(len(m.store)) && uint64(len(m.store))-off.Uint64() >= 32
+}
+
 // Len returns the length of the backing slice
 func (m *Memory) Len() int {
 	return len(m.store)

@@ -191,7 +191,7 @@ func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.Sign
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
 			return err
 		}
-		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 	}); err != nil {
 		return err
 	}
@@ -243,9 +243,7 @@ digraph {
 */
 
 // ConsensusClStages creates a stage loop container to be used to run caplin
-func ConsensusClStages(ctx context.Context,
-	cfg *Cfg,
-) *clstages.StageGraph[*Cfg, Args] {
+func ConsensusClStages() *clstages.StageGraph[*Cfg, Args] {
 	// clstages run in a single thread - so we don't need to worry about any synchronization.
 	return &clstages.StageGraph[*Cfg, Args]{
 		// the ArgsFunc is run after every stage. It is passed into the transition function, and the same args are passed into the next stage.
@@ -475,7 +473,7 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 	}
 
 	return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
-		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, genesisBlock, true)
+		return beacon_indicies.WriteBeaconBlockAndIndicies(tx, genesisBlock, true)
 	})
 }
 

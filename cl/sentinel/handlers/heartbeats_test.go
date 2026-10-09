@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/handshake"
-	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -109,7 +108,6 @@ func newPingTestStream(t *testing.T) network.Stream {
 		beaconDB,
 		indiciesDB,
 		host,
-		peers.NewPool(host),
 		&clparams.NetworkConfig{},
 		testLocalNode(t),
 		beaconCfg,
@@ -198,7 +196,6 @@ func TestGoodbye(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
@@ -209,7 +206,6 @@ func TestGoodbye(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&clparams.NetworkConfig{},
 		testLocalNode(t),
 		beaconCfg,
@@ -258,7 +254,6 @@ func TestMetadataV2(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
@@ -270,7 +265,6 @@ func TestMetadataV2(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&nc,
 		testLocalNode(t),
 		beaconCfg,
@@ -316,7 +310,6 @@ func TestMetadataV1(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	peersPool := peers.NewPool(host)
 	beaconDB, indiciesDB := setupStore(t)
 
 	f := forkchoicemock.NewForkChoiceStorageMock(t)
@@ -329,7 +322,6 @@ func TestMetadataV1(t *testing.T) {
 		beaconDB,
 		indiciesDB,
 		host,
-		peersPool,
 		&nc,
 		testLocalNode(t),
 		beaconCfg,
@@ -404,7 +396,6 @@ func newStatusTestStream(t *testing.T, protocolID protocol.ID) (network.Stream, 
 		beaconDB,
 		indiciesDB,
 		host,
-		peers.NewPool(host),
 		&nc,
 		testLocalNode(t),
 		beaconCfg,

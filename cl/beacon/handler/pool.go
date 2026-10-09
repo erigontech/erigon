@@ -49,9 +49,7 @@ const maxFutureSlotLookahead = 1 << 32
 // sync-committee message for the given slot is still worth publishing: the
 // slot's end, plus the protocol's maximum gossip clock disparity allowance.
 // Mirrors the exact inclusive boundary the consensus spec's gossip
-// validation uses (reject only once now exceeds this instant), which the
-// coarser, whole-slot-rounding IsSlotCurrentSlotWithMaximumClockDisparity
-// does not preserve.
+// validation uses (reject only once now exceeds this instant).
 //
 // A slot far beyond the current one is always treated as already expired
 // rather than handed to GetSlotTime: slot+1 or GetSlotTime's own

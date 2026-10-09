@@ -1066,3 +1066,126 @@ func TestTxnByIdxInBlockCarriesStoredSender(t *testing.T) {
 		require.Equal(t, want, got.Value())
 	}
 }
+
+// A raw body skips the transaction decode, so it must carry the bytes the decoded body encodes
+// to, for every transaction type and for both stored forms: binary, and wrapped in an RLP string.
+func TestBodyWithRawTransactionsMatchesDecodedBody(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
+
+	to := common.Address{1}
+	dynFee := func() types.DynamicFeeTransaction {
+		return types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000, Data: []byte("abc")},
+			ChainID:  *uint256.NewInt(1),
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(2),
+		}
+	}
+	txs := types.Transactions{
+		types.NewTransaction(0, to, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+		&types.AccessListTx{
+			LegacyTx: types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000}, GasPrice: *uint256.NewInt(1)}, ChainID: *uint256.NewInt(1),
+			AccessList: types.AccessList{{Address: to, StorageKeys: []common.Hash{{0x01}}}},
+		},
+		func() types.Transaction { txn := dynFee(); return &txn }(),
+		&types.BlobTx{DynamicFeeTransaction: dynFee(), MaxFeePerBlobGas: *uint256.NewInt(3), BlobVersionedHashes: []common.Hash{{0x01}}},
+		&types.SetCodeTransaction{DynamicFeeTransaction: dynFee(), Authorizations: []types.Authorization{{ChainID: *uint256.NewInt(1), Address: to, Nonce: 2}}},
+	}
+	binaryTxs, err := types.MarshalTransactionsBinary(txs)
+	require.NoError(t, err)
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	_, err = rawdb.WriteRawBody(rwTx, common.Hash{1}, 1, &types.RawBody{Transactions: binaryTxs})
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteBody(rwTx, common.Hash{2}, 2, &types.Body{Transactions: txs, Withdrawals: []*types.Withdrawal{{Index: 7, Address: to, Amount: 9}}}))
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	missing, err := blockReader.BodyWithRawTransactions(t.Context(), tx, common.Hash{3}, 3)
+	require.NoError(t, err)
+	require.Nil(t, missing)
+	for num, hash := range map[uint64]common.Hash{1: {1}, 2: {2}} {
+		decoded, err := blockReader.BodyWithTransactions(t.Context(), tx, hash, num)
+		require.NoError(t, err)
+		want, err := decoded.BinaryRawBody()
+		require.NoError(t, err)
+		got, err := blockReader.BodyWithRawTransactions(t.Context(), tx, hash, num)
+		require.NoError(t, err)
+		require.Equal(t, want, got, "block %d", num)
+		require.Equal(t, binaryTxs, got.Transactions, "block %d", num)
+	}
+}
+
+// A record whose framing is not one transaction's stays in the database: reading it as a raw body
+// fails, so the malformed bytes never reach a caller that expects a transaction.
+func TestBodyWithRawTransactionsRejectsMalformedRecord(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
+
+	wrapped := func(b []byte) []byte {
+		out := make([]byte, rlp.StringLen(b))
+		rlp.EncodeStringToBuf(b, out)
+		return out
+	}
+	to := common.Address{1}
+	valid, err := types.MarshalTransactionsBinary(types.Transactions{
+		types.NewTransaction(0, to, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+	})
+	require.NoError(t, err)
+	typed := &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000},
+		ChainID:  *uint256.NewInt(1), TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(2),
+	}
+	typedBinary, err := types.MarshalTransactionsBinary(types.Transactions{typed})
+	require.NoError(t, err)
+
+	// want is the binary encoding the read must return, or nil when the record must be rejected.
+	records := []struct {
+		name   string
+		stored []byte
+		want   []byte
+	}{
+		{"legacy binary", valid[0], valid[0]},
+		{"typed wrapped in an rlp string", wrapped(typedBinary[0]), typedBinary[0]},
+		{"empty list", []byte{0xc0}, nil},
+		{"wrapped type byte with no fields", wrapped([]byte{0x02}), nil},
+		{"wrapped with a trailing byte", append(wrapped(typedBinary[0]), 0xff), nil},
+		{"legacy with one field", []byte{0xc1, 0x80}, nil},
+		{"typed with one field", []byte{0x02, 0xc1, 0x80}, nil},
+		{"unsupported type", []byte{0x7f, 0xc1, 0x80}, nil},
+		{"zero type byte", append([]byte{0x00}, valid[0]...), nil},
+		{"legacy list wrapped in an rlp string", wrapped(valid[0]), nil},
+	}
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for i, rec := range records {
+		num, hash := uint64(i+1), common.Hash{byte(i + 1)}
+		_, err = rawdb.WriteRawBody(rwTx, hash, num, &types.RawBody{Transactions: [][]byte{rec.stored}})
+		require.NoError(t, err)
+		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hash, num))
+	}
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for i, rec := range records {
+		t.Run(rec.name, func(t *testing.T) {
+			body, err := blockReader.BodyWithRawTransactions(t.Context(), tx, common.Hash{byte(i + 1)}, uint64(i+1))
+			if rec.want == nil {
+				require.Error(t, err, "a malformed record must not be served as a transaction")
+				require.Nil(t, body)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, rec.want, body.Transactions[0])
+		})
+	}
+}

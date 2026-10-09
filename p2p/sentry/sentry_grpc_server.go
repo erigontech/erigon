@@ -355,9 +355,10 @@ const (
 	maxBlockHashesPerMsg = 4096
 	// maxNewBlockHashesBytes caps the wire bytes buffered before the entry count is checked, so an oversized packet is dropped before its payload is read.
 	maxNewBlockHashesBytes = maxBlockHashesPerMsg * 48
-	// newBlockHashesBurst and newBlockHashesRate bound how frequently one peer may send NewBlockHashes packets before it is disconnected.
-	newBlockHashesBurst            = 30
-	newBlockHashesRate  rate.Limit = 10
+	// Each peer gets independent limits for full blocks and block hashes.
+	// Short bursts are allowed; sustained announcement floods disconnect the peer.
+	blockAnnouncementsBurst            = 30
+	blockAnnouncementsRate  rate.Limit = 10
 )
 
 // newBlockHashesExceedsCap reports whether the RLP NewBlockHashes payload holds more than maxBlockHashesPerMsg entries; malformed RLP returns false and is left to the decoding subscriber.
@@ -407,7 +408,8 @@ func runPeer(
 		}
 	}()
 
-	newBlockHashesLimiter := rate.NewLimiter(newBlockHashesRate, newBlockHashesBurst)
+	newBlockHashesLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
+	newBlockLimiter := rate.NewLimiter(blockAnnouncementsRate, blockAnnouncementsBurst)
 
 	for {
 		if !peerPrinted {
@@ -542,6 +544,10 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewBlockMsg:
+			if !newBlockLimiter.Allow() {
+				msg.Discard()
+				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, nil, "sentry.runPeer: NewBlock rate limit exceeded")
+			}
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
 			}
@@ -825,7 +831,7 @@ type GrpcServer struct {
 	statusReadyOnce      sync.Once
 	statusData           *sentryproto.StatusData
 	statusDataLock       sync.RWMutex
-	messageStreams       map[sentryproto.MessageId]map[uint64]chan *sentryproto.InboundMessage
+	messageStreams       map[sentryproto.MessageId]map[uint64]*libsentry.SentryStreamS[*sentryproto.InboundMessage]
 	messagesSubscriberID uint64
 	messageStreamsLock   sync.RWMutex
 	peersStreams         *PeersStreams
@@ -1496,14 +1502,10 @@ func (ss *GrpcServer) send(msgID sentryproto.MessageId, peerID [64]byte, b []byt
 		Id:     msgID,
 		Data:   b,
 	}
+	// Only enqueue here: transport sends must stay outside messageStreamsLock
+	// so slow subscribers cannot block peer handlers or subscription changes.
 	for i := range ss.messageStreams[msgID] {
-		ch := ss.messageStreams[msgID][i]
-		ch <- req
-		before := len(ch)
-		libsentry.EvictOldestIfHalfFull(ch)
-		if before > cap(ch)/2 {
-			ss.logger.Debug("[sentry] consuming is slow, drop oldest 25% of messages", "msgID", msgID.String())
-		}
+		_ = ss.messageStreams[msgID][i].Send(req)
 	}
 }
 
@@ -1514,21 +1516,21 @@ func (ss *GrpcServer) hasSubscribers(msgID sentryproto.MessageId) bool {
 	//	log.Error("Sending msg to core P2P failed", "msg", sentryproto.MessageId_name[int32(streamMsg.msgId)], "err", err)
 }
 
-func (ss *GrpcServer) addMessagesStream(ids []sentryproto.MessageId, ch chan *sentryproto.InboundMessage) func() {
+func (ss *GrpcServer) addMessagesStream(ids []sentryproto.MessageId, stream *libsentry.SentryStreamS[*sentryproto.InboundMessage]) func() {
 	ss.messageStreamsLock.Lock()
 	defer ss.messageStreamsLock.Unlock()
 	if ss.messageStreams == nil {
-		ss.messageStreams = map[sentryproto.MessageId]map[uint64]chan *sentryproto.InboundMessage{}
+		ss.messageStreams = map[sentryproto.MessageId]map[uint64]*libsentry.SentryStreamS[*sentryproto.InboundMessage]{}
 	}
 
 	ss.messagesSubscriberID++
 	for _, id := range ids {
 		m, ok := ss.messageStreams[id]
 		if !ok {
-			m = map[uint64]chan *sentryproto.InboundMessage{}
+			m = map[uint64]*libsentry.SentryStreamS[*sentryproto.InboundMessage]{}
 			ss.messageStreams[id] = m
 		}
-		m[ss.messagesSubscriberID] = ch
+		m[ss.messagesSubscriberID] = stream
 	}
 
 	sID := ss.messagesSubscriberID
@@ -1543,22 +1545,23 @@ func (ss *GrpcServer) addMessagesStream(ids []sentryproto.MessageId, ch chan *se
 
 func (ss *GrpcServer) Messages(req *sentryproto.MessagesRequest, server sentryproto.Sentry_MessagesServer) error {
 	ss.logger.Trace("[Messages] new subscriber", "to", req.Ids)
-	ch := make(chan *sentryproto.InboundMessage, libsentry.MessagesQueueSize)
-	defer close(ch)
-	clean := ss.addMessagesStream(req.Ids, ch)
+	ctx, cancel := context.WithCancel(server.Context())
+	defer cancel()
+	stop := context.AfterFunc(ss.ctx, cancel)
+	defer stop()
+	streamServer, streamClient := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
+	defer streamServer.Close()
+	clean := ss.addMessagesStream(req.Ids, streamServer)
 	defer clean()
 
 	for {
-		select {
-		case <-ss.ctx.Done():
+		in, err := streamClient.Recv()
+		if err != nil {
 			return nil
-		case <-server.Context().Done():
-			return nil
-		case in := <-ch:
-			if err := server.Send(in); err != nil {
-				ss.logger.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "err", err)
-				return err
-			}
+		}
+		if err := server.Send(in); err != nil {
+			ss.logger.Warn("Sending msg to core P2P failed", "msg", in.Id.String(), "err", err)
+			return err
 		}
 	}
 }

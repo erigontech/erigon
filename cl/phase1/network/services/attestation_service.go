@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -303,7 +304,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if err != nil {
 			return fmt.Errorf("unable to get public key: %w", err)
 		}
-		domain, err = headState.GetDomain(s.beaconCfg.DomainBeaconAttester, targetEpoch)
+		domain, err = fork.ComputeDomainAtEpoch(s.beaconCfg, s.beaconCfg.DomainBeaconAttester, targetEpoch, headState.GenesisValidatorsRoot())
 		if err != nil {
 			return fmt.Errorf("unable to get the domain: %w", err)
 		}

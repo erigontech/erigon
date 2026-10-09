@@ -57,7 +57,7 @@ import (
 // which each test reads from its own local config.
 func initTestBeaconConfig(cfg *clparams.BeaconChainConfig) {
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(cfg)
 	}
 }
 

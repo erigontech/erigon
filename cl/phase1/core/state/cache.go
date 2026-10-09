@@ -110,7 +110,7 @@ func (b *CachingBeaconState) _updateProposerIndex() (err error) {
 		beaconConfig.EpochsPerHistoricalVector
 	// Input for the seed hash.
 	mix := b.GetRandaoMix(int(mixPosition))
-	input := shuffling.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	input := shuffling.GetSeed(mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
 
