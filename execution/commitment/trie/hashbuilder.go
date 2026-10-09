@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	length2 "github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -212,7 +213,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
 	key := keyHex[len(keyHex)-length:]
-	copy(hb.acc.Root[:], EmptyRoot[:])
+	copy(hb.acc.Root[:], empty.RootHash[:])
 	hb.acc.CodeHash = accounts.EmptyCodeHash
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
@@ -222,7 +223,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	var root Node
 	if fieldSet&uint32(4) != 0 {
 		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
-		if hb.acc.Root != EmptyRoot {
+		if hb.acc.Root != empty.RootHash {
 			// Root is on top of the stack
 			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
 			if root == nil {
@@ -275,35 +276,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 	return nil
-}
-
-func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
-	if hb.trace {
-		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
-	}
-	key := keyHex[len(keyHex)-length:]
-	hb.acc.Nonce = nonce
-	hb.acc.Balance.Set(balance)
-	hb.acc.Incarnation = incarnation
-
-	popped := 0
-	if fieldSet&AccountFieldStorageOnly != 0 {
-		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
-		popped++
-	} else {
-		copy(hb.acc.Root[:], EmptyRoot[:])
-	}
-
-	if fieldSet&AccountFieldCodeOnly != 0 {
-		var codeHashValue common.Hash
-		copy(codeHashValue[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
-		hb.acc.CodeHash = accounts.InternCodeHash(codeHashValue)
-		popped++
-	} else {
-		hb.acc.CodeHash = accounts.EmptyCodeHash
-	}
-
-	return hb.accountLeafHashWithKey(key, popped)
 }
 
 // To be called internally
@@ -629,7 +601,7 @@ func (hb *HashBuilder) emptyRoot() {
 	hb.nodeStack = append(hb.nodeStack, nil)
 	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	hash[0] = 0x80 + length2.Hash
-	copy(hash[1:], EmptyRoot[:])
+	copy(hash[1:], empty.RootHash[:])
 	hb.hashStack = append(hb.hashStack, hash[:]...)
 }
 

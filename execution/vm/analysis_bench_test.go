@@ -20,6 +20,7 @@
 package vm
 
 import (
+	"math/rand"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -30,7 +31,6 @@ import (
 )
 
 func BenchmarkJumpdestAnalysisEmpty_1200k(bench *testing.B) {
-	// 1.4 ms
 	code := make([]byte, 1200000)
 
 	for bench.Loop() {
@@ -71,6 +71,41 @@ func BenchmarkJumpDest(b *testing.B) {
 	for b.Loop() {
 		for i := range contract.Code {
 			contract.validJumpdest(pc.SetUint64(uint64(i)))
+		}
+	}
+}
+
+// BenchmarkJumpdestAnalysisInputs uses 32 KiB inputs over the alphabets of the execution-specs
+// JUMPDEST analysis benchmark (the worst cases for branchy scanners), plus PUSH32-only and random code.
+// Each case rotates through 64 different inputs, so the branch predictor cannot learn them.
+func BenchmarkJumpdestAnalysisInputs(b *testing.B) {
+	for name, alphabet := range map[string][]byte{
+		"jumpdest":            {0x5b},
+		"stop_jumpdest_push1": {0x00, 0x5b, 0x60},
+		"jumpdest_push1":      {0x5b, 0x60},
+		"push1to32":           {0x5b, 0x60, 0x6f, 0x70, 0x7f, 0x00},
+		"push32":              {0x7f},
+		"random":              nil,
+	} {
+		r := rand.New(rand.NewSource(1))
+		codes := make([][]byte, 64)
+		for k := range codes {
+			codes[k] = make([]byte, 32*1024)
+			for i := range codes[k] {
+				if alphabet == nil {
+					codes[k][i] = byte(r.Intn(256))
+				} else {
+					codes[k][i] = alphabet[r.Intn(len(alphabet))]
+				}
+			}
+		}
+		for impl, fn := range codeBitmapImpls() {
+			b.Run(impl+"/"+name, func(b *testing.B) {
+				b.SetBytes(int64(len(codes[0])))
+				for i := 0; b.Loop(); i++ {
+					fn(codes[i%len(codes)])
+				}
+			})
 		}
 	}
 }

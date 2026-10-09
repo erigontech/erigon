@@ -160,7 +160,7 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 	})
 
 	t.Run("failed writer drops instead of buffering", func(t *testing.T) {
-		s := New(goneWriter{}).(*StackStream)
+		s := New(goneWriter{})
 		val := strings.Repeat("c", 4096)
 		for range 20 * FlushThreshold / len(val) {
 			s.WriteString(val)

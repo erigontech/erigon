@@ -49,6 +49,7 @@ var (
 	ErrInvalidSignature         = errors.New("invalid signature")
 	ErrPublishedBlockJobExpired = errors.New("published block integration expired")
 	ErrPublishedBlockJobStopped = errors.New("block service stopped")
+	errBlockStorage             = errors.New("local block storage failed")
 )
 
 var publishedBlockJobSequence atomic.Uint64
@@ -73,6 +74,9 @@ type blockJob struct {
 	running             bool
 	attempt             *blockJobAttempt
 	lastAttempt         *blockJobAttempt
+	retryAfter          time.Time
+	retryDelay          time.Duration
+	storageErrorLogged  bool
 }
 
 type blockJobAttempt struct {
@@ -129,6 +133,19 @@ func newFailedBlockJob(block *cltypes.SignedBeaconBlock, store func(context.Cont
 	job.terminal = true
 	close(job.attempt.done)
 	return job
+}
+
+func (job *blockJob) logStorageErrorOnce(err error) {
+	if !errors.Is(err, errBlockStorage) {
+		return
+	}
+	job.mu.Lock()
+	alreadyLogged := job.storageErrorLogged
+	job.storageErrorLogged = true
+	job.mu.Unlock()
+	if !alreadyLogged {
+		log.Warn("Failed to store beacon block", "slot", job.block.Block.Slot, "proposer", job.block.Block.ProposerIndex, "err", err)
+	}
 }
 
 type blockReservation struct {
@@ -195,6 +212,20 @@ func NewBlockService(
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.EventEmitter,
 ) BlockService {
+	b := newBlockService(db, forkchoiceStore, syncedData, ethClock, beaconCfg, emitter)
+	go b.stopPublishedBlockJobsOnContext(ctx)
+	go b.loop(ctx)
+	return b
+}
+
+func newBlockService(
+	db kv.RwDB,
+	forkchoiceStore forkchoice.ForkChoiceStorage,
+	syncedData *synced_data.SyncedDataManager,
+	ethClock eth_clock.EthereumClock,
+	beaconCfg *clparams.BeaconChainConfig,
+	emitter *beaconevents.EventEmitter,
+) *blockService {
 	seenBlocksCache, err := lru.New[proposerIndexAndSlot, seenBlock]("seenblocks", seenBlockCacheSize)
 	if err != nil {
 		panic(err)
@@ -203,7 +234,7 @@ func NewBlockService(
 	if err != nil {
 		panic(err)
 	}
-	b := &blockService{
+	return &blockService{
 		forkchoiceStore: forkchoiceStore,
 		syncedData:      syncedData,
 		ethClock:        ethClock,
@@ -216,9 +247,6 @@ func NewBlockService(
 		emitter:         emitter,
 		db:              db,
 	}
-	go b.stopPublishedBlockJobsOnContext(ctx)
-	go b.loop(ctx)
-	return b
 }
 
 func (b *blockService) Names() []string {
@@ -255,13 +283,23 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			b.ScheduleBlockForLaterProcessing(msg)
 			return nil
 		}
-		if errors.Is(err, forkchoice.ErrNewPayloadNoStatus) {
-			b.ScheduleBlockForLaterProcessing(msg)
+		// Retain canceled imports too: gossip validation has already marked the block as seen.
+		if shouldBackOffBlockRetry(err) || isCallerCancellation(ctx, err) {
+			job, _ := b.scheduleBlockForLaterProcessing(msg, nil)
+			job.logStorageErrorOnce(err)
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
 		return err
 	}
 	return nil
+}
+
+func shouldBackOffBlockRetry(err error) bool {
+	return errors.Is(err, forkchoice.ErrNewPayloadNoStatus) || errors.Is(err, errBlockStorage)
+}
+
+func isCallerCancellation(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && errors.Is(err, ctx.Err())
 }
 
 func (b *blockService) ValidateGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock) error {
@@ -501,12 +539,10 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, ErrIgnore) && schedule != nil {
-			schedule()
-		}
 		return err
 	}
 
+	// Only signature-verified blocks may reach the retry checks below.
 	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
 	parentHeader, ok := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot)
 	if !ok {
@@ -838,6 +874,9 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 	existing.storeGeneration++
 	existing.scheduleSequence = job.scheduleSequence
 	existing.creationTime = time.Now()
+	// Retry backoff belongs to the store generation that failed.
+	existing.retryAfter = time.Time{}
+	existing.retryDelay = 0
 	if existing.terminal {
 		existing.terminal = false
 		existing.attempt = &blockJobAttempt{done: make(chan struct{})}
@@ -862,13 +901,19 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		persisted = slot != nil
 		return err
 	}); err != nil {
-		return err
+		if isCallerCancellation(ctx, err) {
+			return err
+		}
+		return fmt.Errorf("%w: read block index: %w", errBlockStorage, err)
 	}
 	if !persisted {
 		if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 			return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
 		}); err != nil {
-			return err
+			if isCallerCancellation(ctx, err) {
+				return err
+			}
+			return fmt.Errorf("%w: write block: %w", errBlockStorage, err)
 		}
 	}
 
@@ -880,8 +925,9 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 	}
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
-	}); err != nil {
-		return err
+	}); err != nil && !isCallerCancellation(ctx, err) {
+		// Import has succeeded; failure to update this local index is not a peer fault.
+		log.Warn("Failed to update highest finalized after block import", "slot", block.Block.Slot, "err", err)
 	}
 	return nil
 }
@@ -982,7 +1028,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		job.mu.Unlock()
 		return
 	}
-	if job.terminal {
+	if job.terminal || now.Before(job.retryAfter) {
 		job.mu.Unlock()
 		return
 	}
@@ -995,6 +1041,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		store = func(ctx context.Context) error { return b.processAndStoreBlock(ctx, job.block) }
 	}
 	err := store(ctx)
+	job.logStorageErrorOnce(err)
 	job.mu.Lock()
 	job.running = false
 	if job.terminal && job.completedGeneration >= generation {
@@ -1006,6 +1053,16 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	close(attempt.done)
 	job.lastAttempt = attempt
 	latest := generation == job.storeGeneration
+	// Preserve the accumulated delay across other errors so alternating failures
+	// cannot bypass backoff.
+	if latest && shouldBackOffBlockRetry(err) {
+		if job.retryDelay == 0 {
+			job.retryDelay = blockRetryInitialDelay
+		} else {
+			job.retryDelay = min(2*job.retryDelay, blockRetryMaxDelay)
+		}
+		job.retryAfter = time.Now().Add(job.retryDelay)
+	}
 	terminal := latest && (err == nil || errors.Is(err, forkchoice.ErrBlockInvalid))
 	if terminal {
 		job.completedGeneration = generation

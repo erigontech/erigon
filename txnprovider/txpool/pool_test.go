@@ -2894,3 +2894,164 @@ func TestBaseFeeRoundTripAnnouncesOnce(t *testing.T) {
 	drain()
 	require.Equal(t, 1, announced, "a return to pending is not a new pending txn")
 }
+
+func TestFromDBBlobsOutliveReadTx(t *testing.T) {
+	require := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	chainConfig := testforks.Forks["Osaka"]
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	poolDB := mdbxtest.NewTestPoolDB(t)
+	pool, err := New(ctx, make(chan Announcements, 5), poolDB, coreDB, txpoolcfg.DefaultConfig,
+		kvcache.New(kvcache.DefaultCoherentConfig), chainConfig, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(err)
+
+	sender := common.Address{1}
+	acc := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
+	require.NoError(pool.OnNewBlock(ctx, &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee:  1,
+		BlockGasLimit:        30_000_000,
+		PendingBlobFeePerGas: 1,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{}),
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(sender),
+				Data:    accounts.SerialiseV3(&acc),
+			}},
+		}},
+	}, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	txnRlp := makeWrappedBlobTxnRlpWithCellProofs(t, chainConfig.ChainID, 2)
+	parseCtx := NewTxnParseContext(*chainConfig.ChainID)
+	parseCtx.WithSender(false)
+	var slot TxnSlot
+	_, err = parseCtx.ParseTransaction(txnRlp, 0, &slot, nil, false, true, nil)
+	require.NoError(err)
+	blobHashes := slot.GetBlobHashes()
+
+	require.NoError(poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Put(kv.PoolTransaction, slot.IDHash[:], append(sender[:], txnRlp...))
+	}))
+	require.NoError(poolDB.View(ctx, func(poolTx kv.Tx) error {
+		return coreDB.ViewTemporal(ctx, func(coreTx kv.TemporalTx) error {
+			return pool.fromDB(ctx, poolTx, coreTx)
+		})
+	}))
+
+	bundles := pool.GetBlobs(blobHashes)
+	require.Len(bundles, len(blobHashes))
+	require.NotEmpty(bundles[0].Blob)
+	want := bytes.Clone(bundles[0].Blob)
+
+	require.NoError(poolDB.Update(ctx, func(tx kv.RwTx) error {
+		return tx.Delete(kv.PoolTransaction, slot.IDHash[:])
+	}))
+	filler := bytes.Repeat([]byte{0xaa}, len(txnRlp)+20)
+	for i := range 16 {
+		require.NoError(poolDB.Update(ctx, func(tx kv.RwTx) error {
+			return tx.Put(kv.PoolTransaction, []byte{byte(i)}, filler)
+		}))
+	}
+
+	bundles = pool.GetBlobs(blobHashes)
+	require.Len(bundles, len(blobHashes))
+	require.Equal(want, bundles[0].Blob, "blob loaded from the pool DB must not change after its read tx ends")
+}
+
+func TestAddLocalTxnsKeepsOriginalWhenReplacementRejected(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	original := newTestTxnSlot(0, 0, 1, 2, 100_000)
+	original.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(original, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	replacement := newTestSetCodeTxnSlot(0, 0, 10, 20, 100_000)
+	replacement.IDHash[0] = 2
+	replacement.AuthAndNonces = []AuthAndNonce{{authority: sender, nonce: 7}}
+	txns = TxnSlots{}
+	txns.Append(replacement, sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.NonceTooLow}, reasons)
+
+	require.Contains(t, pool.byHash, string(original.IDHash[:]))
+	require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))
+	pending, baseFee, queued := pool.CountContent()
+	require.Equal(t, 1, pending+baseFee+queued)
+}
+
+func TestAddLocalTxnsReplacesSetCodeTxnWithSameAuthorization(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	auth := AuthAndNonce{authority: common.Address{9}, nonce: 3}
+
+	original := newTestSetCodeTxnSlot(0, 0, 1, 2, 100_000)
+	original.IDHash[0] = 1
+	original.AuthAndNonces = []AuthAndNonce{auth}
+	var txns TxnSlots
+	txns.Append(original, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	replacement := newTestSetCodeTxnSlot(0, 0, 10, 20, 100_000)
+	replacement.IDHash[0] = 2
+	replacement.AuthAndNonces = []AuthAndNonce{auth}
+	txns = TxnSlots{}
+	txns.Append(replacement, sender[:], true)
+	reasons, err = pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	require.NotContains(t, pool.byHash, string(original.IDHash[:]))
+	require.Contains(t, pool.byHash, string(replacement.IDHash[:]))
+	require.Same(t, pool.byHash[string(replacement.IDHash[:])], pool.auths[auth])
+}
+
+func TestOnNewBlockKeepsOriginalWhenUnwoundReplacementRejected(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	original := newTestTxnSlot(0, 0, 1, 2, 100_000)
+	original.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(original, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+
+	replacement := newTestSetCodeTxnSlot(0, 0, 10, 20, 100_000)
+	replacement.IDHash[0] = 2
+	replacement.AuthAndNonces = []AuthAndNonce{{authority: sender, nonce: 7}}
+	var unwind TxnSlots
+	unwind.Append(replacement, sender[:], false)
+
+	account := accounts.Account{Balance: *uint256.NewInt(common.Ether), CodeHash: accounts.EmptyCodeHash}
+	change := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 1,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHash: gointerfaces.ConvertHashToH256(common.Hash{1}),
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(sender),
+				Data:    accounts.SerialiseV3(&account),
+			}},
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, unwind, TxnSlots{}, TxnSlots{}))
+
+	require.Contains(t, pool.byHash, string(original.IDHash[:]))
+	require.NotContains(t, pool.byHash, string(replacement.IDHash[:]))
+	senderID, ok := pool.senders.getID(sender)
+	require.True(t, ok)
+	kept := pool.all.get(senderID, 0)
+	require.NotNil(t, kept)
+	require.Equal(t, original.IDHash, kept.TxnSlot.IDHash)
+	pending, baseFee, queued := pool.CountContent()
+	require.Equal(t, 1, pending+baseFee+queued)
+}

@@ -81,7 +81,7 @@ func runStateAntiquaryWithSnapshots(t *testing.T, ctx context.Context, blocks []
 	require.NoError(t, sd.OnHeadState(postState))
 	vt := state_accessors.NewStaticValidatorTable()
 	dirs := datadir.New(t.TempDir())
-	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, cfg, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
 	t.Cleanup(stateSn.Close)
 	a := NewAntiquary(ctx, nil, preState, vt, cfg, dirs, nil, db, stateSn, nil, reader, sd, log.New(), true, true, true, false, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
@@ -268,7 +268,7 @@ func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 	}))
 
 	dirs := datadir.New(t.TempDir())
-	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, cfg, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
+	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, dirs, snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
 	t.Cleanup(stateSn.Close)
 	require.NoError(t, stateSn.DumpCaplinState(ctx, boundary, statePruneTestFileSlots, 0, dirs, 1, log.LvlDebug, log.New()))
 	require.NoError(t, stateSn.OpenFolder())

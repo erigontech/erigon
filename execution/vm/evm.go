@@ -351,25 +351,26 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	depth := evm.depth
 	gasRemaining = gas
 	inputTotal := gas.Total()
+	var (
+		snapshot      int
+		snapshotTaken bool
+	)
 
-	if (dbg.TraceTransactionIO && !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
-		version := evm.intraBlockState.Version()
-		fmt.Printf("%d (%d.%d) %s: %x %x\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, input)
-		defer func() {
-			fmt.Printf("%d (%d.%d) RETURN (%s): %x: %x, %d, %v\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, addr, ret, gasRemaining, err)
-		}()
-	}
-
-	gasTracing := evm.Config().Tracer != nil
+	tracer := evm.Config().Tracer
+	gasTracing := tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook() || dbg.TraceTransactionIO
+	// One defer, so the compiler can open-code it despite the many returns.
 	defer func() {
+		if snapshotTaken {
+			evm.intraBlockState.PopSnapshot(snapshot)
+		}
 		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if gasTracing {
-			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
+			evm.captureEnd(depth, typ, caller, addr, gasRemaining, gasUsed, ret, err)
 		}
 	}()
 
 	p, isPrecompile := evm.precompile(addr)
-	var code []byte
+	var code accounts.Code
 	if !isPrecompile {
 		code, err = evm.intraBlockState.ResolveCode(addr)
 		if err != nil {
@@ -380,7 +381,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 
 	// Invoke tracer hooks that signal entering/exiting a call frame
 	if gasTracing {
-		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code)
+		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code.Bytes)
 	}
 
 	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
@@ -409,8 +410,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}
 	}
 
-	snapshot := evm.intraBlockState.PushSnapshot()
-	defer evm.intraBlockState.PopSnapshot(snapshot)
+	snapshot = evm.intraBlockState.PushSnapshot()
+	snapshotTaken = true
 
 	if typ == CALL {
 		exist, err := evm.intraBlockState.Exist(addr)
@@ -430,13 +431,15 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 			}
 		}
-		// System calls use TouchAccount instead of Transfer to avoid
+		// System calls skip Transfer (and, outside AuRa, TouchAccount) to avoid
 		// spurious balance reads on the caller that would pollute the
 		// Block Access List (EIP-7928). The touch is still needed so
 		// AuRa/Gnosis keeps the empty system account in the PMT.
 		if syscall && value.IsZero() {
-			if err := evm.intraBlockState.TouchAccount(caller); err != nil {
-				return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			if evm.chainRules.IsAura {
+				if err := evm.intraBlockState.TouchAccount(caller); err != nil {
+					return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+				}
 			}
 		} else {
 			// Normal (non-syscall) calls always go through Transfer —
@@ -466,44 +469,19 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	switch {
 	case isPrecompile:
 		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, evm.Config().Tracer)
-	case len(code) == 0:
+	case code.Len() == 0:
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
 		ret, err = nil, nil // gas is unchanged
 	default:
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
-		var codeHash accounts.CodeHash
-		codeHash, err = evm.intraBlockState.ResolveCodeHash(addr)
-		if err != nil {
-			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
-		}
-		var contract Contract
+		contract := Contract{caller: caller, addr: addr, value: value, Code: code.Bytes, CodeHash: code.Hash}
 		switch typ {
 		case CALLCODE:
-			contract = Contract{
-				caller:   caller,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
+			contract.addr = caller
 		case DELEGATECALL:
-			contract = Contract{
-				caller:   callerAddress,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
-		default:
-			contract = Contract{
-				caller:   caller,
-				addr:     addr,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
+			contract.caller, contract.addr = callerAddress, caller
 		}
 		readOnly := false
 		if typ == STATICCALL {
@@ -619,6 +597,10 @@ func (evm *EVM) prepareCreate(caller accounts.Address, address accounts.Address,
 }
 
 func (evm *EVM) hasCreateCollision(address accounts.Address) (bool, error) {
+	// An absent account has no nonce or code.
+	if exists, err := evm.intraBlockState.Exist(address); err != nil || !exists {
+		return false, err
+	}
 	targetCodeHash, err := evm.intraBlockState.GetCodeHash(address)
 	if err != nil {
 		return false, err
@@ -647,24 +629,21 @@ func (evm *EVM) createPrepared(caller accounts.Address, codeAndHash *codeAndHash
 func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, preparation *createPreparation) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	gasRemaining = gas
 
-	if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
-		defer func() {
-			version := evm.intraBlockState.Version()
-			if err != nil {
-				fmt.Printf("%d (%d.%d) Create Contract: %x, err=%s\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, createAddress, err)
-			} else {
-				fmt.Printf("%d (%d.%d) Create Contract: %x, gas=%d\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, createAddress, gasRemaining)
-			}
-		}()
-	}
-
 	depth := evm.depth
 	inputTotal := gas.Total()
-	gasTracing := evm.Config().Tracer != nil
+	tracer := evm.Config().Tracer
+	gasTracing := tracer.HasEnterHook() || tracer.HasExitHook() || tracer.HasGasChangeHook() || dbg.TraceTransactionIO
+	var (
+		snapshot      int
+		snapshotTaken bool
+	)
 	defer func() {
+		if snapshotTaken {
+			evm.intraBlockState.PopSnapshot(snapshot)
+		}
 		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
 		if gasTracing {
-			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
+			evm.captureEnd(depth, typ, caller, address, gasRemaining, gasUsed, ret, err)
 		}
 	}()
 
@@ -700,14 +679,14 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	if collision {
 		err = ErrContractAddressCollision
 		gasRemaining.Execution = 0
-		if tracer := evm.config.Tracer; tracer.HasGasChangeHook() {
+		if tracer.HasGasChangeHook() {
 			tracer.EmitGasChange(gas, gasRemaining, tracing.GasChangeCallFailedExecution)
 		}
 		return nil, accounts.NilAddress, gasRemaining, mdgas.MdGasUsage{}, err
 	}
 	// Create a new account on the state
-	snapshot := evm.intraBlockState.PushSnapshot()
-	defer evm.intraBlockState.PopSnapshot(snapshot)
+	snapshot = evm.intraBlockState.PushSnapshot()
+	snapshotTaken = true
 
 	if err := evm.intraBlockState.CreateAccount(address, true); err != nil {
 		return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -865,13 +844,26 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 	}
 }
 
+func (evm *EVM) traceIO(typ OpCode, caller accounts.Address) bool {
+	isCreate := typ == CREATE || typ == CREATE2
+	return dbg.TraceTransactionIO && (isCreate || !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle()))
+}
+
 func (evm *EVM) captureBegin(depth int, typ OpCode, from accounts.Address, to accounts.Address, precompile bool, input []byte, startGas mdgas.MdGas, value uint256.Int, code []byte) {
+	if evm.traceIO(typ, from) {
+		version := evm.intraBlockState.Version()
+		fmt.Printf("%d (%d.%d) %s: %x %x\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, to, input)
+	}
 	tracer := evm.Config().Tracer
 	tracer.EmitEnter(depth, byte(typ), from, to, precompile, input, startGas, value, code)
 	tracer.EmitGasChange(mdgas.MdGas{}, startGas, tracing.GasChangeCallInitialBalance)
 }
 
-func (evm *EVM) captureEnd(depth int, leftOverGas mdgas.MdGas, gasUsed mdgas.MdGasUsage, ret []byte, err error) {
+func (evm *EVM) captureEnd(depth int, typ OpCode, from accounts.Address, to accounts.Address, leftOverGas mdgas.MdGas, gasUsed mdgas.MdGasUsage, ret []byte, err error) {
+	if evm.traceIO(typ, from) {
+		version := evm.intraBlockState.Version()
+		fmt.Printf("%d (%d.%d) RETURN (%s): %x: %x, %d, %v\n", evm.intraBlockState.BlockNumber(), version.TxIndex, version.Incarnation, typ, to, ret, leftOverGas, err)
+	}
 	tracer := evm.Config().Tracer
 	if tracer.HasGasChangeHook() && leftOverGas != (mdgas.MdGas{}) {
 		tracer.EmitGasChange(leftOverGas, mdgas.MdGas{}, tracing.GasChangeCallLeftOverReturned)

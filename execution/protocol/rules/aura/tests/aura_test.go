@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
-	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -72,8 +71,8 @@ func TestEmptyBlock(t *testing.T) {
 	time := uint64(1539016985)
 	header := builder.MakeEmptyHeader(genesisBlock.Header(), chainConfig, time, nil)
 	header.UncleHash = empty.UncleHash
-	header.TxHash = trie.EmptyRoot
-	header.ReceiptHash = trie.EmptyRoot
+	header.TxHash = empty.RootHash
+	header.ReceiptHash = empty.RootHash
 	header.Coinbase = common.HexToAddress("0xcace5b3c29211740e595850e80478416ee77ca21")
 	header.Difficulty = engine.CalcDifficulty(
 		nil, time,

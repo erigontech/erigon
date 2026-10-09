@@ -729,7 +729,7 @@ func checkCommitmentFileHasRoot(filePath string) (hasState, broken bool, label s
 		log.Warn("[dbg] no accessor found, assuming file may have state", "file", filePath)
 		return true, false, "", nil
 	}
-	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, statecfg.Schema.CommitmentDomain.Compression, false)
+	rd, bti, err := btindex.OpenBtreeIndexAndDataFile(bt, filePath, statecfg.Schema.CommitmentDomain.Compression)
 	if err != nil {
 		return false, false, "", err
 	}
@@ -1446,7 +1446,7 @@ func doBtSearch(ctx context.Context, cliCtx *cli.Command) error {
 	dbg.ReadMemStats(&m)
 	logger.Info("before open", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 	compress := seg.CompressKeys | seg.CompressVals
-	kv, idx, err := btindex.OpenBtreeIndexAndDataFile(srcF, dataFilePath, compress, false)
+	kv, idx, err := btindex.OpenBtreeIndexAndDataFile(srcF, dataFilePath, compress)
 	if err != nil {
 		return err
 	}
@@ -1672,7 +1672,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 		case integrity.HistoryNoSystemTxs:
 			return integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader)
 		case integrity.StateProgress:
-			return integrity.CheckStateProgress(ctx, db, blockReader, failFast)
+			return integrity.CheckStateProgress(ctx, db, blockReader)
 		case integrity.Publishable:
 			return doPublishable(dirs, chainDB)
 		case integrity.CaplinStateRoots:
@@ -3108,7 +3108,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 		snTypes := snapshotsync.MakeCaplinStateSnapshotsTypes(indexDB)
 		blkFreezeCfg := ethconfig.BlocksFreezing{ChainName: beaconConfig.ConfigName}
-		res.CaplinStateSnaps = snapshotsync.NewCaplinStateSnapshots(blkFreezeCfg, beaconConfig, dirs, snTypes, logger)
+		res.CaplinStateSnaps = snapshotsync.NewCaplinStateSnapshots(blkFreezeCfg, dirs, snTypes, logger)
 		if err := res.CaplinStateSnaps.OpenFolder(); err != nil {
 			return res, nil, err
 		}
@@ -3305,7 +3305,7 @@ func doRemoveOverlap(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 	defer clean()
 
-	return agg.RemoveOverlapsAfterMerge(ctx)
+	return agg.RemoveOverlapsAfterMerge()
 }
 
 func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
@@ -3566,7 +3566,7 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	if err := agg.MergeLoop(ctx); err != nil {
 		return err
 	}
-	if err := agg.RemoveOverlapsAfterMerge(ctx); err != nil {
+	if err := agg.RemoveOverlapsAfterMerge(); err != nil {
 		return err
 	}
 

@@ -65,7 +65,7 @@ type GraphQLReceipt struct {
 }
 
 // MarshalFastJSONTo shadows the promoted RPCReceipt method, which would drop the transaction fields.
-func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	return writeReflected(s, r)
 }
 

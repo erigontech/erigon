@@ -31,7 +31,7 @@ import (
 // existence and the {Balance,Nonce,CodeHash} fields; it never consults
 // Incarnation, and (EIP-6780) a same-tx self-destruct leaves the account alive.
 func emptyCharIBS(reader *accountStateReader, vm *VersionMap, txIndex int) *IntraBlockState {
-	ibs := New(NewVersionedStateReader(txIndex, ReadSet{}, vm, reader))
+	ibs := New(NewVersionedStateReader(txIndex, ReadSet{}, vm, reader, false))
 	ibs.SetTxContext(0, txIndex)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)

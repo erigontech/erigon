@@ -126,7 +126,7 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 		return g.blockReader.Header(ctx, tx, hash, number)
 	}
 	chainReader := exec.NewChainReader(cfg, tx, g.blockReader, g.logger)
-	bal, err := RederiveBlockAccessList(ctx, cfg, g.engine, chainReader, reader, getHeader, header, block.Transactions(), block.Uncles(), block.Withdrawals(), ibs, g.logger)
+	bal, err := RederiveBlockAccessList(ctx, cfg, g.engine, chainReader, getHeader, header, block.Transactions(), block.Uncles(), block.Withdrawals(), ibs, g.logger)
 	if err != nil {
 		return nil, err
 	}

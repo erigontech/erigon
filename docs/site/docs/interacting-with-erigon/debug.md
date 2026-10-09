@@ -328,6 +328,10 @@ curl -s --data '{"jsonrpc":"2.0","method":"debug_traceCallMany","params":[[{"tra
 | ----- | -------------------------------------- |
 | Array | Array of trace results for each bundle |
 
+:::note[callTracer output]
+With `{"tracer": "callTracer", "tracerConfig": {"withLog": true}}`, each entry in `logs` has an `index` that is the log's index **within the block**, matching `eth_getLogs` and the receipts, for `debug_traceTransaction` and `debug_traceBlockByNumber`/`ByHash`. `debug_traceCall` counts from `0x0`, and `debug_traceCallMany` counts within each bundle. A failed `CREATE` or `CREATE2` frame, including one that reverts, has no `to` field.
+:::
+
 ### debug\_setMemoryLimit
 
 Sets the GOMEMLIMIT for the process.

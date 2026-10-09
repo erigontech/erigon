@@ -325,58 +325,22 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(ctx context.Context, id uint64)
 
 	br := result.Block
 	block := br.Block
-	header := block.Header()
-
-	// Encode transactions
-	encodedTxs, err := types.MarshalTransactionsBinary(block.Transactions())
+	payload, err := engine_types.ExecutionPayloadFromBlock(block)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	// Build CL Eth1Block
-	extraData := solid.NewExtraData()
-	extraData.SetBytes(header.Extra)
-	blockHash := block.Hash()
-
-	var baseFeeLE common.Hash
-	if header.BaseFee != nil {
-		_, _ = header.BaseFee.MarshalSSZAppend(baseFeeLE[:0])
+	// The beacon block producer supplies the consensus version.
+	eth1Block, err := payload.ToEth1Block(clparams.Phase0Version, &clparams.MainnetBeaconConfig)
+	if err != nil {
+		return nil, nil, nil, nil, err
 	}
-
-	eth1Block := &cltypes.Eth1Block{
-		ParentHash:    header.ParentHash,
-		FeeRecipient:  header.Coinbase,
-		StateRoot:     header.Root,
-		ReceiptsRoot:  header.ReceiptHash,
-		LogsBloom:     header.Bloom,
-		BlockNumber:   header.Number.Uint64(),
-		GasLimit:      header.GasLimit,
-		GasUsed:       header.GasUsed,
-		Time:          header.Time,
-		Extra:         extraData,
-		PrevRandao:    header.MixDigest,
-		Transactions:  solid.NewTransactionsSSZFromTransactions(encodedTxs),
-		BlockHash:     blockHash,
-		BaseFeePerGas: baseFeeLE,
+	if eth1Block.Extra == nil {
+		eth1Block.Extra = solid.NewExtraData()
 	}
-	if header.ExcessBlobGas != nil {
-		eth1Block.ExcessBlobGas = *header.ExcessBlobGas
+	if eth1Block.Withdrawals == nil {
+		eth1Block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
 	}
-	if header.BlobGasUsed != nil {
-		eth1Block.BlobGasUsed = *header.BlobGasUsed
-	}
-
-	// Withdrawals
-	withdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
-	for _, w := range block.Withdrawals() {
-		withdrawals.Append(&cltypes.Withdrawal{
-			Amount:    uint64(w.Amount),
-			Address:   w.Address,
-			Index:     uint64(w.Index),
-			Validator: uint64(w.Validator),
-		})
-	}
-	eth1Block.Withdrawals = withdrawals
 
 	// Blob bundle
 	blobsBundle, err := engine_types.BlobsBundleFromTransactions(block.Transactions())

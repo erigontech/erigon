@@ -559,7 +559,7 @@ func pruneCanonicalMarkers(ctx context.Context, tx kv.RwTx, blockReader dbservic
 }
 
 // SnapshotsPrune moving block data from db into snapshots, removing old snapshots (if --prune.* enabled)
-func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx, logger log.Logger) (err error) {
+func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.RwTx) (err error) {
 	if dbg.NoPrune() {
 		return nil
 	}
@@ -577,7 +577,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			log.LvlDebug,
 			cfg.getSeederClient(),
 			func() error {
-				filesDeleted, err := retireBlockSnapshots(ctx, cfg, logger)
+				filesDeleted, err := retireBlockSnapshots(ctx, cfg)
 				if filesDeleted && cfg.notifier != nil {
 					cfg.notifier.Events.OnNewSnapshot()
 				}
@@ -609,7 +609,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 	return nil
 }
 
-func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logger) (bool, error) {
+func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg) (bool, error) {
 	if dbg.NoRetire() {
 		return false, nil
 	}

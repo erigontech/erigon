@@ -84,7 +84,7 @@ func (c *LatestBatchCache) Len() int {
 	return len(c.accounts)
 }
 
-func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
+func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx) ([]byte, error) {
 	// Check the in-memory account cache first (populated by OnNewBlock).
 	if len(k) == 20 {
 		c.mu.RLock()
@@ -100,7 +100,7 @@ func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, e
 	return v, err
 }
 
-func (c *LatestBatchCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
+func (c *LatestBatchCache) GetCode(k []byte, tx kv.TemporalTx) ([]byte, error) {
 	v, _, err := tx.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
@@ -114,10 +114,10 @@ type LatestBatchView struct {
 	tx    kv.TemporalTx
 }
 
-func (c *LatestBatchView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx, 0) }
+func (c *LatestBatchView) Get(k []byte) ([]byte, error) { return c.cache.Get(k, c.tx) }
 
 // The cache holds latest-state only, so historical reads always fall through.
 func (c *LatestBatchView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err error) {
 	return nil, false, nil
 }
-func (c *LatestBatchView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
+func (c *LatestBatchView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx) }

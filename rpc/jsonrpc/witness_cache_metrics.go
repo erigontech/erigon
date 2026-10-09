@@ -21,6 +21,7 @@ import "github.com/erigontech/erigon/diagnostics/metrics"
 var (
 	witnessCacheHitCounter             = metrics.GetOrCreateCounter("witness_cache_hit_total")
 	witnessCacheMissCounter            = metrics.GetOrCreateCounter("witness_cache_miss_total")
+	witnessCacheAwaitCounter           = metrics.GetOrCreateCounter("witness_cache_await_total")
 	witnessCacheBuildOKCounter         = metrics.GetOrCreateCounter("witness_cache_build_ok_total")
 	witnessCacheBuildFailVerifyCounter = metrics.GetOrCreateCounter("witness_cache_build_fail_verify_total")
 	witnessCacheBuildFailOtherCounter  = metrics.GetOrCreateCounter("witness_cache_build_fail_other_total")

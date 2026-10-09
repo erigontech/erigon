@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -824,10 +825,41 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 	}
 }
 
+// Start building a block, then accept a competing block with the same parent.
+// The original build must still produce a valid block. Also run without the
+// competing commit as a control.
+// The 256 recipients must exceed commitment.minForkGrain (currently 128)
+// to exercise parallel commitment worker reads.
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
-	t.Parallel()
+	original := statecfg.ExperimentalParallelCommitment
+	statecfg.ExperimentalParallelCommitment = true
+	t.Cleanup(func() { statecfg.ExperimentalParallelCommitment = original })
+
+	t.Run("without_concurrent_commit", func(t *testing.T) {
+		testAssembleBlockWithSiblingCommit(t, false)
+	})
+	t.Run("with_concurrent_commit", func(t *testing.T) {
+		testAssembleBlockWithSiblingCommit(t, true)
+	})
+}
+
+func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
+	t.Helper()
 	ctx := t.Context()
-	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	genesis := &types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 30_000_000,
+		Alloc: types.GenesisAlloc{
+			crypto.PubkeyToAddress(key.PublicKey): {Balance: big.NewInt(common.Ether)},
+		},
+	}
+	for i := range 512 {
+		address := common.BigToAddress(big.NewInt(int64(4096 + i)))
+		genesis.Alloc[address] = types.GenesisAccount{Balance: big.NewInt(10_000)}
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithChainConfig(chain.AllProtocolChanges), execmoduletester.WithKey(key))
 	parentChain, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
 		tx, txErr := types.SignTx(
 			types.NewTransaction(0, common.Address{1}, uint256.NewInt(10_000), 50_000, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
@@ -840,15 +872,21 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(parentChain))
 	parent := parentChain.TopBlock
-	builderTx, err := types.SignTx(
-		types.NewTransaction(1, common.Address{2}, uint256.NewInt(20_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
-		m.Key,
-	)
-	require.NoError(t, err)
-	builderTx.SetSender(accounts.InternAddress(m.Address))
+	builderTxs := make([]types.Transaction, 256)
+	for i := range builderTxs {
+		address := common.BigToAddress(big.NewInt(int64(4096 + i)))
+		tx, err := types.SignTx(
+			types.NewTransaction(uint64(i+1), address, uint256.NewInt(20_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		)
+		require.NoError(t, err)
+		tx.SetSender(accounts.InternAddress(m.Address))
+		builderTxs[i] = tx
+	}
+	// The competing block pays an account that none of the payload transactions
+	// touch. Its transfer must not affect the balances in the built block.
 	siblingTx, err := types.SignTx(
-		types.NewTransaction(1, common.Address{3}, uint256.NewInt(30_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
+		types.NewTransaction(1, common.BigToAddress(big.NewInt(4496)), uint256.NewInt(30_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
 		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
 		m.Key,
 	)
@@ -861,9 +899,9 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		ready:     make(chan struct{}),
 		release:   make(chan struct{}, 1),
 		exhausted: make(chan struct{}),
-		txns:      []types.Transaction{builderTx},
+		txns:      builderTxs,
 	}
-	parentBeaconBlockRoot := randomHash()
+	parentBeaconBlockRoot := common.Hash{1}
 	payloadID, err := m.AssembleBlock(ctx, &builder.Parameters{
 		ParentHash:            parent.Hash(),
 		Timestamp:             parent.Time() + 1,
@@ -887,7 +925,10 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("builder did not reach transaction selection")
 	}
-	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, siblingChain.Blocks))
+	if commitSibling {
+		// Make the competing block the chain head before the original build finishes.
+		require.NoError(t, m.InsertValidateAndUfc1By1(ctx, siblingChain.Blocks))
+	}
 	provider.release <- struct{}{}
 	select {
 	case <-provider.exhausted:
@@ -897,14 +938,15 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	built, err := m.GetAssembledBlock(ctx, payloadID)
 	require.NoError(t, err)
 	require.Equal(t, parent.Hash(), built.ParentHash())
-	require.Len(t, built.Transactions(), 1)
-	require.Equal(t, builderTx.Hash(), built.Transactions()[0].Hash())
+	require.Len(t, built.Transactions(), len(builderTxs))
+	require.Equal(t, builderTxs[0].Hash(), built.Transactions()[0].Hash())
 	status, err := m.InsertBlocks(ctx, []*types.Block{built})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	// Check that the built block is valid on its original parent, even if the head changed.
 	validation, err := m.ValidateChain(ctx, built.Header())
 	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
 }
 
 func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testing.T) {
@@ -1695,6 +1737,44 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
 		require.NoError(t, err)
 		require.Equal(t, expected, pb.BlockAccessList, "byRange block %d", i+1)
+	}
+}
+
+// The payload bodies serve each transaction in its binary (canonical EIP-2718) encoding, so a
+// typed transaction must lose the RLP string header it is stored under.
+func TestGetPayloadBodiesServeBinaryTransactions(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	to := common.Address{1}
+	gasPrice := *uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		commonTx := func() types.CommonTx {
+			return types.CommonTx{Nonce: b.TxNonce(m.Address), To: &to, GasLimit: params.TxGas, Value: *uint256.NewInt(1)}
+		}
+		var txn types.Transaction = &types.LegacyTx{CommonTx: commonTx(), GasPrice: gasPrice}
+		if i == 1 {
+			txn = &types.DynamicFeeTransaction{CommonTx: commonTx(), ChainID: *m.ChainConfig.ChainID, TipCap: gasPrice, FeeCap: gasPrice}
+		}
+		signed, signErr := types.SignTx(txn, *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, signErr)
+		b.AddTx(signed)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	require.Equal(t, byte(types.DynamicFeeTxType), chainPack.Blocks[1].Transactions()[0].Type(),
+		"fixture: the typed branch is only exercised by a typed transaction")
+
+	for _, block := range chainPack.Blocks {
+		want, err := block.Body().BinaryRawBody()
+		require.NoError(t, err)
+		byHash, err := m.ExecModule.GetPayloadBodiesByHash(t.Context(), []common.Hash{block.Hash()})
+		require.NoError(t, err)
+		require.Len(t, byHash, 1)
+		require.Equal(t, want.Transactions, byHash[0].Transactions, "byHash block %d", block.NumberU64())
+		byRange, err := m.ExecModule.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
+		require.NoError(t, err)
+		require.Len(t, byRange, 1)
+		require.Equal(t, want.Transactions, byRange[0].Transactions, "byRange block %d", block.NumberU64())
 	}
 }
 

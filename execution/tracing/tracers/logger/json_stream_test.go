@@ -209,7 +209,7 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 
 // closeStreamLikeCaller writes the tail ExecuteTraceTx appends once execution is
 // over: exactly one array end and one object end, whatever the logger emitted.
-func closeStreamLikeCaller(stream jsonstream.Stream) {
+func closeStreamLikeCaller(stream *jsonstream.Stream) {
 	stream.WriteArrayEnd()
 	stream.Field("gas")
 	stream.Uint(0)

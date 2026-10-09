@@ -347,7 +347,7 @@ func (t *jsTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdG
 }
 
 // onEnd is called after the call finishes to finalize the tracing.
-func (t *jsTracer) onEnd(output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
+func (t *jsTracer) onEnd(output []byte, err error) {
 	t.ctx["output"] = t.vm.ToValue(output)
 	if err != nil {
 		t.ctx["error"] = t.vm.ToValue(err.Error())
@@ -390,7 +390,7 @@ func (t *jsTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, 
 	}
 
 	if depth == 0 {
-		t.onEnd(output, gasUsed, err, reverted)
+		t.onEnd(output, err)
 		return
 	}
 

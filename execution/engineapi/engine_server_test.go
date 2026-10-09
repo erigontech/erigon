@@ -415,7 +415,7 @@ func TestGetBlobsV4FastJSON(t *testing.T) {
 	result, err := server.GetBlobsV4(t.Context(), []common.Hash{hash, {}}, hexutil.MustDecodeHex("0x01000000000000000100000000000080"))
 	require.NoError(t, err)
 	marshaler, ok := any(result).(interface {
-		MarshalFastJSONTo(*jsonstream.StackStream) error
+		MarshalFastJSONTo(*jsonstream.Stream) error
 	})
 	require.True(t, ok, "GetBlobsV4 must return a fast JSON result")
 	want, err := json.Marshal(result)

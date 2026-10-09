@@ -42,7 +42,7 @@ func BenchmarkSeekInterp(b *testing.B) {
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 	buildBtreeIndex(b, kvPath, indexPath, compress, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress)
 	require.NoError(b, err)
 	defer bt.Close()
 	defer kv.Close()

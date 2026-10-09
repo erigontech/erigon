@@ -407,18 +407,6 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 	return tx, nil
 }
 
-// checkChainID rejects a call object whose chainId names another chain. Such a call is invalid
-// whatever the state, so it is invalid params rather than an execution error.
-func (args *TraceCallParam) checkChainID(chainID *uint256.Int) error {
-	if args.ChainID == nil {
-		return nil
-	}
-	if have := (*uint256.Int)(args.ChainID); !have.Eq(chainID) {
-		return &rpc.InvalidParamsError{Message: fmt.Sprintf("chainId does not match node's (have=%v, want=%v)", have, chainID)}
-	}
-	return nil
-}
-
 func (ot *OeTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
@@ -838,7 +826,10 @@ func (ot *OeTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.Md
 	if ot.r.VmTrace == nil || ot.lastVmOp == nil || errors.Is(err, vm.ErrExecutionReverted) {
 		return
 	}
-	if rejectedBeforeExecution(err) {
+	// Stack bounds are checked before the opcode hook, so an undefined opcode is the only fault
+	// here for an operation that did not execute.
+	var invalid *vm.ErrInvalidOpCode
+	if errors.As(err, &invalid) && invalid.Undefined() {
 		vmTrace := ot.r.VmTrace
 		if len(ot.vmOpStack) > 0 {
 			vmTrace = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
@@ -851,12 +842,11 @@ func (ot *OeTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.Md
 }
 
 // rejectedBeforeExecution reports whether err rejects an operation before it executes:
-// an undefined opcode (including the designated INVALID, 0xFE) or a stack underflow or overflow.
+// a stack underflow or overflow.
 func rejectedBeforeExecution(err error) bool {
 	var underflow *vm.ErrStackUnderflow
 	var overflow *vm.ErrStackOverflow
-	var invalid *vm.ErrInvalidOpCode
-	return errors.As(err, &underflow) || errors.As(err, &overflow) || errors.As(err, &invalid)
+	return errors.As(err, &underflow) || errors.As(err, &overflow)
 }
 
 func (ot *OeTracer) GetResult() (json.RawMessage, error) {
@@ -1240,7 +1230,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
-	if err := args.checkChainID(chainConfig.ChainID); err != nil {
+	if err := ethapi.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
 		return nil, err
 	}
 	engine := api.engine()
@@ -1412,6 +1402,36 @@ func applyStateOverrides(ibs *state.IntraBlockState, overrides *ethapi.StateOver
 	return precompiles, nil
 }
 
+// overriddenStorageReader serves the storage of accounts with a full `state`
+// override, so slots missing from the override read as zero instead of falling
+// through to the database.
+type overriddenStorageReader struct {
+	state.StateReader
+	storage map[accounts.Address]map[common.Hash]common.Hash
+}
+
+func withOverriddenStorage(r state.StateReader, overrides *ethapi.StateOverrides) state.StateReader {
+	storage := make(map[accounts.Address]map[common.Hash]common.Hash)
+	for addr, account := range *overrides {
+		if account.State != nil {
+			storage[addr] = *account.State
+		}
+	}
+	if len(storage) == 0 {
+		return r
+	}
+	return &overriddenStorageReader{StateReader: r, storage: storage}
+}
+
+func (r *overriddenStorageReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
+	slots, ok := r.storage[address]
+	if !ok {
+		return r.StateReader.ReadAccountStorage(address, key)
+	}
+	value, ok := slots[key.Value()]
+	return *new(uint256.Int).SetBytes32(value[:]), ok, nil
+}
+
 // CallMany implements trace_callMany.
 func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, parentNrOrHash *rpc.BlockNumberOrHash, traceConfig *config.TraceConfig) ([]*TraceCallResult, error) {
 	tx, err := api.kv.BeginTemporalRo(ctx)
@@ -1465,7 +1485,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 	for i := range callParams {
-		if err := callParams[i].checkChainID(chainConfig.ChainID); err != nil {
+		if err := ethapi.CheckChainID(callParams[i].ChainID, chainConfig.ChainID); err != nil {
 			return nil, fmt.Errorf("call %d: %w", i, err)
 		}
 	}
@@ -1522,6 +1542,11 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if err != nil {
 		return nil, err
 	}
+	var overrides *ethapi.StateOverrides
+	if traceConfig != nil && traceConfig.StateOverrides != nil {
+		overrides = traceConfig.StateOverrides
+		stateReader = withOverriddenStorage(stateReader, overrides)
+	}
 	stateCache := shards.NewStateCache(
 		32, 0, /* no limit */
 	) // this cache living only during current RPC call, but required to store state writes
@@ -1532,7 +1557,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig)
+		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig, overrides)
 	if err != nil {
 		return nil, callError(err)
 	}
@@ -1546,7 +1571,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
 	header *types.Header, requireCanonical, gasBailout, advanceTxNum, noBaseFee bool,
-	traceConfig *config.TraceConfig,
+	traceConfig *config.TraceConfig, overrides *ethapi.StateOverrides,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
@@ -1577,6 +1602,19 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	blockCtx := transactions.NewEVMBlockContext(engine, header, requireCanonical, dbtx, api._blockReader, chainConfig)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 		return nil, nil, err
+	}
+	var precompiles vm.PrecompiledContracts
+	if overrides != nil {
+		rules := blockCtx.Rules(chainConfig)
+		if precompiles, err = applyStateOverrides(ibs, overrides, rules); err != nil {
+			return nil, nil, err
+		}
+		// Committed to the cache because a stateDiff call resets ibs. The reset
+		// here drops the fake storage, whose committed value tracks every write.
+		if err := ibs.CommitOverrideDirtyAccounts(rules, cachedWriter, ibs.ExtractAndClearDirty()); err != nil {
+			return nil, nil, err
+		}
+		ibs.Reset()
 	}
 	var tracer *tracers.Tracer
 	var tracingHooks *tracing.Hooks
@@ -1650,6 +1688,9 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			args.zeroUnpricedBlobBaseFee(&txBlockCtx)
 		}
 		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(txBlockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
+		if precompiles != nil {
+			evm.SetPrecompiles(precompiles)
+		}
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
 		if tracer != nil && tracer.Hooks.OnTxStart != nil {
@@ -1709,7 +1750,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 
 func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
-	msg *types.Message, callParam TraceCallParam,
+	txn types.Transaction, callParam TraceCallParam,
 	header *types.Header, requireCanonical, gasBailout bool, txIndex int,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
@@ -1742,6 +1783,15 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	blockCtx := transactions.NewEVMBlockContext(engine, header, requireCanonical, dbtx, api._blockReader, chainConfig)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 		return nil, err
+	}
+	chainRules := blockCtx.Rules(chainConfig)
+	signer := types.MakeSigner(chainConfig, blockCtx.BlockNumber, blockCtx.Time)
+	if err := checkOverriddenSigner(traceConfig, signer, txn); err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
+	}
+	msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, chainRules)
+	if err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
 	}
 
 	if isHistoricalStateReader {
@@ -1807,12 +1857,14 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
+		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
+	}
 	execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	if err != nil {
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
 
-	chainRules := blockCtx.Rules(chainConfig)
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)
@@ -1850,6 +1902,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
 		return nil, err
+	}
+	if api.gasCap != 0 && txn.GetGasLimit() > api.gasCap {
+		return nil, clientLimitExceededError(fmt.Sprintf("transaction gas limit %d exceeds the RPC gas cap %d", txn.GetGasLimit(), api.gasCap))
 	}
 
 	dbtx, err := api.kv.BeginTemporalRo(ctx)

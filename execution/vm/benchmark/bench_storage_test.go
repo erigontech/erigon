@@ -9,6 +9,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
@@ -70,6 +71,43 @@ func BenchmarkSLOADWarm(b *testing.B) {
 				callOOG(b, vmenv, addrContract)
 			}
 		})
+	}
+}
+
+// BenchmarkSLOADCommitted reads storage from the DB as a noMaterialize eth_call
+// does: every iteration is a fresh tx that reads each slot once from the state
+// reader and then repeatedly from the in-tx caches.
+func BenchmarkSLOADCommitted(b *testing.B) {
+	const n, rounds = 50, 8
+	p := program.New()
+	slots := make(map[uint256.Int]uint256.Int, n)
+	for i := range n {
+		slots[*uint256.NewInt(uint64(i))] = *uint256.NewInt(0xDEAD)
+	}
+	for range rounds {
+		for i := range n {
+			p.Push(i).Op(vm.SLOAD, vm.POP)
+		}
+	}
+	code := p.Op(vm.STOP).Bytes()
+
+	b.ReportAllocs()
+	vmenv := newCommittedBenchEnv(b, 10_000_000, func(statedb *state.IntraBlockState) {
+		deployContract(b, statedb, addrContract, code)
+		setStorage(b, statedb, addrContract, slots)
+	})
+	statedb := vmenv.IntraBlockState()
+	v, err := statedb.GetState(addrContract, accounts.InternKey(uint256.NewInt(1).Bytes32()))
+	require.NoError(b, err)
+	require.EqualValues(b, 0xDEAD, v.Uint64(), "storage must come from the DB")
+	versionMap := state.NewVersionMap(nil)
+	for b.Loop() {
+		statedb.Reset()
+		statedb.SetVersionMap(versionMap)
+		statedb.SetNoMaterialize(true)
+		if _, _, err := prepareAndCall(vmenv, addrContract, nil); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

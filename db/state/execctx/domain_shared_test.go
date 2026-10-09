@@ -1733,7 +1733,7 @@ func TestBlockOverlay_DomainReadsRegression(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 
-	err = sd.InitBlockOverlay(tx, t.TempDir())
+	err = sd.InitBlockOverlay(tx)
 	require.NoError(t, err)
 
 	txNum := uint64(42)
@@ -1814,7 +1814,7 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
 	defer sd.Close()
-	require.NoError(t, sd.InitBlockOverlay(tx, t.TempDir()))
+	require.NoError(t, sd.InitBlockOverlay(tx))
 	require.NoError(t, rawtemporaldb.AppendReceiptMetadata(sd.AsPutDel(tx), inFlightLogIdx, 0, 0, inFlightTxNum))
 
 	_, _, got, err := rawtemporaldb.ReceiptAsOf(sd.BlockOverlay().NewReadView(tx), inFlightTxNum+1)

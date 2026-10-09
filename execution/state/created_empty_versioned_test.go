@@ -56,11 +56,47 @@ func TestFinalizedWritesWithholdCreatedEmptyAccount(t *testing.T) {
 	require.False(t, exists)
 }
 
+// TestFinalizedWritesEmptyRemovalClearsWholeAccountCell pins item 1's write-side
+// invariant: when an EIP-161 account that existed at base is (re)created empty and
+// removed, the removal must drop the whole-account AddressPath write too — not only the
+// account fields. Otherwise the tx flushes both a SelfDestruct(true) and an AddressPath
+// cell at the SAME tx index, which is the exact cell layout of a same-tx SD+CREATE2
+// metamorphic recreate. AccountLifecycleAt then reads the removed account as Revived
+// (its AddressPath-at-destroyedAt branch), undoing the removal and diverging the root.
+// The fix must be write-side: the two cases are indistinguishable from cells, so
+// tightening AccountLifecycleAt's >= would instead regress genuine metamorphic recreate.
+func TestFinalizedWritesEmptyRemovalClearsWholeAccountCell(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xe2})
+	reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
+	base := accounts.NewAccount() // existing empty EOA: bal 0, nonce 0, EmptyCodeHash
+	reader.accounts[addr] = &base
+
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(reader, vm)
+	t.Cleanup(ibs.Close)
+	ibs.SetNoMaterialize(true)
+	ibs.SetTxContext(1, 0)
+
+	require.NoError(t, ibs.CreateAccount(addr, false))
+
+	writes := ibs.FinalizedWrites(&chain.Rules{IsSpuriousDragon: true})
+
+	_, hasDelete := writes.GetSelfDestruct(addr)
+	require.True(t, hasDelete, "empty removal must emit a SelfDestruct delete")
+	_, hasAddress := writes.GetAddress(addr)
+	require.False(t, hasAddress,
+		"empty removal must not leave a whole-account AddressPath cell alongside the delete "+
+			"(same layout as a metamorphic recreate -> AccountLifecycleAt would read it as Revived)")
+}
+
 func TestEmptyAccountTouchInvalidatedByFunding(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xe2})
 	vm := NewVersionMap(nil)
+	// Model a real create+SELFDESTRUCT: the destroying tx marks the account
+	// destructed and zeroes its balance at the same version.
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 0}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 0}, uint256.Int{}, true)
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
 	ibs.SetNoMaterialize(true)
@@ -79,7 +115,7 @@ func TestEmptyAccountTouchInvalidatedByFunding(t *testing.T) {
 	vm.WriteAddress(addr, Version{TxIndex: 1}, &account, true)
 	vm.WriteBalance(addr, Version{TxIndex: 1}, account.Balance, true)
 
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
 }
 
 func TestDestroyedAccountReadRemainsValid(t *testing.T) {
@@ -101,7 +137,7 @@ func TestDestroyedAccountReadRemainsValid(t *testing.T) {
 
 	io := NewVersionedIO(3)
 	io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
-	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, false, ""))
 }
 
 func TestFinalizedWritesLeavesVersionMapForApplyLoop(t *testing.T) {

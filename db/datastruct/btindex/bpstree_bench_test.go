@@ -32,7 +32,7 @@ func BenchmarkBpsTreeSeek(t *testing.B) {
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	defer bt.Close()
@@ -69,7 +69,7 @@ func BenchmarkBpsTreeGet(t *testing.B) {
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	buildBtreeIndex(t, dataPath, indexPath, compressFlags, 1, logger, true)
 
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, compressFlags)
 	require.NoError(t, err)
 	require.EqualValues(t, bt.KeyCount(), keyCount)
 	defer bt.Close()

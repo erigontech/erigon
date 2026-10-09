@@ -404,12 +404,12 @@ var (
 // pin its backing array to the heap on every call even when tracing is off.
 func traceHex(b []byte) string { return hex.EncodeToString(b) }
 
-func (cell *cell) hashAccKey(keccak keccak.KeccakState, depth int16, hashBuf []byte) error {
-	return hashKey(keccak, cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth, hashBuf)
+func (cell *cell) hashAccKey(depth int16, hashBuf []byte) {
+	hashKey(cell.accountAddr[:cell.accountAddrLen], cell.hashedExtension[:], depth, hashBuf)
 }
 
-func (cell *cell) hashStorageKey(keccak keccak.KeccakState, accountKeyLen, downOffset int16, hashedKeyOffset int16, hashBuf []byte) error {
-	return hashKey(keccak, cell.storageAddr[accountKeyLen:cell.storageAddrLen], cell.hashedExtension[downOffset:], hashedKeyOffset, hashBuf)
+func (cell *cell) hashStorageKey(accountKeyLen, downOffset int16, hashedKeyOffset int16, hashBuf []byte) {
+	hashKey(cell.storageAddr[accountKeyLen:cell.storageAddrLen], cell.hashedExtension[downOffset:], hashedKeyOffset, hashBuf)
 }
 
 func (cell *cell) reset() {
@@ -629,7 +629,7 @@ func (cell *cell) fillFromLowerCell(lowCell *cell, lowDepth int16, preExtension 
 	}
 }
 
-func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accountKeyLen int16, hashBuf []byte) error {
+func (cell *cell) deriveHashedKeys(depth int16, accountKeyLen int16, hashBuf []byte) error {
 	extraLen := int16(0)
 	if cell.accountAddrLen > 0 {
 		if depth > 64 {
@@ -651,9 +651,7 @@ func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accou
 		cell.hashedExtLen = min(extraLen+cell.hashedExtLen, int16(len(cell.hashedExtension)))
 		var hashedKeyOffset, downOffset int16
 		if cell.accountAddrLen > 0 {
-			if err := cell.hashAccKey(keccak, depth, hashBuf); err != nil {
-				return err
-			}
+			cell.hashAccKey(depth, hashBuf)
 			downOffset = 64 - depth
 		}
 		if cell.storageAddrLen > 0 {
@@ -663,9 +661,7 @@ func (cell *cell) deriveHashedKeys(depth int16, keccak keccak.KeccakState, accou
 			if depth == 0 && cell.accountAddrLen == 0 {
 				accountKeyLen = 0
 			}
-			if err := cell.hashStorageKey(keccak, accountKeyLen, downOffset, hashedKeyOffset, hashBuf); err != nil {
-				return err
-			}
+			cell.hashStorageKey(accountKeyLen, downOffset, hashedKeyOffset, hashBuf)
 		}
 	}
 	return nil
@@ -1036,9 +1032,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 			// if account key is empty, then we need to hash storage key from the key beginning
 			koffset = 0
 		}
-		if err := hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], hashedKeyBuf[:], hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
-			return nil, storageRootHashIsSet, nil, err
-		}
+		hashKey(cell.storageAddr[koffset:cell.storageAddrLen], hashedKeyBuf[:], hashedKeyOffset, hph.cellHashBuf[:])
 		hashedKeyBuf[64-hashedKeyOffset] = terminatorHexByte // Add terminator
 
 		if cell.stateHashLen > 0 {
@@ -1103,9 +1097,7 @@ func (hph *HexPatriciaHashed) witnessComputeCellHashWithStorage(cell *cell, dept
 		}
 	}
 	if cell.accountAddrLen > 0 {
-		if err := hashKey(hph.keccak, cell.accountAddr[:cell.accountAddrLen], hashedKeyBuf[:], depth, hph.cellHashBuf[:]); err != nil {
-			return nil, storageRootHashIsSet, nil, err
-		}
+		hashKey(cell.accountAddr[:cell.accountAddrLen], hashedKeyBuf[:], depth, hph.cellHashBuf[:])
 		hashedKeyBuf[64-depth] = terminatorHexByte // Add terminator
 		if !storageRootHashIsSet {
 			switch {
@@ -1227,9 +1219,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				koffset = 0
 			}
 			key := hph.leafKeyBuf[:]
-			if err := hashKey(hph.keccak, cell.storageAddr[koffset:cell.storageAddrLen], key, hashedKeyOffset, hph.cellHashBuf[:]); err != nil {
-				return nil, err
-			}
+			hashKey(cell.storageAddr[koffset:cell.storageAddrLen], key, hashedKeyOffset, hph.cellHashBuf[:])
 			key[64-hashedKeyOffset] = terminatorHexByte
 			if !cell.loaded.storage() {
 				return nil, fmt.Errorf("storage %x was not loaded as expected: cell %v", cell.storageAddr[:cell.storageAddrLen], cell.String())
@@ -1305,9 +1295,7 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 		// Derived here rather than on entry: the memoized-stateHash return above
 		// never reads the hashed key, and hashing the address is not free.
 		key := hph.leafKeyBuf[:]
-		if err := hashKey(hph.keccak, cell.accountAddr[:cell.accountAddrLen], key, depth, hph.cellHashBuf[:]); err != nil {
-			return nil, err
-		}
+		hashKey(cell.accountAddr[:cell.accountAddrLen], key, depth, hph.cellHashBuf[:])
 		key[64-depth] = terminatorHexByte
 
 		valLen := cell.accountForHashing(hph.accValBuf, storageRootHash)
@@ -1367,7 +1355,7 @@ func (hph *HexPatriciaHashed) needUnfolding(hashedKey []byte) int16 {
 		}
 		if hph.root.hashedExtLen == 64 && hph.root.accountAddrLen > 0 && hph.root.storageAddrLen > 0 {
 			// in case if root is a leaf node with storage and account, we need to derive storage part of a key
-			if err := hph.root.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+			if err := hph.root.deriveHashedKeys(depth, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 				log.Warn("deriveHashedKeys for root with storage", "err", err, "cell", hph.root.FullString())
 				return 0
 			}
@@ -1492,7 +1480,7 @@ func (hph *HexPatriciaHashed) witnessMaterializeBranch(branchPrefix []byte, chil
 		if childDepth > 64 {
 			c.accountAddrLen = 0
 		}
-		if err := c.deriveHashedKeys(childDepth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+		if err := c.deriveHashedKeys(childDepth, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 			return nil, err
 		}
 		cellHash, _, _, err := hph.witnessComputeCellHashWithStorage(&c, childDepth, nil)
@@ -1585,7 +1573,7 @@ func (hph *HexPatriciaHashed) decodeBranchIntoRow(row int, depth int16, branch [
 		if hph.traceW != nil {
 			fmt.Fprintf(hph.traceW, "cell (%d, %x, depth=%d) %s\n", row, nibble, depth, cell.FullString())
 		}
-		if err := cell.deriveHashedKeys(depth, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+		if err := cell.deriveHashedKeys(depth, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 			return err
 		}
 		bitset ^= bit
@@ -2302,6 +2290,75 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 	hph.collapseTracer(siblingPath, bytes.Clone(hph.currentKey[:depth]))
 }
 
+// deleteStorageSubtreeBranches tombstones every persisted commitment branch under
+// a self-destructed account's storage subtree, so a later recreate at the same
+// address cannot fold in stale branches. It uses bounded point reads rather than a
+// domain range scan, which on the step-sharded commitment domain would map every file.
+func (hph *HexPatriciaHashed) deleteStorageSubtreeBranches(prefix []byte) error {
+	branch, err := hph.branchFromCacheOrDB(nibbles.HexToCompact(prefix))
+	if err != nil {
+		return err
+	}
+	// No branch record at this prefix (leaf, absent, or already a tombstone).
+	if len(branch) < 4 || BranchData(branch).ChildCount() == 0 {
+		return nil
+	}
+	var scratch [16]cell
+	maps, err := DecodeBranchInto(branch[2:], false, &scratch)
+	if err != nil {
+		return fmt.Errorf("deleteStorageSubtreeBranches decode %x: %w", prefix, err)
+	}
+	// Snapshot child nibbles+extensions before recursing (each recursive call
+	// reads and decodes further branches).
+	type childRef struct {
+		nib byte
+		ext []byte
+	}
+	children := make([]childRef, 0, bits.OnesCount16(maps.Bitmap))
+	for bm := maps.Bitmap; bm != 0; {
+		nib := bits.TrailingZeros16(bm)
+		bm &^= uint16(1) << nib
+		c := &scratch[nib]
+		children = append(children, childRef{byte(nib), append([]byte{}, c.extension[:c.extLen]...)})
+	}
+	for _, ch := range children {
+		childPrefix := make([]byte, 0, len(prefix)+1+len(ch.ext))
+		childPrefix = append(childPrefix, prefix...)
+		childPrefix = append(childPrefix, ch.nib)
+		childPrefix = append(childPrefix, ch.ext...)
+		if err := hph.deleteStorageSubtreeBranches(childPrefix); err != nil {
+			return err
+		}
+	}
+	// Delete this branch: touchMap = all present children, afterMap = 0 → the
+	// merge clears every child, leaving an empty-branch tombstone. prev is nil: the
+	// tombstone carries no cells, so it must be written raw, not merged against the
+	// existing branch (Merge would read cells that aren't there).
+	return hph.branchEncoder.CollectUpdate(hph.ctx, nibbles.HexToCompact(prefix), 0, maps.Bitmap, 0, nil, nil)
+}
+
+// resetAccountStorageRoot clears the in-grid account cell's storage-root reference
+// so a self-destructed account rebuilds from empty storage rather than re-mounting
+// its old subtree (persisted branches are tombstoned by deleteStorageSubtreeBranches).
+func (hph *HexPatriciaHashed) resetAccountStorageRoot(hashedKey []byte) {
+	if hph.activeRows == 0 {
+		return
+	}
+	row := hph.activeRows - 1
+	nibble := int(hashedKey[hph.currentKeyLen])
+	cell := &hph.grid[row][nibble]
+	cell.hashLen = 0
+	cell.extLen = 0
+	cell.stateHashLen = 0
+	// A single-slot account is stored as one combined account+storage leaf, so the
+	// storage subtree has no branch for deleteStorageSubtreeBranches to drop. Strip
+	// the inline storage here so the account rebuilds with an empty storage root
+	// rather than folding the leftover slot back in.
+	cell.storageAddrLen = 0
+	cell.StorageLen = 0
+	cell.loaded &^= cellLoadStorage
+}
+
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
 func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte, u *Update) (cell *cell) {
 	hph.metrics.Updates(plainKey)
@@ -2431,6 +2488,16 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 				return fmt.Errorf("GetStorage for key %x failed: %w", plainKey, err)
 			}
 		}
+	}
+	// A self-destruct that recreates the account carries the transient
+	// DeleteStorageSubtree marker: tombstone the persisted storage branches and
+	// reset the in-grid storage root before applying the recreate, so no stale
+	// slot folds back in. The path is unfolded above, so the account cell is reachable.
+	if stateUpdate != nil && stateUpdate.DeleteStorageSubtree && int16(len(plainKey)) == hph.accountKeyLen {
+		if err := hph.deleteStorageSubtreeBranches(hashedKey); err != nil {
+			return fmt.Errorf("deleteStorageSubtreeBranches %x: %w", hashedKey, err)
+		}
+		hph.resetAccountStorageRoot(hashedKey)
 	}
 	hph.updateCell(plainKey, hashedKey, stateUpdate)
 	return nil
@@ -3175,7 +3242,7 @@ func (hph *HexPatriciaHashed) SetState(buf []byte) error {
 	// wall probe sees an unfoldable root and the mount paths overwrite the leaf in place.
 	if hph.root.accountAddrLen > 0 || hph.root.storageAddrLen > 0 {
 		hph.root.hashedExtLen = 0
-		if err := hph.root.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
+		if err := hph.root.deriveHashedKeys(0, hph.accountKeyLen, hph.cellHashBuf[:]); err != nil {
 			return err
 		}
 	}

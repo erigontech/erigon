@@ -33,6 +33,8 @@ const (
 	singleAttestationIntervalTick = 10 * time.Millisecond
 	attestationJobsIntervalTick   = 100 * time.Millisecond
 	blockJobExpiry                = 30 * time.Second
+	blockRetryInitialDelay        = 250 * time.Millisecond
+	blockRetryMaxDelay            = 2 * time.Second
 	attestationJobExpiry          = 30 * time.Minute
 	singleAttestationJobExpiry    = 6 * time.Second
 	maximumGossipClockDisparity   = 500 * time.Millisecond

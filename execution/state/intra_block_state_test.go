@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
@@ -482,6 +483,69 @@ func TestCloseIsIdempotent(t *testing.T) {
 	require.NotPanics(t, state.Close)
 }
 
+func TestValStatus_OscillationNetVsOrigin(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
+	s.txIndex = 1
+
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	a, b := u256.U64(100), u256.U64(200)
+
+	// Origin is 0 (nothing committed). A→B→0 nets 0→0: the intermediate writes must
+	// not fool the stamp into Changed — it classifies against the captured origin.
+	back := accounts.InternKey(common.HexToHash("0x01"))
+	require.NoError(t, s.SetState(addr, back, a))
+	require.NoError(t, s.SetState(addr, back, b))
+	require.NoError(t, s.SetState(addr, back, uint256.Int{}))
+	vw, ok := s.VersionedWrites().GetStorage(addr, back)
+	require.True(t, ok)
+	require.Equal(t, ValueUnchanged, vw.valStatus, "net 0->0 is Unchanged despite A,B in between")
+
+	// A→B→A nets 0→A: a real create, not skipped.
+	keep := accounts.InternKey(common.HexToHash("0x02"))
+	require.NoError(t, s.SetState(addr, keep, a))
+	require.NoError(t, s.SetState(addr, keep, b))
+	require.NoError(t, s.SetState(addr, keep, a))
+	vw2, ok := s.VersionedWrites().GetStorage(addr, keep)
+	require.True(t, ok)
+	require.Equal(t, ValueCreated, vw2.valStatus, "net 0->A is Created")
+}
+
+func TestValStatus_RevertRestamps(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
+	s.txIndex = 1
+
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	a := u256.U64(100)
+
+	require.NoError(t, s.SetState(addr, key, a)) // origin 0 -> A: Created
+	snap := s.PushSnapshot()
+	require.NoError(t, s.SetState(addr, key, uint256.Int{})) // A -> 0 (== origin): Unchanged
+	vw, ok := s.VersionedWrites().GetStorage(addr, key)
+	require.True(t, ok)
+	require.Equal(t, ValueUnchanged, vw.valStatus)
+
+	s.RevertToSnapshot(snap, nil)
+	// The value is A again; valStatus must be re-stamped to Created, not left at the
+	// stale Unchanged from the reverted write (which would wrongly skip the write).
+	vw, ok = s.VersionedWrites().GetStorage(addr, key)
+	require.True(t, ok)
+	require.Equal(t, a, vw.Val)
+	require.Equal(t, ValueCreated, vw.valStatus)
+}
+
 func TestVersionMapReadWriteDelete(t *testing.T) {
 	t.Parallel()
 
@@ -634,7 +698,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.Equal(t, balance, b)
 }
 
-func TestVersionMapMarkEstimate(t *testing.T) {
+func TestEstimateDependencyCaughtAtCommit(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 
@@ -669,14 +733,16 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.Equal(t, val, v)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
-	// Tx1 write
+	// Tx1 speculative write: flushed incomplete, so its cells are born ESTIMATE
+	// (the branch never downgrades a completed Done cell back to Estimate).
 	_, err = states[1].GetOrNewStateObject(addr)
 	require.NoError(t, err)
 	require.NoError(t, states[1].SetState(addr, key, val))
 	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
-	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
+	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), false, "")
 
-	// Tx2 read
+	// Tx2 read: an estimate cell still carries its value, so the read returns it
+	// and records the dependency.
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err := states[2].GetBalance(addr)
@@ -684,15 +750,10 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 
-	// Tx1 mark estimate
-	for h := range states[1].VersionedWrites().AllHeaders() {
-		mvhm.MarkEstimate(h.Address, h.Path, h.Key, 1)
-	}
-
 	// Read-once (Block-STM): states[2] already recorded its state/balance reads
 	// above, so the repeat reads are served from the read-set and no longer abort
-	// eagerly when Tx1's writes are marked ESTIMATE. The estimate dependency is
-	// caught at commit — ValidateVersion re-reads Tx1's now-Estimate balance cell
+	// eagerly on the ESTIMATE dependency. The estimate dependency is caught at
+	// commit — ValidateVersion re-reads Tx1's Estimate balance cell
 	// (MVReadResultDependency) and returns VersionInvalid, which drives re-execution.
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
@@ -707,7 +768,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 			return VersionValid
 		}
 		return VersionInvalid
-	}, true, false, false, "")
+	}, false, "")
 	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the ESTIMATE dependency")
 
 	// Tx1 read again should get Tx0 vals
@@ -1181,4 +1242,51 @@ func TestPropagatesBalanceIncGetStateObjectError(t *testing.T) {
 			require.ErrorIs(t, tc.call(sdb), wantErr)
 		})
 	}
+}
+
+// TestRevertSetCodeOnCodelessAccount pins the revert of a code change whose
+// previous code was empty on an account that outlives the revert, e.g. an EOA.
+func TestRevertSetCodeOnCodelessAccount(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1), tracing.BalanceChangeUnspecified))
+
+	snapshot := ibs.PushSnapshot()
+	require.NoError(t, ibs.SetCode(addr, []byte{0x60, 0x00}, tracing.CodeChangeUnspecified))
+	ibs.RevertToSnapshot(snapshot, nil)
+
+	code, err := ibs.GetCode(addr)
+	require.NoError(t, err)
+	require.Empty(t, code)
+	codeHash, err := ibs.GetCodeHash(addr)
+	require.NoError(t, err)
+	require.Equal(t, accounts.EmptyCodeHash, codeHash)
+}
+
+// TestSetCodeReusesTheLastEqualCode pins the SetCode memo: an equal code from a
+// separate allocation gets the previous code's bytes and hash, a different code
+// gets its own.
+func TestSetCodeReusesTheLastEqualCode(t *testing.T) {
+	t.Parallel()
+
+	ibs := New(NewNoopReader())
+	codeA := []byte{0x60, 0x01, 0x60, 0x00, 0xf3}
+	codeB := []byte{0x60, 0x02, 0x60, 0x00, 0xf3}
+	var stored [][]byte
+	for i, code := range [][]byte{codeA, bytes.Clone(codeA), codeB, bytes.Clone(codeA)} {
+		addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i + 1))))
+		require.NoError(t, ibs.SetCode(addr, code, tracing.CodeChangeContractCreation))
+
+		got, err := ibs.GetCode(addr)
+		require.NoError(t, err)
+		require.Equal(t, code, got)
+		codeHash, err := ibs.GetCodeHash(addr)
+		require.NoError(t, err)
+		require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(code)), codeHash)
+		stored = append(stored, got)
+	}
+	require.Same(t, &stored[0][0], &stored[1][0], "an equal code reuses the previous one")
+	require.NotSame(t, &stored[0][0], &stored[3][0], "a different code in between replaces the memo")
 }

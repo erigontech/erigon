@@ -8,7 +8,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-func CheckStateProgress(ctx context.Context, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
+func CheckStateProgress(ctx context.Context, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader) (err error) {
 	// state files should not be ahead of blocks files
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {

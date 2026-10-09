@@ -1111,7 +1111,7 @@ func TestMergeFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	w := dc.NewWriter()
+	w := dc.NewWriter(db)
 
 	prev := []byte{}
 	for key, upd := range data {

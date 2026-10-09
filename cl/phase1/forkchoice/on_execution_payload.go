@@ -537,7 +537,7 @@ func (f *ForkChoiceStore) validatePayloadHashFallbackLocked(blockRoot, execution
 		return err
 	}
 	if f.payloadInvalidatedLocked(blockRoot, executionBlockHash) {
-		f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated)
+		f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated, nil)
 		return fmt.Errorf("%w: execution payload was invalidated during local payload hash validation", ErrInvalidExecutionPayloadEnvelope)
 	}
 	return nil
@@ -617,12 +617,12 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 		return err
 	}
 	if payloadStatus != execution_client.PayloadStatusValidated && payloadStatus != execution_client.PayloadStatusInvalidated && f.payloadValidatedLocked(beaconBlockRoot, executionBlockHash) {
-		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, executionBlockHash, execution_client.PayloadStatusValidated)
+		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, executionBlockHash, execution_client.PayloadStatusValidated, nil)
 		return nil
 	}
 	if guard, ok := f.forkGraph.(retainedBlockGuard); ok {
-		retained := guard.WithRetainedBlock(beaconBlockRoot, func() {
-			payloadStatus = f.markPayloadStatusRetainedLocked(beaconBlockRoot, executionBlockHash, payloadStatus)
+		retained := guard.WithRetainedBlock(beaconBlockRoot, func(isRetained func(common.Hash) bool) {
+			payloadStatus = f.markPayloadStatus(beaconBlockRoot, executionBlockHash, payloadStatus, isRetained)
 		})
 		if !retained {
 			return fmt.Errorf("%w: block disappeared during payload validation for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
@@ -674,7 +674,7 @@ func (f *ForkChoiceStore) rejectKnownInvalidPayloadStatusLocked(payloadStatus ex
 	if payloadStatus == execution_client.PayloadStatusInvalidated || !f.payloadInvalidatedLocked(blockRoot, executionBlockHash) {
 		return nil
 	}
-	f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated)
+	f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated, nil)
 	return fmt.Errorf("%w: execution payload was invalidated while validation was in progress", ErrInvalidExecutionPayloadEnvelope)
 }
 
@@ -713,14 +713,14 @@ func (f *ForkChoiceStore) applyTerminalPayloadValidationResultLocked(
 		return true, f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, beaconBlockRoot)
 	}
 	if f.payloadInvalidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash) {
-		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusInvalidated)
+		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusInvalidated, nil)
 		return true, fmt.Errorf("%w: execution payload was invalidated while validation was in progress", ErrInvalidExecutionPayloadEnvelope)
 	}
 	if payloadStatus == execution_client.PayloadStatusValidated {
 		return true, f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, beaconBlockRoot)
 	}
 	if f.payloadValidatedLocked(beaconBlockRoot, envelope.Payload.BlockHash) {
-		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusValidated)
+		f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusValidated, nil)
 		return true, nil
 	}
 	return false, nil
@@ -1151,7 +1151,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 	if f.engine == nil && envelope.Payload != nil {
-		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
+		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated, &envelope.Payload.GasLimit); !retained {
 			return false, fmt.Errorf("%w: block disappeared while storing payload status for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
 		}
 	}
@@ -1295,7 +1295,7 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 		}
 	}
 	if f.engine == nil {
-		if _, retained := f.markPayloadStatusIfRetainedLocked(blockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
+		if _, retained := f.markPayloadStatusIfRetainedLocked(blockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated, nil); !retained {
 			f.mu.Unlock()
 			return fmt.Errorf("%w: block disappeared while storing anchor payload status for beacon_block_root %v", ErrIgnore, blockRoot)
 		}

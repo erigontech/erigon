@@ -115,9 +115,6 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	msg.SetCheckNonce(!e.vmConfig.StatelessExec)
 
 	txContext := protocol.NewEVMTxContext(msg)
-	if e.vmConfig.TraceJumpDest {
-		txContext.TxHash = txn.Hash()
-	}
 	blockCtx := vm.ZeroUnpricedBaseFee(*e.blockCtx, txContext, *e.vmConfig)
 	e.evm.ResetBetweenBlocks(blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
 

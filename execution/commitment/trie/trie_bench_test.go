@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
@@ -49,7 +50,7 @@ func BenchmarkHash(b *testing.B) {
 		var (
 			nonce   = uint64(random.Int63())
 			balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
-			root    = EmptyRoot
+			root    = empty.RootHash
 			code    = crypto.Keccak256(nil)
 		)
 		accounts[i], _ = rlp.EncodeToBytes([]any{nonce, balance, root, code})

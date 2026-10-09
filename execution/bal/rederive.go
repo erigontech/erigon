@@ -45,7 +45,6 @@ func RederiveBlockAccessList(
 	cfg *chain.Config,
 	engine rules.Engine,
 	chainReader rules.ChainReader,
-	stateReader state.StateReader,
 	getHeader GetHeaderFunc,
 	header *types.Header,
 	txns types.Transactions,
@@ -109,7 +108,7 @@ func RederiveBlockAccessList(
 	}
 	ibs.SetTxContext(blockNum, len(txns))
 	ibs.ResetVersionedIO()
-	_, _, err = protocol.FinalizeBlockExecution(engine, stateReader, header, txns, uncles, noopWriter, cfg, ibs, receipts, withdrawals, chainReader, false, logger, nil)
+	_, _, err = protocol.FinalizeBlockExecution(engine, header, txns, uncles, noopWriter, cfg, ibs, receipts, withdrawals, chainReader, false, logger)
 	if err != nil {
 		return nil, fmt.Errorf("bal.RederiveBlockAccessList: finalize block %d: %w", blockNum, err)
 	}

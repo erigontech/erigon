@@ -256,7 +256,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	for i := 0; iiReader.HasNext(); i++ {
 		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
 		valBuf, _ = iiReader.Next(valBuf[:0])
-		cnt += multiencseq.Count(efBaseTxNum, valBuf)
+		cnt += multiencseq.Count(valBuf)
 		if i%1024 == 0 {
 			select {
 			case <-ctx.Done():
@@ -459,8 +459,8 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	return nil
 }
 
-func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
-	return ht.newWriter(ht.h.dirs.Tmp, !ht.h.Enabled)
+func (ht *HistoryRoTx) NewWriter(db kv.RoDB) *historyBufferedWriter {
+	return ht.newWriter(db, ht.h.dirs.Tmp, !ht.h.Enabled)
 }
 
 type historyBufferedWriter struct {
@@ -481,7 +481,7 @@ type historyBufferedWriter struct {
 }
 
 func (w *historyBufferedWriter) close() {
-	if w == nil { // allow dobule-close
+	if w == nil {
 		return
 	}
 	w.ii.close()
@@ -490,14 +490,14 @@ func (w *historyBufferedWriter) close() {
 	}
 }
 
-func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWriter {
+func (ht *HistoryRoTx) newWriter(db kv.RoDB, tmpdir string, discard bool) *historyBufferedWriter {
 	w := &historyBufferedWriter{
 		discard: discard,
 
 		largeValues:      ht.h.HistoryLargeValues,
 		historyValsTable: ht.h.ValuesTable,
 
-		ii: ht.iit.newWriter(tmpdir, discard),
+		ii: ht.iit.newWriter(db, tmpdir, discard),
 	}
 	return w
 }

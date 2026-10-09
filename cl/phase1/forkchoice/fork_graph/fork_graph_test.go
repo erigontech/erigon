@@ -832,7 +832,7 @@ func TestValidatedChildQueryProgressesDuringPruneLifecycle(t *testing.T) {
 	}
 	statusDone := make(chan bool, 1)
 	go func() {
-		statusDone <- f.WithRetainedBlock(newerRoot, func() { f.MarkPayloadAccepted(newerRoot, false) })
+		statusDone <- f.WithRetainedBlock(newerRoot, func(func(common.Hash) bool) { f.MarkPayloadAccepted(newerRoot, false) })
 	}()
 	select {
 	case retained := <-statusDone:
@@ -917,7 +917,9 @@ func TestPruneYieldsLifecycleBetweenBatches(t *testing.T) {
 	require.False(t, found)
 	require.False(t, f.HasBlockChildAtOrAfter(staleParentRoot, 1))
 	progress := make(chan bool, 1)
-	go func() { progress <- f.WithRetainedBlock(newRoot, func() { f.MarkPayloadAccepted(newRoot, false) }) }()
+	go func() {
+		progress <- f.WithRetainedBlock(newRoot, func(func(common.Hash) bool) { f.MarkPayloadAccepted(newRoot, false) })
+	}()
 	select {
 	case retained := <-progress:
 		require.True(t, retained)

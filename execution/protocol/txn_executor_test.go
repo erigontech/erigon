@@ -17,6 +17,7 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -64,6 +65,36 @@ func newSimpleTransferMsg(from, to accounts.Address, gas uint64, checkGas bool) 
 		false, // isFree
 		nil,   // maxFeePerBlobGas
 	)
+}
+
+// panicOnBalanceReader panics on the first account read, standing in for a genuine
+// infrastructure failure during versioned transition execution.
+type panicOnBalanceReader struct {
+	*state.NoopReader
+}
+
+func (panicOnBalanceReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	panic("injected exec panic")
+}
+
+// TestExecute_VersionedPanicWrapsErrExecPanic pins that a panic recovered inside
+// versioned transition execution surfaces as ErrExecPanic, so downstream (TxTask.Execute)
+// can route it operationally rather than condemning the block as invalid.
+func TestExecute_VersionedPanicWrapsErrExecPanic(t *testing.T) {
+	t.Parallel()
+	const blockGasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+
+	ibs := state.NewWithVersionMap(panicOnBalanceReader{state.NewNoopReader()}, state.NewVersionMap(nil))
+	defer ibs.Close()
+	ibs.SetTxContext(0, 0)
+	evm := newTestEVM(ibs, chain.TestChainOsakaConfig, blockGasLimit)
+	msg := newSimpleTransferMsg(sender, recipient, 100_000, true)
+
+	_, err := NewTxnExecutor(evm, msg, new(GasPool).AddGas(blockGasLimit)).Execute(true, false)
+	require.ErrorIs(t, err, ErrExecPanic,
+		"a panic in versioned execution must surface as ErrExecPanic (operational, not a block verdict)")
 }
 
 type nilBlobFeeCapMessage struct {
@@ -656,17 +687,21 @@ func TestGasRefundWithCalldataFloor(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		dataLen    int
+		gasLimit   uint64
 		noRefunds  bool
 		gasBailout bool
 		wantRefund uint64
 	}{
-		{name: "capped", dataLen: 4096, wantRefund: 8719},
-		{name: "uncapped", dataLen: 8192, wantRefund: 10000},
-		{name: "no refunds", dataLen: 4096, noRefunds: true},
-		{name: "gas bailout", dataLen: 4096, gasBailout: true},
+		{name: "capped", dataLen: 4096, gasLimit: 1_000_000, wantRefund: 8719},
+		{name: "uncapped", dataLen: 8192, gasLimit: 1_000_000, wantRefund: 10000},
+		{name: "no refunds", dataLen: 4096, gasLimit: 1_000_000, noRefunds: true},
+		{name: "gas bailout", dataLen: 4096, gasLimit: 1_000_000, gasBailout: true},
+		{name: "capped with state gas", dataLen: 4096, gasLimit: params.MaxTxnGasLimit + 100_000, wantRefund: 8719},
+		{name: "uncapped with state gas", dataLen: 8192, gasLimit: params.MaxTxnGasLimit + 100_000, wantRefund: 10000},
+		{name: "no refunds with state gas", dataLen: 4096, gasLimit: params.MaxTxnGasLimit + 100_000, noRefunds: true},
+		{name: "gas bailout with state gas", dataLen: 4096, gasLimit: params.MaxTxnGasLimit + 100_000, gasBailout: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			const blockGasLimit = 1_000_000
 			sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
 			recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
 			ibs := state.New(state.NewNoopReader())
@@ -676,13 +711,15 @@ func TestGasRefundWithCalldataFloor(t *testing.T) {
 				byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.SSTORE),
 				byte(vm.STOP),
 			}, tracing.CodeChangeUnspecified))
-			evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+			var changes []gasChange
+			evm := gasTracingEVM(ibs, chain.AllProtocolChanges, &changes)
 			msg := types.NewMessage(
-				sender, recipient, 0, uint256.NewInt(0), blockGasLimit,
+				sender, recipient, 0, uint256.NewInt(0), test.gasLimit,
 				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 				make([]byte, test.dataLen), nil, false, false, true, false, nil,
 			)
-			result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(!test.noRefunds, test.gasBailout)
+			executor := NewTxnExecutor(evm, msg, NewGasPool(test.gasLimit, 0))
+			result, err := executor.Execute(!test.noRefunds, test.gasBailout)
 			require.NoError(t, err)
 			require.NoError(t, result.Err)
 			require.Equal(t, result.MaxGasUsed, result.ReceiptGasUsed)
@@ -690,7 +727,149 @@ func TestGasRefundWithCalldataFloor(t *testing.T) {
 			require.Zero(t, result.BlockStateGasUsed)
 			require.EqualValues(t, 10_000, ibs.GetRefund())
 			require.Equal(t, test.wantRefund, result.GasRefund)
+			var txnChanges []gasChange
+			for _, change := range changes {
+				if change.reason == tracing.GasChangeTxRefunds || change.reason == tracing.GasChangeTxDataFloor || change.reason == tracing.GasChangeTxLeftOverReturned {
+					txnChanges = append(txnChanges, change)
+				}
+			}
+			gasLeft := executor.gasRemaining
+			if test.gasLimit > params.MaxTxnGasLimit {
+				require.EqualValues(t, 100_000, gasLeft.State)
+			}
+			var wantChanges []gasChange
+			if !test.noRefunds && !test.gasBailout {
+				old := gasLeft
+				gasLeft.Execution += test.wantRefund
+				wantChanges = append(wantChanges, gasChange{
+					old:    old,
+					new:    gasLeft,
+					reason: tracing.GasChangeTxRefunds,
+				})
+			}
+			old := gasLeft
+			gasLeft.Execution = test.gasLimit - result.ReceiptGasUsed - gasLeft.State
+			wantChanges = append(wantChanges, gasChange{
+				old:    old,
+				new:    gasLeft,
+				reason: tracing.GasChangeTxDataFloor,
+			})
+			if !test.noRefunds && !test.gasBailout {
+				wantChanges = append(wantChanges, gasChange{
+					old:    gasLeft,
+					reason: tracing.GasChangeTxLeftOverReturned,
+				})
+			}
+			require.Equal(t, wantChanges, txnChanges)
 		})
+	}
+}
+
+func TestGasChangeTxFloorWithoutGasCap(t *testing.T) {
+	const gasLimit = 30_000_000
+	sender := accounts.InternAddress(common.HexToAddress("0x1000"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
+	ibs := state.New(state.NewNoopReader())
+	defer ibs.Close()
+	require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(gasLimit), tracing.BalanceChangeUnspecified))
+	require.NoError(t, ibs.SetCode(recipient, []byte{byte(vm.STOP)}, tracing.CodeChangeUnspecified))
+	var changes []gasChange
+	evm := gasTracingEVM(ibs, chain.AllProtocolChanges, &changes)
+	msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), gasLimit,
+		uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1), bytes.Repeat([]byte{1}, 300_000),
+		nil, false, false, false, false, nil)
+	executor := NewTxnExecutor(evm, msg, NewGasPool(gasLimit, 0))
+	intrinsic, overflow := executor.calcIntrinsicGas(false, nil, nil)
+	require.False(t, overflow)
+	require.Less(t, intrinsic.ExecutionGas, params.MaxTxnGasLimit)
+	require.Greater(t, intrinsic.FloorGasCost, params.MaxTxnGasLimit)
+	require.Less(t, intrinsic.FloorGasCost, uint64(gasLimit))
+
+	result, err := executor.Execute(true, false)
+	require.NoError(t, err)
+	require.NoError(t, result.Err)
+	require.Zero(t, result.GasRefund)
+	require.Equal(t, intrinsic.FloorGasCost, result.ReceiptGasUsed)
+	gasLeft := mdgas.MdGas{State: gasLimit - intrinsic.FloorGasCost}
+	require.Contains(t, changes, gasChange{
+		old: executor.gasRemaining, new: gasLeft, reason: tracing.GasChangeTxDataFloor,
+	})
+	require.Equal(t, gasChange{old: gasLeft, reason: tracing.GasChangeTxLeftOverReturned}, changes[len(changes)-1])
+	balance, err := ibs.GetBalance(sender)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(gasLeft.Total()), balance)
+}
+
+func TestGasChangeTxReturn(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		config   *chain.Config
+		gasLimit uint64
+		fail     bool
+	}{
+		{name: "pre-amsterdam", config: chain.TestChainOsakaConfig, gasLimit: 100_000},
+		{name: "state reservoir", config: chain.AllProtocolChanges, gasLimit: params.MaxTxnGasLimit + 100_000},
+		{name: "exceptional halt", config: chain.AllProtocolChanges, gasLimit: 100_000, fail: true},
+		{name: "exceptional halt with state reservoir", config: chain.AllProtocolChanges, gasLimit: params.MaxTxnGasLimit + 100_000, fail: true},
+	} {
+		for _, hook := range []string{"v1", "v2"} {
+			t.Run(test.name+"/"+hook, func(t *testing.T) {
+				const initialBalance = 30_000_000
+				sender := accounts.InternAddress(common.HexToAddress("0x1000"))
+				recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(initialBalance), tracing.BalanceChangeUnspecified))
+				code := []byte{byte(vm.STOP)}
+				if test.fail {
+					code = []byte{byte(vm.INVALID)}
+				}
+				require.NoError(t, ibs.SetCode(recipient, code, tracing.CodeChangeUnspecified))
+				var changes []gasChange
+				evm := gasTracingEVM(ibs, test.config, &changes)
+				if hook == "v1" {
+					hooks := evm.Config().Tracer
+					record := hooks.OnGasChangeV2
+					hooks.OnGasChangeV2 = nil
+					hooks.OnGasChange = func(old, new uint64, reason tracing.GasChangeReason) {
+						record(mdgas.MdGas{Execution: old}, mdgas.MdGas{Execution: new}, reason)
+					}
+				}
+				msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), test.gasLimit,
+					uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1), nil, nil, false, false, true, false, nil)
+				executor := NewTxnExecutor(evm, msg, NewGasPool(initialBalance, 0))
+				result, err := executor.Execute(true, false)
+				require.NoError(t, err)
+				if test.fail {
+					require.Error(t, result.Err)
+				} else {
+					require.NoError(t, result.Err)
+				}
+				require.Zero(t, result.GasRefund)
+				if test.gasLimit > params.MaxTxnGasLimit {
+					require.EqualValues(t, 100_000, executor.gasRemaining.State)
+				}
+				var txnChanges []gasChange
+				for _, change := range changes {
+					if change.reason == tracing.GasChangeTxRefunds || change.reason == tracing.GasChangeTxDataFloor || change.reason == tracing.GasChangeTxLeftOverReturned {
+						txnChanges = append(txnChanges, change)
+					}
+				}
+				gasLeft := executor.gasRemaining
+				require.Equal(t, test.gasLimit-result.ReceiptGasUsed, gasLeft.Total())
+				if hook == "v1" {
+					gasLeft.State = 0
+				}
+				wantChanges := []gasChange{{old: gasLeft, new: gasLeft, reason: tracing.GasChangeTxRefunds}}
+				if executor.gasRemaining.Total() != 0 {
+					wantChanges = append(wantChanges, gasChange{old: gasLeft, reason: tracing.GasChangeTxLeftOverReturned})
+				}
+				require.Equal(t, wantChanges, txnChanges)
+				balance, err := ibs.GetBalance(sender)
+				require.NoError(t, err)
+				require.Equal(t, *uint256.NewInt(initialBalance - result.ReceiptGasUsed), balance)
+			})
+		}
 	}
 }
 
@@ -1380,4 +1559,28 @@ func TestPreCheckBlobPrerequisites(t *testing.T) {
 	t.Run("well formed blob hashes are accepted", func(t *testing.T) {
 		require.NoError(t, runPreCheckMsg(t, chain.TestChainOsakaConfig, newMsg(recipient, []common.Hash{validHash}), params.GasPerBlob))
 	})
+}
+
+// Callers that build no block access list, such as eth_call, skip recording accesses with NoBAL.
+func TestNoBALSkipsAccessRecording(t *testing.T) {
+	t.Parallel()
+
+	sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+	recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+	coinbase := accounts.InternAddress(common.HexToAddress("0x3333333333333333333333333333333333333333"))
+	entries := map[string]func(*TxnExecutor) error{
+		"Execute":    func(st *TxnExecutor) error { _, err := st.Execute(true, false); return err },
+		"ApplyFrame": func(st *TxnExecutor) error { _, err := st.ApplyFrame(); return err },
+	}
+	for name, apply := range entries {
+		for _, noBAL := range []bool{false, true} {
+			ibs := state.New(state.NewNoopReader())
+			blockCtx := evmtypes.BlockContext{CanTransfer: CanTransfer, Transfer: misc.Transfer, GasLimit: 30_000_000, Coinbase: coinbase}
+			evm := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.TestChainOsakaConfig, vm.Config{NoBaseFee: true, NoBAL: noBAL})
+			require.NoError(t, apply(NewTxnExecutor(evm, newSimpleTransferMsg(sender, recipient, 21_000, false), new(GasPool).AddGas(30_000_000))))
+			require.Equal(t, !noBAL, ibs.AccessedAddr(recipient), "%s NoBAL=%v", name, noBAL)
+			require.Equal(t, !noBAL, ibs.AccessedAddr(coinbase), "%s NoBAL=%v: Prepare marks the coinbase", name, noBAL)
+			ibs.Close()
+		}
+	}
 }

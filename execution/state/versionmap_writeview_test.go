@@ -121,3 +121,72 @@ func TestVersionMapWriteView_SelfDestructFallsBackToKeySetOnMapMiss(t *testing.T
 	require.True(t, seen, "the self-destruct key should be iterated")
 	require.True(t, got, "SelfDestructs must fall back to the key-set value on a versionMap miss, not drop the delete")
 }
+
+// StoragesChanged drops a write whose final value equals what the tx would have
+// read, and keeps one that only looks equal: after a destruct the slot baseline
+// is zero, so writing the pre-destruct value back is a real change.
+func TestVersionMapWriteView_StoragesChanged(t *testing.T) {
+	t.Parallel()
+
+	const priorTx, myTx = 2, 5
+	addr := getAddress(1)
+	unchanged := accounts.InternKey(uint256.NewInt(0x11).Bytes32())
+	changed := accounts.InternKey(uint256.NewInt(0x22).Bytes32())
+	val100, val200 := *uint256.NewInt(100), *uint256.NewInt(200)
+
+	// Real execution stamps each write from the tx's own prior read: a write-back of
+	// the value the tx read is ValueUnchanged; a genuine update is ValueChanged.
+	keys := &WriteSet{}
+	keys.SetStorage(addr, unchanged, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: unchanged, valStatus: ValueUnchanged}, Val: val100})
+	keys.SetStorage(addr, changed, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: changed, valStatus: ValueChanged}, Val: val200})
+
+	vm := NewVersionMap(nil)
+	writeFor(vm, addr, StoragePath, unchanged, Version{TxIndex: priorTx}, val100, true)
+	writeFor(vm, addr, StoragePath, changed, Version{TxIndex: priorTx}, val100, true)
+	writeFor(vm, addr, StoragePath, unchanged, Version{TxIndex: myTx}, val100, true)
+	writeFor(vm, addr, StoragePath, changed, Version{TxIndex: myTx}, val200, true)
+
+	view := NewVersionMapWriteView(keys, vm, myTx)
+
+	all := map[accounts.StorageKey]bool{}
+	for _, inner := range view.Storages() {
+		for k := range inner {
+			all[k] = true
+		}
+	}
+	require.True(t, all[unchanged] && all[changed], "Storages must still yield every write")
+
+	got := map[accounts.StorageKey]uint256.Int{}
+	for _, inner := range view.StoragesChanged() {
+		for k, vw := range inner {
+			got[k] = vw.Val
+		}
+	}
+	require.Equal(t, map[accounts.StorageKey]uint256.Int{changed: val200}, got,
+		"only the slot stamped changed survives; the ValueUnchanged no-op is dropped")
+
+	// After a destruct the tx reads zero, so writing the pre-destruct value back is
+	// stamped ValueCreated at write time (not Unchanged) — a real change that survives.
+	// The status rides on the write, so no vm re-derivation or destruct guard is needed.
+	revivedKeys := &WriteSet{}
+	revivedKeys.SetStorage(addr, unchanged, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: unchanged, valStatus: ValueCreated}, Val: val100})
+	revived := map[accounts.StorageKey]uint256.Int{}
+	for _, inner := range NewVersionMapWriteView(revivedKeys, vm, myTx).StoragesChanged() {
+		for k, vw := range inner {
+			revived[k] = vw.Val
+		}
+	}
+	require.Equal(t, val100, revived[unchanged],
+		"a post-destruct write-back is stamped Created, so it survives")
+}
+
+func TestStorageValueStatus(t *testing.T) {
+	t.Parallel()
+	zero := uint256.Int{}
+	a, b := *uint256.NewInt(100), *uint256.NewInt(200)
+	require.Equal(t, ValueUnchanged, storageValueStatus(a, a), "value == prev")
+	require.Equal(t, ValueUnchanged, storageValueStatus(zero, zero), "absent stays absent")
+	require.Equal(t, ValueCreated, storageValueStatus(zero, a), "absent -> value")
+	require.Equal(t, ValueDeleted, storageValueStatus(a, zero), "value -> absent")
+	require.Equal(t, ValueChanged, storageValueStatus(a, b), "value -> different value")
+}

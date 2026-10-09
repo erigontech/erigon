@@ -83,7 +83,7 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 	const forward uint64 = 10_000
 	require.NoError(t, PruneExecutionStage(ctx, &PruneState{ID: stages.Execution, ForwardProgress: forward}, tx, ExecuteBlockCfg{}, 0, logger))
 	require.NoError(t, PruneTxLookup(&PruneState{ID: stages.TxLookup, ForwardProgress: forward}, tx, TxLookupCfg{}, ctx, logger))
-	require.NoError(t, SnapshotsPrune(&PruneState{ID: stages.Snapshots, ForwardProgress: forward}, SnapshotsCfg{}, ctx, tx, logger))
+	require.NoError(t, SnapshotsPrune(&PruneState{ID: stages.Snapshots, ForwardProgress: forward}, SnapshotsCfg{}, ctx, tx))
 
 	for _, table := range tracked {
 		require.Equal(t, pre[table], countRows(t, table), "table %s lost rows under --exec.no-prune", table)

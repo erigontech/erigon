@@ -2,6 +2,7 @@ package integrity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -44,10 +45,10 @@ func CheckRCacheNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, b
 
 	log.Info("[integrity] RCacheNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
 
-	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(RCacheNoDups), RCacheNoDupsRange)
+	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(RCacheNoDups), rcacheNoDupsRange)
 }
 
-func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
+func rcacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, probs *problems) (err error) {
 	if fromBlock > toBlock {
 		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
 	}
@@ -104,22 +105,18 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 		logIdx := r.FirstLogIndexWithinBlock
 		exactLogIdx := logIdx == expectedFirstLogIdx
 		if !exactLogIdx && txNum <= _max {
-			err := fmt.Errorf("RCacheNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, expectedFirstLogIdx=%d", txNum, blockNum, _min, _max, logIdx, expectedFirstLogIdx)
-			if failFast {
+			if err := probs.report(failFast, fmt.Errorf("RCacheNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdx=%d, expectedFirstLogIdx=%d", txNum, blockNum, _min, _max, logIdx, expectedFirstLogIdx)); err != nil {
 				return err
 			}
-			log.Error(err.Error())
 		}
 		expectedFirstLogIdx = logIdx + uint32(len(r.Logs))
 
 		cumUsedGas := r.CumulativeGasUsed
 		strongMonotonicCumGasUsed := int(cumUsedGas) > prevCumUsedGas
 		if !strongMonotonicCumGasUsed && txNum <= _max { // system tx can be skipped
-			err := fmt.Errorf("RCacheNoDups: non-monotonic cumUsedGas at txnum: %d, block: %d(%d-%d), cumUsedGas=%d, prevCumUsedGas=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)
-			if failFast {
+			if err := probs.report(failFast, fmt.Errorf("RCacheNoDups: non-monotonic cumUsedGas at txnum: %d, block: %d(%d-%d), cumUsedGas=%d, prevCumUsedGas=%d", txNum, blockNum, _min, _max, cumUsedGas, prevCumUsedGas)); err != nil {
 				return err
 			}
-			log.Error(err.Error())
 		}
 		prevCumUsedGas = int(cumUsedGas)
 
@@ -135,7 +132,7 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 	return nil
 }
 
-type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) error
+type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, p *problems) error
 
 func parallelChunkCheck(ctx context.Context, sampler *Sampler, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, prefix string, fn chunkFn) (err error) {
 	blockRange := toBlock - fromBlock + 1
@@ -146,6 +143,7 @@ func parallelChunkCheck(ctx context.Context, sampler *Sampler, fromBlock, toBloc
 	numWorkers := estimate.AlmostAllCPUs()
 	chunkSize := uint64(100)
 
+	var probs problems
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(numWorkers)
 	var completedChunks atomic.Uint64
@@ -176,7 +174,7 @@ func parallelChunkCheck(ctx context.Context, sampler *Sampler, fromBlock, toBloc
 		chunkStart := start
 		chunkEnd := end
 		g.Go(func() error {
-			chunkErr := fn(ctx, chunkStart, chunkEnd, db, blockReader, failFast)
+			chunkErr := fn(ctx, chunkStart, chunkEnd, db, blockReader, failFast, &probs)
 			if chunkErr != nil {
 				return chunkErr
 			}
@@ -185,8 +183,7 @@ func parallelChunkCheck(ctx context.Context, sampler *Sampler, fromBlock, toBloc
 		})
 	}
 
-	if err := g.Wait(); err != nil {
-		return err
-	}
-	return nil
+	// A chunk that failed operationally must not erase the problems already reported: the count
+	// is what --failFast=false is run for.
+	return errors.Join(g.Wait(), probs.verdict(prefix))
 }

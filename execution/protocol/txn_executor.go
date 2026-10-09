@@ -60,40 +60,10 @@ TxnExecutor applies a single transaction to the current world state.
 
 var ErrTxnExecutionFailed = errors.New("txn execution failed")
 
-type ErrExecAbortError struct {
-	DependencyTxIndex int
-	OriginError       error
-}
-
-// ErrExecPanic is a recovered non-dependency panic during transaction execution.
-// It is an operational failure, not evidence that the block is invalid.
-type ErrExecPanic struct {
-	message string
-}
-
-func (e *ErrExecPanic) Error() string {
-	return e.message
-}
-
-func (e ErrExecAbortError) Error() string {
-	if e.DependencyTxIndex >= 0 {
-		return fmt.Sprintf("execution aborted due to dependency %d", e.DependencyTxIndex)
-	} else {
-		if e.OriginError != nil {
-			return e.OriginError.Error()
-		}
-		return "execution aborted"
-	}
-}
-
-// IsError reports whether the abort carries an execution error rather than only
-// a speculative dependency. Dependency aborts raised by state.ErrDependency
-// carry no OriginError and are retried; DependencyTxIndex is scheduling
-// metadata, not the classifier. An OriginError must be validated against settled
-// input before it can be attributed to block data rather than stale state.
-func (e ErrExecAbortError) IsError() bool {
-	return e.OriginError != nil
-}
+// ErrExecPanic wraps a panic recovered during versioned transition execution. It is an
+// infrastructure failure, not a block-validity verdict, so callers route it operationally
+// (fail the stage retryably) rather than as ErrInvalidBlock.
+var ErrExecPanic = errors.New("transition exec panic")
 
 // nonceError formats lazily: under parallel execution a nonce mismatch is a
 // routine re-execution signal whose text is discarded.
@@ -483,6 +453,9 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 	st.gasRemaining = mdgas.SplitTxnGasLimit(st.msg.Gas(), intrinsicGas, rules)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
+	if st.evm.Config().NoBAL {
+		st.state.StopAccessRecording()
+	}
 	var (
 		gasUsed         runtimeGasAccounting
 		runtimeGas      mdgas.MdGas
@@ -555,14 +528,10 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	if st.evm.IntraBlockState().IsVersioned() {
 		defer func() {
 			if r := recover(); r != nil {
-				panicErr, isError := r.(error)
-				if isError && errors.Is(panicErr, state.ErrDependency) {
-					err = ErrExecAbortError{DependencyTxIndex: st.evm.IntraBlockState().DepTxIndex()}
-					return
-				}
-				stack := dbg.Stack()
-				log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", stack)
-				err = &ErrExecPanic{message: fmt.Sprintf("transition exec panic: %v at: %s", r, stack)}
+				// Versioned execution no longer panics for control flow — an
+				// in-flight dependency pauses and re-reads (see waitCommit), it does
+				// not abort. Any panic here is therefore a genuine failure.
+				err = fmt.Errorf("%w: %v at: %s", ErrExecPanic, r, dbg.Stack())
 			}
 		}()
 	}
@@ -644,6 +613,9 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		createNonce     uint64
 	)
 	st.state.Prepare(rules, msg.From(), coinbase, msg.To(), vm.ActivePrecompiles(rules), accessTuples)
+	if st.evm.Config().NoBAL {
+		st.state.StopAccessRecording()
+	}
 	if rules.IsAmsterdam {
 		runtimeGas = st.gasRemaining
 		runtimeSnapshot = st.state.PushSnapshot()
@@ -697,47 +669,58 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	totalGasUsed := gasUsed.total()
-	var refund uint64
-	switch {
-	case refunds && !gasBailout:
-		refundQuotient := params.RefundQuotient
-		if rules.IsLondon {
-			refundQuotient = params.RefundQuotientEIP3529
-		}
-		switch {
-		case rules.IsAmsterdam:
-			combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
-			st.blockStateGasUsed = combined.StateClamped()
-			st.blockExecutionGasUsed = max(combined.Execution, intrinsicGasResult.FloorGasCost)
-			st.txnGasUsedB4Refunds = combined.Total()
-			refund = min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-		case rules.IsPrague:
-			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
-			refund = min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
-			st.blockExecutionGasUsed = st.txnGasUsed
-		default:
-			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
-			refund = min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
-			st.blockExecutionGasUsed = st.txnGasUsed
-		}
-		if err := st.refundGas(); err != nil {
-			return nil, err
-		}
-	case rules.IsAmsterdam:
+	if rules.IsAmsterdam {
 		combined := totalGasUsed.PlusIntrinsic(intrinsicGas)
 		st.blockStateGasUsed = combined.StateClamped()
 		st.blockExecutionGasUsed = max(combined.Execution, intrinsicGasResult.FloorGasCost)
 		st.txnGasUsedB4Refunds = combined.Total()
-		st.txnGasUsed = max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost)
-	default:
-		// No-refund path: gasBailout (trace_call) or !refunds.
-		// Don't apply Prague floor or refunds — just record raw gas used.
+	} else {
 		st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
-		st.txnGasUsed = st.txnGasUsedB4Refunds
-		st.blockExecutionGasUsed = st.msg.Gas() // match pre-refactor: consume full gas limit from pool
+	}
+	gasLeft := st.gasRemaining
+	gasTracing := vmConfig.Tracer.HasGasChangeHook()
+	applyRefunds := refunds && !gasBailout
+	var refund uint64
+	if applyRefunds {
+		refundQuotient := params.RefundQuotient
+		if rules.IsLondon {
+			refundQuotient = params.RefundQuotientEIP3529
+		}
+		var old mdgas.MdGas
+		if gasTracing {
+			old = gasLeft
+		}
+		refund = min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+		gasLeft.Execution += refund
+		if gasTracing {
+			vmConfig.Tracer.EmitGasChange(old, gasLeft, tracing.GasChangeTxRefunds)
+		}
+	}
+	st.txnGasUsed = st.msg.Gas() - gasLeft.Total()
+	if st.txnGasUsed < intrinsicGasResult.FloorGasCost && (rules.IsAmsterdam || (rules.IsPrague && applyRefunds)) {
+		var old mdgas.MdGas
+		if gasTracing {
+			old = gasLeft
+		}
+		floorAdjustment := intrinsicGasResult.FloorGasCost - st.txnGasUsed
+		executionAdjustment := min(floorAdjustment, gasLeft.Execution)
+		gasLeft.Execution -= executionAdjustment
+		// calls that skip the execution gas cap can pay part of the floor from state gas.
+		gasLeft.State -= floorAdjustment - executionAdjustment
+		st.txnGasUsed = intrinsicGasResult.FloorGasCost
+		if gasTracing {
+			vmConfig.Tracer.EmitGasChange(old, gasLeft, tracing.GasChangeTxDataFloor)
+		}
+	}
+	if applyRefunds {
+		if !rules.IsAmsterdam {
+			st.blockExecutionGasUsed = st.txnGasUsed
+		}
+		if err := st.refundGas(gasLeft); err != nil {
+			return nil, err
+		}
+	} else if !rules.IsAmsterdam {
+		st.blockExecutionGasUsed = st.msg.Gas()
 	}
 	// EIP-8037: deduct the actual per-dimension usage from the block pool.
 	// Pre-Amsterdam only the execution dimension exists.
@@ -967,13 +950,19 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	return gasRemaining, gasUsed, nil
 }
 
-func (st *TxnExecutor) refundGas() error {
+func (st *TxnExecutor) refundGas(gasLeft mdgas.MdGas) error {
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := u256.Mul(u256.U64(st.msg.Gas()-st.txnGasUsed), *st.gasPrice)
+	remaining := u256.Mul(u256.U64(gasLeft.Total()), *st.gasPrice)
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
 		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %s\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining.String())
 	}
-	return st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
+	if err := st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn); err != nil {
+		return err
+	}
+	if tracer := st.evm.Config().Tracer; gasLeft.Total() > 0 && tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(gasLeft, mdgas.MdGas{}, tracing.GasChangeTxLeftOverReturned)
+	}
+	return nil
 }
 
 func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Authorization, accessTuples types.AccessList) (mdgas.IntrinsicGasCalcResult, bool) {

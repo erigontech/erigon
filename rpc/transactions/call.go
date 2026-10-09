@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -63,8 +64,15 @@ func DoCall(
 		}
 	*/
 
-	state := state.New(stateReader)
-	defer state.Close()
+	ibs := state.New(stateReader)
+	// Overrides end in FinalizeTx, which clears the journal; the versioned read
+	// path then serves this tx's own writes only from a resident stateObject.
+	if dbg.CallNoMaterialize && stateOverrides == nil {
+		ibs.SetVersionMap(state.NewVersionMap(nil))
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(0, 0)
+	}
+	defer ibs.Close()
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -94,8 +102,8 @@ func DoCall(
 	}
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
-	vmConfig := vm.Config{NoBaseFee: true}
-	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state, chainConfig, vmConfig)
+	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
 	// stop() runs before cancel() (LIFO), so the callback cannot fire for a later call, and
 	// this EVM is not reused, so a callback already running needs no join.
 	var timedOut atomic.Bool
@@ -109,7 +117,7 @@ func DoCall(
 	if stateOverrides != nil {
 		rules := blockCtx.Rules(chainConfig)
 		precompiles := vm.ActivePrecompiledContracts(rules)
-		if err := stateOverrides.Override(state, precompiles, rules); err != nil {
+		if err := stateOverrides.Override(ibs, precompiles, rules); err != nil {
 			return nil, err
 		}
 		evm.SetPrecompiles(precompiles)
@@ -314,7 +322,7 @@ func NewReusableCaller(
 	}
 	initialArgs.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
-	vmConfig := vm.Config{NoBaseFee: true}
+	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
 
 	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.New(stateReader), chainConfig, vmConfig)
 

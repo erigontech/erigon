@@ -109,7 +109,7 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range 24 {
 			RangesOld = append(RangesOld, NewRange(uint64(i*100_000), uint64((i+1)*100_000)))
 		}
-		found := merger.FindMergeRanges(RangesOld, uint64(24*100_000))
+		found := merger.FindMergeRanges(RangesOld)
 
 		expect := Ranges{
 			NewRange(0, 500000),
@@ -124,7 +124,7 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range uint64(24) {
 			RangesNew = append(RangesNew, NewRange(start+(i*100_000), start+((i+1)*100_000)))
 		}
-		found = merger.FindMergeRanges(RangesNew, uint64(24*100_000))
+		found = merger.FindMergeRanges(RangesNew)
 
 		expect = Ranges{}
 		require.Equal(t, expect.String(), Ranges(found).String())
@@ -135,7 +135,7 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range uint64(240) {
 			RangesOld = append(RangesOld, NewRange(i*10_000, (i+1)*10_000))
 		}
-		found := merger.FindMergeRanges(RangesOld, uint64(240*10_000))
+		found := merger.FindMergeRanges(RangesOld)
 		var expect Ranges
 		for i := range uint64(4) {
 			expect = append(expect, NewRange(i*snaptype.Erigon2OldMergeLimit, (i+1)*snaptype.Erigon2OldMergeLimit))
@@ -151,7 +151,7 @@ func TestFindMergeRange(t *testing.T) {
 		for i := range uint64(240) {
 			RangesNew = append(RangesNew, NewRange(start+i*10_000, start+(i+1)*10_000))
 		}
-		found = merger.FindMergeRanges(RangesNew, uint64(240*10_000))
+		found = merger.FindMergeRanges(RangesNew)
 		expect = nil
 		for i := range uint64(24) {
 			expect = append(expect, NewRange(start+i*snaptype.Erigon2MergeLimit, start+(i+1)*snaptype.Erigon2MergeLimit))
@@ -190,7 +190,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 		merger.DisableFsync()
 		require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
-		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
+		Ranges := merger.FindMergeRanges(s.Ranges(false))
 		require.Len(Ranges, 3)
 		// NOTE: TestMergeSnapshots calls Merge with doIndex=false.
 		// Since the merged segment is not indexed, RecalcVisibleSegments will not promote it
@@ -212,7 +212,7 @@ func TestMergeSnapshots(t *testing.T) {
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.Mainnet.Config, logger)
 		merger.DisableFsync()
 		require.NoError(s.OpenFolder())
-		Ranges := merger.FindMergeRanges(s.Ranges(false), s.SegmentsMax())
+		Ranges := merger.FindMergeRanges(s.Ranges(false))
 		require.Empty(Ranges)
 		// doIndex=false, same rationale as above
 		err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
@@ -240,7 +240,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// 	merger.DisableFsync()
 	// 	fmt.Println(s.Ranges(), s.SegmentsMax())
 	// 	fmt.Println(s.Ranges(), s.SegmentsMax())
-	// 	Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
+	// 	Ranges := merger.FindMergeRanges(s.Ranges())
 	// 	require.True(len(Ranges) > 0)
 	// 	err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 	// 	require.NoError(err)
@@ -257,7 +257,7 @@ func TestMergeSnapshots(t *testing.T) {
 	// 	merger := NewMerger(dir, 1, log.LvlInfo, nil, chainspec.MainnetChainConfig, logger)
 	// 	merger.DisableFsync()
 	// 	s.OpenSegments(snaptype2.BlockSnapshotTypes, false)
-	// 	Ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
+	// 	Ranges := merger.FindMergeRanges(s.Ranges())
 	// 	require.True(len(Ranges) == 0)
 	// 	err := merger.Merge(t.Context(), s, snaptype2.BlockSnapshotTypes, Ranges, s.Dir(), false, nil, nil)
 	// 	require.NoError(err)

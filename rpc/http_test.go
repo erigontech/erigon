@@ -281,7 +281,7 @@ type overloadService struct{}
 
 func (*overloadService) Reject(context.Context) (string, error) { return "", kv.ErrReadTxLimitExceeded }
 
-func (*overloadService) RejectStreaming(_ context.Context, _ jsonstream.Stream) error {
+func (*overloadService) RejectStreaming(_ context.Context, _ *jsonstream.Stream) error {
 	return kv.ErrReadTxLimitExceeded
 }
 

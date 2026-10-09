@@ -209,7 +209,7 @@ func TestMapResultsMarshalAsJSONDoes(t *testing.T) {
 			s := jsonstream.Get(nil)
 			defer jsonstream.Put(s)
 			require.NoError(t, result.(interface {
-				MarshalFastJSONTo(*jsonstream.StackStream) error
+				MarshalFastJSONTo(*jsonstream.Stream) error
 			}).MarshalFastJSONTo(s))
 			require.NoError(t, s.Flush())
 

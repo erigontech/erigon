@@ -23,7 +23,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -34,7 +33,7 @@ func newBatchOverDbNonDupSort(tb testing.TB) *membatchwithdb.MemoryMutation {
 	tb.Helper()
 	_, rwTx := newTestTx(tb)
 	initializeDbNonDupSort(tb, rwTx)
-	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(tb, err)
 	tb.Cleanup(batch.Close)
 	return batch
@@ -44,7 +43,7 @@ func newBatchOverDbDupSort(tb testing.TB) *membatchwithdb.MemoryMutation {
 	tb.Helper()
 	_, rwTx := newTestTx(tb)
 	initializeDbDupSort(tb, rwTx)
-	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(tb, err)
 	tb.Cleanup(batch.Close)
 	return batch
@@ -171,7 +170,7 @@ func TestPrefixSkipsDeletedDbEntry(t *testing.T) {
 func TestRangeOnReadViewSkipsDeletedDbEntry(t *testing.T) {
 	_, rwTx := newTestTx(t)
 	initializeDbNonDupSort(t, rwTx)
-	overlay, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	overlay, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(t, err)
 	defer overlay.Close()
 	require.NoError(t, overlay.Delete(kv.HeaderNumber, []byte("CBAA")))
@@ -187,7 +186,7 @@ func TestRangeOnReadViewSkipsDeletedDbEntry(t *testing.T) {
 func TestRangeOnReadViewIsSafeAgainstConcurrentDelete(t *testing.T) {
 	_, rwTx := newTestTx(t)
 	initializeDbNonDupSort(t, rwTx)
-	overlay, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	overlay, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(t, err)
 	defer overlay.Close()
 	require.NoError(t, overlay.Delete(kv.HeaderNumber, []byte("CBAA")))
@@ -259,7 +258,7 @@ func TestRangeDupSortWithLimitCountsNonDeletedValues(t *testing.T) {
 	_, rwTx := newTestTx(t)
 	initializeDbDupSort(t, rwTx)
 	require.NoError(t, rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.5")))
-	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx)
 	require.NoError(t, err)
 	defer batch.Close()
 

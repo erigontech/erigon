@@ -235,6 +235,7 @@ func TestCompactInPlace(t *testing.T) {
 	require.NoError(t, CompactInPlace(t.Context(), dbDir, dbcfg.ChainDB, log.New()))
 
 	after := dataFileStat(t, dbDir)
+	require.False(t, os.SameFile(before, after), "compaction must replace the original file")
 	require.Less(t, after.Size(), before.Size())
 	require.Equal(t, before.Mode().Perm(), after.Mode().Perm())
 	require.FileExists(t, filepath.Join(dbDir, lockFileName))
@@ -281,7 +282,9 @@ func TestAutoCompactDatadir(t *testing.T) {
 
 	require.NoError(t, ApplyMigrations(t.Context(), dirs, log.New()))
 
-	require.Less(t, dataFileStat(t, dirs.Chaindata).Size(), bloated.Size())
+	after := dataFileStat(t, dirs.Chaindata)
+	require.False(t, os.SameFile(bloated, after), "auto-compaction must replace the bloated file")
+	require.Less(t, after.Size(), bloated.Size())
 	require.True(t, os.SameFile(healthy, dataFileStat(t, dirs.TxPool)), "a healthy db must not be rewritten")
 }
 

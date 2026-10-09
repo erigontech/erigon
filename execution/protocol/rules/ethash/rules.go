@@ -448,7 +448,7 @@ func (ethash *Ethash) ValidateBlockPostExecution(chainConfig *chain.Config, head
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 	receipts types.Receipts, txns types.Transactions, logger log.Logger,
 ) error {
-	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
+	return rules.DefaultBlockPostValidation(header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
 // SealHash returns the hash of a block prior to it being sealed.

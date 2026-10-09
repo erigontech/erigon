@@ -47,6 +47,9 @@ var (
 	noMemstat                   = EnvBool("NO_MEMSTAT", false)
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
+	// CallNoMaterialize runs eth_call on the versioned state path, where reads
+	// go straight to the state reader instead of a resident stateObject.
+	CallNoMaterialize = EnvBool("CALL_NO_MATERIALIZE", false)
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
@@ -193,7 +196,16 @@ func ReadMemStats(m *runtime.MemStats) {
 	runtime.ReadMemStats(m)
 }
 
-func DiscardCommitment() bool       { return discardCommitment }
+func DiscardCommitment() bool { return discardCommitment }
+
+// OverrideDiscardCommitment sets DiscardCommitment for a test and returns a restore
+// func; discardCommitment is otherwise read once from the env at init. Test-only.
+func OverrideDiscardCommitment(v bool) (restore func()) {
+	prev := discardCommitment
+	discardCommitment = v
+	return func() { discardCommitment = prev }
+}
+
 func NoPrune() bool                 { return noPrune }
 func NoRetire() bool                { return noRetire }
 func NoMerge() bool                 { return noMerge }

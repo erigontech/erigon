@@ -387,12 +387,11 @@ func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, b
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
 }
 
-func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
+func (e *ExecModule) getRawBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.RawBody, error) {
 	if e.blockReader == nil {
-		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
-		return body, nil
+		return rawdb.ReadRawBody(tx, blockHash, blockNumber)
 	}
-	return e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+	return e.blockReader.BodyWithRawTransactions(ctx, tx, blockHash, blockNumber)
 }
 
 func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (common.Hash, error) {
@@ -578,7 +577,7 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// forkValidator.sharedDom inside ValidatePayload and later phases close it,
 	// so we Close explicitly only on the early-return error paths below.
 	doms.SetInMemHistoryReads(inMemHistoryReads)
-	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+	if err := doms.InitBlockOverlay(roTx); err != nil {
 		doms.Close()
 		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
 	}

@@ -279,7 +279,7 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 
 type streamedPayload struct{}
 
-func (streamedPayload) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (streamedPayload) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	w.WriteHex([]byte{0xab})
 	return nil
 }
@@ -288,7 +288,7 @@ func (streamedPayload) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 // reflection path.
 type valueFastJSON struct{ data []byte }
 
-func (b valueFastJSON) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (b valueFastJSON) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	w.WriteHex(b.data)
 	return nil
 }
@@ -352,7 +352,7 @@ func TestNotificationMatchesMarshalledMessage(t *testing.T) {
 // emptyStreamed writes nothing; a notification still carries a result, as a response does.
 type emptyStreamed struct{}
 
-func (emptyStreamed) MarshalFastJSONTo(*jsonstream.StackStream) error { return nil }
+func (emptyStreamed) MarshalFastJSONTo(*jsonstream.Stream) error { return nil }
 
 func TestNotifyStreamsTheNotification(t *testing.T) {
 	for payload, result := range map[any]string{streamedPayload{}: `"0xab"`, 7: `7`, (*valueFastJSON)(nil): `null`, emptyStreamed{}: `null`, common.Hash{0xab}: `"0xab00000000000000000000000000000000000000000000000000000000000000"`} {

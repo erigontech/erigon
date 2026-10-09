@@ -116,13 +116,16 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	if err != nil {
 		return nil, err
 	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
+		return nil, err
+	}
 	engine := api.engine()
 
 	if args.Gas == nil || uint64(*args.Gas) == 0 {
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +143,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, header.Number.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +190,9 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
+		return 0, err
+	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
 		return 0, err
 	}
 	engine := api.engine()
@@ -665,6 +671,11 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, err
 	}
 
+	if err := api.checkPruneBlocks(ctx, tx, blockNr); err != nil {
+		return nil, err
+	}
+	// Witness generation needs history before the initial system transaction,
+	// not only the pre-state of the first user transaction.
 	if err := api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
 	}
@@ -732,8 +743,8 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return emptyWitnessBytes()
 	}
 
-	// The stateless verifier navigates the system address (system-call msg.sender, then its
-	// EIP-161 empty-account cleanup via DeleteSubtree), so its path must be in the witness.
+	// On AuRa the stateless verifier navigates the system address (system-call msg.sender),
+	// so its path must be in the witness.
 	// collectAccessedState drops it per EIP-7928 — a witness-content rule for the
 	// debug_executionWitness format that does not apply to this op-stream witness.
 	accessed.Addresses[common.Address(params.SystemAddress.Value())] = struct{}{}
@@ -954,6 +965,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
+		return nil, err
+	}
+	if err := ethapi2.CheckChainID(args.ChainID, chainConfig.ChainID); err != nil {
 		return nil, err
 	}
 	engine := api.engine()

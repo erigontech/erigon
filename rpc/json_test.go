@@ -508,7 +508,7 @@ func FuzzFillMessage(f *testing.F) {
 	})
 }
 
-func respond(s jsonstream.Stream, id json.RawMessage, result any) {
+func respond(s *jsonstream.Stream, id json.RawMessage, result any) {
 	_ = (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
 }
 
@@ -604,12 +604,12 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 
 type failingFastJSON struct{}
 
-func (failingFastJSON) MarshalFastJSONTo(*jsonstream.StackStream) error {
+func (failingFastJSON) MarshalFastJSONTo(*jsonstream.Stream) error {
 	return errors.New("encode failed")
 }
 
 func testResponseEncodeFailure(t *testing.T, result any) {
-	bad := func(s jsonstream.Stream) {
+	bad := func(s *jsonstream.Stream) {
 		respond(s, json.RawMessage(`7`), result)
 	}
 	assertErrorResponse := func(t *testing.T, raw []byte) {
@@ -718,7 +718,7 @@ func (failingAppender) AppendText([]byte) ([]byte, error) { return nil, errors.N
 
 type failingMidWrite struct{}
 
-func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	w.WriteObjectStart()
 	w.Field("balance")
 	w.WriteQuotedText(failingAppender{})

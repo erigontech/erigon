@@ -11,7 +11,6 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -20,10 +19,9 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 )
 
-// Capture re-executes block blockNum from tx via a recordingReader and returns a
-// self-contained Fixture: the pre-state values the block reads, its RLP, the
-// parent header, and the BLOCKHASH ancestor hashes. It validates receipts as a
-// side effect (a capture that fails execution is not a usable fixture).
+// Capture re-executes block blockNum via a recordingReader and returns a
+// self-contained Fixture: the pre-state the block reads, its RLP, the parent
+// header, and the BLOCKHASH ancestor hashes.
 func Capture(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -33,9 +31,6 @@ func Capture(
 	blockNum uint64,
 	logger log.Logger,
 ) (*Fixture, error) {
-	if blockNum == 0 {
-		return nil, fmt.Errorf("cannot capture genesis block (0): it has no parent")
-	}
 	hash, ok, err := blockReader.CanonicalHash(ctx, tx, blockNum)
 	if err != nil {
 		return nil, fmt.Errorf("canonical hash %d: %w", blockNum, err)
@@ -84,11 +79,9 @@ func Capture(
 	}
 
 	fx := rec.Fixture()
-	// Authoritative outputs: the block's exec tells us WHICH cells it wrote
-	// (rw.out keys); the reference VALUES come from the canonical committed
-	// state at end-of-block, read via history — never the executor's own
-	// computed values (that would make the replay's oracle the very code under
-	// test). State after block N is as-of its last txNum + 1.
+	// The block's exec tells us which cells it wrote (rw.out keys); the reference
+	// values come from canonical committed history, not the executor's own
+	// computed values (that would make the oracle the code under test).
 	postTxNum, err := txNums.Max(ctx, tx, blockNum)
 	if err != nil {
 		return nil, fmt.Errorf("max txNum %d: %w", blockNum, err)
@@ -106,21 +99,14 @@ func Capture(
 	if fx.ParentHeaderRLP, err = rlpEncodeHeader(parent); err != nil {
 		return nil, err
 	}
-	// Persist the block access list sidecar so a BAL fixture replays through the
-	// production BAL-driven scheduling path, not the OCC/no-BAL fallback. Empty
-	// pre-Amsterdam (no sidecar in the DB).
-	if fx.BALBytes, err = rawdb.ReadBlockAccessListBytes(tx, hash, blockNum); err != nil {
-		return nil, fmt.Errorf("read block access list %d: %w", blockNum, err)
-	}
 	if err := captureAncestors(ctx, tx, blockReader, block.Header(), fx); err != nil {
 		return nil, err
 	}
 	return fx, nil
 }
 
-// captureAncestors records the last 256 ancestor hashes (BLOCKHASH range) so
-// replay can answer the BLOCKHASH opcode without a DB. Fails on any gap: a
-// silently skipped ancestor would make BLOCKHASH return zero and diverge.
+// captureAncestors records the last 256 ancestor hashes so replay can answer
+// the BLOCKHASH opcode without a DB.
 func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, header *types.Header, fx *Fixture) error {
 	n := header.Number.Uint64()
 	lo := uint64(0)
@@ -130,10 +116,10 @@ func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservi
 	for a := lo; a < n; a++ {
 		h, ok, err := blockReader.CanonicalHash(ctx, tx, a)
 		if err != nil {
-			return fmt.Errorf("capture ancestor %d canonical hash: %w", a, err)
+			return fmt.Errorf("capture ancestor %d: %w", a, err)
 		}
 		if !ok {
-			return fmt.Errorf("capture ancestor %d: canonical hash missing (BLOCKHASH would diverge)", a)
+			return fmt.Errorf("capture ancestor %d: missing canonical hash", a)
 		}
 		fx.Ancestors[a] = h
 	}
@@ -141,10 +127,8 @@ func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservi
 }
 
 // Replay re-executes the fixture's block against an in-memory reader with no DB.
-// It validates receipts/gas/bloom (ExecuteBlockEphemerally) but computes no
-// commitment. readNanos>0 models a per-storage-read latency (busy-spin) so a
-// read-bound block's shape can be reproduced despite the in-mem reader being
-// otherwise free.
+// It validates receipts/gas/bloom but computes no commitment. readNanos>0 models
+// a per-storage-read latency to reproduce a read-bound block's shape.
 func Replay(
 	fx *Fixture,
 	chainConfig *chain.Config,
@@ -189,8 +173,8 @@ func Replay(
 }
 
 // fixtureChainReader is a DB-free rules.ChainReader backed by the fixture: it
-// serves only the parent header (by hash/number), which is all block execution
-// consults beyond state and BLOCKHASH.
+// serves only the parent header, which is all block execution consults beyond
+// state and BLOCKHASH.
 type fixtureChainReader struct {
 	config *chain.Config
 	parent *types.Header
@@ -204,24 +188,13 @@ func newFixtureChainReader(config *chain.Config, fx *Fixture) (*fixtureChainRead
 	return &fixtureChainReader{config: config, parent: parent}, nil
 }
 
-func (c *fixtureChainReader) Config() *chain.Config                 { return c.config }
-func (c *fixtureChainReader) CurrentHeader() *types.Header          { return c.parent }
-func (c *fixtureChainReader) CurrentFinalizedHeader() *types.Header { return c.parent }
-func (c *fixtureChainReader) CurrentSafeHeader() *types.Header      { return c.parent }
-func (c *fixtureChainReader) GetHeaderByNumber(number uint64) *types.Header {
-	if c.parent != nil && c.parent.Number.Uint64() == number {
-		return c.parent
-	}
-	return nil
-}
-
-func (c *fixtureChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	if c.parent != nil && c.parent.Hash() == hash {
-		return c.parent
-	}
-	return nil
-}
-func (c *fixtureChainReader) FrozenBlocks() uint64 { return 0 }
+func (c *fixtureChainReader) Config() *chain.Config                     { return c.config }
+func (c *fixtureChainReader) CurrentHeader() *types.Header              { return c.parent }
+func (c *fixtureChainReader) CurrentFinalizedHeader() *types.Header     { return c.parent }
+func (c *fixtureChainReader) CurrentSafeHeader() *types.Header          { return c.parent }
+func (c *fixtureChainReader) GetHeaderByNumber(uint64) *types.Header    { return c.parent }
+func (c *fixtureChainReader) GetHeaderByHash(common.Hash) *types.Header { return c.parent }
+func (c *fixtureChainReader) FrozenBlocks() uint64                      { return 0 }
 
 func (c *fixtureChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if c.parent != nil && c.parent.Number.Uint64() == number {

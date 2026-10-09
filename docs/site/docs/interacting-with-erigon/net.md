@@ -28,7 +28,7 @@ For API usage refer to the below official resources:
 
 ### Network Information Usage
 
-* `net_version` is commonly used by applications to verify they're connected to the correct .Ethereum network.
+* `net_version` is commonly used by applications to verify they're connected to the correct Ethereum network.
 * `net_peerCount` helps monitor node connectivity and network health.
 * `net_listening` provides a basic connectivity check for the node's network interface.
 

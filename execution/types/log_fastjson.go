@@ -22,9 +22,9 @@ import (
 
 // MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
 // pointer method Logs itself would not satisfy the fast-JSON interface.
-func (logs Logs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (logs Logs) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	jsonstream.ArrayValue(s, logs, writeLogElem)
 	return nil
 }
 
-func writeLogElem(s *jsonstream.StackStream, l **Log) { _ = (*l).MarshalFastJSONTo(s) }
+func writeLogElem(s *jsonstream.Stream, l **Log) { _ = (*l).MarshalFastJSONTo(s) }

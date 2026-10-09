@@ -30,21 +30,22 @@ func _() {
 	_ = x[GasChangeRuntimeNewAccount-19]
 	_ = x[GasChangeTxAuthorization-20]
 	_ = x[GasChangeRefundAccountCreation-21]
+	_ = x[GasChangeTxDataFloor-22]
 	_ = x[GasChangeIgnored-255]
 }
 
 const (
-	_GasChangeReason_name_0 = "GasChangeUnspecifiedGasChangeTxInitialBalanceGasChangeTxIntrinsicGasGasChangeTxRefundsGasChangeTxLeftOverReturnedGasChangeCallInitialBalanceGasChangeCallLeftOverReturnedGasChangeCallLeftOverRefundedGasChangeCallContractCreationGasChangeCallContractCreation2GasChangeCallCodeStorageGasChangeCallOpCodeGasChangeCallPrecompiledContractGasChangeCallStorageColdAccessGasChangeCallFailedExecutionGasChangeDelegatedDesignationGasChangeCallStateGasReturnedGasChangeRefundRevertedStateGasChangeCallGasForwardedGasChangeRuntimeNewAccountGasChangeTxAuthorizationGasChangeRefundAccountCreation"
+	_GasChangeReason_name_0 = "GasChangeUnspecifiedGasChangeTxInitialBalanceGasChangeTxIntrinsicGasGasChangeTxRefundsGasChangeTxLeftOverReturnedGasChangeCallInitialBalanceGasChangeCallLeftOverReturnedGasChangeCallLeftOverRefundedGasChangeCallContractCreationGasChangeCallContractCreation2GasChangeCallCodeStorageGasChangeCallOpCodeGasChangeCallPrecompiledContractGasChangeCallStorageColdAccessGasChangeCallFailedExecutionGasChangeDelegatedDesignationGasChangeCallStateGasReturnedGasChangeRefundRevertedStateGasChangeCallGasForwardedGasChangeRuntimeNewAccountGasChangeTxAuthorizationGasChangeRefundAccountCreationGasChangeTxDataFloor"
 	_GasChangeReason_name_1 = "GasChangeIgnored"
 )
 
 var (
-	_GasChangeReason_index_0 = [...]uint16{0, 20, 45, 68, 86, 113, 140, 169, 198, 227, 257, 281, 300, 332, 362, 390, 419, 448, 476, 501, 527, 551, 581}
+	_GasChangeReason_index_0 = [...]uint16{0, 20, 45, 68, 86, 113, 140, 169, 198, 227, 257, 281, 300, 332, 362, 390, 419, 448, 476, 501, 527, 551, 581, 601}
 )
 
 func (i GasChangeReason) String() string {
 	switch {
-	case i <= 21:
+	case i <= 22:
 		return _GasChangeReason_name_0[_GasChangeReason_index_0[i]:_GasChangeReason_index_0[i+1]]
 	case i == 255:
 		return _GasChangeReason_name_1

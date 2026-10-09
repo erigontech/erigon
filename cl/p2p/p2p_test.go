@@ -273,8 +273,12 @@ func TestNewP2PManagerRejectsPartialStartupWhenTCPPortIsOccupied(t *testing.T) {
 	blockedTCP, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
 	require.NoError(t, err)
 	defer blockedTCP.Close()
+	tcpPort := blockedTCP.Addr().(*net.TCPAddr).Port
 
-	port := blockedTCP.Addr().(*net.TCPAddr).Port
+	quicProbe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	require.NoError(t, err)
+	defer quicProbe.Close()
+	quicPort := quicProbe.LocalAddr().(*net.UDPAddr).Port
 
 	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
 	require.NoError(t, err)
@@ -285,13 +289,14 @@ func TestNewP2PManagerRejectsPartialStartupWhenTCPPortIsOccupied(t *testing.T) {
 		BeaconConfig:  beaconConfig,
 		IpAddr:        "127.0.0.1",
 		Port:          0,
-		TCPPort:       uint(port),
-		QUICPort:      uint(port),
+		TCPPort:       uint(tcpPort),
+		QUICPort:      uint(quicPort),
 		TmpDir:        t.TempDir(),
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
 	ctx, cancel := context.WithCancel(t.Context())
 
+	require.NoError(t, quicProbe.Close())
 	manager, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
 	cancel()
 	if manager != nil {
@@ -304,7 +309,7 @@ func TestNewP2PManagerRejectsPartialStartupWhenTCPPortIsOccupied(t *testing.T) {
 	require.ErrorContains(t, err, "failed to bind TCP listener")
 	require.Nil(t, manager)
 
-	reboundQUIC, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
+	reboundQUIC, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: quicPort})
 	require.NoError(t, err)
 	require.NoError(t, reboundQUIC.Close())
 }
@@ -313,7 +318,12 @@ func TestNewP2PManagerRejectsPartialStartupWhenQUICPortIsOccupied(t *testing.T) 
 	blockedQUIC, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
 	require.NoError(t, err)
 	defer blockedQUIC.Close()
-	port := blockedQUIC.LocalAddr().(*net.UDPAddr).Port
+	quicPort := blockedQUIC.LocalAddr().(*net.UDPAddr).Port
+
+	tcpProbe, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	require.NoError(t, err)
+	defer tcpProbe.Close()
+	tcpPort := tcpProbe.Addr().(*net.TCPAddr).Port
 
 	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
 	require.NoError(t, err)
@@ -324,13 +334,14 @@ func TestNewP2PManagerRejectsPartialStartupWhenQUICPortIsOccupied(t *testing.T) 
 		BeaconConfig:  beaconConfig,
 		IpAddr:        "127.0.0.1",
 		Port:          0,
-		TCPPort:       uint(port),
-		QUICPort:      uint(port),
+		TCPPort:       uint(tcpPort),
+		QUICPort:      uint(quicPort),
 		TmpDir:        t.TempDir(),
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
 	ctx, cancel := context.WithCancel(t.Context())
 
+	require.NoError(t, tcpProbe.Close())
 	manager, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
 	cancel()
 	if manager != nil {
@@ -343,7 +354,7 @@ func TestNewP2PManagerRejectsPartialStartupWhenQUICPortIsOccupied(t *testing.T) 
 	require.ErrorContains(t, err, "failed to bind QUIC listener")
 	require.Nil(t, manager)
 
-	reboundTCP, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
+	reboundTCP, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: tcpPort})
 	require.NoError(t, err)
 	require.NoError(t, reboundTCP.Close())
 }
