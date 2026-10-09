@@ -257,6 +257,72 @@ func (*PayloadStatus) Clone() clonable.Clonable {
 	return &PayloadStatus{}
 }
 
+func (s *PayloadStatusV2) Static() bool { return false }
+
+func (s *PayloadStatusV2) EncodeSSZ(dst []byte) ([]byte, error) {
+	status, err := payloadStatusByte(s.Status)
+	if err != nil {
+		return nil, err
+	}
+	latestHashes := solid.NewHashList(1)
+	if s.LatestValidHash != nil {
+		latestHashes.Append(*s.LatestValidHash)
+	}
+	errBytes := solid.NewByteListSSZ(sszMaxValidationError)
+	if s.ValidationError != nil && s.ValidationError.Error() != nil {
+		msg := []byte(s.ValidationError.Error().Error())
+		if len(msg) > sszMaxValidationError {
+			msg = msg[:sszMaxValidationError]
+		}
+		_ = errBytes.SetBytes(msg)
+	}
+	ilSatisfied := solid.NewByteListSSZ(1)
+	if s.InclusionListSatisfied != nil {
+		var b byte
+		if *s.InclusionListSatisfied {
+			b = 1
+		}
+		_ = ilSatisfied.SetBytes([]byte{b})
+	}
+	return ssz2.MarshalSSZ(dst, []byte{status}, latestHashes, errBytes, ilSatisfied)
+}
+
+func (s *PayloadStatusV2) DecodeSSZ(buf []byte, version int) error {
+	latest := solid.NewHashList(1)
+	errBytes := solid.NewByteListSSZ(sszMaxValidationError)
+	ilSatisfied := solid.NewByteListSSZ(1)
+	status := []byte{0}
+	if err := ssz2.UnmarshalSSZ(buf, version, status, latest, errBytes, ilSatisfied); err != nil {
+		return err
+	}
+	engineStatus, err := payloadStatusFromByte(status[0])
+	if err != nil {
+		return err
+	}
+	s.Status = engineStatus
+	if latest.Length() > 0 {
+		hash := latest.Get(0)
+		s.LatestValidHash = &hash
+	}
+	if msg := string(errBytes.Bytes()); msg != "" {
+		s.ValidationError = NewStringifiedErrorFromString(msg)
+	}
+	if b := ilSatisfied.Bytes(); len(b) == 1 {
+		if b[0] > 1 {
+			return fmt.Errorf("invalid inclusionListSatisfied byte %d", b[0])
+		}
+		satisfied := b[0] == 1
+		s.InclusionListSatisfied = &satisfied
+	}
+	return nil
+}
+
+func (s *PayloadStatusV2) EncodingSizeSSZ() int { out, _ := s.EncodeSSZ(nil); return len(out) }
+
+func (*PayloadStatusV2) Clone() clonable.Clonable {
+	return &PayloadStatusV2{}
+}
+
 func payloadStatusByte(status EngineStatus) (uint8, error) {
 	switch status {
 	case ValidStatus:

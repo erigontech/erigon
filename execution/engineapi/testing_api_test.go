@@ -1533,6 +1533,42 @@ func TestNewPayloadV5RequiresBlockAccessListBeforeAmsterdam(t *testing.T) {
 	require.Equal(t, "blockAccessList missing", invalidParams.Message)
 }
 
+func TestNewPayloadV5RejectsBogotaPayload(t *testing.T) {
+	t.Parallel()
+
+	cfg := bogotaChainConfig()
+	srv := NewEngineServer(log.New(), cfg, &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+
+	status, err := srv.NewPayloadV5(t.Context(), bogotaPayload(t, makeParentHeader(1000)), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+	require.Nil(t, status)
+	var unsupported *rpc.UnsupportedForkError
+	require.ErrorAs(t, err, &unsupported)
+}
+
+func TestNewPayloadV6RejectsPreBogotaPayload(t *testing.T) {
+	t.Parallel()
+
+	cfg := allForksChainConfig()
+	srv := NewEngineServer(log.New(), cfg, &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+
+	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, makeParentHeader(1000)), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, signedInclusionList(t, cfg))
+	require.Nil(t, status)
+	var unsupported *rpc.UnsupportedForkError
+	require.ErrorAs(t, err, &unsupported)
+}
+
+func TestNewPayloadV6RequiresInclusionList(t *testing.T) {
+	t.Parallel()
+
+	srv := NewEngineServer(log.New(), bogotaChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+
+	status, err := srv.NewPayloadV6(t.Context(), bogotaPayload(t, makeParentHeader(1000)), []common.Hash{}, &common.Hash{}, []hexutil.Bytes{}, nil)
+	require.Nil(t, status)
+	require.Error(t, err)
+	var invalidParams *rpc.InvalidParamsError
+	require.ErrorAs(t, err, &invalidParams)
+}
+
 func TestForkchoiceUpdatedReturnsSyncingForIncompleteExecution(t *testing.T) {
 	t.Parallel()
 

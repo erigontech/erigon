@@ -231,16 +231,16 @@ func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Blo
 	return c.InsertBlocks(ctx, []*types.Block{block})
 }
 
-func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execmodule.ExecutionStatus, *string, common.Hash, *bool, error) {
 	result, err := c.executionModule.ValidateChain(ctx, hash, number)
 	if err != nil {
-		return 0, nil, common.Hash{}, err
+		return 0, nil, common.Hash{}, nil, err
 	}
 	var validationError *string
 	if len(result.ValidationError) > 0 {
 		validationError = &result.ValidationError
 	}
-	return result.ValidationStatus, validationError, result.LatestValidHash, nil
+	return result.ValidationStatus, validationError, result.LatestValidHash, result.InclusionListSatisfied, nil
 }
 
 func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {

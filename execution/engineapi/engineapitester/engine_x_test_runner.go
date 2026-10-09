@@ -488,6 +488,7 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 	var blobHashes []common.Hash
 	var parentBeaconRoot common.Hash
 	var executionRequests []hexutil.Bytes
+	var inclusionList []hexutil.Bytes
 	err := json.Unmarshal(payload.Params[0], &enginePayload)
 	if err != nil {
 		return err
@@ -506,6 +507,12 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 	}
 	if len(payload.Params) > 3 {
 		err := json.Unmarshal(payload.Params[3], &executionRequests)
+		if err != nil {
+			return err
+		}
+	}
+	if len(payload.Params) > 4 {
+		err := json.Unmarshal(payload.Params[4], &inclusionList)
 		if err != nil {
 			return err
 		}
@@ -530,6 +537,12 @@ func processNewPayload(ctx context.Context, tester EngineApiTester, payload Engi
 				r, err = tester.EngineApiClient.NewPayloadV4(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests)
 			case "5":
 				r, err = tester.EngineApiClient.NewPayloadV5(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests)
+			case "6":
+				var r6 *enginetypes.PayloadStatusV2
+				r6, err = tester.EngineApiClient.NewPayloadV6(ctx, &enginePayload, blobHashes, &parentBeaconRoot, executionRequests, inclusionList)
+				if r6 != nil {
+					r = &enginetypes.PayloadStatus{Status: r6.Status, ValidationError: r6.ValidationError, LatestValidHash: r6.LatestValidHash}
+				}
 			default:
 				return nil, "", fmt.Errorf("unsupported new payload version: %s", payload.NewPayloadVersion)
 			}

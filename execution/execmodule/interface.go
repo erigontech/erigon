@@ -64,9 +64,10 @@ func (s ExecutionStatus) String() string {
 
 // ValidationResult is the native return type for ValidateChain.
 type ValidationResult struct {
-	ValidationStatus ExecutionStatus
-	LatestValidHash  common.Hash
-	ValidationError  string
+	ValidationStatus       ExecutionStatus
+	LatestValidHash        common.Hash
+	ValidationError        string
+	InclusionListSatisfied *bool
 }
 
 // ForkChoiceResult is the native return type for UpdateForkChoice.

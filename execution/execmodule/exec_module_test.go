@@ -910,6 +910,102 @@ func TestExecModuleTesterReportsUnknownPayload(t *testing.T) {
 	require.Nil(t, block)
 }
 
+func TestInsertBlocksCachesInclusionList(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	il := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil)}
+	block := chainPack.Blocks[0].WithInclusionList(il)
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+
+	got, ok := m.ReadAheader.ReadInclusionList(block.Hash())
+	require.True(t, ok)
+	require.Equal(t, il, got)
+}
+
+func TestInsertBlocksWithoutInclusionListCachesNothing(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+
+	_, ok := m.ReadAheader.ReadInclusionList(block.Hash())
+	require.False(t, ok)
+}
+
+func signedInclusionListTxn(t *testing.T, m *execmoduletester.ExecModuleTester) types.Transaction {
+	t.Helper()
+	txn, err := types.SignTx(
+		types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
+		m.Key,
+	)
+	require.NoError(t, err)
+	return txn
+}
+
+func TestValidateChainReportsInclusionListSatisfied(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	ilTxn := signedInclusionListTxn(t, m)
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
+		gen.AddTx(ilTxn)
+	})
+	require.NoError(t, err)
+	block := chainPack.Blocks[0].WithInclusionList(types.Transactions{ilTxn})
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	validation, err := m.ValidateChain(t.Context(), block.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.NotNil(t, validation.InclusionListSatisfied)
+	require.True(t, *validation.InclusionListSatisfied)
+}
+
+func TestValidateChainReportsInclusionListUnsatisfied(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	block := chainPack.Blocks[0].WithInclusionList(types.Transactions{signedInclusionListTxn(t, m)})
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	validation, err := m.ValidateChain(t.Context(), block.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.NotNil(t, validation.InclusionListSatisfied)
+	require.False(t, *validation.InclusionListSatisfied)
+}
+
+func TestValidateChainWithoutInclusionListReportsNothing(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+	validation, err := m.ValidateChain(t.Context(), block.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	require.Nil(t, validation.InclusionListSatisfied)
+}
+
 func TestAssembleBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

@@ -26,12 +26,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -158,4 +161,26 @@ func TestSerialFinalizeClassifiesRulesEngineError(t *testing.T) {
 			require.ErrorIs(t, err, rules.ErrInvalidBlock)
 		})
 	}
+}
+
+func TestSerialBlockEndChecksInclusionList(t *testing.T) {
+	se, task := newSerialFinalizeTestExec(t, ethash.NewFaker())
+	se.cfg.readAheader = exec.NewBlockReadAheader()
+	task.Header.ReceiptHash = empty.RootHash
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	omitted, err := types.SignTx(
+		types.NewTransaction(0, common.Address{}, uint256.NewInt(0), params.TxGas, uint256.NewInt(0), nil),
+		*types.LatestSignerForChainID(se.cfg.chainConfig.ChainID), key,
+	)
+	require.NoError(t, err)
+	block := types.NewBlockFromStorage(task.Header.Hash(), task.Header, nil, nil, nil, nil)
+	se.cfg.readAheader.AddInclusionList(block.Hash(), types.Transactions{omitted})
+
+	_, err = se.executeBlock(t.Context(), block, []exec.Task{task}, true)
+	require.NoError(t, err)
+
+	satisfied, checked := se.cfg.readAheader.ReadInclusionListResult(block.Hash())
+	require.True(t, checked)
+	require.False(t, satisfied)
 }

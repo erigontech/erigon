@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
 )
 
@@ -3428,6 +3429,20 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			ibs.StartAccessRecording()
 
 			if tt, ok := lastResult.Task.(*taskVersion).Task.(*exec.TxTask); ok {
+				if pe.cfg.readAheader != nil {
+					if inclusionList, ok := pe.cfg.readAheader.ReadInclusionList(be.hash()); ok {
+						ilIBS := state.New(reader)
+						defer ilIBS.Close()
+						ilEVM := vm.NewEVM(tt.EvmBlockContext, evmtypes.TxContext{}, ilIBS, pe.cfg.chainConfig, *pe.cfg.vmConfig)
+						signer := *types.MakeSigner(pe.cfg.chainConfig, be.number(), tt.Header.Time)
+						blockTxns := be.block.Transactions()
+
+						ilSatisfied := protocol.CheckInclusionListTransactions(ilEVM, be.gasPool, signer, blockTxns, inclusionList)
+
+						pe.cfg.readAheader.SetInclusionListResult(be.hash(), ilSatisfied)
+					}
+				}
+
 				// Syscalls share the main ibs so their writes (EIP-7002/7251
 				// dequeue, EIP-4788 beacon root) land in ibs.VersionedWrites
 				// and then in finalizeWrites via Normalize below. If we instead

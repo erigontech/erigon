@@ -67,28 +67,31 @@ func validatePayloadIDList(id *solid.ByteListSSZ) error {
 	return nil
 }
 
-func newPayloadRequestSchema(version clparams.StateVersion, payload *engine_types.ExecutionPayload, blobHashes solid.HashListSSZ, parentRoot *common.Hash, requests *solid.TransactionsSSZ) []any {
+func newPayloadRequestSchema(version clparams.StateVersion, payload *engine_types.ExecutionPayload, blobHashes solid.HashListSSZ, parentRoot *common.Hash, requests *solid.TransactionsSSZ, inclusionList *solid.TransactionsSSZ) []any {
 	switch version {
 	case clparams.BellatrixVersion, clparams.CapellaVersion:
 		return []any{payload}
 	case clparams.DenebVersion:
 		return []any{payload, blobHashes, parentRoot[:]}
+	case clparams.HezeVersion:
+		return []any{payload, blobHashes, parentRoot[:], requests, inclusionList}
 	default:
 		return []any{payload, blobHashes, parentRoot[:], requests}
 	}
 }
 
-func decodeNewPayloadRequest(buf []byte, version clparams.StateVersion) (*engine_types.ExecutionPayload, solid.HashListSSZ, common.Hash, *solid.TransactionsSSZ, error) {
+func decodeNewPayloadRequest(buf []byte, version clparams.StateVersion) (*engine_types.ExecutionPayload, solid.HashListSSZ, common.Hash, *solid.TransactionsSSZ, *solid.TransactionsSSZ, error) {
 	payload := engine_types.NewExecutionPayloadSSZ(version)
 	blobHashes := solid.NewHashList(sszMaxBlobHashes)
 	parentRoot := common.Hash{}
 	requests := &solid.TransactionsSSZ{}
-	err := ssz2.UnmarshalSSZ(buf, int(version), newPayloadRequestSchema(version, payload, blobHashes, &parentRoot, requests)...)
-	return payload, blobHashes, parentRoot, requests, err
+	inclusionList := &solid.TransactionsSSZ{}
+	err := ssz2.UnmarshalSSZ(buf, int(version), newPayloadRequestSchema(version, payload, blobHashes, &parentRoot, requests, inclusionList)...)
+	return payload, blobHashes, parentRoot, requests, inclusionList, err
 }
 
-func encodeNewPayloadRequest(version clparams.StateVersion, payload *engine_types.ExecutionPayload, blobHashes solid.HashListSSZ, parentRoot common.Hash, requests *solid.TransactionsSSZ) ([]byte, error) {
-	return ssz2.MarshalSSZ(nil, newPayloadRequestSchema(version, payload, blobHashes, &parentRoot, requests)...)
+func encodeNewPayloadRequest(version clparams.StateVersion, payload *engine_types.ExecutionPayload, blobHashes solid.HashListSSZ, parentRoot common.Hash, requests *solid.TransactionsSSZ, inclusionList *solid.TransactionsSSZ) ([]byte, error) {
+	return ssz2.MarshalSSZ(nil, newPayloadRequestSchema(version, payload, blobHashes, &parentRoot, requests, inclusionList)...)
 }
 
 func decodeForkchoiceRequest(buf []byte, version clparams.StateVersion) (engine_types.ForkChoiceState, *engine_types.PayloadAttributes, error) {
