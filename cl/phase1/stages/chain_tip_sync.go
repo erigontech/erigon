@@ -1177,7 +1177,8 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		}
 	} else if _, ok := cfg.forkChoice.GetBlock(root); !ok {
 		root = headRoot
-	} else if root != headRoot {
+	}
+	if root != headRoot {
 		headBlock, headOK := cfg.forkChoice.GetBlock(headRoot)
 		if headOK && headBlock != nil && cfg.forkChoice.HasEnvelope(headRoot) && !cfg.forkChoice.IsPayloadVerified(headRoot) {
 			selectedHead = &gloasVerificationItem{root: headRoot, block: headBlock}
@@ -1231,6 +1232,9 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
 		if err != nil {
 			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
+		}
+		if status == execution_client.PayloadStatusNone && ctx.Err() != nil {
+			return false
 		}
 		status, retained := recordGloasPayloadRetryResult(
 			cfg.forkChoice,
@@ -1407,6 +1411,12 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	}
 
 	log.Debug("[chainTipSync] execution engine is ready")
+	if canValidatePayloads && shouldRecoverMissingEnvelopes(cfg.beaconCfg, args.targetSlot) {
+		// Recheck persisted envelopes because payload verification state is not durable.
+		verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
+		verifyUnverifiedGloasPayloads(verifyCtx, cfg)
+		cancelVerify()
+	}
 
 	logger.Debug(
 		"waiting for blocks...",
