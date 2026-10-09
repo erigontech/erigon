@@ -218,7 +218,7 @@ func (a *ApiHandler) PostEthV1BeaconStatesBuilders(w http.ResponseWriter, r *htt
 	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("state not found"))
 	}
-	requestedState, err := a.forkchoiceStore.GetStateAtBlockRoot(root, true)
+	requestedState, err := a.forkchoiceStateAtBlockSlot(root, *slot)
 	if err != nil && !errors.Is(err, fork_graph.ErrStateNotFound) {
 		return nil, err
 	}
@@ -356,4 +356,14 @@ func (a *ApiHandler) PostEthV1BuilderRegisterValidator(w http.ResponseWriter, r 
 	}
 	log.Info("Registered new validator", "count", len(registerReq))
 	return newBeaconResponse(nil), nil
+}
+
+// forkchoiceStateAtBlockSlot returns the fork choice state of blockRoot, or nil
+// if that state was advanced past the block's slot, as an anchor state can be.
+func (a *ApiHandler) forkchoiceStateAtBlockSlot(blockRoot common.Hash, blockSlot uint64) (*state.CachingBeaconState, error) {
+	st, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
+	if err != nil || st == nil || st.Slot() != blockSlot {
+		return nil, err
+	}
+	return st, nil
 }
