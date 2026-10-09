@@ -1740,6 +1740,44 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	}
 }
 
+// The payload bodies serve each transaction in its binary (canonical EIP-2718) encoding, so a
+// typed transaction must lose the RLP string header it is stored under.
+func TestGetPayloadBodiesServeBinaryTransactions(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	to := common.Address{1}
+	gasPrice := *uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+	chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
+		commonTx := func() types.CommonTx {
+			return types.CommonTx{Nonce: b.TxNonce(m.Address), To: &to, GasLimit: params.TxGas, Value: *uint256.NewInt(1)}
+		}
+		var txn types.Transaction = &types.LegacyTx{CommonTx: commonTx(), GasPrice: gasPrice}
+		if i == 1 {
+			txn = &types.DynamicFeeTransaction{CommonTx: commonTx(), ChainID: *m.ChainConfig.ChainID, TipCap: gasPrice, FeeCap: gasPrice}
+		}
+		signed, signErr := types.SignTx(txn, *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(t, signErr)
+		b.AddTx(signed)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+	require.Equal(t, byte(types.DynamicFeeTxType), chainPack.Blocks[1].Transactions()[0].Type(),
+		"fixture: the typed branch is only exercised by a typed transaction")
+
+	for _, block := range chainPack.Blocks {
+		want, err := block.Body().BinaryRawBody()
+		require.NoError(t, err)
+		byHash, err := m.ExecModule.GetPayloadBodiesByHash(t.Context(), []common.Hash{block.Hash()})
+		require.NoError(t, err)
+		require.Len(t, byHash, 1)
+		require.Equal(t, want.Transactions, byHash[0].Transactions, "byHash block %d", block.NumberU64())
+		byRange, err := m.ExecModule.GetPayloadBodiesByRange(t.Context(), block.NumberU64(), 1)
+		require.NoError(t, err)
+		require.Len(t, byRange, 1)
+		require.Equal(t, want.Transactions, byRange[0].Transactions, "byRange block %d", block.NumberU64())
+	}
+}
+
 func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
 	t.Parallel()
 	m, chainPack := newPayloadBodiesBALTestChain(t, chain.AllProtocolChanges)

@@ -134,9 +134,11 @@ func TestVersionMapWriteView_StoragesChanged(t *testing.T) {
 	changed := accounts.InternKey(uint256.NewInt(0x22).Bytes32())
 	val100, val200 := *uint256.NewInt(100), *uint256.NewInt(200)
 
+	// Real execution stamps each write from the tx's own prior read: a write-back of
+	// the value the tx read is ValueUnchanged; a genuine update is ValueChanged.
 	keys := &WriteSet{}
-	keys.SetStorage(addr, unchanged, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: unchanged}, Val: val100})
-	keys.SetStorage(addr, changed, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: changed}, Val: val200})
+	keys.SetStorage(addr, unchanged, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: unchanged, valStatus: ValueUnchanged}, Val: val100})
+	keys.SetStorage(addr, changed, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: changed, valStatus: ValueChanged}, Val: val200})
 
 	vm := NewVersionMap(nil)
 	writeFor(vm, addr, StoragePath, unchanged, Version{TxIndex: priorTx}, val100, true)
@@ -161,75 +163,30 @@ func TestVersionMapWriteView_StoragesChanged(t *testing.T) {
 		}
 	}
 	require.Equal(t, map[accounts.StorageKey]uint256.Int{changed: val200}, got,
-		"only the slot whose value differs from the pre-tx origin survives")
+		"only the slot stamped changed survives; the ValueUnchanged no-op is dropped")
 
-	// A destruct between the origin and this tx wipes storage, so the write-back
-	// is not a no-op any more.
-	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: priorTx + 1}, true, true)
+	// After a destruct the tx reads zero, so writing the pre-destruct value back is
+	// stamped ValueCreated at write time (not Unchanged) — a real change that survives.
+	// The status rides on the write, so no vm re-derivation or destruct guard is needed.
+	revivedKeys := &WriteSet{}
+	revivedKeys.SetStorage(addr, unchanged, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: unchanged, valStatus: ValueCreated}, Val: val100})
 	revived := map[accounts.StorageKey]uint256.Int{}
-	for _, inner := range NewVersionMapWriteView(keys, vm, myTx).StoragesChanged() {
+	for _, inner := range NewVersionMapWriteView(revivedKeys, vm, myTx).StoragesChanged() {
 		for k, vw := range inner {
 			revived[k] = vw.Val
 		}
 	}
 	require.Equal(t, val100, revived[unchanged],
-		"after a destruct, writing the pre-destruct value back is a real change")
+		"a post-destruct write-back is stamped Created, so it survives")
 }
 
-// A destruct at the same tx index as the origin wipes that origin too: the read
-// paths only let a cell survive a destruct when it sits strictly above it, so
-// the filter must not treat an equal-index origin as the baseline.
-func TestVersionMapWriteView_DestructAtOriginIndexWipesIt(t *testing.T) {
+func TestStorageValueStatus(t *testing.T) {
 	t.Parallel()
-
-	const originTx, myTx = 2, 5
-	addr := getAddress(1)
-	key := accounts.InternKey(uint256.NewInt(0x11).Bytes32())
-	val100 := *uint256.NewInt(100)
-
-	keys := &WriteSet{}
-	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val100})
-
-	vm := NewVersionMap(nil)
-	writeFor(vm, addr, StoragePath, key, Version{TxIndex: originTx}, val100, true)
-	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: originTx}, true, true)
-	writeFor(vm, addr, StoragePath, key, Version{TxIndex: myTx}, val100, true)
-
-	got := map[accounts.StorageKey]uint256.Int{}
-	for _, inner := range NewVersionMapWriteView(keys, vm, myTx).StoragesChanged() {
-		for k, vw := range inner {
-			got[k] = vw.Val
-		}
-	}
-	require.Equal(t, map[accounts.StorageKey]uint256.Int{key: val100}, got,
-		"the origin shares the destruct's tx index, so it was wiped and the write-back is real")
-}
-
-// An account created in this tx has its storage wiped, so its origin is the
-// pre-creation snapshot: a write that happens to equal it is still a real
-// change and must survive the filter, with its value from the version map.
-func TestVersionMapWriteView_CreatedAccountKeepsEveryWrite(t *testing.T) {
-	t.Parallel()
-
-	const priorTx, myTx = 2, 5
-	addr := getAddress(2)
-	key := accounts.InternKey(uint256.NewInt(0x33).Bytes32())
-	val, keySetVal := *uint256.NewInt(100), *uint256.NewInt(1)
-
-	keys := &WriteSet{}
-	keys.SetStorage(addr, key, &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: keySetVal})
-	keys.SetCreateContract(addr, &VersionedWrite[bool]{WriteHeader: WriteHeader{Address: addr, Path: CreateContractPath}, Val: true})
-
-	vm := NewVersionMap(nil)
-	writeFor(vm, addr, StoragePath, key, Version{TxIndex: priorTx}, val, true)
-	writeFor(vm, addr, StoragePath, key, Version{TxIndex: myTx}, val, true)
-
-	got := map[accounts.StorageKey]uint256.Int{}
-	for _, inner := range NewVersionMapWriteView(keys, vm, myTx).StoragesChanged() {
-		for k, vw := range inner {
-			got[k] = vw.Val
-		}
-	}
-	require.Equal(t, map[accounts.StorageKey]uint256.Int{key: val}, got,
-		"a created account's storage write is never a no-op, and its value comes from the version map")
+	zero := uint256.Int{}
+	a, b := *uint256.NewInt(100), *uint256.NewInt(200)
+	require.Equal(t, ValueUnchanged, storageValueStatus(a, a), "value == prev")
+	require.Equal(t, ValueUnchanged, storageValueStatus(zero, zero), "absent stays absent")
+	require.Equal(t, ValueCreated, storageValueStatus(zero, a), "absent -> value")
+	require.Equal(t, ValueDeleted, storageValueStatus(a, zero), "value -> absent")
+	require.Equal(t, ValueChanged, storageValueStatus(a, b), "value -> different value")
 }

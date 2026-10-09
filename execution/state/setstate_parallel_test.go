@@ -170,5 +170,5 @@ func TestBaseStateReadConsistency_NoReResolve(t *testing.T) {
 	tr, ok := ibs.versionedReads.GetStorage(addr, key)
 	require.True(t, ok)
 	assert.Equal(t, 0, tr.Version.TxIndex)
-	assert.Equal(t, 0, tr.Version.Incarnation, "recorded dep must remain the consumed incarnation, not re-resolve to 0.1")
+	assert.Equal(t, 0, int(tr.Version.Incarnation), "recorded dep must remain the consumed incarnation, not re-resolve to 0.1")
 }

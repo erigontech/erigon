@@ -637,6 +637,7 @@ type WriteHeader struct {
 	Path        AccountPath
 	Reason      tracing.BalanceChangeReason
 	NonceReason tracing.NonceChangeReason
+	valStatus   valueStatus
 }
 
 func (h WriteHeader) String() string {
@@ -645,10 +646,14 @@ func (h WriteHeader) String() string {
 
 // VersionedWrite is a single versioned write.  The per-path map it lives
 // in fixes the address (map key), path — and, for storage, the slot key.
-// The struct carries the header and the path-typed value.
+// The struct carries the header and the path-typed value. orig is the committed
+// value the tx first read for this key, captured on the first write and held across
+// re-writes so valStatus reflects the net transition (origin -> final), not the last
+// step of an intra-tx oscillation.
 type VersionedWrite[T any] struct {
 	WriteHeader
-	Val T
+	Val  T
+	orig T
 }
 
 func cloneVW[T any](w *VersionedWrite[T]) *VersionedWrite[T] {
@@ -1376,8 +1381,8 @@ func (ws *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[acc
 	return maps.All(ws.codeHash)
 }
 
-// StoragesChanged cannot filter: a plain WriteSet carries no version map to
-// compare a write against, so it yields every write, intra-tx no-ops included.
+// StoragesChanged has nothing to filter: a plain WriteSet carries no version map
+// to compare a write against, so its writes are already the changed ones.
 func (ws *WriteSet) StoragesChanged() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	return ws.Storages()
 }
@@ -1555,6 +1560,10 @@ func (ws *WriteSet) updateStorage(addr accounts.Address, key accounts.StorageKey
 	if inner := ws.storage[addr]; inner != nil {
 		if vw, ok := inner[key]; ok {
 			vw.Val = val
+			// A journal revert restores an earlier value; re-stamp against the
+			// captured origin so valStatus tracks the restored value, not the
+			// reverted write it replaced.
+			vw.valStatus = storageValueStatus(vw.orig, val)
 		}
 	}
 }
@@ -1775,18 +1784,7 @@ func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.
 
 // applyVersionedUpdates overlays versionMap field cells onto account, so field-only updates from prior txs are not missed when only a subset of fields was read.
 func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, account accounts.Account) accounts.Account {
-	if update, ok := versionedUpdateBalance(vr.versionMap, address, vr.txIndex); ok {
-		account.Balance = update
-	}
-	if update, ok := versionedUpdateNonce(vr.versionMap, address, vr.txIndex); ok {
-		account.Nonce = update
-	}
-	if update, ok := versionedUpdateIncarnation(vr.versionMap, address, vr.txIndex); ok {
-		account.Incarnation = update
-	}
-	if update, ok := versionedUpdateCodeHash(vr.versionMap, address, vr.txIndex); ok {
-		account.CodeHash = update
-	}
+	vr.versionMap.applySubFieldWrites(address, vr.txIndex, &account)
 	return account
 }
 
@@ -2252,7 +2250,7 @@ func (io *VersionedIO) ReadSetIncarnation(txnIdx int) int {
 		return -1
 	}
 	if io.inputs[txnIdx+1].readSet.Len() > 0 {
-		return io.inputs[txnIdx+1].incarnation
+		return int(io.inputs[txnIdx+1].incarnation)
 	}
 	return 0
 }
@@ -2871,7 +2869,7 @@ func (account *accountState) removeStorageRead(slot accounts.StorageKey) {
 }
 
 type versionedReadSet struct {
-	incarnation int
+	incarnation Incarnation
 	readSet     ReadSet
 }
 

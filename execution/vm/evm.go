@@ -597,6 +597,10 @@ func (evm *EVM) prepareCreate(caller accounts.Address, address accounts.Address,
 }
 
 func (evm *EVM) hasCreateCollision(address accounts.Address) (bool, error) {
+	// An absent account has no nonce or code.
+	if exists, err := evm.intraBlockState.Exist(address); err != nil || !exists {
+		return false, err
+	}
 	targetCodeHash, err := evm.intraBlockState.GetCodeHash(address)
 	if err != nil {
 		return false, err

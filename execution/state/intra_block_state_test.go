@@ -482,6 +482,69 @@ func TestCloseIsIdempotent(t *testing.T) {
 	require.NotPanics(t, state.Close)
 }
 
+func TestValStatus_OscillationNetVsOrigin(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
+	s.txIndex = 1
+
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	a, b := u256.U64(100), u256.U64(200)
+
+	// Origin is 0 (nothing committed). A→B→0 nets 0→0: the intermediate writes must
+	// not fool the stamp into Changed — it classifies against the captured origin.
+	back := accounts.InternKey(common.HexToHash("0x01"))
+	require.NoError(t, s.SetState(addr, back, a))
+	require.NoError(t, s.SetState(addr, back, b))
+	require.NoError(t, s.SetState(addr, back, uint256.Int{}))
+	vw, ok := s.VersionedWrites().GetStorage(addr, back)
+	require.True(t, ok)
+	require.Equal(t, ValueUnchanged, vw.valStatus, "net 0->0 is Unchanged despite A,B in between")
+
+	// A→B→A nets 0→A: a real create, not skipped.
+	keep := accounts.InternKey(common.HexToHash("0x02"))
+	require.NoError(t, s.SetState(addr, keep, a))
+	require.NoError(t, s.SetState(addr, keep, b))
+	require.NoError(t, s.SetState(addr, keep, a))
+	vw2, ok := s.VersionedWrites().GetStorage(addr, keep)
+	require.True(t, ok)
+	require.Equal(t, ValueCreated, vw2.valStatus, "net 0->A is Created")
+}
+
+func TestValStatus_RevertRestamps(t *testing.T) {
+	t.Parallel()
+
+	_, tx, domains := NewTestRwTx(t)
+	mvhm := NewVersionMap(nil)
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	s := NewWithVersionMap(reader, mvhm)
+	defer s.Close()
+	s.txIndex = 1
+
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.InternKey(common.HexToHash("0x01"))
+	a := u256.U64(100)
+
+	require.NoError(t, s.SetState(addr, key, a)) // origin 0 -> A: Created
+	snap := s.PushSnapshot()
+	require.NoError(t, s.SetState(addr, key, uint256.Int{})) // A -> 0 (== origin): Unchanged
+	vw, ok := s.VersionedWrites().GetStorage(addr, key)
+	require.True(t, ok)
+	require.Equal(t, ValueUnchanged, vw.valStatus)
+
+	s.RevertToSnapshot(snap, nil)
+	// The value is A again; valStatus must be re-stamped to Created, not left at the
+	// stale Unchanged from the reverted write (which would wrongly skip the write).
+	vw, ok = s.VersionedWrites().GetStorage(addr, key)
+	require.True(t, ok)
+	require.Equal(t, a, vw.Val)
+	require.Equal(t, ValueCreated, vw.valStatus)
+}
+
 func TestVersionMapReadWriteDelete(t *testing.T) {
 	t.Parallel()
 

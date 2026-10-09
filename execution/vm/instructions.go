@@ -1565,6 +1565,10 @@ func opPush2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 // make push instruction function
 func makePush(size uint64, pushByteSize int) executionFunc {
 	return func(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
+		if end := pc + 1 + size; end <= uint64(len(scope.Contract.Code)) {
+			scope.Stack.pushRef().SetBytes(scope.Contract.Code[pc+1 : end])
+			return pc + size, nil, nil
+		}
 		codeLen := len(scope.Contract.Code)
 
 		startMin := min(int(pc+1), codeLen)
