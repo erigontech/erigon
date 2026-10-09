@@ -145,15 +145,19 @@ type BlobCellsAndProofsV1 struct {
 	Proofs    []*hexutil.Bytes `json:"proofs"`
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type ExecutionPayloadBody
+
 type ExecutionPayloadBody struct {
-	Transactions []hexutil.Bytes     `json:"transactions"`
-	Withdrawals  []*types.Withdrawal `json:"withdrawals"`
+	Transactions []hexutil.Bytes   `json:"transactions" ethjson:"datalist"`
+	Withdrawals  types.Withdrawals `json:"withdrawals" ethjson:"objects"`
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type ExecutionPayloadBodyV2
+
 type ExecutionPayloadBodyV2 struct {
-	Transactions    []hexutil.Bytes     `json:"transactions"`
-	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
-	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
+	Transactions    []hexutil.Bytes   `json:"transactions" ethjson:"datalist"`
+	Withdrawals     types.Withdrawals `json:"withdrawals" ethjson:"objects"`
+	BlockAccessList *hexutil.Bytes    `json:"blockAccessList" ethjson:"data"`
 }
 
 type PayloadStatus struct {

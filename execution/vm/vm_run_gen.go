@@ -295,6 +295,31 @@ run:
 					pc++
 					continue run
 				}
+			case PUSH3, PUSH4, PUSH5, PUSH6, PUSH7, PUSH8, PUSH9, PUSH10, PUSH11, PUSH12, PUSH13, PUSH14, PUSH15, PUSH16, PUSH17, PUSH18, PUSH19, PUSH20, PUSH21, PUSH22, PUSH23, PUSH24, PUSH25, PUSH26, PUSH27, PUSH28, PUSH29, PUSH30, PUSH31, PUSH32:
+				if sLen < stackLimit && gasLeft >= GasFastestStep {
+					gasLeft -= GasFastestStep
+					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(callContext.Contract.Code)) {
+						callContext.Stack.pushRef().SetBytes(callContext.Contract.Code[pc+1 : end])
+						pc = pc + uint64(op-PUSH0)
+						pc++
+						continue run
+					}
+					codeLen := len(callContext.Contract.Code)
+
+					startMin := min(int(pc+1), codeLen)
+					endMin := min(startMin+int(op-PUSH0), codeLen)
+
+					integer := callContext.Stack.pushRef()
+					integer.SetBytes(callContext.Contract.Code[startMin:endMin])
+
+					if missing := int(op-PUSH0) - (endMin - startMin); missing > 0 {
+						integer.ILsh(uint(8 * missing))
+					}
+
+					pc += uint64(op - PUSH0)
+					pc++
+					continue run
+				}
 			case DUP1:
 				if sLen >= 1 && sLen < stackLimit && gasLeft >= GasFastestStep {
 					gasLeft -= GasFastestStep

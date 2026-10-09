@@ -1809,7 +1809,7 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 		}
 		bumpInc := func() bool {
 			tv.version.Incarnation++
-			if tv.version.Incarnation > len(be.tasks)+8 {
+			if int(tv.version.Incarnation) > len(be.tasks)+8 {
 				// Failing to converge is the executor giving up, not a block-validity
 				// verdict — route it operationally (like the panic handler above), never
 				// as ErrInvalidBlock, so a valid block is not reported INVALID to the CL.
@@ -2462,7 +2462,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		ev.statsMutex.Lock()
 		ev.stats[ev.version.TxIndex] = ExecutionStat{
 			TxIdx:       ev.version.TxIndex,
-			Incarnation: ev.version.Incarnation,
+			Incarnation: int(ev.version.Incarnation),
 			Duration:    end.Sub(start),
 		}
 		ev.statsMutex.Unlock()
