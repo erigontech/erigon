@@ -1518,6 +1518,24 @@ func TestNormalizeWriteSet_PostSelfDestructZeroStorageDroppedViaHistory(t *testi
 	assert.Equal(t, *uint256.NewInt(77), s.Val)
 }
 
+// A destruct also wipes the slots its own tx wrote: a re-creation that writes
+// the same value back is a change, not a no-op.
+func TestNormalizeWriteSet_RecreateWritesBackSlotOfDestroyingTx(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x3a})
+	slot := accounts.InternKey([32]byte{0x01})
+	vm.FlushVersionedWrites(newWS().
+		stor(addr, slot, state.Version{TxIndex: 2, Incarnation: 0}, *uint256.NewInt(77)).
+		selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).
+		build(), true)
+
+	writeBack := newWS().stor(addr, slot, state.Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(77)).build()
+	res, _ := writeBack.Normalize(vm, 3, 0, nil, nil, true, false, false)
+	s, ok := res.GetStorage(addr, slot)
+	require.True(t, ok, "the write-back over the wiped slot must survive")
+	assert.Equal(t, *uint256.NewInt(77), s.Val)
+}
+
 // Backfill after an earlier-tx self-destruct: when THIS tx re-creates via
 // CREATE(2) (CreateContractPath=true), the missing account fields are the
 // post-destruction zero defaults — NOT the stale pre-SD nonce/codeHash still in
