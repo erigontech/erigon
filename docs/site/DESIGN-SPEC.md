@@ -18,7 +18,7 @@ Complete specification of every customization applied to this site relative to a
 | `typescript` | ~6.0.2 |
 | `@easyops-cn/docusaurus-search-local` | ^0.55.1 |
 | `prism-react-renderer` | ^2.3.0 |
-| Node requirement | `>=20.0` |
+| Node requirement | `>=24.0` |
 
 ---
 
