@@ -58,10 +58,11 @@ func (a *ApiHandler) resolveProductionPayloadSource(ctx context.Context, baseSta
 	return a.awaitPendingParentPayload(ctx, baseState, baseBlockRoot, targetSlot, stateVersion, source), nil
 }
 
-// awaitGloasPayloadSource re-resolves the payload source until it is decided or the deadline
-// passes. The retry runs on its own goroutine, one at a time, so a retry that blocks cannot
-// hold the wait past the cutoff; the source is resolved on the caller's goroutine, which the
-// proposal needs after the wait in any case. A resolve error keeps the last resolved source.
+// awaitGloasPayloadSource starts one retry and re-resolves the payload source until it is
+// decided or the deadline passes. Later availability changes trigger their own retries. The
+// retry runs on its own goroutine, so a retry that blocks cannot hold the wait past the cutoff;
+// the source is resolved on the caller's goroutine, which the proposal needs after the wait in
+// any case. A resolve error keeps the last resolved source.
 func awaitGloasPayloadSource(
 	ctx context.Context,
 	deadline time.Time,
@@ -74,14 +75,11 @@ func awaitGloasPayloadSource(
 	defer ticker.Stop()
 	cutoff := time.NewTimer(time.Until(deadline))
 	defer cutoff.Stop()
-	var retryDone chan struct{}
-	startRetry := func() {
-		retryDone = make(chan struct{})
-		go func(done chan struct{}) {
-			defer close(done)
-			retry()
-		}(retryDone)
-	}
+	retryDone := make(chan struct{})
+	go func() {
+		defer close(retryDone)
+		retry()
+	}()
 	// A decision that landed during the last poll window is still picked up.
 	resolveLast := func() executionPayloadSource {
 		if source, err := resolve(); err == nil {
@@ -89,15 +87,11 @@ func awaitGloasPayloadSource(
 		}
 		return last
 	}
-	startRetry()
 	for {
 		select {
 		case <-retryDone:
 			retryDone = nil
 		case <-ticker.C:
-			if retryDone == nil {
-				startRetry()
-			}
 		case <-ctx.Done():
 			return resolveLast()
 		case <-cutoff.C:
@@ -116,8 +110,8 @@ func awaitGloasPayloadSource(
 
 // awaitPendingParentPayload gives the parent's payload a bounded chance to be applied before
 // the proposal falls back to the EMPTY parent. A pending envelope is only re-applied by an
-// explicit retry, so the wait keeps one running; each retry owns a context that outlives the
-// deadline by one retry budget, so one in flight at the cutoff is not cut short.
+// explicit retry, so the wait starts one; it owns a context that outlives the deadline by one
+// retry budget, so a retry in flight at the cutoff is not cut short.
 func (a *ApiHandler) awaitPendingParentPayload(
 	ctx context.Context,
 	baseState *state.CachingBeaconState,
