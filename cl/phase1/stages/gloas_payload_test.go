@@ -1481,6 +1481,11 @@ func TestProcessDownloadedGloasEnvelopeRecordsNotValidatedWhenNotValidating(t *t
 	require.Empty(t, store.recorded)
 	require.Empty(t, store.requeued)
 
+	// None is no verdict: it leaves the payload unavailable, so it moves to NotValidated.
+	store = &envelopeReadTestStore{known: map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNone}}
+	require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, &gloasCollectorTest{}, block, root, envelope, true, false))
+	require.Equal(t, map[common.Hash]execution_client.PayloadStatus{root: execution_client.PayloadStatusNotValidated}, store.recorded)
+
 	// When the apply validated with the EL, the verdict is already recorded; nothing is added.
 	store = &envelopeReadTestStore{}
 	require.NoError(t, processDownloadedGloasEnvelope(t.Context(), log.Root(), store, &gloasCollectorTest{}, block, root, envelope, false, true))
