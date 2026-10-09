@@ -10,7 +10,6 @@ import (
 )
 
 func TestMultiEncodingSeqBuilder(t *testing.T) {
-
 	t.Run("singleton sequence", func(t *testing.T) {
 		builder := NewBuilder(1000, 1, 1005)
 		builder.AddOffset(1005)
@@ -60,7 +59,8 @@ func TestMultiEncodingSeqBuilder(t *testing.T) {
 				"0000001D"+
 				"0000001F"+
 				"00000021"+
-				"00000023"), b)
+				"00000023",
+		), b)
 	})
 
 	t.Run("large sequences must use rebased elias fano", func(t *testing.T) {

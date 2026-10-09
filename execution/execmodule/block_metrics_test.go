@@ -142,7 +142,11 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 	chainResult, err := m.GenerateChain(2, sendThenDeploy(t, m, privKey, senderAddr, 1_000))
 	require.NoError(t, err)
 
-	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainResult.Blocks))
+	execStageMs := make(map[uint64]float64, len(chainResult.Blocks))
+	for _, block := range chainResult.Blocks {
+		require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), []*types.Block{block}))
+		execStageMs[block.NumberU64()] = float64(m.ForkValidator.LastValidationExecStageTiming().Nanoseconds()) / 1e6
+	}
 
 	records := collector.records(t)
 	require.Len(t, records, len(chainResult.Blocks),
@@ -159,10 +163,14 @@ func TestSlowBlockMetricsAreEmittedForValidatedBlocks(t *testing.T) {
 		require.Contains(t, timing, "state_hash_ms")
 		assert.GreaterOrEqual(t, timing["total_ms"].(float64), timing["state_hash_ms"].(float64))
 
-		if block["gas_used"].(float64) > 0 {
-			assert.Positive(t, timing["execution_ms"].(float64),
-				"commitment is nested inside the validation span on the single-block path, so the subtraction never clamps")
-			assert.Positive(t, rec["throughput"].(map[string]any)["mgas_per_sec"].(float64),
+		execStage := execStageMs[uint64(block["number"].(float64))]
+		stateHashMs := timing["state_hash_ms"].(float64)
+		assert.GreaterOrEqual(t, execStage, stateHashMs,
+			"commitment is nested inside the exec stage span on the single-block path")
+		assert.InDelta(t, execStage, timing["execution_ms"].(float64)+stateHashMs, 1e-6,
+			"so the subtraction never clamps")
+		if executionMs := timing["execution_ms"].(float64); executionMs > 0 {
+			assert.InDelta(t, block["gas_used"].(float64)/1e6/(executionMs/1e3), rec["throughput"].(map[string]any)["mgas_per_sec"].(float64), 0.0051,
 				"a zero rate here would be indistinguishable from a stalled block")
 		}
 

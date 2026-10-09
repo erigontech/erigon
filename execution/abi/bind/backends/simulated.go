@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -97,7 +98,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	default:
 		engine = ethash.NewFaker()
 	}
-	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
+	// SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithEngine(engine))
 
 	backend := &SimulatedBackend{
@@ -635,12 +636,13 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (
 	defer b.mu.Unlock()
 
 	// Determine the lowest and highest possible gas limits to binary search in between
+	minTxGas := mdgas.MinTxGas(b.m.ChainConfig.IsAmsterdam(b.pendingBlock.Time()))
 	var (
-		lo     = params.TxGas - 1
+		lo     = minTxGas - 1
 		hi     uint64
 		gasCap uint64
 	)
-	if call.Gas >= params.TxGas {
+	if call.Gas >= minTxGas {
 		hi = call.Gas
 	} else {
 		hi = b.pendingBlock.GasLimit()
@@ -698,7 +700,6 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
 		failed, _, err := executable(mid)
-
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigned. Return the error directly, don't struggle any more
@@ -810,7 +811,8 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, txn,
 		b.pendingGasUsed,
-		vm.Config{}); err != nil {
+		vm.Config{},
+	); err != nil {
 		return err
 	}
 	protocol.SetGasUsed(b.pendingHeader, b.pendingGasUsed)
@@ -899,6 +901,7 @@ func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value
 func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
 func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
 func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
+func (m callMsg) DynamicFeeArgs() bool                  { return false }
 func (m callMsg) IsFree() bool                          { return false }
 func (m callMsg) SetIsFree(_ bool)                      {}
 

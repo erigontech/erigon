@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 
@@ -125,7 +126,7 @@ func TestTraceCallUsesCommittedState(t *testing.T) {
 	result, err := api.Call(m.Ctx, TraceCallParam{
 		From: &bankAddress,
 		To:   &contractAddress,
-		Data: input,
+		Data: &input,
 	}, []string{TraceTypeTrace}, &latest, nil)
 	require.NoError(t, err)
 
@@ -202,19 +203,11 @@ func TestAdHocTracesRejectNonCanonicalBlockHash(t *testing.T) {
 
 func TestTraceFilterRejectsNonCanonicalBlockHash(t *testing.T) {
 	base, m, _ := newOverlayAheadTestAPI(t)
-	sideHeader := writeNonCanonicalTestBlock(t, m)
-	selector := rpc.BlockNumberOrHashWithHash(sideHeader.Hash(), false)
+	sideHash := writeNonCanonicalTestBlock(t, m).Hash()
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
 
-	t.Run("fromBlock", func(t *testing.T) {
-		err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &selector}, nil, nil, jsonstream.New(io.Discard))
-		require.ErrorContains(t, err, "is not currently canonical")
-	})
-
-	t.Run("toBlock", func(t *testing.T) {
-		err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &selector}, nil, nil, jsonstream.New(io.Discard))
-		require.ErrorContains(t, err, "is not currently canonical")
-	})
+	err := api.Filter(m.Ctx, TraceFilterRequest{BlockHash: &sideHash}, nil, nil, jsonstream.New(io.Discard))
+	requireResourceNotFound(t, err, fmt.Sprintf("block not found: %x", sideHash))
 }
 
 func TestTraceBlockUsesCommittedBlockBody(t *testing.T) {
@@ -287,8 +280,7 @@ func TestSimulateV1IgnoresNewerSharedBranchCache(t *testing.T) {
 	baseline, err := api.SimulateV1(m.Ctx, request, latest)
 	require.NoError(t, err)
 	require.Len(t, baseline, 1)
-	expectedRoot, ok := baseline[0]["stateRoot"].(common.Hash)
-	require.True(t, ok)
+	expectedRoot := baseline[0].StateRoot
 
 	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
@@ -313,7 +305,7 @@ func TestSimulateV1IgnoresNewerSharedBranchCache(t *testing.T) {
 	result, err := api.SimulateV1(m.Ctx, request, latest)
 	require.NoError(t, err)
 	require.Len(t, result, 1)
-	require.Equal(t, expectedRoot, result[0]["stateRoot"])
+	require.Equal(t, expectedRoot, result[0].StateRoot)
 }
 
 func TestExecutionWitnessRejectsNonCanonicalBlockHash(t *testing.T) {

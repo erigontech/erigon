@@ -75,6 +75,12 @@ type historyDownloader interface {
 	SetThrottle(time.Duration)
 }
 
+type blobHistoryDownloader interface {
+	SetHeadSlot(uint64)
+	SetNotifyBlobBackfilled(*network.BlobBackfilledNotifier)
+	Start()
+}
+
 const logIntervalTime = 30 * time.Second
 
 func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger, forkchoiceStore forkchoice.ForkChoiceStorage, blobDownloader *network.BlobHistoryDownloader) StageHistoryReconstructionCfg {
@@ -146,7 +152,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	cfg.downloader.SetBlockReader(cfg.blockReader)
 	cfg.downloader.SetOnInitialGloasBlock(blockRoot, func(block *cltypes.SignedBeaconBlock) error {
 		return cfg.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
-			return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, true)
+			return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true)
 		})
 	})
 
@@ -203,7 +209,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		isInCLSnapshots := cfg.sn.SegmentsMax() > blk.Block.Slot
 		// Skip blocks that are already in the snapshots
 		if !isInCLSnapshots {
-			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(tx, blk, true); err != nil {
 				return false, err
 			}
 			// [New in Gloas:EIP7732] WriteBeaconBlockAndIndicies skips EL indices for GLOAS blocks
@@ -425,11 +431,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			cfg.logger.Info("Full backfilling finished")
 		}
 
-		if cfg.blobDownloader != nil {
-			cfg.blobDownloader.SetHeadSlot(cfg.startingSlot + 1)
-			cfg.blobDownloader.SetNotifyBlobBackfilled(cfg.antiquary.NotifyBlobBackfilled)
-			cfg.blobDownloader.Start()
-		}
+		startBlobHistoryDownload(
+			cfg.downloader.Finished(),
+			cfg.blobDownloader,
+			cfg.startingSlot+1,
+			cfg.antiquary.NotifyBlobBackfilled,
+		)
 	}()
 	if err := waitForHistoryDownload(ctx, cfg, destinationSlotForEL, historyDone); err != nil {
 		return err
@@ -440,7 +447,34 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	cfg.logger.Info("Ready to insert history, waiting for sync cycle to finish")
 
-	return nil
+	return waitForHistoryCompletion(ctx, finishCh, cfg.waitForAllRoutines)
+}
+
+func startBlobHistoryDownload(blockHistoryFinished bool, downloader blobHistoryDownloader, headSlot uint64, notify func(bool)) {
+	if !blockHistoryFinished || downloader == nil {
+		return
+	}
+	if configured, ok := downloader.(*network.BlobHistoryDownloader); ok && configured == nil {
+		return
+	}
+	downloader.SetHeadSlot(headSlot)
+	downloader.SetNotifyBlobBackfilled(network.NewBlobBackfilledNotifier(notify))
+	downloader.Start()
+}
+
+func waitForHistoryCompletion(ctx context.Context, finishCh <-chan struct{}, waitForAllRoutines bool) error {
+	if !waitForAllRoutines {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case <-finishCh:
+		return ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func waitForHistoryDownload(ctx context.Context, cfg StageHistoryReconstructionCfg, destinationSlotForEL uint64, historyDone <-chan error) error {

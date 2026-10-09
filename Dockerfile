@@ -16,7 +16,7 @@
 ##
 ##   5. DOCKER_BINARIES='erigon downloader rpcdaemon' make docker
 
-ARG BUILDER_IMAGE="golang:1.26-trixie" \
+ARG BUILDER_IMAGE="golang:1.27-trixie" \
     TARGET_BASE_IMAGE="debian:13-slim" \
     BINARIES="erigon" \
     BUILD_DBTOOLS="false" \
@@ -63,11 +63,8 @@ RUN xx-apt-get install -y libc6-dev g++ && \
 COPY . /erigon/
 
 RUN echo "DEBUG: building on ${TARGETARCH}${TARGETVARIANT}" && \
-    if [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "x" ]; then \
-        echo "DEBUG: detected architecture AMD64v1"; \
-        export CPU_FLAGS="GOAMD64_VERSION=v1 GOARCH=amd64"; \
-    elif [ "x${TARGETARCH}" == "xamd64" ] && [ "x${TARGETVARIANT}" == "xv2" ]; then \
-        echo "DEBUG: detected architecture AMD64v2"; \
+    if [ "x${TARGETARCH}" == "xamd64" ]; then \
+        echo "DEBUG: detected architecture AMD64, building for x86-64-v2"; \
         export CPU_FLAGS="GOAMD64_VERSION=v2 GOARCH=amd64"; \
     elif [ "x${TARGETARCH}" == "xarm64" ]; then \
         echo "DEBUG: detected architecture ARM64"; \

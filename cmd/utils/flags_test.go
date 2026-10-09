@@ -110,6 +110,47 @@ func TestRpcGasCap_UserValuePreserved(t *testing.T) {
 	require.NoError(t, app.Run(context.Background(), []string{"erigon", "--rpc.gascap=30000000"}))
 }
 
+func TestCaplinDiscoveryPortsCanBeConfiguredIndependently(t *testing.T) {
+	discoveryPort := CaplinDiscoveryPortFlag
+	tcpPort := CaplinDiscoveryTCPPortFlag
+	quicPort := CaplinDiscoveryQUICPortFlag
+	cmd := &cli.Command{Flags: []cli.Flag{&discoveryPort, &tcpPort, &quicPort}}
+	cmd.Action = func(_ context.Context, cmd *cli.Command) error {
+		require.Equal(t, uint64(9000), cmd.Uint64(CaplinDiscoveryPortFlag.Name))
+		require.Equal(t, uint64(9000), cmd.Uint64(CaplinDiscoveryTCPPortFlag.Name))
+		require.Equal(t, uint64(9001), cmd.Uint64(CaplinDiscoveryQUICPortFlag.Name))
+		return nil
+	}
+
+	require.NoError(t, cmd.Run(t.Context(), []string{
+		"erigon",
+		"--caplin.discovery.port=9000",
+		"--caplin.discovery.tcpport=9000",
+		"--caplin.discovery.quicport=9001",
+	}))
+}
+
+// The default QUIC port must not collide with the default discv5 UDP port (4000) or
+// the default TCP port (4001) under the upstream ethereum-package Caplin launcher,
+// which starts Caplin with --sentinel.tcp.port=4001 --discovery.port=4001.
+func TestCaplinDiscoveryQUICPortDefaultAvoidsUpstreamLauncherConflict(t *testing.T) {
+	require.Equal(t, uint64(4002), CaplinDiscoveryQUICPortFlag.Value)
+	require.NotEqual(t, CaplinDiscoveryPortFlag.Value, CaplinDiscoveryQUICPortFlag.Value)
+	require.NotEqual(t, CaplinDiscoveryTCPPortFlag.Value, CaplinDiscoveryQUICPortFlag.Value)
+}
+
+func TestCaplinDisableQUICFlagDefaultsFalseAndCanBeSet(t *testing.T) {
+	require.False(t, CaplinDisableQUICFlag.Value)
+
+	disableQUIC := CaplinDisableQUICFlag
+	cmd := &cli.Command{Flags: []cli.Flag{&disableQUIC}}
+	cmd.Action = func(_ context.Context, cmd *cli.Command) error {
+		require.True(t, cmd.Bool(CaplinDisableQUICFlag.Name))
+		return nil
+	}
+	require.NoError(t, cmd.Run(t.Context(), []string{"erigon", "--caplin.quic.disable"}))
+}
+
 func TestResolveChainName(t *testing.T) {
 	tests := []struct {
 		name string

@@ -52,13 +52,6 @@ func WithTesting(t *testing.T) func(*Harness) error {
 	}
 }
 
-func WithTests(name string, xs []Test) func(*Harness) error {
-	return func(h *Harness) error {
-		h.tests[name] = xs
-		return nil
-	}
-}
-
 func WithHandler(name string, handler http.Handler) func(*Harness) error {
 	return func(h *Harness) error {
 		h.handlers[name] = handler
@@ -346,18 +339,18 @@ type Source struct {
 
 func (s *Source) Execute(ctx context.Context) (json.RawMessage, int, error) {
 	if s.Raw != nil {
-		return s.executeRaw(ctx)
+		return s.executeRaw()
 	}
 	if s.File != nil {
-		return s.executeFile(ctx)
+		return s.executeFile()
 	}
 	if s.Remote != nil || s.Handler != nil {
 		return s.executeRemote(ctx)
 	}
 	if s.Data != nil {
-		return s.executeData(ctx)
+		return s.executeData()
 	}
-	return s.executeEmpty(ctx)
+	return s.executeEmpty()
 }
 
 func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error) {
@@ -430,7 +423,7 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 	return json.RawMessage(out), 200, nil
 }
 
-func (s *Source) executeData(ctx context.Context) (json.RawMessage, int, error) {
+func (s *Source) executeData() (json.RawMessage, int, error) {
 	ans, err := json.Marshal(s.Data)
 	if err != nil {
 		return nil, 400, nil
@@ -438,7 +431,7 @@ func (s *Source) executeData(ctx context.Context) (json.RawMessage, int, error) 
 	return ans, 200, nil
 }
 
-func (s *Source) executeFile(ctx context.Context) (json.RawMessage, int, error) {
+func (s *Source) executeFile() (json.RawMessage, int, error) {
 	afs, ok := s.h.fss[s.Fs]
 	if !ok {
 		return nil, 404, fmt.Errorf("filesystem %s not defined", s.Fs)
@@ -460,10 +453,10 @@ func (s *Source) executeFile(ctx context.Context) (json.RawMessage, int, error) 
 	return json.RawMessage(fileBytes), 200, nil
 }
 
-func (s *Source) executeRaw(ctx context.Context) (json.RawMessage, int, error) {
+func (s *Source) executeRaw() (json.RawMessage, int, error) {
 	return json.RawMessage(*s.Raw), 200, nil
 }
 
-func (s *Source) executeEmpty(ctx context.Context) (json.RawMessage, int, error) {
+func (s *Source) executeEmpty() (json.RawMessage, int, error) {
 	return []byte("{}"), 200, nil
 }

@@ -71,7 +71,7 @@ func TestAggregateAndProofServiceRejectsMalformedNestedInput(t *testing.T) {
 	}
 }
 
-func getAggregateAndProofAndState(t *testing.T) (*SignedAggregateAndProofForGossip, *state.CachingBeaconState) {
+func getAggregateAndProofAndState() (*SignedAggregateAndProofForGossip, *state.CachingBeaconState) {
 	_, _, s := tests.GetBellatrixRandom()
 	br, _ := s.BlockRoot()
 	checkpoint := s.CurrentJustifiedCheckpoint()
@@ -124,7 +124,7 @@ func TestAggregateAndProofServiceUnsynced(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, _ := getAggregateAndProofAndState(t)
+	agg, _ := getAggregateAndProofAndState()
 
 	aggService, _, _ := setupAggregateAndProofTest(t)
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
@@ -134,7 +134,7 @@ func TestAggregateAndProofServiceHighSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = 9998898
 
 	aggService, sd, _ := setupAggregateAndProofTest(t)
@@ -146,7 +146,7 @@ func TestAggregateAndProofServiceBadEpoch(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = 0
 
 	aggService, sd, _ := setupAggregateAndProofTest(t)
@@ -158,7 +158,7 @@ func TestAggregateAndProofServiceNotAncestor(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -170,7 +170,7 @@ func TestAggregateAndProofServiceNoHeader(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -183,7 +183,7 @@ func TestAggregateAndProofInvalidEpoch(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -198,7 +198,7 @@ func TestAggregateAndProofInvalidCommittee(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -213,7 +213,7 @@ func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	nextEpochSlot := s.Slot() + clparams.MainnetBeaconConfig.SlotsPerEpoch
 	nextEpoch := nextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = nextEpochSlot
@@ -240,7 +240,7 @@ func TestAggregateAndProofRejectsNextEpochBeforeForkchoiceHasSeenIt(t *testing.T
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	nextEpochSlot := s.Slot() + clparams.MainnetBeaconConfig.SlotsPerEpoch
 	nextEpoch := nextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = nextEpochSlot
@@ -260,7 +260,7 @@ func TestAggregateAndProofRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt(t 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	beyondNextEpochSlot := s.Slot() + 2*clparams.MainnetBeaconConfig.SlotsPerEpoch
 	beyondNextEpoch := beyondNextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = beyondNextEpochSlot
@@ -280,7 +280,7 @@ func TestAggregateAndProofAncestorMissing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -294,7 +294,7 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -508,7 +508,7 @@ func TestAggregateAndProofGloasAllowIndex1WhenSlotsDiffer(t *testing.T) {
 	}
 
 	// Set envelope as seen/validated (required for index=1)
-	fcu.Envelopes[blockRoot] = &cltypes.SignedExecutionPayloadEnvelope{}
+	fcu.SetEnvelope(blockRoot, &cltypes.SignedExecutionPayloadEnvelope{})
 	fcu.VerifiedPayloads = map[common.Hash]bool{blockRoot: true}
 
 	// Should pass (index=1 is allowed when slots differ and envelope exists)
@@ -588,9 +588,6 @@ func TestAggregateAndProofGloasIgnoreIndex1NoEnvelope(t *testing.T) {
 		Slot: blockSlot,
 	}
 
-	// Do NOT set envelope — simulate payload not yet seen
-	// fcu.Envelopes is empty
-
 	err := aggService.ProcessMessage(context.Background(), nil, agg)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrIgnore)
@@ -621,12 +618,12 @@ func TestAggregateAndProofGloasIgnoreIndex1EnvelopeNotVerified(t *testing.T) {
 	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
 		Slot: agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot - 1,
 	}
-	fcu.Envelopes[blockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+	fcu.SetEnvelope(blockRoot, &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
 			BeaconBlockRoot: blockRoot,
 			Payload:         &cltypes.Eth1Block{BlockHash: common.HexToHash("0x1234")},
 		},
-	}
+	})
 	fcu.VerifiedPayloads = map[common.Hash]bool{blockRoot: false}
 	fcu.ExecutionPayloadStatusMap[common.HexToHash("0x1234")] = execution_client.PayloadStatusInvalidated
 
@@ -661,12 +658,12 @@ func TestAggregateAndProofGloasRejectIndex1InvalidPayload(t *testing.T) {
 	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
 		Slot: agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot - 1,
 	}
-	fcu.Envelopes[blockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+	fcu.SetEnvelope(blockRoot, &cltypes.SignedExecutionPayloadEnvelope{
 		Message: &cltypes.ExecutionPayloadEnvelope{
 			BeaconBlockRoot: blockRoot,
 			Payload:         &cltypes.Eth1Block{BlockHash: execHash},
 		},
-	}
+	})
 	fcu.VerifiedPayloads = map[common.Hash]bool{blockRoot: false}
 	fcu.PayloadStatusByRootMap[blockRoot] = execution_client.PayloadStatusInvalidated
 

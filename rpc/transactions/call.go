@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -63,8 +64,16 @@ func DoCall(
 		}
 	*/
 
-	state := state.New(stateReader)
-	defer state.Close()
+	ibs := state.New(stateReader)
+	// Overrides end in FinalizeTx, which clears the journal; the versioned read
+	// path then serves this tx's own writes only from a resident stateObject.
+	if dbg.CallNoMaterialize && stateOverrides == nil {
+		ibs.SetVersionMap(state.NewVersionMap(nil))
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(0, 0)
+		ibs.SetNoConflictDetection()
+	}
+	defer ibs.Close()
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -94,27 +103,22 @@ func DoCall(
 	}
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
-	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
-	// done is closed on return to stop the watcher goroutine before it can
-	// cancel the EVM for a subsequent call.
-	done := make(chan struct{})
-	defer close(done) // runs before cancel() (LIFO), so goroutine exits cleanly on success
-
+	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
+	// stop() runs before cancel() (LIFO), so the callback cannot fire for a later call, and
+	// this EVM is not reused, so a callback already running needs no join.
 	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evm.Cancel()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, func() {
+		timedOut.Store(true)
+		evm.Cancel()
+	})
+	defer stop()
 
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
 		rules := blockCtx.Rules(chainConfig)
 		precompiles := vm.ActivePrecompiledContracts(rules)
-		if err := stateOverrides.Override(state, precompiles, rules); err != nil {
+		if err := stateOverrides.Override(ibs, precompiles, rules); err != nil {
 			return nil, err
 		}
 		evm.SetPrecompiles(precompiles)
@@ -134,7 +138,8 @@ func DoCall(
 }
 
 func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineReader, header *types.Header, tx kv.Getter,
-	reader dbservices.CanonicalReader, config *chain.Config, blockOverrides *ethapi2.BlockOverrides, blockHashOverrides ethapi2.BlockHashOverrides) evmtypes.BlockContext {
+	reader dbservices.CanonicalReader, config *chain.Config, blockOverrides *ethapi2.BlockOverrides, blockHashOverrides ethapi2.BlockHashOverrides,
+) evmtypes.BlockContext {
 	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, blockHashOverrides)
 	blockContext := protocol.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 	if blockOverrides != nil {
@@ -144,7 +149,8 @@ func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineRea
 }
 
 func NewEVMBlockContext(engine rules.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
-	headerReader dbservices.HeaderReader, config *chain.Config) evmtypes.BlockContext {
+	headerReader dbservices.HeaderReader, config *chain.Config,
+) evmtypes.BlockContext {
 	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
 	return protocol.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 }
@@ -200,17 +206,25 @@ func (r *ReusableCaller) Close() {
 
 func (r *ReusableCaller) Message() *types.Message { return r.message }
 
-// InitialState builds a fresh state with the request's overrides applied, the
-// state every call runs against. The precompiles come with it because a
-// MovePrecompileTo override changes them. The caller must Close the state.
+// InitialState returns the state every call runs against, rewound to the request's
+// overrides. eth_estimateGas probes the same state several times, so the state object
+// is reused and reset rather than rebuilt: Reset returns its objects to their pools,
+// which is what building a new one would have to allocate again.
+// The precompiles come with it because a MovePrecompileTo override changes them.
+// The state stays owned by the EVM, so Close must not run until the last probe: it
+// nils the journal Reset would then rewind.
 func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledContracts, error) {
-	ibs := state.New(r.stateReader)
+	ibs := r.evm.IntraBlockState()
+	if ibs == nil {
+		ibs = state.New(r.stateReader)
+	} else {
+		ibs.Reset()
+	}
 	if r.stateOverrides == nil {
 		return ibs, nil, nil
 	}
 	precompiles := vm.ActivePrecompiledContracts(r.rules)
 	if err := r.stateOverrides.Override(ibs, precompiles, r.rules); err != nil {
-		ibs.Close()
 		return nil, nil, err
 	}
 	return ibs, precompiles, nil
@@ -219,7 +233,8 @@ func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledC
 func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
-	engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
+	engine rules.EngineReader,
+) (*evmtypes.ExecutionResult, error) {
 	var cancel context.CancelFunc
 	if r.callTimeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, r.callTimeout)
@@ -241,9 +256,6 @@ func (r *ReusableCaller) DoCallWithNewGas(
 	}
 	if r.stateOverrides != nil {
 		r.evm.SetPrecompiles(precompiles)
-	}
-	if prev := r.evm.IntraBlockState(); prev != nil {
-		prev.Close()
 	}
 	r.evm.Reset(txCtx, ibs)
 
@@ -295,7 +307,6 @@ func NewReusableCaller(
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
-
 	baseFee := header.BaseFee
 
 	msg, err := initialArgs.ToMessage(gasCap, baseFee)
@@ -312,8 +323,9 @@ func NewReusableCaller(
 	}
 	initialArgs.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
+	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
 
-	evm := vm.NewEVM(blockCtx, txCtx, state.New(stateReader), chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.New(stateReader), chainConfig, vmConfig)
 
 	return &ReusableCaller{
 		evm:            evm,

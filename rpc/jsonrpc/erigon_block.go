@@ -85,7 +85,7 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 	return header, nil
 }
 
-func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (map[string]any, error) {
+func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (*ethapi.RPCBlock, error) {
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -168,7 +168,7 @@ func (api *ErigonImpl) blockNumByTimestamp(ctx context.Context, tx kv.Tx, uintTi
 	return uint64(blockNum), nil
 }
 
-func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]any, error) {
+func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (*ethapi.RPCBlock, error) {
 	header, err := br.HeaderByNumber(ctx, db, blockNum)
 	if err != nil {
 		return nil, err
@@ -185,17 +185,11 @@ func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db k
 		return nil, nil
 	}
 
-	additionalFields := make(map[string]any)
-
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, additionalFields)
-
-	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
-		// Pending blocks need to nil out a few fields
-		for _, field := range []string{"hash", "nonce", "miner"} {
-			response[field] = nil
-		}
+	response := ethapi.RPCMarshalBlock(block, true, fullTx)
+	if rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
+		response.MarkPending()
 	}
-	return response, err
+	return response, nil
 }
 
 func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.U256, error) {
@@ -207,7 +201,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 	balancesMapping := make(map[common.Address]*hexutil.U256)
 
-	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, _, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +211,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNumber)
+	err = rpchelper.CheckBlockExecuted(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}

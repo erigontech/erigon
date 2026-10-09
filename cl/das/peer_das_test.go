@@ -57,7 +57,7 @@ import (
 // which each test reads from its own local config.
 func initTestBeaconConfig(cfg *clparams.BeaconChainConfig) {
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(cfg, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(cfg)
 	}
 }
 
@@ -282,7 +282,7 @@ func recoverableGloasColumns(t *testing.T, cfg *clparams.BeaconChainConfig, slot
 	}
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
-	columns, err := peerdasutils.GetDataColumnSidecarsGloas(slot, root, cellsAndProofs)
+	columns, err := peerdasutils.GetDataColumnSidecarsGloas(cfg, slot, root, cellsAndProofs)
 	require.NoError(t, err)
 	return block, root, columns
 }

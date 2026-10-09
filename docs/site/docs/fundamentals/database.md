@@ -102,7 +102,7 @@ Deleting `chaindata/` is **recoverable but not free**: it discards the latest mu
 
 - **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM. It is the Execution stage's commit threshold, so a larger value means larger single MDBX write transactions, which raise the file's high-water mark in bigger steps. Keeping it at or below `1G` is a useful heuristic if you want MDBX to grow more gradually.
 - **`--db.size.limit`** — caps the MDBX file size. Useful when running multiple Erigon instances on one disk to prevent one from starving the others.
-- **`--db.read.concurrency`** — maximum number of concurrent open MDBX read transactions (the read-tx semaphore). Raise it for nodes serving heavy parallel RPC (for example a high-throughput RPC daemon against the same datadir). Lowering it does not reduce read concurrency: a value below the parallel-execution worker count would deadlock, since each worker holds a long-lived read transaction, so it is silently raised to the worker count. Lower `--exec.workers` instead.
+- **`--db.read.concurrency`** — maximum number of concurrent open MDBX read transactions (the read-tx semaphore). Raise it for nodes serving heavy parallel RPC (for example a high-throughput RPC daemon against the same datadir). Lowering it does not reduce read concurrency: a value below the parallel-execution worker count would deadlock, since each worker holds a long-lived read transaction, and parallel commitment (`--experimental.parallel-commitment`) also needs GOMAXPROCS + 1 readers, one per worker and one for the base trie. Erigon raises a lower value, with a warning, to a floor that also counts the warmup and read-ahead readers and a fixed reserve; rpcdaemon uses it as given. Lower `--exec.workers` instead.
 - **Symlinks for tiered storage.** Place `chaindata/` and `snapshots/domain/` on fast NVMe, leave `snapshots/idx/` and `snapshots/history/` on cheaper SATA. See [Optimizing Storage](optimizing-storage) for the recipe.
 
 ## Safe-to-delete subdirectories
@@ -136,7 +136,14 @@ The copy is written inside the database's own directory, so each database needs
 free space for a second copy of itself on the volume it already lives on, and a
 big `chaindata/` can take hours.
 
-This is a manual defragmentation pass, not the background compaction of an
+Erigon also compacts at startup, before the node opens its databases: any
+database whose free pages are at least 10 GB **and** more than four times its live
+data is rewritten the same way (`[compact] auto-compact` in the log). It needs the
+same free space for a second copy, delays startup while it runs, and cannot be
+turned off. A database that fails to compact is left as it was, and startup
+continues. It skips the step if another process holds the datadir lock.
+
+`erigon db compact` is a manual defragmentation pass, not the background compaction of an
 LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
 ## Where to go next

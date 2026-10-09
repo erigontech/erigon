@@ -38,7 +38,8 @@ type pairKU64 struct {
 func newPairKU64(pairs ...struct {
 	key   []byte
 	txNum uint64
-}) *pairKU64 {
+},
+) *pairKU64 {
 	return &pairKU64{pairs: pairs}
 }
 
@@ -213,7 +214,8 @@ func TestChangedKeysPerBlock_ManyKeysOneBlock(t *testing.T) {
 	slices.SortFunc(pairs, func(a, b struct {
 		key   []byte
 		txNum uint64
-	}) int {
+	},
+	) int {
 		return bytes.Compare(a.key, b.key)
 	})
 	idx, err := changedKeysPerBlock(&pairKU64{pairs: pairs}, simpleTxNums(1))

@@ -34,7 +34,29 @@ these gaps, so this page will change as the two converge.
 
 ### Pending state
 
-Erigon does not support the `pending` block tag for `eth_call`, `eth_createAccessList`, `eth_getProof`, `eth_getWitness`, `eth_getTxWitness`, or `eth_simulateV1`. These methods need a block header and state from the same view, and Erigon cannot currently acquire a matching pending-state view. They return `pending state is not supported` instead of executing against a different block. Other `eth` methods keep their existing pending behavior.
+Erigon does not support the `pending` block tag for `eth_call`, `eth_callMany`, `eth_createAccessList`, `eth_getProof`, `eth_getWitness`, `eth_getTxWitness`, or `eth_simulateV1`. These methods need a block header and state from the same view, and Erigon cannot currently acquire a matching pending-state view. They return `pending state is not supported` instead of executing against a different block. Other `eth` methods keep their existing pending behavior.
+
+### Fork-gated call fields
+
+Methods that execute a call object — among them `eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_simulateV1`, `eth_callMany`, `debug_traceCall` and the `trace_call` family — validate it against the fork active at the effective execution block, as a transaction would be. For `eth_simulateV1` that is each simulated block, which runs after the selected parent, and block overrides can move it to a different fork than the parent's:
+
+| Call carries | Rejected when | Error |
+|---|---|---|
+| `accessList` | the block is before Berlin | `eip-2930 transactions require Berlin` |
+| `blobVersionedHashes` | the block is before Cancun | `BlobTx transactions require Cancun` |
+| `blobVersionedHashes` and no `to` | from Cancun on | `txn: field 'To' can not be 'nil'` |
+| an empty `blobVersionedHashes` list | from Cancun on | `blob txn must contain at least one blob versioned hash` |
+| a blob versioned hash with the wrong version byte | from Cancun on | `blob txn versioned hash has invalid version byte` |
+
+`eth_createAccessList` therefore rejects every request on a block before Berlin, including a plain transfer.
+
+A call object whose `chainId` is not the node's is rejected with `-32602` (`chainId does not match node's`) by `eth_call`, `eth_estimateGas`, `eth_createAccessList`, `eth_callMany`, `debug_traceCall`, `debug_traceCallMany`, `trace_call` and `trace_callMany`. `eth_simulateV1` and `eth_fillTransaction` reject it with `-32000`.
+
+### eth\_syncing and eth\_subscribe("syncing")
+
+`eth_syncing` returns `false` when the current block is fewer than 8 blocks from the highest block seen, in either direction; otherwise an object with `startingBlock`, `currentBlock`, `highestBlock` and `stages` (per-stage progress). While snapshots download, `currentBlock` advances with the bytes downloaded, scaled to the block the snapshots reach, and `stages` is empty (as it is while the highest block is not yet known). A node 8 or more blocks ahead of a stale highest block therefore reports syncing, with `highestBlock` equal to `currentBlock`. Both report `startingBlock` as the block where the current sync session began.
+
+`eth_subscribe("syncing")` (WebSocket or IPC) sends the last known state when you subscribe, if the node has reported one, then a message on each change: the same object with `syncing: true` while syncing, or `false` once synced. A slow client can miss intermediate states: each subscription buffers 8 messages and drops the oldest first, so the latest state always arrives.
 
 ### eth\_getProof
 
@@ -246,14 +268,26 @@ rule. A type `0x1` fill is reached by supplying `gasPrice` together with an
 `accessList` — Erigon keeps the list where geth drops it to a legacy transaction.
 
 :::info
-KZG commitment and proof generation from raw blobs is not implemented. Blob
-transactions must already carry their `blobVersionedHashes`.
+A request may carry the sidecar fields `blobs`, `commitments` and `proofs`. When
+`blobs` is present, the fill builds the sidecar:
 
-The sidecar fields the specification defines — `blobs`, `commitments` and `proofs` — are
-not supported: `CallArgs` has no field for them, so they are dropped from the request
-without an error even when a complete precomputed sidecar is supplied, and they are
-absent from the returned `tx` and `raw`. Callers that need the sidecar must keep it
-themselves and reattach it before submitting.
+* `commitments` and `proofs` are either both supplied or both absent; one without the
+  other is rejected. Absent ones are computed from the blobs, supplied ones are verified
+  with KZG (`failed to verify blob proof`).
+* Once Osaka is active on the head, the proofs are EIP-7594 cell proofs — 128 per blob —
+  and the sidecar has wrapper version 1. One blob proof per blob, as pre-Osaka tooling
+  sends, is not rejected: the commitments and proofs are recomputed as cell proofs.
+* `blobVersionedHashes` are derived from the commitments, or checked against them when
+  supplied (`blob hash verification failed`).
+* Blobs together with `authorizationList` are rejected (`both blobs and authorizationList
+  specified`); geth instead builds a set-code transaction and drops the sidecar.
+
+`raw` is then the network form of the transaction with the sidecar attached, and `tx`
+also carries `blobs`, `commitments` and `proofs`. Without `blobs`, a blob transaction
+must already carry its `blobVersionedHashes` and is returned without a sidecar.
+
+Other methods that take the same transaction object, such as `eth_call` and
+`eth_estimateGas`, ignore the sidecar fields.
 :::
 
 ### Block number parameter format
@@ -337,6 +371,9 @@ on a quiet chain as long as the client keeps calling it. `eth_getFilterLogs` doe
 without touching the deadline — so a client that only ever calls `eth_getFilterLogs`
 loses its filter after five idle minutes. A call against an evicted filter returns
 `filter not found`.
+
+Logs returned by `eth_getFilterChanges` for a log filter, and logs pushed by
+`eth_subscribe("logs")`, carry the block time as `blockTimestamp`, as `eth_getLogs` does.
 
 Change the window, or turn eviction off entirely, with:
 

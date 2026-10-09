@@ -55,30 +55,6 @@ func TestTrieConfig_WarmupNumWorkers_EnvDisable(t *testing.T) {
 	}
 }
 
-func TestTrieConfig_Subtrie(t *testing.T) {
-	cfg := TrieConfig{
-		Variant:                VariantHexPatriciaTrie,
-		DeferBranchUpdates:     true,
-		LeaveDeferredForCaller: true,
-		EnableTrieWarmup:       true,
-		CsvMetricsFilePrefix:   "pre",
-		MemoizationOff:         true,
-		WarmupNumWorkers:       7,
-	}
-
-	sub := cfg.Subtrie()
-
-	if sub.DeferBranchUpdates {
-		t.Error("Subtrie should disable DeferBranchUpdates")
-	}
-
-	want := cfg
-	want.DeferBranchUpdates = false
-	if sub != want {
-		t.Errorf("Subtrie should copy all other fields unchanged: got %+v, want %+v", sub, want)
-	}
-}
-
 func TestTrieConfig_PropagationToHPH(t *testing.T) {
 	cfg := TrieConfig{
 		DeferBranchUpdates:     false,
@@ -95,37 +71,10 @@ func TestTrieConfig_PropagationToHPH(t *testing.T) {
 	if hph.branchEncoder.deferUpdates {
 		t.Error("branchEncoder.deferUpdates should be false")
 	}
-	if !hph.leaveDeferredForCaller {
-		t.Error("leaveDeferredForCaller should be true")
+	if !hph.branchEncoder.callerOwnsDeferred {
+		t.Error("branchEncoder.callerOwnsDeferred should be true")
 	}
 	if !hph.memoizationOff {
 		t.Error("memoizationOff should be true")
-	}
-}
-
-func TestTrieConfig_SpawnSubTrieInheritsConfig(t *testing.T) {
-	cfg := TrieConfig{
-		DeferBranchUpdates:     true,
-		LeaveDeferredForCaller: true,
-		MemoizationOff:         true,
-	}
-
-	parent := NewHexPatriciaHashed(length.Addr, nil, cfg)
-	defer parent.Release()
-
-	sub := parent.SpawnSubTrie(nil, 0)
-	defer sub.Release()
-
-	if sub.cfg.DeferBranchUpdates {
-		t.Error("sub-trie DeferBranchUpdates should be false")
-	}
-	if !sub.cfg.LeaveDeferredForCaller {
-		t.Error("sub-trie should inherit LeaveDeferredForCaller=true")
-	}
-	if !sub.cfg.MemoizationOff {
-		t.Error("sub-trie should inherit MemoizationOff=true")
-	}
-	if sub.branchEncoder.deferUpdates {
-		t.Error("sub-trie branchEncoder should not defer updates")
 	}
 }

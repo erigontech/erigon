@@ -24,6 +24,11 @@ import (
 
 // OnTick executes on_tick operation for forkchoice.
 func (f *ForkChoiceStore) OnTick(time uint64) {
+	// The ticker passes wall-clock time from startup. Before genesis the unsigned
+	// tick slot wraps and the catch-up loop would effectively never end.
+	if time < f.genesisTime {
+		return
+	}
 	startSlot := f.Slot()
 	justified := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	tickSlot := (time - f.genesisTime) / f.beaconCfg.SecondsPerSlot

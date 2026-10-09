@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
@@ -34,12 +35,15 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -177,6 +181,53 @@ func TestGetBlockAccessListRegeneratesPrunedBAL(t *testing.T) {
 	}
 }
 
+func TestGetHeaderByNumber(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+
+	header, err := api.GetHeaderByNumber(ctx, rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	assert.Equal(t, common.HexToHash("0x9c47d5780744fa24ccdb1543a9b715e53431d5560b9e460b8b7a68f7c58310ae"), *header.Hash)
+
+	for _, blockNum := range []rpc.BlockNumber{rpc.SafeBlockNumber, rpc.FinalizedBlockNumber} {
+		header, err = api.GetHeaderByNumber(ctx, blockNum)
+		require.NoError(t, err, "block %d", blockNum)
+		require.NotNil(t, header, "block %d resolves in the test module", blockNum)
+	}
+
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		if err := tx.Delete(kv.LastForkchoice, []byte("safeBlockHash")); err != nil {
+			return err
+		}
+		return tx.Delete(kv.LastForkchoice, []byte("finalizedBlockHash"))
+	}))
+
+	unresolvable := []rpc.BlockNumber{rpc.SafeBlockNumber, rpc.FinalizedBlockNumber}
+	for _, blockNum := range append(unresolvable, 1_000_000, rpc.PendingBlockNumber) {
+		header, err = api.GetHeaderByNumber(ctx, blockNum)
+		require.NoError(t, err, "block %d", blockNum)
+		require.Nil(t, header, "block %d", blockNum)
+	}
+}
+
+func TestGetHeaderByHash(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+
+	latestHash := common.HexToHash("0x9c47d5780744fa24ccdb1543a9b715e53431d5560b9e460b8b7a68f7c58310ae")
+	header, err := api.GetHeaderByHash(ctx, latestHash)
+	require.NoError(t, err)
+	require.NotNil(t, header)
+	assert.Equal(t, latestHash, *header.Hash)
+
+	header, err = api.GetHeaderByHash(ctx, common.HexToHash("0xdeadbeef"))
+	require.NoError(t, err)
+	require.Nil(t, header)
+}
+
 // Gets the latest block number with the latest tag
 func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -186,7 +237,7 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	if err != nil {
 		t.Errorf("error getting block number with latest tag: %s", err)
 	}
-	assert.Equal(t, expected, b["hash"])
+	assert.Equal(t, expected, *b.Hash)
 }
 
 func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
@@ -216,7 +267,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
 	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
-	assert.Equal(t, expectedHash, block["hash"])
+	assert.Equal(t, expectedHash, *block.Hash)
 }
 
 func TestGetBlockByNumberWithPendingTag(t *testing.T) {
@@ -246,7 +297,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 		t.Errorf("error getting block number with pending tag: %s", err)
 	}
 	expectedNum := (*hexutil.U256)(uint256.NewInt(uint64(expected)))
-	assert.Equal(t, expectedNum, b["number"])
+	assert.Equal(t, expectedNum, b.Number)
 }
 
 func TestGetBlockByNumber_WithFinalizedTag_NoFinalizedBlockInDb(t *testing.T) {
@@ -290,7 +341,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 		t.Errorf("error retrieving block by number: %s", err)
 	}
 	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
-	assert.Equal(t, expectedHash, block["hash"])
+	assert.Equal(t, expectedHash, *block.Hash)
 }
 
 func TestGetBlockByNumber_WithSafeTag_NoSafeBlockInDb(t *testing.T) {
@@ -334,7 +385,99 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
 	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
-	assert.Equal(t, expectedHash, block["hash"])
+	assert.Equal(t, expectedHash, *block.Hash)
+}
+
+func TestBlockTransactionCountsWithoutTransactionData(t *testing.T) {
+	m, chainPack, orphanedChains := rpcdaemontest.CreateTestExecModule(t)
+	block := chainPack.Blocks[0]
+	require.NotEmpty(t, block.Transactions())
+	dropTransactions(t, m.DB, 1, chainPack.Blocks[len(chainPack.Blocks)-1].NumberU64()+1)
+
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	client := remoteproto.NewETHBACKENDClient(conn)
+	remoteReader := freezeblocks.NewRemoteBlockReader(client)
+	backend := rpcservices.NewRemoteBackend(client, m.DB, remoteReader)
+
+	want := hexutil.Uint(len(block.Transactions()))
+	zero := hexutil.Uint(0)
+	hashCases := []struct {
+		name string
+		hash common.Hash
+		want *hexutil.Uint
+	}{
+		{"canonical hash", block.Hash(), &want},
+		{"noncanonical hash", orphanedChains[0].Blocks[0].Hash(), &zero},
+		{"genesis", m.Genesis.Hash(), &zero},
+		{"unknown hash", common.Hash{0xff}, nil},
+	}
+	mode := prune.Mode{Initialised: true, History: prune.Distance(2), Blocks: prune.Distance(2)}
+	for _, reader := range []struct {
+		name string
+		base *BaseAPI
+	}{
+		{"local", newBaseApiForTest(m)},
+		{"remote", NewBaseApi(nil, m.StateCache, backend, m.Engine, nil)},
+	} {
+		t.Run(reader.name, func(t *testing.T) {
+			reader.base._pruneMode.Store(&mode)
+			api := newEthApiForTest(reader.base, m.DB, nil, nil)
+			t.Run("by number", func(t *testing.T) {
+				count, err := api.GetBlockTransactionCountByNumber(ctx, rpc.BlockNumber(block.NumberU64()))
+				require.NoError(t, err)
+				require.NotNil(t, count)
+				require.Equal(t, want, *count)
+			})
+			for _, tc := range hashCases {
+				t.Run(tc.name, func(t *testing.T) {
+					count, err := api.GetBlockTransactionCountByHash(ctx, tc.hash)
+					require.NoError(t, err)
+					require.Equal(t, tc.want, count)
+				})
+			}
+		})
+	}
+}
+
+func TestRemoteBlockBodyMetadata(t *testing.T) {
+	m, _ := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	reader := freezeblocks.NewRemoteBlockReader(remoteproto.NewETHBACKENDClient(conn))
+	hash := common.Hash{1}
+	uncle := m.Genesis.Header()
+	uncle.Extra = []byte("uncle metadata")
+	uncle.Hash()
+	for _, tc := range []struct {
+		name string
+		body types.BodyForStorage
+	}{
+		{"uncles", types.BodyForStorage{TxCount: 3, Uncles: []*types.Header{uncle}}},
+		{"empty withdrawals", types.BodyForStorage{TxCount: 2, Withdrawals: []*types.Withdrawal{}}},
+		{"withdrawals", types.BodyForStorage{TxCount: 4, Withdrawals: []*types.Withdrawal{{Index: 1, Validator: 2, Address: common.Address{3}, Amount: 4}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+				return rawdb.WriteBodyForStorage(tx, hash, 1, &tc.body)
+			}))
+			body, count, err := reader.Body(ctx, nil, hash, 1)
+			require.NoError(t, err)
+			require.NotNil(t, body)
+			require.Empty(t, body.Transactions)
+			require.Equal(t, tc.body.TxCount-2, count)
+			wantUncles, err := rlp.EncodeToBytes(tc.body.Uncles)
+			require.NoError(t, err)
+			gotUncles, err := rlp.EncodeToBytes(body.Uncles)
+			require.NoError(t, err)
+			require.Equal(t, wantUncles, gotUncles)
+			require.Equal(t, tc.body.Withdrawals, body.Withdrawals)
+		})
+	}
+	t.Run("missing body", func(t *testing.T) {
+		body, count, err := reader.Body(ctx, nil, hash, 2)
+		require.NoError(t, err)
+		require.Nil(t, body)
+		require.Zero(t, count)
+	})
 }
 
 func TestGetBlockTransactionCountByHash(t *testing.T) {

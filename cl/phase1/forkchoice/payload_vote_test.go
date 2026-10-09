@@ -23,9 +23,13 @@ type ptcVoteForkGraph struct {
 	envelopes        map[common.Hash]bool
 	blocks           map[common.Hash]*cltypes.SignedBeaconBlock
 	acceptedPayloads map[common.Hash]bool
+	onHasEnvelope    func()
 }
 
 func (g ptcVoteForkGraph) HasEnvelope(root common.Hash) bool {
+	if g.onHasEnvelope != nil {
+		g.onHasEnvelope()
+	}
 	return g.envelopes[root]
 }
 
@@ -72,11 +76,11 @@ func (g payloadVoteForkGraph) IsBlockRetained(common.Hash) bool {
 	return g.retained == nil || *g.retained
 }
 
-func (g payloadVoteForkGraph) WithRetainedBlock(_ common.Hash, fn func()) bool {
+func (g payloadVoteForkGraph) WithRetainedBlock(_ common.Hash, fn func(func(common.Hash) bool)) bool {
 	if !g.IsBlockRetained(common.Hash{}) {
 		return false
 	}
-	fn()
+	fn(g.IsBlockRetained)
 	return true
 }
 
@@ -170,6 +174,23 @@ func TestGetPTCFromWindowRejectsSlotOutsideWindow(t *testing.T) {
 
 	_, err := s.GetPTCFromWindow(0)
 	require.Error(t, err)
+}
+
+func TestGetPTCRejectsPreGloasSlot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 2
+	s := state2.New(&cfg)
+	s.SetVersion(clparams.GloasVersion)
+	require.NoError(t, s.SetSlot(cfg.GloasForkEpoch*cfg.SlotsPerEpoch))
+	s.SetPtcWindow(solid.NewUint64VectorOfVectors(int(3*cfg.SlotsPerEpoch), 4))
+
+	_, err := s.GetPTC(cfg.GloasForkEpoch*cfg.SlotsPerEpoch - 1)
+	require.ErrorContains(t, err, "pre-Gloas")
+
+	_, err = s.GetPTC(cfg.GloasForkEpoch * cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	_, err = s.GetPTC((cfg.GloasForkEpoch + 1) * cfg.SlotsPerEpoch)
+	require.NoError(t, err)
 }
 
 func TestPtcBoolToVote(t *testing.T) {
@@ -337,6 +358,49 @@ func TestPtcShouldBuildOnFullWithLatePayloadMajority(t *testing.T) {
 	}, f.Slot()))
 }
 
+func TestPtcShouldBuildOnFullReadsOneVoteSnapshot(t *testing.T) {
+	root := common.HexToHash("0x09")
+	f := newPtcVoteTestStore(root)
+	head := ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull}
+	threshold := ptcVoteThreshold()
+	f.payloadTimelinessVote.Store(root, ptcVotes(0, threshold+1))
+	availability := ptcVotes(0, threshold)
+	availability[threshold] = 1
+	f.payloadDataAvailabilityVote.Store(root, availability)
+	require.False(t, f.ShouldBuildOnFull(head, f.Slot()))
+
+	// Replacing this vote switches the EMPTY reason from lateness to unavailable data.
+	// Combining old availability with new timeliness must not allow FULL.
+	replaceVote := func() {
+		f.applyPayloadAttestationVotes([]int{threshold}, &cltypes.PayloadAttestationData{
+			PayloadPresent:    true,
+			BlobDataAvailable: false,
+		}, root)
+	}
+	graph := f.forkGraph.(ptcVoteForkGraph)
+	lockedReads := make([]bool, 0, 2)
+	graph.onHasEnvelope = func() {
+		// Each vote-array read reaches this callback. TryLock detects an unprotected
+		// read without blocking when the reader correctly holds the mutex.
+		acquired := f.ptcVoteMu.TryLock()
+		lockedReads = append(lockedReads, !acquired)
+		if acquired {
+			f.ptcVoteMu.Unlock()
+			replaceVote()
+		}
+	}
+	f.forkGraph = graph
+
+	buildOnFull := f.ShouldBuildOnFull(head, f.Slot())
+
+	require.Equal(t, []bool{true, true}, lockedReads, "both vote reads must exclude concurrent updates")
+	require.False(t, buildOnFull, "both complete vote snapshots require EMPTY")
+	graph.onHasEnvelope = nil
+	f.forkGraph = graph
+	replaceVote()
+	require.False(t, f.ShouldBuildOnFull(head, f.Slot()))
+}
+
 func TestPtcShouldBuildOnFullIgnoresVotesBeforePreviousSlot(t *testing.T) {
 	root := common.HexToHash("0x05")
 	f := newPtcVoteTestStore(root)
@@ -372,21 +436,20 @@ func TestPtcIsPreviousSlotPayloadDecision(t *testing.T) {
 	require.True(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
-	}))
+	}, 1))
 	require.True(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusEmpty,
-	}))
+	}, 1))
 	require.False(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusPending,
-	}))
+	}, 1))
 
-	f.time.Store(2 * f.beaconCfg.SecondsPerSlot)
 	require.False(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
-	}))
+	}, 2))
 }
 
 func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {
@@ -611,6 +674,18 @@ func TestValidateParentPayloadPathUsesValidationAvailability(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParentPayloadStatusFromBidsRejectsIncompleteBlocks(t *testing.T) {
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(nil, &cltypes.BeaconBlock{}))
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(&cltypes.SignedBeaconBlock{}, &cltypes.BeaconBlock{}))
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion), nil))
+	parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	parent.Block.Body = nil
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(parent, &cltypes.BeaconBlock{}))
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.Body = nil
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion), child.Block))
 }
 
 func TestApplyPayloadValidationResultRecordsRootAvailability(t *testing.T) {

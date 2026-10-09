@@ -28,15 +28,18 @@ func (r *fieldReader) ReadAccountData(addr accounts.Address) (*accounts.Account,
 	}
 	return nil, nil
 }
+
 func (r *fieldReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(addr)
 }
+
 func (r *fieldReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
 	if addr == r.addr {
 		return r.code, nil
 	}
 	return nil, nil
 }
+
 func (r *fieldReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
 	if addr == r.addr {
 		return len(r.code), nil

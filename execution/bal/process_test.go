@@ -68,7 +68,7 @@ func TestCreateBALOrdering(t *testing.T) {
 	}
 
 	// Addresses must be sorted lexicographically.
-	if bal[0].Address != addrA || bal[1].Address != addrB {
+	if bal[0].Address != addrA.Value() || bal[1].Address != addrB.Value() {
 		t.Fatalf("unexpected account ordering: %x, %x", bal[0].Address, bal[1].Address)
 	}
 
@@ -198,17 +198,17 @@ func TestBALBlock943Direct(t *testing.T) {
 	bal := types.BlockAccessList{
 		// EIP-7002: only storage reads (empty queue, all writes are net-zero)
 		{
-			Address:      eip7002Addr,
+			Address:      eip7002Addr.Value(),
 			StorageReads: []accounts.StorageKey{slot0, slot1, slot2, slot3},
 		},
 		// EIP-7251: only storage reads (empty queue, all writes are net-zero)
 		{
-			Address:      eip7251Addr,
+			Address:      eip7251Addr.Value(),
 			StorageReads: []accounts.StorageKey{slot0, slot1, slot2, slot3},
 		},
 		// EIP-2935: 1 storage change at accessIndex 0 (system call txIndex=-1)
 		{
-			Address: eip2935Addr,
+			Address: eip2935Addr.Value(),
 			StorageChanges: []types.SlotChanges{
 				{
 					Slot:    slot2935,
@@ -218,7 +218,7 @@ func TestBALBlock943Direct(t *testing.T) {
 		},
 		// EIP-4788: 2 storage changes at accessIndex 0 (system call txIndex=-1)
 		{
-			Address: eip4788Addr,
+			Address: eip4788Addr.Value(),
 			StorageChanges: []types.SlotChanges{
 				{
 					Slot:    slot4788Timestamp,
@@ -281,12 +281,6 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 
 	// === txIndex=-1: Initialize system calls (EIP-4788, EIP-2935) ===
 
-	// System address balance reads/writes (from SubBalance with Gnosis exception)
-	// Balance is 0x24ac0a — read and write same value (no-op write filtered)
-	systemBalance := uint256.NewInt(0x24ac0a)
-	addBalanceRead(readSets, -1, systemAddr, systemBalance.Uint64())
-	addBalanceWrite(writeSets, -1, systemAddr, systemBalance.Uint64())
-
 	// EIP-4788 contract: balance read+write (no-op), 2 storage writes
 	addBalanceRead(readSets, -1, eip4788Addr, 0)
 	addBalanceWrite(writeSets, -1, eip4788Addr, 0)
@@ -325,10 +319,6 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 	addStorageWrite(writeSets, 0, eip7251Addr, slot2, 0)
 	addStorageWrite(writeSets, 0, eip7251Addr, slot3, 0)
 
-	// System address balance from Finalize Transfer calls (no-op)
-	addBalanceRead(readSets, 0, systemAddr, systemBalance.Uint64())
-	addBalanceWrite(writeSets, 0, systemAddr, systemBalance.Uint64())
-
 	recordAll(vio, readSets, writeSets)
 
 	bal := balpkg.Create(943, vio, "", log.New())
@@ -336,7 +326,7 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 	t.Logf("BAL accounts: %d", len(bal))
 	for i, ac := range bal {
 		t.Logf("  [%d] %s: storage_changes=%d storage_reads=%d balance_changes=%d nonce_changes=%d code_changes=%d",
-			i, ac.Address.Value().Hex(),
+			i, ac.Address.Hex(),
 			len(ac.StorageChanges), len(ac.StorageReads),
 			len(ac.BalanceChanges), len(ac.NonceChanges), len(ac.CodeChanges))
 		for _, sc := range ac.StorageChanges {
@@ -356,10 +346,10 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 		t.Fatalf("BAL hash mismatch:\n  got:      %s\n  expected: %s", got.Hex(), expectedHash.Hex())
 	}
 
-	// Verify system address was filtered out
+	// Verify system address is absent
 	for _, ac := range bal {
-		if ac.Address == systemAddr {
-			t.Fatal("system address should have been filtered from BAL")
+		if ac.Address == systemAddr.Value() {
+			t.Fatal("system address should be absent from BAL")
 		}
 	}
 
