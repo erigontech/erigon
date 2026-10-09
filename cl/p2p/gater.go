@@ -2,12 +2,16 @@ package p2p
 
 import (
 	"net"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/control"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 var privateCIDRList = []string{
@@ -22,16 +26,67 @@ var privateCIDRList = []string{
 }
 
 type Gater struct {
-	filter *multiaddr.Filters
+	filter      *multiaddr.Filters
+	rateLimiter *ipRateLimiter
+	poolLimiter *peerPoolLimiter
 }
 
-func NewGater(cfg *P2PConfig) (g *Gater, err error) {
+func NewGater(cfg *P2PConfig, logger log.Logger) (g *Gater, err error) {
 	g = &Gater{}
 	g.filter, err = configureFilter(cfg)
 	if err != nil {
 		return nil, err
 	}
+	g.rateLimiter = newIPRateLimiter(defaultIPRateLimiterConfig(), logger, time.Now)
+	g.poolLimiter = newPeerPoolLimiter(cfg.MaxPeerCount, logger)
 	return g, nil
+}
+
+// SetHost lets the gater see live connections once the host exists. buildOptions
+// registers the gater before libp2p.New returns the host it gates, so the peer-pool
+// occupancy check fails open (allow) until this is called.
+func (g *Gater) SetHost(h host.Host) {
+	g.poolLimiter.setHost(hostConns{h})
+	h.Network().Notify(&network.NotifyBundle{ConnectedF: g.onConnected})
+}
+
+// onConnected retires the peer-pool reservation a now-live inbound connection was
+// admitted under, so it stops being counted alongside the live connection it became -
+// including once that connection later closes again, which polling allow() alone would
+// never observe for an IP other than whichever one is attempting admission right then.
+func (g *Gater) onConnected(_ network.Network, conn network.Conn) {
+	if conn.Stat().Direction != network.DirInbound {
+		return
+	}
+	ip, err := manet.ToIP(conn.RemoteMultiaddr())
+	if err != nil {
+		return
+	}
+	g.poolLimiter.onConnected(ip)
+}
+
+// hostConns adapts a live libp2p host.Host to liveConnsSource.
+type hostConns struct {
+	host host.Host
+}
+
+// remoteIPs reports only inbound connections. peerPoolLimiter only ever creates or
+// retires reservations for inbound attempts; counting an outbound connection here -
+// one we dialed ourselves, which never went through the limiter - would both inflate
+// occupancy for an IP we are not actually being flooded from and risk onConnected
+// mistaking it for a still-genuinely-pending inbound reservation maturing.
+func (h hostConns) remoteIPs() []net.IP {
+	conns := h.host.Network().Conns()
+	ips := make([]net.IP, 0, len(conns))
+	for _, conn := range conns {
+		if conn.Stat().Direction != network.DirInbound {
+			continue
+		}
+		if ip, err := manet.ToIP(conn.RemoteMultiaddr()); err == nil {
+			ips = append(ips, ip)
+		}
+	}
+	return ips
 }
 
 // InterceptPeerDial tests whether we're permitted to Dial the specified peer.
@@ -52,9 +107,24 @@ func (g *Gater) InterceptAddrDial(_ peer.ID, n multiaddr.Multiaddr) (allow bool)
 // InterceptAccept tests whether an incipient inbound connection is allowed.
 //
 // This is called by the upgrader, or by the transport directly (e.g. QUIC,
-// Bluetooth), straight after it has accepted a connection from its socket.
+// Bluetooth), straight after it has accepted a connection from its socket. For TCP
+// this runs before the security handshake, the cheapest point to reject abusive
+// traffic; for QUIC the transport's own Accept already completes the handshake before
+// this is called, since QUIC bundles the crypto handshake into connection
+// establishment itself, so rejecting here still avoids the muxer and application layer
+// but not the handshake cost.
 func (g *Gater) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
-	return filterConnections(g.filter, n.RemoteMultiaddr())
+	if !filterConnections(g.filter, n.RemoteMultiaddr()) {
+		return false
+	}
+	ip, err := manet.ToIP(n.RemoteMultiaddr())
+	if err != nil {
+		return true
+	}
+	if !g.rateLimiter.allow(ip) {
+		return false
+	}
+	return g.poolLimiter.allow(ip)
 }
 
 // InterceptSecured tests whether a given connection, now authenticated,
