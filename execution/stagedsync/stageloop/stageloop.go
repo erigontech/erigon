@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/blockio"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/bal/offlinebal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
@@ -379,6 +380,7 @@ func NewDefaultStages(ctx context.Context,
 	tracer *tracers.Tracer,
 	afterSnapshotDownload func(ctx context.Context) error,
 	readAheader *exec.BlockReadAheader,
+	offlineBAL offlinebal.Store,
 ) []*stagedsync.Stage {
 	var tracingHooks *tracing.Hooks
 	if tracer != nil {
@@ -393,7 +395,7 @@ func NewDefaultStages(ctx context.Context,
 		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
 		stagedsync.StageBodiesCfg(blockReader, blockWriter),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, blockReader, readAheader),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader).WithOfflineBAL(offlineBAL),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
 		stagedsync.StageFinishCfg(),
 	)
@@ -410,6 +412,7 @@ func NewPipelineStages(ctx context.Context,
 	tracer *tracers.Tracer,
 	afterSnapshotDownload func(ctx context.Context) error,
 	readAheader *exec.BlockReadAheader,
+	offlineBAL offlinebal.Store,
 ) []*stagedsync.Stage {
 	var tracingHooks *tracing.Hooks
 	if tracer != nil {
@@ -429,7 +432,7 @@ func NewPipelineStages(ctx context.Context,
 		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
 		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, dbg.BadBlockHalt, dirs.Tmp, blockReader, readAheader),
-		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+		stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{Tracer: tracingHooks}, notifications, cfg.StateStream, dbg.BadBlockHalt, dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader).WithOfflineBAL(offlineBAL),
 		stagedsync.StageTxLookupCfg(cfg.Prune, dirs.Tmp, blockReader),
 		stagedsync.StageFinishCfg(),
 	)
@@ -445,6 +448,7 @@ func NewInMemoryExecution(
 	blockWriter *blockio.BlockWriter,
 	logger log.Logger,
 	readAheader *exec.BlockReadAheader,
+	offlineBAL offlinebal.Store,
 ) *stagedsync.Sync {
 	return stagedsync.New(
 		cfg.Sync,
@@ -454,7 +458,7 @@ func NewInMemoryExecution(
 			stagedsync.StageBodiesCfg(blockReader, blockWriter),
 			stagedsync.StageBlockHashesCfg(cfg.Dirs.Tmp, blockWriter),
 			stagedsync.StageSendersCfg(controlServer.ChainConfig, true /* badBlockHalt */, cfg.Dirs.Tmp, blockReader, readAheader),
-			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader),
+			stagedsync.StageExecuteBlocksCfg(db, cfg.Prune, cfg.BatchSize, controlServer.ChainConfig, controlServer.Engine, &vm.Config{}, notifications, cfg.StateStream, true, cfg.Dirs, blockReader, cfg.Genesis, cfg.Sync, cfg.ExperimentalBAL, readAheader).WithOfflineBAL(offlineBAL),
 		),
 		stagedsync.StateUnwindOrder,
 		nil, /* pruneOrder */

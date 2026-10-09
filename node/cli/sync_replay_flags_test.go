@@ -17,6 +17,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -57,5 +58,28 @@ func TestPruneBlocksDistanceDefaultKeepsReplayRange(t *testing.T) {
 	})
 	t.Run("archive keeps all blocks", func(t *testing.T) {
 		require.Zero(t, buildEthCfg(t, []string{"--prune.mode", "archive"}).Prune.Blocks.PruneTo(head))
+	})
+}
+
+func TestOfflineBALFlags(t *testing.T) {
+	t.Run("off by default", func(t *testing.T) {
+		cfg := buildEthCfg(t, nil)
+		require.False(t, cfg.Sync.GenerateOfflineBALs)
+		require.False(t, cfg.Sync.UseOfflineBALs)
+		require.False(t, cfg.ExperimentalBAL)
+		require.Equal(t, filepath.Join(cfg.Dirs.DataDir, "offline-bal"), cfg.Sync.OfflineBALDir)
+	})
+
+	t.Run("generate implies experimental BAL", func(t *testing.T) {
+		cfg := buildEthCfg(t, []string{"--generate-offline-bals", "--offline-bal.dir", "/bal"})
+		require.True(t, cfg.Sync.GenerateOfflineBALs)
+		require.True(t, cfg.ExperimentalBAL)
+		require.Equal(t, "/bal", cfg.Sync.OfflineBALDir)
+	})
+
+	t.Run("use", func(t *testing.T) {
+		cfg := buildEthCfg(t, []string{"--use-offline-bals"})
+		require.True(t, cfg.Sync.UseOfflineBALs)
+		require.False(t, cfg.ExperimentalBAL)
 	})
 }

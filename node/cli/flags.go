@@ -19,6 +19,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -128,6 +129,21 @@ var (
 	ExecStopAtBlockFlag = cli.Uint64Flag{
 		Name:  "pfb.exec.stop-at-block",
 		Usage: "Stop the node after frozen-block execution reaches and commits this block (0 = off)",
+	}
+
+	GenerateOfflineBALsFlag = cli.BoolFlag{
+		Name:  "generate-offline-bals",
+		Usage: "Compute a block access list per executed block and persist it to the offline-BAL store (for blocks that carry no BAL). Implies --experimental.bal",
+	}
+
+	UseOfflineBALsFlag = cli.BoolFlag{
+		Name:  "use-offline-bals",
+		Usage: "Feed BALs from the offline-BAL store into execution and commitment",
+	}
+
+	OfflineBALDirFlag = cli.StringFlag{
+		Name:  "offline-bal.dir",
+		Usage: "Offline-BAL store directory (default: <datadir>/offline-bal)",
 	}
 
 	SyncParallelStateFlushing = cli.BoolFlag{
@@ -323,6 +339,15 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 		cfg.Sync.AlwaysGenerateChangesets = true
 	}
 	cfg.Sync.ExecStopAtBlock = ctx.Uint64(ExecStopAtBlockFlag.Name)
+	cfg.Sync.GenerateOfflineBALs = ctx.Bool(GenerateOfflineBALsFlag.Name)
+	cfg.Sync.UseOfflineBALs = ctx.Bool(UseOfflineBALsFlag.Name)
+	if cfg.Sync.GenerateOfflineBALs {
+		cfg.ExperimentalBAL = true
+	}
+	cfg.Sync.OfflineBALDir = ctx.String(OfflineBALDirFlag.Name)
+	if cfg.Sync.OfflineBALDir == "" {
+		cfg.Sync.OfflineBALDir = filepath.Join(cfg.Dirs.DataDir, "offline-bal")
+	}
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 	if d := ctx.Duration(utils.SlowBlockThresholdFlag.Name); d >= 0 {
 		cfg.Sync.SlowBlockThreshold = &d

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/exec"
@@ -31,6 +32,7 @@ type dbBlockSource struct {
 	blockTx kv.Tx
 	cur     uint64
 	max     uint64
+	logger  log.Logger
 }
 
 func (s *dbBlockSource) next(ctx context.Context) (*types.Block, types.BlockAccessList, uint64, bool, error) {
@@ -62,7 +64,7 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 		return nil, nil, fmt.Errorf("nil block %d", blockNum)
 	}
 
-	blockBAL, err := blockAccessList(s.blockTx, b, blockNum, s.cfg.offlineBALReader)
+	blockBAL, err := blockAccessList(s.blockTx, b, blockNum, s.cfg.offlineBAL.Reader, s.logger)
 	if err != nil {
 		return nil, nil, err
 	}

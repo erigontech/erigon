@@ -635,12 +635,13 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 	}
 }
 
-func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64, offlineBAL *offlinebal.Reader) (types.BlockAccessList, error) {
+func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64, offlineBAL *offlinebal.Reader, logger log.Logger) (types.BlockAccessList, error) {
 	bal := block.BlockAccessList()
 	if bal == nil && offlineBAL != nil {
 		if data, ok := offlineBAL.Get(blockNum, block.Hash()); ok {
 			return types.DecodeBlockAccessListBytes(data)
 		}
+		logger.Warn("[exec] offline BAL store has no record for block", "block", blockNum, "hash", block.Hash())
 	}
 	if bal == nil && block.HeaderNoCopy().HasNonEmptyBAL() {
 		return rawdb.ReadBlockAccessList(blockTx, block.Hash(), blockNum)
@@ -710,7 +711,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 
 		src := te.blockSrc
 		if src == nil {
-			src = &dbBlockSource{cfg: &te.cfg, blockTx: blockTx, cur: startBlockNum, max: maxBlockNum}
+			src = &dbBlockSource{cfg: &te.cfg, blockTx: blockTx, cur: startBlockNum, max: maxBlockNum, logger: te.logger}
 		}
 
 		// Use the max of all state domain steps (not just commitment) to

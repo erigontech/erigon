@@ -267,6 +267,9 @@ var DefaultFlags = []cli.Flag{
 	&SyncLoopBlockLimitFlag,
 	&SyncChainTipModeFlag,
 	&ExecStopAtBlockFlag,
+	&GenerateOfflineBALsFlag,
+	&UseOfflineBALsFlag,
+	&OfflineBALDirFlag,
 	&SyncLoopBreakAfterFlag,
 	&SyncParallelStateFlushing,
 

@@ -60,9 +60,6 @@ var (
 	dbWriteMap bool
 
 	chainTipMode                    bool
-	generateOfflineBAL              bool
-	useOfflineBAL                   bool
-	offlineBALDir                   string
 	clearCommitment                 bool
 	resume                          bool
 	noHistory                       bool
@@ -251,7 +248,7 @@ func withChainTipMode(cmd *cobra.Command) {
 }
 
 func withOfflineBAL(cmd *cobra.Command) {
-	cmd.Flags().BoolVar(&generateOfflineBAL, "generate-offline-bals", false, "Compute a synthetic block access list per executed block and persist it to the offline-BAL store (for chains whose blocks carry no BAL)")
-	cmd.Flags().BoolVar(&useOfflineBAL, "use-offline-bals", false, "Feed BALs from the offline-BAL store into execution and commitment")
-	cmd.Flags().StringVar(&offlineBALDir, "offline-bal.dir", "", "Offline-BAL store directory (default: <datadir>/offline-bal)")
+	cmd.Flags().BoolVar(&syncCfg.GenerateOfflineBALs, "generate-offline-bals", false, "Compute a synthetic block access list per executed block and persist it to the offline-BAL store (for chains whose blocks carry no BAL)")
+	cmd.Flags().BoolVar(&syncCfg.UseOfflineBALs, "use-offline-bals", false, "Feed BALs from the offline-BAL store into execution and commitment")
+	cmd.Flags().StringVar(&syncCfg.OfflineBALDir, "offline-bal.dir", "", "Offline-BAL store directory (default: <datadir>/offline-bal)")
 }

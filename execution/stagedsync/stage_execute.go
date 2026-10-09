@@ -92,8 +92,7 @@ type ExecuteBlockCfg struct {
 
 	// offline-BAL store: generate persists a synthetic BAL per block, use feeds
 	// stored BALs into execution/commitment. At most one is set.
-	offlineBALWriter *offlinebal.Writer
-	offlineBALReader *offlinebal.Reader
+	offlineBAL offlinebal.Store
 }
 
 func StageExecuteBlocksCfg(
@@ -157,12 +156,11 @@ func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 	return cfg
 }
 
-// WithOfflineBAL returns a copy of the config wired to a offline-BAL store: a writer
-// to persist synthetic BALs during generation, or a reader to feed stored BALs
-// into execution. Pass nil for the one not in use.
-func (cfg ExecuteBlockCfg) WithOfflineBAL(w *offlinebal.Writer, r *offlinebal.Reader) ExecuteBlockCfg {
-	cfg.offlineBALWriter = w
-	cfg.offlineBALReader = r
+// WithOfflineBAL returns a copy of the config wired to an offline-BAL store: its
+// writer persists synthetic BALs during generation, its reader feeds stored BALs
+// into execution.
+func (cfg ExecuteBlockCfg) WithOfflineBAL(s offlinebal.Store) ExecuteBlockCfg {
+	cfg.offlineBAL = s
 	return cfg
 }
 
