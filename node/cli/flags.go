@@ -89,7 +89,7 @@ var (
 	}
 	PruneBlocksDistanceFlag = cli.StringFlag{
 		Name:  "prune.distance.blocks",
-		Usage: `Keep block history for the latest N blocks, or a named policy: "keep-post-merge" (prune pre-merge blocks only) or "keep-all" (keep every block). If unset, retention follows --prune.mode`,
+		Usage: `Keep block history for the latest N blocks, or a named policy: "keep-post-merge" (prune pre-merge blocks only) or "keep-all" (keep every block). If unset: 2500000 for --prune.mode=full/minimal, otherwise retention follows --prune.mode`,
 	}
 	StateStreamDisableFlag = cli.BoolFlag{
 		Name:  "state.stream.disable",
@@ -241,6 +241,10 @@ func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	applyRemainingEthFlags(ctx, cfg, logger)
 }
 
+// defaultReplayBlocksDistance keeps the transaction segments that a multi-month
+// replay below the tip needs; the stock full/minimal distances would prune them.
+const defaultReplayBlocksDistance = 2_500_000
+
 func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	chainId := cfg.NetworkID
 	if cfg.Genesis != nil {
@@ -249,6 +253,9 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 	_ = chainId
 
 	blockDistance := mustDistance(prune.ParseBlocksDistance(ctx.String(PruneBlocksDistanceFlag.Name), PruneBlocksDistanceFlag.Name))
+	if pruneMode := ctx.String(PruneModeFlag.Name); !ctx.IsSet(PruneBlocksDistanceFlag.Name) && (pruneMode == "full" || pruneMode == "minimal") {
+		blockDistance = defaultReplayBlocksDistance
+	}
 	distance := mustDistance(prune.ParseHistoryDistance(ctx.String(PruneDistanceFlag.Name), PruneDistanceFlag.Name))
 
 	cfg.PersistReceiptsCacheV2 = ctx.Bool(utils.PersistReceiptsV2Flag.Name)

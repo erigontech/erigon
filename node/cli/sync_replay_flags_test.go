@@ -41,3 +41,21 @@ func TestExecStopAtBlockFlag(t *testing.T) {
 	require.Zero(t, buildEthCfg(t, nil).Sync.ExecStopAtBlock)
 	require.EqualValues(t, 25_640_187, buildEthCfg(t, []string{"--exec.stop-at-block", "25640187"}).Sync.ExecStopAtBlock)
 }
+
+func TestPruneBlocksDistanceDefaultKeepsReplayRange(t *testing.T) {
+	const replayRange = 2_500_000
+	head := uint64(30_000_000)
+	for _, mode := range []string{"full", "minimal"} {
+		t.Run(mode+" defaults to the replay range", func(t *testing.T) {
+			cfg := buildEthCfg(t, []string{"--prune.mode", mode})
+			require.EqualValues(t, head-replayRange, cfg.Prune.Blocks.PruneTo(head))
+		})
+	}
+	t.Run("explicit distance wins", func(t *testing.T) {
+		cfg := buildEthCfg(t, []string{"--prune.mode", "full", "--prune.distance.blocks", "300000"})
+		require.EqualValues(t, head-300_000, cfg.Prune.Blocks.PruneTo(head))
+	})
+	t.Run("archive keeps all blocks", func(t *testing.T) {
+		require.Zero(t, buildEthCfg(t, []string{"--prune.mode", "archive"}).Prune.Blocks.PruneTo(head))
+	})
+}
