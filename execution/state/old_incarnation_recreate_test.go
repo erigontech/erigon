@@ -58,31 +58,76 @@ func TestOldIncarnationStorageMaskedAfterRecreate(t *testing.T) {
 	require.True(t, v.IsZero(), "recreated contract's unwritten slot must read 0, got %s", v.String())
 }
 
-// tx0 creates and self-destructs the address; tx1 credits it, which revives it;
-// tx2 recreates it and must carry the credit.
-func TestRecreateAfterCreditRevivalCarriesBalance(t *testing.T) {
-	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
-	vm := NewVersionMap(nil)
-	runTx := func(txIdx int, f func(ibs *IntraBlockState)) {
-		ibs := NewWithVersionMap(&emptyReader{}, vm)
-		ibs.SetTxContext(100, txIdx)
-		ibs.SetNoMaterialize(true)
-		f(ibs)
-		vm.FlushVersionedWrites(ibs.FinalizedWrites(&chain.Rules{}), true)
-	}
+// runRevivalTx runs f as tx txIdx on a noMaterialize IBS over vm and flushes its
+// finalized writes, which it returns.
+func runRevivalTx(t *testing.T, vm *VersionMap, txIdx int, f func(ibs *IntraBlockState)) *WriteSet {
+	t.Helper()
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	ibs.SetTxContext(100, txIdx)
+	ibs.SetNoMaterialize(true)
+	f(ibs)
+	writes := ibs.FinalizedWrites(&chain.Rules{})
+	vm.FlushVersionedWrites(writes, true)
+	return writes
+}
 
-	runTx(0, func(ibs *IntraBlockState) {
+func createAndDestroy(t *testing.T, addr accounts.Address) func(ibs *IntraBlockState) {
+	return func(ibs *IntraBlockState) {
 		require.NoError(t, ibs.CreateAccount(addr, true))
 		_, err := ibs.Selfdestruct(addr, false)
 		require.NoError(t, err)
-	})
-	runTx(1, func(ibs *IntraBlockState) {
+	}
+}
+
+func credit(t *testing.T, addr accounts.Address) func(ibs *IntraBlockState) {
+	return func(ibs *IntraBlockState) {
 		require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(5), tracing.BalanceChangeTransfer))
-	})
-	runTx(2, func(ibs *IntraBlockState) {
+	}
+}
+
+// tx0 creates and self-destructs the address; tx1 credits it, which revives it
+// as a fresh account committed with incarnation 0.
+func TestCreditRevivalCommitsIncarnationZero(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	vm := NewVersionMap(nil)
+	runRevivalTx(t, vm, 0, createAndDestroy(t, addr))
+	writes := runRevivalTx(t, vm, 1, credit(t, addr))
+
+	normalized, err := writes.Normalize(vm, 1, 0, &emptyReader{}, nil, true, false, false)
+	require.NoError(t, err)
+	inc, ok := normalized.GetIncarnation(addr)
+	require.True(t, ok)
+	require.Zero(t, inc.Val)
+}
+
+// tx0 creates and self-destructs the address; tx1 credits it, which revives it
+// as a fresh account; tx2 recreates it, carrying the credit, as incarnation 1.
+func TestRecreateAfterCreditRevivalCarriesBalance(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	vm := NewVersionMap(nil)
+	runRevivalTx(t, vm, 0, createAndDestroy(t, addr))
+	runRevivalTx(t, vm, 1, credit(t, addr))
+	runRevivalTx(t, vm, 2, func(ibs *IntraBlockState) {
 		require.NoError(t, ibs.CreateAccount(addr, true))
 		balance, err := ibs.GetBalance(addr)
 		require.NoError(t, err)
 		require.Equal(t, uint64(5), balance.Uint64())
+		incarnation, err := ibs.GetIncarnation(addr)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), incarnation)
+	})
+}
+
+// tx0 creates and self-destructs the address; tx1 recreates it as incarnation 1,
+// as serial execution does.
+func TestRecreateAfterDestructInEarlierTx(t *testing.T) {
+	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
+	vm := NewVersionMap(nil)
+	runRevivalTx(t, vm, 0, createAndDestroy(t, addr))
+	runRevivalTx(t, vm, 1, func(ibs *IntraBlockState) {
+		require.NoError(t, ibs.CreateAccount(addr, true))
+		incarnation, err := ibs.GetIncarnation(addr)
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), incarnation)
 	})
 }

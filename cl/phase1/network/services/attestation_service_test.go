@@ -414,6 +414,75 @@ func (t *attestationTestSuite) TestAttestationProcessMessageAllowsNextEpochWhenC
 	t.Require().NoError(err)
 }
 
+func (t *attestationTestSuite) TestAttestationProcessMessageAllowsSecondEpochWhenNoLaterBlockSeen() {
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
+		return 8
+	}
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+		return 1
+	}
+	blsVerifyMultipleSignatures = func(signatures [][]byte, signRoots [][]byte, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+
+	secondEpoch := mockEpoch + 2
+	secondEpochSlot := secondEpoch * mockSlotsPerEpoch
+	secondEpochAttData := *attData
+	secondEpochAttData.Slot = secondEpochSlot
+	secondEpochAttData.Target.Epoch = secondEpoch
+	secondEpochAtt := *att
+	secondEpochAtt.Data = &secondEpochAttData
+
+	t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+		secondEpochAttData.BeaconBlockRoot: {},
+	}
+	finalizedCheckpoint := solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
+	t.mockForkChoice.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+		secondEpochSlot: {Root: secondEpochAttData.Target.Root},
+		finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
+	}
+	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
+	t.committeeSubscibe.EXPECT().AggregateAttestation(&secondEpochAtt).Return(nil).Times(1)
+
+	t.ethClock.EXPECT().GetEpochAtSlot(secondEpochSlot).Return(secondEpoch).Times(1)
+	t.ethClock.EXPECT().GetCurrentSlot().Return(secondEpochSlot).Times(1)
+	t.mockForkChoice.HighestSeenVal = mockSlot
+	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		Attestation:      &secondEpochAtt,
+		ImmediateProcess: true,
+	})
+	t.Require().NoError(err)
+	t.Eventually(t.gomockCtrl.Satisfied, time.Second, time.Millisecond)
+
+	thirdEpoch := mockEpoch + 3
+	thirdEpochSlot := thirdEpoch * mockSlotsPerEpoch
+	thirdEpochAttData := secondEpochAttData
+	thirdEpochAttData.Slot = thirdEpochSlot
+	thirdEpochAttData.Target.Epoch = thirdEpoch
+	thirdEpochAtt := *att
+	thirdEpochAtt.Data = &thirdEpochAttData
+
+	t.ethClock.EXPECT().GetEpochAtSlot(thirdEpochSlot).Return(thirdEpoch).Times(1)
+	t.ethClock.EXPECT().GetCurrentSlot().Return(thirdEpochSlot).Times(1)
+	t.mockForkChoice.HighestSeenVal = mockSlot
+	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		Attestation:      &thirdEpochAtt,
+		ImmediateProcess: true,
+	})
+	t.Require().Error(err)
+	t.Require().Contains(err.Error(), "too far from attestation epoch")
+
+	t.ethClock.EXPECT().GetEpochAtSlot(secondEpochSlot).Return(secondEpoch).Times(1)
+	t.ethClock.EXPECT().GetCurrentSlot().Return(secondEpochSlot).Times(1)
+	t.mockForkChoice.HighestSeenVal = mockSlot + 1
+	err = t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		Attestation:      &secondEpochAtt,
+		ImmediateProcess: true,
+	})
+	t.Require().Error(err)
+	t.Require().Contains(err.Error(), "too far from attestation epoch")
+}
+
 // The head state can still carry the previous fork when the attestation targets the first epoch of a new one.
 func (t *attestationTestSuite) TestAttestationSignatureDomainUsesTargetEpochForkVersion() {
 	t.beaconConfig.DenebForkVersion = 0x04000099 // the fork scheduled for mockEpoch under this config
@@ -515,7 +584,7 @@ func (t *attestationTestSuite) TestAttestationSeenOnlyAfterSignatureVerification
 		ImmediateProcess: true,
 	})
 	t.Require().ErrorIs(err, ErrIgnore)
-	t.Require().Contains(err.Error(), "already seen")
+	t.Require().ErrorIs(err, ErrAttestationAlreadySeen)
 }
 
 func (t *attestationTestSuite) TestAttestationProcessMessageRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt() {
