@@ -90,7 +90,8 @@ type BackwardBeaconDownloader struct {
 	httpFallbackURL        string
 	httpPreferred          atomic.Bool // set after first HTTP success; skips P2P probing
 
-	consecutiveEnvelopeFailures int
+	consecutiveEnvelopeFailures  int
+	gloasSuccessorSourceFailures int
 
 	mu sync.Mutex
 }
@@ -100,6 +101,7 @@ var (
 	errCanonicalGloasSuccessorUnavailable = errors.New("canonical GLOAS successor source is not configured")
 	errInvalidCanonicalGloasSuccessor     = errors.New("canonical GLOAS successor response is invalid")
 	errDisconnectedGloasSuccessorRange    = errors.New("canonical GLOAS successor range is disconnected")
+	errGloasSuccessorNotServed            = errors.New("canonical GLOAS successor is not served")
 )
 
 const (
@@ -490,7 +492,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 	// [New in Gloas:EIP7732] Fetch envelopes for GLOAS FULL blocks before processing.
 	log.Debug("[BackwardBeaconDownloader] processResponses start", "blocks", len(responses), "slotToDownload", b.slotToDownload.Load(), "expectedRoot", b.expectedRoot)
 	expectedBlock := blockWithRoot(responses, b.expectedRoot)
-	if expectedBlock == nil && b.canDeferInitialGloasBlock() && b.db != nil && b.blockReader != nil {
+	if expectedBlock == nil && b.awaitingInitialGloasBlock() && b.db != nil && b.blockReader != nil {
 		if err := b.db.View(ctx, func(tx kv.Tx) error {
 			stored, err := b.blockReader.ReadBlockByRoot(ctx, tx, b.expectedRoot)
 			if err != nil {
@@ -502,42 +504,19 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			return nil
 		}); err != nil {
 			log.Warn("Failed to read initial GLOAS block", "root", b.expectedRoot, "err", err)
-			return nil
+		} else if expectedBlock != nil && expectedBlock.Version() >= clparams.GloasVersion {
+			responses = append(responses, expectedBlock)
 		}
 	}
-	if expectedBlock != nil && expectedBlock.Version() >= clparams.GloasVersion && b.canDeferInitialGloasBlock() {
-		if err := b.onInitialGloasBlock(expectedBlock); err != nil {
-			log.Warn("Failed to persist initial GLOAS block", "root", b.expectedRoot, "err", err)
-			return nil
+	if expectedBlock != nil && expectedBlock.Version() >= clparams.GloasVersion && b.prevBatchTopBlock == nil {
+		if ok, err := b.resolveGloasLookahead(ctx, expectedBlock); !ok {
+			return err
 		}
-		b.prevBatchTopBlock = expectedBlock
-		b.setExpectedRoot(expectedBlock.Block.ParentRoot)
-		if expectedBlock.Block.Slot == 0 {
-			b.finished.Store(true)
-			return nil
-		}
-		b.slotToDownload.Store(expectedBlock.Block.Slot - 1)
 		expectedBlock = blockWithRoot(responses, b.expectedRoot)
 	}
-	if expectedBlock != nil && expectedBlock.Version() >= clparams.GloasVersion {
-		if b.prevBatchTopBlock != nil && !isDirectSuccessor(expectedBlock, b.prevBatchTopBlock) {
-			return fmt.Errorf("%w: retained successor is not a child of the expected block", errInvalidCanonicalGloasSuccessor)
-		}
-		if b.prevBatchTopBlock == nil {
-			successor, err := b.fetchGloasSuccessor(ctx, expectedBlock)
-			if err != nil {
-				if errors.Is(err, errCanonicalGloasSuccessorUnavailable) || errors.Is(err, errInvalidCanonicalGloasSuccessor) {
-					return err
-				}
-				b.httpPreferred.Store(false)
-				log.Debug("[BackwardBeaconDownloader] initial GLOAS successor fetch failed", "root", b.expectedRoot, "err", err)
-				return nil
-			}
-			if successor == nil {
-				return nil
-			}
-			b.prevBatchTopBlock = successor
-		}
+	if expectedBlock != nil && expectedBlock.Version() >= clparams.GloasVersion &&
+		b.prevBatchTopBlock != nil && !isDirectSuccessor(expectedBlock, b.prevBatchTopBlock) {
+		return fmt.Errorf("%w: retained successor is not a child of the expected block", errInvalidCanonicalGloasSuccessor)
 	}
 	canonicalResponses := canonicalBackwardResponses(responses, b.expectedRoot)
 	envelopes, fullRootSet := b.fetchGloasEnvelopes(ctx, canonicalResponses)
@@ -598,9 +577,9 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 	// Fall back to fetching by root hash which works regardless of fork choice.
 	if !matched && !b.finished.Load() && b.httpFallbackURL != "" {
 		block, err := fetchBlockFromBeaconAPIByRoot(ctx, b.httpFallbackURL, b.expectedRoot, b.beaconCfg)
-		if err != nil {
-			log.Debug("[BackwardBeaconDownloader] root-based HTTP fallback failed", "root", b.expectedRoot, "err", err)
-		} else if block != nil {
+		if err != nil || block == nil {
+			log.Warn("[BackwardBeaconDownloader] expected block is missing from the peer batch and the beacon API", "root", b.expectedRoot, "err", err)
+		} else {
 			blockRoot, err := block.Block.HashSSZ()
 			if err == nil && blockRoot == b.expectedRoot {
 				log.Debug("[BackwardBeaconDownloader] block matched via root lookup", "slot", block.Block.Slot, "root", common.Hash(blockRoot))
@@ -611,19 +590,10 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 						return fmt.Errorf("%w: retained successor is not a child of the expected block", errInvalidCanonicalGloasSuccessor)
 					}
 					if b.prevBatchTopBlock == nil {
-						successor, successorErr := b.fetchGloasSuccessor(ctx, block)
-						if successorErr != nil {
-							if errors.Is(successorErr, errCanonicalGloasSuccessorUnavailable) || errors.Is(successorErr, errInvalidCanonicalGloasSuccessor) {
-								return successorErr
-							}
-							b.httpPreferred.Store(false)
-							log.Debug("[BackwardBeaconDownloader] root-fetched GLOAS successor fetch failed", "root", b.expectedRoot, "err", successorErr)
-							return nil
+						// A deferred anchor is its own lookahead and must stay unclassified.
+						if ok, err := b.resolveGloasLookahead(ctx, block); !ok || b.prevBatchTopBlock == block {
+							return err
 						}
-						if successor == nil {
-							return nil
-						}
-						b.prevBatchTopBlock = successor
 					}
 					if len(determineGloasFullRoots([]*cltypes.SignedBeaconBlock{block}, b.prevBatchTopBlock)) > 0 {
 						env, fetchErr := b.fetchSingleEnvelope(ctx, block)
@@ -660,9 +630,51 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 	return nil
 }
 
+// P2P never supplies the successor: a valid child is not necessarily canonical.
 func (b *BackwardBeaconDownloader) canDeferInitialGloasBlock() bool {
-	return b.httpFallbackURL == "" && b.prevBatchTopBlock == nil &&
-		b.onInitialGloasBlock != nil && b.expectedRoot == b.initialGloasRoot
+	sourceUnavailable := b.httpFallbackURL == "" || b.gloasSuccessorSourceFailures >= maxGloasSuccessorFailures
+	return b.prevBatchTopBlock == nil && sourceUnavailable && b.awaitingInitialGloasBlock()
+}
+
+func (b *BackwardBeaconDownloader) awaitingInitialGloasBlock() bool {
+	return b.onInitialGloasBlock != nil && b.expectedRoot == b.initialGloasRoot
+}
+
+func (b *BackwardBeaconDownloader) resolveGloasLookahead(ctx context.Context, block *cltypes.SignedBeaconBlock) (bool, error) {
+	if !b.canDeferInitialGloasBlock() {
+		successor, err := b.fetchGloasSuccessor(ctx, block)
+		if errors.Is(err, errCanonicalGloasSuccessorUnavailable) || errors.Is(err, errInvalidCanonicalGloasSuccessor) {
+			return false, err
+		}
+		if err != nil {
+			b.httpPreferred.Store(false)
+			log.Warn("[BackwardBeaconDownloader] GLOAS successor fetch failed", "root", b.expectedRoot,
+				"sourceFailures", b.gloasSuccessorSourceFailures, "maxSourceFailures", maxGloasSuccessorFailures, "err", err)
+		}
+		if successor != nil {
+			b.prevBatchTopBlock = successor
+			return true, nil
+		}
+		if !b.canDeferInitialGloasBlock() {
+			return false, nil
+		}
+	}
+	if err := b.onInitialGloasBlock(block); err != nil {
+		log.Warn("Failed to persist initial GLOAS block", "root", b.expectedRoot, "err", err)
+		return false, nil
+	}
+	if b.httpFallbackURL != "" {
+		log.Warn("[BackwardBeaconDownloader] checkpoint sync URL cannot serve the GLOAS anchor successor, persisting the anchor without payload classification",
+			"root", b.expectedRoot, "slot", block.Block.Slot)
+	}
+	b.prevBatchTopBlock = block
+	b.setExpectedRoot(block.Block.ParentRoot)
+	if block.Block.Slot == 0 {
+		b.finished.Store(true)
+		return false, nil
+	}
+	b.slotToDownload.Store(block.Block.Slot - 1)
+	return true, nil
 }
 
 func blockWithRoot(blocks []*cltypes.SignedBeaconBlock, expectedRoot common.Hash) *cltypes.SignedBeaconBlock {
@@ -723,6 +735,7 @@ func (b *BackwardBeaconDownloader) fetchGloasSuccessor(ctx context.Context, bloc
 		b.gloasSuccessorRoot = blockRoot
 		b.gloasSuccessorNext = saturatingIncrement(block.Block.Slot)
 		b.gloasSuccessorFailures = 0
+		b.gloasSuccessorSourceFailures = 0
 	}
 	start := b.gloasSuccessorNext
 	if start == block.Block.Slot {
@@ -730,8 +743,9 @@ func (b *BackwardBeaconDownloader) fetchGloasSuccessor(ctx context.Context, bloc
 	}
 	count := backwardGloasSuccessorSearchBatch
 	completedRange := false
+	var currentSlot uint64
 	if b.currentSlot != nil {
-		currentSlot := b.currentSlot()
+		currentSlot = b.currentSlot()
 		if start >= currentSlot {
 			start = saturatingIncrement(block.Block.Slot)
 			b.gloasSuccessorNext = start
@@ -755,6 +769,10 @@ func (b *BackwardBeaconDownloader) fetchGloasSuccessor(ctx context.Context, bloc
 	if successor == nil {
 		if completedRange {
 			b.gloasSuccessorNext = nextSlotAfterRange(start, count)
+			if b.gloasSuccessorNext >= currentSlot {
+				b.gloasSuccessorSourceFailures++
+				return nil, fmt.Errorf("no block in slots [%d,%d)", saturatingIncrement(block.Block.Slot), currentSlot)
+			}
 		}
 		return nil, nil
 	}
@@ -771,11 +789,26 @@ func (b *BackwardBeaconDownloader) fetchGloasSuccessorRange(ctx context.Context,
 	if b.httpFallbackURL == "" {
 		return nil, errCanonicalGloasSuccessorUnavailable
 	}
+	// On error the fetcher returns only blocks before the first failing or cancelled slot.
 	blocks, err := fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start, count, b.beaconCfg)
-	if err != nil {
-		return nil, err
+	if err != nil && len(blocks) == 0 {
+		// Retry in order so a later failure cannot cancel an earlier child.
+		for i := range count {
+			blocks, err = fetchBlocksFromBeaconAPI(ctx, b.httpFallbackURL, start+i, 1, b.beaconCfg)
+			if err != nil {
+				b.gloasSuccessorSourceFailures++
+				return nil, err
+			}
+			if len(blocks) > 0 {
+				break
+			}
+		}
 	}
 	successor, err := linkedGloasSuccessor(blocks, start, count, parentRoot)
+	if errors.Is(err, errGloasSuccessorNotServed) {
+		b.gloasSuccessorSourceFailures++
+		return nil, err
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", errDisconnectedGloasSuccessorRange, err)
 	}
@@ -808,6 +841,10 @@ func connectedGloasSuccessor(blocks []*cltypes.SignedBeaconBlock, parentRoot com
 	slices.SortFunc(ordered, func(left, right *cltypes.SignedBeaconBlock) int {
 		return cmp.Compare(left.Block.Slot, right.Block.Slot)
 	})
+	// The source skipped the direct child, for example because it pruned it.
+	if ordered[0].Block.ParentRoot != parentRoot {
+		return nil, fmt.Errorf("%w: first served block at slot %d has parent %v", errGloasSuccessorNotServed, ordered[0].Block.Slot, ordered[0].Block.ParentRoot)
+	}
 	expectedParent := parentRoot
 	for _, block := range ordered {
 		if block.Block.ParentRoot != expectedParent {
