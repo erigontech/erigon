@@ -295,14 +295,15 @@ func (x *Cursor) GetV() []byte {
 }
 
 type Pair struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	K             []byte                 `protobuf:"bytes,1,opt,name=k,proto3" json:"k,omitempty"`
-	V             []byte                 `protobuf:"bytes,2,opt,name=v,proto3" json:"v,omitempty"`
-	CursorId      uint32                 `protobuf:"varint,3,opt,name=cursor_id,json=cursorId,proto3" json:"cursor_id,omitempty"` // send once after new cursor open
-	ViewId        uint64                 `protobuf:"varint,4,opt,name=view_id,json=viewId,proto3" json:"view_id,omitempty"`       // return once after tx open. mdbx's tx.ViewID() - id of write transaction in db
-	TxId          uint64                 `protobuf:"varint,5,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"`             // return once after tx open. internal identifier - use it in other methods - to achieve consistent DB view (to read data from same DB tx on server).
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	K                      []byte                 `protobuf:"bytes,1,opt,name=k,proto3" json:"k,omitempty"`
+	V                      []byte                 `protobuf:"bytes,2,opt,name=v,proto3" json:"v,omitempty"`
+	CursorId               uint32                 `protobuf:"varint,3,opt,name=cursor_id,json=cursorId,proto3" json:"cursor_id,omitempty"`                                                   // send once after new cursor open
+	ViewId                 uint64                 `protobuf:"varint,4,opt,name=view_id,json=viewId,proto3" json:"view_id,omitempty"`                                                         // MDBX snapshot ID, refreshed when the server renews the transaction.
+	TxId                   uint64                 `protobuf:"varint,5,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"`                                                               // return once after tx open. internal identifier - use it in other methods - to achieve consistent DB view (to read data from same DB tx on server).
+	HistoryFilesGeneration *uint64                `protobuf:"varint,6,opt,name=history_files_generation,json=historyFilesGeneration,proto3,oneof" json:"history_files_generation,omitempty"` // Pinned history files for view_id, refreshed on renewal; absent when unsupported.
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *Pair) Reset() {
@@ -366,6 +367,13 @@ func (x *Pair) GetViewId() uint64 {
 func (x *Pair) GetTxId() uint64 {
 	if x != nil {
 		return x.TxId
+	}
+	return 0
+}
+
+func (x *Pair) GetHistoryFilesGeneration() uint64 {
+	if x != nil && x.HistoryFilesGeneration != nil {
+		return *x.HistoryFilesGeneration
 	}
 	return 0
 }
@@ -2180,13 +2188,15 @@ const file_remote_kv_proto_rawDesc = "" +
 	"bucketName\x12\x16\n" +
 	"\x06cursor\x18\x03 \x01(\rR\x06cursor\x12\f\n" +
 	"\x01k\x18\x04 \x01(\fR\x01k\x12\f\n" +
-	"\x01v\x18\x05 \x01(\fR\x01v\"m\n" +
+	"\x01v\x18\x05 \x01(\fR\x01v\"\xc9\x01\n" +
 	"\x04Pair\x12\f\n" +
 	"\x01k\x18\x01 \x01(\fR\x01k\x12\f\n" +
 	"\x01v\x18\x02 \x01(\fR\x01v\x12\x1b\n" +
 	"\tcursor_id\x18\x03 \x01(\rR\bcursorId\x12\x17\n" +
 	"\aview_id\x18\x04 \x01(\x04R\x06viewId\x12\x13\n" +
-	"\x05tx_id\x18\x05 \x01(\x04R\x04txId\"L\n" +
+	"\x05tx_id\x18\x05 \x01(\x04R\x04txId\x12=\n" +
+	"\x18history_files_generation\x18\x06 \x01(\x04H\x00R\x16historyFilesGeneration\x88\x01\x01B\x1b\n" +
+	"\x19_history_files_generation\"L\n" +
 	"\rStorageChange\x12'\n" +
 	"\blocation\x18\x01 \x01(\v2\v.types.H256R\blocation\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\"\xe8\x01\n" +
@@ -2479,6 +2489,7 @@ func file_remote_kv_proto_init() {
 	if File_remote_kv_proto != nil {
 		return
 	}
+	file_remote_kv_proto_msgTypes[1].OneofWrappers = []any{}
 	file_remote_kv_proto_msgTypes[12].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
@@ -157,7 +158,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("end (%d) > MaxUint32)", end), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, crit); err != nil {
+	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
 
@@ -228,10 +229,27 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	// Searches the log indices and re-executes, so stored receipts cannot answer for it.
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, begin)
-	if err != nil {
-		return nil, err
+	// A count-limited scan may finish before reaching the pruned part of its range.
+	// Keep that error for an incomplete scan: missing index entries can end it early.
+	rangeErr := api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, tx, begin, end)
+	if rangeErr != nil && !errors.Is(rangeErr, state.ErrPruned) {
+		return nil, rangeErr
+	}
+	// Non-zero starts need a txNum mapping, which may be missing below the
+	// retained range. Genesis needs no lookup and keeps its existing scan bound.
+	if rangeErr != nil && begin > 0 {
+		head, err := rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return nil, err
+		}
+		firstAvailable, err := api.blocksAvailableFrom(ctx, tx, head)
+		if err != nil {
+			return nil, err
+		}
+		begin = max(begin, firstAvailable)
+		if begin > end {
+			return nil, rangeErr
+		}
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -285,6 +303,18 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			if logOptions.BlockCount != 0 && logOptions.BlockCount <= blockCount {
 				return rpcLogs, nil
 			}
+			if rangeErr != nil {
+				if err := api.checkPruneBlocksRange(ctx, tx, blockNum, end); err != nil {
+					return nil, err
+				}
+				// Block-count queries must not return a partial block when older
+				// log-index entries are missing.
+				if logOptions.BlockCount != 0 {
+					if err := api.checkPruneTransactionHistory(ctx, tx, blockNum); err != nil {
+						return nil, err
+					}
+				}
+			}
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
@@ -307,6 +337,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			continue
 		}
 
+		if rangeErr != nil && logOptions.LogCount != 0 {
+			if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(txIndex)); err != nil {
+				return nil, err
+			}
+		}
 		err = exec.ExecTxn(txNum, txIndex, txn, true)
 		if err != nil {
 			return nil, err
@@ -366,6 +401,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if logOptions.LogCount != 0 && logOptions.LogCount <= logCount {
 			return rpcLogs, nil
 		}
+	}
+	if rangeErr != nil && (logOptions.BlockCount == 0 || blockCount < logOptions.BlockCount) {
+		return nil, rangeErr
 	}
 	return rpcLogs, nil
 }

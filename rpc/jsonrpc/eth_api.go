@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
@@ -167,6 +168,8 @@ type BaseAPI struct {
 	// shorter than the verdict's, since the data it waits for can arrive at any time.
 	_preMergeUnsettled    atomic.Pointer[unsettledProbe]
 	_preMergeUnsettledTTL time.Duration
+	_historyPruneFloor    pruneFloorCache[historyPruneFloors]
+	_blocksPruneFloor     pruneFloorCache[uint64]
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -490,28 +493,269 @@ const defaultUnsettledPreMergeTTL = time.Second
 // sequence, which a stored TxCount includes.
 const systemTxsPerBlock = 2
 
-// checks the pruning state to see if we would hold information about this
-// block in state history or not.  Some strange issues arise getting account
-// history for blocks that have been pruned away giving nonce too low errors
-// etc. as red herrings
+// checkPruneHistory requires history from the block's first system transaction.
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available")
+	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.wholeBlock })
 }
 
-// checkPruneBlocks gates on block-body availability rather than state history — use for RPCs
-// that read block headers/bodies but do not require state (e.g. GetBlockByNumber, GetTransactionByHash).
+// checkPruneState requires the state after the block, read at Min(block+1).
+func (api *BaseAPI) checkPruneState(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.postState })
+}
+
+// checkPruneStateAfterSystemTx matches state readers opened at Min(block+1)+1.
+func (api *BaseAPI) checkPruneStateAfterSystemTx(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.stateAfterSystemTx })
+}
+
+func (api *BaseAPI) checkHistoryFloor(ctx context.Context, tx kv.Tx, block uint64, pick func(historyPruneFloors) uint64) error {
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
+		floors, err := api.historyStartBlocks(ctx, tx, head)
+		return pick(floors), err
+	})
+}
+
+// checkPruneTransactionHistory requires the first user transaction's pre-state,
+// at Min(block)+1, after the block's initial system transaction.
+func (api *BaseAPI) checkPruneTransactionHistory(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneTransactionHistoryAtIndex(ctx, tx, block, 0)
+}
+
+func (api *BaseAPI) checkPruneTransactionHistoryAtIndex(ctx context.Context, tx kv.Tx, block, txIndex uint64) error {
+	for {
+		var indexedKey pruneFloorCacheKey
+		var hasIndexedKey bool
+		err := api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
+			floors, err := api.historyStartBlocks(ctx, tx, head)
+			if err != nil || txIndex == 0 || block >= floors.replay {
+				return floors.replay, err
+			}
+			indexedKey, hasIndexedKey = historyFloorCacheKey(tx.(kv.TemporalTx), head)
+			// The block-level replay floor may reject an indexed read whose pre-state
+			// survives. Check its exact txNum only when that floor would reject it.
+			c, err := tx.Cursor(kv.MaxTxNum)
+			if err != nil {
+				return 0, err
+			}
+			defer c.Close()
+			minTxNum, err := api._txNumReader.MinWithCursor(ctx, tx, c, block)
+			if err != nil {
+				return 0, err
+			}
+			maxTxNum, err := api._txNumReader.MaxWithCursor(ctx, tx, c, block)
+			if err != nil {
+				return 0, err
+			}
+			// Only a position in this block can bypass its replay floor. Max names the
+			// final system transaction, whose pre-state follows all user transactions.
+			if maxTxNum > minTxNum && txIndex < maxTxNum-minTxNum && minTxNum+txIndex+1 >= floors.startTxNum {
+				return block, nil
+			}
+			return 0, fmt.Errorf("%w: requested block %d at transaction index %d, history is available from txNum %d", state.ErrPruned, block, txIndex, floors.startTxNum)
+		})
+		// Closing a remote cursor can also renew its view. Check after the deferred
+		// Close completes, so the history floor and indexed bounds describe one view.
+		if hasIndexedKey {
+			if current, ok := historyFloorCacheKey(tx.(kv.TemporalTx), indexedKey.head); !ok || current != indexedKey {
+				continue
+			}
+		}
+		return err
+	}
+}
+
+// checkPruneBlocks gates RPCs that need retained block transactions,
+// independently of state history.
 func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneBlocksRange(ctx, tx, block, block)
+}
+
+func (api *BaseAPI) checkPruneBlocksRange(ctx context.Context, tx kv.Tx, from, to uint64) error {
 	expiry, oldest, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if expiry {
-		if oldest == nil || block >= *oldest {
-			return nil
-		}
-		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.ErrPruned, block, *oldest)
+	if expiry && oldest != nil && from < *oldest {
+		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.ErrPruned, from, *oldest)
 	}
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
+	return api.checkPruneField(tx, from, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available", func(head uint64) (uint64, error) {
+		// Separately kept genesis cannot fill a gap in a range. Only a genesis-only
+		// read may bypass the physical floor; retention and chain-history expiry still apply.
+		if from == 0 && to == 0 {
+			return 0, nil
+		}
+		return api.minimumBlockAvailable(ctx, tx, head)
+	})
+}
+
+// blocksAvailableFrom combines the configured policy, any chain-history expiry,
+// and the physical block-data floor into the effective block boundary.
+func (api *BaseAPI) blocksAvailableFrom(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
+	p, err := api.pruneMode(tx)
+	if err != nil {
+		return 0, err
+	}
+	floor := uint64(0)
+	if p != nil {
+		floor = p.Blocks.PruneTo(head)
+	}
+	expiry, expiryFrom, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if expiry && expiryFrom != nil {
+		floor = max(floor, *expiryFrom)
+	}
+	onDiskFloor, err := api.minimumBlockAvailable(ctx, tx, head)
+	if err != nil {
+		return 0, err
+	}
+	floor = max(floor, onDiskFloor)
+	return floor, nil
+}
+
+type historyPruneFloors struct {
+	startTxNum         uint64
+	postState          uint64
+	stateAfterSystemTx uint64
+	wholeBlock         uint64
+	replay             uint64
+}
+
+var errHistoryViewChanged = errors.New("history view changed during availability lookup")
+
+func (api *BaseAPI) historyStartBlocks(ctx context.Context, tx kv.Tx, head uint64) (historyPruneFloors, error) {
+	ttx, ok := tx.(kv.TemporalTx)
+	if !ok {
+		return historyPruneFloors{}, fmt.Errorf("history availability requires a temporal transaction, got %T", tx)
+	}
+	for {
+		key, ok := historyFloorCacheKey(ttx, head)
+		if !ok {
+			// Older remote servers and custom views may not identify their pinned files.
+			return api.readHistoryStartBlocks(ctx, ttx, head)
+		}
+		floors, err := api._historyPruneFloor.getForKey(ctx, key, func() (historyPruneFloors, error) {
+			floors, err := api.readHistoryStartBlocks(ctx, ttx, head)
+			if err != nil {
+				return historyPruneFloors{}, err
+			}
+			// Cursor reads can renew a remote transaction. Retry instead of caching
+			// a floor read across two different views.
+			if current, ok := historyFloorCacheKey(ttx, head); !ok || current != key {
+				return historyPruneFloors{}, errHistoryViewChanged
+			}
+			return floors, nil
+		})
+		if !errors.Is(err, errHistoryViewChanged) {
+			return floors, err
+		}
+	}
+}
+
+func historyFloorCacheKey(tx kv.TemporalTx, head uint64) (pruneFloorCacheKey, bool) {
+	files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 })
+	if !ok {
+		return pruneFloorCacheKey{}, false
+	}
+	return pruneFloorCacheKey{
+		head:                   head,
+		dbViewID:               tx.ViewID(),
+		historyFilesGeneration: files.HistoryFilesGeneration(),
+		blockFilesGeneration:   blockFilesGeneration(tx),
+	}, true
+}
+
+func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx, head uint64) (historyPruneFloors, error) {
+	startTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return historyPruneFloors{}, err
+	}
+	return api.historyStartBlocksFromTxNum(ctx, tx, head, startTxNum)
+}
+
+func (api *BaseAPI) readCommitmentHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx, head uint64) (historyPruneFloors, error) {
+	for {
+		key, hasKey := historyFloorCacheKey(tx, head)
+		startTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return historyPruneFloors{}, err
+		}
+		floors, err := api.historyStartBlocksFromTxNum(ctx, tx, head, startTxNum)
+		if err != nil || !hasKey {
+			return floors, err
+		}
+		// Cursor reads in the conversion can renew a remote transaction.
+		// Retry the whole lookup if it spans different views.
+		if current, ok := historyFloorCacheKey(tx, head); ok && current == key {
+			return floors, nil
+		}
+	}
+}
+
+func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, head, startTxNum uint64) (historyPruneFloors, error) {
+	if startTxNum == 0 {
+		return historyPruneFloors{}, nil
+	}
+	containingBlock, ok, err := api._txNumReader.FindBlockNum(ctx, tx, startTxNum)
+	if err != nil {
+		return historyPruneFloors{}, err
+	}
+	if !ok {
+		// No historical block can be proven available; the current state remains readable.
+		return historyPruneFloors{
+			startTxNum:         startTxNum,
+			postState:          head,
+			stateAfterSystemTx: head,
+			wholeBlock:         head,
+			replay:             head,
+		}, nil
+	}
+	blockStartTxNum, err := api._txNumReader.Min(ctx, tx, containingBlock)
+	if err != nil {
+		return historyPruneFloors{}, err
+	}
+	// State queries read at the next block's start, while whole-block history
+	// reads need this block's start. Transaction replay skips the initial system tx.
+	floors := historyPruneFloors{
+		startTxNum:         startTxNum,
+		postState:          containingBlock,
+		stateAfterSystemTx: containingBlock,
+		wholeBlock:         containingBlock,
+		replay:             containingBlock,
+	}
+	if startTxNum > blockStartTxNum {
+		floors.wholeBlock = min(containingBlock+1, head)
+	} else if containingBlock > 0 {
+		floors.postState = containingBlock - 1
+	}
+	if startTxNum > blockStartTxNum+1 {
+		floors.replay = min(containingBlock+1, head)
+	} else if containingBlock > 0 {
+		floors.stateAfterSystemTx = containingBlock - 1
+	}
+	return floors, nil
+}
+
+func (api *BaseAPI) minimumBlockAvailable(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
+	key := pruneFloorCacheKey{head: head, dbViewID: tx.ViewID(), blockFilesGeneration: blockFilesGeneration(tx)}
+	return api._blocksPruneFloor.getForKey(ctx, key, func() (uint64, error) {
+		return api._blockReader.MinimumBlockAvailable(ctx, tx)
+	})
+}
+
+// blockFilesGeneration returns zero when tx has no local pinned snapshot view;
+// those callers rely on the cache TTL to refresh their physical floor.
+func blockFilesGeneration(tx kv.Tx) uint64 {
+	provider, ok := tx.(freezeblocks.HasBlockFilesRoTx)
+	if !ok {
+		return 0
+	}
+	view := provider.BlockFilesRoTx()
+	if view == nil {
+		return 0
+	}
+	return view.Generation()
 }
 
 // blocksFollowChainHistoryExpiry reports whether block retention is the chain's
@@ -596,8 +840,8 @@ func (api *BaseAPI) probePreMergeBlockData(ctx context.Context, tx kv.Tx, mergeH
 	if err != nil {
 		return preMergeBlockData{}, false, err
 	}
-	// Zero is a snapshot set starting at genesis, one a database holding every block
-	// after it; anything higher starts mid-chain, however far below the merge point.
+	// A floor above block 1 proves that the retained range starts mid-chain.
+	// Otherwise, probe transactions: stored bodies do not prove their transactions are readable.
 	if oldest > 1 {
 		return preMergeBlockData{oldest: oldest}, true, nil
 	}
@@ -759,7 +1003,7 @@ func (api *BaseAPI) readsUserTransaction(ctx context.Context, tx kv.Tx, blockNum
 	return ok && txn != nil, true, nil
 }
 
-func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
+func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string, onDiskFloor func(uint64) (uint64, error)) error {
 	p, err := api.pruneMode(tx)
 	if err != nil {
 		return err
@@ -768,31 +1012,65 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 		return nil
 	}
 	amount := field(p)
-	if !amount.Enabled() {
-		return nil
-	}
 	latest, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return err
 	}
-	if block < amount.PruneTo(latest) {
-		return fmt.Errorf("%w: requested block %d, %s from block %d", state.ErrPruned, block, available, amount.PruneTo(latest))
+	floor := amount.PruneTo(latest)
+	if block >= floor && block < latest && onDiskFloor != nil {
+		actual, err := onDiskFloor(latest)
+		if err != nil {
+			return err
+		}
+		floor = max(floor, actual)
+	}
+	if block < floor {
+		return fmt.Errorf("%w: requested block %d, %s from block %d", state.ErrPruned, block, available, floor)
 	}
 	return nil
 }
 
-// checkReceiptsAvailable gates endpoints serving the full receipts of a block. Below
-// Byzantium those carry a post state the cache does not store, so the block has to be
-// re-executed and reaches only as far back as state history.
+// Pre-Byzantium post-state roots are not stored in the receipt domain. Rebuilding
+// them needs state history and, when enabled, commitment history from the initial
+// system transaction, not just the first user transaction.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
-	computed, err := api.postStateCalculated(ctx, tx, block)
+	return api.checkReceiptAvailableAtIndex(ctx, tx, block, 0)
+}
+
+func (api *BaseAPI) checkReceiptAvailableAtIndex(ctx context.Context, tx kv.Tx, block, txIndex uint64) error {
+	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if computed {
-		return api.checkPruneHistory(ctx, tx, block)
+	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
+	if err != nil {
+		return err
 	}
-	return api.checkReceiptSourceAvailable(ctx, tx, block)
+	if !receipts.PostStateCalculated(chainConfig, block, commitmentHistory, api._blockReader) {
+		return api.checkReceiptSourceAvailable(ctx, tx, block, txIndex)
+	}
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
+		for {
+			floors, err := api.historyStartBlocks(ctx, tx, head)
+			if err != nil || !commitmentHistory {
+				return floors.wholeBlock, err
+			}
+			ttx := tx.(kv.TemporalTx)
+			key, hasKey := historyFloorCacheKey(ttx, head)
+			commitmentFloors, err := api.readCommitmentHistoryStartBlocks(ctx, ttx, head)
+			if err != nil {
+				return 0, err
+			}
+			// The commitment lookup can renew the remote view after the state
+			// floor was read. Retry both floors together if that happens.
+			if hasKey {
+				if current, ok := historyFloorCacheKey(ttx, head); !ok || current != key {
+					continue
+				}
+			}
+			return max(floors.wholeBlock, commitmentFloors.wholeBlock), nil
+		}
+	})
 }
 
 // checkReceiptSourceAvailable gates on where the receipts come from, whatever fields
@@ -801,46 +1079,28 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 // cache says it exists on disk, not how much of it is kept: RCacheDomain is retired on
 // its own --prune.receipts.distance window when one is set, and alongside history
 // otherwise.
-func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
+func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, block, txIndex uint64) error {
 	persisted, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {
 		return err
 	}
-	if !persisted || !receipts.PersistedReceiptsServed() {
-		return api.checkPruneHistory(ctx, tx, block)
-	}
-	p, err := api.pruneMode(tx)
-	if err != nil || p == nil {
-		return err
-	}
-	switch amount := p.ReceiptsAmount(); {
-	case amount == prune.KeepAllReceiptsPruneMode:
-		return nil
-	case !amount.Enabled():
-		return api.checkPruneHistory(ctx, tx, block)
-	default:
-		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
-		if err == nil || !errors.Is(err, state.ErrPruned) {
+	if persisted && receipts.PersistedReceiptsServed() {
+		p, err := api.pruneMode(tx)
+		if err != nil || p == nil {
 			return err
 		}
-		return api.checkPruneHistory(ctx, tx, block)
+		amount := p.ReceiptsAmount()
+		if amount == prune.KeepAllReceiptsPruneMode {
+			return nil
+		}
+		if amount.Enabled() {
+			err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available", nil)
+			if !errors.Is(err, state.ErrPruned) {
+				return err
+			}
+		}
 	}
-}
-
-// postStateCalculated reports whether the receipts of this block carry a post state
-// that has to be computed, which is the case below Byzantium. The persistent cache
-// does not store that field, so those receipts are always re-executed and reach only
-// as far back as state history.
-func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return false, err
-	}
-	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
-	if err != nil {
-		return false, err
-	}
-	return receipts.PostStateCalculated(chainConfig, block, commitmentHistory, api._blockReader), nil
+	return api.checkPruneTransactionHistoryAtIndex(ctx, tx, block, txIndex)
 }
 
 // checkBlockReceiptsAvailable gates endpoints serving the receipts of one block.
@@ -858,28 +1118,30 @@ func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, b
 // range, which are derived from the block's transactions, plus the log indices when
 // the filter searches them. The indices are retired at the history cutoff whatever
 // the receipt retention is. Logs are read off a receipt without its post state, so
-// this takes the receipt source rather than the full-receipt gate. Every leg is a
-// lower bound, so checking the first block of the range covers all of it.
-func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint64, crit filters.FilterCriteria) error {
-	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+// this takes the receipt source rather than the full-receipt gate.
+func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, from, to uint64, crit filters.FilterCriteria) error {
+	if err := api.checkPruneBlocksRange(ctx, tx, from, to); err != nil {
 		return err
 	}
-	if err := api.checkReceiptSourceAvailable(ctx, tx, block); err != nil {
-		return err
+	if usesLogIndex(crit) {
+		// Replay history also provides receipts when the receipt cache cannot.
+		// Log queries skip the initial system entry and only return user-transaction logs.
+		return api.checkPruneTransactionHistory(ctx, tx, from)
 	}
-	if !usesLogIndex(crit) {
-		return nil
-	}
-	return api.checkPruneHistory(ctx, tx, block)
+	return api.checkReceiptSourceAvailable(ctx, tx, from, 0)
 }
 
-// checkBlockHistoryAvailable gates endpoints that re-execute a block: they read its
-// transactions from the body and start from the state history preceding it.
+// checkBlockHistoryAvailable gates transaction replay, which needs block
+// transactions and state history from the first user transaction.
 func (api *BaseAPI) checkBlockHistoryAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
-	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+	return api.checkBlockHistoryRangeAvailable(ctx, tx, block, block)
+}
+
+func (api *BaseAPI) checkBlockHistoryRangeAvailable(ctx context.Context, tx kv.Tx, from, to uint64) error {
+	if err := api.checkPruneBlocksRange(ctx, tx, from, to); err != nil {
 		return err
 	}
-	return api.checkPruneHistory(ctx, tx, block)
+	return api.checkPruneTransactionHistory(ctx, tx, from)
 }
 
 func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {

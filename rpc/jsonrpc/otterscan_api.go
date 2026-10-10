@@ -119,7 +119,7 @@ func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx,
 		return nil, nil, common.Hash{}, 0, 0, nil
 	}
 
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return nil, nil, common.Hash{}, 0, 0, err
 	}
@@ -162,6 +162,9 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 	if txn == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
+	}
+	if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, block.NumberU64(), txIndex); err != nil {
+		return nil, err
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -267,6 +270,13 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	if uint64(pageSize) > api.maxPageSize {
 		return nil, fmt.Errorf("max allowed page size: %v", api.maxPageSize)
 	}
+	if blockNum == MaxBlockNum {
+		return &TransactionsWithReceipts{
+			Txs:       []*ethapi.RPCTransaction{},
+			Receipts:  []ReceiptWithTimestamp{},
+			FirstPage: true,
+		}, nil
+	}
 
 	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -274,9 +284,9 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	}
 	defer dbtx.Rollback()
 
-	// blockNum 0 is the oldest-page sentinel; see SearchTransactionsBefore.
+	// The cursor block is excluded; zero instead requests the oldest page.
 	if blockNum != 0 {
-		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum)
+		err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, blockNum+1)
 		if err != nil {
 			return nil, err
 		}

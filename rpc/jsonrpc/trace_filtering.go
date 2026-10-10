@@ -359,7 +359,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	// if we've pruned this history away for this block then just return early
 	// to save any red herring errors
 
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, dbtx, fromBlock)
+	err = api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, dbtx, fromBlock, toBlock)
 	if err != nil {
 		return err
 	}

@@ -17,6 +17,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -27,6 +29,29 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
+
+func TestSimulationSkipsDisabledCommitmentHistory(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	tx, err := apis.eth.db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	wantErr := errors.New("commitment history unavailable")
+	view := historyFloorTx{TemporalTx: tx, errs: map[kv.Domain]error{kv.CommitmentDomain: wantErr}}
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("commitment_history_%t", enabled), func(t *testing.T) {
+			sim := simulator{txNumReader: apis.eth._txNumReader, commitmentHistory: enabled}
+			reader, _, _, err := sim.newStateReaderForBlock(t.Context(), view, nil, chainInfo.old.num, nil, false)
+			if enabled {
+				require.ErrorIs(t, err, wantErr)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, reader)
+			}
+		})
+	}
+}
 
 type simulateV1TestService struct{}
 

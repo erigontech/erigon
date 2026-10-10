@@ -133,7 +133,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, fmt.Errorf("header not found")
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64())
+	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	blockNum := header.Number
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum.Uint64())
+	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, dbtx, blockNum.Uint64())
 	if err != nil {
 		return 0, err
 	}
@@ -483,7 +483,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, roTx, blockNumber)
+	err = api.BaseAPI.checkPruneState(ctx, roTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -519,7 +519,10 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err != nil {
 			return nil, err
 		}
-		commitmentStartingTxNum := roTx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		commitmentStartingTxNum, err := roTx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return nil, err
+		}
 		if lastTxnInBlock < commitmentStartingTxNum {
 			return nil, fmt.Errorf("%w: commitment start: %d, last tx: %d", state.ErrPruned, commitmentStartingTxNum, lastTxnInBlock)
 		}
@@ -711,7 +714,10 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	endTxNum := lastTxNumInBlock + 1
 	parentNum := blockNr - 1
 
-	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	commitmentStartingTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if err != nil {
+		return nil, err
+	}
 	if firstTxNumInBlock < commitmentStartingTxNum {
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
@@ -990,7 +996,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
 
-		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber+1)
+		err = api.BaseAPI.checkPruneTransactionHistory(ctx, tx, blockNumber+1)
 		if err != nil {
 			return nil, err
 		}

@@ -172,7 +172,7 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 		return StorageRangeResult{}, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNumber, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -257,7 +257,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		return state.IteratorDump{}, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -606,7 +606,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
+	err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, *blockNumber, txIndex)
 	if err != nil {
 		return nil, err
 	}

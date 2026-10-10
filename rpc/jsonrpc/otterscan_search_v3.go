@@ -74,12 +74,12 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		// it is necessary to track dirty/lazy-must-read block headers
 		// because we skip system txs like rewards (which are not "real" txs
 		// for this rpc purposes)
-		if isFinalTxn {
+		if isFinalTxn || txIndex < 0 {
 			continue
 		}
 
 		if mustReadBlock {
-			if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
+			if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
 				return nil, nil, false, err
 			}
 			block, err = api.blockByNumberWithSenders(ctx, tx, blockNum)
@@ -90,6 +90,9 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 				return nil, nil, false, fmt.Errorf("block not found: %d", blockNum)
 			}
 			mustReadBlock = false
+		}
+		if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(txIndex)); err != nil {
+			return nil, nil, false, err
 		}
 
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)

@@ -125,7 +125,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	if err := api.checkPruneHistory(ctx, tx, blockNumber); err != nil {
+	if err := api.checkPruneState(ctx, tx, blockNumber); err != nil {
 		return nil, err
 	}
 
@@ -690,12 +690,21 @@ func (s *simulator) newStateReaderForBlock(
 		return state.NewReaderV3(sharedDomains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), minTxNum, firstMinTxNum, nil
 	}
 
-	if minTxNum < state.StateHistoryStartTxNum(tx) {
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if minTxNum < minHistoryTxNum {
 		return nil, 0, 0, fmt.Errorf("%w: min tx: %d", state.ErrPruned, minTxNum)
 	}
-	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-		return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.ErrPruned, commitmentStartingTxNum, minTxNum)
+	if s.commitmentHistory {
+		commitmentStartingTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		if minTxNum < commitmentStartingTxNum {
+			return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.ErrPruned, commitmentStartingTxNum, minTxNum)
+		}
 	}
 
 	if len(ancestors) > 0 {

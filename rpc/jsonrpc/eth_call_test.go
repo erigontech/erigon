@@ -1189,13 +1189,16 @@ func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 }
 
 func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
+	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
 	m, bankAddr, _, _ := chainWithDeployedContract(t)
 
 	ctx := context.Background()
 	tx, err := m.DB.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
+	require.NoError(t, rawdb.WriteDBCommitmentHistoryEnabled(tx, true))
 	pruneTo, err := m.BlockReader.TxnumReader().Min(ctx, tx, 3)
 	require.NoError(t, err)
 	c, err := tx.RwCursorDupSort(kv.TblCommitmentHistoryKeys)
@@ -1216,6 +1219,18 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
 	require.ErrorIs(t, err, state.ErrPruned)
 	require.Nil(t, proof)
+
+	caps, err := api.Capabilities(ctx)
+	require.NoError(t, err)
+	require.Zero(t, uint64(*caps.State.OldestBlock), "ordinary state history is still retained")
+	require.False(t, caps.StateProofs.Disabled)
+	oldest := uint64(*caps.StateProofs.OldestBlock)
+	require.Positive(t, oldest, "proofs must not advertise pruned commitment history")
+	proof, err = api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(oldest))))
+	require.NoError(t, err, "the advertised proof boundary must be readable")
+	require.NotNil(t, proof)
+	_, err = api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(oldest-1))))
+	require.ErrorIs(t, err, state.ErrPruned)
 }
 
 // TestGetProofStorageKeyEncoding pins the storage-key echo format eth_getProof shares
