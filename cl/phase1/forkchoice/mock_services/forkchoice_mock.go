@@ -60,6 +60,7 @@ type ForkChoiceStorageMock struct {
 	GetStateAtBlockRootFn                 func(common.Hash, bool) (*state.CachingBeaconState, error)
 	ViewStateAtBlockRootFn                func(common.Hash, func(*state.CachingBeaconState) error) error
 	HighestSeenVal                        uint64
+	HighestImportedVal                    uint64
 	JustifiedCheckpointVal                solid.Checkpoint
 	JustifiedSlotVal                      uint64
 	ProposerBoostRootVal                  common.Hash
@@ -119,6 +120,9 @@ type ForkChoiceStorageMock struct {
 
 	ShouldExtendPayloadVal bool
 	ShouldBuildOnFullVal   *bool
+
+	RetryPendingEnvelopeFunc func(ctx context.Context, blockRoot common.Hash)
+	PendingEnvelopeRoots     map[common.Hash]struct{}
 
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
@@ -309,6 +313,10 @@ func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Has
 
 func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 	return f.HighestSeenVal
+}
+
+func (f *ForkChoiceStorageMock) HighestImported() uint64 {
+	return f.HighestImportedVal
 }
 
 func (f *ForkChoiceStorageMock) BlockProcessing() bool {
@@ -654,6 +662,17 @@ func (f *ForkChoiceStorageMock) GetBlock(
 	blockRoot common.Hash,
 ) (*cltypes.SignedBeaconBlock, bool) {
 	return f.Blocks[blockRoot], f.Blocks[blockRoot] != nil
+}
+
+func (f *ForkChoiceStorageMock) HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool {
+	_, ok := f.PendingEnvelopeRoots[blockRoot]
+	return ok
+}
+
+func (f *ForkChoiceStorageMock) RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash) {
+	if f.RetryPendingEnvelopeFunc != nil {
+		f.RetryPendingEnvelopeFunc(ctx, blockRoot)
+	}
 }
 
 func (f *ForkChoiceStorageMock) HasEnvelope(blockRoot common.Hash) bool {

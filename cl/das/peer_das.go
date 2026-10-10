@@ -33,11 +33,19 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
+const (
+	deferredColumnSyncInterval    = time.Second
+	deferredColumnSyncSlotDivisor = 6
+)
+
 // BlockGetter is an interface for getting blocks by root.
 // Used to avoid import cycle with forkchoice package.
 // [New in Gloas:EIP7732]
 type BlockGetter interface {
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	// RetryPendingExecutionPayloadEnvelope re-applies an envelope that waited for the block's
+	// column data.
+	RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash)
 }
 
 // gloasBlockData holds only the fields needed from a block for GLOAS sidecar verification.
@@ -104,7 +112,7 @@ type peerdas struct {
 	recoverySlots       map[uint64]*blobRecoverySlot
 	recoverySlotQueue   blobRecoverySlotHeap
 	recoveryPruneFloor  uint64
-	blocksToCheckSync   sync.Map // blockRoot -> ColumnSyncableSignedBlock (SignedBeaconBlock or SignedBlindedBeaconBlock)
+	blocksToCheckSync   sync.Map // blockRoot -> deferredColumnSync
 
 	// [New in Gloas:EIP7732] For fetching blocks to get kzg_commitments
 	forkChoice     BlockGetter
@@ -1256,6 +1264,7 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 		timeAddColumns := time.Since(beginAddColumns)
 		log.Debug("[blobsRecover] recovering done", "slot", slot, "blockRoot", blockRoot, "numberOfBlobs", numberOfBlobs, "elapsedTime", time.Since(begin),
 			"timeRecoverMatrix", timeRecoverMatrix, "timeRecoverBlobs", timeRecoverBlobs, "timeRemoveColumns", timeRemoveColumns, "timeAddColumns", timeAddColumns)
+		go d.columnDataSynced(ctx, blockRoot)
 		return false
 	}
 
@@ -1916,72 +1925,230 @@ func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 	}
 	// [Modified in Gloas:EIP7732] Store SignedBeaconBlock directly via ColumnSyncableSignedBlock interface
 	// instead of calling Blinded() which fails for GLOAS blocks
-	d.blocksToCheckSync.Store(common.Hash(blockRoot), block)
+	d.blocksToCheckSync.LoadOrStore(common.Hash(blockRoot), deferredColumnSync{block: block, queuedAt: time.Now()})
 	return nil
 }
 
+// deferredColumnSync is a block queued for the column sync worker and when it was queued.
+type deferredColumnSync struct {
+	block    cltypes.ColumnSyncableSignedBlock
+	queuedAt time.Time
+}
+
+// deferredColumnSyncDue reports whether gossip has had its share of the slot to deliver a
+// block's columns, counted from the later of the slot start and the moment the root was
+// queued, after which the missing columns are requested from peers.
+func deferredColumnSyncDue(now, slotStart, queuedAt time.Time, delay time.Duration) bool {
+	start := slotStart
+	if queuedAt.After(start) {
+		start = queuedAt
+	}
+	return !now.Before(start.Add(delay))
+}
+
+func (d *peerdas) slotDuration() time.Duration {
+	return time.Duration(d.beaconConfig.SecondsPerSlot) * time.Second
+}
+
+// deferredColumnSyncDelay is how long gossip gets before missing columns are requested. A
+// custody node needs every custody column, so it asks early; an archive node recovers from
+// half the columns and gives in-flight gossip a full slot instead of duplicating it.
+func (d *peerdas) deferredColumnSyncDelay() time.Duration {
+	if d.IsArchivedMode() {
+		return d.slotDuration()
+	}
+	return d.slotDuration() / deferredColumnSyncSlotDivisor
+}
+
+// deferredColumnSyncRound bounds one download round at a slot, which leaves room for the
+// per-request timeout of the by-root fetches.
+func (d *peerdas) deferredColumnSyncRound() time.Duration {
+	return d.slotDuration()
+}
+
+// pendingEnvelopeRetryBudget bounds the envelope retry that follows completed column data.
+func (d *peerdas) pendingEnvelopeRetryBudget() time.Duration {
+	return d.slotDuration() / deferredColumnSyncSlotDivisor
+}
+
+// columnDataSynced notifies fork choice that a block's column data is complete, so an envelope
+// that waited for it is re-applied without waiting for the next slot boundary.
+func (d *peerdas) columnDataSynced(ctx context.Context, blockRoot common.Hash) {
+	if d.forkChoice == nil {
+		return
+	}
+	retryCtx, cancel := context.WithTimeout(ctx, d.pendingEnvelopeRetryBudget())
+	defer cancel()
+	d.forkChoice.RetryPendingExecutionPayloadEnvelope(retryCtx, blockRoot)
+}
+
+type deferredColumnSyncEntry struct {
+	attempts    int
+	nextAttempt time.Time
+	inFlight    bool
+}
+
+// deferredColumnSyncQueue paces the queued roots whose columns are still missing. A failed
+// round grows the root's backoff by one slot; a root whose backoff would reach an epoch is
+// given up, so a block nobody serves, such as an orphaned one, is not retried until it leaves
+// the serve range.
+type deferredColumnSyncQueue struct {
+	mu      sync.Mutex
+	entries map[common.Hash]*deferredColumnSyncEntry
+}
+
+func newDeferredColumnSyncQueue() *deferredColumnSyncQueue {
+	return &deferredColumnSyncQueue{entries: map[common.Hash]*deferredColumnSyncEntry{}}
+}
+
+// ready reports whether root may be checked now: not in a round and past its backoff.
+func (q *deferredColumnSyncQueue) ready(root common.Hash, now time.Time) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e := q.entries[root]
+	if e == nil {
+		q.entries[root] = &deferredColumnSyncEntry{}
+		return true
+	}
+	return !e.inFlight && !now.Before(e.nextAttempt)
+}
+
+func (q *deferredColumnSyncQueue) start(roots []common.Hash) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, root := range roots {
+		if e := q.entries[root]; e != nil {
+			e.inFlight = true
+		}
+	}
+}
+
+// failed records a round that left columns missing and grows the backoff. It reports true once
+// the backoff would reach maxBackoffSlots, and the caller then gives the root up. A root
+// dropped meanwhile stays dropped.
+func (q *deferredColumnSyncQueue) failed(root common.Hash, now time.Time, slot time.Duration, maxBackoffSlots uint64) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	e := q.entries[root]
+	if e == nil {
+		return false
+	}
+	e.inFlight = false
+	e.attempts++
+	if uint64(e.attempts) >= maxBackoffSlots {
+		return true
+	}
+	e.nextAttempt = now.Add(slot * time.Duration(e.attempts))
+	return false
+}
+
+func (q *deferredColumnSyncQueue) done(root common.Hash) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	delete(q.entries, root)
+}
+
+// syncColumnDataWorker fetches the custody columns gossip did not deliver. Download rounds run
+// off the ticker with a per-root in-flight marker, so one root nobody serves cannot stall the
+// others, and the envelope retry runs off the loop as well.
 func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
+	ticker := time.NewTicker(deferredColumnSyncInterval)
 	defer ticker.Stop()
+	queue := newDeferredColumnSyncQueue()
+	forget := func(root common.Hash) {
+		d.blocksToCheckSync.Delete(root)
+		queue.done(root)
+	}
+	giveUp := func(root common.Hash, slot uint64) {
+		log.Debug("[syncColumnDataWorker] column data still missing after an epoch of retries, removing from sync queue", "slot", slot, "blockRoot", root)
+		forget(root)
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// check peers count
-			if d.rpc != nil {
-				if peersCount, err := d.rpc.Peers(); err != nil {
-					log.Warn("failed to get peers count", "err", err)
-					continue
-				} else if peersCount == 0 {
-					log.Info("[syncColumnDataWorker] no peers available, skipping sync")
-					continue
-				}
-			}
-
-			// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
-			blocks := []cltypes.ColumnSyncableSignedBlock{}
-			roots := []common.Hash{}
-			d.blocksToCheckSync.Range(func(key, value any) bool {
-				root := key.(common.Hash)
-				block := value.(cltypes.ColumnSyncableSignedBlock)
-				curSlot := d.ethClock.GetCurrentSlot()
-				if curSlot-block.GetSlot() < 5 { // wait slow data from peers
-					// skip blocks that are too close to the current slot
-					return true
-				}
-				available, err := d.IsDataAvailable(block.GetSlot(), root)
-				switch {
-				case err != nil:
-					log.Warn("failed to check if data is available", "err", err)
-				case available:
-					log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
-					d.blocksToCheckSync.Delete(root)
-				default:
-					blocks = append(blocks, block)
-					roots = append(roots, root)
-				}
+		}
+		now := time.Now()
+		serveRangeStart := d.beaconConfig.DataColumnSidecarServeRangeStartSlot(d.ethClock.GetCurrentSlot())
+		// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
+		var due []cltypes.ColumnSyncableSignedBlock
+		var dueRoots []common.Hash
+		d.blocksToCheckSync.Range(func(key, value any) bool {
+			root := key.(common.Hash)
+			queued := value.(deferredColumnSync)
+			block := queued.block
+			if block.GetSlot() < serveRangeStart {
+				log.Debug("[syncColumnDataWorker] block left the data-column serve range, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
+				forget(root)
 				return true
-			})
-			if len(blocks) == 0 {
+			}
+			if queue.ready(root, now) && deferredColumnSyncDue(now, d.ethClock.GetSlotTime(block.GetSlot()), queued.queuedAt, d.deferredColumnSyncDelay()) {
+				due = append(due, block)
+				dueRoots = append(dueRoots, root)
+			}
+			return true
+		})
+		if len(due) == 0 {
+			continue
+		}
+		// Without peers nothing can be downloaded, so the availability scan waits as well.
+		if d.rpc != nil {
+			peersCount, err := d.rpc.Peers()
+			if err != nil || peersCount == 0 {
+				log.Debug("[syncColumnDataWorker] no peers available, deferring column sync", "err", err)
 				continue
 			}
-			log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))
-			if d.IsArchivedMode() {
-				if err := d.DownloadColumnsAndRecoverBlobs(ctx, blocks); err != nil {
-					log.Warn("failed to download columns and recover blobs", "err", err)
-					continue
+		}
+		blocks := []cltypes.ColumnSyncableSignedBlock{}
+		roots := []common.Hash{}
+		for i, root := range dueRoots {
+			block := due[i]
+			available, err := d.IsDataAvailable(block.GetSlot(), root)
+			switch {
+			case err != nil:
+				log.Warn("failed to check if data is available", "err", err)
+				if queue.failed(root, now, d.slotDuration(), d.beaconConfig.SlotsPerEpoch) {
+					giveUp(root, block.GetSlot())
 				}
-			} else {
-				if err := d.DownloadOnlyCustodyColumns(ctx, blocks); err != nil {
-					log.Warn("failed to download only custody columns", "err", err)
-					continue
-				}
-			}
-			for i, root := range roots {
-				d.blocksToCheckSync.Delete(root)
-				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].GetSlot(), "blockRoot", root)
+			case available:
+				log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
+				forget(root)
+				go d.columnDataSynced(ctx, root)
+			default:
+				blocks = append(blocks, block)
+				roots = append(roots, root)
 			}
 		}
+		if len(blocks) == 0 {
+			continue
+		}
+		queue.start(roots)
+		log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))
+		go func() {
+			roundCtx, cancel := context.WithTimeout(ctx, d.deferredColumnSyncRound())
+			defer cancel()
+			var err error
+			if d.IsArchivedMode() {
+				err = d.DownloadColumnsAndRecoverBlobs(roundCtx, blocks)
+			} else {
+				err = d.DownloadOnlyCustodyColumns(roundCtx, blocks)
+			}
+			if err != nil {
+				log.Warn("failed to download column data", "err", err)
+			}
+			for i, root := range roots {
+				available, err := d.IsDataAvailable(blocks[i].GetSlot(), root)
+				if err != nil || !available {
+					if queue.failed(root, time.Now(), d.slotDuration(), d.beaconConfig.SlotsPerEpoch) {
+						giveUp(root, blocks[i].GetSlot())
+					}
+					continue
+				}
+				forget(root)
+				log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].GetSlot(), "blockRoot", root)
+				go d.columnDataSynced(ctx, root)
+			}
+		}()
 	}
 }

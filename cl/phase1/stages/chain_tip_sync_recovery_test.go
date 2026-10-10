@@ -831,7 +831,7 @@ func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
 		gloasPayloadValidator: engine,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope)
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope) == nil
 
 	require.True(t, accepted)
 	require.Equal(t, 1, engine.newPayloadCalls)
@@ -854,7 +854,7 @@ func TestEnsureStoredParentPayloadAcceptedRejectsInvalidVerdict(t *testing.T) {
 		block:       cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion),
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope) == nil
 
 	require.False(t, accepted)
 	require.Empty(t, store.requeued)
@@ -876,7 +876,7 @@ func TestEnsureStoredParentPayloadAcceptedRestoresGasLimitForKnownVerdict(t *tes
 		markRetained: true,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope) == nil
 
 	require.True(t, accepted)
 	require.Equal(t, payload.GasLimit, store.markedGas)
@@ -895,7 +895,7 @@ func TestEnsureStoredParentPayloadAcceptedWithoutExecutionClient(t *testing.T) {
 		markRetained: true,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope) == nil
 
 	require.True(t, accepted)
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.marked)
@@ -916,7 +916,7 @@ func TestStoredParentPayloadReplaySharesBudgetAndCachesResult(t *testing.T) {
 	}
 	replay := storedParentPayloadReplay{
 		deadline: time.Now().Add(10 * time.Millisecond),
-		results:  make(map[common.Hash]bool),
+		results:  make(map[common.Hash]error),
 	}
 	engine := &testExecutionEngine{}
 	engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
@@ -929,8 +929,8 @@ func TestStoredParentPayloadReplaySharesBudgetAndCachesResult(t *testing.T) {
 		gloasPayloadValidator: engine,
 	}
 
-	accepted := replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore)
-	replayed := replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore)
+	accepted := replay.acceptedOnly(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore)
+	replayed := replay.acceptedOnly(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore)
 
 	require.False(t, accepted)
 	require.False(t, replayed)
@@ -949,9 +949,9 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 	secondStore := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
 	validator := &orderedPayloadValidator{slow: firstPayload.BlockHash}
 	replay := storedParentPayloadReplay{
-		deadline:  time.Now().Add(100 * time.Millisecond),
+		deadline:  time.Now().Add(time.Second),
 		remaining: 2,
-		results:   make(map[common.Hash]bool),
+		results:   make(map[common.Hash]error),
 	}
 	cfg := &Cfg{
 		beaconCfg:             &clparams.MainnetBeaconConfig,
@@ -959,11 +959,11 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 		gloasPayloadValidator: validator,
 	}
 
-	require.False(t, replay.accepted(t.Context(), cfg, firstStore, firstRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+	require.False(t, replay.acceptedOnly(t.Context(), cfg, firstStore, firstRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: firstRoot,
 		Payload:         firstPayload,
 	}}, nil))
-	require.True(t, replay.accepted(t.Context(), cfg, secondStore, secondRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+	require.True(t, replay.acceptedOnly(t.Context(), cfg, secondStore, secondRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: secondRoot,
 		Payload:         secondPayload,
 	}}, nil))
@@ -973,9 +973,9 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
 	root := common.Hash{1}
 	store := &storedParentPayloadTestStore{has: true, markRetained: true}
-	replay := storedParentPayloadReplay{deadline: time.Now(), remaining: 1, results: make(map[common.Hash]bool)}
+	replay := storedParentPayloadReplay{deadline: time.Now(), remaining: 1, results: make(map[common.Hash]error)}
 
-	accepted := replay.accepted(
+	accepted := replay.acceptedOnly(
 		t.Context(),
 		&Cfg{},
 		store,
@@ -1018,10 +1018,10 @@ func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
 			budget:    gloasPayloadRetryBudget,
 			deadline:  time.Now().Add(-time.Millisecond),
 			remaining: 1,
-			results:   make(map[common.Hash]bool),
+			results:   make(map[common.Hash]error),
 		}
 
-		require.False(t, replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore))
+		require.False(t, replay.acceptedOnly(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore))
 		require.Zero(t, engine.newPayloadCalls)
 		require.Equal(t, unchanged, store.marked)
 		require.Empty(t, store.requeued)
@@ -1037,9 +1037,14 @@ func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 		defer cancel()
 
-		require.False(t, ensureStoredParentPayloadAccepted(ctx, cfg, store, root, envelope))
+		require.Error(t, ensureStoredParentPayloadAccepted(ctx, cfg, store, root, envelope))
 		require.Equal(t, 1, engine.newPayloadCalls)
 		require.Equal(t, unchanged, store.marked)
 		require.Empty(t, store.requeued)
 	})
+}
+
+func (r *storedParentPayloadReplay) acceptedOnly(ctx context.Context, cfg *Cfg, store storedParentPayloadStore, root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope, applyErr error) bool {
+	accepted, _ := r.accepted(ctx, cfg, store, root, envelope, applyErr)
+	return accepted
 }

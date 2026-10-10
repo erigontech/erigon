@@ -47,6 +47,73 @@ type embeddedPtcVoteForkGraph struct {
 	*getFinalizedExecutionHashForkGraph
 	postState *state.CachingBeaconState
 	envelopes map[common.Hash]bool
+	invalid   map[common.Hash]bool
+}
+
+func (g *embeddedPtcVoteForkGraph) MarkHeaderAsInvalid(root common.Hash) {
+	if g.invalid == nil {
+		g.invalid = map[common.Hash]bool{}
+	}
+	g.invalid[root] = true
+}
+
+func (g *embeddedPtcVoteForkGraph) IsBlockInvalid(root common.Hash) bool {
+	return g.invalid[root]
+}
+
+func TestHighestImportedDropsBlocksCutOffByAnInvalidPayload(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	require.Equal(t, cltypes.PayloadStatusFull, store.getParentPayloadStatus(child.Block))
+	require.Equal(t, child.Block.Slot, store.HighestImported())
+
+	// The child builds on the anchor's payload, so an INVALID verdict leaves no path to it.
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+	require.Equal(t, uint64(1), store.HighestImported())
+}
+
+// While the recompute after an invalidation waits for the store lock, no reader may return the
+// watermark from before the invalidation.
+func TestHighestImportedReadersWaitForTheRecompute(t *testing.T) {
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+
+	store.mu.Lock() // a writer, such as OnBlock, holds the lock
+	results := make(chan uint64, 128)
+	readers := 0
+	read := func() {
+		readers++
+		go func() { results <- store.HighestImported() }()
+	}
+	read()
+	for deadline := time.Now().Add(100 * time.Millisecond); time.Now().Before(deadline) && readers < cap(results); {
+		read()
+		select {
+		case slot := <-results:
+			store.mu.Unlock()
+			t.Fatalf("a reader returned slot %d before the recompute", slot)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	store.mu.Unlock()
+	for range readers {
+		select {
+		case slot := <-results:
+			require.Equal(t, uint64(1), slot)
+		case <-time.After(5 * time.Second):
+			t.Fatal("a reader did not return after the lock was released")
+		}
+	}
+}
+
+func TestHighestImportedKeepsBlocksOnTheEmptyVariantOfAnInvalidPayload(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
+	require.True(t, ok)
+	anchorBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0xe1}
+	require.Equal(t, cltypes.PayloadStatusEmpty, store.getParentPayloadStatus(child.Block))
+
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+	require.Equal(t, child.Block.Slot, store.HighestImported())
 }
 
 func TestGloasAnchorStartsWithoutPtcVotes(t *testing.T) {

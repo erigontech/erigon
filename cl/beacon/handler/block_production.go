@@ -593,6 +593,9 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 	w http.ResponseWriter,
 	r *http.Request,
 ) (*beaconhttp.BeaconResponse, error) {
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
 	slot, err := beaconhttp.Uint64FromQueryParams(r, "slot")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -755,6 +758,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 
 	log.Debug("[Beacon API] Producing block", "slot", targetSlot)
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
 	builderBoostFactor := uint64(100)
 	if options := gloasBlockOptionsFromContext(ctx); options != nil {
 		builderBoostFactor = options.builderConfig.BuilderBoostFactor
@@ -1659,7 +1665,7 @@ func (a *ApiHandler) produceBeaconBody(
 	beaconBody.Graffiti = graffiti
 	beaconBody.Version = stateVersion
 
-	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+	payloadSource, err := a.resolveProductionPayloadSource(ctx, baseState, baseBlockRoot, targetSlot, stateVersion)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2882,9 +2888,11 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 		return fmt.Errorf("%w: block conflicts with a previously validated proposal", errPublishedBlockValidation)
 	}
 	// Broadcast the block and its blobs
+	publishStart := time.Now()
 	if err := a.publishGossip(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
 		return err
 	}
+	blockPublished := time.Since(publishStart)
 	if onBlockPublished != nil {
 		onBlockPublished()
 	}
@@ -2921,6 +2929,15 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 			}
 		}
 	}
+	publishFields := []any{
+		"slot", blk.Block.Slot,
+		"block", blockPublished.Round(time.Millisecond),
+		"total", time.Since(publishStart).Round(time.Millisecond),
+	}
+	if a.ethClock != nil {
+		publishFields = append(publishFields, "sinceSlotStart", time.Since(a.ethClock.GetSlotTime(blk.Block.Slot)).Round(time.Millisecond))
+	}
+	log.Info("BlockPublishing: published", publishFields...)
 
 	if blk.Version() >= clparams.GloasVersion {
 		if err := a.validateSelfBuildPayloadAvailable(blk); err != nil {

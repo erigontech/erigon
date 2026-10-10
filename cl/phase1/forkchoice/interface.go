@@ -50,6 +50,7 @@ type ForkChoiceStorageReader interface {
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	GetHeadNode() (ForkChoiceNode, uint64, error)
 	HighestSeen() uint64
+	HighestImported() uint64
 	BlockProcessing() bool
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
@@ -82,6 +83,9 @@ type ForkChoiceStorageReader interface {
 	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
 	HasEnvelope(blockRoot common.Hash) bool
+	// [New in Gloas:EIP7732] HasPendingExecutionPayloadEnvelope reports an envelope that is
+	// waiting for its block or its data columns.
+	HasPendingExecutionPayloadEnvelope(blockRoot common.Hash) bool
 	ExecutionPayloadReceivedBefore(blockRoot common.Hash, deadline time.Time) bool
 	// IsPayloadVerified reports whether the EL has fully validated the payload.
 	IsPayloadVerified(blockRoot common.Hash) bool
@@ -150,6 +154,9 @@ type ForkChoiceStorageWriter interface {
 	// checkBlobData: verify blob data availability via PeerDAS
 	// validatePayload: call engine.NewPayload() to validate with EL
 	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
+	// [New in Gloas:EIP7732] RetryPendingExecutionPayloadEnvelope re-applies the envelope queued
+	// for blockRoot once its data is available.
+	RetryPendingExecutionPayloadEnvelope(ctx context.Context, blockRoot common.Hash)
 	ValidateExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	ClaimExecutionPayloadEnvelopeForGossip(context.Context, common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
 	TryClaimExecutionPayloadEnvelopeForGossip(common.Hash, uint64) (ExecutionPayloadEnvelopeAdmissionToken, error)
