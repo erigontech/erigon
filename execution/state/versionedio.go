@@ -944,7 +944,7 @@ func (ws *WriteSet) zeroSameTxCreateDestructStorage() {
 // the write-set in step with reverts, so every address present is a surviving
 // write — no dirty reconciliation is needed. Under self-destruct only
 // SelfDestruct/Balance/Incarnation/Storage/CreateContract are kept (the BAL needs
-// residual balance, resurrection needs the prior incarnation, the calculator
+// residual balance, later reads need the incarnation cell as the storage-wipe signal, the calculator
 // needs per-slot deletes, and fee finalization needs the creation marker);
 // Nonce/Code/CodeHash/CodeSize/Address drop.
 func (ws *WriteSet) Snapshot() *WriteSet {
@@ -1090,8 +1090,7 @@ func (ws *WriteSet) restoreCreateFields(addr accounts.Address, snap *createWrite
 // assertSelfDestructNormalized panics if a self-destructed address still carries
 // the account fields Normalize is required to drop. Any of them makes Apply
 // compute pureDelete=false and take the cleanup-before-recreate branch, which
-// writes the account back with a live incarnation instead of deleting it — a
-// phantom account that breaks a later CREATE2 at the same address. Balance
+// writes the account back instead of deleting it — a phantom account. Balance
 // (retained under EIP-8246) and the storage-delete cascade are legal.
 func (ws *WriteSet) assertSelfDestructNormalized() {
 	for addr, sdw := range ws.selfDestruct {

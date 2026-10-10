@@ -154,3 +154,23 @@ func TestForkGraphPruneRunsOutsideLock(t *testing.T) {
 	}
 	requireOperationPrunerIdle(t, f)
 }
+
+func TestOnTickBeforeGenesisIsNoop(t *testing.T) {
+	f := buildExAnteStore(t)
+	const shift = 1000
+	f.genesisTime += shift
+	f.time.Store(f.time.Load() + shift)
+	before := f.time.Load()
+
+	done := make(chan struct{})
+	go func() {
+		f.OnTick(f.genesisTime - 1)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("OnTick before genesis did not return")
+	}
+	require.Equal(t, before, f.time.Load())
+}
