@@ -397,6 +397,9 @@ func NewPooled(stateReader StateReader) *IntraBlockState {
 // ReleasePooled hands ibs to the next NewPooled, or closes it when it grew too
 // large to keep.
 func ReleasePooled(ibs *IntraBlockState) {
+	if ibs.stateObjects == nil { // closed: its maps are gone
+		return
+	}
 	// Measured before the reset clears what it measures.
 	poolable := ibs.poolable()
 	ibs.resetForReuse()

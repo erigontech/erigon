@@ -1348,6 +1348,18 @@ func TestReleasePooledDropsAnOversizedState(t *testing.T) {
 	require.NotSame(t, big, fresh, "an oversized state must not come back from the pool")
 }
 
+// A state closed before its release has lost its maps, so it must not reach the
+// pool for the next call to write into.
+func TestReleasePooledDropsAClosedState(t *testing.T) {
+	closed := NewPooled(NewNoopReader())
+	closed.Close()
+	ReleasePooled(closed)
+
+	fresh := NewPooled(NewNoopReader())
+	defer ReleasePooled(fresh)
+	require.NotSame(t, closed, fresh, "a closed state must not come back from the pool")
+}
+
 // A call that warms slots and then reverts keeps the grown slot maps, so it is
 // not poolable even though nothing is live.
 func TestResetForPoolDropsARevertedWarmUp(t *testing.T) {
