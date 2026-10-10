@@ -25,6 +25,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -48,7 +49,7 @@ import (
 const (
 	wsPingInterval     = 60 * time.Second
 	wsPingWriteTimeout = 5 * time.Second
-	wsMessageSizeLimit = 32 * 1024 * 1024
+	wsMessageSizeLimit = maxRequestContentLength
 	heldWriteLimit     = int(64 * datasize.KB) // held bytes past which a coalesced batch writes out early
 )
 
@@ -83,7 +84,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			logger.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
-		codec := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
+		codec := newWebsocketCodec(conn, hw.conn, &s.ingress, r.Host, r.Header, r.RemoteAddr)
 		// Tag the connection context so BeginRo fails fast (ErrReadTxLimitExceeded)
 		// instead of blocking indefinitely when the DB semaphore is full.
 		// r.Context() remains valid for the lifetime of the WebSocket session because
@@ -261,7 +262,8 @@ func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {
 // hijacked socket on the server side, as a context deadline on the client side.
 type wsConnAdapter struct {
 	conn     *websocket.Conn
-	netConn  *heldConn // the hijacked socket on the server side, nil on the client side
+	netConn  *heldConn      // the hijacked socket on the server side, nil on the client side
+	budget   *ingressBudget // the server's, nil on the client side
 	mu       sync.Mutex
 	deadline time.Time
 }
@@ -410,10 +412,27 @@ func (a *wsConnAdapter) encode(v any) error {
 }
 
 // readFrame returns the next message. Every websocket frame is one message, so
-// it can be read in one go and checked once.
-func (a *wsConnAdapter) readFrame() ([]byte, error) {
-	_, data, err := a.conn.Read(context.Background())
-	return data, err
+// it can be read in one go and checked once. On the server a message is charged to
+// the ingress budget until its handler is done; one that does not fit closes the connection.
+func (a *wsConnAdapter) readFrame() ([]byte, func(), error) {
+	if a.budget == nil {
+		_, data, err := a.conn.Read(context.Background())
+		return data, nil, err
+	}
+	_, r, err := a.conn.Reader(context.Background())
+	if err != nil {
+		return nil, nil, err
+	}
+	body, _ := a.budget.admit(r, -1)
+	data, err := readAllBody(body, 0)
+	if err != nil {
+		body.release()
+		if errors.Is(err, errServerOverloaded) {
+			_ = a.conn.Close(websocket.StatusTryAgainLater, ErrMsgServerOverloaded)
+		}
+		return nil, nil, err
+	}
+	return data, body.release, nil
 }
 
 type websocketCodec struct {
@@ -427,13 +446,14 @@ type websocketCodec struct {
 // NewWebsocketCodec wraps a coder websocket connection as a ServerCodec.
 // remoteAddr should be r.RemoteAddr on the server side, or the endpoint URL on the client side.
 func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
-	return newWebsocketCodec(conn, nil, host, req, remoteAddr)
+	return newWebsocketCodec(conn, nil, nil, host, req, remoteAddr)
 }
 
-// newWebsocketCodec is NewWebsocketCodec with the hijacked socket, which bounds and coalesces server writes.
-func newWebsocketCodec(conn *websocket.Conn, netConn *heldConn, host string, req http.Header, remoteAddr string) *websocketCodec {
+// newWebsocketCodec is NewWebsocketCodec with the hijacked socket, which bounds and coalesces
+// server writes, and the server's ingress budget.
+func newWebsocketCodec(conn *websocket.Conn, netConn *heldConn, budget *ingressBudget, host string, req http.Header, remoteAddr string) *websocketCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
-	adapter := &wsConnAdapter{conn: conn, netConn: netConn}
+	adapter := &wsConnAdapter{conn: conn, netConn: netConn, budget: budget}
 	wc := &websocketCodec{
 		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
 		conn:      conn,
