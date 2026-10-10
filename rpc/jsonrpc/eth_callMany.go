@@ -231,8 +231,10 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	// after replaying the txns, we want to overload the state
 	// overload state
+	var activePrecompiles vm.PrecompiledContracts
 	if stateOverride != nil {
-		err = stateOverride.Override(evm.IntraBlockState(), nil, blockCtx.Rules(chainConfig))
+		activePrecompiles = vm.ActivePrecompiledContracts(rules)
+		err = stateOverride.Override(evm.IntraBlockState(), activePrecompiles, rules)
 		if err != nil {
 			return nil, err
 		}
@@ -256,6 +258,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			msg.SetSkipExecutionGasCap(true)
 			txCtx = protocol.NewEVMTxContext(msg)
 			evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{})
+			evm.SetPrecompiles(activePrecompiles)
 			storeEVM(evm)
 			result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, api.engine())
 			if err != nil {

@@ -1048,7 +1048,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	// Retrieve the precompiles since they don't need to be added to the access list
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
-	precompiles := vm.ActivePrecompiles(blockCtx.Rules(chainConfig))
+	rules := blockCtx.Rules(chainConfig)
+	precompiles := vm.ActivePrecompiles(rules)
 	excl := make(map[common.Address]struct{})
 	// Exclude 'from' and precompiles — they are pre-warmed by EIP-2929.
 	// 'to' is intentionally not excluded: its storage slots must appear in the
@@ -1064,7 +1065,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		if err != nil {
 			return nil, err
 		}
-		if err := excludeAuthorities(msg, blockCtx.Rules(chainConfig), excl); err != nil {
+		if err := excludeAuthorities(msg, rules, excl); err != nil {
 			return nil, err
 		}
 	}
@@ -1085,9 +1086,12 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	step := func(prevTracer *logger.AccessListTracer) (*accessListResult, *logger.AccessListTracer, error) {
 		ibs.Reset()
 
-		// Override the fields of specified contracts before execution.
+		// Override the fields of specified contracts before execution. Override
+		// edits the precompile set it is given, so each iteration starts fresh.
+		var activePrecompiles vm.PrecompiledContracts
 		if stateOverrides != nil {
-			if err := stateOverrides.Override(ibs, nil, blockCtx.Rules(chainConfig)); err != nil {
+			activePrecompiles = vm.ActivePrecompiledContracts(rules)
+			if err := stateOverrides.Override(ibs, activePrecompiles, rules); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -1116,6 +1120,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		txCtx := protocol.NewEVMTxContext(msg)
 
 		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, config), txCtx, ibs, chainConfig, config)
+		evm.SetPrecompiles(activePrecompiles)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
