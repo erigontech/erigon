@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -19,7 +20,9 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -251,7 +254,7 @@ func TestSanitizeCallGasDefaultsToRemainingBlock(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 10_000_000, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 10_000_000}, 50_000_000)
 	require.NoError(t, err)
 	// remaining = 30M - 10M = 20M, which is < globalGasCap of 50M, so gas = 20M
 	assert.Equal(t, uint64(20_000_000), uint64(*args.Gas))
@@ -264,7 +267,7 @@ func TestSanitizeCallGasDefaultsCappedByGasCap(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(100_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 25_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 25_000_000)
 	require.NoError(t, err)
 	// remaining = 100M, globalGasCap = 25M → capped to 25M
 	assert.Equal(t, uint64(25_000_000), uint64(*args.Gas))
@@ -277,7 +280,7 @@ func TestSanitizeCallGasDefaultsNoCap(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 0)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 0)
 	require.NoError(t, err)
 	// remaining = 30M, effectiveCap = MaxUint64/2 → gas = 30M (remaining is less)
 	assert.Equal(t, uint64(30_000_000), uint64(*args.Gas))
@@ -291,7 +294,7 @@ func TestSanitizeCallUserGasRespected(t *testing.T) {
 	args.Gas = &userGas
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(5_000_000), uint64(*args.Gas))
 }
@@ -305,7 +308,7 @@ func TestSanitizeCallUserGasCappedByGlobalCap(t *testing.T) {
 	args.Gas = &userGas
 	bc := blockCtx(200_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(50_000_000), uint64(*args.Gas))
 }
@@ -318,7 +321,7 @@ func TestSanitizeCallUserGasNoCap(t *testing.T) {
 	args.Gas = &userGas
 	bc := blockCtx(200_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 0)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 0)
 	require.NoError(t, err)
 	// No globalGasCap, so user gas is not capped
 	assert.Equal(t, uint64(100_000_000), uint64(*args.Gas))
@@ -332,7 +335,7 @@ func TestSanitizeCallBlockGasLimitExceeded(t *testing.T) {
 	args.Gas = &userGas
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 10_000_000, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 10_000_000}, 50_000_000)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "block gas limit reached")
 	var customErr *rpc.CustomError
@@ -348,7 +351,7 @@ func TestSanitizeCallBlockGasLimitExact(t *testing.T) {
 	args.Gas = &userGas
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 10_000_000, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 10_000_000}, 50_000_000)
 	require.NoError(t, err)
 }
 
@@ -360,7 +363,7 @@ func TestSanitizeCallChainIDDefaultCopied(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	require.NotNil(t, args.ChainID)
 	// The returned chain ID should equal the original.
@@ -377,7 +380,7 @@ func TestSanitizeCallChainIDMismatch(t *testing.T) {
 	args.ChainID = (*hexutil.U256)(uint256.NewInt(999))
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "chainId does not match")
 }
@@ -389,7 +392,7 @@ func TestSanitizeCallChainIDMatch(t *testing.T) {
 	args.ChainID = (*hexutil.U256)(uint256.NewInt(42))
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 }
 
@@ -400,7 +403,7 @@ func TestSanitizeCallBaseFeeNil(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.NotNil(t, args.GasPrice, "GasPrice should be set when baseFee is nil")
 	assert.Nil(t, args.MaxFeePerGas, "MaxFeePerGas should not be set when baseFee is nil")
@@ -414,7 +417,7 @@ func TestSanitizeCallBaseFeeSet(t *testing.T) {
 	bc := blockCtx(30_000_000)
 	baseFee := uint256.NewInt(1_000_000_000) // 1 gwei
 
-	err := sim.sanitizeCall(&args, nil, &bc, baseFee, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, baseFee, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.NotNil(t, args.MaxFeePerGas, "MaxFeePerGas should be set when baseFee is provided")
 	assert.NotNil(t, args.MaxPriorityFeePerGas, "MaxPriorityFeePerGas should be set when baseFee is provided")
@@ -428,7 +431,7 @@ func TestSanitizeCallBlobGas(t *testing.T) {
 	args.BlobVersionedHashes = []common.Hash{{1}}
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.NotNil(t, args.MaxFeePerBlobGas, "MaxFeePerBlobGas should be set when BlobVersionedHashes is present")
 }
@@ -440,7 +443,7 @@ func TestSanitizeCallBlobGasNotSetWithoutHashes(t *testing.T) {
 	args := callArgs()
 	bc := blockCtx(30_000_000)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 50_000_000)
 	require.NoError(t, err)
 	assert.Nil(t, args.MaxFeePerBlobGas, "MaxFeePerBlobGas should not be set without BlobVersionedHashes")
 }
@@ -454,7 +457,7 @@ func TestSanitizeCallGasDefaultCappedAtEffectiveCapWhenNoGlobalCap(t *testing.T)
 	hugeGasLimit := uint64(math.MaxUint64/2) + 1000
 	bc := blockCtx(hugeGasLimit)
 
-	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 0)
+	err := sim.sanitizeCall(&args, nil, &bc, nil, protocol.GasUsed{BlockExecution: 0}, 0)
 	require.NoError(t, err)
 	// Gas should be capped to MaxUint64/2, not the full block remaining.
 	assert.Equal(t, uint64(math.MaxUint64/2), uint64(*args.Gas))
@@ -538,7 +541,7 @@ func TestNewSimulatorGasPool(t *testing.T) {
 	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 50_000_000, 1024, 0, false)
-	assert.Equal(t, uint64(50_000_000), sim.gasPool.Gas())
+	assert.Equal(t, uint64(50_000_000), sim.gasBudget)
 	assert.True(t, sim.traceTransfers)
 	assert.True(t, sim.validation)
 	assert.True(t, sim.fullTransactions)
@@ -550,7 +553,7 @@ func TestNewSimulatorZeroGasCap(t *testing.T) {
 	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 0, 1024, 0, false)
-	assert.Equal(t, uint64(0), sim.gasPool.Gas())
+	assert.Equal(t, uint64(0), sim.gasBudget)
 }
 
 // ─── SimulationRequest validation tests ──────────────────────────────────────
@@ -870,4 +873,172 @@ func newUint64(n uint64) *hexutil.Uint64 {
 
 func newBig(n uint64) *hexutil.U256 {
 	return (*hexutil.U256)(uint256.NewInt(n))
+}
+
+// ─── EIP-8037 two-dimensional block gas ─────────────────────────────────────
+
+// amsterdamSimulator returns a simulator on a chain with Amsterdam active.
+func amsterdamSimulator() *simulator {
+	return &simulator{chainConfig: chain.AllProtocolChanges}
+}
+
+// TestSanitizeCallEIP8037Inclusion covers what the pre-Amsterdam gate tests
+// cannot: the state dimension, and only the execution side being capped at
+// MaxTxnGasLimit (TestSanitizeCallBlockGasLimitExceeded is the uncapped side).
+func TestSanitizeCallEIP8037Inclusion(t *testing.T) {
+	overCap := params.MaxTxnGasLimit + 5_000_000
+
+	tests := []struct {
+		name       string
+		validation bool
+		gasLimit   uint64
+		gasUsed    protocol.GasUsed
+		gas        uint64
+		wantErr    bool
+	}{
+		{"state exceeded by one", false, 30_000_000, protocol.GasUsed{BlockState: 28_000_000}, 2_000_001, true},
+		{"over tx cap, execution side capped", true, 60_000_000, protocol.GasUsed{BlockExecution: 40_000_000}, overCap, false},
+		// Without validation the execution gas is not capped, so the whole gas must fit.
+		{"over tx cap, validation off", false, 60_000_000, protocol.GasUsed{BlockExecution: 40_000_000}, overCap, true},
+		// Execution already past the limit must leave nothing, not wrap around.
+		{"execution overshoot leaves nothing", false, 30_000_000, protocol.GasUsed{BlockExecution: 31_000_000}, 1, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			args := callArgs()
+			gas := hexutil.Uint64(tc.gas)
+			args.Gas = &gas
+			bc := blockCtx(tc.gasLimit)
+
+			sim := amsterdamSimulator()
+			sim.validation = tc.validation
+			err := sim.sanitizeCall(&args, nil, &bc, nil, tc.gasUsed, 0)
+			if !tc.wantErr {
+				require.NoError(t, err)
+				return
+			}
+			var customErr *rpc.CustomError
+			require.ErrorAs(t, err, &customErr)
+			assert.Equal(t, rpc.ErrCodeBlockGasLimitReached, customErr.Code)
+		})
+	}
+}
+
+// The default gas limit is blockGasLimit - soFarUsedGasInBlock, and after
+// Amsterdam the gas used so far is the larger dimension, here state.
+func TestSanitizeCallDefaultGasBoundedByState(t *testing.T) {
+	args := callArgs()
+	bc := blockCtx(30_000_000)
+	gasUsed := protocol.GasUsed{BlockExecution: 5_000_000, BlockState: 28_000_000}
+
+	require.NoError(t, amsterdamSimulator().sanitizeCall(&args, nil, &bc, nil, gasUsed, 0))
+	assert.Equal(t, uint64(2_000_000), uint64(*args.Gas))
+}
+
+func newAmsterdamSimulateAPI(t *testing.T) *APIImpl {
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
+	return newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+}
+
+// Calls run through stateOverrides: sender is funded, refunder clears a
+// non-zero slot (PUSH1 0 PUSH1 0 SSTORE STOP), newAccount does not exist yet.
+var (
+	simSender     = common.HexToAddress("0xc000000000000000000000000000000000000000")
+	simRefunder   = common.HexToAddress("0xc200000000000000000000000000000000000000")
+	simNewAccount = common.HexToAddress("0xc300000000000000000000000000000000000000")
+)
+
+func amsterdamSimulateOverrides() *ethapi.StateOverrides {
+	balance := (*hexutil.U256)(uint256.NewInt(1_000_000_000_000_000_000))
+	code := hexutil.Bytes{0x60, 0x00, 0x60, 0x00, 0x55, 0x00}
+	storage := map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(42))}
+	return &ethapi.StateOverrides{
+		accounts.InternAddress(simSender):   {Balance: &balance},
+		accounts.InternAddress(simRefunder): {Code: &code, State: &storage},
+	}
+}
+
+func receiptGasSum(t *testing.T, block SimulatedBlockResult) (sum uint64) {
+	for _, c := range block.Calls {
+		require.Nil(t, c.Error)
+		sum += uint64(c.GasUsed)
+	}
+	return sum
+}
+
+// TestSimulateV1AmsterdamBlockGasUsed pins a simulated block's gasUsed to
+// max(execution, state) with both counted before refunds. Each block pulls the
+// receipt sum away from that figure in a different direction.
+func TestSimulateV1AmsterdamBlockGasUsed(t *testing.T) {
+	api := newAmsterdamSimulateAPI(t)
+	value := (*hexutil.U256)(uint256.NewInt(1))
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{
+			{StateOverrides: amsterdamSimulateOverrides(), Calls: []ethapi.CallArgs{{From: &simSender, To: &simRefunder}}},
+			{Calls: []ethapi.CallArgs{{From: &simSender, To: &simNewAccount, Value: value}}},
+		},
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+
+	// A refund lowers the receipt but not the block's execution gas.
+	require.Greater(t, uint64(result[0].GasUsed), receiptGasSum(t, result[0]))
+
+	// A new account's receipt is execution + state, the block only the larger:
+	// above half the receipt sum, below all of it.
+	receipts := receiptGasSum(t, result[1])
+	require.Greater(t, uint64(result[1].GasUsed), receipts/2)
+	require.Less(t, uint64(result[1].GasUsed), receipts)
+}
+
+// TestSimulateV1AmsterdamGlobalGasBudget checks the request-wide gas budget is
+// read as the scarcer EIP-8037 dimension. After a new account drains most of its
+// state side, a call left to the default must get a gas limit the budget still
+// admits; sized from the execution side alone, the EVM's precheck rejects it.
+func TestSimulateV1AmsterdamGlobalGasBudget(t *testing.T) {
+	api := newAmsterdamSimulateAPI(t)
+	api.GasCap = 300_000
+	value := (*hexutil.U256)(uint256.NewInt(1))
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			StateOverrides: amsterdamSimulateOverrides(),
+			Calls: []ethapi.CallArgs{
+				{From: &simSender, To: &simNewAccount, Value: value},
+				{From: &simSender, To: &simNewAccount, Value: value},
+			},
+		}},
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err, "the second call must fit what the first left of the budget")
+	require.Len(t, result, 1)
+	require.Len(t, result[0].Calls, 2)
+}
+
+// TestSimulateV1GasCapBudgetTakesReceiptGas checks that each call takes its
+// receipt gas off the request-wide gas cap, so the next call's default gas is
+// the cap minus the receipt gas so far.
+func TestSimulateV1GasCapBudgetTakesReceiptGas(t *testing.T) {
+	api := newAmsterdamSimulateAPI(t)
+	api.GasCap = 1_000_000
+	value := (*hexutil.U256)(uint256.NewInt(1))
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			StateOverrides: amsterdamSimulateOverrides(),
+			Calls: []ethapi.CallArgs{
+				{From: &simSender, To: &simNewAccount, Value: value},
+				{From: &simSender, To: &simNewAccount, Value: value},
+			},
+		}},
+		ReturnFullTransactions: true,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	txs, ok := result[0].Transactions.([]*ethapi.RPCTransaction)
+	require.True(t, ok)
+	require.Len(t, txs, 2)
+	assert.Equal(t, api.GasCap, uint64(txs[0].Gas))
+	assert.Equal(t, api.GasCap-uint64(result[0].Calls[0].GasUsed), uint64(txs[1].Gas))
 }
