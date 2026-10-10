@@ -57,6 +57,10 @@ func validationEpochRange(headState *state.CachingBeaconState, highestSeenSlot, 
 	if currentSlot/slotsPerEpoch > headEpoch {
 		currEpoch = headEpoch + 1
 	}
+	// Shuffling for headEpoch+2 uses the head epoch's final RANDAO mix, provided no later block has been seen.
+	if currentSlot/slotsPerEpoch > headEpoch+1 && highestSeenSlot <= headState.Slot() {
+		currEpoch = headEpoch + 2
+	}
 	return state.PreviousEpoch(headState), currEpoch
 }
 
@@ -292,7 +296,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
-			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
+			return fmt.Errorf("%w: %w", ErrIgnore, ErrAttestationAlreadySeen)
 		}
 
 		// [REJECT] The signature of attestation is valid.

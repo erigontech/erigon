@@ -136,6 +136,18 @@ func (sd *TemporalMemBatch) unlockAllDomains() {
 	}
 }
 
+func (sd *TemporalMemBatch) rlockAllDomains() {
+	for i := range sd.latestStateLocks {
+		sd.latestStateLocks[i].RLock()
+	}
+}
+
+func (sd *TemporalMemBatch) runlockAllDomains() {
+	for i := range sd.latestStateLocks {
+		sd.latestStateLocks[i].RUnlock()
+	}
+}
+
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
 	sameTxNumUpdate := sd.putLatest(domain, k, v, txNum)
 	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval, sameTxNumUpdate)
@@ -733,7 +745,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 }
 
 // flushLocked is the body of Flush, factored so the callback path can run it
-// holding all domain locks without re-acquiring. PlainStateVersion advances here
+// holding all domain read locks without re-acquiring. PlainStateVersion advances here
 // with the domain writes; metadata overlays must not advance it independently.
 func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if sd.unwindChangesetRaw != nil {
@@ -761,11 +773,11 @@ func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 // Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
 // registered per-domain callback is invoked for every (key, value, step, txNum)
 // tuple after the MDBX write succeeds, so a downstream cache can never be left
-// ahead of MDBX. Runs under all domain locks so the callback's snapshot matches
-// flush-time state.
+// ahead of MDBX. Holds every domain read lock: writers must not change the batch
+// before the callbacks run, while readers of a published batch keep going.
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
-	sd.lockAllDomains()
-	defer sd.unlockAllDomains()
+	sd.rlockAllDomains()
+	defer sd.runlockAllDomains()
 
 	if err := sd.flushLocked(ctx, tx); err != nil {
 		return err
@@ -805,10 +817,10 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 }
 
 // FlushWithCommitmentCallback flushes the batch then invokes cb per
-// commitment-domain tuple under the lock.
+// commitment-domain tuple under the read locks, like Flush.
 func (sd *TemporalMemBatch) FlushWithCommitmentCallback(ctx context.Context, tx kv.RwTx, cb execctx.CommitmentFlushCallback) error {
-	sd.lockAllDomains()
-	defer sd.unlockAllDomains()
+	sd.rlockAllDomains()
+	defer sd.runlockAllDomains()
 
 	if err := sd.flushLocked(ctx, tx); err != nil {
 		return err
