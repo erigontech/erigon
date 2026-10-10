@@ -367,7 +367,7 @@ func fastLoop(traced []byte, fast string, ops []fastOp, hooked bool) []byte {
 		}
 	}
 	if hooked {
-		mask := []string{"byte(STOP)"}
+		mask := append(make([]string, 0, 1+len(ops)), "byte(STOP)")
 		for _, o := range ops {
 			mask = append(mask, "byte("+o.name+")")
 		}
