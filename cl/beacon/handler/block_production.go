@@ -650,42 +650,69 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(
 		committeeIndex = &zero
 	}
 
-	if ok {
-		// Set committee_index from the request parameter. The cached attestation data
-		// has CommitteeIndex=0 (shared across all committees for the same slot), but
-		// the VC expects it to match the requested committee_index.
-		if committeeIndex != nil {
-			attestationData.CommitteeIndex = *committeeIndex
-		}
-		return newBeaconResponse(attestationData), nil
-	}
-
-	if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
-		attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
-			tx,
-			headState,
-			headRoot,
-			*slot,
-		)
-
-		if errors.Is(err, attestation_producer.ErrHeadStateBehind) {
-			return beaconhttp.NewEndpointError(
-				http.StatusServiceUnavailable,
-				synced_data.ErrNotSynced,
+	if !ok {
+		if err := a.viewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
+			attestationData, err = a.attestationProducer.ProduceAndCacheAttestationData(
+				tx,
+				headState,
+				headRoot,
+				*slot,
 			)
-		} else if err != nil {
-			return beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+
+			if errors.Is(err, attestation_producer.ErrHeadStateBehind) {
+				return beaconhttp.NewEndpointError(
+					http.StatusServiceUnavailable,
+					synced_data.ErrNotSynced,
+				)
+			} else if err != nil {
+				return beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
+			}
+			return nil
+		}); err != nil {
+			return nil, err
 		}
-		return nil
-	}); err != nil {
-		return nil, err
 	}
 
-	// Set committee_index from the request parameter for pre-Electra versions.
-	if committeeIndex != nil {
+	// The cached attestation data has CommitteeIndex=0 (shared across all committees for the same slot), but the VC
+	// expects it to match the requested committee_index. In Gloas the field signals payload presence instead.
+	if clversion.AfterOrEqual(clparams.GloasVersion) {
+		attestationData.CommitteeIndex, err = a.gloasAttestationIndex(*slot, attestationData.BeaconBlockRoot)
+		if err != nil {
+			return nil, err
+		}
+	} else if committeeIndex != nil {
 		attestationData.CommitteeIndex = *committeeIndex
 	}
 	return newBeaconResponse(attestationData), nil
+}
+
+// gloasAttestationIndex returns attestation_data.index for Gloas: 0 when the attested block is from the attestation
+// slot, otherwise 1 if the head's chain has the block FULL and 0 if not. A FULL block whose payload is not verified
+// is optimistic, so it gets a 503 instead.
+func (a *ApiHandler) gloasAttestationIndex(slot uint64, root common.Hash) (uint64, error) {
+	header, ok := a.forkchoiceStore.GetHeader(root)
+	if !ok || header.Slot == slot {
+		return 0, nil
+	}
+	node, _, err := a.forkchoiceStore.GetHeadNode()
+	if err != nil {
+		return 0, nil
+	}
+	// Attestation data is cached per slot, so the served root can be an ancestor of the head; take the payload status
+	// the head's chain gives it.
+	if node.Root != root {
+		node = a.forkchoiceStore.Ancestor(node.Root, header.Slot)
+	}
+	if node.Root != root || node.PayloadStatus != cltypes.PayloadStatusFull {
+		return 0, nil
+	}
+	if !a.forkchoiceStore.IsPayloadVerified(root) {
+		return 0, beaconhttp.NewEndpointError(
+			http.StatusServiceUnavailable,
+			errors.New("payload of the beacon block root is not verified"),
+		)
+	}
+	return 1, nil
 }
 
 func (a *ApiHandler) GetEthV3ValidatorBlock(

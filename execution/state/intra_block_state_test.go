@@ -1270,6 +1270,22 @@ func TestResetForPoolCarriesNothingToTheNextCall(t *testing.T) {
 	require.False(t, ibs.AddressInAccessList(addr))
 }
 
+// The caller reads a call's output after its ibs goes back to the pool, so the
+// next call must not write into that buffer.
+func TestResetForPoolDropsTheOutputBuffer(t *testing.T) {
+	ibs := New(NewNoopReader())
+	ibs.txOutputFree = true
+	out := ibs.TxOutputBuffer()
+	*out = append((*out)[:0], 1, 2, 3)
+	kept := *out
+
+	require.True(t, ibs.resetForPool())
+	ibs.txOutputFree = true
+	next := ibs.TxOutputBuffer()
+	*next = append((*next)[:0], 9, 9, 9)
+	require.Equal(t, []byte{1, 2, 3}, kept)
+}
+
 // Maps never shrink, so a call that grew the state past the bound is not pooled.
 func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 	ibs := New(NewNoopReader())
