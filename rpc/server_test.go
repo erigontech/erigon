@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func TestServerRegisterName(t *testing.T) {
@@ -62,6 +63,13 @@ func TestNewServerClampsZeroBatchConcurrency(t *testing.T) {
 	server := NewServer(0, false /* traceRequests */, false /* debugSingleRequests */, true, log.New(), 100)
 	if server.batchConcurrency != minBatchConcurrency {
 		t.Fatalf("expected batch concurrency %d, got %d", minBatchConcurrency, server.batchConcurrency)
+	}
+}
+
+func TestNewServerDefaultsSubscriptionLimit(t *testing.T) {
+	server := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, log.New(), 100)
+	if server.subscriptionLimit != rpccfg.DefaultSubscriptionLimit {
+		t.Fatalf("subscription limit %d, want %d", server.subscriptionLimit, rpccfg.DefaultSubscriptionLimit)
 	}
 }
 

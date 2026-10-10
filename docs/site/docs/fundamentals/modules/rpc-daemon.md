@@ -108,6 +108,7 @@ Flags:
       --rpc.subscription.filters.maxlogs int        Maximum number of logs to store per subscription.
       --rpc.subscription.filters.maxtopics int      Maximum number of topic alternatives accepted across all positions per log subscription.
       --rpc.subscription.filters.maxtxs int         Maximum number of transactions to store per subscription.
+      --rpc.subscription.limit int                  Maximum number of concurrent subscriptions per connection (WebSocket, IPC). 0 = unlimited (default 1024)
       --rpc.txfeecap float                          Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default 1)
       --socket.enabled                              Enable IPC server
       --socket.url string                           IPC server listening url. prefix supported are tcp, unix (default "unix:///var/run/erigon.sock")
