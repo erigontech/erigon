@@ -72,6 +72,8 @@ type crashRecoveryRequest struct {
 	Deadline       time.Time
 	Canonical      []*engineapitester.MockClPayload
 	Replacement    []*engineapitester.MockClPayload
+	CatchupCycle   int // One-based catch-up cycle; zero selects tip-mode crash windows.
+	Downloaded     []crashRecoveryBlock
 }
 
 type crashRecoveryState struct {
@@ -216,20 +218,7 @@ func TestEngineApiCrashRecovery(t *testing.T) {
 						assertChurnState(t.Context(), t, eat, churn, tip, target.sum)
 						assertCrashRecoveryState(t, target.state, readCrashRecoveryState(t, eat.ChainDB))
 					}
-					for i, payload := range scenario.replacement.continuation {
-						insertCrashRecoveryPayloads(t.Context(), t, eat, []*engineapitester.MockClPayload{payload})
-						require.NoError(t, eat.MockCl.UpdateForkChoice(t.Context(), payload))
-						assertChurnState(t.Context(), t, eat, churn, payload, scenario.replacement.continuationSums[i])
-					}
-					built, buildErr := eat.MockCl.BuildCanonicalBlock(t.Context())
-					require.NoError(t, buildErr)
-					parent := scenario.replacement.continuation[len(scenario.replacement.continuation)-1]
-					require.NotNil(t, parent.ExecutionPayload.SlotNumber)
-					require.NotNil(t, built.ExecutionPayload.SlotNumber)
-					require.Greater(t, uint64(*built.ExecutionPayload.SlotNumber), uint64(*parent.ExecutionPayload.SlotNumber), "block production must advance the CL slot")
-					assertCanonicalHead(t.Context(), t, eat, built)
-					_, _, _, consistent := readChurn(t.Context(), t, churn)
-					require.True(t, consistent, "state must remain consistent after block production resumes")
+					assertCrashRecoveryContinuation(t, eat, churn, scenario.replacement)
 				})
 			}
 		})
@@ -315,6 +304,14 @@ func assertCrashRecoveryReference(t *testing.T, chain crashRecoveryChain) {
 
 func readCrashRecoveryState(t *testing.T, db kv.TemporalRoDB) crashRecoveryState {
 	t.Helper()
+	state := readCrashRecoveryCheckpoint(t, db)
+	require.Equal(t, uint64(len(state.TxNums)-1), state.CommitmentBlock, "commitment and canonical TxNums must describe the same block")
+	require.Equal(t, state.Canonical[state.CommitmentBlock], state.HeadBlock, "commitment must describe the head block")
+	return state
+}
+
+func readCrashRecoveryCheckpoint(t *testing.T, db kv.TemporalRoDB) crashRecoveryState {
+	t.Helper()
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -359,11 +356,11 @@ func readCrashRecoveryState(t *testing.T, db kv.TemporalRoDB) crashRecoveryState
 	root, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(encoded)
 	require.NoError(t, err)
 	state.StateRoot, state.CommitmentBlock, state.CommitmentTx = common.BytesToHash(root), blockNum, txNum
-	require.Equal(t, lastBlock, blockNum, "commitment and canonical TxNums must describe the same block")
-	header, err := rawdb.ReadHeaderByHash(tx, state.HeadBlock)
+	require.LessOrEqual(t, blockNum, lastBlock, "commitment must have a canonical block")
+	header, err := rawdb.ReadHeaderByHash(tx, state.Canonical[blockNum])
 	require.NoError(t, err)
 	require.NotNil(t, header)
-	require.Equal(t, header.Root, state.StateRoot, "persisted commitment root must match the head header")
+	require.Equal(t, header.Root, state.StateRoot, "persisted commitment root must match its canonical header")
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain, kv.ReceiptDomain, kv.RCacheDomain} {
 		state.Domains[domain] = readCrashRecoveryDomain(t, tx, domain)
 	}
@@ -432,6 +429,25 @@ func assertCrashRecoveryState(t *testing.T, want, got crashRecoveryState) {
 	require.Equal(t, want, got, "persisted canonical metadata and commitment")
 }
 
+func assertCrashRecoveryContinuation(t *testing.T, eat engineapitester.EngineApiTester, churn *contracts.StateChurn, chain crashRecoveryChain) {
+	t.Helper()
+	ctx := t.Context()
+	for i, payload := range chain.continuation {
+		insertCrashRecoveryPayloads(ctx, t, eat, []*engineapitester.MockClPayload{payload})
+		require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, payload))
+		assertChurnState(ctx, t, eat, churn, payload, chain.continuationSums[i])
+	}
+	built, err := eat.MockCl.BuildCanonicalBlock(ctx)
+	require.NoError(t, err)
+	parent := chain.continuation[len(chain.continuation)-1]
+	require.NotNil(t, parent.ExecutionPayload.SlotNumber)
+	require.NotNil(t, built.ExecutionPayload.SlotNumber)
+	require.Greater(t, uint64(*built.ExecutionPayload.SlotNumber), uint64(*parent.ExecutionPayload.SlotNumber), "block production must advance the CL slot")
+	assertCanonicalHead(ctx, t, eat, built)
+	_, _, _, consistent := readChurn(ctx, t, churn)
+	require.True(t, consistent, "state must remain consistent after block production resumes")
+}
+
 func insertCrashRecoveryPayloads(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester, payloads []*engineapitester.MockClPayload) {
 	t.Helper()
 	for _, payload := range payloads {
@@ -446,19 +462,28 @@ func insertCrashRecoveryPayloads(ctx context.Context, t *testing.T, eat engineap
 	}
 }
 
-func waitCrashRecoveryTransition(ctx context.Context, hold *stateTransitionHold, response <-chan error) error {
+func waitCrashRecoveryTransition(ctx context.Context, hold *stateTransitionHold, response <-chan error, allowEarlySuccess bool) error {
 	for {
+		var err error
 		select {
 		case <-hold.reached:
-			return ctx.Err()
-		case err := <-response:
-			if err != nil {
-				return fmt.Errorf("forkchoice before transition %d: %w", hold.point, err)
+			// A reached barrier must not hide an already-queued FCU response.
+			select {
+			case err = <-response:
+			default:
+				return ctx.Err()
 			}
-			response = nil
+		case err = <-response:
 		case <-ctx.Done():
 			return fmt.Errorf("waiting for transition %d: %w", hold.point, ctx.Err())
 		}
+		if err != nil {
+			return fmt.Errorf("forkchoice before transition %d: %w", hold.point, err)
+		}
+		if !allowEarlySuccess {
+			return fmt.Errorf("forkchoice returned before transition %d", hold.point)
+		}
+		response = nil
 	}
 }
 
@@ -483,21 +508,27 @@ func runUnwindCrashChild(t *testing.T) {
 		EngineApiClientTimeout:  &clientTimeout,
 		StateTransitionObserver: transitions.observe,
 		EthConfigTweaker: func(config *ethconfig.Config) {
-			configureCrashRecovery(config)
+			if request.CatchupCycle > 0 {
+				configureCatchupCrashRecovery(config)
+			} else {
+				configureCrashRecovery(config)
+			}
 			config.Sync.ParallelStateFlushing = true
 		},
 	})
 	require.NoError(t, err)
-	startForkchoice := func(payload *engineapitester.MockClPayload) <-chan error {
+	startForkchoice := func(head common.Hash) <-chan error {
 		response := make(chan error, 1)
-		go func() { response <- eat.MockCl.UpdateForkChoice(ctx, payload) }()
+		go func() {
+			response <- eat.MockCl.UpdateForkChoiceByHash(ctx, head)
+		}()
 		return response
 	}
 	t.Log("importing the canonical chain")
 	insertCrashRecoveryPayloads(ctx, t, eat, request.Canonical)
 	canonicalPublished := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
 	canonicalCleared := transitions.hold(t, execmodule.StateTransitionOverlayCleared, 1)
-	canonicalResponse := startForkchoice(request.Canonical[len(request.Canonical)-1])
+	canonicalResponse := startForkchoice(request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockHash)
 	// Force the early response to arrive while persistence is still blocked.
 	// Only this FCU's clear event allows the replacement barrier to be armed.
 	t.Log("waiting for the canonical FCU's early response")
@@ -508,20 +539,49 @@ func runUnwindCrashChild(t *testing.T) {
 		t.Fatalf("canonical FCU did not respond before commit: %v", ctx.Err())
 	}
 	t.Log("waiting for canonical overlay publication")
-	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalPublished, nil), "canonical FCU after its early response")
+	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalPublished, nil, true), "canonical FCU after its early response")
 	canonicalPublished.release()
 	t.Log("waiting for canonical overlay teardown")
-	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalCleared, nil), "canonical FCU after overlay publication")
+	require.NoError(t, waitCrashRecoveryTransition(ctx, canonicalCleared, nil, true), "canonical FCU after overlay publication")
 	canonicalCleared.release()
 
 	t.Log("importing the replacement chain")
-	insertCrashRecoveryPayloads(ctx, t, eat, request.Replacement)
-	boundary := transitions.hold(t, request.Point, 1)
+	var boundary *stateTransitionHold
+	var replacementHead common.Hash
+	if request.CatchupCycle > 0 {
+		blocks, err := decodeCrashRecoveryBlocks(request.Downloaded)
+		require.NoError(t, err)
+		require.NotEmpty(t, blocks)
+		replacementHead = blocks[len(blocks)-1].Hash()
+		status, err := eat.ExecutionModule.InsertBlocks(ctx, blocks)
+		require.NoError(t, err)
+		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+		// The crash windows require durable block data before execution starts.
+		// Read the DB directly: the execution module can also serve its overlay.
+		require.NoError(t, eat.ChainDB.View(ctx, func(tx kv.Tx) error {
+			for i, block := range blocks {
+				require.Equal(t, request.Downloaded[i], readCrashRecoveryBlock(t, tx, block.Hash(), block.NumberU64()),
+					"block %d and its BAL must be durable before the replacement FCU", block.NumberU64())
+			}
+			return nil
+		}))
+		seen := 0
+		boundary = transitions.holdMatching(t, request.Point, 1, func(context.Context) bool {
+			seen++
+			return seen == request.CatchupCycle
+		})
+	} else {
+		insertCrashRecoveryPayloads(ctx, t, eat, request.Replacement)
+		replacementHead = request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockHash
+		boundary = transitions.hold(t, request.Point, 1)
+	}
 	// Abort before cleanup can release the crash barrier, even on failure.
 	t.Cleanup(func() { os.Exit(crashRecoveryFailureExitCode) })
-	response := startForkchoice(request.Replacement[len(request.Replacement)-1])
+	response := startForkchoice(replacementHead)
 	t.Logf("waiting for replacement transition %d", request.Point)
-	require.NoError(t, waitCrashRecoveryTransition(ctx, boundary, response), "replacement FCU")
+	// A prevalidated tip FCU may return VALID before its commit. Bulk import
+	// clears that validation, so a catch-up response before the barrier is a failure.
+	require.NoError(t, waitCrashRecoveryTransition(ctx, boundary, response, request.CatchupCycle == 0), "replacement FCU, catch-up cycle %d", request.CatchupCycle)
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", request.ControlAddress)
 	require.NoError(t, err)
@@ -563,13 +623,41 @@ func crashRecoveryExitError(err error) error {
 	return fmt.Errorf("child exited without the expected kill: %w", err)
 }
 
+func (request crashRecoveryRequest) validateMode() error {
+	if request.CatchupCycle < 0 {
+		return errors.New("catch-up cycle must not be negative")
+	}
+	if request.CatchupCycle > 0 {
+		if request.Point != execmodule.StateTransitionFCUCatchupCommitReady && request.Point != execmodule.StateTransitionFCUCatchupCommitComplete {
+			return fmt.Errorf("catch-up mode requires a catch-up commit boundary, got %d", request.Point)
+		}
+	} else {
+		switch request.Point {
+		case execmodule.StateTransitionUnwindComplete, execmodule.StateTransitionOverlayPublished,
+			execmodule.StateTransitionCommitReady, execmodule.StateTransitionCommitComplete, execmodule.StateTransitionOverlayCleared:
+		default:
+			return fmt.Errorf("tip mode requires a tip FCU boundary, got %d", request.Point)
+		}
+		if len(request.Downloaded) > 0 {
+			return errors.New("tip-mode crash requests must not include downloaded blocks")
+		}
+	}
+	return nil
+}
+
 func killAtUnwindBoundary(t *testing.T, request crashRecoveryRequest) {
 	t.Helper()
+	require.NoError(t, request.validateMode())
 	require.NotEmpty(t, request.Canonical)
-	require.NotEmpty(t, request.Replacement)
 	canonicalHead := request.Canonical[len(request.Canonical)-1].ExecutionPayload.BlockNumber
-	replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
-	require.LessOrEqual(t, replacementHead, canonicalHead, "the replacement FCU must stay in tip mode, without catch-up commits")
+	if request.CatchupCycle > 0 {
+		require.Empty(t, request.Replacement, "catch-up imports use only the downloaded blocks")
+		require.NotEmpty(t, request.Downloaded)
+	} else {
+		require.NotEmpty(t, request.Replacement)
+		replacementHead := request.Replacement[len(request.Replacement)-1].ExecutionPayload.BlockNumber
+		require.LessOrEqual(t, replacementHead, canonicalHead, "the replacement FCU must stay in tip mode, without catch-up commits")
+	}
 	testDeadline, _ := t.Deadline()
 	deadline := crashRecoveryAttemptDeadline(time.Now(), testDeadline)
 	ctx, cancel := context.WithDeadline(t.Context(), deadline)
