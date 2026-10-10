@@ -223,6 +223,8 @@ type simulator struct {
 	traceTransfers    bool
 	validation        bool
 	fullTransactions  bool
+	// Without commitment history, each block's root is replayed from the base block, so it needs the keys of all earlier simulated blocks.
+	touchedKeys keysByAccount
 }
 
 func newSimulator(
@@ -258,6 +260,7 @@ func newSimulator(
 		traceTransfers:    req.TraceTransfers,
 		validation:        req.Validation,
 		fullTransactions:  req.ReturnFullTransactions,
+		touchedKeys:       make(keysByAccount),
 	}
 }
 
@@ -445,10 +448,10 @@ type (
 
 var _ state.StateWriter = (*diffTrackingWriter)(nil)
 
-func newDiffTrackingWriter(tx kv.TemporalPutDel, txNum uint64) *diffTrackingWriter {
+func newDiffTrackingWriter(tx kv.TemporalPutDel, txNum uint64, touchedKeys keysByAccount) *diffTrackingWriter {
 	return &diffTrackingWriter{
 		delegate:    state.NewWriter(tx, nil, txNum),
-		touchedKeys: make(map[accounts.Address]storageKeys),
+		touchedKeys: touchedKeys,
 	}
 }
 
@@ -598,7 +601,7 @@ func (s *simulator) simulateBlock(
 		return nil, nil, err
 	}
 
-	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum)
+	stateWriter := newDiffTrackingWriter(sharedDomains.AsPutDel(tx), minTxNum, s.touchedKeys)
 	callResults := make([]ethapi.CallResult, 0, len(bsc.Calls))
 	for callIndex := range bsc.Calls {
 		call := &bsc.Calls[callIndex]
@@ -646,7 +649,7 @@ func (s *simulator) simulateBlock(
 		}
 	}
 
-	if err := s.computeSimulatedStateRoot(ctx, tx, sharedDomains, bsc, block, parent, minTxNum, firstMinTxNum, stateWriter.touchedKeys, ancestors, latest); err != nil {
+	if err := s.computeSimulatedStateRoot(ctx, tx, sharedDomains, bsc, block, minTxNum, firstMinTxNum, stateWriter.touchedKeys, ancestors, latest); err != nil {
 		return nil, nil, err
 	}
 
@@ -713,7 +716,6 @@ func (s *simulator) computeSimulatedStateRoot(
 	sharedDomains *execctx.SharedDomains,
 	bsc *SimulatedBlock,
 	block *types.Block,
-	parent *types.Header,
 	minTxNum, firstMinTxNum uint64,
 	touchedKeys keysByAccount,
 	ancestors []*types.Header,
@@ -756,7 +758,7 @@ func (s *simulator) computeSimulatedStateRoot(
 	// No commitment history: compute from state history if blocks are not frozen, otherwise leave root as zero.
 	if frozen, observed := s.blockReader.FrozenBlocksObserved(); observed && frozen == 0 {
 		txNum := minTxNum + 1 + uint64(len(bsc.Calls))
-		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, parent.Number.Uint64(), txNum)
+		stateRoot, err := s.computeCommitmentFromStateHistory(ctx, tx, sharedDomains, touchedKeys, s.base.Number.Uint64(), block.NumberU64(), txNum)
 		if err != nil {
 			return err
 		}
@@ -1140,6 +1142,7 @@ func (s *simulator) computeCommitmentFromStateHistory(
 	sd *execctx.SharedDomains,
 	touched keysByAccount,
 	baseBlockNum uint64,
+	simBlockNum uint64,
 	simMaxTxNum uint64,
 ) ([]byte, error) {
 	replay := rpchelper.NewCommitmentReplay(s.dirs, s.txNumReader, s.logger)
@@ -1147,7 +1150,6 @@ func (s *simulator) computeCommitmentFromStateHistory(
 	// - use a custom state reader which uses both the primary db (tx, sd) and temporary commitment db (ttx, tsd)
 	// - touch the keys registered by diffTrackingWriter during IntraBlockState flush
 	simBlockComputeCommitment := func(ctx context.Context, ttx kv.TemporalTx, tsd *execctx.SharedDomains) ([]byte, error) {
-		simBlockNum := baseBlockNum + 1
 		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd))
 		storageFullKey := make([]byte, length.Addr+length.Hash)
 		for address, locations := range touched {

@@ -2,6 +2,7 @@ package jsonrpc
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"math"
@@ -19,7 +20,9 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -852,12 +855,77 @@ func TestComputeSimulatedStateRootWithoutCommitmentHistory(t *testing.T) {
 			sim := &simulator{blockReader: observedFrozenBlocks{frozen: tc.frozen, observed: tc.observed}}
 			block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
 
-			err := sim.computeSimulatedStateRoot(context.Background(), nil, nil, &SimulatedBlock{}, block,
-				&types.Header{Number: *uint256.NewInt(0)}, 0, 0, nil, nil, false)
+			err := sim.computeSimulatedStateRoot(context.Background(), nil, nil, &SimulatedBlock{}, block, 0, 0, nil, nil, false)
 
 			require.NoError(t, err)
 			require.Equal(t, common.Hash{}, block.Root())
 		})
+	}
+}
+
+func TestSimulateV1HistoricalRootsFollowSimulatedChain(t *testing.T) {
+	generate := func(t *testing.T, m *execmoduletester.ExecModuleTester, key *ecdsa.PrivateKey, recipients []*common.Address) *blockgen.ChainPack {
+		t.Helper()
+		signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+		chainPack, err := m.GenerateChain(len(recipients), func(i int, b *blockgen.BlockGen) {
+			if recipients[i] == nil {
+				return
+			}
+			txn, err := types.SignTx(&types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: b.TxNonce(m.Address), To: recipients[i], Value: *uint256.NewInt(7), GasLimit: 21_000},
+				ChainID:  *uint256.MustFromBig(m.ChainConfig.ChainID.ToBig()),
+				FeeCap:   *uint256.NewInt(1_000_000_000_000),
+			}, *signer, key)
+			require.NoError(t, err)
+			b.AddTx(txn)
+		})
+		require.NoError(t, err)
+		return chainPack
+	}
+	canonical := common.HexToAddress("0x00000000000000000000000000000000c0ffee01")
+	simulated := common.HexToAddress("0x00000000000000000000000000000000c0ffee02")
+
+	m, key, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	require.NoError(t, m.InsertChain(generate(t, m, key, []*common.Address{&canonical, &canonical, &canonical, &canonical})))
+
+	oracle, oracleKey, _ := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	wants := generate(t, oracle, oracleKey, []*common.Address{&canonical, &simulated, nil, &simulated}).Blocks[1:]
+
+	blocks := make([]SimulatedBlock, 0, len(wants))
+	for _, want := range wants {
+		header := want.Header()
+		gasLimit := hexutil.Uint64(header.GasLimit)
+		calls := make([]ethapi.CallArgs, 0, len(want.Transactions()))
+		for _, txn := range want.Transactions() {
+			gas := hexutil.Uint64(txn.GetGasLimit())
+			nonce := hexutil.Uint64(txn.GetNonce())
+			calls = append(calls, ethapi.CallArgs{
+				From:                 &bankAddr,
+				To:                   txn.GetTo(),
+				Gas:                  &gas,
+				Nonce:                &nonce,
+				MaxFeePerGas:         (*hexutil.U256)(txn.GetFeeCap()),
+				MaxPriorityFeePerGas: (*hexutil.U256)(txn.GetTipCap()),
+				Value:                (*hexutil.U256)(txn.GetValue()),
+			})
+		}
+		blocks = append(blocks, SimulatedBlock{
+			BlockOverrides: &ethapi.BlockOverrides{
+				Time:         (*hexutil.Uint64)(&header.Time),
+				GasLimit:     &gasLimit,
+				FeeRecipient: &header.Coinbase,
+				PrevRandao:   &header.MixDigest,
+			},
+			Calls: calls,
+		})
+	}
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{BlockStateCalls: blocks, Validation: true}, rpc.BlockNumberOrHashWithNumber(1))
+	require.NoError(t, err)
+	require.Len(t, result, len(wants))
+	for i, want := range wants {
+		require.Equal(t, want.Root(), result[i].StateRoot, "block %d", want.NumberU64())
 	}
 }
 
