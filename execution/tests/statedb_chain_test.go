@@ -174,22 +174,25 @@ func TestSelfDestructReceive(t *testing.T) {
 // hash survives on the record. A pre-block deploy leaves no in-block CodeHash
 // cell to floor the destruct scan on, so both placements run.
 //
-// Clearing experimentalBAL alone leaves the parallel executor running, so the
-// driver sets dbg.Exec3Parallel — which rules out t.Parallel.
+// The block is built by the serial or the versioned generator and imported in
+// each mode. Clearing experimentalBAL alone leaves the parallel executor running,
+// so the driver sets dbg.Exec3Parallel — which rules out t.Parallel.
 func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
-		parallel       bool
+		parallelImport bool
 		preBlockDeploy bool
+		parallelGen    bool
 	}{
-		{"serial/same-block-deploy", false, false},
-		{"parallel/same-block-deploy", true, false},
-		{"serial/pre-block-deploy", false, true},
-		{"parallel/pre-block-deploy", true, true},
+		{"serial/same-block-deploy", false, false, false},
+		{"parallel/same-block-deploy", true, false, false},
+		{"serial/pre-block-deploy", false, true, false},
+		{"parallel/pre-block-deploy", true, true, false},
+		{"versioned-gen/same-block-deploy", false, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prev := dbg.Exec3Parallel
-			dbg.Exec3Parallel = tc.parallel
+			dbg.Exec3Parallel = tc.parallelGen
 			t.Cleanup(func() { dbg.Exec3Parallel = prev })
 			var (
 				key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -246,6 +249,7 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 				contractBackend.Commit()
 			})
 			require.NoError(t, err)
+			dbg.Exec3Parallel = tc.parallelImport
 			require.NoError(t, m.InsertChain(chain.Slice(0, 3)))
 
 			require.NoError(t, m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
@@ -261,14 +265,9 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, accounts.EmptyCodeHash, hash, "the code hash must agree with the code")
 
-				// Parallel keeps the pre-destruct nonce for a same-block deploy, #23206.
-				wantNonce := uint64(0)
-				if tc.parallel && !tc.preBlockDeploy {
-					wantNonce = 1
-				}
 				nonce, err := st.GetNonce(addr)
 				require.NoError(t, err)
-				require.Equal(t, wantNonce, nonce)
+				require.Zero(t, nonce, "the transfer revived it as a new account")
 
 				bal, err := st.GetBalance(addr)
 				require.NoError(t, err)

@@ -1521,8 +1521,7 @@ func TestNormalizeWriteSet_PostSelfDestructZeroStorageDroppedViaHistory(t *testi
 // Backfill after an earlier-tx self-destruct: when THIS tx re-creates via
 // CREATE(2) (CreateContractPath=true), the missing account fields are the
 // post-destruction zero defaults — NOT the stale pre-SD nonce/codeHash still in
-// the versionMap. A value-transfer resurrect (no CreateContractPath) instead
-// inherits the pre-SD fields via the map's last-write-wins chain.
+// the versionMap.
 func TestNormalizeWriteSet_SelfDestructEarlierThenCreateContractZeroesFields(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0x33})
@@ -1548,14 +1547,98 @@ func TestNormalizeWriteSet_SelfDestructEarlierThenCreateContractZeroesFields(t *
 	ch, ok := res.GetCodeHash(addr)
 	require.True(t, ok)
 	assert.Equal(t, accounts.EmptyCodeHash, ch.Val, "CREATE2 after SD gets empty codeHash, not the stale pre-SD hash")
+}
 
-	// Control: value-transfer resurrect (no CreateContractPath) inherits pre-SD
-	// fields from the versionMap.
-	resurrect := newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).build()
-	res2, _ := resurrect.Normalize(vm, 5, 0, nil, nil, true, false, false)
-	n2, ok := res2.GetNonce(addr)
+// A value-transfer revival (no CreateContractPath) writes no nonce: it must not
+// take the pre-SD nonce from the versionMap.
+func TestNormalizeWriteSet_ValueTransferRevivalDropsPreDestructNonce(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x36})
+	vm.FlushVersionedWrites(newWS().nonce(addr, state.Version{TxIndex: 1, Incarnation: 0}, 9).build(), true)
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+
+	revival := newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).build()
+	res, _ := revival.Normalize(vm, 5, 0, nil, nil, true, false, false)
+	n, ok := res.GetNonce(addr)
 	require.True(t, ok)
-	assert.Equal(t, uint64(9), n2.Val, "value-transfer resurrect inherits the pre-SD nonce")
+	assert.Equal(t, uint64(0), n.Val, "value-transfer revival gets zero nonce, not the pre-SD 9")
+}
+
+// A fee credit revives a destroyed coinbase with only a balance and an account
+// record write: it must not take the pre-SD code hash from the versionMap.
+func TestNormalizeWriteSet_FeeCreditRevivalDropsPreDestructCodeHash(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x38})
+	staleHash := accounts.InternCodeHash(common.HexToHash("0x11223344"))
+	vm.FlushVersionedWrites(newWS().codeHash(addr, state.Version{TxIndex: 1, Incarnation: 0}, staleHash).build(), true)
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(100)
+	credit := newWS().
+		addr(addr, state.Version{TxIndex: 5, Incarnation: 0}, &account).
+		bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, account.Balance).
+		build()
+	res, _ := credit.Normalize(vm, 5, 0, nil, nil, true, false, false)
+	ch, ok := res.GetCodeHash(addr)
+	require.True(t, ok)
+	assert.Equal(t, accounts.EmptyCodeHash, ch.Val, "fee-credit revival gets empty codeHash, not the pre-SD hash")
+}
+
+// The fee-credit revival must not take the pre-block code hash from a state
+// reader that has not applied the destruct.
+func TestNormalizeWriteSet_FeeCreditRevivalDropsPreBlockCodeHash(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x39})
+	reader := newMapStateReader()
+	reader.accounts[addr] = &accounts.Account{Nonce: 1, CodeHash: accounts.InternCodeHash(common.HexToHash("0x11223344"))}
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+
+	account := accounts.NewAccount()
+	account.Balance = *uint256.NewInt(100)
+	credit := newWS().
+		addr(addr, state.Version{TxIndex: 5, Incarnation: 0}, &account).
+		bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, account.Balance).
+		build()
+	res, _ := credit.Normalize(vm, 5, 0, reader, nil, true, false, false)
+	ch, ok := res.GetCodeHash(addr)
+	require.True(t, ok)
+	assert.Equal(t, accounts.EmptyCodeHash, ch.Val, "fee-credit revival gets empty codeHash, not the pre-block hash")
+}
+
+// A later credit must not take the pre-SD nonce either: the revival
+// (SelfDestructPath=false) wrote no nonce.
+func TestNormalizeWriteSet_CreditAfterRevivalDropsPreDestructNonce(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x35})
+	vm.FlushVersionedWrites(newWS().nonce(addr, state.Version{TxIndex: 1, Incarnation: 0}, 9).build(), true)
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+	vm.FlushVersionedWrites(newWS().
+		selfDestruct(addr, state.Version{TxIndex: 3, Incarnation: 0}, false).
+		bal(addr, state.Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(100)).
+		build(), true)
+
+	credit := newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(200)).build()
+	res, _ := credit.Normalize(vm, 5, 0, nil, nil, true, false, false)
+	n, ok := res.GetNonce(addr)
+	require.True(t, ok)
+	assert.Equal(t, uint64(0), n.Val, "credit after revival gets zero nonce, not the pre-SD 9")
+}
+
+// The revival must not take the pre-block nonce from a state reader that has
+// not applied the destruct.
+func TestNormalizeWriteSet_RevivalDropsPreBlockNonce(t *testing.T) {
+	vm := state.NewVersionMap(nil)
+	addr := accounts.InternAddress([20]byte{0x37})
+	reader := newMapStateReader()
+	reader.accounts[addr] = &accounts.Account{Nonce: 9, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+
+	revival := newWS().bal(addr, state.Version{TxIndex: 5, Incarnation: 0}, *uint256.NewInt(100)).build()
+	res, _ := revival.Normalize(vm, 5, 0, reader, nil, true, false, false)
+	n, ok := res.GetNonce(addr)
+	require.True(t, ok)
+	assert.Equal(t, uint64(0), n.Val, "revival gets zero nonce, not the pre-block 9")
 }
 
 // Storage no-op detected via the stateReader's pre-block value (no prior in-block
