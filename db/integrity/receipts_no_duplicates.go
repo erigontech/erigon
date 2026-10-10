@@ -3,6 +3,7 @@ package integrity
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -42,10 +43,10 @@ func CheckReceiptsNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB,
 	}
 
 	log.Info("[integrity] ReceiptsNoDups starting", "fromBlock", fromBlock, "toBlock", toBlock)
-	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(ReceiptsNoDups), ReceiptsNoDupsRange)
+	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(ReceiptsNoDups), receiptsNoDupsRange)
 }
 
-func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
+func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, probs *problems) (err error) {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -104,11 +105,9 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 
 		strongMonotonicCumGasUsed := int(cumGasUsed) > prevCumGasUsed
 		if !strongMonotonicCumGasUsed && !blockChanged { // system tx can be skipped
-			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)
-			if failFast {
+			if err := probs.report(failFast, fmt.Errorf("CheckReceiptsNoDups: non-monotonic cumGasUsed at txnum: %d, block: %d(%d-%d), cumGasUsed=%d, prevCumGasUsed=%d", txNum, blockNum, _min, _max, cumGasUsed, prevCumGasUsed)); err != nil {
 				return err
 			}
-			log.Error(err.Error())
 		}
 
 		if !blockChanged {
@@ -126,7 +125,7 @@ func checkCumGas(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	return nil
 }
 
-func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
+func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, probs *problems) (err error) {
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return err
@@ -185,11 +184,9 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 
 		monotonicLogIdx := logIdxAfterTx >= prevLogIdxAfterTx
 		if !monotonicLogIdx && !blockChanged {
-			err := fmt.Errorf("CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdxAfterTx=%d, prevLogIdxAfterTx=%d", txNum, blockNum, _min, _max, logIdxAfterTx, prevLogIdxAfterTx)
-			if failFast {
+			if err := probs.report(failFast, fmt.Errorf("CheckReceiptsNoDups: non-monotonic logIndex at txnum: %d, block: %d(%d-%d), logIdxAfterTx=%d, prevLogIdxAfterTx=%d", txNum, blockNum, _min, _max, logIdxAfterTx, prevLogIdxAfterTx)); err != nil {
 				return err
 			}
-			log.Error(err.Error())
 		}
 
 		if !blockChanged {
@@ -207,11 +204,19 @@ func checkLogIdx(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalR
 	return nil
 }
 
-func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
-	if err := checkCumGas(ctx, fromBlock, toBlock, db, blockReader, failFast); err != nil {
+// ReceiptsNoDupsRange checks one block range on its own. Callers inside a fan-out use
+// receiptsNoDupsRange instead, so that one tally covers every chunk.
+func ReceiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) error {
+	var probs problems
+	err := receiptsNoDupsRange(ctx, fromBlock, toBlock, db, blockReader, failFast, &probs)
+	return errors.Join(err, probs.verdict(string(ReceiptsNoDups)))
+}
+
+func receiptsNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, probs *problems) (err error) {
+	if err := checkCumGas(ctx, fromBlock, toBlock, db, blockReader, failFast, probs); err != nil {
 		return err
 	}
-	if err := checkLogIdx(ctx, fromBlock, toBlock, db, blockReader, failFast); err != nil {
+	if err := checkLogIdx(ctx, fromBlock, toBlock, db, blockReader, failFast, probs); err != nil {
 		return err
 	}
 	return nil
