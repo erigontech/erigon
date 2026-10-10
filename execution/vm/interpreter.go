@@ -480,6 +480,10 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	tracer := evm.config.Tracer
 	debug := tracer != nil && (tracer.HasOpcodeHook() || tracer.HasGasChangeHook() || tracer.HasFaultHook())
 	trace := dbg.TraceInstructions && evm.intraBlockState.Trace()
+	// runHooked emits neither gas changes nor faults nor hooks on the fast path.
+	if debug && !trace && !dbg.TraceDynamicGas && !tracer.HasGasChangeHook() && !tracer.HasFaultHook() && !tracer.WantsAnyOpcode(fastPathMask) {
+		return evm.runHooked(contract, gas, input, readOnly, true, false)
+	}
 	if debug || trace || dbg.TraceDynamicGas {
 		return evm.runTraced(contract, gas, input, readOnly, debug, trace)
 	}
@@ -489,8 +493,12 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 // anyTrace is true here; execution/vm/vmgen sets it to false in run.
 const anyTrace = true
 
+// fastPath is false here; execution/vm/vmgen sets it to true in run and runHooked.
+const fastPath = false
+
 // runTraced is Run's loop with the tracing code. execution/vm/vmgen generates
-// run in vm_run_gen.go from it, with anyTrace false and the fast-path switch.
+// run in vm_run_gen.go from it, with anyTrace false and the fast-path switch,
+// and runHooked in vm_run_hooked_gen.go, with the switch and the tracing code.
 func (evm *EVM) runTraced(contract Contract, gas mdgas.MdGas, input []byte, readOnly, debug, trace bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
@@ -572,7 +580,7 @@ run:
 	for {
 		// Past the end of the code is STOP. Exiting here, out of line, spares
 		// every op a taken jump in GetOp.
-		if !anyTrace && pc >= uint64(len(contract.Code)) {
+		if fastPath && pc >= uint64(len(contract.Code)) {
 			res, err = nil, errStopToken
 			break run
 		}
@@ -580,7 +588,7 @@ run:
 		// The hottest constant-gas opcodes run inline, without the jump table and
 		// its indirect call. A failed check falls through to the generic path,
 		// which reports the error.
-		if !anyTrace {
+		if fastPath {
 			// execution/vm/vmgen inserts the fastOps switch here.
 			callContext.gas = gasLeft
 		}

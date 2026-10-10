@@ -6,14 +6,15 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 )
 
-// run is runTraced without the tracing code and with the fast path.
-func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, debug, trace bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+// runHooked is runTraced with the fast path, whose ops emit no opcode hook.
+func (evm *EVM) runHooked(contract Contract, gas mdgas.MdGas, input []byte, readOnly, debug, trace bool) (ret []byte, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	evm.returnData = nil
@@ -26,7 +27,13 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// to be uint256. Practically much less so feasible.
 		pc   = uint64(0) // program counter
 		cost mdgas.MdGasCost
-		res  []byte // result of the opcode execution function
+		// copies used by tracer
+		pcCopy  uint64 // needed for the deferred Tracer
+		oldGas  mdgas.MdGas
+		callGas mdgas.MdGasCost
+		logged  bool   // deferred Tracer should ignore already logged steps
+		res     []byte // result of the opcode execution function
+		tracer  = evm.config.Tracer
 	)
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
@@ -55,6 +62,22 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		}
 		evm.depth--
 	}()
+
+	// Registered after the cleanup defer so LIFO runs it first: the tracer needs
+	// the stacks before callContext.put() returns them to the pool.
+	if anyTrace && debug {
+		defer func() {
+			if err == nil {
+				return
+			}
+			switch {
+			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
+				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
+				tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
+			}
+		}()
+	}
 
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
@@ -408,6 +431,12 @@ run:
 		}
 		callContext.cacheGen++
 		callContext.savedPC = pc
+		if anyTrace && debug {
+			// Capture pre-execution values for tracing.
+			logged = false
+			pcCopy = pc
+			oldGas = callContext.Gas()
+		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		operation := &jt[op]
@@ -454,6 +483,15 @@ run:
 				}
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, err
 			}
+			if anyTrace {
+				cost = cost.Plus(dynamicCost)
+				callGas = cost
+				callGas.Execution -= evm.CallGasTemp()
+				if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGasCost{}) {
+					gasCost := traceGas(op, callGas, cost)
+					fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
+				}
+			}
 			if callContext.gas < dynamicCost.Execution {
 				return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 			}
@@ -468,8 +506,33 @@ run:
 			}
 		}
 
+		// Do gas tracing before memory expansion
+		if anyTrace && debug {
+			if tracer.HasGasChangeHook() {
+				tracer.EmitGasChange(oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
+			}
+			if tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)) {
+				tracer.EmitOpcode(pc, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
+				logged = true
+			}
+		}
+
 		if memorySize > 0 {
 			callContext.Memory.Resize(memorySize)
+		}
+
+		// TODO - move this to a trace & set in the worker
+
+		if anyTrace && trace {
+			var opstr string
+			if operation.string != nil {
+				opstr = operation.string(pc, callContext)
+			} else {
+				opstr = op.String()
+			}
+
+			gasCost := traceGas(op, callGas, cost)
+			fmt.Printf("%d (%d.%d) %5d %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, gasCost.Execution, gasCost.State, opstr)
 		}
 
 		// execute the operation
@@ -488,3 +551,7 @@ run:
 
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
 }
+
+// fastPathMask holds the ops runHooked runs without the opcode hook: the fast-path
+// ops and the STOP past the end of the code.
+var fastPathMask = tracing.NewOpcodeMask(byte(STOP), byte(PUSH1), byte(PUSH2), byte(ADD), byte(POP), byte(JUMPDEST), byte(JUMP), byte(JUMPI), byte(SUB), byte(MUL), byte(DIV), byte(LT), byte(GT), byte(EQ), byte(AND), byte(ISZERO), byte(MLOAD), byte(MSTORE), byte(PUSH3), byte(PUSH4), byte(PUSH5), byte(PUSH6), byte(PUSH7), byte(PUSH8), byte(PUSH9), byte(PUSH10), byte(PUSH11), byte(PUSH12), byte(PUSH13), byte(PUSH14), byte(PUSH15), byte(PUSH16), byte(PUSH17), byte(PUSH18), byte(PUSH19), byte(PUSH20), byte(PUSH21), byte(PUSH22), byte(PUSH23), byte(PUSH24), byte(PUSH25), byte(PUSH26), byte(PUSH27), byte(PUSH28), byte(PUSH29), byte(PUSH30), byte(PUSH31), byte(PUSH32), byte(DUP1), byte(DUP2), byte(DUP3), byte(DUP4), byte(DUP5), byte(DUP6), byte(DUP7), byte(DUP8), byte(SWAP1), byte(SWAP2), byte(SWAP3), byte(SWAP4))
