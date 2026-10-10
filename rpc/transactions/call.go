@@ -201,7 +201,7 @@ type ReusableCaller struct {
 // r.evm is never cleared: the timeout watcher goroutine reads it and is never awaited.
 func (r *ReusableCaller) Close() {
 	if ibs := r.evm.IntraBlockState(); ibs != nil {
-		ibs.Close()
+		state.ReleasePooled(ibs)
 	}
 }
 
@@ -217,7 +217,7 @@ func (r *ReusableCaller) Message() *types.Message { return r.message }
 func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledContracts, error) {
 	ibs := r.evm.IntraBlockState()
 	if ibs == nil {
-		ibs = state.New(r.stateReader)
+		ibs = state.NewPooled(r.stateReader)
 	} else {
 		ibs.Reset()
 	}
@@ -326,7 +326,7 @@ func NewReusableCaller(
 	txCtx := protocol.NewEVMTxContext(msg)
 	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
 
-	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.New(stateReader), chainConfig, vmConfig)
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.NewPooled(stateReader), chainConfig, vmConfig)
 
 	return &ReusableCaller{
 		evm:            evm,
