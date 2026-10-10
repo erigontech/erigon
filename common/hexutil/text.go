@@ -17,7 +17,6 @@
 package hexutil
 
 import (
-	"encoding/hex"
 	"fmt"
 )
 
@@ -44,7 +43,7 @@ func unmarshalFixedText(typeName string, input, out []byte, wantPrefix bool) err
 			return ErrSyntax
 		}
 	}
-	_, err = hex.Decode(out, raw)
+	_, err = decodeHex(out, raw)
 	return err
 }
 
