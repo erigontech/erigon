@@ -28,6 +28,11 @@ const (
 	maxGloasEnvelopeRecoveryPending   = 128
 	maxPendingGloasPayloadsPerCycle   = 32
 	gloasPayloadRetryBudget           = 2 * time.Second
+	// Pause after a failed block request, e.g. a peer rate-limiting us. Same pacing as forward
+	// sync (forwardRequestRetryInterval); retrying at once floods peers until the stage deadline.
+	chainTipRequestRetryInterval = 300 * time.Millisecond
+	chainTipNoPeersRetryInterval = 2 * time.Second
+	chainTipPollInterval         = time.Second
 )
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
@@ -122,20 +127,15 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
 	blocks, pid, err := cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	for err != nil {
-		// Respect context cancellation to avoid infinite loops.
+		retryInterval := chainTipRequestRetryInterval
+		if errors.Is(err, peers.ErrNoPeers) {
+			retryInterval = chainTipNoPeersRetryInterval
+		}
+		log.Debug("[Caplin] block request failed, backing off before retrying", "from", from, "count", count, "retryIn", retryInterval, "err", err)
 		select {
+		case <-time.After(retryInterval):
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		default:
-		}
-		if errors.Is(err, peers.ErrNoPeers) {
-			// Back off when no peers are available to avoid CPU-burning tight loops.
-			log.Debug("[Caplin] no peers available, backing off before retrying block request", "from", from, "count", count)
-			select {
-			case <-time.After(2 * time.Second):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
 		}
 		blocks, pid, err = cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	}
@@ -200,7 +200,11 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		case respCh <- blocks:
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Second): // Take a short pause before the next iteration
+		}
+		select {
+		case <-time.After(chainTipPollInterval):
+		case <-ctx.Done():
+			return
 		}
 	}
 }
@@ -1177,7 +1181,8 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		}
 	} else if _, ok := cfg.forkChoice.GetBlock(root); !ok {
 		root = headRoot
-	} else if root != headRoot {
+	}
+	if root != headRoot {
 		headBlock, headOK := cfg.forkChoice.GetBlock(headRoot)
 		if headOK && headBlock != nil && cfg.forkChoice.HasEnvelope(headRoot) && !cfg.forkChoice.IsPayloadVerified(headRoot) {
 			selectedHead = &gloasVerificationItem{root: headRoot, block: headBlock}
@@ -1231,6 +1236,9 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
 		if err != nil {
 			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
+		}
+		if status == execution_client.PayloadStatusNone && ctx.Err() != nil {
+			return false
 		}
 		status, retained := recordGloasPayloadRetryResult(
 			cfg.forkChoice,
@@ -1408,6 +1416,12 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 	}
 
 	log.Debug("[chainTipSync] execution engine is ready")
+	if canValidatePayloads && shouldRecoverMissingEnvelopes(cfg.beaconCfg, args.targetSlot) {
+		// Recheck persisted envelopes because payload verification state is not durable.
+		verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)
+		verifyUnverifiedGloasPayloads(verifyCtx, cfg)
+		cancelVerify()
+	}
 
 	logger.Debug(
 		"waiting for blocks...",
