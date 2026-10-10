@@ -27,6 +27,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -188,6 +189,36 @@ func TestRunHasNoJumpTable(t *testing.T) {
 	require.Contains(t, string(out), "vm_run_gen.go")
 	tableJump := regexp.MustCompile(`(?m)\tJMP (0\(\w+\)\(\w+\*8\)|\(R\d+\))\s`)
 	require.Empty(t, tableJump.FindString(string(out)), "run dispatches through a jump table")
+}
+
+// TestRunLoopHeadStoresNothing fails when Go spills run's loop-carried registers at
+// the top of the loop, which every op then pays: a value live across a call in any
+// case is spilled there unless vmgen saves it around that call.
+func TestRunLoopHeadStoresNothing(t *testing.T) {
+	src, err := os.ReadFile("vm_run_gen.go")
+	require.NoError(t, err)
+	head := slices.IndexFunc(strings.Split(string(src), "\n"), func(l string) bool {
+		return strings.Contains(l, "pc >= uint64(len(contract.Code))")
+	}) + 1
+	require.Positive(t, head)
+	pkg := filepath.Join(t.TempDir(), "vm.a")
+	out, err := exec.CommandContext(t.Context(), "go", "build", "-o", pkg, ".").CombinedOutput()
+	require.NoError(t, err, string(out))
+	out, err = exec.CommandContext(t.Context(), "go", "tool", "objdump", "-s", `vm\.\(\*EVM\)\.run$`, pkg).Output()
+	require.NoError(t, err)
+	// The loop head is the first run of instructions from its line; the out-of-line
+	// stop path comes from the same line further down.
+	at := fmt.Sprintf("vm_run_gen.go:%d\t", head)
+	lines := strings.Split(string(out), "\n")
+	first := slices.IndexFunc(lines, func(l string) bool { return strings.Contains(l, at) })
+	require.Positive(t, first)
+	spill := regexp.MustCompile(`\tMOV\w*\s+[^,\s]+, -?\w*\(R?SP\)`)
+	for _, l := range lines[first:] {
+		if !strings.Contains(l, at) {
+			break
+		}
+		require.False(t, spill.MatchString(l), "run spills at the top of its loop: %s", l)
+	}
 }
 
 // TestRunEmptyCodeReturnsBeforeTraceChoice pins that Run returns for empty code

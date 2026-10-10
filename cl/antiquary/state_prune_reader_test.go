@@ -76,7 +76,7 @@ func runStateAntiquaryWithSnapshots(t *testing.T, ctx context.Context, blocks []
 	t.Helper()
 	cfg := &clparams.MainnetBeaconConfig
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	reader := tests.LoadChain(blocks, postState, db, t)
+	reader := tests.LoadChain(blocks, db, t)
 	sd := synced_data.NewSyncedDataManager(cfg, true)
 	require.NoError(t, sd.OnHeadState(postState))
 	vt := state_accessors.NewStaticValidatorTable()

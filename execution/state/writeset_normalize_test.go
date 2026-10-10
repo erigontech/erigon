@@ -144,7 +144,7 @@ func TestNormalize_SelfDestructBalanceRetention_EIP8246(t *testing.T) {
 // A self-destructed address must keep none of its account-field or raw storage
 // writes: any survivor makes Apply see a non-empty account and take the
 // cleanup-before-recreate branch instead of the pure delete, leaving a phantom
-// account whose incarnation breaks a later CREATE2 at the same address. Only
+// account. Only
 // SelfDestructPath (and, under EIP-8246, the balance) may remain.
 func TestNormalize_SelfDestructDropsAccountFieldAndStorageWrites(t *testing.T) {
 	t.Parallel()

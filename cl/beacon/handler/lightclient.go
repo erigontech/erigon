@@ -38,7 +38,7 @@ func (a *ApiHandler) GetEthV1BeaconLightClientBootstrap(w http.ResponseWriter, r
 	if err != nil {
 		return nil, err
 	}
-	root, err := a.rootFromBlockId(ctx, tx, blockId)
+	root, err := a.rootFromBlockId(tx, blockId)
 	if err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,31 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package beaconhttp
+package sentinelflags
 
 import (
-	"encoding/json"
-	"strconv"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
-type IntStr int
-
-func (i IntStr) MarshalJSON() ([]byte, error) {
-	return json.Marshal(strconv.FormatInt(int64(i), 10))
-}
-
-func (i *IntStr) UnmarshalJSON(b []byte) error {
-	// Try string first
-	var s string
-	if err := json.Unmarshal(b, &s); err == nil {
-		value, err := strconv.ParseInt(s, 10, 64)
-		if err != nil {
-			return err
-		}
-		*i = IntStr(value)
-		return nil
-	}
-
-	// Fallback to number
-	return json.Unmarshal(b, (*int)(i))
+// The upstream ethereum-package Caplin launcher starts the standalone sentinel with
+// --sentinel.tcp.port=4001 --discovery.port=4001, so the default QUIC port must not
+// collide with either of those, or with the standalone sentinel's own defaults.
+func TestSentinelQUICPortDefaultAvoidsUpstreamLauncherConflict(t *testing.T) {
+	require.Equal(t, uint(4002), SentinelQUICPort.Value)
+	require.NotEqual(t, uint(SentinelDiscoveryPort.Value), SentinelQUICPort.Value)
+	require.NotEqual(t, SentinelTcpPort.Value, SentinelQUICPort.Value)
 }

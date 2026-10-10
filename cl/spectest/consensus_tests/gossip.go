@@ -464,7 +464,7 @@ func gossipAttesterSlashingHandler(t *testing.T, root fs.FS, c spectest.TestCase
 
 		// If valid, mark the slashable indices as seen.
 		if result == "valid" {
-			markAttesterSlashingSeen(beaconState, slashing, seenIndices)
+			markAttesterSlashingSeen(slashing, seenIndices)
 		}
 	}
 	return nil
@@ -542,7 +542,6 @@ func validateAttesterSlashing(
 
 // markAttesterSlashingSeen adds the slashable indices from the intersection to the seen set.
 func markAttesterSlashingSeen(
-	s *state.CachingBeaconState,
 	slashing *cltypes.AttesterSlashing,
 	seenIndices map[uint64]bool,
 ) {

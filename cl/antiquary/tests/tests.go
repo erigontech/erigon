@@ -126,7 +126,7 @@ func (m *MockBlockReader) CacheBlockBody(blockNumber uint64, transactions [][]by
 	m.CachedBodies = append(m.CachedBodies, blockNumber)
 }
 
-func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState, db kv.RwDB, t *testing.T) *MockBlockReader {
+func LoadChain(blocks []*cltypes.SignedBeaconBlock, db kv.RwDB, t *testing.T) *MockBlockReader {
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -134,7 +134,7 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState,
 	m := NewMockBlockReader()
 	for _, block := range blocks {
 		m.U[block.Block.Slot] = block
-		require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(context.Background(), tx, block, true))
+		require.NoError(t, beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, true))
 		require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64))
 	}
 

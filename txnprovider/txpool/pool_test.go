@@ -27,6 +27,7 @@ import (
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -49,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/txnprovider"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -405,10 +407,7 @@ func TestGetCachedBlobTxnLockedSkipsTruncatedCachedRow(t *testing.T) {
 	}))
 }
 
-// newAmsterdamPoolWithPendingSelfTransfer returns a pool on an Amsterdam chain
-// holding one pending zero-value self-transfer with the given gas limit, so its
-// intrinsic gas is exactly params.TxBaseEIP2780.
-func newAmsterdamPoolWithPendingSelfTransfer(t *testing.T, ctx context.Context, txnGasLimit uint64) *TxPool {
+func newAmsterdamPoolWithPendingSelfTransfer(t *testing.T, ctx context.Context, txnGasLimits ...uint64) *TxPool {
 	t.Helper()
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -431,37 +430,117 @@ func newAmsterdamPoolWithPendingSelfTransfer(t *testing.T, ctx context.Context, 
 	)
 	require.NoError(t, err)
 
-	sender := common.Address{0x01}
 	account := accounts.Account{
 		Balance:  *uint256.NewInt(1 * common.Ether),
 		CodeHash: accounts.EmptyCodeHash,
 	}
 	change := &remoteproto.StateChangeBatch{
 		PendingBlockBaseFee: 200_000,
-		BlockGasLimit:       1_000_000,
+		BlockGasLimit:       40_000_000,
 		ChangeBatch: []*remoteproto.StateChange{{
 			BlockHeight: 0,
 			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{}),
-			Changes: []*remoteproto.AccountChange{{
-				Action:  remoteproto.Action_UPSERT,
-				Address: gointerfaces.ConvertAddressToH160(sender),
-				Data:    accounts.SerialiseV3(&account),
-			}},
 		}},
 	}
-	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
-
-	slot := newTestTxnSlot(0, 0, 300_000, 300_000, txnGasLimit)
-	slot.IDHash[0] = 1
-	slot.Rlp = []byte{1}
-	slot.Size = uint32(len(slot.Rlp))
 	var slots TxnSlots
-	slots.Append(slot, sender[:], true)
+	for i, gasLimit := range txnGasLimits {
+		sender := common.Address{byte(i + 1)}
+		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+			Action:  remoteproto.Action_UPSERT,
+			Address: gointerfaces.ConvertAddressToH160(sender),
+			Data:    accounts.SerialiseV3(&account),
+		})
+		slot := newTestTxnSlot(0, 0, 300_000-uint64(i), 300_000-uint64(i), gasLimit)
+		slot.Txn.(*types.DynamicFeeTransaction).To = &sender
+		slot.Txn.SetSender(accounts.InternAddress(sender))
+		slot.IDHash[0] = byte(i + 1)
+		slot.Rlp = []byte{byte(i + 1)}
+		slot.Size = uint32(len(slot.Rlp))
+		slots.Append(slot, sender[:], true)
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 	reasons, err := pool.AddLocalTxns(ctx, slots)
 	require.NoError(t, err)
-	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.Success}, reasons)
+	for _, reason := range reasons {
+		require.Equal(t, txpoolcfg.Success, reason)
+	}
+	require.Equal(t, len(txnGasLimits), pool.pending.Len())
 
 	return pool
+}
+
+func TestProvideTxnsAmsterdamGasAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		name                  string
+		gas, execution, state uint64
+		want                  int
+	}{
+		{"execution insufficient", 100_000, 50_000, 100_000, 0},
+		{"both budgets equal", 100_000, 100_000, 100_000, 1},
+		{"above execution cap", 30_000_000, 20_000_000, 40_000_000, 1},
+		{"below execution cap", 30_000_000, params.MaxTxnGasLimit - 1, 40_000_000, 0},
+		{"at execution cap", 30_000_000, params.MaxTxnGasLimit, 30_000_000, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), tc.gas)
+			txns, err := pool.ProvideTxns(t.Context(),
+				txnprovider.WithGasTarget(mdgas.NewFullMdGas(tc.execution, tc.state, 0)))
+			require.NoError(t, err)
+			require.Len(t, txns, tc.want)
+		})
+	}
+}
+
+func TestProvideTxnsUsesRemainingGasForAdmission(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000, 100_000)
+	for _, tc := range []struct {
+		execution uint64
+		want      int
+	}{
+		{124_000, 2},
+		{112_000, 2},
+		{111_999, 1},
+		{100_000, 1},
+	} {
+		txns, err := pool.ProvideTxns(t.Context(),
+			txnprovider.WithGasTarget(mdgas.NewFullMdGas(tc.execution, 100_000, 0)))
+		require.NoError(t, err)
+		require.Len(t, txns, tc.want, "execution gas: %d", tc.execution)
+	}
+}
+
+func TestProvideTxnsRejectsAAAboveExecutionGasTarget(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000)
+	aaTxn := &types.AccountAbstractionTransaction{
+		SenderAddress: accounts.InternAddress(common.Address{1}),
+		GasLimit:      100_000 - params.TxAAGas,
+	}
+	pool.pending.best.ms[0].TxnSlot.Txn = aaTxn
+	txns, err := pool.ProvideTxns(t.Context(),
+		txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, 100_000, 0)))
+	require.NoError(t, err)
+	require.Empty(t, txns)
+}
+
+func TestProvideTxnsContinuesAfterGasRejection(t *testing.T) {
+	pool := newAmsterdamPoolWithPendingSelfTransfer(t, t.Context(), 100_000, 12_000)
+	first, second := pool.pending.best.ms[0].TxnSlot, pool.pending.best.ms[1].TxnSlot
+	require.Equal(t, uint64(100_000), first.GetGas())
+	yielded := mapset.NewThreadUnsafeSet[[32]byte]()
+	txns, err := pool.ProvideTxns(t.Context(),
+		txnprovider.WithTxnIdsFilter(yielded),
+		txnprovider.WithGasTarget(mdgas.NewFullMdGas(50_000, 100_000, 0)))
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{second.Txn}, txns)
+	require.False(t, yielded.Contains(first.IDHash))
+	require.True(t, yielded.Contains(second.IDHash))
+	require.Equal(t, 2, pool.pending.Len())
+
+	txns, err = pool.ProvideTxns(t.Context(),
+		txnprovider.WithTxnIdsFilter(yielded),
+		txnprovider.WithGasTarget(mdgas.NewFullMdGas(100_000, 100_000, 0)))
+	require.NoError(t, err)
+	require.Equal(t, []types.Transaction{first.Txn}, txns)
 }
 
 func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {

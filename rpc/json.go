@@ -365,9 +365,9 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !json.Valid(frame) {
-		// Decode the broken message to report where it went wrong. Unmarshal
-		// checks syntax the same way Valid does, so it fails here too. The
+	if !validJSON(frame) {
+		// Decode the broken message to report where it went wrong. validJSON
+		// only ever accepts more than Unmarshal, so it fails here too. The
 		// fallback only guards against the two ever disagreeing.
 		var rawmsg json.RawMessage
 		if err := json.Unmarshal(frame, &rawmsg); err != nil {

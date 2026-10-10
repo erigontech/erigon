@@ -17,6 +17,7 @@
 package mdgas
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -533,5 +534,22 @@ func TestMinTxGas(t *testing.T) {
 		cheapest, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{IsSelfTransfer: true, IsEIP2780: isEIP2780})
 		assert.False(t, overflow)
 		assert.Equal(t, cheapest.ExecutionGas, MinTxGas(isEIP2780), "isEIP2780=%v", isEIP2780)
+	}
+}
+
+func BenchmarkCountNonZeroBytes(b *testing.B) {
+	for _, n := range []int{4, 128, 4096, 731000} {
+		data := make([]byte, n)
+		for i := range data {
+			if i%3 != 0 {
+				data[i] = byte(i)
+			}
+		}
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			b.SetBytes(int64(n))
+			for b.Loop() {
+				CountNonZeroBytes(data)
+			}
+		})
 	}
 }

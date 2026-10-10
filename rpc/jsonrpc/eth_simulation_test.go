@@ -167,6 +167,50 @@ func TestSimulateSanitizeBlockOrder(t *testing.T) {
 	}
 }
 
+func TestMakeHeadersSlotNumber(t *testing.T) {
+	slot := func(v uint64) *uint64 { return &v }
+	for _, tc := range []struct {
+		name     string
+		baseSlot *uint64
+		want     []*uint64
+	}{
+		{name: "parent slot plus one", baseSlot: slot(41), want: []*uint64{slot(42), slot(43)}},
+		{name: "omitted when the parent has none", baseSlot: nil, want: []*uint64{nil, nil}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sim := &simulator{
+				base:        &types.Header{Number: *uint256.NewInt(10), Time: 50, SlotNumber: tc.baseSlot},
+				chainConfig: chain.AllProtocolChanges,
+			}
+			blocks, err := sim.sanitizeSimulatedBlocks([]SimulatedBlock{{}, {}})
+			require.NoError(t, err)
+			headers, err := sim.makeHeaders(blocks)
+			require.NoError(t, err)
+			require.Len(t, headers, len(tc.want))
+			for i, header := range headers {
+				assert.Equal(t, tc.want[i], header.SlotNumber, "block %d", i)
+			}
+		})
+	}
+}
+
+func TestMakeHeadersDifficultyAtMergeHeight(t *testing.T) {
+	config := chain.TestChainBerlinConfig.Copy()
+	config.TerminalTotalDifficulty = uint256.NewInt(1)
+	config.MergeHeight = common.NewUint64(12)
+	sim := &simulator{
+		base:        &types.Header{Number: *uint256.NewInt(10), Time: 50, Difficulty: *uint256.NewInt(5)},
+		chainConfig: config,
+	}
+	blocks, err := sim.sanitizeSimulatedBlocks([]SimulatedBlock{{}, {}})
+	require.NoError(t, err)
+	headers, err := sim.makeHeaders(blocks)
+	require.NoError(t, err)
+	require.Len(t, headers, 2)
+	assert.Equal(t, *uint256.NewInt(5), headers[0].Difficulty, "block before MergeHeight")
+	assert.Equal(t, uint256.Int{}, headers[1].Difficulty, "block at MergeHeight")
+}
+
 // TestSanitizeBlocksTooMany verifies the maxSimulateBlocks limit.
 func TestSanitizeBlocksTooMany(t *testing.T) {
 	sim := &simulator{base: &types.Header{Number: *uint256.NewInt(0), Time: 0}}
@@ -654,6 +698,60 @@ func TestSimulateV1BaseFeeOverrideDoesNotFundBurntContract(t *testing.T) {
 	assert.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000000", calls[1].ReturnData)
 }
 
+func TestSimulateV1TraceTransfersWithEIP7708(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	to := common.HexToAddress("0x00000000000000000000000000000000c0ffee01")
+	value := (*hexutil.U256)(uint256.NewInt(1000))
+	gas := hexutil.Uint64(300_000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			Calls: []ethapi.CallArgs{{From: &bankAddr, To: &to, Value: value, Gas: &gas}},
+		}},
+		TraceTransfers: true,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	calls := result[0].Calls
+	require.Len(t, calls, 1)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[0].Status))
+	require.Len(t, calls[0].Logs, 1)
+	assert.Equal(t, common.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe"), calls[0].Logs[0].Address)
+}
+
+func TestSimulateV1WithdrawalsOverrideCreditsBalance(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	recipient := common.HexToAddress("0x00000000000000000000000000000000c0ffee02")
+	balanceCode := hexutil.Bytes(runtimeReturningOpcode(byte(vm.SELFBALANCE)))
+	gas := hexutil.Uint64(100_000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{
+			{
+				BlockOverrides: &ethapi.BlockOverrides{
+					Withdrawals: &types.Withdrawals{{Index: 0, Validator: 1, Address: recipient, Amount: 7}},
+				},
+				StateOverrides: &ethapi.StateOverrides{
+					accounts.InternAddress(recipient): {Code: &balanceCode},
+				},
+			},
+			{Calls: []ethapi.CallArgs{{From: &bankAddr, To: &recipient, Gas: &gas}}},
+		},
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 2)
+
+	calls := result[1].Calls
+	require.Len(t, calls, 1)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[0].Status))
+	assert.Equal(t, "0x00000000000000000000000000000000000000000000000000000001a13b8600", calls[0].ReturnData)
+}
+
 func TestSimulateV1ClientDecodesMaxUsedGas(t *testing.T) {
 	server := rpc.NewServer(50, false, false, true, log.New(), 100)
 	require.NoError(t, server.RegisterName("eth", simulateV1TestService{}))
@@ -719,6 +817,14 @@ func TestValidateSimulationRequest(t *testing.T) {
 			},
 			wantCode:  rpc.ErrCodeClientLimitExceeded,
 			wantError: fmt.Sprintf("too many calls: %d > %d", maxSimulateTotalCalls+1, maxSimulateTotalCalls),
+		},
+		{
+			name: "null withdrawal",
+			blocks: []SimulatedBlock{
+				{BlockOverrides: &ethapi.BlockOverrides{Withdrawals: &types.Withdrawals{nil}}},
+			},
+			wantCode:  rpc.ErrCodeInvalidParams,
+			wantError: "withdrawal 0 of block 0 is null",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

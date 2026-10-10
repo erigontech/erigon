@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -411,7 +412,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		return err
 	}
 
-	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView, nil)
+	_, unwindTxns, err = p.validateTxns(&unwindTxns, cacheView, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -792,6 +793,13 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			// Skip transactions with very large gas limit
 			continue
 		}
+		executionGas, stateGas := protocol.InclusionContributions(mt.TxnSlot.GetGas(), isAmsterdam, false)
+		if executionGas > availableGas.Execution {
+			continue
+		}
+		if stateGas > availableGas.State {
+			continue
+		}
 
 		if int64(mt.TxnSlot.Size) > int64(availableRlpSpace) {
 			p.logger.Debug("[txpool] skipping txn bigger than available rlp space", "size", int64(mt.TxnSlot.Size), "available", int64(availableRlpSpace))
@@ -852,9 +860,6 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 		}
 		if intrinsicGas > availableGas.Execution {
 			// we might find another txn with a low enough intrinsic gas to include so carry on
-			continue
-		}
-		if isAmsterdam && mt.TxnSlot.GetGas() > availableGas.State {
 			continue
 		}
 		availableGas.Execution -= intrinsicGas
@@ -1412,7 +1417,7 @@ func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]tx
 	var goodTxns TxnSlots
 	err := p.withLockedState(ctx, &setCode, func(view kvcache.CacheView) error {
 		var err error
-		precheckReasons, goodTxns, err = p.validateTxns(&setCode, view, nil)
+		precheckReasons, goodTxns, err = p.validateTxns(&setCode, view, nil, nil)
 		return err
 	})
 	if err != nil {
@@ -1430,11 +1435,10 @@ func (p *TxPool) prepareAuthorizations(ctx context.Context, txns TxnSlots) ([]tx
 }
 
 // validateTxns returns per-slot discard reasons and the txns that passed.
-// For a remote (IsLocal=false) batch, validation short-circuits on the first
-// UnmatchedBlobTxExt: trailing reasons stay NotSet but those txns are not in
-// goodTxns, so callers reading reasons in isolation must also consult goodTxns
-// to distinguish "accepted" from "not validated".
-func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
+// A remote KZG failure skips later txns from that peer; with nil sources,
+// it skips all later remote txns. Skipped txns keep NotSet and are not returned.
+// Non-nil sources must be index-aligned with txns.
+func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reasons []txpoolcfg.DiscardReason, sources []remoteSource) (_ []txpoolcfg.DiscardReason, goodTxns TxnSlots, err error) {
 	// Keep precheck failures; NotSet entries still need validation.
 	if reasons == nil {
 		reasons = make([]txpoolcfg.DiscardReason, len(txns.Txns))
@@ -1444,8 +1448,20 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 		return reasons, goodTxns, err
 	}
 
+	skipAllRemote := false
+	var kzgOffenders [][64]byte
+	isKZGOffender := func(i int) bool {
+		if skipAllRemote {
+			return true
+		}
+		if i >= len(sources) || sources[i].peerID == nil {
+			return false
+		}
+		return slices.Contains(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
+	}
+
 	for i, txn := range txns.Txns {
-		if reasons[i] != txpoolcfg.NotSet {
+		if reasons[i] != txpoolcfg.NotSet || (!txns.IsLocal[i] && isKZGOffender(i)) {
 			continue
 		}
 		reason, err := p.validateTx(txn, txns.IsLocal[i], stateCache)
@@ -1466,9 +1482,13 @@ func (p *TxPool) validateTxns(txns *TxnSlots, stateCache kvcache.CacheView, reas
 			p.punishSpammer(txn.SenderID)
 		}
 		reasons[i] = reason
-		// On first KZG-verify failure in a remote batch, drop the rest without re-verifying.
+		// On a KZG-verify failure in a remote batch, drop the rest from the same peer without re-verifying.
 		if reason == txpoolcfg.UnmatchedBlobTxExt && !txns.IsLocal[i] {
-			break
+			if i < len(sources) && sources[i].peerID != nil {
+				kzgOffenders = append(kzgOffenders, gointerfaces.ConvertH512ToHash(sources[i].peerID))
+			} else {
+				skipAllRemote = true
+			}
 		}
 	}
 	return reasons, goodTxns, nil
@@ -1517,7 +1537,11 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 		return nil, err
 	}
 	err = p.withLockedState(ctx, &newTxns, func(cacheView kvcache.CacheView) error {
-		validatedReasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, reasons)
+		var sources []remoteSource
+		if fromRemoteQueue {
+			sources = p.unprocessedRemotePeers[:len(newTxns.Txns)]
+		}
+		validatedReasons, goodTxns, err := p.validateTxns(&newTxns, cacheView, reasons, sources)
 		if err != nil {
 			return err
 		}
@@ -1534,7 +1558,7 @@ func (p *TxPool) addNewTxns(ctx context.Context, newTxns TxnSlots, fromRemoteQue
 		// reasons is indexed by newTxns; addReasons is indexed by goodTxns.
 		// Walk reasons and advance j only on slots that survived validation.
 		for i, j := 0, 0; i < len(reasons) && j < len(addReasons); i++ {
-			if reasons[i] != txpoolcfg.NotSet {
+			if reasons[i] != txpoolcfg.NotSet || newTxns.Txns[i] != goodTxns.Txns[j] {
 				continue
 			}
 			reasons[i] = addReasons[j]
