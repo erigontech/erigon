@@ -1114,3 +1114,27 @@ func TestClientBatchItemLimit(t *testing.T) {
 	require.NotNil(t, resp[0].Error)
 	require.Contains(t, resp[0].Error.Message, "batch limit 1 exceeded")
 }
+
+// The batch item limit is for batches the server sends, not for responses to the client's own.
+func TestClientBatchItemLimitSkipsResponses(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	httpsrv := httptest.NewServer(srv.WebsocketHandler(nil, nil, false, logger))
+	defer httpsrv.Close()
+	client, err := DialOptions(context.Background(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), logger, WithBatchItemLimit(1))
+	require.NoError(t, err)
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var a, b echoResult
+	batch := []BatchElem{
+		{Method: "test_echo", Args: []any{"a", 1, nil}, Result: &a},
+		{Method: "test_echo", Args: []any{"b", 2, nil}, Result: &b},
+	}
+	require.NoError(t, client.BatchCallContext(ctx, batch))
+	require.NoError(t, batch[0].Error)
+	require.NoError(t, batch[1].Error)
+	require.Equal(t, "b", b.String)
+}

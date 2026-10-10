@@ -232,20 +232,19 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		})
 		return
 	}
-	// Apply limit on total number of requests.
-	if h.batchLimit != 0 && len(msgs) > h.batchLimit {
-		h.startCallProc(func(cp *callProc) {
-			h.respondWithBatchTooLarge(cp, msgs)
-		})
-		return
-	}
-
 	// Handle non-call messages first:
 	calls := make([]*jsonrpcMessage, 0, len(msgs))
 	h.handleResponses(msgs, func(msg *jsonrpcMessage) {
 		calls = append(calls, msg)
 	})
 	if len(calls) == 0 {
+		return
+	}
+	// Apply limit on total number of requests.
+	if h.batchLimit != 0 && len(calls) > h.batchLimit {
+		h.startCallProc(func(cp *callProc) {
+			h.respondWithBatchTooLarge(cp, calls)
+		})
 		return
 	}
 
