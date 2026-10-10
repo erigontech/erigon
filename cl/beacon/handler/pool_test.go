@@ -19,9 +19,12 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1009,4 +1012,73 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 		SubcommitteeIndex: 0,
 		AggregationBits:   aggrBits,
 	}, out.Data)
+}
+
+// An ignored submission is not published because gossip accepts self-published messages without validating them
+// again. An already-seen attestation succeeds without publishing because the seen check runs before signature
+// validation, so the submitted attestation itself was not validated.
+func TestPoolAttestationsDoNotPublishIgnored(t *testing.T) {
+	data, err := json.Marshal(&solid.AttestationData{})
+	require.NoError(t, err)
+	single, err := json.Marshal([]*solid.SingleAttestation{{Data: &solid.AttestationData{}}})
+	require.NoError(t, err)
+	requests := []struct {
+		name    string
+		path    string
+		version string
+		body    string
+	}{
+		{
+			name: "v1",
+			path: "/eth/v1/beacon/pool/attestations",
+			body: fmt.Sprintf(`[{"aggregation_bits":"0x01","data":%s,"signature":"0x%s"}]`, data, strings.Repeat("00", 96)),
+		},
+		{
+			name:    "v2",
+			path:    "/eth/v2/beacon/pool/attestations",
+			version: "electra",
+			body:    string(single),
+		},
+	}
+	outcomes := []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{name: "already seen", err: fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrAttestationAlreadySeen), status: http.StatusOK},
+		{name: "stale head", err: fmt.Errorf("head epoch 0 too far from attestation epoch 2: %w", services.ErrIgnore), status: http.StatusBadRequest},
+		{name: "invalid signature", err: errors.New("invalid signature"), status: http.StatusBadRequest},
+	}
+	for _, tt := range requests {
+		for _, outcome := range outcomes {
+			t.Run(tt.name+" "+outcome.name, func(t *testing.T) {
+				_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+				require.NoError(t, sd.OnHeadState(s))
+				netCfg := clparams.NetworkConfigs[chainspec.MainnetChainID]
+				handler.netConfig = &netCfg
+
+				ctrl := gomock.NewController(t)
+				attestationService := services_mock.NewMockAttestationService(ctrl)
+				attestationService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(outcome.err).Times(1)
+				handler.attestationService = attestationService
+				mockGossip := gossip_mock.NewMockGossip(ctrl)
+				mockGossip.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+				handler.gossipManager = mockGossip
+
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tt.path, strings.NewReader(tt.body))
+				req.Header.Set("Content-Type", "application/json")
+				if tt.version != "" {
+					req.Header.Set("Eth-Consensus-Version", tt.version)
+				}
+				recorder := httptest.NewRecorder()
+				handler.ServeHTTP(recorder, req)
+				require.Equal(t, outcome.status, recorder.Code, recorder.Body.String())
+				if outcome.status == http.StatusBadRequest {
+					var response poolingError
+					require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+					require.Equal(t, []poolingFailure{{Index: 0, Message: outcome.err.Error()}}, response.Failures)
+				}
+			})
+		}
+	}
 }

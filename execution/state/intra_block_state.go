@@ -990,12 +990,13 @@ func (ibs *IntraBlockState) ReadVersion(addr accounts.Address, path AccountPath,
 
 // writeBalanceVersioned records a balance change on the versionMap write-set and
 // the journal without materializing the stateObject on the common existing-alive
-// path. An absent or destroyed-no-revival account is materialized via
-// GetOrNewStateObject so createObject records the AddressPath write OCC needs; the
-// create path never reads balance (matching the old stateObject path). The journal
-// prev is read only in the existing branch so a create does not widen the OCC
-// read-set with a spurious BalancePath read.
-// writeBalanceVersioned takes prev from a caller that already read the balance; nil reads it here.
+// path; an already-materialized one is kept in step. An absent or
+// destroyed-no-revival account is materialized via GetOrNewStateObject so
+// createObject records the AddressPath write OCC needs; the create path never
+// reads balance (matching the old stateObject path). The journal prev comes from a
+// caller that already read the balance, or, when nil, is read only in the existing
+// branch so a create does not widen the OCC read-set with a spurious BalancePath
+// read.
 func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *uint256.Int, update uint256.Int, wasCommited bool, reason tracing.BalanceChangeReason) error {
 	base, _, _, err := ibs.versionedAccountBase(addr, true)
 	if err != nil {
@@ -1028,6 +1029,9 @@ func (ibs *IntraBlockState) writeBalanceVersioned(addr accounts.Address, prev *u
 	ibs.journal.balanceChange(addr, *prev, wasCommited)
 	if ibs.tracingHooks != nil && ibs.tracingHooks.OnBalanceChange != nil {
 		ibs.tracingHooks.OnBalanceChange(addr, *prev, update, reason)
+	}
+	if so, ok := ibs.stateObjects[addr]; ok {
+		so.setBalance(update)
 	}
 	ibs.recordWriteBalance(addr, update)
 	return nil
@@ -1581,6 +1585,11 @@ func (ibs *IntraBlockState) writeNonceVersioned(addr accounts.Address, nonce uin
 		if err != nil {
 			return err
 		}
+		// The object is built from the base record and can lag this tx's own
+		// nonce write: seed it so a revert restores the live nonce.
+		if vw, ok := ibs.versionedWrites.GetNonce(addr); ok {
+			stateObject.setNonce(vw.Val)
+		}
 		stateObject.SetNonce(nonce, wasCommited, reason)
 		ibs.recordWriteNonce(addr, nonce, reason)
 		return nil
@@ -1981,14 +1990,14 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 	}
 
 	prev := hadSD && sdW.Val
-	prevBalance, inc := base.Balance, base.Incarnation
+	prevBalance := base.Balance
 	// The self-destruct clears the incarnation and balance writes below; capture
 	// them so a revert restores them (a balance write may predate the snapshot)
 	// rather than the cleared values.
 	var prevIncarnation uint64
 	var prevBalanceVersioned uint256.Int
 	if hadIncarnation {
-		inc, prevIncarnation = incW.Val, incW.Val
+		prevIncarnation = incW.Val
 	}
 	if hadBalance {
 		prevBalance, prevBalanceVersioned = balW.Val, balW.Val
@@ -2010,21 +2019,16 @@ func (ibs *IntraBlockState) selfdestructVersioned(addr accounts.Address, preserv
 	}
 
 	ibs.recordWriteSelfDestruct(addr, true)
+	// A later revival or re-creation starts from incarnation 0, as in serial.
+	ibs.recordWriteIncarnation(addr, 0)
 	if !preserveBalance {
-		// Pre-EIP-8246: SELFDESTRUCT burns the balance and the account is deleted;
-		// keep the pre-destruct incarnation for the storage-delete cascade.
-		ibs.recordWriteIncarnation(addr, inc)
+		// Pre-EIP-8246: SELFDESTRUCT burns the balance and the account is deleted.
 		ibs.recordWriteBalance(addr, uint256.Int{})
-		return true, nil
 	}
-	// EIP-8246: the balance is preserved, leaving a balance-only account, and a
-	// re-creation bumps the incarnation from 0 (matching serial). Nonce and code
-	// hash are not written here: extraction already drops them for a
-	// self-destructed account, so the reconstruction reads empty code / zero
+	// Nonce and code hash are not written here: extraction already drops them for
+	// a self-destructed account, so the reconstruction reads empty code / zero
 	// nonce. Writing explicit zero cells instead made a same-tx re-creation at the
 	// address read them and abort with a phantom collision.
-	ibs.recordWriteIncarnation(addr, 0)
-
 	return true, nil
 }
 
@@ -2407,14 +2411,9 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		} else if sd, ok := ibs.versionedWriteSelfDestruct(addr); ok && sd {
 			// Cache-free parallel path: a within-tx create→self-destruct leaves no
 			// committed base record and no cached stateObject. Rebuild `previous`
-			// from this tx's own cells so the recreated account's incarnation still
-			// accumulates and the resurrect write is emitted.
-			prev := newObject(ibs, addr, &accounts.Account{}, &accounts.Account{})
-			prev.selfdestructed = true
-			if vw, ok := ibs.versionedWrites.GetIncarnation(addr); ok {
-				prev.data.Incarnation = vw.Val
-			}
-			previous = prev
+			// as destroyed so the resurrect write is emitted.
+			previous = newObject(ibs, addr, &accounts.Account{}, &accounts.Account{})
+			previous.selfdestructed = true
 		}
 	}
 
@@ -2451,19 +2450,6 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			preTxBalance = bal
 		}
 	}
-	// Writer.DeleteAccount stores the selfdestructed incarnation in rs.selfdestructedByTx.
-	// Recover it here so that CreateAccount in the next tx computes newInc = prevInc+1 correctly.
-	if ibs.versionMap == nil && previous == nil {
-		type deletedIncReader interface {
-			ReadDeletedIncarnation(accounts.Address) (uint64, bool)
-		}
-		if r, ok := ibs.stateReader.(deletedIncReader); ok {
-			if inc, ok2 := r.ReadDeletedIncarnation(addr); ok2 && inc > prevInc {
-				prevInc = inc
-			}
-		}
-	}
-
 	// Capture the address's current balance BEFORE createObject writes the fresh
 	// zero-balance record. versionedAccountBase returns the base record without
 	// overlaying this tx's own field writes, so previous.data.Balance can lag
@@ -2603,11 +2589,6 @@ func updateAccount(eip161Enabled bool, isAura bool, stateWriter StateWriter, add
 		stateObject.data.Incarnation = 0
 		stateObject.code = accounts.Code{}
 		stateObject.deleted = false
-		// Supersede Selfdestruct's pre-destruct IncarnationPath: extraction keeps
-		// incarnation for self-destructed accounts (unlike nonce/code/codeHash,
-		// which the extraction filter drops), and a later CREATE2 must see the
-		// persisted balance-only record's 0 in every execution mode.
-		stateObject.db.recordWriteIncarnation(addr, 0)
 		if err := stateWriter.CreateContract(addr); err != nil {
 			return err
 		}
