@@ -77,7 +77,8 @@ type BranchCache struct {
 
 	putStripes [256]sync.Mutex
 
-	coh coherence.Gen
+	coh         coherence.Gen
+	unwoundView atomic.Uint64 // MDBX txn that committed the latest unwind
 }
 
 type branchCacheEntry struct {
@@ -619,6 +620,31 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	})
 }
 
+// Fill copies a branch read through MDBX txn viewID. It drops the read if that txn is older than the latest
+// committed unwind, or if an Unwind or Clear ran during the read.
+func (c *BranchCache) Fill(prefix []byte, data []byte, step, txN, viewID uint64) {
+	epoch := c.coh.Epoch()
+	if viewID < c.unwoundView.Load() || isCommitmentStateKey(prefix) {
+		return
+	}
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
+
+	stripe := c.putStripe(prefix)
+	stripe.Lock()
+	defer stripe.Unlock()
+
+	if c.coh.Epoch() != epoch {
+		return
+	}
+	c.store(prefix, &branchCacheEntry{
+		data:  dataCopy,
+		step:  step,
+		txN:   txN,
+		epoch: epoch,
+	})
+}
+
 func (c *BranchCache) Invalidate(prefix []byte) {
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
@@ -647,6 +673,12 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 // floor, so stale entries drop lazily on their next Get.
 func (c *BranchCache) Unwind(unwindToTxN uint64) {
 	c.coh.Unwind(unwindToTxN)
+}
+
+// UnwindCommitted is Unwind for an unwind committed by MDBX txn viewID; older txns can no longer Fill.
+func (c *BranchCache) UnwindCommitted(unwindToTxN, viewID uint64) {
+	c.unwoundView.Store(viewID) // before the epoch bump, see Fill
+	c.Unwind(unwindToTxN)
 }
 
 // Clear holds every writer stripe so a publication cannot cross generations.
