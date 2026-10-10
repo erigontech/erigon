@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -30,23 +28,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
-
-func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
-	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
-	if forkchoiceHeadHash != (common.Hash{}) {
-		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
-		if forkchoiceHeadNum != nil {
-			return *forkchoiceHeadNum, nil
-		}
-	}
-
-	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return 0, fmt.Errorf("getting latest block number: %w", err)
-	}
-
-	return blockNum, nil
-}
 
 // SetHead rewinds the local chain to the specified block number by unwinding
 // all staged sync stages. This is the core implementation used by debug_setHead.
@@ -71,7 +52,7 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	defer tx.Rollback()
 
 	// Get the current head block number
-	currentHead, err := getLatestBlockNumber(tx)
+	currentHead, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
 		return fmt.Errorf("failed to get current head: %w", err)
 	}
