@@ -203,6 +203,8 @@ type ForkChoiceStore struct {
 	// Later, when OnBlock processes the block, it checks this cache and processes any pending envelope.
 	pendingEnvelopes         *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
 	envelopeGossipAdmissions ExecutionPayloadEnvelopeAdmissions
+	// Earliest time RetryDataAvailablePendingExecutionPayloadEnvelopes may retry a pending envelope again, by block root.
+	dataAvailableEnvelopeRetryAt *lru.Cache[common.Hash, time.Time]
 
 	// [New in Gloas:EIP7732] Locally-produced self-build envelopes waiting for their block.
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
@@ -369,6 +371,11 @@ func NewForkChoiceStore(
 		return nil, err
 	}
 
+	dataAvailableEnvelopeRetryAt, err := lru.New[common.Hash, time.Time](queueCacheSize)
+	if err != nil {
+		return nil, err
+	}
+
 	// [New in Gloas:EIP7732] Separate queue for locally-produced self-build envelopes
 	pendingLocalSelfBuildEnvelopes, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	if err != nil {
@@ -455,6 +462,7 @@ func NewForkChoiceStore(
 		partialWithdrawals:             partialWithdrawals,
 		proposerLookahead:              proposerLookahead,
 		pendingEnvelopes:               pendingEnvelopes,
+		dataAvailableEnvelopeRetryAt:   dataAvailableEnvelopeRetryAt,
 		pendingLocalSelfBuildEnvelopes: pendingLocalSelfBuildEnvelopes,
 		executionPayloadStatus:         executionPayloadStatus,
 		payloadStatusByRoot:            payloadStatusByRoot,
