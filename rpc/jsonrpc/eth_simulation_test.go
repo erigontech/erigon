@@ -889,16 +889,19 @@ func TestSanitizeCallEIP8037Inclusion(t *testing.T) {
 	overCap := params.MaxTxnGasLimit + 5_000_000
 
 	tests := []struct {
-		name     string
-		gasLimit uint64
-		gasUsed  protocol.GasUsed
-		gas      uint64
-		wantErr  bool
+		name       string
+		validation bool
+		gasLimit   uint64
+		gasUsed    protocol.GasUsed
+		gas        uint64
+		wantErr    bool
 	}{
-		{"state exceeded by one", 30_000_000, protocol.GasUsed{BlockState: 28_000_000}, 2_000_001, true},
-		{"over tx cap, execution side capped", 60_000_000, protocol.GasUsed{BlockExecution: 40_000_000}, overCap, false},
+		{"state exceeded by one", false, 30_000_000, protocol.GasUsed{BlockState: 28_000_000}, 2_000_001, true},
+		{"over tx cap, execution side capped", true, 60_000_000, protocol.GasUsed{BlockExecution: 40_000_000}, overCap, false},
+		// Without validation the execution gas is not capped, so the whole gas must fit.
+		{"over tx cap, validation off", false, 60_000_000, protocol.GasUsed{BlockExecution: 40_000_000}, overCap, true},
 		// Execution already past the limit must leave nothing, not wrap around.
-		{"execution overshoot leaves nothing", 30_000_000, protocol.GasUsed{BlockExecution: 31_000_000}, 1, true},
+		{"execution overshoot leaves nothing", false, 30_000_000, protocol.GasUsed{BlockExecution: 31_000_000}, 1, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -907,7 +910,9 @@ func TestSanitizeCallEIP8037Inclusion(t *testing.T) {
 			args.Gas = &gas
 			bc := blockCtx(tc.gasLimit)
 
-			err := amsterdamSimulator().sanitizeCall(&args, nil, &bc, nil, tc.gasUsed, 0)
+			sim := amsterdamSimulator()
+			sim.validation = tc.validation
+			err := sim.sanitizeCall(&args, nil, &bc, nil, tc.gasUsed, 0)
 			if !tc.wantErr {
 				require.NoError(t, err)
 				return

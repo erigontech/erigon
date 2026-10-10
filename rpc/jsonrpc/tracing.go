@@ -354,6 +354,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	if err != nil {
 		return fmt.Errorf("convert args to msg: %w", err)
 	}
+	msg.SetSkipExecutionGasCap(true)
 	transaction, err := args.ToTransaction(api.GasCap, baseFee)
 	if err != nil {
 		return fmt.Errorf("convert args to msg: %w", err)
@@ -502,6 +503,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 			if err != nil {
 				return err
 			}
+			msg.SetSkipExecutionGasCap(true)
 			transaction, err := txn.ToTransaction(api.GasCap, &blockCtx.BaseFee)
 			if err != nil {
 				return err

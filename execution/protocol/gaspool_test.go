@@ -35,22 +35,35 @@ import (
 // against the state reservoir); no intrinsic gas is subtracted.
 func TestInclusionContributions(t *testing.T) {
 	t.Run("pre-Amsterdam returns (gas, 0)", func(t *testing.T) {
-		execution, state := InclusionContributions(100_000, false)
+		execution, state := InclusionContributions(100_000, false, false)
 		require.Equal(t, uint64(100_000), execution)
 		require.Equal(t, uint64(0), state)
 	})
 
 	t.Run("Amsterdam reserves the full gas_limit in both dimensions", func(t *testing.T) {
-		execution, state := InclusionContributions(50_000, true)
+		execution, state := InclusionContributions(50_000, true, false)
 		require.Equal(t, uint64(50_000), execution)
 		require.Equal(t, uint64(50_000), state)
 	})
 
 	t.Run("Amsterdam caps execution at MaxTxnGasLimit, leaves state uncapped", func(t *testing.T) {
 		gas := params.MaxTxnGasLimit + 1_000_000
-		execution, state := InclusionContributions(gas, true)
+		execution, state := InclusionContributions(gas, true, false)
 		require.Equal(t, params.MaxTxnGasLimit, execution)
 		require.Equal(t, gas, state)
+	})
+
+	t.Run("Amsterdam without the execution gas cap reserves the full gas_limit in both dimensions", func(t *testing.T) {
+		gas := params.MaxTxnGasLimit + 1_000_000
+		execution, state := InclusionContributions(gas, true, true)
+		require.Equal(t, gas, execution)
+		require.Equal(t, gas, state)
+	})
+
+	t.Run("pre-Amsterdam ignores skipping the execution gas cap", func(t *testing.T) {
+		execution, state := InclusionContributions(100_000, false, true)
+		require.Equal(t, uint64(100_000), execution)
+		require.Equal(t, uint64(0), state)
 	})
 }
 

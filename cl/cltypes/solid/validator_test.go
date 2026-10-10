@@ -18,6 +18,7 @@ package solid
 
 import (
 	"encoding/binary"
+	"math"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
@@ -103,4 +104,17 @@ func TestMarshalUnmarshalJson(t *testing.T) {
 	err = decoded.UnmarshalJSON(encoded)
 	require.NoError(t, err)
 	assert.Equal(t, validator, decoded)
+}
+
+func TestValidatorSetRejectsNegativeIndex(t *testing.T) {
+	set := NewValidatorSet(4)
+	for range 3 {
+		set.Append(NewValidator())
+	}
+	wrapping := math.MinInt64 / validatorSize * 2
+	require.Positive(t, wrapping*validatorSize)
+	for _, idx := range []int{-1, wrapping} {
+		require.PanicsWithValue(t, "ValidatorSet -- Get: out of bounds", func() { set.Get(idx) })
+		require.PanicsWithValue(t, "ValidatorSet -- Set: out of bounds", func() { set.Set(idx, NewValidator()) })
+	}
 }

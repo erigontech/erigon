@@ -268,7 +268,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	defer caller.Close()
 
 	msg := caller.Message()
-	plainTransfer := len(msg.Data()) == 0 && !msg.To().IsNil()
+	plainTransfer := len(msg.Data()) == 0 && !msg.To().IsNil() && len(msg.Authorizations()) == 0
 
 	var initialState *state.IntraBlockState
 	if feeCap.Sign() != 0 || plainTransfer {
