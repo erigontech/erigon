@@ -541,7 +541,7 @@ func TestNewSimulatorGasPool(t *testing.T) {
 	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 50_000_000, 1024, 0, false)
-	assert.Equal(t, uint64(50_000_000), sim.gasPool.Gas())
+	assert.Equal(t, uint64(50_000_000), sim.gasBudget)
 	assert.True(t, sim.traceTransfers)
 	assert.True(t, sim.validation)
 	assert.True(t, sim.fullTransactions)
@@ -553,7 +553,7 @@ func TestNewSimulatorZeroGasCap(t *testing.T) {
 	cfg := &chain.Config{ChainID: uint256.NewInt(1)}
 
 	sim := newSimulator(req, header, cfg, datadir.Dirs{}, nil, rawdbv3.TxNumsReader{}, nil, nil, 0, 1024, 0, false)
-	assert.Equal(t, uint64(0), sim.gasPool.Gas())
+	assert.Equal(t, uint64(0), sim.gasBudget)
 }
 
 // ─── SimulationRequest validation tests ──────────────────────────────────────
@@ -1013,4 +1013,32 @@ func TestSimulateV1AmsterdamGlobalGasBudget(t *testing.T) {
 	require.NoError(t, err, "the second call must fit what the first left of the budget")
 	require.Len(t, result, 1)
 	require.Len(t, result[0].Calls, 2)
+}
+
+// TestSimulateV1GasCapBudgetTakesReceiptGas checks that each call takes its
+// receipt gas off the request-wide gas cap, so the next call's default gas is
+// the cap minus the receipt gas so far.
+func TestSimulateV1GasCapBudgetTakesReceiptGas(t *testing.T) {
+	api := newAmsterdamSimulateAPI(t)
+	api.GasCap = 1_000_000
+	value := (*hexutil.U256)(uint256.NewInt(1))
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			StateOverrides: amsterdamSimulateOverrides(),
+			Calls: []ethapi.CallArgs{
+				{From: &simSender, To: &simNewAccount, Value: value},
+				{From: &simSender, To: &simNewAccount, Value: value},
+			},
+		}},
+		ReturnFullTransactions: true,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	txs, ok := result[0].Transactions.([]*ethapi.RPCTransaction)
+	require.True(t, ok)
+	require.Len(t, txs, 2)
+	assert.Equal(t, api.GasCap, uint64(txs[0].Gas))
+	assert.Equal(t, api.GasCap-uint64(result[0].Calls[0].GasUsed), uint64(txs[1].Gas))
 }

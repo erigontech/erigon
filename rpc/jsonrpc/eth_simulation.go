@@ -216,7 +216,7 @@ type simulator struct {
 	txNumReader       rawdbv3.TxNumsReader
 	blockReader       dbservices.FullBlockReader
 	logger            log.Logger
-	gasPool           *protocol.GasPool
+	gasBudget         uint64
 	returnDataLimit   int
 	evmCallTimeout    time.Duration
 	commitmentHistory bool
@@ -239,10 +239,10 @@ func newSimulator(
 	evmCallTimeout time.Duration,
 	commitmentHistory bool,
 ) *simulator {
-	// The gas pool is intentionally shared across all simulated blocks as a global gas budget
-	// (similar to eth_call's gas cap). Per-block gas limits are enforced separately via
-	// blockContext.GasLimit in sanitizeCall. This prevents DoS by bounding the total gas
-	// consumed across the entire simulation request.
+	// The gas budget is intentionally shared across all simulated blocks (similar to eth_call's
+	// gas cap). Each call takes its receipt gas off it. Per-block gas limits are enforced
+	// separately via blockContext.GasLimit in sanitizeCall. This prevents DoS by bounding the
+	// total gas consumed across the entire simulation request.
 	return &simulator{
 		base:              header,
 		chainConfig:       chainConfig,
@@ -251,7 +251,7 @@ func newSimulator(
 		txNumReader:       txNumReader,
 		blockReader:       blockReader,
 		logger:            logger,
-		gasPool:           new(protocol.GasPool).AddGas(gasCap),
+		gasBudget:         gasCap,
 		returnDataLimit:   returnDataLimit,
 		evmCallTimeout:    evmCallTimeout,
 		commitmentHistory: commitmentHistory,
@@ -786,7 +786,11 @@ func (s *simulator) simulateCall(
 	_, storeEVM, cleanup := setupEVMTimeout(ctx, s.evmCallTimeout)
 	defer cleanup()
 
-	globalGasCap := s.gasPool.BlockGasRemaining()
+	// A zero budget would read as no cap below.
+	if s.gasBudget == 0 {
+		return nil, nil, nil, txValidationError(protocol.ErrGasLimitReached)
+	}
+	globalGasCap := s.gasBudget
 	// sanitizeCall fills zero dynamic fees when the block has a base fee, even one overridden
 	// before London; only the fields the caller named make a dynamic fee call.
 	dynamicFeeArgs := call.MaxFeePerGas != nil || call.MaxPriorityFeePerGas != nil
@@ -824,8 +828,9 @@ func (s *simulator) simulateCall(
 	evm.SetPrecompiles(precompiles)
 	storeEVM(evm)
 
-	s.gasPool.AddBlobGas(msg.BlobGas())
-	result, err := protocol.ApplyMessage(evm, msg, s.gasPool, true, false, s.engine)
+	blockGas := protocol.NewBlockGasPool(gasLeft(blockCtx.GasLimit, gasUsed.BlockExecution),
+		gasLeft(blockCtx.GasLimit, gasUsed.BlockState), msg.BlobGas())
+	result, err := protocol.ApplyMessage(evm, msg, blockGas, true, false, s.engine)
 	if err != nil {
 		return nil, nil, nil, txValidationError(err)
 	}
@@ -834,6 +839,7 @@ func (s *simulator) simulateCall(
 		return nil, nil, nil, fmt.Errorf("execution aborted (timeout = %v)", s.evmCallTimeout)
 	}
 	gasUsed.AddResult(result)
+	s.gasBudget -= result.ReceiptGasUsed
 	receipt := protocol.MakeReceipt(&header.Number, common.Hash{}, msg, txn, gasUsed.Receipt, result, intraBlockState, evm)
 	gasUsed.Blob += receipt.BlobGasUsed
 
