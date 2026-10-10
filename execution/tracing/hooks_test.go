@@ -41,3 +41,20 @@ func TestOpcodeMask(t *testing.T) {
 		}
 	}
 }
+
+// TestWantsAnyOpcode checks the overlap test in every mask word: a nil mask overlaps
+// anything, disjoint masks do not.
+func TestWantsAnyOpcode(t *testing.T) {
+	if !(&Hooks{}).WantsAnyOpcode(NewOpcodeMask(0x01)) {
+		t.Fatal("a nil mask wants every opcode")
+	}
+	h := &Hooks{OnOpcodeMask: NewOpcodeMask(0x3f, 0x40, 0xff)}
+	for _, op := range []byte{0x3f, 0x40, 0xff} {
+		if !h.WantsAnyOpcode(NewOpcodeMask(0x01, op)) {
+			t.Fatalf("overlap on %#x not found", op)
+		}
+	}
+	if h.WantsAnyOpcode(NewOpcodeMask(0x00, 0x3e, 0x41, 0x80, 0xfe)) {
+		t.Fatal("disjoint masks must not overlap")
+	}
+}
