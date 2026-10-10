@@ -818,6 +818,14 @@ func TestRawTransaction(t *testing.T) {
 	require.NotEmpty(t, result.Trace)
 }
 
+func TestRawTransactionMalformed(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+
+	_, err := api.RawTransaction(context.Background(), hexutil.Bytes{0xde, 0xad, 0xbe, 0xef}, []string{"trace"})
+	requireErrorCode(t, err, rpc.ErrCodeInvalidParams)
+}
+
 func TestRawTransactionStateDiff(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
