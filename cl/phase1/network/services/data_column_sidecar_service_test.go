@@ -354,7 +354,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotIsFinalizedEpoch
 	finalizedEpoch := testSlot / testSlotsPerEpoch
 	t.mockForkChoice.FinalizedCheckpointVal = solid.Checkpoint{Epoch: finalizedEpoch}
 
-	sidecar := createMockDataColumnSidecar(finalizedEpoch*testSlotsPerEpoch, 0)
+	sidecar := createMockDataColumnSidecar(finalizedEpoch*testSlotsPerEpoch, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	t.Equal(ErrIgnore, err)
@@ -404,7 +404,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenSlotAfterFinalizedEp
 	t.mockForkChoice.Ancestors[finalizedEpoch*testSlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: testFinalizedRoot}
 	t.mockForkChoice.FinalizedSlotVal = finalizedEpoch*testSlotsPerEpoch + testSlotsPerEpoch - 1
 
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// The sidecar gets past the finality check and fails on the forced inclusion proof error.
@@ -425,7 +425,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenAnchorAfterFinalized
 	t.mockForkChoice.AnchorSlotVal = anchorSlot
 	t.mockForkChoice.Ancestors[anchorSlot] = forkchoice.ForkChoiceNode{Root: checkpointRoot}
 
-	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	sidecar := createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion)
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	// The sidecar gets past the ancestor check and fails on the forced inclusion proof error.
@@ -456,7 +456,7 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenFinalizedCheckpointI
 	t.setupFinalizedAncestorTest(common.Hash{0x0f})
 	t.mockForkChoice.Ancestors[(testSlot/testSlotsPerEpoch)*testSlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: common.Hash{0x1f}}
 
-	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, createMockDataColumnSidecar(testSlot, 0))
+	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, createMockDataColumnSidecar(testSlot, 0, clparams.FuluVersion))
 
 	t.Error(err)
 	t.NotErrorIs(err, ErrIgnore)
