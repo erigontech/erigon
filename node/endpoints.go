@@ -26,6 +26,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -61,6 +62,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 			return nil, nil, err
 		}
 	}
+	listener = readYieldListener{listener}
 	// make sure timeout values are meaningful
 	CheckTimeouts(&cfg.Timeouts)
 	// Bundle the http server. Server.Protocols is left nil, so the default applies: HTTP/1 plus
@@ -88,6 +90,36 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 		}
 	}()
 	return httpSrv, listener.Addr(), err
+}
+
+// readYieldListener hands out connections that yield once before reading after a
+// short read. Go's poller calls read() before parking, so on a keep-alive
+// connection the read for the next request returns EAGAIN unless the request
+// already arrived; under load it usually does after a yield.
+type readYieldListener struct{ net.Listener }
+
+func (l readYieldListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if tcpConn, ok := conn.(*net.TCPConn); ok && err == nil {
+		return &readYieldConn{TCPConn: tcpConn}, nil
+	}
+	return conn, err
+}
+
+type readYieldConn struct {
+	*net.TCPConn
+	drained bool // the last read returned less than asked, so the socket was empty
+}
+
+func (c *readYieldConn) Read(b []byte) (int, error) {
+	if c.drained {
+		runtime.Gosched()
+	}
+	n, err := c.TCPConn.Read(b)
+	if err == nil {
+		c.drained = n < len(b)
+	}
+	return n, err
 }
 
 func isIgnoredHttpServerError(serveErr error) bool {

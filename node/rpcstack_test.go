@@ -601,3 +601,43 @@ func TestNewWSConnectionLimiter(t *testing.T) {
 		return limiter.(*wsConnectionLimiter).count.Load() == 0
 	}, 2*time.Second, time.Millisecond)
 }
+
+func TestReadYieldConnKeepAlive(t *testing.T) {
+	srv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_, _ = w.Write(body)
+	}))
+	require.NoError(t, err)
+	defer srv.Close()
+	client := &http.Client{Timeout: 2 * time.Second}
+	defer client.CloseIdleConnections()
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Go(func() {
+			for range 500 {
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+addr.String(), strings.NewReader(`{"id":1}`))
+				if err != nil {
+					errs <- err
+					return
+				}
+				resp, err := client.Do(req)
+				if err != nil {
+					errs <- err
+					return
+				}
+				body, err := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if err != nil || string(body) != `{"id":1}` {
+					errs <- fmt.Errorf("body %q: %w", body, err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+}
