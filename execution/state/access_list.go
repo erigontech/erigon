@@ -41,6 +41,10 @@ type accessList struct {
 	lastAddr     accounts.Address
 	lastSlots    map[accounts.StorageKey]struct{}
 	lastWarmSlot accounts.StorageKey
+
+	// inserted counts the keys added since the last Reset, which is what the
+	// maps keep capacity for.
+	inserted int
 }
 
 // newAccessList creates a new accessList.
@@ -59,8 +63,14 @@ func (al *accessList) Reset() {
 	}
 	al.slots = al.slots[:0]
 	clear(al.addresses)
+	al.inserted = 0
 	al.dropMemo()
 }
+
+// entries reports how many keys this list inserted since the last Reset, not
+// how many are live: a reverted slot leaves its grown map past len(slots) for
+// addSlotSlow to reuse, so the live count would under-report what is retained.
+func (al *accessList) entries() int { return al.inserted }
 
 func (al *accessList) dropMemo() {
 	al.lastAddr = accounts.NilAddress
@@ -114,6 +124,7 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 		return false
 	}
 	al.addresses[address] = -1
+	al.inserted++
 	return true
 }
 
@@ -135,6 +146,7 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		}
 		al.lastSlots[slot] = struct{}{}
 		al.lastWarmSlot = slot
+		al.inserted++
 		return false, true
 	}
 	return al.addSlotSlow(address, slot)
@@ -157,6 +169,10 @@ func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.Storag
 		slotmap[slot] = struct{}{}
 		al.slots = append(al.slots, slotmap)
 		al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
+		al.inserted++
+		if !addrPresent {
+			al.inserted++
+		}
 		return !addrPresent, true
 	}
 	slotmap := al.slots[idx]
@@ -165,6 +181,7 @@ func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.Storag
 		return false, false
 	}
 	slotmap[slot] = struct{}{}
+	al.inserted++
 	return false, true
 }
 

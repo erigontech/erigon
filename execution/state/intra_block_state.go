@@ -28,6 +28,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -377,6 +378,64 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.codeReadCount = 0
 	ibs.dep = UnknownDep
 	ibs.stateReadErr = nil
+}
+
+var ibsPool sync.Pool
+
+// NewPooled is New over an IntraBlockState reused from an earlier call, whose
+// maps keep their capacity. Release it with ReleasePooled.
+func NewPooled(stateReader StateReader) *IntraBlockState {
+	ibs, ok := ibsPool.Get().(*IntraBlockState)
+	if !ok {
+		return New(stateReader)
+	}
+	ibs.stateReader = stateReader
+	ibs.codeAccess, _ = stateReader.(codeAccessTracker)
+	return ibs
+}
+
+// ReleasePooled hands ibs to the next NewPooled, or closes it when it grew too
+// large to keep.
+func ReleasePooled(ibs *IntraBlockState) {
+	if ibs.stateObjects == nil { // closed: its maps are gone
+		return
+	}
+	if ibs.resetForPool() {
+		ibsPool.Put(ibs)
+		return
+	}
+	ibs.Close()
+}
+
+// Maps never shrink, so a call that grew past this must not pin its capacity
+// for every later one.
+const maxPooledEntries = 16 * 1024
+
+// resetForPool clears everything one call left and reports whether ibs is
+// small enough to pool.
+func (ibs *IntraBlockState) resetForPool() bool {
+	reads := ibs.versionedReads
+	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+reads.entries() <= maxPooledEntries
+	ibs.Reset()
+	if !poolable {
+		return false
+	}
+	// One call never hands its read set out, so the maps keep their capacity
+	// instead of the empty set Reset installs.
+	reads.clearForReuse()
+	ibs.versionedReads = reads
+	// Reset only bumps the probe epoch; a pooled ibs would collect every
+	// address later calls touch.
+	clear(ibs.sdProbe)
+	ibs.tracingHooks = nil
+	ibs.trace = false
+	// The caller reads this call's output after the ibs goes back to the pool.
+	ibs.txOutput = nil
+	ibs.stateReader, ibs.codeAccess = nil, nil
+	// Reset keeps the tx context and fork flags; New starts them at zero.
+	ibs.blockNum, ibs.version = 0, 0
+	ibs.eip8246, ibs.eip161, ibs.isAura = false, false, false
+	return true
 }
 
 // SetNoConflictDetection marks an execution that neither ValidateVersion checks
