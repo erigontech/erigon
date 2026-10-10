@@ -48,7 +48,7 @@ func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
 		return err
 	}
 	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
-		return fmt.Errorf("expected JSON array")
+		return errors.New("expected JSON array")
 	}
 	transactions := make([][]byte, 0, int(min(t.maxTransactions(), 16)))
 	var encodedSize uint64

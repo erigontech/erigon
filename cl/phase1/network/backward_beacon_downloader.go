@@ -1243,7 +1243,7 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelopeP2P(ctx context.Context, b
 
 func (b *BackwardBeaconDownloader) fetchSingleEnvelopeHTTP(ctx context.Context, block *cltypes.SignedBeaconBlock) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if b.httpFallbackURL == "" {
-		return nil, fmt.Errorf("no HTTP fallback URL configured")
+		return nil, errors.New("no HTTP fallback URL configured")
 	}
 	if block == nil || block.Block == nil {
 		return nil, errors.New("cannot fetch envelope for nil block")

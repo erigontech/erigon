@@ -126,7 +126,7 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
-		return fmt.Errorf("expected JSON array")
+		return errors.New("expected JSON array")
 	}
 	list := make([]T, 0, min(l.limit, 16))
 	for decoder.More() {
@@ -138,7 +138,7 @@ func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-			return fmt.Errorf("null list element")
+			return errors.New("null list element")
 		}
 		var element T
 		if err := json.Unmarshal(raw, &element); err != nil {
@@ -161,7 +161,7 @@ func requireJSONEOF(decoder *json.Decoder) error {
 	var trailing json.RawMessage
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 		if err == nil {
-			return fmt.Errorf("unexpected trailing JSON value")
+			return errors.New("unexpected trailing JSON value")
 		}
 		return err
 	}

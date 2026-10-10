@@ -3,6 +3,7 @@ package cltypes
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -248,19 +249,19 @@ func (e *ExecutionRequests) validateForConfig(cfg *clparams.BeaconChainConfig) e
 
 func (e *ExecutionRequests) validateListsPresent() error {
 	if e.Deposits == nil {
-		return fmt.Errorf("nil deposit requests")
+		return errors.New("nil deposit requests")
 	}
 	if e.Withdrawals == nil {
-		return fmt.Errorf("nil withdrawal requests")
+		return errors.New("nil withdrawal requests")
 	}
 	if e.Consolidations == nil {
-		return fmt.Errorf("nil consolidation requests")
+		return errors.New("nil consolidation requests")
 	}
 	if e.BuilderDeposits == nil {
-		return fmt.Errorf("nil builder deposit requests")
+		return errors.New("nil builder deposit requests")
 	}
 	if e.BuilderExits == nil {
-		return fmt.Errorf("nil builder exit requests")
+		return errors.New("nil builder exit requests")
 	}
 	return nil
 }
@@ -395,7 +396,7 @@ func (e *ExecutionRequests) UnmarshalJSON(b []byte) error {
 	e.BuilderExits = c.BuilderExits
 	e.ensureLists()
 	if e.effectiveVersion() < clparams.GloasVersion && (e.BuilderDeposits.Len() > 0 || e.BuilderExits.Len() > 0) {
-		return fmt.Errorf("builder execution requests before gloas")
+		return errors.New("builder execution requests before gloas")
 	}
 	return nil
 }
@@ -463,14 +464,14 @@ func DecodeExecutionRequestsList(cfg *clparams.BeaconChainConfig, requests []hex
 			}
 		case byte(cfg.BuilderDepositRequestType):
 			if version < clparams.GloasVersion {
-				return nil, fmt.Errorf("builder deposit request before gloas")
+				return nil, errors.New("builder deposit request before gloas")
 			}
 			if err := out.BuilderDeposits.DecodeSSZ(data, int(version)); err != nil {
 				return nil, err
 			}
 		case byte(cfg.BuilderExitRequestType):
 			if version < clparams.GloasVersion {
-				return nil, fmt.Errorf("builder exit request before gloas")
+				return nil, errors.New("builder exit request before gloas")
 			}
 			if err := out.BuilderExits.DecodeSSZ(data, int(version)); err != nil {
 				return nil, err

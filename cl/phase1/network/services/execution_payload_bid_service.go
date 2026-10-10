@@ -207,7 +207,7 @@ func (s *executionPayloadBidService) DecodeGossipMessage(_ peer.ID, data []byte,
 // [New in Gloas:EIP7732]
 func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltypes.SignedExecutionPayloadBid) error {
 	if msg == nil || msg.Message == nil {
-		return fmt.Errorf("nil execution payload bid message")
+		return errors.New("nil execution payload bid message")
 	}
 
 	bid := msg.Message
@@ -433,7 +433,7 @@ func (s *executionPayloadBidService) validateBidAuthentication(ctx context.Conte
 	validationStateEntry.mu.Lock()
 	if bid.PrevRandao != validationStateEntry.parentRandao {
 		validationStateEntry.mu.Unlock()
-		return fmt.Errorf("bid prev_randao does not match parent state randao mix")
+		return errors.New("bid prev_randao does not match parent state randao mix")
 	}
 	builder, err := s.validateBuilderAvailability(bid, validationStateEntry.state)
 	if err != nil {
@@ -762,7 +762,7 @@ func validateBuilderBidSignature(msg *cltypes.SignedExecutionPayloadBid, domain 
 		return fmt.Errorf("signature verification error: %w", err)
 	}
 	if !valid {
-		return fmt.Errorf("invalid builder signature")
+		return errors.New("invalid builder signature")
 	}
 	return nil
 }
@@ -774,7 +774,7 @@ func (s *executionPayloadBidService) validateBuilderAvailability(
 	builderIndex := bid.BuilderIndex
 	builders := validationState.GetBuilders()
 	if builders == nil {
-		return nil, fmt.Errorf("builders list not available")
+		return nil, errors.New("builders list not available")
 	}
 	if builderIndex >= uint64(builders.Len()) {
 		return nil, fmt.Errorf("builder index %d out of range (max: %d)", builderIndex, builders.Len())
