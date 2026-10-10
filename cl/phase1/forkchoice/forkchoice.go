@@ -622,9 +622,14 @@ func (f *ForkChoiceStore) HighestSeen() uint64 {
 // HighestSeen it is not raised by a block that is later rejected, and an invalidation lowers
 // it to the blocks that stay reachable.
 func (f *ForkChoiceStore) HighestImported() uint64 {
-	if f.highestImportedStale.CompareAndSwap(true, false) {
+	if f.highestImportedStale.Load() {
+		// The flag is cleared only after the recompute, under the lock that invalidations take,
+		// so every reader that sees it stale waits for the new value.
 		f.mu.Lock()
-		f.recomputeHighestImported()
+		if f.highestImportedStale.Load() {
+			f.recomputeHighestImported()
+			f.highestImportedStale.Store(false)
+		}
 		f.mu.Unlock()
 	}
 	return f.highestImported.Load()
