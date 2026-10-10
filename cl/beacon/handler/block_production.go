@@ -97,6 +97,9 @@ const (
 const (
 	minPayloadPollingWindow     = 100 * time.Millisecond
 	builderHandoffRetryInterval = 500 * time.Millisecond
+	// A published block is normally stored within one block service tick (50 ms) plus OnBlock; the bound only caps
+	// how long a stalled store can delay the block's data columns.
+	publishedBlockStoreWaitBeforeColumns = time.Second
 )
 
 // Polling for the assembled payload stops attestationDeadline/payloadPublicationDivisor before the
@@ -2870,6 +2873,13 @@ func (a *ApiHandler) broadcastBlockWithIntegrationWaitAndPublication(
 	}
 
 	if blk.Version() >= clparams.FuluVersion && len(columnsSidecars) > 0 {
+		// A Gloas column has no signed block header. Lighthouse requests an unknown block from the column's peer
+		// and penalizes that peer if it cannot serve the block.
+		if blk.Version() >= clparams.GloasVersion && job != nil {
+			storeCtx, cancel := context.WithTimeout(ctx, publishedBlockStoreWaitBeforeColumns)
+			_ = job.Wait(storeCtx) // a failed or slow store must not hold back the columns of an already gossiped block
+			cancel()
+		}
 		for _, column := range columnsSidecars {
 			columnSSZ, err := column.EncodeSSZ(nil)
 			if err != nil {
