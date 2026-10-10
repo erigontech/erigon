@@ -56,6 +56,15 @@ var computedAheadCount atomic.Int64
 func ComputedAheadCountForTest() int64 { return computedAheadCount.Load() }
 func ResetComputedAheadForTest()       { computedAheadCount.Store(0) }
 
+var commitmentComputeNs atomic.Int64
+
+func (cc *commitmentCalculator) computeCommitmentTimed(ctx context.Context, t commitTarget, diff *kv.DomainDiff) ([]byte, error) {
+	start := time.Now()
+	rh, err := cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, diff)
+	commitmentComputeNs.Add(int64(time.Since(start)))
+	return rh, err
+}
+
 // commitmentCalculator receives the same txResult/blockResult stream as the
 // apply loop (via a fan-out channel). For each txResult it accumulates key
 // touches from the writes. It contains the break logic that decides when
@@ -1017,7 +1026,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 		return nil, nil, err
 	}
 
-	rh, err := cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, nil)
+	rh, err := cc.computeCommitmentTimed(ctx, t, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1147,7 +1156,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	} else if live != nil {
 		diff = &live.Diffs[kv.CommitmentDomain]
 	}
-	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, cc.onCommitProgress, diff)
+	return cc.computeCommitmentTimed(ctx, t, diff)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via

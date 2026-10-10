@@ -53,7 +53,11 @@ func writeBALToFile(bal types.BlockAccessList, dataDir string, name string, logg
 	}
 }
 
-func Process(h *types.Header, blockBal types.BlockAccessList, vio *state.VersionedIO, isEIP7928 bool, experimental bool, dataDir string, logger log.Logger) error {
+type BALSink interface {
+	Append(blockNum uint64, hash common.Hash, bal []byte) error
+}
+
+func Process(h *types.Header, blockBal types.BlockAccessList, vio *state.VersionedIO, isEIP7928 bool, experimental bool, sink BALSink, dataDir string, logger log.Logger) error {
 	if !isEIP7928 && !experimental {
 		return nil
 	}
@@ -66,6 +70,15 @@ func Process(h *types.Header, blockBal types.BlockAccessList, vio *state.Version
 	err := computedBlockBal.Validate()
 	if err != nil {
 		return fmt.Errorf("block %d: invalid computed block access list: %w", blockNum, err)
+	}
+	if sink != nil {
+		encoded, err := types.EncodeBlockAccessListBytes(computedBlockBal)
+		if err != nil {
+			return fmt.Errorf("block %d: encode computed block access list: %w", blockNum, err)
+		}
+		if err := sink.Append(blockNum, blockHash, encoded); err != nil {
+			return fmt.Errorf("block %d: persist temp block access list: %w", blockNum, err)
+		}
 	}
 	if !isEIP7928 {
 		return nil

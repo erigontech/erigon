@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/bal/offlinebal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -88,6 +89,11 @@ type ExecuteBlockCfg struct {
 	// the ephemeral single-block replay harness sets it directly since the env is
 	// read only at package init.
 	discardCommitment bool
+
+	// offline-BAL store: generate persists a synthetic BAL per block, use feeds
+	// stored BALs into execution/commitment. At most one is set.
+	offlineBALWriter *offlinebal.Writer
+	offlineBALReader *offlinebal.Reader
 }
 
 func StageExecuteBlocksCfg(
@@ -148,6 +154,15 @@ func (cfg ExecuteBlockCfg) DirsDataDir() string { return cfg.dirs.DataDir }
 // WithAuthor returns a copy of the config with the author set.
 func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 	cfg.author = author
+	return cfg
+}
+
+// WithOfflineBAL returns a copy of the config wired to a offline-BAL store: a writer
+// to persist synthetic BALs during generation, or a reader to feed stored BALs
+// into execution. Pass nil for the one not in use.
+func (cfg ExecuteBlockCfg) WithOfflineBAL(w *offlinebal.Writer, r *offlinebal.Reader) ExecuteBlockCfg {
+	cfg.offlineBALWriter = w
+	cfg.offlineBALReader = r
 	return cfg
 }
 
