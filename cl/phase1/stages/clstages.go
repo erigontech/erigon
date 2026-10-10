@@ -92,6 +92,8 @@ type Args struct {
 	targetSlot, seenSlot   uint64
 
 	hasDownloaded bool
+	// headUnpublished is set while the fork choice head differs from the head the beacon API serves.
+	headUnpublished bool
 }
 
 func ClStagesCfg(
@@ -186,6 +188,16 @@ func MetaCatchingUp(args Args) StageName {
 	return ""
 }
 
+// catchUpAfterImport is MetaCatchingUp for the stages that import blocks. Before going back to ChainTipSync, which can
+// wait a slot or longer for the next block, it publishes a newly imported head: validators attest to the served head.
+func catchUpAfterImport(args Args) StageName {
+	next := MetaCatchingUp(args)
+	if next == ChainTipSync && args.headUnpublished {
+		return ForkChoice
+	}
+	return next
+}
+
 func processBlock(ctx context.Context, cfg *Cfg, db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
@@ -260,6 +272,9 @@ func ConsensusClStages(ctx context.Context,
 			args.seenSlot = cfg.forkChoice.HighestSeen()
 			args.seenEpoch = args.seenSlot / cfg.beaconCfg.SlotsPerEpoch
 			args.targetSlot = cfg.ethClock.GetCurrentSlot()
+			if head, _, err := cfg.forkChoice.GetHead(nil); err == nil {
+				args.headUnpublished = head != cfg.syncedData.HeadRoot()
+			}
 			// Note that the target epoch is always one behind. this is because we are always behind in the current epoch, so it would not be very useful.
 			// Guard against uint64 underflow at genesis (GetCurrentEpoch() == 0).
 			if currentEpoch := cfg.ethClock.GetCurrentEpoch(); currentEpoch > 0 {
@@ -340,8 +355,11 @@ func ConsensusClStages(ctx context.Context,
 					if errors.Is(err, ErrForwardSyncStale) {
 						return ChainTipSync
 					}
-					if x := MetaCatchingUp(args); x != "" {
+					if x := catchUpAfterImport(args); x != "" {
 						return x
+					}
+					if args.headUnpublished && args.seenSlot < args.targetSlot {
+						return ForkChoice
 					}
 					return ChainTipSync
 				},
@@ -350,7 +368,7 @@ func ConsensusClStages(ctx context.Context,
 			ChainTipSync: {
 				Description: `if we are within the epoch but not at head, we run catchupblocks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args); x != "" {
+					if x := catchUpAfterImport(args); x != "" {
 						return x
 					}
 					return ForkChoice
