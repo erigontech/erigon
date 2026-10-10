@@ -138,7 +138,7 @@ func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight,
 		for i, fork := range forks {
 			// If our head is beyond this fork, continue to the next (we have a dummy
 			// fork of maxuint64 as the last item to always fail this check eventually).
-			if headHeight > fork || (forkIsTimeBased(fork) && headTime > fork) {
+			if headHeight >= fork || (forkIsTimeBased(fork) && headTime >= fork) {
 				continue
 			}
 			// Found the first unpassed fork block, check if our current state matches
