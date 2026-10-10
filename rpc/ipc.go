@@ -20,6 +20,7 @@
 package rpc
 
 import (
+	"context"
 	"net"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -38,5 +39,23 @@ func (s *Server) ServeListener(l net.Listener) error {
 		}
 		log.Trace("Accepted RPC connection", "conn", conn.RemoteAddr())
 		go s.ServeCodec(NewCodec(&heldConn{Conn: conn}), 0)
+	}
+}
+
+// DialIPC creates a new client that connects to the unix socket at endpoint.
+//
+// The context is used for the initial connection establishment. It does not
+// affect subsequent interactions with the client.
+func DialIPC(ctx context.Context, endpoint string, logger log.Logger) (*Client, error) {
+	return newClient(ctx, new(clientConfig), newClientTransportIPC(endpoint), logger)
+}
+
+func newClientTransportIPC(endpoint string) reconnectFunc {
+	return func(ctx context.Context) (ServerCodec, error) {
+		conn, err := new(net.Dialer).DialContext(ctx, "unix", endpoint)
+		if err != nil {
+			return nil, err
+		}
+		return NewCodec(conn), nil
 	}
 }
