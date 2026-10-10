@@ -128,6 +128,9 @@ type ReadSet struct {
 	codeHash              map[accounts.Address]VersionedRead[accounts.CodeHash]
 	codeSize              map[accounts.Address]VersionedRead[int]
 	storage               map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int]
+	// slotMapPeak is the most slots each kept storage map has held: a cleared
+	// map keeps the buckets it grew.
+	slotMapPeak map[accounts.Address]int
 
 	// access carries EIP-7928 "address was accessed" marks (with the
 	// non-revertable "real EVM access" bit) on the read side, so the access set
@@ -136,8 +139,14 @@ type ReadSet struct {
 }
 
 func (s *ReadSet) entries() int {
-	return len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
-		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize) + len(s.storage)
+	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
+		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize)
+	// Slots, not addresses: one contract's slot map is what a reused set keeps,
+	// and a map never shrinks back.
+	for _, inner := range s.storage {
+		n += len(inner)
+	}
+	return n
 }
 
 func (s *ReadSet) clearForReuse() {
@@ -151,9 +160,39 @@ func (s *ReadSet) clearForReuse() {
 	clear(s.code)
 	clear(s.codeHash)
 	clear(s.codeSize)
-	clear(s.storage)
+	// Keep the per-address slot maps: a call that reads one contract's slots
+	// would otherwise regrow its map from scratch on every later call. Only
+	// this call's contracts stay, or a run of calls on different contracts
+	// would pin a map each while every entries() count looked small.
+	if len(s.storage) <= maxReusedStorageAddrs {
+		held := 0
+		for addr, inner := range s.storage {
+			if len(inner) == 0 {
+				delete(s.storage, addr)
+				delete(s.slotMapPeak, addr)
+				continue
+			}
+			if s.slotMapPeak == nil {
+				s.slotMapPeak = make(map[accounts.Address]int, len(s.storage))
+			}
+			peak := max(s.slotMapPeak[addr], len(inner))
+			s.slotMapPeak[addr] = peak
+			held += peak
+			clear(inner)
+		}
+		if held > maxPooledEntries {
+			s.storage, s.slotMapPeak = nil, nil
+		}
+	} else {
+		// Nil, not cleared: a cleared map keeps the buckets those addresses grew.
+		s.storage, s.slotMapPeak = nil, nil
+	}
 	s.access = nil
 }
+
+// maxReusedStorageAddrs bounds how many per-address slot maps a reused read set
+// keeps; past it the outer map is dropped with them.
+const maxReusedStorageAddrs = 64
 
 func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.Address, tr VersionedRead[T]) {
 	if *m == nil {

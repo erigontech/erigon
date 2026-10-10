@@ -396,26 +396,32 @@ func ReleasePooled(ibs *IntraBlockState) {
 	if ibs.stateObjects == nil { // closed: its maps are gone
 		return
 	}
-	if ibs.resetForPool() {
-		ibsPool.Put(ibs)
+	// Measured before the reset clears what it measures.
+	poolable := ibs.poolable()
+	ibs.resetForReuse()
+	if !poolable {
+		ibs.Close()
 		return
 	}
-	ibs.Close()
+	ibsPool.Put(ibs)
 }
 
 // Maps never shrink, so a call that grew past this must not pin its capacity
 // for every later one.
 const maxPooledEntries = 16 * 1024
 
-// resetForPool clears everything one call left and reports whether ibs is
-// small enough to pool.
-func (ibs *IntraBlockState) resetForPool() bool {
+// poolable reports whether this call stayed small enough to hand on. Call it
+// before resetForReuse, which clears what it counts.
+func (ibs *IntraBlockState) poolable() bool {
+	return len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+ibs.versionedReads.entries() <= maxPooledEntries
+}
+
+// resetForReuse clears everything one call left. Reset is the per-tx boundary
+// and keeps what the next tx re-establishes; a call handed to another caller
+// must keep nothing.
+func (ibs *IntraBlockState) resetForReuse() {
 	reads := ibs.versionedReads
-	poolable := len(ibs.stateObjects)+len(ibs.nilAccounts)+ibs.accessList.entries()+reads.entries() <= maxPooledEntries
 	ibs.Reset()
-	if !poolable {
-		return false
-	}
 	// One call never hands its read set out, so the maps keep their capacity
 	// instead of the empty set Reset installs.
 	reads.clearForReuse()
@@ -429,7 +435,6 @@ func (ibs *IntraBlockState) resetForPool() bool {
 	// Reset keeps the tx context and fork flags; New starts them at zero.
 	ibs.blockNum, ibs.version = 0, 0
 	ibs.eip8246, ibs.eip161, ibs.isAura = false, false, false
-	return true
 }
 
 // SetNoConflictDetection marks an execution that neither ValidateVersion checks
