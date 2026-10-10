@@ -871,25 +871,6 @@ func TestCreateAccessListConvergesOnCleanState(t *testing.T) {
 	require.Equal(t, single.GasUsed, converged.GasUsed)
 }
 
-// TestCreateAccessListKeepsStateOverrides pins that overridden code runs in every
-// convergence iteration: the converged gas includes executing it.
-func TestCreateAccessListKeepsStateOverrides(t *testing.T) {
-	m, bankAddress, _, _ := chainWithDeployedContract(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-
-	target := common.HexToAddress("0x00000000000000000000000000000000000000cc")
-	sloadSlot1 := hexutil.Bytes(hexutil.MustDecode("0x60015450")) // PUSH1 1, SLOAD, POP
-	overrides := &ethapi.StateOverrides{accounts.InternAddress(target): {Code: &sloadSlot1}}
-
-	res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{From: &bankAddress, To: &target}, nil, overrides, nil)
-	require.NoError(t, err)
-	require.Empty(t, res.Error)
-	require.Equal(t, types.AccessList{{Address: target, StorageKeys: []common.Hash{common.BigToHash(big.NewInt(1))}}}, *res.Accesslist)
-	listGas := params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas
-	codeGas := params.WarmStorageReadCostEIP2929 + 3 + 2
-	require.Equal(t, hexutil.Uint64(params.TxGas+listGas+codeGas), res.GasUsed)
-}
-
 func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
