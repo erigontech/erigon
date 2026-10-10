@@ -24,6 +24,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -131,9 +132,9 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 	}
 	for i := 1; i < len(keys); i++ {
 		alt := bytes.Clone(keys[i])
-		for j := len(alt) - 1; j >= 0; j-- {
-			if alt[j] > 0 {
-				alt[j] -= 1
+		for i, v := range slices.Backward(alt) {
+			if v > 0 {
+				alt[i]--
 				break
 			}
 		}
