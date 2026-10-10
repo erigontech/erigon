@@ -49,10 +49,6 @@ import (
 
 var mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
 
-// CommitmentFlushCallback is invoked once per flushed commitment-domain tuple
-// (key, value, step, txNum) by TemporalMemBatch.FlushWithCommitmentCallback.
-type CommitmentFlushCallback func(k []byte, v []byte, step kv.Step, txNum uint64)
-
 // KvList sort.Interface to sort write list by keys
 type KvList struct {
 	Keys []string
