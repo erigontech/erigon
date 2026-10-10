@@ -76,11 +76,15 @@ func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	statedb := state.NewWithVersionMap(
-		state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})),
-		state.NewVersionMap(nil),
-	)
-	statedb.SetNoMaterialize(noMaterialize)
+	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	// noMaterialize is bound to versionMap presence: a versionMap means the
+	// cache-free versioned path, no versionMap means the materialize path.
+	var statedb *state.IntraBlockState
+	if noMaterialize {
+		statedb = state.NewWithVersionMap(reader, state.NewVersionMap(nil))
+	} else {
+		statedb = state.New(reader)
+	}
 	return envFor(statedb, gasLimit)
 }
 

@@ -483,7 +483,6 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			// stateObject cache lets a reused IBS serve stale account state across
 			// txs (e.g. a revived account's code hash), producing a header the
 			// executor's noMaterialize run then disagrees with.
-			ibs.SetNoMaterialize(true)
 		}
 
 		b := &BlockGen{

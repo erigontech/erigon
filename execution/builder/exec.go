@@ -155,7 +155,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		// left empty by the cell-authoritative balance path would be marked
 		// deleted at finalize and then wrongly shadow the account on the next tx's
 		// existence read (spurious re-create → lost balance).
-		ibs.SetNoMaterialize(true)
 	}
 
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
