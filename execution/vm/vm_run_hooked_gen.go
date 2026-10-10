@@ -95,7 +95,7 @@ run:
 	for {
 		// Past the end of the code is STOP. Exiting here, out of line, spares
 		// every op a taken jump in GetOp.
-		if !false && pc >= uint64(len(contract.Code)) {
+		if true && pc >= uint64(len(contract.Code)) {
 			res, err = nil, errStopToken
 			break run
 		}
@@ -103,7 +103,7 @@ run:
 		// The hottest constant-gas opcodes run inline, without the jump table and
 		// its indirect call. A failed check falls through to the generic path,
 		// which reports the error.
-		if !false {
+		if true {
 			sLen := stack.len()
 			switch op {
 			case PUSH1:

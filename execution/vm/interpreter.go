@@ -493,6 +493,9 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 // anyTrace is true here; execution/vm/vmgen sets it to false in run.
 const anyTrace = true
 
+// fastPath is false here; execution/vm/vmgen sets it to true in run and runHooked.
+const fastPath = false
+
 // runTraced is Run's loop with the tracing code. execution/vm/vmgen generates
 // run in vm_run_gen.go from it, with anyTrace false and the fast-path switch,
 // and runHooked in vm_run_hooked_gen.go, with the switch and the tracing code.
@@ -577,7 +580,7 @@ run:
 	for {
 		// Past the end of the code is STOP. Exiting here, out of line, spares
 		// every op a taken jump in GetOp.
-		if !anyTrace && pc >= uint64(len(contract.Code)) {
+		if fastPath && pc >= uint64(len(contract.Code)) {
 			res, err = nil, errStopToken
 			break run
 		}
@@ -585,7 +588,7 @@ run:
 		// The hottest constant-gas opcodes run inline, without the jump table and
 		// its indirect call. A failed check falls through to the generic path,
 		// which reports the error.
-		if !anyTrace {
+		if fastPath {
 			// execution/vm/vmgen inserts the fastOps switch here.
 			callContext.gas = gasLeft
 		}
