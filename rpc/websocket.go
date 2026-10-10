@@ -25,7 +25,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -33,6 +35,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -50,6 +53,11 @@ const (
 	wsPingWriteTimeout = 5 * time.Second
 	wsMessageSizeLimit = 32 * 1024 * 1024
 	heldWriteLimit     = int(64 * datasize.KB) // held bytes past which a coalesced batch writes out early
+	// defaultWSReadBudget caps the total bytes buffered across all in-progress
+	// WebSocket reads on a server, so concurrent connections cannot each hold a
+	// near-wsMessageSizeLimit partial frame and exhaust memory together. 0 disables it.
+	defaultWSReadBudget = 512 * 1024 * 1024
+	wsReadBufMinCap     = 4 * 1024 // initial read-buffer capacity, doubled as a frame fills
 )
 
 // WebsocketHandler returns a handler that serves JSON-RPC to WebSocket connections.
@@ -83,7 +91,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			logger.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
-		codec := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
+		codec := newWebsocketCodec(conn, hw.conn, s.wsReadBudget, r.Host, r.Header, r.RemoteAddr)
 		// Tag the connection context so BeginRo fails fast (ErrReadTxLimitExceeded)
 		// instead of blocking indefinitely when the DB semaphore is full.
 		// r.Context() remains valid for the lifetime of the WebSocket session because
@@ -256,12 +264,42 @@ func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {
 	return endpointURL.String(), header, nil
 }
 
+// wsReadBudget bounds the total bytes buffered across all in-progress WebSocket
+// message reads sharing it. wsMessageSizeLimit caps one message; this caps their
+// sum, so many connections cannot each hold a near-cap partial frame and exhaust
+// memory together. A nil budget, or a non-positive limit, is unlimited.
+type wsReadBudget struct {
+	limit int64 // set before serving, read concurrently thereafter
+	inUse atomic.Int64
+}
+
+func (b *wsReadBudget) acquire(n int64) bool {
+	if b == nil || b.limit <= 0 {
+		return true
+	}
+	if b.inUse.Add(n) > b.limit {
+		b.inUse.Add(-n)
+		return false
+	}
+	return true
+}
+
+func (b *wsReadBudget) release(n int64) {
+	if b == nil || b.limit <= 0 || n == 0 {
+		return
+	}
+	b.inUse.Add(-n)
+}
+
+var errWSReadBudgetExceeded = errors.New("websocket in-flight read budget exceeded")
+
 // wsConnAdapter adapts coder/websocket.Conn to satisfy the deadlineCloser interface
 // used by jsonCodec. A write deadline set by jsonCodec bounds the next write: on the
 // hijacked socket on the server side, as a context deadline on the client side.
 type wsConnAdapter struct {
 	conn     *websocket.Conn
 	netConn  *heldConn // the hijacked socket on the server side, nil on the client side
+	budget   *wsReadBudget
 	mu       sync.Mutex
 	deadline time.Time
 }
@@ -409,11 +447,52 @@ func (a *wsConnAdapter) encode(v any) error {
 	return err
 }
 
-// readFrame returns the next message. Every websocket frame is one message, so
-// it can be read in one go and checked once.
+// readFrame returns the next message, read through the shared budget so concurrent
+// partial frames stay bounded.
 func (a *wsConnAdapter) readFrame() ([]byte, error) {
-	_, data, err := a.conn.Read(context.Background())
+	_, r, err := a.conn.Reader(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	data, err := readCharged(r, a.budget)
+	if errors.Is(err, errWSReadBudgetExceeded) {
+		// A graceful close drains the rest of the declared frame with no read
+		// deadline, which a peer withholding it can stall; drop the socket instead.
+		_ = a.conn.CloseNow()
+	}
 	return data, err
+}
+
+// readCharged reads r to EOF into one buffer, charging budget for the buffer's
+// capacity as it grows, before each allocation, and releasing it before returning:
+// the heap holds the capacity, not just the bytes read. A growth the budget cannot
+// cover returns errWSReadBudgetExceeded. The buffer keeps one byte past the charged
+// capacity so a message that exactly fills the budget still reaches EOF, rather than
+// forcing another growth the budget would then wrongly reject.
+func readCharged(r io.Reader, budget *wsReadBudget) ([]byte, error) {
+	var charged int64
+	defer func() { budget.release(charged) }()
+	var buf []byte
+	for {
+		if len(buf) == cap(buf) {
+			next := max(2*charged, wsReadBufMinCap)
+			if !budget.acquire(next - charged) {
+				return nil, errWSReadBudgetExceeded
+			}
+			charged = next
+			grown := make([]byte, len(buf), int(next)+1)
+			copy(grown, buf)
+			buf = grown
+		}
+		n, err := r.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return buf, nil
+			}
+			return nil, err
+		}
+	}
 }
 
 type websocketCodec struct {
@@ -427,13 +506,14 @@ type websocketCodec struct {
 // NewWebsocketCodec wraps a coder websocket connection as a ServerCodec.
 // remoteAddr should be r.RemoteAddr on the server side, or the endpoint URL on the client side.
 func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
-	return newWebsocketCodec(conn, nil, host, req, remoteAddr)
+	return newWebsocketCodec(conn, nil, nil, host, req, remoteAddr)
 }
 
-// newWebsocketCodec is NewWebsocketCodec with the hijacked socket, which bounds and coalesces server writes.
-func newWebsocketCodec(conn *websocket.Conn, netConn *heldConn, host string, req http.Header, remoteAddr string) *websocketCodec {
+// newWebsocketCodec is NewWebsocketCodec with the hijacked socket, which bounds and coalesces
+// server writes, and the shared read budget, which bounds in-flight read buffers.
+func newWebsocketCodec(conn *websocket.Conn, netConn *heldConn, budget *wsReadBudget, host string, req http.Header, remoteAddr string) *websocketCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
-	adapter := &wsConnAdapter{conn: conn, netConn: netConn}
+	adapter := &wsConnAdapter{conn: conn, netConn: netConn, budget: budget}
 	wc := &websocketCodec{
 		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
 		conn:      conn,

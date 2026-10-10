@@ -62,6 +62,7 @@ type Server struct {
 	traceRequests       bool // Whether to print requests at INFO level
 	debugSingleRequest  bool // Whether to print requests at INFO level
 	batchLimit          int  // Maximum number of requests in a batch
+	wsReadBudget        *wsReadBudget
 	logger              log.Logger
 	rpcSlowLogThreshold time.Duration
 }
@@ -74,6 +75,7 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 	server := &Server{
 		services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold,
+		wsReadBudget: &wsReadBudget{limit: defaultWSReadBudget},
 	}
 	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
@@ -93,6 +95,12 @@ func (s *Server) SetAllowList(allowList AllowList) {
 // SetBatchLimit sets limit of number of requests in a batch
 func (s *Server) SetBatchLimit(limit int) {
 	s.batchLimit = limit
+}
+
+// SetWSReadBudget sets the total bytes that may be buffered across all in-progress
+// WebSocket reads on this server. 0 or less disables the bound. Call before serving.
+func (s *Server) SetWSReadBudget(bytes int64) {
+	s.wsReadBudget.limit = bytes
 }
 
 // RegisterName creates a service for the given receiver type under the given name. When no
