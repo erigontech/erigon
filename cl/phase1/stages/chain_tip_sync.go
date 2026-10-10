@@ -190,8 +190,10 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		// Fetch blocks from the specified range
 		blocks, err := fetchBlocksFromReqResp(ctx, cfg, from, count)
 		if err != nil {
-			// Send error to the error channel and return
-			errCh <- err
+			select {
+			case errCh <- err:
+			case <-ctx.Done():
+			}
 			return
 		}
 
@@ -1256,11 +1258,11 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			return true
 		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
-		if execution_client.ValidationInterrupted(ctx, status, err) {
-			return continueGloasVerificationAfterItemFailure(ctx, &completeBatch)
-		}
 		if err != nil {
 			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
+		}
+		if status == execution_client.PayloadStatusNone && ctx.Err() != nil {
+			return false
 		}
 		status, retained := recordGloasPayloadRetryResult(
 			cfg.forkChoice,
