@@ -29,12 +29,18 @@ func (f *ForkChoiceStore) OnTick(time uint64) {
 	if time < f.genesisTime {
 		return
 	}
+	startSlot := f.Slot()
+	justified, _ := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	tickSlot := (time - f.genesisTime) / f.beaconCfg.SecondsPerSlot
 	for f.Slot() < tickSlot {
 		previousTime := f.genesisTime + (f.Slot()+1)*f.beaconCfg.SecondsPerSlot
 		f.onTickPerSlot(previousTime)
 	}
 	f.onTickPerSlot(time)
+	next, _ := f.unrealizedJustifiedCheckpoint.Load().(solid.Checkpoint)
+	if slot := f.Slot(); slot > startSlot && next.Epoch > justified.Epoch && f.highestSeen.Load()+2*f.beaconCfg.SlotsPerEpoch >= slot {
+		go func() { _, _ = f.getCheckpointState(next) }()
+	}
 }
 
 // onTickPerSlot implements the spec's on_tick_per_slot (consensus-specs/fork_choice).
