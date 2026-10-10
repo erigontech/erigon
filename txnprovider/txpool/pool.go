@@ -793,7 +793,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			// Skip transactions with very large gas limit
 			continue
 		}
-		executionGas, stateGas := protocol.InclusionContributions(mt.TxnSlot.GetGas(), isAmsterdam)
+		executionGas, stateGas := protocol.InclusionContributions(mt.TxnSlot.GetGas(), isAmsterdam, false)
 		if executionGas > availableGas.Execution {
 			continue
 		}

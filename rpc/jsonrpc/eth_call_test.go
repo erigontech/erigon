@@ -2425,3 +2425,124 @@ func TestCallArgsRejectOtherChainID(t *testing.T) {
 		})
 	}
 }
+
+// TestExecutionGasCapAmsterdam checks that after Amsterdam (EIP-8037) the read-only calls (eth_call,
+// debug_traceCall, trace_call and eth_simulateV1 without validation) may spend more than
+// params.MaxTxnGasLimit on execution, while eth_estimateGas, eth_createAccessList and eth_simulateV1
+// with validation are still bound by it.
+func TestExecutionGasCapAmsterdam(t *testing.T) {
+	const (
+		threshold = 20_000_000 // Execution gas the contract requires, above params.MaxTxnGasLimit
+		gasLimit  = 30_000_000 // Gas limit of the calls
+		gasCap    = 50_000_000 // RPC gas cap
+	)
+	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	contract := common.HexToAddress("0x000000000000000000000000000000000000c0de")
+	m := execmoduletester.New(t, execmoduletester.WithKey(bankKey), execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config:   chain.AllProtocolChanges,
+		GasLimit: 60_000_000,
+		Alloc: types.GenesisAlloc{
+			bank: {Balance: new(big.Int).Mul(big.NewInt(100), big.NewInt(1e18))},
+			// Returns the gas left at entry if it is at least threshold, reverts otherwise:
+			//   GAS PUSH4 threshold DUP2 LT PUSH1 0x11 JUMPI
+			//   PUSH0 MSTORE PUSH1 0x20 PUSH0 RETURN
+			//   JUMPDEST PUSH0 PUSH0 REVERT
+			contract: {Code: hexutil.MustDecode("0x5a6301312d0081106011575f5260205ff35b5f5ffd"), Balance: new(big.Int)},
+		},
+	}))
+	ctx := context.Background()
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	gas := hexutil.Uint64(gasLimit)
+	args := ethapi.CallArgs{From: &bank, To: &contract, Gas: &gas, MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(100e9))}
+	requireGasLeft := func(t *testing.T, ret []byte) {
+		t.Helper()
+		require.Len(t, ret, 32)
+		require.GreaterOrEqual(t, new(uint256.Int).SetBytes(ret).Uint64(), uint64(threshold))
+	}
+
+	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ethAPI.GasCap = gasCap
+
+	t.Run("eth_call", func(t *testing.T) {
+		ret, err := ethAPI.Call(ctx, args, &latest, nil, nil)
+		require.NoError(t, err)
+		requireGasLeft(t, ret)
+	})
+	t.Run("debug_traceCall", func(t *testing.T) {
+		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{GasCap: gasCap})
+		var buf bytes.Buffer
+		s := jsonstream.New(&buf)
+		require.NoError(t, api.TraceCall(ctx, args, &latest, nil, s))
+		require.NoError(t, s.Flush())
+		var res ethapi.ExecutionResult
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &res))
+		require.False(t, res.Failed, buf.String())
+		requireGasLeft(t, hexutil.MustDecode(res.ReturnValue))
+	})
+	t.Run("trace_call", func(t *testing.T) {
+		api := NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{GasCap: gasCap})
+		res, err := api.Call(ctx, TraceCallParam{From: &bank, To: &contract, Gas: &gas}, []string{TraceTypeTrace}, &latest, nil)
+		require.NoError(t, err)
+		requireGasLeft(t, res.Output)
+	})
+	t.Run("eth_estimateGas", func(t *testing.T) {
+		// The estimate must not be a gas limit a transaction cannot execute with.
+		estimate, err := ethAPI.EstimateGas(ctx, &args, &latest, nil, nil)
+		require.Error(t, err, "estimate %d", estimate)
+	})
+	t.Run("eth_createAccessList", func(t *testing.T) {
+		res, err := ethAPI.CreateAccessList(ctx, args, &latest, nil, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, res.Error)
+	})
+	for _, validation := range []bool{false, true} {
+		t.Run(fmt.Sprintf("eth_simulateV1 validation=%v", validation), func(t *testing.T) {
+			res, err := ethAPI.SimulateV1(ctx, SimulationRequest{
+				BlockStateCalls: []SimulatedBlock{{Calls: []ethapi.CallArgs{args}}},
+				Validation:      validation,
+			}, latest)
+			require.NoError(t, err)
+			call := res[0].Calls[0]
+			if validation {
+				require.Equal(t, hexutil.Uint64(types.ReceiptStatusFailed), call.Status)
+				return
+			}
+			require.Equal(t, hexutil.Uint64(types.ReceiptStatusSuccessful), call.Status, "%v", call.Error)
+			requireGasLeft(t, hexutil.MustDecode(call.ReturnData))
+		})
+	}
+}
+
+// TestSimulateGasLimitAmsterdam checks that after Amsterdam (EIP-8037) the default and the maximum gas of a
+// call in eth_simulateV1 without validation account for the uncapped execution gas of the preceding calls.
+func TestSimulateGasLimitAmsterdam(t *testing.T) {
+	const gasLimit = 30_000_000 // Block gas limit, above params.MaxTxnGasLimit
+	m, _, bank := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	api.GasCap = 50_000_000
+	blockGasLimit := hexutil.Uint64(gasLimit)
+	simulate := func(calls ...ethapi.CallArgs) (SimulationResult, error) {
+		return api.SimulateV1(context.Background(), SimulationRequest{
+			BlockStateCalls: []SimulatedBlock{{BlockOverrides: &ethapi.BlockOverrides{GasLimit: &blockGasLimit}, Calls: calls}},
+		}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	}
+	newArgs := func(gas *hexutil.Uint64) ethapi.CallArgs {
+		return ethapi.CallArgs{From: &bank, To: &bank, Gas: gas}
+	}
+
+	// A call without gas following another call defaults to the gas left.
+	res, err := simulate(newArgs(nil), newArgs(nil))
+	require.NoError(t, err)
+	for i, call := range res[0].Calls {
+		require.Equal(t, hexutil.Uint64(types.ReceiptStatusSuccessful), call.Status, "call %d: %v", i, call.Error)
+	}
+
+	// A call with more gas than left in the block is rejected with the block gas limit error.
+	gas := hexutil.Uint64(gasLimit)
+	_, err = simulate(newArgs(nil), newArgs(&gas))
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeBlockGasLimitReached, rpcErr.ErrorCode())
+}
