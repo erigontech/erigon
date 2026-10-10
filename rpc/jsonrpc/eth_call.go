@@ -276,7 +276,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if err != nil {
 			return 0, err
 		}
-		defer initialState.Close()
 	}
 
 	// Recap the highest gas limit with account's available balance.
@@ -1075,8 +1074,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
 	}
 
-	ibs := state.New(stateReader)
-	defer ibs.Close()
+	ibs := state.NewPooled(stateReader)
+	defer state.ReleasePooled(ibs)
 
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
