@@ -393,6 +393,9 @@ func NewPooled(stateReader StateReader) *IntraBlockState {
 // ReleasePooled hands ibs to the next NewPooled, or closes it when it grew too
 // large to keep.
 func ReleasePooled(ibs *IntraBlockState) {
+	if ibs.stateObjects == nil { // closed: its maps are gone
+		return
+	}
 	if ibs.resetForPool() {
 		ibsPool.Put(ibs)
 		return
