@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/sentinel"
+	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
@@ -110,4 +111,41 @@ func receivePeerRequestTestValue[T any](t *testing.T, values <-chan T) T {
 		var zero T
 		return zero
 	}
+}
+
+// Requests to one peer share MAX_CONCURRENT_REQUESTS open streams per request type, across protocol versions and alternatives lists.
+func TestPeerRequestLimitsConcurrentStreamsPerPeerAndRequestType(t *testing.T) {
+	release := make(chan struct{})
+	reached := make(chan string, 8)
+	server := &SentinelServer{peerRequestBackend: peerRequestBackendStub{
+		handler: http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+			reached <- request.Header.Get("REQRESP-PEER-ID") + " " + request.Header.Get("REQRESP-TOPIC")
+			<-release
+		}),
+	}}
+	request := func(pid, topic string) <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := server.requestPeer(t.Context(), peer.ID(pid), &sentinelproto.RequestData{Topic: topic, Data: []byte("request")})
+			done <- err
+		}()
+		return done
+	}
+
+	blocksByRange := communication.BeaconBlocksByRangeProtocolV2 + "," + communication.BeaconBlocksByRangeProtocolV1
+	first, second := request("a", blocksByRange), request("a", blocksByRange)
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+
+	require.ErrorIs(t, receivePeerRequestTestValue(t, request("a", communication.BeaconBlocksByRangeProtocolV2)), ErrPeerBusy)
+	otherPeer := request("b", communication.BeaconBlocksByRangeProtocolV1)
+	otherRequestType := request("a", communication.DataColumnSidecarsByRootProtocolV1)
+	receivePeerRequestTestValue(t, reached)
+	receivePeerRequestTestValue(t, reached)
+
+	close(release)
+	for _, done := range []<-chan error{first, second, otherPeer, otherRequestType} {
+		require.NotErrorIs(t, receivePeerRequestTestValue(t, done), ErrPeerBusy)
+	}
+	require.NotErrorIs(t, receivePeerRequestTestValue(t, request("a", communication.BeaconBlocksByRangeProtocolV2)), ErrPeerBusy, "finished streams free their slots")
 }
