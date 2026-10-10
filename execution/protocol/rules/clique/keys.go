@@ -14,30 +14,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package chain
+package clique
 
-import "fmt"
-
-type RulesName string
-
-const (
-	AuRaRules   RulesName = "aura"
-	EtHashRules RulesName = "ethash"
-	CliqueRules RulesName = "clique"
+import (
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 )
 
-// ValidRulesNames is the set of recognised consensus engine names.
-var ValidRulesNames = map[RulesName]struct{}{
-	AuRaRules:   {},
-	EtHashRules: {},
-	CliqueRules: {},
-	"":          {}, // empty is valid (defaults to ethash)
+func SnapshotFullKey(number uint64, hash common.Hash) []byte {
+	return append(dbutils.EncodeBlockNumber(number), hash[:]...)
 }
 
-// Validate returns an error if the RulesName is not a recognised consensus engine.
-func (r RulesName) Validate() error {
-	if _, ok := ValidRulesNames[r]; !ok {
-		return fmt.Errorf("unsupported consensus engine %q (supported: aura, clique, ethash)", r)
-	}
-	return nil
+func SnapshotKey(number uint64) []byte {
+	return dbutils.EncodeBlockNumber(number)
+}
+
+func LastSnapshotKey() []byte {
+	return []byte{0}
 }

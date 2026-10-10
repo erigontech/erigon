@@ -445,7 +445,11 @@ var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = ChaindataTables
+
+const CliqueSeparate = "CliqueSeparate"
+const CliqueLastSnapshot = "CliqueLastSnapshot"
+
+var ConsensusTables = append([]string{CliqueSeparate, CliqueLastSnapshot}, ChaindataTables...)
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,

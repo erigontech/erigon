@@ -125,6 +125,7 @@ type Config struct {
 
 	// Various rules engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
+	Clique *CliqueConfig `json:"clique,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
 
 	// L2 carries opaque L2-chain-specific config. L2JSON is decoded from the
@@ -314,6 +315,8 @@ func (c *Config) String() string {
 
 func (c *Config) getEngine() string {
 	switch {
+	case c.Clique != nil:
+		return c.Clique.String()
 	case c.Ethash != nil:
 		return c.Ethash.String()
 	case c.Aura != nil:
@@ -926,6 +929,13 @@ func (err *ConfigCompatError) HasTimestampConflict() bool { return err.WhatTime 
 
 // EthashConfig is the rules engine configs for proof-of-work based sealing.
 type EthashConfig struct{}
+
+type CliqueConfig struct {
+	Period uint64 `json:"period"`
+	Epoch  uint64 `json:"epoch"`
+}
+
+func (c *CliqueConfig) String() string { return "clique" }
 
 // String implements the stringer interface, returning the rules engine details.
 func (c *EthashConfig) String() string {
