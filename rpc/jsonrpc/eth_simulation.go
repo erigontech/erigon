@@ -571,6 +571,12 @@ func (s *simulator) simulateBlock(
 		// Snapshot and clear dirty set so CommitBlock won't apply EIP-161 to
 		// override-only accounts (they were not "touched" by any transaction).
 		overrideDirtyAccounts = intraBlockState.ExtractAndClearDirty()
+		for addr, account := range *stateOverrides {
+			// An empty storage replacement journals nothing, but must still clear the stored slots.
+			if account.State != nil {
+				overrideDirtyAccounts[addr] = struct{}{}
+			}
+		}
 	}
 
 	vmConfig := vm.Config{NoBaseFee: !s.validation}
