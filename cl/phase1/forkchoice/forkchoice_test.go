@@ -71,6 +71,40 @@ func TestHighestImportedDropsBlocksCutOffByAnInvalidPayload(t *testing.T) {
 	require.Equal(t, uint64(1), store.HighestImported())
 }
 
+// While the recompute after an invalidation waits for the store lock, no reader may return the
+// watermark from before the invalidation.
+func TestHighestImportedReadersWaitForTheRecompute(t *testing.T) {
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+
+	store.mu.Lock() // a writer, such as OnBlock, holds the lock
+	results := make(chan uint64, 128)
+	readers := 0
+	read := func() {
+		readers++
+		go func() { results <- store.HighestImported() }()
+	}
+	read()
+	for deadline := time.Now().Add(100 * time.Millisecond); time.Now().Before(deadline) && readers < cap(results); {
+		read()
+		select {
+		case slot := <-results:
+			store.mu.Unlock()
+			t.Fatalf("a reader returned slot %d before the recompute", slot)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	store.mu.Unlock()
+	for range readers {
+		select {
+		case slot := <-results:
+			require.Equal(t, uint64(1), slot)
+		case <-time.After(5 * time.Second):
+			t.Fatal("a reader did not return after the lock was released")
+		}
+	}
+}
+
 func TestHighestImportedKeepsBlocksOnTheEmptyVariantOfAnInvalidPayload(t *testing.T) {
 	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
 	anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
