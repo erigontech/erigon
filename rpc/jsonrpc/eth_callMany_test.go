@@ -399,32 +399,44 @@ func TestCallManyStateOverridePrecompile(t *testing.T) {
 	revert := hexutil.Bytes(hexutil.MustDecode("0x60006000fd"))
 	input := hexutil.Bytes{0xde, 0xad, 0xbe, 0xef}
 	latest := StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)}
-	call := func(to common.Address, overrides *ethapi.StateOverrides) map[string]any {
-		args := ethapi.CallArgs{
+	callTo := func(to common.Address) ethapi.CallArgs {
+		return ethapi.CallArgs{
 			From:         &bankAddr,
 			To:           &to,
 			Data:         &input,
 			MaxFeePerGas: (*hexutil.U256)(uint256.NewInt(2e9)),
 		}
-		res, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{args}}}, latest, overrides, nil)
-		require.NoError(t, err)
-		require.Len(t, res, 1)
-		require.Len(t, res[0], 1)
-		return res[0][0]
 	}
 
 	t.Run("code replaces the precompile", func(t *testing.T) {
-		res := call(identity, &ethapi.StateOverrides{
+		res, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{callTo(identity)}}}, latest, &ethapi.StateOverrides{
 			accounts.InternAddress(identity): {Code: &revert},
-		})
-		require.Equal(t, "execution reverted", res["error"])
+		}, nil)
+		require.NoError(t, err)
+		require.Len(t, res, 1)
+		require.Len(t, res[0], 1)
+		require.Equal(t, "execution reverted", res[0][0]["error"])
 	})
 
-	t.Run("moved precompile runs at the new address", func(t *testing.T) {
-		res := call(moveTo, &ethapi.StateOverrides{
+	t.Run("moved precompile runs at the new address in every call", func(t *testing.T) {
+		// The override is applied once, so the moved set has to reach every
+		// call of every bundle.
+		bundles := []Bundle{
+			{Transactions: []ethapi.CallArgs{callTo(moveTo), callTo(moveTo)}},
+			{Transactions: []ethapi.CallArgs{callTo(moveTo)}},
+		}
+		res, err := api.CallMany(context.Background(), bundles, latest, &ethapi.StateOverrides{
 			accounts.InternAddress(identity): {MovePrecompileTo: &moveTo},
-		})
-		require.NotContains(t, res, "error")
-		require.Equal(t, "deadbeef", res["value"])
+		}, nil)
+		require.NoError(t, err)
+		require.Len(t, res, 2)
+		require.Len(t, res[0], 2)
+		require.Len(t, res[1], 1)
+		for i, bundle := range res {
+			for j, call := range bundle {
+				require.NotContains(t, call, "error", "bundle %d, call %d", i, j)
+				require.Equal(t, "deadbeef", call["value"], "bundle %d, call %d", i, j)
+			}
+		}
 	})
 }

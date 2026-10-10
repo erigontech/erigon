@@ -847,9 +847,6 @@ func TestCreateAccessList(t *testing.T) {
 	})
 }
 
-// TestCreateAccessListConvergesOnCleanState pins that every convergence iteration
-// starts from the pre-state. Seeding the converged list makes the run execute
-// exactly once, which is the oracle for the multi-iteration run beside it.
 // A state override on a precompile applies to the access list run as it does
 // to eth_call: a code override replaces the precompile, and a move is accepted
 // on every pass of the convergence loop.
@@ -893,6 +890,9 @@ func TestCreateAccessListStateOverridePrecompile(t *testing.T) {
 	})
 }
 
+// TestCreateAccessListConvergesOnCleanState pins that every convergence iteration
+// starts from the pre-state. Seeding the converged list makes the run execute
+// exactly once, which is the oracle for the multi-iteration run beside it.
 func TestCreateAccessListConvergesOnCleanState(t *testing.T) {
 	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
