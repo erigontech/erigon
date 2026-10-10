@@ -64,7 +64,7 @@ func TestCallDataInputConflict(t *testing.T) {
 		},
 	}
 	with := func(calldata map[string]any) map[string]any {
-		// A nonce spares eth_createAccessList and eth_fillTransaction a txpool lookup.
+		// A nonce spares eth_fillTransaction a txpool lookup.
 		call := map[string]any{"from": bankAddr, "gas": "0x493e0", "maxFeePerGas": "0x77359400", "maxPriorityFeePerGas": "0x0", "nonce": "0x0"}
 		maps.Copy(call, calldata)
 		return call

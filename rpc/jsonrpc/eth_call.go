@@ -24,7 +24,6 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -49,8 +48,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -1014,37 +1011,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		args.From = &common.Address{}
 	}
 
-	var to common.Address
-	if args.To != nil {
-		to = *args.To
-	} else {
-		// Require nonce to calculate address of created contract
-		if args.Nonce == nil {
-			var nonce uint64
-			reply, err := api.txPool.Nonce(ctx, &txpoolproto.NonceRequest{
-				Address: gointerfaces.ConvertAddressToH160(*args.From),
-			}, &grpc.EmptyCallOption{})
-			if err != nil {
-				return nil, err
-			}
-			if reply.Found {
-				nonce = reply.Nonce + 1
-			} else {
-				a, err := stateReader.ReadAccountData(accounts.InternAddress(*args.From))
-				if err != nil {
-					return nil, err
-				}
-				if a == nil {
-					return nil, errors.New("Account: " + args.From.Hex() + " not found")
-				}
-				nonce = a.Nonce + 1
-			}
-
-			args.Nonce = (*hexutil.Uint64)(&nonce)
-		}
-		to = types.CreateAddress(*args.From, uint64(*args.Nonce))
-	}
-
 	// Retrieve the precompiles since they don't need to be added to the access list
 	blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
@@ -1131,7 +1097,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		result := &accessListResult{Accesslist: &accessList, Error: errString, GasUsed: hexutil.Uint64(res.ReceiptGasUsed)}
 		if args.To != nil {
-			optimizeWarmAddrAndAdjustGas(result, to)
+			optimizeWarmAddrAndAdjustGas(result, *args.To)
 		}
 		if optimizeGas != nil && *optimizeGas {
 			optimizeWarmAddrInAccessList(result, header.Coinbase)
