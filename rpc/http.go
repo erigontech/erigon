@@ -112,11 +112,7 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 
 // DialHTTP creates a new RPC client that connects to an RPC server over HTTP.
 func DialHTTP(endpoint string, logger log.Logger) (*Client, error) {
-	return DialHTTPWithClient(endpoint, newDefaultHTTPClient(), logger)
-}
-
-func newDefaultHTTPClient() *http.Client {
-	return &http.Client{Timeout: 30 * time.Second}
+	return DialHTTPWithClient(endpoint, nil, logger)
 }
 
 func newClientTransportHTTP(endpoint string, cfg *clientConfig) reconnectFunc {
@@ -127,7 +123,7 @@ func newClientTransportHTTP(endpoint string, cfg *clientConfig) reconnectFunc {
 
 	client := cfg.httpClient
 	if client == nil {
-		client = newDefaultHTTPClient()
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 
 	hc := &httpConn{
@@ -146,18 +142,10 @@ func newClientTransportHTTP(endpoint string, cfg *clientConfig) reconnectFunc {
 // be applied by Client when making a request using the returned context.
 func NewContextWithHeaders(ctx context.Context, h http.Header) context.Context {
 	if len(h) == 0 {
-		// This check ensures the header map set in context will never be nil.
 		return ctx
 	}
-
-	var ctxh http.Header
-	prev, ok := ctx.Value(mdHeaderKey{}).(http.Header)
-	if ok {
-		ctxh = setHeaders(prev.Clone(), h)
-	} else {
-		ctxh = h.Clone()
-	}
-	return context.WithValue(ctx, mdHeaderKey{}, ctxh)
+	prev, _ := ctx.Value(mdHeaderKey{}).(http.Header)
+	return context.WithValue(ctx, mdHeaderKey{}, setHeaders(setHeaders(http.Header{}, prev), h))
 }
 
 type mdHeaderKey struct{}

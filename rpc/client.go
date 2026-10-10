@@ -194,7 +194,7 @@ func DialOptions(ctx context.Context, rawurl string, logger log.Logger, options 
 
 	cfg := new(clientConfig)
 	for _, opt := range options {
-		opt.applyOption(cfg)
+		opt(cfg)
 	}
 
 	var reconnect reconnectFunc

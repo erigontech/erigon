@@ -1081,7 +1081,7 @@ func pipeClient(t *testing.T, opts ...ClientOption) (*Client, io.Writer, *json.D
 	outR, outW := io.Pipe()
 	cfg := new(clientConfig)
 	for _, opt := range opts {
-		opt.applyOption(cfg)
+		opt(cfg)
 	}
 	client, err := newClient(context.Background(), cfg, newClientTransportIO(inR, outW), log.New())
 	require.NoError(t, err)

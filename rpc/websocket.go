@@ -222,7 +222,7 @@ func parseOriginURL(origin string) (string, string, string, error) {
 func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logger) (*Client, error) {
 	cfg := new(clientConfig)
 	if origin != "" {
-		cfg.setHeader("origin", origin)
+		cfg.headers().Set("origin", origin)
 	}
 	connect, err := newClientTransportWS(endpoint, cfg)
 	if err != nil {
@@ -232,10 +232,7 @@ func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logg
 }
 
 func newClientTransportWS(endpoint string, cfg *clientConfig) (reconnectFunc, error) {
-	var dialOpts websocket.DialOptions
-	if cfg.wsDialOptions != nil {
-		dialOpts = *cfg.wsDialOptions
-	}
+	dialOpts := cfg.wsDialOptions
 	dialURL, urlHeader, err := wsClientHeaders(endpoint, "")
 	if err != nil {
 		return nil, err
@@ -245,11 +242,8 @@ func newClientTransportWS(endpoint string, cfg *clientConfig) (reconnectFunc, er
 		setHeaders(header, h)
 	}
 	readLimit := int64(wsMessageSizeLimit)
-	if cfg.wsMessageSizeLimit != nil && *cfg.wsMessageSizeLimit >= 0 {
+	if cfg.wsMessageSizeLimit != nil {
 		readLimit = *cfg.wsMessageSizeLimit
-		if readLimit == 0 {
-			readLimit = -1 // coder/websocket's "no limit"
-		}
 	}
 
 	connect := func(ctx context.Context) (ServerCodec, error) {
