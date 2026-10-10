@@ -33,6 +33,7 @@ import (
 type TxPoolAPI interface {
 	Content(ctx context.Context) (TxPoolContent, error)
 	ContentFrom(ctx context.Context, addr common.Address) (TxPoolContentFrom, error)
+	Inspect(ctx context.Context) (map[string]map[string]map[string]string, error)
 }
 
 // TxPoolAPIImpl data structure to store things needed for net_ commands
@@ -58,24 +59,39 @@ func flattenTxs(txs []types.Transaction) map[string]*ethapi.RPCTransaction {
 }
 
 func (api *TxPoolAPIImpl) Content(ctx context.Context) (TxPoolContent, error) {
-	reply, err := api.pool.All(ctx, &txpoolproto.AllRequest{})
+	pending, queued, err := api.poolContent(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	content := TxPoolContent{
-		"pending": make(map[string]map[string]*ethapi.RPCTransaction),
-		"queued":  make(map[string]map[string]*ethapi.RPCTransaction),
+		"pending": make(map[string]map[string]*ethapi.RPCTransaction, len(pending)),
+		"queued":  make(map[string]map[string]*ethapi.RPCTransaction, len(queued)),
+	}
+	for account, txs := range pending {
+		content["pending"][account.Hex()] = flattenTxs(txs)
+	}
+	for account, txs := range queued {
+		content["queued"][account.Hex()] = flattenTxs(txs)
+	}
+	return content, nil
+}
+
+// poolContent returns the pool's transactions grouped by sender and split into pending and queued.
+func (api *TxPoolAPIImpl) poolContent(ctx context.Context) (pending, queued map[common.Address][]types.Transaction, err error) {
+	reply, err := api.pool.All(ctx, &txpoolproto.AllRequest{})
+	if err != nil {
+		return nil, nil, err
 	}
 
-	pending := make(map[common.Address][]types.Transaction, 8)
-	queued := make(map[common.Address][]types.Transaction, 8)
+	pending = make(map[common.Address][]types.Transaction, 8)
+	queued = make(map[common.Address][]types.Transaction, 8)
 	for i := range reply.Txs {
 		txn, err := types.DecodeWrappedTransaction(reply.Txs[i].RlpTx)
 		if err != nil {
-			return nil, fmt.Errorf("decoding transaction from: %x: %w", reply.Txs[i].RlpTx, err)
+			return nil, nil, fmt.Errorf("decoding transaction from: %x: %w", reply.Txs[i].RlpTx, err)
 		}
-		// Blob transactions (type 3) are excluded from txpool_content, matching Geth and Nethermind behaviour.
+		// Blob transactions (type 3) are excluded from txpool_content and txpool_inspect, matching Geth and Nethermind behaviour.
 		// Geth's BlobPool.Content() returns empty maps; Nethermind queries only the standard pool.
 		if txn.Type() == types.BlobTxType {
 			continue
@@ -85,25 +101,12 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (TxPoolContent, error) {
 		// Base fee sub-pool transactions are nonce-ready and otherwise valid, waiting only for the
 		// base fee to drop, which is what Geth keeps in its pending list, so they are pending here too.
 		case txpoolproto.AllReply_PENDING, txpoolproto.AllReply_BASE_FEE:
-			if _, ok := pending[addr]; !ok {
-				pending[addr] = make([]types.Transaction, 0, 4)
-			}
 			pending[addr] = append(pending[addr], txn)
 		case txpoolproto.AllReply_QUEUED:
-			if _, ok := queued[addr]; !ok {
-				queued[addr] = make([]types.Transaction, 0, 4)
-			}
 			queued[addr] = append(queued[addr], txn)
 		}
 	}
-
-	for account, txs := range pending {
-		content["pending"][account.Hex()] = flattenTxs(txs)
-	}
-	for account, txs := range queued {
-		content["queued"][account.Hex()] = flattenTxs(txs)
-	}
-	return content, nil
+	return pending, queued, nil
 }
 
 func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) (TxPoolContentFrom, error) {
@@ -159,40 +162,39 @@ func (api *TxPoolAPIImpl) Status(ctx context.Context) (map[string]hexutil.Uint, 
 	}, nil
 }
 
-/*
-
 // Inspect retrieves the content of the transaction pool and flattens it into an
 // easily inspectable list.
-func (s *PublicTxPoolAPI) Inspect() map[string]map[string]map[string]string {
-	content := map[string]map[string]map[string]string{
-		"pending": make(map[string]map[string]string),
-		"queued":  make(map[string]map[string]string),
+func (api *TxPoolAPIImpl) Inspect(ctx context.Context) (map[string]map[string]map[string]string, error) {
+	pending, queued, err := api.poolContent(ctx)
+	if err != nil {
+		return nil, err
 	}
-	pending, queue := s.b.TxPoolContent()
 
-	// Define a formatter to flatten a transaction into a string
-	var format = func(tx *types.Transaction) string {
-		if to := tx.To(); to != nil {
-			return fmt.Sprintf("%s: %v wei + %v gas × %v wei", tx.To().Hex(), tx.Value(), tx.Gas(), tx.GasPrice())
-		}
-		return fmt.Sprintf("contract creation: %v wei + %v gas × %v wei", tx.Value(), tx.Gas(), tx.GasPrice())
+	content := map[string]map[string]map[string]string{
+		"pending": make(map[string]map[string]string, len(pending)),
+		"queued":  make(map[string]map[string]string, len(queued)),
 	}
-	// Flatten the pending transactions
 	for account, txs := range pending {
-		dump := make(map[string]string)
-		for _, txn := range txs {
-			dump[fmt.Sprintf("%d", tx.Nonce())] = format(tx)
-		}
-		content["pending"][account.Hex()] = dump
+		content["pending"][account.Hex()] = inspectTxs(txs)
 	}
-	// Flatten the queued transactions
-	for account, txs := range queue {
-		dump := make(map[string]string)
-		for _, txn := range txs {
-			dump[fmt.Sprintf("%d", tx.Nonce())] = format(tx)
-		}
-		content["queued"][account.Hex()] = dump
+	for account, txs := range queued {
+		content["queued"][account.Hex()] = inspectTxs(txs)
 	}
-	return content
+	return content, nil
 }
-*/
+
+func inspectTxs(txs []types.Transaction) map[string]string {
+	dump := make(map[string]string, len(txs))
+	for _, txn := range txs {
+		dump[strconv.FormatUint(txn.GetNonce(), 10)] = inspectTx(txn)
+	}
+	return dump
+}
+
+// inspectTx uses the fee cap as the gas price, as Geth's Transaction.GasPrice does for EIP-1559 transactions.
+func inspectTx(txn types.Transaction) string {
+	if to := txn.GetTo(); to != nil {
+		return fmt.Sprintf("%s: %s wei + %d gas × %s wei", to.Hex(), txn.GetValue().Dec(), txn.GetGasLimit(), txn.GetFeeCap().Dec())
+	}
+	return fmt.Sprintf("contract creation: %s wei + %d gas × %s wei", txn.GetValue().Dec(), txn.GetGasLimit(), txn.GetFeeCap().Dec())
+}
