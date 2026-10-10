@@ -121,3 +121,60 @@ func TestStateOverridesBalanceDecoding(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, maxU256, balance.Hex()[2:])
 }
+
+// Only code and movePrecompileToAddress change what runs at a precompile address.
+func TestStateOverridesKeepPrecompileUnlessCodeOrMove(t *testing.T) {
+	t.Parallel()
+
+	identity := accounts.InternAddress(common.HexToAddress("0x04"))
+	modexp := accounts.InternAddress(common.HexToAddress("0x05"))
+	moveTo := accounts.InternAddress(common.HexToAddress("0x1111"))
+	rules := &chain.Rules{IsByzantium: true}
+
+	for _, tc := range []struct {
+		name     string
+		override string
+		kept     bool
+		movedTo  accounts.Address
+	}{
+		{name: "balance", override: `{"balance":"0x1"}`, kept: true},
+		{name: "nonce", override: `{"nonce":"0x1"}`, kept: true},
+		{name: "state", override: `{"state":{"0x0000000000000000000000000000000000000000000000000000000000000001":"0x0000000000000000000000000000000000000000000000000000000000000002"}}`, kept: true},
+		{name: "stateDiff", override: `{"stateDiff":{"0x0000000000000000000000000000000000000000000000000000000000000001":"0x0000000000000000000000000000000000000000000000000000000000000002"}}`, kept: true},
+		{name: "empty", override: `{}`, kept: true},
+		{name: "unknown field", override: `{"balanse":"0x1"}`, kept: true},
+		{name: "null code", override: `{"code":null,"balance":"0x1"}`, kept: true},
+		{name: "code", override: `{"code":"0x60006000fd"}`},
+		{name: "empty code", override: `{"code":"0x"}`},
+		{name: "code with balance", override: `{"code":"0x00","balance":"0x1"}`},
+		{name: "move", override: `{"movePrecompileToAddress":"0x0000000000000000000000000000000000001111"}`, movedTo: moveTo},
+		{name: "move with balance", override: `{"movePrecompileToAddress":"0x0000000000000000000000000000000000001111","balance":"0x1"}`, movedTo: moveTo},
+		{name: "move with code", override: `{"movePrecompileToAddress":"0x0000000000000000000000000000000000001111","code":"0x00"}`, movedTo: moveTo},
+		{name: "move onto precompile", override: `{"movePrecompileToAddress":"0x0000000000000000000000000000000000000005"}`, movedTo: modexp},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var so StateOverrides
+			require.NoError(t, json.Unmarshal([]byte(`{"0x0000000000000000000000000000000000000004":`+tc.override+`}`), &so))
+
+			precompiles := vm.ActivePrecompiledContracts(rules)
+			want := precompiles[identity]
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			require.NoError(t, so.Override(ibs, precompiles, rules))
+
+			got, ok := precompiles[identity]
+			require.Equal(t, tc.kept, ok)
+			if tc.kept {
+				require.Equal(t, want, got)
+			}
+			if !tc.movedTo.IsNil() {
+				require.Equal(t, want, precompiles[tc.movedTo])
+			}
+			if so[identity].Balance != nil {
+				balance, err := ibs.GetBalance(identity)
+				require.NoError(t, err)
+				require.Equal(t, uint64(1), balance.Uint64())
+			}
+		})
+	}
+}

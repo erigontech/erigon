@@ -155,6 +155,28 @@ func TestOverlayGetLogsReplaysFailedTxWithCodeOverride(t *testing.T) {
 	require.Equal(t, controlTarget, logs[1].Address, "positive-control transaction should emit one log")
 }
 
+// The rules parameter is optional: a request with state overrides and no rules must not crash.
+func TestOverlayGetLogsStateOverrideWithoutRules(t *testing.T) {
+	failedTarget := common.HexToAddress("0x00000000000000000000000000000000000000aa")
+	controlTarget := common.HexToAddress("0x00000000000000000000000000000000000000bb")
+	revertCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.REVERT)}
+	logCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.LOG0)}
+	setup := newOverlayGetLogsTestSetup(t, map[common.Address][]byte{
+		failedTarget:  revertCode,
+		controlTarget: logCode,
+	}, failedTarget, 100_000, controlTarget)
+
+	balance := (*hexutil.U256)(uint256.NewInt(1))
+	logs, err := setup.api.GetLogs(setup.m.Ctx, filters.FilterCriteria{
+		FromBlock: setup.blockNumber,
+		ToBlock:   setup.blockNumber,
+		Addresses: []common.Address{failedTarget, controlTarget},
+	}, &ethapi.StateOverrides{accounts.InternAddress(controlTarget): {Balance: &balance}}, nil)
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.Equal(t, controlTarget, logs[0].Address)
+}
+
 // Without overrides an originally failed txn must keep being skipped, even one
 // that would succeed on replay (the replay raises its gas limit to the gas cap,
 // so an out-of-gas failure would flip to success and emit a spurious log).
