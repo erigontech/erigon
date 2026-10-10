@@ -74,8 +74,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	}
 	defer tx.Rollback()
 
-	// Try to find a slot in the epoch or close to it
-	startSlotAtEpoch := (epoch * a.beaconChainCfg.SlotsPerEpoch) - (a.beaconChainCfg.SlotsPerEpoch - 1)
+	startSlotAtEpoch := epoch * a.beaconChainCfg.SlotsPerEpoch
 
 	// Now try reading the sync committee
 	syncCommittee, _, ok := a.forkchoiceStore.GetSyncCommittees(period)
