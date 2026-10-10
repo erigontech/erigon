@@ -254,7 +254,7 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 	if queueErr != nil {
 		return queueErr
 	}
-	log.Info("Upgrade to Electra complete")
+	log.Debug("Upgrade to Electra complete")
 	return nil
 }
 
@@ -287,7 +287,7 @@ func (b *CachingBeaconState) UpgradeToFulu() error {
 	}
 	b.SetProposerLookahead(lookahead)
 
-	log.Info("Upgrade to Fulu complete")
+	log.Debug("Upgrade to Fulu complete")
 	return nil
 }
 
@@ -375,7 +375,7 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 		return err
 	}
 
-	log.Info("Upgrade to Gloas complete")
+	log.Debug("Upgrade to Gloas complete")
 	return nil
 }
 
