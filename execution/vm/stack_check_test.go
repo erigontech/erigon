@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
@@ -238,23 +239,39 @@ func TestRunEmptyCodeReturnsBeforeTraceChoice(t *testing.T) {
 // TestRunMatchesRunTraced runs each program through run and through runTraced,
 // which has no fast path, at every gas budget up to the program's full cost, so
 // every fast-path body must match its jump-table op in result, gas and error.
+// It also runs them through runHooked and runTraced with an opcode hook that
+// skips the fast-path ops, which must see the same events.
 // Programs end by returning their top four stack items. A failing op's gas is
 // not in the measured cost, so the full budget is always run as well.
 func TestRunMatchesRunTraced(t *testing.T) {
 	t.Parallel()
-	runOnce := func(code []byte, gas uint64, traced bool) (string, uint64) {
+	slowOps := tracing.NewOpcodeMask(byte(GAS), byte(MSIZE), byte(NOT), byte(OR), byte(CALL), byte(RETURN), byte(INVALID))
+	runOnce := func(code []byte, gas uint64, fast, hooked bool) (string, uint64) {
+		var events []string
+		var cfg Config
+		if hooked {
+			cfg.Tracer = &tracing.Hooks{
+				OnOpcodeV2: func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, _ tracing.OpContext, _ []byte, depth int, err error) {
+					events = append(events, fmt.Sprintf("%d:%v:%d:%+v:%d:%v", pc, OpCode(op), gas.Execution, cost, depth, err))
+				},
+				OnOpcodeMask: slowOps,
+			}
+		}
 		// A fresh state per run: a shared one leaves the first run's cold accesses warm.
 		ibs := state.New(state.NewNoopReader())
 		defer ibs.Close()
-		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+		evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, cfg)
 		c := NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
 		c.Code = code
-		f := evm.run
-		if traced {
-			f = evm.runTraced
+		f := evm.runTraced
+		switch {
+		case fast && hooked:
+			f = evm.runHooked
+		case fast:
+			f = evm.run
 		}
-		ret, left, used, err := f(*c, mdgas.MdGas{Execution: gas}, nil, false, false, false)
-		return fmt.Sprintf("ret=%x left=%d used=%+v err=%v", ret, left.Execution, used, err), gas - left.Execution
+		ret, left, used, err := f(*c, mdgas.MdGas{Execution: gas}, nil, false, hooked, false)
+		return fmt.Sprintf("ret=%x left=%d used=%+v err=%v events=%v", ret, left.Execution, used, err, events), gas - left.Execution
 	}
 	prog := func(parts ...any) []byte {
 		var b []byte
@@ -332,7 +349,7 @@ func TestRunMatchesRunTraced(t *testing.T) {
 	}
 	for name, code := range programs {
 		const plenty = 1_000_000
-		_, cost := runOnce(code, plenty, true)
+		_, cost := runOnce(code, plenty, false, false)
 		budgets := []uint64{plenty, cost / 2, cost - 1, cost, cost + 1}
 		if cost < 2000 {
 			for gas := range cost + 2 {
@@ -340,9 +357,11 @@ func TestRunMatchesRunTraced(t *testing.T) {
 			}
 		}
 		for _, gas := range budgets {
-			want, _ := runOnce(code, gas, true)
-			got, _ := runOnce(code, gas, false)
-			require.Equal(t, want, got, "%s at gas %d", name, gas)
+			for _, hooked := range []bool{false, true} {
+				want, _ := runOnce(code, gas, false, hooked)
+				got, _ := runOnce(code, gas, true, hooked)
+				require.Equal(t, want, got, "%s at gas %d hooked %v", name, gas, hooked)
+			}
 		}
 	}
 }

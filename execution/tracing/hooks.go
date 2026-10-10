@@ -547,3 +547,16 @@ func (m *OpcodeMask) wants(op byte) bool {
 
 // WantsOpcode reports whether the hooks ask to see op.
 func (h *Hooks) WantsOpcode(op byte) bool { return h.OnOpcodeMask.wants(op) }
+
+// WantsAnyOpcode reports whether the hooks ask to see any op in m.
+func (h *Hooks) WantsAnyOpcode(m *OpcodeMask) bool {
+	if h.OnOpcodeMask == nil {
+		return true
+	}
+	for i, w := range h.OnOpcodeMask.words {
+		if w&m.words[i] != 0 {
+			return true
+		}
+	}
+	return false
+}
