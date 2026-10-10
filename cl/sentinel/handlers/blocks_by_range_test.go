@@ -20,11 +20,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
@@ -36,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/snappypool"
 )
 
@@ -163,4 +167,108 @@ func TestBlocksByRootHandler(t *testing.T) {
 
 	indiciesDB.Close()
 	tx.Rollback()
+}
+
+// TestBeaconBlocksByRangeHandlerStaysInRequestedRange checks that a response only holds blocks with
+// start_slot <= slot < start_slot+count. Empty slots inside the range are left out, not replaced by
+// blocks after it.
+func TestBeaconBlocksByRangeHandlerStaysInRequestedRange(t *testing.T) {
+	slotRange := func(start, n uint64) []uint64 {
+		slots := make([]uint64, n)
+		for i := range slots {
+			slots[i] = start + uint64(i)
+		}
+		return slots
+	}
+	for _, tc := range []struct {
+		name        string
+		blockSlots  []uint64
+		start       uint64
+		count       uint64
+		want        []uint64
+		wantInvalid bool
+	}{
+		{name: "empty slot in range", blockSlots: []uint64{100, 102, 110, 111, 112}, start: 100, count: 5, want: []uint64{100, 102}},
+		{name: "zero count", blockSlots: []uint64{100, 102, 110, 111, 112}, start: 100, count: 0, want: nil},
+		// MAX_REQUEST_BLOCKS_DENEB is 128: the whole range is searched, not only its first 96 slots.
+		{name: "first block late in a full-size range", blockSlots: []uint64{200}, start: 100, count: 128, want: []uint64{200}},
+		{name: "response limited to 96 blocks", blockSlots: slotRange(100, 128), start: 100, count: 128, want: slotRange(100, MaxRequestsBlocks)},
+		// A larger count is capped, not rejected: Caplin's chain tip sync can request more than 128 slots.
+		{name: "count above the request limit is capped", blockSlots: []uint64{100, 300}, start: 100, count: 1000, want: []uint64{100}},
+		{name: "end slot overflow", blockSlots: []uint64{100}, start: math.MaxUint64 - 2, count: 5, wantInvalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+			require.NoError(t, err)
+			t.Cleanup(func() { host.Close() })
+			host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+			require.NoError(t, err)
+			t.Cleanup(func() { host1.Close() })
+			require.NoError(t, host.Connect(ctx, peer.AddrInfo{ID: host1.ID(), Addrs: host1.Addrs()}))
+
+			_, indiciesDB := setupStore(t)
+			store := tests.NewMockBlockReader()
+			tx, err := indiciesDB.BeginRw(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			for _, slot := range tc.blockSlots {
+				populateDatabaseWithBlocks(t, store, tx, slot, 0)
+			}
+			require.NoError(t, tx.Commit())
+
+			ethClock := getEthClock(t)
+			_, beaconCfg := clparams.GetConfigsByNetwork(1)
+			c := NewConsensusHandlers(ctx, store, indiciesDB, host, &clparams.NetworkConfig{}, nil,
+				beaconCfg, ethClock, nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true)
+			c.Start()
+
+			var reqBuf bytes.Buffer
+			require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, &cltypes.BeaconBlocksByRangeRequest{StartSlot: tc.start, Count: tc.count, Step: 1}))
+			stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRangeProtocolV2))
+			require.NoError(t, err)
+			_, err = stream.Write(reqBuf.Bytes())
+			require.NoError(t, err)
+
+			if tc.wantInvalid {
+				code := make([]byte, 1)
+				_, err := io.ReadFull(stream, code)
+				require.NoError(t, err)
+				require.Equal(t, byte(InvalidRequestPrefix), code[0])
+				return
+			}
+			require.Equal(t, tc.want, readBlocksByRangeSlots(t, stream, ethClock))
+		})
+	}
+}
+
+// readBlocksByRangeSlots reads every response chunk until the stream ends and returns the block slots.
+func readBlocksByRangeSlots(t *testing.T, stream network.Stream, ethClock eth_clock.EthereumClock) []uint64 {
+	t.Helper()
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
+	var slots []uint64
+	for {
+		code := make([]byte, 1)
+		if _, err := io.ReadFull(stream, code); errors.Is(err, io.EOF) {
+			return slots
+		} else {
+			require.NoError(t, err)
+		}
+		require.Equal(t, byte(0), code[0])
+		forkDigest := make([]byte, 4)
+		_, err := io.ReadFull(stream, forkDigest)
+		require.NoError(t, err)
+		encodedLn, err := ssz_snappy.ReadUvarint(stream)
+		require.NoError(t, err)
+		raw := make([]byte, encodedLn)
+		sr.Reset(stream)
+		_, err = io.ReadFull(sr, raw)
+		require.NoError(t, err)
+		version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(binary.BigEndian.Uint32(forkDigest)))
+		require.NoError(t, err)
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
+		require.NoError(t, block.DecodeSSZ(raw, int(version)))
+		slots = append(slots, block.Block.Slot)
+	}
 }
