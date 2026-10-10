@@ -672,6 +672,27 @@ func waitForBlockValidationContext(ctx context.Context, call *blockValidationCon
 }
 
 func (b *blockService) computeBlockValidationContext(parentRoot common.Hash, slot uint64) (*blockValidationContext, error) {
+	// Epoch processing and fork upgrades only run at epoch boundaries, so advancing the
+	// parent state within its epoch cannot change anything read here; skip the costly copy.
+	// The epoch is taken from the header because fetching a non-head parent state replays it.
+	epoch := slot / b.beaconCfg.SlotsPerEpoch
+	if parentHeader, ok := b.forkchoiceStore.GetHeader(parentRoot); ok && parentHeader.Slot/b.beaconCfg.SlotsPerEpoch == epoch {
+		var validationContext *blockValidationContext
+		if err := b.forkchoiceStore.ViewStateAtBlockRoot(parentRoot, func(parentState *state.CachingBeaconState) error {
+			if state.Epoch(parentState) != epoch {
+				return nil
+			}
+			var err error
+			validationContext, err = readBlockValidationContext(parentState, parentState.GetLatestExecutionPayloadBid(), slot)
+			return err
+		}); err != nil {
+			return nil, fmt.Errorf("%w: view parent block state: %w", ErrIgnore, err)
+		}
+		if validationContext != nil {
+			return validationContext, nil
+		}
+	}
+
 	parentState, err := b.forkchoiceStore.GetStateAtBlockRoot(parentRoot, true)
 	if err != nil {
 		return nil, fmt.Errorf("%w: get parent block state: %w", ErrIgnore, err)
@@ -679,19 +700,26 @@ func (b *blockService) computeBlockValidationContext(parentRoot common.Hash, slo
 	if parentState == nil {
 		return nil, fmt.Errorf("%w: parent block state not found", ErrIgnore)
 	}
-	validationContext := &blockValidationContext{}
-	if bid := parentState.GetLatestExecutionPayloadBid(); bid != nil {
-		validationContext.latestExecutionPayloadBidBlockHash = bid.BlockHash
-		validationContext.hasLatestExecutionPayloadBid = true
-	}
+	// The latest bid is read before advancing, as the fork upgrade may rewrite it.
+	bid := parentState.GetLatestExecutionPayloadBid()
 	if err := transition.DefaultMachine.ProcessSlots(parentState, slot); err != nil {
 		return nil, fmt.Errorf("%w: process parent state to block slot: %w", ErrIgnore, err)
 	}
-	validationContext.latestBlockHash = parentState.GetLatestBlockHash()
-	validationContext.expectedProposer, err = parentState.GetBeaconProposerIndexForSlot(slot)
+	return readBlockValidationContext(parentState, bid, slot)
+}
+
+// readBlockValidationContext reads the context from a state already in the epoch of slot.
+func readBlockValidationContext(s *state.CachingBeaconState, bid *cltypes.ExecutionPayloadBid, slot uint64) (*blockValidationContext, error) {
+	validationContext := &blockValidationContext{latestBlockHash: s.GetLatestBlockHash()}
+	if bid != nil {
+		validationContext.latestExecutionPayloadBidBlockHash = bid.BlockHash
+		validationContext.hasLatestExecutionPayloadBid = true
+	}
+	expectedProposer, err := s.GetBeaconProposerIndexForSlot(slot)
 	if err != nil {
 		return nil, fmt.Errorf("%w: get expected proposer: %w", ErrIgnore, err)
 	}
+	validationContext.expectedProposer = expectedProposer
 	return validationContext, nil
 }
 
