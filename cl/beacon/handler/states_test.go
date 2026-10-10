@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -310,6 +311,51 @@ func TestGetStateFullForkchoice(t *testing.T) {
 			otherRoot, err := other.HashSSZ()
 			require.NoError(t, err)
 			require.Equal(t, postRoot, otherRoot)
+		})
+	}
+}
+
+// TestGetStateFullSkipsForkchoiceStateAtLaterSlot pins that a fork choice state
+// advanced past its block, as an anchor state can be, is not served for that
+// block's slot or root.
+func TestGetStateFullSkipsForkchoiceStateAtLaterSlot(t *testing.T) {
+	_, blocks, _, _, postState, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+
+	postRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+	fcu.FinalizedCheckpointVal = solid.Checkpoint{Epoch: fcu.HeadSlotVal / 32, Root: fcu.HeadVal}
+
+	advanced, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advanced, postState.Slot()+1))
+	fcu.StateAtBlockRootVal[fcu.HeadVal] = advanced
+
+	for _, stateID := range []string{
+		"0x" + common.Bytes2Hex(postRoot[:]),
+		strconv.FormatUint(postState.Slot(), 10),
+	} {
+		t.Run(stateID, func(t *testing.T) {
+			server := httptest.NewServer(handler.mux)
+			defer server.Close()
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v2/debug/beacon/states/"+stateID, nil)
+			require.NoError(t, err)
+			req.Header.Set("Accept", "application/octet-stream")
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+
+			out, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			got := state.New(&clparams.MainnetBeaconConfig)
+			require.NoError(t, got.DecodeSSZ(out, int(clparams.Phase0Version)))
+			require.Equal(t, postState.Slot(), got.Slot())
+			gotRoot, err := got.HashSSZ()
+			require.NoError(t, err)
+			require.Equal(t, postRoot, gotRoot)
 		})
 	}
 }
