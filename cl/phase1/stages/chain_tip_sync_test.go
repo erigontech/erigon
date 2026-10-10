@@ -84,6 +84,40 @@ func TestStartFetchingBlocksMissedByGossipPacesSuccessfulPolls(t *testing.T) {
 	require.LessOrEqual(t, sentinel.calls, 3, "polls that return no new block must be paced")
 }
 
+func TestStartFetchingBlocksMissedByGossipReturnsAfterCancelWithoutErrorReader(t *testing.T) {
+	beaconCfg := clparams.MainnetBeaconConfig
+	beaconCfg.SecondsPerSlot = 1
+	sentinel := &failingRequestSentinel{}
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-100, common.Hash{}, &beaconCfg)
+	cfg := &Cfg{
+		beaconCfg:  &beaconCfg,
+		ethClock:   clock,
+		forkChoice: &forkchoice.ForkChoiceStore{},
+		rpc:        rpc.NewBeaconRpcP2P(t.Context(), sentinel, &beaconCfg, clock, nil),
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
+	errCh := make(chan error)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		startFetchingBlocksMissedByGossipAfterSomeTime(ctx, cfg, Args{targetSlot: math.MaxUint64}, respCh, errCh)
+	}()
+
+	// Cancel only after a request has failed; cancelling during the initial wait returns before the error send.
+	require.Eventually(t, func() bool {
+		return sentinel.calls.Load() > 0
+	}, 5*time.Second, 10*time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fetch goroutine did not return after cancellation")
+	}
+}
+
 // ChainTipSync can wait a slot or longer for the next block, and validators attest to the head the beacon API serves
 // meanwhile, so a fork choice head imported by ForwardSync or ChainTipSync must be published first.
 func TestCatchUpPublishesForkChoiceHeadBeforeChainTipSync(t *testing.T) {
