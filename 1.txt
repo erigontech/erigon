@@ -1,0 +1,194 @@
+➜  erigon git:(alex/rm_release_maps_from_hotpath_37) ✗ go tool pprof -edgefraction=0.00000001 -nodefraction=0.0000001 -http=:8089 /Users/alex/projects/erigon/n2-slow.pprof
+
+Main binary filename not available.
+Serving web UI on http://localhost:8089
+^Cgo tool pprof: signal: interrupt
+➜  erigon git:(alex/rm_release_maps_from_hotpath_37) ✗ pwd
+
+
+
+
+i like how you handled `memo`.
+     can you check: CallContext `cacheGen`, `cachedKey`, machinery - can be done by similar `memo` trick?
+
+
+
+
+ The nuance worth knowing: --prune.receipts.distance alone under minimal does not
+ keep all receipt history — it inherits the 100k minimal window. To keep more you
+ must pass --=<large N> (which makes rcache authoritative over
+ its own window). There's no "keep-all"
+ value expressible through the distance flag under a finite-history
+ mode — 0 means "follow the mode default", which for minimal is 100k.
+
+
+
+
+
+
+
+
+is it possible to store dirtyFiles inside Lifetime? So Agg will have access to it only inside UpdateDirtyFiles method?
+maybe do similar trick with Generation - we embedded user's value into object holded by Lifetime?
+Lets assume: Agg better don't touch direct dirtyFiles, Domain/History/InvIndex are okey to touch dirtyFiles without any locks - because it's
+  already done this way, and most of methods there are called by Agg and mutex in Agg.
+
+ToDo:
+- `retired, publish, err = mutate()` avoid returning `publish` from `mutate`
+
+
+
+
+
+milen — 14:03
+on bal-devnet-7 i will have to have both parallel exec + new perf changes on file format - it will be a massive mess if i have to deal with release/3.5 and main
+what disk format changes in particular dont have feature flags yet?
+that's why we have erigondb.toml to be honest
+Artem — 14:05
+references doesnt have flag e.g
+milen — 14:05
+let's add one
+it's easy
+erigondb.toml
+Alex Sharov GMT+7 — 14:17
+We need new name for it:  when you say "feature flag" in my head it's cli flag of erigon
+erigondb.toml - are also feature flags - but another kind with another properties (config which co-located with data)
+nice that now we have erigondb.toml
+milen — 14:18
+yes, we have several different types of "feature flags":
+some are in the files themselves (e.g. reader encoded versions)
+others are in the file names (e.g. versioned files)
+others are in erigondb.toml (e.g. step size)
+others are env vars/input flags (e.g. which snapshot branch to use)
+
+Alex Sharov GMT+7 — 14:18
+i mean: erigon/3.4 can read erigon/3.3 files
+(unless we decide to drop very old versions)
+milen — 14:19
+all 4 of these are good, depending on what is best for the situation
+but my main point is all code is in main and we use 1-4 to flip what we use on a given branch etc
+i think it will make our lives a bit easier
+milen — 14:26
+for example for bal-devnet-7:
+we can run it with PARALLEL_EXEC=true and SNAPSHOT_BRANCH=release/3.4 - for parallel exec + no file optimisations
+we can run it with PARALLEL_EXEC=true and SNAPSHOT_BRANCH=release/3.6 - for parallel exec + file optimisations (no deref, lower step size, new key layout)
+
+for 2. to work only by flipping SNAPSHOT_BRANCH=release/3.6 we may need to leverage erigondb.toml for no-deref:true and step-size: 15,625 and new-commitment-key-layout: true
+some other branch can choose to run with PARALLEL_EXEC=false and SNAPSHOT_BRANCH=release/3.6 for serial exec + file optimisations for example, etc
+
+milen — 14:34
+One question though: for new no-ref files are we bumping up the file version? That could also be another option, eg “noRef := commitmentVersion >= 3”
+Artem — 14:35
+yes, that’s what i forgot to include to pr
+
+major version changes when FORMAT of snapshot is changed while min version updated when CONTENTS updated
+Alex Sharov GMT+7 — 14:35
+it's so hard... then all versions of all files also need to be in erigondb.toml
+Alex Sharov GMT+7 — 14:36
+also what if we have 3 features which changing .kvi file: and only 2 enabled - then which version to use
+milen — 14:36
+So you prefer “noref:true” in erigondb.toml right? I think me too
+Alex Sharov GMT+7 — 14:36
+i don't have all the answers 🙂
+milen — 14:36
+Yea I guess no one has
+Alex Sharov GMT+7 — 14:43
+in my head min version - is not about content - it's about:
+can erigon/3.4 open v1.0 old files? (even if now it producing v21.7)
+if can - then min=v1.0. if can't (we dropped support of old formats) - then need bump.
+Versions - very fragile and discipline-intensive:
+usually devs adding new tables to db - but don't increase DBSchemaVersion
+also even in current small 1 file version bump - we actually missed 1 thing: https://github.com/erigontech/erigon/pull/21376/changes#diff-5cefad2064391bd79f133ef45c9641d13b6e46d62ce1e2af95ac4fac7dbb7f03L61  -  if .kv version changed then .kvi also need to change (it's content changing)
+all this story with versions - fragile and brain-fuel-wasting (it adding +25 tasks for me as a CodeReviewer)
+even app.go: wasting tons of time (start release - on next day found that it failed because you didn't bump manually version in app.go) and brain-fuel-wasting
+Even worse:  Caplin using Chaindata DB tables schema and adding tables there 🙂
+
+Artem — 14:44
+vMajor.Minor agreement was like that
+that’s why i set v2.0-> v2.1 , format is the same but contents changed
+milen — 14:45
+it's not just code reviewer's responsibility though, it is author's responsibility too
+i get your point about versions, but there is no way around them, they are necessary
+but anyway we were talking about feature flags
+Alex Sharov GMT+7 — 14:49
+i mean "version" is part of "feature"
+and if we have 4 kind of "feature flags" - then what it means for "version"
+milen — 14:49
+i dont know what it means but it is far simpler than having 10 branches
+for no-deref feature flag there are 2 options:
+put it in erigondb.toml
+use the file version
+
+i dont have a preference on which one, up to you guys. to me both are fine
+Alex Sharov GMT+7 — 14:53
+agree
+milen — 14:56
+maybe we teach Claude about our "versioning discipline" and have it review PRs?
+that might make it a bit easier because i also agree with you that it is hard to keep track
+Alex Sharov GMT+7 — 14:58
+There is 2 versions now: currentVerison and minimumVersion
+Case1: can new Erigon read old files?. if yes: minimumVersion <= fileVersion
+Case2: can old Erigon read new files?. if yes: currentVersion.Major >= fileVersion
+
+In any case Erigon creating new files of currentVersion (unclear is it good or bad - from "feature flags in erigondb.toml" point of view)
+milen — 15:04
+i thought:
+if there is a breaking change to format: we increase "major version"
+if there is no breaking change but data change (e.g. incorrect data): we increase "minor version"
+yea, we need to document all of this so we are all on the same page
+we already do actually - https://github.com/erigontech/erigon-documents/blob/master/erigon3/snapshots/versioning.md
+i guess erigondb.toml now adds another dimension that confuses us a bit more
+and maybe we should keep a change log of snapshot version changes - e.g. in v1.0.bt->v1.1.bt we changed xyz
+Alex Sharov GMT+7 — 15:11
+smells like job for machine: or codegen, or ai-reviewer, or assert at startup, or sharov bot, or ...
+milen — 15:11
+yes, also the agent can help us create the version changelog so we have an easy way to see what changed in each version
+Alex Sharov GMT+7 — 15:13
+also in https://github.com/erigontech/erigon/blob/main/db/version/file_version.go#L19
+milen — 15:13
+for example i didnt know we should increment DBSchemaVersion when we add new tables (the caplin using chaindata tables is easier to spot as a bad move) - but if we have all of these rules in 1 .md and give it to an agent/claude/copilot to review in our PRs - it might help us a lot with this
+Alex Sharov GMT+7 — 15:14
+Image
+milen — 15:16
+good thing we have AI now, it can keep us in order
+in that case, if we have our "versioning discipline" in order - do you think we can use file versioning for things like "noRef := true/false" and "stepSize=xyz"? maybe yes and then erigondb.toml is obsolete?
+Alex Sharov GMT+7 — 16:08
+erigondb.toml - unique property: it's stored with all other data files. Means:
+different chains can have different erigondb.toml
+can release new files (with new erigondb.toml) to old Erigon releases: like "disable references for 3.4 by pointing 3.4 to new R2 bucket)
+if store flag in erigondb.toml then don't need git branch for some feature enabling (because it not stored in git)
+now: if Erigon has 1 bad file on Sepolia - we have to increase "version" for ALL chains of this file (means erigon seg reset will force all users of all chains to re-sync this files). It smells - may bite us some day. But what is alternative? Have in erigon source git: 1 db/state/statecfg/versions.yaml per chain? and 1 experiments.go per chain? and 1 DefaultConfig (for cli flags defaults) per chain? 6 version.yaml smells more fragile than 1 version.yaml
+
+Also erigondb.toml seems "unbounding files releases" from "software releases":
+file releases are slower, require additional hardware (snapshotters, r2 butckets, etc...)
+for "file change feature": not enough to "pass code review"
+tension is opposite: we usually want "group file changes" - so users don't have to re-sync every month (every erigon's major release)
+
+Add on top of it: that we have internal version inside file (like db/recsplit/recsplit.go:ExistenceFilterVersion, db/seg/seg_interface.go:FileCompressionFormatV1, recsplit.go:dataStructureVersion). Maybe we don't need any file-name-versions and only internal-version is enough: "or Erigon can read or can't". And version-in-file-name replace to checksum https://github.com/erigontech/erigon/pull/19150
+
+Easy to dies on this hill
+Example:
+PR to add 2 bits flags into .seg changing version https://github.com/erigontech/erigon/pull/20074/changes#diff-5cefad2064391bd79f133ef45c9641d13b6e46d62ce1e2af95ac4fac7dbb7f03R7
+What if Other PR also changing version?
+It's not enough to "resolve conflict" in git - need actually produce files on servers with this version (we have ./cmd/bumper tool for renaming files, or incrementing version in code)
+But "produce files on server" - means we need merge PR to main first? Merge to main with enabled or disabled feature flag? If disabled then what version must be in main?
+Brr... chiken-egg-problem-egg-chiken
+Still: need to move forward. Can’t analysis-paralysis
+One thing clear: can’t use version in file name as “feature flag” - it’s only for fail-fast at startup
+Alex Sharov GMT+7 — 16:28
+Probably can store “erigondb.toml” in https://github.com/erigontech/erigon-snapshot (where we store hashes). Because it’s “about data”
+
+But version.yml can’t store in this repo - because it’s Erigon’s  property (what it can produce) - not data property.
+Sudeep — 16:43
+we removed this feature, because too many steps were accumulating in db; but yeah, this is probably safe to do in seg retire.
+about old commitment files in 3.6 -- I think it's possible to have this. I was attempting to do that - https://github.com/erigontech/erigon/pull/21206/changes ("merge produces noref" but "reads can read from ref files") -- makes sense to bring it back up.
+we have easy differentiation for when a key is reference vs plain keys -- so can lookup in storage/account files or just use plain
+for merging we follow AggregatorSqueezeCommitmentValuesetc.
+milen — 17:54
+different configs per chain - yea that’s a good point in favour of erigondb.toml
+also decoupling file release from code release is another good point in favour of erigondb.toml
+
+Sounds like for the short term “no-commitment-ref: true” can go in erigondb.toml then. We can figure out the rest with time
+it aligns with ⁠bloatnet⁠
+Alex Sharov GMT+7 — 18:25
+ah, tnx
