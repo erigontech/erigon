@@ -40,22 +40,24 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-// SignedAggregateAndProofData is passed to SignedAggregateAndProof service. The service does the signature verification
-// asynchronously. That's why we cannot wait for its ProcessMessage call to finish to check error. The service
-// will do re-publishing of the gossip or banning the peer in case of invalid signature by itself.
-// that's why we are passing sentinelproto.SentinelClient and *sentinelproto.GossipData to enable the service
-// to do all of that by itself.
 type SignedAggregateAndProofForGossip struct {
 	SignedAggregateAndProof *cltypes.SignedAggregateAndProof
 	Receiver                *sentinelproto.Peer
 	ImmediateProcess        bool
+	TopicForkDigest         *common.Bytes4
+}
+
+func (m *SignedAggregateAndProofForGossip) SetTopicForkDigest(digest common.Bytes4) {
+	m.TopicForkDigest = &digest
 }
 
 type aggregateJob struct {
@@ -73,11 +75,12 @@ const seenAggregateCacheSize = 10_000
 type aggregateAndProofServiceImpl struct {
 	syncedDataManager      *synced_data.SyncedDataManager
 	forkchoiceStore        forkchoice.ForkChoiceStorage
+	ethClock               eth_clock.EthereumClock
 	beaconCfg              *clparams.BeaconChainConfig
 	opPool                 pool.OperationsPool
 	test                   bool
 	batchSignatureVerifier *BatchSignatureVerifier
-	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, struct{}]
+	seenAggreatorIndexes   *lru.Cache[seenAggregateIndex, common.Hash]
 	validatorParams        *validator_params.ValidatorParams
 
 	// Cached proposer indices per epoch (for current epoch check)
@@ -91,13 +94,14 @@ func NewAggregateAndProofService(
 	ctx context.Context,
 	syncedDataManager *synced_data.SyncedDataManager,
 	forkchoiceStore forkchoice.ForkChoiceStorage,
+	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	opPool pool.OperationsPool,
 	test bool,
 	batchSignatureVerifier *BatchSignatureVerifier,
 	validatorParams *validator_params.ValidatorParams,
 ) AggregateAndProofService {
-	seenAggCache, err := lru.New[seenAggregateIndex, struct{}]("seenAggregate", seenAggregateCacheSize)
+	seenAggCache, err := lru.New[seenAggregateIndex, common.Hash]("seenAggregate", seenAggregateCacheSize)
 	if err != nil {
 		panic(err)
 	}
@@ -108,6 +112,7 @@ func NewAggregateAndProofService(
 	a := &aggregateAndProofServiceImpl{
 		syncedDataManager:      syncedDataManager,
 		forkchoiceStore:        forkchoiceStore,
+		ethClock:               ethClock,
 		beaconCfg:              beaconCfg,
 		opPool:                 opPool,
 		test:                   test,
@@ -199,6 +204,15 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
+	if aggregateAndProof.TopicForkDigest != nil {
+		messageForkDigest, err := a.ethClock.ComputeForkDigest(epoch)
+		if err != nil {
+			return fmt.Errorf("%w: compute aggregate fork digest: %w", ErrIgnore, err)
+		}
+		if messageForkDigest != *aggregateAndProof.TopicForkDigest {
+			return fmt.Errorf("%w: aggregate fork digest does not match topic", ErrIgnore)
+		}
+	}
 	aggregateAndProof.SignedAggregateAndProof.SetVersion(clversion)
 	if err := aggregate.ValidateForConfig(a.beaconCfg, clversion); err != nil {
 		return err
@@ -229,6 +243,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	var (
 		aggregateVerificationData *AggregateVerificationData
+		aggregateRoot             common.Hash
 		attestingIndices          []uint64
 		seenIndex                 seenAggregateIndex
 		localValidatorIsProposer  bool
@@ -291,8 +306,19 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			epoch: target.Epoch,
 			index: aggregateAndProof.SignedAggregateAndProof.Message.AggregatorIndex,
 		}
-		if a.seenAggreatorIndexes.Contains(seenIndex) {
-			return fmt.Errorf("%w: aggregator already seen", ErrIgnore)
+		if aggregateAndProof.ImmediateProcess {
+			root, err := aggregateAndProof.SignedAggregateAndProof.HashSSZ()
+			if err != nil {
+				return err
+			}
+			aggregateRoot = root
+		}
+		if seenRoot, ok := a.seenAggreatorIndexes.Peek(seenIndex); ok {
+			if aggregateAndProof.ImmediateProcess && seenRoot == aggregateRoot {
+				// ErrAggregatorAlreadySeen means this exact signed aggregate was validated before.
+				return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadySeen)
+			}
+			return fmt.Errorf("%w: %w", ErrIgnore, ErrAggregatorAlreadyKnown)
 		}
 
 		committee, err := headState.GetBeaconCommitee(slot, committeeIndex)
@@ -361,7 +387,6 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	if aggregateVerificationData == nil {
 		return ErrIgnore
 	}
-	// further processing will be done after async signature verification
 	aggregateVerificationData.F = func() {
 		a.opPool.AttestationsPool.Insert(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Signature,
@@ -371,7 +396,8 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 			aggregateAndProof.SignedAggregateAndProof.Message.Aggregate,
 			attestingIndices,
 		)
-		a.seenAggreatorIndexes.Add(seenIndex, struct{}{})
+		// Keep the root of the first aggregate validated for this aggregator and epoch.
+		a.seenAggreatorIndexes.ContainsOrAdd(seenIndex, aggregateRoot)
 	}
 	// for this specific request, collect data for potential peer banning or gossip publishing
 	aggregateVerificationData.SendingPeer = aggregateAndProof.Receiver
@@ -380,8 +406,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		return a.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	a.batchSignatureVerifier.AsyncVerifyAggregateProof(aggregateVerificationData)
-	return nil
+	return a.batchSignatureVerifier.VerifyAggregateProof(ctx, aggregateVerificationData)
 }
 
 func GetSignaturesOnAggregate(

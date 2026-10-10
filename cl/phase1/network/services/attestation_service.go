@@ -87,6 +87,11 @@ type AttestationForGossip struct {
 	Receiver          *sentinelproto.Peer
 	// ImmediateProcess indicates whether the attestation should be processed immediately or able to be scheduled for later processing.
 	ImmediateProcess bool
+	TopicForkDigest  *common.Bytes4
+}
+
+func (a *AttestationForGossip) SetTopicForkDigest(digest common.Bytes4) {
+	a.TopicForkDigest = &digest
 }
 
 func NewAttestationService(
@@ -159,6 +164,15 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	attEpoch := s.ethClock.GetEpochAtSlot(slot)
 	clVersion := s.beaconCfg.GetCurrentStateVersion(attEpoch)
+	if att.TopicForkDigest != nil {
+		messageForkDigest, err := s.ethClock.ComputeForkDigest(attEpoch)
+		if err != nil {
+			return fmt.Errorf("%w: compute attestation fork digest: %w", ErrIgnore, err)
+		}
+		if messageForkDigest != *att.TopicForkDigest {
+			return fmt.Errorf("%w: attestation fork digest does not match topic", ErrIgnore)
+		}
+	}
 
 	var err error
 	if clVersion >= clparams.ElectraVersion {
@@ -378,14 +392,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	// push the signatures to verify asynchronously and run final functions after that.
-	s.batchSignatureVerifier.AsyncVerifyAttestation(aggregateVerificationData)
-
-	// As the logic goes, if we return ErrIgnore there will be no peer banning and further publishing
-	// gossip data into the network by the gossip manager. That's what we want because we will be doing that ourselves
-	// in BatchSignatureVerifier service. After validating signatures, if they are valid we will publish the
-	// gossip ourselves or ban the peer which sent that particular invalid signature.
-	return nil
+	return s.batchSignatureVerifier.VerifyAttestation(ctx, aggregateVerificationData)
 }
 
 // type attestationJob struct {

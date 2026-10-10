@@ -138,10 +138,14 @@ func (s *onBlockErrorStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock,
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	cfg := &clparams.MainnetBeaconConfig
-	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
+	testCfg := *cfg
+	testCfg.AltairForkEpoch = 0
+	testCfg.BellatrixForkEpoch = 0
+	testCfg.CapellaForkEpoch = testCfg.FarFutureEpoch
+	syncedDataManager := synced_data.NewSyncedDataManager(&testCfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
-	blockService := newBlockService(db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil)
+	blockService := newBlockService(db, forkchoiceMock, syncedDataManager, ethClock, &testCfg, nil)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
 }
 
@@ -1368,6 +1372,58 @@ func TestBlockServiceGossipAcceptsEmptyParentExecutionHead(t *testing.T) {
 		return parentExecutionHead
 	})
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServiceProcessMessageIgnoresForkSchemaMismatchBeforeStorage(t *testing.T) {
+	service, child, fcu, _, _ := newGloasGossipValidationFixture(t, nil)
+	impl := service.(*blockService)
+	cfg := *impl.beaconCfg
+	cfg.GloasForkEpoch = child.Block.Slot/cfg.SlotsPerEpoch + 1
+	impl.beaconCfg = &cfg
+	require.False(t, cfg.ForkSchemaMatchesSlot(child.Block.Slot, child.Version()))
+
+	assertBlockServiceProcessMessageIgnoredBeforeStorage(t, service, child, fcu, "fork schema mismatch reached fork choice")
+}
+
+func TestBlockServiceProcessMessageIgnoresExactForkVersionMismatchBeforeStorage(t *testing.T) {
+	service, child, fcu, _, _ := newGloasGossipValidationFixture(t, nil)
+	impl := service.(*blockService)
+	cfg := *impl.beaconCfg
+	cfg.GloasForkEpoch = child.Block.Slot/cfg.SlotsPerEpoch + 1
+	impl.beaconCfg = &cfg
+	child.Block.Body.Version = clparams.ElectraVersion
+	require.Equal(t, clparams.FuluVersion, cfg.GetCurrentStateVersion(child.Block.Slot/cfg.SlotsPerEpoch))
+	require.True(t, cfg.ForkSchemaMatchesSlot(child.Block.Slot, child.Version()))
+
+	assertBlockServiceProcessMessageIgnoredBeforeStorage(t, service, child, fcu, "fork version mismatch reached fork choice")
+}
+
+func assertBlockServiceProcessMessageIgnoredBeforeStorage(
+	t *testing.T,
+	service BlockService,
+	child *cltypes.SignedBeaconBlock,
+	fcu *mock_services.ForkChoiceStorageMock,
+	forkChoiceErr string,
+) {
+	t.Helper()
+	impl := service.(*blockService)
+	forkChoice := &onBlockErrorStore{
+		ForkChoiceStorage: fcu,
+		err:               errors.New(forkChoiceErr),
+	}
+	impl.forkchoiceStore = forkChoice
+	blockRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+
+	err = service.ProcessMessage(t.Context(), nil, child)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, forkChoice.calls.Load())
+	require.NoError(t, impl.db.View(t.Context(), func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		require.NoError(t, err)
+		require.Nil(t, slot)
+		return nil
+	}))
 }
 
 func TestBlockServiceGossipAcceptsChildOfHeaderOnlyCheckpointAnchor(t *testing.T) {

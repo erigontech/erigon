@@ -42,6 +42,8 @@ const (
 
 var (
 	ErrIgnore                          = errors.New("ignore") // ErrIgnore is used to indicate that the message should be ignored.
+	ErrAggregatorAlreadyKnown          = errors.New("aggregator already known")
+	ErrAggregatorAlreadySeen           = errors.New("aggregator already seen")
 	ErrProposerPreferenceAlreadySeen   = errors.New("already seen proposer preferences")
 	ErrAttestationQueued               = errors.New("attestation queued")
 	ErrAttestationAlreadySeen          = errors.New("validator already seen in target epoch") // Returned before signature validation, so it does not prove the submitted attestation is valid.

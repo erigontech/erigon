@@ -3,11 +3,14 @@ package gossip
 import (
 	"context"
 	"time"
+
+	"github.com/erigontech/erigon/common"
 )
 
 //go:generate mockgen -destination=./mock_services/gossip_mock.go -package=mock_services . Gossip
 type Gossip interface {
 	Publish(ctx context.Context, name string, data []byte) error
+	PublishToForkDigest(ctx context.Context, forkDigest common.Bytes4, name string, data []byte) error
 	// PublishBackground queues data for asynchronous publish to the given
 	// gossip topic without waiting for the network call. The implementation
 	// clones data before returning, so the caller keeps ownership of its

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 )
@@ -116,7 +117,8 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	t.Cleanup(cancel)
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
 	return blockService, syncedDataManager, forkchoiceMock
 }
 
@@ -305,6 +307,73 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 	require.NoError(t, aggService.ProcessMessage(context.Background(), nil, agg))
 }
 
+func TestAggregateAndProofGossipDoesNotAcceptBeforeBLSVerification(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return false, nil
+	}
+
+	agg, s := getAggregateAndProofAndState()
+	setValidAggregateSelectionProof(t, &clparams.MainnetBeaconConfig, agg, s)
+
+	service, syncedDataManager, forkchoiceMock := setupAggregateAndProofGossipTestWithConfig(t, &clparams.MainnetBeaconConfig)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	forkchoiceMock.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	forkchoiceMock.Ancestors[s.FinalizedCheckpoint().Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	forkchoiceMock.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
+	forkchoiceMock.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+
+	err := service.ProcessMessage(context.Background(), nil, agg)
+	require.ErrorIs(t, err, ErrInvalidBlsSignature)
+}
+
+func TestAggregateAndProofImmediateRetryReturnsAlreadySeenOnlyForSameAggregate(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+
+	cfg := clparams.MainnetBeaconConfig
+	agg, s := getAggregateAndProofAndState()
+	epoch := agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot / cfg.SlotsPerEpoch
+	service, _ := setupValidAggregateGossipMessage(t, &cfg, agg, s, cfg.GetCurrentStateVersion(epoch))
+	digest, err := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg).ComputeForkDigest(epoch)
+	require.NoError(t, err)
+	agg.ImmediateProcess = true
+	agg.TopicForkDigest = &digest
+
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, agg))
+	err = service.ProcessMessage(context.Background(), nil, agg)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAggregatorAlreadySeen)
+	require.Contains(t, err.Error(), "ignore")
+
+	differentSignedAggregate := *agg.SignedAggregateAndProof
+	differentSignedAggregate.Signature[0] ^= 1
+	differentAggregate := *agg
+	differentAggregate.SignedAggregateAndProof = &differentSignedAggregate
+	err = service.ProcessMessage(context.Background(), nil, &differentAggregate)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.ErrorIs(t, err, ErrAggregatorAlreadyKnown)
+	require.NotErrorIs(t, err, ErrAggregatorAlreadySeen)
+}
+
+func setValidAggregateSelectionProof(t *testing.T, cfg *clparams.BeaconChainConfig, agg *SignedAggregateAndProofForGossip, s *state.CachingBeaconState) {
+	t.Helper()
+	committee, err := s.GetBeaconCommitee(
+		agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot,
+		agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex,
+	)
+	require.NoError(t, err)
+	for i := range 256 {
+		agg.SignedAggregateAndProof.Message.SelectionProof[0] = byte(i)
+		if state.IsAggregator(cfg, uint64(len(committee)), agg.SignedAggregateAndProof.Message.SelectionProof) {
+			return
+		}
+	}
+	t.Fatal("no valid selection proof found")
+}
+
 func TestSyncMapRangeDeadlock(t *testing.T) {
 	var m sync.Map
 	m.Store(1, 1)
@@ -364,8 +433,158 @@ func setupAggregateAndProofTestWithConfig(t *testing.T, cfg *clparams.BeaconChai
 	t.Cleanup(cancel)
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
 	return blockService, syncedDataManager, forkchoiceMock
+}
+
+func setupAggregateAndProofGossipTestWithConfig(t *testing.T, cfg *clparams.BeaconChainConfig) (AggregateAndProofService, *synced_data.SyncedDataManager, *mock_services.ForkChoiceStorageMock) {
+	service, syncedDataManager, forkchoiceMock := setupAggregateAndProofTestWithConfig(t, cfg)
+	serviceImpl := service.(*aggregateAndProofServiceImpl)
+	serviceImpl.test = false
+	serviceImpl.validatorParams.SetFeeRecipient(0, common.Address{})
+	return service, syncedDataManager, forkchoiceMock
+}
+
+func setupValidAggregateGossipMessage(
+	t *testing.T,
+	cfg *clparams.BeaconChainConfig,
+	agg *SignedAggregateAndProofForGossip,
+	s *state.CachingBeaconState,
+	encodingVersion clparams.StateVersion,
+) (AggregateAndProofService, []byte) {
+	t.Helper()
+	setValidAggregateSelectionProof(t, cfg, agg, s)
+	agg.SignedAggregateAndProof.SetVersion(encodingVersion)
+	encoded, err := agg.SignedAggregateAndProof.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	service, syncedDataManager, forkchoiceMock := setupAggregateAndProofGossipTestWithConfig(t, cfg)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	forkchoiceMock.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	forkchoiceMock.Ancestors[s.FinalizedCheckpoint().Epoch*cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	forkchoiceMock.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
+	forkchoiceMock.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+	return service, encoded
+}
+
+func TestAggregateAndProofGossipNewForkAggregateOnOldForkTopicNotAccepted(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+
+	agg, s := getAggregateAndProofAndStateForVersion(t, clparams.GloasVersion)
+	aggregateEpoch := agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot / cfg.SlotsPerEpoch
+	require.Positive(t, aggregateEpoch)
+	cfg.GloasForkEpoch = aggregateEpoch
+	service, encoded := setupValidAggregateGossipMessage(t, &cfg, agg, s, clparams.GloasVersion)
+
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	oldDigest, err := clock.ComputeForkDigest(aggregateEpoch - 1)
+	require.NoError(t, err)
+	message, err := service.DecodeGossipMessage("peer", encoded, clparams.FuluVersion)
+	require.NoError(t, err)
+	message.SetTopicForkDigest(oldDigest)
+
+	err = service.ProcessMessage(context.Background(), nil, message)
+	require.ErrorIs(t, err, ErrIgnore)
+}
+
+func TestAggregateAndProofGossipRejectsDifferentBPOForkDigest(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = cfg.FarFutureEpoch
+
+	agg, s := getAggregateAndProofAndStateForVersion(t, clparams.FuluVersion)
+	aggregateEpoch := agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot / cfg.SlotsPerEpoch
+	require.Positive(t, aggregateEpoch)
+	cfg.BlobSchedule = []clparams.BlobParameters{
+		{Epoch: aggregateEpoch - 1, MaxBlobsPerBlock: 15},
+		{Epoch: aggregateEpoch, MaxBlobsPerBlock: 21},
+	}
+	service, encoded := setupValidAggregateGossipMessage(t, &cfg, agg, s, clparams.FuluVersion)
+
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	oldDigest, err := clock.ComputeForkDigest(aggregateEpoch - 1)
+	require.NoError(t, err)
+	messageDigest, err := clock.ComputeForkDigest(aggregateEpoch)
+	require.NoError(t, err)
+	require.NotEqual(t, oldDigest, messageDigest)
+
+	oldTopicMessage, err := service.DecodeGossipMessage("peer", encoded, clparams.FuluVersion)
+	require.NoError(t, err)
+	oldTopicMessage.SetTopicForkDigest(oldDigest)
+	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, oldTopicMessage), ErrIgnore)
+
+	matchingTopicMessage, err := service.DecodeGossipMessage("peer", encoded, clparams.FuluVersion)
+	require.NoError(t, err)
+	matchingTopicMessage.SetTopicForkDigest(messageDigest)
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, matchingTopicMessage))
+}
+
+func TestAggregateAndProofGossipPreForkAggregateOnPostForkTopicNotAccepted(t *testing.T) {
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = func(signatures, signRoots, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+
+	agg, s := getAggregateAndProofAndStateForVersion(t, clparams.FuluVersion)
+	aggregateEpoch := agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot / cfg.SlotsPerEpoch
+	cfg.GloasForkEpoch = aggregateEpoch + 1
+	setValidAggregateSelectionProof(t, &cfg, agg, s)
+	agg.SignedAggregateAndProof.SetVersion(clparams.FuluVersion)
+	encoded, err := agg.SignedAggregateAndProof.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	service, syncedDataManager, forkchoiceMock := setupAggregateAndProofGossipTestWithConfig(t, &cfg)
+	require.NoError(t, syncedDataManager.OnHeadState(s))
+	forkchoiceMock.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+	forkchoiceMock.Ancestors[s.FinalizedCheckpoint().Epoch*cfg.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+	forkchoiceMock.Ancestors[agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
+	forkchoiceMock.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+
+	gloasMessage, err := service.DecodeGossipMessage("peer", encoded, clparams.GloasVersion)
+	require.NoError(t, err)
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	gloasDigest, err := clock.ComputeForkDigest(aggregateEpoch + 1)
+	require.NoError(t, err)
+	gloasMessage.SetTopicForkDigest(gloasDigest)
+	err = service.ProcessMessage(context.Background(), nil, gloasMessage)
+	require.ErrorIs(t, err, ErrIgnore)
+
+	fuluMessage, err := service.DecodeGossipMessage("peer", encoded, clparams.FuluVersion)
+	require.NoError(t, err)
+	fuluDigest, err := clock.ComputeForkDigest(aggregateEpoch)
+	require.NoError(t, err)
+	fuluMessage.SetTopicForkDigest(fuluDigest)
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, fuluMessage))
 }
 
 // TestAggregateAndProofGloasRejectIndexGte2 tests that GLOAS rejects aggregate.data.index >= 2
