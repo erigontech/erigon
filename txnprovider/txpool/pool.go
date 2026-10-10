@@ -2134,11 +2134,21 @@ func (p *TxPool) deleteMinedBlobTxn(hash string) {
 	if !exists {
 		return
 	}
-	l := len(p.minedBlobTxnsByBlock[mt.minedBlockNum])
-	if l > 1 {
-		p.minedBlobTxnsByBlock[mt.minedBlockNum][mt.bestIndex] = p.minedBlobTxnsByBlock[mt.minedBlockNum][l-1]
+	items := p.minedBlobTxnsByBlock[mt.minedBlockNum]
+	last := len(items) - 1
+	if mt.bestIndex != last {
+		moved := items[last]
+		items[mt.bestIndex] = moved
+		moved.bestIndex = mt.bestIndex
 	}
-	p.minedBlobTxnsByBlock[mt.minedBlockNum] = p.minedBlobTxnsByBlock[mt.minedBlockNum][:l-1]
+	items[last] = nil
+	items = items[:last]
+	if len(items) == 0 {
+		delete(p.minedBlobTxnsByBlock, mt.minedBlockNum)
+	} else {
+		p.minedBlobTxnsByBlock[mt.minedBlockNum] = items
+	}
+	mt.bestIndex = -1
 	delete(p.minedBlobTxnsByHash, hash)
 }
 
