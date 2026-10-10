@@ -78,9 +78,8 @@ type BatchElem struct {
 
 // Client represents a connection to an RPC server.
 type Client struct {
-	isHTTP         bool
-	services       *serviceRegistry // methods the server can call on this client
-	batchItemLimit int
+	isHTTP   bool
+	services *serviceRegistry // methods the server can call on this client
 
 	idCounter atomic.Uint32
 
@@ -117,7 +116,7 @@ type clientConn struct {
 func (c *Client) newClientConn(conn ServerCodec) *clientConn {
 	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, conn.peerInfo())
-	handler := newHandler(ctx, conn, randomIDGenerator(), c.services, c.batchItemLimit, nil, 50, false /* traceRequests */, c.logger, 0)
+	handler := newHandler(ctx, conn, randomIDGenerator(), c.services, 0, nil, 50, false /* traceRequests */, c.logger, 0)
 	return &clientConn{conn, handler}
 }
 
@@ -235,20 +234,19 @@ func newClient(initctx context.Context, cfg *clientConfig, connect reconnectFunc
 func initClient(conn ServerCodec, cfg *clientConfig, logger log.Logger) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
-		isHTTP:         isHTTP,
-		services:       &serviceRegistry{logger: logger},
-		batchItemLimit: cfg.batchItemLimit,
-		writeConn:      conn,
-		close:          make(chan struct{}),
-		closing:        make(chan struct{}),
-		didClose:       make(chan struct{}),
-		reconnected:    make(chan ServerCodec),
-		readOp:         make(chan readOp),
-		readErr:        make(chan error),
-		reqInit:        make(chan *requestOp),
-		reqSent:        make(chan error, 1),
-		reqTimeout:     make(chan *requestOp),
-		logger:         logger,
+		isHTTP:      isHTTP,
+		services:    &serviceRegistry{logger: logger},
+		writeConn:   conn,
+		close:       make(chan struct{}),
+		closing:     make(chan struct{}),
+		didClose:    make(chan struct{}),
+		reconnected: make(chan ServerCodec),
+		readOp:      make(chan readOp),
+		readErr:     make(chan error),
+		reqInit:     make(chan *requestOp),
+		reqSent:     make(chan error, 1),
+		reqTimeout:  make(chan *requestOp),
+		logger:      logger,
 	}
 	if !isHTTP {
 		go c.dispatch(conn)

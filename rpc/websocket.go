@@ -22,6 +22,7 @@ package rpc
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -241,10 +242,7 @@ func newClientTransportWS(endpoint string, cfg *clientConfig) (reconnectFunc, er
 	for _, h := range []http.Header{dialOpts.HTTPHeader, urlHeader, cfg.httpHeaders} {
 		setHeaders(header, h)
 	}
-	readLimit := int64(wsMessageSizeLimit)
-	if cfg.wsMessageSizeLimit != nil {
-		readLimit = *cfg.wsMessageSizeLimit
-	}
+	readLimit := cmp.Or(cfg.wsMessageSizeLimit, wsMessageSizeLimit)
 
 	connect := func(ctx context.Context) (ServerCodec, error) {
 		header := header.Clone()

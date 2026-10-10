@@ -37,10 +37,7 @@ type clientConfig struct {
 
 	// WebSocket options
 	wsDialOptions      websocket.DialOptions
-	wsMessageSizeLimit *int64 // nil = default, negative = no limit
-
-	// RPC handler options
-	batchItemLimit int
+	wsMessageSizeLimit int64 // 0 = default, negative = no limit
 }
 
 func (cfg *clientConfig) headers() http.Header {
@@ -62,8 +59,7 @@ func WithWebsocketDialOptions(opts websocket.DialOptions) ClientOption {
 // client. Passing a limit of 0 means no limit.
 func WithWebsocketMessageSizeLimit(messageSizeLimit int64) ClientOption {
 	return func(cfg *clientConfig) {
-		limit := cmp.Or(messageSizeLimit, -1) // coder/websocket's "no limit"
-		cfg.wsMessageSizeLimit = &limit
+		cfg.wsMessageSizeLimit = cmp.Or(messageSizeLimit, -1) // coder/websocket's "no limit"
 	}
 }
 
@@ -108,13 +104,3 @@ func WithHTTPAuth(a HTTPAuth) ClientOption {
 // Usually, HTTPAuth functions will call h.Set("authorization", "...") to add
 // auth information to the request.
 type HTTPAuth func(h http.Header) error
-
-// WithBatchItemLimit changes the maximum number of items allowed in batch requests.
-//
-// Note: this option applies when processing incoming batch requests. It does not affect
-// batch requests sent by the client.
-func WithBatchItemLimit(limit int) ClientOption {
-	return func(cfg *clientConfig) {
-		cfg.batchItemLimit = limit
-	}
-}
