@@ -24,10 +24,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -36,7 +38,9 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -967,4 +971,146 @@ func memHTTPTestClient(srv *Server, fl *flakeyListener) (*Client, *http.Server) 
 		panic(err)
 	}
 	return client, hs
+}
+
+func TestClientOptionsSetHeaders(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	wsHandler := srv.WebsocketHandler(nil, nil, false, logger)
+	var (
+		mu  sync.Mutex
+		got http.Header
+	)
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = r.Header.Clone()
+		mu.Unlock()
+		if r.Header.Get("Upgrade") == "websocket" {
+			wsHandler.ServeHTTP(w, r)
+			return
+		}
+		srv.ServeHTTP(w, r)
+	}))
+	defer httpsrv.Close()
+
+	for _, transport := range []string{"http", "ws"} {
+		t.Run(transport, func(t *testing.T) {
+			url := httpsrv.URL
+			if transport == "ws" {
+				url = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
+			}
+			client, err := DialOptions(context.Background(), url, logger,
+				WithHeader("X-A", "a"),
+				WithHeaders(http.Header{"X-B": {"b"}}),
+				WithHTTPAuth(func(h http.Header) error {
+					h.Set("Authorization", "Bearer token")
+					return nil
+				}),
+				WithWebsocketDialOptions(websocket.DialOptions{HTTPHeader: http.Header{"X-D": {"d"}}}),
+			)
+			require.NoError(t, err)
+			defer client.Close()
+			require.Equal(t, transport != "http", client.SupportsSubscriptions())
+
+			ctx := NewContextWithHeaders(context.Background(), http.Header{"X-C": {"c"}})
+			_, err = client.SupportedModules()
+			require.NoError(t, err)
+			require.NoError(t, client.CallContext(ctx, nil, "test_noArgsRets"))
+
+			mu.Lock()
+			defer mu.Unlock()
+			require.Equal(t, "a", got.Get("X-A"))
+			require.Equal(t, "b", got.Get("X-B"))
+			require.Equal(t, "Bearer token", got.Get("Authorization"))
+			if transport == "http" {
+				require.Equal(t, "c", got.Get("X-C"))
+			} else {
+				require.Equal(t, "d", got.Get("X-D"))
+			}
+		})
+	}
+}
+
+func TestClientHTTPError(t *testing.T) {
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "short and stout", http.StatusTeapot)
+	}))
+	defer httpsrv.Close()
+	client, err := DialOptions(context.Background(), httpsrv.URL, log.New())
+	require.NoError(t, err)
+	defer client.Close()
+
+	var httpErr HTTPError
+	require.ErrorAs(t, client.Call(nil, "test_noArgsRets"), &httpErr)
+	require.Equal(t, http.StatusTeapot, httpErr.StatusCode)
+	require.Contains(t, string(httpErr.Body), "short and stout")
+}
+
+func TestClientIPC(t *testing.T) {
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	path := filepath.Join(t.TempDir(), "rpc.ipc")
+	l, err := net.Listen("unix", path)
+	require.NoError(t, err)
+	defer l.Close()
+	go srv.ServeListener(l) //nolint:errcheck
+
+	client, err := DialOptions(context.Background(), path, logger)
+	require.NoError(t, err)
+	defer client.Close()
+	var res echoResult
+	require.NoError(t, client.Call(&res, "test_echo", "x", 1, nil))
+	require.Equal(t, "x", res.String)
+	require.True(t, client.SupportsSubscriptions())
+}
+
+type reverseService struct{}
+
+func (reverseService) Echo(ctx context.Context, s string) (string, error) {
+	if _, ok := ClientFromContext(ctx); !ok {
+		return "", errors.New("no client in the context")
+	}
+	return s, nil
+}
+
+// pipeClient returns a client whose server side is the returned writer and decoder.
+func pipeClient(t *testing.T, opts ...ClientOption) (*Client, io.Writer, *json.Decoder) {
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	cfg := new(clientConfig)
+	for _, opt := range opts {
+		opt.applyOption(cfg)
+	}
+	client, err := newClient(context.Background(), cfg, newClientTransportIO(inR, outW), log.New())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		inW.Close() // ends the client's read loop, which Close waits for
+		outR.Close()
+		client.Close()
+	})
+	require.NoError(t, client.RegisterName("rev", reverseService{}))
+	return client, inW, json.NewDecoder(outR)
+}
+
+func TestClientServesReverseCalls(t *testing.T) {
+	_, in, out := pipeClient(t)
+	_, err := io.WriteString(in, `{"jsonrpc":"2.0","id":1,"method":"rev_echo","params":["hi"]}`)
+	require.NoError(t, err)
+	var resp jsonrpcMessage
+	require.NoError(t, out.Decode(&resp))
+	require.Nil(t, resp.Error)
+	require.JSONEq(t, `"hi"`, string(resp.Result))
+}
+
+func TestClientBatchItemLimit(t *testing.T) {
+	_, in, out := pipeClient(t, WithBatchItemLimit(1))
+	_, err := io.WriteString(in, `[{"jsonrpc":"2.0","id":1,"method":"rev_echo","params":["a"]},{"jsonrpc":"2.0","id":2,"method":"rev_echo","params":["b"]}]`)
+	require.NoError(t, err)
+	var resp []jsonrpcMessage
+	require.NoError(t, out.Decode(&resp))
+	require.Len(t, resp, 1)
+	require.NotNil(t, resp[0].Error)
+	require.Contains(t, resp[0].Error.Message, "batch limit 1 exceeded")
 }

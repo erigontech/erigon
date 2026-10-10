@@ -220,12 +220,48 @@ func parseOriginURL(origin string) (string, string, string, error) {
 // The context is used for the initial connection establishment. It does not
 // affect subsequent interactions with the client.
 func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logger) (*Client, error) {
-	endpoint, header, err := wsClientHeaders(endpoint, origin)
+	cfg := new(clientConfig)
+	if origin != "" {
+		cfg.setHeader("origin", origin)
+	}
+	connect, err := newClientTransportWS(endpoint, cfg)
 	if err != nil {
 		return nil, err
 	}
-	return newClient(ctx, func(ctx context.Context) (ServerCodec, error) {
-		conn, resp, err := websocket.Dial(ctx, endpoint, &websocket.DialOptions{HTTPHeader: header})
+	return newClient(ctx, cfg, connect, logger)
+}
+
+func newClientTransportWS(endpoint string, cfg *clientConfig) (reconnectFunc, error) {
+	var dialOpts websocket.DialOptions
+	if cfg.wsDialOptions != nil {
+		dialOpts = *cfg.wsDialOptions
+	}
+	dialURL, urlHeader, err := wsClientHeaders(endpoint, "")
+	if err != nil {
+		return nil, err
+	}
+	header := make(http.Header)
+	for _, h := range []http.Header{dialOpts.HTTPHeader, urlHeader, cfg.httpHeaders} {
+		setHeaders(header, h)
+	}
+	readLimit := int64(wsMessageSizeLimit)
+	if cfg.wsMessageSizeLimit != nil && *cfg.wsMessageSizeLimit >= 0 {
+		readLimit = *cfg.wsMessageSizeLimit
+		if readLimit == 0 {
+			readLimit = -1 // coder/websocket's "no limit"
+		}
+	}
+
+	connect := func(ctx context.Context) (ServerCodec, error) {
+		header := header.Clone()
+		if cfg.httpAuth != nil {
+			if err := cfg.httpAuth(header); err != nil {
+				return nil, err
+			}
+		}
+		opts := dialOpts
+		opts.HTTPHeader = header
+		conn, resp, err := websocket.Dial(ctx, dialURL, &opts)
 		if err != nil {
 			// Only close resp.Body on error; on success the connection owns it.
 			hErr := wsHandshakeError{err: err}
@@ -235,8 +271,11 @@ func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logg
 			}
 			return nil, hErr
 		}
-		return NewWebsocketCodec(conn, endpoint, header, endpoint), nil
-	}, logger)
+		codec := NewWebsocketCodec(conn, dialURL, header, dialURL)
+		conn.SetReadLimit(readLimit)
+		return codec, nil
+	}
+	return connect, nil
 }
 
 func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {

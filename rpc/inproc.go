@@ -35,7 +35,7 @@ func DialInProc(handler *Server, logger log.Logger) *Client {
 // context for every handler invocation on the connection (see
 // Server.ServeCodecWithContext).
 func DialInProcWithContext(connCtx context.Context, handler *Server, logger log.Logger) *Client {
-	c, _ := newClient(connCtx, func(context.Context) (ServerCodec, error) {
+	c, _ := newClient(connCtx, new(clientConfig), func(context.Context) (ServerCodec, error) {
 		p1, p2 := net.Pipe()
 		go handler.ServeCodecWithContext(connCtx, NewCodec(p1), 0)
 		return NewCodec(p2), nil

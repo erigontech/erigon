@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"reflect"
 	"strconv"
 	"sync/atomic"
@@ -77,7 +78,9 @@ type BatchElem struct {
 
 // Client represents a connection to an RPC server.
 type Client struct {
-	isHTTP bool
+	isHTTP         bool
+	services       *serviceRegistry // methods the server can call on this client
+	batchItemLimit int
 
 	idCounter atomic.Uint32
 
@@ -104,14 +107,17 @@ type Client struct {
 
 type reconnectFunc func(ctx context.Context) (ServerCodec, error)
 
+type clientContextKey struct{}
+
 type clientConn struct {
 	codec   ServerCodec
 	handler *handler
 }
 
 func (c *Client) newClientConn(conn ServerCodec) *clientConn {
-	ctx := context.WithValue(context.Background(), peerInfoContextKey{}, conn.peerInfo())
-	handler := newHandler(ctx, conn, randomIDGenerator(), &serviceRegistry{logger: c.logger}, 0, nil, 50, false /* traceRequests */, c.logger, 0)
+	ctx := context.WithValue(context.Background(), clientContextKey{}, c)
+	ctx = context.WithValue(ctx, peerInfoContextKey{}, conn.peerInfo())
+	handler := newHandler(ctx, conn, randomIDGenerator(), c.services, c.batchItemLimit, nil, 50, false /* traceRequests */, c.logger, 0)
 	return &clientConn{conn, handler}
 }
 
@@ -153,8 +159,10 @@ func (op *requestOp) wait(ctx context.Context, c *Client) ([]*jsonrpcMessage, er
 //
 // The currently supported URL schemes are "http", "https", "ws" and "wss". If rawurl is a
 // file name with no URL scheme, a local socket connection is established using UNIX
-// domain sockets on supported platforms and named pipes on Windows. If you want to
-// configure transport options, use DialHTTP, DialWebsocket or DialIPC instead.
+// domain sockets.
+//
+// If you want to further configure the transport, use DialOptions instead of this
+// function.
 //
 // For websocket connections, the origin is set to the local host name.
 //
@@ -168,53 +176,93 @@ func Dial(rawurl string, logger log.Logger) (*Client, error) {
 // The context is used to cancel or time out the initial connection establishment. It does
 // not affect subsequent interactions with the client.
 func DialContext(ctx context.Context, rawurl string, logger log.Logger) (*Client, error) {
+	return DialOptions(ctx, rawurl, logger)
+}
+
+// DialOptions creates a new RPC client for the given URL. You can supply any of the
+// pre-defined client options to configure the underlying transport.
+//
+// The context is used to cancel or time out the initial connection establishment. It does
+// not affect subsequent interactions with the client.
+//
+// The client reconnects automatically when the connection is lost.
+func DialOptions(ctx context.Context, rawurl string, logger log.Logger, options ...ClientOption) (*Client, error) {
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return nil, err
 	}
+
+	cfg := new(clientConfig)
+	for _, opt := range options {
+		opt.applyOption(cfg)
+	}
+
+	var reconnect reconnectFunc
 	switch u.Scheme {
 	case "http", "https":
-		return DialHTTP(rawurl, logger)
+		reconnect = newClientTransportHTTP(rawurl, cfg)
 	case "ws", "wss":
-		return DialWebsocket(ctx, rawurl, "", logger)
+		if reconnect, err = newClientTransportWS(rawurl, cfg); err != nil {
+			return nil, err
+		}
 	case "stdio":
-		return DialStdIO(ctx, logger)
+		reconnect = newClientTransportIO(os.Stdin, os.Stdout)
+	case "":
+		reconnect = newClientTransportIPC(rawurl)
 	default:
 		return nil, fmt.Errorf("no known transport for URL scheme %q", u.Scheme)
 	}
+	return newClient(ctx, cfg, reconnect, logger)
 }
 
-func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger) (*Client, error) {
+// ClientFromContext retrieves the client from the context, if any. This can be used to perform
+// 'reverse calls' in a handler method.
+func ClientFromContext(ctx context.Context) (*Client, bool) {
+	client, ok := ctx.Value(clientContextKey{}).(*Client)
+	return client, ok
+}
+
+func newClient(initctx context.Context, cfg *clientConfig, connect reconnectFunc, logger log.Logger) (*Client, error) {
 	conn, err := connect(initctx)
 	if err != nil {
 		return nil, err
 	}
-	c := initClient(conn, logger)
+	c := initClient(conn, cfg, logger)
 	c.reconnectFunc = connect
 	return c, nil
 }
 
-func initClient(conn ServerCodec, logger log.Logger) *Client {
+func initClient(conn ServerCodec, cfg *clientConfig, logger log.Logger) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
-		isHTTP:      isHTTP,
-		writeConn:   conn,
-		close:       make(chan struct{}),
-		closing:     make(chan struct{}),
-		didClose:    make(chan struct{}),
-		reconnected: make(chan ServerCodec),
-		readOp:      make(chan readOp),
-		readErr:     make(chan error),
-		reqInit:     make(chan *requestOp),
-		reqSent:     make(chan error, 1),
-		reqTimeout:  make(chan *requestOp),
-		logger:      logger,
+		isHTTP:         isHTTP,
+		services:       &serviceRegistry{logger: logger},
+		batchItemLimit: cfg.batchItemLimit,
+		writeConn:      conn,
+		close:          make(chan struct{}),
+		closing:        make(chan struct{}),
+		didClose:       make(chan struct{}),
+		reconnected:    make(chan ServerCodec),
+		readOp:         make(chan readOp),
+		readErr:        make(chan error),
+		reqInit:        make(chan *requestOp),
+		reqSent:        make(chan error, 1),
+		reqTimeout:     make(chan *requestOp),
+		logger:         logger,
 	}
 	if !isHTTP {
 		go c.dispatch(conn)
 		go c.read(conn)
 	}
 	return c
+}
+
+// RegisterName creates a service for the given receiver type under the given name. When no
+// methods on the given receiver match the criteria to be either a RPC method or a
+// subscription an error is returned. Otherwise a new service is created and added to the
+// service collection this client provides to the server.
+func (c *Client) RegisterName(name string, receiver any) error {
+	return c.services.registerName(name, receiver, nil)
 }
 
 func (c *Client) nextID() json.RawMessage {
@@ -475,6 +523,13 @@ func (c *Client) Subscribe(ctx context.Context, namespace string, channel any, a
 		return nil, err
 	}
 	return op.sub, nil
+}
+
+// SupportsSubscriptions reports whether subscriptions are supported by the client
+// transport. When this returns false, Subscribe and related methods will return
+// ErrNotificationsUnsupported.
+func (c *Client) SupportsSubscriptions() bool {
+	return !c.isHTTP
 }
 
 func (c *Client) newMessage(method string, paramsIn ...any) (*jsonrpcMessage, error) {
