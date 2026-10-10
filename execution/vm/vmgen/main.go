@@ -315,10 +315,10 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 	return b.String()
 }
 
-// fastLoop returns runTraced in a file of its own, with fast in place of the
-// switchHere comment: as run, with anyTrace set to false and without the code
-// this makes dead, or, if hooked, as runHooked, which keeps the tracing code and
-// turns on only the !anyTrace guards of the fast path.
+// fastLoop returns runTraced in a file of its own, with fastPath set to true and
+// fast in place of the switchHere comment: as run, with anyTrace set to false and
+// without the code this makes dead, or, if hooked, as runHooked, which keeps the
+// tracing code.
 func fastLoop(traced []byte, fast string, ops []fastOp, hooked bool) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
@@ -356,16 +356,10 @@ func fastLoop(traced []byte, fast string, ops []fastOp, hooked bool) []byte {
 			b.WriteString(text(fset, d) + "\n\n")
 		case *ast.FuncDecl:
 			d.Doc, d.Name.Name = nil, name
-			guards := map[*ast.Ident]bool{}
 			for n := range ast.Preorder(d) {
-				if u, ok := n.(*ast.UnaryExpr); ok && u.Op == token.NOT {
-					if id, ok := u.X.(*ast.Ident); ok {
-						guards[id] = true
-					}
-				}
-			}
-			for n := range ast.Preorder(d) {
-				if id, ok := n.(*ast.Ident); ok && id.Name == "anyTrace" && (!hooked || guards[id]) {
+				if id, ok := n.(*ast.Ident); ok && id.Name == "fastPath" {
+					id.Name = "true"
+				} else if ok && id.Name == "anyTrace" && !hooked {
 					id.Name = "false"
 				}
 			}
