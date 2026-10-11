@@ -61,13 +61,13 @@ func cancunConfig() *chain.Config {
 // interns into.
 func benchConfig(b *testing.B, gasLimit uint64) *vm.EVM {
 	b.Helper()
-	return newBenchEnv(b, gasLimit, true)
+	return newBenchEnv(b, gasLimit)
 }
 
 // newBenchEnv returns the env, not the runtime.Config it built: NewEnv ignores
 // Config.Value — only runtime.Call reads it — so a Value set here would never
-// reach the call.
-func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
+// reach the call. It builds the cache-free versioned path staged sync runs.
+func newBenchEnv(t testing.TB, gasLimit uint64) *vm.EVM {
 	t.Helper()
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
@@ -77,14 +77,7 @@ func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 	require.NoError(t, err)
 
 	reader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	// noMaterialize is bound to versionMap presence: a versionMap means the
-	// cache-free versioned path, no versionMap means the materialize path.
-	var statedb *state.IntraBlockState
-	if noMaterialize {
-		statedb = state.NewWithVersionMap(reader, state.NewVersionMap(nil))
-	} else {
-		statedb = state.New(reader)
-	}
+	statedb := state.NewWithVersionMap(reader, state.NewVersionMap(nil))
 	return envFor(statedb, gasLimit)
 }
 
