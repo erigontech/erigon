@@ -1,0 +1,37 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package registry
+
+import (
+	"testing"
+
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
+)
+
+// Proposers publish their preferences for an epoch in bursts, and gossip drops every later copy
+// of a message the limiter ignored, so one peer must be able to relay both accepted epochs at once.
+func TestProposerPreferencesRateLimiterAcceptsTwoEpochsFromOnePeer(t *testing.T) {
+	allow := proposerPreferencesRateLimiter()
+	pid := peer.ID("relaying-peer")
+
+	for i := range 2 * clparams.MainnetBeaconConfig.SlotsPerEpoch {
+		require.True(t, allow(pid, nil, clparams.GloasVersion), "preference %d", i)
+	}
+}
