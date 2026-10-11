@@ -65,7 +65,7 @@ func RegisterGossipServices(
 	// gloas
 	add(gossip.RegisterGossipService(gm, executionPayloadService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(2, 4)))
 	add(gossip.RegisterGossipService(gm, payloadAttestationService, waitReady, withBeginVersion(clparams.GloasVersion), withPayloadAttestationRateLimiter()))
-	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withRateLimiterByPeer(2, 4)))
+	add(gossip.RegisterGossipService(gm, proposerPreferencesService, waitReady, withProposerPreferencesRateLimiter()))
 	add(gossip.RegisterGossipService(gm, executionPayloadBidService, waitReady, withBeginVersion(clparams.GloasVersion), withRateLimiterByPeer(8, 16)))
 
 	log.Info("[GossipManager] Registered services", "subscribed", subscribed, "expired", expired)
@@ -104,6 +104,13 @@ func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests func() i
 // peer, because gossipsub has already marked it as seen.
 func withPayloadAttestationRateLimiter() gossip.ConditionFunc {
 	return withRateLimiterByPeer(float64(clparams.MaxPtcSize), int(clparams.MaxPtcSize))
+}
+
+// withProposerPreferencesRateLimiter lets one peer relay a full burst of preferences for the two
+// accepted epochs: gossip marks a message seen before validation, so a copy this limiter ignores
+// is never accepted from another peer either.
+func withProposerPreferencesRateLimiter() gossip.ConditionFunc {
+	return withRateLimiterByPeer(2, 64)
 }
 
 // withRateLimiterByPeer returns a condition that checks if the message can be processed based on the token bucket rate limiter
