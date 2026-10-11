@@ -640,7 +640,11 @@ func (d *Downloader) chainTomlDiscoveryLoop(ctx context.Context, networkName str
 	if pubErr := d.PublishLocalChainToml(); pubErr != nil {
 		d.logger.Debug("[chaintoml] no existing chain.toml to re-publish", "err", pubErr)
 	} else {
-		d.logger.Info("[chaintoml] re-published existing chain.toml ENR entry")
+		// Say what was advertised, not that something was. This publish
+		// usually runs before the torrent client has registered anything, so
+		// a bare success here reads as "peers can find us" when the ENR entry
+		// was never written.
+		d.logger.Info("[chaintoml] startup publish", "servable", d.servableCount())
 	}
 
 	// 10s ticker (was 30s) — chain.toml discovery is now the dominant

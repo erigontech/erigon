@@ -1019,6 +1019,15 @@ func (d *Downloader) publishLocalChainTomlInner() error {
 // on a restart — the same files on disk produce identical output — so
 // gating the first V2 publish on V1 contentChanged alone would never
 // produce an initial chain.v2.<seq>.toml.
+// servableCount is how many files the torrent client can currently serve, and
+// so how many the next advertisement can carry.
+func (d *Downloader) servableCount() int {
+	if d.torrentClient == nil {
+		return 0
+	}
+	return len(d.torrentClient.Torrents())
+}
+
 // republishOnServableGrowth advertises the set once the torrent client can
 // serve more of it than last time.
 //
@@ -1028,10 +1037,7 @@ func (d *Downloader) publishLocalChainTomlInner() error {
 // the node stays silent until it builds a file of its own, which is a step
 // boundary away and unrelated to when it became able to serve.
 func (d *Downloader) republishOnServableGrowth() {
-	if d.torrentClient == nil {
-		return
-	}
-	servable := len(d.torrentClient.Torrents())
+	servable := d.servableCount()
 	d.lock.Lock()
 	grew := servable > d.lastServableCount
 	d.lastServableCount = servable

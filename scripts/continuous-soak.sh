@@ -107,6 +107,37 @@ wait_publisher_tip() {
   return 1
 }
 
+wait_publisher_manifest() {
+  # Being at tip is not the same as being able to serve. Leg M bootstraps from
+  # the publisher's manifest, which it advertises as a "chain-toml" ENR entry —
+  # and that entry only appears once the torrent client can serve the set. A
+  # publisher at tip with no entry is invisible to every consumer, which cost a
+  # cycle to a 4h sync deadline with withChainToml=0 throughout.
+  local MANIFEST_WAIT_MIN="${MANIFEST_WAIT_MIN:-60}"
+  echo "[continuous-soak] waiting for publisher to advertise a chain-toml ENR entry (${MANIFEST_WAIT_MIN}m cap)..."
+  for i in $(seq 1 "$MANIFEST_WAIT_MIN"); do
+    local enr
+    enr=$(curl -sS -m 5 -X POST -H "Content-Type: application/json" \
+      --data '{"jsonrpc":"2.0","method":"admin_nodeInfo","params":[],"id":1}' \
+      "http://127.0.0.1:${PUB_HTTP_PORT}" 2>/dev/null | jq -r '.result.enr // empty' || true)
+    if [[ -n "$enr" ]] && python3 -c '
+import sys, base64
+e = sys.argv[1]
+b = e[4:] if e.startswith("enr:") else e
+b = b.replace("-", "+").replace("_", "/")
+b += "=" * (-len(b) % 4)
+sys.exit(0 if b"chain-toml" in base64.b64decode(b) else 1)
+' "$enr" 2>/dev/null; then
+      echo "[continuous-soak] publisher advertising chain-toml after ${i}m"
+      return 0
+    fi
+    echo "[continuous-soak] publisher at tip but not advertising a manifest yet (attempt $i / $MANIFEST_WAIT_MIN)"
+    sleep 60
+  done
+  echo "[continuous-soak] FAIL: publisher never advertised a chain-toml ENR entry within ${MANIFEST_WAIT_MIN}m" >&2
+  return 1
+}
+
 CONSUMER_DATADIR="${CONSUMER_DATADIR:-/erigon/tmp/erigon-hoodi-soak.continuous}"
 CONSUMER_STDERR_LOG="${CONSUMER_STDERR_LOG:-/tmp/erigon-hoodi.log}"
 
@@ -190,6 +221,7 @@ run_leg_m() {
     fi
   fi
   wait_publisher_tip || return 1
+  wait_publisher_manifest || return 1
 
   eval "$(scripts/publisher-info.sh master)"
   echo "[continuous-soak] master ENR=$ENR" >"$out/publisher-info.txt"
