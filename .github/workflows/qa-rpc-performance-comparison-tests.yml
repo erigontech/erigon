@@ -23,7 +23,8 @@ on:
           - serial
           - parallel
   schedule:
-    - cron: '0 2 * * *'  # Run daily at 02:00 UTC
+    - cron: '0 2 * * *'   # Run daily at 02:00 UTC
+    - cron: '30 2 * * 0'  # Run on Sunday at 02:30 UTC, nethermind as peer
 
 concurrency:
   group: rpc-performance-latest-${{ github.ref }}
@@ -59,12 +60,13 @@ jobs:
           RUN_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
           # Decide which client, if any, runs besides erigon:
-          # - schedule: geth, only on Sunday (UTC)
+          # - schedule: on Sunday (UTC) geth with the daily cron, nethermind with the Sunday one
           # - workflow_dispatch: controlled by inputs, at most one of them
           PEER=""
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            DOW="$(date -u +%w)"
-            if [ "$DOW" = "0" ]; then  # Sunday, (0..6 = Sun..Sat)
+            if [ "${{ github.event.schedule }}" = "30 2 * * 0" ]; then
+              PEER="nethermind"
+            elif [ "$(date -u +%w)" = "0" ]; then  # Sunday, (0..6 = Sun..Sat)
               PEER="geth"
             fi
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
