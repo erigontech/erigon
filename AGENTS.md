@@ -53,6 +53,12 @@ When fixing bugs or adding new features, follow the test-driven development (TDD
 
 Inspect the relevant existing tests first. Verify whether one already covers the behavior and fails for the intended reason when the implementation is incorrect. If it does, use that failure as the Red step and do not add duplicate coverage. Add a new test only when the existing suite does not protect the required behavior or when a more focused regression test materially improves failure diagnosis.
 
+### Before changing a bound or constant
+
+A deliberate tolerance and an off-by-one are indistinguishable at the call site. Before changing a bound, threshold or rounding expression, read the code that *produces* the value being compared against and confirm the intended relationship.
+
+A red test does not settle this. It proves the code disagrees with your expectation, not that your expectation matches the system's contract — a test that encodes the same wrong assumption as the change passes for the wrong reason.
+
 ### For bug fixes
 
 Reproduce the bug as a failing test **before** touching the fix. This proves three things at once: (a) the bug exists, (b) the agent/contributor understands it, and (c) the fix actually addresses it — the test flips red → green when the fix lands.

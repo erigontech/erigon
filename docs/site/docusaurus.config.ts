@@ -12,7 +12,7 @@ const archivedVersions: string[] = require('./versions.json');
 // The docs series this branch publishes; also scopes the {ERIGON_VERSION}
 // lookup below. The `label: 'vX.Y'` literal is rewritten at each cutover.
 const currentDocsVersion = {
-  label: 'v3.6',
+  label: 'v3.7',
   badge: false,
 };
 

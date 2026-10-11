@@ -105,7 +105,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 | Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so RAID 0 striping is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](https://docs.erigon.tech/get-started/hardware-requirements#filesystem). |
 | Filesystem | ext4 or XFS | See [Filesystem](https://docs.erigon.tech/get-started/hardware-requirements#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
-| CPU | 4–8 cores for Full nodes, 8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
+| CPU | 4–8 cores for Full nodes, 8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. On amd64, the CPU must support the `x86-64-v2` baseline (SSE4.2, POPCNT): Intel Nehalem (2008), AMD Bulldozer (2011) or newer. |
 | Linux | Kernel version > v4 | A modern Linux distribution is required. |
 
 ## Filesystem
@@ -160,7 +160,7 @@ If you must split the datadir across a fast and a slow device, see [Optimizing S
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](https://docs.erigon.tech/fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](https://docs.erigon.tech/fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. Each figure is the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
 
 :::note
 These nodes were measured before the receipts cache was on by default. From 3.7 it is on, which adds about 441 GB on a mainnet archive node and a few GB on full and minimal nodes, whose receipts follow their history window. See [Database](https://docs.erigon.tech/fundamentals/database). The recommended disk sizes below already leave room for it.
@@ -170,45 +170,51 @@ These nodes were measured before the receipts cache was on by default. From 3.7 
 
 | Pruning Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
-| Archive | 2.03 TB | 4 TB | 32 GB | 64 GB |
-| Full (Default) | 419.04 GB | 2 TB | 16 GB | 32 GB |
-| Minimal | 478.40 GB | 1 TB | 16 GB | 64 GB |
+| Archive | 2.25 TB | 4 TB | 32 GB | 64 GB |
+| Full (Default) | 534.94 GB | 2 TB | 16 GB | 32 GB |
+| Minimal | 510.82 GB | 1 TB | 16 GB | 64 GB |
 
-*Current Disk Usage measured as of 2026-07-19; usage grows over time as the chain grows.*
+*Current Disk Usage measured as of 2026-09-17, the oldest of the measurements in this table; usage grows over time as the chain grows.*
 
 **Gnosis Chain**
 
 | **Pruning Mode** | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | --- | --- | --- | --- | --- |
-| Archive | 673.59 GB | 1 TB | 16 GB | 32 GB |
-| Full (Default) | 220.10 GB | 1 TB | 8 GB | 16 GB |
-| Minimal | 304.67 GB | 500 GB | 8 GB | 16 GB |
+| Archive | 803.35 GB | 1 TB | 16 GB | 32 GB |
+| Full (Default) | 314.35 GB | 1 TB | 8 GB | 16 GB |
+| Minimal | 311.75 GB | 500 GB | 8 GB | 16 GB |
 
-*Current Disk Usage measured as of 2026-07-21; usage grows over time as the chain grows.*
+*Current Disk Usage measured as of 2026-09-19, the oldest of the measurements in this table; usage grows over time as the chain grows.*
 
 **Sepolia**
 
 | **Pruning Mode** | **Current Disk Usage** |
 | --- | --- |
-| Archive | 1.10 TB |
+| Archive | 1.12 TB |
+| Full (Default) | 301.82 GB |
+| Minimal | 272.59 GB |
 
-*Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network.*
+*Current Disk Usage measured as of 2026-09-18, the oldest of the measurements in this table; usage grows over time as the chain grows.*
 
 **Hoodi**
 
 | **Pruning Mode** | **Current Disk Usage** |
 | --- | --- |
-| Archive | 133.73 GB |
+| Archive | 132.92 GB |
+| Full (Default) | 62.86 GB |
+| Minimal | 58.89 GB |
 
-*Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network.*
+*Current Disk Usage measured as of 2026-09-20, the oldest of the measurements in this table; usage grows over time as the chain grows.*
 
 **Chiado**
 
 | **Pruning Mode** | **Current Disk Usage** |
 | --- | --- |
-| Archive | 29.64 GB |
+| Archive | 29.98 GB |
+| Full (Default) | 16.07 GB |
+| Minimal | 16.00 GB |
 
-*Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network.*
+*Current Disk Usage measured as of 2026-09-20, the oldest of the measurements in this table; usage grows over time as the chain grows.*
 
 :::tip
 See also how you can [optimize storage](https://docs.erigon.tech/fundamentals/optimizing-storage).
@@ -229,11 +235,15 @@ Approximate times to sync from scratch to the tip of the chain.
 
 | Chain | Archive | Full (Default) | Minimal |
 | --- | --- | --- | --- |
-| Ethereum | ~8 h | ~4–6 h | ~2 h |
-| Gnosis | ~2 h | ~1–2 h | ~30 m |
+| Ethereum | ~14 h 20 m | ~5 h 40 m | ~5 h 20 m |
+| Gnosis | ~5 h 15 m | ~2 h 50 m | ~2 h 50 m |
 
 :::info
-These figures are indicative and are **not measured by CI** — read them as an order of magnitude, not a target. Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](https://docs.erigon.tech/get-started/hardware-requirements#bandwidth-requirements) influences the result more than CPU does: expect proportionally faster syncs on a well-connected host and slower ones on a constrained link.
+Measured on Erigon 3.6.1 in September 2026, syncing each node from an empty datadir on one machine (16-core Intel Core Ultra 9 185H, 93 GB RAM, NVMe SSD on ext4), one node at a time. Time is measured from process start to the first report of a head at the chain tip.
+
+**The download rate was capped at 400 Mbps, and that cap — not the hardware — is what set these times.** Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](https://docs.erigon.tech/get-started/hardware-requirements#bandwidth-requirements) influences the result far more than CPU does. Note that 400 Mbps is eight times the 50 Mbps recommended above for a staking node: on a link at that recommended speed, expect these times to be several times longer, with block execution rather than download eventually setting the floor. Treat them as an order of magnitude, not a target — they are a single sample per configuration, with no variance estimate, and sync time also depends on peer quality and chain activity on the day.
+
+Note that full and minimal land within a few percent of each other on both chains. The gap between them is small; the gap to archive is about 1.9× on Gnosis and 2.5× on Ethereum.
 :::
 
 ---
@@ -443,7 +453,7 @@ docker pull erigontech/erigon:<version_tag>
 For example:
 
 ```sh
-docker pull erigontech/erigon:v3.6.1
+docker pull erigontech/erigon:v3.7.1
 ```
 
 **3. Start the Erigon container**
@@ -457,7 +467,7 @@ docker run -it erigontech/erigon:<version_tag> <flags>
 For example:
 
 ```sh
-docker run -it erigontech/erigon:v3.6.1 --chain=hoodi --prune.mode=minimal --datadir /erigon-data
+docker run -it erigontech/erigon:v3.7.1 --chain=hoodi --prune.mode=minimal --datadir /erigon-data
 ```
 
 - `-v` connects a folder on your computer to the container (must have authorization)
@@ -472,16 +482,16 @@ docker run -it erigontech/erigon:v3.6.1 --chain=hoodi --prune.mode=minimal --dat
 
 **1. Select Your Processor Architecture and Download**
 
-Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., v3.6.1) or whichever version you prefer.
+Go to the Erigon [releases page](https://github.com/erigontech/erigon/releases) on GitHub and select the latest stable version (e.g., v3.7.1) or whichever version you prefer.
 
 Download the appropriate binary file for your processor architecture:
 
 | Processor Type | Binary File Type | Example File Name |
 | --- | --- | --- |
-| 64-bit Intel/AMD | Debian Package (.deb) | erigon_3.6.1_amd64.deb |
-| 64-bit ARM | Debian Package (.deb) | erigon_3.6.1_arm64.deb |
-| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v3.6.1_linux_amd64.tar.gz |
-| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v3.6.1_linux_arm64.tar.gz |
+| 64-bit Intel/AMD | Debian Package (.deb) | erigon_3.7.1_amd64.deb |
+| 64-bit ARM | Debian Package (.deb) | erigon_3.7.1_arm64.deb |
+| 64-bit Intel/AMD | Compressed Archive (.tar.gz) | erigon_v3.7.1_linux_amd64.tar.gz |
+| 64-bit ARM | Compressed Archive (.tar.gz) | erigon_v3.7.1_linux_arm64.tar.gz |
 
 The amd64 artifacts are compiled for the `x86-64-v2` baseline (SSE4.2, POPCNT). Intel Nehalem (2008) and AMD Bulldozer (2011) or newer qualify; older hardware is not supported.
 
@@ -502,7 +512,7 @@ sha256sum <DOWNLOADED_FILE_NAME>
 Example with a `tar.gz` file:
 
 ```sh
-sha256sum erigon_v3.6.1_linux_amd64.tar.gz
+sha256sum erigon_v3.7.1_linux_amd64.tar.gz
 ```
 
 This command will output a long string (the computed checksum) followed by the file name.
@@ -622,7 +632,7 @@ git fetch --tags
 Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```sh
-git checkout v3.6.1
+git checkout v3.7.1
 ```
 
 **2.3 Compile the Software**
@@ -731,7 +741,7 @@ git fetch --tags
 Check out the desired version tag by replacing `<tag_name>` with the version you want. Normally latest stable version is the best, check the official [Release Notes](https://github.com/erigontech/erigon/releases). For example:
 
 ```bash
-git checkout v3.6.1
+git checkout v3.7.1
 ```
 
 You might need to change the `ExecutionPolicy` to allow scripts created locally or signed by a trusted publisher to run. Open a **Powershell session as Administrator** and type:
@@ -784,7 +794,7 @@ erigon.exe [options]
 **Note**: When you first start Erigon, Windows Firewall may prompt you to allow internet access. Select "YES" to proceed.
 :::
 
-**Window Subsystem for Linux (WSL)**
+**Windows Subsystem for Linux (WSL)**
 
 WSL enables you to run a complete GNU/Linux environment natively within Windows, offering Linux compatibility without the performance and resource overhead of traditional virtual machines.
 
@@ -857,6 +867,17 @@ Updating to the latest version of Erigon gives you access to the latest features
 - **Read Release Notes**: Carefully review the [Release Notes](https://github.com/erigontech/erigon/releases) for breaking changes and new features relevant to your setup.
 - **Terminate your Erigon**: End your current Erigon session by pressing `CTRL+C`.
 - **Backup**: Always back up your `datadir` before performing major upgrades.
+
+## Upgrading from 3.6 to 3.7
+
+A 3.6.x node upgrades to 3.7 in place: there is no database migration and no re-sync. Before restarting on the new version, check the following:
+
+- **CPU baseline**: amd64 binaries and Docker images now require the `x86-64-v2` baseline (SSE4.2, POPCNT). The separate `amd64v2` tarball and `linux/amd64/v2` Docker platform are gone; use the standard amd64 artifacts. Building from source requires Go 1.26 or newer. See [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements).
+- **Removed flags**: `--fcu.background.commit` and `--experimental.streaming-commitment` now prevent startup. Remove them from your startup arguments.
+- **Caplin with checkpoint sync disabled**: nodes running `--caplin.checkpoint-sync.disable` re-sync Caplin from genesis on upgrade unless a finalized state is saved locally. Allow checkpoint sync during the upgrade to avoid the replay.
+- **Receipts**: fresh datadirs now keep receipts by default (`--prune.include-receipts`). An existing datadir keeps the setting it was created with; changing it requires a fresh datadir. See [Pruning Modes](https://docs.erigon.tech/fundamentals/pruning-modes).
+- **Polygon**: Polygon chain names, datadirs and `--bor.*` / `--polygon.*` flags are no longer accepted. Use [0xPolygon/erigon](https://github.com/0xPolygon/erigon).
+- **JSON-RPC**: several endpoints are stricter or return renamed fields. Review the [v3.7.0 release notes](https://github.com/erigontech/erigon/releases/tag/v3.7.0) if you run applications against the RPC.
 
 ## Managing your Data
 
@@ -960,7 +981,7 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.6.1
+    image: erigontech/erigon:v3.7.1
     container_name: erigon-node
     restart: always
     command:
@@ -987,7 +1008,8 @@ services:
       - "42069:42069/tcp"     # snapshot downloader (BitTorrent)
       - "42069:42069/udp"
       - "4000:4000/udp"       # Caplin consensus-layer discovery
-      - "4001:4001/tcp"       # Caplin consensus-layer p2p
+      - "4001:4001/tcp"       # Caplin consensus-layer p2p over TCP
+      - "4002:4002/udp"       # Caplin consensus-layer p2p over QUIC (see note below)
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
       # Replace the path below with an actual directory on your machine
@@ -1001,7 +1023,9 @@ Set `EXTERNAL_IP` before starting, either in a `.env` file next to `docker-compo
 echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 ```
 
-or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001` ports on your router as well, otherwise peers still cannot reach you.
+or by exporting it in your shell. Forward the `30303`, `42069`, `4000`, `4001` and `4002` ports on your router as well, otherwise peers still cannot reach you.
+
+If only the QUIC port (`4002/udp`) cannot be published, drop the `4002:4002/udp` line above and add `--caplin.quic.disable` to the `command` block instead. Caplin then falls back to TCP-only peering. This does not help if `4000/udp` cannot be published either: Caplin needs that port for discovery whether or not QUIC is enabled.
 
 :::warning
 ⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
@@ -1047,7 +1071,7 @@ Publishing each port individually is explicit, but Docker's NAT is also what mak
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.6.1
+    image: erigontech/erigon:v3.7.1
     network_mode: host
     command:
       - --chain=mainnet
@@ -1173,7 +1197,7 @@ Create a new file named `docker-compose.yml` in a directory where you want to ma
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.6.1
+    image: erigontech/erigon:v3.7.1
     container_name: erigon-node
     restart: always
     command:
@@ -1200,7 +1224,8 @@ services:
       - "42069:42069/tcp"     # snapshot downloader (BitTorrent)
       - "42069:42069/udp"
       - "4000:4000/udp"       # Caplin consensus-layer discovery
-      - "4001:4001/tcp"       # Caplin consensus-layer p2p
+      - "4001:4001/tcp"       # Caplin consensus-layer p2p over TCP
+      - "4002:4002/udp"       # Caplin consensus-layer p2p over QUIC (see note below)
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
       # Replace the path below with an actual directory on your machine
@@ -1214,7 +1239,9 @@ Set `EXTERNAL_IP` before starting, either in a `.env` file next to `docker-compo
 echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 ```
 
-or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001` ports on your router as well, otherwise peers still cannot reach you.
+or by exporting it in your shell. Forward the `30303`, `42069`, `4000`, `4001` and `4002` ports on your router as well, otherwise peers still cannot reach you.
+
+If only the QUIC port (`4002/udp`) cannot be published, drop the `4002:4002/udp` line above and add `--caplin.quic.disable` to the `command` block instead. Caplin then falls back to TCP-only peering. This does not help if `4000/udp` cannot be published either: Caplin needs that port for discovery whether or not QUIC is enabled.
 
 :::warning
 ⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.
@@ -1260,7 +1287,7 @@ Publishing each port individually is explicit, but Docker's NAT is also what mak
 ```yaml
 services:
   erigon:
-    image: erigontech/erigon:v3.6.1
+    image: erigontech/erigon:v3.7.1
     network_mode: host
     command:
       - --chain=gnosis
@@ -1405,7 +1432,7 @@ erigon [options]
 
 - Alternatively you can use the Docker syntax, for example:
 
-  `docker run -it erigontech/erigon:v3.6.1 [options]`
+  `docker run -it erigontech/erigon:v3.7.1 [options]`
 
 **Built from Source**
 
@@ -2080,8 +2107,11 @@ When Caplin is running, it exposes a Beacon API that external tools can query. T
 | `--beacon.api.read.timeout` | `5` | HTTP server read timeout, in seconds |
 | `--beacon.api.write.timeout` | `31536000` | HTTP server write timeout, in seconds (~1 year) |
 | `--beacon.api.idle.timeout` | `25` | HTTP server idle timeout, in seconds |
+| `--beacon.api.preserve-graffiti` | `false` | Use validator-supplied graffiti exactly as given, without prefixing the EL+CL client identification segment |
 
 The API is not served until you enable it with `--beacon.api=<namespaces>`; see [Caplin for staking](https://docs.erigon.tech/staking/caplin) for the full namespace list.
+
+By default, block-production requests that include a `graffiti` value have the [client-version graffiti standard](https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md)'s identification segment (execution and consensus client codes and commit prefixes, e.g. `EGab48CN5c2c`) prefixed to them, truncating the supplied graffiti to fit the 32-byte field if needed. Set `--beacon.api.preserve-graffiti` to use the supplied graffiti as decoded instead, with no prefix or truncation. A supplied `graffiti` value shorter than 32 bytes is right-padded (its bytes come first, zero bytes fill the rest) under both settings.
 
 :::note
 Enabling the Beacon API increases RAM usage by roughly **6 GB**. Account for it when sizing your host — see [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements).
@@ -2841,8 +2871,14 @@ Flags for configuring the [Caplin](https://docs.erigon.tech/fundamentals/caplin)
 - `--caplin.discovery.port value`: The port for the Caplin DISCV5 protocol.
   - Default: `4000`
 
-- `--caplin.discovery.tcpport value`: The TCP port for the Caplin DISCV5 protocol.
+- `--caplin.discovery.tcpport value`: The TCP port for Caplin libp2p.
   - Default: `4001`
+
+- `--caplin.discovery.quicport value`: The QUIC UDP port for Caplin libp2p.
+  - Default: `4002`
+
+- `--caplin.quic.disable`: Disables the QUIC transport for Caplin libp2p, falling back to TCP only. Useful when the QUIC UDP port cannot be exposed, for example in some Docker or Kubernetes setups.
+  - Default: `false`
 
 - `--caplin.checkpoint-sync-url value`: The checkpoint sync endpoint.
 - `--caplin.subscribe-all-topics`: Subscribes to all gossip topics.
@@ -3214,7 +3250,9 @@ Here is a comprehensive list of port-related options:
 ### Caplin
 
 - `--caplin.discovery.port [value]`: Port for Caplin DISCV5 protocol (default: `4000`)
-- `--caplin.discovery.tcpport [value]`: TCP Port for Caplin DISCV5 protocol (default: `4001`)
+- `--caplin.discovery.tcpport [value]`: TCP port for Caplin libp2p (default: `4001`)
+- `--caplin.discovery.quicport [value]`: QUIC UDP port for Caplin libp2p (default: `4002`)
+- `--caplin.quic.disable`: Disables the QUIC transport for Caplin libp2p, falling back to TCP only (default: `false`)
 - `--sentinel.port [value]`: Port the Caplin sentinel gRPC service listens on (default: `7777`)
 
 ### BeaconAPI
@@ -3360,6 +3398,8 @@ This flag sets the external address advertised in the **discv5 ENR** and **libp2
 
 :::tip For validators running behind NAT or inside Docker
 Set **both** `--nat` and `--caplin.nat` to the same external IP, otherwise your execution-layer peers and consensus-layer peers will see different (or no) reachable addresses.
+
+UPnP and NAT-PMP gateway discovery do not cross Docker's default bridge network, so use `extip` or host networking in that setup.
 
 ```bash
 --nat extip:203.0.113.114 --caplin.nat extip:203.0.113.114
@@ -3934,6 +3974,10 @@ openssl ecparam -name prime256v1 -genkey -noout -out RPC-key.pem
 ## 4. Creating the certificate file for each public key
 
 Now create the Certificate Signing Request for the Erigon key pair, and from this request, produce the certificate (signed by the CA) that proves that this key is now part of the “cluster of trust”:
+
+```bash
+openssl req -new -key erigon-key.pem -out erigon.csr
+```
 
 ```bash
 openssl x509 -req -in erigon.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out erigon.crt -days 3650 -sha256
@@ -4742,7 +4786,13 @@ make rpcdaemon
 ./build/bin/erigon --txpool.disable --private.api.addr=localhost:9090 --datadir=<your datadir> --http=false
 ```
 
-If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0` or TxPool will listen on localhost by default.
+If the components run on different devices, `localhost` is no longer the right address on either side.
+
+On the Erigon host, bind the internal gRPC endpoint to an interface the other components can reach — `--private.api.addr=<erigon_lan_ip>:9090` — since it defaults to `127.0.0.1:9090`. Bind it to a private interface, never `0.0.0.0`: the endpoint serves the remote database interface and is not authenticated by default, so it must not be reachable from a public network.
+
+On each of the other hosts, point the same flag at Erigon rather than at themselves: the `txpool` and `rpcdaemon` commands below use `--private.api.addr` as the address they dial, so `localhost:9090` has to become `<erigon_lan_ip>:9090`. `--sentry.api.addr` and `--txpool.api.addr` point in whichever direction the binary reading them needs: the `sentry` command binds `--sentry.api.addr` and `txpool` dials it, and the `txpool` command binds `--txpool.api.addr` and `rpcdaemon` dials it. Bind each one to a reachable private address on the host that serves it, and give the hosts that connect that same address.
+
+`--datadir` does not follow that pattern, and on `rpcdaemon` it is the one flag to drop. For `sentry` and `txpool` it names their *own* working directory on their own host — `txpool` keeps its database in `<datadir>/txpool` — so it stays. On `rpcdaemon` it means the opposite: it is the same-machine optimisation that makes the daemon read Erigon's `chaindata/` and snapshots directly instead of over gRPC (`RemoteServices` in `cmd/rpcdaemon/cli/config.go`, which logs *"if you run RPCDaemon on same machine with Erigon add --datadir option"*). Pointed at a host that has no Erigon datadir it fails on the missing salt files rather than falling back to the remote connection. A remote `rpcdaemon` therefore keeps every other flag: `--private.api.addr` pointed at Erigon and `--txpool.api.addr` at the TxPool host. Left out, `--txpool.api.addr` defaults to the value of `--private.api.addr`, and the daemon dials Erigon instead of the external TxPool.
 
 ```sh
 ./build/bin/sentry --sentry.api.addr=localhost:9091 --datadir=<your datadir>
@@ -4760,7 +4810,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 
 - `--txpool.disable`: This flag disables the internal transaction pool (TxPool) and block producer (default: `false`). When running the TxPool as a separate process, this flag is used to prevent the internal TxPool from interfering with the external one.
 - `--private.api.addr=localhost:9090`: This flag sets the address and port for the private API. The private API is used for internal communication between Erigon components (default: `127.0.0.1:9090`).
-- `--datadir=<your datadir>`: This flag specifies the data directory for Erigon. This is where Erigon stores its databases and other data.
+- `--datadir=<your datadir>`: The working directory of the process reading it, not a single shared path. For Erigon it is the node's own datadir; for `sentry` and `txpool` it is where that component keeps its own files (`txpool` uses `<datadir>/txpool`); for `rpcdaemon` it additionally selects direct local access to Erigon's databases and is therefore only valid when the daemon runs on the Erigon host.
 - `--http=false`: This flag disables the HTTP API server in Erigon (default: `true`). When running the TxPool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external TxPool.
 - `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the Sentry API. The Sentry API is used for communication between the TxPool and the Sentry.
 - `--txpool.api.addr=localhost:9094`: This flag sets the address and port for the TxPool API (default: use value of `--private.api.addr`). The TxPool API is used for communication between the TxPool and other Erigon components.
@@ -5875,7 +5925,7 @@ For API usage refer to the below official resources:
 
 ### Network Information Usage
 
-- `net_version` is commonly used by applications to verify they're connected to the correct .Ethereum network.
+- `net_version` is commonly used by applications to verify they're connected to the correct Ethereum network.
 - `net_peerCount` helps monitor node connectivity and network health.
 - `net_listening` provides a basic connectivity check for the node's network interface.
 
@@ -7800,6 +7850,7 @@ erigon \
   --caplin.discovery.addr=0.0.0.0 \
   --caplin.discovery.port=4000 \
   --caplin.discovery.tcpport=4001 \
+  --caplin.discovery.quicport=4002 \
   --beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse 
 ```
 
@@ -7881,7 +7932,9 @@ Since v3.6, Caplin publishes the head chosen by fork choice as soon as it is sel
 
 Since v3.6, when the validator client does not supply a graffiti, Caplin fills it with the proposing node's connected execution and consensus clients, following the [Engine API client-identification standard](https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md). The value is a two-letter execution client code and the first four hex characters of its commit, followed by Caplin's own code `CN` and the first four hex characters of the Erigon commit — for example `EGa53eCNa53e` when Caplin is paired with Erigon. If the execution client does not answer `engine_getClientVersionV1`, or has not answered it yet, the graffiti carries the consensus half only (`CN` plus commit). The graffiti always names the locally connected execution client. An external builder's bid does not change it: the graffiti is written into the beacon body before the payload is chosen, and the winning bid replaces only the execution side of the block — so the value still identifies the proposing node's own clients, not whoever built the payload.
 
-There is no CLI flag for graffiti. The only way to override it is per block, through the Beacon API: a validator client that sends a `graffiti` query parameter on a validator block-production endpoint — `GET /eth/v2/validator/blocks/{slot}` (deprecated), `GET /eth/v3/validator/blocks/{slot}` or `GET /eth/v4/validator/blocks/{slot}` — has its value used instead of the default. The parameter is read as a 32-byte hex value, as the Beacon API specification requires. It is not validated: a malformed or empty value is not rejected and does not fall back to the default — it silently produces an all-zero graffiti. A shorter hex value is left-padded with zeros, and a longer one is cropped from the left. Note that a validator client which sets graffiti by default — including its own client string — overrides Caplin's default; to get the client-pair graffiti, leave the validator client's graffiti unset.
+Since v3.7, this identification segment is also combined with a validator-client-supplied graffiti by default, rather than being replaced by it: the segment occupies a fixed offset at the start of the 32-byte field, followed by a single space and as much of the supplied graffiti as fits in the remaining bytes (19 with the execution client resolved, 25 without). A supplied value that fits alongside the segment is kept in full; a longer one is truncated, backing off to a valid UTF-8 rune boundary where possible. Set `--beacon.api.preserve-graffiti` to use the supplied graffiti exactly as given instead, with no combining or truncation.
+
+The only way to override the default is per block, through the Beacon API: a validator client that sends a `graffiti` query parameter on a validator block-production endpoint — `GET /eth/v2/validator/blocks/{slot}` (deprecated), `GET /eth/v3/validator/blocks/{slot}` or `GET /eth/v4/validator/blocks/{slot}` — has its value combined with the identification segment as above, or used as-is with `--beacon.api.preserve-graffiti`. The parameter is read as a 32-byte hex value, as the Beacon API specification requires, and is not validated: a malformed value is not rejected. A shorter hex value is right-padded with zeros — its bytes come first, matching the identification standard's own convention, rather than the left-padding used before v3.7 — and a longer one keeps its first 32 bytes rather than its last 32. On the default combining path, an all-zero or empty value is treated the same as no graffiti supplied at all; with `--beacon.api.preserve-graffiti`, an explicit empty or all-zero query produces an all-zero graffiti instead, since that path returns the supplied value as-is rather than falling back to the identification segment. Note that a validator client which sets graffiti by default — including its own client string — now has it combined with Caplin's identification segment rather than replacing it, unless `--beacon.api.preserve-graffiti` is set.
 
 ---
 
@@ -7966,7 +8019,7 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
 1. **Set Up Your Validator**
 
-   Deposit your stake and register your validator on Gnosis Chain reby following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
+   Deposit your stake and register your validator on Gnosis Chain by following the [Gnosis Chain Validator Setup](https://docs.gnosischain.com/node/manual/validator/deposit).
 
 2. **Register as a Shutterized Validator**
 
@@ -7976,20 +8029,19 @@ To participate in the Shutter encrypted transaction pool as a validator using Er
 
    Use the Erigon CLI command to verify that your registration was successful:
 
-```bash
-    erigon shutter-validator-reg-check --chain <CHAIN> --el-url <EL_RPC_URL> --validator-info-file <VALIDATOR_INFO_JSON>
-```
+   ```bash
+   erigon shutter-validator-reg-check --chain <CHAIN> --el-url <EL_RPC_URL> --validator-info-file <VALIDATOR_INFO_JSON>
+   ```
 
-- `--chain` valid values are `gnosis` or `chiado`
+   - `--chain` valid values are `gnosis` or `chiado`
+   - `--el-url`, in case you are using Erigon default ports is `http://localhost:8545`
+   - `<VALIDATOR_INFO_JSON>` is the file generated during registration.
 
-  - `--el-url`, in case you are using Erigon default ports is `http://localhost:8545`
-  - `<VALIDATOR_INFO_JSON>` is the file generated during registration.
+   For example:
 
-  for example:
-
-```bash
-    erigon shutter-validator-reg-check --chain gnosis --el-url http://localhost:8545 --validator-info-file /path/validatorInfo.json
-```
+   ```bash
+   erigon shutter-validator-reg-check --chain gnosis --el-url http://localhost:8545 --validator-info-file /path/validatorInfo.json
+   ```
 
 4. **Run Erigon with Shutter Support**
 
@@ -8104,10 +8156,10 @@ Open an issue in the repository to suggest corrections, flag outdated content, o
 
 ### Submitting a pull request
 
-1. Create a new branch from `release/3.4`.
+1. Create a new branch from the branch the documentation is published from — the one named by the `DOCS_DEPLOY_BRANCH` repository variable, which is not necessarily the newest release branch. If you cannot read repository variables, open an issue asking which branch to target before you start, or open the pull request as a draft and ask there before building on the branch.
 2. Edit or add `.md` / `.mdx` files under `docs/site/docs/`.
 3. Verify your changes render correctly in the local dev server.
-4. Open a pull request against `release/3.4` with a clear description of what changed and why.
+4. Open a pull request against that same branch, with a clear description of what changed and why.
 
 ---
 
@@ -8216,7 +8268,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
 
 27. **What is the difference between deleting `chaindata` and deleting the whole `datadir`?** `chaindata` is Erigon's small, mutable MDBX database (typically 15–20 GB, even on an archive node) holding recent state and sync progress. The `snapshots` directory holds the immutable historical data — roughly 95% of the total footprint. Deleting `chaindata` is recoverable but not free: Erigon re-derives state from the snapshots (re-downloading them if needed) and resyncs the post-snapshot tip from the consensus layer — a chain-tip resync, not an instant rebuild. Deleting the entire `datadir` also discards the snapshots and forces a full re-sync. When in doubt, delete only `chaindata`. See [Database](https://docs.erigon.tech/fundamentals/database).
 
-28. **My node has no peers or won't sync. Which ports do I need to open?** Erigon needs several ports reachable (both TCP and UDP where applicable): `30303`/`30304` (execution-layer P2P), `4000` and `4001` (Caplin consensus peering), and `42069` (BitTorrent snapshot download). Keep the RPC port (`8545`) bound to localhost and never expose it publicly. If your node is behind NAT, set `--nat` and `--caplin.nat` to `stun` or `upnp` and forward those ports on your router. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports) and [NAT](https://docs.erigon.tech/fundamentals/nat).
+28. **My node has no peers or won't sync. Which ports do I need to open?** Erigon needs several ports reachable (both TCP and UDP where applicable): `30303`/`30304` (execution-layer P2P), `4000`, `4001` and `4002` (Caplin consensus peering — discovery, TCP and QUIC respectively), and `42069` (BitTorrent snapshot download). Keep the RPC port (`8545`) bound to localhost and never expose it publicly. If your node is behind NAT, set `--nat` and `--caplin.nat` to `stun` or `upnp` and forward those ports on your router. If you can't open the QUIC port specifically, pass `--caplin.quic.disable` to fall back to TCP-only Caplin peering instead. See [Default Ports](https://docs.erigon.tech/fundamentals/default-ports) and [NAT](https://docs.erigon.tech/fundamentals/nat).
 
 29. **How do I reduce Erigon's memory use or stop it from being OOM-killed?** Erigon and the Go runtime size their memory and CPU use from the resources they can see, so on a shared or memory-constrained host you can make them more conservative: set `GOMEMLIMIT` (e.g. `GOMEMLIMIT=26GiB`), lower `GOGC` (e.g. `GOGC=80`), cap `GOMAXPROCS` (e.g. to half your cores), and reduce `--batchSize` (e.g. `--batchSize=256m`). See [Common Errors and Solutions](https://docs.erigon.tech/help-center/common-errors-and-solutions) and [Performance Tricks](https://docs.erigon.tech/fundamentals/performance-tricks).
 
@@ -8298,11 +8350,14 @@ The ports to allow inbound:
 | P2P (execution layer) | 30303 | TCP+UDP |
 | Snapshot downloader (BitTorrent) | 42069 | TCP+UDP |
 | Caplin DISCV5 discovery | 4000 | UDP |
-| Caplin libp2p peering | 4001 | TCP |
+| Caplin libp2p peering (TCP) | 4001 | TCP |
+| Caplin libp2p peering (QUIC) | 4002 | UDP |
 
 This table is not exhaustive — it lists what a default node needs. See [Default ports](https://docs.erigon.tech/fundamentals/default-ports) for every port Erigon can open, including the opt-in Shutter port.
 
-The Caplin ports are its defaults (`--caplin.discovery.port` and `--caplin.discovery.tcpport`); change the rules to match if you override them. Note the second flag's help text calls it a DISCV5 port, which is a misnomer: DISCV5 is UDP-only and runs on `4000`, while `4001` is the libp2p TCP listen address Caplin advertises for peering. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+The Caplin ports are its defaults (`--caplin.discovery.port`, `--caplin.discovery.tcpport`, and `--caplin.discovery.quicport`); change the rules to match if you override them. DISCV5 is UDP-only and runs on `4000`, TCP peering defaults to `4001`, and QUIC/UDP peering defaults to `4002`. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+
+If specifically the QUIC port (`4002`) cannot be opened — for example a Docker or Kubernetes setup where only the TCP peering port was published — pass `--caplin.quic.disable` to fall back to TCP-only peering instead of leaving it unreachable. This does not help if DISCV5 discovery's UDP port (`4000`) is also blocked: Caplin needs that port regardless of whether QUIC is enabled.
 
 Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure Cloud firewalls in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`; for dedicated servers the equivalent lives in the Robot panel under **Server → Firewall**.
 

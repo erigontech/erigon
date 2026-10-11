@@ -52,7 +52,8 @@ services:
       - "42069:42069/tcp"     # snapshot downloader (BitTorrent)
       - "42069:42069/udp"
       - "4000:4000/udp"       # Caplin consensus-layer discovery
-      - "4001:4001/tcp"       # Caplin consensus-layer p2p
+      - "4001:4001/tcp"       # Caplin consensus-layer p2p over TCP
+      - "4002:4002/udp"       # Caplin consensus-layer p2p over QUIC (see note below)
     volumes:
       # *** IMPORTANT: CHANGE THIS PATH! ***
       # Replace the path below with an actual directory on your machine
@@ -66,8 +67,10 @@ Set `EXTERNAL_IP` before starting, either in a `.env` file next to `docker-compo
 echo "EXTERNAL_IP=$(curl -s https://api.ipify.org)" > .env
 ```
 
-or by exporting it in your shell. Forward the `30303`, `42069`, `4000` and `4001`
+or by exporting it in your shell. Forward the `30303`, `42069`, `4000`, `4001` and `4002`
 ports on your router as well, otherwise peers still cannot reach you.
+
+If only the QUIC port (`4002/udp`) cannot be published, drop the `4002:4002/udp` line above and add `--caplin.quic.disable` to the `command` block instead. Caplin then falls back to TCP-only peering. This does not help if `4000/udp` cannot be published either: Caplin needs that port for discovery whether or not QUIC is enabled.
 
 :::warning
 ⚠️ **Action Required**: the volume path should be changed to suit your setup — replace `/path/to/erigon/data` with a valid, empty directory on your machine where you want Erigon to store its files.

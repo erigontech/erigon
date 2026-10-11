@@ -58,6 +58,7 @@ type CaplinCliCfg struct {
 	AllowedMethods     []string `json:"allowed_methods"`
 	AllowedOrigins     []string `json:"allowed_origins"`
 	AllowCredentials   bool     `json:"allow_credentials"`
+	PreserveGraffiti   bool     `json:"preserve_graffiti"`
 	SubscribeAllTopics bool     `json:"subscribe_all_topics"`
 
 	Dirs datadir.Dirs
@@ -79,6 +80,7 @@ func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 	cfg.MaxPeerCount = ctx.Uint64(utils.CaplinMaxPeerCount.Name)
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Uint(caplinflags.BeaconApiPort.Name))
 	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
+	cfg.PreserveGraffiti = ctx.Bool(utils.BeaconApiPreserveGraffitiFlag.Name)
 	cfg.AllowedMethods = ctx.StringSlice(utils.BeaconApiAllowMethodsFlag.Name)
 	cfg.AllowedOrigins = ctx.StringSlice(utils.BeaconApiAllowOriginsFlag.Name)
 	cfg.BeaconProtocol = "tcp"

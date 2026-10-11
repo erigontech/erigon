@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	state_mock "github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -72,6 +73,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	dbversion "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -85,6 +87,26 @@ import (
 )
 
 var _ serviceinterface.Service[*cltypes.SignedExecutionPayloadBid] = acceptingExecutionPayloadBidService{}
+
+func TestComputeAttestationRewardUsesGloasParentHeaderSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	s := state_mock.NewMockBeaconState(ctrl)
+	cfg := clparams.MainnetBeaconConfig
+	data := &solid.AttestationData{Slot: 10}
+	attestation := &solid.Attestation{Data: data}
+	wantErr := errors.New("stop after parent slot observation")
+
+	s.EXPECT().BaseRewardPerIncrement().Return(uint64(0))
+	s.EXPECT().BeaconConfig().Return(&cfg).AnyTimes()
+	s.EXPECT().Slot().Return(uint64(12)).AnyTimes()
+	s.EXPECT().Version().Return(clparams.GloasVersion)
+	s.EXPECT().GetLatestExecutionPayloadBid().Return(&cltypes.ExecutionPayloadBid{Slot: 9}).AnyTimes()
+	s.EXPECT().LatestBlockHeader().Return(cltypes.BeaconBlockHeader{Slot: 11}).AnyTimes()
+	s.EXPECT().GetAttestationParticipationFlagIndicies(data, uint64(2), uint64(11), false).Return(nil, wantErr)
+
+	_, err := computeAttestationReward(s, attestation)
+	require.ErrorIs(t, err, wantErr)
+}
 
 type publishingBlockKey struct {
 	proposer uint64
@@ -3043,6 +3065,7 @@ func TestProduceBlockV4IncludesRequestPayloadAfterSharedCacheEviction(t *testing
 			Blobs: []hexutil.Bytes{blob}, Commitments: []hexutil.Bytes{commitment}, Proofs: []hexutil.Bytes{proof},
 		}, nil, big.NewInt(1_000_000_000), nil)
 	handler.engine = engine
+	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 	handler.selfBuildPayloads = evictingSelfBuildPayloadCache{}
 	handler.blobBundles = evictingBlobBundleCache{}
 
@@ -3571,6 +3594,7 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).
 		Times(2)
 	handler.engine = engine
+	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 
 	produce := func() *cltypes.BeaconBlock {
 		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
@@ -3590,6 +3614,11 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 
 	selfBuiltBlock := produce()
 	require.Equal(t, uint64(clparams.BuilderIndexSelfBuild), selfBuiltBlock.Body.SignedExecutionPayloadBid.Message.BuilderIndex)
+	// Exercises the graffiti wiring end-to-end (graffitiFromHex, requestGraffiti,
+	// combinedGraffiti), not just those functions directly: the request's graffiti=0x01
+	// combines with the (EL-unavailable) consensus-only identification segment.
+	clCommit := graffitiCommitPrefix(dbversion.GitCommit)
+	require.Equal(t, graffitiFromString(caplinClientCode+clCommit+" \x01"), selfBuiltBlock.Body.Graffiti)
 	selfBuiltRoot, err := selfBuiltBlock.HashSSZ()
 	require.NoError(t, err)
 	key := selfBuildEnvelopeKey{Slot: fixture.block.Slot, BeaconBlockRoot: common.Hash(selfBuiltRoot)}
@@ -4692,4 +4721,78 @@ func TestProcessProducedBlockConfiguredBidPreservesSelfBuildFallback(t *testing.
 			}
 		})
 	}
+}
+
+func TestProduceBeaconBodyIncludesPTCVotesReceivedDuringPayloadWait(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	// The state needs the Gloas fork epoch in its own config for GetPTC.
+	baseState := state.New(handler.beaconChainCfg)
+	require.NoError(t, postState.CopyInto(baseState))
+	handler.epbsPool = pool.NewEpbsPool()
+	handler.elClientVersion.Store(elClientVersionUnavailable)
+	handler.selfBuildPayloads = evictingSelfBuildPayloadCache{}
+	handler.blobBundles = evictingBlobBundleCache{}
+
+	parentHash := common.HexToHash("0x1111")
+	emptyRequests := cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion)
+	emptyRequestsRoot, err := emptyRequests.HashSSZ()
+	require.NoError(t, err)
+	baseState.SetLatestBlockHash(parentHash)
+	baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		BlockHash:             parentHash,
+		ParentBlockHash:       parentHash,
+		GasLimit:              30_000_000,
+		ExecutionRequestsRoot: common.Hash(emptyRequestsRoot),
+	})
+	targetSlot := baseState.Slot() + 1
+	root, err := baseState.BlockRoot()
+	require.NoError(t, err)
+	baseBlockRoot := common.Hash(root)
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadSlotVal = baseState.Slot()
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	forkchoiceStore.ExecutionPayloadGasLimitMap[parentHash] = 30_000_000
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now()).AnyTimes()
+	handler.ethClock = clock
+
+	ptc, err := baseState.GetPTC(targetSlot - 1)
+	require.NoError(t, err)
+	require.NotEmpty(t, ptc)
+	vote := newTestPayloadAttestationMessage(t, ptc[0], baseBlockRoot)
+	vote.Data.Slot = targetSlot - 1
+
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
+	payload.ParentHash = parentHash
+	payload.BlockHash = common.HexToHash("0x2222")
+	payload.PrevRandao = baseState.GetRandaoMixes(targetSlot / handler.beaconChainCfg.SlotsPerEpoch)
+	payload.GasLimit = 30_000_000
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), parentHash, gomock.Any(), clparams.GloasVersion).
+		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+			// The vote lands while the payload is being built.
+			time.Sleep(20 * time.Millisecond)
+			handler.epbsPool.PayloadAttestations.Add(pool.PayloadAttestationKey{Slot: vote.Data.Slot, ValidatorIndex: vote.ValidatorIndex}, vote)
+			return []byte{1}, nil
+		})
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
+		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil)
+	handler.engine = engine
+
+	body, _, err := handler.produceBeaconBody(t.Context(), 3, baseState.Slot(), baseBlockRoot, baseState,
+		targetSlot, common.Bytes96{0xc0}, common.Hash{})
+
+	require.NoError(t, err)
+	require.NotNil(t, body)
+	require.Equal(t, 1, body.PayloadAttestations.Len())
+	attestation := body.PayloadAttestations.Get(0)
+	require.Equal(t, baseBlockRoot, attestation.Data.BeaconBlockRoot)
+	require.Equal(t, targetSlot-1, attestation.Data.Slot)
+	require.Contains(t, attestation.AggregationBits.GetOnIndices(), 0)
 }

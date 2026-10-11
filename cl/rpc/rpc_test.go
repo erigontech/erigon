@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -24,8 +25,11 @@ import (
 
 type blockResponseSentinel struct {
 	sentinelproto.SentinelClient
-	response   []byte
-	bannedPeer string
+	response         []byte
+	bannedPeer       string
+	maxResponseBytes []uint64
+	requestData      [][]byte
+	calls            int
 }
 
 type contextRecordingSentinel struct {
@@ -355,7 +359,10 @@ func TestColumnSidecarsSparseMultiRootCapPreservesFilteredOrderAndWrapper(t *tes
 	require.Equal(t, []uint64{wantCap, wantCap}, sentinel.maxResponseBytes)
 }
 
-func (s *blockResponseSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+func (s *blockResponseSentinel) SendRequest(_ context.Context, req *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	s.calls++
+	s.maxResponseBytes = append(s.maxResponseBytes, req.MaxResponseBytes)
+	s.requestData = append(s.requestData, bytes.Clone(req.Data))
 	return &sentinelproto.ResponseData{
 		Data: s.response,
 		Peer: &sentinelproto.Peer{Pid: "malicious-peer"},
@@ -367,16 +374,96 @@ func (s *blockResponseSentinel) BanPeer(_ context.Context, peer *sentinelproto.P
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
-func TestExecutionPayloadEnvelopeRequestsRejectOverLimit(t *testing.T) {
+func TestExecutionPayloadEnvelopesByRootRejectsOverLimit(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxRequestPayloads = 1
 	rpc := &BeaconRpcP2P{beaconConfig: &cfg}
 
-	_, _, err := rpc.SendExecutionPayloadEnvelopesByRangeReq(context.Background(), 10, 2)
+	_, _, err := rpc.SendExecutionPayloadEnvelopesByRootReq(context.Background(), make([][32]byte, 2))
 	require.ErrorContains(t, err, "MAX_REQUEST_PAYLOADS")
+}
 
-	_, _, err = rpc.SendExecutionPayloadEnvelopesByRootReq(context.Background(), make([][32]byte, 2))
-	require.ErrorContains(t, err, "MAX_REQUEST_PAYLOADS")
+func TestExecutionPayloadEnvelopesByRangeAllowsSpanAboveResponseLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxRequestPayloads = 1
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, gloasDigest[:]...))
+
+	sentinel := &blockResponseSentinel{response: response.Bytes()}
+	client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
+	envelopes, pid, err := client.SendExecutionPayloadEnvelopesByRangeReq(t.Context(), 1, 2)
+	require.NoError(t, err)
+	require.Len(t, envelopes, 1)
+	require.Equal(t, "malicious-peer", pid)
+	require.Empty(t, sentinel.bannedPeer)
+	require.Equal(t, []uint64{communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), 1)}, sentinel.maxResponseBytes)
+	require.Len(t, sentinel.requestData, 1)
+
+	wireRequest := &cltypes.ExecutionPayloadEnvelopesByRangeRequest{}
+	require.NoError(t, ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(sentinel.requestData[0]), wireRequest, clparams.GloasVersion))
+	require.Equal(t, uint64(1), wireRequest.StartSlot)
+	require.Equal(t, uint64(2), wireRequest.Count)
+}
+
+func TestExecutionPayloadEnvelopesByRangeCapsResponseBelowSlotSpan(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxRequestPayloads = 1
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, gloasDigest[:]...))
+	require.NoError(t, response.WriteByte(0))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, gloasDigest[:]...))
+
+	sentinel := &blockResponseSentinel{response: response.Bytes()}
+	client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg, ethClock: clock}
+	envelopes, pid, err := client.SendExecutionPayloadEnvelopesByRangeReq(t.Context(), 1, 2)
+	require.ErrorContains(t, err, "more chunks than requested")
+	require.Len(t, envelopes, 1)
+	require.Equal(t, "malicious-peer", pid)
+	require.Equal(t, pid, sentinel.bannedPeer)
+}
+
+func TestExecutionPayloadEnvelopesByRangeRejectsOnlyOverflowingRanges(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxRequestPayloads = 1
+	tests := []struct {
+		name      string
+		start     uint64
+		count     uint64
+		wantError bool
+	}{
+		{name: "zero count at maximum start", start: math.MaxUint64, count: 0},
+		{name: "range ends at maximum slot", start: math.MaxUint64 - 1, count: 1},
+		{name: "maximum count from genesis", start: 0, count: math.MaxUint64},
+		{name: "minimum wrapping range", start: math.MaxUint64, count: 1, wantError: true},
+		{name: "maximum count wraps after genesis", start: 1, count: math.MaxUint64, wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sentinel := &blockResponseSentinel{}
+			client := &BeaconRpcP2P{ctx: t.Context(), sentinel: sentinel, beaconConfig: &cfg}
+
+			_, _, err := client.SendExecutionPayloadEnvelopesByRangeReq(t.Context(), tt.start, tt.count)
+			if tt.wantError {
+				require.ErrorContains(t, err, "overflows")
+				require.Zero(t, sentinel.calls)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, 1, sentinel.calls)
+		})
+	}
 }
 
 func TestExecutionPayloadEnvelopeRequestsRejectPreGloasResponseVersion(t *testing.T) {
@@ -666,10 +753,7 @@ func TestMaxRequestPayloadsFallback(t *testing.T) {
 
 	require.Equal(t, uint64(17), rpc.MaxRequestPayloads())
 
-	_, _, err := rpc.SendExecutionPayloadEnvelopesByRangeReq(context.Background(), 10, 18)
-	require.ErrorContains(t, err, "17")
-
-	_, _, err = rpc.SendExecutionPayloadEnvelopesByRootReq(context.Background(), make([][32]byte, 18))
+	_, _, err := rpc.SendExecutionPayloadEnvelopesByRootReq(context.Background(), make([][32]byte, 18))
 	require.ErrorContains(t, err, "17")
 }
 

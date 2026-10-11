@@ -125,12 +125,17 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 	}
 
 	// PTC duties available for current and next epoch (beacon-APIs PR #592)
+	var dependentRoot common.Hash
 	duties := make([]ptcDutyResponse, 0)
-	if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+	if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, headRoot common.Hash, headSlot uint64) error {
 		currentEpoch := state.Epoch(s)
 		if epoch < currentEpoch || epoch > currentEpoch+1 {
 			return beaconhttp.NewEndpointError(http.StatusBadRequest,
 				fmt.Errorf("PTC duties only available for current epoch %d and next epoch %d, requested %d", currentEpoch, currentEpoch+1, epoch))
+		}
+		if s.Version() < clparams.GloasVersion {
+			return beaconhttp.NewEndpointError(http.StatusServiceUnavailable,
+				fmt.Errorf("PTC duties for fork epoch %d are not available until the head reaches the Gloas fork", epoch))
 		}
 
 		// Build a lookup set for requested validators
@@ -142,15 +147,21 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 		// Get PTC for each slot in the epoch
 		startSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 		endSlot := startSlot + a.beaconChainCfg.SlotsPerEpoch
+		emitted := make(map[uint64]struct{})
 		for slot := startSlot; slot < endSlot; slot++ {
 			ptc, err := s.GetPTC(slot)
 			if err != nil {
 				return err
 			}
+			clear(emitted)
 			for _, validatorIndex := range ptc {
 				if _, ok := requestedSet[validatorIndex]; !ok {
 					continue
 				}
+				if _, ok := emitted[validatorIndex]; ok {
+					continue
+				}
+				emitted[validatorIndex] = struct{}{}
 				pk, err := s.ValidatorPublicKey(int(validatorIndex))
 				if err != nil {
 					return err
@@ -162,14 +173,19 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 				})
 			}
 		}
+
+		dependentRootSlot := computeDependentRootSlot(epoch, a.beaconChainCfg.SlotsPerEpoch, true)
+		if dependentRootSlot == headSlot {
+			dependentRoot = headRoot
+			return nil
+		}
+		root, err := s.GetBlockRootAtSlot(dependentRootSlot)
+		if err != nil {
+			return beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("dependent root for epoch %d: %w", epoch, err))
+		}
+		dependentRoot = root
 		return nil
 	}); err != nil {
-		return nil, err
-	}
-
-	// PTC duties use the same dependent_root as proposer duties (start of epoch shuffling)
-	dependentRoot, err := a.getDependentRoot(epoch, false)
-	if err != nil {
 		return nil, err
 	}
 
