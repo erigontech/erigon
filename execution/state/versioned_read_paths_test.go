@@ -116,16 +116,16 @@ func TestVersionedRead_B_DeletedStateObjectBeatsWarmStorageRead(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 99, v.Uint64(), "first read resolves from the version map")
 
-	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
-	so, err := ibs.getStateObject(addr, true)
-	require.NoError(t, err)
-	require.Nil(t, so, "destructed account resolves to no object")
-	parked, ok := ibs.stateObjects[addr]
-	require.True(t, ok && parked.deleted, "getStateObject must park a deleted object")
+	// Snapshot this tx's reads for OCC validation.
+	io := NewVersionedIO(6)
+	io.RecordReads(Version{TxIndex: 5, Incarnation: 0}, ibs.VersionedReads())
 
-	v, err = ibs.GetState(addr, key)
-	require.NoError(t, err)
-	assert.True(t, v.IsZero(), "slot of a destructed account reads as zero, not as the recorded value")
+	// A prior tx destroys the account after this tx's warm read. The cache-free
+	// path keeps no deleted stateObject to shadow the recorded read; the staleness
+	// is caught by OCC validation, which fails and forces re-execution rather than
+	// letting the pre-destruct value stand.
+	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
+	require.Equal(t, VersionInvalid, mvhm.ValidateVersion(5, io, validateEqualVersion, false, ""))
 }
 
 // The read-once fast path must return exactly what the read-set-hit branch it
@@ -151,49 +151,54 @@ func TestVersionedRead_B_WarmStorageReadReturnsReadSetTuple(t *testing.T) {
 	assert.False(t, clean, "a read-set hit is never clean: it carries no dirty value to keep on revert")
 }
 
-func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, noMaterialize bool) *IntraBlockState {
+func newTouchTestIBS(t *testing.T, addr accounts.Address, acc accounts.Account, versioned bool) *IntraBlockState {
 	_, tx, domains := NewTestRwTx(t)
 	addrValue := addr.Value()
 	domains.SetTxNum(10)
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrValue[:], accounts.SerialiseV3(&acc), 10, nil))
-	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), NewVersionMap(nil))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
+	var ibs *IntraBlockState
+	if versioned {
+		ibs = NewWithVersionMap(reader, NewVersionMap(nil))
+	} else {
+		ibs = New(reader)
+	}
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(noMaterialize)
 	ibs.SetTxContext(1, 5)
 	return ibs
 }
 
 func TestVersionedTouch_RepeatedTouchIsNoop(t *testing.T) {
 	t.Parallel()
-	for _, noMaterialize := range []bool{false, true} {
+	for _, versioned := range []bool{false, true} {
 		addr := accounts.InternAddress([20]byte{0xb6})
 		acc := accounts.NewAccount()
 		acc.Incarnation = 1
-		ibs := newTouchTestIBS(t, addr, acc, noMaterialize)
+		ibs := newTouchTestIBS(t, addr, acc, versioned)
 
 		require.NoError(t, ibs.TouchAccount(addr))
 		n := ibs.journal.length()
 		require.Positive(t, n)
 		require.NoError(t, ibs.TouchAccount(addr))
-		assert.Equal(t, n, ibs.journal.length(), "noMaterialize=%v", noMaterialize)
+		assert.Equal(t, n, ibs.journal.length(), "versioned=%v", versioned)
 	}
 }
 
 // The touch result does not depend on the other fields once the tx wrote the balance.
 func TestVersionedTouch_OwnBalanceWriteReadsNoFields(t *testing.T) {
 	t.Parallel()
-	for _, noMaterialize := range []bool{false, true} {
+	for _, versioned := range []bool{false, true} {
 		addr := accounts.InternAddress([20]byte{0xb7})
 		acc := accounts.NewAccount()
 		acc.Incarnation = 1
 		acc.Nonce = 1
 		acc.Balance = *uint256.NewInt(5)
-		ibs := newTouchTestIBS(t, addr, acc, noMaterialize)
+		ibs := newTouchTestIBS(t, addr, acc, versioned)
 
 		require.NoError(t, ibs.SetBalance(addr, uint256.Int{}, 0))
 		require.NoError(t, ibs.TouchAccount(addr))
 		_, ok := ibs.versionedReads.GetNonce(addr)
-		assert.False(t, ok, "nonce read, noMaterialize=%v", noMaterialize)
+		assert.False(t, ok, "nonce read, versioned=%v", versioned)
 	}
 }
 

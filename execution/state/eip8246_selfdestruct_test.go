@@ -72,7 +72,6 @@ func TestEIP8246_PreservedSD_WithEarlierAccountRecord(t *testing.T) {
 
 	ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 	t.Cleanup(ibs.Close)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(1, 2)
 	ibs.eip8246 = true
 

@@ -901,7 +901,6 @@ func TestGetCodeAfterDestructThenRevivalIsEmpty(t *testing.T) {
 
 	reader := newAccountStateReader(addr)
 	ibs := NewWithVersionMap(NewVersionedStateReader(3, ReadSet{}, vm, reader, false), vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 3)
 	ibs.SetVersion(0)
 
@@ -1266,7 +1265,6 @@ func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
 
 			ibs := NewWithVersionMap(&minimalStateReader{}, vm)
 			t.Cleanup(ibs.Close)
-			ibs.SetNoMaterialize(true)
 			ibs.SetTxContext(1, 2)
 			ibs.eip8246 = tc.eip8246
 			codeHash, err := ibs.GetCodeHash(addr)

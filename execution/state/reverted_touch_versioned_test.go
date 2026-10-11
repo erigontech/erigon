@@ -21,7 +21,6 @@ func TestNoMaterialize_RevertedTouchNotPublished(t *testing.T) {
 
 	vm := NewVersionMap(nil)
 	ibs := NewWithVersionMap(reader, vm)
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 5)
 	ibs.SetVersion(0)
 

@@ -261,6 +261,21 @@ func NewWithVersionMap(stateReader StateReader, mvhm *VersionMap) *IntraBlockSta
 	return ibs
 }
 
+// NewForSequentialCommitment builds a versioned IBS that keeps the stateObject
+// cache on. Genesis is the sole caller that needs both representations at once:
+// its writes must reach the executor as versioned writes AND be read back and
+// persisted through the materialize path (ComputeGenesisCommitment's FinalizeTx,
+// the serial executor's MakeWriteSet). Every other versioned caller runs
+// cache-free via NewWithVersionMap; the version-map-implies-noMaterialize
+// invariant SetVersionMap enforces holds for all of them. Retire this with the
+// materialize path.
+func NewForSequentialCommitment(stateReader StateReader) *IntraBlockState {
+	ibs := New(stateReader)
+	ibs.versionMap = NewVersionMap(nil)
+	ibs.noMaterialize = false
+	return ibs
+}
+
 func (ibs *IntraBlockState) ReadDuration() time.Duration {
 	return ibs.accountReadDuration + ibs.storageReadDuration + ibs.codeReadDuration
 }

@@ -24,7 +24,6 @@ func TestRevertedFreshCreate_NoPhantom(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xda, 0x11})
 	code := []byte("deployed-bytecode")
 	ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 
@@ -54,7 +53,6 @@ func TestRevertedRecreate_NoPhantom(t *testing.T) {
 	pre.Balance = *uint256.NewInt(0)
 	reader := &fieldReader{addr: addr, account: &pre}
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
-	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(0, 0)
 	ibs.SetVersion(0)
 

@@ -461,7 +461,6 @@ func TestCloseReleasesVersionedWrites(t *testing.T) {
 	t.Parallel()
 	state := NewWithVersionMap(&minimalStateReader{}, NewVersionMap(nil))
 	t.Cleanup(state.Close)
-	state.SetNoMaterialize(true)
 	state.SetTxContext(1, 0)
 
 	require.NoError(t, state.TouchAccount(accounts.InternAddress([20]byte{0xe1})))
@@ -600,27 +599,21 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 
-	// Tx3 delete. FinalizeTx below is the materialized-object commit path
-	// (serial/genesis/RPC); the parallel executor never runs it (see the
-	// IsVersioned guards in txtask.go) and instead commits via the write-set.
-	// Materialize explicitly here — as Tx1 does — so FinalizeTx's updateAccount
-	// marks the object deleted and the post-finalize read observes the wipe.
-	_, err = states[3].GetOrNewStateObject(addr)
-	require.NoError(t, err)
+	// Tx3 delete, published to the versionMap the way the parallel path commits
+	// (the cache-free path records the destruct as a versioned write rather than
+	// through the materialized-object FinalizeTx commit path).
 	_, err = states[3].Selfdestruct(addr, false)
 	require.NoError(t, err)
 
-	// Within Tx 3, the state should not change before finalize
+	// Within Tx 3, the slot still reads its pre-destruct value: an existing
+	// contract's storage is wiped at finalize (EIP-6780), not on the destruct call.
 	v, err = states[3].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 
-	// After finalizing Tx 3, the state will change
-	require.NoError(t, states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
-	v, err = states[3].GetState(addr, key)
-	assert.NoError(t, err)
-	assert.Equal(t, uint256.Int{}, v)
-	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
+	// Publishing the finalized write-set to the versionMap carries the wipe, so
+	// later txs read the destroyed account as empty.
+	states[3].versionMap.FlushVersionedWrites(states[3].FinalizedWrites(&chain.Rules{}), true, "")
 
 	// Tx4 read
 	v, err = states[4].GetState(addr, key)
