@@ -173,6 +173,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().IntVar(&cfg.GetLogsMaxResults, utils.RpcGetLogsMaxResults.Name, utils.RpcGetLogsMaxResults.Value, utils.RpcGetLogsMaxResults.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.LogQueryLimit, utils.RpcLogQueryLimit.Name, utils.RpcLogQueryLimit.Value, utils.RpcLogQueryLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.BatchLimit, utils.RpcBatchLimit.Name, utils.RpcBatchLimit.Value, utils.RpcBatchLimit.Usage)
+	rootCmd.PersistentFlags().IntVar(&cfg.SubscriptionLimit, utils.RpcSubscriptionLimit.Name, utils.RpcSubscriptionLimit.Value, utils.RpcSubscriptionLimit.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.ReturnDataLimit, utils.RpcReturnDataLimit.Name, utils.RpcReturnDataLimit.Value, utils.RpcReturnDataLimit.Usage)
 	rootCmd.PersistentFlags().BoolVar(&cfg.AllowUnprotectedTxs, utils.AllowUnprotectedTxs.Name, utils.AllowUnprotectedTxs.Value, utils.AllowUnprotectedTxs.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
@@ -634,6 +635,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 	srv.SetAllowList(allowListForRPC)
 
 	srv.SetBatchLimit(cfg.BatchLimit)
+	srv.SetSubscriptionLimit(cfg.SubscriptionLimit)
 
 	defer srv.Stop()
 
@@ -714,7 +716,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		wsHandler = node.NewWSConnectionLimiter(int64(cfg.WsMaxConnections),
 			srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression, logger))
 	}
-	graphQLHandler := node.NewHTTPHandlerStack(graphql.CreateHandler(defaultAPIList), cfg.HttpCORSDomain, cfg.HttpVirtualHost, false, 0, false)
+	graphQLHandler := newGraphQLHandler(cfg, graphql.CreateHandler(defaultAPIList), rpcConcurrencyLimit)
 	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
 	if err != nil {
 		return err
@@ -887,6 +889,10 @@ func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 	return jwtSecret, nil
 }
 
+func newGraphQLHandler(cfg *httpcfg.HttpCfg, graphQLSrv http.Handler, rpcConcurrencyLimit int64) http.Handler {
+	return node.NewHTTPHandlerStack(graphQLSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, false, rpcConcurrencyLimit, true)
+}
+
 func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, graphQLHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if cfg.GraphQLEnabled && graphql.ProcessGraphQLcheckIfNeeded(graphQLHandler, w, r) {
@@ -925,6 +931,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	engineHttpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
 
 	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, true, logger, cfg.RPCSlowLogThreshold)
+	engineSrv.SetSubscriptionLimit(cfg.SubscriptionLimit)
 
 	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true, logger); err != nil {
 		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
