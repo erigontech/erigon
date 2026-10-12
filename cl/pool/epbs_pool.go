@@ -88,6 +88,7 @@ func (m *slotMap[K, V]) remove(key K) bool {
 func (m *slotMap[K, V]) PruneSlotsBefore(slot uint64) {
 	m.PruneSlots(func(entrySlot uint64) bool { return entrySlot < slot })
 }
+
 func (m *slotMap[K, V]) PruneSlots(remove func(uint64) bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

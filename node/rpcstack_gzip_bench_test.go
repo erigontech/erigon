@@ -429,11 +429,11 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 					stream.WriteArrayStart()
 					for i := range entries {
 						stream.WriteObjectStart()
-						stream.WriteObjectField("pc")
-						stream.WriteInt(i)
-						stream.WriteObjectField("op")
+						stream.Field("pc")
+						stream.Int(int64(i))
+						stream.Field("op")
 						stream.WriteString("SSTORE")
-						stream.WriteObjectField("stack")
+						stream.Field("stack")
 						stream.WriteString(stackWords[i%len(stackWords)])
 						stream.WriteObjectEnd()
 						// A traced txn ends by flushing (rpc/jsonrpc/tracing.go),

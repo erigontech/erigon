@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -226,11 +227,13 @@ func (s *testFinalizeScenario) buildExecResult() *execResult {
 	txResult := &exec.TxResult{
 		Task: task,
 		ExecutionResult: evmtypes.ExecutionResult{
-			FeeTipped:             s.feeTipped,
-			FeeBurnt:              s.feeBurnt,
-			BurntContractAddress:  s.burntAddr,
-			ReceiptGasUsed:        21000,
-			BlockExecutionGasUsed: 21000,
+			TxnGasUsage: mdgas.TxnGasUsage{
+				BlockExecutionGasUsed: 21000,
+			},
+			ReceiptGasUsed:       21000,
+			FeeTipped:            s.feeTipped,
+			FeeBurnt:             s.feeBurnt,
+			BurntContractAddress: s.burntAddr,
 		},
 		Coinbase: s.coinbase,
 	}
@@ -535,7 +538,7 @@ func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance 
 		acc.Balance = *priorCoinbaseBalance
 	}
 
-	vm.FlushVersionedWrites(result.TxOut, true, "")
+	vm.FlushVersionedWrites(result.TxOut, true)
 
 	task := result.Task.(*taskVersion)
 
@@ -689,13 +692,13 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 		task := result.Task.(*taskVersion)
 		task.version = iterVersion
 
-		vm.FlushVersionedWrites(result.TxOut, true, "")
+		vm.FlushVersionedWrites(result.TxOut, true)
 
 		writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 		require.NoError(t, err, "tx %d: calcFees", txIdx)
 
 		// Flush finalize writes so the next tx sees them via versionMap.
-		vm.FlushVersionedWrites(writes, true, "")
+		vm.FlushVersionedWrites(writes, true)
 
 		coinbaseWrite := findBalance(writes, s.coinbase)
 		require.NotNil(t, coinbaseWrite, "tx %d: coinbase BalancePath write must exist (workerWroteCoinbase gate fires when newBal==oldBal)", txIdx)
@@ -737,7 +740,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 		state.Version{TxIndex: 0, Incarnation: 0},
 		*uint256.NewInt(abandonedPostBal), true)
 
-	vm.FlushVersionedWrites(result.TxOut, true, "")
+	vm.FlushVersionedWrites(result.TxOut, true)
 
 	writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 	require.NoError(t, err)
@@ -826,13 +829,13 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		task.version.TxIndex = txIdx
 
 		// Flush TxOut to versionMap (simulates line 1928).
-		vm.FlushVersionedWrites(result.TxOut, true, "")
+		vm.FlushVersionedWrites(result.TxOut, true)
 
 		writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 		require.NoError(t, err)
 
 		// Flush finalize writes to versionMap for next TX.
-		vm.FlushVersionedWrites(writes, true, "")
+		vm.FlushVersionedWrites(writes, true)
 
 		// Verify accumulated balance.
 		coinbaseWrite := findBalance(writes, s.coinbase)
@@ -870,7 +873,7 @@ func TestFinalizeTxSimple_FeeWriteInvalidatesStaleCoinbaseRead(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	cbWS := &state.WriteSet{}
 	cbWS.SetBalance(s.coinbase, coinbaseWrite)
-	vm.FlushVersionedWrites(cbWS, true, "")
+	vm.FlushVersionedWrites(cbWS, true)
 
 	checkVersion := func(readV, writeV state.Version) state.VersionValidity {
 		if readV != writeV {
@@ -939,11 +942,11 @@ func TestNormalizeWriteSet_StorageNoOp(t *testing.T) {
 	val100 := *uint256.NewInt(100)
 
 	// TX 0 writes slotA=100
-	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true, "")
+	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true)
 
 	// TX 1 writes slotA=100 (same as TX 0 — no-op)
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 1, Incarnation: 0}, val100).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	result, _ := writeSet.Normalize(vm, 1, 0, nil, nil, true, false, false)
 	storageCount := countPath(result, state.StoragePath)
@@ -960,11 +963,11 @@ func TestNormalizeWriteSet_StorageChanged(t *testing.T) {
 	val200 := *uint256.NewInt(200)
 
 	// TX 0 writes slotA=100
-	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true, "")
+	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true)
 
 	// TX 1 writes slotA=200 (changed from TX 0's 100)
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 1, Incarnation: 0}, val200).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	result, _ := writeSet.Normalize(vm, 1, 0, nil, nil, true, false, false)
 	storageCount := countPath(result, state.StoragePath)
@@ -984,7 +987,7 @@ func TestNormalizeWriteSet_StorageNewKey(t *testing.T) {
 
 	// TX 0 writes slotA=100 (no prior TX)
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	result, _ := writeSet.Normalize(vm, 0, 0, nil, nil, true, false, false)
 	storageCount := countPath(result, state.StoragePath)
@@ -1006,11 +1009,11 @@ func TestNormalizeWriteSet_StaleIncarnation(t *testing.T) {
 	vm.FlushVersionedWrites(newWS().
 		stor(addr, slotA, state.Version{TxIndex: 5, Incarnation: 0}, val100).
 		stor(addr, slotB, state.Version{TxIndex: 5, Incarnation: 0}, val200).
-		build(), true, "")
+		build(), true)
 
 	// TX 5 incarnation 1: only writes slotA=100
 	inc1Writes := newWS().stor(addr, slotA, state.Version{TxIndex: 5, Incarnation: 1}, val100).build()
-	vm.FlushVersionedWrites(inc1Writes, true, "")
+	vm.FlushVersionedWrites(inc1Writes, true)
 
 	// The WriteSet has BOTH incarnation 0 and 1 entries (versionMap doesn't clear old)
 	// But we pass incarnation=1 as the validated one
@@ -1042,11 +1045,11 @@ func TestNormalizeWriteSet_SelfDestruct(t *testing.T) {
 	vm.FlushVersionedWrites(newWS().
 		stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).
 		stor(addr, slotB, state.Version{TxIndex: 0, Incarnation: 0}, val200).
-		build(), true, "")
+		build(), true)
 
 	// TX 1 self-destructs (val=true means actually destructed)
 	writeSet := newWS().selfDestruct(addr, state.Version{TxIndex: 1, Incarnation: 0}, true).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	result, _ := writeSet.Normalize(vm, 1, 0, nil, nil, true, false, false)
 	// Should have: SelfDestructPath + DELETE for slotA + DELETE for slotB
@@ -1070,10 +1073,10 @@ func TestNormalizeWriteSet_AccountFieldResolution(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x15})
 
 	// TX 0 writes balance=100
-	vm.FlushVersionedWrites(newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(100)).build(), true, "")
+	vm.FlushVersionedWrites(newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(100)).build(), true)
 
 	// TX 1 writes balance=150 (accumulated from TX 0's 100 + delta)
-	vm.FlushVersionedWrites(newWS().bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(150)).build(), true, "")
+	vm.FlushVersionedWrites(newWS().bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(150)).build(), true)
 
 	// Worker's WriteSet had stale balance=120 (from speculative execution)
 	writeSet := newWS().bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(120)).build()
@@ -1095,7 +1098,7 @@ func TestNormalizeWriteSet_AddressPathExcluded(t *testing.T) {
 		addr(addr, state.Version{TxIndex: 0, Incarnation: 0}, &accounts.Account{}).
 		bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(100)).
 		build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	result, _ := writeSet.Normalize(vm, 0, 0, nil, nil, true, false, false)
 	addrCount := countPath(result, state.AddressPath)
@@ -1115,7 +1118,8 @@ func TestNormalizeWriteSet_StorageOnlyAddress(t *testing.T) {
 	val100 := *uint256.NewInt(100)
 
 	emptyCodeHash := accounts.InternCodeHash(common.HexToHash(
-		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"))
+		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+	))
 
 	// Pre-block account state (from domain/stateReader).
 	reader := newMapStateReader()
@@ -1127,7 +1131,7 @@ func TestNormalizeWriteSet_StorageOnlyAddress(t *testing.T) {
 
 	// TX 0 only writes storage — no balance/nonce/code changes
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	result, _ := writeSet.Normalize(vm, 0, 0, reader, nil, true, false, false)
 	// Should have storage write AND account-level fields for addr.
@@ -1154,7 +1158,8 @@ func TestNormalizeWriteSet_StorageAllNoOps(t *testing.T) {
 	val100 := *uint256.NewInt(100)
 
 	emptyCodeHash := accounts.InternCodeHash(common.HexToHash(
-		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"))
+		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+	))
 
 	reader := newMapStateReader()
 	reader.accounts[addr] = &accounts.Account{
@@ -1164,11 +1169,11 @@ func TestNormalizeWriteSet_StorageAllNoOps(t *testing.T) {
 	}
 
 	// TX 0 writes slotA=100
-	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true, "")
+	vm.FlushVersionedWrites(newWS().stor(addr, slotA, state.Version{TxIndex: 0, Incarnation: 0}, val100).build(), true)
 
 	// TX 1 writes slotA=100 (same as TX 0 — no-op, will be filtered)
 	writeSet := newWS().stor(addr, slotA, state.Version{TxIndex: 1, Incarnation: 0}, val100).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	result, _ := writeSet.Normalize(vm, 1, 0, reader, nil, true, false, false)
 	// Storage write should be filtered (no-op).
@@ -1189,7 +1194,8 @@ func TestNormalizeWriteSet_CreateContract(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0x19})
 	codeHash := accounts.InternCodeHash(common.HexToHash(
-		"40802296c24793f9d86e9e09d87c4e03606856c98cbdd749d6499bea4467d07c"))
+		"40802296c24793f9d86e9e09d87c4e03606856c98cbdd749d6499bea4467d07c",
+	))
 
 	// TX 0 creates a contract with nonce=1, balance=0, non-empty codeHash
 	ver0 := state.Version{TxIndex: 0, Incarnation: 0}
@@ -1200,7 +1206,7 @@ func TestNormalizeWriteSet_CreateContract(t *testing.T) {
 		inc(addr, ver0, uint64(1)).
 		codeHash(addr, ver0, codeHash).
 		build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	result, _ := writeSet.Normalize(vm, 0, 0, nil, nil, true, false, false)
 	// Should have CreateContractPath + all 4 account fields.
@@ -1226,7 +1232,7 @@ func TestNormalizeWriteSet_NewAccount(t *testing.T) {
 
 	// TX 0 sends ETH to a new address — only BalancePath written
 	writeSet := newWS().bal(addr, state.Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(50000)).build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	// stateReader returns nil for this address (doesn't exist yet)
 	reader := newMapStateReader() // empty — no accounts
@@ -1257,7 +1263,8 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x37, 0x42}) // target account
 
 	emptyCodeHash := accounts.InternCodeHash(common.HexToHash(
-		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"))
+		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+	))
 
 	// The account previously had Balance > 0 (from a prior block).
 	// In this block, a TX zeroes the balance. The account becomes empty
@@ -1269,7 +1276,7 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 		nonce(addr, ver5, uint64(0)).
 		codeHash(addr, ver5, emptyCodeHash).
 		build()
-	vm.FlushVersionedWrites(writeSet, true, "")
+	vm.FlushVersionedWrites(writeSet, true)
 
 	// The stateReader has the account from the prior block (Balance > 0).
 	reader := newMapStateReader()
@@ -1313,7 +1320,8 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 // account.
 func TestNormalizeWriteSet_AuraSystemAddressRetained(t *testing.T) {
 	emptyCodeHash := accounts.InternCodeHash(common.HexToHash(
-		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"))
+		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+	))
 
 	run := func(isAura bool) *state.WriteSet {
 		vm := state.NewVersionMap(nil)
@@ -1323,7 +1331,7 @@ func TestNormalizeWriteSet_AuraSystemAddressRetained(t *testing.T) {
 			nonce(params.SystemAddress, ver, uint64(0)).
 			codeHash(params.SystemAddress, ver, emptyCodeHash).
 			build()
-		vm.FlushVersionedWrites(writeSet, true, "")
+		vm.FlushVersionedWrites(writeSet, true)
 
 		reader := newMapStateReader()
 		reader.accounts[params.SystemAddress] = &accounts.Account{
@@ -1369,11 +1377,11 @@ func TestNormalizeWriteSet_CodePathTravelsWithCodeHash(t *testing.T) {
 		code(authority, ver0, designatorCode).
 		codeHash(authority, ver0, designatorHash).
 		nonce(authority, ver0, 1).
-		build(), true, "")
+		build(), true)
 
 	// Incarnation 1 (validated) re-executes; SetCode short-circuits, so only the
 	// nonce is re-emitted — no fresh CodePath/CodeHashPath.
-	vm.FlushVersionedWrites(newWS().nonce(authority, ver1, 1).build(), true, "")
+	vm.FlushVersionedWrites(newWS().nonce(authority, ver1, 1).build(), true)
 
 	// blockIO.WriteSet retains both incarnations' entries (versionMap doesn't
 	// clear old), so the validated tx's raw writeset carries the stale inc-0
@@ -1422,7 +1430,7 @@ func TestNormalizeWriteSet_CodePathRecoveredFromStateReader(t *testing.T) {
 	// Re-delegating tx: SetCode short-circuits (code unchanged), so the only
 	// write is the nonce bump — no CodePath/CodeHashPath, and nothing for
 	// CodePath in the versionMap.
-	vm.FlushVersionedWrites(newWS().nonce(authority, ver0, 2).build(), true, "")
+	vm.FlushVersionedWrites(newWS().nonce(authority, ver0, 2).build(), true)
 	rawWrites := newWS().nonce(authority, ver0, 2).build()
 
 	result, _ := rawWrites.Normalize(vm, txIndex, 0, reader, nil, true, false, false)
@@ -1451,7 +1459,7 @@ func TestNormalizeWriteSet_MetamorphicSameTxRecreateKeepsWrites(t *testing.T) {
 		bal(addr, state.Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(500)).
 		nonce(addr, state.Version{TxIndex: 1, Incarnation: 0}, 1).
 		build()
-	vm.FlushVersionedWrites(ws, true, "")
+	vm.FlushVersionedWrites(ws, true)
 
 	result, _ := ws.Normalize(vm, 1, 0, nil, nil, true, false, false)
 	assert.Equal(t, 0, countPath(result, state.SelfDestructPath), "SelfDestructPath=false is not emitted")
@@ -1475,7 +1483,7 @@ func TestNormalizeWriteSet_StaleIncarnationSelfDestructIgnored(t *testing.T) {
 		selfDestruct(addr, state.Version{TxIndex: 5, Incarnation: 0}, true). // stale incarnation
 		bal(addr, state.Version{TxIndex: 5, Incarnation: 1}, *uint256.NewInt(300)).
 		build()
-	vm.FlushVersionedWrites(ws, true, "")
+	vm.FlushVersionedWrites(ws, true)
 
 	result, _ := ws.Normalize(vm, 5, 1, nil, nil, true, false, false)
 	assert.Equal(t, 0, countPath(result, state.SelfDestructPath), "stale-incarnation SD must not be emitted")
@@ -1494,8 +1502,8 @@ func TestNormalizeWriteSet_PostSelfDestructZeroStorageDroppedViaHistory(t *testi
 
 	// tx2 destructs, tx3 revives → latest SelfDestructPath is false, but history
 	// carries a Done true at tx2.
-	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true, "")
-	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 3, Incarnation: 0}, false).build(), true, "")
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 3, Incarnation: 0}, false).build(), true)
 	reader := newMapStateReader()
 
 	zeroWrite := newWS().stor(addr, slot, state.Version{TxIndex: 5, Incarnation: 0}, uint256.Int{}).build()
@@ -1524,8 +1532,8 @@ func TestNormalizeWriteSet_SelfDestructEarlierThenCreateContractZeroesFields(t *
 	vm.FlushVersionedWrites(newWS().
 		nonce(addr, state.Version{TxIndex: 1, Incarnation: 0}, 9).
 		codeHash(addr, state.Version{TxIndex: 1, Incarnation: 0}, staleHash).
-		build(), true, "")
-	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true, "")
+		build(), true)
+	vm.FlushVersionedWrites(newWS().selfDestruct(addr, state.Version{TxIndex: 2, Incarnation: 0}, true).build(), true)
 
 	// tx5 re-creates via CREATE2 and funds it (balance keeps the account
 	// non-empty so EIP-161 doesn't delete it and the zeroed fields are visible).
@@ -1722,7 +1730,7 @@ func newFeeCreditRound(t testing.TB, s *testFinalizeScenario) *feeCreditRound {
 
 	result := s.buildExecResult()
 	be := feeMergeTestExecutor(t)
-	be.versionMap.FlushVersionedWrites(result.TxOut, true, "")
+	be.versionMap.FlushVersionedWrites(result.TxOut, true)
 
 	r := &feeCreditRound{
 		be:     be,
@@ -1767,7 +1775,7 @@ func (r *feeCreditRound) run(t testing.TB) *state.WriteSet {
 	}
 	r.be.recordFeeMerge(version, recorded, tip, outcome,
 		[2]accounts.Address{r.result.Coinbase, r.result.ExecutionResult.BurntContractAddress})
-	r.vm.FlushVersionedWrites(r.recorded(), true, "")
+	r.vm.FlushVersionedWrites(r.recorded(), true)
 	return credit
 }
 

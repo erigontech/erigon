@@ -34,11 +34,13 @@ func NewRecentReceipts(limit uint64) *RecentReceipts {
 	return notifications.NewRecentReceipts(limit)
 }
 
-type NewSnapshotSubscription func() error
-type HeaderSubscription func(headerRLP []byte) error
-type PendingLogsSubscription func(types.Logs) error
-type PendingBlockSubscription func(*types.Block) error
-type PendingTxsSubscription func([]types.Transaction) error
+type (
+	NewSnapshotSubscription  func() error
+	HeaderSubscription       func(headerRLP []byte) error
+	PendingLogsSubscription  func(types.Logs) error
+	PendingBlockSubscription func(*types.Block) error
+	PendingTxsSubscription   func([]types.Transaction) error
+)
 
 // Events manages event subscriptions and dissemination. Thread-safe.
 type Events struct {

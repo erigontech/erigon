@@ -15,10 +15,14 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // SendRawTransaction implements eth_sendRawTransaction. Creates a new message call or contract creation for a previously signed transaction.
 func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
+	if err := txpool.ValidateSerializedTxn(encodedTx); err != nil {
+		return common.Hash{}, err
+	}
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
 		return common.Hash{}, err
@@ -99,6 +103,8 @@ func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexuti
 	return api.waitForReceipt(ctx, hash, timeout)
 }
 
+const receiptPollInterval = time.Second
+
 func (api *APIImpl) waitForReceipt(ctx context.Context, hash common.Hash, timeout time.Duration) (*ethutils.RPCReceipt, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -113,31 +119,35 @@ func (api *APIImpl) waitForReceipt(ctx context.Context, hash common.Hash, timeou
 	}
 	defer api.filters.UnsubscribeReceipts(id)
 
-	// The filter update reaches the server asynchronously, so a receipt produced before it lands is never
-	// delivered on the channel. Look the receipt up once to cover a transaction mined by then.
-	// An exhausted budget is the timeout itself and is reported as such below; any other lookup failure is real.
-	receipt, err := api.GetTransactionReceipt(timeoutCtx, hash)
-	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
-		return nil, err
-	}
-	if receipt != nil {
-		return receipt, nil
-	}
+	// The filter update reaches the server asynchronously and without an ack, so a receipt produced before it
+	// lands is never delivered on the channel. Look the receipt up periodically to cover that window.
+	poll := time.NewTicker(receiptPollInterval)
+	defer poll.Stop()
+	for {
+		// An exhausted budget is the timeout itself and is reported as such below; any other lookup failure is real.
+		receipt, err := api.GetTransactionReceipt(timeoutCtx, hash)
+		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+		if receipt != nil {
+			return receipt, nil
+		}
 
-	// Wait up to the timeout for the transaction to be processed and the receipt to be available.
-	select {
-	case <-timeoutCtx.Done():
-		return nil, &rpc.TxSyncTimeoutError{
-			Msg:  fmt.Sprintf("the transaction was added to the mempool but wasn't processed in %v", timeout),
-			Hash: hash,
+		select {
+		case <-timeoutCtx.Done():
+			return nil, &rpc.TxSyncTimeoutError{
+				Msg:  fmt.Sprintf("the transaction was added to the mempool but wasn't processed in %v", timeout),
+				Hash: hash,
+			}
+		case batch, ok := <-receiptsCh:
+			// The filter is this transaction's hash, so the batch holds only its receipt.
+			if !ok || batch == nil || len(batch.Value) == 0 {
+				log.Warn("[rpc] receipts subscription was closed")
+				return nil, fmt.Errorf("receipts subscription was closed")
+			}
+			return ethutils.MarshalSubscribeReceipt(batch.Value[0]), nil
+		case <-poll.C:
 		}
-	case batch, ok := <-receiptsCh:
-		// The filter is this transaction's hash, so the batch holds only its receipt.
-		if !ok || batch == nil || len(batch.Value) == 0 {
-			log.Warn("[rpc] receipts subscription was closed")
-			return nil, fmt.Errorf("receipts subscription was closed")
-		}
-		return ethutils.MarshalSubscribeReceipt(batch.Value[0]), nil
 	}
 }
 

@@ -252,6 +252,7 @@ func TestPrecompiledModExpInputEip7823(t *testing.T) {
 
 // Tests the sample inputs from the elliptic curve scalar multiplication EIP 213.
 func TestPrecompiledBn254ScalarMul(t *testing.T) { testJson("bn254ScalarMul", "07", t) }
+
 func TestPrecompiledBn254ScalarMulFail(t *testing.T) {
 	testJsonFail("bn254ScalarMul", "07", t)
 }

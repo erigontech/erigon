@@ -196,12 +196,14 @@ func (f *ForkChoiceStore) getParentPayloadStatus(block *cltypes.BeaconBlock) clt
 	if !ok || parentBlock == nil {
 		return cltypes.PayloadStatusEmpty
 	}
-	return parentPayloadStatusFromBids(parentBlock, block)
+	return ParentPayloadStatusFromBids(parentBlock, block)
 }
 
-// parentPayloadStatusFromBids is getParentPayloadStatus with the parent block
-// already resolved, so callers iterating siblings fetch the parent only once.
-func parentPayloadStatusFromBids(parentBlock *cltypes.SignedBeaconBlock, block *cltypes.BeaconBlock) cltypes.PayloadStatus {
+// ParentPayloadStatusFromBids derives the parent's canonical payload status from its child.
+func ParentPayloadStatusFromBids(parentBlock *cltypes.SignedBeaconBlock, block *cltypes.BeaconBlock) cltypes.PayloadStatus {
+	if parentBlock == nil || parentBlock.Block == nil || parentBlock.Block.Body == nil || block == nil || block.Body == nil {
+		return cltypes.PayloadStatusEmpty
+	}
 	// Pre-GLOAS parent blocks have no bid field. From the GLOAS fork choice
 	// perspective they are treated as EMPTY: they always carried their execution
 	// payload inline (no separate envelope), so the PENDING → EMPTY/FULL

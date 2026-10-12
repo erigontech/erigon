@@ -113,7 +113,7 @@ func openTestCaplinStateSnapshots(t *testing.T, dirs datadir.Dirs, table string,
 		KeyValueGetters: map[string]KeyValueGetter{table: nil},
 		Compression:     map[string]bool{},
 	}
-	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, logger)
+	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dirs, types, logger)
 	t.Cleanup(s.Close)
 	require.NoError(t, s.OpenFolder())
 	return s

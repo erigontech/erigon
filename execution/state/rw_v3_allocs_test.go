@@ -40,6 +40,7 @@ type fixedTemporalTx struct {
 func (g fixedTemporalTx) GetLatest(name kv.Domain, k []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	return g.val, 0, nil
 }
+
 func (g fixedTemporalTx) GetLatestValSize(name kv.Domain, k []byte) (int, bool, error) {
 	return len(g.val), len(g.val) > 0, nil
 }
@@ -151,6 +152,7 @@ func (g addrTemporalTx) GetLatest(_ kv.Domain, k []byte, _ kv.GetLatestOptions) 
 	}
 	return nil, 0, nil
 }
+
 func (g addrTemporalTx) GetLatestValSize(_ kv.Domain, k []byte) (int, bool, error) {
 	if bytes.Equal(k, g.present[:]) {
 		return len(g.val), true, nil

@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -274,10 +273,6 @@ type ForkChoicePayloadStatus struct {
 
 type ForkChoice struct{}
 
-func NewForkChoice(fn func(s abstract.BeaconState) error) *ForkChoice {
-	return &ForkChoice{}
-}
-
 func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	// Skip GLOAS wrong_withdrawals fork choice test: the Python test generator modifies
 	// block_state.payload_expected_withdrawals at runtime (injecting a fake withdrawal)
@@ -361,7 +356,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 				} else if len(step.Proofs) != blobs.Len() || len(step.Proofs) != blk.Block.Body.GetBlobKzgCommitments().Len() {
 					continue
 				}
-				blobSidecarService := services.NewBlobSidecarService(ctx, &clparams.MainnetBeaconConfig, forkStore, nil, ethClock, emitters, true)
+				blobSidecarService := services.NewBlobSidecarService(&clparams.MainnetBeaconConfig, forkStore, nil, ethClock, emitters, true)
 
 				blobs.Range(func(index int, value *cltypes.Blob, length int) bool {
 					var proof common.Bytes48

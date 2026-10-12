@@ -3,8 +3,10 @@ package graph
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/99designs/gqlgen/graphql"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
@@ -37,7 +39,56 @@ func (r *Resolver) resolveAccountAtBlock(ctx context.Context, address string, de
 
 func ptr[T any](v T) *T { return &v }
 
-func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
+func blockTxsRequested(ctx context.Context) bool {
+	return graphql.AnyFieldRequested(ctx, "transactions", "transactionAt")
+}
+
+func (r *queryResolver) block(ctx context.Context, number *string, hash *string, withTxs bool) (*model.Block, error) {
+	if number != nil && hash != nil {
+		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
+	}
+
+	if hash != nil {
+		blockHash := common.HexToHash(*hash)
+		res, err := r.GraphQLAPI.GetBlockDetailsByHash(ctx, blockHash, &withTxs)
+		if err != nil {
+			return nil, err
+		}
+		if res == nil {
+			return nil, nil
+		}
+		return r.buildBlock(res, withTxs)
+	}
+
+	var blockNumber rpc.BlockNumber
+
+	if number != nil {
+		bNum, err := strconv.ParseUint(*number, 10, 64)
+		if err == nil {
+			blockNumber = rpc.BlockNumber(bNum)
+		} else {
+			bNum, err := hexutil.DecodeUint64(*number)
+			if err == nil {
+				blockNumber = rpc.BlockNumber(bNum)
+			} else {
+				return nil, fmt.Errorf("invalid block number: %s", *number)
+			}
+		}
+	} else {
+		blockNumber = rpc.LatestBlockNumber
+	}
+
+	res, err := r.GraphQLAPI.GetBlockDetails(ctx, blockNumber, &withTxs)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return nil, nil
+	}
+	return r.buildBlock(res, withTxs)
+}
+
+func (r *queryResolver) buildBlock(res map[string]any, withTxs bool) (*model.Block, error) {
 	block := &model.Block{}
 	absBlk := res["block"]
 	if absBlk == nil {
@@ -96,8 +147,8 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 	if blk.ExcessBlobGas != nil {
 		block.ExcessBlobGas = ptr(uint64(*blk.ExcessBlobGas))
 	}
-	if n, ok := blk.TransactionCount.(hexutil.Uint64); ok {
-		block.TransactionCount = ptr(uint64(n))
+	if blk.TransactionCount != nil {
+		block.TransactionCount = ptr(*blk.TransactionCount)
 	}
 
 	uncles := blk.Uncles
@@ -108,14 +159,15 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 	ommerCount := uint64(len(block.Ommers))
 	block.OmmerCount = &ommerCount
 
-	rcp, ok := res["receipts"].([]*jsonrpc.GraphQLReceipt)
-	if !ok {
-		return nil, fmt.Errorf("unexpected receipts type %T", res["receipts"])
-	}
-	block.Transactions = make([]*model.Transaction, 0, len(rcp))
-	for _, transReceipt := range rcp {
-		trans := r.buildTransaction(block, transReceipt)
-		block.Transactions = append(block.Transactions, trans)
+	if withTxs {
+		rcp, ok := res["receipts"].([]*jsonrpc.GraphQLReceipt)
+		if !ok {
+			return nil, fmt.Errorf("unexpected receipts type %T", res["receipts"])
+		}
+		block.Transactions = make([]*model.Transaction, 0, len(rcp))
+		for _, transReceipt := range rcp {
+			block.Transactions = append(block.Transactions, r.buildTransaction(block, transReceipt))
+		}
 	}
 
 	if block.WithdrawalsRoot != nil {
@@ -244,7 +296,7 @@ func topicsFromModel(topicSets [][]string) ([][]common.Hash, error) {
 	return result, nil
 }
 
-func rpcLogsToModel(logs types.RPCLogs) []*model.Log {
+func rpcLogsToModel(logs types.Logs) []*model.Log {
 	result := make([]*model.Log, 0, len(logs))
 	for _, l := range logs {
 		ml := &model.Log{

@@ -18,6 +18,7 @@ package integrity
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -76,7 +77,9 @@ func CheckRCacheRootAtBlk(ctx context.Context, db kv.TemporalRoDB, blockReader d
 			"block", blockNum, "byzantium", *cc.ByzantiumBlock)
 		return nil
 	}
-	return checkRCacheRootAtBlkChunk(ctx, blockNum, blockNum, db, blockReader, failFast)
+	var probs problems
+	err := checkRCacheRootAtBlkChunk(ctx, blockNum, blockNum, db, blockReader, failFast, &probs)
+	return errors.Join(err, probs.verdict(string(ReceiptRootIntegrity)))
 }
 
 // CheckRCacheRootAtBlkRange verifies receipt roots over [from, to) using
@@ -105,7 +108,7 @@ func CheckRCacheRootAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tempora
 // blocks. It opens a single ReceiptCacheV2Stream covering [fromBlock, toBlock]
 // and walks blocks in lockstep with the stream's txNum cursor, so we avoid one
 // stream + one Min query per block.
-func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
+func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, probs *problems) (err error) {
 	if fromBlock > toBlock {
 		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
 	}
@@ -152,10 +155,9 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 		if computedRoot != header.ReceiptHash {
 			mismatch := fmt.Errorf("%w: check-rcache-root-at-blk: receipt root mismatch at block %d: computed=%s, header=%s",
 				ErrIntegrity, blockNum, computedRoot, header.ReceiptHash)
-			if failFast {
-				return mismatch
+			if reportErr := probs.report(failFast, mismatch); reportErr != nil {
+				return reportErr
 			}
-			log.Error(mismatch.Error())
 		}
 		receipts = receipts[:0]
 		blockNum++

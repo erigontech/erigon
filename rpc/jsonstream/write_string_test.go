@@ -115,9 +115,9 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 		var out bytes.Buffer
 		s := New(&out)
 		s.WriteObjectStart()
-		s.WriteObjectField("oddName")
+		s.Field("oddName")
 		s.WriteString("0x" + strings.Repeat("ab", 32))
-		s.WriteObjectField("clean")
+		s.Field("clean")
 		s.WriteString("short")
 		require.NoError(t, s.ClosePending(0))
 		require.NoError(t, s.Flush())
@@ -160,7 +160,7 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 	})
 
 	t.Run("failed writer drops instead of buffering", func(t *testing.T) {
-		s := New(goneWriter{}).(*StackStream)
+		s := New(goneWriter{})
 		val := strings.Repeat("c", 4096)
 		for range 20 * FlushThreshold / len(val) {
 			s.WriteString(val)

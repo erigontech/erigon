@@ -663,9 +663,11 @@ func (s *Sync) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 func (s *Sync) checkStopBeforeStage(stage *Stage) {
 	s.checkStopStage(stage, "STOP_BEFORE_STAGE", dbg.StopBeforeStage())
 }
+
 func (s *Sync) checkStopAfterStage(stage *Stage) {
 	s.checkStopStage(stage, "STOP_AFTER_STAGE", dbg.StopAfterStage())
 }
+
 func (s *Sync) checkStopStage(stage *Stage, envName, value string) {
 	if string(stage.ID) == value { // stop process for debugging reasons
 		s.logger.Warn("env flag forced to stop app", "env", envName, "value", value)

@@ -67,23 +67,9 @@ func legacyMarshalReceipt(
 		logsBloom = types.CreateBloom(types.Receipts{receipt})
 	}
 
-	var logsToMarshal any
-	if withBlockTimestamp {
-		if receipt.Logs != nil {
-			rpcLogs := make([]*types.RPCLog, 0, len(receipt.Logs))
-			for _, l := range receipt.Logs {
-				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header))
-			}
-			logsToMarshal = rpcLogs
-		} else {
-			logsToMarshal = make([]*types.RPCLog, 0)
-		}
-	} else {
-		if receipt.Logs == nil {
-			logsToMarshal = make([]*types.Log, 0)
-		} else {
-			logsToMarshal = receipt.Logs
-		}
+	logsToMarshal := make([]map[string]any, 0, len(receipt.Logs))
+	for _, l := range receipt.Logs {
+		logsToMarshal = append(logsToMarshal, legacyLogFields(l, withBlockTimestamp, header.Time))
 	}
 
 	fields := map[string]any{
@@ -128,6 +114,26 @@ func legacyMarshalReceipt(
 		fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
 	}
 
+	return fields
+}
+
+// legacyLogFields spells the log object out by hand, so the oracle keeps its shape
+// even if types.Log's own encoder drops a field.
+func legacyLogFields(l *types.Log, withBlockTimestamp bool, timestamp uint64) map[string]any {
+	fields := map[string]any{
+		"address":          l.Address,
+		"topics":           l.Topics,
+		"data":             l.Data,
+		"blockNumber":      l.BlockNumber,
+		"transactionHash":  l.TxHash,
+		"transactionIndex": l.TxIndex,
+		"blockHash":        l.BlockHash,
+		"logIndex":         l.Index,
+		"removed":          l.Removed,
+	}
+	if withBlockTimestamp {
+		fields["blockTimestamp"] = hexutil.Uint64(timestamp)
+	}
 	return fields
 }
 
@@ -215,7 +221,7 @@ func TestMarshalReceiptMatchesLegacyJSON(t *testing.T) {
 								name := fmt.Sprintf("%s/%s/logs=%s/bloom=%v/%s/contract=%v/ts=%v", cfg.name, txName, logs.name, !bloom.IsEmpty(), state.name, contract != (common.Address{}), withBlockTimestamp)
 								want, err := json.Marshal(legacyMarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true, withBlockTimestamp))
 								require.NoError(t, err)
-								got, err := json.Marshal(MarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true, withBlockTimestamp))
+								got, err := json.Marshal(MarshalReceipt(receipt, txn, cfg.config, header, true, withBlockTimestamp))
 								require.NoError(t, err)
 								require.JSONEq(t, string(want), string(got), name)
 							}
@@ -245,12 +251,7 @@ func legacyMarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsRe
 
 	// To can be null for contract creation
 	if protoReceipt.To != nil {
-		toAddr := common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.To))
-		if toAddr != (common.Address{}) {
-			receipt["to"] = toAddr
-		} else {
-			receipt["to"] = nil
-		}
+		receipt["to"] = common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.To))
 	} else {
 		receipt["to"] = nil
 	}
@@ -261,12 +262,7 @@ func legacyMarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsRe
 	receipt["gasUsed"] = hexutil.Uint64(protoReceipt.GasUsed)
 
 	if protoReceipt.ContractAddress != nil {
-		addr := common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.ContractAddress))
-		if addr != (common.Address{}) {
-			receipt["contractAddress"] = addr
-		} else {
-			receipt["contractAddress"] = nil
-		}
+		receipt["contractAddress"] = common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.ContractAddress))
 	} else {
 		receipt["contractAddress"] = nil
 	}
@@ -295,9 +291,12 @@ func legacyMarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsRe
 	}
 	receipt["logs"] = logs
 
-	if protoReceipt.BaseFee != nil {
-		baseFee := gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee)
-		receipt["effectiveGasPrice"] = (*hexutil.U256)(baseFee)
+	// Always present, null when the backend sends neither, as geth's receipt has it.
+	receipt["effectiveGasPrice"] = nil
+	if protoReceipt.EffectiveGasPrice != nil {
+		receipt["effectiveGasPrice"] = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.EffectiveGasPrice))
+	} else if protoReceipt.BaseFee != nil {
+		receipt["effectiveGasPrice"] = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee))
 	}
 
 	if protoReceipt.BlobGasUsed > 0 {
@@ -330,6 +329,7 @@ func TestMarshalSubscribeReceiptMatchesLegacyJSON(t *testing.T) {
 			From:              gointerfaces.ConvertAddressToH160(common.HexToAddress("0x03")),
 			To:                gointerfaces.ConvertAddressToH160(addr),
 			BaseFee:           gointerfaces.ConvertUint256IntToH256(uint256.NewInt(7_000_000_000)),
+			EffectiveGasPrice: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(8_000_000_000)),
 			BlobGasUsed:       131072,
 			BlobGasPrice:      gointerfaces.ConvertUint256IntToH256(uint256.NewInt(1)),
 		}
@@ -343,7 +343,10 @@ func TestMarshalSubscribeReceiptMatchesLegacyJSON(t *testing.T) {
 		"failed without logs": func(r *remoteproto.SubscribeReceiptsReply) {
 			r.Status, r.Logs, r.LogsBloom = 0, nil, make([]byte, types.BloomByteLength)
 		},
-		"no base fee, no blobs": func(r *remoteproto.SubscribeReceiptsReply) { r.BaseFee, r.BlobGasUsed, r.BlobGasPrice = nil, 0, nil },
+		"no base fee, no blobs": func(r *remoteproto.SubscribeReceiptsReply) {
+			r.BaseFee, r.EffectiveGasPrice, r.BlobGasUsed, r.BlobGasPrice = nil, nil, 0, nil
+		},
+		"base fee only": func(r *remoteproto.SubscribeReceiptsReply) { r.EffectiveGasPrice = nil },
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := full()

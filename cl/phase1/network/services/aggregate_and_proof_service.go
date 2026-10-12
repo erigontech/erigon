@@ -324,7 +324,7 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		}
 
 		// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
-		if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), committeeIndex, selectionProof) {
+		if !state.IsAggregator(a.beaconCfg, uint64(len(committee)), selectionProof) {
 			log.Warn("receveived aggregate and proof from invalid aggregator")
 			return errors.New("invalid aggregate and proof")
 		}
@@ -423,10 +423,8 @@ func AggregateAndProofSignature(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	domain, err := state.GetDomain(
-		state.BeaconConfig().DomainSelectionProof,
-		slot*state.BeaconConfig().SlotsPerEpoch,
-	)
+	cfg := state.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainSelectionProof, slot/cfg.SlotsPerEpoch, state.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -443,7 +441,8 @@ func AggregatorSignature(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	domain, err := state.GetDomain(state.BeaconConfig().DomainAggregateAndProof, state.Slot())
+	cfg := state.BeaconConfig()
+	domain, err := fork.ComputeDomainAtEpoch(cfg, cfg.DomainAggregateAndProof, aggregate.Message.Aggregate.Data.Slot/cfg.SlotsPerEpoch, state.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -482,7 +481,7 @@ func AggregateMessageSignature(
 		return nil, nil, nil, err
 	}
 
-	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, indexedAttestation.Data.Target.Epoch)
+	domain, err := fork.ComputeDomainAtEpoch(s.BeaconConfig(), s.BeaconConfig().DomainBeaconAttester, indexedAttestation.Data.Target.Epoch, s.GenesisValidatorsRoot())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("unable to get the domain: %w", err)
 	}

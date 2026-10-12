@@ -134,14 +134,14 @@ func TestEthSubscribeReceipts(t *testing.T) {
 // pointer receiver or a renamed method fails here instead of sending {} to every subscriber.
 var (
 	_ interface {
-		MarshalFastJSONTo(*jsonstream.StackStream) error
-	} = sharedJSON[*types.Header]{}
-	_ interface{ LocalValue() any } = sharedJSON[*types.Header]{}
+		MarshalFastJSONTo(*jsonstream.Stream) error
+	} = sharedJSON[*types.Header, *types.Header]{}
+	_ interface{ LocalValue() any } = sharedJSON[*types.Header, *types.Header]{}
 )
 
 func TestSharedJSONEncodesTheValue(t *testing.T) {
 	h := &types.Header{Number: *uint256.NewInt(7)}
-	s := sharedJSON[*types.Header]{&rpchelper.Shared[*types.Header]{Value: h}, headerValue}
+	s := sharedJSON[*types.Header, *types.Header]{&rpchelper.Shared[*types.Header]{Value: h}, headerValue}
 	got, err := jsonstream.Marshal(s)
 	require.NoError(t, err)
 	want, err := json.Marshal(h)
@@ -154,14 +154,14 @@ func TestSharedJSONEncodesTheValue(t *testing.T) {
 // shows which one ran.
 type fastOnly struct{}
 
-func (fastOnly) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (fastOnly) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	w.WriteRaw(`"fast"`)
 	return nil
 }
 
 // An event whose value has a fast marshaller is encoded with it, not with reflection.
 func TestSharedJSONUsesTheFastMarshaller(t *testing.T) {
-	s := sharedJSON[int]{&rpchelper.Shared[int]{Value: 1}, func(int) any { return fastOnly{} }}
+	s := sharedJSON[int, fastOnly]{&rpchelper.Shared[int]{Value: 1}, func(int) fastOnly { return fastOnly{} }}
 	got, err := jsonstream.Marshal(s)
 	require.NoError(t, err)
 	require.Equal(t, `"fast"`, string(got))

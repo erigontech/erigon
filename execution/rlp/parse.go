@@ -166,6 +166,7 @@ func ParseString(payload []byte, pos int) (dataPos, dataLen int, err error) {
 	}
 	return
 }
+
 func StringOfLen(payload []byte, pos, expectedLen int) (dataPos int, err error) {
 	dataPos, dataLen, err := ParseString(payload, pos)
 	if err != nil {

@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -69,6 +71,11 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 		bidValidationStateCacheSize,
 		bidValidationStateCacheTTL(&beaconCfg),
 	)
+	parentExitsCache, err := lru.New[common.Hash, parentBuilderExitsResult](
+		"parent_builder_exit_requests_test",
+		parentBuilderExitsCacheSize,
+	)
+	require.NoError(t, err)
 
 	service := &executionPayloadBidService{
 		syncedDataManager: mockSyncedData,
@@ -82,6 +89,9 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 		},
 		seenCache:            newSeenBidStore(),
 		validationStateCache: validationStateCache,
+		parentExitsCalls:     make(map[common.Hash]*parentBuilderExitsCall),
+		parentExitsCache:     parentExitsCache,
+		parentExitsWork:      make(chan struct{}, parentBuilderExitsMaxInFlight),
 	}
 
 	return service, mockSyncedData, ethClockMock, fcMock, epbsPool
@@ -327,6 +337,32 @@ func TestValidateDirectBidAllowsExecutionPayment(t *testing.T) {
 	require.NoError(t, service.ValidateBid(context.Background(), msg))
 }
 
+func TestExecutionPayloadBidRejectsParentBlockHash(t *testing.T) {
+	for _, api := range []bool{false, true} {
+		for _, zero := range []bool{false, true} {
+			service, _, clock, fc, epbsPool := setupExecutionPayloadBidService(t, gomock.NewController(t))
+			msg := newTestSignedExecutionPayloadBid(100, 1, 1)
+			if zero {
+				msg.Message.ParentBlockHash = common.Hash{}
+			}
+			msg.Message.BlockHash = msg.Message.ParentBlockHash
+			fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+			addPreferencesToPool(epbsPool, 100)
+			clock.EXPECT().GetCurrentSlot().Return(uint64(100))
+			var err error
+			if api {
+				err = service.ValidateBid(t.Context(), msg)
+			} else {
+				err = service.ProcessMessage(t.Context(), nil, msg)
+			}
+			require.ErrorContains(t, err, "block hash equals parent block hash", "api=%t zero=%t", api, zero)
+			require.NotErrorIs(t, err, ErrIgnore)
+			require.False(t, service.seenCache.Contains(newSeenBidKey(msg.Message)))
+			require.Empty(t, epbsPool.HighestBids.Keys())
+		}
+	}
+}
+
 func TestValidateDirectBidUsesFrozenParentWhenHeadFlipsToSibling(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	service, _, ethClockMock, fcMock, _ := setupExecutionPayloadBidService(t, ctrl)
@@ -363,8 +399,8 @@ func TestExecutionPayloadBidServiceWrongSlot(t *testing.T) {
 func TestIsCurrentOrNextSlotClockDisparityBoundaries(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
-	lower := service.ethClock.GetSlotTime(99).Add(-gloasMaximumClockDisparity)
-	upper := service.ethClock.GetSlotTime(101).Add(gloasMaximumClockDisparity)
+	lower := service.ethClock.GetSlotTime(99).Add(-maximumGossipClockDisparity)
+	upper := service.ethClock.GetSlotTime(101).Add(maximumGossipClockDisparity)
 
 	tests := []struct {
 		name string
@@ -380,7 +416,7 @@ func TestIsCurrentOrNextSlotClockDisparityBoundaries(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			require.Equal(t, test.want, isCurrentOrNextSlot(service.ethClock, service.beaconCfg, test.now, 100, gloasMaximumClockDisparity))
+			require.Equal(t, test.want, isCurrentOrNextSlot(service.ethClock, service.beaconCfg, test.now, 100, maximumGossipClockDisparity))
 		})
 	}
 }
@@ -781,6 +817,27 @@ func TestExecutionPayloadBidServiceBuilderInactiveError(t *testing.T) {
 	require.False(t, service.seenCache.Contains(seenKey))
 }
 
+func TestExecutionPayloadBidServiceRejectsInvalidBuilderBeforeBalance(t *testing.T) {
+	for _, inactive := range []bool{false, true} {
+		service, _, clock, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+		msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+		clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+		fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+		builder := fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot].GetBuilders().Get(1)
+		builder.Balance = 0
+		want := "unsupported version"
+		if inactive {
+			builder.WithdrawableEpoch = 3
+			want = "not active"
+		} else {
+			builder.Version = service.beaconCfg.PayloadBuilderVersion + 1
+		}
+		err := service.ValidateBid(t.Context(), msg)
+		require.ErrorContains(t, err, want)
+		require.NotErrorIs(t, err, ErrIgnore)
+	}
+}
+
 func TestExecutionPayloadBidServiceParentBlockHashUnknown(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -931,7 +988,7 @@ func TestExecutionPayloadBidServiceSeenBidsPrunesAfterGossipWindow(t *testing.T)
 	defer ctrl.Finish()
 
 	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
-	boundary := time.Unix(101*12, 0).Add(gloasMaximumClockDisparity)
+	boundary := time.Unix(101*12, 0).Add(maximumGossipClockDisparity)
 	service.now = func() time.Time { return boundary }
 	stale := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	require.NoError(t, service.storeValidBidAt(stale, service.now()))
@@ -962,7 +1019,7 @@ func TestExecutionPayloadBidServiceRetainsPreferencesThroughBidWindow(t *testing
 		DependentRoot: dependentRoot,
 	}}
 	epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{Slot: bid.Message.Slot, DependentRoot: dependentRoot}, preferences)
-	now := time.Unix(100*12, 0).Add(gloasMaximumClockDisparity + time.Nanosecond)
+	now := time.Unix(100*12, 0).Add(maximumGossipClockDisparity + time.Nanosecond)
 	epbsPool.ProposerPreferences.PruneSlots(func(entrySlot uint64) bool {
 		return isPastBidWindow(service.ethClock, service.beaconCfg, now, entrySlot)
 	})
@@ -1064,6 +1121,460 @@ func TestExecutionPayloadBidServiceSuccess(t *testing.T) {
 	stored, found := epbsPool.GetHighestBid(bidKey)
 	require.True(t, found)
 	require.Equal(t, msg, stored)
+}
+
+func TestExecutionPayloadBidServiceParentBuilderExitPredicate(t *testing.T) {
+	for _, test := range []struct {
+		name                                string
+		fullParent, samePubkey, sameAddress bool
+	}{
+		{"matching full parent", true, true, true},
+		{"different pubkey", true, false, true},
+		{"different address", true, true, false},
+		{"empty parent", false, true, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, _, clock, fc, epbsPool := setupExecutionPayloadBidService(t, gomock.NewController(t))
+			msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+			addPreferencesToPool(epbsPool, 100)
+			clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+			fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+			parent := fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot]
+			if test.fullParent {
+				parent.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: msg.Message.ParentBlockHash})
+			}
+			builder := parent.GetBuilders().Get(1)
+			builder.Pubkey = common.Bytes48{1}
+			builder.ExecutionAddress = common.Address{2}
+			request := &solid.BuilderExitRequest{PubKey: builder.Pubkey, SourceAddress: builder.ExecutionAddress}
+			if !test.samePubkey {
+				request.PubKey[0]++
+			}
+			if !test.sameAddress {
+				request.SourceAddress[0]++
+			}
+			requests := cltypes.NewExecutionRequests(service.beaconCfg)
+			requests.BuilderExits.Append(request)
+			if test.fullParent {
+				fc.Envelopes[msg.Message.ParentBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{ExecutionRequests: requests}}
+			}
+			reader := &countingBidEnvelopeReader{ForkChoiceStorageReader: fc}
+			service.forkchoiceStore = reader
+			err := service.ProcessMessage(t.Context(), nil, msg)
+			if test.fullParent && test.samePubkey && test.sameAddress {
+				require.ErrorIs(t, err, ErrIgnore)
+				require.ErrorContains(t, err, "builder may exit")
+				require.False(t, service.seenCache.Contains(newSeenBidKey(msg.Message)))
+				require.Empty(t, epbsPool.HighestBids.Keys())
+				request.PubKey[0]++
+				request.SourceAddress[0]++
+				require.ErrorIs(t, service.ValidateBid(t.Context(), msg), ErrIgnore)
+			} else {
+				require.NoError(t, err)
+				require.True(t, service.seenCache.Contains(newSeenBidKey(msg.Message)))
+				require.Len(t, epbsPool.HighestBids.Keys(), 1)
+				require.NoError(t, service.ValidateBid(t.Context(), msg))
+			}
+			wantReads := int32(0)
+			if test.fullParent {
+				wantReads = 1
+			}
+			require.Equal(t, wantReads, reader.reads.Load())
+		})
+	}
+}
+
+func TestExecutionPayloadBidServicePreGloasParentDoesNotReadLatestBid(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	parent := fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot]
+	parent.SetLatestExecutionPayloadBid(nil)
+	entry := &bidValidationStateEntry{
+		state:         parent,
+		parentSlot:    99,
+		parentVersion: clparams.FuluVersion,
+		parentRandao:  msg.Message.PrevRandao,
+	}
+
+	require.NotPanics(t, func() {
+		require.NoError(t, service.validateBidAuthentication(t.Context(), msg, entry, time.Now()))
+	})
+}
+
+func TestExecutionPayloadBidServiceGloasParentRejectsMissingLatestBid(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	parent := fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot]
+	parent.SetLatestExecutionPayloadBid(nil)
+	entry := &bidValidationStateEntry{
+		state:         parent,
+		parentSlot:    99,
+		parentVersion: clparams.GloasVersion,
+		parentRandao:  msg.Message.PrevRandao,
+	}
+
+	require.NotPanics(t, func() {
+		err := service.validateBidAuthentication(t.Context(), msg, entry, time.Now())
+		require.ErrorIs(t, err, ErrIgnore)
+		require.ErrorContains(t, err, "latest execution payload bid unavailable")
+	})
+}
+
+func TestExecutionPayloadBidServiceReusesParentExitSummary(t *testing.T) {
+	service, _, clock, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+	fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	parent := fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot]
+	parent.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: msg.Message.ParentBlockHash})
+	fc.Envelopes[msg.Message.ParentBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		ExecutionRequests: cltypes.NewExecutionRequests(service.beaconCfg),
+	}}
+	reader := &countingBidEnvelopeReader{ForkChoiceStorageReader: fc}
+	service.forkchoiceStore = reader
+
+	require.NoError(t, service.ValidateBid(t.Context(), msg))
+	require.NoError(t, service.ValidateBid(t.Context(), msg))
+	require.Equal(t, int32(1), reader.reads.Load())
+}
+
+type countingBidEnvelopeReader struct {
+	forkchoice.ForkChoiceStorageReader
+	reads      atomic.Int32
+	err        error
+	beforeRead func()
+}
+
+type cachedParentExitReader struct {
+	*countingBidEnvelopeReader
+	root         common.Hash
+	requests     []solid.BuilderExitRequest
+	unavailable  atomic.Bool
+	beforeLookup func()
+}
+
+func (r *cachedParentExitReader) GetCachedParentBuilderExitRequests(root common.Hash) ([]solid.BuilderExitRequest, bool) {
+	if r.beforeLookup != nil {
+		r.beforeLookup()
+	}
+	if root != r.root || r.unavailable.Load() {
+		return nil, false
+	}
+	return r.requests, true
+}
+
+func (r *countingBidEnvelopeReader) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	r.reads.Add(1)
+	if r.beforeRead != nil {
+		r.beforeRead()
+	}
+	if r.err != nil {
+		return nil, r.err
+	}
+	return r.ForkChoiceStorageReader.ReadEnvelopeFromDisk(root)
+}
+
+func TestExecutionPayloadBidServiceUsesCachedParentExitSummary(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	root := common.HexToHash("0x01")
+	reader := &cachedParentExitReader{
+		countingBidEnvelopeReader: &countingBidEnvelopeReader{ForkChoiceStorageReader: fc},
+		root:                      root,
+		requests:                  []solid.BuilderExitRequest{{SourceAddress: common.Address{1}}},
+	}
+	service.forkchoiceStore = reader
+
+	requests, err := service.parentBuilderExitRequests(t.Context(), root, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, reader.requests, requests)
+	require.Zero(t, reader.reads.Load())
+	reader.requests[0].SourceAddress[0] = 2
+	requests, err = service.parentBuilderExitRequests(t.Context(), root, time.Now())
+	require.NoError(t, err)
+	require.Equal(t, byte(1), requests[0].SourceAddress[0])
+}
+
+func TestExecutionPayloadBidServiceHotCacheSupersedesTransientFailure(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	root := common.HexToHash("0x01")
+	reader := &cachedParentExitReader{
+		countingBidEnvelopeReader: &countingBidEnvelopeReader{ForkChoiceStorageReader: fc},
+		root:                      root,
+		requests:                  []solid.BuilderExitRequest{{SourceAddress: common.Address{1}}},
+	}
+	service.forkchoiceStore = reader
+	now := time.Unix(100*12, 0)
+	service.parentExitsCache.Add(root, parentBuilderExitsResult{
+		err:     errBidDependencyUnavailable,
+		retryAt: now.Add(parentBuilderExitsRetryDelay),
+	})
+
+	requests, err := service.parentBuilderExitRequests(t.Context(), root, now)
+	require.NoError(t, err)
+	require.Equal(t, reader.requests, requests)
+	require.Zero(t, reader.reads.Load())
+}
+
+func TestExecutionPayloadBidServiceRechecksHotCacheAfterWaitingForWork(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	root := common.HexToHash("0x01")
+	now := time.Unix(100*12, 0)
+	service.now = func() time.Time { return now }
+	firstLookup := make(chan struct{})
+	var once sync.Once
+	reader := &cachedParentExitReader{
+		countingBidEnvelopeReader: &countingBidEnvelopeReader{
+			ForkChoiceStorageReader: fc,
+			err:                     errors.New("temporary read failure"),
+		},
+		root:     root,
+		requests: []solid.BuilderExitRequest{{SourceAddress: common.Address{1}}},
+		beforeLookup: func() {
+			once.Do(func() { close(firstLookup) })
+		},
+	}
+	reader.unavailable.Store(true)
+	service.forkchoiceStore = reader
+	service.parentExitsWork <- struct{}{}
+
+	type result struct {
+		requests []solid.BuilderExitRequest
+		err      error
+	}
+	results := make(chan result, 1)
+	go func() {
+		requests, err := service.parentBuilderExitRequests(t.Context(), root, now)
+		results <- result{requests: requests, err: err}
+	}()
+	<-firstLookup
+	reader.unavailable.Store(false)
+	<-service.parentExitsWork
+
+	got := <-results
+	require.NoError(t, got.err)
+	require.Equal(t, reader.requests, got.requests)
+	require.Zero(t, reader.reads.Load())
+}
+
+func TestExecutionPayloadBidServiceRefreshesRetryTimeAfterWaitingForWork(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	root := common.HexToHash("0x01")
+	now := time.Unix(100*12, 0)
+	currentTime := now
+	service.now = func() time.Time { return currentTime }
+	firstLookup := make(chan struct{})
+	var once sync.Once
+	reader := &cachedParentExitReader{
+		countingBidEnvelopeReader: &countingBidEnvelopeReader{ForkChoiceStorageReader: fc},
+		root:                      root,
+		beforeLookup: func() {
+			once.Do(func() { close(firstLookup) })
+		},
+	}
+	reader.unavailable.Store(true)
+	service.forkchoiceStore = reader
+	fc.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		ExecutionRequests: cltypes.NewExecutionRequests(service.beaconCfg),
+	}}
+	service.parentExitsWork <- struct{}{}
+
+	type result struct {
+		requests []solid.BuilderExitRequest
+		err      error
+	}
+	results := make(chan result, 1)
+	go func() {
+		requests, err := service.parentBuilderExitRequests(t.Context(), root, now)
+		results <- result{requests: requests, err: err}
+	}()
+	<-firstLookup
+	service.parentExitsMu.Lock()
+	service.parentExitsCache.Add(root, parentBuilderExitsResult{
+		err:     errBidDependencyUnavailable,
+		retryAt: now.Add(parentBuilderExitsRetryDelay),
+	})
+	service.parentExitsMu.Unlock()
+	currentTime = now.Add(2 * parentBuilderExitsRetryDelay)
+	<-service.parentExitsWork
+
+	got := <-results
+	require.NoError(t, got.err)
+	require.Empty(t, got.requests)
+	require.Equal(t, int32(1), reader.reads.Load())
+}
+
+func TestExecutionPayloadBidServiceRetriesUnavailableParentExits(t *testing.T) {
+	service, _, clock, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+	fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot].SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: msg.Message.ParentBlockHash})
+	reader := &countingBidEnvelopeReader{ForkChoiceStorageReader: fc}
+	service.forkchoiceStore = reader
+	now := time.Unix(100*12, 0)
+	service.now = func() time.Time { return now }
+	advance := func() { now = now.Add(parentBuilderExitsRetryDelay) }
+	for range 2 {
+		require.ErrorIs(t, service.ValidateBid(t.Context(), msg), errBidDependencyUnavailable)
+		advance()
+	}
+	fc.Envelopes[msg.Message.ParentBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{}
+	require.ErrorIs(t, service.ValidateBid(t.Context(), msg), errBidDependencyUnavailable)
+	advance()
+	fc.Envelopes[msg.Message.ParentBlockRoot].Message = &cltypes.ExecutionPayloadEnvelope{}
+	require.ErrorIs(t, service.ValidateBid(t.Context(), msg), errBidDependencyUnavailable)
+	advance()
+	fc.Envelopes[msg.Message.ParentBlockRoot].Message.ExecutionRequests = cltypes.NewExecutionRequests(service.beaconCfg)
+	readErr := errors.New("temporary read failure")
+	reader.err = readErr
+	err := service.ValidateBid(t.Context(), msg)
+	require.ErrorIs(t, err, errBidDependencyUnavailable)
+	require.ErrorIs(t, err, readErr)
+	advance()
+	reader.err = nil
+	require.NoError(t, service.ValidateBid(t.Context(), msg))
+	require.NoError(t, service.ValidateBid(t.Context(), msg))
+	require.Equal(t, int32(6), reader.reads.Load())
+}
+
+func TestExecutionPayloadBidServiceCollapsesConcurrentFailedParentExitReads(t *testing.T) {
+	service, _, clock, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+	fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot].SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: msg.Message.ParentBlockHash})
+	fc.Envelopes[msg.Message.ParentBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{ExecutionRequests: cltypes.NewExecutionRequests(service.beaconCfg)}}
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	readErr := errors.New("temporary read failure")
+	reader := &countingBidEnvelopeReader{ForkChoiceStorageReader: fc, err: readErr, beforeRead: func() {
+		once.Do(func() { close(started) })
+		<-release
+	}}
+	service.forkchoiceStore = reader
+	now := time.Unix(100*12, 0)
+	service.now = func() time.Time { return now }
+
+	results := make(chan error, 1)
+	go func() { results <- service.ValidateBid(t.Context(), msg) }()
+	<-started
+	service.validationStateCache.Remove(bidValidationStateKey{parentBlockRoot: msg.Message.ParentBlockRoot, slot: msg.Message.Slot})
+	canceled := make(chan error, 7)
+	for range 7 {
+		canceledCtx, cancel := context.WithCancel(t.Context())
+		cancel()
+		go func() { canceled <- service.ValidateBid(canceledCtx, msg) }()
+	}
+	for range 7 {
+		err := <-canceled
+		require.ErrorIs(t, err, ErrIgnore)
+		require.ErrorIs(t, err, context.Canceled)
+	}
+	close(release)
+
+	err := <-results
+	require.ErrorIs(t, err, errBidDependencyUnavailable)
+	require.ErrorIs(t, err, readErr)
+	require.Equal(t, int32(1), reader.reads.Load())
+
+	reader.beforeRead = nil
+	require.ErrorIs(t, service.ValidateBid(t.Context(), msg), readErr)
+	require.Equal(t, int32(1), reader.reads.Load())
+
+	now = now.Add(parentBuilderExitsRetryDelay)
+	reader.err = nil
+	require.NoError(t, service.ValidateBid(t.Context(), msg))
+	require.Equal(t, int32(2), reader.reads.Load())
+}
+
+func TestExecutionPayloadBidServiceBoundsDistinctParentExitReads(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	readErr := errors.New("temporary read failure")
+	reader := &countingBidEnvelopeReader{ForkChoiceStorageReader: fc, err: readErr, beforeRead: func() {
+		once.Do(func() { close(started) })
+		<-release
+	}}
+	service.forkchoiceStore = reader
+	now := time.Unix(100*12, 0)
+	service.now = func() time.Time { return now }
+	first := make(chan error, 1)
+	go func() {
+		_, err := service.parentBuilderExitRequests(t.Context(), common.HexToHash("0x01"), now)
+		first <- err
+	}()
+	<-started
+
+	for i := byte(2); i < 10; i++ {
+		ctx, cancel := context.WithCancel(t.Context())
+		result := make(chan error, 1)
+		go func(root common.Hash) {
+			_, err := service.parentBuilderExitRequests(ctx, root, now)
+			result <- err
+		}(common.BytesToHash([]byte{i}))
+		cancel()
+		err := <-result
+		require.ErrorIs(t, err, ErrIgnore)
+		require.ErrorIs(t, err, context.Canceled)
+	}
+	service.parentExitsMu.Lock()
+	require.Len(t, service.parentExitsCalls, parentBuilderExitsMaxInFlight)
+	service.parentExitsMu.Unlock()
+	require.Equal(t, int32(1), reader.reads.Load())
+	close(release)
+	require.ErrorIs(t, <-first, readErr)
+}
+
+func TestExecutionPayloadBidServiceCollapsesConcurrentParentExitReads(t *testing.T) {
+	service, _, clock, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+	fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot].SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: msg.Message.ParentBlockHash})
+	fc.Envelopes[msg.Message.ParentBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{ExecutionRequests: cltypes.NewExecutionRequests(service.beaconCfg)}}
+	started, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	reader := &countingBidEnvelopeReader{ForkChoiceStorageReader: fc, beforeRead: func() {
+		once.Do(func() { close(started) })
+		<-release
+	}}
+	service.forkchoiceStore = reader
+	results := make(chan error, 8)
+	for range 8 {
+		go func() { results <- service.ValidateBid(t.Context(), msg) }()
+	}
+	<-started
+	close(release)
+	for range 8 {
+		require.NoError(t, <-results)
+	}
+	require.Equal(t, int32(1), reader.reads.Load())
+}
+
+func TestExecutionPayloadBidServiceRetriesInvalidParentExitSummary(t *testing.T) {
+	for _, nilRequest := range []bool{false, true} {
+		service, _, clock, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+		msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+		clock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+		now := time.Unix(100*12, 0)
+		service.now = func() time.Time { return now }
+		fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+		fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot].SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: msg.Message.ParentBlockHash})
+		requests := cltypes.NewExecutionRequests(service.beaconCfg)
+		if nilRequest {
+			requests.BuilderExits.Append(nil)
+		} else {
+			requests.BuilderExits.Append(&solid.BuilderExitRequest{})
+			requests.BuilderExits.Append(&solid.BuilderExitRequest{})
+			service.beaconCfg.MaxBuilderExitRequestsPerPayload = 1
+		}
+		fc.Envelopes[msg.Message.ParentBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{ExecutionRequests: requests}}
+		require.ErrorIs(t, service.ValidateBid(t.Context(), msg), errBidDependencyUnavailable)
+		requests.BuilderExits.Clear()
+		now = now.Add(parentBuilderExitsRetryDelay)
+		require.NoError(t, service.ValidateBid(t.Context(), msg))
+	}
 }
 
 func TestExecutionPayloadBidServiceRejectsWhenPreferencesAreMissing(t *testing.T) {

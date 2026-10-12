@@ -25,6 +25,7 @@ import (
 	"io"
 	"net"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -33,6 +34,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
@@ -169,6 +171,14 @@ var messageCorpus = []string{
 	// empty and odd values
 	`{"method":"","id":1}`,
 	`{"":1,"method":"m"}`,
+	// string fields that are not plain ASCII text, or not strings at all
+	`{"method":"a","method":null,"id":1}`,
+	`{"jsonrpc":"2.0","jsonrpc":null}`,
+	`{"method":5,"id":1}`,
+	`{"jsonrpc":2.0,"method":["m"]}`,
+	`{"method":"caf\u00e9","id":1}`,
+	"{\"method\":\"caf\u00e9\",\"id\":1}",
+	"{\"method\":\"\xff\",\"id\":1}",
 	// not an object at all
 	`1`,
 	`"str"`,
@@ -209,32 +219,46 @@ func TestParseMessage(t *testing.T) {
 		want  []*jsonrpcMessage
 	}{
 		{"empty object", `{}`, false, []*jsonrpcMessage{zero()}},
-		{"call", `{"jsonrpc":"2.0","id":1,"method":"m","params":[1,2]}`, false,
-			[]*jsonrpcMessage{testMessage("2.0", "m", "1", "[1,2]")}},
+		{
+			"call", `{"jsonrpc":"2.0","id":1,"method":"m","params":[1,2]}`, false,
+			[]*jsonrpcMessage{testMessage("2.0", "m", "1", "[1,2]")},
+		},
 		{"null message", `null`, false, []*jsonrpcMessage{nil}},
 		{"not an object", `1`, false, []*jsonrpcMessage{zero()}},
 		{"string", `"str"`, false, []*jsonrpcMessage{zero()}},
 		{"empty batch", `[]`, true, nil},
-		{"batch", `[{"method":"a","id":1},{"method":"b","id":2}]`, true,
-			[]*jsonrpcMessage{testMessage("", "a", "1", ""), testMessage("", "b", "2", "")}},
-		{"batch with null", `[{"method":"a","id":1},null]`, true,
-			[]*jsonrpcMessage{testMessage("", "a", "1", ""), nil}},
-		{"duplicate key, last wins", `{"method":"first","method":"second","id":1}`, false,
-			[]*jsonrpcMessage{testMessage("", "second", "1", "")}},
+		{
+			"batch", `[{"method":"a","id":1},{"method":"b","id":2}]`, true,
+			[]*jsonrpcMessage{testMessage("", "a", "1", ""), testMessage("", "b", "2", "")},
+		},
+		{
+			"batch with null", `[{"method":"a","id":1},null]`, true,
+			[]*jsonrpcMessage{testMessage("", "a", "1", ""), nil},
+		},
+		{
+			"duplicate key, last wins", `{"method":"first","method":"second","id":1}`, false,
+			[]*jsonrpcMessage{testMessage("", "second", "1", "")},
+		},
 
 		// field names have one spelling in the spec; any other spelling is an
 		// unknown key, but unicode escapes are unescaped first so they match the
 		// same way encoding/json map keys do
 		{"cased keys ignored", `{"Method":"m","ID":1,"Params":[1]}`, false, []*jsonrpcMessage{zero()}},
-		{"unicode-escaped method key", "{\"metho\\u0064\":\"m\",\"i\\u0064\":7}", false,
-			[]*jsonrpcMessage{testMessage("", "m", "7", "")}},
+		{
+			"unicode-escaped method key", "{\"metho\\u0064\":\"m\",\"i\\u0064\":7}", false,
+			[]*jsonrpcMessage{testMessage("", "m", "7", "")},
+		},
 		{"double-escaped key is not method", `{"metho\\u0064":"x"}`, false, []*jsonrpcMessage{zero()}},
 
 		// a string holding structural bytes must not end the value early
-		{"structural bytes in a string", `{"method":"m","params":["a\"},{\"b"],"id":1}`, false,
-			[]*jsonrpcMessage{testMessage("", "m", "1", `["a\"},{\"b"]`)}},
-		{"batch element with a brace in a string", `[{"method":"m","params":["},{"]}]`, true,
-			[]*jsonrpcMessage{testMessage("", "m", "", `["},{"]`)}},
+		{
+			"structural bytes in a string", `{"method":"m","params":["a\"},{\"b"],"id":1}`, false,
+			[]*jsonrpcMessage{testMessage("", "m", "1", `["a\"},{\"b"]`)},
+		},
+		{
+			"batch element with a brace in a string", `[{"method":"m","params":["},{"]}]`, true,
+			[]*jsonrpcMessage{testMessage("", "m", "", `["},{"]`)},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -486,7 +510,7 @@ func FuzzFillMessage(f *testing.F) {
 	})
 }
 
-func respond(s jsonstream.Stream, id json.RawMessage, result any) {
+func respond(s *jsonstream.Stream, id json.RawMessage, result any) {
 	_ = (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
 }
 
@@ -538,16 +562,12 @@ func TestResponseNilResultEmitsNull(t *testing.T) {
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
 
-type emptyFastJSON struct{}
-
-func (emptyFastJSON) MarshalFastJSON() ([]byte, error) { return nil, nil }
-
-func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
+func TestResponseEmptyStreamedEmitsNull(t *testing.T) {
 	var out bytes.Buffer
 	s := jsonstream.Get(&out)
 	defer jsonstream.Put(s)
 
-	respond(s, json.RawMessage(`7`), emptyFastJSON{})
+	respond(s, json.RawMessage(`7`), emptyStreamed{})
 	require.NoError(t, s.Flush())
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
@@ -586,12 +606,12 @@ func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
 
 type failingFastJSON struct{}
 
-func (failingFastJSON) MarshalFastJSONTo(*jsonstream.StackStream) error {
+func (failingFastJSON) MarshalFastJSONTo(*jsonstream.Stream) error {
 	return errors.New("encode failed")
 }
 
 func testResponseEncodeFailure(t *testing.T, result any) {
-	bad := func(s jsonstream.Stream) {
+	bad := func(s *jsonstream.Stream) {
 		respond(s, json.RawMessage(`7`), result)
 	}
 	assertErrorResponse := func(t *testing.T, raw []byte) {
@@ -653,7 +673,7 @@ func TestLargeResultStreamsAndStaysPoolable(t *testing.T) {
 
 	s2 := jsonstream.Get(&got)
 	respond(s2, id, res)
-	require.LessOrEqual(t, cap(s2.Buffer()), 16*jsonstream.FlushThreshold,
+	require.LessOrEqual(t, cap(s2.Buffer()), jsonstream.MaxPooledBufferSize(),
 		"the result grew the stream buffer past the pool limit")
 	_ = s2.Flush()
 
@@ -692,7 +712,6 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 		require.Contains(t, back, "error")
 		require.NotContains(t, back, "result")
 	}
-
 }
 
 type failingAppender struct{}
@@ -701,9 +720,9 @@ func (failingAppender) AppendText([]byte) ([]byte, error) { return nil, errors.N
 
 type failingMidWrite struct{}
 
-func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.Stream) error {
 	w.WriteObjectStart()
-	w.WriteObjectField("balance")
+	w.Field("balance")
 	w.WriteQuotedText(failingAppender{})
 	w.WriteObjectEnd()
 	return nil
@@ -746,4 +765,86 @@ func TestCodecCoalescedMessagesLeaveInOneWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), writes.Load(), "3 coalesced messages, socket writes")
 	require.Equal(t, "0\n1\n2\n", <-read)
+}
+
+func TestDecodeStringFieldMatchesUnmarshal(t *testing.T) {
+	t.Parallel()
+	for _, in := range []string{`"eth_chainId`, `"eth_chainId"`, `"a\"b"`, `null`, `"é"`, `"`} {
+		var want, got string = "prev", "prev"
+		if json.Unmarshal([]byte(in), &want) != nil {
+			want = ""
+		}
+		decodeStringField([]byte(in), &got)
+		require.Equal(t, want, got, in)
+	}
+}
+
+// FuzzValidJSON pins the fast gate against encoding/json on any input. Plain
+// `go test` runs the seeds, so they double as the table of cases.
+func FuzzValidJSON(f *testing.F) {
+	for _, s := range append([]string{
+		``, ` `, `{`, `}`, `[`, `]`, `,`, `:`, `"`, `"a`, `nul`, `tru`, `fals`,
+		`null`, `true`, `false`, `0`, `-0`, `1.5e3`, `1e+3`, `1E-3`, `"a"`,
+		`01`, `-`, `.5`, `1.`, `1e`, `1e+`, `+1`, `00`, `1.2.3`, `0x1`,
+		`{}`, `[]`, `{"a":1}`, `[1,2]`, `[[[]]]`, `{"a":{"b":[1,{}]}}`,
+		`{"a":1,}`, `[1,]`, `{,}`, `{"a"}`, `{"a":}`, `{:1}`, `{"a":1"b":2}`,
+		`[1 2]`, `{} {}`, `1 1`, `  {"a" : 1 }  `, "\t\n\r{}\t\n\r",
+		`{"a":"A\n\\\""}`, `{"a":"😀"}`,
+		`{"a":"\q"}`, "\"\x01\"", "\"\xff\"", nest(maxJSONDepth), nest(maxJSONDepth + 1),
+	}, messageCorpus...) {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		data := []byte(input)
+		require.Equal(t, json.Valid(data), validJSON(data), "input %.80q", input)
+	})
+}
+
+// A body at the nesting limit is ~20 KB; validating it must not grow the
+// request goroutine's stack by a frame per level.
+func TestValidJSONDeepNestingKeepsStackSmall(t *testing.T) {
+	deep := []byte(nest(maxJSONDepth))
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	done := make(chan bool)
+	go func() {
+		ok := validJSON(deep)
+		runtime.ReadMemStats(&after)
+		done <- ok
+	}()
+	require.True(t, <-done)
+	grew := int64(after.StackInuse) - int64(before.StackInuse)
+	require.Less(t, grew, int64(256*datasize.KB), "stack grew %d KB for a %d-byte body", grew/1024, len(deep))
+}
+
+// nest returns a value inside n nested arrays, which encoding/json accepts up
+// to its own nesting limit and no further.
+func nest(n int) string {
+	return strings.Repeat("[", n) + "1" + strings.Repeat("]", n)
+}
+
+func BenchmarkValidJSON(b *testing.B) {
+	for _, n := range []int{0, 4096, 731000} {
+		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"eth_call","params":[{"to":"0x1234","data":"0x` +
+			strings.Repeat("ab", n) + `"},"latest"]}`)
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			b.Run("stdlib", func(b *testing.B) {
+				b.SetBytes(int64(len(body)))
+				for b.Loop() {
+					if !json.Valid(body) {
+						b.Fatal("invalid")
+					}
+				}
+			})
+			b.Run("scan", func(b *testing.B) {
+				b.SetBytes(int64(len(body)))
+				for b.Loop() {
+					if !validJSON(body) {
+						b.Fatal("invalid")
+					}
+				}
+			})
+		})
+	}
 }

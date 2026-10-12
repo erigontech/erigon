@@ -28,6 +28,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -69,7 +70,7 @@ func newFourByteTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart: t.OnTxStart,
-			OnEnter:   t.OnEnter,
+			OnEnterV2: t.OnEnterV2,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -91,7 +92,7 @@ func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.activePrecompiles = vm.ActivePrecompiles(env.Rules)
 }
 
-func (t *fourByteTracer) OnEnter(depth int, opcode byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) { // Skip if tracing was interrupted
+func (t *fourByteTracer) OnEnterV2(depth int, opcode byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) { // Skip if tracing was interrupted
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
 		return

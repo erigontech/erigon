@@ -313,7 +313,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_sendTransaction                        | -       | not yet implemented                                   |
 | eth_sign                                   | No      | deprecated                                            |
 | eth_signTransaction                        | -       | not yet implemented                                   |
-| eth_fillTransaction                        | Yes     | Blob sidecar generation (KZG commitments/proofs from raw blobs) not yet supported |
+| eth_fillTransaction                        | Yes     |                                                       |
 |                                            |         |                                                       |
 | eth_getProof                               | Yes     | Limited to last 100000 blocks                         |
 |                                            |         |                                                       |
@@ -396,6 +396,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | txpool_content                             | Yes     | `remote`                                              |
 | txpool_contentFrom                         | Yes     | `remote`                                              |
 | txpool_status                              | Yes     | `remote`                                              |
+| txpool_inspect                             | Yes     | `remote`                                              |
 |                                            |         |                                                       |
 | eth_getCompilers                           | No      | deprecated                                            |
 | eth_compileLLL                             | No      | deprecated                                            |

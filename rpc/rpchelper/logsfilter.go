@@ -43,7 +43,7 @@ type LogsFilter struct {
 	topics          *concurrent.SyncMap[common.Hash, int]
 	topicsOriginal  [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
 	pollingCriteria *filters.FilterCriteria
-	sender          Sub[*types.RPCLog] // nil for aggregate subscriber, for appropriate stream server otherwise
+	sender          Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
 // Close closes the sender associated with the LogsFilter.
@@ -64,7 +64,7 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 	}
 }
 
-func newLogsFilter(sender Sub[*types.RPCLog], criteria filters.FilterCriteria, pollingCriteria *filters.FilterCriteria) *LogsFilter {
+func newLogsFilter(sender Sub[*types.Log], criteria filters.FilterCriteria, pollingCriteria *filters.FilterCriteria) *LogsFilter {
 	filter := &LogsFilter{
 		addrs:           concurrent.NewSyncMap[common.Address, int](),
 		topics:          concurrent.NewSyncMap[common.Hash, int](),
@@ -78,15 +78,16 @@ func newLogsFilter(sender Sub[*types.RPCLog], criteria filters.FilterCriteria, p
 			filter.addrs.Put(addr, 1)
 		}
 	}
-	if len(criteria.Topics) == 0 {
-		filter.allTopics = 1
-	} else {
-		for _, topics := range criteria.Topics {
-			for _, topic := range topics {
-				filter.topics.Put(topic, 1)
-			}
+	filter.topicsOriginal = criteria.Topics
+	anyTopic := true
+	for _, topics := range criteria.Topics {
+		for _, topic := range topics {
+			filter.topics.Put(topic, 1)
+			anyTopic = false
 		}
-		filter.topicsOriginal = criteria.Topics
+	}
+	if anyTopic {
+		filter.allTopics = 1
 	}
 	return filter
 }
@@ -259,7 +260,7 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogs
 				return nil
 			}
 		}
-		if filter.allTopics == 0 && !a.chooseTopics(filter, topics) {
+		if !a.chooseTopics(filter, topics) {
 			return nil
 		}
 		filter.sender.Send(lg)

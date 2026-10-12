@@ -125,7 +125,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, errors.New("contract construction txn not found")
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +325,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 				}
 
 				// try to recompute the state
-				stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber-1)), 0, api.stateCache, api._txNumReader)
+				stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, uint64(blockNumber), 0, api._txNumReader)
 				if err != nil {
 					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 					continue
@@ -542,7 +542,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			log.Debug("[replayBlock] res result for transaction", "transactionHash", txn.Hash(), "failed", res.Failed(), "revert", res.Revert(), "error", res.Err)
 			log.Debug("[replayBlock] discarding txLogs because txn has status=failed", "transactionHash", txn.Hash())
 		} else {
-			//append logs only if txn has not reverted
+			// append logs only if txn has not reverted
 			txLogs := statedb.GetLogs(statedb.TxnIndex(), txn.Hash(), blockNum, header.Hash())
 			log.Debug("[replayBlock]", "len(txLogs)", len(txLogs), "transactionHash", txn.Hash())
 			blockLogs = append(blockLogs, txLogs...)

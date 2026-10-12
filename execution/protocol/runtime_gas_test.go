@@ -100,7 +100,7 @@ func TestGasChangeV2RuntimeCharges(t *testing.T) {
 		return change.reason == tracing.GasChangeTxAuthorization && change.old.Total() == change.new.Total()+params.StateGasAuthBase
 	}))
 	require.True(t, slices.ContainsFunc(changes, func(change gasChange) bool {
-		return change.reason == tracing.GasChangeCallNewAccount && change.old.Total() == change.new.Total()+params.StateGasNewAccount
+		return change.reason == tracing.GasChangeRuntimeNewAccount && change.old.Total() == change.new.Total()+params.StateGasNewAccount
 	}))
 	require.Equal(t, gasChange{new: mdgas.MdGas{Execution: msg.Gas()}, reason: tracing.GasChangeTxInitialBalance}, changes[0])
 	require.Equal(t, tracing.GasChangeTxIntrinsicGas, changes[1].reason)
@@ -117,7 +117,7 @@ func TestGasChangeV2TopLevelRefund(t *testing.T) {
 	require.NoError(t, err)
 	require.ErrorIs(t, result.Err, vm.ErrExecutionReverted)
 	require.True(t, slices.ContainsFunc(changes, func(change gasChange) bool {
-		return change.reason == tracing.GasChangeCallNewAccount && change.old.Total() == change.new.Total()+params.StateGasNewAccount
+		return change.reason == tracing.GasChangeRuntimeNewAccount && change.old.Total() == change.new.Total()+params.StateGasNewAccount
 	}))
 	require.True(t, slices.ContainsFunc(changes, func(change gasChange) bool {
 		return change.reason == tracing.GasChangeRefundAccountCreation && change.new.Total() == change.old.Total()+params.StateGasNewAccount

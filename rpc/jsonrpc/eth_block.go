@@ -405,7 +405,7 @@ func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, 
 	}
 	if len(data) == 0 {
 		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
-		if errors.Is(err, state.PrunedError) {
+		if errors.Is(err, state.ErrPruned) {
 			return nil, blockAccessListPrunedHistoryError()
 		}
 		if err != nil {
@@ -448,11 +448,6 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
 	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return nil, err
@@ -488,11 +483,6 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		// (Compatibility) Every other node just return `null` for when the block does not exist.
 		log.Debug("eth_getBlockTransactionCountByHash GetBlockNumber failed", "err", err)
 		return nil, nil
-	}
-
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
 	}
 
 	body, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)

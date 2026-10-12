@@ -132,6 +132,7 @@ func (s sortGasAndReward) Len() int { return len(s) }
 func (s sortGasAndReward) Swap(i, j int) {
 	s[i], s[j] = s[j], s[i]
 }
+
 func (s sortGasAndReward) Less(i, j int) bool {
 	return s[i].reward.Cmp(&s[j].reward) < 0
 }

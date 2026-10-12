@@ -69,7 +69,8 @@ func runCollectAndProcessBench(b *testing.B, pk [][]byte, updates []Update, work
 }
 
 func runParallelBenchWith(b *testing.B, pk [][]byte, updates []Update, workers int,
-	newFactory func(*MockState) (TrieContextFactory, func()), timeCollect bool) {
+	newFactory func(*MockState) (TrieContextFactory, func()), timeCollect bool,
+) {
 	ctx := context.Background()
 	b.ReportAllocs()
 	var pph *ParallelPatriciaHashed

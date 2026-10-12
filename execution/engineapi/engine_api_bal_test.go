@@ -890,9 +890,9 @@ func TestEngineApiBALSelfDestruct(t *testing.T) {
 
 // TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance asserts
 // the EIP-7928 rule that a zero-value SELFDESTRUCT to SystemAddress is still
-// recorded in the BAL: the SELFDESTRUCT is itself the state access that
-// satisfies the SystemAddress carve-out, so the entry survives even with no
-// value transferred and every change-set empty.
+// recorded in the BAL: the SELFDESTRUCT is a state access on the beneficiary,
+// so the entry is present even with no value transferred and every change-set
+// empty.
 func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
@@ -926,7 +926,7 @@ func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithZeroBalance(t *t
 
 		sysEntry := findAccountChanges(bal, params.SystemAddress)
 		require.NotNilf(t, sysEntry,
-			"BAL must include a SystemAddress entry: EIP-7928 records SELFDESTRUCT as an access on the beneficiary even when no value is transferred, and the SystemAddress carve-out is satisfied because the SELFDESTRUCT is the access itself\n%s",
+			"BAL must include a SystemAddress entry: EIP-7928 records SELFDESTRUCT as an access on the beneficiary even when no value is transferred\n%s",
 			bal.DebugString())
 
 		require.Empty(t, sysEntry.StorageChanges, "SystemAddress entry should have no storage changes")
@@ -976,9 +976,106 @@ func TestEngineApiBALIncludesSystemAddressOnSelfdestructToItWithNonZeroBalance(t
 	})
 }
 
+// TestEngineApiBALIncludesSystemAddressOnZeroAmountWithdrawal asserts the
+// EIP-7928 rule that a withdrawal to SystemAddress records it in the BAL even
+// when the amount is zero: the withdrawal is a state access, and SystemAddress
+// is excluded only as the caller of system calls (ethereum/execution-specs#3681).
+func TestEngineApiBALIncludesSystemAddressOnZeroAmountWithdrawal(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	eat := newSelfdestructBALTester(ctx, t, logger, crypto.PubkeyToAddress(senderKey.PublicKey))
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		withdrawals := []*types.Withdrawal{
+			{Index: 0, Validator: 0, Address: params.SystemAddress.Value(), Amount: 0},
+		}
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx, engineapitester.WithWithdrawals(withdrawals))
+		require.NoError(t, err)
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		sysEntry := findAccountChanges(bal, params.SystemAddress)
+		require.NotNilf(t, sysEntry,
+			"BAL must include SystemAddress when it is a withdrawal recipient, even with a zero amount\n%s",
+			bal.DebugString())
+		require.Empty(t, sysEntry.StorageChanges, "SystemAddress entry should have no storage changes")
+		require.Empty(t, sysEntry.StorageReads, "SystemAddress entry should have no storage reads")
+		require.Empty(t, sysEntry.BalanceChanges, "SystemAddress entry should have no balance changes (zero amount)")
+		require.Empty(t, sysEntry.NonceChanges, "SystemAddress entry should have no nonce changes")
+		require.Empty(t, sysEntry.CodeChanges, "SystemAddress entry should have no code changes")
+	})
+}
+
+// TestEngineApiBALIncludesSystemAddressAsDelegationTarget asserts the EIP-7928
+// rule that calling an EOA delegated (EIP-7702) to SystemAddress records
+// SystemAddress in the BAL: resolving the delegation loads the target's code,
+// which is a state access (ethereum/execution-specs#3681).
+func TestEngineApiBALIncludesSystemAddressAsDelegationTarget(t *testing.T) {
+	if !dbg.Exec3Parallel {
+		t.Skip("requires parallel exec")
+	}
+	ctx := t.Context()
+	logger := testlog.Logger(t, log.LvlDebug)
+
+	senderKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	senderAddr := crypto.PubkeyToAddress(senderKey.PublicKey)
+	eat := newSelfdestructBALTester(ctx, t, logger, senderAddr)
+
+	authorityKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+
+	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
+		chainID := eat.ChainId()
+		signer := types.LatestSignerForChainID(chainID)
+		feeCap := uint256.NewInt(1_000_000_000)
+		nonce, err := eat.RpcApiClient.GetTransactionCount(senderAddr, rpc.PendingBlock)
+		require.NoError(t, err)
+
+		auth, err := types.SignAuthorization(authorityKey, *chainID, params.SystemAddress.Value(), 0)
+		require.NoError(t, err)
+		tx, err := types.SignTx(&types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: nonce.Uint64(), GasLimit: 500_000, To: &authority},
+				ChainID:  *chainID, TipCap: *feeCap, FeeCap: *feeCap,
+			},
+			Authorizations: []types.Authorization{auth},
+		}, *signer, senderKey)
+		require.NoError(t, err)
+		_, err = eat.RpcApiClient.SendTransaction(tx)
+		require.NoError(t, err)
+
+		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		require.NoError(t, err)
+		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, payload.ExecutionPayload, tx.Hash()))
+
+		bal := decodeAndValidateBAL(t, payload)
+
+		authorityEntry := findAccountChanges(bal, accounts.InternAddress(authority))
+		require.NotNilf(t, authorityEntry, "BAL must include the authority\n%s", bal.DebugString())
+		require.NotEmptyf(t, authorityEntry.CodeChanges, "authority must record the delegation code change\n%s", bal.DebugString())
+
+		sysEntry := findAccountChanges(bal, params.SystemAddress)
+		require.NotNilf(t, sysEntry,
+			"BAL must include SystemAddress when a called EOA delegates to it\n%s", bal.DebugString())
+		require.Empty(t, sysEntry.StorageChanges, "SystemAddress entry should have no storage changes")
+		require.Empty(t, sysEntry.StorageReads, "SystemAddress entry should have no storage reads")
+		require.Empty(t, sysEntry.BalanceChanges, "SystemAddress entry should have no balance changes")
+		require.Empty(t, sysEntry.NonceChanges, "SystemAddress entry should have no nonce changes")
+		require.Empty(t, sysEntry.CodeChanges, "SystemAddress entry should have no code changes")
+	})
+}
+
 // TestEngineApiBALIncludesOrdinaryBeneficiaryOnSelfdestructWithZeroBalance
-// guards that ordinary EOA beneficiaries (where the SystemAddress carve-out
-// does not apply) still appear in the BAL on a zero-balance SELFDESTRUCT.
+// guards that ordinary EOA beneficiaries also appear in the BAL on a
+// zero-balance SELFDESTRUCT.
 func TestEngineApiBALIncludesOrdinaryBeneficiaryOnSelfdestructWithZeroBalance(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")

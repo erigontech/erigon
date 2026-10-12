@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -65,6 +66,26 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 			BlobsBundle: worstCaseBlobsBundle(),
 		},
 		"nil response": nil,
+		"zero payload": {ExecutionPayload: &ExecutionPayload{}},
+		"prague payload": {
+			ExecutionPayload: &ExecutionPayload{
+				LogsBloom:     make(hexutil.Bytes, 256),
+				ExtraData:     hexutil.Bytes{0xe0},
+				Transactions:  []hexutil.Bytes{},
+				Withdrawals:   []*types.Withdrawal{{Index: 1, Validator: 2, Address: common.HexToAddress("0xabc"), Amount: 3}, nil},
+				BlobGasUsed:   (*hexutil.Uint64)(new(uint64)),
+				ExcessBlobGas: func() *hexutil.Uint64 { v := hexutil.Uint64(0x20000); return &v }(),
+			},
+			ExecutionRequests: []hexutil.Bytes{},
+		},
+		"amsterdam payload": {
+			ExecutionPayload: &ExecutionPayload{
+				Withdrawals:     []*types.Withdrawal{},
+				SlotNumber:      func() *hexutil.Uint64 { v := hexutil.Uint64(9); return &v }(),
+				BlockAccessList: &hexutil.Bytes{0xc0},
+			},
+		},
+		"empty block access list": {ExecutionPayload: &ExecutionPayload{BlockAccessList: &hexutil.Bytes{}}},
 		"populated payload": {
 			ExecutionPayload: &ExecutionPayload{
 				ParentHash:    common.HexToHash("0xabc1"),
@@ -136,4 +157,47 @@ func TestGetPayloadResponseQuantitiesJSON(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, string(enc), string(again), q)
 	}
+}
+
+// The payload bodies are streamed field by field, so they must match encoding/json byte for byte:
+// missing blocks are null elements, and nil withdrawals or access list are null, not [].
+func TestExecutionPayloadBodiesMarshalFastJSONToMatchesReflection(t *testing.T) {
+	txs := []hexutil.Bytes{{0x02, 0xab}, {0xf8, 0x01}, {}}
+	withdrawals := []*types.Withdrawal{{Index: 0, Validator: 1, Address: common.Address{0xaa}, Amount: 0}, nil, {Index: 7, Validator: 8, Address: common.Address{0xbb}, Amount: 9}}
+	bal := hexutil.Bytes{0xc0}
+	emptyBal := hexutil.Bytes{}
+	for name, bodies := range map[string]ExecutionPayloadBodies{
+		"nil":               nil,
+		"empty":             {},
+		"missing block":     {nil, {Transactions: txs}},
+		"nil withdrawals":   {{Transactions: txs}},
+		"empty withdrawals": {{Transactions: []hexutil.Bytes{}, Withdrawals: []*types.Withdrawal{}}},
+		"withdrawals":       {{Transactions: txs, Withdrawals: withdrawals}},
+		"nil tx list":       {{Withdrawals: withdrawals}},
+	} {
+		t.Run("v1 "+name, func(t *testing.T) { requireStreamedMatchesReflection(t, bodies) })
+	}
+	for name, bodies := range map[string]ExecutionPayloadBodiesV2{
+		"nil":               nil,
+		"missing block":     {nil},
+		"nil access list":   {{Transactions: txs, Withdrawals: withdrawals}},
+		"access list":       {{Transactions: txs, BlockAccessList: &bal}},
+		"empty access list": {{Transactions: txs, Withdrawals: []*types.Withdrawal{}, BlockAccessList: &emptyBal}},
+	} {
+		t.Run("v2 "+name, func(t *testing.T) { requireStreamedMatchesReflection(t, bodies) })
+	}
+}
+
+func requireStreamedMatchesReflection(t *testing.T, v interface {
+	MarshalFastJSONTo(*jsonstream.Stream) error
+},
+) {
+	t.Helper()
+	want, err := json.Marshal(v)
+	require.NoError(t, err)
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+	require.NoError(t, v.MarshalFastJSONTo(s))
+	require.NoError(t, s.Flush())
+	require.Equal(t, string(want), string(s.Buffer()))
 }

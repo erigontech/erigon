@@ -369,17 +369,18 @@ func (r *Receipt) Size() int {
 	return n
 }
 
-// LogsBloom returns Bloom, or the bloom derived from the logs and cached when Bloom is unset.
-func (r *Receipt) LogsBloom() Bloom {
+// LogsBloom returns a pointer into the receipt, or to the bloom derived from the logs and
+// cached when Bloom is unset, so a caller that only reads it copies nothing.
+func (r *Receipt) LogsBloom() *Bloom {
 	if !r.Bloom.IsEmpty() || len(r.Logs) == 0 {
-		return r.Bloom
+		return &r.Bloom
 	}
 	if b := r.derivedBloom.Load(); b != nil {
-		return *b
+		return b
 	}
 	b := CreateBloom(Receipts{r})
 	r.derivedBloom.Store(&b)
-	return b
+	return &b
 }
 
 // Copy creates a deep copy of the Receipt.
@@ -603,7 +604,7 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 		}
 		logIndex += len(r.Logs)
 
-		//no duplicates
+		// no duplicates
 		if len(r.Logs) <= 1 {
 			continue
 		}

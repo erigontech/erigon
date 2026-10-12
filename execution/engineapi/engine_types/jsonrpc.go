@@ -76,13 +76,15 @@ type PayloadAttributes struct {
 	SSZVersion            clparams.StateVersion `json:"-"`
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobsBundle
+
 // BlobsBundle holds the blobs of an execution payload.
 // It covers both BlobsBundleV1 (https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#blobsbundlev1)
 // and BlobsBundleV2 (https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#blobsbundlev2)
 type BlobsBundle struct {
-	Commitments []hexutil.Bytes       `json:"commitments"`
-	Proofs      []hexutil.Bytes       `json:"proofs"`
-	Blobs       []hexutil.Bytes       `json:"blobs"`
+	Commitments []hexutil.Bytes       `json:"commitments" ethjson:"datalist"`
+	Proofs      []hexutil.Bytes       `json:"proofs" ethjson:"datalist"`
+	Blobs       []hexutil.Bytes       `json:"blobs" ethjson:"datalist"`
 	SSZVersion  clparams.StateVersion `json:"-"`
 }
 
@@ -123,15 +125,19 @@ func BlobsBundleFromTransactions(txs types.Transactions) (*BlobsBundle, error) {
 }
 
 // BlobAndProofV1 holds one item for engine_getBlobsV1
+//
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobAndProofV1
 type BlobAndProofV1 struct {
-	Blob  hexutil.Bytes `json:"blob"`
-	Proof hexutil.Bytes `json:"proof"`
+	Blob  hexutil.Bytes `json:"blob" ethjson:"data"`
+	Proof hexutil.Bytes `json:"proof" ethjson:"data"`
 }
 
 // BlobAndProofV2 holds one item for engine_getBlobsV2/engine_getBlobsV3
+//
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobAndProofV2
 type BlobAndProofV2 struct {
-	Blob       hexutil.Bytes   `json:"blob"`
-	CellProofs []hexutil.Bytes `json:"proofs"`
+	Blob       hexutil.Bytes   `json:"blob" ethjson:"data"`
+	CellProofs []hexutil.Bytes `json:"proofs" ethjson:"datalist"`
 }
 
 type BlobCellsAndProofsV1 struct {
@@ -139,15 +145,19 @@ type BlobCellsAndProofsV1 struct {
 	Proofs    []*hexutil.Bytes `json:"proofs"`
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type ExecutionPayloadBody
+
 type ExecutionPayloadBody struct {
-	Transactions []hexutil.Bytes     `json:"transactions"`
-	Withdrawals  []*types.Withdrawal `json:"withdrawals"`
+	Transactions []hexutil.Bytes   `json:"transactions" ethjson:"datalist"`
+	Withdrawals  types.Withdrawals `json:"withdrawals" ethjson:"objects"`
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type ExecutionPayloadBodyV2
+
 type ExecutionPayloadBodyV2 struct {
-	Transactions    []hexutil.Bytes     `json:"transactions"`
-	Withdrawals     []*types.Withdrawal `json:"withdrawals"`
-	BlockAccessList *hexutil.Bytes      `json:"blockAccessList"`
+	Transactions    []hexutil.Bytes   `json:"transactions" ethjson:"datalist"`
+	Withdrawals     types.Withdrawals `json:"withdrawals" ethjson:"objects"`
+	BlockAccessList *hexutil.Bytes    `json:"blockAccessList" ethjson:"data"`
 }
 
 type PayloadStatus struct {
@@ -177,8 +187,8 @@ type ClientVersionV1 struct {
 	Commit  string `json:"commit"`
 }
 
-func (c ClientVersionV1) String() string {
-	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", c.Code, c.Name, c.Version, c.Commit)
+func (v ClientVersionV1) String() string {
+	return fmt.Sprintf("ClientCode: %s, %s-%s-%s", v.Code, v.Name, v.Version, v.Commit)
 }
 
 // NewClientVersionV1 builds a ClientVersionV1 from a git commit hash, using its leading

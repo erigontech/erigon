@@ -70,7 +70,7 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart:           t.OnTxStart,
-			OnTxEnd:             t.OnTxEnd,
+			OnTxEndV2:           t.OnTxEndV2,
 			OnEnterV2:           t.OnEnterV2,
 			OnExitV2:            t.OnExitV2,
 			OnOpcodeV2:          t.OnOpcodeV2,
@@ -89,13 +89,13 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 	}
 }
 
-func (t *muxTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (t *muxTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	for _, child := range t.tracers {
 		child.Hooks.EmitOpcode(pc, op, gas, cost, scope, rData, depth, err)
 	}
 }
 
-func (t *muxTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+func (t *muxTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
 	for _, child := range t.tracers {
 		child.Hooks.EmitFault(pc, op, gas, cost, scope, depth, err)
 	}
@@ -130,14 +130,9 @@ func (t *muxTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from
 	}
 }
 
-func (t *muxTracer) OnTxEnd(receipt *types.Receipt, err error) {
-	for _, t := range t.tracers {
-		if t.Hooks == nil {
-			continue
-		}
-		if t.OnTxEnd != nil {
-			t.OnTxEnd(receipt, err)
-		}
+func (t *muxTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
+	for _, child := range t.tracers {
+		child.Hooks.EmitTxEnd(receipt, txnGasUsage, err)
 	}
 }
 

@@ -43,7 +43,11 @@ func TestBlockAccessListRequiresAccountFields(t *testing.T) {
 	t.Parallel()
 	fields := []rlp.RawValue{
 		common.Hex2Bytes("9400000000000000000000000000000000000000aa"),
-		{0xc0}, {0xc0}, {0xc0}, {0xc0}, {0xc0},
+		{0xc0},
+		{0xc0},
+		{0xc0},
+		{0xc0},
+		{0xc0},
 	}
 	for i, name := range []string{"storage changes", "storage reads", "balance changes", "nonce changes", "code changes"} {
 		t.Run(name, func(t *testing.T) {
@@ -80,7 +84,11 @@ func TestSlotChangesRequiresChanges(t *testing.T) {
 
 	fields := []rlp.RawValue{
 		common.Hex2Bytes("9400000000000000000000000000000000000000aa"),
-		slots, {0xc0}, {0xc0}, {0xc0}, {0xc0},
+		slots,
+		{0xc0},
+		{0xc0},
+		{0xc0},
+		{0xc0},
 	}
 	encoded, err := rlp.EncodeToBytes([][]rlp.RawValue{fields})
 	require.NoError(t, err)

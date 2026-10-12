@@ -49,7 +49,8 @@ func writeKVFile(t *testing.T, compression FileCompression, words [][]byte) stri
 func TestReaderPeekSizePreservesPosition(t *testing.T) {
 	words := [][]byte{
 		[]byte("key-0"), bytes.Repeat([]byte("pattern-"), 8192),
-		[]byte("key-1"), {},
+		[]byte("key-1"),
+		{},
 		[]byte("key-2"), []byte("short value"),
 	}
 	for _, compression := range []FileCompression{CompressNone, CompressKeys, CompressVals, CompressKeys | CompressVals} {

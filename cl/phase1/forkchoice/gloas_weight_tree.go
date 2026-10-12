@@ -169,7 +169,7 @@ func (t *gloasWeightTree) ensureTopology(root common.Hash) {
 			if !hasParentBlock || parentBlock == nil {
 				childNode.parentPayloadStatus = cltypes.PayloadStatusEmpty
 			} else {
-				childNode.parentPayloadStatus = parentPayloadStatusFromBids(parentBlock, block.Block)
+				childNode.parentPayloadStatus = ParentPayloadStatusFromBids(parentBlock, block.Block)
 			}
 			t.stack = append(t.stack, child)
 		}

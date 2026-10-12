@@ -24,14 +24,14 @@ import (
 )
 
 // benchmarkSimpleObject is used to compare writing a simple JSON object
-func benchmarkSimpleObject(b *testing.B, s Stream) {
+func benchmarkSimpleObject(b *testing.B, s *Stream) {
 	b.Helper()
 	for b.Loop() {
 		s.WriteObjectStart()
-		s.WriteObjectField("name")
+		s.Field("name")
 		s.WriteString("John")
-		s.WriteObjectField("age")
-		s.WriteInt(30)
+		s.Field("age")
+		s.Int(30)
 		s.WriteObjectEnd()
 
 		err := s.ClosePending(0)
@@ -41,28 +41,28 @@ func benchmarkSimpleObject(b *testing.B, s Stream) {
 	}
 }
 
-func BenchmarkSimpleObject_StackStream(b *testing.B) {
-	benchmarkSimpleObject(b, newStackStream(nil, InitialBufferSize))
+func BenchmarkSimpleObject_Stream(b *testing.B) {
+	benchmarkSimpleObject(b, newStream(nil, InitialBufferSize))
 }
 
 // benchmarkNestedStructure is used to compare writing a nested JSON structure
-func benchmarkNestedStructure(b *testing.B, s Stream) {
+func benchmarkNestedStructure(b *testing.B, s *Stream) {
 	b.Helper()
 	for b.Loop() {
 		s.WriteObjectStart()
-		s.WriteObjectField("person")
+		s.Field("person")
 		s.WriteObjectStart()
-		s.WriteObjectField("name")
+		s.Field("name")
 		s.WriteString("John")
-		s.WriteObjectField("address")
+		s.Field("address")
 		s.WriteObjectStart()
-		s.WriteObjectField("city")
+		s.Field("city")
 		s.WriteString("New York")
-		s.WriteObjectField("zip")
+		s.Field("zip")
 		s.WriteString("10001")
 		s.WriteObjectEnd()
 		s.WriteObjectEnd()
-		s.WriteObjectField("active")
+		s.Field("active")
 		s.WriteTrue()
 		s.WriteObjectEnd()
 
@@ -73,17 +73,17 @@ func benchmarkNestedStructure(b *testing.B, s Stream) {
 	}
 }
 
-func BenchmarkNestedStructure_StackStream(b *testing.B) {
-	benchmarkNestedStructure(b, newStackStream(nil, InitialBufferSize))
+func BenchmarkNestedStructure_Stream(b *testing.B) {
+	benchmarkNestedStructure(b, newStream(nil, InitialBufferSize))
 }
 
 // benchmarkLargeArray is used to compare writing a large array
-func benchmarkLargeArray(b *testing.B, s Stream) {
+func benchmarkLargeArray(b *testing.B, s *Stream) {
 	b.Helper()
 	for b.Loop() {
 		s.WriteArrayStart()
 		for j := range 1000 {
-			s.WriteInt(j)
+			s.Int(int64(j))
 		}
 		s.WriteArrayEnd()
 
@@ -94,24 +94,24 @@ func benchmarkLargeArray(b *testing.B, s Stream) {
 	}
 }
 
-func BenchmarkLargeArray_StackStream(b *testing.B) {
-	benchmarkLargeArray(b, newStackStream(nil, InitialBufferSize))
+func BenchmarkLargeArray_Stream(b *testing.B) {
+	benchmarkLargeArray(b, newStream(nil, InitialBufferSize))
 }
 
 // benchmarkMixedTypes is used to compare writing mixed data types
-func benchmarkMixedTypes(b *testing.B, s Stream) {
+func benchmarkMixedTypes(b *testing.B, s *Stream) {
 	b.Helper()
 	for b.Loop() {
 		s.WriteObjectStart()
-		s.WriteObjectField("string")
+		s.Field("string")
 		s.WriteString("value")
-		s.WriteObjectField("int")
-		s.WriteInt(42)
-		s.WriteObjectField("float")
+		s.Field("int")
+		s.Int(42)
+		s.Field("float")
 		s.WriteFloat64(3.14159)
-		s.WriteObjectField("bool")
+		s.Field("bool")
 		s.WriteBool(true)
-		s.WriteObjectField("null")
+		s.Field("null")
 		s.WriteNil()
 		s.WriteObjectEnd()
 
@@ -122,21 +122,21 @@ func benchmarkMixedTypes(b *testing.B, s Stream) {
 	}
 }
 
-func BenchmarkMixedTypes_StackStream(b *testing.B) {
-	benchmarkMixedTypes(b, newStackStream(nil, InitialBufferSize))
+func BenchmarkMixedTypes_Stream(b *testing.B) {
+	benchmarkMixedTypes(b, newStream(nil, InitialBufferSize))
 }
 
 // benchmarkWriteToBuffer is used to compare writing to a buffer
-func benchmarkWriteToBuffer(b *testing.B, s Stream) {
+func benchmarkWriteToBuffer(b *testing.B, s *Stream) {
 	b.Helper()
 	buf := bytes.NewBuffer(nil)
 	for b.Loop() {
 		s.Reset(buf)
 		s.WriteObjectStart()
-		s.WriteObjectField("name")
+		s.Field("name")
 		s.WriteString("John")
-		s.WriteObjectField("age")
-		s.WriteInt(30)
+		s.Field("age")
+		s.Int(30)
 		s.WriteObjectEnd()
 
 		err := s.ClosePending(0)
@@ -146,29 +146,29 @@ func benchmarkWriteToBuffer(b *testing.B, s Stream) {
 	}
 }
 
-func BenchmarkWriteToBuffer_StackStream(b *testing.B) {
-	benchmarkWriteToBuffer(b, newStackStream(nil, InitialBufferSize))
+func BenchmarkWriteToBuffer_Stream(b *testing.B) {
+	benchmarkWriteToBuffer(b, newStream(nil, InitialBufferSize))
 }
 
 // benchmarkIncompleteStructure is used to compare handling incomplete structures
-func benchmarkIncompleteStructure(b *testing.B, s Stream) {
+func benchmarkIncompleteStructure(b *testing.B, s *Stream) {
 	b.Helper()
 	for b.Loop() {
 		// Create an incomplete structure
 		s.WriteObjectStart()
-		s.WriteObjectField("name")
+		s.Field("name")
 		s.WriteString("John")
-		s.WriteObjectField("details")
+		s.Field("details")
 		s.WriteObjectStart()
-		s.WriteObjectField("age")
-		s.WriteInt(30)
-		s.WriteObjectField("address") // Missing value
+		s.Field("age")
+		s.Int(30)
+		s.Field("address") // Missing value
 
 		err := s.Flush()
 		assert.NoError(b, err)
 	}
 }
 
-func BenchmarkIncompleteStructure_StackStream(b *testing.B) {
-	benchmarkIncompleteStructure(b, newStackStream(nil, InitialBufferSize))
+func BenchmarkIncompleteStructure_Stream(b *testing.B) {
+	benchmarkIncompleteStructure(b, newStream(nil, InitialBufferSize))
 }

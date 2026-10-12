@@ -50,7 +50,8 @@ func TestBuildBlockReadsMarshalledBlock(t *testing.T) {
 
 	marshalled := ethapi.RPCMarshalBlock(block, true, false)
 	marshalled.TotalDifficulty = (*hexutil.U256)(uint256.NewInt(99))
-	marshalled.TransactionCount = hexutil.Uint64(0)
+	var txCount uint64
+	marshalled.TransactionCount = &txCount
 
 	r := &queryResolver{}
 	got, err := r.buildBlock(map[string]any{
@@ -62,7 +63,7 @@ func TestBuildBlockReadsMarshalledBlock(t *testing.T) {
 			Address:   common.HexToAddress("0xAbCdEf0123456789aBcDeF0123456789AbCdEf02"),
 			Amount:    9,
 		}},
-	})
+	}, true)
 	require.NoError(t, err)
 
 	require.Equal(t, uint64(21_000_000), got.Number)
@@ -112,7 +113,7 @@ func TestBuildBlockHandlesPendingBlock(t *testing.T) {
 	got, err := r.buildBlock(map[string]any{
 		"block":    marshalled,
 		"receipts": []*jsonrpc.GraphQLReceipt{},
-	})
+	}, true)
 	require.NoError(t, err)
 	require.Empty(t, got.Hash)
 	require.Empty(t, got.Nonce)
@@ -133,7 +134,7 @@ func TestBuildBlockRejectsUnexpectedWithdrawalsType(t *testing.T) {
 		"block":       ethapi.RPCMarshalBlock(block, true, false),
 		"receipts":    []*jsonrpc.GraphQLReceipt{},
 		"withdrawals": []map[string]any{{"index": hexutil.Uint64(7)}},
-	})
+	}, true)
 	require.Error(t, err)
 }
 
@@ -142,6 +143,6 @@ func TestBuildBlockRejectsUnexpectedType(t *testing.T) {
 	t.Parallel()
 
 	r := &queryResolver{}
-	_, err := r.buildBlock(map[string]any{"block": map[string]any{"number": "0x1"}})
+	_, err := r.buildBlock(map[string]any{"block": map[string]any{"number": "0x1"}}, true)
 	require.Error(t, err)
 }

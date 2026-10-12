@@ -90,7 +90,6 @@ func createRPCMetricsLabel(method string, valid bool) string {
 	}
 
 	return fmt.Sprintf(`rpc_duration_seconds{method=%q,success=%q}`, method, status)
-
 }
 
 func newRPCServingTimerMS(method string, valid bool) metrics.Summary {

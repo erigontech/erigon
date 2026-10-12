@@ -37,11 +37,9 @@ import (
 	"github.com/erigontech/erigon/execution/rlp/internal/rlpstruct"
 )
 
-//lint:ignore ST1012 EOL is not an error.
-
 // EOL is returned when the end of the current list
 // has been reached during streaming.
-var EOL = errors.New("rlp: end of list")
+var EOL = errors.New("rlp: end of list") //nolint:staticcheck // ST1012: EOL is not an error, same as io.EOF
 
 var (
 	ErrExpectedString      = errors.New("rlp: expected String or Byte")
@@ -193,6 +191,17 @@ var (
 	u256Int          = reflect.TypeFor[uint256.Int]()
 )
 
+// isNamedU256 reports a named type defined as uint256.Int, such as hexutil.U256. Its kind
+// is an array of four words, so without this check it would encode as a list of limbs
+// instead of an integer.
+func isNamedU256(typ reflect.Type) bool {
+	return typ != u256Int && typ.Name() != "" && typ.ConvertibleTo(u256Int) && u256Int.ConvertibleTo(typ)
+}
+
+func errNamedU256(typ reflect.Type) error {
+	return fmt.Errorf("rlp: %v is its own type declared as uint256.Int, so RLP would encode its four words as a list instead of one integer; use uint256.Int on the field", typ)
+}
+
 func makeDecoder(typ reflect.Type, tags rlpstruct.Tags) (dec decoder, err error) {
 	kind := typ.Kind()
 	switch {
@@ -202,6 +211,8 @@ func makeDecoder(typ reflect.Type, tags rlpstruct.Tags) (dec decoder, err error)
 		return decodeU256, nil
 	case typ == u256Int:
 		return decodeU256NoPtr, nil
+	case isNamedU256(typ):
+		return nil, errNamedU256(typ)
 	case kind == reflect.Pointer:
 		return makePtrDecoder(typ, tags)
 	case reflect.PointerTo(typ).Implements(decoderInterface):

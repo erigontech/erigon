@@ -17,7 +17,7 @@ func TestNodeOfftPointsAtPivotKeys(t *testing.T) {
 		kvPath := generateVarLenKV(t, t.TempDir(), 20000, log.New(), compress)
 		indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 		buildBtreeIndex(t, kvPath, indexPath, compress, 1, log.New(), true)
-		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
+		kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress)
 		require.NoError(t, err)
 
 		b := bt.bplus
@@ -36,7 +36,7 @@ func TestSeekExactHitSurvivesPooledCursor(t *testing.T) {
 	kvPath := generateKV(t, t.TempDir(), 20, 10, 20000, log.New(), compress)
 	indexPath := strings.TrimSuffix(kvPath, ".kv") + ".bt"
 	buildBtreeIndex(t, kvPath, indexPath, compress, 1, log.New(), true)
-	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
+	kv, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress)
 	require.NoError(t, err)
 	defer bt.Close()
 	defer kv.Close()

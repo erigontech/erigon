@@ -40,8 +40,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const dumpSlotFrequency = 4
-const pruneBatchSize = 256
+const (
+	dumpSlotFrequency = 4
+	pruneBatchSize    = 256
+)
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee
@@ -737,13 +739,13 @@ func (f *forkGraphDisk) IsBlockRetained(blockRoot common.Hash) bool {
 	return f.retainedBlock(blockRoot)
 }
 
-func (f *forkGraphDisk) WithRetainedBlock(blockRoot common.Hash, fn func()) bool {
+func (f *forkGraphDisk) WithRetainedBlock(blockRoot common.Hash, fn func(func(common.Hash) bool)) bool {
 	f.lifecycleMu.RLock()
 	defer f.lifecycleMu.RUnlock()
 	if !f.retainedBlock(blockRoot) {
 		return false
 	}
-	fn()
+	fn(f.retainedBlock)
 	return true
 }
 

@@ -17,9 +17,12 @@
 package accounts
 
 import (
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // Result structs for GetProof
@@ -38,22 +41,22 @@ type StorProofResult struct {
 	Proof []hexutil.Bytes `json:"proof"`
 }
 
-func (r *AccProofResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (r *AccProofResult) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	s.WriteObjectStart()
-	s.WriteObjectField("address").WriteHex(r.Address[:])
+	ethjson.Data(s, "address", r.Address[:])
 	writeHexArray(s, "accountProof", r.AccountProof)
-	jsonstream.Text(s, "balance", r.Balance)
-	jsonstream.Field(s, "codeHash").WriteHex(r.CodeHash[:])
-	jsonstream.Text(s, "nonce", &r.Nonce)
-	jsonstream.Field(s, "storageHash").WriteHex(r.StorageHash[:])
-	jsonstream.Field(s, "storageProof")
+	ethjson.Quantity256(s, "balance", (*uint256.Int)(r.Balance))
+	ethjson.Data(s, "codeHash", r.CodeHash[:])
+	ethjson.Quantity(s, "nonce", r.Nonce)
+	ethjson.Data(s, "storageHash", r.StorageHash[:])
+	s.Field("storageProof")
 	jsonstream.ArrayValue(s, r.StorageProof, writeStorProofElem)
 	s.WriteObjectEnd()
 	return nil
 }
 
-func writeHexArray(s *jsonstream.StackStream, name string, nodes []hexutil.Bytes) {
-	jsonstream.Field(s, name)
+func writeHexArray(s *jsonstream.Stream, name string, nodes []hexutil.Bytes) {
+	s.Field(name)
 	if nodes == nil {
 		s.WriteNil()
 		return
@@ -61,10 +64,10 @@ func writeHexArray(s *jsonstream.StackStream, name string, nodes []hexutil.Bytes
 	jsonstream.WriteHexBytes(s, nodes)
 }
 
-func writeStorProofElem(s *jsonstream.StackStream, sp *StorProofResult) {
+func writeStorProofElem(s *jsonstream.Stream, sp *StorProofResult) {
 	s.WriteObjectStart()
-	s.WriteObjectField("key").WriteString(sp.Key)
-	jsonstream.Text(s, "value", sp.Value)
+	s.Field("key").WriteString(sp.Key)
+	ethjson.Quantity256(s, "value", (*uint256.Int)(sp.Value))
 	writeHexArray(s, "proof", sp.Proof)
 	s.WriteObjectEnd()
 }

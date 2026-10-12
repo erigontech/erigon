@@ -29,68 +29,44 @@ type (
 	BlobsBundleV3 []*BlobCellsAndProofsV1
 )
 
-func (bundle BlobsBundleV1) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	jsonstream.ArrayValue(s, bundle, writeBlobV1)
+func (bundle BlobsBundleV1) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	jsonstream.ArrayValue(s, bundle, writeMarshaler[*BlobAndProofV1])
 	return nil
 }
 
-func (bundle BlobsBundleV2) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	jsonstream.ArrayValue(s, bundle, writeBlobV2)
+func (bundle BlobsBundleV2) MarshalFastJSONTo(s *jsonstream.Stream) error {
+	jsonstream.ArrayValue(s, bundle, writeMarshaler[*BlobAndProofV2])
 	return nil
 }
 
-func (bundle BlobsBundleV3) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+func (bundle BlobsBundleV3) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	jsonstream.ArrayValue(s, bundle, writeBlobCellsV1)
 	return nil
 }
 
-func writeBlobV1(s *jsonstream.StackStream, bp **BlobAndProofV1) {
+func writeBlobCellsV1(s *jsonstream.Stream, bp **BlobCellsAndProofsV1) {
 	b := *bp
 	if b == nil {
 		s.WriteNil()
 		return
 	}
 	s.WriteObjectStart()
-	s.WriteObjectField("blob").WriteHex(b.Blob)
-	jsonstream.Field(s, "proof").WriteHex(b.Proof)
-	s.WriteObjectEnd()
-}
-
-func writeBlobV2(s *jsonstream.StackStream, bp **BlobAndProofV2) {
-	b := *bp
-	if b == nil {
-		s.WriteNil()
-		return
-	}
-	s.WriteObjectStart()
-	s.WriteObjectField("blob").WriteHex(b.Blob)
-	jsonstream.Field(s, "proofs")
-	jsonstream.ArrayValue(s, b.CellProofs, writeHex)
-	s.WriteObjectEnd()
-}
-
-func writeBlobCellsV1(s *jsonstream.StackStream, bp **BlobCellsAndProofsV1) {
-	b := *bp
-	if b == nil {
-		s.WriteNil()
-		return
-	}
-	s.WriteObjectStart()
-	s.WriteObjectField("blob_cells")
+	s.Field("blob_cells")
 	jsonstream.ArrayValue(s, b.BlobCells, writeHexPtr)
-	jsonstream.Field(s, "proofs")
+	s.Field("proofs")
 	jsonstream.ArrayValue(s, b.Proofs, writeHexPtr)
 	s.WriteObjectEnd()
 }
 
-// writeHex writes one value per element, so a blob array flushes blob by blob instead of
-// growing one buffer for all of them.
-func writeHex(s *jsonstream.StackStream, b *hexutil.Bytes) { s.WriteHex(*b) }
-
-func writeHexPtr(s *jsonstream.StackStream, b **hexutil.Bytes) {
+func writeHexPtr(s *jsonstream.Stream, b **hexutil.Bytes) {
 	if *b == nil {
 		s.WriteNil()
 		return
 	}
 	s.WriteHex(**b)
+}
+
+// writeMarshaler writes one element of a slice whose elements write themselves.
+func writeMarshaler[M jsonstream.Marshaler](s *jsonstream.Stream, m *M) {
+	_ = (*m).MarshalFastJSONTo(s)
 }

@@ -21,11 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/common/dbg"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon/common/dbg"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -54,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
-	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
@@ -82,7 +82,7 @@ type EthAPI interface {
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*ethutils.RPCReceipt, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error)
 	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) (ethutils.RPCReceipts, error)
 
 	// Block access list related (see ./eth_block_access_list.go)
@@ -100,7 +100,7 @@ type EthAPI interface {
 	NewFilter(_ context.Context, crit filters.FilterCriteria) (string, error)
 	UninstallFilter(_ context.Context, index string) (bool, error)
 	GetFilterChanges(_ context.Context, index string) ([]any, error)
-	GetFilterLogs(ctx context.Context, index string) (types.RPCLogs, error)
+	GetFilterLogs(ctx context.Context, index string) (types.Logs, error)
 	Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error)
 
 	// Account related (see ./eth_accounts.go)
@@ -117,6 +117,7 @@ type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.U256, error)
+	MaxPriorityFeePerGas(ctx context.Context) (*hexutil.U256, error)
 	BaseFee(ctx context.Context) (*hexutil.U256, error)
 	BlobBaseFee(ctx context.Context) (*hexutil.U256, error)
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
@@ -135,7 +136,7 @@ type EthAPI interface {
 	SignTransaction(_ context.Context, txObject any) (common.Hash, error)
 	FillTransaction(ctx context.Context, args ethapi.CallArgs) (*ethapi.SignTransactionResult, error)
 	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
-	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides, optimizeGas *bool) (*accessListResult, error)
+	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)
 	Coinbase(ctx context.Context) (common.Address, error)
@@ -150,6 +151,8 @@ type BaseAPI struct {
 	// all caches are thread-safe
 	stateCache kvcache.Cache
 	blocksLRU  *cache.HashByteLRU[*types.Block]
+	// headersLRU holds headers decoded for header-only lookups.
+	headersLRU *cache.HashByteLRU[*types.Header]
 
 	filters                   *rpchelper.Filters
 	_chainConfig              atomic.Pointer[chain.Config]
@@ -159,6 +162,11 @@ type BaseAPI struct {
 	// _preMergeData is kept for a TTL rather than settled once: it reads live snapshot
 	// availability, which widens as segments arrive.
 	_preMergeData concurrent.CachedValue[preMergeBlockData]
+	// _preMergeUnsettled is what a probe answered without settling the question. It
+	// stands in for another walk over the same absent block data, for a TTL of its own:
+	// shorter than the verdict's, since the data it waits for can arrive at any time.
+	_preMergeUnsettled    atomic.Pointer[unsettledProbe]
+	_preMergeUnsettledTTL time.Duration
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -184,10 +192,18 @@ type BaseAPI struct {
 // heap, so this holds ~1600 of them, about 5 hours of chain.
 var BlockCacheBytes = dbg.EnvDataSize("RPC_BLOCK_CACHE", 512*datasize.MB)
 
+// HeaderCacheBytes bounds the decoded headers the RPC layer keeps for header-only lookups.
+var HeaderCacheBytes = dbg.EnvDataSize("RPC_HEADER_CACHE", 2*datasize.MB)
+
 // blockHeapSize approximates a decoded block's heap: its encoding plus the header and one
 // transaction struct per transaction, which hold inline integers and hash and sender caches.
 func blockHeapSize(b *types.Block) int64 {
 	return int64(b.EncodingSize()) + int64(unsafe.Sizeof(types.Header{})) + int64(len(b.Transactions()))*int64(unsafe.Sizeof(types.DynamicFeeTransaction{}))
+}
+
+// headerHeapSize approximates a decoded header's heap: its encoding plus the struct.
+func headerHeapSize(h *types.Header) int64 {
+	return int64(h.EncodingSize()) + int64(unsafe.Sizeof(types.Header{}))
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, conf *rpccfg.BaseApiConfig) *BaseAPI {
@@ -195,6 +211,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		conf = &rpccfg.BaseApiConfig{}
 	}
 	blocksLRU := cache.NewHashByteLRU(BlockCacheBytes, blockHeapSize)
+	headersLRU := cache.NewHashByteLRU(HeaderCacheBytes, headerHeapSize)
 
 	evmCallTimeout := conf.EvmCallTimeout
 	if evmCallTimeout == 0 {
@@ -205,6 +222,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		filters:           f,
 		stateCache:        stateCache,
 		blocksLRU:         blocksLRU,
+		headersLRU:        headersLRU,
 		_blockReader:      blockReader,
 		_txnReader:        blockReader,
 		_txNumReader:      blockReader.TxnumReader(),
@@ -218,6 +236,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		logQueryLimit:     conf.LogQueryLimit,
 	}
 	api._preMergeData.SetTTL(defaultPreMergeDataTTL)
+	api._preMergeUnsettledTTL = defaultUnsettledPreMergeTTL
 	return api
 }
 
@@ -368,7 +387,22 @@ func (api *BaseAPI) headerByHashAndNumber(ctx context.Context, tx kv.Getter, has
 			return block.HeaderNoCopy(), nil
 		}
 	}
-	return api._blockReader.Header(ctx, tx, hash, number)
+	if api.headersLRU != nil {
+		if header, ok := api.headersLRU.Get(hash); ok && header != nil {
+			return header, nil
+		}
+	}
+	header, err := api._blockReader.Header(ctx, tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil { // don't save nil's to cache
+		return nil, nil
+	}
+	if api.headersLRU != nil {
+		api.headersLRU.Add(hash, header)
+	}
+	return header, nil
 }
 
 func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, number uint64) (*types.Header, error) {
@@ -397,7 +431,6 @@ func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash commo
 		return 0, errors.New("header number not found")
 	}
 	return *number, nil
-
 }
 
 // canonicalHeaderByNumberOrHash resolves the selector and header through tx.
@@ -451,6 +484,8 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 
 const defaultPreMergeDataTTL = 30 * time.Second
 
+const defaultUnsettledPreMergeTTL = time.Second
+
 // systemTxsPerBlock is the pair of system entries every block carries in the txnum
 // sequence, which a stored TxCount includes.
 const systemTxsPerBlock = 2
@@ -474,7 +509,7 @@ func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64
 		if oldest == nil || block >= *oldest {
 			return nil
 		}
-		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *oldest)
+		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.ErrPruned, block, *oldest)
 	}
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
 }
@@ -512,6 +547,12 @@ type preMergeBlockData struct {
 	oldest uint64
 }
 
+// unsettledProbe is what a probe answered without settling the question, and when.
+type unsettledProbe struct {
+	data preMergeBlockData
+	at   time.Time
+}
+
 // holdsPreMergeBlockData reports whether the datadir holds full blocks below the merge
 // point, which tells a legacy archive from chain-history expiry where the stored prune
 // mode carries the same sentinel for both. Only a readable transaction of an early block
@@ -522,8 +563,15 @@ func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeH
 		if data, observed, fresh := api._preMergeData.Load(); observed && fresh {
 			return data, nil
 		}
+		if unsettled := api._preMergeUnsettled.Load(); unsettled != nil && time.Since(unsettled.at) < api._preMergeUnsettledTTL {
+			return unsettled.data, nil
+		}
 		data, ran, err := api._preMergeData.Produce(ctx, func() (preMergeBlockData, bool, error) {
-			return api.probePreMergeBlockData(ctx, tx, mergeHeight)
+			data, decided, err := api.probePreMergeBlockData(ctx, tx, mergeHeight)
+			if err == nil && !decided {
+				api._preMergeUnsettled.Store(&unsettledProbe{data: data, at: time.Now()})
+			}
+			return data, decided, err
 		})
 		switch {
 		case err == nil:
@@ -728,7 +776,7 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 		return err
 	}
 	if block < amount.PruneTo(latest) {
-		return fmt.Errorf("%w: requested block %d, %s from block %d", state.PrunedError, block, available, amount.PruneTo(latest))
+		return fmt.Errorf("%w: requested block %d, %s from block %d", state.ErrPruned, block, available, amount.PruneTo(latest))
 	}
 	return nil
 }
@@ -772,7 +820,7 @@ func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, b
 		return api.checkPruneHistory(ctx, tx, block)
 	default:
 		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
-		if err == nil || !errors.Is(err, state.PrunedError) {
+		if err == nil || !errors.Is(err, state.ErrPruned) {
 			return err
 		}
 		return api.checkPruneHistory(ctx, tx, block)

@@ -61,8 +61,10 @@ type testAddresses struct {
 	address2 common.Address
 }
 
-var randSrc = rand.New(rand.NewSource(42)) // fixed seed
-var randMu sync.Mutex
+var (
+	randSrc = rand.New(rand.NewSource(42)) // fixed seed
+	randMu  sync.Mutex
+)
 
 var sameStoragePrefixAddresses []common.Address // plain keys with same balanceOf storage mapping (of address1)
 

@@ -76,7 +76,7 @@ func NewRegenerator(blockReader dbservices.FullBlockReader, engine rules.Engine,
 // for the given block, regenerating it via re-execution against historical
 // state. Returns (nil, nil) for blocks without a BAL commitment in the header
 // (pre-Amsterdam) and for non-canonical blocks (only canonical history can be
-// replayed), and state.PrunedError-wrapped errors when the required history is
+// replayed), and state.ErrPruned-wrapped errors when the required history is
 // no longer available. The returned bytes are shared with the internal cache
 // and must be treated as read-only.
 func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, blockHash common.Hash, blockNum uint64) ([]byte, error) {
@@ -126,7 +126,7 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 		return g.blockReader.Header(ctx, tx, hash, number)
 	}
 	chainReader := exec.NewChainReader(cfg, tx, g.blockReader, g.logger)
-	bal, err := RederiveBlockAccessList(ctx, cfg, g.engine, chainReader, reader, getHeader, header, block.Transactions(), block.Uncles(), block.Withdrawals(), ibs, g.logger)
+	bal, err := RederiveBlockAccessList(ctx, cfg, g.engine, chainReader, getHeader, header, block.Transactions(), block.Uncles(), block.Withdrawals(), ibs, g.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +154,7 @@ func (g *Regenerator) historyStateReader(ctx context.Context, tx kv.TemporalTx, 
 	}
 	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); minTxNum < minHistoryTxNum {
 		firstAvailBlock, _, _ := g.txNumReader.FindBlockNum(ctx, tx, minHistoryTxNum)
-		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, blockNum, firstAvailBlock)
+		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.ErrPruned, blockNum, firstAvailBlock)
 	}
 	return state.NewHistoryReaderV3(tx, minTxNum), nil
 }

@@ -43,11 +43,13 @@ import (
 
 type OpType int
 
-const readType = 0
-const writeType = 1
-const otherType = 2
-const greenTick = "✅"
-const redCross = "❌"
+const (
+	readType  = 0
+	writeType = 1
+	otherType = 2
+	greenTick = "✅"
+	redCross  = "❌"
+)
 
 const threeRockets = "🚀🚀🚀"
 
@@ -80,7 +82,6 @@ type Timer func(txIdx int, opIdx int) time.Duration
 type Sender func(int) accounts.Address
 
 func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *testExecTask {
-
 	return &testExecTask{
 		TxTask: &exec.TxTask{
 			Header: &types.Header{
@@ -198,7 +199,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) *exec.TxResult {
+	calcFees bool,
+) *exec.TxResult {
 	// Sleep for 50 microsecond to simulate setup time
 	sleepWithContext(t.ctx, time.Microsecond*50) //nolint:errcheck
 
@@ -228,7 +230,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
 						return &exec.TxResult{Err: protocol.ErrExecAbortError{
 							DependencyTxIndex: -1,
-							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}}
+							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce),
+						}}
 					}
 				}
 			}
@@ -323,8 +326,8 @@ type opkey struct {
 }
 
 var randomPathGenerator = func(i int, j int, total int) opkey {
-	addr := accounts.InternAddress(common.BigToAddress((big.NewInt(int64(i % 10)))))
-	hash := accounts.InternKey(common.BigToHash((big.NewInt(int64(total)))))
+	addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 10))))
+	hash := accounts.InternKey(common.BigToHash(big.NewInt(int64(total))))
 	return opkey{addr, hash, state.StoragePath}
 }
 
@@ -338,9 +341,11 @@ var dexPathGenerator = func(i int, j int, total int) opkey {
 	}
 }
 
-var readTime = randTimeGenerator(4*time.Microsecond, 12*time.Microsecond)
-var writeTime = randTimeGenerator(2*time.Microsecond, 6*time.Microsecond)
-var nonIOTime = randTimeGenerator(1*time.Microsecond, 2*time.Microsecond)
+var (
+	readTime  = randTimeGenerator(4*time.Microsecond, 12*time.Microsecond)
+	writeTime = randTimeGenerator(2*time.Microsecond, 6*time.Microsecond)
+	nonIOTime = randTimeGenerator(1*time.Microsecond, 2*time.Microsecond)
+)
 
 func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonIOPerT int, pathGenerator PathGenerator, readTime Timer, writeTime Timer, nonIOTime Timer) ([]exec.Task, time.Duration) {
 	exec := make([]exec.Task, 0, numTask)
@@ -716,6 +721,42 @@ func TestExecuteParallelWithCheckCancelsBeforeWait(t *testing.T) {
 		cancelExecLoop(nil)
 		require.NoError(t, <-done)
 		t.Fatal("executeParallelWithCheck waited without stopping the executor")
+	}
+}
+
+func TestParallelExecutorWorkerPoolSize(t *testing.T) {
+	for _, tc := range []struct {
+		workerCount int
+		poolSize    int
+	}{
+		{workerCount: 1, poolSize: 1},
+		{workerCount: 4, poolSize: 5},
+	} {
+		t.Run(fmt.Sprintf("workers=%d", tc.workerCount), func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			tx, err := db.BeginTemporalRo(t.Context()) //nolint:gocritic
+			require.NoError(t, err)
+			defer tx.Rollback()
+			domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+			require.NoError(t, err)
+			defer domains.Close()
+
+			chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
+			pe := &parallelExecutor{
+				txExecutor: txExecutor{
+					cfg:    ExecuteBlockCfg{chainConfig: chainSpec.Config, db: db},
+					doms:   domains,
+					rs:     state.NewStateV3Buffered(state.NewStateV3(domains, false, log.New())),
+					logger: log.New(),
+				},
+				workerCount: tc.workerCount,
+			}
+			_, executorCancel, err := pe.run(t.Context())
+			require.NoError(t, err)
+			defer func() { require.NoError(t, executorCancel(nil)) }()
+
+			require.Len(t, pe.execWorkers, tc.poolSize)
+		})
 	}
 }
 
