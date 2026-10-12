@@ -14,7 +14,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -1320,20 +1319,13 @@ func refreshIncarnation(s *IntraBlockState, addr accounts.Address, currentIncarn
 	}
 }
 
-// readCode returns the contract code with its hash. The commited flag selects whether
-// the version-aware lookup honours the committed-only contract.
-func readCode(s *IntraBlockState, addr accounts.Address, commited bool) (accounts.Code, ReadSource, Version, error) {
-	if !commited {
-		if v, src, ver, ok := warmField(s, addr, s.versionedWrites.code, s.versionedReads.code); ok {
-			return v, src, ver, nil
-		}
-	} else if s.warmReadable(addr) {
-		if tr, ok := s.versionedReads.GetCode(addr); ok && warmSource(tr.Source) {
-			return tr.Val, tr.Source, tr.Version, nil
-		}
+// readCode returns the contract code with its hash.
+func readCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, ReadSource, Version, error) {
+	if v, src, ver, ok := warmField(s, addr, s.versionedWrites.code, s.versionedReads.code); ok {
+		return v, src, ver, nil
 	}
 	var r readPathResult
-	versionedReadCore(s, addr, CodePath, accounts.NilKey, commited, false, &r)
+	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, false, &r)
 	if r.err != nil {
 		return accounts.Code{}, r.source, r.version, r.err
 	}
@@ -1379,47 +1371,32 @@ func readCode(s *IntraBlockState, addr accounts.Address, commited bool) (account
 	}
 }
 
-// refreshedCode is refreshCode's result. Unlike accounts.Code it promises no
-// Hash == Keccak256(Bytes): KnownHash is Nil when the source stored bytes only.
-type refreshedCode struct {
-	Bytes     []byte
-	KnownHash accounts.CodeHash
-}
-
 // refreshCode is the in-memory-only variant for CodePath.
 // CodePath is never recorded via the skipStorage branch in legacy
 // (the `path != CodePath` guard), so no recording on the default case.
-func refreshCode(s *IntraBlockState, addr accounts.Address) (refreshedCode, ReadSource, Version, error) {
+func refreshCode(s *IntraBlockState, addr accounts.Address) (accounts.Code, error) {
 	var r readPathResult
 	versionedReadCore(s, addr, CodePath, accounts.NilKey, false, true, &r)
 	if r.err != nil {
-		return refreshedCode{}, r.source, r.version, r.err
+		return accounts.Code{}, r.err
 	}
+	var code accounts.Code
 	switch r.outcome {
 	case outcomeWriteSetHit:
-		return refreshedCode{r.vwCode.Val.Bytes, r.vwCode.Val.Hash}, r.source, r.version, nil
+		code = r.vwCode.Val
 	case outcomeReadSetHit:
 		tr, _ := s.versionedReads.GetCode(addr)
-		return refreshedCode{tr.Val.Bytes, tr.Val.Hash}, r.source, r.version, nil
+		code = tr.Val
 	case outcomeMapDone:
-		return refreshedCode{r.mapCodeVal.Bytes, r.mapCodeVal.Hash}, r.source, r.version, nil
+		code = r.mapCodeVal
 	case outcomeReturnZero, outcomeReturnDefault:
-		return refreshedCode{}, r.source, r.version, nil
 	default:
 		panic(fmt.Sprintf("refreshCode: unexpected outcome %d for %x", r.outcome, addr))
 	}
-}
-
-// codeHash avoids re-hashing when the source knew the hash. For committed bytes
-// the account record is authoritative; a prior tx's write can outrun it.
-func (c refreshedCode) codeHash(source ReadSource, accountHash accounts.CodeHash) accounts.CodeHash {
-	if c.KnownHash != accounts.NilCodeHash {
-		return c.KnownHash
+	if dbg.AssertEnabled && code.Bytes != nil && code.Hash == accounts.NilCodeHash {
+		panic(fmt.Sprintf("refreshCode: code without hash for %x", addr))
 	}
-	if source == StorageRead {
-		return accountHash
-	}
-	return accounts.InternCodeHash(crypto.Keccak256Hash(c.Bytes))
+	return code, nil
 }
 
 // readCodeSize returns the contract code size.

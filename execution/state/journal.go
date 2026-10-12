@@ -356,7 +356,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			} else {
 				s.versionedWrites.DelBalance(je.account)
 			}
-			// selfdestructVersioned clears the incarnation cell on both paths. Restore
+			// selfdestructVersioned resets the incarnation cell to 0 on both paths. Restore
 			// it to its pre-destruct versioned value, or drop the write if the
 			// self-destruct created it.
 			if je.flags&flagSelfdestructHadIncarnation != 0 {

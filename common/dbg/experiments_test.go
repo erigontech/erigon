@@ -69,3 +69,11 @@ func TestReadAheadWorkerReaders(t *testing.T) {
 	ReadAheadWorkers = 6
 	require.Equal(t, 6, ReadAheadWorkerReaders())
 }
+
+func TestMemUsageMatchesMemStats(t *testing.T) {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	alloc, sys := MemUsage()
+	require.InEpsilon(t, m.Alloc, alloc, 0.05)
+	require.InEpsilon(t, m.Sys, sys, 0.05)
+}

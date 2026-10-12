@@ -218,7 +218,7 @@ func TestAntiquateField(t *testing.T) {
 
 	data := []byte("hello world antiquary field data")
 	slot := uint64(clparams.SlotsPerDump*3 + 42) // not aligned to SlotsPerDump
-	require.NoError(t, antiquateField(context.Background(), slot, data, buf, compressor, collector))
+	require.NoError(t, antiquateField(slot, data, buf, compressor, collector))
 
 	collected := collectAll(t, collector)
 	// antiquateField rounds the slot down to SlotsPerDump boundary
@@ -241,7 +241,7 @@ func TestAntiquateField_SlotAligned(t *testing.T) {
 
 	data := []byte("aligned slot data")
 	slot := uint64(clparams.SlotsPerDump * 5) // exactly aligned
-	require.NoError(t, antiquateField(context.Background(), slot, data, buf, compressor, collector))
+	require.NoError(t, antiquateField(slot, data, buf, compressor, collector))
 
 	collected := collectAll(t, collector)
 	_, ok := collected[string(base_encoding.Encode64ToBytes4(slot))]
@@ -270,7 +270,7 @@ func TestAntiquateBytesListDiff(t *testing.T) {
 		return err
 	}
 
-	require.NoError(t, antiquateBytesListDiff(context.Background(), key, old, newData, &bytes.Buffer{}, collector, simpleDiff))
+	require.NoError(t, antiquateBytesListDiff(key, old, newData, &bytes.Buffer{}, collector, simpleDiff))
 
 	collected := collectAll(t, collector)
 	result, ok := collected[string(key)]
@@ -295,7 +295,7 @@ func TestAntiquateBytesListDiff_WithRealDiffFn(t *testing.T) {
 
 	key := base_encoding.Encode64ToBytes4(99)
 	require.NoError(t, antiquateBytesListDiff(
-		context.Background(), key, old, newData, &bytes.Buffer{}, collector,
+		key, old, newData, &bytes.Buffer{}, collector,
 		base_encoding.ComputeCompressedSerializedUint64ListDiff,
 	))
 
@@ -315,7 +315,7 @@ func TestFindNearestSlotBackwards(t *testing.T) {
 	// Write canonical roots at slots 0, 32, 64 (epoch boundaries with SlotsPerEpoch=32)
 	for _, slot := range []uint64{0, 32, 64} {
 		root := common.Hash{byte(slot)}
-		require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, root))
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 	}
 
 	// From slot 64 (epoch boundary with canonical root) → should return 64
@@ -365,7 +365,7 @@ func TestComputeSlotToBeRequested(t *testing.T) {
 	for slot := uint64(0); slot <= 200000; slot += cfg.SlotsPerEpoch {
 		root := common.Hash{}
 		binary.LittleEndian.PutUint64(root[:], slot)
-		require.NoError(t, beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, root))
+		require.NoError(t, beacon_indicies.MarkRootCanonical(tx, slot, root))
 	}
 
 	// If targetSlot > SlotsPerDump * backoffStep, we get findNearestSlotBackwards(targetSlot - SlotsPerDump*backoffStep)
@@ -559,7 +559,7 @@ func TestBeaconStatesCollector_CollectBalancesDiffs(t *testing.T) {
 	binary.LittleEndian.PutUint64(newBal[8:], 250)
 	binary.LittleEndian.PutUint64(newBal[16:], 300)
 
-	require.NoError(t, c.collectBalancesDiffs(context.Background(), 500, old, newBal))
+	require.NoError(t, c.collectBalancesDiffs(500, old, newBal))
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
@@ -589,7 +589,7 @@ func TestBeaconStatesCollector_CollectBalancesDump(t *testing.T) {
 	binary.LittleEndian.PutUint64(balances[24:], 32_050_000_000)
 
 	slot := uint64(clparams.SlotsPerDump * 2) // aligned to dump boundary
-	require.NoError(t, c.collectBalancesDump(t.Context(), slot, balances))
+	require.NoError(t, c.collectBalancesDump(slot, balances))
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())

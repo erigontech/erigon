@@ -421,6 +421,8 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	if so.db.versionMap != nil {
 		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.Status() == MVReadResultDone {
 			so.code = c
+			so.data.CodeHash = c.Hash
+			so.original.CodeHash = c.Hash
 			return c, nil
 		}
 	}
@@ -468,12 +470,7 @@ func (so *stateObject) SetCode(code accounts.Code, wasCommited bool, reason trac
 		return false, nil
 	}
 
-	so.db.journal.codeChange(so.address, prev.Bytes, so.data.CodeHash, wasCommited)
-	if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChangeV2 != nil {
-		so.db.tracingHooks.OnCodeChangeV2(so.address, so.data.CodeHash, prev.Bytes, code.Hash, code.Bytes, reason)
-	} else if so.db.tracingHooks != nil && so.db.tracingHooks.OnCodeChange != nil {
-		so.db.tracingHooks.OnCodeChange(so.address, so.data.CodeHash, prev.Bytes, code.Hash, code.Bytes)
-	}
+	so.db.journalCodeChange(so.address, so.data.CodeHash, prev.Bytes, code, wasCommited, reason)
 	so.setCode(code)
 	return true, nil
 }

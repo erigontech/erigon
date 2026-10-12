@@ -62,7 +62,7 @@ func TestCheckCaplinBlobSidecarsRejectsMissingSidecar(t *testing.T) {
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, root)
+		return beacon_indicies.MarkRootCanonical(tx, slot, root)
 	}))
 
 	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
@@ -250,7 +250,7 @@ func TestCheckCaplinBlobSidecarsRejectsMalformedRecord(t *testing.T) {
 
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, root)
+		return beacon_indicies.MarkRootCanonical(tx, slot, root)
 	}))
 	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &cfg, dirs, log.New())
 	t.Cleanup(snapshots.Close)
@@ -434,7 +434,7 @@ func checkCaplinBlobIntegrityFixture(t *testing.T, cfg *clparams.BeaconChainConf
 
 	db := mdbxtest.NewTestDB(t, dbcfg.CaplinDB)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-		return beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, canonicalRoot)
+		return beacon_indicies.MarkRootCanonical(tx, slot, canonicalRoot)
 	}))
 	snapshots := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, cfg, dirs, log.New())
 	t.Cleanup(snapshots.Close)
