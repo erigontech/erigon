@@ -242,6 +242,7 @@ type cachedHistoryReaderV3 struct {
 	cache     asOfView
 	reader    *state.HistoryReaderV3
 	composite []byte
+	addr      common.Address
 }
 
 func (hr *cachedHistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
@@ -269,7 +270,8 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 }
 
 func (hr *cachedHistoryReaderV3) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
-	enc, ok, err := hr.cache.GetAsOf(address[:], hr.reader.GetTxNum())
+	hr.addr = address
+	enc, ok, err := hr.cache.GetAsOf(hr.addr[:], hr.reader.GetTxNum())
 	if err != nil {
 		return nil, err
 	}
