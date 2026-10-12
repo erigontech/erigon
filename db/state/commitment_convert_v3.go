@@ -445,14 +445,14 @@ func (w *legacyDelta) reemit(path []byte, conv *v3.LegacyConverter, emit v3.Lega
 		w.stack = w.stack[:len(w.stack)-1]
 		key := encodeLegacyPrefix(path, w.keysV2)
 		value, old, unchanged, err := w.unchanged(key)
-		if err != nil || !unchanged {
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
+		}
+		if !unchanged {
 			continue
 		}
-		if err := conv.Convert(key, value, old, emit); err != nil {
-			return err
+		if convErr := conv.Convert(key, value, old, emit); convErr != nil {
+			return convErr
 		}
 		liveBefore, err := w.reachBefore.reachable(key, old)
 		if err != nil {
@@ -474,21 +474,21 @@ func (w *legacyDelta) drop(path []byte, conv *v3.LegacyConverter, reach *legacyR
 		w.stack = w.stack[:len(w.stack)-1]
 		key := encodeLegacyPrefix(path, w.keysV2)
 		value, _, unchanged, err := w.unchanged(key)
-		if err != nil || !unchanged {
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
+		}
+		if !unchanged {
 			continue
 		}
 		live, err := reach.reachable(key, value)
-		if err != nil || live {
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
+		}
+		if live {
 			continue
 		}
-		if err := conv.Tombstone(key, emit); err != nil {
-			return err
+		if tombErr := conv.Tombstone(key, emit); tombErr != nil {
+			return tombErr
 		}
 		if w.stack, err = appendLegacyChildren(w.stack, path, value); err != nil {
 			return err
