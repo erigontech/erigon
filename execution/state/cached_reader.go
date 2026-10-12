@@ -65,8 +65,8 @@ func (cr *CachedReader) ReadAccountByPlainAddr(address common.Address) (*account
 	return cr.ReadAccountData(accounts.InternAddress(address))
 }
 
-func (cr *CachedReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := cr.ReadAccountData(address)
+func (cr *CachedReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := cr.ReadAccountByPlainAddr(address)
 	return acc != nil, err
 }
 

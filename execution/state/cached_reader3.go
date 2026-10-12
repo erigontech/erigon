@@ -67,8 +67,8 @@ func (r *CachedReader3) ReadAccountByPlainAddr(address common.Address) (*account
 	return &a, nil
 }
 
-func (r *CachedReader3) HasAccount(address accounts.Address) (bool, error) {
-	r.addr = address.Value()
+func (r *CachedReader3) HasAccount(address common.Address) (bool, error) {
+	r.addr = address
 	enc, err := r.cache.Get(r.addr[:])
 	return len(enc) > 0, err
 }

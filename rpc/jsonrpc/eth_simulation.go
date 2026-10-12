@@ -1078,8 +1078,8 @@ func (r *simulationIntraBlockStateReader) ReadAccountByPlainAddr(address common.
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
-func (r *simulationIntraBlockStateReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
+func (r *simulationIntraBlockStateReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
 	return acc != nil, err
 }
 

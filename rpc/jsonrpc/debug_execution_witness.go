@@ -167,8 +167,8 @@ func (s *RecordingState) ReadAccountByPlainAddr(address common.Address) (*accoun
 	return s.ReadAccountData(accounts.InternAddress(address))
 }
 
-func (s *RecordingState) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := s.ReadAccountData(address)
+func (s *RecordingState) HasAccount(address common.Address) (bool, error) {
+	acc, err := s.ReadAccountByPlainAddr(address)
 	return acc != nil, err
 }
 
@@ -1658,8 +1658,8 @@ func (s *witnessStateless) ReadAccountDataForDebug(address accounts.Address) (*a
 	return s.ReadAccountData(address)
 }
 
-func (s *witnessStateless) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := s.ReadAccountData(address)
+func (s *witnessStateless) HasAccount(address common.Address) (bool, error) {
+	acc, err := s.ReadAccountByPlainAddr(address)
 	return acc != nil, err
 }
 

@@ -759,8 +759,8 @@ func (r *refreshReader) ReadAccountByPlainAddr(address common.Address) (*account
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
-func (r *refreshReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
+func (r *refreshReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
 	return acc != nil, err
 }
 

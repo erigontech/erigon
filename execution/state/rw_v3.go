@@ -1428,8 +1428,8 @@ func (r *CachedReaderV3) ReadAccountByPlainAddr(address common.Address) (*accoun
 
 // HasAccount goes through ReadAccountData so it sees blockCache, which the promoted
 // ReaderV3 method would skip.
-func (r *CachedReaderV3) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
+func (r *CachedReaderV3) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
 	return acc != nil, err
 }
 
@@ -1488,8 +1488,8 @@ func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account,
 	return r.ReadAccountByPlainAddr(address.Value())
 }
 
-func (r *ReaderV3) HasAccount(address accounts.Address) (bool, error) {
-	r.addr = address.Value()
+func (r *ReaderV3) HasAccount(address common.Address) (bool, error) {
+	r.addr = address
 	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{})
 	return len(enc) > 0, err
 }
@@ -1640,8 +1640,8 @@ func (r *bufferedReader) ReadAccountByPlainAddr(address common.Address) (*accoun
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
-func (r *bufferedReader) HasAccount(address accounts.Address) (bool, error) {
-	acc, err := r.ReadAccountData(address)
+func (r *bufferedReader) HasAccount(address common.Address) (bool, error) {
+	acc, err := r.ReadAccountByPlainAddr(address)
 	return acc != nil, err
 }
 
