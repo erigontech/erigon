@@ -254,10 +254,9 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 		// Note: uses epoch (from slot), not target.Epoch, so malformed messages
 		// with wrong target.Epoch still reach the reject check below.
 		// [IGNORE] the epoch of aggregate.data.slot is either the current or previous epoch
-		// When the head state lags behind (solo validator / genesis start), use the
-		// highest seen slot to widen the accepted epoch window.
-		highestSeen := a.forkchoiceStore.HighestSeen()
-		prevEpoch, currEpoch := validationEpochRange(headState, highestSeen, highestSeen, a.beaconCfg.SlotsPerEpoch)
+		// Use the wall-clock slot and highest seen slot to widen the accepted epoch
+		// window when the head state lags.
+		prevEpoch, currEpoch := validationEpochRange(headState, a.forkchoiceStore.HighestSeen(), a.ethClock.GetCurrentSlot(), a.beaconCfg.SlotsPerEpoch)
 		if epoch < prevEpoch || epoch > currEpoch {
 			return fmt.Errorf("%w: epoch outside validation range: %d (prev=%d, curr=%d)", ErrIgnore, epoch, prevEpoch, currEpoch)
 		}

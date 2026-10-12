@@ -713,7 +713,7 @@ func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []r
 		wsHandler = node.NewWSConnectionLimiter(int64(cfg.WsMaxConnections),
 			srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression, logger))
 	}
-	graphQLHandler := node.NewHTTPHandlerStack(graphql.CreateHandler(defaultAPIList), cfg.HttpCORSDomain, cfg.HttpVirtualHost, false, 0, false)
+	graphQLHandler := newGraphQLHandler(cfg, graphql.CreateHandler(defaultAPIList), rpcConcurrencyLimit)
 	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
 	if err != nil {
 		return err
@@ -884,6 +884,10 @@ func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 	}
 	logger.Info("Generated JWT secret", "path", cfg.JWTSecretPath)
 	return jwtSecret, nil
+}
+
+func newGraphQLHandler(cfg *httpcfg.HttpCfg, graphQLSrv http.Handler, rpcConcurrencyLimit int64) http.Handler {
+	return node.NewHTTPHandlerStack(graphQLSrv, cfg.HttpCORSDomain, cfg.HttpVirtualHost, false, rpcConcurrencyLimit, true)
 }
 
 func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, graphQLHandler http.Handler, jwtSecret []byte) (http.Handler, error) {

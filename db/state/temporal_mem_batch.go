@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
@@ -133,6 +132,18 @@ func (sd *TemporalMemBatch) lockAllDomains() {
 func (sd *TemporalMemBatch) unlockAllDomains() {
 	for i := range sd.latestStateLocks {
 		sd.latestStateLocks[i].Unlock()
+	}
+}
+
+func (sd *TemporalMemBatch) rlockAllDomains() {
+	for i := range sd.latestStateLocks {
+		sd.latestStateLocks[i].RLock()
+	}
+}
+
+func (sd *TemporalMemBatch) runlockAllDomains() {
+	for i := range sd.latestStateLocks {
+		sd.latestStateLocks[i].RUnlock()
 	}
 }
 
@@ -732,10 +743,15 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	return nil
 }
 
-// flushLocked is the body of Flush, factored so the callback path can run it
-// holding all domain locks without re-acquiring. PlainStateVersion advances here
-// with the domain writes; metadata overlays must not advance it independently.
-func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
+// Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
+// registered per-domain callback is invoked for every (key, value, step, txNum)
+// tuple after the MDBX write succeeds, so a downstream cache can never be left
+// ahead of MDBX. Holds every domain read lock: writers must not change the batch
+// before the callbacks run, while readers of a published batch keep going.
+func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
+	sd.rlockAllDomains()
+	defer sd.runlockAllDomains()
+
 	if sd.unwindChangesetRaw != nil {
 		for domain := range sd.unwindChangesetRaw {
 			slices.SortFunc(sd.unwindChangesetRaw[domain], func(a, b kv.DomainEntryDiff) int {
@@ -752,23 +768,10 @@ func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if err := sd.flushWriters(ctx, tx); err != nil {
 		return err
 	}
+	// PlainStateVersion advances here with the domain writes; metadata overlays
+	// must not advance it independently.
 	if _, err := rawdb.IncrementStateVersion(tx); err != nil {
 		return fmt.Errorf("can't write plain state version: %w", err)
-	}
-	return nil
-}
-
-// Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
-// registered per-domain callback is invoked for every (key, value, step, txNum)
-// tuple after the MDBX write succeeds, so a downstream cache can never be left
-// ahead of MDBX. Runs under all domain locks so the callback's snapshot matches
-// flush-time state.
-func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
-	sd.lockAllDomains()
-	defer sd.unlockAllDomains()
-
-	if err := sd.flushLocked(ctx, tx); err != nil {
-		return err
 	}
 
 	if len(opts) > 0 {
@@ -798,29 +801,6 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 				latest := history[len(history)-1]
 				cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 			}
-		}
-	}
-
-	return nil
-}
-
-// FlushWithCommitmentCallback flushes the batch then invokes cb per
-// commitment-domain tuple under the lock.
-func (sd *TemporalMemBatch) FlushWithCommitmentCallback(ctx context.Context, tx kv.RwTx, cb execctx.CommitmentFlushCallback) error {
-	sd.lockAllDomains()
-	defer sd.unlockAllDomains()
-
-	if err := sd.flushLocked(ctx, tx); err != nil {
-		return err
-	}
-
-	if cb != nil {
-		for keyStr, history := range sd.domains[kv.CommitmentDomain] {
-			if len(history) == 0 {
-				continue
-			}
-			latest := history[len(history)-1]
-			cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 		}
 	}
 
