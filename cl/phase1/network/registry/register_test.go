@@ -25,8 +25,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 )
 
-// Proposers publish their preferences for an epoch in bursts, and gossip drops every later copy
-// of a message the limiter ignored, so one peer must be able to relay both accepted epochs at once.
 func TestProposerPreferencesRateLimiterAcceptsTwoEpochsFromOnePeer(t *testing.T) {
 	allow := proposerPreferencesRateLimiter()
 	pid := peer.ID("relaying-peer")

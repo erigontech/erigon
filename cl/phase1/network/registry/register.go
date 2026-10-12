@@ -96,8 +96,8 @@ func withGlobalTimeBasedRateLimiter(duration time.Duration, maxRequests int) gos
 }
 
 // proposerPreferencesRateLimiter lets one peer relay a full burst of preferences for the two
-// accepted epochs: gossip marks a message seen before validation, so a copy this limiter ignores
-// is never accepted from another peer either.
+// accepted epochs: gossip marks a message seen before validation, so while its ID stays in the
+// seen cache, other peers' copies of a message this limiter ignored are dropped as duplicates.
 func proposerPreferencesRateLimiter() gossip.ConditionFunc {
 	return withRateLimiterByPeer(2, 64)
 }
