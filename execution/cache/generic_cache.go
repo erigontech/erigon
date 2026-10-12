@@ -33,80 +33,10 @@ import (
 // so the stripe index is a mask of the key hash.
 const putStripeCount = 256
 
-// avgBytesPerEntry is the assumption used to translate a byte budget into
-// the entry-count cap the sharded LRU is sized against. 256 B
-// approximates account-record + key overhead and storage-slot value+key
-// overhead in the same order of magnitude. Actual residency tracked in
-// currentSize and reported via PrintStatsAndReset.
-const avgBytesPerEntry = 256
-
-// freelruElem mirrors freelru's element, which is unexported: the stored value
-// with a hashed key, five uint32 list indices and an expiry around it. The
-// caches are generic over their value, so the slot cost has to follow that
-// value rather than the sizes this package happens to instantiate.
-//
-//nolint:unused // layout mirror: only unsafe.Sizeof reads it
-type freelruElem[T any] struct {
-	key                                           uint64
-	value                                         T
-	nextBucket, prevBucket, bucketPos, next, prev uint32
-	expire                                        int64
-}
-
-// elemBytesFor is what one table slot costs: the element plus its uint32 bucket
-// index in the parallel table.
-func elemBytesFor[T any]() int64 {
-	var e freelruElem[T]
-	return int64(unsafe.Sizeof(e)) + 4
-}
-
-// slotChargeBytes is a slot at freelru's best table ratio, 5/4, so it is a lower
-// bound: a capacity off that ratio costs up to 5/2. It seeds the ceiling search
-// only; every reservation charges the exact table through tableSlots.
-func slotChargeBytes(elemBytes int64) int64 { return elemBytes*5/4 + 1 }
-
-// freelruShardBytes covers a shard beyond its two arrays: the LRU struct and the
-// slice headers. Measured at 239-359 B; charged high to stay covering. The zero
-// key and value it also holds scale with the value type, so shardChargeBytes
-// adds a slot on top.
-const freelruShardBytes = 512
-
-func shardChargeBytes(elemBytes int64) int64 { return freelruShardBytes + elemBytes }
-
-// maxCacheSlots caps the slot array whatever the byte budget says.
-const maxCacheSlots = 16_000_000
-
-// fitCeiling is the largest capacity up to ceiling whose exact cost is inside the
-// budget. estimate only seeds the search and may sit on either side of the answer.
-// cost must be non-decreasing in capacity, as both callers' are: the payload term
-// grows with it and the table it rounds up to never shrinks.
-func fitCeiling(estimate, ceiling uint32, budget datasize.ByteSize, cost func(uint32) int64) uint32 {
-	if cost(1) > int64(budget) {
-		return 1
-	}
-	ceiling = max(ceiling, 1)
-	hi := max(min(estimate, ceiling), 1)
-	for hi < ceiling && cost(hi) <= int64(budget) {
-		hi = uint32(min(uint64(hi)*2, uint64(ceiling)))
-	}
-	lo := uint32(1)
-	for lo < hi {
-		mid := lo + (hi-lo+1)/2
-		if cost(mid) <= int64(budget) {
-			lo = mid
-		} else {
-			hi = mid - 1
-		}
-	}
-	return lo
-}
-
-// entry stores the full key alongside the value so callers can detect
-// hash collisions (the freelru shard key is the uint64 maphash of the
-// byte-string key — Go's randomized stdlib hasher, so collisions are
-// rare but not impossible). size carries the byte cost of the entry so
-// the OnEvict callback can update currentSize without re-running
-// sizeFunc.
+// entry stores the full key alongside the value so reads can detect hash
+// collisions: the layer is keyed by the uint64 maphash of the key, Go's
+// randomized stdlib hasher, so collisions are rare but not impossible. size is
+// the key and value bytes, so weighing needs no sizeFunc call.
 type entry[T any] struct {
 	key   []byte
 	val   T
@@ -129,7 +59,7 @@ type GenericCache[T any] struct {
 	coh coherence.Gen
 
 	// putStripes serialize same-key writers so PutIfAbsent's check+insert is
-	// atomic w.r.t. a concurrent Put (freelru offers no conditional insert).
+	// atomic w.r.t. a concurrent Put.
 	putStripes [putStripeCount]sync.Mutex
 
 	hits         atomic.Uint64
@@ -141,35 +71,16 @@ type GenericCache[T any] struct {
 	sizeFunc func(T) int
 }
 
-func u64identity(k uint64) uint32 { return uint32(k) }
-
-const (
-	// genericCacheStartCapacity is the slot count a jump-grow cache is born with.
-	// A cache whose working set never exceeds it (a test fixture) stays this small
-	// regardless of its configured byte budget.
-	genericCacheStartCapacity = 1024
-	genericCacheGrowFactor    = 4
-)
-
-// NewGenericCache creates a jump-grow cache with the specified byte capacity as
-// its growth ceiling, using the generic per-entry estimate. mode selects
-// ModeEvictLRU (default in this tree) or ModeNoOp (diagnostic baseline).
+// NewGenericCache creates a cache bounded by capacityBytes, drawing its
+// reservation from the shared envelope as it fills. mode selects ModeEvictLRU
+// (default in this tree) or ModeNoOp (diagnostic baseline).
 func NewGenericCache[T any](capacityBytes datasize.ByteSize, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
-	return NewGenericCacheWithAvg(capacityBytes, avgBytesPerEntry, sizeFunc, mode)
-}
-
-// NewGenericCacheWithAvg is NewGenericCache with an explicit per-domain average
-// for the bytes an entry points at — what a slice or string header refers to,
-// not T's own inline bytes, which the slot cost already charges along with the
-// element and its bookkeeping (accounts ≈ 70 B, storage ≈ 64 B). Folding either
-// in charges them twice and shrinks the ceiling. It starts small and jump-grows
-// toward the ceiling on demand, funding each step from the shared envelope.
-// avgBytes of 0 is meaningful, not a request for the default: an inline-only T
-// points at nothing outside its slot.
-func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, _ uint32, sizeFunc func(T) int, mode Mode) *GenericCache[T] {
-	c := &GenericCache[T]{capacityB: capacityBytes, mode: mode, sizeFunc: sizeFunc}
-	c.data = newByteLRU(capacityBytes, weighEntry[T], nil)
-	return c
+	return &GenericCache[T]{
+		capacityB: capacityBytes,
+		mode:      mode,
+		sizeFunc:  sizeFunc,
+		data:      newByteLRU(capacityBytes, weighEntry[T], nil),
+	}
 }
 
 // weighEntry charges an entry what it holds: its payload, the entry itself and
@@ -302,11 +213,8 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	} else {
 		e.key = bytes.Clone(key)
 	}
-	if hasExisting {
-		// Add is SetIfAbsent, so the resident entry -- this key's older value or
-		// a 64-bit hash collision -- has to go first.
-		c.data.Remove(h)
-	}
+	// Add replaces in place whatever holds the hash: this key's older value or
+	// a 64-bit hash collision.
 	c.data.Add(h, e)
 	c.inserts.Add(1)
 }

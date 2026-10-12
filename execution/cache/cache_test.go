@@ -919,7 +919,8 @@ func TestCodeCache_PutWithCodeHashIfAbsent(t *testing.T) {
 // check (absent), lose the CPU to the authoritative writer's insert, then
 // clobber it — the prefetch-vs-flush staleness this cache guards against.
 func TestDomainCache_PutIfAbsentAtomicWithPut(t *testing.T) {
-	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
+	// Room for every round, so admission never refuses the key under test.
+	c := closeOnCleanup(t, NewDomainCacheMode(16*datasize.MB, ModeEvictLRU))
 	fresh := []byte("fresh")
 	stale := []byte("stale")
 	addr := make([]byte, 20)
@@ -1372,7 +1373,7 @@ func TestDomainCache_StaleDropAtomicWithPut_NoSizeDrift(t *testing.T) {
 	addr := makeAddr(1)
 	v1 := []byte("value-one")
 	v2 := []byte("value-two")
-	wantSize := int64(len(addr) + len(v1) + 24)
+	wantSize := int64(oneEntryBytes(addr, v1))
 	for round := range 20000 {
 		c.Put(addr, v1, 10)
 		c.Unwind(5)
@@ -1392,7 +1393,7 @@ func TestDomainCache_ClearAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c := closeOnCleanup(t, NewDomainCacheMode(1*datasize.MB, ModeEvictLRU))
 	addr := makeAddr(1)
 	v1 := []byte("value-one")
-	entrySize := int64(len(addr) + len(v1) + 24)
+	entrySize := int64(oneEntryBytes(addr, v1))
 	for round := range 20000 {
 		var wg sync.WaitGroup
 		wg.Go(func() { c.Put(addr, v1, 10) })
