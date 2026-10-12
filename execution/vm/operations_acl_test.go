@@ -39,7 +39,7 @@ func TestGasSStoreDoesNotRefill(t *testing.T) {
 	require.EqualValues(t, -int64(params.StateGasPerStorageSet), cost.State)
 }
 
-var eip7702CallGas = map[OpCode]gasFunc{
+var eip7702CallGas = map[OpCode]callGasFunc{
 	CALL:         gasCallEIP7702,
 	CALLCODE:     gasCallCodeEIP7702,
 	DELEGATECALL: gasDelegateCallEIP7702,
@@ -71,7 +71,7 @@ func TestGasCallDoesNotCharge(t *testing.T) {
 			scope.Stack.push(*uint256.NewInt(0x1000))
 			scope.Stack.push(*uint256.NewInt(100_000))
 
-			cost, err := eip7702CallGas[op](evm, scope, initial, 0)
+			cost, forwarded, err := eip7702CallGas[op](evm, scope, initial, 0)
 			if op == CALL {
 				require.NoError(t, err)
 			} else {
@@ -81,7 +81,7 @@ func TestGasCallDoesNotCharge(t *testing.T) {
 			require.Zero(t, scope.stateGasSpill)
 			if op == CALL {
 				require.EqualValues(t, params.StateGasNewAccount, cost.State)
-				require.EqualValues(t, 100_000, evm.CallGasTemp())
+				require.EqualValues(t, 100_000, forwarded)
 				require.EqualValues(t, 100_000+params.ColdAccountAccessCostEIP8038-params.WarmStorageReadCostEIP2929+params.CallValueTransferGasEIP8038, cost.Execution)
 			}
 		})

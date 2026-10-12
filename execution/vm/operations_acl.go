@@ -210,8 +210,8 @@ func gasExtCodeCopyEIP2929(evm *EVM, callContext *CallContext, scopeGas mdgas.Md
 	return gas, nil
 }
 
-func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
-	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+func makeCallVariantGasCallEIP2929(oldCalculator callGasFunc) callGasFunc {
+	return func(evm *EVM, callContext *CallContext, scopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, uint64, error) {
 		addr := evm.internAddress(callContext.Stack.back(1))
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
 		// the cost to charge for cold access, if any, is Cold - Warm
@@ -221,7 +221,7 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
 			if scopeGas.Execution < coldCost {
-				return mdgas.MdGasCost{}, ErrOutOfGas
+				return mdgas.MdGasCost{}, 0, ErrOutOfGas
 			}
 			evm.IntraBlockState().AddAddressToAccessList(addr)
 			scopeGas.Execution -= coldCost
@@ -232,16 +232,16 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 		// - transfer value
 		// - memory expansion
 		// - 63/64ths rule
-		gas, err := oldCalculator(evm, callContext, scopeGas, memorySize)
+		gas, callGas, err := oldCalculator(evm, callContext, scopeGas, memorySize)
 		if warmAccess || err != nil {
-			return gas, err
+			return gas, callGas, err
 		}
 		// In case of a cold access, we temporarily add the cold charge back, and also
 		// add it to the returned gas. By adding it to the return, it will be charged
 		// outside of this function, as part of the dynamic gas, and that will make it
 		// also become correctly reported to tracers.
 		gas.Execution += coldCost
-		return gas, nil
+		return gas, callGas, nil
 	}
 }
 
@@ -313,12 +313,12 @@ var (
 	gasCallCodeEIP7702     = makeCallVariantGasCallEIP7702(statelessGasCallCode, statefulGasCallCode, false)
 )
 
-func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefulCalculator statefulGasFunc, rejectStaticValueTransfer bool) gasFunc {
-	return func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
+func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefulCalculator statefulGasFunc, rejectStaticValueTransfer bool) callGasFunc {
+	return func(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, uint64, error) {
 		// In static mode, CALL with value must fail before EIP-7702 can warm
 		// the target or delegated address.
 		if rejectStaticValueTransfer && evm.readOnly && !callContext.Stack.back(2).IsZero() {
-			return mdgas.MdGasCost{}, ErrWriteProtection
+			return mdgas.MdGasCost{}, 0, ErrWriteProtection
 		}
 		addr := evm.internAddress(callContext.Stack.back(1))
 		coldAccountAccess := coldAccountAccessCost(evm.ChainRules())
@@ -331,7 +331,7 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
 			if availableGas.Execution < accessGas {
-				return mdgas.MdGasCost{}, ErrOutOfGas
+				return mdgas.MdGasCost{}, 0, ErrOutOfGas
 			}
 
 			evm.intraBlockState.AddAddressToAccessList(addr)
@@ -341,39 +341,39 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 		// - create new account
 		// - transfer value
 		// - memory expansion
-		statelessBaseGas, transfersValue, err := statelessCalculator(evm, callContext, availableGas, memorySize, false)
+		statelessBaseGas, transfersValue, err := statelessCalculator(evm, callContext, availableGas, memorySize)
 		if err != nil {
-			return mdgas.MdGasCost{}, err
+			return mdgas.MdGasCost{}, 0, err
 		}
 		if statelessGas, overflow := math.SafeAdd(statelessBaseGas.Execution, accessGas); overflow {
-			return mdgas.MdGasCost{}, ErrGasUintOverflow
+			return mdgas.MdGasCost{}, 0, ErrGasUintOverflow
 		} else if availableGas.Execution < statelessGas {
-			return mdgas.MdGasCost{}, ErrOutOfGas
+			return mdgas.MdGasCost{}, 0, ErrOutOfGas
 		}
 
 		statefulBaseGas, err := statefulCalculator(evm, callContext, statelessBaseGas, mdgas.MdGas{Execution: availableGas.Execution - accessGas}, transfersValue)
 		if err != nil {
-			return mdgas.MdGasCost{}, err
+			return mdgas.MdGasCost{}, 0, err
 		}
 
 		// Account for base costs and state-gas spill before the 63/64 rule.
 		executionBase := accessGas + statefulBaseGas.Execution
 		if availableGas.Execution < executionBase {
-			return mdgas.MdGasCost{}, ErrOutOfGas
+			return mdgas.MdGasCost{}, 0, ErrOutOfGas
 		}
 		availableGas.Execution -= executionBase
 
 		if statefulBaseGas.State > 0 {
 			var used mdgas.MdGasUsage
 			if !mdgas.Consume(&availableGas, &used, uint64(statefulBaseGas.State), mdgas.StateGas) {
-				return mdgas.MdGasCost{}, ErrOutOfGas
+				return mdgas.MdGasCost{}, 0, ErrOutOfGas
 			}
 		}
 
 		// Check if code is a delegation and if so, charge for resolution.
 		dd, ok, err := evm.intraBlockState.GetDelegatedDesignation(addr)
 		if err != nil {
-			return mdgas.MdGasCost{}, err
+			return mdgas.MdGasCost{}, 0, err
 		}
 
 		var delegationGas uint64
@@ -385,34 +385,34 @@ func makeCallVariantGasCallEIP7702(statelessCalculator statelessGasFunc, statefu
 			}
 			_, err := evm.intraBlockState.GetCode(addr)
 			if err != nil {
-				return mdgas.MdGasCost{}, err
+				return mdgas.MdGasCost{}, 0, err
 			}
 			if availableGas.Execution < delegationGas {
-				return mdgas.MdGasCost{}, ErrOutOfGas
+				return mdgas.MdGasCost{}, 0, ErrOutOfGas
 			}
 			availableGas.Execution -= delegationGas
 			evm.intraBlockState.AddAddressToAccessList(dd)
 		}
 
 		// 63/64ths rule with the reduced gas (after base + state + delegation).
-		callGas, err := calcCallGas(evm, callContext, availableGas.Execution, 0)
+		forwarded, err := callGas(evm.chainRules.IsTangerineWhistle, availableGas.Execution, 0, callContext.Stack.back(0))
 		if err != nil {
-			return mdgas.MdGasCost{}, err
+			return mdgas.MdGasCost{}, 0, err
 		}
 
 		if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 			fmt.Printf("%d (%d.%d) Variant Gas: base %d, access: %d, delegation: %d, call: %d\n",
 				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(),
-				statefulBaseGas, accessGas, delegationGas, callGas)
+				statefulBaseGas, accessGas, delegationGas, forwarded)
 		}
 		gas := statefulBaseGas
 		var overflow bool
 		if gas.Execution, overflow = math.SafeAdd(gas.Execution, accessGas+delegationGas); overflow {
-			return mdgas.MdGasCost{}, ErrGasUintOverflow
+			return mdgas.MdGasCost{}, 0, ErrGasUintOverflow
 		}
-		if gas.Execution, overflow = math.SafeAdd(gas.Execution, callGas); overflow {
-			return mdgas.MdGasCost{}, ErrGasUintOverflow
+		if gas.Execution, overflow = math.SafeAdd(gas.Execution, forwarded); overflow {
+			return mdgas.MdGasCost{}, 0, ErrGasUintOverflow
 		}
-		return gas, nil
+		return gas, forwarded, nil
 	}
 }
