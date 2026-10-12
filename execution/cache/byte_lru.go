@@ -83,7 +83,11 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
 	b.c = newOtter(floor, weigh, func(e otter.DeletionEvent[uint64, V]) {
-		b.resident.Add(-weigh(e.Key, e.Value))
+		// A replacement is refunded by Add, synchronously with the Set that
+		// displaced the value; this path can run later, off the writer.
+		if e.Cause != otter.CauseReplacement {
+			b.resident.Add(-weigh(e.Key, e.Value))
+		}
 		if fn := b.onEvict.Load(); fn != nil {
 			(*fn)(e.Key, e.Value)
 		}
@@ -122,19 +126,21 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	if w > b.maxBytes {
 		return false
 	}
-	// Grow on the net change: replacing a live entry with one of its own size
-	// adds nothing, and reserving a chunk for it would hold envelope bytes that
-	// only Purge or Close returns.
-	delta := w
-	if old, present := b.c.GetIfPresent(key); present {
-		delta -= b.weigh(key, old)
-	}
-	if lim := b.limit.Load(); b.resident.Load()+delta > lim && lim < b.ceiling.Load() {
-		b.grow(delta)
+	// Account after the write, as one net add. Set reports the value it
+	// displaced, so no separate lookup is needed -- one would race a concurrent
+	// writer to the same key -- and charging the full weight up front would let
+	// several writers inflate residency enough to reserve chunks none of them
+	// needs. The deletion handler skips replacements for the same reason: this
+	// is the only place that refunds one, and it is synchronous with the Set.
+	// Set returns (new value, true) for an absent key and (displaced value,
+	// false) for a present one.
+	prev, inserted := b.c.Set(key, value)
+	if !inserted {
+		w -= b.weigh(key, prev)
 	}
 	b.resident.Add(w)
-	if old, present := b.c.Set(key, value); present && b.unbudgeted {
-		b.resident.Add(-b.weigh(key, old))
+	if lim := b.limit.Load(); b.resident.Load() > lim && lim < b.ceiling.Load() {
+		b.grow(0)
 	}
 	return true
 }
