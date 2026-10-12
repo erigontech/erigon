@@ -18,6 +18,7 @@ package p2p
 
 import (
 	"fmt"
+	"net"
 	"testing"
 
 	"github.com/libp2p/go-libp2p/core/network"
@@ -36,7 +37,11 @@ type connOpener struct {
 }
 
 func newConnOpener(t *testing.T) *connOpener {
-	rm, err := newResourceManager(testMaxPeerCount)
+	return newConnOpenerWithPeers(t, testMaxPeerCount)
+}
+
+func newConnOpenerWithPeers(t *testing.T, maxPeerCount uint64) *connOpener {
+	rm, err := newResourceManager(maxPeerCount)
 	require.NoError(t, err)
 	o := &connOpener{t: t, rm: rm}
 	t.Cleanup(func() {
@@ -48,7 +53,11 @@ func newConnOpener(t *testing.T) *connOpener {
 
 // open opens an inbound connection scope from addr ("/ip4/..." or "/ip6/...").
 func (o *connOpener) open(addr string) error {
-	scope, err := o.rm.OpenConnection(network.DirInbound, false, multiaddr.StringCast(addr+"/tcp/30303"))
+	return o.openDir(network.DirInbound, addr)
+}
+
+func (o *connOpener) openDir(dir network.Direction, addr string) error {
+	scope, err := o.rm.OpenConnection(dir, false, multiaddr.StringCast(addr+"/tcp/30303"))
 	if err == nil {
 		o.scopes = append(o.scopes, scope)
 	}
@@ -112,6 +121,28 @@ func TestResourceManagerCapsConnectionsPerIPv6Slash32(t *testing.T) {
 	require.ErrorContains(t, o.open("/ip6/2001:db8:ff00::1"), errPerSubnetLimit)
 }
 
+func TestResourceManagerKeepsDefaultPerIPv6Slash56Cap(t *testing.T) {
+	o := newConnOpener(t)
+	for i := range 8 {
+		require.NoError(t, o.open(fmt.Sprintf("/ip6/2001:db8:0:1::%x", i+1)))
+	}
+	require.ErrorContains(t, o.open("/ip6/2001:db8:0:1::ff"), errPerSubnetLimit)
+}
+
+// Inbound and outbound connections share the cap; mixing them keeps each direction below the
+// transient-scope limits of small machines.
+func TestResourceManagerKeepsDefaultPerIPv6Slash48Cap(t *testing.T) {
+	o := newConnOpenerWithPeers(t, 256) // the /32 cap (128) is then above the /48 cap (64)
+	for i := range 64 {
+		dir := network.DirInbound
+		if i%2 == 1 {
+			dir = network.DirOutbound
+		}
+		require.NoError(t, o.openDir(dir, fmt.Sprintf("/ip6/2001:db8:1:%x00::1", i)))
+	}
+	require.ErrorContains(t, o.open("/ip6/2001:db8:1:ff00::1"), errPerSubnetLimit)
+}
+
 func TestResourceManagerKeepsDefaultPerIPCap(t *testing.T) {
 	o := newConnOpener(t)
 	for range 8 {
@@ -126,7 +157,7 @@ func TestResourceManagerDoesNotCapPrivateAndLoopbackNetworks(t *testing.T) {
 	o := newConnOpener(t)
 	_, perBlock16 := subnetConnLimits(testMaxPeerCount)
 	// One IPv6 /56 per connection: go-libp2p also rate-limits each /56, private or not.
-	for _, format := range []string{"/ip4/10.0.0.%d", "/ip4/172.16.0.%d", "/ip4/192.168.1.%d", "/ip4/100.64.0.%d", "/ip4/169.254.1.%d", "/ip6/fd00:0:0:%x00::1"} {
+	for _, format := range []string{"/ip4/10.0.0.%d", "/ip4/172.16.0.%d", "/ip4/192.168.1.%d", "/ip4/100.64.0.%d", "/ip4/169.254.1.%d", "/ip6/fd00:0:0:%x00::1", "/ip6/fe80:0:0:%x00::1"} {
 		for i := range perBlock16 + 4 {
 			require.NoError(t, o.open(fmt.Sprintf(format, i+1)), format)
 		}
@@ -134,5 +165,24 @@ func TestResourceManagerDoesNotCapPrivateAndLoopbackNetworks(t *testing.T) {
 	}
 	for range perBlock16 + 4 {
 		require.NoError(t, o.open("/ip4/127.0.0.1"))
+	}
+}
+
+// QUIC asks an unverified source to prove its address once it exceeds a per-network burst; the
+// exemption from the caps must not remove that burst for private networks.
+func TestResourceManagerKeepsQUICSourceVerificationForPrivateNetworks(t *testing.T) {
+	rm, err := newResourceManager(testMaxPeerCount)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, rm.Close()) })
+	for _, ip := range []string{"10.0.0.1", "fd00::1"} {
+		addr := &net.UDPAddr{IP: net.ParseIP(ip), Port: 30303}
+		verified := false
+		for range 2 * privateNetworkConnLimit {
+			if rm.VerifySourceAddress(addr) {
+				verified = true
+				break
+			}
+		}
+		require.True(t, verified, ip)
 	}
 }

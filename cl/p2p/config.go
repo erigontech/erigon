@@ -174,18 +174,23 @@ func newResourceManager(maxPeerCount uint64) (network.ResourceManager, error) {
 			},
 		),
 		rcmgr.WithNetworkPrefixLimit(
-			unlimitedNetworks(append([]string{"127.0.0.0/8"}, privateCIDRList...)...),
-			unlimitedNetworks("::1/128", "fc00::/7", "fe80::/10"),
+			append(networkLimits(math.MaxInt, "127.0.0.0/8"), networkLimits(privateNetworkConnLimit, privateCIDRList...)...),
+			append(networkLimits(math.MaxInt, "::1/128"), networkLimits(privateNetworkConnLimit, "fc00::/7", "fe80::/10")...),
 		),
 	)
 }
 
-// unlimitedNetworks exempts loopback and the networks the gater treats as private from the
-// per-subnet caps.
-func unlimitedNetworks(prefixes ...string) []rcmgr.NetworkPrefixLimit {
+// privateNetworkConnLimit caps the connections of all addresses in one private network together.
+// It is far above any peer pool, and go-libp2p also uses half of it as the QUIC source-address
+// verification burst for that network, which an unlimited count would remove.
+const privateNetworkConnLimit = 1024
+
+// networkLimits exempts each prefix from the per-subnet caps and counts all its connections
+// against one connCount instead. Used for loopback and the networks the gater treats as private.
+func networkLimits(connCount int, prefixes ...string) []rcmgr.NetworkPrefixLimit {
 	out := make([]rcmgr.NetworkPrefixLimit, 0, len(prefixes))
 	for _, p := range prefixes {
-		out = append(out, rcmgr.NetworkPrefixLimit{Network: netip.MustParsePrefix(p), ConnCount: math.MaxInt})
+		out = append(out, rcmgr.NetworkPrefixLimit{Network: netip.MustParsePrefix(p), ConnCount: connCount})
 	}
 	return out
 }
