@@ -34,6 +34,11 @@ func (r *fieldReader) ReadAccountByPlainAddr(address common.Address) (*accounts.
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
+func (r *fieldReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
 func (r *fieldReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(addr)
 }

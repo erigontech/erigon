@@ -1998,6 +1998,11 @@ func (vr *versionedStateReader) ReadAccountByPlainAddr(address common.Address) (
 	return vr.ReadAccountData(accounts.InternAddress(address))
 }
 
+func (vr *versionedStateReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := vr.ReadAccountData(address)
+	return acc != nil, err
+}
+
 // Per-path versionedUpdate helpers replace the legacy generic
 // versionedUpdate[T] — they consume the typed VersionMap Read primitives
 // directly so neither the call site nor the read path crosses an any

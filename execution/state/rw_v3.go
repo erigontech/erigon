@@ -1640,6 +1640,11 @@ func (r *bufferedReader) ReadAccountByPlainAddr(address common.Address) (*accoun
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
+func (r *bufferedReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
 func (r *bufferedReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	var data *accounts.Account
 
