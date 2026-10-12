@@ -37,13 +37,12 @@ import (
 	"github.com/erigontech/erigon/execution/vm/program"
 )
 
-// Before Cancun, a contract deployed and destroyed in the block is revived by a
-// block-end withdrawal as a new account with nonce 0. Parallel execution must
-// accept the block built by the serial generator.
-func TestWithdrawalRevivesDestroyedContract(t *testing.T) {
+// Before Cancun, a contract deployed and destroyed in the block is revived as a
+// new account by a credit that writes neither its nonce nor its code hash.
+// Parallel execution must accept the block built by the serial generator.
+func TestCreditRevivesDestroyedContract(t *testing.T) {
 	prev := dbg.Exec3Parallel
 	t.Cleanup(func() { dbg.Exec3Parallel = prev })
-	dbg.Exec3Parallel = false
 
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
@@ -52,33 +51,56 @@ func TestWithdrawalRevivesDestroyedContract(t *testing.T) {
 	initCode := program.New().ReturnViaCodeCopy(runtime).Bytes()
 	factory := common.HexToAddress("0xaaaa")
 	contract := types.CreateAddress2(factory, [32]byte{31: 1}, accounts.InternCodeHash(crypto.Keccak256Hash(initCode)))
-
 	config := chain.TestChainOsakaConfig.Copy()
 	config.CancunTime, config.PragueTime, config.OsakaTime = nil, nil, nil
-	gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
-		sender:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
-		factory: {Code: program.New().Create2(initCode, 1).Op(vm.POP).Bytes()},
-	}}
-	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 	signer := types.LatestSignerForChainID(config.ChainID)
-	chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
-		for _, to := range []common.Address{factory, contract} {
-			txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), to, uint256.NewInt(0), 500_000, uint256.NewInt(10_000_000_000), nil), *signer, key)
-			require.NoError(t, err)
-			b.AddTx(txn)
-		}
-		b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: contract, Amount: 7})
-	})
-	require.NoError(t, err)
 
-	dbg.Exec3Parallel = true
-	require.NoError(t, m.InsertChain(chainPack))
-	require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
-		st := state.New(m.NewStateReader(tx))
-		defer st.Close()
-		nonce, err := st.GetNonce(accounts.InternAddress(contract))
-		require.NoError(t, err)
-		require.Zero(t, nonce)
-		return nil
-	}))
+	for _, tc := range []struct {
+		name string
+		fill func(b *blockgen.BlockGen, send func(to common.Address))
+	}{
+		{"withdrawal", func(b *blockgen.BlockGen, send func(common.Address)) {
+			send(factory)
+			send(contract)
+			b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 1, Address: contract, Amount: 7})
+		}},
+		{"coinbase-tip", func(b *blockgen.BlockGen, send func(common.Address)) {
+			b.SetCoinbase(contract)
+			send(factory)
+			send(contract)
+			send(common.HexToAddress("0xbbbb"))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dbg.Exec3Parallel = false
+			gspec := &types.Genesis{Config: config, GasLimit: 30_000_000, Alloc: types.GenesisAlloc{
+				sender:  {Balance: big.NewInt(1_000_000_000_000_000_000)},
+				factory: {Code: program.New().Create2(initCode, 1).Op(vm.POP).Bytes()},
+			}}
+			m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+			chainPack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+				tc.fill(b, func(to common.Address) {
+					txn, err := types.SignTx(types.NewTransaction(b.TxNonce(sender), to, uint256.NewInt(0), 500_000, uint256.NewInt(10_000_000_000), nil), *signer, key)
+					require.NoError(t, err)
+					b.AddTx(txn)
+				})
+			})
+			require.NoError(t, err)
+
+			dbg.Exec3Parallel = true
+			require.NoError(t, m.InsertChain(chainPack))
+			require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
+				st := state.New(m.NewStateReader(tx))
+				defer st.Close()
+				addr := accounts.InternAddress(contract)
+				nonce, err := st.GetNonce(addr)
+				require.NoError(t, err)
+				require.Zero(t, nonce)
+				hash, err := st.GetCodeHash(addr)
+				require.NoError(t, err)
+				require.Equal(t, accounts.EmptyCodeHash, hash)
+				return nil
+			}))
+		})
+	}
 }
