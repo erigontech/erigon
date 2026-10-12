@@ -76,11 +76,9 @@ type addrCodeHashEntry struct {
 // because precompile and test addresses share eight zero leading bytes, which
 // would collapse every one of them onto a single slot.
 //
-// ponytail: two addresses sharing their low 8 bytes evict each other on every
-// put. Reads stay correct -- the entry carries the full address, so a collision
-// is a miss -- but the pairs that collide here are the structured ones,
-// precompiles and fixtures, whose low bytes are small and dense. Widen the key
-// to the full address if a workload ever shows the thrash.
+// ponytail: the slot is 8 of the 20 address bytes, so two addresses can share
+// one and evict each other; the stored entry carries the full address, which is
+// what every read checks.
 func addrSlot(a common.Address) uint64 { return binary.BigEndian.Uint64(a[length.Addr-8:]) }
 
 // Per-entry residency of the two addr-keyed LRUs: a 20-byte key plus the
