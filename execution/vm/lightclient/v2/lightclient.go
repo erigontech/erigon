@@ -36,6 +36,78 @@ type ConsensusState struct {
 	ValidatorSet         *types.ValidatorSet
 }
 
+type validatorDuplicateTracker struct {
+	field      string
+	seen       map[string]int
+	ignoreZero bool
+}
+
+func newValidatorDuplicateTracker(field string, size int, ignoreZero bool) *validatorDuplicateTracker {
+	return &validatorDuplicateTracker{
+		field:      field,
+		seen:       make(map[string]int, size),
+		ignoreZero: ignoreZero,
+	}
+}
+
+func (t *validatorDuplicateTracker) check(idx int, value []byte) error {
+	// Omitted and zero-filled bridge keys both mean "unset", so they never collide.
+	if t.ignoreZero && (len(value) == 0 || isZeroBytes(value)) {
+		return nil
+	}
+
+	key := string(value)
+	if firstIdx, ok := t.seen[key]; ok {
+		return fmt.Errorf("duplicate validator %s #%d and #%d: %X", t.field, firstIdx, idx, value)
+	}
+	t.seen[key] = idx
+	return nil
+}
+
+func isZeroBytes(value []byte) bool {
+	if len(value) == 0 {
+		return false
+	}
+	for _, b := range value {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func validateUniqueValidatorSet(validatorSet *types.ValidatorSet) error {
+	if validatorSet == nil {
+		return nil
+	}
+
+	size := len(validatorSet.Validators)
+	addresses := newValidatorDuplicateTracker("address", size, false)
+	pubKeys := newValidatorDuplicateTracker("pubkey", size, false)
+	blsKeys := newValidatorDuplicateTracker("bls key", size, true)
+	relayerAddresses := newValidatorDuplicateTracker("relayer address", size, true)
+
+	for idx, validator := range validatorSet.Validators {
+		if validator == nil || validator.PubKey == nil {
+			return fmt.Errorf("invalid validator #%d", idx)
+		}
+		if err := addresses.check(idx, validator.Address); err != nil {
+			return err
+		}
+		if err := pubKeys.check(idx, validator.PubKey.Bytes()); err != nil {
+			return err
+		}
+		if err := blsKeys.check(idx, validator.BlsKey); err != nil {
+			return err
+		}
+		if err := relayerAddresses.check(idx, validator.RelayerAddress); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // output:
 // | chainID   | height   | nextValidatorSetHash | [{validator pubkey, voting power, relayer address, relayer bls pubkey}] |
 // | 32 bytes  | 8 bytes  | 32 bytes             | [{32 bytes, 8 bytes, 20 bytes, 48 bytes}]                               |
@@ -135,11 +207,14 @@ func (cs *ConsensusState) ApplyLightBlock(block *types.LightBlock, isHertz bool)
 // input:
 // | chainID   | height   | nextValidatorSetHash | [{validator pubkey, voting power, relayer address, relayer bls pubkey}] |
 // | 32 bytes  | 8 bytes  | 32 bytes             | [{32 bytes, 8 bytes, 20 bytes, 48 bytes}]                               |
-func DecodeConsensusState(input []byte) (ConsensusState, error) {
+func DecodeConsensusState(input []byte, requireUniqueValidators bool) (ConsensusState, error) {
 	minimumLength := chainIDLength + heightLength + validatorSetHashLength
 	inputLen := uint64(len(input))
 	if inputLen <= minimumLength || (inputLen-minimumLength)%singleValidatorBytesLength != 0 {
 		return ConsensusState{}, fmt.Errorf("expected input size %d+%d*N, actual input size: %d", minimumLength, singleValidatorBytesLength, inputLen)
+	}
+	if inputLen > maxConsensusStateLength {
+		return ConsensusState{}, fmt.Errorf("consensus state too large: %d bytes exceeds maximum %d (max 99 validators)", inputLen, maxConsensusStateLength)
 	}
 
 	pos := uint64(0)
@@ -187,6 +262,11 @@ func DecodeConsensusState(input []byte) (ConsensusState, error) {
 			Validators: validatorSet,
 		},
 	}
+	if requireUniqueValidators {
+		if err := validateUniqueValidatorSet(consensusState.ValidatorSet); err != nil {
+			return ConsensusState{}, err
+		}
+	}
 
 	return consensusState, nil
 }
@@ -194,17 +274,20 @@ func DecodeConsensusState(input []byte) (ConsensusState, error) {
 // input:
 // consensus state length | consensus state | light block |
 // 32 bytes               |                 |             |
-func DecodeLightBlockValidationInput(input []byte) (*ConsensusState, *types.LightBlock, error) {
+func DecodeLightBlockValidationInput(input []byte, requireUniqueValidators bool) (*ConsensusState, *types.LightBlock, error) {
 	if uint64(len(input)) <= consensusStateLengthBytesLength {
 		return nil, nil, errors.New("invalid input")
 	}
 
 	csLen := binary.BigEndian.Uint64(input[consensusStateLengthBytesLength-uint64TypeLength : consensusStateLengthBytesLength])
+	if consensusStateLengthBytesLength+csLen < consensusStateLengthBytesLength {
+		return nil, nil, fmt.Errorf("integer overflow, csLen: %d", csLen)
+	}
 	if uint64(len(input)) <= consensusStateLengthBytesLength+csLen {
 		return nil, nil, fmt.Errorf("expected payload size %d, actual size: %d", consensusStateLengthBytesLength+csLen, len(input))
 	}
 
-	cs, err := DecodeConsensusState(input[consensusStateLengthBytesLength : consensusStateLengthBytesLength+csLen])
+	cs, err := DecodeConsensusState(input[consensusStateLengthBytesLength:consensusStateLengthBytesLength+csLen], requireUniqueValidators)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -217,6 +300,11 @@ func DecodeLightBlockValidationInput(input []byte) (*ConsensusState, *types.Ligh
 	block, err := types.LightBlockFromProto(&lbpb)
 	if err != nil {
 		return nil, nil, err
+	}
+	if requireUniqueValidators {
+		if err := validateUniqueValidatorSet(block.ValidatorSet); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	return &cs, block, nil

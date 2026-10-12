@@ -156,6 +156,62 @@ func TestChapelMendelPrecompiles(t *testing.T) {
 	}
 }
 
+func TestChapelIsPasteur(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+	cfg := spec.Config
+
+	require.NotNil(t, cfg.PasteurTime)
+	assert.Equal(t, uint64(1784601000), *cfg.PasteurTime)
+	assert.False(t, cfg.IsPasteur(120346348, 1784600999))
+	assert.True(t, cfg.IsPasteur(120346349, 1784601000))
+	assert.False(t, cfg.IsPasteur(*cfg.LondonBlock-1, *cfg.PasteurTime))
+}
+
+// TestChapelPasteurPrecompiles pins the Pasteur precompile set on the first Pasteur
+// block: the legacy Tendermint precompiles are deprecated and the CometBFT light-block
+// precompile is priced per input byte.
+func TestChapelPasteurPrecompiles(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+
+	addr := func(b ...byte) accounts.Address { return accounts.InternAddress(common.BytesToAddress(b)) }
+	tmHeader, iavlProof, cometBFT := addr(0x64), addr(0x65), addr(0x67)
+	input := make([]byte, 1000)
+
+	for _, tc := range []struct {
+		name        string
+		block       uint64
+		time        uint64
+		tmHeader    string
+		iavlProof   string
+		cometBFT    string
+		cometBFTGas uint64
+	}{
+		{"mendel", 120346348, 1784600999, "TMHeaderValidate", "IAVLMerkleProofValidatePlato", "CometBFTLightBlockValidateHertz", 3000},
+		{"pasteur", 120346349, 1784601000, "TMHeaderValidateDeprecated", "IAVLMerkleProofValidateDeprecated", "CometBFTLightBlockValidatePasteur", 3000 + 16*1000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blockContext := evmtypes.BlockContext{BlockNumber: tc.block, Time: tc.time}
+			rules := blockContext.Rules(spec.Config)
+			set := vm.Precompiles(rules)
+			assert.ElementsMatch(t, slices.Collect(maps.Keys(set)), vm.ActivePrecompiles(rules))
+			assert.ElementsMatch(t, slices.Collect(maps.Keys(vm.PrecompiledContractsOsakaForBSC)), vm.ActivePrecompiles(rules))
+
+			assert.Equal(t, tc.tmHeader, set[tmHeader].Name())
+			assert.Equal(t, tc.iavlProof, set[iavlProof].Name())
+			assert.Equal(t, tc.cometBFT, set[cometBFT].Name())
+			assert.Equal(t, params.TendermintHeaderValidateGas, set[tmHeader].RequiredGas(input))
+			assert.Equal(t, params.IAVLMerkleProofValidateGas, set[iavlProof].RequiredGas(input))
+			assert.Equal(t, tc.cometBFTGas, set[cometBFT].RequiredGas(input))
+		})
+	}
+}
+
 func TestChapelSpec(t *testing.T) {
 	t.Parallel()
 

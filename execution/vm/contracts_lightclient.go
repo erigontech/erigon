@@ -191,6 +191,30 @@ func (c *iavlMerkleProofValidateNano) Run(input []byte) (result []byte, err erro
 
 func (c *iavlMerkleProofValidateNano) Name() string { return "IAVLMerkleProofValidateNano" }
 
+var errDeprecatedPrecompile = errors.New("deprecated")
+
+type tmHeaderValidateDeprecated struct{}
+
+func (c *tmHeaderValidateDeprecated) RequiredGas([]byte) uint64 {
+	return params2.TendermintHeaderValidateGas
+}
+
+func (c *tmHeaderValidateDeprecated) Run([]byte) ([]byte, error) { return nil, errDeprecatedPrecompile }
+
+func (c *tmHeaderValidateDeprecated) Name() string { return "TMHeaderValidateDeprecated" }
+
+type iavlMerkleProofValidateDeprecated struct{}
+
+func (c *iavlMerkleProofValidateDeprecated) RequiredGas([]byte) uint64 {
+	return params2.IAVLMerkleProofValidateGas
+}
+
+func (c *iavlMerkleProofValidateDeprecated) Run([]byte) ([]byte, error) {
+	return nil, errDeprecatedPrecompile
+}
+
+func (c *iavlMerkleProofValidateDeprecated) Name() string { return "IAVLMerkleProofValidateDeprecated" }
+
 // ------------------------------------------------------------------------------------------------------------------------------------------------
 type iavlMerkleProofValidateMoran struct {
 	basicIavlMerkleProofValidate
@@ -481,14 +505,14 @@ func (c *cometBFTLightBlockValidate) RequiredGas(input []byte) uint64 {
 	return params2.CometBFTLightBlockValidateGas
 }
 
-func (c *cometBFTLightBlockValidate) run(input []byte, isHertz bool) (result []byte, err error) {
+func (c *cometBFTLightBlockValidate) run(input []byte, isHertz, requireUniqueValidators bool) (result []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("internal error: %v", r)
 		}
 	}()
 
-	cs, block, err := v2.DecodeLightBlockValidationInput(input)
+	cs, block, err := v2.DecodeLightBlockValidationInput(input, requireUniqueValidators)
 	if err != nil {
 		return nil, err
 	}
@@ -507,7 +531,7 @@ func (c *cometBFTLightBlockValidate) run(input []byte, isHertz bool) (result []b
 }
 
 func (c *cometBFTLightBlockValidate) Run(input []byte) (result []byte, err error) {
-	return c.run(input, false)
+	return c.run(input, false, false)
 }
 
 // cometBFTLightBlockValidateHertz corrects the validator-set-changed flag, which the
@@ -520,7 +544,23 @@ type cometBFTLightBlockValidateHertz struct {
 func (c *cometBFTLightBlockValidateHertz) Name() string { return "CometBFTLightBlockValidateHertz" }
 
 func (c *cometBFTLightBlockValidateHertz) Run(input []byte) (result []byte, err error) {
-	return c.run(input, true)
+	return c.run(input, true, false)
+}
+
+// cometBFTLightBlockValidatePasteur prices the input per byte, so cost scales with the
+// validator and signature count, and rejects validator sets with duplicate keys.
+type cometBFTLightBlockValidatePasteur struct {
+	cometBFTLightBlockValidate
+}
+
+func (c *cometBFTLightBlockValidatePasteur) Name() string { return "CometBFTLightBlockValidatePasteur" }
+
+func (c *cometBFTLightBlockValidatePasteur) RequiredGas(input []byte) uint64 {
+	return params2.CometBFTLightBlockValidateGas + uint64(len(input))*params2.CometBFTLightBlockValidatePerByteGas
+}
+
+func (c *cometBFTLightBlockValidatePasteur) Run(input []byte) (result []byte, err error) {
+	return c.run(input, true, true)
 }
 
 type verifyDoubleSignEvidence struct{}

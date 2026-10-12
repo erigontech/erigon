@@ -3,13 +3,15 @@ package v2
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
-	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/cometbft/cometbft/crypto/ed25519"
+	tmproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	"github.com/cometbft/cometbft/types"
 )
 
@@ -144,7 +146,7 @@ func TestDecodeConsensusState(t *testing.T) {
 		csBytes, err := hex.DecodeString(testcase.consensusStateBytes)
 		require.NoError(t, err)
 
-		cs, err := DecodeConsensusState(csBytes)
+		cs, err := DecodeConsensusState(csBytes, false)
 		require.NoError(t, err)
 
 		if cs.ChainID != testcase.chainID {
@@ -182,7 +184,7 @@ func TestConsensusStateApplyLightBlock(t *testing.T) {
 		block, err := types.LightBlockFromProto(&lbpb)
 		require.NoError(t, err)
 
-		cs, err := DecodeConsensusState(csBytes)
+		cs, err := DecodeConsensusState(csBytes, false)
 		require.NoError(t, err)
 		validatorSetChanged, err := cs.ApplyLightBlock(block, true)
 		require.NoError(t, err)
@@ -195,4 +197,137 @@ func TestConsensusStateApplyLightBlock(t *testing.T) {
 			t.Fatalf("Validator set changed is unexpected, expected: %v, actual: %v\n", testcase.expectValSetChanged, validatorSetChanged)
 		}
 	}
+}
+
+func TestDecodeConsensusStateWithValidationRejectsDuplicateValidators(t *testing.T) {
+	csBytes, err := hex.DecodeString(testcases[0].consensusStateBytes)
+	require.NoError(t, err)
+
+	validatorBytes := csBytes[chainIDLength+heightLength+validatorSetHashLength:]
+	duplicateConsensusState := append([]byte{}, csBytes[:chainIDLength+heightLength+validatorSetHashLength]...)
+	duplicateConsensusState = append(duplicateConsensusState, validatorBytes...)
+	duplicateConsensusState = append(duplicateConsensusState, validatorBytes...)
+
+	_, err = DecodeConsensusState(duplicateConsensusState, false)
+	require.NoError(t, err)
+	_, err = DecodeConsensusState(duplicateConsensusState, true)
+	require.ErrorContains(t, err, "duplicate validator")
+}
+
+func TestValidateUniqueValidatorSetRejectsDuplicateBridgeKeys(t *testing.T) {
+	makeValidator := func(info validatorInfo) *types.Validator {
+		t.Helper()
+
+		pubKeyBytes, err := hex.DecodeString(info.pubKey)
+		require.NoError(t, err)
+		relayerAddress, err := hex.DecodeString(info.relayerAddress)
+		require.NoError(t, err)
+		relayerBlsKey, err := hex.DecodeString(info.relayerBlsKey)
+		require.NoError(t, err)
+
+		pubkey := ed25519.PubKey(make([]byte, ed25519.PubKeySize))
+		copy(pubkey[:], pubKeyBytes)
+		validator := types.NewValidator(pubkey, info.votingPower)
+		validator.SetRelayerAddress(relayerAddress)
+		validator.SetBlsKey(relayerBlsKey)
+		return validator
+	}
+
+	t.Run("duplicate bls key", func(t *testing.T) {
+		first := makeValidator(testcases[1].vals[0])
+		second := makeValidator(testcases[1].vals[1])
+		second.SetBlsKey(append([]byte{}, first.BlsKey...))
+
+		err := validateUniqueValidatorSet(&types.ValidatorSet{Validators: []*types.Validator{first, second}})
+		require.ErrorContains(t, err, "duplicate validator bls key")
+	})
+
+	t.Run("duplicate relayer address", func(t *testing.T) {
+		first := makeValidator(testcases[1].vals[0])
+		second := makeValidator(testcases[1].vals[1])
+		second.SetRelayerAddress(append([]byte{}, first.RelayerAddress...))
+
+		err := validateUniqueValidatorSet(&types.ValidatorSet{Validators: []*types.Validator{first, second}})
+		require.ErrorContains(t, err, "duplicate validator relayer address")
+	})
+}
+
+func TestDecodeConsensusStateWithValidationAllowsUnsetBridgeKeys(t *testing.T) {
+	makeValidator := func(seed byte) *types.Validator {
+		pubkey := ed25519.PubKey(make([]byte, ed25519.PubKeySize))
+		for i := range pubkey {
+			pubkey[i] = seed + byte(i) + 1
+		}
+		return types.NewValidator(pubkey, 100)
+	}
+
+	consensusState := ConsensusState{
+		ChainID:              "chain_9000-121",
+		Height:               1,
+		NextValidatorSetHash: bytes.Repeat([]byte{0xAB}, int(validatorSetHashLength)),
+		ValidatorSet: &types.ValidatorSet{
+			Validators: []*types.Validator{makeValidator(0x01), makeValidator(0x02)},
+		},
+	}
+
+	csBytes, err := consensusState.EncodeConsensusState()
+	require.NoError(t, err)
+
+	_, err = DecodeConsensusState(csBytes, true)
+	require.NoError(t, err)
+}
+
+func TestDecodeLightBlockValidationInputAllowsUnsetBlockBridgeKeys(t *testing.T) {
+	csBytes, err := hex.DecodeString(applyBlocksTestcases[0].consensusStateBytes)
+	require.NoError(t, err)
+
+	blockBytes, err := hex.DecodeString(applyBlocksTestcases[0].lightBlockBytes)
+	require.NoError(t, err)
+
+	var lbpb tmproto.LightBlock
+	require.NoError(t, lbpb.Unmarshal(blockBytes))
+	block, err := types.LightBlockFromProto(&lbpb)
+	require.NoError(t, err)
+
+	for _, validator := range block.ValidatorSet.Validators {
+		validator.SetBlsKey(nil)
+		validator.SetRelayerAddress(nil)
+	}
+
+	blockProto, err := block.ToProto()
+	require.NoError(t, err)
+	blockBytes, err = blockProto.Marshal()
+	require.NoError(t, err)
+
+	csLength := make([]byte, consensusStateLengthBytesLength)
+	binary.BigEndian.PutUint64(csLength[consensusStateLengthBytesLength-uint64TypeLength:], uint64(len(csBytes)))
+	input := slices.Concat(csLength, csBytes, blockBytes)
+
+	_, _, err = DecodeLightBlockValidationInput(input, true)
+	require.NoError(t, err)
+}
+
+func TestDecodeConsensusStateRejectsMoreThan99Validators(t *testing.T) {
+	csBytes, err := hex.DecodeString(testcases[0].consensusStateBytes)
+	require.NoError(t, err)
+
+	header := csBytes[:chainIDLength+heightLength+validatorSetHashLength]
+	validator := csBytes[len(header) : uint64(len(header))+singleValidatorBytesLength]
+	oversized := append([]byte{}, header...)
+	for range 100 {
+		oversized = append(oversized, validator...)
+	}
+
+	_, err = DecodeConsensusState(oversized[:maxConsensusStateLength], false)
+	require.NoError(t, err)
+	_, err = DecodeConsensusState(oversized, false)
+	require.ErrorContains(t, err, "consensus state too large")
+}
+
+func TestDecodeLightBlockValidationInputRejectsOverflowingLength(t *testing.T) {
+	input := make([]byte, consensusStateLengthBytesLength+1)
+	binary.BigEndian.PutUint64(input[consensusStateLengthBytesLength-uint64TypeLength:], ^uint64(0))
+
+	_, _, err := DecodeLightBlockValidationInput(input, false)
+	require.ErrorContains(t, err, "integer overflow")
 }

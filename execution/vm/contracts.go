@@ -74,6 +74,8 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 // stays active forever.
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 	switch {
+	case chainRules.IsPasteur:
+		return PrecompiledContractsPasteurForBSC
 	case chainRules.IsOsaka:
 		if chainRules.IsParlia {
 			return PrecompiledContractsOsakaForBSC
@@ -316,6 +318,14 @@ var PrecompiledContractsOsakaForBSC = func() PrecompiledContracts {
 	return m
 }()
 
+var PrecompiledContractsPasteurForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsOsakaForBSC)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{0x64}))] = &tmHeaderValidateDeprecated{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{0x65}))] = &iavlMerkleProofValidateDeprecated{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{0x67}))] = &cometBFTLightBlockValidatePasteur{}
+	return m
+}()
+
 var (
 	PrecompiledAddressesOsaka          []accounts.Address
 	PrecompiledAddressesPrague         []accounts.Address
@@ -334,6 +344,7 @@ var (
 	PrecompiledAddressesHaberForBSC    []accounts.Address
 	PrecompiledAddressesPragueForBSC   []accounts.Address
 	PrecompiledAddressesOsakaForBSC    []accounts.Address
+	PrecompiledAddressesPasteurForBSC  []accounts.Address
 	PrecompiledAddressesByzantium      []accounts.Address
 	PrecompiledAddressesHomestead      []accounts.Address
 )
@@ -384,6 +395,9 @@ func init() {
 	for k := range PrecompiledContractsOsakaForBSC {
 		PrecompiledAddressesOsakaForBSC = append(PrecompiledAddressesOsakaForBSC, k)
 	}
+	for k := range PrecompiledContractsPasteurForBSC {
+		PrecompiledAddressesPasteurForBSC = append(PrecompiledAddressesPasteurForBSC, k)
+	}
 	for k := range PrecompiledContractsBerlin {
 		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
 	}
@@ -401,6 +415,8 @@ func init() {
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 	switch {
+	case rules.IsPasteur:
+		return PrecompiledAddressesPasteurForBSC
 	case rules.IsOsaka:
 		if rules.IsParlia {
 			return PrecompiledAddressesOsakaForBSC

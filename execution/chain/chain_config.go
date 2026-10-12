@@ -474,6 +474,10 @@ func (c *Config) IsHaber(num, time uint64) bool {
 	return c.IsLondon(num) && isForked(c.HaberTime, time)
 }
 
+func (c *Config) IsPasteur(num, time uint64) bool {
+	return c.IsLondon(num) && isForked(c.PasteurTime, time)
+}
+
 func (c *Config) GetBurntContract(num uint64) accounts.Address {
 	if len(c.BurntContract) == 0 {
 		return accounts.NilAddress
@@ -888,6 +892,7 @@ type Rules struct {
 	IsAura                                            bool
 	IsParlia, IsNano, IsMoran, IsPlanck               bool
 	IsLuban, IsPlato, IsHertz, IsFeynman, IsHaber     bool
+	IsPasteur                                         bool
 
 	// L2Version is the L2 stack's own upgrade version (e.g. an ArbOS-style
 	// version ladder), resolved per block by the chain's L2Config oracle.
