@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -213,6 +214,38 @@ func (b *bucketStore) stream(w io.Writer, slot uint64, root common.Hash, idx uin
 // pruneBelow removes every bucket that ends before slot. It attempts all of them and
 // returns the first failure, so one bucket that cannot be removed — an open file blocks
 // its directory on Windows — does not stop the rest.
+// The returned slot is where the lowest non-empty bucket starts, which can be below the
+// first sidecar actually stored in it.
+func (b *bucketStore) lowestStoredSlot() (uint64, bool, error) {
+	entries, err := afero.ReadDir(b.fs, ".")
+	if err != nil {
+		return 0, false, err
+	}
+	buckets := make([]uint64, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		bucket, err := strconv.ParseUint(name, 10, 64)
+		if err != nil || strconv.FormatUint(bucket, 10) != name {
+			continue
+		}
+		buckets = append(buckets, bucket)
+	}
+	slices.Sort(buckets)
+	for _, bucket := range buckets {
+		files, err := afero.ReadDir(b.fs, strconv.FormatUint(bucket, 10))
+		if err != nil {
+			return 0, false, err
+		}
+		if len(files) > 0 {
+			return bucket * subdivisionSlot, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
 func (b *bucketStore) pruneBelow(slot uint64) error {
 	if slot == 0 {
 		return nil

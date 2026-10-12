@@ -788,3 +788,23 @@ func TestBucketStoreWriteSurfacesAShortWriteFromTheFinalFlush(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, exists)
 }
+
+func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	b := newBucketStore(t, fs)
+
+	_, ok, err := b.lowestStoredSlot()
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	makeBuckets(t, fs, "2", "3", "5", "07")
+	require.NoError(t, afero.WriteFile(fs, "3/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "5/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "07/root_0", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "1", []byte{1}, 0o644))
+
+	slot, ok, err := b.lowestStoredSlot()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(3*subdivisionSlot), slot)
+}
