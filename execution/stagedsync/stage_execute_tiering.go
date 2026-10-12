@@ -55,7 +55,7 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, doms *execctx.Share
 	mxTieringColdBoundaryBlock.SetUint64(boundary)
 	var commitmentLag tiering.Lag
 	for _, d := range []kv.Domain{kv.CommitmentDomain, kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		files, err := tieringFiles(tx.Debug().DomainFiles(d))
+		files, err := tieringFiles(tiering.KVFiles(tx.Debug().DomainFiles(d)))
 		if err != nil {
 			return err
 		}
@@ -77,7 +77,7 @@ func reportTiering(ctx context.Context, cfg ExecuteBlockCfg, doms *execctx.Share
 		return nil
 	}
 	tieringLoggedAt.Store(now.UnixNano())
-	cold := tiering.ColdFiles(tx.Debug().DomainFiles(kv.CommitmentDomain), boundaryTxNum)
+	cold := tiering.ColdFiles(tiering.KVFiles(tx.Debug().DomainFiles(kv.CommitmentDomain)), boundaryTxNum)
 	names := make([]string, len(cold))
 	for i, f := range cold {
 		names[i] = filepath.Base(f.Fullpath())

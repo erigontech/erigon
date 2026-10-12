@@ -31,15 +31,18 @@ func TestColdBoundary(t *testing.T) {
 	require.Zero(t, ColdBoundary(216_000, 216_000))
 }
 
-type file struct{ start, end uint64 }
+type file struct {
+	start, end uint64
+	path       string
+}
 
-func (f file) Fullpath() string         { return "" }
+func (f file) Fullpath() string         { return f.path }
 func (f file) StartRootNum() uint64     { return f.start }
 func (f file) EndRootNum() uint64       { return f.end }
 func (f file) Version() version.Version { return version.Version{} }
 
 func TestColdFiles(t *testing.T) {
-	f0, f1, f2 := file{0, 100}, file{100, 150}, file{150, 160}
+	f0, f1, f2 := file{start: 0, end: 100}, file{start: 100, end: 150}, file{start: 150, end: 160}
 	files := kv.VisibleFiles{f0, f1, f2}
 	require.Empty(t, ColdFiles(files, 99))
 	require.Equal(t, kv.VisibleFiles{f0}, ColdFiles(files, 100))
@@ -62,4 +65,9 @@ func TestLag(t *testing.T) {
 
 	require.Equal(t, Lag{CopyPending: Usage{Files: 2, Bytes: 1500}}, ComputeLag(files, 150, ""), "no cold dir; end == boundary is fully cold")
 	require.Equal(t, Lag{CopyPending: Usage{Files: 1, Bytes: 1000}}, ComputeLag(files, 100, "/hdd/dom"), "prefix of a dir name is not the cold dir")
+}
+
+func TestKVFiles(t *testing.T) {
+	kvFile, history, ii := file{path: "/d/domain/v2.0-accounts.0-8192.kv"}, file{path: "/d/history/v2.0-accounts.0-8192.v"}, file{path: "/d/idx/v2.0-accounts.0-8192.ef"}
+	require.Equal(t, kv.VisibleFiles{kvFile}, KVFiles(kv.VisibleFiles{kvFile, history, ii}))
 }

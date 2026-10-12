@@ -31,6 +31,17 @@ func ColdBoundary(head, lookback uint64) uint64 {
 	return head - lookback
 }
 
+// KVFiles keeps only the domain data files: a domain's visible files also include its history and index files.
+func KVFiles(files kv.VisibleFiles) kv.VisibleFiles {
+	var res kv.VisibleFiles
+	for _, f := range files {
+		if filepath.Ext(f.Fullpath()) == ".kv" {
+			res = append(res, f)
+		}
+	}
+	return res
+}
+
 // ColdFiles returns the files that hold only txnums below boundaryTxNum.
 func ColdFiles(files kv.VisibleFiles, boundaryTxNum uint64) kv.VisibleFiles {
 	var cold kv.VisibleFiles
