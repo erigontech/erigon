@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 // makeCodeHash builds a deterministic 32-byte codeHash for tests/benchmarks.
@@ -338,4 +339,43 @@ func TestCodeCache_AddrCodeSlotCollision(t *testing.T) {
 	got, ok = c.Get(a2)
 	require.True(t, ok, "Delete of a colliding address dropped the wrong entry")
 	require.Equal(t, code2, got)
+}
+
+// A seed's undo removes only its own mapping, never a fresher one.
+func TestCodeCache_DropAddrCodeHashIfKeepsAFresherWrite(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	addr := make([]byte, 20)
+	addr[19] = 7
+	seeded, fresher := [32]byte{1}, [32]byte{2}
+
+	c.PutAddrCodeHash(addr, seeded, 10)
+	c.DeleteAddrCodeHash(addr)
+	c.PutAddrCodeHash(addr, fresher, 12)
+	c.dropAddrCodeHashIf(addr, seeded, 10)
+	got, ok := c.GetAddrCodeHash(addr)
+	require.True(t, ok)
+	require.Equal(t, fresher, got)
+
+	c.dropAddrCodeHashIf(addr, fresher, 12)
+	_, ok = c.GetAddrCodeHash(addr)
+	require.False(t, ok)
+}
+
+// A code fill's undo drops only its own addr binding.
+func TestCodeCache_UnbindAddrIfKeepsAFresherBinding(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	addr := make([]byte, 20)
+	addr[19] = 9
+	oldCode, newCode := []byte{0x60, 0x01}, []byte{0x60, 0x02}
+	oldHash, newHash := crypto.Keccak256(oldCode), crypto.Keccak256(newCode)
+
+	c.PutWithCodeHash(addr, newCode, newHash, 12)
+	c.unbindAddrIf(addr, oldHash, 10)
+	got, ok := c.Get(addr)
+	require.True(t, ok)
+	require.Equal(t, newCode, got)
+
+	c.unbindAddrIf(addr, newHash, 12)
+	_, ok = c.Get(addr)
+	require.False(t, ok)
 }

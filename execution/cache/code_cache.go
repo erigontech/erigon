@@ -465,6 +465,25 @@ func dropSlotIf[V any](b *ByteLRU[V], mu sync.Locker, slot uint64, drop func(V) 
 	}
 }
 
+// dropAddrCodeHashIf removes a mapping only if it is still the one written for
+// h at txNum, so a fresher authoritative write survives.
+func (c *CodeCache) dropAddrCodeHashIf(addr []byte, h [32]byte, txNum uint64) {
+	a := common.BytesToAddress(addr)
+	dropSlotIf(c.addrToCodeHash, &c.putStripes[a[length.Addr-1]], addrSlot(a), func(e addrCodeHashEntry) bool {
+		return e.addr == a && e.hash == h && e.txNum == txNum
+	})
+}
+
+// unbindAddrIf drops addr's code binding only if it still points at codeHash as
+// written at txNum. The content-addressed layers are immutable and stay.
+func (c *CodeCache) unbindAddrIf(addr, codeHash []byte, txNum uint64) {
+	a := common.BytesToAddress(addr)
+	kh := hash32(codeHash)
+	dropSlotIf(c.addrToHash, &c.addrBindMu, addrSlot(a), func(e versionedAddressID) bool {
+		return e.addr == a && e.codeHash == kh && e.txNum == txNum
+	})
+}
+
 // GetByCodeHash retrieves contract code by its Ethereum codeHash (keccak256).
 // Bypasses the addr-keyed L1/L2 path. Returns (code, true) on hit, (nil, false) on miss.
 //

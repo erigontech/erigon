@@ -111,16 +111,8 @@ func (c *StateCache) View(f Frontier) ReadView {
 	if c == nil {
 		return ReadView{}
 	}
-	if f == nil {
-		return ReadView{c: c, readViewEpoch: c.readViewEpoch.Load()}
-	}
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	return ReadView{
-		c:             c,
-		frontier:      c.bindFrontierLocked(f),
-		readViewEpoch: c.readViewEpoch.Load(),
-	}
+	adm := c.admission()
+	return ReadView{c: c, frontier: adm.bindFrontier(f), readViewEpoch: adm.epoch}
 }
 
 // WithFrontier binds f while preserving the original view's read-view epoch.
@@ -134,18 +126,16 @@ func (v ReadView) WithFrontier(f Frontier) ReadView {
 		v.frontier = nil
 		return v
 	}
-	v.c.admissionMu.RLock()
-	defer v.c.admissionMu.RUnlock()
-	v.frontier = v.c.bindFrontierLocked(f)
+	v.frontier = v.c.admission().bindFrontier(f)
 	return v
 }
 
-func (c *StateCache) bindFrontierLocked(frontier Frontier) Frontier {
-	if frontier == nil || c.publishing {
+func (a *admission) bindFrontier(frontier Frontier) Frontier {
+	if frontier == nil || a.publishing {
 		return nil
 	}
 	versioned, ok := frontier.(stateVersionFrontier)
-	if !c.stateVersionKnown {
+	if !a.stateVersionKnown {
 		if ok {
 			return nil
 		}
@@ -155,10 +145,10 @@ func (c *StateCache) bindFrontierLocked(frontier Frontier) Frontier {
 		return rejectedFrontier{}
 	}
 	stateVersion := versioned.StateVersion()
-	if stateVersion < c.stateVersion {
+	if stateVersion < a.stateVersion {
 		return rejectedFrontier{}
 	}
-	if stateVersion > c.stateVersion {
+	if stateVersion > a.stateVersion {
 		return nil
 	}
 	return frontier
@@ -197,7 +187,7 @@ func (v ReadView) GetVisible(domain kv.Domain, key []byte) ([]byte, uint64, bool
 	val, txNum, hit := v.c.getWithTxNum(domain, key)
 	// The epoch is loaded after the entry: an unwind bumps it before it installs
 	// the replacement fork's entries.
-	if !hit || txNum >= end || v.readViewEpoch != v.c.readViewEpoch.Load() {
+	if !hit || txNum >= end || v.readViewEpoch != v.c.admission().epoch {
 		return nil, 0, false
 	}
 	return val, txNum, true

@@ -53,9 +53,16 @@ func (c *StateCache) apply(domain kv.Domain, key, value []byte, txNum uint64) {
 	prepared := prepareStateUpdate(StateUpdate{Domain: domain, Key: key, Value: value, TxNum: txNum})
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
+	// As publish does: fills see the batch begin before any entry changes.
+	a := c.admitted()
+	a.publishing = true
+	c.adm.Store(&a)
+	c.pendingEnd = a.appliedEnd
 	c.applyPrepared(prepared)
+	done := a
+	done.publishing = false
+	done.appliedEnd = c.pendingEnd
+	c.adm.Store(&done)
 }
 
 func makeAddr(i int) []byte {
@@ -952,18 +959,18 @@ func TestStateCache_AppliedEndLifecycle(t *testing.T) {
 	b := 1 * datasize.MB
 	sc := NewStateCache(b, b, b, b)
 	t.Cleanup(sc.Close)
-	require.Zero(t, sc.appliedEnd[kv.AccountsDomain])
+	require.Zero(t, sc.admission().appliedEnd[kv.AccountsDomain])
 
 	sc.apply(kv.AccountsDomain, makeAddr(1), makeValue(1), 20)
 	sc.apply(kv.AccountsDomain, makeAddr(2), makeValue(2), 10)
-	require.Equal(t, uint64(21), sc.appliedEnd[kv.AccountsDomain])
-	require.Zero(t, sc.appliedEnd[kv.StorageDomain])
+	require.Equal(t, uint64(21), sc.admission().appliedEnd[kv.AccountsDomain])
+	require.Zero(t, sc.admission().appliedEnd[kv.StorageDomain])
 
 	sc.unwind(15)
-	require.Equal(t, uint64(15), sc.appliedEnd[kv.AccountsDomain])
+	require.Equal(t, uint64(15), sc.admission().appliedEnd[kv.AccountsDomain])
 
 	sc.clear()
-	require.Equal(t, uint64(15), sc.appliedEnd[kv.AccountsDomain],
+	require.Equal(t, uint64(15), sc.admission().appliedEnd[kv.AccountsDomain],
 		"clear drops entries, not admission history")
 }
 
@@ -1659,4 +1666,48 @@ func TestStateCache_OldForkViewMissesTheReplacementEntry(t *testing.T) {
 
 	_, _, ok := view.GetVisible(kv.AccountsDomain, key)
 	require.False(t, ok, "an old-fork view must not read the replacement fork's entry")
+}
+
+// unwindingFill runs a hook between the admission check and the write of a
+// fill, which is where a publication or unwind can land.
+type unwindingFill struct {
+	*DomainCache
+	hook func()
+}
+
+func (c *unwindingFill) PutIfAbsent(key, value []byte, txNum uint64) {
+	c.hook()
+	c.DomainCache.PutIfAbsent(key, value, txNum)
+}
+
+// A fill admitted before an unwind and written after it would be stamped with
+// the post-unwind epoch and served as current; it has to undo itself.
+func TestStateCache_FillRacingUnwindLeavesNothing(t *testing.T) {
+	sc := closeOnCleanup(t, NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB))
+	inner := sc.caches[kv.StorageDomain].(*DomainCache)
+	sc.caches[kv.StorageDomain] = &unwindingFill{DomainCache: inner, hook: func() { sc.unwind(5) }}
+
+	key := []byte("slot")
+	adm := sc.admission()
+	sc.fillIfFresh(kv.StorageDomain, key, []byte("dead-fork"), 10, 11, adm.epoch)
+
+	_, ok := inner.Get(key)
+	require.False(t, ok, "a fill that straddled an unwind left its value in the cache")
+}
+
+// The same for a publication: its batch may delete the key the fill writes.
+func TestStateCache_FillRacingPublicationLeavesNothing(t *testing.T) {
+	sc := closeOnCleanup(t, NewStateCache(1*datasize.MB, 1*datasize.MB, 1*datasize.MB, 1*datasize.MB))
+	sc.Applier().Initialize(1)
+	inner := sc.caches[kv.StorageDomain].(*DomainCache)
+	key := []byte("slot")
+	sc.caches[kv.StorageDomain] = &unwindingFill{DomainCache: inner, hook: func() {
+		sc.publish(1, 2, 0, false, []StateUpdate{{Domain: kv.StorageDomain, Key: key, TxNum: 12}})
+	}}
+
+	adm := sc.admission()
+	sc.fillIfFresh(kv.StorageDomain, key, []byte("pre-delete"), 10, 11, adm.epoch)
+
+	_, ok := inner.Get(key)
+	require.False(t, ok, "a fill that straddled a publication outlived the publication's delete")
 }

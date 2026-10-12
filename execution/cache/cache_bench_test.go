@@ -145,10 +145,9 @@ func BenchmarkStateCachePublicationUnderLoad(b *testing.B) {
 	}
 }
 
-// BenchmarkPublishVsViewBindLock isolates what admissionMu costs a publication.
-// Readers do identical work; only the bind differs. View(nil) returns without
-// touching admissionMu, so the delta is the read-lock's contribution to both
-// the publisher's cost and reader throughput.
+// BenchmarkPublishVsViewBindLock isolates what binding a frontier costs a
+// publication. Readers do identical work; only the bind differs, so the delta
+// is the bind's contribution to both the publisher's cost and reader throughput.
 func BenchmarkPublishVsViewBindLock(b *testing.B) {
 	const keySpace = 4096
 	mkKey := func(i int) []byte { return []byte{byte(i), byte(i >> 8), 0x5A} }

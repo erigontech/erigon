@@ -535,6 +535,19 @@ func (c *GenericCache[T]) Delete(key []byte) {
 	}
 }
 
+// deleteIfTxNum removes key's entry only if it is still the one stamped txNum,
+// so a fresher write survives.
+func (c *GenericCache[T]) deleteIfTxNum(key []byte, txNum uint64) {
+	h := maphash.Hash(key)
+	mu := &c.putStripes[h&(putStripeCount-1)]
+	mu.Lock()
+	defer mu.Unlock()
+	lru := c.data.Load()
+	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && e.txNum == txNum {
+		lru.Remove(h)
+	}
+}
+
 // dropStale removes key's entry under its put stripe: the re-check keeps an
 // entry a concurrent put revived, and the stripe keeps the removal out of
 // generation swaps.

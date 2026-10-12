@@ -55,25 +55,50 @@ const (
 // Code uses CodeCache (two-level for deduplication).
 type StateCache struct {
 	caches [kv.DomainLen]Cache
-	// applierMu serializes authoritative operations while a batch publication
-	// releases admissionMu around cache writes.
+	// applierMu serializes authoritative operations; adm is replaced only
+	// under it.
 	applierMu sync.Mutex
-	// admissionMu protects fill eligibility and publication identity.
-	// publishing disables admission-gated fills while an update is incomplete.
-	admissionMu       sync.RWMutex
-	publishing        bool
-	appliedEnd        [kv.DomainLen]uint64
-	stateVersion      uint64
-	stateVersionKnown bool
-	// readViewEpoch lets an unwind or state-version discontinuity revoke fill
-	// authority from all older ReadViews. Per-cache entry epochs instead stamp
-	// stored values and also advance on Clear; sharing them would make an
-	// ordinary Clear revoke otherwise valid read views.
-	readViewEpoch atomic.Uint64
+	// adm is what fills are admitted against. A fill re-loads it after writing
+	// and undoes its own entry if a publication, unwind or reset replaced it
+	// meanwhile, so neither side takes a lock.
+	adm atomic.Pointer[admission]
+	// pendingEnd collects appliedEnd while a publication installs its batch.
+	pendingEnd [kv.DomainLen]uint64
 	// disableFills (STATE_CACHE_FILLS=false) turns off every reader fill
 	// (including the content-addressed ones), leaving canonical publication as
 	// the only writer — an A/B lever and an operational kill switch.
 	disableFills bool
+}
+
+// admission is one immutable view of fill eligibility.
+type admission struct {
+	// publishing disables fills while an update is incomplete.
+	publishing        bool
+	appliedEnd        [kv.DomainLen]uint64
+	stateVersion      uint64
+	stateVersionKnown bool
+	// epoch lets an unwind or state-version discontinuity revoke fill authority
+	// from all older ReadViews. Per-cache entry epochs instead stamp stored
+	// values and also advance on Clear; sharing them would make an ordinary
+	// Clear revoke otherwise valid read views.
+	epoch uint64
+}
+
+// noAdmission is what a zero-value StateCache admits against. Writers copy it,
+// never mutate it.
+var noAdmission admission
+
+// admission returns the current admission; a zero-value StateCache has none
+// stored yet.
+func (c *StateCache) admission() *admission {
+	if a := c.adm.Load(); a != nil {
+		return a
+	}
+	return &noAdmission
+}
+
+func (a *admission) admits(viewEpoch, visibleEnd uint64, domain kv.Domain) bool {
+	return !a.publishing && viewEpoch == a.epoch && visibleEnd >= a.appliedEnd[domain]
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -234,14 +259,14 @@ func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd
 	if !ok {
 		return
 	}
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if c.publishing ||
-		viewEpoch != c.readViewEpoch.Load() ||
-		visibleEnd < c.appliedEnd[kv.AccountsDomain] {
+	adm := c.admission()
+	if !adm.admits(viewEpoch, visibleEnd, kv.AccountsDomain) {
 		return
 	}
 	cc.PutAddrCodeHash(addr, h, txNum)
+	if c.admission() != adm {
+		cc.dropAddrCodeHashIf(addr, h, txNum)
+	}
 }
 
 func (c *StateCache) deleteAddrCodeHash(addr []byte) {
@@ -270,14 +295,16 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 			readTxNum = visibleEnd - 1
 		}
 	}
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if c.publishing ||
-		viewEpoch != c.readViewEpoch.Load() ||
-		visibleEnd < c.appliedEnd[domain] {
+	adm := c.admission()
+	if !adm.admits(viewEpoch, visibleEnd, domain) {
 		return
 	}
 	cache.PutIfAbsent(key, cloned, readTxNum)
+	if c.admission() != adm {
+		if u, ok := cache.(interface{ deleteIfTxNum([]byte, uint64) }); ok {
+			u.deleteIfTxNum(key, readTxNum)
+		}
+	}
 }
 
 // fillCodeIfFresh is fillIfFresh for the code domain. An addr-keyed code entry
@@ -303,15 +330,14 @@ func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTx
 	if !ok || len(value) == 0 || len(codeHash) != len(common.Hash{}) {
 		return
 	}
-	c.admissionMu.RLock()
-	defer c.admissionMu.RUnlock()
-	if c.publishing ||
-		viewEpoch != c.readViewEpoch.Load() ||
-		visibleEnd < c.appliedEnd[kv.CodeDomain] ||
-		accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
+	adm := c.admission()
+	if !adm.admits(viewEpoch, visibleEnd, kv.CodeDomain) || !adm.admits(viewEpoch, accountsVisibleEnd, kv.AccountsDomain) {
 		return
 	}
 	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readTxNum)
+	if c.admission() != adm {
+		codeCache.unbindAddrIf(key, codeHash, readTxNum)
+	}
 }
 
 // deleteKey removes the data for the given domain and key. The authoritative
@@ -389,8 +415,8 @@ func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
 	if end < math.MaxUint64 {
 		end++
 	}
-	if end > c.appliedEnd[domain] {
-		c.appliedEnd[domain] = end
+	if end > c.pendingEnd[domain] {
+		c.pendingEnd[domain] = end
 	}
 }
 
@@ -400,8 +426,6 @@ func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
 func (c *StateCache) clear() {
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
 	c.clearLocked()
 }
 
@@ -413,12 +437,20 @@ func (c *StateCache) clearLocked() {
 	}
 }
 
-func (c *StateCache) resetForStateVersionLocked() {
+// admitted returns a copy of the current admission for a writer to edit and
+// store. Callers hold applierMu.
+func (c *StateCache) admitted() admission { return *c.admission() }
+
+// Writers store the new admission before touching entries: a fill that lands
+// after the store re-loads it and undoes itself.
+
+func (c *StateCache) resetForStateVersionLocked(a *admission) {
 	// Clearing entries is not enough: views bound to the previous state could
 	// otherwise refill them after continuity was lost.
-	c.readViewEpoch.Add(1)
+	a.epoch++
+	clear(a.appliedEnd[:])
+	c.adm.Store(a)
 	c.clearLocked()
-	clear(c.appliedEnd[:])
 }
 
 // Close releases every sub-cache's slot in the shared memory envelope so later
@@ -439,72 +471,75 @@ func (c *StateCache) Close() {
 func (c *StateCache) unwind(unwindToTxNum uint64) {
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
-	c.unwindLocked(unwindToTxNum)
+	a := c.admitted()
+	c.unwindLocked(&a, unwindToTxNum)
 }
 
-func (c *StateCache) unwindLocked(unwindToTxNum uint64) {
-	c.readViewEpoch.Add(1)
+func (c *StateCache) unwindLocked(a *admission, unwindToTxNum uint64) {
+	a.epoch++
+	for i := range a.appliedEnd {
+		a.appliedEnd[i] = min(a.appliedEnd[i], unwindToTxNum)
+	}
+	c.adm.Store(a)
 	for _, cache := range c.caches {
 		if cache != nil {
 			cache.Unwind(unwindToTxNum)
 		}
 	}
-	for i := range c.appliedEnd {
-		c.appliedEnd[i] = min(c.appliedEnd[i], unwindToTxNum)
-	}
 }
 
-func (c *StateCache) canAdvanceStateVersionLocked(stateVersion uint64) bool {
-	return !c.stateVersionKnown || stateVersion > c.stateVersion
+func (a *admission) canAdvanceStateVersion(stateVersion uint64) bool {
+	return !a.stateVersionKnown || stateVersion > a.stateVersion
 }
 
 func (c *StateCache) initialize(stateVersion uint64) {
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
-	if !c.canAdvanceStateVersionLocked(stateVersion) {
+	a := c.admitted()
+	if !a.canAdvanceStateVersion(stateVersion) {
 		return
 	}
-	c.resetForStateVersionLocked()
-	c.stateVersion = stateVersion
-	c.stateVersionKnown = true
-	c.publishing = false
+	a.stateVersion = stateVersion
+	a.stateVersionKnown = true
+	a.publishing = false
+	c.resetForStateVersionLocked(&a)
 }
 
 func (c *StateCache) beginPublication(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
 	hasUnwind bool,
 ) bool {
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
-	if committedStateVersion <= sourceStateVersion || !c.canAdvanceStateVersionLocked(committedStateVersion) {
+	a := c.admitted()
+	if committedStateVersion <= sourceStateVersion || !a.canAdvanceStateVersion(committedStateVersion) {
 		// PublishUnwind follows a durable commit, so its invalidation remains
 		// authoritative even when a newer cache generation rejects its updates.
 		if hasUnwind {
-			c.unwindLocked(unwindToTxNum)
+			c.unwindLocked(&a, unwindToTxNum)
 		}
 		return false
 	}
-	c.publishing = true
-	discontinuous := !c.stateVersionKnown || sourceStateVersion != c.stateVersion
-	if discontinuous {
+	a.publishing = true
+	discontinuous := !a.stateVersionKnown || sourceStateVersion != a.stateVersion
+	switch {
+	case discontinuous:
 		// The cache missed part of the source state. Incremental updates cannot
 		// repair unknown retained entries, so publish into an empty generation.
-		c.resetForStateVersionLocked()
-	} else if hasUnwind {
-		c.unwindLocked(unwindToTxNum)
+		c.resetForStateVersionLocked(&a)
+	case hasUnwind:
+		c.unwindLocked(&a, unwindToTxNum)
+	default:
+		c.adm.Store(&a)
 	}
+	c.pendingEnd = a.appliedEnd
 	return true
 }
 
 func (c *StateCache) finishPublication(committedStateVersion uint64) {
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
-	c.stateVersion = committedStateVersion
-	c.stateVersionKnown = true
-	c.publishing = false
+	a := c.admitted()
+	a.appliedEnd = c.pendingEnd
+	a.stateVersion = committedStateVersion
+	a.stateVersionKnown = true
+	a.publishing = false
+	c.adm.Store(&a)
 }
 
 func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
@@ -517,8 +552,8 @@ func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindTo
 	}
 
 	// Sub-caches synchronize their own reads and writes. While publishing is
-	// true, admission-gated fills cannot mutate state entries or read appliedEnd,
-	// so the serialized applier can install the batch without admissionMu.
+	// set, admission-gated fills are refused or undone, so the serialized
+	// applier installs the batch without excluding readers.
 	// One at a time: preparing the batch up front clones every value at once.
 	for i := range updates {
 		c.applyPrepared(prepareStateUpdate(updates[i]))
