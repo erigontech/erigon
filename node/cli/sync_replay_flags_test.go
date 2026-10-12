@@ -17,10 +17,13 @@
 package cli
 
 import (
+	"context"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/urfave/cli/v3"
 )
 
 func TestChainTipModeFlag(t *testing.T) {
@@ -82,4 +85,15 @@ func TestOfflineBALFlags(t *testing.T) {
 		require.True(t, cfg.Sync.UseOfflineBALs)
 		require.False(t, cfg.ExperimentalBAL)
 	})
+}
+
+func TestTieringLookbackBlocksFlag(t *testing.T) {
+	require.Zero(t, buildEthCfg(t, nil).Sync.TieringLookbackBlocks)
+	for _, n := range []uint64{216_000, 1_296_000} {
+		require.Equal(t, n, buildEthCfg(t, []string{"--tiering.lookback-blocks", strconv.FormatUint(n, 10)}).Sync.TieringLookbackBlocks)
+	}
+	for _, n := range []string{"1", "215999", "1296001"} {
+		app := &cli.Command{Flags: DefaultFlags, Action: func(context.Context, *cli.Command) error { return nil }}
+		require.Error(t, app.Run(context.Background(), []string{"erigon", "--tiering.lookback-blocks", n}), n)
+	}
 }

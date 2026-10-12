@@ -311,6 +311,7 @@ type Sync struct {
 	GenerateOfflineBALs        bool
 	UseOfflineBALs             bool
 	OfflineBALDir              string
+	TieringLookbackBlocks      uint64
 
 	ChaosMonkey              bool
 	AlwaysGenerateChangesets bool
