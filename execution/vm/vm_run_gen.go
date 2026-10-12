@@ -167,7 +167,13 @@ run:
 					}
 					pos := callContext.Stack.popAt(top)
 					top -= 1
-					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
+					valid := callContext.Contract.analysedJumpdest(pos)
+					if !valid {
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						valid = callContext.Contract.validJumpdest(pos)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+					}
+					if !valid {
 						res, err = nil, ErrInvalidJump
 						break run
 					}
@@ -197,7 +203,13 @@ run:
 						pc++
 						continue run
 					}
-					if !callContext.Contract.analysedJumpdest(pos) && !callContext.Contract.validJumpdest(pos) {
+					valid := callContext.Contract.analysedJumpdest(pos)
+					if !valid {
+						callContext.gas, callContext.savedPC = gasLeft, pc
+						valid = callContext.Contract.validJumpdest(pos)
+						gasLeft, pc = callContext.gas, callContext.savedPC
+					}
+					if !valid {
 						res, err = nil, ErrInvalidJump
 						break run
 					}
@@ -316,7 +328,9 @@ run:
 				if left, borrow := bits.Sub64(gasLeft, GasFastestStep, 0); borrow == 0 && uint(sLen) < stackLimit {
 					gasLeft = left
 					if end := pc + 1 + uint64(op-PUSH0); end <= uint64(len(callContext.Contract.Code)) {
+						callContext.gas, callContext.savedPC = gasLeft, pc
 						callContext.Stack.pushRefAt(top).SetBytes(callContext.Contract.Code[pc+1 : end])
+						gasLeft, pc = callContext.gas, callContext.savedPC
 						top += 1
 						pc = pc + uint64(op-PUSH0)
 						pc++
@@ -329,10 +343,14 @@ run:
 
 					integer := callContext.Stack.pushRefAt(top)
 					top += 1
+					callContext.gas, callContext.savedPC = gasLeft, pc
 					integer.SetBytes(callContext.Contract.Code[startMin:endMin])
+					gasLeft, pc = callContext.gas, callContext.savedPC
 
 					if missing := int(op-PUSH0) - (endMin - startMin); missing > 0 {
+						callContext.gas, callContext.savedPC = gasLeft, pc
 						integer.ILsh(uint(8 * missing))
+						gasLeft, pc = callContext.gas, callContext.savedPC
 					}
 
 					pc += uint64(op - PUSH0)
