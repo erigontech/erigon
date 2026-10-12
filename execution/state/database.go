@@ -57,7 +57,6 @@ type AccountValueReader interface {
 
 var (
 	_ AccountValueReader = (*CachedReader3)(nil)
-	_ AccountValueReader = (*ReaderV3)(nil)
 	_ AccountValueReader = (*HistoryReaderV3)(nil)
 )
 

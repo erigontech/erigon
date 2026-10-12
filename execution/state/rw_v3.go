@@ -1481,11 +1481,6 @@ func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accoun
 }
 
 func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	_, acc, err := r.readAccountData(address.Value())
-	return acc, err
-}
-
-func (r *ReaderV3) ReadAccountDataByValue(address common.Address) (*accounts.Account, error) {
 	_, acc, err := r.readAccountData(address)
 	return acc, err
 }
@@ -1496,8 +1491,8 @@ func (r *ReaderV3) HasAccount(address accounts.Address) (bool, error) {
 	return len(enc) > 0, err
 }
 
-func (r *ReaderV3) readAccountData(address common.Address) ([]byte, *accounts.Account, error) {
-	r.addr = address
+func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.Account, error) {
+	r.addr = address.Value()
 	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{})
 	if err != nil {
 		return nil, nil, err
