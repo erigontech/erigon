@@ -329,8 +329,8 @@ func TestCodeCache_CodeDeduplication(t *testing.T) {
 }
 
 func TestCodeCache_AddrCapacityLimit(t *testing.T) {
-	// addrToHash is an LRU keyed by 20-byte address. Verify eviction is
-	// LRU rather than no-op-when-full so fresh-address workloads warm up.
+	// addrToHash is keyed by 20-byte address. Verify a full cache keeps
+	// serving fresh addresses rather than going no-op-when-full.
 	// makeAddr / makeCode wrap at 256, so we generate addrs/codes from
 	// a wider 16-bit space directly.
 	wideAddr := func(i int) []byte {
