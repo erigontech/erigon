@@ -127,7 +127,7 @@ func TestStateReader_HasAccount_Existence(t *testing.T) {
 				addr accounts.Address
 				want bool
 			}{{present, true}, {absent, false}} {
-				got, err := HasAccount(r, tc.addr)
+				got, err := r.HasAccount(tc.addr)
 				require.NoError(t, err)
 				require.Equal(t, tc.want, got)
 

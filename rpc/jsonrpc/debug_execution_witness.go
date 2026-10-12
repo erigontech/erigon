@@ -167,6 +167,11 @@ func (s *RecordingState) ReadAccountByPlainAddr(address common.Address) (*accoun
 	return s.ReadAccountData(accounts.InternAddress(address))
 }
 
+func (s *RecordingState) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := s.ReadAccountData(address)
+	return acc != nil, err
+}
+
 func (s *RecordingState) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	addr := address.Value()
 	s.AccessedAccounts[addr] = struct{}{}
@@ -1651,6 +1656,11 @@ func (s *witnessStateless) TracePrefix() string {
 
 func (s *witnessStateless) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return s.ReadAccountData(address)
+}
+
+func (s *witnessStateless) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := s.ReadAccountData(address)
+	return acc != nil, err
 }
 
 func (s *witnessStateless) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {

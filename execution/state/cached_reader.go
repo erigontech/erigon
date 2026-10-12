@@ -65,6 +65,11 @@ func (cr *CachedReader) ReadAccountByPlainAddr(address common.Address) (*account
 	return cr.ReadAccountData(accounts.InternAddress(address))
 }
 
+func (cr *CachedReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := cr.ReadAccountData(address)
+	return acc != nil, err
+}
+
 // ReadAccountDataForDebug is called when an account needs to be fetched from the state
 func (cr *CachedReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return cr.ReadAccountData(address)

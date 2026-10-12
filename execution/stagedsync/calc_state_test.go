@@ -395,6 +395,11 @@ func (r *preBlockReader) ReadAccountByPlainAddr(address common.Address) (*accoun
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
+func (r *preBlockReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
 func (r *preBlockReader) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
 	if a == r.addr {
 		return r.acc, nil

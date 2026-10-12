@@ -27,6 +27,11 @@ func (r *emptyReader) ReadAccountByPlainAddr(address common.Address) (*accounts.
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
+func (r *emptyReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
 func (r *emptyReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }

@@ -168,6 +168,11 @@ func (r *recordingReader) ReadAccountByPlainAddr(address common.Address) (*accou
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
+func (r *recordingReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
 func (r *recordingReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(address)
 }
@@ -235,6 +240,11 @@ func spin(ns int64) {
 	deadline := time.Now().Add(time.Duration(ns))
 	for time.Now().Before(deadline) {
 	}
+}
+
+func (r *inMemReader) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
 }
 
 func (r *inMemReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {

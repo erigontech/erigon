@@ -39,19 +39,10 @@ const (
 
 // HasAccount answers whether the account exists. A reader that can tell without decoding
 // the account says so with a HasAccount method of its own; the rest read and discard.
-func HasAccount(r StateReader, address accounts.Address) (bool, error) {
-	if h, ok := r.(interface {
-		HasAccount(accounts.Address) (bool, error)
-	}); ok {
-		return h.HasAccount(address)
-	}
-	acc, err := r.ReadAccountData(address)
-	return acc != nil, err
-}
-
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
 	ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error)
+	HasAccount(address accounts.Address) (bool, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
 	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
 	ReadAccountCode(address accounts.Address) ([]byte, error)
@@ -142,6 +133,10 @@ func (*NoopReader) ReadAccountData(address accounts.Address) (*accounts.Account,
 
 func (*NoopReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return nil, nil
+}
+
+func (*NoopReader) HasAccount(address accounts.Address) (bool, error) {
+	return false, nil
 }
 
 func (*NoopReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
