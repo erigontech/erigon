@@ -42,6 +42,7 @@ import (
 	clgossip "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	forkchoicemock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/gossip"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
@@ -354,6 +355,7 @@ func TestPoolV1AttestationsPublishesOnMessageEpochForkDigest(t *testing.T) {
 	require.NoError(t, err)
 	clock.EXPECT().ComputeForkDigest(messageEpoch).Return(messageDigest, nil).Times(1)
 	syncedData.EXPECT().Syncing().Return(false).Times(1)
+	syncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), true).Times(1)
 	syncedData.EXPECT().CommitteeCount(messageEpoch).Return(uint64(1)).Times(1)
 
 	requestBody, err := json.Marshal([]*solid.Attestation{{
@@ -384,6 +386,7 @@ func TestPoolV1AttestationsPublishesOnMessageEpochForkDigest(t *testing.T) {
 		ethClock:           clock,
 		beaconChainCfg:     &cfg,
 		syncedData:         syncedData,
+		forkchoiceStore:    &forkchoicemock.ForkChoiceStorageMock{},
 		attestationService: service,
 		gossipManager:      gossipManager,
 	}
@@ -417,6 +420,7 @@ func TestPoolV2AttestationsPublishesOnMessageEpochForkDigest(t *testing.T) {
 	require.NoError(t, err)
 	clock.EXPECT().ComputeForkDigest(messageEpoch).Return(messageDigest, nil).Times(1)
 	syncedData.EXPECT().Syncing().Return(false).Times(1)
+	syncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), true).Times(1)
 	syncedData.EXPECT().CommitteeCount(messageEpoch).Return(uint64(1)).Times(1)
 
 	requestBody, err := json.Marshal([]*solid.SingleAttestation{{
@@ -447,6 +451,7 @@ func TestPoolV2AttestationsPublishesOnMessageEpochForkDigest(t *testing.T) {
 		ethClock:           clock,
 		beaconChainCfg:     &cfg,
 		syncedData:         syncedData,
+		forkchoiceStore:    &forkchoicemock.ForkChoiceStorageMock{},
 		attestationService: service,
 		gossipManager:      gossipManager,
 	}
