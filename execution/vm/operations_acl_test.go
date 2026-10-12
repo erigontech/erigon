@@ -39,6 +39,13 @@ func TestGasSStoreDoesNotRefill(t *testing.T) {
 	require.EqualValues(t, -int64(params.StateGasPerStorageSet), cost.State)
 }
 
+var eip7702CallGas = map[OpCode]gasFunc{
+	CALL:         gasCallEIP7702,
+	CALLCODE:     gasCallCodeEIP7702,
+	DELEGATECALL: gasDelegateCallEIP7702,
+	STATICCALL:   gasStaticCallEIP7702,
+}
+
 func TestGasCallDoesNotCharge(t *testing.T) {
 	for _, op := range []OpCode{CALL, CALLCODE, DELEGATECALL, STATICCALL} {
 		t.Run(op.String(), func(t *testing.T) {
@@ -64,7 +71,7 @@ func TestGasCallDoesNotCharge(t *testing.T) {
 			scope.Stack.push(*uint256.NewInt(0x1000))
 			scope.Stack.push(*uint256.NewInt(100_000))
 
-			cost, err := evm.jt[op].dynamicGas(evm, scope, initial, 0)
+			cost, err := eip7702CallGas[op](evm, scope, initial, 0)
 			if op == CALL {
 				require.NoError(t, err)
 			} else {
