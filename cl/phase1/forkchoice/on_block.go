@@ -882,7 +882,7 @@ func (f *ForkChoiceStore) settlePendingEnvelopeError(blockRoot common.Hash, pend
 // enterPendingEnvelopeApply admits one apply of a parked envelope per root at a time, at block
 // import and on every retry, so no two of them reach NewPayload for one parked copy. A later
 // caller waits for the holder and then runs itself, because the holder may have stopped
-// without a verdict.
+// without a verdict. A direct OnExecutionPayload of the same root does not take this gate.
 func (f *ForkChoiceStore) enterPendingEnvelopeApply(ctx context.Context, blockRoot common.Hash) bool {
 	done := make(chan struct{})
 	for {
@@ -907,14 +907,12 @@ func (f *ForkChoiceStore) leavePendingEnvelopeApply(blockRoot common.Hash) {
 	}
 }
 
-// holdsPendingEnvelope reports whether pending is still the parked copy for blockRoot.
-func (f *ForkChoiceStore) holdsPendingEnvelope(blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local bool) bool {
-	cache := f.pendingEnvelopes
+// parkedEnvelope returns the copy currently parked for blockRoot.
+func (f *ForkChoiceStore) parkedEnvelope(blockRoot common.Hash, local bool) (*cltypes.SignedExecutionPayloadEnvelope, bool) {
 	if local {
-		cache = f.pendingLocalSelfBuildEnvelopes
+		return f.pendingLocalSelfBuildEnvelopes.Peek(blockRoot)
 	}
-	current, ok := cache.Peek(blockRoot)
-	return ok && current == pending
+	return f.pendingEnvelopes.Peek(blockRoot)
 }
 
 func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local, checkDataAvailability bool) (*cltypes.ExecutionPayloadEnvelope, bool) {
@@ -926,10 +924,12 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 		return nil, false
 	}
 	defer f.leavePendingEnvelopeApply(blockRoot)
-	if !f.holdsPendingEnvelope(blockRoot, pending, local) {
-		// An earlier holder of the gate settled this copy.
+	// An earlier holder of the gate may have settled this copy or parked a newer one.
+	current, ok := f.parkedEnvelope(blockRoot, local)
+	if !ok {
 		return nil, false
 	}
+	pending = current
 	if pending == nil {
 		if !f.forkGraph.HasEnvelope(blockRoot) {
 			if local {

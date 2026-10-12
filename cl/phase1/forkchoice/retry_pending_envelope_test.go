@@ -294,3 +294,31 @@ func TestApplyPendingEnvelopeSkipsACopyTheHolderSettled(t *testing.T) {
 
 	require.Zero(t, calls.Load(), "the waiter must return without touching the envelope")
 }
+
+// A waiter whose copy was replaced while it waited applies the newer parked copy instead of
+// leaving it for the next external trigger.
+func TestApplyPendingEnvelopeAppliesANewerParkedCopy(t *testing.T) {
+	root := common.HexToHash("0x1")
+	peerDas := das_mock.NewMockPeerDas(gomock.NewController(t))
+	peerDas.EXPECT().IsDataAvailable(uint64(7), root).Return(true, nil).AnyTimes()
+	f, pending := newRetryPendingStore(t, peerDas)
+	calls := &atomic.Int32{}
+	opened := make(chan struct{})
+	close(opened) // the apply ends on the persisted path instead of the stub's missing config
+	f.forkGraph = countingForkGraph{retryPendingForkGraph: retryPendingForkGraph{block: f.forkGraph.(retryPendingForkGraph).block, gate: opened}, hasEnvelopeCalls: calls}
+	older := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}}
+	newer := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root, BuilderIndex: 1}}
+	pending.Add(root, older)
+
+	require.True(t, f.enterPendingEnvelopeApply(t.Context(), root))
+	done := make(chan struct{})
+	go func() {
+		f.applyPendingEnvelope(t.Context(), root, older, false, false)
+		close(done)
+	}()
+	pending.Add(root, newer) // the holder parked a newer copy
+	f.leavePendingEnvelopeApply(root)
+	requireClosed(t, done)
+
+	require.NotZero(t, calls.Load(), "the waiter must apply the newer parked copy")
+}
