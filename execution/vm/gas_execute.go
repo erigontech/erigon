@@ -263,6 +263,7 @@ func opExpEIP160WithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (ui
 }
 
 func opExtCodeCopyWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	addr := evm.internAddress(scope.Stack.peek())
 	size, err := wordMemorySize(memoryExtCodeCopy(scope))
 	if err != nil {
 		return pc, nil, err
@@ -272,48 +273,51 @@ func opExtCodeCopyWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (
 	if err != nil {
 		return pc, nil, err
 	}
-	return opExtCodeCopy(pc, evm, scope)
+	return opExtCodeCopy(pc, evm, scope, addr)
 }
 
 func opExtCodeCopyEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
+	addr := evm.internAddress(scope.Stack.peek())
 	size, err := wordMemorySize(memoryExtCodeCopy(scope))
 	if err != nil {
 		return pc, nil, err
 	}
-	cost, err := gasExtCodeCopyEIP2929(evm, scope, scope.Gas(), size)
+	cost, err := gasExtCodeCopyEIP2929(evm, scope, scope.Gas(), size, addr)
 	err = evm.chargeDynamic(pc, scope, t, cost, err, size)
 	if err != nil {
 		return pc, nil, err
 	}
-	return opExtCodeCopy(pc, evm, scope)
+	return opExtCodeCopy(pc, evm, scope, addr)
 }
 
 func opSstoreWithGas(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	cost, err := gasSStore(evm, scope, scope.Gas(), 0)
+	key := evm.internStorageKey(scope.Stack.peek())
+	cost, err := gasSStore(evm, scope, scope.Gas(), key)
 	err = evm.chargeDynamic(pc, scope, t, cost, err, 0)
 	if err != nil {
 		return pc, nil, err
 	}
-	return opSstore(pc, evm, scope)
+	return opSstore(pc, evm, scope, key)
 }
 
 func opSstoreEIP2200(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	cost, err := gasSStoreEIP2200(evm, scope, scope.Gas(), 0)
+	key := evm.internStorageKey(scope.Stack.peek())
+	cost, err := gasSStoreEIP2200(evm, scope, scope.Gas(), key)
 	err = evm.chargeDynamic(pc, scope, t, cost, err, 0)
 	if err != nil {
 		return pc, nil, err
 	}
-	return opSstore(pc, evm, scope)
+	return opSstore(pc, evm, scope, key)
 }
 
 func makeSstoreEIP2929(clearingRefund uint64) gasExecuteFunc {
 	return func(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-		cost, err := sstoreGasEIP2929(evm, scope, scope.Gas(), clearingRefund)
+		cost, key, err := sstoreGasEIP2929(evm, scope, scope.Gas(), clearingRefund)
 		err = evm.chargeDynamic(pc, scope, t, cost, err, 0)
 		if err != nil {
 			return pc, nil, err
 		}
-		return opSstore(pc, evm, scope)
+		return opSstore(pc, evm, scope, key)
 	}
 }
 
@@ -384,25 +388,28 @@ func accountSurcharge(evm *EVM, addr accounts.Address) uint64 {
 }
 
 func opBalanceEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	cost := mdgas.MdGasCost{Execution: accountSurcharge(evm, scope.peekAddress(evm))}
+	addr := evm.internAddress(scope.Stack.peek())
+	cost := mdgas.MdGasCost{Execution: accountSurcharge(evm, addr)}
 	if err := evm.chargeDynamic(pc, scope, t, cost, nil, 0); err != nil {
 		return pc, nil, err
 	}
-	return opBalance(pc, evm, scope)
+	return opBalanceOf(pc, evm, scope, addr)
 }
 
 func opExtCodeSizeEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	cost := mdgas.MdGasCost{Execution: accountSurcharge(evm, scope.peekAddress(evm))}
+	addr := evm.internAddress(scope.Stack.peek())
+	cost := mdgas.MdGasCost{Execution: accountSurcharge(evm, addr)}
 	if err := evm.chargeDynamic(pc, scope, t, cost, nil, 0); err != nil {
 		return pc, nil, err
 	}
-	return opExtCodeSize(pc, evm, scope)
+	return opExtCodeSizeOf(pc, evm, scope, addr)
 }
 
 func opExtCodeHashEIP2929(pc uint64, evm *EVM, scope *CallContext, t *opTrace) (uint64, []byte, error) {
-	cost := mdgas.MdGasCost{Execution: accountSurcharge(evm, scope.peekAddress(evm))}
+	addr := evm.internAddress(scope.Stack.peek())
+	cost := mdgas.MdGasCost{Execution: accountSurcharge(evm, addr)}
 	if err := evm.chargeDynamic(pc, scope, t, cost, nil, 0); err != nil {
 		return pc, nil, err
 	}
-	return opExtCodeHash(pc, evm, scope)
+	return opExtCodeHashOf(pc, evm, scope, addr)
 }

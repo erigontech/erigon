@@ -342,16 +342,16 @@ func fastSwitch(instructions []byte, ops []fastOp) string {
 
 // untraced returns runTraced as run in a file of its own, with anyTrace set
 // to false, without the code this makes dead, with fast in place of the
-// switchHere comment and direct after the cacheGenStep.
+// switchHere comment and direct in place of the directHere one.
 func untraced(traced []byte, fast, direct string) []byte {
 	if !bytes.Contains(traced, []byte(switchHere)) {
 		log.Fatal("interpreter.go: the fast-path switch comment is missing")
 	}
 	src := bytes.Replace(traced, []byte(switchHere), []byte(fast), 1)
-	if bytes.Count(src, []byte(cacheGenStep)) != 1 {
-		log.Fatalf("interpreter.go: want one %q", cacheGenStep)
+	if bytes.Count(src, []byte(directHere)) != 1 {
+		log.Fatalf("interpreter.go: want one %q", directHere)
 	}
-	src = dropDeadCode(bytes.Replace(src, []byte(cacheGenStep), []byte(cacheGenStep+direct), 1))
+	src = dropDeadCode(bytes.Replace(src, []byte(directHere), []byte(direct), 1))
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "interpreter.go", src, parser.ParseComments)
 	if err != nil {
@@ -476,9 +476,7 @@ func testTable(ops []fastOp, gasOps [][2]string) []byte {
 	return out
 }
 
-// cacheGenStep is where run calls the gasExecute ops: after the per-op generation
-// moves, which the ops' memos read.
-const cacheGenStep = "callContext.cacheGen++\n"
+const directHere = "// execution/vm/vmgen inserts the gasExecute switch here.\n"
 
 // gasExecuteOps returns the ops the jump tables give a gasExecute, with the func:
 // run inlines the func's copy without the trace. TestFastPathMatchesJumpTables
