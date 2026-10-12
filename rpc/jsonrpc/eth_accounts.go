@@ -243,6 +243,5 @@ func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOr
 	}
 	defer tx.Rollback()
 
-	acc, err := reader.ReadAccountByPlainAddr(address)
-	return acc != nil, err
+	return reader.HasAccount(address)
 }
