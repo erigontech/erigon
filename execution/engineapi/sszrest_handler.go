@@ -62,6 +62,8 @@ func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
 		e.handleSSZForkchoice(w, r, version)
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "blobs":
 		e.handleSSZGetBlobs(w, r, version)
+	case r.Method == http.MethodGet && len(parts) == 3 && parts[2] == "inclusion-list":
+		e.handleSSZGetInclusionList(w, r, version)
 	case r.Method == http.MethodPost && len(parts) == 4 && parts[2] == "client" && parts[3] == "version" && version == 1:
 		e.handleSSZClientVersion(w, r)
 	case r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "capabilities" && version == 1:
@@ -378,6 +380,25 @@ func (e *EngineServer) handleSSZGetBlobs(w http.ResponseWriter, r *http.Request,
 		writeSSZBytes(w, out)
 		return
 	}
+}
+
+func (e *EngineServer) handleSSZGetInclusionList(w http.ResponseWriter, r *http.Request, version int) {
+	if version != 1 {
+		writeSSZError(w, http.StatusNotFound, "unsupported get inclusion list version")
+		return
+	}
+	resp, err := e.GetInclusionListV1(r.Context())
+	if err != nil {
+		writeEngineError(w, err)
+		return
+	}
+	e.logger.Info("[SSZ-REST] handled get inclusion list", "path", r.URL.Path)
+	out, err := encodeGetInclusionListResponse(resp)
+	if err != nil {
+		writeSSZError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSSZBytes(w, out)
 }
 
 func (e *EngineServer) handleSSZClientVersion(w http.ResponseWriter, r *http.Request) {

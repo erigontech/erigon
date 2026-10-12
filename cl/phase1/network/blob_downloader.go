@@ -40,6 +40,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 const (
@@ -52,8 +54,14 @@ const (
 	blobRetryShardShift         = 64 - blobRetryShardBits
 	// bounds a fulu block's column recovery; columns past the custody window are
 	// unfetchable and would otherwise block forever.
-	blobColumnBackfillTimeout = 30 * time.Second
+	blobColumnBackfillTimeout  = 30 * time.Second
+	blobBackfillCompleteMetric = "caplin_blob_backfill_complete"
 )
+
+// Created on the first report, so a node that never runs blob backfill exports no misleading 0.
+var blobBackfillCompleteGauge = sync.OnceValue(func() metrics.Gauge {
+	return metrics.GetOrCreateGauge(blobBackfillCompleteMetric)
+})
 
 type blobRetryRange struct {
 	start          uint64
@@ -105,6 +113,7 @@ type blobPeerClient interface {
 
 type blobSnapshotReader interface {
 	FrozenBlobs() uint64
+	VisibleSegmentsMaxTo(snaptype.Enum) uint64
 }
 
 // BlobHistoryDownloader downloads blob history backwards from a head slot
@@ -227,7 +236,16 @@ func (b *BlobHistoryDownloader) SetNotifyBlobBackfilled(notify *BlobBackfilledNo
 	}
 }
 
+func publishBackfillCompleted(completed bool) {
+	if completed {
+		blobBackfillCompleteGauge().SetUint64(1)
+	} else {
+		blobBackfillCompleteGauge().SetUint64(0)
+	}
+}
+
 func (b *BlobHistoryDownloader) setBackfillCompleted(completed bool) {
+	publishBackfillCompleted(completed)
 	if b.backfillCompleted.Swap(completed) == completed {
 		return
 	}
@@ -296,6 +314,7 @@ func (b *BlobHistoryDownloader) Start() {
 
 func (b *BlobHistoryDownloader) run() {
 	defer b.running.Store(false)
+	publishBackfillCompleted(b.backfillCompleted.Load())
 
 	// Do an initial download immediately
 	if err := b.downloadOnce(true); err != nil {
@@ -319,11 +338,27 @@ func (b *BlobHistoryDownloader) run() {
 			downloadTimer.Reset(blobDownloaderInterval)
 		case <-warningTimer.C:
 			if !b.backfillCompleted.Load() {
-				b.logger.Warn("[BlobHistoryDownloader] Blob backfilling is not finished, some blobs might be unavailable", "currentSlot", b.headSlot.Load(), "highestBackfilled", b.highestBackfilledSlot.Load())
+				b.warnBackfillIncomplete()
 			}
 			warningTimer.Reset(blobBackfillWarningInterval)
 		}
 	}
+}
+
+func (b *BlobHistoryDownloader) warnBackfillIncomplete() {
+	logCtx := []any{
+		"currentSlot", b.headSlot.Load(), "highestBackfilled", b.highestBackfilledSlot.Load(),
+		"frozenBlobsTo", b.sn.FrozenBlobs(), "frozenBlocksTo", b.sn.VisibleSegmentsMaxTo(snaptype.BeaconBlocks.Enum()),
+	}
+	if len(b.retryRanges) > 0 {
+		var unresolved uint64
+		for i := range b.retryRanges {
+			unresolved += b.retryRanges[i].workCount()
+		}
+		logCtx = append(logCtx, "unresolvedSlots", unresolved,
+			"lowestUnresolved", b.retryRanges[0].start, "highestUnresolved", b.retryRanges[len(b.retryRanges)-1].end)
+	}
+	b.logger.Warn("[BlobHistoryDownloader] Blob backfilling is not finished, some blobs might be unavailable", logCtx...)
 }
 
 // downloadOnce performs a single download pass
