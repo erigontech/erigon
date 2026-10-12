@@ -1417,3 +1417,30 @@ func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(5), bal)
 }
+
+// Each call stays under the bound on its own, yet leaves a grown slot map at
+// the next index for addSlotSlow to reuse. The retained maps have to add up, or
+// a sequence of such calls pins them all in the pool.
+func TestResetForPoolCountsSlotMapsRetainedAcrossCalls(t *testing.T) {
+	ibs := New(NewNoopReader())
+	const perCall = maxPooledEntries / 4
+
+	// Call k warms one slot on every earlier address, then many on its own, so
+	// its own map lands at a fresh index.
+	for call := range 4 {
+		for earlier := range call {
+			a := accounts.InternAddress(common.BigToAddress(big2(earlier)))
+			ibs.AddSlotToAccessList(a, accounts.InternKey(common.BigToHash(big2(0))))
+		}
+		own := accounts.InternAddress(common.BigToAddress(big2(call)))
+		for i := range perCall {
+			ibs.AddSlotToAccessList(own, accounts.InternKey(common.BigToHash(big2(i))))
+		}
+		poolable := ibs.resetForPool()
+		if call < 3 {
+			require.True(t, poolable, "call %d is under the bound on its own", call)
+			continue
+		}
+		require.False(t, poolable, "the maps retained by earlier calls must count")
+	}
+}

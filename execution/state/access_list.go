@@ -42,9 +42,10 @@ type accessList struct {
 	lastSlots    map[accounts.StorageKey]struct{}
 	lastWarmSlot accounts.StorageKey
 
-	// inserted counts the keys added since the last Reset, which is what the
-	// maps keep capacity for.
-	inserted int
+	// peak is the largest each slot map at the same index has ever been. A
+	// cleared map keeps that capacity for addSlotSlow to reuse at its index, so
+	// this is what a pooled list pins, however little it holds right now.
+	peak []int
 }
 
 // newAccessList creates a new accessList.
@@ -63,14 +64,32 @@ func (al *accessList) Reset() {
 	}
 	al.slots = al.slots[:0]
 	clear(al.addresses)
-	al.inserted = 0
 	al.dropMemo()
 }
 
-// entries reports how many keys this list inserted since the last Reset, not
-// how many are live: a reverted slot leaves its grown map past len(slots) for
-// addSlotSlow to reuse, so the live count would under-report what is retained.
-func (al *accessList) entries() int { return al.inserted }
+// entries reports the keys this list pins rather than the keys it holds: a map
+// that grew keeps its capacity at its index for addSlotSlow to reuse, so a
+// short or fully reverted call still answers for every map it left behind.
+func (al *accessList) entries() int {
+	for i, s := range al.slots {
+		al.markPeak(i, len(s))
+	}
+	total := len(al.addresses)
+	for _, n := range al.peak {
+		total += n
+	}
+	return total
+}
+
+// markPeak remembers the largest the map at idx has been.
+func (al *accessList) markPeak(idx, n int) {
+	if idx >= len(al.peak) {
+		al.peak = append(al.peak, make([]int, idx+1-len(al.peak))...)
+	}
+	if n > al.peak[idx] {
+		al.peak[idx] = n
+	}
+}
 
 func (al *accessList) dropMemo() {
 	al.lastAddr = accounts.NilAddress
@@ -124,7 +143,6 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 		return false
 	}
 	al.addresses[address] = -1
-	al.inserted++
 	return true
 }
 
@@ -146,7 +164,6 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 		}
 		al.lastSlots[slot] = struct{}{}
 		al.lastWarmSlot = slot
-		al.inserted++
 		return false, true
 	}
 	return al.addSlotSlow(address, slot)
@@ -169,10 +186,6 @@ func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.Storag
 		slotmap[slot] = struct{}{}
 		al.slots = append(al.slots, slotmap)
 		al.lastAddr, al.lastSlots, al.lastWarmSlot = address, slotmap, slot
-		al.inserted++
-		if !addrPresent {
-			al.inserted++
-		}
 		return !addrPresent, true
 	}
 	slotmap := al.slots[idx]
@@ -181,7 +194,6 @@ func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.Storag
 		return false, false
 	}
 	slotmap[slot] = struct{}{}
-	al.inserted++
 	return false, true
 }
 
@@ -198,6 +210,9 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 		panic("reverting slot change, address has no slots")
 	}
 	slotmap := al.slots[idx]
+	// Record the size before it shrinks: a revert can truncate this map out of
+	// slots[:len] entirely, and its capacity still waits at this index.
+	al.markPeak(idx, len(slotmap))
 	delete(slotmap, slot)
 	al.dropMemo()
 	// Since additions and rollbacks are always in LIFO order, when a slot map
