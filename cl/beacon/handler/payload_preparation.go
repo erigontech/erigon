@@ -840,10 +840,14 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 	return source, nil
 }
 
-// envelopeParked reports an EMPTY head whose envelope waits for its data; a parked copy of an
-// envelope that is already persisted is stale and does not count.
+// envelopeParked reports an EMPTY head whose envelope has arrived but is not applied yet: parked
+// for its data, or with its apply still in flight. An envelope already persisted does not count.
 func (a *ApiHandler) envelopeParked(root common.Hash) bool {
-	return !a.forkchoiceStore.HasEnvelope(root) && a.forkchoiceStore.HasPendingExecutionPayloadEnvelope(root)
+	if a.forkchoiceStore.HasEnvelope(root) {
+		return false
+	}
+	return a.forkchoiceStore.HasPendingExecutionPayloadEnvelope(root) ||
+		a.forkchoiceStore.ExecutionPayloadReceivedBefore(root, time.Now())
 }
 
 func (a *ApiHandler) executionPayloadSourceForGloasPath(

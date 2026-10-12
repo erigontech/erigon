@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
@@ -114,6 +115,14 @@ func TestEnvelopeParkedFlagsOnlyAnUnpersistedParkedEnvelope(t *testing.T) {
 	require.Equal(t, gloasPayloadPathEmpty, handler.gloasPayloadPathForHead(head, 10), "the path stays EMPTY so preparation primes the fallback")
 	fcu.SetEnvelope(head.Root, &cltypes.SignedExecutionPayloadEnvelope{})
 	require.False(t, handler.envelopeParked(head.Root))
+
+	// An envelope whose apply is still in flight is neither parked nor persisted yet.
+	inFlight := common.Hash{2}
+	require.False(t, handler.envelopeParked(inFlight))
+	fcu.ExecutionPayloadReceivedAt = map[common.Hash]time.Time{inFlight: time.Now().Add(-time.Second)}
+	require.True(t, handler.envelopeParked(inFlight))
+	fcu.SetEnvelope(inFlight, &cltypes.SignedExecutionPayloadEnvelope{})
+	require.False(t, handler.envelopeParked(inFlight))
 }
 
 // Validator endpoints refuse to serve a head that trails the imported blocks, as block
