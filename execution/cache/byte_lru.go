@@ -53,7 +53,11 @@ type ByteLRU[V any] struct {
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
 
 	growMu sync.Mutex
-	closed bool
+	// addStripes serialize same-key writers, so the net change a write is about
+	// to make can be read before the write without racing another writer to the
+	// same key. Readers never take them.
+	addStripes [putStripeCount]sync.Mutex
+	closed     bool
 	// unbudgeted holds maxBytes from the start and never touches the envelope.
 	unbudgeted bool
 }
@@ -126,22 +130,34 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	if w > b.maxBytes {
 		return false
 	}
-	// Account after the write, as one net add. Set reports the value it
-	// displaced, so no separate lookup is needed -- one would race a concurrent
-	// writer to the same key -- and charging the full weight up front would let
-	// several writers inflate residency enough to reserve chunks none of them
-	// needs. The deletion handler skips replacements for the same reason: this
-	// is the only place that refunds one, and it is synchronous with the Set.
+	// The stripe makes the look-up, the growth step and the write one sequence
+	// for this key, so a concurrent writer to the same key cannot leave a stale
+	// predecessor weight behind.
+	mu := &b.addStripes[key&(putStripeCount-1)]
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Growth is decided on the net change, so replacing an entry with one of
+	// its own size reserves nothing, and it is decided before the write: after
+	// it, maintenance may already have evicted the newcomer and refunded its
+	// weight, hiding the pressure that called for the step.
+	delta := w
+	if prev, present := b.c.GetIfPresent(key); present {
+		delta -= b.weigh(key, prev)
+	}
+	if lim := b.limit.Load(); delta > 0 && b.resident.Load()+delta > lim && lim < b.ceiling.Load() {
+		b.grow(delta)
+	}
+
 	// Set returns (new value, true) for an absent key and (displaced value,
-	// false) for a present one.
+	// false) for a present one, so the charge is the net change. A rejected or
+	// evicted newcomer is refunded by the deletion handler, which leaves
+	// replacements to this.
 	prev, inserted := b.c.Set(key, value)
 	if !inserted {
 		w -= b.weigh(key, prev)
 	}
 	b.resident.Add(w)
-	if lim := b.limit.Load(); b.resident.Load() > lim && lim < b.ceiling.Load() {
-		b.grow(0)
-	}
 	return true
 }
 

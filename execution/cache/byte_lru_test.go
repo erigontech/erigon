@@ -183,3 +183,21 @@ func TestByteLRUConcurrentSameKeyDoesNotOverReserve(t *testing.T) {
 	require.Equal(t, int64(len(val)), b.resident.Load())
 	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
 }
+
+// A growing working set must still raise the limit: the growth step is decided
+// before the write, so maintenance evicting the newcomer cannot hide the
+// pressure that called for it.
+func TestByteLRUGrowsOnPositiveNetChange(t *testing.T) {
+	val := make([]byte, 256*1024)
+	b := newByteLRU(64*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
+	defer b.Close()
+
+	start := b.limit.Load()
+	for key := range uint64(64) {
+		require.True(t, b.Add(key, val))
+	}
+	b.c.CleanUp()
+
+	require.Greater(t, b.limit.Load(), start, "distinct keys past the floor must grow the limit")
+	require.LessOrEqual(t, b.resident.Load(), b.limit.Load())
+}
