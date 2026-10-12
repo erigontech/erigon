@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -32,40 +33,73 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-func TestAwaitGloasPayloadSourceReturnsOnceDecided(t *testing.T) {
-	calls := 0
+// parkedFor reports the envelope parked for the first n polls.
+func parkedFor(n int) func() bool {
+	polls := 0
+	return func() bool {
+		polls++
+		return polls <= n
+	}
+}
+
+func TestAwaitGloasPayloadSourceResolvesOnceTheEnvelopeIsNoLongerParked(t *testing.T) {
+	resolves := 0
 	resolve := func() (executionPayloadSource, error) {
-		calls++
-		if calls < 3 {
-			return executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}, nil
-		}
+		resolves++
 		return executionPayloadSource{gloasPath: gloasPayloadPathFull}, nil
 	}
 	pending := executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}
-	src := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, pending, func() {}, resolve)
+	src, err := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, pending, parkedFor(3), func() {}, resolve)
+	require.NoError(t, err)
 	require.Equal(t, gloasPayloadPathFull, src.gloasPath)
-	require.Equal(t, 3, calls)
+	require.Equal(t, 1, resolves)
 }
 
-func TestAwaitGloasPayloadSourceGivesUpAtDeadline(t *testing.T) {
+// A resolve that races an envelope commit can read the head before the commit and the envelope
+// after it, and report EMPTY with nothing parked. The wait must not take that as the decision
+// while the cheap parked check still holds.
+func TestAwaitGloasPayloadSourceDoesNotEndOnARacedResolve(t *testing.T) {
+	resolves := 0
 	resolve := func() (executionPayloadSource, error) {
-		return executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}, nil
+		resolves++
+		return executionPayloadSource{gloasPath: gloasPayloadPathEmpty}, nil
 	}
 	pending := executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}
 	start := time.Now()
+	deadline := start.Add(50 * time.Millisecond)
+	_, err := awaitGloasPayloadSource(context.Background(), deadline, time.Millisecond, pending, func() bool { return true }, func() {}, resolve)
+	require.NoError(t, err)
+	require.False(t, time.Now().Before(deadline), "the wait ended before the cutoff")
+	require.Equal(t, 1, resolves, "only the cutoff resolves")
+}
+
+func TestAwaitGloasPayloadSourceResolvesOnceMoreAtTheCutoff(t *testing.T) {
+	parked := executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}
+	start := time.Now()
 	// A poll interval far longer than the deadline: the cutoff itself must end the wait.
-	src := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Second, pending, func() {}, resolve)
-	require.True(t, src.envelopeParked)
+	src, err := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Second, parked, func() bool { return true }, func() {}, func() (executionPayloadSource, error) {
+		return executionPayloadSource{gloasPath: gloasPayloadPathFull}, nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, gloasPayloadPathFull, src.gloasPath, "a decision that lands at the cutoff is picked up")
 	require.Less(t, time.Since(start), 500*time.Millisecond)
 }
 
 func TestAwaitGloasPayloadSourceKeepsLastSourceOnResolveError(t *testing.T) {
 	last := executionPayloadSource{gloasPath: gloasPayloadPathPending, head: common.Hash{1}}
-	resolve := func() (executionPayloadSource, error) {
-		return executionPayloadSource{}, errors.New("head changed")
-	}
-	src := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, last, func() {}, resolve)
+	src, err := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, last, parkedFor(0), func() {}, func() (executionPayloadSource, error) {
+		return executionPayloadSource{}, errors.New("state unavailable")
+	})
+	require.NoError(t, err)
 	require.Equal(t, last, src)
+}
+
+func TestAwaitGloasPayloadSourceReturnsAHeadChange(t *testing.T) {
+	last := executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}
+	_, err := awaitGloasPayloadSource(context.Background(), time.Now().Add(time.Second), time.Millisecond, last, parkedFor(0), func() {}, func() (executionPayloadSource, error) {
+		return executionPayloadSource{}, fmt.Errorf("%w: proposal parent a, current head b", errForkChoiceHeadChanged)
+	})
+	require.ErrorIs(t, err, errForkChoiceHeadChanged)
 }
 
 func TestGloasPendingParentDeadline(t *testing.T) {
@@ -85,38 +119,22 @@ func TestGloasPendingParentDeadline(t *testing.T) {
 func TestAwaitGloasPayloadSourceDoesNotWaitForABlockedRetry(t *testing.T) {
 	release := make(chan struct{})
 	defer close(release)
-	retry := func() { <-release }
 	last := executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}
-	resolve := func() (executionPayloadSource, error) { return last, nil }
 	start := time.Now()
-	src := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Millisecond, last, retry, resolve)
+	src, err := awaitGloasPayloadSource(context.Background(), start.Add(20*time.Millisecond), time.Millisecond, last, func() bool { return true }, func() { <-release }, func() (executionPayloadSource, error) { return last, nil })
+	require.NoError(t, err)
 	require.Equal(t, last, src)
 	require.Less(t, time.Since(start), 500*time.Millisecond)
 }
 
 // Availability changes trigger their own retries, so the wait starts one retry and then only
-// re-resolves.
+// polls.
 func TestAwaitGloasPayloadSourceStartsOneRetry(t *testing.T) {
 	var retries atomic.Int32
 	pending := executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}
-	resolve := func() (executionPayloadSource, error) { return pending, nil }
-	awaitGloasPayloadSource(context.Background(), time.Now().Add(30*time.Millisecond), time.Millisecond, pending, func() { retries.Add(1) }, resolve)
+	_, err := awaitGloasPayloadSource(context.Background(), time.Now().Add(30*time.Millisecond), time.Millisecond, pending, func() bool { return true }, func() { retries.Add(1) }, func() (executionPayloadSource, error) { return pending, nil })
+	require.NoError(t, err)
 	require.Equal(t, int32(1), retries.Load())
-}
-
-// A decision that lands in the last poll window must not be lost: the wait resolves once more
-// after the cutoff.
-func TestAwaitGloasPayloadSourceResolvesOnceMoreAtTheCutoff(t *testing.T) {
-	parked := executionPayloadSource{gloasPath: gloasPayloadPathEmpty, envelopeParked: true}
-	deadline := time.Now().Add(20 * time.Millisecond)
-	resolve := func() (executionPayloadSource, error) {
-		if time.Now().Before(deadline) {
-			return parked, nil
-		}
-		return executionPayloadSource{gloasPath: gloasPayloadPathFull}, nil
-	}
-	src := awaitGloasPayloadSource(context.Background(), deadline, time.Second, parked, func() {}, resolve)
-	require.Equal(t, gloasPayloadPathFull, src.gloasPath)
 }
 
 // The retry outlives the wait: a retry in flight at the cutoff keeps its budget instead of
@@ -146,7 +164,8 @@ func TestAwaitPendingParentPayloadLetsTheRetryOutliveTheWait(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, source.envelopeParked)
 
-	handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion, source)
+	_, err = handler.awaitPendingParentPayload(t.Context(), postState, baseBlockRoot, postState.Slot()+1, clparams.GloasVersion, source)
+	require.NoError(t, err)
 	close(release)
 
 	select {

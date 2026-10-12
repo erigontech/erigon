@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -55,22 +56,22 @@ func (a *ApiHandler) resolveProductionPayloadSource(ctx context.Context, baseSta
 	if err != nil || !source.envelopeParked {
 		return source, err
 	}
-	return a.awaitPendingParentPayload(ctx, baseState, baseBlockRoot, targetSlot, stateVersion, source), nil
+	return a.awaitPendingParentPayload(ctx, baseState, baseBlockRoot, targetSlot, stateVersion, source)
 }
 
-// awaitGloasPayloadSource starts one retry and re-resolves the payload source until it is
-// decided or the deadline passes. Later availability changes trigger their own retries. The
-// retry runs on its own goroutine, so a retry that blocks cannot hold the wait past the cutoff;
-// the source is resolved on the caller's goroutine, which the proposal needs after the wait in
-// any case. A resolve error keeps the last resolved source.
+// awaitGloasPayloadSource polls parked until it reports false or the deadline passes, then
+// resolves the source once, so a resolve racing an envelope commit cannot end the wait early.
+// The retry runs on its own goroutine, so a blocked retry cannot hold the wait past the cutoff.
+// A head change is returned as an error; any other resolve error keeps the last source.
 func awaitGloasPayloadSource(
 	ctx context.Context,
 	deadline time.Time,
 	interval time.Duration,
 	last executionPayloadSource,
+	parked func() bool,
 	retry func(),
 	resolve func() (executionPayloadSource, error),
-) executionPayloadSource {
+) (executionPayloadSource, error) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	cutoff := time.NewTimer(time.Until(deadline))
@@ -80,32 +81,26 @@ func awaitGloasPayloadSource(
 		defer close(retryDone)
 		retry()
 	}()
-	// A decision that landed during the last poll window is still picked up.
-	resolveLast := func() executionPayloadSource {
-		if source, err := resolve(); err == nil {
-			return source
-		}
-		return last
-	}
-	for {
+wait:
+	for parked() {
 		select {
 		case <-retryDone:
 			retryDone = nil
 		case <-ticker.C:
 		case <-ctx.Done():
-			return resolveLast()
+			break wait
 		case <-cutoff.C:
-			return resolveLast()
-		}
-		source, err := resolve()
-		if err != nil {
-			return last
-		}
-		last = source
-		if !last.envelopeParked || !time.Now().Before(deadline) {
-			return last
+			break wait
 		}
 	}
+	source, err := resolve()
+	if errors.Is(err, errForkChoiceHeadChanged) {
+		return last, err
+	}
+	if err != nil {
+		return last, nil
+	}
+	return source, nil
 }
 
 // awaitPendingParentPayload gives the parent's payload a bounded chance to be applied before
@@ -119,7 +114,7 @@ func (a *ApiHandler) awaitPendingParentPayload(
 	targetSlot uint64,
 	stateVersion clparams.StateVersion,
 	current executionPayloadSource,
-) executionPayloadSource {
+) (executionPayloadSource, error) {
 	slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
 	deadline := gloasPendingParentDeadline(time.Now(), a.ethClock.GetSlotTime(targetSlot), slotDuration)
 	a.logger.Info("BlockProduction: waiting for parent payload decision", "slot", targetSlot, "head", baseBlockRoot, "budget", time.Until(deadline).Round(time.Millisecond))
@@ -129,11 +124,10 @@ func (a *ApiHandler) awaitPendingParentPayload(
 		defer cancel()
 		a.forkchoiceStore.RetryPendingExecutionPayloadEnvelope(retryCtx, baseBlockRoot)
 	}
-	return awaitGloasPayloadSource(ctx, deadline, gloasPendingParentPollInterval, current, retry, func() (executionPayloadSource, error) {
+	parked := func() bool { return a.envelopeParked(baseBlockRoot) }
+	return awaitGloasPayloadSource(ctx, deadline, gloasPendingParentPollInterval, current, parked, retry, func() (executionPayloadSource, error) {
 		source, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
 		if err != nil {
-			// The proposal keeps its parent, as it would without the wait; a head change
-			// here is visible but not fatal.
 			a.logger.Warn("BlockProduction: parent payload wait stopped", "slot", targetSlot, "head", baseBlockRoot, "err", err)
 		}
 		return source, err
