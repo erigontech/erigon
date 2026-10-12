@@ -37,8 +37,6 @@ const (
 	NonContractIncarnation = 0
 )
 
-// HasAccount answers whether the account exists. A reader that can tell without decoding
-// the account says so with a HasAccount method of its own; the rest read and discard.
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
 	ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error)
