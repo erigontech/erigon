@@ -49,15 +49,15 @@ func HasAccount(r StateReader, address accounts.Address) (bool, error) {
 	return acc != nil, err
 }
 
-// AccountValueReader reads an account by plain address. One-shot RPC reads use it: interning
+// PlainAccountReader reads an account by plain address. One-shot RPC reads use it: interning
 // a fresh address per request (unique.Make) makes each GC cycle stall a loaded server.
-type AccountValueReader interface {
-	ReadAccountDataByValue(address common.Address) (*accounts.Account, error)
+type PlainAccountReader interface {
+	ReadAccountDataPlain(address common.Address) (*accounts.Account, error)
 }
 
 var (
-	_ AccountValueReader = (*CachedReader3)(nil)
-	_ AccountValueReader = (*HistoryReaderV3)(nil)
+	_ PlainAccountReader = (*CachedReader3)(nil)
+	_ PlainAccountReader = (*HistoryReaderV3)(nil)
 )
 
 type StateReader interface {
