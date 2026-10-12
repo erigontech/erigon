@@ -22,8 +22,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 )
 
@@ -38,6 +40,8 @@ func TestGetNodeHealthWhileSyncing(t *testing.T) {
 	}{
 		{"", http.StatusPartialContent},
 		{"?syncing_status=503", http.StatusServiceUnavailable},
+		{"?syncing_status=100", http.StatusContinue},
+		{"?syncing_status=599", 599},
 		{"?syncing_status=42", http.StatusBadRequest},
 		{"?syncing_status=600", http.StatusBadRequest},
 	} {
@@ -45,6 +49,29 @@ func TestGetNodeHealthWhileSyncing(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/node/health"+tc.query, nil)
 			require.NotPanics(t, func() { a.GetEthV1NodeHealth(rec, req) })
+			require.Equal(t, tc.code, rec.Code)
+		})
+	}
+}
+
+func TestGetNodeHealthWhenSynced(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
+	syncedData.EXPECT().Syncing().Return(false).AnyTimes()
+	a := &ApiHandler{syncedData: syncedData}
+
+	for _, tc := range []struct {
+		query string
+		code  int
+	}{
+		{"", http.StatusOK},
+		{"?syncing_status=503", http.StatusOK},
+		{"?syncing_status=42", http.StatusBadRequest},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/node/health"+tc.query, nil)
+			a.GetEthV1NodeHealth(rec, req)
 			require.Equal(t, tc.code, rec.Code)
 		})
 	}

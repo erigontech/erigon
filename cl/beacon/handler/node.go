@@ -52,7 +52,7 @@ func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) 
 	syncingCode := http.StatusPartialContent
 	if syncingStatus != nil {
 		if *syncingStatus < 100 || *syncingStatus > 599 {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid syncing status code %d", *syncingStatus)).WriteTo(w)
+			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("syncing_status must be between 100 and 599, got %d", *syncingStatus)).WriteTo(w)
 			return
 		}
 		syncingCode = int(*syncingStatus)
