@@ -30,6 +30,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -116,26 +117,25 @@ func testPrefixFoldMatchesStateRecord(t *testing.T, build func(t *testing.T, con
 		err                    error
 	}
 	var results []result
-	for i := len(kvs) - 1; i >= 0; i-- {
-		keys, vals := readKVFile(t, agg, kvs[i])
+	for _, path := range slices.Backward(kvs) {
+		keys, vals := readKVFile(t, agg, path)
 		idx := slices.IndexFunc(keys, func(k []byte) bool { return bytes.Equal(k, commitment.KeyCommitmentV3State) })
-		require.GreaterOrEqual(t, idx, 0, "%s has no v3 state record", filepath.Base(kvs[i]))
+		require.GreaterOrEqual(t, idx, 0, "%s has no v3 state record", filepath.Base(path))
 		_, _, recorded, err := commitment.DecodeCommitmentV3State(vals[idx])
 		require.NoError(t, err)
 		c, foldErr := state.FoldCommitmentV3(t.Context(), agg, math.MaxUint64)
-		results = append(results, result{filepath.Base(kvs[i]), fmt.Sprintf("%x", c.Root), fmt.Sprintf("%x", recorded), foldErr})
+		results = append(results, result{filepath.Base(path), fmt.Sprintf("%x", c.Root), fmt.Sprintf("%x", recorded), foldErr})
 
-		base := strings.TrimSuffix(kvs[i], ".kv")
+		base := strings.TrimSuffix(path, ".kv")
 		for _, ext := range []string{".kv", ".bt", ".kvei", ".kvi"} {
-			if rmErr := os.Remove(base + ext); rmErr != nil {
+			if rmErr := dir.RemoveFile(base + ext); rmErr != nil {
 				require.ErrorIs(t, rmErr, os.ErrNotExist)
 			}
 		}
 		require.NoError(t, agg.OpenFolder(db))
 	}
 	var failed []string
-	for i := len(results) - 1; i >= 0; i-- {
-		r := results[i]
+	for _, r := range slices.Backward(results) {
 		t.Logf("file=%s folded=%s record=%s err=%v", r.name, r.folded, r.recorded, r.err)
 		if r.err != nil || r.folded != r.recorded {
 			failed = append(failed, r.name)

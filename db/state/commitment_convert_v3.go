@@ -368,7 +368,7 @@ func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs 
 		if prev, _, _, _, err = prevs.getLatestFromFiles(k, nil, stepFrom-1); err != nil {
 			return err
 		}
-		if err = delta.wipeStorage(prev, v, conv, reach, emit); err != nil {
+		if err := delta.wipeStorage(prev, v, conv, reach, emit); err != nil {
 			return err
 		}
 	}
@@ -467,8 +467,8 @@ func (w *legacyDelta) wipeStorage(prev, v []byte, conv *v3.LegacyConverter, reac
 				return err
 			}
 			if !live {
-				if err := conv.Tombstone(key, emit); err != nil {
-					return err
+				if tombErr := conv.Tombstone(key, emit); tombErr != nil {
+					return tombErr
 				}
 			}
 			if w.stack, err = appendLegacyChildren(w.stack, path, before); err != nil {
