@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -221,12 +222,13 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	var (
-		domain      []byte
-		pubKey      common.Bytes48
-		vIndex      uint64
-		attestation *solid.Attestation // SingleAttestation will be transformed to Attestation struct with given member index in committee
+		domain         []byte
+		pubKey         common.Bytes48
+		vIndex         uint64
+		attestation    *solid.Attestation // SingleAttestation will be transformed to Attestation struct with given member index in committee
+		otherShuffling bool
 	)
-	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+	if err := s.syncedDataManager.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, headRoot common.Hash, _ uint64) error {
 		// If our head state is too far from the attestation epoch, committee
 		// computations will use a stale RANDAO mix and produce wrong results.
 		prevEpoch, currEpoch := validationEpochRange(headState, s.forkchoiceStore.HighestSeen(), currentSlot, s.beaconCfg.SlotsPerEpoch)
@@ -244,6 +246,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if subnet == nil || subnetId != *subnet {
 			return errors.New("wrong subnet")
 		}
+		otherShuffling = shufflingDiffersFromHead(s.forkchoiceStore, s.beaconCfg, headRoot, root, targetEpoch)
 		beaconCommittee, err := headState.GetBeaconCommitee(slot, committeeIndex)
 		if err != nil {
 			return err
@@ -298,7 +301,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			// [REJECT] The attester is a member of the committee -- i.e. attestation.attester_index in get_beacon_committee(state, attestation.data.slot, index).
 			memIndexInCommittee := contains(att.SingleAttestation.AttesterIndex, beaconCommittee)
 			if memIndexInCommittee < 0 {
-				return fmt.Errorf("attester is not a member of the committee. attester index %d committeeIndex %v", att.SingleAttestation.AttesterIndex, committeeIndex)
+				return rejectWithoutBanIf(fmt.Errorf("attester is not a member of the committee. attester index %d committeeIndex %v", att.SingleAttestation.AttesterIndex, committeeIndex), otherShuffling)
 			}
 			vIndex = att.SingleAttestation.AttesterIndex
 			var err error
@@ -363,10 +366,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 
 	aggregateVerificationData := &AggregateVerificationData{
-		Signatures:  [][]byte{signature[:]},
-		SignRoots:   [][]byte{signingRoot[:]},
-		Pks:         [][]byte{pubKey[:]},
-		SendingPeer: att.Receiver,
+		Signatures: [][]byte{signature[:]},
+		SignRoots:  [][]byte{signingRoot[:]},
+		Pks:        [][]byte{pubKey[:]},
 		F: func() {
 			start := time.Now()
 			defer monitor.ObserveAggregateAttestation(start)
@@ -387,12 +389,17 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			}
 		},
 	}
+	// Electra and later attestations name the attester, so their signatures do not depend on the head committee.
+	rejectSignatureWithoutBan := otherShuffling && clVersion < clparams.ElectraVersion
+	if !rejectSignatureWithoutBan {
+		aggregateVerificationData.SendingPeer = att.Receiver
+	}
 
 	if att.ImmediateProcess {
 		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
 	}
 
-	return s.batchSignatureVerifier.VerifyAttestation(ctx, aggregateVerificationData)
+	return rejectWithoutBanIf(s.batchSignatureVerifier.VerifyAttestation(ctx, aggregateVerificationData), rejectSignatureWithoutBan)
 }
 
 // type attestationJob struct {
@@ -447,4 +454,33 @@ func contains[T comparable](target T, slices []T) int {
 		}
 	}
 	return -1
+}
+
+// shufflingDiffersFromHead treats unknown ancestry as the head shuffling.
+func shufflingDiffersFromHead(fc forkchoice.ForkChoiceStorageReader, cfg *clparams.BeaconChainConfig, headRoot, blockRoot common.Hash, epoch uint64) bool {
+	dependentSlot := forkchoice.ComputeShufflingDependentSlot(epoch, cfg.MinSeedLookahead, cfg.SlotsPerEpoch)
+	blockAncestor := fc.Ancestor(blockRoot, dependentSlot).Root
+	if blockAncestor == (common.Hash{}) {
+		return false
+	}
+	headAncestor := fc.Ancestor(headRoot, dependentSlot).Root
+	return headAncestor != (common.Hash{}) && blockAncestor != headAncestor
+}
+
+// rejectWithoutBanError adds peer-ban classification without changing the original error message.
+type rejectWithoutBanError struct{ error }
+
+func (err rejectWithoutBanError) Unwrap() error {
+	return err.error
+}
+
+func (rejectWithoutBanError) Is(target error) bool {
+	return target == serviceintf.ErrRejectWithoutBan
+}
+
+func rejectWithoutBanIf(err error, rejectWithoutBan bool) error {
+	if err == nil || !rejectWithoutBan {
+		return err
+	}
+	return rejectWithoutBanError{err}
 }

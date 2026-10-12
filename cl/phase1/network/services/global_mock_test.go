@@ -17,7 +17,9 @@
 package services
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"go.uber.org/mock/gomock"
 
@@ -102,4 +104,27 @@ func saveSignatureGlobals(t testing.TB) {
 		blsVerify = origBlsVerify
 		blsVerifyMultipleSignatures = origBlsVerifyMultipleSignatures
 	})
+}
+
+func captureQueuedVerification(
+	t testing.TB,
+	queue <-chan *AggregateVerificationData,
+	process func(context.Context) error,
+) (*AggregateVerificationData, <-chan error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	result := make(chan error, 1)
+	go func() {
+		result <- process(ctx)
+	}()
+
+	select {
+	case verification := <-queue:
+		return verification, result
+	case err := <-result:
+		t.Fatalf("ProcessMessage returned before queueing signature verification: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for signature verification")
+	}
+	return nil, nil
 }

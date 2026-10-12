@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
+	serviceintf "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -311,22 +312,37 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_DecodeError() {
 }
 
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_ProcessMessageError() {
+	noBanPeer := peer.ID("no-ban-peer")
+	banPeer := peer.ID("ban-peer")
+	banned := make(recordingPeerBanner, 1)
+	s.gm.SetPeerBanner(banned)
 	service := &mockService{
-		processFunc: func(ctx context.Context, subnet *uint64, msg any) error {
+		decodeFunc: func(pid peer.ID, _ []byte, _ clparams.StateVersion) (any, error) {
+			return pid, nil
+		},
+		processFunc: func(_ context.Context, _ *uint64, msg any) error {
+			if msg == noBanPeer {
+				return serviceintf.ErrRejectWithoutBan
+			}
 			return errors.New("process error")
 		},
 	}
 	validator := s.gm.newPubsubValidator(service)
 
 	ctx := context.Background()
-	pid := peer.ID("test-peer")
 	topic := "/eth2/abcd1234/beacon_block/ssz_snappy"
 	testData := []byte("test data")
 	compressedData := utils.CompressSnappy(testData)
 	msg := createMockMessage(topic, compressedData)
 
-	result := validator(ctx, pid, msg)
-	s.Equal(pubsub.ValidationReject, result)
+	s.Equal(pubsub.ValidationReject, validator(ctx, noBanPeer, msg))
+	s.Equal(pubsub.ValidationReject, validator(ctx, banPeer, msg))
+	select {
+	case got := <-banned:
+		s.Equal(banPeer.String(), got)
+	case <-time.After(time.Second):
+		s.T().Fatal("peer ban did not run")
+	}
 }
 
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorBansEncodedPeerID() {

@@ -18,10 +18,14 @@ package serviceinterface
 
 import (
 	"context"
+	"errors"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
+
+// ErrRejectWithoutBan marks a rejection that does not prove the sending peer faulty.
+var ErrRejectWithoutBan = errors.New("reject without peer ban")
 
 // Note: BlobSidecarService and BlockService are tested in spectests
 
