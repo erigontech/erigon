@@ -1052,7 +1052,7 @@ func TestClientIPC(t *testing.T) {
 	srv := newTestServer(logger)
 	defer srv.Stop()
 	path := filepath.Join(t.TempDir(), "rpc.ipc")
-	l, err := net.Listen("unix", path)
+	l, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", path)
 	require.NoError(t, err)
 	defer l.Close()
 	go srv.ServeListener(l) //nolint:errcheck
