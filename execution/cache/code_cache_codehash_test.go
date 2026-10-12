@@ -23,6 +23,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // makeCodeHash builds a deterministic 32-byte codeHash for tests/benchmarks.
@@ -266,4 +268,108 @@ func TestCodeCache_Unwind_RedeployRevives(t *testing.T) {
 	gotH, ok := c.GetByCodeHash(codeHash)
 	require.True(t, ok, "re-deployed codeHash→code must be live")
 	require.Equal(t, code, gotH)
+}
+
+// Only 8 of an address's bytes pick the slot, so two addresses can collide
+// there. The full-address compare is what keeps a collision a miss instead of
+// serving the other contract's codeHash.
+func TestCodeCache_AddrCodeHashSlotCollision(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	a1 := append(bytes.Repeat([]byte{0x11}, 12), 0, 0, 0, 0, 0, 0, 0, 1)
+	a2 := append(bytes.Repeat([]byte{0x22}, 12), 0, 0, 0, 0, 0, 0, 0, 1)
+	require.Equal(t, addrSlot(common.BytesToAddress(a1)), addrSlot(common.BytesToAddress(a2)),
+		"the two addresses must share a slot for this test to mean anything")
+	h1, h2 := [32]byte{1}, [32]byte{2}
+
+	c.PutAddrCodeHash(a1, h1, 100)
+	got, ok := c.GetAddrCodeHash(a1)
+	require.True(t, ok)
+	require.Equal(t, h1, got)
+
+	// The colliding address must miss, never inherit a1's hash.
+	_, ok = c.GetAddrCodeHash(a2)
+	require.False(t, ok)
+
+	// Replacement serves the address just inserted.
+	c.PutAddrCodeHash(a2, h2, 100)
+	got, ok = c.GetAddrCodeHash(a2)
+	require.True(t, ok)
+	require.Equal(t, h2, got)
+	_, ok = c.GetAddrCodeHash(a1)
+	require.False(t, ok, "a1 was displaced by the colliding insert")
+}
+
+// The addr→code binding shares the same lossy 64-bit slot, guarded by the full
+// address in GetWithTxNum. Without that guard one address would serve another's
+// code.
+func TestCodeCache_AddrCodeSlotCollision(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	a1 := append(bytes.Repeat([]byte{0x33}, 12), 0, 0, 0, 0, 0, 0, 0, 7)
+	a2 := append(bytes.Repeat([]byte{0x44}, 12), 0, 0, 0, 0, 0, 0, 0, 7)
+	require.Equal(t, addrSlot(common.BytesToAddress(a1)), addrSlot(common.BytesToAddress(a2)),
+		"the two addresses must share a slot for this test to mean anything")
+	code1, code2 := []byte{0x60, 0x01}, []byte{0x60, 0x02}
+
+	c.Put(a1, code1, 0)
+	got, ok := c.Get(a1)
+	require.True(t, ok)
+	require.Equal(t, code1, got)
+
+	// The colliding address must miss, never inherit a1's code.
+	_, ok = c.Get(a2)
+	require.False(t, ok)
+
+	// Binding the colliding address serves it, and a1 no longer claims the slot.
+	c.Put(a2, code2, 0)
+	got, ok = c.Get(a2)
+	require.True(t, ok)
+	require.Equal(t, code2, got)
+	_, ok = c.Get(a1)
+	require.False(t, ok)
+
+	// Deleting a non-resident colliding address must not evict a2's live entry.
+	c.Delete(a1)
+	got, ok = c.Get(a2)
+	require.True(t, ok, "Delete of a colliding address dropped the wrong entry")
+	require.Equal(t, code2, got)
+}
+
+// DeleteAddrCodeHash is slot-keyed too, so it must leave a colliding address's
+// live mapping alone.
+func TestCodeCache_DeleteAddrCodeHashKeepsCollidingEntry(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	a1 := append(bytes.Repeat([]byte{0x55}, 12), 0, 0, 0, 0, 0, 0, 0, 9)
+	a2 := append(bytes.Repeat([]byte{0x66}, 12), 0, 0, 0, 0, 0, 0, 0, 9)
+	h2 := [32]byte{9}
+
+	c.PutAddrCodeHash(a2, h2, 100)
+	c.DeleteAddrCodeHash(a1)
+
+	got, ok := c.GetAddrCodeHash(a2)
+	require.True(t, ok, "deleting a colliding address dropped the wrong mapping")
+	require.Equal(t, h2, got)
+}
+
+// A colliding address's live mapping survives a read of its unwind-stale
+// sibling: the address guard answers the miss before the stale-drop path.
+// (The drop itself is serialized against writers in dropStaleAddrCodeHash; that
+// interleaving has no deterministic test.)
+func TestCodeCache_StaleSiblingReadKeepsCollidingMapping(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	a1 := append(bytes.Repeat([]byte{0x77}, 12), 0, 0, 0, 0, 0, 0, 0, 3)
+	a2 := append(bytes.Repeat([]byte{0x88}, 12), 0, 0, 0, 0, 0, 0, 0, 3)
+	h1, h2 := [32]byte{1}, [32]byte{2}
+
+	// a1's mapping is on a fork that gets unwound.
+	c.PutAddrCodeHash(a1, h1, 200)
+	c.Unwind(150)
+	// A colliding address publishes a live mapping afterwards.
+	c.PutAddrCodeHash(a2, h2, 100)
+
+	// The stale read of a1 must leave a2's live mapping in place.
+	_, ok := c.GetAddrCodeHash(a1)
+	require.False(t, ok, "a1 is unwind-stale")
+	got, ok := c.GetAddrCodeHash(a2)
+	require.True(t, ok, "stale read of a colliding address dropped the live mapping")
+	require.Equal(t, h2, got)
 }
