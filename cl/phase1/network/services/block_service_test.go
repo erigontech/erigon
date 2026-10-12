@@ -169,6 +169,100 @@ func TestBlockServiceIgnoreSlot(t *testing.T) {
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
 }
 
+// TestBlockServiceDoesNotIgnoreLateBlockAsFuture proves the future-slot check compares against the
+// wall-clock slot, not the head: a block for a slot that has already passed, arriving while the
+// head is still behind it, is not from the future.
+func TestBlockServiceDoesNotIgnoreLateBlockAsFuture(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.ErrorIs(t, err, ErrInvalidSignature)
+}
+
+func scheduledBlockCount(t *testing.T, service BlockService) int {
+	t.Helper()
+	count := 0
+	service.(*blockService).blocksScheduledForLaterExecution.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
+}
+
+// A late block whose proposer is past the head state's registry can only be checked against its
+// parent's state. While the parent is unknown it must be ignored, and not queued unverified.
+func TestBlockServiceIgnoresUnknownProposerWhileParentIsUnknown(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	block.Block.ProposerIndex = uint64(post.ValidatorLength())
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.Zero(t, scheduledBlockCount(t, blockService))
+}
+
+func TestBlockServiceRejectsUnknownProposerWhenParentIsKnown(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, forkchoiceMock := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	block.Block.ProposerIndex = uint64(post.ValidatorLength())
+	forkchoiceMock.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{block.Block.ParentRoot: {Slot: post.Slot()}}
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+// Only the unknown proposer is excused while the parent is unknown: a malformed signature is
+// still rejected.
+func TestBlockServiceRejectsMalformedSignatureWhileParentIsUnknown(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+
+	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
+	require.NoError(t, syncedData.OnHeadState(post))
+	block := blocks[0]
+	block.Block.Slot = post.Slot() + 1
+	for i := range block.Signature {
+		block.Signature[i] = 0xff
+	}
+	ethClock.EXPECT().GetCurrentSlot().Return(post.Slot() + 2).AnyTimes()
+
+	err := blockService.ProcessMessage(context.Background(), nil, block)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
 func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -436,10 +530,13 @@ func TestBlockServiceGossipRejectsUnexpectedProposer(t *testing.T) {
 	var stateReads atomic.Int32
 	var stateCopyMu sync.Mutex
 	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-		if root != blocks[1].Block.ParentRoot || !alwaysCopy {
+		if root != blocks[1].Block.ParentRoot {
 			return nil, fmt.Errorf("unexpected parent state request")
 		}
 		stateReads.Add(1)
+		if !alwaysCopy {
+			return parentState, nil
+		}
 		stateCopyMu.Lock()
 		defer stateCopyMu.Unlock()
 		return parentState.Copy()
@@ -683,6 +780,65 @@ func TestBlockServiceBoundsConcurrentParentStateReplays(t *testing.T) {
 	}
 }
 
+func newBellatrixValidationContextFixture(t *testing.T) (*blockService, *mock_services.ForkChoiceStorageMock, *cltypes.SignedBeaconBlock, *state.CachingBeaconState) {
+	ctrl := gomock.NewController(t)
+	blocks, pre, _ := tests.GetBellatrixRandom()
+	parentState, err := pre.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+	service, _, _, fcu := setupBlockService(t, ctrl)
+	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	return service.(*blockService), fcu, blocks[1], parentState
+}
+
+func TestBlockValidationContextReadsSameEpochParentStateWithoutCopy(t *testing.T) {
+	service, fcu, child, parentState := newBellatrixValidationContextFixture(t)
+	require.Equal(t, state.Epoch(parentState), child.Block.Slot/parentState.BeaconConfig().SlotsPerEpoch)
+	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		if root != child.Block.ParentRoot || alwaysCopy {
+			return nil, fmt.Errorf("unexpected parent state request: root=%x alwaysCopy=%v", root, alwaysCopy)
+		}
+		return parentState, nil
+	}
+	parentSlot := parentState.Slot()
+
+	validationContext, err := service.blockValidationContext(t.Context(), child.Block.ParentRoot, child.Block.Slot)
+	require.NoError(t, err)
+	require.Equal(t, child.Block.ProposerIndex, validationContext.expectedProposer)
+	require.Equal(t, parentSlot, parentState.Slot())
+}
+
+func TestBlockValidationContextAdvancesCopiedParentStateAcrossEpoch(t *testing.T) {
+	service, fcu, child, parentState := newBellatrixValidationContextFixture(t)
+	slotsPerEpoch := parentState.BeaconConfig().SlotsPerEpoch
+	nextEpochSlot := (state.Epoch(parentState) + 1) * slotsPerEpoch
+	expected, err := parentState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(expected, nextEpochSlot))
+	expectedProposer, err := expected.GetBeaconProposerIndexForSlot(nextEpochSlot)
+	require.NoError(t, err)
+	var stateFetches, copies atomic.Int32
+	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		if root != child.Block.ParentRoot {
+			return nil, fmt.Errorf("unexpected parent state request: root=%x", root)
+		}
+		stateFetches.Add(1)
+		if !alwaysCopy {
+			return parentState, nil
+		}
+		copies.Add(1)
+		return parentState.Copy()
+	}
+	parentSlot := parentState.Slot()
+
+	validationContext, err := service.blockValidationContext(t.Context(), child.Block.ParentRoot, nextEpochSlot)
+	require.NoError(t, err)
+	require.Equal(t, expectedProposer, validationContext.expectedProposer)
+	require.Equal(t, int32(1), copies.Load())
+	require.Equal(t, int32(1), stateFetches.Load(), "a non-head parent state is rebuilt on every fetch")
+	require.Equal(t, parentSlot, parentState.Slot())
+}
+
 func TestBlockServiceGossipWaitsForFullParentPayloadVerification(t *testing.T) {
 	service, child, fcu, parentRoot, parentBlockHash := newGloasGossipValidationFixture(t, nil)
 	fcu.ExecutionPayloadStatusMap[parentBlockHash] = execution_client.PayloadStatusValidated
@@ -889,7 +1045,7 @@ func TestPublishedBlockJobRetainsFullStoreUntilSuccess(t *testing.T) {
 		storedSidecars = true
 		imported = true
 		return db.Update(t.Context(), func(tx kv.RwTx) error {
-			return beacon_indicies.WriteBeaconBlockAndIndicies(t.Context(), tx, block, false)
+			return beacon_indicies.WriteBeaconBlockAndIndicies(tx, block, false)
 		})
 	})
 	jobValue, ok := service.blocksScheduledForLaterExecution.Load(root)
@@ -1117,11 +1273,13 @@ func TestBlockServiceUnrelatedReservationDoesNotRevalidateP2P(t *testing.T) {
 	validationCalls := 0
 	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 		require.Equal(t, parentRoot, root)
-		require.True(t, alwaysCopy)
 		validationCalls++
 		if validationCalls == 1 {
 			close(validationEntered)
 			<-finishValidation
+		}
+		if !alwaysCopy {
+			return parentState, nil
 		}
 		return parentState.Copy()
 	}

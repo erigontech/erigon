@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"slices"
 	"sync"
@@ -212,91 +211,6 @@ func ApplyCompressedSerializedUint64ListDiff(in, out []byte, diff []byte, revers
 			}
 			currIndex += 8
 		}
-	}
-
-	return out, nil
-}
-
-func ComputeCompressedSerializedValidatorSetListDiff(w io.Writer, oldVal, newVal []byte) error {
-	if len(oldVal) > len(newVal) {
-		return errors.New("old list is longer than new list")
-	}
-
-	validatorLength := validatorSSZSize
-	if len(oldVal)%validatorLength != 0 {
-		return fmt.Errorf("old list is not a multiple of validator length got %d", len(oldVal))
-	}
-	if len(newVal)%validatorLength != 0 {
-		return fmt.Errorf("new list is not a multiple of validator length got %d", len(newVal))
-	}
-	for i := 0; i < len(oldVal); i += validatorLength {
-		if !bytes.Equal(oldVal[i:i+validatorLength], newVal[i:i+validatorLength]) {
-			if err := binary.Write(w, binary.BigEndian, uint32(i/validatorLength)); err != nil {
-				return err
-			}
-			if _, err := w.Write(newVal[i : i+validatorLength]); err != nil {
-				return err
-			}
-		}
-	}
-	if err := binary.Write(w, binary.BigEndian, uint32(1<<31)); err != nil {
-		return err
-	}
-
-	if _, err := w.Write(newVal[len(oldVal):]); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, reverse bool) ([]byte, error) {
-	out = out[:0]
-	if cap(out) < len(in) {
-		out = make([]byte, len(in))
-	}
-	out = out[:len(in)]
-
-	reader := bytes.NewReader(diff)
-
-	currValidator := make([]byte, validatorSSZSize)
-
-	for {
-		var index uint32
-		if err := binary.Read(reader, binary.BigEndian, &index); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, err
-		}
-		if index == 1<<31 {
-			break
-		}
-		n, err := io.ReadFull(reader, currValidator)
-		if err != nil && !errors.Is(err, io.EOF) {
-			return nil, err
-		}
-		if n == 0 {
-			break
-		}
-		if n != validatorSSZSize {
-			return nil, fmt.Errorf("read %d bytes, expected %d", n, validatorSSZSize)
-		}
-		// overwrite the validator
-		copy(out[index*validatorSSZSize:], currValidator)
-	}
-	for {
-		n, err := io.ReadFull(reader, currValidator)
-		if err != nil && !errors.Is(err, io.EOF) {
-			return nil, err
-		}
-		if n == 0 {
-			break
-		}
-		if n != validatorSSZSize {
-			return nil, fmt.Errorf("read %d bytes, expected %d", n, validatorSSZSize)
-		}
-		out = append(out, currValidator...) //nolint:makezero
 	}
 
 	return out, nil

@@ -1034,11 +1034,11 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 			break
 		}
 
-		parentRoot, err := beacon_indicies.ReadParentBlockRoot(b.ctx, tx, expectedRoot)
+		parentRoot, err := beacon_indicies.ReadParentBlockRoot(tx, expectedRoot)
 		if err != nil {
 			return err
 		}
-		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, expectedRoot); err != nil {
+		if err := beacon_indicies.MarkRootCanonical(tx, *slot, expectedRoot); err != nil {
 			return err
 		}
 		slotToDownload = *slot - 1

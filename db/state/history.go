@@ -65,6 +65,9 @@ type History struct {
 	// snapshot and published atomically via Aggregator.visible. BeginFilesRo opens
 	// readers against that snapshot in zero-copy way.
 	dirtyFiles *DirtyFiles
+
+	// _testBuildVIHook - test-only: called before the build loop in buildVI
+	_testBuildVIHook func()
 }
 
 func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
@@ -277,6 +280,9 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 
 	histReader.Reset(0)
 	iiReader.Reset(0)
+	if h._testBuildVIHook != nil {
+		h._testBuildVIHook()
+	}
 
 	var seq multiencseq.SequenceReader
 	var it multiencseq.SequenceIterator

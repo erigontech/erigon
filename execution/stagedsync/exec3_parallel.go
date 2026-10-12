@@ -1808,11 +1808,17 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 		}
 	}
 
+	// The pool runs one worker beyond the configured count, except for a count
+	// of one (--exec.serial), which must run one transaction at a time.
+	poolSize := pe.workerCount + 1
+	if pe.workerCount <= 1 {
+		poolSize = 1
+	}
 	var err error
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
 		workersCtx, workerFaults, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
+		poolSize, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
 	)
 
 	executorCancel := func(cause error) error {
@@ -3144,7 +3150,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				if txn := txTask.Tx(); txn != nil {
-					executionContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam)
+					executionContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam, false)
 					if err := protocol.CheckBlockGasInclusion(be.gasPool, executionContribution, stateContribution, txn.GetBlobGas()); err != nil {
 						return be.invalidBlockResult(fmt.Errorf("%w: tx exceeds block gas budget at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.number(), txVersion.TxIndex, err)), nil
 					}
