@@ -301,6 +301,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `50000000`
 * `--rpc.batch.limit value`: Sets the maximum number of requests in a batch.
   * Default: `100`
+* `--rpc.subscription.limit value`: Maximum number of concurrent subscriptions per WebSocket or IPC connection.
+  * Default: `1024`
+  * Set to `0` for unlimited subscriptions.
 * `--rpc.blockrange.limit value`: Sets the maximum block range for `eth_getLogs` and similar range queries.
   * Default: `1000`
   * Applies to: `eth_getLogs`, `eth_getFilterLogs`, `erigon_getLogs`
