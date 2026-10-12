@@ -797,11 +797,12 @@ func TestBucketStoreLowestStoredSlotSkipsEmptyBuckets(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 
-	makeBuckets(t, fs, "2", "3", "5", "07")
+	makeBuckets(t, fs, "1/sub", "2", "3", "5", "07")
+	require.NoError(t, afero.WriteFile(fs, "2/root_0"+tmpSuffix, []byte{1}, 0o644))
 	require.NoError(t, afero.WriteFile(fs, "3/root_0", []byte{1}, 0o644))
 	require.NoError(t, afero.WriteFile(fs, "5/root_0", []byte{1}, 0o644))
 	require.NoError(t, afero.WriteFile(fs, "07/root_0", []byte{1}, 0o644))
-	require.NoError(t, afero.WriteFile(fs, "1", []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(fs, "4", []byte{1}, 0o644))
 
 	slot, ok, err := b.lowestStoredSlot()
 	require.NoError(t, err)
