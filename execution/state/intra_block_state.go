@@ -380,9 +380,8 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
-// statePool is sync.Pool's surface, so a test can hand the release path a
-// deterministic one: sync.Pool may discard any item, and under -race it drops
-// one in four.
+// statePool is sync.Pool's surface, so a test can substitute one that keeps
+// what it is given: sync.Pool may discard any item.
 type statePool interface {
 	Get() any
 	Put(any)

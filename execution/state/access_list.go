@@ -42,10 +42,9 @@ type accessList struct {
 	lastSlots    map[accounts.StorageKey]struct{}
 	lastWarmSlot accounts.StorageKey
 
-	// peak is the largest each slot map at the same index has ever been, and
-	// addrPeak the same for the address map. A cleared or reverted map keeps its
-	// buckets, so these are what a pooled list pins, however little it holds
-	// right now.
+	// A cleared, truncated or reverted map keeps its buckets for the next call
+	// to reuse, so what a pooled list pins is the largest each has been, not
+	// what it holds now. Every shrink records it: see markPeak.
 	peak     []int
 	addrPeak int
 }
@@ -62,9 +61,6 @@ func newAccessList() *accessList {
 // subsequent AddSlot calls without new allocations.
 func (al *accessList) Reset() {
 	for i, s := range al.slots {
-		// Record before clearing: estimateGas probes and access-list
-		// convergence reset between executions, and the capacity each map keeps
-		// outlives every one of them.
 		al.markPeak(i, len(s))
 		clear(s)
 	}
@@ -74,9 +70,7 @@ func (al *accessList) Reset() {
 	al.dropMemo()
 }
 
-// entries reports the keys this list pins rather than the keys it holds: a map
-// that grew keeps its capacity at its index for addSlotSlow to reuse, so a
-// short or fully reverted call still answers for every map it left behind.
+// entries reports the keys this list pins, not the keys it holds.
 func (al *accessList) entries() int {
 	for i, s := range al.slots {
 		al.markPeak(i, len(s))
@@ -89,14 +83,12 @@ func (al *accessList) entries() int {
 	return total
 }
 
-// markAddrPeak remembers the largest the address map has been.
 func (al *accessList) markAddrPeak() {
 	if n := len(al.addresses); n > al.addrPeak {
 		al.addrPeak = n
 	}
 }
 
-// markPeak remembers the largest the map at idx has been.
 func (al *accessList) markPeak(idx, n int) {
 	if idx >= len(al.peak) {
 		al.peak = append(al.peak, make([]int, idx+1-len(al.peak))...)
@@ -225,8 +217,6 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 		panic("reverting slot change, address has no slots")
 	}
 	slotmap := al.slots[idx]
-	// Record the size before it shrinks: a revert can truncate this map out of
-	// slots[:len] entirely, and its capacity still waits at this index.
 	al.markPeak(idx, len(slotmap))
 	delete(slotmap, slot)
 	al.dropMemo()
@@ -253,8 +243,6 @@ func (al *accessList) DeleteAddress(address accounts.Address) {
 	if idx != -1 {
 		panic("reverting address change, address still has slots")
 	}
-	// Record before it shrinks: a reverted warm-up empties this map and its
-	// buckets stay.
 	al.markAddrPeak()
 	delete(al.addresses, address)
 }
