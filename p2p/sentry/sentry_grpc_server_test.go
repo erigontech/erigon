@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 // Handles RLP encoding/decoding for p2p.Msg
@@ -805,7 +806,7 @@ func TestRunPeer_NewBlockHashesFloodKicksPeer(t *testing.T) {
 		assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
 	}
 
-	for range newBlockHashesBurst + 10 {
+	for range blockAnnouncementsBurst + 10 {
 		select {
 		case rw.readCh <- freshNewBlockHashesMsg(t, 1):
 		case peerErr := <-errCh:
@@ -857,6 +858,100 @@ func TestRunPeer_NormalNewBlockHashesForwarded(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatal("timed out waiting for forwarded NewBlockHashes")
 		}
+	}
+}
+
+func TestRunPeer_NewBlockFloodKicksPeer(t *testing.T) {
+	for _, subscribers := range []bool{true, false} {
+		t.Run(fmt.Sprintf("subscribers=%t", subscribers), func(t *testing.T) {
+			peerInfo, peerID := newTestPeerInfoWithEth(t)
+			rw := NewMockMsgReadWriter()
+			for range 40 {
+				require.NoError(t, rw.WriteMsg(p2p.Msg{
+					Code: eth.NewBlockMsg, Size: 1, Payload: bytes.NewReader([]byte{0xc0}),
+				}))
+			}
+			rw.WriteToReadBuffer(rw.ReadAllWritten())
+			forwarded := 0
+			peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68},
+				rw, peerInfo, func(sentryproto.MessageId, [64]byte, []byte) { forwarded++ },
+				func(sentryproto.MessageId) bool { return subscribers }, log.Root())
+			require.NotNil(t, peerErr)
+			require.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+			if subscribers {
+				require.Positive(t, forwarded)
+				require.Less(t, forwarded, 40)
+			} else {
+				require.Zero(t, forwarded)
+			}
+		})
+	}
+}
+
+func TestSentryServer_BoundsQueuedPayloadBytes(t *testing.T) {
+	ss := &GrpcServer{}
+	server, client := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	defer ss.addMessagesStream([]sentryproto.MessageId{sentryproto.MessageId_NEW_BLOCK_66}, server)()
+	data := make([]byte, eth.ProtocolMaxMsgSize)
+	for range 20 {
+		ss.send(sentryproto.MessageId_NEW_BLOCK_66, [64]byte{}, data)
+	}
+	server.Close()
+	var queuedBytes, count int
+	for {
+		message, err := client.Recv()
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+		queuedBytes += len(message.Data)
+		count++
+	}
+	require.Equal(t, 6, count)
+	require.LessOrEqual(t, queuedBytes, libsentry.MessagesQueueByteLimit)
+}
+
+func TestSentryServer_BoundsMixedUploadRequestBytes(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ss := &GrpcServer{}
+	ids := []sentryproto.MessageId{
+		sentryproto.MessageId_GET_BLOCK_BODIES_66,
+		sentryproto.MessageId_GET_RECEIPTS_66,
+	}
+	server, client := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
+	defer server.Close()
+	defer ss.addMessagesStream(ids, server)()
+	data, err := rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
+		RequestId:            1,
+		GetBlockBodiesPacket: make(eth.GetBlockBodiesPacket, 317700),
+	})
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(data), eth.ProtocolMaxMsgSize)
+	var receipts eth.GetReceiptsPacket66
+	require.NoError(t, rlp.DecodeBytes(data, &receipts))
+	const flood = 20
+	for i := range flood {
+		ss.send(ids[i%len(ids)], [64]byte{byte(i)}, data)
+	}
+	server.Close()
+	var queuedBytes int
+	messages := make([]*sentryproto.InboundMessage, 0, 6)
+	for {
+		message, err := client.Recv()
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+		queuedBytes += len(message.Data)
+		messages = append(messages, message)
+	}
+	require.LessOrEqual(t, queuedBytes, libsentry.MessagesQueueByteLimit)
+	require.Len(t, messages, 6)
+	for i, message := range messages {
+		sequence := flood - len(messages) + i
+		require.Equal(t, [64]byte{byte(sequence)}, gointerfaces.ConvertH512ToHash(message.PeerId))
+		require.Equal(t, ids[sequence%len(ids)], message.Id)
 	}
 }
 

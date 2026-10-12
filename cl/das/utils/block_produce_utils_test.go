@@ -29,7 +29,7 @@ import (
 
 func TestGetDataColumnSidecarsGloasUsesProgressiveLists(t *testing.T) {
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig)
 	}
 	cfg := *clparams.GetBeaconConfig()
 	cfg.NumberOfColumns = 1
@@ -59,7 +59,7 @@ func TestGetDataColumnSidecarsGloasUsesProgressiveLists(t *testing.T) {
 
 func TestGetDataColumnSidecarsGloasRejectsIncompleteCellVectors(t *testing.T) {
 	if clparams.GetBeaconConfig() == nil {
-		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &clparams.CaplinConfig{})
+		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig)
 	}
 
 	cfg := *clparams.GetBeaconConfig()
