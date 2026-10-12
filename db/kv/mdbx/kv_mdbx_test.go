@@ -1298,3 +1298,43 @@ func TestInMemKeepsUtterlyNoSync(t *testing.T) {
 	require.Equal(t, uint(mdbxgo.UtterlyNoSync), flags&mdbxgo.UtterlyNoSync,
 		"utterly-nosync lost a bit, and without all of them mdbx flushes on commit")
 }
+
+// Begin racing Close: a transaction either starts before Close and is waited
+// for, or fails as closed. Close must never free the env under a running read,
+// and nothing may start once it has returned.
+func TestCloseRacingBeginRo(t *testing.T) {
+	for range 20 {
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).MustOpen()
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			return tx.Put(kv.Headers, []byte{1}, []byte{2})
+		}))
+
+		var live atomic.Int64
+		var closed atomic.Bool
+		var wg sync.WaitGroup
+		for range 16 {
+			wg.Go(func() {
+				for {
+					tx, err := db.BeginRo(t.Context())
+					if err != nil {
+						require.ErrorContains(t, err, "closed")
+						return
+					}
+					require.False(t, closed.Load(), "a read began after Close returned")
+					live.Add(1)
+					// A read on a freed env crashes or errors: this is what Close must wait for.
+					v, err := tx.GetOne(kv.Headers, []byte{1})
+					require.NoError(t, err)
+					require.Equal(t, []byte{2}, v)
+					live.Add(-1)
+					tx.Rollback()
+				}
+			})
+		}
+		time.Sleep(time.Millisecond)
+		db.Close()
+		closed.Store(true)
+		require.Zero(t, live.Load(), "Close returned while a read was still running")
+		wg.Wait()
+	}
+}
