@@ -104,6 +104,34 @@ func TestHasImportedDescendantAfterKeepsBlocksOnTheEmptyVariantOfAnInvalidPayloa
 	require.True(t, store.HasImportedDescendantAfter(anchorRoot, 0))
 }
 
+// A pre-Gloas block has no EMPTY alternative: an invalid one cuts off itself and every child,
+// whatever the child's bid claims.
+func TestCutOffByInvalidationAtThePreGloasBoundary(t *testing.T) {
+	store, _, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	graph := store.forkGraph.(*embeddedPtcVoteForkGraph)
+	add := func(block *cltypes.SignedBeaconBlock) common.Hash {
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		graph.blocks[root] = block
+		return root
+	}
+	parent := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.FuluVersion)
+	parent.Block.Slot = 30
+	parentRoot := add(parent)
+	child := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+	child.Block.Slot = 31
+	child.Block.ParentRoot = parentRoot
+	childRoot := add(child)
+	require.Equal(t, cltypes.PayloadStatusEmpty, store.getParentPayloadStatus(child.Block))
+
+	require.False(t, store.cutOffByInvalidation(parentRoot))
+	require.False(t, store.cutOffByInvalidation(childRoot))
+
+	graph.MarkHeaderAsInvalid(parentRoot)
+	require.True(t, store.cutOffByInvalidation(parentRoot))
+	require.True(t, store.cutOffByInvalidation(childRoot))
+}
+
 func TestGloasAnchorStartsWithoutPtcVotes(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	anchor := state.New(&cfg)

@@ -1182,7 +1182,8 @@ func (f *ForkChoiceStore) markPayloadStatus(
 }
 
 // cutOffByInvalidation reports whether no fork-choice node of root survives the recorded
-// invalidations: an invalid pre-Gloas block, or a Gloas block built on an invalid parent payload.
+// invalidations: an invalid pre-Gloas block, a child of one (it has no EMPTY alternative), or a
+// Gloas block built on an invalid parent payload.
 func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
 	block, ok := f.forkGraph.GetBlock(root)
 	if !ok || block == nil || block.Block == nil {
@@ -1191,7 +1192,14 @@ func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
 	if block.Version() < clparams.GloasVersion {
 		return f.forkGraph.IsBlockInvalid(root)
 	}
-	return f.forkGraph.IsBlockInvalid(block.Block.ParentRoot) && f.getParentPayloadStatus(block.Block) == cltypes.PayloadStatusFull
+	parentRoot := block.Block.ParentRoot
+	if !f.forkGraph.IsBlockInvalid(parentRoot) {
+		return false
+	}
+	if parent, ok := f.forkGraph.GetBlock(parentRoot); ok && parent != nil && parent.Version() < clparams.GloasVersion {
+		return true
+	}
+	return f.getParentPayloadStatus(block.Block) == cltypes.PayloadStatusFull
 }
 
 func (f *ForkChoiceStore) payloadStatusAuthority(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {
