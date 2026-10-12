@@ -40,7 +40,6 @@ func TestGetNodeHealthWhileSyncing(t *testing.T) {
 	}{
 		{"", http.StatusPartialContent},
 		{"?syncing_status=503", http.StatusServiceUnavailable},
-		{"?syncing_status=100", http.StatusContinue},
 		{"?syncing_status=599", 599},
 		{"?syncing_status=42", http.StatusBadRequest},
 		{"?syncing_status=600", http.StatusBadRequest},
@@ -52,6 +51,20 @@ func TestGetNodeHealthWhileSyncing(t *testing.T) {
 			require.Equal(t, tc.code, rec.Code)
 		})
 	}
+}
+
+func TestGetNodeHealthAcceptsInformationalSyncingStatus(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	a := &ApiHandler{syncedData: synced_data.NewSyncedDataManager(&cfg, true)}
+	server := httptest.NewServer(http.HandlerFunc(a.GetEthV1NodeHealth))
+	defer server.Close()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/eth/v1/node/health?syncing_status=100", nil)
+	require.NoError(t, err)
+	resp, err := server.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 func TestGetNodeHealthWhenSynced(t *testing.T) {
