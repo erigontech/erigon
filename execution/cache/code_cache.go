@@ -139,7 +139,8 @@ type CodeCache struct {
 	// (keccak), separately from addrToHash (which uses the cheap maphash
 	// for bytes-lookup chaining). Used by SharedDomains.codeHashForAddr to
 	// skip a cold account-domain read when the EVM-known codeHash is
-	// already in cache. An addr → codeHash LRU.
+	// already in cache. Reads take no lock; admission is W-TinyLFU, so a
+	// freshly seen address can be refused rather than displacing a warm one.
 	addrToCodeHash *ByteLRU[addrCodeHashEntry]
 
 	// codeHashToCode: 32-byte Ethereum codeHash (keccak256) → code bytes. Populated
@@ -257,7 +258,9 @@ func NewCodeCache(codeCapacityBytes, addrCapacityBytes datasize.ByteSize) *CodeC
 	}
 	cc := &CodeCache{
 		addrToHash: addrLRU,
-		addrToCodeHash: NewByteLRU(max(addrCapacityBytes/2, 1),
+		// Same entry count as addrToHash, since addrEntryBytes charges one slot
+		// in each: a flat half of the budget would leave part of it unreachable.
+		addrToCodeHash: NewByteLRU(datasize.ByteSize(addrEntries)*datasize.ByteSize(addrToCodeHashEntryBytes),
 			func(uint64, addrCodeHashEntry) int64 { return int64(addrToCodeHashEntryBytes) }),
 		codeSizeCapEntries: DefaultCodeSizeCacheEntries,
 		addrCapacityB:      addrCapacityBytes,
@@ -384,8 +387,9 @@ func (c *CodeCache) putCodeLocked(addr []byte, code []byte, keyHash [32]byte, co
 
 // GetAddrCodeHash returns the Ethereum codeHash for addr if cached. Lets
 // SharedDomains.codeHashForAddr skip a cold AccountsDomain read when the
-// EVM-known codeHash is already known. Eviction is LRU; freshly seen addrs
-// replace coldest entries.
+// EVM-known codeHash is already known. Admission is W-TinyLFU, so a freshly
+// seen address can be refused instead of displacing a warm entry; a miss falls
+// through to the authoritative read.
 func (c *CodeCache) GetAddrCodeHash(addr []byte) ([32]byte, bool) {
 	h, _, ok := c.GetAddrCodeHashWithTxNum(addr)
 	return h, ok

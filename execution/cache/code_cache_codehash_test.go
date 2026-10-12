@@ -23,6 +23,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // makeCodeHash builds a deterministic 32-byte codeHash for tests/benchmarks.
@@ -266,4 +268,33 @@ func TestCodeCache_Unwind_RedeployRevives(t *testing.T) {
 	gotH, ok := c.GetByCodeHash(codeHash)
 	require.True(t, ok, "re-deployed codeHash→code must be live")
 	require.Equal(t, code, gotH)
+}
+
+// Only 8 of an address's bytes pick the slot, so two addresses can collide
+// there. The full-address compare is what keeps a collision a miss instead of
+// serving the other contract's codeHash.
+func TestCodeCache_AddrCodeHashSlotCollision(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	a1 := append(bytes.Repeat([]byte{0x11}, 12), 0, 0, 0, 0, 0, 0, 0, 1)
+	a2 := append(bytes.Repeat([]byte{0x22}, 12), 0, 0, 0, 0, 0, 0, 0, 1)
+	require.Equal(t, addrSlot(common.BytesToAddress(a1)), addrSlot(common.BytesToAddress(a2)),
+		"the two addresses must share a slot for this test to mean anything")
+	h1, h2 := [32]byte{1}, [32]byte{2}
+
+	c.PutAddrCodeHash(a1, h1, 100)
+	got, ok := c.GetAddrCodeHash(a1)
+	require.True(t, ok)
+	require.Equal(t, h1, got)
+
+	// The colliding address must miss, never inherit a1's hash.
+	_, ok = c.GetAddrCodeHash(a2)
+	require.False(t, ok)
+
+	// Replacement serves the address just inserted.
+	c.PutAddrCodeHash(a2, h2, 100)
+	got, ok = c.GetAddrCodeHash(a2)
+	require.True(t, ok)
+	require.Equal(t, h2, got)
+	_, ok = c.GetAddrCodeHash(a1)
+	require.False(t, ok, "a1 was displaced by the colliding insert")
 }
