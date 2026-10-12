@@ -126,7 +126,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			heap.Pop(&hi.h)
 		}
 
-		if hi.from != nil && bytes.Compare(key, hi.from) < 0 { //TODO: replace by seekInFiles()
+		if hi.from != nil && bytes.Compare(key, hi.from) < 0 { // TODO: replace by seekInFiles()
 			continue
 		}
 
@@ -191,8 +191,8 @@ func (hi *HistoryRangeAsOfFiles) HasNext() bool {
 		return true
 	}
 
-	//Asc:  [from, to) AND from < to
-	//Desc: [from, to) AND from > to
+	// Asc:  [from, to) AND from < to
+	// Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
 	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
@@ -327,8 +327,8 @@ func (hi *HistoryRangeAsOfDB) HasNext() bool {
 		return true
 	}
 
-	//Asc:  [from, to) AND from < to
-	//Desc: [from, to) AND from > to
+	// Asc:  [from, to) AND from < to
+	// Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
 	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }

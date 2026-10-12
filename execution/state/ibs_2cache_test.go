@@ -247,7 +247,7 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 
 	// Capture and flush before FinalizeTx (journal.dirties still populated).
 	writes0 := ibs0.VersionedWrites()
-	mvhm.FlushVersionedWrites(writes0, true, "")
+	mvhm.FlushVersionedWrites(writes0, true)
 
 	// — tx1 (txIndex 1) — reads committed state before modifying —
 	ibs1 := NewWithVersionMap(reader, mvhm)

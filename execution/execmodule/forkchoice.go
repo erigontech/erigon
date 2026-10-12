@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
 	"strconv"
 	"sync"
 	"time"
@@ -426,7 +425,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// ValidateChain (fork validation, exec_module.go) set this, leaving
 		// the canonical execution path running uncached against the aggTx.
 		currentContext.SetStateCache(e.stateCache)
-		currentContext.SetCodeStore(e.codeStore)
 	}
 
 	// Clear the published overlay before closing the SD, so concurrent
@@ -453,7 +451,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// hashes, stage progress, forkchoice markers, TxNums, etc.). All
 	// pipeline reads cascade through the overlay to the RO tx; writes
 	// stay in memory until commit.
-	if err := currentContext.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+	if err := currentContext.InitBlockOverlay(roTx); err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("updateForkChoice: init block overlay: %w", err), false)
 	}
 	var tx kv.TemporalRwTx = currentContext.BlockOverlay()
@@ -558,7 +556,16 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if mergeExtendingFork {
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
 		if stateFlushingInParallel {
-			// Send forkchoice early (We already know the fork is valid)
+			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
+			if err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+			if !valid {
+				sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+					Status: ExecutionStatusInvalidForkchoice,
+				}, false)
+				return nil
+			}
 			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				LatestValidHash: blockHash,
 				Status:          ExecutionStatusSuccess,
@@ -619,8 +626,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			freshSD.SetInMemHistoryReads(inMemHistoryReads)
 			freshSD.SetStateCache(e.stateCache)
-			freshSD.SetCodeStore(e.codeStore)
-			if err := freshSD.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+			if err := freshSD.InitBlockOverlay(roTx); err != nil {
 				roTx.Rollback()
 				freshSD.Close()
 				return nil, nil, fmt.Errorf("updateForkChoice: init overlay after hasMore: %w", err)
@@ -694,7 +700,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, stateFlushingInParallel)
 			return nil
 		}
-		if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
+		if err := rawdb.TruncateCanonicalChain(tx, *headNumber+1); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
@@ -796,9 +802,8 @@ func (e *ExecModule) logTimings(msg string, timings []any) {
 	if len(timings) == 0 {
 		return
 	}
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	timings = append(timings, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	alloc, sys := dbg.MemUsage()
+	timings = append(timings, "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 	e.logger.Info(msg, timings...)
 }
 
@@ -876,7 +881,10 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 		roTxToCloseBeforeCommit.Rollback()
 	}
 	flushStart := time.Now()
-	if err := sd.Commit(e.backgroundCtx, rwTx); err != nil {
+	if err := sd.Commit(e.backgroundCtx, rwTx, func(kv.RwTx) error {
+		e.observeStateTransition(e.backgroundCtx, StateTransitionCommitReady)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
 	timings = append(timings, "flush+commit", common.Round(time.Since(flushStart), 0))
@@ -888,12 +896,6 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 		}); err != nil {
 			return nil, err
 		}
-	}
-	// Force fsync so data is durable before the next slot.
-	if err := e.db.Update(e.backgroundCtx, func(tx kv.RwTx) error {
-		return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
-	}); err != nil {
-		return nil, err
 	}
 	return timings, nil
 }
@@ -917,11 +919,6 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 	maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
 	pruneTimeout := min(baseTimeout+time.Duration(e.db.MaxPrunableStepsBacklog()/100)*200*time.Millisecond, maxTimeout)
 	started, finished, err := e.db.CollateAndPrune(e.backgroundCtx, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
-		if e.codeStore != nil {
-			if err := e.codeStore.Evict(tx); err != nil {
-				return nil, err
-			}
-		}
 		return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)
 	})
 	if err != nil {
@@ -947,8 +944,7 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 		return
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
+	alloc, sys := dbg.MemUsage()
 	blockTimings := e.forkValidator.GetTimings(blockHash)
 
 	logArgs := []any{"hash", blockHash, "number", fcuHeader.Number.Uint64()}
@@ -981,7 +977,7 @@ func (e *ExecModule) logHeadUpdated(blockHash common.Hash, fcuHeader *types.Head
 		}
 	}
 
-	logArgs = append(logArgs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+	logArgs = append(logArgs, "alloc", common.ByteCount(alloc), "sys", common.ByteCount(sys))
 
 	dbgLevel := log.LvlInfo
 	if debug {

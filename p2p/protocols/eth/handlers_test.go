@@ -477,15 +477,18 @@ func (m *mockHeaderReader) Header(_ context.Context, _ kv.Getter, hash common.Ha
 	}
 	return nil, nil
 }
+
 func (m *mockHeaderReader) HeaderByNumber(_ context.Context, _ kv.Getter, blockNum uint64) (*types.Header, error) {
 	return m.headers[blockNum], nil
 }
+
 func (m *mockHeaderReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
 	if n, ok := m.byHash[hash]; ok {
 		return &n, nil
 	}
 	return nil, nil
 }
+
 func (m *mockHeaderReader) HeaderByHash(_ context.Context, _ kv.Getter, hash common.Hash) (*types.Header, error) {
 	n, ok := m.byHash[hash]
 	if !ok {
@@ -493,6 +496,7 @@ func (m *mockHeaderReader) HeaderByHash(_ context.Context, _ kv.Getter, hash com
 	}
 	return m.headers[n], nil
 }
+
 func (m *mockHeaderReader) ReadAncestor(_ kv.Getter, hash common.Hash, number, ancestor uint64, _ *uint64) (common.Hash, uint64) {
 	n, ok := m.byHash[hash]
 	if !ok || n != number || ancestor > number {
@@ -501,6 +505,7 @@ func (m *mockHeaderReader) ReadAncestor(_ kv.Getter, hash common.Hash, number, a
 	anc := m.headers[number-ancestor]
 	return anc.Hash(), number - ancestor
 }
+
 func (m *mockHeaderReader) HeadersRange(_ context.Context, _ func(*types.Header) error) error {
 	return nil
 }
@@ -549,18 +554,23 @@ func (m balHeaderReader) HeaderNumber(_ context.Context, _ kv.Getter, hash commo
 	}
 	return &n, nil
 }
+
 func (balHeaderReader) Header(context.Context, kv.Getter, common.Hash, uint64) (*types.Header, error) {
 	panic("not expected")
 }
+
 func (balHeaderReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
 	panic("not expected")
 }
+
 func (balHeaderReader) HeaderByHash(context.Context, kv.Getter, common.Hash) (*types.Header, error) {
 	panic("not expected")
 }
+
 func (balHeaderReader) ReadAncestor(kv.Getter, common.Hash, uint64, uint64, *uint64) (common.Hash, uint64) {
 	panic("not expected")
 }
+
 func (balHeaderReader) HeadersRange(context.Context, func(*types.Header) error) error {
 	panic("not expected")
 }

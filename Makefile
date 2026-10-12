@@ -8,6 +8,7 @@ GO ?= go # if using docker, should not need to be installed/linked
 GOAMD64_VERSION ?= v2 # See https://go.dev/wiki/MinimumRequirements#microarchitecture-support
 GOBINREL := build/bin
 export GOBIN := $(CURDIR)/$(GOBINREL)
+export GOEXPERIMENT ?= jsonv2
 GOARCH ?= $(shell go env GOHOSTARCH)
 GOEXE := $(shell $(GO) env GOEXE 2>/dev/null)
 UNAME := $(shell uname) # Supported: Darwin, Linux
@@ -53,11 +54,13 @@ CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 CGO_CFLAGS += -D__BLST_PORTABLE__
 
 # Configure GOAMD64 env.variable for AMD64 architecture:
-ifeq ($(shell uname -m),x86_64)
+ifeq ($(GOARCH),amd64)
 	CPU_ARCH= GOAMD64=${GOAMD64_VERSION}
+	# gcc and clang spell the v1 baseline "x86-64"; "x86-64-v1" is not a valid -march.
+	CGO_MARCH := -march=$(strip $(if $(filter v1,$(GOAMD64_VERSION)),x86-64,x86-64-$(GOAMD64_VERSION)))
 endif
 
-CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3
+CGO_CFLAGS += -Wno-unknown-warning-option -Wno-enum-int-mismatch -Wno-strict-prototypes -Wno-unused-but-set-variable -O3 -DNDEBUG $(CGO_MARCH)
 
 CGO_LDFLAGS := $(shell $(GO) env CGO_LDFLAGS 2> /dev/null)
 CGO_LDFLAGS += -O3 -g
@@ -68,11 +71,10 @@ ifeq ($(shell uname -s), Darwin)
 	endif
 endif
 
-CGO_CXXFLAGS ?= $(shell go env CGO_CXXFLAGS 2>/dev/null)
-ifeq ($(CGO_CXXFLAGS),)
-	CGO_CXXFLAGS += -g
-	CGO_CXXFLAGS += -O2
+ifeq ($(origin CGO_CXXFLAGS),undefined)
+	CGO_CXXFLAGS := -g -O3 -DNDEBUG
 endif
+CGO_CXXFLAGS += $(CGO_MARCH)
 export CGO_CXXFLAGS
 
 BUILD_TAGS =
@@ -341,19 +343,11 @@ check-generated:
 
 ## check-large-files BASE=<ref>:        check for files >1MB added vs BASE (default: main)
 check-large-files:
-	@base="${BASE:-main}"; \
-	found=0; \
-	while IFS= read -r file; do \
-		size=$$(git cat-file -s "HEAD:$$file" 2>/dev/null) || continue; \
-		if [ "$$size" -gt 1048576 ]; then \
-			echo "$$(awk "BEGIN{printf \"%.1f\", $$size/1048576}") MB: $$file"; \
-			found=1; \
-		fi; \
-	done < <(git diff --diff-filter=ACMR --name-only "$$base"...HEAD); \
-	if [ "$$found" -eq 1 ]; then \
-		echo "ERROR: Files exceeding 1 MB found."; \
-		exit 1; \
-	fi
+	@bash .github/workflows/scripts/check-large-files.sh "$(or $(BASE),main)"
+
+## test-check-large-files:          test the large-file checker itself
+test-check-large-files:
+	@bash .github/workflows/scripts/check-large-files.test.sh
 
 ## test-group TEST_GROUP=<name>			run a named CI test group
 test-group: override GOTEST_PACKAGES = $(shell go list ./... | ./tools/test-groups packages $(TEST_GROUP))
@@ -634,7 +628,17 @@ versions-gen:
 	PATH="$(GOBIN):$(PATH)" go generate -run "bumper" ./db/state/statecfg/
 
 ## gen:                               generate all auto-generated code in the codebase
-gen: mocks solc abigen gencodec graphql grpc stringer versions-gen
+gen: mocks solc abigen gencodec graphql grpc stringer versions-gen jsongen evm-interpreter-gen
+
+## jsongen:                           regenerate the fast-JSON encoders from struct tags
+.PHONY: jsongen
+jsongen:
+	go generate -run "jsongen" ./...
+
+## evm-interpreter-gen:               regenerate the EVM interpreter fast loop from interpreter.go
+.PHONY: evm-interpreter-gen
+evm-interpreter-gen:
+	go generate -run "go run ./vmgen" ./execution/vm/
 
 ## bindings:                          generate test contracts and core contracts
 bindings:

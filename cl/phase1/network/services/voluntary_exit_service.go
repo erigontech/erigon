@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -45,6 +46,7 @@ type voluntaryExitService struct {
 	ethClock               eth_clock.EthereumClock
 	batchSignatureVerifier *BatchSignatureVerifier
 	seen                   *lru.Cache[uint64, struct{}]
+	now                    func() time.Time
 }
 
 // SignedVoluntaryExitForGossip type represents SignedVoluntaryExit with the gossip data where it's coming from.
@@ -74,6 +76,7 @@ func NewVoluntaryExitService(
 		ethClock:               ethClock,
 		batchSignatureVerifier: batchSignatureVerifier,
 		seen:                   seen,
+		now:                    time.Now,
 	}
 }
 
@@ -111,6 +114,18 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		return ErrIgnore
 	}
 
+	currentEpoch := uint64(0)
+	now := s.now().Add(maximumGossipClockDisparity)
+	if !now.Before(s.ethClock.GetSlotTime(0)) {
+		currentEpoch = s.ethClock.GetEpochAtSlot(s.ethClock.GetSlotByTime(now))
+	}
+	if voluntaryExit.Epoch > currentEpoch {
+		if msg.ImmediateVerification {
+			return errors.New("exits must specify an epoch when they become valid; they are not valid before then")
+		}
+		return ErrIgnore
+	}
+
 	var (
 		signingRoot common.Hash
 		pk          common.Bytes48
@@ -124,29 +139,30 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		if err != nil {
 			return ErrIgnore
 		}
-		curEpoch := s.ethClock.GetCurrentEpoch()
+		curEpoch := state.Slot() / s.beaconCfg.SlotsPerEpoch
 
+		if val.ExitEpoch() != s.beaconCfg.FarFutureEpoch {
+			if msg.ImmediateVerification {
+				return fmt.Errorf("verify exit has not been initiated. exitEpoch: %d, farFutureEpoch: %d", val.ExitEpoch(), s.beaconCfg.FarFutureEpoch)
+			}
+			return ErrIgnore
+		}
 		// Verify the validator is active
 		// assert is_active_validator(validator, get_current_epoch(state))
 		if !val.Active(curEpoch) {
+			if !msg.ImmediateVerification && val.Active(currentEpoch) {
+				return ErrIgnore
+			}
 			return errors.New("validator is not active")
-		}
-
-		// Verify exit has not been initiated
-		// assert validator.exit_epoch == FAR_FUTURE_EPOCH
-		if val.ExitEpoch() != s.beaconCfg.FarFutureEpoch {
-			return fmt.Errorf("verify exit has not been initiated. exitEpoch: %d, farFutureEpoch: %d", val.ExitEpoch(), s.beaconCfg.FarFutureEpoch)
-		}
-
-		// Exits must specify an epoch when they become valid; they are not valid before then
-		// assert get_current_epoch(state) >= voluntary_exit.epoch
-		if curEpoch < voluntaryExit.Epoch {
-			return errors.New("exits must specify an epoch when they become valid; they are not valid before then")
 		}
 
 		// Verify the validator has been active long enough
 		// assert get_current_epoch(state) >= validator.activation_epoch + SHARD_COMMITTEE_PERIOD
-		if curEpoch < val.ActivationEpoch()+s.beaconCfg.ShardCommitteePeriod {
+		eligibleEpoch := val.ActivationEpoch() + s.beaconCfg.ShardCommitteePeriod
+		if curEpoch < eligibleEpoch {
+			if !msg.ImmediateVerification && currentEpoch >= eligibleEpoch {
+				return ErrIgnore
+			}
 			return errors.New("verify the validator has been active long enough")
 		}
 

@@ -533,7 +533,9 @@ type BadIdentityScheme struct{}
 func (s BadIdentityScheme) Verify(r *enr.Record, sig []byte) error { return nil }
 func (s BadIdentityScheme) NodeAddr(r *enr.Record) []byte {
 	var id enode.ID
-	r.Load(enr.WithEntry("badaddr", &id))
+	if err := r.Load(enr.WithEntry("badaddr", &id)); err != nil {
+		return nil
+	}
 	return id[:]
 }
 
@@ -562,7 +564,7 @@ func TestUDPv5_findnodeCall_InvalidNodes(t *testing.T) {
 			sign: func(r *enr.Record, id enode.ID) *enode.Node {
 				r.Set(enr.ID("bad"))
 				r.Set(enr.WithEntry("badaddr", id))
-				r.SetSig(BadIdentityScheme{}, []byte{})
+				require.NoError(t, r.SetSig(BadIdentityScheme{}, []byte{}))
 				n, _ := enode.New(BadIdentityScheme{}, r)
 				return n
 			},
@@ -1017,7 +1019,6 @@ type testCodecFrame struct {
 }
 
 func (c *testCodec) Encode(toID enode.ID, addr netip.AddrPort, p v5wire.Packet, _ *v5wire.Whoareyou) ([]byte, v5wire.Nonce, error) {
-
 	if wp, ok := p.(*v5wire.Whoareyou); ok && len(wp.ChallengeData) > 0 {
 		// To match the behavior of v5wire.Codec, we return the cached encoding of
 		// WHOAREYOU challenges.

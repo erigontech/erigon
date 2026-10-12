@@ -165,12 +165,12 @@ func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage
 
 func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
 	// f.equivocatingIndicies is a bitlist
-	index := int(validatorIndex) / 8
-	if index >= len(f.equivocatingIndicies) {
+	index := validatorIndex / 8
+	if index >= uint64(len(f.equivocatingIndicies)) {
 		return false
 	}
-	subIndex := int(validatorIndex) % 8
-	return f.equivocatingIndicies[index]&(1<<uint(subIndex)) != 0
+	subIndex := validatorIndex % 8
+	return f.equivocatingIndicies[index]&(1<<subIndex) != 0
 }
 
 func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
@@ -242,6 +242,7 @@ func (f *ForkChoiceStore) updateLatestMessagesGloas(
 	slot := attestation.Data.Slot
 	beaconBlockRoot := attestation.Data.BeaconBlockRoot
 	payloadPresent := attestation.Data.CommitteeIndex == 1
+	updated := false
 
 	for _, index := range indicies {
 		if f.isUnequivocating(index) {
@@ -254,7 +255,12 @@ func (f *ForkChoiceStore) updateLatestMessagesGloas(
 				Root:           beaconBlockRoot,
 				PayloadPresent: payloadPresent,
 			})
+			updated = true
 		}
+	}
+	if updated {
+		f.headHash = common.Hash{}
+		f.headPayloadStatus = cltypes.PayloadStatusPending
 	}
 }
 

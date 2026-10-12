@@ -405,8 +405,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		s, err := chainspec.ChainSpecByName(networkname.Test)
 		require.NoError(t, err)
 		require.Equal(t, s.GenesisStateRoot, common.BytesToHash(rh))
-		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
-		//common.BytesToHash(rh))
+		// require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
+		// common.BytesToHash(rh))
 
 		var i, j int
 		for tt := txToStart; tt <= txs; tt++ {
@@ -430,7 +430,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			}
 		}
 	})
-
 }
 
 func randomAccount(t *testing.T) (*accounts.Account, accounts.Address) {
@@ -487,7 +486,6 @@ func TestCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, common.BytesToHash(common.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), common.BytesToHash(domainsHash))
-
 }
 
 // The commitment context routes both the trie trace and the branch read/write

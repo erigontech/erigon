@@ -20,6 +20,7 @@
 package nibbles
 
 import (
+	"strconv"
 	"testing"
 )
 
@@ -48,5 +49,20 @@ func BenchmarkHexToKeybytes(b *testing.B) {
 	testBytes := []byte{7, 6, 6, 5, 7, 2, 6, 2, Terminator}
 	for b.Loop() {
 		HexToKeybytes(testBytes)
+	}
+}
+
+func BenchmarkHexToCompactInto(b *testing.B) {
+	for _, n := range []int{16, 66} {
+		hex := make([]byte, n)
+		for i := range hex {
+			hex[i] = byte(i) & 0x0f
+		}
+		dst := make([]byte, 64)
+		b.Run(strconv.Itoa(n), func(b *testing.B) {
+			for b.Loop() {
+				HexToCompactInto(dst, hex)
+			}
+		})
 	}
 }

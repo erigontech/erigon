@@ -21,9 +21,7 @@ package rpc
 
 import (
 	"context"
-	"errors"
 	"io"
-	"net"
 	"os"
 	"time"
 
@@ -66,6 +64,8 @@ func (io stdioConn) RemoteAddr() string {
 	return "/dev/stdin"
 }
 
+// SetWriteDeadline does nothing and always returns nil because stdin/stdout pipes
+// do not support deadlines.
 func (io stdioConn) SetWriteDeadline(t time.Time) error {
-	return &net.OpError{Op: "set", Net: "stdio", Source: nil, Addr: nil, Err: errors.New("deadline not supported")}
+	return nil
 }

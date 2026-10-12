@@ -18,9 +18,7 @@ package ethapi
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -51,11 +49,7 @@ func (so *StateOverrides) override(ibs *state.IntraBlockState, addrs []accounts.
 		}
 		// Override account balance.
 		if account.Balance != nil {
-			balance, overflow := uint256.FromBig((*big.Int)(*account.Balance))
-			if overflow {
-				return errors.New("account.Balance higher than 2^256-1")
-			}
-			if err := ibs.SetBalance(addr, *balance, tracing.BalanceChangeUnspecified); err != nil {
+			if err := ibs.SetBalance(addr, uint256.Int(**account.Balance), tracing.BalanceChangeUnspecified); err != nil {
 				return err
 			}
 		}

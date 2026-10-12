@@ -580,7 +580,7 @@ func TestTable_waitForNodesLocking(t *testing.T) {
 	waitDone := make(chan struct{})
 	go func() {
 		defer close(waitDone)
-		tab.waitForNodes(waitCtx, 1<<20)
+		_ = tab.waitForNodes(waitCtx, 1<<20)
 	}()
 
 	// Call addFoundNode in a loop to send to the feed repeatedly.

@@ -429,7 +429,7 @@ func TestWriteSetReleasedTripwireWholeSetConsumers(t *testing.T) {
 		name    string
 		consume func(*WriteSet)
 	}{
-		{"FlushVersionedWrites", func(s *WriteSet) { NewVersionMap(nil).FlushVersionedWrites(s, true, "") }},
+		{"FlushVersionedWrites", func(s *WriteSet) { NewVersionMap(nil).FlushVersionedWrites(s, true) }},
 		{"TouchUpdates", func(s *WriteSet) {
 			updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
 			s.TouchUpdates(updates)

@@ -38,6 +38,9 @@ const (
 	// StateTransitionOverlayCleared means new RPC views fall back to the
 	// committed database after the FCU-published SharedDomains is unpublished.
 	StateTransitionOverlayCleared
+	// StateTransitionCommitReady means the tip FCU's metadata and domain writes
+	// have been flushed into its MDBX transaction, which has not committed yet.
+	StateTransitionCommitReady
 )
 
 // StateTransitionObserver is an integration-test hook that runs inline at each

@@ -383,3 +383,159 @@ func TestBuildSyncingReplyLastNewBlockSeenNeverBelowCurrentBlock(t *testing.T) {
 	require.Equal(t, uint64(25_723_236), reply.CurrentBlock)
 	require.GreaterOrEqual(t, reply.LastNewBlockSeen, reply.CurrentBlock)
 }
+
+// startingBlock pins where the sync session began so clients can compute
+// progress as (current - starting) / (highest - starting).
+func TestSyncingReplyPinsStartingBlockForTheSession(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 100)
+	ch, unsubscribe := n.Events.AddSyncStateSubscription()
+	defer unsubscribe()
+
+	n.NewLastBlockSeen(500)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+	published := drainSyncStateEvents(ch)
+	require.Len(t, published, 1)
+	require.Equal(t, uint64(100), published[0].GetStartingBlock())
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 150))
+	require.NoError(t, n.PublishSyncState(tx, 0))
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(150), reply.CurrentBlock)
+	require.Equal(t, uint64(100), reply.GetStartingBlock(), "the pin must not follow the current block")
+}
+
+func TestSyncingReplyRepinsStartingBlockOnANewSession(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 100)
+	n.NewLastBlockSeen(500)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 500))
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 505))
+	n.NewLastBlockSeen(900)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(505), reply.GetStartingBlock())
+}
+
+// An unwind can take execution below the pin; reporting a starting block above
+// the current one makes the progress ratio negative.
+func TestSyncingReplyStartingBlockNeverAboveCurrentBlock(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 100)
+	n.NewLastBlockSeen(500)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 50))
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(50), reply.GetStartingBlock())
+}
+
+// During a snapshot download the reported current block is the byte ratio
+// mapped onto blocks, and the pin is that same reported value: a node restarted
+// mid-download reports the progress of this run, from 0 to 100%.
+func TestSyncingReplyStartingBlockPinsReportedDownloadProgress(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 0)
+	n.SetSnapshotDownloading(400, 1000, 20_000_000)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(8_000_000), reply.CurrentBlock)
+	require.Equal(t, uint64(8_000_000), reply.GetStartingBlock())
+}
+
+// The private gRPC server serves eth_syncing before the stage loop's first
+// publish, so a reply built then must not report progress from genesis.
+func TestSyncingReplyBeforeFirstPublishStartsAtTheCurrentBlock(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 100)
+	n.NewLastBlockSeen(500)
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), reply.GetStartingBlock())
+}
+
+func TestSyncingReplyKeepsAGenesisStartingBlock(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 0)
+	n.NewLastBlockSeen(500)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 200))
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.NotNil(t, reply.StartingBlock, "a zero pin must be sent, not left absent")
+	require.Equal(t, uint64(0), reply.GetStartingBlock(), "a session started at genesis keeps a zero pin")
+}
+
+// An unwind below the pin is reported through the clamp while execution is down
+// there; the pin itself is where the session began and survives the recovery.
+func TestSyncingReplyStartingBlockSurvivesAnUnwindBelowThePin(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 100)
+	n.NewLastBlockSeen(500)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 50))
+	require.NoError(t, n.PublishSyncState(tx, 0))
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(50), reply.GetStartingBlock())
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 150))
+	reply, err = n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(100), reply.GetStartingBlock())
+}
+
+// Dropping the download pin makes the reported current block fall back to
+// committed execution, which is still 0 when the initial sync exits before its
+// first commit. That dip is not an unwind: the session pin must survive it.
+func TestSyncingReplyStartingBlockSurvivesTheDownloadPinDrop(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 0)
+	n.NewLastBlockSeen(20_000_000)
+
+	n.SetSnapshotDownloading(400, 1000, 20_000_000)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	n.SetSnapshotDownloadHandoff(20_000_000)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	n.ClearSnapshotDownloadPin()
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 20_000_100))
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(8_000_000), reply.GetStartingBlock())
+}
+
+// The snapshots stage raises Execution to the commitment block in the pipeline's
+// own rw tx, and the pipeline publishes from it. A failure before the first commit
+// rolls that bump back, so the next publish reads a far lower committed progress
+// without any unwind having happened.
+func TestSyncingReplyStartingBlockSurvivesARolledBackExecutionBump(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 0)
+	n.NewLastBlockSeen(20_000_000)
+
+	n.SetSnapshotDownloading(400, 1000, 20_000_000)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	n.SetSnapshotDownloadHandoff(20_000_000)
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 20_000_000))
+	require.NoError(t, n.PublishSyncState(tx, 0))
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 0))
+
+	n.ClearSnapshotDownloadPin()
+	require.NoError(t, n.PublishSyncState(tx, 0))
+
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 20_000_100))
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(8_000_000), reply.GetStartingBlock())
+}
