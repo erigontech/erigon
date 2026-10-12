@@ -17,12 +17,11 @@
 package cache
 
 import (
-	"unsafe"
-
 	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/elastic/go-freelru"
