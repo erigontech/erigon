@@ -227,6 +227,13 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			return newCfg, nil, err
 		}
 		if overrideBinaryTrieTime != nil {
+			storedGenesis, err := rawdb.ReadGenesis(tx)
+			if err != nil {
+				return newCfg, nil, err
+			}
+			if storedGenesis != nil && storedGenesis.Config != nil {
+				configuredBinaryTrieTime = storedGenesis.Config.BinaryTrieTime
+			}
 			if err := checkBinaryTrieOverride(newCfg, configuredBinaryTrieTime, storedBlock, dirs); err != nil {
 				return newCfg, nil, err
 			}
