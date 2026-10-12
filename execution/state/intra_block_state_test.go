@@ -1316,17 +1316,43 @@ func TestResetForPoolDropsAnOversizedState(t *testing.T) {
 }
 
 // sync.Pool may drop any one entry, so the reuse shows over a few round trips.
+// slotPool keeps exactly what it was handed, so the release path can be checked
+// without sync.Pool's freedom to discard.
+type slotPool struct{ held any }
+
+func (p *slotPool) Get() any {
+	v := p.held
+	p.held = nil
+	return v
+}
+func (p *slotPool) Put(v any) { p.held = v }
+
+func withSlotPool(t *testing.T) *slotPool {
+	t.Helper()
+	prev := ibsPool
+	p := &slotPool{}
+	ibsPool = p
+	t.Cleanup(func() { ibsPool = prev })
+	return p
+}
+
 func TestReleasePooledHandsTheStateToNewPooled(t *testing.T) {
-	for range 100 {
-		ibs := NewPooled(NewNoopReader())
-		ReleasePooled(ibs)
-		got := NewPooled(NewNoopReader())
-		ReleasePooled(got)
-		if got == ibs {
-			return
-		}
+	withSlotPool(t)
+	ibs := NewPooled(NewNoopReader())
+	ReleasePooled(ibs)
+	require.Same(t, ibs, NewPooled(NewNoopReader()), "the released state must come back")
+}
+
+func TestReleasePooledKeepsAnOversizedStateOutOfThePool(t *testing.T) {
+	p := withSlotPool(t)
+	ibs := NewPooled(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+	for i := range maxPooledEntries + 1 {
+		ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(i))))
 	}
-	t.Fatal("NewPooled never got the released state back")
+	ReleasePooled(ibs)
+	require.Nil(t, p.held, "an oversized state must not be pooled")
+	require.NotSame(t, ibs, NewPooled(NewNoopReader()))
 }
 
 func TestPooledStateRoundTripIsLikeNew(t *testing.T) {
@@ -1393,6 +1419,19 @@ func TestResetForPoolDropsARevertedWarmUp(t *testing.T) {
 	require.False(t, ibs.resetForPool(), "the grown slot maps are still retained")
 }
 
+// The address map is the same case: a reverted warm-up deletes its keys and the
+// buckets stay.
+func TestResetForPoolDropsARevertedAddressWarmUp(t *testing.T) {
+	ibs := New(NewNoopReader())
+	snap := ibs.PushSnapshot()
+	for i := range maxPooledEntries + 1 {
+		ibs.AddAddressToAccessList(accounts.InternAddress(common.BigToAddress(big2(i))))
+	}
+	ibs.RevertToSnapshot(snap, nil)
+	require.Empty(t, ibs.accessList.addresses, "the revert leaves nothing live")
+	require.False(t, ibs.resetForPool(), "the grown address map is still retained")
+}
+
 func big2(i int) *big.Int { return big.NewInt(int64(i)) }
 
 // On a versioned IBS that caches state objects, an account touched and then
@@ -1416,4 +1455,49 @@ func TestFinalizeTxKeepsTouchedThenCreditedAccount(t *testing.T) {
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, *uint256.NewInt(5), bal)
+}
+
+// Each call stays under the bound on its own, yet leaves a grown slot map at
+// the next index for addSlotSlow to reuse. The retained maps have to add up, or
+// a sequence of such calls pins them all in the pool.
+func TestResetForPoolCountsSlotMapsRetainedAcrossCalls(t *testing.T) {
+	ibs := New(NewNoopReader())
+	const perCall = maxPooledEntries / 4
+
+	// Call k warms one slot on every earlier address, then many on its own, so
+	// its own map lands at a fresh index.
+	for call := range 4 {
+		for earlier := range call {
+			a := accounts.InternAddress(common.BigToAddress(big2(earlier)))
+			ibs.AddSlotToAccessList(a, accounts.InternKey(common.BigToHash(big2(0))))
+		}
+		own := accounts.InternAddress(common.BigToAddress(big2(call)))
+		for i := range perCall {
+			ibs.AddSlotToAccessList(own, accounts.InternKey(common.BigToHash(big2(i))))
+		}
+		poolable := ibs.resetForPool()
+		if call < 3 {
+			require.True(t, poolable, "call %d is under the bound on its own", call)
+			continue
+		}
+		require.False(t, poolable, "the maps retained by earlier calls must count")
+	}
+}
+
+// estimateGas probes and access-list convergence call Reset between executions.
+// A large intermediate execution leaves its grown map behind, so the bound has
+// to survive those resets, not just the final release.
+func TestResetForPoolCountsMapsLostToAnIntermediateReset(t *testing.T) {
+	ibs := New(NewNoopReader())
+	addr := accounts.InternAddress(common.HexToAddress("0xc0de"))
+
+	// A big intermediate execution, discarded the way a gas probe discards one.
+	for i := range maxPooledEntries + 1 {
+		ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(i))))
+	}
+	ibs.Reset()
+
+	// The final execution is tiny, but the grown map is still there to reuse.
+	ibs.AddSlotToAccessList(addr, accounts.InternKey(common.BigToHash(big2(0))))
+	require.False(t, ibs.resetForPool(), "a map lost to an intermediate reset must still count")
 }

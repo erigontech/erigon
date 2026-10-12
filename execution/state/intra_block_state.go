@@ -366,9 +366,8 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.versionedReads = ReadSet{}
 	// Write side: VersionedWrites() returns Cloned snapshots, so the
 	// originals in ibs.versionedWrites are no longer referenced after the
-	// boundary call.  Walk the per-path maps and return every VW to its
-	// typed pool before resetting.
-	ibs.versionedWrites.ReleaseAndReset()
+	// boundary call, so recycle can take every VW back.
+	ibs.versionedWrites.recycle()
 	ibs.recordAccess = false
 	ibs.accountReadDuration = 0
 	ibs.accountReadCount = 0
@@ -380,7 +379,14 @@ func (ibs *IntraBlockState) Reset() {
 	ibs.stateReadErr = nil
 }
 
-var ibsPool sync.Pool
+// statePool is sync.Pool's surface, so a test can substitute one that keeps
+// what it is given: sync.Pool may discard any item.
+type statePool interface {
+	Get() any
+	Put(any)
+}
+
+var ibsPool statePool = &sync.Pool{}
 
 // NewPooled is New over an IntraBlockState reused from an earlier call, whose
 // maps keep their capacity. Release it with ReleasePooled.
@@ -2873,6 +2879,7 @@ func (ibs *IntraBlockState) FlushWritesToVersionMap(writes *WriteSet) {
 	if ibs.versionMap == nil {
 		return
 	}
+	writes.assertNotArena("flush")
 	ibs.versionMap.FlushVersionedWrites(writes, true)
 }
 
@@ -3119,7 +3126,7 @@ func (ibs *IntraBlockState) accountRead(addr accounts.Address, account *accounts
 // path: a repeat write to the same (addr[,key]) reuses the existing
 // *VersionedWrite[T] in place (no alloc, no map churn).  Only the first
 // write per (addr[,key]) per tx hits getVW* + SetX.  WriteSet.ReleaseAndReset
-// returns every VW to its pool.
+// takes every VW back.
 
 func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint256.Int) {
 	ibs.MarkAddressAccess(addr, true)
@@ -3132,7 +3139,7 @@ func (ibs *IntraBlockState) recordWriteBalance(addr accounts.Address, val uint25
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWBalance()
+	vw := ibs.versionedWrites.newVWBalance()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: BalancePath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetBalance(addr, vw)
@@ -3151,7 +3158,7 @@ func (ibs *IntraBlockState) recordWriteNonce(addr accounts.Address, val uint64, 
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWNonce()
+	vw := ibs.versionedWrites.newVWNonce()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: NoncePath, Version: ibs.Version(), NonceReason: reason}
 	vw.Val = val
 	ibs.versionedWrites.SetNonce(addr, vw)
@@ -3169,7 +3176,7 @@ func (ibs *IntraBlockState) recordWriteIncarnation(addr accounts.Address, val ui
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWIncarnation()
+	vw := ibs.versionedWrites.newVWIncarnation()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: IncarnationPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetIncarnation(addr, vw)
@@ -3187,7 +3194,7 @@ func (ibs *IntraBlockState) recordWriteSelfDestruct(addr accounts.Address, val b
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWSelfDestruct()
+	vw := ibs.versionedWrites.newVWSelfDestruct()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: SelfDestructPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetSelfDestruct(addr, vw)
@@ -3205,7 +3212,7 @@ func (ibs *IntraBlockState) recordWriteCreateContract(addr accounts.Address, val
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCreateContract()
+	vw := ibs.versionedWrites.newVWCreateContract()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CreateContractPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCreateContract(addr, vw)
@@ -3223,7 +3230,7 @@ func (ibs *IntraBlockState) recordWriteCode(addr accounts.Address, val accounts.
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCode()
+	vw := ibs.versionedWrites.newVWCode()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodePath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCode(addr, vw)
@@ -3241,7 +3248,7 @@ func (ibs *IntraBlockState) recordWriteCodeHash(addr accounts.Address, val accou
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCodeHash()
+	vw := ibs.versionedWrites.newVWCodeHash()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeHashPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCodeHash(addr, vw)
@@ -3259,7 +3266,7 @@ func (ibs *IntraBlockState) recordWriteCodeSize(addr accounts.Address, val int) 
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWCodeSize()
+	vw := ibs.versionedWrites.newVWCodeSize()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: CodeSizePath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetCodeSize(addr, vw)
@@ -3279,7 +3286,7 @@ func (ibs *IntraBlockState) recordWriteAddress(addr accounts.Address, account *a
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWAddress()
+	vw := ibs.versionedWrites.newVWAddress()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: AddressPath, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetAddress(addr, vw)
@@ -3297,7 +3304,7 @@ func (ibs *IntraBlockState) recordWriteStorage(addr accounts.Address, key accoun
 		traceWrite(ibs, vw)
 		return
 	}
-	vw := getVWStorage()
+	vw := ibs.versionedWrites.newVWStorage()
 	vw.WriteHeader = WriteHeader{Address: addr, Path: StoragePath, Key: key, Version: ibs.Version()}
 	vw.Val = val
 	ibs.versionedWrites.SetStorage(addr, key, vw)
@@ -3516,7 +3523,7 @@ func (ibs *IntraBlockState) VersionedReads() ReadSet {
 
 func (ibs *IntraBlockState) ResetVersionedIO() {
 	ibs.versionedReads = ReadSet{}
-	ibs.versionedWrites.ReleaseAndReset()
+	ibs.versionedWrites.recycle()
 	ibs.dep = UnknownDep
 	ibs.stateReadErr = nil
 	ibs.recordAccess = false
