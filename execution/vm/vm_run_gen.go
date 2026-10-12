@@ -25,7 +25,8 @@ func (evm *EVM) run(contract Contract, gas mdgas.MdGas, input []byte, readOnly, 
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
 		pc  = uint64(0) // program counter
-		res []byte      // result of the opcode execution function
+		t   *opTrace
+		res []byte // result of the opcode execution function
 	)
 	_, callContext.slots.on = evm.intraBlockState.ReadStamp()
 	callContext.slots.misses = 0
@@ -449,6 +450,15 @@ run:
 			return nil, callContext.Gas(), mdgas.MdGasUsage{}, ErrOutOfGas
 		} else {
 			callContext.gas -= cost
+		}
+		if operation.gasExecute != nil {
+			pc, res, err = operation.gasExecute(pc, evm, callContext, t)
+			gasLeft = callContext.gas
+			if err != nil {
+				break run
+			}
+			pc++
+			continue run
 		}
 
 		// All ops with a dynamic memory usage also has a dynamic gas cost.
