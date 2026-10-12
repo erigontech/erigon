@@ -64,9 +64,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("streaming unsupported")).WriteTo(w)
 		return
 	}
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Content-Type", "application/json")
 
 	subscribeTopics := mapset.NewSet[event.EventTopic]()
 	for _, param := range r.URL.Query()["topics"] {
@@ -83,7 +81,10 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("topics are required")).WriteTo(w)
 		return
 	}
-	log.Info("Subscribed to event stream topics", "topics", subscribeTopics)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	log.Debug("Subscribed to event stream topics", "topics", subscribeTopics)
 
 	eventCh := make(chan *event.EventStream, 128)
 	opSub := a.emitters.Operation().Subscribe(eventCh)
@@ -130,7 +131,7 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %w", err)).WriteTo(w)
 			return
 		case <-r.Context().Done():
-			log.Info("Client disconnected from event stream")
+			log.Debug("Client disconnected from event stream")
 			return
 		}
 	}

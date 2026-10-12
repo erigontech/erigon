@@ -19,8 +19,10 @@ package handler
 import (
 	"bufio"
 	"context"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -31,45 +33,60 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 )
 
-func TestEventStreamRepeatedTopicsParam(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	a := &ApiHandler{emitters: beaconevents.NewEventEmitter(), beaconChainCfg: &cfg}
-	server := httptest.NewServer(http.HandlerFunc(a.EventSourceGetV1Events))
-	defer server.Close()
+func TestEventStreamSubscribesToEveryTopicsValue(t *testing.T) {
+	for _, tc := range []struct {
+		query string
+		want  []string
+	}{
+		{"topics=head&topics=block", []string{"block", "head"}},
+		{"topics=head,block", []string{"block", "head"}},
+		{"topics=head,block&topics=finalized_checkpoint", []string{"block", "finalized_checkpoint", "head"}},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cfg.SecondsPerSlot = 1
+			a := &ApiHandler{emitters: beaconevents.NewEventEmitter(), beaconChainCfg: &cfg}
+			server := httptest.NewServer(http.HandlerFunc(a.EventSourceGetV1Events))
+			defer server.Close()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-	defer cancel()
-	go func() {
-		for ctx.Err() == nil {
-			if a.emitters.State().SendBlock(&beaconevents.BlockData{Slot: 7}) > 0 {
-				return
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			go func() {
+				for ctx.Err() == nil {
+					a.emitters.State().SendHead(&beaconevents.HeadData{Slot: 7})
+					a.emitters.State().SendBlock(&beaconevents.BlockData{Slot: 7})
+					a.emitters.State().SendFinalizedCheckpoint(&beaconevents.FinalizedCheckpointData{Epoch: 1})
+					time.Sleep(10 * time.Millisecond)
+				}
+			}()
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/eth/v1/events?"+tc.query, nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			require.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
+
+			seen := map[string]struct{}{}
+			scanner := bufio.NewScanner(resp.Body)
+			for len(seen) < len(tc.want) && scanner.Scan() {
+				if topic, ok := strings.CutPrefix(scanner.Text(), "event: "); ok {
+					require.Contains(t, tc.want, topic)
+					seen[topic] = struct{}{}
+				}
 			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+"/eth/v1/events?topics=head&topics=block", nil)
-	require.NoError(t, err)
-	resp, err := server.Client().Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		if strings.HasPrefix(scanner.Text(), "event: ") {
-			require.Equal(t, "event: block", scanner.Text())
-			return
-		}
+			require.Equal(t, tc.want, slices.Sorted(maps.Keys(seen)))
+		})
 	}
-	t.Fatal("block event not delivered for the second topics parameter")
 }
 
-func TestEventStreamRequiresTopics(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	a := &ApiHandler{emitters: beaconevents.NewEventEmitter(), beaconChainCfg: &cfg}
-	rec := httptest.NewRecorder()
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	a.EventSourceGetV1Events(rec, httptest.NewRequestWithContext(ctx, http.MethodGet, "/eth/v1/events", nil))
-	require.Equal(t, http.StatusBadRequest, rec.Code)
+func TestEventStreamRejectsMissingOrInvalidTopics(t *testing.T) {
+	for _, query := range []string{"", "?topics=bogus", "?topics=head&topics=bogus", "?topics=head&topics="} {
+		t.Run(query, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			(&ApiHandler{}).EventSourceGetV1Events(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/events"+query, nil))
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+		})
+	}
 }
