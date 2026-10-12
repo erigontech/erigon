@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"sync/atomic"
@@ -189,6 +190,9 @@ func DialOptions(ctx context.Context, rawurl string, logger log.Logger, options 
 	u, err := url.Parse(rawurl)
 	if err != nil {
 		return nil, err
+	}
+	if filepath.VolumeName(rawurl) != "" {
+		u.Scheme = "" // a Windows drive letter, not a URL scheme
 	}
 
 	cfg := new(clientConfig)
