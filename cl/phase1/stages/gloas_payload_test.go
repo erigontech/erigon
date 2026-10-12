@@ -1156,11 +1156,11 @@ func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 	}
 }
 
-func newAnchorForkChoiceStore(t *testing.T, cfg *clparams.BeaconChainConfig, st *state2.CachingBeaconState) *forkchoice.ForkChoiceStore {
+func newAnchorForkChoiceStore(t *testing.T, cfg *clparams.BeaconChainConfig, st *state2.CachingBeaconState, engine execution_client.ExecutionEngine) *forkchoice.ForkChoiceStore {
 	t.Helper()
 	forkGraph, err := fork_graph.NewForkGraphDisk(st, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 	require.NoError(t, err)
-	store, err := forkchoice.NewForkChoiceStore(nil, st, nil, pool.NewOperationsPool(cfg), forkGraph, beaconevents.NewEventEmitter(), nil, nil,
+	store, err := forkchoice.NewForkChoiceStore(nil, st, engine, pool.NewOperationsPool(cfg), forkGraph, beaconevents.NewEventEmitter(), nil, nil,
 		public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)
 	require.NoError(t, err)
 	return store
@@ -1178,7 +1178,7 @@ func TestValidateAnchorPayloadRecordsNoVerdictWhenInterrupted(t *testing.T) {
 	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
 	anchorRoot, err := st.BlockRoot()
 	require.NoError(t, err)
-	store := newAnchorForkChoiceStore(t, cfg, st)
+	store := newAnchorForkChoiceStore(t, cfg, st, nil)
 	ctx, cancel := context.WithCancel(t.Context())
 	engine := interruptingEngine(cancel)
 
@@ -1186,6 +1186,28 @@ func TestValidateAnchorPayloadRecordsNoVerdictWhenInterrupted(t *testing.T) {
 	require.Equal(t, 1, engine.newPayloadCalls)
 	_, recorded := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
 	require.False(t, recorded)
+}
+
+// The anchor's payload is recorded as NotValidated when it is stored, also with an EL
+// configured, so an interrupted first validation does not leave the anchor hash without a status
+// or gas limit until the next retry.
+func TestStoreAnchorEnvelopeRecordsNotValidatedWithAnExecutionClient(t *testing.T) {
+	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	anchorRoot, err := st.BlockRoot()
+	require.NoError(t, err)
+	env.Message.BeaconBlockRoot = anchorRoot
+	privKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+	signAnchorEnvelope(t, st, privKey, env, bid.Slot)
+	store := newAnchorForkChoiceStore(t, cfg, st, &testExecutionEngine{})
+
+	require.NoError(t, store.StoreAnchorEnvelope(anchorRoot, env))
+	status, known := store.GetRecentExecutionPayloadStatusByRoot(anchorRoot)
+	require.True(t, known)
+	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
+	gasLimit, ok := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
+	require.True(t, ok)
+	require.Equal(t, env.Message.Payload.GasLimit, gasLimit)
 }
 
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {

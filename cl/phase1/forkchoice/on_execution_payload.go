@@ -1300,11 +1300,10 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 			return fmt.Errorf("%w: StoreAnchorEnvelope failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
 		}
 	}
-	if f.engine == nil {
-		if _, retained := f.markPayloadStatusIfRetainedLocked(blockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated, nil); !retained {
-			f.mu.Unlock()
-			return fmt.Errorf("%w: block disappeared while storing anchor payload status for beacon_block_root %v", ErrIgnore, blockRoot)
-		}
+	// Until the EL answers, the anchor's payload counts as NotValidated; a later verdict replaces it.
+	if _, retained := f.markPayloadStatusIfRetainedLocked(blockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated, &envelope.Payload.GasLimit); !retained {
+		f.mu.Unlock()
+		return fmt.Errorf("%w: block disappeared while storing anchor payload status for beacon_block_root %v", ErrIgnore, blockRoot)
 	}
 	f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
 	f.headHash = common.Hash{}
