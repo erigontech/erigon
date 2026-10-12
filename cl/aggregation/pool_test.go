@@ -18,14 +18,18 @@ package aggregation
 
 import (
 	"context"
+	"errors"
 	"log"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 )
 
@@ -88,7 +92,30 @@ type PoolTestSuite struct {
 	suite.Suite
 }
 
+type fakeSignatureAggregator struct {
+	sigs     [][]byte
+	delay    time.Duration
+	failNext error
+}
+
+func (f *fakeSignatureAggregator) AddValidated(sig []byte) error {
+	time.Sleep(f.delay)
+	if len(f.sigs) > 0 && f.failNext != nil {
+		return f.failNext
+	}
+	f.sigs = append(f.sigs, sig)
+	return nil
+}
+
+func (f *fakeSignatureAggregator) Compressed() [96]byte {
+	if len(f.sigs) == 1 {
+		return [96]byte(f.sigs[0])
+	}
+	return mockAggrResult
+}
+
 func (t *PoolTestSuite) SetupTest() {
+	newSignatureAggregator = func() signatureAggregator { return &fakeSignatureAggregator{} }
 	blsAggregate = func(sigs [][]byte) ([]byte, error) {
 		ret := make([]byte, 96)
 		copy(ret, mockAggrResult[:])
@@ -104,6 +131,8 @@ func (t *PoolTestSuite) SetupTest() {
 
 func (t *PoolTestSuite) TearDownTest() {
 	t.ctrl.Finish()
+	blsAggregate = bls.AggregateSignatures
+	newSignatureAggregator = func() signatureAggregator { return &bls.SignatureAggregator{} }
 }
 
 func (t *PoolTestSuite) TestAddAttestationElectra() {
@@ -353,6 +382,97 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			t.Equal(expected, att, tc.name)
 		}()
 	}
+}
+
+func (t *PoolTestSuite) TestAggregatesReturnsEveryCommitteeAggregate() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+	t.Require().NoError(pool.AddAttestation(t.electraAttestation(5, 10, 0b00001001)))
+	t.Require().NoError(pool.AddAttestation(t.electraAttestation(5, 10, 0b00001100)))
+	t.Require().NoError(pool.AddAttestation(t.electraAttestation(5, 11, 0b00000011)))
+
+	committees := map[int]byte{}
+	for _, att := range pool.Aggregates() {
+		indices := att.CommitteeBits.GetOnIndices()
+		t.Require().Len(indices, 1)
+		committees[indices[0]] = att.AggregationBits.Bytes()[0]
+	}
+	t.Equal(map[int]byte{10: 0b00001101, 11: 0b00000011}, committees)
+}
+
+func (t *PoolTestSuite) electraAttestation(slot uint64, committee int, bits byte) *solid.Attestation {
+	cBits := solid.NewBitVector(64)
+	t.Require().NoError(cBits.SetBitAt(committee, true))
+	data := &solid.AttestationData{Slot: slot, Source: attData1.Source, Target: attData1.Target}
+	return &solid.Attestation{
+		AggregationBits: solid.BitlistFromBytes([]byte{bits}, 2048*64),
+		Data:            data,
+		Signature:       [96]byte{bits},
+		CommitteeBits:   cBits,
+	}
+}
+
+// Since Deneb an attestation stays includable until the end of the epoch after its own.
+func (t *PoolTestSuite) TestPruneStaleKeepsInclusionWindow() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 { return slot / 32 }).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, &clparams.NetworkConfig{AttestationPropagationSlotRange: 32}, t.mockEthClock).(*aggregationPoolImpl)
+	for committee, slot := range []uint64{1, 63, 64, 100, 101} {
+		t.Require().NoError(pool.AddAttestation(t.electraAttestation(slot, committee, 0b11)))
+	}
+
+	pool.pruneStale()
+
+	slots := []uint64{}
+	for _, att := range pool.Aggregates() {
+		slots = append(slots, att.Data.Slot)
+	}
+	t.ElementsMatch([]uint64{64, 100, 101}, slots)
+}
+
+func (t *PoolTestSuite) TestAddAttestationElectraKeepsConcurrentVotes() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	newSignatureAggregator = func() signatureAggregator {
+		return &fakeSignatureAggregator{delay: time.Millisecond} // widen the window between reading and storing the aggregate
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+	var wg sync.WaitGroup
+	for bit := range 7 {
+		wg.Go(func() {
+			t.NoError(pool.AddAttestation(t.electraAttestation(5, 4, byte(1<<bit)|0x80)))
+		})
+	}
+	wg.Wait()
+
+	aggregates := pool.Aggregates()
+	t.Require().Len(aggregates, 1)
+	t.Equal(byte(0xff), aggregates[0].AggregationBits.Bytes()[0])
+}
+
+func (t *PoolTestSuite) TestAddAttestationElectraKeepsAggregateOnSignatureError() {
+	t.mockEthClock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(1)).AnyTimes()
+	t.mockEthClock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.ElectraVersion).AnyTimes()
+	errBadSignature := errors.New("bad signature")
+	newSignatureAggregator = func() signatureAggregator { return &fakeSignatureAggregator{failNext: errBadSignature} }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
+	t.Require().NoError(pool.AddAttestation(t.electraAttestation(5, 1, 0b00001001)))
+
+	t.ErrorIs(pool.AddAttestation(t.electraAttestation(5, 1, 0b00001100)), errBadSignature)
+
+	aggregates := pool.Aggregates()
+	t.Require().Len(aggregates, 1)
+	t.Equal(byte(0b00001001), aggregates[0].AggregationBits.Bytes()[0])
 }
 
 func TestPool(t *testing.T) {

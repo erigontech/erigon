@@ -27,6 +27,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/abstract"
+	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -73,6 +74,7 @@ type attestationTestSuite struct {
 	ethClock          *eth_clock.MockEthereumClock
 	attService        AttestationService
 	beaconConfig      *clparams.BeaconChainConfig
+	emitters          *beaconevents.EventEmitter
 }
 
 func (t *attestationTestSuite) SetupTest() {
@@ -90,6 +92,7 @@ func (t *attestationTestSuite) SetupTest() {
 	}
 	netConfig := &clparams.NetworkConfig{}
 	emitters := beaconevents.NewEventEmitter()
+	t.emitters = emitters
 	computeSigningRoot = func(obj ssz.HashableSSZ, domain []byte) ([32]byte, error) { return [32]byte{}, nil }
 	batchSignatureVerifier := NewBatchSignatureVerifier(context.TODO(), nil)
 	go batchSignatureVerifier.Start()
@@ -587,6 +590,49 @@ func (t *attestationTestSuite) TestAttestationSeenOnlyAfterSignatureVerification
 	})
 	t.Require().ErrorIs(err, ErrIgnore)
 	t.Require().ErrorIs(err, ErrAttestationAlreadySeen)
+}
+
+// The attestation event reports every verified attestation, whether or not the
+// aggregation pool already holds its vote.
+func (t *attestationTestSuite) TestAttestationEventEmittedWhenPoolAlreadyHasVote() {
+	computeCommitteeCountPerSlot = func(_ abstract.BeaconStateReader, _, _ uint64) uint64 {
+		return 8
+	}
+	computeSubnetForAttestation = func(_, _, _, _, _ uint64) uint64 {
+		return 1
+	}
+	blsVerifyMultipleSignatures = func(signatures [][]byte, signRoots [][]byte, pks [][]byte) (bool, error) {
+		return true, nil
+	}
+	t.ethClock.EXPECT().GetEpochAtSlot(mockSlot).Return(mockEpoch).AnyTimes()
+	t.ethClock.EXPECT().GetCurrentSlot().Return(mockSlot).AnyTimes()
+	t.mockForkChoice.HighestSeenVal = mockSlot
+	finalizedCheckpoint := solid.Checkpoint{Root: [32]byte{1, 0}, Epoch: 1}
+	t.mockForkChoice.Headers = map[common.Hash]*cltypes.BeaconBlockHeader{
+		attData.BeaconBlockRoot: {},
+	}
+	t.mockForkChoice.Ancestors = map[uint64]forkchoice.ForkChoiceNode{
+		mockEpoch * mockSlotsPerEpoch:                 {Root: attData.Target.Root},
+		finalizedCheckpoint.Epoch * mockSlotsPerEpoch: {Root: finalizedCheckpoint.Root},
+	}
+	t.mockForkChoice.FinalizedCheckpointVal = finalizedCheckpoint
+	t.committeeSubscibe.EXPECT().AggregateAttestation(att).Return(aggregation.ErrIsSuperset).Times(1)
+	events := make(chan *beaconevents.EventStream, 4)
+	sub := t.emitters.Operation().Subscribe(events)
+	defer sub.Unsubscribe()
+
+	err := t.attService.ProcessMessage(context.Background(), common.NewUint64(1), &AttestationForGossip{
+		Attestation:      att,
+		ImmediateProcess: true,
+	})
+	t.Require().NoError(err)
+
+	select {
+	case event := <-events:
+		t.Equal(beaconevents.OpAttestation, event.Event)
+	default:
+		t.Fail("no attestation event emitted")
+	}
 }
 
 func (t *attestationTestSuite) TestAttestationGossipNotAcceptedBeforeSignatureVerification() {

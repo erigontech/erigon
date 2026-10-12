@@ -373,11 +373,8 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 			// Claimed only now: a message dropped before its signature was
 			// verified must not consume the validator's slot for the epoch.
 			s.validatorAttestationSeen.Add(vIndex, targetEpoch)
-			if err = s.committeeSubscribe.AggregateAttestation(attestation); errors.Is(err, aggregation.ErrIsSuperset) {
-				return
-			} else if err != nil {
+			if err := s.committeeSubscribe.AggregateAttestation(attestation); err != nil && !errors.Is(err, aggregation.ErrIsSuperset) {
 				log.Warn("could not check aggregate attestation", "err", err)
-				return
 			}
 			// send to subscribers
 			if att.Attestation != nil {

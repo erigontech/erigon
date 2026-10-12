@@ -24,7 +24,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -36,6 +35,20 @@ var ErrIsSuperset = errors.New("attestation is superset of existing attestation"
 
 var blsAggregate = bls.AggregateSignatures
 
+type signatureAggregator interface {
+	AddValidated(sig []byte) error
+	Compressed() [96]byte
+}
+
+var newSignatureAggregator = func() signatureAggregator { return &bls.SignatureAggregator{} }
+
+// committeeAggregate keeps the running signature uncompressed, so adding a verified
+// attestation does not decompress and group-check the stored aggregate again.
+type committeeAggregate struct {
+	attestation *solid.Attestation
+	signature   signatureAggregator
+}
+
 type aggregationPoolImpl struct {
 	// config
 	beaconConfig   *clparams.BeaconChainConfig
@@ -43,8 +56,8 @@ type aggregationPoolImpl struct {
 	ethClock       eth_clock.EthereumClock
 	aggregatesLock sync.RWMutex
 	aggregates     map[common.Hash]*solid.Attestation // don't need this anymore after electra upgrade
-	// aggregationInCommittee is a cache for aggregation in committee, which is used after electra upgrade
-	aggregatesInCommittee *lru.CacheWithTTL[keyAggrInCommittee, *solid.Attestation]
+	// aggregatesInCommittee holds the per-committee aggregates used after the electra upgrade
+	aggregatesInCommittee map[keyAggrInCommittee]*committeeAggregate
 }
 
 type keyAggrInCommittee struct {
@@ -64,7 +77,7 @@ func NewAggregationPool(
 		netConfig:             netConfig,
 		aggregatesLock:        sync.RWMutex{},
 		aggregates:            make(map[common.Hash]*solid.Attestation),
-		aggregatesInCommittee: lru.NewWithTTL[keyAggrInCommittee, *solid.Attestation]("aggregation_in_committee", 100_000, 30*time.Minute),
+		aggregatesInCommittee: make(map[keyAggrInCommittee]*committeeAggregate),
 	}
 	go p.sweepStaleAtt(ctx)
 	return p
@@ -142,14 +155,20 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 		dataRoot:       hashRoot,
 		committeeIndex: committeeIndex,
 	}
-	att, exist := p.aggregatesInCommittee.Get(key)
+	p.aggregatesLock.Lock()
+	defer p.aggregatesLock.Unlock()
+	entry, exist := p.aggregatesInCommittee[key]
 	if !exist {
+		signature := newSignatureAggregator()
+		if err := signature.AddValidated(inAtt.Signature[:]); err != nil {
+			return err
+		}
 		storedAttestation := inAtt.Copy()
 		storedAttestation.SetVersion(version)
-		p.aggregatesInCommittee.Add(key, storedAttestation)
+		p.aggregatesInCommittee[key] = &committeeAggregate{attestation: storedAttestation, signature: signature}
 		return nil
 	}
-
+	att := entry.attestation
 	if utils.IsOverlappingSSZBitlist(att.AggregationBits.Bytes(), inAtt.AggregationBits.Bytes()) {
 		// the on bit is already set, so ignore
 		return ErrIsSuperset
@@ -161,23 +180,17 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, ver
 		log.Debug("failed to merge aggregation bits", "err", err)
 		return err
 	}
-	merged, err := blsAggregate([][]byte{att.Signature[:], inAtt.Signature[:]})
-	if err != nil {
+	if err := entry.signature.AddValidated(inAtt.Signature[:]); err != nil {
 		return err
 	}
-	if len(merged) != 96 {
-		return errors.New("merged signature is too long")
-	}
-	var mergedSig [96]byte
-	copy(mergedSig[:], merged)
 	mergedAttestation := &solid.Attestation{
 		AggregationBits: mergedAggrBits,
 		CommitteeBits:   att.CommitteeBits,
 		Data:            att.Data,
-		Signature:       mergedSig,
+		Signature:       entry.signature.Compressed(),
 	}
 	mergedAttestation.SetVersion(version)
-	p.aggregatesInCommittee.Add(key, mergedAttestation)
+	entry.attestation = mergedAttestation
 	return nil
 }
 
@@ -194,11 +207,21 @@ func (p *aggregationPoolImpl) GetAggregatationByRootAndCommittee(root common.Has
 		dataRoot:       root,
 		committeeIndex: committeeIndex,
 	}
-	att, exist := p.aggregatesInCommittee.Get(key)
+	entry, exist := p.aggregatesInCommittee[key]
 	if !exist {
 		return nil
 	}
-	return att
+	return entry.attestation
+}
+
+func (p *aggregationPoolImpl) Aggregates() []*solid.Attestation {
+	p.aggregatesLock.RLock()
+	defer p.aggregatesLock.RUnlock()
+	aggregates := make([]*solid.Attestation, 0, len(p.aggregatesInCommittee))
+	for _, entry := range p.aggregatesInCommittee {
+		aggregates = append(aggregates, entry.attestation)
+	}
+	return aggregates
 }
 
 func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
@@ -208,19 +231,24 @@ func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			p.aggregatesLock.Lock()
-			toRemoves := make([][32]byte, 0)
-			for hashRoot := range p.aggregates {
-				att := p.aggregates[hashRoot]
-				if p.slotIsStale(att.Data.Slot) {
-					toRemoves = append(toRemoves, hashRoot)
-				}
-			}
-			// remove stale attestation
-			for _, hashRoot := range toRemoves {
-				delete(p.aggregates, hashRoot)
-			}
-			p.aggregatesLock.Unlock()
+			p.pruneStale()
+		}
+	}
+}
+
+func (p *aggregationPoolImpl) pruneStale() {
+	p.aggregatesLock.Lock()
+	defer p.aggregatesLock.Unlock()
+	for hashRoot, att := range p.aggregates {
+		if p.slotIsStale(att.Data.Slot) {
+			delete(p.aggregates, hashRoot)
+		}
+	}
+	// Since Deneb an attestation stays includable until the end of the epoch after its own.
+	currentEpoch := p.ethClock.GetEpochAtSlot(p.ethClock.GetCurrentSlot())
+	for key, entry := range p.aggregatesInCommittee {
+		if p.ethClock.GetEpochAtSlot(entry.attestation.Data.Slot)+1 < currentEpoch {
+			delete(p.aggregatesInCommittee, key)
 		}
 	}
 }
