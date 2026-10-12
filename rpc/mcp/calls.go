@@ -305,6 +305,9 @@ func buildTraceFilter(req mcp.CallToolRequest) ([]any, error) {
 	if v := req.GetString("toBlock", ""); v != "" {
 		filter["toBlock"] = normalizeBlockRef(v)
 	}
+	if v := req.GetString("blockHash", ""); v != "" {
+		filter["blockHash"] = v
+	}
 	for _, k := range []string{"fromAddress", "toAddress"} {
 		v := strings.TrimSpace(req.GetString(k, ""))
 		if v == "" {
@@ -791,6 +794,7 @@ func rpcToolCalls() []toolCall {
 			params: []param{
 				{name: "fromBlock", desc: "Start block (default: latest executed; earliest scans from genesis)", kind: pString},
 				{name: "toBlock", desc: "End block (default: latest executed)", kind: pString},
+				{name: "blockHash", desc: "Single block hash, instead of fromBlock and toBlock", kind: pString},
 				{name: "fromAddress", desc: "Sender address(es), single or JSON array", kind: pString},
 				{name: "toAddress", desc: "Recipient address(es), single or JSON array", kind: pString},
 				{name: "mode", desc: "Address filter mode: intersection (default) or union", kind: pString},

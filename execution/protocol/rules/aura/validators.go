@@ -600,7 +600,7 @@ func (s *ValidatorSafeContract) getListSyscall(caller rules.SystemCall) (*Simple
 }
 
 func (s *ValidatorSafeContract) genesisEpochData(header *types.Header, call rules.SystemCall) ([]byte, error) {
-	return proveInitial(s, s.contractAddress, header, call)
+	return proveInitial(s.contractAddress, header)
 }
 
 func (s *ValidatorSafeContract) onEpochBegin(firstInEpoch bool, header *types.Header, caller rules.SystemCall) error {
@@ -855,7 +855,7 @@ func (s *ValidatorContract) signalEpochEnd(firstInEpoch bool, header *types.Head
 	return s.validators.signalEpochEnd(firstInEpoch, header, r)
 }
 
-func proveInitial(s *ValidatorSafeContract, contractAddr common.Address, header *types.Header, caller rules.SystemCall) ([]byte, error) {
+func proveInitial(contractAddr common.Address, header *types.Header) ([]byte, error) {
 	return rlp.EncodeToBytes(&FirstValidatorSetProof{Header: header, ContractAddress: contractAddr})
 	//list, err := s.getList(caller)
 	//fmt.Printf("aaa: %x,%t\n", list, err)

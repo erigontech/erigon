@@ -1044,3 +1044,56 @@ func TestQueryResolver_Blocks_RangeCapCannotWrap(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "Invalid params")
 	require.Zero(t, mock.calls, "a range wider than the cap must be rejected before any block is read")
 }
+
+type chainBlocksAPI struct {
+	mockGraphQLAPI
+	byNumber map[uint64]*types.Block
+}
+
+func (m *chainBlocksAPI) details(b *types.Block) map[string]any {
+	if b == nil {
+		return nil
+	}
+	return map[string]any{"block": ethapi.RPCMarshalBlock(b, false, false), "receipts": []*jsonrpc.GraphQLReceipt{}}
+}
+
+func (m *chainBlocksAPI) GetBlockDetails(_ context.Context, number rpc.BlockNumber, _ *bool) (map[string]any, error) {
+	return m.details(m.byNumber[uint64(number)]), nil
+}
+
+func (m *chainBlocksAPI) GetBlockDetailsByHash(_ context.Context, hash common.Hash, _ *bool) (map[string]any, error) {
+	for _, b := range m.byNumber {
+		if b.Hash() == hash {
+			return m.details(b), nil
+		}
+	}
+	return nil, nil
+}
+
+func TestBlockResolver_ParentIsTheParentBlock(t *testing.T) {
+	t.Parallel()
+
+	genesis := types.NewBlockFromStorage(common.Hash{}, &types.Header{GasLimit: 5000}, nil, nil, nil, nil)
+	genesisHash := genesis.Header().Hash()
+	genesis = types.NewBlockFromStorage(genesisHash, genesis.Header(), nil, nil, nil, nil)
+	childHeader := &types.Header{Number: *uint256.NewInt(1), ParentHash: genesisHash, GasLimit: 6000}
+	child := types.NewBlockFromStorage(childHeader.Hash(), childHeader, nil, nil, nil, nil)
+	mock := &chainBlocksAPI{byNumber: map[uint64]*types.Block{0: genesis, 1: child}}
+
+	srv := handler.New(NewExecutableSchema(Config{Resolvers: &Resolver{GraphQLAPI: mock}}))
+	srv.AddTransport(transport.POST{})
+	query := func(q string) string {
+		body, err := json.Marshal(map[string]string{"query": q})
+		require.NoError(t, err)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Body.String()
+	}
+
+	require.JSONEq(t,
+		`{"data":{"block":{"parent":{"number":"0x0","hash":"`+genesisHash.Hex()+`","gasLimit":"0x1388"}}}}`,
+		query(`{block(number:1){parent{number hash gasLimit}}}`))
+	require.JSONEq(t, `{"data":{"block":{"parent":null}}}`, query(`{block(number:0){parent{hash}}}`))
+}

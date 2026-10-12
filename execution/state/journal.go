@@ -98,6 +98,7 @@ type journalEntry struct {
 type journal struct {
 	dirties map[accounts.Address]int // Dirty accounts and the number of changes
 	entries []journalEntry           // Current changes tracked by the journal
+	epoch   uint64                   // Moves on every revert, reset and unjournalled state change
 }
 
 // newJournal gets a journal from the pool.
@@ -112,6 +113,7 @@ func (j *journal) release() {
 }
 
 func (j *journal) Reset() {
+	j.epoch++
 	clear(j.entries)
 	j.entries = j.entries[:0]
 	clear(j.dirties)
@@ -137,6 +139,7 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 	}
 	clear(j.entries[snapshot:])
 	j.entries = j.entries[:snapshot]
+	j.epoch++
 }
 
 // dirty explicitly sets an address to dirty, even if the change entries would
@@ -237,7 +240,11 @@ func (j *journal) fakeStorageChange(account accounts.Address, key accounts.Stora
 }
 
 func (j *journal) codeChange(account accounts.Address, prevcode []byte, prevhash accounts.CodeHash, wasCommitted bool) {
-	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: &journalExtra{prevcode: prevcode, prevhash: prevhash}})
+	var extra *journalExtra // nil means the previous code was accounts.EmptyCode
+	if len(prevcode) != 0 || prevhash != accounts.EmptyCodeHash {
+		extra = &journalExtra{prevcode: prevcode, prevhash: prevhash}
+	}
+	j.entries = append(j.entries, journalEntry{kind: kindCode, account: account, flags: commitFlag(wasCommitted), extra: extra})
 	j.dirties[account]++
 }
 
@@ -349,7 +356,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			} else {
 				s.versionedWrites.DelBalance(je.account)
 			}
-			// selfdestructVersioned clears the incarnation cell on both paths. Restore
+			// selfdestructVersioned resets the incarnation cell to 0 on both paths. Restore
 			// it to its pre-destruct versioned value, or drop the write if the
 			// self-destruct created it.
 			if je.flags&flagSelfdestructHadIncarnation != 0 {
@@ -421,8 +428,10 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindCode:
-		prevcode := je.extra.prevcode
-		prevhash := je.extra.prevhash
+		prevcode, prevhash := []byte(nil), accounts.EmptyCodeHash
+		if je.extra != nil {
+			prevcode, prevhash = je.extra.prevcode, je.extra.prevhash
+		}
 		if so, ok := s.stateObjects[je.account]; ok {
 			so.setCode(accounts.Code{Hash: prevhash, Bytes: prevcode})
 		} else if s.versionMap == nil {

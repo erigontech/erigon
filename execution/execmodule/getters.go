@@ -32,23 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// bodyToRawBody converts a parsed Body to a RawBody using MarshalBinary
-// (canonical binary encoding) for transactions. This differs from
-// Body.RawBody() which uses rlp.EncodeToBytes and wraps typed transactions
-// in an extra RLP string header — incorrect for the engine API which expects
-// raw binary tx format (type prefix + RLP payload, no outer wrapper).
-func bodyToRawBody(body *types.Body) (*types.RawBody, error) {
-	txs, err := types.MarshalTransactionsBinary(body.Transactions)
-	if err != nil {
-		return nil, err
-	}
-	return &types.RawBody{
-		Transactions: txs,
-		Uncles:       body.Uncles,
-		Withdrawals:  body.Withdrawals,
-	}, nil
-}
-
 var errNotFound = errors.New("notfound")
 
 // beginOverlayOrRo returns a tx that reads from the block overlay (if a
@@ -58,34 +41,45 @@ var errNotFound = errors.New("notfound")
 // getters never share MDBX internal state.
 // The caller must call the returned cleanup function when done.
 func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(), error) {
-	e.lock.RLock()
-	sd := e.currentContext
-	// Fall back to published SD while an FCU commits.
-	if sd == nil && e.publishedSD != nil {
-		sd = e.publishedSD()
+	if view, cleanup, err := e.beginOverlayView(ctx); cleanup != nil || err != nil {
+		return view, cleanup, err
 	}
-	if sd != nil {
-		if overlay := sd.BlockOverlay(); overlay != nil {
-			// Open a fresh RO tx while still holding the read lock so that
-			// the overlay cannot be closed between our check and the
-			// NewReadView call (TOCTOU avoidance).
-			roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
-			if err != nil {
-				e.lock.RUnlock()
-				return nil, nil, err
-			}
-			view := overlay.NewReadView(roTx)
-			e.lock.RUnlock()
-			return view, func() { roTx.Rollback() }, nil
-		}
-	}
-	e.lock.RUnlock()
 
 	tx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, nil, err
 	}
 	return tx, func() { tx.Rollback() }, nil
+}
+
+// beginOverlayView returns a nil cleanup when no overlay is active.
+func (e *ExecModule) beginOverlayView(ctx context.Context) (kv.TemporalTx, func(), error) {
+	e.lock.RLock()
+	defer e.lock.RUnlock()
+	sd := e.currentContext
+	// Fall back to published SD while an FCU commits.
+	if sd == nil && e.publishedSD != nil {
+		sd = e.publishedSD()
+	}
+	if sd == nil {
+		return nil, nil, nil
+	}
+	overlay := sd.BlockOverlay()
+	if overlay == nil {
+		return nil, nil, nil
+	}
+	// Open a fresh RO tx while still holding the read lock so that
+	// the overlay cannot be closed between our check and the
+	// NewReadView call (TOCTOU avoidance).
+	roTx, err := e.db.BeginTemporalRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, nil, err
+	}
+	ok := false
+	defer kv.RollbackUnless(&ok, roTx)
+	view := overlay.NewReadView(roTx)
+	ok = true
+	return view, func() { roTx.Rollback() }, nil
 }
 
 // resolveSegment converts optional (blockHash, blockNumber) to a concrete
@@ -133,14 +127,11 @@ func (e *ExecModule) GetBody(ctx context.Context, blockHash *common.Hash, blockN
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: resolveSegment error %w", err)
 	}
-	body, err := e.getBody(ctx, tx, hash, number)
+	body, err := e.getRawBody(ctx, tx, hash, number)
 	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: getBody error %w", err)
+		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: getRawBody error %w", err)
 	}
-	if body == nil {
-		return nil, nil
-	}
-	return bodyToRawBody(body)
+	return body, nil
 }
 
 func (e *ExecModule) GetHeader(ctx context.Context, blockHash *common.Hash, blockNumber *uint64) (*types.Header, error) {
@@ -177,19 +168,11 @@ func (e *ExecModule) GetBodiesByHashes(ctx context.Context, hashes []common.Hash
 			bodies = append(bodies, nil)
 			continue
 		}
-		body, err := e.getBody(ctx, tx, h, *number)
+		body, err := e.getRawBody(ctx, tx, h, *number)
 		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: getBody error %w", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: getRawBody error %w", err)
 		}
-		if body == nil {
-			bodies = append(bodies, nil)
-			continue
-		}
-		rb, err := bodyToRawBody(body)
-		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: MarshalTransactionsBinary error %w", err)
-		}
-		bodies = append(bodies, rb)
+		bodies = append(bodies, body)
 	}
 	return bodies, nil
 }
@@ -211,19 +194,11 @@ func (e *ExecModule) GetBodiesByRange(ctx context.Context, start, count uint64) 
 			// beyond the last known canonical header
 			break
 		}
-		body, err := e.getBody(ctx, tx, hash, start+i)
+		body, err := e.getRawBody(ctx, tx, hash, start+i)
 		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: getBody error %w", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: getRawBody error %w", err)
 		}
-		if body == nil {
-			bodies = append(bodies, nil)
-			continue
-		}
-		rb, err := bodyToRawBody(body)
-		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: MarshalTransactionsBinary error %w", err)
-		}
-		bodies = append(bodies, rb)
+		bodies = append(bodies, body)
 	}
 	// Remove trailing nil values as per spec
 	// See point 4 in https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#specification-4
@@ -254,17 +229,13 @@ func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common
 			bodies = append(bodies, nil)
 			continue
 		}
-		body, err := e.getBody(ctx, tx, h, *number)
+		body, err := e.getRawBody(ctx, tx, h, *number)
 		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: getBody error %w", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: getRawBody error %w", err)
 		}
 		if body == nil {
 			bodies = append(bodies, nil)
 			continue
-		}
-		txs, err := types.MarshalTransactionsBinary(body.Transactions)
-		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: MarshalTransactionsBinary error %w", err)
 		}
 		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, h, *number)
 		if err != nil {
@@ -280,7 +251,7 @@ func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common
 			}
 		}
 		bodies = append(bodies, &PayloadBody{
-			Transactions:    txs,
+			Transactions:    body.Transactions,
 			Withdrawals:     body.Withdrawals,
 			BlockAccessList: balBytes,
 		})
@@ -305,17 +276,13 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 		if hash == (common.Hash{}) {
 			break
 		}
-		body, err := e.getBody(ctx, tx, hash, blockNum)
+		body, err := e.getRawBody(ctx, tx, hash, blockNum)
 		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: getBody error %w", err)
+			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: getRawBody error %w", err)
 		}
 		if body == nil {
 			bodies = append(bodies, nil)
 			continue
-		}
-		txs, err := types.MarshalTransactionsBinary(body.Transactions)
-		if err != nil {
-			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: MarshalTransactionsBinary error %w", err)
 		}
 		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, hash, blockNum)
 		if err != nil {
@@ -331,7 +298,7 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 			}
 		}
 		bodies = append(bodies, &PayloadBody{
-			Transactions:    txs,
+			Transactions:    body.Transactions,
 			Withdrawals:     body.Withdrawals,
 			BlockAccessList: balBytes,
 		})
