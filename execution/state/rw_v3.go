@@ -1422,6 +1422,10 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 	return nil, nil
 }
 
+func (r *CachedReaderV3) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
 // HasAccount goes through ReadAccountData so it sees blockCache, which the promoted
 // ReaderV3 method would skip.
 func (r *CachedReaderV3) HasAccount(address accounts.Address) (bool, error) {
@@ -1481,6 +1485,11 @@ func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accoun
 }
 
 func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	_, acc, err := r.readAccountData(address.Value())
+	return acc, err
+}
+
+func (r *ReaderV3) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
 	_, acc, err := r.readAccountData(address)
 	return acc, err
 }
@@ -1491,8 +1500,8 @@ func (r *ReaderV3) HasAccount(address accounts.Address) (bool, error) {
 	return len(enc) > 0, err
 }
 
-func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.Account, error) {
-	r.addr = address.Value()
+func (r *ReaderV3) readAccountData(address common.Address) ([]byte, *accounts.Account, error) {
+	r.addr = address
 	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{})
 	if err != nil {
 		return nil, nil, err
@@ -1631,6 +1640,10 @@ func (r *bufferedReader) Trace() bool {
 
 func (r *bufferedReader) TracePrefix() string {
 	return r.reader.TracePrefix()
+}
+
+func (r *bufferedReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
 func (r *bufferedReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {

@@ -49,19 +49,11 @@ func HasAccount(r StateReader, address accounts.Address) (bool, error) {
 	return acc != nil, err
 }
 
-// PlainAccountReader reads an account by plain address. One-shot RPC reads use it: interning
-// a fresh address per request (unique.Make) makes each GC cycle stall a loaded server.
-type PlainAccountReader interface {
-	ReadAccountDataPlain(address common.Address) (*accounts.Account, error)
-}
-
-var (
-	_ PlainAccountReader = (*CachedReader3)(nil)
-	_ PlainAccountReader = (*HistoryReaderV3)(nil)
-)
-
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
+	// ReadAccountDataPlain is for one-shot reads: interning a fresh address per request
+	// (unique.Make) makes each GC cycle stall a loaded server.
+	ReadAccountDataPlain(address common.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
 	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
 	ReadAccountCode(address accounts.Address) ([]byte, error)
@@ -147,6 +139,10 @@ func NewNoopReader() *NoopReader {
 
 func (*NoopReader) SetTx(kv.TemporalTx) {}
 func (*NoopReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	return nil, nil
+}
+
+func (*NoopReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
 	return nil, nil
 }
 

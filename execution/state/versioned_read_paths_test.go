@@ -755,6 +755,10 @@ func (r *refreshReader) ReadAccountData(accounts.Address) (*accounts.Account, er
 	return r.account, nil
 }
 
+func (r *refreshReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+	return r.ReadAccountData(accounts.InternAddress(address))
+}
+
 func (r *refreshReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
 	return r.account, nil
 }

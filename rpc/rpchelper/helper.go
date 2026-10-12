@@ -268,8 +268,6 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 	return hr.ReadAccountDataPlain(address.Value())
 }
 
-var _ state.PlainAccountReader = (*cachedHistoryReaderV3)(nil)
-
 func (hr *cachedHistoryReaderV3) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
 	enc, ok, err := hr.cache.GetAsOf(address[:], hr.reader.GetTxNum())
 	if err != nil {

@@ -79,7 +79,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	}
 	defer tx.Rollback()
 
-	acc, err := readAccountPlain(reader, address)
+	acc, err := reader.ReadAccountDataPlain(address)
 	if err != nil {
 		return nil, fmt.Errorf("cant get a balance for account %x: %w", address.String(), err)
 	}
@@ -89,13 +89,6 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	}
 
 	return (*hexutil.U256)(&acc.Balance), nil
-}
-
-func readAccountPlain(reader state.StateReader, address common.Address) (*accounts.Account, error) {
-	if r, ok := reader.(state.PlainAccountReader); ok {
-		return r.ReadAccountDataPlain(address)
-	}
-	return reader.ReadAccountData(accounts.InternAddress(address))
 }
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
