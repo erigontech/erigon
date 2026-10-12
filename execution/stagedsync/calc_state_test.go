@@ -42,7 +42,7 @@ import (
 func newTestCalcState() *calcState {
 	return &calcState{
 		accounts:     make(map[accounts.Address]*calcAccountState),
-		storageState: make(map[accounts.Address]*calcStorage),
+		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
 	}
 }
@@ -570,10 +570,10 @@ func TestSDStorageCascade_EmitsPerSlotDeletes(t *testing.T) {
 	// load-bearing question is whether Normalize appends the
 	// StoragePath=0 entries needed to overwrite these values.
 	cs := newTestCalcState()
-	cs.storageState[addr] = &calcStorage{slots: map[accounts.StorageKey]calcSlot{
-		slot1: {value: preSDValue1},
-		slot2: {value: preSDValue2},
-	}}
+	cs.storageState[addr] = map[accounts.StorageKey]uint256.Int{
+		slot1: preSDValue1,
+		slot2: preSDValue2,
+	}
 
 	// Populate vm with StoragePath entries for both slots (this is what
 	// IBS' versionWritten does when EVM SLOAD/SSTORE touches a slot).
@@ -1072,7 +1072,7 @@ func TestFlushToUpdates_MidBlockFlushKeepsTheListUntilReset(t *testing.T) {
 
 func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
 	cs := newTestCalcState()
-	cs.hashKeys = true
+	cs.hashes = newCalcHashes()
 	a := accounts.InternAddress(common.Address{0xa1})
 	b := accounts.InternAddress(common.Address{0xb2})
 	c := accounts.InternAddress(common.Address{0xc3})

@@ -28,17 +28,35 @@ type calcAccountState struct {
 	Deleted     bool
 	// dirty tracks whether this account was modified in the current block
 	dirty bool
-	hash  [32]byte
 }
 
-type calcSlot struct {
-	value uint256.Int
-	hash  [32]byte
+type calcHashes struct {
+	accounts map[accounts.Address][32]byte
+	slots    map[accounts.StorageKey][32]byte
 }
 
-type calcStorage struct {
-	hash  [32]byte
-	slots map[accounts.StorageKey]calcSlot
+func newCalcHashes() *calcHashes {
+	return &calcHashes{accounts: map[accounts.Address][32]byte{}, slots: map[accounts.StorageKey][32]byte{}}
+}
+
+func (h *calcHashes) account(addr accounts.Address) [32]byte {
+	hash, ok := h.accounts[addr]
+	if !ok {
+		address := addr.Value()
+		hash = keccak.Sum256(address[:])
+		h.accounts[addr] = hash
+	}
+	return hash
+}
+
+func (h *calcHashes) slot(key accounts.StorageKey) [32]byte {
+	hash, ok := h.slots[key]
+	if !ok {
+		k := key.Value()
+		hash = keccak.Sum256(k[:])
+		h.slots[key] = hash
+	}
+	return hash
 }
 
 // calcDomainReader provides lazy-load reads for calcState using the
@@ -102,7 +120,7 @@ type calcState struct {
 	accounts      map[accounts.Address]*calcAccountState
 	dirtyAccounts []accounts.Address
 	// storageState holds the accumulated value for each slot
-	storageState map[accounts.Address]*calcStorage
+	storageState map[accounts.Address]map[accounts.StorageKey]uint256.Int
 	// storageDirty tracks which slots were modified in the current block
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
 
@@ -129,7 +147,7 @@ type calcState struct {
 
 	prefetch       func(plainKey []byte)
 	branchPrefetch *branchPrefetcher
-	hashKeys       bool
+	hashes         *calcHashes
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -141,7 +159,7 @@ func (cs *calcState) LazyLoadErr() error { return cs.lazyLoadErr }
 func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) *calcState {
 	return &calcState{
 		accounts:     make(map[accounts.Address]*calcAccountState),
-		storageState: make(map[accounts.Address]*calcStorage),
+		storageState: make(map[accounts.Address]map[accounts.StorageKey]uint256.Int),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
 		domainReader: &calcDomainReader{reader: reader},
 		logger:       logger,
@@ -165,10 +183,6 @@ func (cs *calcState) ensureAccount(addr accounts.Address, writes *state.WriteSet
 	}
 
 	acc := &calcAccountState{CodeHash: empty.CodeHash}
-	if cs.hashKeys {
-		address := addr.Value()
-		acc.hash = keccak.Sum256(address[:])
-	}
 	if cs.domainReader != nil && !writesCoverBaseline(writes, addr) {
 		dbAcc, err := cs.domainReader.ReadAccountData(addr)
 		if err != nil {
@@ -196,7 +210,9 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	}
 	acc.dirty = true
 	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
-	cs.branchPrefetch.add(prefetchItem{account: acc.hash})
+	if cs.hashes != nil {
+		cs.branchPrefetch.add(prefetchItem{account: cs.hashes.account(addr)})
+	}
 	if cs.prefetch != nil {
 		address := addr.Value()
 		cs.prefetch(address[:])
@@ -266,37 +282,31 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		// Skip lazy-loading the prior slot value: the only downstream consumer
 		// (FlushToUpdates) reads exactly the value set below, so the cold
 		// GetAsOf seek it would cost is wasted.
-		st := cs.storageState[addr]
-		if st == nil {
-			st = &calcStorage{slots: make(map[accounts.StorageKey]calcSlot)}
-			if cs.hashKeys {
-				address := addr.Value()
-				st.hash = keccak.Sum256(address[:])
-			}
-			cs.storageState[addr] = st
+		slots := cs.storageState[addr]
+		if slots == nil {
+			slots = make(map[accounts.StorageKey]uint256.Int)
+			cs.storageState[addr] = slots
 		}
 		dirty := cs.storageDirty[addr]
 		if dirty == nil {
 			dirty = make(map[accounts.StorageKey]bool)
 			cs.storageDirty[addr] = dirty
-			cs.branchPrefetch.add(prefetchItem{account: st.hash})
+			if cs.hashes != nil {
+				cs.branchPrefetch.add(prefetchItem{account: cs.hashes.account(addr)})
+			}
 		}
 		for key, vw := range inner {
-			slot, ok := st.slots[key]
-			if !ok && cs.hashKeys {
-				k := key.Value()
-				slot.hash = keccak.Sum256(k[:])
-			}
-			slot.value = vw.Val
-			st.slots[key] = slot
 			if !dirty[key] {
-				dirty[key] = true
-				cs.branchPrefetch.add(prefetchItem{account: st.hash, slot: slot.hash, storage: true})
+				if cs.hashes != nil {
+					cs.branchPrefetch.add(prefetchItem{account: cs.hashes.account(addr), slot: cs.hashes.slot(key), storage: true})
+				}
 				if cs.prefetch != nil {
 					address, slotKey := addr.Value(), key.Value()
 					cs.prefetch(append(address[:], slotKey[:]...))
 				}
 			}
+			slots[key] = vw.Val
+			dirty[key] = true
 		}
 	}
 	// An account still Deleted after the field writes (no reviving non-zero
@@ -319,8 +329,8 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 // own DeleteUpdate collapses the rest of the subtree, so untouched on-disk slots
 // need not be read.
 func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
-	st := cs.storageState[addr]
-	if st == nil || len(st.slots) == 0 {
+	slots := cs.storageState[addr]
+	if len(slots) == 0 {
 		return
 	}
 	dirty := cs.storageDirty[addr]
@@ -328,9 +338,8 @@ func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 		dirty = make(map[accounts.StorageKey]bool)
 		cs.storageDirty[addr] = dirty
 	}
-	for key, slot := range st.slots {
-		slot.value = uint256.Int{}
-		st.slots[key] = slot
+	for key := range slots {
+		slots[key] = uint256.Int{}
 		dirty[key] = true
 	}
 }
@@ -392,7 +401,7 @@ func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
 		address := addr.Value()
 		slots := cs.storageState[addr]
 		for key := range dirtySlots {
-			val := slots.slots[key].value
+			val := slots[key]
 			keyVal := key.Value()
 			var composite [20 + 32]byte
 			copy(composite[:], address[:])
@@ -425,16 +434,16 @@ func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
 		if len(dirty) == 0 {
 			continue
 		}
-		st := cs.storageState[addr]
+		slots := cs.storageState[addr]
 		start := len(cs.feedSlots)
 		for key := range dirty {
-			slot := st.slots[key]
-			at, n := len(cs.feedValues), slot.value.ByteLen()
+			value := slots[key]
+			at, n := len(cs.feedValues), value.ByteLen()
 			cs.feedValues = cs.feedValues[:at+n]
-			slot.value.WriteToSlice(cs.feedValues[at:])
-			cs.feedSlots = append(cs.feedSlots, commitment.FeedSlot{Hash: slot.hash, Value: cs.feedValues[at : at+n : at+n]})
+			value.WriteToSlice(cs.feedValues[at:])
+			cs.feedSlots = append(cs.feedSlots, commitment.FeedSlot{Hash: cs.hashes.slot(key), Value: cs.feedValues[at : at+n : at+n]})
 		}
-		account := commitment.FeedAccount{Hash: st.hash, Slots: cs.feedSlots[start:len(cs.feedSlots):len(cs.feedSlots)]}
+		account := commitment.FeedAccount{Hash: cs.hashes.account(addr), Slots: cs.feedSlots[start:len(cs.feedSlots):len(cs.feedSlots)]}
 		if acc := cs.accounts[addr]; acc != nil && acc.dirty {
 			account.Update = cs.feedUpdate(acc)
 		}
@@ -445,7 +454,7 @@ func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
 			continue
 		}
 		acc := cs.accounts[addr]
-		feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: acc.hash, Update: cs.feedUpdate(acc)})
+		feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: cs.hashes.account(addr), Update: cs.feedUpdate(acc)})
 	}
 }
 
