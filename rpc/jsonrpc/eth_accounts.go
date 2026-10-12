@@ -79,7 +79,14 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	}
 	defer tx.Rollback()
 
-	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
+	var acc *accounts.Account
+	if r, ok := reader.(interface {
+		ReadAccountDataByValue(common.Address) (*accounts.Account, error)
+	}); ok {
+		acc, err = r.ReadAccountDataByValue(address)
+	} else {
+		acc, err = reader.ReadAccountData(accounts.InternAddress(address))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("cant get a balance for account %x: %w", address.String(), err)
 	}
