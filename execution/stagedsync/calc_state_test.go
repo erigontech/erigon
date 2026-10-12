@@ -391,7 +391,7 @@ type preBlockReader struct {
 	acc  *accounts.Account
 }
 
-func (r *preBlockReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (r *preBlockReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 

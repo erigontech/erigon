@@ -164,7 +164,7 @@ func (r *recordingReader) ReadAccountData(address accounts.Address) (*accounts.A
 	return a, nil
 }
 
-func (r *recordingReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (r *recordingReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
@@ -237,8 +237,8 @@ func spin(ns int64) {
 	}
 }
 
-func (r *inMemReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
-	return r.ReadAccountData(accounts.InternAddress(address))
+func (r *inMemReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return r.fx.Accounts[address].toAccount(), nil
 }
 
 func (r *inMemReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {

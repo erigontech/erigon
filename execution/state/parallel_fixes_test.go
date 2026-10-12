@@ -23,7 +23,7 @@ func (r *emptyReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Accou
 	return nil, nil
 }
 
-func (r *emptyReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (r *emptyReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 

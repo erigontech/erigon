@@ -130,7 +130,7 @@ func (r *minimalStateReader) ReadAccountData(addr accounts.Address) (*accounts.A
 	return nil, nil
 }
 
-func (r *minimalStateReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (r *minimalStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 

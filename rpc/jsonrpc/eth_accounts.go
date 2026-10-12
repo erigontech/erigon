@@ -79,7 +79,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 	}
 	defer tx.Rollback()
 
-	acc, err := reader.ReadAccountDataPlain(address)
+	acc, err := reader.ReadAccountByPlainAddr(address)
 	if err != nil {
 		return nil, fmt.Errorf("cant get a balance for account %x: %w", address.String(), err)
 	}

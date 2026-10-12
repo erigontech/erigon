@@ -30,7 +30,7 @@ func (r *fieldReader) ReadAccountData(addr accounts.Address) (*accounts.Account,
 	return nil, nil
 }
 
-func (r *fieldReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (r *fieldReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 

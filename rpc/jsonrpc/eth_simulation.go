@@ -1074,7 +1074,7 @@ func (r *simulationIntraBlockStateReader) ReadAccountData(address accounts.Addre
 	return &a, nil
 }
 
-func (r *simulationIntraBlockStateReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (r *simulationIntraBlockStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 

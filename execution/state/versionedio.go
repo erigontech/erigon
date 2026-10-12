@@ -1958,7 +1958,7 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	return nil, nil
 }
 
-func (vr *versionedStateReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (vr *versionedStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return vr.ReadAccountData(accounts.InternAddress(address))
 }
 

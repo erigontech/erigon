@@ -163,7 +163,7 @@ func (s *RecordingState) ReadAccountData(address accounts.Address) (*accounts.Ac
 	return acc, err
 }
 
-func (s *RecordingState) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (s *RecordingState) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return s.ReadAccountData(accounts.InternAddress(address))
 }
 
@@ -1653,7 +1653,7 @@ func (s *witnessStateless) ReadAccountDataForDebug(address accounts.Address) (*a
 	return s.ReadAccountData(address)
 }
 
-func (s *witnessStateless) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (s *witnessStateless) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return s.ReadAccountData(accounts.InternAddress(address))
 }
 

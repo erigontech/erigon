@@ -51,7 +51,7 @@ func HasAccount(r StateReader, address accounts.Address) (bool, error) {
 
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
-	ReadAccountDataPlain(address common.Address) (*accounts.Account, error)
+	ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
 	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
 	ReadAccountCode(address accounts.Address) ([]byte, error)
@@ -140,7 +140,7 @@ func (*NoopReader) ReadAccountData(address accounts.Address) (*accounts.Account,
 	return nil, nil
 }
 
-func (*NoopReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (*NoopReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return nil, nil
 }
 

@@ -53,7 +53,7 @@ func (r *fakeStateReader) ReadAccountData(address accounts.Address) (*accounts.A
 	return r.accounts[address.Value()], nil
 }
 
-func (r *fakeStateReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (r *fakeStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 

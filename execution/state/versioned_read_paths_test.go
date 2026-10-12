@@ -755,7 +755,7 @@ func (r *refreshReader) ReadAccountData(accounts.Address) (*accounts.Account, er
 	return r.account, nil
 }
 
-func (r *refreshReader) ReadAccountDataPlain(address common.Address) (*accounts.Account, error) {
+func (r *refreshReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(accounts.InternAddress(address))
 }
 
