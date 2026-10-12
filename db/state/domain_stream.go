@@ -118,10 +118,14 @@ type DomainLatestIterFile struct {
 	h *CursorHeap
 
 	nextKey, nextVal       []byte
+	nextStamp              uint64
 	k, v, kBackup, vBackup []byte
+	stamp                  uint64
 
 	logger log.Logger
 }
+
+func (hi *DomainLatestIterFile) Stamp() uint64 { return hi.stamp }
 
 func (hi *DomainLatestIterFile) Close() {
 	if hi.h == nil {
@@ -364,6 +368,7 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 	for hi.h.Len() > 0 {
 		lastKey := (*hi.h)[0].key
 		lastVal := (*hi.h)[0].val
+		nextStamp := (*hi.h)[0].endTxNum
 
 		// Advance all the items that have this key (including the top)
 		for hi.h.Len() > 0 && bytes.Equal((*hi.h)[0].key, lastKey) {
@@ -408,11 +413,11 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 			}
 		}
 		if len(lastVal) > 0 {
-			hi.nextKey, hi.nextVal = lastKey, lastVal
+			hi.nextKey, hi.nextVal, hi.nextStamp = lastKey, lastVal, nextStamp
 			return nil // founc
 		}
 	}
-	hi.nextKey = nil
+	hi.nextKey, hi.nextStamp = nil, 0
 	return nil
 }
 
@@ -436,6 +441,7 @@ func (hi *DomainLatestIterFile) HasNext() bool {
 func (hi *DomainLatestIterFile) Next() ([]byte, []byte, error) {
 	hi.limit--
 	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
+	hi.stamp = hi.nextStamp
 
 	// Satisfy iter.Dual Invariant 2
 	hi.k, hi.kBackup, hi.v, hi.vBackup = hi.kBackup, hi.k, hi.vBackup, hi.v

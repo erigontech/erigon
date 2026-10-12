@@ -154,6 +154,29 @@ func TestHeadCaptureStateReader_Routing(t *testing.T) {
 	require.Len(t, pinnedTx.getCalls, 1)
 }
 
+func TestCommitmentSplitStateReaderUsesBoundDomain(t *testing.T) {
+	t.Parallel()
+
+	commitmentReader := &testStateReader{commitmentDomain: kv.CommitmentBinDomain, branchData: []byte{1}, step: 1}
+	plainReader := &testStateReader{branchData: []byte{2}, step: 2}
+	reader := NewCommitmentSplitStateReader(commitmentReader, plainReader, kv.CommitmentBinDomain, false)
+
+	value, step, err := reader.Read(kv.CommitmentBinDomain, []byte{1}, 1)
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, value)
+	require.Equal(t, kv.Step(1), step)
+	require.Equal(t, kv.CommitmentBinDomain, commitmentReader.readDomain)
+	require.Equal(t, 1, commitmentReader.readCalls)
+	require.Zero(t, plainReader.readCalls)
+
+	value, step, err = reader.Read(kv.CommitmentDomain, []byte{2}, 1)
+	require.NoError(t, err)
+	require.Equal(t, []byte{2}, value)
+	require.Equal(t, kv.Step(2), step)
+	require.Equal(t, kv.CommitmentDomain, plainReader.readDomain)
+	require.Equal(t, 1, plainReader.readCalls)
+}
+
 func TestHeadCaptureStateReader_PlainStateAsOfRouting(t *testing.T) {
 	t.Parallel()
 

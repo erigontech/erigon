@@ -68,6 +68,11 @@ func (p *ParallelPatriciaHashed) grainFor(roundKeys uint64, concurrency int) uin
 // Metrics exposes the round's counters; see HexPatriciaHashed.Metrics.
 func (p *ParallelPatriciaHashed) Metrics() *Metrics { return p.metrics }
 
+func (p *ParallelPatriciaHashed) SetMetricsEnabled(enabled bool) {
+	p.metrics.SetMetricsEnabled(enabled)
+	p.template.SetMetricsEnabled(enabled)
+}
+
 func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int16, cfg TrieConfig) *ParallelPatriciaHashed {
 	p := &ParallelPatriciaHashed{
 		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
@@ -117,6 +122,21 @@ func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.template
 }
 
+// EncodeCurrentState and SetState delegate to the template trie, which is where
+// the live root state lives; they make the parallel trie a StatefulTrie.
+func (p *ParallelPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
+	return p.template.EncodeCurrentState(buf)
+}
+
+// A restore moves the root, so a root published by an earlier Process no longer
+// describes the trie and RootHash has to fall back to the template.
+func (p *ParallelPatriciaHashed) SetState(buf []byte) error {
+	p.rootHash.Store(nil)
+	return p.template.SetState(buf)
+}
+
+// Reset clears the published root hash and resets the template so the instance
+// can be reused; pooled workers stay cached for the next Process call.
 func (p *ParallelPatriciaHashed) Reset() {
 	if p.template != nil {
 		p.template.Reset()
@@ -250,7 +270,7 @@ func (p *ParallelPatriciaHashed) Process(
 	p.metrics.Reset()
 	p.metrics.AddRoundKeys(updates.Size())
 	roundStart := time.Now()
-	defer func() { observeRound(p.metrics, roundStart) }()
+	defer func() { ObserveRound(p.metrics, roundStart) }()
 
 	pu := updates.parallel
 	if pu.trie == nil || pu.trie.root == nil || pu.trie.root.subtreeCount == 0 {
@@ -293,7 +313,7 @@ func (p *ParallelPatriciaHashed) Process(
 	out := make([]byte, len(rh))
 	copy(out, rh)
 	p.rootHash.Store(&out)
-	flushTrieStateRates()
+	metricsSinkFor(p.metrics).flushTrieStateRates()
 	if onProgress != nil && p.metrics != nil {
 		n := updates.Size()
 		onProgress(&CommitProgress{KeyIndex: n, UpdateCount: n, Metrics: p.metrics.AsValues()})
@@ -358,7 +378,7 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 		})
 	}
 	err := g.Wait()
-	publishBranchWrites(int(written.Load()), int(bytesOut.Load()), p.metrics)
+	PublishBranchWrites(int(written.Load()), int(bytesOut.Load()), p.metrics)
 	if err != nil {
 		return fmt.Errorf("apply deferred branch updates: %w", err)
 	}

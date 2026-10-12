@@ -373,6 +373,10 @@ func TestBranchCache_StateKeyNeverCached(t *testing.T) {
 	_, _, ok := c.Get(KeyCommitmentState)
 	require.False(t, ok, "state key must never be served from the cache")
 	require.Equal(t, 0, c.tailLen(), "state key must not occupy a tail slot")
+	c.Put(KeyCommitmentV3State, []byte("checkpoint"), 1, 1)
+	_, _, ok = c.Get(KeyCommitmentV3State)
+	require.False(t, ok, "v3 state key must never be served from the cache")
+	require.Equal(t, 0, c.tailLen(), "v3 state key must not occupy a tail slot")
 
 	deepKey := []byte{0x12, 0x34}
 	c.Put(deepKey, []byte("d"), 0, 0)
@@ -539,6 +543,23 @@ func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {
 			require.Zerof(t, c.PinnedCount(), "depth=%d", depth)
 		})
 	}
+}
+
+func TestBranchCache_TryPutSkipsBusyStripe(t *testing.T) {
+	c := NewBranchCache(10)
+	key := []byte{0xa0, 0xb0}
+
+	stripe := c.putStripe(key)
+	stripe.Lock()
+	c.TryPut(key, []byte("fill"), 0, 100, false)
+	stripe.Unlock()
+	_, _, ok := c.Get(key)
+	require.False(t, ok)
+
+	c.TryPut(key, []byte("fill"), 0, 100, false)
+	got, _, ok := c.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("fill"), got)
 }
 
 func TestBranchCache_UnpinContractDropsTheTrunk(t *testing.T) {

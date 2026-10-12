@@ -69,7 +69,7 @@ func addVec(v *metrics.CounterVec, kind string, n uint64) {
 // write lands rather than at a round boundary, because deferred writes can be
 // applied after their round has closed. m, when non-nil, also gets them for the
 // trie's own log and CSV counters.
-func publishBranchWrites(n, bytesOut int, m *Metrics) {
+func PublishBranchWrites(n, bytesOut int, m *Metrics) {
 	if n <= 0 {
 		return
 	}
@@ -83,9 +83,9 @@ func publishBranchWrites(n, bytesOut int, m *Metrics) {
 	}
 }
 
-// observeRound publishes one finished round. Branch writes are not published
-// here — publishBranchWrites bills those where they land.
-func observeRound(m *Metrics, start time.Time) {
+// ObserveRound publishes one finished round. Branch writes are not published
+// here — PublishBranchWrites bills those where they land.
+func ObserveRound(m *Metrics, start time.Time) {
 	mxRoundDuration.ObserveDuration(start)
 	if m == nil {
 		return

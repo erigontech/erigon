@@ -74,11 +74,12 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.
 		}
 	}
 	logger.Info("[integrity] CommitmentRoot files discovered", "total", len(allFiles), "kvFiles", len(files), "onlyCheckLastFile", onlyCheckLastFile, "onlyRecomputeLastFile", onlyRecomputeLastFile)
-	if len(files) == 0 {
+	hasBinDomain := slices.Contains(aggTx.CommitmentDomains(), kv.CommitmentBinDomain)
+	if len(files) == 0 && !hasBinDomain {
 		logger.Warn("[integrity] CommitmentRoot: no commitment .kv files found, nothing to check")
 		return nil
 	}
-	if onlyCheckLastFile {
+	if onlyCheckLastFile && len(files) != 0 {
 		files = files[len(files)-1:]
 	}
 	var integrityErr error
@@ -97,7 +98,67 @@ func CheckCommitmentRoot(ctx context.Context, db kv.TemporalRoDB, br dbservices.
 			continue
 		}
 	}
+	if hasBinDomain {
+		if err := checkPBinCommitmentStateFiles(tx); err != nil {
+			err = fmt.Errorf("%w: binary commitment state: %w", ErrIntegrity, err)
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+		}
+		_, err = state.VerifyPBinDomainRoot(ctx, tx, aggTx.Agg(), kv.CommitmentBinDomain)
+		if err != nil {
+			err = fmt.Errorf("%w: binary commitment: %w", ErrIntegrity, err)
+			if failFast {
+				return err
+			}
+			logger.Warn(err.Error())
+			integrityErr = err
+		}
+	}
 	return integrityErr
+}
+
+func checkPBinCommitmentStateFiles(tx kv.TemporalTx) error {
+	allFiles := tx.Debug().DomainFiles(kv.CommitmentBinDomain)
+	files := make([]state.VisibleFile, 0, len(allFiles))
+	for _, file := range allFiles {
+		if strings.HasSuffix(file.Fullpath(), ".kv") {
+			files = append(files, file)
+		}
+	}
+	if len(files) == 0 {
+		return errors.New("commitment state is missing from binary files")
+	}
+	_, conversionTx, hasConversion, err := state.ReadErigonDBConversionPoint(tx.Debug().Dirs())
+	if err != nil {
+		return err
+	}
+	latest := files[len(files)-1]
+	latestValue, found, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, fileLookupMaxTxNum(latest.EndRootNum()))
+	if err != nil {
+		return err
+	}
+	if !found || len(latestValue) == 0 || start != latest.StartRootNum() || end != latest.EndRootNum() {
+		return fmt.Errorf("latest binary commitment state is missing from %s", filepath.Base(latest.Fullpath()))
+	}
+	for _, file := range files[:len(files)-1] {
+		_, found, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentBinDomain, commitment.KeyCommitmentState, fileLookupMaxTxNum(file.EndRootNum()))
+		if err != nil {
+			return err
+		}
+		if !found {
+			if hasConversion && file.EndRootNum() <= conversionTx {
+				continue
+			}
+			return fmt.Errorf("binary commitment state is missing from %s", filepath.Base(file.Fullpath()))
+		}
+		if start != file.StartRootNum() || end != file.EndRootNum() {
+			return fmt.Errorf("binary commitment state range does not match %s", filepath.Base(file.Fullpath()))
+		}
+	}
+	return nil
 }
 
 func checkCommitmentRootInFile(ctx context.Context, db kv.TemporalRoDB, br dbservices.FullBlockReader, f state.VisibleFile, recompute bool, logger log.Logger) error {
@@ -146,8 +207,8 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 	var info commitmentRootInfo
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
-	maxTxNum := endTxNum - 1
-	v, ok, start, end, err := tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, maxTxNum)
+	maxTxNum := fileLookupMaxTxNum(endTxNum)
+	stateKey, v, ok, start, end, err := latestCommitmentStateFromFiles(tx, maxTxNum)
 	if err != nil {
 		return info, err
 	}
@@ -160,12 +221,12 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 	if end != endTxNum {
 		return info, fmt.Errorf("%w: commitment root not found with same endTxNum: %d != %d", ErrIntegrity, end, endTxNum)
 	}
-	rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
+	rootHashBytes, blockNum, txNum, err := ExtractCommitmentStateRoot(stateKey, v)
 	if err != nil {
 		return info, fmt.Errorf("%w: commitment root could not be extracted: %w", ErrIntegrity, err)
 	}
-	if txNum >= endTxNum {
-		return info, fmt.Errorf("%w: commitment root txNum is gte endTxNum: %d >= %d", ErrIntegrity, txNum, endTxNum)
+	if txNum > endTxNum {
+		return info, fmt.Errorf("%w: commitment root txNum is gt endTxNum: %d > %d", ErrIntegrity, txNum, endTxNum)
 	}
 	if txNum < startTxNum {
 		return info, fmt.Errorf("%w: commitment root txNum is lt startTxNum: %d < %d", ErrIntegrity, txNum, startTxNum)
@@ -210,9 +271,34 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 	return info, nil
 }
 
+func latestCommitmentStateFromFiles(tx kv.TemporalTx, maxTxNum uint64) (stateKey, value []byte, found bool, startTxNum, endTxNum uint64, err error) {
+	for _, key := range commitmentdb.CommitmentStateKeys {
+		value, found, startTxNum, endTxNum, err = tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, key, maxTxNum)
+		if err != nil || found {
+			return key, value, found, startTxNum, endTxNum, err
+		}
+	}
+	return nil, nil, false, 0, 0, nil
+}
+
+func ExtractCommitmentStateRoot(stateKey, value []byte) ([]byte, uint64, uint64, error) {
+	if bytes.Equal(stateKey, commitment.KeyCommitmentV3State) {
+		blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(value)
+		return root, blockNum, txNum, err
+	}
+	return commitment.HexTrieExtractStateRoot(value)
+}
+
+func fileLookupMaxTxNum(endTxNum uint64) uint64 {
+	if endTxNum == 0 {
+		return 0
+	}
+	return endTxNum - 1
+}
+
 func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
-	maxTxNum := f.EndRootNum() - 1
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
+	maxTxNum := f.EndRootNum()
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithHexCommitmentOnly())
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +307,7 @@ func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.Vis
 	} else {
 		sd.GetCommitmentCtx().SetTraceWriter(nil)
 	}
-	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, maxTxNum))
+	sd.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(tx, fileLookupMaxTxNum(maxTxNum)))
 	latestTxNum, _, err := sd.SeekCommitment(ctx, tx) // seek commitment again to use the new state reader instead
 	if err != nil {
 		return nil, err
@@ -566,7 +652,7 @@ func computeCommitmentFileScan(file state.VisibleFile) commitmentFileScan {
 			return commitmentFileScan{referenced: true}
 		}
 		v, _ = g.Next(v[:0])
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+		if commitment.IsCommitmentStateKey(k) {
 			continue
 		}
 		counts.branchKeys++
@@ -668,7 +754,7 @@ func checkCommitmentKvDeref(ctx context.Context, file state.VisibleFile, stepSiz
 				return
 			}
 			branchValue, _ := commReader.Next(branchValueBuf[:0])
-			if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+			if commitment.IsCommitmentStateKey(branchKey) {
 				logger.Info("[integrity] CommitmentKvDeref skipping state key", "valueLen", len(branchValue), "file", fileName)
 				continue
 			}
@@ -970,8 +1056,8 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 		if err != nil {
 			return 0, err
 		}
-		if bytes.Equal(k, commitmentdb.KeyCommitmentState) {
-			rootHashBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(v)
+		if commitment.IsCommitmentStateKey(k) {
+			rootHashBytes, blockNum, txNum, err := ExtractCommitmentStateRoot(k, v)
 			if err != nil {
 				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
 			}
@@ -1138,7 +1224,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br dbserv
 		return err
 	}
 	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithHexCommitmentOnly())
 	if err != nil {
 		return err
 	}
@@ -1207,7 +1293,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return err
 			}
 			defer tx.Rollback()
-			sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+			sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithHexCommitmentOnly())
 			if err != nil {
 				return err
 			}
@@ -1221,7 +1307,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
 				// Fresh SharedDomains per block: an SD is committed-or-closed,
 				// never reset in place.
-				sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+				sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithHexCommitmentOnly(), execctx.WithSequentialCommitment())
 				if err != nil {
 					return err
 				}
@@ -1387,7 +1473,7 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, f
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+		if commitment.IsCommitmentStateKey(branchKey) {
 			continue
 		}
 		branchKeys++
@@ -1601,7 +1687,7 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+		if commitment.IsCommitmentStateKey(branchKey) {
 			continue
 		}
 		branchKeys++
@@ -1980,7 +2066,7 @@ func extractCommitmentRefsToCollectors(ctx context.Context, file state.VisibleFi
 		}
 		branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-		if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+		if commitment.IsCommitmentStateKey(branchKey) {
 			continue
 		}
 
@@ -2170,7 +2256,7 @@ func checkHashVerification(ctx context.Context, file state.VisibleFile, failFast
 			}
 			branchValue, _ := commReader.Next(branchValueBuf[:0])
 
-			if bytes.Equal(branchKey, commitmentdb.KeyCommitmentState) {
+			if commitment.IsCommitmentStateKey(branchKey) {
 				continue
 			}
 

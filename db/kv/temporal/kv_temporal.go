@@ -836,6 +836,13 @@ func (tx *RwTx) PruneSmallBatches(ctx context.Context, timeout time.Duration) (h
 }
 
 func (tx *RwTx) Unwind(ctx context.Context, txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) error {
+	blockNum, conversionTxNum, ok, err := state.ReadErigonDBConversionPoint(tx.Debug().Dirs())
+	if err != nil {
+		return err
+	}
+	if ok && txNumUnwindTo <= conversionTxNum {
+		return state.NewConversionFloorError(blockNum, conversionTxNum, txNumUnwindTo, state.ConversionFloorTx)
+	}
 	return tx.aggtx.Unwind(ctx, tx.RwTx, txNumUnwindTo, changeset)
 }
 

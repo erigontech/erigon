@@ -390,8 +390,20 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		log.Warn("[witness-cache] resolve chain config", "block", num, "err", err)
+		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
+	defaultTrie, err := resolveWitnessTrie(nil, chainConfig.IsBinaryTrie(info.Block.Time()))
+	if err != nil {
+		log.Warn("[witness-cache] resolve trie", "block", num, "err", err)
+		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
 	if _, err = api.witnessCache.buildOnce(ctx, hash, func(ctx context.Context) (*ExecutionWitnessResult, error) {
-		return api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
+		return api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy, defaultTrie)
 	}, api.storeBuiltWitness(num, hash)); err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()
@@ -472,8 +484,20 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
+	chainConfig, err := api.chainConfig(ctx, committedTx)
+	if err != nil {
+		log.Warn("[witness-cache] resolve chain config", "block", num, "err", err)
+		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
+	defaultTrie, err := resolveWitnessTrie(nil, chainConfig.IsBinaryTrie(info.Block.Time()))
+	if err != nil {
+		log.Warn("[witness-cache] resolve trie", "block", num, "err", err)
+		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
 	if _, err = api.witnessCache.buildOnce(ctx, hash, func(ctx context.Context) (*ExecutionWitnessResult, error) {
-		return api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy)
+		return api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy, defaultTrie)
 	}, api.storeBuiltWitness(num, hash)); err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()

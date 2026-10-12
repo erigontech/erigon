@@ -80,6 +80,8 @@ type Config struct {
 	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
 	BogotaTime    *uint64 `json:"bogotaTime,omitempty"`
 
+	BinaryTrieTime *uint64 `json:"binaryTrieTime,omitempty"`
+
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice *uint64                       `json:"minBlobGasPrice,omitempty"`
 	BlobSchedule    map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
@@ -403,6 +405,16 @@ func (c *Config) IsAmsterdam(time uint64) bool {
 	return isForked(c.AmsterdamTime, time)
 }
 
+// IsBinaryTrie returns whether time is either equal to the EIP-8297 binary-tree fork
+// time or greater.
+func (c *Config) IsBinaryTrie(time uint64) bool {
+	return isForked(c.BinaryTrieTime, time)
+}
+
+func (c *Config) IsBinaryTrieScheduled() bool {
+	return c.BinaryTrieTime != nil
+}
+
 // IsBogota returns whether time is either equal to the Bogota fork time or greater.
 func (c *Config) IsBogota(time uint64) bool {
 	return isForked(c.BogotaTime, time)
@@ -643,6 +655,7 @@ func (c *Config) forkTimestamps() []forkTimestamp {
 		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime, outOfOrder: true},
 		{name: "bogotaTime", what: "Bogota fork timestamp", timestamp: c.BogotaTime, outOfOrder: true},
 		{name: "balancerTime", what: "Balancer fork timestamp", timestamp: c.BalancerTime, outOfOrder: true},
+		{name: "binaryTrieTime", what: "Binary trie fork timestamp", timestamp: c.BinaryTrieTime, outOfOrder: true},
 	}
 }
 

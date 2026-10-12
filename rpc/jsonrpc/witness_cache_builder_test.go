@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -418,7 +419,7 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 
 	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	bn := rpc.BlockNumber(buildNum)
-	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 	require.NoError(t, err, "durable on-demand build must succeed")
 
 	next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
@@ -496,7 +497,7 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	}, 30*time.Second, 20*time.Millisecond, "builder must populate the cache")
 
 	bn := rpc.BlockNumber(blockNum)
-	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 	require.NoError(t, err)
 
 	// Compare the served form: the cache stores a shell carrying only pre-marshaled
@@ -539,6 +540,44 @@ func buildDurationSamples(t *testing.T) uint64 {
 	var m dto.Metric
 	require.NoError(t, witnessCacheBuildDuration.Write(&m))
 	return m.GetHistogram().GetSampleCount()
+}
+
+func TestWitnessCacheBuildsDefaultPBT(t *testing.T) {
+	var pin *rollingPin
+	var block4Hash common.Hash
+	api, m := pbinWitnessFixtureWithHook(t, 20, func(m *execmoduletester.ExecModuleTester, pack *blockgen.ChainPack) error {
+		if err := m.InsertChain(pack.Slice(0, 3)); err != nil {
+			return err
+		}
+		var err error
+		pin, err = openRollingPin(t.Context(), m.DB)
+		if err != nil {
+			return err
+		}
+		block4Hash = pack.Blocks[3].Hash()
+		return m.InsertChain(pack.Slice(3, 4))
+	})
+	t.Cleanup(func() { pin.close() })
+	repairPBinPreForkShadows(t, m, 20)
+	api.witnessCache = newWitnessResultCache(96, 0, false, false)
+	ctx := t.Context()
+	var block3Hash common.Hash
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		block3Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 3)
+		return err
+	}))
+	failuresBefore := witnessCacheBuildFailOtherCounter.GetValueUint64()
+	require.True(t, api.buildAndCache(ctx, 3, block3Hash))
+	require.Equal(t, failuresBefore, witnessCacheBuildFailOtherCounter.GetValueUint64())
+	require.True(t, api.witnessCache.Contains(block3Hash))
+
+	committedTx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer committedTx.Rollback()
+	require.True(t, api.tryHeadCaptureBuild(ctx, committedTx, pin, 4, block4Hash))
+	require.Equal(t, failuresBefore, witnessCacheBuildFailOtherCounter.GetValueUint64())
+	require.True(t, api.witnessCache.Contains(block4Hash))
 }
 
 func TestBuildAndCacheHeadCaptureJoinsRunningBuild(t *testing.T) {
@@ -632,7 +671,7 @@ func TestBuildAndCacheHeadCaptureReorgDropsLosingFork(t *testing.T) {
 	require.True(t, api.witnessCache.Contains(canonHash), "the winning canonical hash is cached")
 	require.False(t, api.witnessCache.Contains(forkHash), "the losing fork stays absent")
 
-	_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(forkHash, false), nil)
+	_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(forkHash, false), nil, nil)
 	require.ErrorIs(t, err, errWitnessReorgedAway, "a by-hash request for the reorged-out sibling is out-of-window, never served")
 }
 

@@ -17,13 +17,26 @@
 package execctx
 
 import (
+	"errors"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
+// ErrBinCommitmentUnsupported is returned by NewSharedDomains for a caller that
+// declared itself hex-only (WithHexCommitmentOnly) over a bin-variant datadir.
+var ErrBinCommitmentUnsupported = errors.New("this code path supports the hex commitment trie only, and the datadir uses the bin trie")
+
+var ErrHexBinRequiresV3 = errors.New("hex+bin requires VariantCommitmentV3 for the hex arm and VariantBinPatriciaTrie for the bin arm")
+
 type sharedDomainOptions struct {
 	trieCfg              commitment.TrieConfig
 	useSharedBranchCache bool
+	hexCommitmentOnly    bool
+	commitmentDomain     *kv.Domain
+	commitmentDomainOnly bool
+	skipCommitmentSeek   bool
+	pbinOnly             bool
 	localCacheUnwind     bool
 	mem                  kv.TemporalMemBatch
 	paraTrieDB           kv.TemporalRoDB
@@ -35,6 +48,26 @@ type SharedDomainOption func(*sharedDomainOptions)
 // WithTrieConfig replaces the trie configuration wholesale; the caller owns Variant.
 func WithTrieConfig(cfg commitment.TrieConfig) SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg = cfg }
+}
+
+func WithCommitmentDomain(domain kv.Domain) SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.commitmentDomain = &domain }
+}
+
+func WithCommitmentDomainOnly(domain kv.Domain) SharedDomainOption {
+	return func(o *sharedDomainOptions) {
+		o.commitmentDomain = &domain
+		o.commitmentDomainOnly = true
+	}
+}
+
+func WithPBinOnly() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.pbinOnly = true }
+}
+
+// WithoutCommitmentSeek skips restoring persisted trie state when a caller rebuilds it from files.
+func WithoutCommitmentSeek() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.skipCommitmentSeek = true }
 }
 
 // WithoutDeferredBranchUpdates disables deferred branch updates (read-only / one-shot domains).
@@ -68,9 +101,26 @@ func WithParaTrieDB(db kv.TemporalRoDB) SharedDomainOption {
 
 // WithSequentialCommitment forces the sequential HexPatriciaHashed trie regardless
 // of the experimental parallel/concurrent flags — for one-shot / empty-DB paths
-// (e.g. genesis) that wire no trie-context factory for the parallel trie.
+// (e.g. genesis) that wire no trie-context factory for the parallel trie. The bin
+// variant is a persisted whole-datadir property and stays bin: demoting it would
+// compute a hex root over a datadir the executor reads as bin.
 func WithSequentialCommitment() SharedDomainOption {
-	return func(o *sharedDomainOptions) { o.trieCfg.Variant = commitment.VariantHexPatriciaTrie }
+	return func(o *sharedDomainOptions) {
+		if o.trieCfg.Variant == commitment.VariantParallelHexPatricia {
+			o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
+		}
+	}
+}
+
+// WithHexCommitmentOnly is WithSequentialCommitment for callers that can only read
+// hex branch records — eth_getProof, eth_getWitness, eth_simulateV1, receipt
+// regeneration, commitment integrity. Under the bin variant NewSharedDomains returns
+// ErrBinCommitmentUnsupported instead of reading bit-path records as hex ones.
+func WithHexCommitmentOnly() SharedDomainOption {
+	return func(o *sharedDomainOptions) {
+		o.hexCommitmentOnly = true
+		WithSequentialCommitment()(o)
+	}
 }
 
 // WithLocalCacheUnwind defers shared-cache invalidation until adoption or commit.

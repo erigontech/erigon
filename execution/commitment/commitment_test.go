@@ -51,6 +51,16 @@ func noopCtxFactory(context.Context) (PatriciaContext, func()) {
 	return &noopPatriciaContext{}, nil
 }
 
+type metricsPatriciaContext struct{ noopPatriciaContext }
+
+func (m *metricsPatriciaContext) Account([]byte) (*Update, error) {
+	return &Update{Flags: BalanceUpdate}, nil
+}
+
+func (m *metricsPatriciaContext) Storage([]byte) (*Update, error) {
+	return &Update{Flags: StorageUpdate}, nil
+}
+
 type gatedPatriciaContext struct {
 	sleep       time.Duration
 	descend     bool
@@ -265,6 +275,23 @@ func TestHashSort_WaitBufferFreeErrorKeepsArenaInvariant(t *testing.T) {
 
 		require.Equal(t, int(ut.gen%arenaRingSize), ut.curArena)
 	})
+}
+
+// TestUpdateDecodeRefusesOversizedStorage: the storage length is a varint on the
+// wire but an int8 in the struct, so a value past the field's own width has to
+// be refused at the bound check rather than wrap negative.
+func TestUpdateDecodeRefusesOversizedStorage(t *testing.T) {
+	t.Parallel()
+
+	for _, storageLen := range []uint64{uint64(length.Hash) + 1, 200} {
+		buf := []byte{byte(StorageUpdate)}
+		buf = binary.AppendUvarint(buf, storageLen)
+		buf = append(buf, bytes.Repeat([]byte{0xAA}, int(storageLen))...)
+
+		var u Update
+		_, err := u.Decode(buf, 0)
+		require.Error(t, err, "storage len %d", storageLen)
+	}
 }
 
 func TestUpdates_ArenaAlloc(t *testing.T) {
@@ -736,7 +763,7 @@ func TestCollectUpdate_HonoursSuppliedPrev(t *testing.T) {
 	beNew := NewBranchEncoder(1024)
 	require.NoError(t, beNew.CollectUpdate(ctxNew, prefix, bm, bm, bm, &cells, nil))
 	require.Len(t, ctxNew.puts, 1)
-	require.Empty(t, ctxNew.puts[0].prev)
+	require.Nil(t, ctxNew.puts[0].prev)
 
 	beSame := NewBranchEncoder(1024)
 	encoded, err := beSame.EncodeBranch(bm, bm, bm, &cells)
@@ -815,6 +842,26 @@ func TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply(t *testing.
 	require.Equal(t, wantB, ctx.puts[1].data, "reused buffer must not retain stale bytes from the earlier, longer round")
 }
 
+func TestUpdatesPlainKeys_AllModes(t *testing.T) {
+	t.Parallel()
+
+	keys := []string{"account-a", "storage-a", "deleted"}
+	for _, mode := range []Mode{ModeUpdate, ModeDirect, ModeParallel} {
+		updates := NewUpdates(mode, t.TempDir(), keyHasherNoop)
+		t.Cleanup(updates.Close)
+		for _, key := range keys {
+			updates.TouchPlainKey(key, []byte("value"), updates.TouchStorage)
+		}
+		updates.TouchPlainKey("deleted", nil, updates.TouchStorage)
+
+		require.Equal(t, map[string]struct{}{
+			"account-a": {},
+			"storage-a": {},
+			"deleted":   {},
+		}, updates.PlainKeys())
+	}
+}
+
 func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	t.Parallel()
 
@@ -847,6 +894,33 @@ func TestModeString(t *testing.T) {
 	require.Equal(t, "unknown", Mode(99).String())
 }
 
+func TestCommitmentMetricsSinkSeparatesFolds(t *testing.T) {
+	loadsBefore := mxTrieStateLoadRate.GetValueUint64()
+	skipsBefore := mxTrieStateSkipRate.GetValueUint64()
+
+	key := make([]byte, length.Addr)
+	key[0] = 1
+	key2 := slices.Clone(key)
+	key2[0] = 2
+	ctx := &metricsPatriciaContext{}
+
+	require.Equal(t, loadsBefore, mxTrieStateLoadRate.GetValueUint64())
+	require.Equal(t, skipsBefore, mxTrieStateSkipRate.GetValueUint64())
+
+	hexUpdates := NewUpdates(ModeDirect, t.TempDir(), KeyToHexNibbleHash)
+	hexUpdates.TouchPlainKey(string(key), nil, nil)
+	hexUpdates.TouchPlainKey(string(key2), nil, nil)
+	hexTrie := NewHexPatriciaHashed(length.Addr, ctx, DefaultTrieConfig())
+	hexTrie.SetMetricsEnabled(true)
+	_, err := hexTrie.Process(t.Context(), hexUpdates, "hex", nil, WarmupConfig{})
+	require.NoError(t, err)
+	hexUpdates.Close()
+	hexTrie.Release()
+
+	require.Greater(t, mxTrieStateLoadRate.GetValueUint64(), loadsBefore)
+	require.GreaterOrEqual(t, mxTrieStateSkipRate.GetValueUint64(), skipsBefore)
+}
+
 func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	t.Parallel()
 
@@ -860,7 +934,7 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	require.Nil(t, ut.tree)
 	require.Nil(t, ut.treeIdx)
 	require.Nil(t, ut.etl, "ModeParallel uses the prefix trie, not any ETL collector")
-	require.True(t, ut.IsConcurrentCommitment(), "IsConcurrentCommitment must report true for ModeParallel")
+	require.Equal(t, ModeParallel, ut.Mode(), "collection must stay in ModeParallel")
 	require.Equal(t, uint64(0), ut.Size())
 }
 
@@ -997,7 +1071,8 @@ func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
 
 	cfg := DefaultTrieConfig()
 	cfg.Variant = VariantParallelHexPatricia
-	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	trie, upd, err := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	require.NoError(t, err)
 	defer upd.Close()
 	defer trie.Release()
 
@@ -1005,7 +1080,7 @@ func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
 	require.Equal(t, VariantParallelHexPatricia, trie.Variant())
 	require.Equal(t, ModeParallel, upd.Mode())
 	require.NotNil(t, upd.parallel)
-	require.True(t, upd.IsConcurrentCommitment())
+	require.Equal(t, ModeParallel, upd.Mode())
 }
 
 func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
@@ -1013,7 +1088,8 @@ func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
 
 	cfg := DefaultTrieConfig()
 	cfg.Variant = VariantHexPatriciaTrie
-	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	trie, upd, err := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	require.NoError(t, err)
 	defer upd.Close()
 	defer trie.Release()
 
@@ -1228,7 +1304,7 @@ func TestCollectDeferredUpdate_InlineFlushesAtCapacity(t *testing.T) {
 	require.Len(t, be.deferred, 1)
 }
 
-func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
+func TestCollectDeferredUpdate_NewBranchLeavesPrevToTheDomain(t *testing.T) {
 	t.Parallel()
 	row, bm := generateCellRow(t, 4)
 	cells := generateCellEncodeDataRow(t, row, bm)
@@ -1237,8 +1313,7 @@ func TestCollectDeferredUpdate_NewBranchCarriesEmptyPrev(t *testing.T) {
 	be.setDeferUpdates(true)
 	require.NoError(t, be.CollectDeferredUpdate(&recordingCtx{}, []byte{0x33, 0x44}, bm, bm, bm, &cells, nil))
 	require.Len(t, be.deferred, 1)
-	require.NotNil(t, be.deferred[0].prev, "a new branch must carry an empty prev, or the domain reads the previous value again on apply")
-	require.Empty(t, be.deferred[0].prev)
+	require.Nil(t, be.deferred[0].prev, "a new branch can land on a stale record the trie never read; a nil prev makes the domain record that record as history")
 	be.ClearDeferred()
 }
 

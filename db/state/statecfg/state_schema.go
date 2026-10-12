@@ -48,6 +48,11 @@ func Configure(Schema SchemaGen, a AggSetters, dirs datadir.Dirs, salt *uint32, 
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.CommitmentDomain), salt, dirs, logger); err != nil {
 		return err
 	}
+	if ExperimentalHexBinCommitment {
+		if err := a.RegisterDomain(Schema.GetDomainCfg(kv.CommitmentBinDomain), salt, dirs, logger); err != nil {
+			return err
+		}
+	}
 	if err := a.RegisterDomain(Schema.GetDomainCfg(kv.ReceiptDomain), salt, dirs, logger); err != nil {
 		return err
 	}
@@ -83,6 +88,9 @@ func init() {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
+	if ExperimentalCommitmentV3 {
+		EnableCommitmentV3Records(&Schema.CommitmentDomain)
+	}
 }
 
 type SchemaGen struct {
@@ -90,6 +98,7 @@ type SchemaGen struct {
 	StorageDomain         DomainCfg
 	CodeDomain            DomainCfg
 	CommitmentDomain      DomainCfg
+	CommitmentBinDomain   DomainCfg
 	ReceiptDomain         DomainCfg
 	RCacheDomain          DomainCfg
 	LogAddrIdx            InvIdxCfg
@@ -104,7 +113,7 @@ type SchemaGen struct {
 
 func (s *SchemaGen) GetVersioned(name string) (Versioned, error) {
 	switch name {
-	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String():
+	case kv.AccountsDomain.String(), kv.StorageDomain.String(), kv.CodeDomain.String(), kv.CommitmentDomain.String(), kv.CommitmentBinDomain.String(), kv.ReceiptDomain.String(), kv.RCacheDomain.String():
 		domain, err := kv.String2Domain(name)
 		if err != nil {
 			return nil, err
@@ -136,6 +145,8 @@ func (s *SchemaGen) GetDomainCfg(name kv.Domain) DomainCfg {
 		v = s.CodeDomain
 	case kv.CommitmentDomain:
 		v = s.CommitmentDomain
+	case kv.CommitmentBinDomain:
+		v = s.CommitmentBinDomain
 	case kv.ReceiptDomain:
 		v = s.ReceiptDomain
 	case kv.RCacheDomain:
@@ -190,6 +201,9 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 // commitmentKVWriteVersion stamps v2.1 on referenced commitment files (matching main's referenced
 // default) and v2.2 on plain ones; the read ceiling (DataKV.Current = v2.2) accepts both.
 func commitmentKVWriteVersion(c *DomainCfg) version.Version {
+	if c.CommitmentV3Records {
+		return version.V3_0
+	}
 	if c.ReferencesInCommitmentBranches {
 		return version.V2_1
 	}
@@ -199,6 +213,24 @@ func commitmentKVWriteVersion(c *DomainCfg) version.Version {
 const DefaultParallelCommitment = true
 
 var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
+
+// ExperimentalBinCommitment selects the EIP-8297 binary commitment trie
+// (commitment.ModeDirect + VariantBinPatriciaTrie). A whole-datadir property:
+// persisted to erigondb.toml on first start and adopted from it on later
+// starts, so a flagless restart of a bin datadir stays bin.
+var ExperimentalBinCommitment = dbg.EnvBool("COMMITMENT_BIN", false)
+
+var ExperimentalHexBinCommitment = dbg.EnvBool("COMMITMENT_HEX_BIN", false)
+
+// BinCommitmentHash names H for the binary trie ("keccak" or "blake3", empty
+// meaning keccak). Persisted and adopted exactly like ExperimentalBinCommitment:
+// roots are incomparable across a change, so a datadir keeps the hash it was
+// built with.
+var BinCommitmentHash = dbg.EnvString("COMMITMENT_BIN_HASH", "")
+
+const DefaultCommitmentV3 = false
+
+var ExperimentalCommitmentV3 = dbg.EnvBool("COMMITMENT_V3", DefaultCommitmentV3)
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
@@ -296,6 +328,33 @@ var Schema = SchemaGen{
 			},
 		},
 	},
+	CommitmentBinDomain: DomainCfg{
+		Name: kv.CommitmentBinDomain, ValuesTable: kv.TblCommitmentBinVals,
+		CompressCfg: DomainCompressCfg, Compression: seg.CompressKeys,
+
+		Accessors:                      AccessorHashMap,
+		ReferencesInCommitmentBranches: false,
+
+		Hist: HistCfg{
+			ValuesTable:   kv.TblCommitmentBinHistoryVals,
+			CompressorCfg: HistoryCompressCfg.WithValuesOnCompressedPage(64), Compression: seg.CompressNone,
+			HistoryIdx: kv.CommitmentBinHistoryIdx,
+			Accessors:  AccessorHashMap,
+
+			HistoryLargeValues:            false,
+			HistoryValuesOnCompressedPage: 64,
+
+			SnapshotsDisabled: true,
+			HistoryDisabled:   true,
+
+			IiCfg: InvIdxCfg{
+				Enabled:      true,
+				FilenameBase: kv.CommitmentBinDomain.String(), KeysTable: kv.TblCommitmentBinHistoryKeys, ValuesTable: kv.TblCommitmentBinIdx,
+				CompressorCfg: seg.DefaultCfg,
+				Accessors:     AccessorHashMap,
+			},
+		},
+	},
 	ReceiptDomain: DomainCfg{
 		Name: kv.ReceiptDomain, ValuesTable: kv.TblReceiptVals,
 		CompressCfg: seg.DefaultCfg, Compression: seg.CompressNone,
@@ -380,11 +439,38 @@ var Schema = SchemaGen{
 	},
 }
 
+const CommitmentV3Accessors = AccessorBTree | AccessorExistence
+
+func EnableCommitmentV3Records(c *DomainCfg) {
+	c.CommitmentV3Records = true
+	c.Accessors = CommitmentV3Accessors
+	c.FileVersion.DataKV.Current = version.V3_0
+	c.FileVersion.AccessorBT = version.Versions{Current: version.V2_0, MinSupported: version.V1_0}
+	c.FileVersion.AccessorKVEI = version.Versions{Current: version.V1_2, MinSupported: version.V1_0}
+	c.Hist.FileVersion.DataV.Current = version.V3_0
+}
+
+func ConfigureCommitmentV3Records(enabled bool) {
+	ExperimentalCommitmentV3 = enabled
+	InitSchemas()
+	if enabled {
+		EnableCommitmentV3Records(&Schema.CommitmentDomain)
+		return
+	}
+	DisableCommitmentV3Records(&Schema.CommitmentDomain)
+	DisableCommitmentV3Records(&Schema.CommitmentBinDomain)
+}
+
+func DisableCommitmentV3Records(c *DomainCfg) {
+	c.CommitmentV3Records = false
+	c.Accessors = AccessorHashMap
+}
+
 func EnableHistoricalCommitment() {
-	cfg := Schema.CommitmentDomain
-	cfg.Hist.HistoryDisabled = false
-	cfg.Hist.SnapshotsDisabled = false
-	Schema.CommitmentDomain = cfg
+	for _, cfg := range []*DomainCfg{&Schema.CommitmentDomain, &Schema.CommitmentBinDomain} {
+		cfg.Hist.HistoryDisabled = false
+		cfg.Hist.SnapshotsDisabled = false
+	}
 }
 
 /*

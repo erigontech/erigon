@@ -288,7 +288,7 @@ func TestSimulateV1IgnoresNewerSharedBranchCache(t *testing.T) {
 
 	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
 	require.True(t, ok)
-	branchCache := provider.BranchCache()
+	branchCache := provider.BranchCache(kv.CommitmentDomain)
 	require.NotNil(t, branchCache)
 	branchCache.Clear()
 	t.Cleanup(branchCache.Clear)
@@ -353,7 +353,7 @@ func TestCommittedStateMethodsRejectPendingTag(t *testing.T) {
 	})
 
 	t.Run("debug_executionWitness", func(t *testing.T) {
-		_, err := debugAPI.ExecutionWitness(m.Ctx, pending, nil)
+		_, err := debugAPI.ExecutionWitness(m.Ctx, pending, nil, nil)
 		require.EqualError(t, err, "pending state is not supported")
 	})
 }
@@ -380,7 +380,7 @@ func TestExecutionWitnessCacheUsesCommittedView(t *testing.T) {
 	defer tx.Rollback()
 
 	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
-	got, hit, reorgedAway := api.serveFromWitnessCache(m.Ctx, tx, latest, witnessModeLegacy)
+	got, hit, reorgedAway := api.serveFromWitnessCache(m.Ctx, tx, latest, witnessModeLegacy, witnessTrieMPT, witnessTrieMPT)
 	require.True(t, hit)
 	require.False(t, reorgedAway)
 	require.Same(t, want, got)

@@ -155,6 +155,79 @@ func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
+func checkUnwindConversionPoint(dirs datadir.Dirs, requested uint64, kind state.ConversionFloorKind) error {
+	conversionBlock, conversionTxNum, ok, err := state.ReadErigonDBConversionPoint(dirs)
+	if err != nil {
+		return err
+	}
+	tooDeep := ok && ((kind == state.ConversionFloorTx && requested <= conversionTxNum) || (kind == state.ConversionFloorBlock && requested < conversionBlock))
+	if tooDeep {
+		return fmt.Errorf("%w: %w", ErrTooDeepUnwind, state.NewConversionFloorError(conversionBlock, conversionTxNum, requested, kind))
+	}
+	return nil
+}
+
+func stoppedHexShadowUnwindError(unwindPoint, activationBlock uint64) error {
+	if unwindPoint >= activationBlock {
+		return nil
+	}
+	return fmt.Errorf("%w: hex commitment shadow stopped at activation block %d", ErrTooDeepUnwind, activationBlock)
+}
+
+func checkStoppedHexShadowUnwind(ctx context.Context, tx kv.TemporalTx, br dbservices.FullBlockReader, config *chain.Config, currentBlock, unwindPoint uint64) error {
+	if config == nil || config.BinaryTrieTime == nil || br == nil {
+		return nil
+	}
+	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentDomain)
+	if err != nil || !stopped {
+		return err
+	}
+	activationBlock, found, err := binaryTrieActivationBlock(ctx, tx, br, config, currentBlock)
+	if err != nil || !found {
+		return err
+	}
+	return stoppedHexShadowUnwindError(unwindPoint, activationBlock)
+}
+
+func binaryTrieActivationBlock(ctx context.Context, tx kv.TemporalTx, br dbservices.FullBlockReader, config *chain.Config, currentBlock uint64) (uint64, bool, error) {
+	head, err := br.HeaderByNumber(ctx, tx, currentBlock)
+	if err != nil {
+		return 0, false, err
+	}
+	return binaryTrieActivationBlockWithHead(ctx, tx, br, config, currentBlock, head)
+}
+
+func binaryTrieActivationBlockWithHead(ctx context.Context, tx kv.TemporalTx, br dbservices.FullBlockReader, config *chain.Config, currentBlock uint64, head *types.Header) (uint64, bool, error) {
+	if head == nil || !config.IsBinaryTrie(head.Time) {
+		return 0, false, nil
+	}
+	low, high := uint64(0), currentBlock
+	for low < high {
+		middle := low + (high-low)/2
+		header, err := br.HeaderByNumber(ctx, tx, middle)
+		if err != nil {
+			return 0, false, err
+		}
+		if header == nil {
+			high = middle
+			continue
+		}
+		if config.IsBinaryTrie(header.Time) {
+			high = middle
+		} else {
+			low = middle + 1
+		}
+	}
+	header, err := br.HeaderByNumber(ctx, tx, low)
+	if err != nil {
+		return 0, false, err
+	}
+	if header == nil || !config.IsBinaryTrie(header.Time) {
+		return 0, false, nil
+	}
+	return low, true, nil
+}
+
 // findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
 // When no canonical hash is recorded at that height (e.g. the block is no longer canonical
 // after a reorg) it falls back to the stored header.
@@ -451,7 +524,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, doms *execctx.SharedDoma
 		maxBlockNum:              to,
 	}
 
-	if !(dbg.Exec3Parallel || cfg.experimentalBAL) {
+	if len(doms.CommitmentDomains()) == 1 && !executeInParallel(doms.GetCommitmentCtx().Trie().Variant(), dbg.Exec3Parallel, cfg.experimentalBAL) {
 		return execV3Serial(ctx, s, u, cfg, doms, rwTx, rng, logger)
 	}
 
@@ -507,12 +580,18 @@ func unwindDomsToBlock(ctx context.Context, rwTx kv.TemporalRwTx, br dbservices.
 	if err != nil {
 		return 0, err
 	}
+	if err := checkUnwindConversionPoint(rwTx.Debug().Dirs(), txNum, state.ConversionFloorTx); err != nil {
+		return 0, err
+	}
 	doms.Unwind(txNum, changeset) // drops [txNum, ∞)
 	doms.SetTxNum(txNum)
 	return txNum, nil
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+	if err := checkStoppedHexShadowUnwind(ctx, rwTx, cfg.blockReader, cfg.chainConfig, s.BlockNumber, u.UnwindPoint); err != nil {
+		return err
+	}
 	if u.UnwindPoint >= s.BlockNumber {
 		// Disk holds nothing above s.BlockNumber, but the in-RAM overlay may.
 
@@ -536,6 +615,9 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 	if !ok {
+		if err := checkUnwindConversionPoint(rwTx.Debug().Dirs(), u.UnwindPoint, state.ConversionFloorBlock); err != nil {
+			return err
+		}
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	}
 
@@ -739,8 +821,9 @@ func historyRetireCutoffs(ctx context.Context, tx kv.Tx, blockReader dbservices.
 	return kv.RetireCutoffs{
 		Default: historyTxNum,
 		PerDomain: map[kv.Domain]uint64{
-			kv.CommitmentDomain: commitmentTxNum,
-			kv.RCacheDomain:     rcacheTxNum,
+			kv.CommitmentDomain:    commitmentTxNum,
+			kv.CommitmentBinDomain: commitmentTxNum,
+			kv.RCacheDomain:        rcacheTxNum,
 		},
 	}, nil
 }

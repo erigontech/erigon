@@ -25,30 +25,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	commitmenttemporal "github.com/erigontech/erigon/internal/commitmenttest/temporal"
 )
 
 var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
@@ -59,22 +57,79 @@ func NewTest(dirs datadir.Dirs) state.AggOpts { //nolint:gocritic
 
 func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 	tb.Helper()
-	logger := log.New()
-	dirs := datadir.New(tb.TempDir())
-	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-	tb.Cleanup(db.Close)
-
-	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context())
-	tb.Cleanup(agg.Close)
-	err := agg.OpenFolder(db)
-	require.NoError(tb, err)
-	tdb, err := temporal.New(db, agg, nil)
-	require.NoError(tb, err)
-	return tdb
+	db, _ := commitmenttemporal.Open(tb, stepSize)
+	return db
 }
 
 func composite(k, k2 []byte) []byte {
 	return append(bytes.Clone(k), k2...)
+}
+
+func TestSharedDomainsCommitmentDiffUsesDomain(t *testing.T) {
+	withDualCommitmentFlags(t)
+
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	cs := &changeset.StateChangeSet{}
+	for domain, value := range map[kv.Domain][]byte{
+		kv.CommitmentDomain:    {1},
+		kv.CommitmentBinDomain: {2},
+	} {
+		key := []byte{byte(domain), 0xaa}
+		require.NoError(t, sd.DomainPutCommitmentDiff(domain, rwTx, key, value, 1, nil, &cs.Diffs[domain]))
+		got, _, err := sd.GetLatest(domain, rwTx, key)
+		require.NoError(t, err)
+		require.Equal(t, value, got)
+	}
+
+	require.Len(t, cs.Diffs[kv.CommitmentDomain].GetDiffSet(), 1)
+	require.Len(t, cs.Diffs[kv.CommitmentBinDomain].GetDiffSet(), 1)
+}
+
+func TestSharedDomainsCommitmentDiffUnwindUsesBothDomains(t *testing.T) {
+	withDualCommitmentFlags(t)
+
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	cs := &changeset.StateChangeSet{}
+	keys := map[kv.Domain][]byte{
+		kv.CommitmentDomain:    {0xaa, 0x01},
+		kv.CommitmentBinDomain: {0xbb, 0x01},
+	}
+	for domain, key := range keys {
+		require.NoError(t, sd.DomainPutCommitmentDiff(domain, rwTx, key, []byte{byte(domain + 1)}, 1, nil, &cs.Diffs[domain]))
+	}
+	require.NoError(t, sd.Flush(t.Context(), rwTx))
+
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	for domain := range keys {
+		diffs[domain] = cs.Diffs[domain].GetDiffSet()
+	}
+	require.NoError(t, rwTx.Unwind(t.Context(), 0, &diffs))
+	require.NoError(t, rwTx.Commit())
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	for domain, key := range keys {
+		value, _, err := roTx.GetLatest(domain, key, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Empty(t, value)
+	}
 }
 
 func TestSharedDomain_Unwind(t *testing.T) {
@@ -174,6 +229,22 @@ Loop:
 	}
 
 	goto Loop
+}
+
+func TestSharedDomainUnwindClearsCodeKeys(t *testing.T) {
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(domains.Close)
+
+	address := make([]byte, 20)
+	domains.GetCommitmentContext().TouchKey(kv.CodeDomain, string(address), []byte{1})
+	require.NotEmpty(t, domains.GetCommitmentContext().CodeKeys())
+	domains.Unwind(0, nil)
+	require.Empty(t, domains.GetCommitmentContext().CodeKeys())
 }
 
 // TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey reproduces the
@@ -1220,7 +1291,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		defer rwTx.Rollback()
 
 		ac := state.AggTx(rwTx)
-		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains...)))
+		require.Equal(int(stepSize*2), int(ac.TxNumsInFiles(kv.StateDomains(kv.CommitmentDomain)...)))
 
 		_, err := ac.PruneSmallBatches(ctx, time.Hour, rwTx)
 		require.NoError(err)
@@ -1267,9 +1338,19 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
-		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
+		deleted := make(map[string]struct{})
+		err = domains.IteratePrefix(kv.StorageDomain, nil, rwTx, func(k, _ []byte) (bool, error) {
+			deleted[string(k)] = struct{}{}
+			return true, nil
+		})
+		require.NoError(err)
+		err = domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
 		require.NoError(err)
 		require.Equal(0, iterCount(domains))
+		for key := range deleted {
+			_, ok := domains.GetCommitmentContext().GetUpdates().PlainKeys()[key]
+			require.True(ok)
+		}
 	}
 }
 
@@ -1638,6 +1719,53 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 	}
 }
 
+func TestSharedDomain_TouchChangedKeysFromHistoryRecordsCodeKeys(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalSchema := statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.Schema = originalSchema
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+
+	db1 := newTestDb(t, 1)
+	rwTx, err := db1.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	addr := common.HexToAddress("0xc0ffee0000000000000000000000000000000000")
+	code := []byte{0x60, 0x00, 0x56}
+	account := accounts.NewAccount()
+	account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	sd1, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	require.NoError(t, sd1.DomainPut(kv.AccountsDomain, rwTx, addr[:], accounts.SerialiseV3(&account), 1, nil))
+	require.NoError(t, sd1.DomainPut(kv.CodeDomain, rwTx, addr[:], code, 1, nil))
+	require.NoError(t, sd1.Flush(t.Context(), rwTx))
+	require.NoError(t, rwTx.Commit())
+	sd1.Close()
+
+	db1RoTx, err := db1.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer db1RoTx.Rollback()
+	db2 := newTestDb(t, 1)
+	db2RoTx, err := db2.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer db2RoTx.Rollback()
+	sd2, err := execctx.NewSharedDomains(t.Context(), db2RoTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		sd2.Close()
+	})
+
+	_, _, err = sd2.TouchChangedKeysFromHistory(db1RoTx, 1, 2)
+	require.NoError(t, err)
+	require.Equal(t, map[string]struct{}{string(addr[:]): {}}, sd2.GetCommitmentContext().CodeKeys())
+	sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(db2RoTx, db1RoTx, sd2, 2))
+	_, err = sd2.ComputeCommitment(t.Context(), db2RoTx, false, 1, 1, "", nil)
+	require.NoError(t, err)
+}
+
 // Deleting an already-absent key must not record a redundant empty->empty
 // history entry, for every prevVal shape an absent key can take:
 //   - nil (same batch, resolved via sd.mem GetLatest)
@@ -1820,6 +1948,41 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 	_, _, got, err := rawtemporaldb.ReceiptAsOf(sd.BlockOverlay().NewReadView(tx), inFlightTxNum+1)
 	require.NoError(t, err)
 	require.Equal(t, inFlightLogIdx, got, "must serve the in-flight block's log index, not the last committed one")
+}
+
+func TestCommitmentGetAsOfBeforeKeyCreation(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	ctx := t.Context()
+	db := newTestDb(t, 1000)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	key, first, second := []byte{0x40, 0x01, 0x02}, []byte("first"), []byte("second")
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, first, 5, nil))
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, second, 9, first))
+	require.NoError(t, domains.Flush(ctx, rwTx))
+
+	for _, tc := range []struct {
+		ts   uint64
+		want []byte
+	}{{3, nil}, {5, nil}, {6, first}, {9, first}, {10, second}} {
+		got, ok, err := rwTx.GetAsOf(kv.CommitmentDomain, key, tc.ts)
+		require.NoError(t, err)
+		if tc.want == nil {
+			require.False(t, ok, "ts=%d: key not created yet, got %x", tc.ts, got)
+			require.Nil(t, got, "ts=%d", tc.ts)
+			continue
+		}
+		require.True(t, ok, "ts=%d", tc.ts)
+		require.Equal(t, tc.want, got, "ts=%d", tc.ts)
+	}
 }
 
 // TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress verifies that a

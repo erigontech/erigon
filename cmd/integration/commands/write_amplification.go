@@ -19,6 +19,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -41,7 +42,7 @@ func init() {
 	withChain(writeAmplificationCmd)
 	writeAmplificationCmd.Flags().StringVar(&writeAmpDomainsToAnalyze, "domains", "all",
 		`Comma-separated list of domains to analyze. 
-Available domains: accounts, storage, code, commitment.
+Available domains: accounts, storage, code, commitment, commitment-bin.
 Use "all" to analyze all domains.
 Examples: --domains=all, --domains=storage,commitment, --domains=accounts`)
 	rootCmd.AddCommand(writeAmplificationCmd)
@@ -50,7 +51,7 @@ Examples: --domains=all, --domains=storage,commitment, --domains=accounts`)
 var writeAmplificationCmd = &cobra.Command{
 	Use:   "write_amplification",
 	Short: "Calculate write amplification ratio for domain .kv files",
-	Long: `Calculates write amplification ration for accounts, storage, code, and commitment domains.
+	Long: `Calculates write amplification ration for accounts, storage, code, commitment, and commitment-bin domains.
 
 The write amplification ratio is calculated as:
   total keys in .kv files / unique keys (via RangeLatest)
@@ -60,7 +61,7 @@ indicating data duplication in the snapshots.
 
 Flags:
   --domains    Comma-separated list of domains to analyze.
-               Available: accounts, storage, code, commitment
+               Available: accounts, storage, code, commitment, commitment-bin
                Default: "all" (analyzes all domains)
                Examples: --domains=storage,commitment`,
 	Example: `go run ./cmd/integration write_amplification --datadir=... --chain=mainnet
@@ -98,6 +99,7 @@ func parseDomainsFlag(domainsStr string) ([]kv.Domain, error) {
 		kv.StorageDomain,
 		kv.CodeDomain,
 		kv.CommitmentDomain,
+		kv.CommitmentBinDomain,
 	}
 
 	if strings.ToLower(strings.TrimSpace(domainsStr)) == "all" {
@@ -105,11 +107,12 @@ func parseDomainsFlag(domainsStr string) ([]kv.Domain, error) {
 	}
 
 	domainMap := map[string]kv.Domain{
-		"accounts":   kv.AccountsDomain,
-		"account":    kv.AccountsDomain,
-		"storage":    kv.StorageDomain,
-		"code":       kv.CodeDomain,
-		"commitment": kv.CommitmentDomain,
+		"accounts":       kv.AccountsDomain,
+		"account":        kv.AccountsDomain,
+		"storage":        kv.StorageDomain,
+		"code":           kv.CodeDomain,
+		"commitment":     kv.CommitmentDomain,
+		"commitment-bin": kv.CommitmentBinDomain,
 	}
 
 	parts := strings.Split(domainsStr, ",")
@@ -123,7 +126,7 @@ func parseDomainsFlag(domainsStr string) ([]kv.Domain, error) {
 		}
 		domain, ok := domainMap[name]
 		if !ok {
-			return nil, fmt.Errorf("unknown domain %q, available: accounts, storage, code, commitment", part)
+			return nil, fmt.Errorf("unknown domain %q, available: accounts, storage, code, commitment, commitment-bin", part)
 		}
 		if !seen[domain] {
 			result = append(result, domain)
@@ -160,7 +163,12 @@ func calculateWriteAmplification(ctx context.Context, chainDb kv.TemporalRwDB, d
 
 	results := make([]domainStats, 0, len(domains))
 
+	commitmentDomains := aggTx.CommitmentDomains()
 	for _, domain := range domains {
+		if domain == kv.CommitmentBinDomain && !slices.Contains(commitmentDomains, domain) {
+			logger.Warn("Skipping domain not present in this datadir", "domain", domain.String())
+			continue
+		}
 		logger.Info("Processing domain", "domain", domain.String())
 
 		stats, err := calculateDomainWriteAmplification(ctx, tx, aggTx, domain, logger)
