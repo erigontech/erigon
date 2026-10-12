@@ -77,9 +77,10 @@ type addrCodeHashEntry struct {
 // would collapse every one of them onto a single slot.
 //
 // ponytail: two addresses sharing their low 8 bytes evict each other on every
-// put. Reads stay correct (the entry carries the full address, so a collision
-// is a miss), and the odds are negligible for keccak-derived addresses; widen
-// the key to the full address if a workload ever shows the thrash.
+// put. Reads stay correct -- the entry carries the full address, so a collision
+// is a miss -- but the pairs that collide here are the structured ones,
+// precompiles and fixtures, whose low bytes are small and dense. Widen the key
+// to the full address if a workload ever shows the thrash.
 func addrSlot(a common.Address) uint64 { return binary.BigEndian.Uint64(a[length.Addr-8:]) }
 
 // Per-entry residency of the two addr-keyed LRUs: a 20-byte key plus the
@@ -312,8 +313,8 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 		return nil, 0, false
 	}
 	if coh.IsStale(vID.txNum, vID.epoch) {
-		dropSlotIf(c.addrToHash, &c.addrBindMu, addrSlot(k), func(e versionedAddressID) bool {
-			return e.addr == k && c.coh.IsStale(e.txNum, e.epoch)
+		dropSlotIf(c.addrToHash, &c.addrBindMu, addrSlot(k), func(cur versionedAddressID) bool {
+			return cur.addr == k && c.coh.IsStale(cur.txNum, cur.epoch)
 		})
 		c.addrMisses.Add(1)
 		return nil, 0, false
@@ -416,8 +417,8 @@ func (c *CodeCache) GetAddrCodeHashWithTxNum(addr []byte) ([32]byte, uint64, boo
 		return [32]byte{}, 0, false
 	}
 	if coh.IsStale(e.txNum, e.epoch) {
-		dropSlotIf(c.addrToCodeHash, &c.putStripes[k[length.Addr-1]], addrSlot(k), func(e addrCodeHashEntry) bool {
-			return e.addr == k && c.coh.IsStale(e.txNum, e.epoch)
+		dropSlotIf(c.addrToCodeHash, &c.putStripes[k[length.Addr-1]], addrSlot(k), func(cur addrCodeHashEntry) bool {
+			return cur.addr == k && c.coh.IsStale(cur.txNum, cur.epoch)
 		})
 		return [32]byte{}, 0, false
 	}
@@ -439,8 +440,8 @@ func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 		if e.addr == a && !c.coh.IsStale(e.txNum, e.epoch) {
 			return
 		}
-		// Add is SetIfAbsent, so a stale mapping (or a colliding address) has to
-		// be removed before the replacement can land.
+		// Whatever holds the slot -- a stale mapping or a colliding address --
+		// goes before the replacement lands.
 		c.addrToCodeHash.Remove(slot)
 	}
 	c.addrToCodeHash.Add(slot, addrCodeHashEntry{addr: a, hash: h, txNum: txNum, epoch: c.coh.Epoch()})
