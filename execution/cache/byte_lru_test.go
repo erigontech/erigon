@@ -93,13 +93,16 @@ func TestByteLRUConcurrentSameKeyStaysBounded(t *testing.T) {
 	require.LessOrEqual(t, b.Len(), 16, "a 1MB cache of 64KB entries holds 16")
 }
 
-func TestByteLRUAddKeepsLiveKey(t *testing.T) {
+func TestByteLRUAddReplacesLiveKey(t *testing.T) {
 	b := NewByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) })
-	b.Add(1, []byte("first"))
-	require.False(t, b.Add(1, []byte("second")))
+	require.True(t, b.Add(1, []byte("first")))
+	require.True(t, b.Add(1, []byte("second")))
 	v, ok := b.Get(1)
 	require.True(t, ok)
-	require.Equal(t, []byte("first"), v)
+	require.Equal(t, []byte("second"), v)
+	// The displaced value is refunded, so the counter holds one entry's bytes.
+	b.c.CleanUp()
+	require.Equal(t, int64(len("second")), b.resident.Load())
 }
 
 // A budgeted layer refunds through onEvict, so its charge must match what otter holds.
