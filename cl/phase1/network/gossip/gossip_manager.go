@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -334,6 +335,7 @@ func (g *GossipManager) registerGossipService(service serviceintf.Service[any], 
 		}
 		log.Debug("[GossipManager] registered topic", "topic", topic)
 	}
+	g.subscribeUpcomingProposerPreferences()
 	err = nil
 	return
 }
@@ -516,6 +518,8 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 		case <-ticker.C:
 		}
 
+		g.subscribeUpcomingProposerPreferences()
+
 		// compute upcoming ForkDigest
 		epoch := g.ethClock.GetEpochAtSlot(g.ethClock.GetCurrentSlot() + slotLookahead)
 		upcomingForkDigest, err := g.ethClock.ComputeForkDigest(epoch)
@@ -559,18 +563,43 @@ func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {
 	}
 }
 
-func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4) error {
+func (g *GossipManager) subscribeUpcomingProposerPreferences() {
+	// Preferences are sent up to one epoch ahead: join the next epoch's digest and,
+	// because the ticker is not slot-aligned, the digest one epoch and one slot ahead.
+	forkDigest, err := g.ethClock.CurrentForkDigest()
+	if err != nil {
+		log.Warn("[GossipManager] failed to get current fork digest for proposer preferences", "err", err)
+		return
+	}
+	currentSlot := g.ethClock.GetCurrentSlot()
+	preferencesEpochs := [...]uint64{
+		g.ethClock.GetEpochAtSlot(currentSlot) + 1,
+		g.ethClock.GetEpochAtSlot(currentSlot + g.beaconConfig.SlotsPerEpoch + 1),
+	}
+	for _, preferencesEpoch := range preferencesEpochs {
+		preferencesForkDigest, err := g.ethClock.ComputeForkDigest(preferencesEpoch)
+		if err != nil {
+			log.Warn("[GossipManager] failed to compute proposer preferences fork digest", "err", err)
+		} else if preferencesForkDigest != forkDigest {
+			if err := g.subscribeUpcomingTopics(preferencesForkDigest, gossip.TopicNameProposerPreferences); err != nil {
+				log.Warn("[GossipManager] failed to subscribe upcoming proposer preferences topic", "err", err)
+			}
+		}
+	}
+}
+
+func (g *GossipManager) subscribeUpcomingTopics(digest common.Bytes4, names ...string) error {
 	allTopics := g.subscriptions.AllTopics()
 	for _, oldTopic := range allTopics {
 		// replace fork digest with new one
 		name := extractTopicName(oldTopic)
-		if name == "" {
+		if name == "" || len(names) > 0 && !slices.Contains(names, name) {
 			continue
 		}
 		prevTopicHandle := g.subscriptions.Get(oldTopic)
 		// register and subscribe new newTopic
 		newTopic := composeTopic(digest, name)
-		if newTopic == oldTopic {
+		if newTopic == oldTopic || g.subscriptions.Get(newTopic) != nil {
 			continue
 		}
 		topicHandle, err := g.p2p.Pubsub().Join(newTopic)
