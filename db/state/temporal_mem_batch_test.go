@@ -17,9 +17,11 @@
 package state
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -27,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
@@ -101,6 +104,55 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 			require.Equal(t, uint64(i) < cutoff, ok, "domain %s key %s", domain, key)
 		}
 	}
+}
+
+// A published batch keeps serving RPC reads while it is flushed, so Flush must
+// not exclude readers. The executor goroutine stays inside Flush until the RPC
+// reader goroutine has finished its reads.
+func TestFlushDoesNotBlockReaders(t *testing.T) {
+	t.Parallel()
+	_, tx := mdbxtest.NewTestTx(t)
+	sd := &TemporalMemBatch{
+		stepSize: 16,
+		storage:  btree2.NewMap[string, []dataWithTxNum](128),
+		metrics:  &kvmetrics.DomainMetrics{Domains: map[kv.Domain]*kvmetrics.DomainIOMetrics{}},
+	}
+	for d := range sd.domains {
+		sd.domains[d] = map[string][]dataWithTxNum{}
+	}
+	sd.putLatest(kv.AccountsDomain, "acc", []byte("v"), 1)
+
+	flushing := make(chan struct{})
+	readerDone := make(chan struct{})
+	flushErr := make(chan error, 1)
+	go func() { // executor
+		flushErr <- sd.Flush(context.Background(), tx, kv.WithFlushCallback(kv.AccountsDomain, func([]byte, []byte, kv.Step, uint64) {
+			close(flushing)
+			<-readerDone
+		}))
+	}()
+
+	const reads = 1000
+	readsDone := make(chan int, 1)
+	go func() { // RPC reader
+		<-flushing
+		n := 0
+		for range reads {
+			if v, _, ok := sd.GetLatest(kv.AccountsDomain, []byte("acc")); ok && string(v) == "v" {
+				n++
+			}
+		}
+		readsDone <- n
+	}()
+
+	select {
+	case n := <-readsDone:
+		require.Equal(t, reads, n)
+	case <-time.After(5 * time.Second):
+		t.Error("RPC reader blocked by an in-progress Flush")
+	}
+	close(readerDone)
+	require.NoError(t, <-flushErr)
 }
 
 // Commit borrows the batch's value buffers instead of copying, which is only
