@@ -325,6 +325,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 				if wasStored && parentEnvelopeRequired(block, parentBlock) {
 					if reason := payloadReplay.rejection(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr); reason != nil {
 						logChainTipRejection(cfg, "parent payload not accepted", block.Block.Slot, reason)
+						rejected[blockRoot] = reason
 						continue
 					}
 				}
