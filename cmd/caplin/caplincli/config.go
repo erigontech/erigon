@@ -53,6 +53,8 @@ type CaplinCliCfg struct {
 	CustomConfig            string        `json:"custom_config"`
 	CustomGenesisState      string        `json:"custom_genesis_state"`
 	MaxPeerCount            uint64        `json:"max_peer_count"`
+	DisableSubnetLimits     bool          `json:"disable_subnet_limits"`
+	TrustedCIDRs            []string      `json:"trusted_cidrs"`
 	JwtSecret               []byte
 
 	AllowedMethods     []string `json:"allowed_methods"`
@@ -78,6 +80,8 @@ func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiReadTimeout.Name)) * time.Second
 	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
 	cfg.MaxPeerCount = ctx.Uint64(utils.CaplinMaxPeerCount.Name)
+	cfg.DisableSubnetLimits = ctx.Bool(utils.CaplinSubnetLimitsDisableFlag.Name)
+	cfg.TrustedCIDRs = ctx.StringSlice(utils.CaplinSubnetLimitsTrustedCIDRsFlag.Name)
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Uint(caplinflags.BeaconApiPort.Name))
 	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
 	cfg.PreserveGraffiti = ctx.Bool(utils.BeaconApiPreserveGraffitiFlag.Name)

@@ -370,6 +370,30 @@ func TestCaplinColumnKeepSlots_UnsetDefersToChainConfig(t *testing.T) {
 	require.Equal(t, uint64(12345), parse("--caplin.columns-keep-slots=12345"), "a user-set window must reach the config")
 }
 
+func TestCaplinSubnetLimitFlagsReachConfig(t *testing.T) {
+	parse := func(args ...string) ethconfig.Config {
+		disable, trusted := CaplinSubnetLimitsDisableFlag, CaplinSubnetLimitsTrustedCIDRsFlag
+		cfg := ethconfig.Config{}
+		app := &cli.Command{
+			Flags: []cli.Flag{&disable, &trusted},
+			Action: func(_ context.Context, cmd *cli.Command) error {
+				setCaplin(cmd, &cfg)
+				return nil
+			},
+		}
+		require.NoError(t, app.Run(context.Background(), append([]string{"test"}, args...)))
+		return cfg
+	}
+
+	cfg := parse()
+	require.False(t, cfg.CaplinConfig.DisableSubnetLimits)
+	require.Empty(t, cfg.CaplinConfig.TrustedCIDRs)
+
+	cfg = parse("--caplin.subnet-limits.disable", "--caplin.subnet-limits.trusted-cidrs=203.0.113.0/24,2001:db8::/32")
+	require.True(t, cfg.CaplinConfig.DisableSubnetLimits)
+	require.Equal(t, []string{"203.0.113.0/24", "2001:db8::/32"}, cfg.CaplinConfig.TrustedCIDRs)
+}
+
 func TestCommitmentPlainValuesFromCtx(t *testing.T) {
 	parse := func(args ...string) *bool {
 		var got *bool

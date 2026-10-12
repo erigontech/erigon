@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strings"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/version"
@@ -142,7 +143,7 @@ func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option
 	// Disable Ping Service.
 	options = append(options, libp2p.Ping(false))
 
-	rm, err := newResourceManager(cfg.MaxPeerCount)
+	rm, err := newResourceManager(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create libp2p resource manager: %w", err)
 	}
@@ -151,46 +152,83 @@ func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option
 	return options, nil
 }
 
-func newResourceManager(maxPeerCount uint64) (network.ResourceManager, error) {
+func newResourceManager(cfg *P2PConfig) (network.ResourceManager, error) {
 	// Tighten per-peer inbound stream limits. The default PeerBaseLimit.StreamsInbound (256) is
 	// far too permissive; Lighthouse caps per-peer inbound substreams at 32.
 	limits := rcmgr.DefaultLimits
 	limits.PeerBaseLimit.StreamsInbound = 32
 	limits.PeerLimitIncrease.StreamsInbound = 0 // do not scale with memory
-	perBlock24, perBlock16 := subnetConnLimits(maxPeerCount)
 	// The per-subnet lists replace go-libp2p's defaults, so they repeat them (8 per IPv4 address or
 	// IPv6 /56, 64 per IPv6 /48) before adding the larger blocks.
+	perSubnetV4 := []rcmgr.ConnLimitPerSubnet{{PrefixLength: 32, ConnCount: 8}}
+	perSubnetV6 := []rcmgr.ConnLimitPerSubnet{{PrefixLength: 56, ConnCount: 8}, {PrefixLength: 48, ConnCount: 64}}
+	if !cfg.DisableSubnetLimits {
+		perBlock24, perBlock16 := subnetConnLimits(cfg.MaxPeerCount)
+		perSubnetV4 = append(perSubnetV4,
+			rcmgr.ConnLimitPerSubnet{PrefixLength: 24, ConnCount: perBlock24},
+			rcmgr.ConnLimitPerSubnet{PrefixLength: 16, ConnCount: perBlock16})
+		perSubnetV6 = append(perSubnetV6, rcmgr.ConnLimitPerSubnet{PrefixLength: 32, ConnCount: perBlock16})
+	}
+
+	exemptV4 := mustParsePrefixes(privateCIDRList...)
+	exemptV6 := mustParsePrefixes("fc00::/7", "fe80::/10")
+	for _, cidr := range cfg.TrustedCIDRs {
+		prefix, err := parseTrustedCIDR(cidr)
+		if err != nil {
+			return nil, err
+		}
+		if prefix.Addr().Is4() {
+			exemptV4 = append(exemptV4, prefix)
+		} else {
+			exemptV6 = append(exemptV6, prefix)
+		}
+	}
+
 	return rcmgr.NewResourceManager(rcmgr.NewFixedLimiter(limits.AutoScale()),
-		rcmgr.WithLimitPerSubnet(
-			[]rcmgr.ConnLimitPerSubnet{
-				{PrefixLength: 32, ConnCount: 8},
-				{PrefixLength: 24, ConnCount: perBlock24},
-				{PrefixLength: 16, ConnCount: perBlock16},
-			},
-			[]rcmgr.ConnLimitPerSubnet{
-				{PrefixLength: 56, ConnCount: 8},
-				{PrefixLength: 48, ConnCount: 64},
-				{PrefixLength: 32, ConnCount: perBlock16},
-			},
-		),
+		rcmgr.WithLimitPerSubnet(perSubnetV4, perSubnetV6),
 		rcmgr.WithNetworkPrefixLimit(
-			append(networkLimits(math.MaxInt, "127.0.0.0/8"), networkLimits(privateNetworkConnLimit, privateCIDRList...)...),
-			append(networkLimits(math.MaxInt, "::1/128"), networkLimits(privateNetworkConnLimit, "fc00::/7", "fe80::/10")...),
+			append(networkLimits(math.MaxInt, mustParsePrefixes("127.0.0.0/8")), networkLimits(privateNetworkConnLimit, exemptV4)...),
+			append(networkLimits(math.MaxInt, mustParsePrefixes("::1/128")), networkLimits(privateNetworkConnLimit, exemptV6)...),
 		),
 	)
 }
 
-// privateNetworkConnLimit caps the connections of all addresses in one private network together.
+// privateNetworkConnLimit caps the connections of all addresses in one exempt network together.
 // It is far above any peer pool, and go-libp2p also uses half of it as the QUIC source-address
 // verification burst for that network, which an unlimited count would remove.
 const privateNetworkConnLimit = 1024
 
 // networkLimits exempts each prefix from the per-subnet caps and counts all its connections
-// against one connCount instead. Used for loopback and the networks the gater treats as private.
-func networkLimits(connCount int, prefixes ...string) []rcmgr.NetworkPrefixLimit {
+// against one connCount instead. Used for loopback, the networks the gater treats as private and
+// the operator's trusted networks.
+func networkLimits(connCount int, prefixes []netip.Prefix) []rcmgr.NetworkPrefixLimit {
 	out := make([]rcmgr.NetworkPrefixLimit, 0, len(prefixes))
 	for _, p := range prefixes {
-		out = append(out, rcmgr.NetworkPrefixLimit{Network: netip.MustParsePrefix(p), ConnCount: connCount})
+		out = append(out, rcmgr.NetworkPrefixLimit{Network: p, ConnCount: connCount})
+	}
+	return out
+}
+
+// parseTrustedCIDR rejects networks broader than an IPv4 /8 or an IPv6 /16: trusting one would
+// drop the per-address caps for a large part of the internet.
+func parseTrustedCIDR(cidr string) (netip.Prefix, error) {
+	prefix, err := netip.ParsePrefix(strings.TrimSpace(cidr))
+	if err != nil {
+		return netip.Prefix{}, fmt.Errorf("invalid trusted CIDR %q: %w", cidr, err)
+	}
+	if addr := prefix.Addr(); addr.Is4In6() && prefix.Bits() >= 96 {
+		prefix = netip.PrefixFrom(addr.Unmap(), prefix.Bits()-96)
+	}
+	if tooBroad := prefix.Addr().Is4() && prefix.Bits() < 8 || prefix.Addr().Is6() && prefix.Bits() < 16; tooBroad {
+		return netip.Prefix{}, fmt.Errorf("trusted CIDR %q is too broad: use at most an IPv4 /8 or an IPv6 /16", cidr)
+	}
+	return prefix.Masked(), nil
+}
+
+func mustParsePrefixes(cidrs ...string) []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(cidrs))
+	for _, c := range cidrs {
+		out = append(out, netip.MustParsePrefix(c))
 	}
 	return out
 }

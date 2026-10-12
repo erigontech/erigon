@@ -558,6 +558,9 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `false`
 * `--caplin.max-peer-count value`: The maximum number of peers to connect to.
   * Default: `128`
+* `--caplin.subnet-limits.disable`: Disables Caplin's connection caps per IPv4 /24 (an eighth of `--caplin.max-peer-count`, at least 16), IPv4 /16 and IPv6 /32 (half of it). go-libp2p's caps per IPv4 address and IPv6 /56 (8) and /48 (64) still apply.
+  * Default: `false`
+* `--caplin.subnet-limits.trusted-cidrs value`: Comma-separated networks in CIDR notation, at most an IPv4 /8 or an IPv6 /16 each, treated like private networks: exempt from every per-address and per-subnet cap, with all connections from one network sharing a limit of 1024. Useful for a trusted cluster on public addresses.
 * `--caplin.enable-upnp`: Enables NAT porting for Caplin.
   * Default: `false`
 * `--caplin.local-discovery`: Also attempts to find peers over private IPs. May cause issues with some hosts (for example, Hetzner).

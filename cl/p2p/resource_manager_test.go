@@ -37,11 +37,15 @@ type connOpener struct {
 }
 
 func newConnOpener(t *testing.T) *connOpener {
-	return newConnOpenerWithPeers(t, testMaxPeerCount)
+	return newConnOpenerWithConfig(t, &P2PConfig{MaxPeerCount: testMaxPeerCount})
 }
 
 func newConnOpenerWithPeers(t *testing.T, maxPeerCount uint64) *connOpener {
-	rm, err := newResourceManager(maxPeerCount)
+	return newConnOpenerWithConfig(t, &P2PConfig{MaxPeerCount: maxPeerCount})
+}
+
+func newConnOpenerWithConfig(t *testing.T, cfg *P2PConfig) *connOpener {
+	rm, err := newResourceManager(cfg)
 	require.NoError(t, err)
 	o := &connOpener{t: t, rm: rm}
 	t.Cleanup(func() {
@@ -171,7 +175,7 @@ func TestResourceManagerDoesNotCapPrivateAndLoopbackNetworks(t *testing.T) {
 // QUIC asks an unverified source to prove its address once it exceeds a per-network burst; the
 // exemption from the caps must not remove that burst for private networks.
 func TestResourceManagerKeepsQUICSourceVerificationForPrivateNetworks(t *testing.T) {
-	rm, err := newResourceManager(testMaxPeerCount)
+	rm, err := newResourceManager(&P2PConfig{MaxPeerCount: testMaxPeerCount})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, rm.Close()) })
 	for _, ip := range []string{"10.0.0.1", "fd00::1"} {
@@ -184,5 +188,70 @@ func TestResourceManagerKeepsQUICSourceVerificationForPrivateNetworks(t *testing
 			}
 		}
 		require.True(t, verified, ip)
+	}
+}
+
+func TestResourceManagerDoesNotCapTrustedNetworks(t *testing.T) {
+	o := newConnOpenerWithConfig(t, &P2PConfig{
+		MaxPeerCount: testMaxPeerCount,
+		TrustedCIDRs: []string{"203.0.113.0/24", "2001:db8:aa::/48"},
+	})
+	_, perBlock16 := subnetConnLimits(testMaxPeerCount)
+	for i := range perBlock16 + 4 {
+		require.NoError(t, o.open(fmt.Sprintf("/ip4/203.0.113.%d", i+1)))
+	}
+	o.closeAll()
+	for i := range perBlock16 + 4 {
+		require.NoError(t, o.open(fmt.Sprintf("/ip6/2001:db8:aa:%x00::1", i)))
+	}
+	o.closeAll()
+
+	perBlock24, _ := subnetConnLimits(testMaxPeerCount)
+	for i := range perBlock24 {
+		require.NoError(t, o.open(fmt.Sprintf("/ip4/198.51.100.%d", i+1)))
+	}
+	require.ErrorContains(t, o.open("/ip4/198.51.100.200"), errPerSubnetLimit, "other public blocks stay capped")
+}
+
+// A trusted network is exempt from every per-address and per-subnet cap, as private networks are.
+func TestResourceManagerDoesNotCapAddressesInTrustedNetworks(t *testing.T) {
+	o := newConnOpenerWithConfig(t, &P2PConfig{
+		MaxPeerCount: testMaxPeerCount,
+		// A space after the comma and an IPv4-mapped form, as an operator may write them.
+		TrustedCIDRs: []string{"203.0.113.0/24", " ::ffff:198.51.100.0/120"},
+	})
+	for _, addr := range []string{"/ip4/203.0.113.7", "/ip4/198.51.100.7"} {
+		for range 12 {
+			require.NoError(t, o.open(addr), addr)
+		}
+	}
+}
+
+func TestResourceManagerRejectsInvalidTrustedCIDR(t *testing.T) {
+	for _, cidr := range []string{"203.0.113.1", "0.0.0.0/0", "10.0.0.0/7", "::/0", "2001::/15"} {
+		_, err := newResourceManager(&P2PConfig{TrustedCIDRs: []string{cidr}})
+		require.Error(t, err, cidr)
+	}
+}
+
+func TestResourceManagerDisableSubnetLimitsKeepsPerAddressCaps(t *testing.T) {
+	o := newConnOpenerWithConfig(t, &P2PConfig{MaxPeerCount: testMaxPeerCount, DisableSubnetLimits: true})
+	_, perBlock16 := subnetConnLimits(testMaxPeerCount)
+	for i := range perBlock16 + 4 {
+		require.NoError(t, o.open(fmt.Sprintf("/ip4/203.0.113.%d", i+1)))
+	}
+	o.closeAll()
+	for range 8 {
+		require.NoError(t, o.open("/ip4/198.51.100.7"))
+	}
+	require.ErrorContains(t, o.open("/ip4/198.51.100.7"), errPerSubnetLimit)
+	o.closeAll()
+	for i := range 8 {
+		require.NoError(t, o.open(fmt.Sprintf("/ip6/2001:db8:0:1::%x", i+1)))
+	}
+	require.ErrorContains(t, o.open("/ip6/2001:db8:0:1::ff"), errPerSubnetLimit)
+	o.closeAll()
+	for i := range perBlock16 + 4 {
+		require.NoError(t, o.open(fmt.Sprintf("/ip6/2001:db8:%x::1", i+1)), "the IPv6 /32 cap is off")
 	}
 }

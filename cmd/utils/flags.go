@@ -927,6 +927,15 @@ var (
 		Usage: "Disable the QUIC transport for Caplin libp2p, falling back to TCP only. Useful when the QUIC UDP port cannot be exposed (e.g. some Docker/Kubernetes setups)",
 		Value: false,
 	}
+	CaplinSubnetLimitsDisableFlag = cli.BoolFlag{
+		Name:  "caplin.subnet-limits.disable",
+		Usage: "Disable Caplin's connection caps per IPv4 /24, IPv4 /16 and IPv6 /32. go-libp2p's caps per IPv4 address and IPv6 /56 and /48 still apply",
+		Value: false,
+	}
+	CaplinSubnetLimitsTrustedCIDRsFlag = cli.StringSliceFlag{
+		Name:  "caplin.subnet-limits.trusted-cidrs",
+		Usage: "Comma-separated networks in CIDR notation (at most an IPv4 /8 or IPv6 /16 each) treated like private networks: exempt from every per-address and per-subnet connection cap, sharing one limit of 1024 connections per network. For trusted clusters on public addresses",
+	}
 	CaplinEnableUPNPlag = cli.BoolFlag{
 		Name:  "caplin.enable-upnp",
 		Usage: "Enable NAT porting for Caplin",
@@ -1864,6 +1873,8 @@ func setBeaconAPI(ctx *cli.Command, cfg *ethconfig.Config) error {
 
 func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.EnableEngineAPI = ctx.Bool(CaplinUseEngineApiFlag.Name)
+	cfg.CaplinConfig.DisableSubnetLimits = ctx.Bool(CaplinSubnetLimitsDisableFlag.Name)
+	cfg.CaplinConfig.TrustedCIDRs = ctx.StringSlice(CaplinSubnetLimitsTrustedCIDRsFlag.Name)
 
 	// Caplin's block's backfilling is enabled if any of the following flags are set
 	if !cfg.CaplinConfig.EnableEngineAPI {
