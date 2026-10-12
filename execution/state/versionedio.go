@@ -188,7 +188,7 @@ func (s *ReadSet) DropColdSlots() { clear(s.coldSlots) }
 
 func (s *ReadSet) entries() int {
 	return len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) + len(s.selfDestruct) +
-		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize) + len(s.storage)
+		len(s.selfDestructWitnesses) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize) + len(s.storage) + len(s.coldSlots)
 }
 
 func (s *ReadSet) clearForReuse() {
@@ -203,6 +203,7 @@ func (s *ReadSet) clearForReuse() {
 	clear(s.codeHash)
 	clear(s.codeSize)
 	clear(s.storage)
+	clear(s.coldSlots)
 	s.access = nil
 }
 
