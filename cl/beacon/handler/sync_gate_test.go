@@ -119,10 +119,15 @@ func TestEnvelopeParkedFlagsOnlyAnUnpersistedParkedEnvelope(t *testing.T) {
 	// An envelope whose apply is still in flight is neither parked nor persisted yet.
 	inFlight := common.Hash{2}
 	require.False(t, handler.envelopeParked(inFlight))
-	fcu.ExecutionPayloadReceivedAt = map[common.Hash]time.Time{inFlight: time.Now().Add(-time.Second)}
+	fcu.ApplyInFlightRoots = map[common.Hash]struct{}{inFlight: {}}
 	require.True(t, handler.envelopeParked(inFlight))
 	fcu.SetEnvelope(inFlight, &cltypes.SignedExecutionPayloadEnvelope{})
 	require.False(t, handler.envelopeParked(inFlight))
+
+	// An envelope that arrived but was rejected is not waited for.
+	rejected := common.Hash{3}
+	fcu.ExecutionPayloadReceivedAt = map[common.Hash]time.Time{rejected: time.Now().Add(-time.Second)}
+	require.False(t, handler.envelopeParked(rejected))
 }
 
 // Validator endpoints refuse to serve a head that trails the imported blocks, as block

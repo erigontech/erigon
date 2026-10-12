@@ -846,8 +846,7 @@ func (a *ApiHandler) envelopeParked(root common.Hash) bool {
 	if a.forkchoiceStore.HasEnvelope(root) {
 		return false
 	}
-	return a.forkchoiceStore.HasPendingExecutionPayloadEnvelope(root) ||
-		a.forkchoiceStore.ExecutionPayloadReceivedBefore(root, time.Now())
+	return a.forkchoiceStore.HasPendingExecutionPayloadEnvelope(root) || a.forkchoiceStore.ExecutionPayloadApplyInFlight(root)
 }
 
 func (a *ApiHandler) executionPayloadSourceForGloasPath(
