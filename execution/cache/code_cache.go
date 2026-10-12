@@ -308,7 +308,7 @@ func (c *CodeCache) GetWithTxNum(addr []byte) ([]byte, uint64, bool) {
 		return nil, 0, false
 	}
 	if coh.IsStale(vID.txNum, vID.epoch) {
-		c.addrToHash.Remove(addrSlot(k))
+		c.dropStaleAddrBinding(k)
 		c.addrMisses.Add(1)
 		return nil, 0, false
 	}
@@ -410,7 +410,7 @@ func (c *CodeCache) GetAddrCodeHashWithTxNum(addr []byte) ([32]byte, uint64, boo
 		return [32]byte{}, 0, false
 	}
 	if coh.IsStale(e.txNum, e.epoch) {
-		c.addrToCodeHash.Remove(addrSlot(k))
+		c.dropStaleAddrCodeHash(k)
 		return [32]byte{}, 0, false
 	}
 	return e.hash, e.txNum, true
@@ -448,6 +448,33 @@ func (c *CodeCache) DeleteAddrCodeHash(addr []byte) {
 	// The slot is shared, so only this address's own entry may be dropped.
 	slot := addrSlot(a)
 	if e, ok := c.addrToCodeHash.Get(slot); ok && e.addr == a {
+		c.addrToCodeHash.Remove(slot)
+	}
+}
+
+// dropStaleAddrBinding removes addr's binding under the lock its writers use,
+// re-reading the slot first: a live replacement -- for this address or for a
+// colliding one -- can be published between the read that found it stale and
+// this removal.
+func (c *CodeCache) dropStaleAddrBinding(a common.Address) {
+	c.addrBindMu.Lock()
+	defer c.addrBindMu.Unlock()
+
+	slot := addrSlot(a)
+	if e, ok := c.addrToHash.Get(slot); ok && e.addr == a && c.coh.IsStale(e.txNum, e.epoch) {
+		c.addrToHash.Remove(slot)
+	}
+}
+
+// dropStaleAddrCodeHash is dropStaleAddrBinding for the addr->codeHash layer,
+// under the stripe PutAddrCodeHash writes with.
+func (c *CodeCache) dropStaleAddrCodeHash(a common.Address) {
+	stripe := &c.putStripes[a[len(a)-1]]
+	stripe.Lock()
+	defer stripe.Unlock()
+
+	slot := addrSlot(a)
+	if e, ok := c.addrToCodeHash.Get(slot); ok && e.addr == a && c.coh.IsStale(e.txNum, e.epoch) {
 		c.addrToCodeHash.Remove(slot)
 	}
 }
