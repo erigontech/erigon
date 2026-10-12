@@ -99,12 +99,7 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 	if len(prefix) >= 128 {
 		return fmt.Errorf("%w: prefix of %d nibbles", errLegacyBranch, len(prefix))
 	}
-	plane, path, ownerHash := byte(planeAccount), prefix, []byte(nil)
-	var addrHash [32]byte
-	if len(prefix) >= 64 {
-		plane, path, ownerHash = planeStorage, prefix[64:], packPath(prefix[:64], addrHash[:0])
-	}
-	c.key = nodeKey(plane, ownerHash, path, c.key[:0])
+	plane, path, addrHash := c.setKey(prefix)
 
 	if c.incremental && plane == planeAccount && len(prev) != 0 {
 		if err := commitment.BranchData(prev).ForEachCell(func(_ int, cell commitment.BranchCell) error {
@@ -186,21 +181,23 @@ func (c *LegacyConverter) Convert(legacyKey, value, prev []byte, emit LegacyEmit
 	return emit(c.key, c.out, LegacyDirect)
 }
 
-func (c *LegacyConverter) ConvertShadowed(legacyKey, value []byte, emit LegacyEmitFunc) error {
-	if !c.incremental || len(value) == 0 || len(value) >= 4 && binary.BigEndian.Uint16(value[2:4]) == 0 {
-		return nil
-	}
+func (c *LegacyConverter) Tombstone(legacyKey []byte, emit LegacyEmitFunc) error {
 	prefix, err := c.decodePrefix(legacyKey)
-	if err != nil || len(prefix) >= 64 {
+	if err != nil {
 		return err
 	}
-	return commitment.BranchData(value).ForEachCell(func(_ int, cell commitment.BranchCell) error {
-		if len(cell.AccountAddr) == 0 || len(cell.StorageAddr) != 0 || len(cell.Extension) != 0 || len(cell.Hash) != length.Hash {
-			return nil
-		}
-		c.rootKey = StorageNodeKey(keccak.Sum256(cell.AccountAddr), nil, c.rootKey[:0])
-		return emit(c.rootKey, nil, LegacyKeep)
-	})
+	c.setKey(prefix)
+	return emit(c.key, nil, LegacyTombstone)
+}
+
+func (c *LegacyConverter) setKey(prefix []byte) (plane byte, path []byte, addrHash [32]byte) {
+	plane, path = planeAccount, prefix
+	var ownerHash []byte
+	if len(prefix) >= 64 {
+		plane, path, ownerHash = planeStorage, prefix[64:], packPath(prefix[:64], addrHash[:0])
+	}
+	c.key = nodeKey(plane, ownerHash, path, c.key[:0])
+	return plane, path, addrHash
 }
 
 func (c *LegacyConverter) decodePrefix(key []byte) ([]byte, error) {
