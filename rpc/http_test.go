@@ -341,6 +341,48 @@ func TestUndeliveredResponseIsCounted(t *testing.T) {
 		"a response the client never received was not recorded")
 }
 
+func TestNewContextWithHeaders(t *testing.T) {
+	t.Parallel()
+
+	expectedHeaders := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		for i := 0; i < expectedHeaders; i++ {
+			key, want := fmt.Sprintf("key-%d", i), fmt.Sprintf("val-%d", i)
+			if have := request.Header.Get(key); have != want {
+				t.Errorf("wrong request headers for %s, want: %s, have: %s", key, want, have)
+			}
+		}
+		writer.WriteHeader(http.StatusOK)
+		_, _ = writer.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	client, err := Dial(server.URL, log.New())
+	if err != nil {
+		t.Fatalf("failed to dial: %s", err)
+	}
+	defer client.Close()
+
+	newHdr := func(k, v string) http.Header {
+		header := http.Header{}
+		header.Set(k, v)
+		return header
+	}
+	ctx1 := NewContextWithHeaders(context.Background(), newHdr("key-0", "val-0"))
+	ctx2 := NewContextWithHeaders(ctx1, newHdr("key-1", "val-1"))
+	ctx3 := NewContextWithHeaders(ctx2, newHdr("key-2", "val-2"))
+
+	expectedHeaders = 3
+	if err := client.CallContext(ctx3, nil, "test"); !errors.Is(err, ErrNoResult) {
+		t.Error("call failed", err)
+	}
+
+	expectedHeaders = 2
+	if err := client.CallContext(ctx2, nil, "test"); !errors.Is(err, ErrNoResult) {
+		t.Error("call failed:", err)
+	}
+}
+
 // TestHTTPRequestFraming covers what the server answers for the shapes of body
 // that reach it, including the ones that are not valid JSON.
 func TestHTTPRequestFraming(t *testing.T) {

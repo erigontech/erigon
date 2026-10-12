@@ -138,10 +138,11 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 			}
 		}
 	}
-	if anySlashed {
-		f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
-		f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })
+	if !anySlashed {
+		return errors.New("no slashable validators in intersection")
 	}
+	f.operationsPool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
+	f.queueEmit(func() { f.emitters.Operation().SendAttesterSlashing(attesterSlashing) })
 	return nil
 }
 
