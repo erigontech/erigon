@@ -428,7 +428,9 @@ func (a *wsConnAdapter) readFrame() ([]byte, func(), error) {
 	if err != nil {
 		body.release()
 		if errors.Is(err, errServerOverloaded) {
-			_ = a.conn.Close(websocket.StatusTryAgainLater, ErrMsgServerOverloaded)
+			// A graceful close drains the rest of the refused frame with no read
+			// deadline, which a peer withholding it can stall; drop the socket instead.
+			_ = a.conn.CloseNow()
 		}
 		return nil, nil, err
 	}

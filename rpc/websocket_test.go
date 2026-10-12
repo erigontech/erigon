@@ -882,8 +882,8 @@ func TestWebsocketClientNotifyKeepsConnection(t *testing.T) {
 }
 
 // TestWebsocketMessageBudget pins that a message outgrowing smallBodyLimit is charged to the
-// server's ingress budget while it is read: when the budget is full the connection is closed
-// with "try again later", and the charge is released once the message is read.
+// server's ingress budget while it is read: when the budget is full the connection is dropped,
+// and the charge is released once the message is read.
 func TestWebsocketMessageBudget(t *testing.T) {
 	logger := log.New()
 	srv := newTestServer(logger)
@@ -913,7 +913,7 @@ func TestWebsocketMessageBudget(t *testing.T) {
 	require.Contains(t, resp, `"result"`)
 
 	_, err = call(int(smallBodyLimit) + 1)
-	require.Equal(t, websocket.StatusTryAgainLater, websocket.CloseStatus(err))
+	require.Error(t, err) // over budget: the socket is dropped (CloseNow), not gracefully closed
 
 	srv.ingress.release(maxRequestContentLength)
 	resp, err = call(int(smallBodyLimit) + 1)
