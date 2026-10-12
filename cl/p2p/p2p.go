@@ -15,6 +15,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/metrics"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -65,6 +66,7 @@ type p2pManager struct {
 	pubsub   *pubsub.PubSub
 	bwc      *metrics.BandwidthCounter
 	host     host.Host
+	gater    *Gater
 	udpv5    *discover.UDPv5
 	ethClock eth_clock.EthereumClock
 }
@@ -142,6 +144,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	p := p2pManager{
 		cfg:      cfg,
 		host:     host,
+		gater:    gater,
 		bwc:      bwc,
 		ethClock: ethClock,
 	}
@@ -255,6 +258,10 @@ func (p *p2pManager) Pubsub() *pubsub.PubSub {
 
 func (p *p2pManager) Host() host.Host {
 	return p.host
+}
+
+func (p *p2pManager) SetDialPolicy(dialable func(peer.ID) bool) {
+	p.gater.SetDialPolicy(dialable)
 }
 
 func (p *p2pManager) BandwidthCounter() *metrics.BandwidthCounter {
