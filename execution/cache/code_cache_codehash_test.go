@@ -298,3 +298,54 @@ func TestCodeCache_AddrCodeHashSlotCollision(t *testing.T) {
 	_, ok = c.GetAddrCodeHash(a1)
 	require.False(t, ok, "a1 was displaced by the colliding insert")
 }
+
+// The addr→code binding shares the same lossy 64-bit slot, guarded by the full
+// address in GetWithTxNum. Without that guard one address would serve another's
+// code.
+func TestCodeCache_AddrCodeSlotCollision(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	a1 := append(bytes.Repeat([]byte{0x33}, 12), 0, 0, 0, 0, 0, 0, 0, 7)
+	a2 := append(bytes.Repeat([]byte{0x44}, 12), 0, 0, 0, 0, 0, 0, 0, 7)
+	require.Equal(t, addrSlot(common.BytesToAddress(a1)), addrSlot(common.BytesToAddress(a2)),
+		"the two addresses must share a slot for this test to mean anything")
+	code1, code2 := []byte{0x60, 0x01}, []byte{0x60, 0x02}
+
+	c.Put(a1, code1, 0)
+	got, ok := c.Get(a1)
+	require.True(t, ok)
+	require.Equal(t, code1, got)
+
+	// The colliding address must miss, never inherit a1's code.
+	_, ok = c.Get(a2)
+	require.False(t, ok)
+
+	// Binding the colliding address serves it, and a1 no longer claims the slot.
+	c.Put(a2, code2, 0)
+	got, ok = c.Get(a2)
+	require.True(t, ok)
+	require.Equal(t, code2, got)
+	_, ok = c.Get(a1)
+	require.False(t, ok)
+
+	// Deleting a non-resident colliding address must not evict a2's live entry.
+	c.Delete(a1)
+	got, ok = c.Get(a2)
+	require.True(t, ok, "Delete of a colliding address dropped the wrong entry")
+	require.Equal(t, code2, got)
+}
+
+// DeleteAddrCodeHash is slot-keyed too, so it must leave a colliding address's
+// live mapping alone.
+func TestCodeCache_DeleteAddrCodeHashKeepsCollidingEntry(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	a1 := append(bytes.Repeat([]byte{0x55}, 12), 0, 0, 0, 0, 0, 0, 0, 9)
+	a2 := append(bytes.Repeat([]byte{0x66}, 12), 0, 0, 0, 0, 0, 0, 0, 9)
+	h2 := [32]byte{9}
+
+	c.PutAddrCodeHash(a2, h2, 100)
+	c.DeleteAddrCodeHash(a1)
+
+	got, ok := c.GetAddrCodeHash(a2)
+	require.True(t, ok, "deleting a colliding address dropped the wrong mapping")
+	require.Equal(t, h2, got)
+}

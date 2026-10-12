@@ -329,8 +329,8 @@ func TestCodeCache_CodeDeduplication(t *testing.T) {
 }
 
 func TestCodeCache_AddrCapacityLimit(t *testing.T) {
-	// addrToHash is keyed by 20-byte address. Verify a full cache keeps
-	// serving fresh addresses rather than going no-op-when-full.
+	// addrToHash is keyed by 20-byte address. Verify a full cache stays bounded
+	// and keeps serving, rather than going no-op-when-full.
 	// makeAddr / makeCode wrap at 256, so we generate addrs/codes from
 	// a wider 16-bit space directly.
 	wideAddr := func(i int) []byte {
@@ -348,28 +348,32 @@ func TestCodeCache_AddrCapacityLimit(t *testing.T) {
 		c.Put(wideAddr(i), wideCode(i), 0)
 	}
 
-	// Len should be exactly the LRU cap (1024), not silently truncated to 0.
-	assert.Equal(t, 1024, c.Len())
+	// Residency stays bounded: the cache neither holds all 1100 nor collapses
+	// to nothing. Which addresses survive is W-TinyLFU's choice, not recency,
+	// so the identity of the evicted entries is not asserted.
+	assert.Positive(t, c.Len())
+	assert.Less(t, c.Len(), 1100)
 
-	// Oldest entries (addrs 0..75) must have been evicted.
-	_, ok := c.Get(wideAddr(0))
-	assert.False(t, ok, "oldest entry should be evicted by LRU")
-	_, ok = c.Get(wideAddr(50))
-	assert.False(t, ok, "second-oldest range should be evicted by LRU")
-
-	// Most recent entry must be present.
-	v, ok := c.Get(wideAddr(1099))
-	assert.True(t, ok, "most recent entry should remain")
-	assert.Equal(t, wideCode(1099), v)
+	// Whatever is admitted answers with its own code, never another address's.
+	admitted := 0
+	for i := range 1100 {
+		v, ok := c.Get(wideAddr(i))
+		if !ok {
+			continue
+		}
+		admitted++
+		assert.Equal(t, wideCode(i), v, "addr %d served the wrong code", i)
+	}
+	assert.Positive(t, admitted, "a full cache must still serve some addresses")
 
 	// hashToCode is bounded by bytes and gets half the configured figure, which
 	// 1100 small codes are nowhere near — they all stay resident.
 	assert.Equal(t, 1100, c.CodeLen())
 	assert.LessOrEqual(t, c.CodeSizeBytes(), int64(1024*1024)/2)
 
-	// Updating an existing addr re-writes the entry (LRU promotes to MRU).
+	// Updating an addr re-writes its entry.
 	c.Put(wideAddr(1099), wideCode(4242), 0)
-	v, ok = c.Get(wideAddr(1099))
+	v, ok := c.Get(wideAddr(1099))
 	assert.True(t, ok)
 	assert.Equal(t, wideCode(4242), v)
 }

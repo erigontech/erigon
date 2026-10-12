@@ -440,7 +440,16 @@ func (c *CodeCache) PutAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 
 // DeleteAddrCodeHash removes the mapping when its account record is invalidated.
 func (c *CodeCache) DeleteAddrCodeHash(addr []byte) {
-	c.addrToCodeHash.Remove(addrSlot(common.BytesToAddress(addr)))
+	a := common.BytesToAddress(addr)
+	stripe := &c.putStripes[a[len(a)-1]]
+	stripe.Lock()
+	defer stripe.Unlock()
+
+	// The slot is shared, so only this address's own entry may be dropped.
+	slot := addrSlot(a)
+	if e, ok := c.addrToCodeHash.Get(slot); ok && e.addr == a {
+		c.addrToCodeHash.Remove(slot)
+	}
 }
 
 // GetByCodeHash retrieves contract code by its Ethereum codeHash (keccak256).
@@ -603,9 +612,15 @@ func (c *CodeCache) putCodeSizeByCodeHashLocked(codeHash []byte, size int, hcs, 
 
 // Delete removes the address → code mapping for addr.
 func (c *CodeCache) Delete(addr []byte) {
+	a := common.BytesToAddress(addr)
 	c.addrBindMu.Lock()
-	c.addrToHash.Remove(addrSlot(common.BytesToAddress(addr)))
-	c.addrBindMu.Unlock()
+	defer c.addrBindMu.Unlock()
+
+	// The slot is shared, so only this address's own binding may be dropped.
+	slot := addrSlot(a)
+	if e, ok := c.addrToHash.Get(slot); ok && e.addr == a {
+		c.addrToHash.Remove(slot)
+	}
 }
 
 // Clear removes every layer, resets accounting, and starts a new coherence
