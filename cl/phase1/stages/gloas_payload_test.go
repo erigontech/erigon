@@ -1508,7 +1508,9 @@ func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block) erro
 
 func (t *testExecutionEngine) InsertBlock(context.Context, *types.Block) error { return nil }
 
-func (t *testExecutionEngine) CurrentHeader(context.Context) (*types.Header, error) { return t.head, nil }
+func (t *testExecutionEngine) CurrentHeader(context.Context) (*types.Header, error) {
+	return t.head, nil
+}
 
 func (t *testExecutionEngine) IsCanonicalHash(context.Context, common.Hash) (bool, error) {
 	return false, nil
