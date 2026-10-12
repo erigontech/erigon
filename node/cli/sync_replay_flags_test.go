@@ -97,3 +97,8 @@ func TestTieringLookbackBlocksFlag(t *testing.T) {
 		require.Error(t, app.Run(context.Background(), []string{"erigon", "--tiering.lookback-blocks", n}), n)
 	}
 }
+
+func TestTieringColdDirFlag(t *testing.T) {
+	require.Empty(t, buildEthCfg(t, nil).Sync.TieringColdDir)
+	require.Equal(t, "/hdd/domain", buildEthCfg(t, []string{"--tiering.cold-dir", "/hdd/domain"}).Sync.TieringColdDir)
+}

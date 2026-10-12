@@ -157,6 +157,11 @@ var (
 		},
 	}
 
+	TieringColdDirFlag = cli.StringFlag{
+		Name:  "tiering.cold-dir",
+		Usage: "Cold-tier directory: a state file whose resolved path is under it counts as cold-resident (default: no cold tier)",
+	}
+
 	SyncParallelStateFlushing = cli.BoolFlag{
 		Name:  "sync.parallel-state-flushing",
 		Usage: "Enables parallel state flushing",
@@ -360,6 +365,7 @@ func applyRemainingEthFlags(ctx *cli.Command, cfg *ethconfig.Config, logger log.
 		cfg.Sync.OfflineBALDir = filepath.Join(cfg.Dirs.DataDir, "offline-bal")
 	}
 	cfg.Sync.TieringLookbackBlocks = ctx.Uint64(TieringLookbackBlocksFlag.Name)
+	cfg.Sync.TieringColdDir = ctx.String(TieringColdDirFlag.Name)
 	cfg.Sync.ParallelStateFlushing = ctx.Bool(SyncParallelStateFlushing.Name)
 	if d := ctx.Duration(utils.SlowBlockThresholdFlag.Name); d >= 0 {
 		cfg.Sync.SlowBlockThreshold = &d
