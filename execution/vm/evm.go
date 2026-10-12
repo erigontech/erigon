@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -154,7 +155,7 @@ func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
 			evm.internOps++
 			return accounts.InternKey(word.Bytes32())
 		}
-		c = new(storageKeyCache)
+		c = storageKeyCachePool.Get().(*storageKeyCache)
 		evm.internCache = c
 		return c.fill(slotIndex(word), word)
 	}
@@ -213,7 +214,7 @@ func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
 			evm.addrOps++
 			return accounts.InternAddress(word.Bytes20())
 		}
-		c = new(addressCache)
+		c = addressCachePool.Get().(*addressCache)
 		evm.addrCache = c
 		return c.fill(addrIndex(word), word)
 	}
@@ -223,6 +224,24 @@ func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
 		return h
 	}
 	return c.fill(i, word)
+}
+
+// The caches never go stale, so a pooled one is reused as is.
+var (
+	storageKeyCachePool = sync.Pool{New: func() any { return new(storageKeyCache) }}
+	addressCachePool    = sync.Pool{New: func() any { return new(addressCache) }}
+)
+
+// ReleaseCaches hands the intern caches to the next EVM. Call it once the EVM is done.
+func (evm *EVM) ReleaseCaches() {
+	if evm.internCache != nil {
+		storageKeyCachePool.Put(evm.internCache)
+		evm.internCache = nil
+	}
+	if evm.addrCache != nil {
+		addressCachePool.Put(evm.addrCache)
+		evm.addrCache = nil
+	}
 }
 
 // ZeroUnpricedBaseFee returns blockCtx with the base fee dropped for a call that

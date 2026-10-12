@@ -130,6 +130,7 @@ func (r *txReplay) run(tb testing.TB, noMaterialize bool) *evmtypes.ExecutionRes
 	txCtx := protocol.NewEVMTxContext(msg)
 	vmConfig := vm.Config{NoBaseFee: true, NoReceipts: true, NoBAL: true}
 	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(r.blockCtx, txCtx, vmConfig), txCtx, ibs, r.cfg, vmConfig)
+	defer evm.ReleaseCaches()
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 	res, err := protocol.ApplyMessage(evm, msg, gp, true, false, nil)
 	require.NoError(tb, err)
