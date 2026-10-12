@@ -601,21 +601,22 @@ func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bo
 
 // Put copies the input data.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
-	c.PutOwned(prefix, bytes.Clone(data), step, txN)
-}
-
-func (c *BranchCache) PutOwned(prefix []byte, data []byte, step, txN uint64) {
 	if isCommitmentStateKey(prefix) {
 		return
 	}
-	entry := &branchCacheEntry{data: data, step: step, txN: txN}
+	dataCopy := make([]byte, len(data))
+	copy(dataCopy, data)
 
 	stripe := c.putStripe(prefix)
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	entry.epoch = c.coh.Epoch()
-	c.store(prefix, entry)
+	c.store(prefix, &branchCacheEntry{
+		data:  dataCopy,
+		step:  step,
+		txN:   txN,
+		epoch: c.coh.Epoch(),
+	})
 }
 
 func (c *BranchCache) Invalidate(prefix []byte) {
