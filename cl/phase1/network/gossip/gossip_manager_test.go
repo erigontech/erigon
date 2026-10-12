@@ -51,6 +51,49 @@ type mockService struct {
 	namesFunc   func() []string
 }
 
+type topicForkDigestMessage struct {
+	digest common.Bytes4
+}
+
+type blockingPeerBanner struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingPeerBanner) BanPeer(string) {
+	b.once.Do(func() { close(b.started) })
+	<-b.release
+}
+
+type panicOncePeerBanner struct {
+	firstStarted chan struct{}
+	secondCalled chan string
+	once         sync.Once
+}
+
+func (b *panicOncePeerBanner) BanPeer(pid string) {
+	panicked := false
+	b.once.Do(func() {
+		close(b.firstStarted)
+		panicked = true
+	})
+	if panicked {
+		panic("peer ban panic")
+	}
+	b.secondCalled <- pid
+}
+
+type recordingPeerBanner chan string
+
+func (b recordingPeerBanner) BanPeer(pid string) {
+	b <- pid
+}
+
+func (m *topicForkDigestMessage) SetTopicForkDigest(digest common.Bytes4) {
+	m.digest = digest
+}
+
 func (m *mockService) Names() []string {
 	if m.namesFunc != nil {
 		return m.namesFunc()
@@ -110,6 +153,12 @@ func (s *newPubsubValidatorTestSuite) SetupTest() {
 		return slot / beaconConfig.SlotsPerEpoch
 	}).AnyTimes()
 	s.mockClock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+	s.mockClock.EXPECT().StateVersionByForkDigest(gomock.Any()).DoAndReturn(func(digest common.Bytes4) (clparams.StateVersion, error) {
+		if digest == (common.Bytes4{0xab, 0xcd, 0x12, 0x34}) {
+			return clparams.FuluVersion, nil
+		}
+		return 0, errors.New("unknown fork digest")
+	}).AnyTimes()
 	s.mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
 	s.mockP2P.EXPECT().Host().Return(nil).AnyTimes()
 
@@ -280,6 +329,102 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_ProcessMessageError
 	s.Equal(pubsub.ValidationReject, result)
 }
 
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorBansEncodedPeerID() {
+	pid, err := peer.Decode("16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA")
+	s.Require().NoError(err)
+	banned := make(recordingPeerBanner, 1)
+	s.gm.SetPeerBanner(banned)
+	service := &mockService{
+		processFunc: func(context.Context, *uint64, any) error {
+			return errors.New("invalid signature")
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/abcd1234/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+
+	s.Equal(pubsub.ValidationReject, validator(context.Background(), pid, msg))
+	select {
+	case got := <-banned:
+		decoded, err := peer.Decode(got)
+		s.Require().NoError(err)
+		s.Equal(pid, decoded)
+	case <-time.After(time.Second):
+		s.T().Fatal("peer ban did not run")
+	}
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorRejectsWhilePeerBanBlocks() {
+	banStarted := make(chan struct{})
+	releaseBan := make(chan struct{})
+	s.T().Cleanup(func() { close(releaseBan) })
+	s.gm.SetPeerBanner(&blockingPeerBanner{started: banStarted, release: releaseBan})
+	service := &mockService{
+		processFunc: func(context.Context, *uint64, any) error {
+			return errors.New("invalid signature")
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/abcd1234/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+	results := make(chan pubsub.ValidationResult, 2)
+
+	go func() { results <- validator(context.Background(), peer.ID("first-peer"), msg) }()
+	select {
+	case <-banStarted:
+	case <-time.After(time.Second):
+		s.T().Fatal("peer ban did not start")
+	}
+	go func() { results <- validator(context.Background(), peer.ID("second-peer"), msg) }()
+
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for received := range 2 {
+		select {
+		case result := <-results:
+			s.Equal(pubsub.ValidationReject, result)
+		case <-deadline.C:
+			s.T().Fatalf("got %d validator results before blocked peer ban returned, want 2", received)
+		}
+	}
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorContinuesAfterPeerBannerPanic() {
+	banner := &panicOncePeerBanner{
+		firstStarted: make(chan struct{}),
+		secondCalled: make(chan string, 1),
+	}
+	s.gm.SetPeerBanner(banner)
+	service := &mockService{
+		processFunc: func(context.Context, *uint64, any) error {
+			return errors.New("invalid signature")
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/abcd1234/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+
+	s.Equal(pubsub.ValidationReject, validator(context.Background(), peer.ID("first-peer"), msg))
+	select {
+	case <-banner.firstStarted:
+	case <-time.After(time.Second):
+		s.T().Fatal("first peer ban did not start")
+	}
+	s.Equal(pubsub.ValidationReject, validator(context.Background(), peer.ID("second-peer"), msg))
+	select {
+	case pid := <-banner.secondCalled:
+		s.Equal(peer.ID("second-peer").String(), pid)
+	case <-time.After(time.Second):
+		s.T().Fatal("peer ban worker did not continue after panic")
+	}
+}
+
 func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_ProcessMessageErrNotSynced() {
 	service := &mockService{
 		processFunc: func(ctx context.Context, subnet *uint64, msg any) error {
@@ -372,6 +517,68 @@ func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_Success() {
 	s.Equal(pubsub.ValidationAccept, result)
 }
 
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_DecodesWithTopicForkVersion() {
+	var decodedVersion clparams.StateVersion
+	service := &mockService{
+		decodeFunc: func(pid peer.ID, data []byte, version clparams.StateVersion) (any, error) {
+			decodedVersion = version
+			return "decoded_message", nil
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/abcd1234/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+
+	result := validator(context.Background(), peer.ID("test-peer"), msg)
+	s.Equal(pubsub.ValidationAccept, result)
+	s.Equal(clparams.FuluVersion, decodedVersion)
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidator_UnknownForkDigestIgnored() {
+	processCalled := false
+	service := &mockService{
+		processFunc: func(ctx context.Context, subnet *uint64, msg any) error {
+			processCalled = true
+			return nil
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/deadbeef/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+
+	result := validator(context.Background(), peer.ID("test-peer"), msg)
+	s.Equal(pubsub.ValidationIgnore, result)
+	s.False(processCalled)
+}
+
+func (s *newPubsubValidatorTestSuite) TestNewPubsubValidatorCarriesExactTopicForkDigest() {
+	wantDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
+	message := &topicForkDigestMessage{}
+	service := &mockService{
+		decodeFunc: func(peer.ID, []byte, clparams.StateVersion) (any, error) {
+			return message, nil
+		},
+		processFunc: func(context.Context, *uint64, any) error {
+			if message.digest != wantDigest {
+				return errors.New("topic fork digest was not carried to the service")
+			}
+			return nil
+		},
+	}
+	validator := s.gm.newPubsubValidator(service)
+	msg := createMockMessage(
+		"/eth2/abcd1234/beacon_block/ssz_snappy",
+		utils.CompressSnappy([]byte("test data")),
+	)
+
+	result := validator(context.Background(), peer.ID("test-peer"), msg)
+	s.Equal(pubsub.ValidationAccept, result)
+}
+
 type subscribeUpcomingTopicsTestSuite struct {
 	suite.Suite
 	gm        *GossipManager
@@ -400,6 +607,7 @@ func (s *subscribeUpcomingTopicsTestSuite) SetupTest() {
 		return slot / beaconConfig.SlotsPerEpoch
 	}).AnyTimes()
 	s.mockClock.EXPECT().ComputeForkDigest(gomock.Any()).Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+	s.mockClock.EXPECT().StateVersionByForkDigest(common.Bytes4{0xab, 0xcd, 0x12, 0x34}).Return(clparams.FuluVersion, nil).AnyTimes()
 
 	// Create actual libp2p host and pubsub
 	var err error
@@ -1372,7 +1580,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishAcceptedAndOutcomeCounters
 	}
 	s.Require().NoError(s.gm.subscriptions.Add(okTopic, okTopicHandle, validator))
 
-	const errTopicName = "invariant_error_topic"       // never joined: publishToDigest fails
+	const errTopicName = "invariant_error_topic"       // never joined: PublishToForkDigest fails
 	const expiredTopicName = "invariant_expired_topic" // stale by the time the worker gets to it
 	const panicTopicName = "invariant_panic_topic"     // hook panics for this one
 	topics := []string{okTopicName, errTopicName, expiredTopicName, panicTopicName}
