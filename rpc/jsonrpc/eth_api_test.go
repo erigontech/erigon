@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -800,4 +801,40 @@ func TestTraceCallManyExcludesNextBlockSystemCall(t *testing.T) {
 		require.Equal(t, common.BigToHash(big.NewInt(42)), outputs[1], "the second call reads the first call's write")
 		require.Equal(t, common.Hash{}, outputs[2], "slot %d is written by block %d", bn, bn+1)
 	})
+}
+
+func TestHeaderByHashAndNumberServesRepeatedLookupsFromCache(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newBaseApiForTest(m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	hash, ok, err := api._blockReader.CanonicalHash(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	first, err := api.headerByHashAndNumber(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	api._blockReader = failHeaderReadBlockReader{FullBlockReader: api._blockReader, hash: hash, blockNumber: 1, err: errors.New("unexpected header database read")}
+	second, err := api.headerByHashAndNumber(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.Same(t, first, second)
+}
+
+// A block read leaves the header cache alone: the block cache already serves that header.
+func TestBlockReadDoesNotFillHeaderCache(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newBaseApiForTest(m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	hash, ok, err := api._blockReader.CanonicalHash(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	block, err := api.blockWithSenders(m.Ctx, tx, hash, 1)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	_, cached := api.headersLRU.Get(hash)
+	require.False(t, cached)
 }

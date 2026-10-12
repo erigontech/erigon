@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 )
@@ -71,7 +73,7 @@ func TestAggregateAndProofServiceRejectsMalformedNestedInput(t *testing.T) {
 	}
 }
 
-func getAggregateAndProofAndState(t *testing.T) (*SignedAggregateAndProofForGossip, *state.CachingBeaconState) {
+func getAggregateAndProofAndState() (*SignedAggregateAndProofForGossip, *state.CachingBeaconState) {
 	_, _, s := tests.GetBellatrixRandom()
 	br, _ := s.BlockRoot()
 	checkpoint := s.CurrentJustifiedCheckpoint()
@@ -116,7 +118,8 @@ func setupAggregateAndProofTest(t *testing.T) (AggregateAndProofService, *synced
 	t.Cleanup(cancel)
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
 	return blockService, syncedDataManager, forkchoiceMock
 }
 
@@ -124,7 +127,7 @@ func TestAggregateAndProofServiceUnsynced(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, _ := getAggregateAndProofAndState(t)
+	agg, _ := getAggregateAndProofAndState()
 
 	aggService, _, _ := setupAggregateAndProofTest(t)
 	require.Error(t, aggService.ProcessMessage(context.Background(), nil, agg))
@@ -134,7 +137,7 @@ func TestAggregateAndProofServiceHighSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = 9998898
 
 	aggService, sd, _ := setupAggregateAndProofTest(t)
@@ -146,7 +149,7 @@ func TestAggregateAndProofServiceBadEpoch(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = 0
 
 	aggService, sd, _ := setupAggregateAndProofTest(t)
@@ -158,7 +161,7 @@ func TestAggregateAndProofServiceNotAncestor(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -170,7 +173,7 @@ func TestAggregateAndProofServiceNoHeader(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -183,7 +186,7 @@ func TestAggregateAndProofInvalidEpoch(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -198,7 +201,7 @@ func TestAggregateAndProofInvalidCommittee(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -213,7 +216,7 @@ func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	nextEpochSlot := s.Slot() + clparams.MainnetBeaconConfig.SlotsPerEpoch
 	nextEpoch := nextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = nextEpochSlot
@@ -236,11 +239,53 @@ func TestAggregateAndProofAllowsNextEpochWhenForkchoiceHasSeenIt(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestAggregateAndProofAllowsEpochReachedByClockBeforeItsFirstBlock(t *testing.T) {
+	tests := []struct {
+		name       string
+		epochDelta uint64
+	}{
+		{name: "next epoch", epochDelta: 1},
+		{name: "head epoch + 2 with no later block seen", epochDelta: 2},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			agg, s := getAggregateAndProofAndState()
+			slot := s.Slot() + test.epochDelta*clparams.MainnetBeaconConfig.SlotsPerEpoch
+			epoch := slot / clparams.MainnetBeaconConfig.SlotsPerEpoch
+			agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = slot
+			agg.SignedAggregateAndProof.Message.Aggregate.Data.Source.Epoch = epoch - 1
+			agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Epoch = epoch
+
+			aggService, sd, fcu := setupAggregateAndProofTest(t)
+			require.NoError(t, sd.OnHeadState(s))
+			fcu.HighestSeenVal = s.Slot()
+			fcu.FinalizedCheckpointVal = s.FinalizedCheckpoint()
+			fcu.Ancestors[s.FinalizedCheckpoint().Epoch*clparams.MainnetBeaconConfig.SlotsPerEpoch] = forkchoice.ForkChoiceNode{Root: s.FinalizedCheckpoint().Root}
+			fcu.Ancestors[slot] = forkchoice.ForkChoiceNode{Root: agg.SignedAggregateAndProof.Message.Aggregate.Data.Target.Root}
+			fcu.Headers[agg.SignedAggregateAndProof.Message.Aggregate.Data.BeaconBlockRoot] = &cltypes.BeaconBlockHeader{}
+			committee, err := s.GetBeaconCommitee(slot, agg.SignedAggregateAndProof.Message.Aggregate.Data.CommitteeIndex)
+			require.NoError(t, err)
+			require.NotEmpty(t, committee)
+			agg.SignedAggregateAndProof.Message.AggregatorIndex = committee[0]
+
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+			clock.EXPECT().GetCurrentSlot().Return(slot).AnyTimes()
+			aggService.(*aggregateAndProofServiceImpl).ethClock = clock
+
+			require.NoError(t, aggService.ProcessMessage(context.Background(), nil, agg))
+		})
+	}
+}
+
 func TestAggregateAndProofRejectsNextEpochBeforeForkchoiceHasSeenIt(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	nextEpochSlot := s.Slot() + clparams.MainnetBeaconConfig.SlotsPerEpoch
 	nextEpoch := nextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = nextEpochSlot
@@ -260,7 +305,7 @@ func TestAggregateAndProofRejectsBeyondNextEpochDespiteForkchoiceHavingSeenIt(t 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 	beyondNextEpochSlot := s.Slot() + 2*clparams.MainnetBeaconConfig.SlotsPerEpoch
 	beyondNextEpoch := beyondNextEpochSlot / clparams.MainnetBeaconConfig.SlotsPerEpoch
 	agg.SignedAggregateAndProof.Message.Aggregate.Data.Slot = beyondNextEpochSlot
@@ -280,7 +325,7 @@ func TestAggregateAndProofAncestorMissing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -294,7 +339,7 @@ func TestAggregateAndProofSuccess(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	agg, s := getAggregateAndProofAndState(t)
+	agg, s := getAggregateAndProofAndState()
 
 	aggService, sd, fcu := setupAggregateAndProofTest(t)
 	require.NoError(t, sd.OnHeadState(s))
@@ -364,7 +409,8 @@ func setupAggregateAndProofTestWithConfig(t *testing.T, cfg *clparams.BeaconChai
 	t.Cleanup(cancel)
 	batchSignatureVerifier := NewBatchSignatureVerifier(verifierCtx, nil)
 	go batchSignatureVerifier.Start()
-	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, cfg)
+	blockService := NewAggregateAndProofService(ctx, syncedDataManager, forkchoiceMock, clock, cfg, p, true, batchSignatureVerifier, validator_params.NewValidatorParams())
 	return blockService, syncedDataManager, forkchoiceMock
 }
 

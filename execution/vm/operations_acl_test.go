@@ -22,8 +22,8 @@ func TestGasSStoreDoesNotRefill(t *testing.T) {
 	require.NoError(t, ibs.SetState(accounts.ZeroAddress, accounts.ZeroKey, *uint256.NewInt(1)))
 	ibs.AddSlotToAccessList(accounts.ZeroAddress, accounts.ZeroKey)
 	evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
-	scope := getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 200_000})
-	defer scope.put()
+	scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, mdgas.MdGas{Execution: 200_000})
+	defer evm.putCallContext(scope)
 	scope.cacheGen++
 	require.True(t, scope.useMdGas(params.StateGasPerStorageSet, mdgas.StateGas, nil, tracing.GasChangeIgnored))
 	scope.Stack.push(uint256.Int{})
@@ -52,8 +52,8 @@ func TestGasCallDoesNotCharge(t *testing.T) {
 			defer ibs.Close()
 			evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
 			initial := mdgas.MdGas{Execution: 500_000, State: params.StateGasNewAccount / 2}
-			scope := getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, initial)
-			defer scope.put()
+			scope := evm.getCallContext(*NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}), nil, initial)
+			defer evm.putCallContext(scope)
 			scope.cacheGen++
 			for range 4 {
 				scope.Stack.push(uint256.Int{})

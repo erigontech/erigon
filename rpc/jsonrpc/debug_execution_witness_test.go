@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
@@ -742,6 +743,27 @@ func TestGetWitness(t *testing.T) {
 		require.ErrorContains(t, err, "transaction index out of bounds")
 		require.Nil(t, got)
 	})
+
+	for _, tc := range []struct {
+		name            string
+		history, blocks prune.BlockAmount
+	}{
+		{"pruned history", prune.Distance(1), prune.KeepAllBlocksPruneMode},
+		{"pruned transactions", prune.KeepAllBlocksPruneMode, prune.Distance(1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := newBaseApiForTest(m)
+			base._pruneMode.Store(&prune.Mode{Initialised: true, History: tc.history, Blocks: tc.blocks})
+			api := newEthApiForTest(base, m.DB, nil, nil)
+
+			got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+			require.ErrorIs(t, err, state.ErrPruned)
+			require.Nil(t, got)
+			got, err = api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, 0)
+			require.ErrorIs(t, err, state.ErrPruned)
+			require.Nil(t, got)
+		})
+	}
 }
 
 // TestGetWitnessRequiresCommitmentHistory pins that eth_getWitness reports the missing
