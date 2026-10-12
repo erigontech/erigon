@@ -311,6 +311,12 @@ func newGzipHandler(next http.Handler) http.Handler {
 	})
 	compressed := gzipWrapper(inner)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept-Encoding") == "" {
+			// gzhttp would only add Vary and pass the writer through; skip its per-request allocations.
+			w.Header().Add("Vary", "Accept-Encoding")
+			next.ServeHTTP(w, r)
+			return
+		}
 		m := &gzipMeter{}
 		m.wire.ResponseWriter = w
 		m.raw.afterWrite = m.commit
