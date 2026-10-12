@@ -1506,7 +1506,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if useBranchCache && !sd.hasLocalCacheUnwind() {
 		getOpts = getOpts.WithBranchCache()
 	}
-	if domain == kv.CommitmentDomain && (sd.commitmentV3 || getOpts.BranchCache() && maxStep == kv.NoStepBound) {
+	if domain == kv.CommitmentDomain && sd.commitmentV3 {
 		getOpts = getOpts.WithOwned()
 	}
 	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
