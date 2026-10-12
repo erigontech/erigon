@@ -66,6 +66,7 @@ type Server struct {
 	subscriptionLimit   int  // Maximum number of concurrent subscriptions per connection; 0 = unlimited
 	logger              log.Logger
 	rpcSlowLogThreshold time.Duration
+	ingress             ingressBudget
 }
 
 // NewServer creates a new server instance with no registered handlers.
@@ -77,6 +78,7 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 		services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
 		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold,
 		subscriptionLimit: rpccfg.DefaultSubscriptionLimit,
+		ingress:           ingressBudget{limit: defaultIngressBudget},
 	}
 	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
@@ -149,10 +151,11 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 			h.close(err, nil)
 			return
 		}
+		release := codec.takeRelease()
 		if batch {
-			h.handleBatch(msgs)
+			h.handleBatch(msgs, release)
 		} else {
-			h.handleMsg(msgs[0], nil)
+			h.handleMsg(msgs[0], nil, release)
 		}
 	}
 }
@@ -178,15 +181,19 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 
 	reqs, batch, err := codec.ReadBatch()
 	if err != nil {
-		if !errors.Is(err, io.EOF) {
-			return errorMessage(&invalidMessageError{"parse error"})
+		switch {
+		case errors.Is(err, io.EOF):
+			return nil
+		case errors.Is(err, errServerOverloaded):
+			SetOverloadedFlag(ctx)
+			return errorMessage(err)
 		}
-		return nil
+		return errorMessage(&invalidMessageError{"parse error"})
 	}
 	if batch {
-		h.handleBatch(reqs)
+		h.handleBatch(reqs, nil)
 	} else {
-		h.handleMsg(reqs[0], stream)
+		h.handleMsg(reqs[0], stream, nil)
 	}
 	return nil
 }
