@@ -136,8 +136,9 @@ func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	defer mu.Unlock()
 
 	// Grow on the net change, and before the write: afterwards maintenance may
-	// have refunded the newcomer already and hidden the pressure.
-	if !b.unbudgeted {
+	// have refunded the newcomer already and hidden the pressure. A cache that
+	// cannot grow skips the extra lookup.
+	if !b.unbudgeted && b.resident.Load()+w > b.limit.Load() && b.limit.Load() < b.ceiling.Load() {
 		delta := w
 		if prev, present := b.c.GetIfPresent(key); present {
 			delta -= b.weigh(key, prev)
