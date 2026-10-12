@@ -105,6 +105,25 @@ func TestByteLRUAddReplacesLiveKey(t *testing.T) {
 	require.Equal(t, int64(len("second")), b.resident.Load())
 }
 
+func TestByteLRUBudgetedAddReplacesLiveKey(t *testing.T) {
+	var evicted [][]byte
+	b := newByteLRU(datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) },
+		func(_ uint64, v []byte) { evicted = append(evicted, v) })
+	defer b.Close()
+
+	require.True(t, b.Add(1, []byte("first")))
+	require.True(t, b.Add(1, []byte("second")))
+	b.c.CleanUp()
+
+	v, ok := b.Get(1)
+	require.True(t, ok)
+	require.Equal(t, []byte("second"), v)
+	// The displaced value is refunded through onEvict, which also sees it.
+	require.Equal(t, [][]byte{[]byte("first")}, evicted)
+	require.Equal(t, int64(len("second")), b.resident.Load())
+	require.Equal(t, int64(b.c.WeightedSize()), b.resident.Load())
+}
+
 // A budgeted layer refunds through onEvict, so its charge must match what otter holds.
 func TestByteLRUBudgetedConcurrentSameKeyAccounting(t *testing.T) {
 	b := newByteLRU(8*datasize.MB, func(_ uint64, v []byte) int64 { return int64(len(v)) }, nil)
