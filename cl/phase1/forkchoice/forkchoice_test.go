@@ -132,6 +132,20 @@ func TestCutOffByInvalidationAtThePreGloasBoundary(t *testing.T) {
 	require.True(t, store.cutOffByInvalidation(childRoot))
 }
 
+// An EL verdict belongs to the execution payload, so a NotValidated recorded for a sibling root
+// that shares the payload hash must not lower a Validated one.
+func TestMarkPayloadStatusKeepsAValidatedPayloadHash(t *testing.T) {
+	store, anchorRoot, _ := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	hash := common.Hash{0xe1}
+	store.MarkPayloadStatus(anchorRoot, hash, execution_client.PayloadStatusValidated)
+
+	sibling := common.Hash{0x51}
+	require.EqualValues(t, execution_client.PayloadStatusValidated, store.MarkPayloadStatus(sibling, hash, execution_client.PayloadStatusNotValidated))
+	byHash, ok := store.executionPayloadStatus.Get(hash)
+	require.True(t, ok)
+	require.EqualValues(t, execution_client.PayloadStatusValidated, byHash)
+}
+
 func TestGloasAnchorStartsWithoutPtcVotes(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	anchor := state.New(&cfg)
