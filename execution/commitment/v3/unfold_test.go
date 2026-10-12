@@ -35,7 +35,7 @@ func TestUnfold(t *testing.T) {
 			ctx := newMockContext()
 			path := []byte{1, 2, 3}
 			hash := bytes.Repeat([]byte{0xab}, 32)
-			ctx.branches[string(AccountNodeKey(path, nil))] = commitmenttest.Record(commitmenttest.RecordSpec{
+			ctx.branches[string(AccountNodeKey(path, nil))] = commitmenttest.Record(&commitmenttest.RecordSpec{
 				Flags: hdrHasChildExt, ChildMask: 1<<2 | 1<<7, LeafMask: 1 << 7, ExtensionMask: 1 << 2,
 				Hashes: [16][]byte{2: hash}, Extensions: [16][]byte{2: {3, 0x45, 0x60}},
 				Leaves: [16]commitmenttest.Leaf{7: {Suffix: bytes.Repeat([]byte{0x99}, 30), Value: []byte{0x42}}},
@@ -58,7 +58,7 @@ func TestUnfold(t *testing.T) {
 			var addrHash [32]byte
 			addrHash[0] = 0x9a
 			hash := bytes.Repeat([]byte{0xcd}, 32)
-			ctx.branches[string(StorageNodeKey(addrHash, path, nil))] = commitmenttest.Record(commitmenttest.RecordSpec{ChildMask: 1 << 6, Hashes: [16][]byte{6: hash}})
+			ctx.branches[string(StorageNodeKey(addrHash, path, nil))] = commitmenttest.Record(&commitmenttest.RecordSpec{ChildMask: 1 << 6, Hashes: [16][]byte{6: hash}})
 
 			got, err := unfold(ctx, path, planeStorage, addrHash[:])
 			require.NoError(t, err)
@@ -70,7 +70,7 @@ func TestUnfold(t *testing.T) {
 			t.Run("leaf root", func(t *testing.T) {
 				ctx := newMockContext()
 				fullPath := bytes.Repeat([]byte{3}, 64)
-				ctx.branches[string(AccountNodeKey(nil, nil))] = commitmenttest.Record(commitmenttest.RecordSpec{Flags: hdrIsLeafRoot, Root: append(bytes.Repeat([]byte{0x33}, 32), 2, 1, 2)})
+				ctx.branches[string(AccountNodeKey(nil, nil))] = commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrIsLeafRoot, Root: append(bytes.Repeat([]byte{0x33}, 32), 2, 1, 2)})
 
 				got, err := unfold(ctx, nil, planeAccount, nil)
 				require.NoError(t, err)
@@ -83,7 +83,7 @@ func TestUnfold(t *testing.T) {
 				ctx := newMockContext()
 				ext := []byte{1, 2, 3}
 				hash := bytes.Repeat([]byte{0x55}, 32)
-				ctx.branches[string(AccountNodeKey(nil, nil))] = commitmenttest.Record(commitmenttest.RecordSpec{Flags: hdrHasSelfExt, SelfExtension: []byte{3, 0x12, 0x30}, ChildMask: 1 << 4, Hashes: [16][]byte{4: hash}})
+				ctx.branches[string(AccountNodeKey(nil, nil))] = commitmenttest.Record(&commitmenttest.RecordSpec{Flags: hdrHasSelfExt, SelfExtension: []byte{3, 0x12, 0x30}, ChildMask: 1 << 4, Hashes: [16][]byte{4: hash}})
 
 				got, err := unfold(ctx, nil, planeAccount, nil)
 				require.NoError(t, err)

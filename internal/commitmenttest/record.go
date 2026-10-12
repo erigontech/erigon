@@ -36,7 +36,7 @@ type RecordSpec struct {
 	Root          []byte
 }
 
-func Record(spec RecordSpec) []byte {
+func Record(spec *RecordSpec) []byte {
 	data := []byte{spec.Flags}
 	if spec.Flags&0x80 != 0 {
 		if spec.Root == nil {

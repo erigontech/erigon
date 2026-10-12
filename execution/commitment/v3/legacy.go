@@ -450,11 +450,18 @@ func ConvertLegacyState(value []byte) ([]byte, error) {
 
 type leafRootContext struct{}
 
-func (leafRootContext) Branch([]byte) ([]byte, kv.Step, error) { return nil, 0, errLegacyLeafRoot }
-func (leafRootContext) PutBranch(_, _, _ []byte) error         { return errLegacyLeafRoot }
+func (leafRootContext) Branch([]byte) ([]byte, kv.Step, error) {
+	return nil, 0, errLegacyLeafRoot
+}
+
+func (leafRootContext) PutBranch(_, _, _ []byte) error {
+	return errLegacyLeafRoot
+}
+
 func (leafRootContext) Account([]byte) (*commitment.Update, error) {
 	return nil, errLegacyLeafRoot
 }
+
 func (leafRootContext) Storage([]byte) (*commitment.Update, error) {
 	return nil, errLegacyLeafRoot
 }

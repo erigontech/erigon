@@ -227,8 +227,8 @@ func convertCommitmentFileV3(
 			conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
 			prevs := wat.d[kv.CommitmentDomain]
 			reach := &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) {
-				v, _, _, _, err := prevs.getLatestFromFiles(key, nil, lastStep-1)
-				return v, err
+				v, _, _, _, readErr := prevs.getLatestFromFiles(key, nil, lastStep-1)
+				return v, readErr
 			}}
 			for batch := range in {
 				res := convertedBatchPool.Get().(*convertedBatch)
