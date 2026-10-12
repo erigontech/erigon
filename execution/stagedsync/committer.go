@@ -225,7 +225,8 @@ type commitmentCalculator struct {
 	// pre-window block triggers a transition compute (computeTransition)
 	// so no pre-window branch deltas leak into a window block's changeset.
 	perBlockFrom       uint64
-	maxReorgDepth      uint64
+	hexStopWindow      uint64
+	finalizedBlockNum  uint64
 	activationBlock    uint64
 	hasActivationBlock bool
 	blockReader        dbservices.FullBlockReader
@@ -374,6 +375,7 @@ func newCommitmentCalculator(
 		balRoots:             map[uint64][]byte{},
 		forcePerBlockCompute: forcePerBlockCompute,
 		perBlockFrom:         perBlockFrom,
+		finalizedBlockNum:    rawdb.ReadForkchoiceFinalizedNum(roTx),
 		done:                 make(chan struct{}),
 		processedWake:        make(chan struct{}),
 	}
@@ -1371,8 +1373,10 @@ func otherCommitmentDomain(domain kv.Domain) kv.Domain {
 	return kv.CommitmentBinDomain
 }
 
-func shouldStopHexShadow(activationBlock, maxReorgDepth, blockNum uint64) bool {
-	return blockNum > activationBlock && blockNum-activationBlock > maxReorgDepth
+const hexShadowStopMargin = 32
+
+func shouldStopHexShadow(activationBlock, window, finalizedBlock, blockNum uint64) bool {
+	return finalizedBlock >= activationBlock && blockNum > activationBlock && blockNum-activationBlock > window
 }
 
 func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t commitTarget) {
@@ -1394,7 +1398,7 @@ func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t com
 			}
 		}
 	}
-	if cc.hasActivationBlock && shouldStopHexShadow(cc.activationBlock, cc.maxReorgDepth, t.blockNum) {
+	if cc.hasActivationBlock && shouldStopHexShadow(cc.activationBlock, cc.hexStopWindow, cc.finalizedBlockNum, t.blockNum) {
 		cc.stopShadowDomain(kv.CommitmentDomain)
 	}
 }

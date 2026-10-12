@@ -19,6 +19,7 @@ package stagedsync
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -39,16 +40,19 @@ import (
 
 func TestHexShadowStopWindowKeepsActivationWindow(t *testing.T) {
 	const activationBlock = 3
-	const maxReorgDepth = 2
-	require.False(t, shouldStopHexShadow(activationBlock, maxReorgDepth, activationBlock+maxReorgDepth), "hex shadow must fold through the reorg window")
-	require.True(t, shouldStopHexShadow(activationBlock, maxReorgDepth, activationBlock+maxReorgDepth+1), "hex shadow must stop after the reorg window")
+	const window = 2
+	require.False(t, shouldStopHexShadow(activationBlock, window, activationBlock, activationBlock+window), "hex shadow must fold through the window")
+	require.True(t, shouldStopHexShadow(activationBlock, window, activationBlock, activationBlock+window+1), "hex shadow must stop after the window once activation is final")
+	require.False(t, shouldStopHexShadow(activationBlock, window, activationBlock-1, activationBlock+window+1_000), "hex shadow must fold while the activation block is not final")
+	require.False(t, shouldStopHexShadow(activationBlock, 96+hexShadowStopMargin, activationBlock, activationBlock+128), "with the default reorg depth the hex shadow must fold for 128 blocks after activation")
 }
 
 func TestCommitmentCalculatorStopsHexShadowAfterWindow(t *testing.T) {
 	activationTime := uint64(10)
 	cc := &commitmentCalculator{
-		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
-		maxReorgDepth: 2,
+		chainConfig:       &chain.Config{BinaryTrieTime: &activationTime},
+		hexStopWindow:     2,
+		finalizedBlockNum: 10,
 	}
 	cc.recordBlockTarget(commitTarget{blockNum: 9, blockTime: activationTime - 1})
 	for blockNum := uint64(10); blockNum <= 12; blockNum++ {
@@ -60,12 +64,41 @@ func TestCommitmentCalculatorStopsHexShadowAfterWindow(t *testing.T) {
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "hex shadow must stop on block 13")
 }
 
+func TestCommitmentCalculatorKeepsHexShadowUntilActivationIsFinal(t *testing.T) {
+	activationTime := uint64(10)
+	cc := &commitmentCalculator{
+		chainConfig:       &chain.Config{BinaryTrieTime: &activationTime},
+		hexStopWindow:     2,
+		finalizedBlockNum: 9,
+	}
+	cc.recordBlockTarget(commitTarget{blockNum: 9, blockTime: activationTime - 1})
+	cc.recordBlockTarget(commitTarget{blockNum: 10, blockTime: activationTime})
+	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 1_000, blockTime: activationTime})
+	require.False(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "the hex shadow must stay live until the activation block is finalized")
+	cc.finalizedBlockNum = 10
+	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 1_001, blockTime: activationTime})
+	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "the hex shadow must stop once the activation block is finalized")
+}
+
+func TestNewCommitmentCalculatorReadsFinalizedBlock(t *testing.T) {
+	db, tx, doms := dualCalculatorTest(t)
+	finalized := &types.Header{Number: *uint256.NewInt(42)}
+	require.NoError(t, rawdb.WriteHeader(tx, finalized))
+	rawdb.WriteForkchoiceFinalized(tx, finalized.Hash())
+	require.NoError(t, doms.Commit(t.Context(), tx))
+	cc, err := newCommitmentCalculator(t.Context(), t.Context(), doms, db, &chain.Config{}, "test", log.New(), false, math.MaxUint64, nil, nil, nil)
+	require.NoError(t, err)
+	t.Cleanup(cc.Stop)
+	require.Equal(t, uint64(42), cc.finalizedBlockNum)
+}
+
 func TestCommitmentCalculatorUsesCurrentBranchHeaderForActivation(t *testing.T) {
 	activationTime := uint64(10)
 	cc := &commitmentCalculator{
-		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
-		blockReader:   uncommittedActivationHeaderReader{},
-		maxReorgDepth: 1,
+		chainConfig:       &chain.Config{BinaryTrieTime: &activationTime},
+		blockReader:       uncommittedActivationHeaderReader{},
+		hexStopWindow:     1,
+		finalizedBlockNum: 5,
 	}
 	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 7, blockTime: activationTime})
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "hex shadow must stop at the first block after the activation window")
@@ -74,9 +107,10 @@ func TestCommitmentCalculatorUsesCurrentBranchHeaderForActivation(t *testing.T) 
 func TestCommitmentCalculatorKeepsHexWhenActivationIsUnresolved(t *testing.T) {
 	activationTime := uint64(10)
 	cc := &commitmentCalculator{
-		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
-		blockReader:   missingActivationHeaderReader{},
-		maxReorgDepth: 1,
+		chainConfig:       &chain.Config{BinaryTrieTime: &activationTime},
+		blockReader:       missingActivationHeaderReader{},
+		hexStopWindow:     1,
+		finalizedBlockNum: 100,
 	}
 	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 7, blockTime: activationTime})
 	require.False(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "an unresolved activation must not stop the hex shadow")
@@ -85,9 +119,10 @@ func TestCommitmentCalculatorKeepsHexWhenActivationIsUnresolved(t *testing.T) {
 func TestCommitmentCalculatorResolvesActivationFromBatchTargets(t *testing.T) {
 	activationTime := uint64(10)
 	cc := &commitmentCalculator{
-		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
-		blockReader:   missingActivationHeaderReader{},
-		maxReorgDepth: 2,
+		chainConfig:       &chain.Config{BinaryTrieTime: &activationTime},
+		blockReader:       missingActivationHeaderReader{},
+		hexStopWindow:     2,
+		finalizedBlockNum: 5,
 	}
 	for blockNum := uint64(2); blockNum <= 4; blockNum++ {
 		cc.recordBlockTarget(commitTarget{blockNum: blockNum, blockTime: 0})
@@ -103,11 +138,12 @@ func TestCommitmentCalculatorResolvesActivationFromBatchTargets(t *testing.T) {
 func TestCommitmentCalculatorSearchesBelowRestartBlock(t *testing.T) {
 	activationTime := uint64(10)
 	cc := &commitmentCalculator{
-		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
-		blockReader:   hexStopHeaderReader{},
-		firstBlockNum: 7,
-		hasFirstBlock: true,
-		maxReorgDepth: 2,
+		chainConfig:       &chain.Config{BinaryTrieTime: &activationTime},
+		blockReader:       hexStopHeaderReader{},
+		firstBlockNum:     7,
+		hasFirstBlock:     true,
+		hexStopWindow:     2,
+		finalizedBlockNum: 5,
 	}
 	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 7, blockTime: activationTime})
 	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 8, blockTime: activationTime})
@@ -132,11 +168,12 @@ func TestCommitmentCalculatorStopsFoldingHexAtWindowEnd(t *testing.T) {
 	doms.SetDisableInlineTouchKey(true)
 	activationTime := uint64(10)
 	cc := &commitmentCalculator{
-		doms:          doms,
-		db:            db,
-		roTx:          roTx,
-		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
-		maxReorgDepth: 2,
+		doms:              doms,
+		db:                db,
+		roTx:              roTx,
+		chainConfig:       &chain.Config{BinaryTrieTime: &activationTime},
+		hexStopWindow:     2,
+		finalizedBlockNum: 10,
 	}
 	address := common.Address{0x42}
 	reader := &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain}
@@ -170,10 +207,11 @@ func TestAutomaticHexStopRecordsMarkerInCommitmentTransaction(t *testing.T) {
 	_, tx, doms := dualCalculatorTest(t)
 	activationTime := uint64(10)
 	cc := &commitmentCalculator{
-		doms:          doms,
-		roTx:          tx,
-		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
-		maxReorgDepth: 0,
+		doms:              doms,
+		roTx:              tx,
+		chainConfig:       &chain.Config{BinaryTrieTime: &activationTime},
+		hexStopWindow:     0,
+		finalizedBlockNum: 4,
 	}
 	cc.recordBlockTarget(commitTarget{blockNum: 3, blockTime: activationTime - 1})
 	cc.recordBlockTarget(commitTarget{blockNum: 4, blockTime: activationTime})

@@ -44,6 +44,13 @@ after both arms succeed. A shadow fold or replay failure stops that domain throu
 `recordStoppedCommitmentDomains` without invalidating the block. The step-boundary path resets
 its block flags once after both arms complete.
 
+After activation the hex shadow stops on its own only when the activation block is finalized
+and more than `MAX_REORG_DEPTH` plus one epoch of blocks have passed (128 at the default depth
+of 96); `shouldStopHexShadow` in
+`execution/stagedsync/committer.go` checks both. Until then both tries stay live, as EIP-8347
+requires (eip:"Transition window"), because a stopped hex shadow refuses any unwind below the
+activation block.
+
 ## State and files
 
 The binary state blob uses marker `0xb1` and row format `0x20`, validated by

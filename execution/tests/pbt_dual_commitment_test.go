@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -259,7 +260,7 @@ func TestPBTCommittedHexStopContinuesInSameProcess(t *testing.T) {
 		require.NoError(t, signErr)
 		b.AddTx(txn)
 	}
-	pack, err := m.GenerateChain(7, generate)
+	pack, err := m.GenerateChain(39, generate)
 	require.NoError(t, err)
 	roots := make([]pbtBlockRoots, len(pack.Blocks))
 	total := uint64(0)
@@ -289,7 +290,8 @@ func TestPBTCommittedHexStopContinuesInSameProcess(t *testing.T) {
 		jsonrpc.NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}),
 		m.DB, nil, &rpccfg.DebugApiConfig{},
 	)
-	for i, block := range pack.Blocks {
+	last := len(pack.Blocks) - 1
+	for i, block := range pack.Blocks[:last-1] {
 		require.NoError(t, m.InsertChain(pack.Slice(i, i+1)))
 		if i >= 4 {
 			assertPBTBinRoot(t, m, block, roots[i])
@@ -297,7 +299,19 @@ func TestPBTCommittedHexStopContinuesInSameProcess(t *testing.T) {
 	}
 	progress, err := debugAPI.MigrationProgress(t.Context())
 	require.NoError(t, err)
-	require.True(t, progress.ShadowStopped)
+	require.False(t, progress.ShadowStopped, "past the window, the hex shadow must stay live while the activation block is not finalized")
+	activation := pack.Blocks[2].Hash()
+	_, err = m.InsertBlocks(t.Context(), pack.Blocks[last-1:last])
+	require.NoError(t, err)
+	fcu, err := m.UpdateForkChoice(t.Context(), pack.Blocks[last-1].Header(), execmoduletester.WithSafeHash(activation), execmoduletester.WithFinalisedHash(activation))
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, fcu.Status)
+	assertPBTBinRoot(t, m, pack.Blocks[last-1], roots[last-1])
+	require.NoError(t, m.InsertChain(pack.Slice(last, last+1)))
+	assertPBTBinRoot(t, m, pack.TopBlock, roots[last])
+	progress, err = debugAPI.MigrationProgress(t.Context())
+	require.NoError(t, err)
+	require.True(t, progress.ShadowStopped, "the hex shadow must stop once the activation block is finalized and the window has passed")
 	m.Close()
 
 	reopened := execmoduletester.New(t,
