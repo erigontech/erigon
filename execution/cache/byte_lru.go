@@ -89,8 +89,7 @@ func newByteLRU[V any](maxBytes datasize.ByteSize, weigh func(uint64, V) int64, 
 	b.limit.Store(floor)
 	b.ceiling.Store(b.maxBytes)
 	b.c = newOtter(floor, weigh, func(e otter.DeletionEvent[uint64, V]) {
-		// A replacement is refunded by Add, synchronously with the Set that
-		// displaced the value; this path can run later, off the writer.
+		// A replacement is refunded by Add, from the value Set displaced.
 		if e.Cause != otter.CauseReplacement {
 			b.resident.Add(-weigh(e.Key, e.Value))
 		}
@@ -115,8 +114,10 @@ func newOtter[V any](maxWeight int64, weigh func(uint64, V) int64, onDeletion fu
 	return otter.Must(&otter.Options[uint64, V]{
 		MaximumWeight: uint64(maxWeight),
 		Weigher:       func(k uint64, v V) uint32 { return uint32(min(weigh(k, v), math.MaxUint32)) },
-		OnDeletion:    onDeletion,
-		Executor:      func(fn func()) { fn() },
+		// Atomic: called inside the delete itself, so otter allocates no event per
+		// eviction to hand to the executor.
+		OnAtomicDeletion: onDeletion,
+		Executor:         func(fn func()) { fn() },
 	})
 }
 
