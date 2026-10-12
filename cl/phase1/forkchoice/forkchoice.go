@@ -117,6 +117,7 @@ type ForkChoiceStore struct {
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
 	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
 	payloadStatusByRoot    *lru.Cache[common.Hash, execution_client.PayloadStatus]
+	retryingEnvelopes      sync.Map // blockRoot -> chan struct{}: envelope retries in flight
 	// [New in Gloas:EIP7732] Track execution payload gas_limit by execution block hash.
 	// Used for the is_gas_limit_target_compatible IGNORE check in bid gossip validation.
 	executionPayloadGasLimit *lru.Cache[common.Hash, uint64]
@@ -608,6 +609,27 @@ func (f *ForkChoiceStore) IsBlobDataAvailable(slot uint64, blockRoot common.Hash
 // Highest seen returns highest seen slot
 func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
+}
+
+// HasImportedDescendantAfter reports whether a block imported on top of root, on a path an
+// invalidation did not cut off, is past slot. A correct head has no such descendant, since
+// get_head walks down to a leaf, so one means the head is stuck.
+func (f *ForkChoiceStore) HasImportedDescendantAfter(root common.Hash, slot uint64) bool {
+	for stack := []common.Hash{root}; len(stack) > 0; {
+		parent := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		for _, child := range f.children(parent) {
+			header, ok := f.forkGraph.GetHeader(child)
+			if !ok || f.cutOffByInvalidation(child) {
+				continue
+			}
+			if header.Slot > slot {
+				return true
+			}
+			stack = append(stack, child)
+		}
+	}
+	return false
 }
 
 // BlockProcessing reports whether an OnBlock call is waiting for the store lock or is active.
@@ -1154,6 +1176,19 @@ func (f *ForkChoiceStore) markPayloadStatus(
 		f.headPayloadStatus = cltypes.PayloadStatusPending
 	}
 	return effective
+}
+
+// cutOffByInvalidation reports whether no fork-choice node of root survives the recorded
+// invalidations: an invalid pre-Gloas block, or a Gloas block built on an invalid parent payload.
+func (f *ForkChoiceStore) cutOffByInvalidation(root common.Hash) bool {
+	block, ok := f.forkGraph.GetBlock(root)
+	if !ok || block == nil || block.Block == nil {
+		return false
+	}
+	if block.Version() < clparams.GloasVersion {
+		return f.forkGraph.IsBlockInvalid(root)
+	}
+	return f.forkGraph.IsBlockInvalid(block.Block.ParentRoot) && f.getParentPayloadStatus(block.Block) == cltypes.PayloadStatusFull
 }
 
 func (f *ForkChoiceStore) payloadStatusAuthority(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {

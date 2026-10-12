@@ -47,6 +47,61 @@ type embeddedPtcVoteForkGraph struct {
 	*getFinalizedExecutionHashForkGraph
 	postState *state.CachingBeaconState
 	envelopes map[common.Hash]bool
+	invalid   map[common.Hash]bool
+}
+
+func (g *embeddedPtcVoteForkGraph) MarkHeaderAsInvalid(root common.Hash) {
+	if g.invalid == nil {
+		g.invalid = map[common.Hash]bool{}
+	}
+	g.invalid[root] = true
+}
+
+func (g *embeddedPtcVoteForkGraph) IsBlockInvalid(root common.Hash) bool {
+	return g.invalid[root]
+}
+
+func TestHasImportedDescendantAfterCountsDescendantsOnly(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	childRoot, err := child.Block.HashSSZ()
+	require.NoError(t, err)
+
+	require.True(t, store.HasImportedDescendantAfter(anchorRoot, child.Block.Slot-1))
+	require.False(t, store.HasImportedDescendantAfter(anchorRoot, child.Block.Slot))
+	// The anchor precedes the child: an ancestor or another branch never counts.
+	require.False(t, store.HasImportedDescendantAfter(childRoot, 0))
+
+	// A deeper descendant counts too.
+	grandchild := cltypes.NewSignedBeaconBlock(store.beaconCfg, clparams.GloasVersion)
+	grandchild.Block.Slot = 40
+	grandchild.Block.ParentRoot = childRoot
+	grandchildRoot, err := grandchild.Block.HashSSZ()
+	require.NoError(t, err)
+	graph := store.forkGraph.(*embeddedPtcVoteForkGraph)
+	graph.blocks[grandchildRoot] = grandchild
+	graph.headers[grandchildRoot] = &cltypes.BeaconBlockHeader{Slot: grandchild.Block.Slot, ParentRoot: childRoot}
+	store.updateChildren(child.Block.Slot, childRoot, grandchildRoot)
+	require.True(t, store.HasImportedDescendantAfter(anchorRoot, grandchild.Block.Slot-1))
+}
+
+func TestHasImportedDescendantAfterSkipsBlocksCutOffByAnInvalidPayload(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	require.Equal(t, cltypes.PayloadStatusFull, store.getParentPayloadStatus(child.Block))
+
+	// The child builds on the anchor's payload, so an INVALID verdict leaves no path to it.
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+	require.False(t, store.HasImportedDescendantAfter(anchorRoot, 0))
+}
+
+func TestHasImportedDescendantAfterKeepsBlocksOnTheEmptyVariantOfAnInvalidPayload(t *testing.T) {
+	store, anchorRoot, child := runEmbeddedPtcVoteBlock(t, clparams.MaxPtcSize, []uint64{42}, []int{0}, false)
+	anchorBlock, ok := store.forkGraph.GetBlock(anchorRoot)
+	require.True(t, ok)
+	anchorBlock.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{0xe1}
+	require.Equal(t, cltypes.PayloadStatusEmpty, store.getParentPayloadStatus(child.Block))
+
+	store.MarkPayloadStatus(anchorRoot, common.Hash{0xe1}, execution_client.PayloadStatusInvalidated)
+	require.True(t, store.HasImportedDescendantAfter(anchorRoot, 0))
 }
 
 func TestGloasAnchorStartsWithoutPtcVotes(t *testing.T) {

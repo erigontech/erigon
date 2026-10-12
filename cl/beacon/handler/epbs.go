@@ -93,6 +93,9 @@ type ptcDutyResponse struct {
 // POST /eth/v1/validator/duties/ptc/{epoch}
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
+	}
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, err
@@ -199,8 +202,8 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 // GetEthV1ValidatorPayloadAttestationData returns PayloadAttestationData for PTC validators.
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	if a.syncedData.Syncing() {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
+	if err := a.refuseLaggingHead(); err != nil {
+		return nil, err
 	}
 	slotStr, err := beaconhttp.StringFromRequest(r, "slot")
 	if err != nil {
