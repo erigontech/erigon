@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -183,4 +185,34 @@ func TestAuthenticatedRpcServerAppliesSubscriptionLimit(t *testing.T) {
 	second := subscribe(2)
 	require.NotNil(t, second, "second subscription accepted with a limit of 1")
 	require.Equal(t, rpc.ErrCodeServerOverloaded, second.Code)
+}
+
+func TestGraphQLHandlerAdmissionControl(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	blockFirst := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+	})
+	handler := newGraphQLHandler(&httpcfg.HttpCfg{HttpVirtualHost: []string{"*"}}, blockFirst, 1)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/graphql", nil))
+	}()
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first request did not reach the GraphQL handler")
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/graphql", nil))
+	close(release)
+	<-done
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 }
