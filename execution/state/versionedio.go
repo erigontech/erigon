@@ -14,6 +14,7 @@ import (
 	"github.com/heimdalr/dag"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -1991,6 +1992,10 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	}
 
 	return nil, nil
+}
+
+func (vr *versionedStateReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
+	return vr.ReadAccountData(accounts.InternAddress(address))
 }
 
 // Per-path versionedUpdate helpers replace the legacy generic

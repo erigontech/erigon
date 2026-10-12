@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -50,6 +51,7 @@ func HasAccount(r StateReader, address accounts.Address) (bool, error) {
 
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
+	ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
 	ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error)
 	ReadAccountCode(address accounts.Address) ([]byte, error)
@@ -135,6 +137,10 @@ func NewNoopReader() *NoopReader {
 
 func (*NoopReader) SetTx(kv.TemporalTx) {}
 func (*NoopReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	return nil, nil
+}
+
+func (*NoopReader) ReadAccountByPlainAddr(address common.Address) (*accounts.Account, error) {
 	return nil, nil
 }
 
