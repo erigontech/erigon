@@ -221,22 +221,26 @@ func (h *handler) answerBatchCall(cp *callProc, msg *jsonrpcMessage) []byte {
 	return buf.Bytes()
 }
 
-// handleBatch executes all messages in a batch and returns the responses.
-func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
+// handleBatch handles a batch and calls done, when it is not nil, once the messages are
+// no longer needed.
+func (h *handler) handleBatch(msgs []*jsonrpcMessage, done func()) {
+	if done == nil {
+		done = func() {}
+	}
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
 		h.startCallProc(func(cp *callProc) {
 			if err := h.conn.WriteJSON(cp.ctx, errorMessage(&invalidRequestError{"empty batch"})); err != nil {
 				h.logger.Debug("Failed to write RPC error response", "err", err)
 			}
-		})
+		}, done)
 		return
 	}
 	// Apply limit on total number of requests.
 	if h.batchLimit != 0 && len(msgs) > h.batchLimit {
 		h.startCallProc(func(cp *callProc) {
 			h.respondWithBatchTooLarge(cp, msgs)
-		})
+		}, done)
 		return
 	}
 
@@ -246,6 +250,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		calls = append(calls, msg)
 	})
 	if len(calls) == 0 {
+		done()
 		return
 	}
 
@@ -280,7 +285,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				h.logger.Debug("Failed to activate RPC notifier", "err", err)
 			}
 		}
-	})
+	}, done)
 }
 
 // sendBatchAnswers sends the answers in request order, leaving out calls that have none.
@@ -337,9 +342,14 @@ func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage
 	}
 }
 
-// handleMsg handles a single message.
-func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream) {
+// handleMsg handles a single message and calls done, when it is not nil, once the message
+// is no longer needed.
+func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream, done func()) {
+	if done == nil {
+		done = func() {}
+	}
 	if ok := h.handleImmediate(msg); ok {
+		done()
 		return
 	}
 	h.startCallProc(func(cp *callProc) {
@@ -356,7 +366,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream *jsonstream.Stream) {
 				h.logger.Debug("Failed to activate RPC notifier", "err", err)
 			}
 		}
-	})
+	}, done)
 }
 
 // handleResponses processes method call responses.
@@ -485,9 +495,11 @@ func (h *handler) cancelServerSubscriptions(err error) {
 	}
 }
 
-// startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine when inlineCalls is set.
-func (h *handler) startCallProc(fn func(*callProc)) {
+// startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine
+// when inlineCalls is set, and then done.
+func (h *handler) startCallProc(fn func(*callProc), done func()) {
 	run := func() {
+		defer done()
 		ctx, cancel := context.WithCancel(h.rootCtx)
 		defer cancel()
 		fn(&callProc{ctx: ctx})
@@ -702,7 +714,7 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 func remapDBOverload(ctx context.Context, err error) error {
 	if errors.Is(err, kv.ErrReadTxLimitExceeded) {
 		SetOverloadedFlag(ctx)
-		return &CustomError{Code: ErrCodeServerOverloaded, Message: ErrMsgServerOverloaded}
+		return errServerOverloaded
 	}
 	return err
 }
