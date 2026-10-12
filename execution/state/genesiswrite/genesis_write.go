@@ -98,16 +98,16 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, chainName string, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, false, dirs, logger)
+	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, nil, false, dirs, logger)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime, overrideBinaryTrieTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, chainName, overrideOsakaTime, overrideAmsterdamTime, keepStoredChainConfig, dirs, logger)
+	c, b, err := WriteGenesisBlock(tx, genesis, chainName, overrideOsakaTime, overrideAmsterdamTime, overrideBinaryTrieTime, keepStoredChainConfig, dirs, logger)
 	if err != nil {
 		return c, b, err
 	}
@@ -131,7 +131,7 @@ func configOrDefault(g *types.Genesis, chainName string, genesisHash common.Hash
 	return chain.AllProtocolChanges
 }
 
-func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, overrideOsakaTime, overrideAmsterdamTime, overrideBinaryTrieTime *uint64, keepStoredChainConfig bool, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	if err := rawdb.WriteGenesisIfNotExist(tx, genesis); err != nil {
 		return nil, nil, err
 	}
@@ -157,6 +157,9 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		}
 		if overrideAmsterdamTime != nil {
 			config.AmsterdamTime = overrideAmsterdamTime
+		}
+		if overrideBinaryTrieTime != nil {
+			config.BinaryTrieTime = overrideBinaryTrieTime
 		}
 	}
 
@@ -250,6 +253,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// the node never adopts and passes the one it does.
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
+	}
+	if overrideBinaryTrieTime != nil {
+		if err := checkBinaryTrieOverride(newCfg, storedBlock, dirs); err != nil {
+			return newCfg, nil, err
+		}
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
@@ -495,6 +503,24 @@ func checkBinaryTrieSchedule(g *types.Genesis, settings *dbstate.ErigonDBSetting
 			*g.Config.BinaryTrieTime, g.Timestamp)
 	}
 	return nil
+}
+
+func checkBinaryTrieOverride(cfg *chain.Config, genesisBlock *types.Block, dirs datadir.Dirs) error {
+	settings, err := dbstate.ReadErigonDBSettings(dirs)
+	if errors.Is(err, fs.ErrNotExist) {
+		settings, err = &dbstate.ErigonDBSettings{}, nil
+	}
+	if err != nil {
+		return err
+	}
+	g := &types.Genesis{Config: cfg}
+	if genesisBlock != nil {
+		g.Timestamp = genesisBlock.Time()
+	}
+	if err := checkBinaryTrieSchedule(g, settings); err != nil {
+		return err
+	}
+	return checkBinaryTrieCommitment(g, settings)
 }
 
 func checkBinaryTrieCommitment(g *types.Genesis, settings *dbstate.ErigonDBSettings) error {

@@ -128,6 +128,12 @@ the binary fork and bin is canonical after it. The other domain is the
 shadow. The role comes from `canonicalCommitmentDomain`, not from a process
 global variant flag.
 
+The fork time is `binaryTrieTime` in the chain config. On a named chain, or
+to change it on an initialized datadir, start the node with
+`--override.binary-trie=<unix-time>`. The node refuses the override, and a
+genesis that schedules the fork after its timestamp, unless the datadir is
+hex+bin, so set it only after attach.
+
 The hex shadow folds through the activation block plus the configured
 `MaxReorgDepth` window. It stops on the next block through
 `stopHexShadowAtWindow` and `recordStoppedCommitmentDomains`, in the same

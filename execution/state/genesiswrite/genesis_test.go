@@ -69,7 +69,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, network, nil, nil, false, datadir.New(t.TempDir()), logger)
+		_, block, err := genesiswrite.WriteGenesisBlock(tx, spec.Genesis, network, nil, nil, nil, false, datadir.New(t.TempDir()), logger)
 		require.NoError(t, err)
 
 		expect, err := chainspec.ChainSpecByName(network)
@@ -131,13 +131,13 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	defer tx.Rollback()
 
 	spec := chainspec.Mainnet
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, networkname.Mainnet, nil, nil, false, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, networkname.Mainnet, nil, nil, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, networkname.Mainnet, nil, nil, false, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.WriteGenesisBlock(tx, spec.Genesis, networkname.Mainnet, nil, nil, nil, false, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func TestCommitGenesisBlockOverrideLeavesTheSpecConfigAlone(t *testing.T) {
 	db := temporaltest.NewTestDB(t, dirs)
 
 	cfg, _, err := genesiswrite.CommitGenesisBlockWithOverride(
-		db, nil, "", common.NewUint64(1765000000), nil, false, dirs, log.New(),
+		db, nil, "", common.NewUint64(1765000000), nil, nil, false, dirs, log.New(),
 	)
 	require.NoError(t, err)
 	require.Equal(t, uint64(1765000000), *cfg.OsakaTime, "the override must reach the returned config")
@@ -180,7 +180,7 @@ func TestCommitGenesisBlockOverrideLeavesTheSpecGenesisAlone(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		db, spec.Genesis, networkname.Sepolia, common.NewUint64(1760500000), nil, false, dirs, log.New(),
+		db, spec.Genesis, networkname.Sepolia, common.NewUint64(1760500000), nil, nil, false, dirs, log.New(),
 	)
 	require.NoError(t, err)
 
@@ -211,7 +211,7 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	require.NoError(t, m.InsertChain(chainBlocks))
 
 	overrideOsakaTime := common.NewUint64(500)
-	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(m.DB, nil, "", overrideOsakaTime, nil, true, datadir.New(t.TempDir()), logger)
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(m.DB, nil, "", overrideOsakaTime, nil, nil, true, datadir.New(t.TempDir()), logger)
 
 	require.Error(t, err)
 	var compatErr *chain.ConfigCompatError
@@ -277,7 +277,7 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
 	// No block snapshots in this datadir either, so the head time is unknowable and the
 	// rescheduled Osaka cannot be cleared.
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		m.DB, nil, "", common.NewUint64(500), nil, true, datadir.New(t.TempDir()), logger,
+		m.DB, nil, "", common.NewUint64(500), nil, nil, true, datadir.New(t.TempDir()), logger,
 	)
 	require.Error(t, err, "an unresolvable head time must not let a rescheduled fork through")
 
@@ -304,7 +304,7 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDBUnchangedSchedule(t *testing.T)
 	dropHeadHeader(t, m.DB)
 
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
-		m.DB, nil, "", nil, nil, true, datadir.New(t.TempDir()), logger,
+		m.DB, nil, "", nil, nil, nil, true, datadir.New(t.TempDir()), logger,
 	)
 	require.NoError(t, err)
 }

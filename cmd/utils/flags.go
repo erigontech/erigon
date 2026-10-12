@@ -145,6 +145,10 @@ var (
 		Name:  "override.amsterdam",
 		Usage: "Manually specify the Amsterdam fork time, overriding the bundled setting",
 	}
+	OverrideBinaryTrieFlag = cli.Uint64Flag{
+		Name:  "override.binary-trie",
+		Usage: "Manually specify the EIP-8297 binary trie fork time (binaryTrieTime), overriding the bundled setting",
+	}
 	KeepStoredChainConfigFlag = cli.BoolFlag{
 		Name:  "keep.stored.chain.config",
 		Usage: "Avoid overriding chain config already stored in the DB",
@@ -2192,6 +2196,10 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	if ctx.IsSet(OverrideAmsterdamFlag.Name) {
 		v := ctx.Uint64(OverrideAmsterdamFlag.Name)
 		cfg.OverrideAmsterdamTime = &v
+	}
+	if ctx.IsSet(OverrideBinaryTrieFlag.Name) {
+		v := ctx.Uint64(OverrideBinaryTrieFlag.Name)
+		cfg.OverrideBinaryTrieTime = &v
 	}
 	cfg.KeepStoredChainConfig = ctx.Bool(KeepStoredChainConfigFlag.Name)
 
