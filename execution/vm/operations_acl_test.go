@@ -31,7 +31,7 @@ func TestGasSStoreDoesNotRefill(t *testing.T) {
 	old := scope.Gas()
 	oldSpill := scope.stateGasSpill
 
-	cost, err := gasSStoreEIP3529(evm, scope, old, 0)
+	cost, err := sstoreGasEIP2929(evm, scope, old, params.SstoreClearsScheduleRefundEIP3529)
 	require.NoError(t, err)
 	require.Equal(t, old, scope.Gas())
 	require.Equal(t, oldSpill, scope.stateGasSpill)
