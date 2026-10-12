@@ -1312,22 +1312,26 @@ func TestCloseRacingBeginRo(t *testing.T) {
 		var live atomic.Int64
 		var closed atomic.Bool
 		var wg sync.WaitGroup
+		// One read per call, so its deferred Rollback ends it before the next begins.
+		read := func() bool {
+			tx, err := db.BeginRo(t.Context())
+			if err != nil {
+				require.ErrorContains(t, err, "closed")
+				return false
+			}
+			defer tx.Rollback()
+			require.False(t, closed.Load(), "a read began after Close returned")
+			live.Add(1)
+			defer live.Add(-1)
+			// A read on a freed env crashes or errors: this is what Close must wait for.
+			v, err := tx.GetOne(kv.Headers, []byte{1})
+			require.NoError(t, err)
+			require.Equal(t, []byte{2}, v)
+			return true
+		}
 		for range 16 {
 			wg.Go(func() {
-				for {
-					tx, err := db.BeginRo(t.Context())
-					if err != nil {
-						require.ErrorContains(t, err, "closed")
-						return
-					}
-					require.False(t, closed.Load(), "a read began after Close returned")
-					live.Add(1)
-					// A read on a freed env crashes or errors: this is what Close must wait for.
-					v, err := tx.GetOne(kv.Headers, []byte{1})
-					require.NoError(t, err)
-					require.Equal(t, []byte{2}, v)
-					live.Add(-1)
-					tx.Rollback()
+				for read() {
 				}
 			})
 		}
