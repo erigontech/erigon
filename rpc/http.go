@@ -65,6 +65,7 @@ type httpConn struct {
 	closeCh   chan any
 	mu        sync.Mutex // protects headers
 	headers   http.Header
+	auth      HTTPAuth
 }
 
 // httpConn implements ServerCodec, but it is treated specially by Client
@@ -105,25 +106,62 @@ func DialHTTPWithClient(endpoint string, client *http.Client, logger log.Logger)
 		return nil, err
 	}
 
-	initctx := context.Background()
-	headers := make(http.Header, 2)
-	headers.Set("accept", contentType)
-	headers.Set("content-type", contentType)
-	return newClient(initctx, func(context.Context) (ServerCodec, error) {
-		hc := &httpConn{
-			client:  client,
-			headers: headers,
-			url:     endpoint,
-			closeCh: make(chan any),
-		}
-		return hc, nil
-	}, logger)
+	cfg := &clientConfig{httpClient: client}
+	return newClient(context.Background(), cfg, newClientTransportHTTP(endpoint, cfg), logger)
 }
 
 // DialHTTP creates a new RPC client that connects to an RPC server over HTTP.
 func DialHTTP(endpoint string, logger log.Logger) (*Client, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	return DialHTTPWithClient(endpoint, client, logger)
+	return DialHTTPWithClient(endpoint, nil, logger)
+}
+
+func newClientTransportHTTP(endpoint string, cfg *clientConfig) reconnectFunc {
+	headers := make(http.Header, 2+len(cfg.httpHeaders))
+	headers.Set("accept", contentType)
+	headers.Set("content-type", contentType)
+	setHeaders(headers, cfg.httpHeaders)
+
+	client := cfg.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+
+	hc := &httpConn{
+		client:  client,
+		headers: headers,
+		url:     endpoint,
+		auth:    cfg.httpAuth,
+		closeCh: make(chan any),
+	}
+	return func(context.Context) (ServerCodec, error) {
+		return hc, nil
+	}
+}
+
+// NewContextWithHeaders wraps the given context, adding HTTP headers. These headers will
+// be applied by Client when making a request using the returned context.
+func NewContextWithHeaders(ctx context.Context, h http.Header) context.Context {
+	if len(h) == 0 {
+		return ctx
+	}
+	prev, _ := ctx.Value(mdHeaderKey{}).(http.Header)
+	return context.WithValue(ctx, mdHeaderKey{}, setHeaders(setHeaders(http.Header{}, prev), h))
+}
+
+type mdHeaderKey struct{}
+
+// headersFromContext is used to extract http.Header from context.
+func headersFromContext(ctx context.Context) http.Header {
+	source, _ := ctx.Value(mdHeaderKey{}).(http.Header)
+	return source
+}
+
+// setHeaders sets all headers from src in dst.
+func setHeaders(dst http.Header, src http.Header) http.Header {
+	for key, values := range src {
+		dst[http.CanonicalHeaderKey(key)] = values
+	}
+	return dst
 }
 
 func (c *Client) sendHTTP(ctx context.Context, op *requestOp, msg any) error {
@@ -164,11 +202,18 @@ func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 		return nil, err
 	}
 	req.ContentLength = int64(len(body))
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(body)), nil }
 
 	// set headers
 	hc.mu.Lock()
 	req.Header = hc.headers.Clone()
 	hc.mu.Unlock()
+	setHeaders(req.Header, headersFromContext(ctx))
+	if hc.auth != nil {
+		if err := hc.auth(req.Header); err != nil {
+			return nil, err
+		}
+	}
 
 	// do request
 	resp, err := hc.client.Do(req)
@@ -184,7 +229,7 @@ func (hc *httpConn) doRequest(ctx context.Context, msg any) ([]byte, error) {
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s: %s", resp.Status, string(respBody))
+		return nil, HTTPError{Status: resp.Status, StatusCode: resp.StatusCode, Body: respBody}
 	}
 
 	if len(respBody) == 0 {
