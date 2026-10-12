@@ -48,8 +48,6 @@ type ByteLRU[V any] struct {
 	// cleanup, and a callback capturing the owner would keep the owner too.
 	onEvict atomic.Pointer[func(uint64, V)]
 
-	// resident is an upper bound for an unbudgeted layer, which has no deletion
-	// handler to refund a replaced value; a budgeted one refunds and stays exact.
 	resident atomic.Int64
 	limit    atomic.Int64 // otter's maximum; for a budgeted cache, the bytes reserved from the envelope
 	ceiling  atomic.Int64 // limit may still grow to this; drops to limit when the envelope refuses
@@ -117,17 +115,27 @@ func (b *ByteLRU[V]) Get(key uint64) (V, bool) { return b.c.GetIfPresent(key) }
 // Add reports that the value could be offered, not that it is resident: a
 // W-TinyLFU rejection also returns true. False means it was not taken -- too
 // big for the whole budget -- and no deletion fires for it. A live key is
-// replaced in place, its predecessor refunded by the deletion handler.
+// replaced in place and its predecessor refunded, by the deletion handler for a
+// budgeted layer and inline for an unbudgeted one, which has none.
 func (b *ByteLRU[V]) Add(key uint64, value V) bool {
 	w := b.weigh(key, value)
 	if w > b.maxBytes {
 		return false
 	}
-	if lim := b.limit.Load(); b.resident.Load()+w > lim && lim < b.ceiling.Load() {
-		b.grow(w)
+	// Grow on the net change: replacing a live entry with one of its own size
+	// adds nothing, and reserving a chunk for it would hold envelope bytes that
+	// only Purge or Close returns.
+	delta := w
+	if old, present := b.c.GetIfPresent(key); present {
+		delta -= b.weigh(key, old)
+	}
+	if lim := b.limit.Load(); b.resident.Load()+delta > lim && lim < b.ceiling.Load() {
+		b.grow(delta)
 	}
 	b.resident.Add(w)
-	b.c.Set(key, value)
+	if old, present := b.c.Set(key, value); present && b.unbudgeted {
+		b.resident.Add(-b.weigh(key, old))
+	}
 	return true
 }
 
