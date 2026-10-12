@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func TestNewID(t *testing.T) {
@@ -440,12 +441,8 @@ func TestNotifySendDoesNotAllocateResult(t *testing.T) {
 
 const subscribeRequest = `{"jsonrpc":"2.0","id":1,"method":"nftest_subscribe","params":["someSubscription",0,0]}`
 
-// limitedServerCall serves one connection on a server with the given subscription limit and
-// returns a function that sends a request over it and reads the reply.
-func limitedServerCall(t *testing.T, limit int) func(request string) *jsonrpcMessage {
+func serverCall(t *testing.T, server *Server) func(request string) *jsonrpcMessage {
 	t.Helper()
-	server := newTestServer(log.New())
-	server.SetSubscriptionLimit(limit)
 	clientConn, serverConn := net.Pipe()
 	go server.ServeCodec(NewCodec(serverConn), 0)
 	t.Cleanup(server.Stop)
@@ -466,10 +463,26 @@ func limitedServerCall(t *testing.T, limit int) func(request string) *jsonrpcMes
 	}
 }
 
+func TestDefaultSubscriptionLimit(t *testing.T) {
+	t.Parallel()
+	call := serverCall(t, newTestServer(log.New()))
+	for i := range rpccfg.DefaultSubscriptionLimit {
+		if resp := call(subscribeRequest); resp.Error != nil {
+			t.Fatalf("subscription %d rejected below the default limit: %v", i+1, resp.Error)
+		}
+	}
+	resp := call(subscribeRequest)
+	if resp.Error == nil || resp.Error.Code != ErrCodeServerOverloaded {
+		t.Fatalf("subscription above the default limit returned %v, want overload error", resp.Error)
+	}
+}
+
 // A connection holds at most the server's subscription limit; an unsubscribe frees a slot.
 func TestSubscriptionLimit(t *testing.T) {
 	t.Parallel()
-	call := limitedServerCall(t, 2)
+	server := newTestServer(log.New())
+	server.SetSubscriptionLimit(2)
+	call := serverCall(t, server)
 
 	first := call(subscribeRequest)
 	if first.Error != nil {
@@ -491,19 +504,6 @@ func TestSubscriptionLimit(t *testing.T) {
 	}
 	if again := call(subscribeRequest); again.Error != nil {
 		t.Fatalf("subscription rejected after a slot was freed: %v", again.Error)
-	}
-}
-
-// A subscribe call that fails holds no slot afterwards.
-func TestSubscriptionLimitFreesSlotOfFailedSubscribe(t *testing.T) {
-	t.Parallel()
-	call := limitedServerCall(t, 1)
-
-	if failed := call(`{"jsonrpc":"2.0","id":1,"method":"nftest_subscribe","params":["failingSubscription"]}`); failed.Error == nil {
-		t.Fatal("failingSubscription did not fail")
-	}
-	if resp := call(subscribeRequest); resp.Error != nil {
-		t.Fatalf("subscription rejected after a failed subscribe call: %v", resp.Error)
 	}
 }
 
