@@ -609,33 +609,13 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 				}
 				return root, nil
 			}
-			reach := &legacyReach{keysV2: keysV2}
+			var reachTxNum uint64
+			reach := &legacyReach{keysV2: keysV2, read: func(key []byte) ([]byte, error) {
+				return legacyCommitmentAsOf(wdt, key, reachTxNum)
+			}}
 			reachableAsOf := func(legacyKey, value []byte, txNum uint64) (bool, error) {
-				if len(value) < 4 || binary.BigEndian.Uint16(value[2:4]) == 0 {
-					return true, nil
-				}
-				path, err := decodeLegacyPrefix(legacyKey, keysV2)
-				if err != nil || len(path) == 0 {
-					return err == nil, err
-				}
-				branch, err := legacyCommitmentAsOf(wdt, rootLegacyKey, txNum)
-				if err != nil {
-					return false, err
-				}
-				for depth := 0; depth < len(path); {
-					next, ok, err := reach.childDepth(branch, path, depth)
-					if err != nil || !ok || next > len(path) {
-						return false, err
-					}
-					if next == len(path) {
-						return true, nil
-					}
-					if branch, err = legacyCommitmentAsOf(wdt, encodeLegacyPrefix(path[:next], keysV2), txNum); err != nil {
-						return false, err
-					}
-					depth = next
-				}
-				return true, nil
+				reachTxNum, reach.chain = txNum, reach.chain[:0]
+				return reach.reachable(legacyKey, value)
 			}
 			emitBoundary := func(txNum uint64, cur, next *historyVersion) error {
 				for _, e := range cur.ents {

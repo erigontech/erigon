@@ -226,7 +226,10 @@ func convertCommitmentFileV3(
 			vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: lastStep - 1}
 			conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
 			prevs := wat.d[kv.CommitmentDomain]
-			reach := &legacyReach{dt: prevs, maxStep: lastStep - 1, keysV2: st.keysV2}
+			reach := &legacyReach{keysV2: st.keysV2, read: func(key []byte) ([]byte, error) {
+				v, _, _, _, err := prevs.getLatestFromFiles(key, nil, lastStep-1)
+				return v, err
+			}}
 			for batch := range in {
 				res := convertedBatchPool.Get().(*convertedBatch)
 				res.buf, res.ents = res.buf[:0], res.ents[:0]
@@ -407,10 +410,8 @@ func convertLegacyPairV3(k, v []byte, shadowed, incremental bool, stepFrom kv.St
 	if shadowed {
 		return conv.ConvertShadowed(k, v, emit)
 	}
-	if len(v) >= 4 && binary.BigEndian.Uint16(v[2:4]) != 0 {
-		if live, err := reach.reachable(k, v); err != nil || !live {
-			return err
-		}
+	if live, err := reach.reachable(k, v); err != nil || !live {
+		return err
 	}
 	var prev []byte
 	if incremental {
@@ -423,12 +424,11 @@ func convertLegacyPairV3(k, v []byte, shadowed, incremental bool, stepFrom kv.St
 }
 
 type legacyReach struct {
-	dt      *DomainRoTx
-	maxStep kv.Step
-	keysV2  bool
-	path    []byte
-	chain   []legacyReachNode
-	hashed  [64]byte
+	read   func(key []byte) ([]byte, error)
+	keysV2 bool
+	path   []byte
+	chain  []legacyReachNode
+	hashed [64]byte
 }
 
 type legacyReachNode struct {
@@ -437,6 +437,9 @@ type legacyReachNode struct {
 }
 
 func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
+	if len(value) < 4 || binary.BigEndian.Uint16(value[2:4]) == 0 {
+		return true, nil
+	}
 	path, err := decodeLegacyPrefix(legacyKey, r.keysV2)
 	if err != nil || len(path) == 0 {
 		return err == nil, err
@@ -452,7 +455,7 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 	r.chain = r.chain[:keep]
 	r.path = append(r.path[:0], path...)
 	if len(r.chain) == 0 {
-		root, _, _, _, err := r.dt.getLatestFromFiles(encodeLegacyPrefix(nil, r.keysV2), nil, r.maxStep)
+		root, err := r.read(encodeLegacyPrefix(nil, r.keysV2))
 		if err != nil {
 			return false, err
 		}
@@ -471,7 +474,7 @@ func (r *legacyReach) reachable(legacyKey, value []byte) (bool, error) {
 			r.chain = append(r.chain, legacyReachNode{next, bytes.Clone(value)})
 			return true, nil
 		}
-		child, _, _, _, err := r.dt.getLatestFromFiles(encodeLegacyPrefix(path[:next], r.keysV2), nil, r.maxStep)
+		child, err := r.read(encodeLegacyPrefix(path[:next], r.keysV2))
 		if err != nil || len(child) < 4 || binary.BigEndian.Uint16(child[2:4]) == 0 {
 			return false, err
 		}
