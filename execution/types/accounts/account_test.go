@@ -429,6 +429,8 @@ func TestInternSlotCollision(t *testing.T) {
 	k1, k2 := common.Hash{1}, common.Hash{1}
 	k2[10] = 7
 	a1, a2 := common.Address{1}, common.Address{2}
+	require.Same(t, keySlot(k1), keySlot(k2))
+	require.Same(t, addressSlot(a1), addressSlot(a2))
 	for range 2 {
 		for _, k := range []common.Hash{k1, k2} {
 			require.Equal(t, StorageKey(unique.Make(k)), InternKey(k))
@@ -439,4 +441,10 @@ func TestInternSlotCollision(t *testing.T) {
 			require.Equal(t, a, InternAddress(a).Value())
 		}
 	}
+}
+
+// Precompiles and small scalar storage slots differ only in their last bytes; they must not share a slot.
+func TestInternSlotsSpreadLowValues(t *testing.T) {
+	require.NotSame(t, addressSlot(common.BytesToAddress([]byte{1})), addressSlot(common.BytesToAddress([]byte{2})))
+	require.NotSame(t, keySlot(common.BytesToHash([]byte{1})), keySlot(common.BytesToHash([]byte{2})))
 }

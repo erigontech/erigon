@@ -41,8 +41,12 @@ var (
 	keyTable     [1 << 20]atomic.Value // StorageKey
 )
 
+func addressSlot(a common.Address) *atomic.Value {
+	return &addressTable[binary.BigEndian.Uint32(a[16:])&uint32(len(addressTable)-1)]
+}
+
 func InternAddress(a common.Address) Address {
-	slot := &addressTable[binary.LittleEndian.Uint32(a[16:])&uint32(len(addressTable)-1)]
+	slot := addressSlot(a)
 	if h, ok := slot.Load().(Address); ok && h.Value() == a {
 		return h
 	}
@@ -136,9 +140,13 @@ var (
 	NilKey  = StorageKey{}
 )
 
-// InternKey mixes both ends of the key: keccak-derived slots differ everywhere, small scalar slots only at the end.
+// keySlot mixes both ends of the key: keccak-derived slots differ everywhere, small scalar slots only at the end.
+func keySlot(k common.Hash) *atomic.Value {
+	return &keyTable[(binary.BigEndian.Uint32(k[:4])^binary.BigEndian.Uint32(k[28:]))&uint32(len(keyTable)-1)]
+}
+
 func InternKey(k common.Hash) StorageKey {
-	slot := &keyTable[(binary.LittleEndian.Uint32(k[:4])^binary.LittleEndian.Uint32(k[28:]))&uint32(len(keyTable)-1)]
+	slot := keySlot(k)
 	if h, ok := slot.Load().(StorageKey); ok && h.Value() == k {
 		return h
 	}
